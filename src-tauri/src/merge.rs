@@ -1,145 +1,204 @@
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::thread;
+use std::time::Duration;
 
-use yamt_session::MergeSession;
+use yamt_session::{
+    Continued, DiskChange, DiskVersion, FileEntry, MergeSession, OperationKind, OperationView,
+    Refreshed, SideNames, StopList,
+};
 
 use crate::ipc_error::IpcError;
 
-/// The merge this run works on: held from the start until `git merge --abort` succeeds (plan §2 #74).
-#[expect(
-    clippy::large_enum_variant,
-    reason = "one value per run, built once and kept in the app's state"
-)]
+const GIT_RUNNING_POLL: Duration = Duration::from_millis(50);
+
+/// The stop this run works on (plan §2 #74, #88, #89).
 pub(crate) enum Merge {
-    Held(MergeSession),
-    Aborted,
+    Held(Box<MergeSession>),
+    /// git aborts or continues; the session is with the worker.
+    Running(OperationKind),
+    /// git moved on to another stop: the old session is dropped; the next list opens the new one,
+    /// its disk versions above the old session's highest (#1383).
+    MovedOn {
+        root: PathBuf,
+        highest_disk_version: DiskVersion,
+    },
+    Aborted(OperationKind),
+    Finished(OperationKind),
 }
 
 pub(crate) type MergeState = Mutex<Merge>;
 
+/// The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it.
+#[derive(Debug, serde::Serialize, specta::Type)]
+#[serde(tag = "kind")]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "one value per list, returned and serialized at once; never stored"
+)]
+pub enum Listing {
+    Files {
+        files: Vec<FileEntry>,
+        disk_changes: Vec<DiskChange>,
+        operation: Option<OperationView>,
+        sides: SideNames,
+    },
+    MovedOn,
+}
+
+/// What a Continue git accepted led to: the operation ended, or git stopped at another stop.
+#[derive(Debug, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(tag = "kind")]
+pub enum ContinueReply {
+    Finished,
+    Stopped { message: String },
+}
+
 pub(crate) fn lock(state: &MergeState) -> MutexGuard<'_, Merge> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The merge once no worker runs git: a close waits for git rather than killing it.
+pub(crate) fn lock_when_git_is_done(state: &MergeState) -> MutexGuard<'_, Merge> {
+    loop {
+        let merge = lock(state);
+        if !matches!(*merge, Merge::Running(_)) {
+            return merge;
+        }
+        drop(merge);
+        thread::sleep(GIT_RUNNING_POLL);
+    }
 }
 
 impl Merge {
     pub(crate) fn session(&mut self) -> Result<&mut MergeSession, IpcError> {
         match self {
             Merge::Held(session) => Ok(session),
-            Merge::Aborted => Err(IpcError::MergeAborted),
+            Merge::Running(_) => Err(IpcError::GitRunning),
+            Merge::MovedOn { .. } => Err(IpcError::StopMovedOn),
+            Merge::Aborted(_) => Err(IpcError::MergeAborted),
+            Merge::Finished(_) => Err(IpcError::MergeFinished),
         }
     }
 
-    pub(crate) fn abort(&mut self) -> Result<(), IpcError> {
-        self.session()?.abort_merge()?;
-        *self = Merge::Aborted;
-        Ok(())
+    /// After a move, opens the new stop first; a list that finds git moved on drops the session.
+    pub(crate) fn list_stop(&mut self) -> Result<Listing, IpcError> {
+        if let Merge::MovedOn {
+            root,
+            highest_disk_version,
+        } = self
+        {
+            let session = MergeSession::open_after(root, *highest_disk_version)?;
+            *self = Merge::Held(Box::new(session));
+        }
+        let session = self.session()?;
+        match session.refresh_stop()? {
+            Refreshed::Files(StopList {
+                files,
+                disk_changes,
+                operation,
+                sides,
+            }) => Ok(Listing::Files {
+                files,
+                disk_changes,
+                operation,
+                sides,
+            }),
+            Refreshed::MovedOn => {
+                *self = moved_on(session);
+                Ok(Listing::MovedOn)
+            }
+        }
+    }
+
+    /// git finished or aborted the operation: nothing is left for this window.
+    pub(crate) fn has_ended(&self) -> bool {
+        match self {
+            Merge::Finished(_) | Merge::Aborted(_) => true,
+            Merge::Held(_) | Merge::Running(_) | Merge::MovedOn { .. } => false,
+        }
+    }
+
+    fn hand_to_worker(&mut self) -> Result<Box<MergeSession>, IpcError> {
+        let kind = self
+            .session()?
+            .operation_kind()
+            .ok_or(IpcError::NoOperation)?;
+        match std::mem::replace(self, Merge::Running(kind)) {
+            Merge::Held(session) => Ok(session),
+            refused @ (Merge::Running(_)
+            | Merge::MovedOn { .. }
+            | Merge::Aborted(_)
+            | Merge::Finished(_)) => {
+                *self = refused;
+                self.hand_to_worker()
+            }
+        }
+    }
+}
+
+fn moved_on(session: &MergeSession) -> Merge {
+    Merge::MovedOn {
+        root: session.root().to_path_buf(),
+        highest_disk_version: session.highest_disk_version(),
+    }
+}
+
+/// Runs `work` on a blocking worker while the merge is `Running`. git's refusal puts the session
+/// back; a stop git left meanwhile (`StopMovedOn`) or a worker that panicked leaves `MovedOn`, so the
+/// next list opens the stop git is at.
+async fn on_worker<T, F>(state: &MergeState, work: F) -> Result<(Box<MergeSession>, T), IpcError>
+where
+    T: Send + 'static,
+    F: FnOnce(&mut MergeSession) -> yamt_session::Result<T> + Send + 'static,
+{
+    let mut session = lock(state).hand_to_worker()?;
+    let after_a_panic = moved_on(&session);
+    let worker = tauri::async_runtime::spawn_blocking(move || {
+        let result = work(&mut session);
+        (session, result)
+    });
+    match worker.await {
+        Ok((session, Ok(value))) => Ok((session, value)),
+        Ok((session, Err(error))) => {
+            *lock(state) = if matches!(error, yamt_session::Error::StopMovedOn) {
+                moved_on(&session)
+            } else {
+                Merge::Held(session)
+            };
+            Err(error.into())
+        }
+        Err(error) => {
+            tracing::error!(%error, "yamt's worker stopped while git ran");
+            *lock(state) = after_a_panic;
+            Err(IpcError::StopMovedOn)
+        }
+    }
+}
+
+/// git's abort of the operation (plan §2 #88); `Aborted` only after git succeeded.
+pub(crate) async fn abort_operation(state: &MergeState) -> Result<(), IpcError> {
+    let (_session, kind) = on_worker(state, MergeSession::abort_operation).await?;
+    *lock(state) = Merge::Aborted(kind);
+    Ok(())
+}
+
+/// git's continue (plan §2 #89): finished, or stopped at another stop (`MovedOn`).
+pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueReply, IpcError> {
+    let (session, continued) = on_worker(state, MergeSession::continue_operation).await?;
+    let mut merge = lock(state);
+    match continued {
+        Continued::Finished { kind, output } => {
+            tracing::info!(%output, "git finished the operation");
+            *merge = Merge::Finished(kind);
+            Ok(ContinueReply::Finished)
+        }
+        Continued::Stopped { message } => {
+            *merge = moved_on(&session);
+            Ok(ContinueReply::Stopped { message })
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-
-    use serde_json::{Value, json};
-    use tauri::Manager;
-    use yamt_conflict_repo::git_ok;
-
-    use super::*;
-    use crate::mock_window::{CRLF_PATH, Window, open_window};
-    use crate::outcome::{Ending, Exit, ending_on_close};
-
-    const ADDED: &str = "added.ts";
-    const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
-
-    impl Window {
-        fn ending(&self) -> Ending {
-            ending_on_close(&mut lock(&self.app.state::<MergeState>()))
-        }
-
-        fn git_text(&self, args: &[&str]) -> String {
-            String::from_utf8(git_ok(self.repo.path(), args).unwrap()).unwrap()
-        }
-    }
-
-    fn merge_aborted() -> Result<Value, Value> {
-        Err(json!({ "kind": "MergeAborted" }))
-    }
-
-    fn merge_commands() -> [(&'static str, Value); 9] {
-        let path = json!({ "path": CRLF_PATH });
-        let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
-        [
-            ("list_files", json!({})),
-            ("load_file", path.clone()),
-            ("describe_file", path),
-            ("finish_file", write.clone()),
-            ("save_file", write),
-            ("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 })),
-            (
-                "take_side",
-                json!({ "path": CRLF_PATH, "side": "remote", "diskVersion": 0 }),
-            ),
-            ("side_names", json!({})),
-            ("abort_merge", json!({})),
-        ]
-    }
-
-    #[test]
-    fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
-        let window = open_window();
-
-        assert_eq!(window.invoke("abort_merge", json!({})), Ok(Value::Null));
-
-        for (command, args) in merge_commands() {
-            assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
-        }
-        assert_eq!(window.git_text(&["status", "--porcelain"]), "");
-        assert_eq!(
-            fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
-            CRLF_AT_HEAD
-        );
-        assert!(window.invoke("servers_context", json!({})).is_ok());
-    }
-
-    #[test]
-    fn the_ending_after_an_abort_is_status_one_and_stages_no_file_changed_since() {
-        let window = open_window();
-        window.invoke("abort_merge", json!({})).unwrap();
-        fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
-        let index_before = window.git_text(&["ls-files", "-s"]);
-
-        let ending = window.ending();
-
-        let aborted = Ending {
-            exit: Exit::Unresolved,
-            message: Some("merge aborted".to_owned()),
-        };
-        assert_eq!(ending, aborted);
-        assert_eq!(window.git_text(&["ls-files", "-s"]), index_before);
-    }
-
-    #[test]
-    fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
-        let window = open_window();
-        let added = window.repo.path().join(ADDED);
-        fs::write(&added, "resolved\n").unwrap();
-        git_ok(window.repo.path(), &["add", "--", ADDED]).unwrap();
-        fs::write(&added, "saved again\n").unwrap();
-        let status_before = window.git_text(&["status", "--porcelain"]);
-
-        let refused = window.invoke("abort_merge", json!({})).unwrap_err();
-
-        assert_eq!(refused["kind"], "Git", "{refused}");
-        let message = refused["message"].as_str().unwrap();
-        assert!(
-            message.contains("error: Entry 'added.ts' not uptodate. Cannot merge."),
-            "{message}"
-        );
-        assert_eq!(window.git_text(&["status", "--porcelain"]), status_before);
-        let listed = window.invoke("list_files", json!({})).unwrap();
-        assert_eq!(listed["merging"], true, "{listed}");
-        assert_eq!(
-            window.ending().message.as_deref(),
-            Some("2 of 3 files still unresolved")
-        );
-    }
-}
+mod tests;

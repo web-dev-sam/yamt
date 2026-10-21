@@ -3,6 +3,7 @@ import { computed, useTemplateRef } from "vue";
 
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+import OperationButtons from "./OperationButtons.vue";
 import PaneDivider from "./PaneDivider.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
 import ServerStatus from "./ServerStatus.vue";
@@ -72,6 +73,7 @@ function paneWidths(): PaneWidths | null {
     :class="{ invisible: !shown }"
   >
     <header class="flex h-10 shrink-0 items-center justify-end px-2">
+      <OperationButtons :abort="true" />
       <ServerStatus class="ml-auto" :path="null" :problems="null" />
       <SettingsButton />
     </header>

@@ -6,6 +6,9 @@ use std::time::{Duration, SystemTime};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Middle, WriteReply};
 
+mod listing;
+use listing::listed;
+
 const TEXT: &str = "src/cart.ts";
 const BASE: &[u8] = b"one\ntwo\nthree\n";
 const LOCAL: &[u8] = b"one\nlocal\nthree\n";
@@ -27,7 +30,7 @@ fn conflict() -> TempDir {
 
 fn opened(dir: &TempDir) -> MergeSession {
     let mut session = MergeSession::open(dir.path()).unwrap();
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     session
 }
 
@@ -72,7 +75,7 @@ fn a_save_writes_without_staging_and_never_comes_back_as_a_disk_change() {
 
     assert_written(&reply);
     assert_eq!(read(&dir), SAVED.as_bytes());
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status(&session), FileStatus::Unresolved);
     assert_eq!(session.load(TEXT).unwrap().disk_version, DiskVersion(0));
@@ -121,7 +124,7 @@ fn save_and_reset_refuse_a_directory_without_touching_the_index() {
     let worktree_file = dir.path().join(TEXT);
     fs::remove_file(&worktree_file).unwrap();
     fs::create_dir(&worktree_file).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
     let index_before = index(&dir);
 
     let saved = session.save(TEXT, SAVED, DiskVersion(1));
@@ -149,7 +152,7 @@ fn a_save_refuses_a_link_and_reset_replaces_it_with_the_file_at_open() {
     let worktree_file = dir.path().join(TEXT);
     fs::remove_file(&worktree_file).unwrap();
     std::os::unix::fs::symlink(&target, &worktree_file).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
 
     let saved = session.save(TEXT, SAVED, DiskVersion(1));
     session.reset(TEXT, DiskVersion(1)).unwrap();
@@ -177,7 +180,7 @@ fn reset_after_a_save_brings_back_the_bytes_and_the_stages_of_this_run_s_start()
     assert!(matches!(middle, Middle::Stages { .. }), "{middle:?}");
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status(&session), FileStatus::Unresolved);
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
 }
 
 #[test]
@@ -187,7 +190,7 @@ fn reset_in_a_later_run_brings_back_what_that_run_found_saved() {
     first_run.save(TEXT, SAVED, DiskVersion(0)).unwrap();
     drop(first_run);
     let mut second_run = MergeSession::open(dir.path()).unwrap();
-    let settled = second_run.refresh().unwrap().disk_changes;
+    let settled = listed(&mut second_run).disk_changes;
     assert_eq!(settled[0].result, DiskResult::MarkersLeft { conflicts: 1 });
     let second_save = SAVED.replace("remote, kept", "remote, changed again");
     second_run.save(TEXT, &second_save, DiskVersion(1)).unwrap();
@@ -195,7 +198,7 @@ fn reset_in_a_later_run_brings_back_what_that_run_found_saved() {
     second_run.reset(TEXT, DiskVersion(1)).unwrap();
 
     assert_eq!(read(&dir), SAVED.as_bytes());
-    assert_eq!(second_run.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut second_run).disk_changes, []);
 }
 
 #[test]
@@ -204,7 +207,7 @@ fn reset_of_a_file_changed_by_hand_before_start_brings_back_the_hand_edit() {
     let before = unmerged(&dir);
     write(&dir, FOREIGN);
     let mut session = MergeSession::open(dir.path()).unwrap();
-    let settled = session.refresh().unwrap().disk_changes;
+    let settled = listed(&mut session).disk_changes;
     assert_eq!(settled[0].result, DiskResult::Staged);
 
     session.reset(TEXT, DiskVersion(1)).unwrap();
@@ -217,7 +220,7 @@ fn reset_of_a_file_changed_by_hand_before_start_brings_back_the_hand_edit() {
     );
     assert_eq!(unmerged(&dir), before);
     assert_eq!(status(&session), FileStatus::Unresolved);
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     assert_eq!(status(&session), FileStatus::Unresolved);
 }
 
@@ -258,4 +261,27 @@ fn reset_whose_file_write_fails_puts_the_index_back() {
     assert_eq!(read(&dir), b"merged\n");
     assert_eq!(index(&dir), index_before);
     assert_eq!(status(&session), FileStatus::Resolved);
+}
+
+// `checkout -m` refuses a path without both sides; running it there turns Reset into git's error.
+#[cfg(unix)]
+#[test]
+fn reset_of_a_link_deleted_on_one_side_keeps_it_unresolved_without_checkout_m() {
+    const LINK: &str = "link";
+    let dir = conflict_repo(&[ConflictFile {
+        path: LINK,
+        kind: FileKind::Symlink,
+        base: Some(b"base-target"),
+        local: Some(b"local-target"),
+        remote: None,
+    }])
+    .unwrap();
+    let mut session = opened(&dir);
+    let unmerged_before = unmerged(&dir);
+
+    let reset = session.reset(LINK, DiskVersion(0));
+
+    assert!(matches!(reset, Ok(WriteReply::Written { .. })), "{reset:?}");
+    assert_eq!(status(&session), FileStatus::Unresolved);
+    assert_eq!(unmerged(&dir), unmerged_before);
 }

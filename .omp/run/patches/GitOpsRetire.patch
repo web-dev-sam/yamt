@@ -1,0 +1,2579 @@
+From 8ec6328bfdf2a456e86175624d7bbb0955657f94 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 14:51:39 +0200
+Subject: [PATCH] refactor: retire list_files, side_names, abort_merge; disk
+ versions never repeat
+
+The window lists with list_stop and aborts with abort_operation, so
+the old commands, FileList, merging.rs and their ipc methods go.
+A reopened stop numbers disk versions after the old session's highest,
+so a stale write is refused in Rust too (#1383).
+
+Refs plan #88 #89
+---
+ crates/gitio/AGENTS.md                     |   2 +-
+ crates/gitio/src/repo.rs                   |  21 -----
+ crates/gitio/tests/abort.rs                | 101 ++-------------------
+ crates/gitio/tests/operations.rs           |  21 ++++-
+ crates/session/AGENTS.md                   |   2 +-
+ crates/session/src/disk.rs                 |   4 +-
+ crates/session/src/lib.rs                  |   3 +-
+ crates/session/src/merging.rs              |  23 -----
+ crates/session/src/open.rs                 |  19 +++-
+ crates/session/src/operation.rs            |   4 +-
+ crates/session/src/session.rs              |  64 +++++--------
+ crates/session/src/side_names.rs           |  12 ++-
+ crates/session/src/writes.rs               |   6 +-
+ crates/session/tests/all_or_nothing.rs     |   5 +-
+ crates/session/tests/deleted_side.rs       |   5 +-
+ crates/session/tests/disk_is_truth.rs      |  42 +++++----
+ crates/session/tests/finish_and_reset.rs   |   7 +-
+ crates/session/tests/git_view.rs           |  13 ++-
+ crates/session/tests/left_as_is.rs         |   9 +-
+ crates/session/tests/listing/mod.rs        |  10 ++
+ crates/session/tests/merging.rs            |  91 -------------------
+ crates/session/tests/operations.rs         |  13 +--
+ crates/session/tests/orientation.rs        |   7 +-
+ crates/session/tests/remembered.rs         |  12 +--
+ crates/session/tests/save.rs               |  21 +++--
+ crates/session/tests/save_round_trip.rs    |   6 +-
+ crates/session/tests/side_names.rs         |   9 +-
+ crates/session/tests/start_from_disk.rs    |  14 +--
+ crates/session/tests/take.rs               |   4 +-
+ frontend/src/ipc/ChunkSource.ts            |   5 -
+ frontend/src/ipc/bindings.ts               |  13 +--
+ frontend/src/ipc/domain.ts                 |  10 --
+ frontend/src/ipc/fixture.test.ts           |  47 ++++------
+ frontend/src/ipc/fixture.ts                |   8 --
+ frontend/src/ipc/fixtureOperations.test.ts |  38 +++-----
+ frontend/src/ipc/fixtureOperations.ts      |  14 +--
+ frontend/src/ipc/index.ts                  |   1 -
+ frontend/src/ipc/tauri.test.ts             |  58 +-----------
+ frontend/src/ipc/tauri.ts                  |  15 ---
+ frontend/src/ui/listing.test.ts            |   3 -
+ frontend/src/ui/saving.test.ts             |   3 -
+ frontend/src/ui/stops.test.ts              |   3 -
+ frontend/src/ui/store.test.ts              |   6 --
+ src-tauri/AGENTS.md                        |   2 +-
+ src-tauri/src/commands.rs                  |  77 +++++-----------
+ src-tauri/src/merge.rs                     |  40 ++++----
+ src-tauri/src/merge/tests.rs               |  62 ++++++++++---
+ src-tauri/src/outcome.rs                   |  64 +++++++++----
+ 48 files changed, 369 insertions(+), 650 deletions(-)
+ delete mode 100644 crates/session/src/merging.rs
+ create mode 100644 crates/session/tests/listing/mod.rs
+ delete mode 100644 crates/session/tests/merging.rs
+
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index 9e1d912..eb1052d 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -2,4 +2,4 @@ Owner skill: `skill://rust-conventions` (RS14–RS15 subprocess rules). Git subp
+ 
+ What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`), in `rebase-merge/current-fixups` (the squash chain this stop is in: git opens the editor at the end of a chain with a squash) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `src/rerere.rs` (plan §2 #90): `Repo::rerere_tracked()` reads `MERGE_RR` (`<id>[.<n>]\t<path>\0` records; a replayed path is dropped by rerere.c `write_rr`) only while rerere is enabled as rerere.c `is_rerere_enabled` decides (`config --type=bool rerere.enabled`; unset → whether `rr-cache` is a directory), so the empty `MERGE_RR` a commit leaves is not read once rerere is off; `None` when rerere is off or without the file, a record without a tab or another `rerere.enabled` answer `UnexpectedOutput`; `tests/rerere.rs` on `yamt_conflict_repo::rerere_repo` (the unset case in a child without the user's and system config). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo, a conflicted `fixup` ending a chain with and without a squash).
+ 
+-Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
++Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`. `tests/abort.rs`: a merge's abort drops staged resolutions, a removal and a saved CRLF file and `MERGE_HEAD`, and keeps an untracked file.
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 85d7a30..76943e7 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -11,7 +11,6 @@ use crate::{Error, Result, StageEntry};
+ 
+ const REV_PARSE: &str = "rev-parse";
+ const HASH_OBJECT: &str = "hash-object";
+-const REBASE_STATE_DIRS: [&str; 2] = ["rebase-merge", "rebase-apply"];
+ const UNRESOLVED_NAME_STATUS: i32 = 1;
+ 
+ pub struct Repo {
+@@ -51,26 +50,6 @@ impl Repo {
+         Ok(Some(Oid::parse(&hex)?))
+     }
+ 
+-    /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
+-    pub fn rebase_in_progress(&self) -> Result<bool> {
+-        for name in REBASE_STATE_DIRS {
+-            if exists(&self.git_path(name)?)? {
+-                return Ok(true);
+-            }
+-        }
+-        Ok(false)
+-    }
+-
+-    /// `git merge --abort`; git's own refusal comes back as `Error::GitFailed` with its stderr.
+-    pub fn abort_merge(&self) -> Result<()> {
+-        run(
+-            self.command(Access::Write, &["merge", "--abort"]),
+-            None,
+-            GIT_TIMEOUT,
+-        )?;
+-        Ok(())
+-    }
+-
+     pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
+         let [path] = self.git_paths([name])?;
+         Ok(path)
+diff --git a/crates/gitio/tests/abort.rs b/crates/gitio/tests/abort.rs
+index c5e11a2..625ed45 100644
+--- a/crates/gitio/tests/abort.rs
++++ b/crates/gitio/tests/abort.rs
+@@ -3,17 +3,14 @@
+ use std::fs;
+ use std::path::Path;
+ 
+-use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, TempDir, conflict_repo, diverged_repo, git, git_ok, operation_repo,
+-};
+-use yamt_gitio::{Error, Repo};
++use yamt_conflict_repo::{ConflictFile, FileKind, conflict_repo, git_ok};
++use yamt_gitio::Repo;
+ 
+ const ADDED: &str = "src/added.ts";
+ const REMOVED: &str = "docs/removed.md";
+ const CRLF: &str = "notes/crlf.txt";
+ const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
+ const UNTRACKED: &str = "scratch.txt";
+-const REFUSED_STATUS: i32 = 128;
+ 
+ fn regular<'a>(
+     path: &'a str,
+@@ -43,34 +40,23 @@ fn files() -> [ConflictFile<'static>; 3] {
+     ]
+ }
+ 
+-fn merging() -> (TempDir, Repo) {
+-    let dir = conflict_repo(&files()).unwrap();
+-    let repo = Repo::discover(dir.path()).unwrap();
+-    (dir, repo)
+-}
+-
+ fn output_text(root: &Path, args: &[&str]) -> String {
+     String::from_utf8(git_ok(root, args).unwrap()).unwrap()
+ }
+ 
+-fn index_and_worktree(root: &Path) -> (String, String) {
+-    (
+-        output_text(root, &["status", "--porcelain"]),
+-        output_text(root, &["ls-files", "-s"]),
+-    )
+-}
+-
+ #[test]
+-fn abort_merge_drops_resolutions_saves_and_merge_head_but_keeps_untracked_files() {
+-    let (dir, repo) = merging();
++fn a_merge_abort_drops_resolutions_saves_and_merge_head_but_keeps_untracked_files() {
++    let dir = conflict_repo(&files()).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
+     let root = dir.path();
+     fs::write(root.join(ADDED), "resolved\n").unwrap();
+     git_ok(root, &["add", "--", ADDED]).unwrap();
+     git_ok(root, &["rm", "--quiet", "--", REMOVED]).unwrap();
+     fs::write(root.join(CRLF), "a\r\nsaved\r\n").unwrap();
+     fs::write(root.join(UNTRACKED), "mine\n").unwrap();
++    let operation = repo.stop().unwrap().operation.unwrap();
+ 
+-    repo.abort_merge().unwrap();
++    repo.abort(&operation).unwrap();
+ 
+     assert_eq!(
+         output_text(root, &["status", "--porcelain"]),
+@@ -79,76 +65,3 @@ fn abort_merge_drops_resolutions_saves_and_merge_head_but_keeps_untracked_files(
+     assert_eq!(repo.commit_named("MERGE_HEAD").unwrap(), None);
+     assert_eq!(fs::read(root.join(CRLF)).unwrap(), CRLF_AT_HEAD);
+ }
+-
+-#[test]
+-fn abort_merge_of_a_file_staged_then_changed_is_git_s_refusal_and_touches_nothing() {
+-    let (dir, repo) = merging();
+-    let root = dir.path();
+-    fs::write(root.join(ADDED), "resolved\n").unwrap();
+-    git_ok(root, &["add", "--", ADDED]).unwrap();
+-    fs::write(root.join(ADDED), "saved again\n").unwrap();
+-    let before = index_and_worktree(root);
+-
+-    let error = repo.abort_merge().unwrap_err();
+-
+-    let Error::GitFailed { status, stderr, .. } = error else {
+-        panic!("expected git's refusal, got {error:?}");
+-    };
+-    assert_eq!(status, Some(REFUSED_STATUS));
+-    assert!(
+-        stderr.contains(&format!(
+-            "error: Entry '{ADDED}' not uptodate. Cannot merge."
+-        )),
+-        "{stderr}"
+-    );
+-    assert_eq!(index_and_worktree(root), before);
+-    assert!(repo.commit_named("MERGE_HEAD").unwrap().is_some());
+-}
+-
+-#[test]
+-fn rebase_in_progress_is_false_in_a_merge() {
+-    let (_dir, repo) = merging();
+-    assert!(!repo.rebase_in_progress().unwrap());
+-}
+-
+-#[cfg(unix)]
+-#[test]
+-fn rebase_in_progress_fails_when_the_rebase_state_cannot_be_looked_at() {
+-    let (dir, repo) = merging();
+-    let rebase_merge = dir.path().join(".git").join("rebase-merge");
+-    std::os::unix::fs::symlink("rebase-merge", &rebase_merge).unwrap();
+-
+-    let error = repo.rebase_in_progress().unwrap_err();
+-
+-    assert!(
+-        matches!(&error, Error::ReadFailed { path, .. } if path.ends_with("rebase-merge")),
+-        "{error:?}"
+-    );
+-}
+-
+-fn stopped_rebase(backend: &str) -> TempDir {
+-    let dir = diverged_repo(&files()).unwrap();
+-    let rebase = git(dir.path(), &["rebase", backend, "remote"]).unwrap();
+-    assert!(!rebase.status.success(), "the rebase did not stop");
+-    dir
+-}
+-
+-#[test]
+-fn rebase_in_progress_is_true_in_a_stopped_rebase_of_either_backend() {
+-    for backend in ["--merge", "--apply"] {
+-        let dir = stopped_rebase(backend);
+-
+-        let repo = Repo::discover(dir.path()).unwrap();
+-
+-        assert!(repo.rebase_in_progress().unwrap(), "{backend}");
+-    }
+-}
+-
+-#[test]
+-fn rebase_in_progress_is_true_in_a_rebase_stopped_on_a_merge_commit_with_merge_head() {
+-    let dir = operation_repo(Run::RebaseMerges, &files()).unwrap();
+-    let repo = Repo::discover(dir.path()).unwrap();
+-
+-    assert!(repo.commit_named("MERGE_HEAD").unwrap().is_some());
+-    assert!(repo.rebase_in_progress().unwrap());
+-}
+diff --git a/crates/gitio/tests/operations.rs b/crates/gitio/tests/operations.rs
+index 9486071..92a1ddc 100644
+--- a/crates/gitio/tests/operations.rs
++++ b/crates/gitio/tests/operations.rs
+@@ -3,9 +3,10 @@
+ use std::path::{Path, PathBuf};
+ 
+ use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, git, git_ok, operation_repo,
++    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, diverged_repo, git, git_ok,
++    operation_repo,
+ };
+-use yamt_gitio::{Oid, Operation, Progress, Rebase, Repo, Stop};
++use yamt_gitio::{Error, Oid, Operation, Progress, Rebase, Repo, Stop};
+ 
+ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+     path: "cart.ts",
+@@ -110,6 +111,22 @@ fn rebase_merges_redoing_a_merge_is_a_rebase_with_redoing_merge_not_a_merge() {
+     assert_eq!(rebase.onto, Some(oid(dir.path(), "local")));
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn a_rebase_state_that_cannot_be_looked_at_fails_the_stop() {
++    let dir = conflict_repo(&FILES).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    let rebase_merge = git_path(dir.path(), "rebase-merge");
++    std::os::unix::fs::symlink("rebase-merge", &rebase_merge).unwrap();
++
++    let error = repo.stop().unwrap_err();
++
++    assert!(
++        matches!(&error, Error::ReadFailed { path, .. } if path.ends_with("rebase-merge")),
++        "{error:?}"
++    );
++}
++
+ #[test]
+ fn single_cherry_pick_reads_the_picked_commit_without_progress() {
+     let (dir, repo) = stopped(Run::CherryPick);
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index 782251c..8b435c5 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` (`Orientation`, public; `Orientation::NO_OPERATION` = ours on the left) decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None, replaying: Some(_) }`, also a conflicted `squash`/`fixup` step, plan §2 #91), ours for everything else, also a rebase at an `edit`/`break`/`exec` stop — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`, `ViewRemembered { shown, git_output }`); finish and save record the bytes they wrote (`Seen::note_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Remembered { remembered, git_output }`, `Unread`; set once in `open.rs`, never written again; a remembered file's bytes are copied into its `Seen` once at open and at each Reset). A resolution git rerere replayed is reviewed, never staged at open (plan §2 #90); detection is in `start.rs` beside `compare_merged`: git's re-run output has blocks and the disk file no marker line (`looks_resolved`), and rerere replayed the path (`RerereTracked`, read at most once per open: `Repo::rerere_tracked` gives the paths only while rerere is enabled as rerere.c decides, so a stale empty `MERGE_RR` with rerere off counts as off; the path not in it → replayed; an unreadable `MERGE_RR` → `Unknown`, a `rerere_unread` warning, and every file that looks resolved counts as replayed) → `AtOpen::Remembered` and `Seen::ViewRemembered`, equal to the disk, so nothing settles it; a later disk change follows #52. `FileStatus::Remembered` while git lists the path unmerged and the file is in that view (`FileState::unmerged_status`, at open, in `refresh_statuses` and after Reset); `remaining()` and the exit status count it. Its view (`remembered.rs`, `remembered_merge_data`) is the file as the Result (`Middle::Disk`) with one `Conflict` per block of git's output, placed in the stages by the same walk as the disk view (`locate::place_pieces`), its Result lines `line_map(git output, text).covering(block)` with both texts' lines read without `\r` (a CRLF worktree over LF blobs, `core.autocrlf`); blocks whose Result lines overlap join into one conflict over both blocks' spans; waiting as `Waiting::Remembered` (Save writes the Result as shown); one-sided changes are already in the text and are no chunks. `remembered_data(path, base, local, remote, &Replayed, &MarkerStyle, DiskVersion)` is the same view from texts (`yamt-cli fixture`'s `tests/showcase/remembered`), `None` when a block of git's output is not found unchanged in the sides. Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view, `Remembered` the remembered view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style, with the marker size it was read with; `MarkerStyle` and `block_markers` take the `Orientation` and set `first` = `orientation.pane(GitSide::Ours)` there only — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region, `Remembered` for a block rerere resolved). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` walks the pieces once (`place_pieces`): each open block or raw region located in the panes showing ours and theirs and in base, its base lines starting where the previous one's end (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker); `seed.rs` builds the middle text and one conflict per open block from the disk over that walk, `start.rs` compares each file with what git wrote at `open` (`git merge-file` in a `scratch.rs` temp directory, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s; `StartCheck::found` gives each path's `Found`). `side_names.rs` names both sides, read once at `open` per git side and placed by the orientation (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation (`applied`) — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; `applied` and the name builders are the only ones (`operation.rs`'s view names what a merge, squash merge, pick or revert applies through `applied`), `message_text` is the one rule for a commit's or patch's message, and one `name_or_warn(label, read)` drops only that name on a git failure with a `side_name_unread` warning naming it (plan §2 #50, #62). `operation.rs` (plan §2 #88/#89) holds the stop's DTOs (`OperationView` with #87's names, `ProgressView`, `OperationKind`, `Refreshed`, `StopList`, `Continued`) and three methods that read `Repo::stop()` again first and compare `Stop::id()` with the stop read at open: `refresh_stop` (another recorded operation → `MovedOn`, nothing settled or staged; none recorded now, ended or aborted outside, → git's view with `operation: None`; else `refresh`'s settle and marks), `abort_operation` (none → `NoOperation`, another → `StopMovedOn`, else git's abort) and `continue_operation` (the same checks, git's continue, then none → `Finished`, the same stop → `GitRefused` with git's output, another → `Stopped`); git's continue output and an abort's refusal (`GitFailed.stderr`) leave the session through `shown_text` only: per line, what follows its last `\r`, as a terminal shows git's progress lines. `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; a conflicted squash step's own commit on the left, both sides named; every other operation, and a pick or stash pop at an `edit` stop, keeps HEAD on the left), `side_names.rs` (every operation's names) and `operations.rs` (`refresh_stop`, Abort, Continue and their outcomes; the hook test runs through `yamt_conflict_repo::run_ignored_in_child` with the user's locale set) run on `conflict-repo`'s `operation_repo`; `remembered.rs` (listed, loaded, saved, finished, reset, changed later; `autoUpdate`, a first-time path, hand fixes with rerere on, off, and switched off over a stale `MERGE_RR`; an unreadable `MERGE_RR`; a replayed path checked out again with markers) on `rerere_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` (`Orientation`, public; `Orientation::NO_OPERATION` = ours on the left) decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None, replaying: Some(_) }`, also a conflicted `squash`/`fixup` step, plan §2 #91), ours for everything else, also a rebase at an `edit`/`break`/`exec` stop — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`, `ViewRemembered { shown, git_output }`); finish and save record the bytes they wrote (`Seen::note_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Remembered { remembered, git_output }`, `Unread`; set once in `open.rs`, never written again; a remembered file's bytes are copied into its `Seen` once at open and at each Reset). A resolution git rerere replayed is reviewed, never staged at open (plan §2 #90); detection is in `start.rs` beside `compare_merged`: git's re-run output has blocks and the disk file no marker line (`looks_resolved`), and rerere replayed the path (`RerereTracked`, read at most once per open: `Repo::rerere_tracked` gives the paths only while rerere is enabled as rerere.c decides, so a stale empty `MERGE_RR` with rerere off counts as off; the path not in it → replayed; an unreadable `MERGE_RR` → `Unknown`, a `rerere_unread` warning, and every file that looks resolved counts as replayed) → `AtOpen::Remembered` and `Seen::ViewRemembered`, equal to the disk, so nothing settles it; a later disk change follows #52. `FileStatus::Remembered` while git lists the path unmerged and the file is in that view (`FileState::unmerged_status`, at open, in `refresh_statuses` and after Reset); `remaining()` and the exit status count it. Its view (`remembered.rs`, `remembered_merge_data`) is the file as the Result (`Middle::Disk`) with one `Conflict` per block of git's output, placed in the stages by the same walk as the disk view (`locate::place_pieces`), its Result lines `line_map(git output, text).covering(block)` with both texts' lines read without `\r` (a CRLF worktree over LF blobs, `core.autocrlf`); blocks whose Result lines overlap join into one conflict over both blocks' spans; waiting as `Waiting::Remembered` (Save writes the Result as shown); one-sided changes are already in the text and are no chunks. `remembered_data(path, base, local, remote, &Replayed, &MarkerStyle, DiskVersion)` is the same view from texts (`yamt-cli fixture`'s `tests/showcase/remembered`), `None` when a block of git's output is not found unchanged in the sides. Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view, `Remembered` the remembered view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style, with the marker size it was read with; `MarkerStyle` and `block_markers` take the `Orientation` and set `first` = `orientation.pane(GitSide::Ours)` there only — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region, `Remembered` for a block rerere resolved). A list (`refresh_stop`) settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). Disk versions never repeat within one app run (#1383): every file starts at the session's `first_disk_version` — 0 for `open`, one above `previous` for `open_after(cwd, previous)`, which the shell calls with the old session's `highest_disk_version()` when git moved on — and a write carrying a version below it was meant for an earlier stop: `Error::StopMovedOn`, nothing written. `markers.rs` reads git's markers from bytes, `locate.rs` walks the pieces once (`place_pieces`): each open block or raw region located in the panes showing ours and theirs and in base, its base lines starting where the previous one's end (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker); `seed.rs` builds the middle text and one conflict per open block from the disk over that walk, `start.rs` compares each file with what git wrote at `open` (`git merge-file` in a `scratch.rs` temp directory, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s; `StartCheck::found` gives each path's `Found`). `side_names.rs` names both sides (`SideNames::read`), read once at `open` per git side and placed by the orientation, given in every `StopList.sides` (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation (`applied`) — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; `applied` and the name builders are the only ones (`operation.rs`'s view names what a merge, squash merge, pick or revert applies through `applied`), `message_text` is the one rule for a commit's or patch's message, and one `name_or_warn(label, read)` drops only that name on a git failure with a `side_name_unread` warning naming it (plan §2 #50, #62). `operation.rs` (plan §2 #88/#89) holds the stop's DTOs (`OperationView` with #87's names, `ProgressView`, `OperationKind`, `Refreshed`, `StopList`, `Continued`) and three methods that read `Repo::stop()` again first and compare `Stop::id()` with the stop read at open: `refresh_stop` (another recorded operation → `MovedOn`, nothing settled or staged; none recorded now, ended or aborted outside, → git's view with `operation: None`; else the settle and marks), `abort_operation` (none → `NoOperation`, another → `StopMovedOn`, else git's abort) and `continue_operation` (the same checks, git's continue, then none → `Finished`, the same stop → `GitRefused` with git's output, another → `Stopped`); git's continue output and an abort's refusal (`GitFailed.stderr`) leave the session through `shown_text` only: per line, what follows its last `\r`, as a terminal shows git's progress lines. Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; a conflicted squash step's own commit on the left, both sides named; every other operation, and a pick or stash pop at an `edit` stop, keeps HEAD on the left), `side_names.rs` (every operation's names) and `operations.rs` (`refresh_stop`, Abort, Continue and their outcomes; the hook test runs through `yamt_conflict_repo::run_ignored_in_child` with the user's locale set) run on `conflict-repo`'s `operation_repo`; `remembered.rs` (listed, loaded, saved, finished, reset, changed later; `autoUpdate`, a first-time path, hand fixes with rerere on, off, and switched off over a stale `MERGE_RR`; an unreadable `MERGE_RR`; a replayed path checked out again with markers) on `rerere_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture; every test that lists does it through `tests/listing/` (`listed`: `refresh_stop` at a stop git has not left).
+diff --git a/crates/session/src/disk.rs b/crates/session/src/disk.rs
+index fa2003e..06102f8 100644
+--- a/crates/session/src/disk.rs
++++ b/crates/session/src/disk.rs
+@@ -10,8 +10,8 @@ use crate::markers::{open_regions, parse, split_lines};
+ use crate::session::LOG_TARGET;
+ use crate::{Error, Result};
+ 
+-/// Counts the settles of one file's disk changes; a view is built from one version.
+-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++/// Counts the settles of one file's disk changes, from the session's first version; a view is built from one version.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
+ pub struct DiskVersion(pub u32);
+ 
+ /// What yamt did with a file that changed on disk.
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index 1d610ed..fe3068f 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -6,7 +6,6 @@ mod disk;
+ mod locate;
+ mod markers;
+ mod merge_data;
+-mod merging;
+ mod open;
+ mod operation;
+ mod orientation;
+@@ -28,7 +27,7 @@ pub use merge_data::{FileMergeData, MergeChunk, Middle, MiddleLine, NotText, mer
+ pub use operation::{Continued, OperationKind, OperationView, ProgressView, Refreshed, StopList};
+ pub use orientation::{GitSide, Orientation};
+ pub use remembered::{Replayed, remembered_data};
+-pub use session::{FileEntry, FileList, FileStatus, MergeSession, WriteReply};
++pub use session::{FileEntry, FileStatus, MergeSession, WriteReply};
+ pub use side_names::{SideName, SideNames};
+ pub use sides::{FileSides, Side, SideContent};
+ pub use waiting::{MarkerStyle, Waiting};
+diff --git a/crates/session/src/merging.rs b/crates/session/src/merging.rs
+deleted file mode 100644
+index 10fe1dc..0000000
+--- a/crates/session/src/merging.rs
++++ /dev/null
+@@ -1,23 +0,0 @@
+-use yamt_gitio::Repo;
+-
+-use crate::session::LOG_TARGET;
+-
+-const MERGE_HEAD: &str = "MERGE_HEAD";
+-
+-pub(crate) fn is_merging(repo: &Repo) -> bool {
+-    match merge_in_progress(repo) {
+-        Ok(merging) => merging,
+-        Err(error) => {
+-            tracing::warn!(target: LOG_TARGET, event = "merge_state_unread", %error, "no merge to abort is assumed");
+-            false
+-        }
+-    }
+-}
+-
+-// A `git rebase -r` stopped on a merge commit's conflict writes MERGE_HEAD too; `git merge --abort` there would leave the rebase half done.
+-fn merge_in_progress(repo: &Repo) -> yamt_gitio::Result<bool> {
+-    if repo.commit_named(MERGE_HEAD)?.is_none() {
+-        return Ok(false);
+-    }
+-    Ok(!repo.rebase_in_progress()?)
+-}
+diff --git a/crates/session/src/open.rs b/crates/session/src/open.rs
+index e0def38..ec058ee 100644
+--- a/crates/session/src/open.rs
++++ b/crates/session/src/open.rs
+@@ -4,11 +4,11 @@ use yamt_gitio::{BlobReader, MergeAttributes, MergeConfig, Repo, StageEntry};
+ 
+ use crate::Result;
+ use crate::decode::{UnsupportedReason, decode_sides};
+-use crate::disk::{AtOpen, MarkerRule, OnDisk, read_on_disk, warn_unread};
++use crate::disk::{AtOpen, DiskVersion, MarkerRule, OnDisk, read_on_disk, warn_unread};
+ use crate::merge_data::Texts;
+ use crate::orientation::{GitSide, Orientation};
+ use crate::session::{Content, FileState, FileStatus, MergeSession};
+-use crate::side_names::read_side_names;
++use crate::side_names::SideNames;
+ use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
+ use crate::stages::{CapturedStages, group_by_path};
+ use crate::start::{Attributes, Found, StartCheck, StartFile, StartLook};
+@@ -27,6 +27,16 @@ enum Stored {
+ 
+ impl MergeSession {
+     pub fn open(cwd: &Path) -> Result<MergeSession> {
++        MergeSession::open_from(cwd, DiskVersion(0))
++    }
++
++    /// Opens the stop git is at now with every disk version above `previous`, the highest of the
++    /// session this one follows: a write meant for the earlier stop never matches (#1383).
++    pub fn open_after(cwd: &Path, previous: DiskVersion) -> Result<MergeSession> {
++        MergeSession::open_from(cwd, DiskVersion(previous.0.saturating_add(1)))
++    }
++
++    fn open_from(cwd: &Path, first_disk_version: DiskVersion) -> Result<MergeSession> {
+         let repo = Repo::discover(cwd)?;
+         let stop = repo.stop()?;
+         let orientation = Orientation::of(&stop);
+@@ -35,13 +45,14 @@ impl MergeSession {
+         let attributes = repo.attributes(&paths)?;
+         let config = repo.merge_config()?;
+         let files = open_files(&repo, groups, &attributes, &config, orientation)?;
+-        let side_names = read_side_names(&repo, &stop, orientation);
++        let side_names = SideNames::read(&repo, &stop, orientation);
+         Ok(MergeSession {
+             repo,
+             files,
+-            side_names: Box::new(side_names),
++            side_names,
+             stop,
+             orientation,
++            first_disk_version,
+         })
+     }
+ }
+diff --git a/crates/session/src/operation.rs b/crates/session/src/operation.rs
+index c5a03ec..00bf093 100644
+--- a/crates/session/src/operation.rs
++++ b/crates/session/src/operation.rs
+@@ -94,7 +94,7 @@ pub enum Continued {
+ 
+ impl MergeSession {
+     /// Reads the stop first: another stop than the one opened → `MovedOn`, nothing settled or staged.
+-    /// Otherwise `refresh`'s settle and git's marks, plus the operation as read now and the names read at open.
++    /// Otherwise settles the disk changes and re-reads git's marks, plus the operation as read now and the names read at open.
+     pub fn refresh_stop(&mut self) -> Result<Refreshed> {
+         let now = self.repo.stop()?;
+         if self.has_moved_on_to(&now) {
+@@ -105,7 +105,7 @@ impl MergeSession {
+             files: self.files(),
+             disk_changes,
+             operation: view(&self.repo, &now),
+-            sides: (*self.side_names).clone(),
++            sides: self.side_names.clone(),
+         }))
+     }
+ 
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index 9bb8504..0daccdd 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -10,7 +10,6 @@ use crate::disk::{
+     read_on_disk, settlement, stage, warn_unread,
+ };
+ use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
+-use crate::merging::is_merging;
+ use crate::orientation::Orientation;
+ use crate::remembered::remembered_merge_data;
+ use crate::side_names::SideNames;
+@@ -34,15 +33,6 @@ pub struct FileEntry {
+     pub unsupported: Option<UnsupportedReason>,
+ }
+ 
+-/// The files as git sees them, the disk changes settled while looking, and whether a merge is in progress.
+-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+-pub struct FileList {
+-    pub files: Vec<FileEntry>,
+-    pub disk_changes: Vec<DiskChange>,
+-    /// A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74).
+-    pub merging: bool,
+-}
+-
+ /// What a write did: written, or nothing written because the file changed on disk first.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(tag = "kind")]
+@@ -61,12 +51,13 @@ pub(crate) const LOG_TARGET: &str = "session";
+ pub struct MergeSession {
+     pub(crate) repo: Repo,
+     pub(crate) files: Vec<FileState>,
+-    // Boxed so that src-tauri's `Startup` and `Merge` enums keep the sizes their
+-    // clippy::large_enum_variant checks expect.
+-    pub(crate) side_names: Box<SideNames>,
++    /// Both panes' names, read once at open.
++    pub(crate) side_names: SideNames,
+     pub(crate) stop: Stop,
+     /// Decided once at open from `stop` (plan §2 #86).
+     pub(crate) orientation: Orientation,
++    /// The disk version every file starts at: above every version an earlier session of this run gave out (#1383).
++    pub(crate) first_disk_version: DiskVersion,
+ }
+ 
+ pub(crate) struct FileState {
+@@ -99,28 +90,23 @@ impl MergeSession {
+         self.repo.root()
+     }
+ 
+-    #[must_use]
+-    pub fn side_names(&self) -> &SideNames {
+-        &self.side_names
+-    }
+-
+     /// What git was doing when the session opened.
+     #[must_use]
+     pub fn stop(&self) -> &Stop {
+         &self.stop
+     }
+ 
+-    /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
+-    pub fn refresh(&mut self) -> Result<FileList> {
+-        let disk_changes = self.settle_and_mark()?;
+-        Ok(FileList {
+-            files: self.files(),
+-            disk_changes,
+-            merging: is_merging(&self.repo),
+-        })
++    /// The highest disk version this session gave out; the session of git's next stop starts above it.
++    #[must_use]
++    pub fn highest_disk_version(&self) -> DiskVersion {
++        let first = self.first_disk_version;
++        self.files
++            .iter()
++            .map(|file| file.disk_version(first))
++            .fold(first, std::cmp::max)
+     }
+ 
+-    /// `refresh`'s two steps: settle the disk changes, then re-read git's marks.
++    /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
+     pub(crate) fn settle_and_mark(&mut self) -> Result<Vec<DiskChange>> {
+         let mut looked = Vec::new();
+         for (index, file) in self.files.iter().enumerate() {
+@@ -135,12 +121,6 @@ impl MergeSession {
+         Ok(disk_changes)
+     }
+ 
+-    /// `git merge --abort`. The session must not be used for the merge afterwards.
+-    pub fn abort_merge(&self) -> Result<()> {
+-        self.repo.abort_merge()?;
+-        Ok(())
+-    }
+-
+     pub(crate) fn refresh_statuses(&mut self) -> Result<()> {
+         let unmerged = self.repo.unmerged()?;
+         for file in &mut self.files {
+@@ -173,10 +153,11 @@ impl MergeSession {
+             decided.push((index, disk, found));
+         }
+         let staging = stage(&self.repo, &adds, &removes);
++        let first = self.first_disk_version;
+         let mut changes = Vec::with_capacity(decided.len());
+         for (index, disk, found) in decided {
+             if let Some(file) = self.files.get_mut(index) {
+-                changes.push(file.settled_as(disk, staging.result(&found)));
++                changes.push(file.settled_as(disk, staging.result(&found), first));
+             }
+         }
+         changes
+@@ -196,9 +177,10 @@ impl MergeSession {
+     }
+ 
+     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
++        let first = self.first_disk_version;
+         let file = find_file(&mut self.files, path)?;
+         let texts = file.require_text()?;
+-        let version = file.disk_version();
++        let version = file.disk_version(first);
+         let path = file.display_path();
+         let orientation = self.orientation;
+         match &file.seen {
+@@ -232,6 +214,7 @@ impl MergeSession {
+     }
+ 
+     pub fn describe(&mut self, path: &str) -> Result<FileSides> {
++        let first = self.first_disk_version;
+         let file = find_file(&mut self.files, path)?;
+         let mut blobs = self.repo.blob_reader()?;
+         let orientation = self.orientation;
+@@ -241,7 +224,7 @@ impl MergeSession {
+             reason: file.unsupported_reason(),
+             local: side_content(&mut blobs, pane(Side::Local))?,
+             remote: side_content(&mut blobs, pane(Side::Remote))?,
+-            disk_version: file.disk_version(),
++            disk_version: file.disk_version(first),
+         })
+     }
+ 
+@@ -297,10 +280,11 @@ impl FileState {
+         }
+     }
+ 
+-    pub(crate) fn disk_version(&self) -> DiskVersion {
++    /// The last settle's version, or `first` (the session's first disk version) before any settle.
++    pub(crate) fn disk_version(&self, first: DiskVersion) -> DiskVersion {
+         self.settled
+             .as_ref()
+-            .map_or(DiskVersion(0), |settled| settled.version)
++            .map_or(first, |settled| settled.version)
+     }
+ 
+     /// The marker lines git wrote into this file, as found at open.
+@@ -343,10 +327,10 @@ impl FileState {
+         Ok((stage_failed || !self.seen.is(&disk)).then_some(disk))
+     }
+ 
+-    fn settled_as(&mut self, disk: OnDisk, result: DiskResult) -> DiskChange {
++    fn settled_as(&mut self, disk: OnDisk, result: DiskResult, first: DiskVersion) -> DiskChange {
+         self.seen = Seen::ViewFromDisk(disk);
+         self.settled = Some(Settled {
+-            version: DiskVersion(self.disk_version().0.saturating_add(1)),
++            version: DiskVersion(self.disk_version(first).0.saturating_add(1)),
+             result: result.clone(),
+         });
+         DiskChange {
+diff --git a/crates/session/src/side_names.rs b/crates/session/src/side_names.rs
+index 1e9a6f9..ea0d447 100644
+--- a/crates/session/src/side_names.rs
++++ b/crates/session/src/side_names.rs
+@@ -39,11 +39,13 @@ pub struct SideNames {
+     pub remote: Option<SideName>,
+ }
+ 
+-pub(crate) fn read_side_names(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
+-    let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
+-    let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
+-    let (local, remote) = orientation.panes(ours, theirs);
+-    SideNames { local, remote }
++impl SideNames {
++    pub(crate) fn read(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
++        let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
++        let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
++        let (local, remote) = orientation.panes(ours, theirs);
++        SideNames { local, remote }
++    }
+ }
+ 
+ /// The name `read` gave; a git failure drops only this name (plan §2 #50, #62), with a warning naming `label`.
+diff --git a/crates/session/src/writes.rs b/crates/session/src/writes.rs
+index 042a49f..401997d 100644
+--- a/crates/session/src/writes.rs
++++ b/crates/session/src/writes.rs
+@@ -129,12 +129,16 @@ impl MergeSession {
+     }
+ 
+     /// The change that stops a write to `path`: one settled after the window's `disk_version`,
+-    /// or one found now, which is settled before returning.
++    /// or one found now, which is settled before returning. A version below this session's first
++    /// comes from an earlier stop's session: `StopMovedOn` (#1383).
+     fn changed_on_disk(
+         &mut self,
+         path: &str,
+         disk_version: DiskVersion,
+     ) -> Result<Option<DiskChange>> {
++        if disk_version < self.first_disk_version {
++            return Err(Error::StopMovedOn);
++        }
+         let index = file_index(&self.files, path)?;
+         let file = find_file(&mut self.files, path)?;
+         if let Some(Settled { version, result }) = &file.settled
+diff --git a/crates/session/tests/all_or_nothing.rs b/crates/session/tests/all_or_nothing.rs
+index abaf44d..d1cf779 100644
+--- a/crates/session/tests/all_or_nothing.rs
++++ b/crates/session/tests/all_or_nothing.rs
+@@ -6,6 +6,9 @@ use std::path::PathBuf;
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Side, WriteReply};
+ 
++mod listing;
++use listing::listed;
++
+ const TEXT: &str = "src/cart.ts";
+ const BINARY: &str = "assets/logo.bin";
+ const DELETED: &str = "assets/removed.txt";
+@@ -98,7 +101,7 @@ fn finish_with_a_held_index_lock_leaves_a_deleted_worktree_file_absent() {
+     let dir = mixed_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     fs::remove_file(dir.path().join(TEXT)).unwrap();
+-    let deleted = session.refresh().unwrap().disk_changes.remove(0).result;
++    let deleted = listed(&mut session).disk_changes.remove(0).result;
+     assert_eq!(deleted, DiskResult::Staged);
+     let staged_before = staged(&dir, TEXT);
+     let _lock = index_lock(&dir);
+diff --git a/crates/session/tests/deleted_side.rs b/crates/session/tests/deleted_side.rs
+index 571ffdd..170385f 100644
+--- a/crates/session/tests/deleted_side.rs
++++ b/crates/session/tests/deleted_side.rs
+@@ -8,6 +8,9 @@ use yamt_session::{
+     DiskVersion, Eol, Error, FileStatus, MergeSession, Middle, Side, UnsupportedReason,
+ };
+ 
++mod listing;
++use listing::listed;
++
+ const LOCAL_DELETED: &str = "a_local_deleted.ts";
+ const REMOTE_DELETED: &str = "b_remote_deleted.ts";
+ const KEPT_BINARY: &str = "c_kept_binary.bin";
+@@ -159,7 +162,7 @@ fn keep_or_delete_then_reset_brings_the_stages_and_the_file_at_open_back() {
+         let worktree = fs::read(dir.path().join(LOCAL_DELETED)).unwrap();
+         assert_eq!(worktree, KEPT, "{side:?}");
+         assert_eq!(session.files()[0].status, FileStatus::Unresolved);
+-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{side:?}");
++        assert_eq!(listed(&mut session).disk_changes, [], "{side:?}");
+     }
+ }
+ 
+diff --git a/crates/session/tests/disk_is_truth.rs b/crates/session/tests/disk_is_truth.rs
+index 2b7af22..d0480fb 100644
+--- a/crates/session/tests/disk_is_truth.rs
++++ b/crates/session/tests/disk_is_truth.rs
+@@ -8,7 +8,7 @@ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
+ };
+ use yamt_session::{
+-    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
++    DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession, Middle, NotText, Side, StopList,
+     WriteReply,
+ };
+ 
+@@ -18,7 +18,9 @@ const BINARY: &str = "logo.bin";
+ const LINK: &str = "link";
+ const SUBMODULE: &str = "vendor/lib";
+ 
++mod listing;
+ mod samples;
++use listing::listed;
+ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
+ 
+ const USER_TEXT: &[u8] = b"written by the user\n";
+@@ -71,11 +73,11 @@ fn merged() -> TempDir {
+ 
+ fn opened(dir: &TempDir) -> MergeSession {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     session
+ }
+ 
+-fn changes(list: &FileList) -> Vec<(&str, &DiskResult)> {
++fn changes(list: &StopList) -> Vec<(&str, &DiskResult)> {
+     let changes = list.disk_changes.iter();
+     changes
+         .map(|change| (change.path.as_str(), &change.result))
+@@ -128,8 +130,8 @@ fn a_regenerated_file_without_markers_is_staged_once() {
+     let mut session = opened(&dir);
+     write(&dir, TEXT, USER_TEXT);
+ 
+-    let first = session.refresh().unwrap();
+-    let second = session.refresh().unwrap();
++    let first = listed(&mut session);
++    let second = listed(&mut session);
+ 
+     assert_eq!(changes(&first), [(TEXT, &DiskResult::Staged)]);
+     assert!(!unmerged(&dir).contains(TEXT), "{}", unmerged(&dir));
+@@ -150,7 +152,7 @@ fn one_of_two_blocks_resolved_on_disk_leaves_one_conflict_over_its_base_lines()
+             with_block_resolved(&git_output, 1, "eight-theirs\n").as_bytes(),
+         );
+ 
+-        let list = session.refresh().unwrap();
++        let list = listed(&mut session);
+         let data = session.load(TEXT).unwrap();
+ 
+         let markers_left = DiskResult::MarkersLeft { conflicts: 1 };
+@@ -184,7 +186,7 @@ fn the_first_block_resolved_on_disk_leaves_the_second_one_open() {
+         with_block_resolved(&git_output, 0, "one\nTWO\nshared-a\nthree-ours\n").as_bytes(),
+     );
+ 
+-    session.refresh().unwrap();
++    listed(&mut session);
+     let data = session.load(TEXT).unwrap();
+ 
+     let [chunk] = data.chunks.as_slice() else {
+@@ -203,7 +205,7 @@ fn a_file_deleted_on_disk_is_staged_as_deleted_and_loads_as_deleted() {
+     let mut session = opened(&dir);
+     fs::remove_file(dir.path().join(TEXT)).unwrap();
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
+     assert_eq!(staged(&dir, TEXT), "");
+@@ -244,7 +246,7 @@ fn a_change_not_yet_seen_stops_finish_take_and_reset_and_is_staged_instead() {
+ 
+         assert_eq!(read(&dir, TEXT), USER_TEXT);
+         assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
+-        assert_eq!(session.refresh().unwrap().disk_changes, []);
++        assert_eq!(listed(&mut session).disk_changes, []);
+     }
+ }
+ 
+@@ -253,7 +255,7 @@ fn a_write_from_a_view_older_than_the_last_settle_changes_nothing() {
+     let dir = merged();
+     let mut session = opened(&dir);
+     write(&dir, TEXT, USER_TEXT);
+-    session.refresh().unwrap();
++    listed(&mut session);
+     let staged_before = staged(&dir, TEXT);
+ 
+     let reply = session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap();
+@@ -273,11 +275,11 @@ fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf(
+         let mut session = opened(&dir);
+ 
+         session.finish(TEXT, "a\nb\n", DiskVersion(0)).unwrap();
+-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
++        assert_eq!(listed(&mut session).disk_changes, [], "{config:?}");
+         session.take(TEXT, Side::Remote, DiskVersion(0)).unwrap();
+-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
++        assert_eq!(listed(&mut session).disk_changes, [], "{config:?}");
+         session.reset(TEXT, DiskVersion(0)).unwrap();
+-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
++        assert_eq!(listed(&mut session).disk_changes, [], "{config:?}");
+         assert!(text(read(&dir, TEXT)).contains("<<<<<<<"));
+     }
+ }
+@@ -294,15 +296,15 @@ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missin
+     let worktree_file = dir.path().join(TEXT);
+     fs::remove_file(&worktree_file).unwrap();
+     symlink(&target, &worktree_file).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+ 
+     let through_link = session.finish(TEXT, "merged\n", DiskVersion(1));
+     fs::remove_file(&worktree_file).unwrap();
+     fs::create_dir(&worktree_file).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+     let into_directory = session.finish(TEXT, "merged\n", DiskVersion(2));
+     fs::remove_dir(&worktree_file).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+     let created = session.finish(TEXT, "merged\n", DiskVersion(3)).unwrap();
+ 
+     for refused in [through_link, into_directory] {
+@@ -335,7 +337,7 @@ fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
+     .unwrap();
+     let head = text(git_ok(&submodule, &["rev-parse", "HEAD"]).unwrap());
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     let expected = [
+         #[cfg(unix)]
+@@ -375,7 +377,7 @@ fn a_held_index_lock_fails_the_staging_reports_every_file_and_is_retried() {
+     let lock = dir.path().join(".git/index.lock");
+     fs::write(&lock, "").unwrap();
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     let [(text_path, markers_left), (binary, failed)] = changes(&list)[..] else {
+         panic!("{list:?}");
+@@ -388,7 +390,7 @@ fn a_held_index_lock_fails_the_staging_reports_every_file_and_is_retried() {
+     assert_eq!(*markers_left, DiskResult::MarkersLeft { conflicts: 1 });
+     assert_eq!(read(&dir, BINARY), b"\0new");
+     fs::remove_file(lock).unwrap();
+-    let retried = session.refresh().unwrap();
++    let retried = listed(&mut session);
+     assert_eq!(changes(&retried), [(BINARY, &DiskResult::Staged)]);
+     assert_eq!(status_of(&session, BINARY), FileStatus::Resolved);
+ }
+@@ -400,7 +402,7 @@ fn an_unchanged_disk_reports_nothing_and_writes_nothing_to_git() {
+     let index = dir.path().join(".git/index");
+     let before = fs::metadata(&index).unwrap().modified().unwrap();
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     assert_eq!(list.disk_changes, []);
+     assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), before);
+diff --git a/crates/session/tests/finish_and_reset.rs b/crates/session/tests/finish_and_reset.rs
+index 38decd3..5fdf8c9 100644
+--- a/crates/session/tests/finish_and_reset.rs
++++ b/crates/session/tests/finish_and_reset.rs
+@@ -7,6 +7,9 @@ use yamt_session::{
+     DiskChange, DiskResult, DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason,
+ };
+ 
++mod listing;
++use listing::listed;
++
+ const FILE: &str = "src/cart.ts";
+ const OTHER: &str = "src/other.ts";
+ 
+@@ -242,10 +245,10 @@ fn a_finished_file_changed_again_is_staged_again_with_its_new_bytes() {
+     let dir = two_file_conflict();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     session.finish(FILE, "merged\n", DiskVersion(0)).unwrap();
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     fs::write(dir.path().join(FILE), "user\n").unwrap();
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     let staged = DiskChange {
+         path: FILE.to_owned(),
+diff --git a/crates/session/tests/git_view.rs b/crates/session/tests/git_view.rs
+index 055645a..e6e7ff9 100644
+--- a/crates/session/tests/git_view.rs
++++ b/crates/session/tests/git_view.rs
+@@ -3,6 +3,9 @@
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ use yamt_session::{DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession};
+ 
++mod listing;
++use listing::listed;
++
+ const FIRST: &str = "a.ts";
+ const SECOND: &str = "b.ts";
+ 
+@@ -40,7 +43,7 @@ fn a_file_added_outside_after_start_reads_as_resolved() {
+     git_ok(dir.path(), &["add", FIRST]).unwrap();
+     assert_eq!(session.remaining(), 2);
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     let after = expected(&[(FIRST, Resolved), (SECOND, Unresolved)]);
+     assert_eq!(statuses(&session), after);
+@@ -57,7 +60,7 @@ fn a_finished_file_checked_out_with_markers_outside_reads_as_unresolved() {
+     session.finish(SECOND, "done\n", DiskVersion(0)).unwrap();
+     git_ok(dir.path(), &["checkout", "-m", FIRST]).unwrap();
+ 
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+ 
+     assert_eq!(
+         statuses(&session),
+@@ -78,7 +81,7 @@ fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     git_ok(dir.path(), &["checkout", "-m", SECOND]).unwrap();
+ 
+-    session.refresh().unwrap();
++    listed(&mut session);
+ 
+     assert_eq!(
+         statuses(&session),
+@@ -87,14 +90,14 @@ fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
+ }
+ 
+ #[test]
+-fn refresh_with_a_broken_index_is_a_git_error_and_keeps_the_statuses() {
++fn a_list_with_a_broken_index_is_a_git_error_and_keeps_the_statuses() {
+     let dir = two_conflicts();
+     let mut session = MergeSession::open(dir.path()).unwrap();
+     session.finish(FIRST, "done\n", DiskVersion(0)).unwrap();
+     let before = statuses(&session);
+     std::fs::write(dir.path().join(".git/index"), "not an index").unwrap();
+ 
+-    let error = session.refresh().unwrap_err();
++    let error = session.refresh_stop().unwrap_err();
+ 
+     assert!(matches!(error, yamt_session::Error::Git(_)), "{error:?}");
+     assert_eq!(statuses(&session), before);
+diff --git a/crates/session/tests/left_as_is.rs b/crates/session/tests/left_as_is.rs
+index 849f048..4b4c0fc 100644
+--- a/crates/session/tests/left_as_is.rs
++++ b/crates/session/tests/left_as_is.rs
+@@ -5,9 +5,12 @@ use std::fs;
+ use yamt_conflict_repo::{ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok};
+ use yamt_session::{DiskChange, DiskResult, MergeSession};
+ 
++mod listing;
++use listing::listed;
++
+ fn opened(dir: &TempDir) -> MergeSession {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     session
+ }
+ 
+@@ -53,7 +56,7 @@ fn a_working_tree_encoding_file_is_never_staged() {
+     let mut session = opened(&dir);
+     fs::write(dir.path().join(ENCODED), utf16("resolved\n")).unwrap();
+ 
+-    let changed = session.refresh().unwrap();
++    let changed = listed(&mut session);
+ 
+     assert_eq!(changed.disk_changes, left_as_is(ENCODED));
+     assert!(unmerged(&dir).contains(ENCODED));
+@@ -81,7 +84,7 @@ fn a_submodule_no_longer_checked_out_is_left_as_is() {
+     let unmerged_before = unmerged(&dir);
+     fs::remove_dir_all(submodule.join(".git")).unwrap();
+ 
+-    let changed = session.refresh().unwrap();
++    let changed = listed(&mut session);
+ 
+     assert_eq!(changed.disk_changes, left_as_is(SUBMODULE));
+     assert_eq!(unmerged(&dir), unmerged_before);
+diff --git a/crates/session/tests/listing/mod.rs b/crates/session/tests/listing/mod.rs
+new file mode 100644
+index 0000000..b64f4e9
+--- /dev/null
++++ b/crates/session/tests/listing/mod.rs
+@@ -0,0 +1,10 @@
++//! The list the window asks for, for tests at a stop git has not left.
++
++use yamt_session::{MergeSession, Refreshed, StopList};
++
++pub fn listed(session: &mut MergeSession) -> StopList {
++    match session.refresh_stop().unwrap() {
++        Refreshed::Files(list) => list,
++        Refreshed::MovedOn => panic!("moved on"),
++    }
++}
+diff --git a/crates/session/tests/merging.rs b/crates/session/tests/merging.rs
+deleted file mode 100644
+index 2ec5a23..0000000
+--- a/crates/session/tests/merging.rs
++++ /dev/null
+@@ -1,91 +0,0 @@
+-#![cfg(test)]
+-
+-use std::path::Path;
+-
+-use yamt_conflict_repo::{
+-    ConflictFile, FileKind, Run, TempDir, conflict_repo, diverged_repo, git, git_ok, operation_repo,
+-};
+-use yamt_session::MergeSession;
+-
+-const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+-    path: "cart.ts",
+-    kind: FileKind::Regular,
+-    base: Some(b"one\n"),
+-    local: Some(b"local\n"),
+-    remote: Some(b"remote\n"),
+-}];
+-
+-fn merging_after_refresh(root: &Path) -> bool {
+-    MergeSession::open(root).unwrap().refresh().unwrap().merging
+-}
+-
+-fn stopped_by(args: &[&str]) -> TempDir {
+-    let dir = diverged_repo(&FILES).unwrap();
+-    let output = git(dir.path(), args).unwrap();
+-    assert!(!output.status.success(), "{args:?} did not stop");
+-    dir
+-}
+-
+-#[test]
+-fn a_merge_stopped_on_conflicts_is_merging() {
+-    let dir = conflict_repo(&FILES).unwrap();
+-    assert!(merging_after_refresh(dir.path()));
+-}
+-
+-#[test]
+-fn stops_that_git_merge_abort_refuses_are_not_merging() {
+-    for args in [
+-        ["cherry-pick", "remote"].as_slice(),
+-        ["rebase", "remote"].as_slice(),
+-        ["revert", "--no-edit", "remote"].as_slice(),
+-        ["merge", "--squash", "remote"].as_slice(),
+-    ] {
+-        let dir = stopped_by(args);
+-        assert!(!merging_after_refresh(dir.path()), "{args:?}");
+-    }
+-}
+-
+-#[test]
+-fn a_rebase_stopped_on_a_merge_commit_has_merge_head_but_is_not_merging() {
+-    let dir = operation_repo(Run::RebaseMerges, &FILES).unwrap();
+-    assert!(git_ok(dir.path(), &["rev-parse", "--verify", "MERGE_HEAD"]).is_ok());
+-    assert!(!merging_after_refresh(dir.path()));
+-}
+-
+-#[test]
+-fn a_merge_aborted_outside_is_not_merging_on_the_next_refresh() {
+-    let dir = conflict_repo(&FILES).unwrap();
+-    let mut session = MergeSession::open(dir.path()).unwrap();
+-    assert!(session.refresh().unwrap().merging);
+-
+-    git_ok(dir.path(), &["merge", "--abort"]).unwrap();
+-
+-    assert!(!session.refresh().unwrap().merging);
+-}
+-
+-#[cfg(unix)]
+-#[test]
+-fn an_unreadable_rebase_state_is_not_merging_and_never_fails_the_list() {
+-    let dir = conflict_repo(&FILES).unwrap();
+-    let mut session = MergeSession::open(dir.path()).unwrap();
+-    let rebase_merge = dir.path().join(".git").join("rebase-merge");
+-    std::os::unix::fs::symlink("rebase-merge", &rebase_merge).unwrap();
+-    assert!(rebase_merge.try_exists().is_err());
+-
+-    let list = session.refresh().unwrap();
+-
+-    assert!(!list.merging);
+-    assert_eq!(list.files.len(), FILES.len());
+-}
+-
+-#[test]
+-fn abort_merge_runs_git_merge_abort() {
+-    let dir = conflict_repo(&FILES).unwrap();
+-    let session = MergeSession::open(dir.path()).unwrap();
+-
+-    session.abort_merge().unwrap();
+-
+-    let status = git_ok(dir.path(), &["status", "--porcelain"]).unwrap();
+-    assert_eq!(String::from_utf8(status).unwrap(), "");
+-    assert!(git_ok(dir.path(), &["rev-parse", "--verify", "MERGE_HEAD"]).is_err());
+-}
+diff --git a/crates/session/tests/operations.rs b/crates/session/tests/operations.rs
+index 743a005..211f850 100644
+--- a/crates/session/tests/operations.rs
++++ b/crates/session/tests/operations.rs
+@@ -9,9 +9,12 @@ use yamt_conflict_repo::{
+ };
+ use yamt_session::{
+     Continued, DiskVersion, Error, FileStatus, MergeSession, OperationKind, OperationView,
+-    ProgressView, Refreshed, SideName, StopList,
++    ProgressView, Refreshed, SideName,
+ };
+ 
++mod listing;
++use listing::listed;
++
+ const CART: &str = "cart.ts";
+ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+     path: CART,
+@@ -43,13 +46,6 @@ fn opened(run: Run, files: &[ConflictFile]) -> (TempDir, MergeSession) {
+     (dir, session)
+ }
+ 
+-fn listed(session: &mut MergeSession) -> StopList {
+-    match session.refresh_stop().unwrap() {
+-        Refreshed::Files(list) => list,
+-        Refreshed::MovedOn => panic!("moved on"),
+-    }
+-}
+-
+ fn finished_every_file(session: &mut MergeSession) {
+     for file in session.files() {
+         session
+@@ -136,7 +132,6 @@ fn a_list_at_the_same_stop_has_the_rebase_with_its_names_and_progress() {
+     };
+     assert_eq!(list.operation, Some(expected));
+     assert_eq!(list.files.len(), 1);
+-    assert_eq!(&list.sides, session.side_names());
+     let Some(SideName::Commit { message, .. }) = &list.sides.local else {
+         panic!("{:?}", list.sides);
+     };
+diff --git a/crates/session/tests/orientation.rs b/crates/session/tests/orientation.rs
+index c007da4..6d5fc75 100644
+--- a/crates/session/tests/orientation.rs
++++ b/crates/session/tests/orientation.rs
+@@ -12,6 +12,9 @@ use yamt_session::{
+     DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, SideName, Waiting,
+ };
+ 
++mod listing;
++use listing::listed;
++
+ mod window;
+ use window::{lines, middle_text, saved_with_everything_waiting};
+ 
+@@ -167,7 +170,7 @@ fn a_disk_view_block_is_written_back_as_it_was_and_its_left_section_is_own_work(
+     let edited = git_wrote.replacen("one\n", "ONE, by hand\n", 1);
+     fs::write(root.join(TEXT), &edited).unwrap();
+     let mut session = MergeSession::open(root).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+ 
+     let data = session.load(TEXT).unwrap();
+ 
+@@ -238,7 +241,7 @@ fn a_conflicted_squash_step_shows_its_own_commit_on_the_left_and_names_both_side
+         (data.local.as_str(), data.remote.as_str()),
+         ("remote\n", "local\n")
+     );
+-    let names = session.side_names();
++    let names = listed(&mut session).sides;
+     assert_eq!(commit_subject(names.local.as_ref()), Some("step 2"));
+     assert_eq!(commit_subject(names.remote.as_ref()), Some("step 1"));
+ }
+diff --git a/crates/session/tests/remembered.rs b/crates/session/tests/remembered.rs
+index 0af4655..3f58568 100644
+--- a/crates/session/tests/remembered.rs
++++ b/crates/session/tests/remembered.rs
+@@ -7,10 +7,11 @@ use yamt_conflict_repo::{
+ };
+ use yamt_merge_core::{BaseLine, ChunkKind, LineRange, LocalLine, RemoteLine};
+ use yamt_session::{
+-    DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession, Middle, MiddleLine, Refreshed,
+-    StopList, Waiting,
++    DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession, Middle, MiddleLine, Waiting,
+ };
+ 
++mod listing;
++use listing::listed;
+ mod window;
+ use window::saved_with_everything_waiting;
+ 
+@@ -49,13 +50,6 @@ fn remembered_repo(fresh: &[ConflictFile], replay: Replay) -> (TempDir, MergeSes
+     (dir, session)
+ }
+ 
+-fn listed(session: &mut MergeSession) -> StopList {
+-    match session.refresh_stop().unwrap() {
+-        Refreshed::Files(list) => list,
+-        Refreshed::MovedOn => panic!("moved on"),
+-    }
+-}
+-
+ fn status_of(session: &MergeSession, path: &str) -> FileStatus {
+     let files = session.files();
+     files.iter().find(|file| file.path == path).unwrap().status
+diff --git a/crates/session/tests/save.rs b/crates/session/tests/save.rs
+index 53243f7..e3cc193 100644
+--- a/crates/session/tests/save.rs
++++ b/crates/session/tests/save.rs
+@@ -6,6 +6,9 @@ use std::time::{Duration, SystemTime};
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+ use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Middle, WriteReply};
+ 
++mod listing;
++use listing::listed;
++
+ const TEXT: &str = "src/cart.ts";
+ const BASE: &[u8] = b"one\ntwo\nthree\n";
+ const LOCAL: &[u8] = b"one\nlocal\nthree\n";
+@@ -27,7 +30,7 @@ fn conflict() -> TempDir {
+ 
+ fn opened(dir: &TempDir) -> MergeSession {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     session
+ }
+ 
+@@ -72,7 +75,7 @@ fn a_save_writes_without_staging_and_never_comes_back_as_a_disk_change() {
+ 
+     assert_written(&reply);
+     assert_eq!(read(&dir), SAVED.as_bytes());
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     assert_eq!(unmerged(&dir), before);
+     assert_eq!(status(&session), FileStatus::Unresolved);
+     assert_eq!(session.load(TEXT).unwrap().disk_version, DiskVersion(0));
+@@ -121,7 +124,7 @@ fn save_and_reset_refuse_a_directory_without_touching_the_index() {
+     let worktree_file = dir.path().join(TEXT);
+     fs::remove_file(&worktree_file).unwrap();
+     fs::create_dir(&worktree_file).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+     let index_before = index(&dir);
+ 
+     let saved = session.save(TEXT, SAVED, DiskVersion(1));
+@@ -149,7 +152,7 @@ fn a_save_refuses_a_link_and_reset_replaces_it_with_the_file_at_open() {
+     let worktree_file = dir.path().join(TEXT);
+     fs::remove_file(&worktree_file).unwrap();
+     std::os::unix::fs::symlink(&target, &worktree_file).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+ 
+     let saved = session.save(TEXT, SAVED, DiskVersion(1));
+     session.reset(TEXT, DiskVersion(1)).unwrap();
+@@ -177,7 +180,7 @@ fn reset_after_a_save_brings_back_the_bytes_and_the_stages_of_this_run_s_start()
+     assert!(matches!(middle, Middle::Stages { .. }), "{middle:?}");
+     assert_eq!(unmerged(&dir), before);
+     assert_eq!(status(&session), FileStatus::Unresolved);
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+ }
+ 
+ #[test]
+@@ -187,7 +190,7 @@ fn reset_in_a_later_run_brings_back_what_that_run_found_saved() {
+     first_run.save(TEXT, SAVED, DiskVersion(0)).unwrap();
+     drop(first_run);
+     let mut second_run = MergeSession::open(dir.path()).unwrap();
+-    let settled = second_run.refresh().unwrap().disk_changes;
++    let settled = listed(&mut second_run).disk_changes;
+     assert_eq!(settled[0].result, DiskResult::MarkersLeft { conflicts: 1 });
+     let second_save = SAVED.replace("remote, kept", "remote, changed again");
+     second_run.save(TEXT, &second_save, DiskVersion(1)).unwrap();
+@@ -195,7 +198,7 @@ fn reset_in_a_later_run_brings_back_what_that_run_found_saved() {
+     second_run.reset(TEXT, DiskVersion(1)).unwrap();
+ 
+     assert_eq!(read(&dir), SAVED.as_bytes());
+-    assert_eq!(second_run.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut second_run).disk_changes, []);
+ }
+ 
+ #[test]
+@@ -204,7 +207,7 @@ fn reset_of_a_file_changed_by_hand_before_start_brings_back_the_hand_edit() {
+     let before = unmerged(&dir);
+     write(&dir, FOREIGN);
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    let settled = session.refresh().unwrap().disk_changes;
++    let settled = listed(&mut session).disk_changes;
+     assert_eq!(settled[0].result, DiskResult::Staged);
+ 
+     session.reset(TEXT, DiskVersion(1)).unwrap();
+@@ -217,7 +220,7 @@ fn reset_of_a_file_changed_by_hand_before_start_brings_back_the_hand_edit() {
+     );
+     assert_eq!(unmerged(&dir), before);
+     assert_eq!(status(&session), FileStatus::Unresolved);
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     assert_eq!(status(&session), FileStatus::Unresolved);
+ }
+ 
+diff --git a/crates/session/tests/save_round_trip.rs b/crates/session/tests/save_round_trip.rs
+index 47f4f49..4653ff9 100644
+--- a/crates/session/tests/save_round_trip.rs
++++ b/crates/session/tests/save_round_trip.rs
+@@ -7,6 +7,8 @@ use yamt_conflict_repo::{ConflictFile, FileKind, Setup, TempDir, conflict_repo_w
+ use yamt_merge_core::{ChunkKind, LineRange};
+ use yamt_session::{FileMergeData, MergeChunk, MergeSession, Middle, Waiting, WriteReply};
+ 
++mod listing;
++use listing::listed;
+ mod samples;
+ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
+ mod window;
+@@ -66,14 +68,14 @@ fn repo(path: &str, sides: [&[u8]; 3], style: &str) -> TempDir {
+ 
+ fn opened(dir: &TempDir) -> MergeSession {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     session
+ }
+ 
+ /// A second run of yamt on the repository: open, the first look, and the file's data.
+ fn loaded_again(dir: &TempDir, path: &str) -> FileMergeData {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+     session.load(path).unwrap()
+ }
+ 
+diff --git a/crates/session/tests/side_names.rs b/crates/session/tests/side_names.rs
+index d565c95..8e2dc7b 100644
+--- a/crates/session/tests/side_names.rs
++++ b/crates/session/tests/side_names.rs
+@@ -10,6 +10,9 @@ use yamt_conflict_repo::{
+ };
+ use yamt_session::{MergeSession, SideName, SideNames};
+ 
++mod listing;
++use listing::listed;
++
+ const FILE: &str = "cart.ts";
+ 
+ fn cart() -> ConflictFile<'static> {
+@@ -55,7 +58,7 @@ fn short_id_as_gitio_reads_config(root: &Path, revision: &str) -> String {
+ }
+ 
+ fn side_names_of(root: &Path) -> SideNames {
+-    MergeSession::open(root).unwrap().side_names().clone()
++    listed(&mut MergeSession::open(root).unwrap()).sides
+ }
+ 
+ fn branch(name: &str) -> SideName {
+@@ -331,11 +334,11 @@ fn a_conflict_from_stash_pop_names_only_the_branch() {
+     git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
+     require_conflict(root, &["stash", "pop"]);
+ 
+-    let session = MergeSession::open(root).unwrap();
++    let mut session = MergeSession::open(root).unwrap();
+     assert_eq!(session.files().len(), 1);
+     let expected = SideNames {
+         local: Some(branch("local")),
+         remote: None,
+     };
+-    assert_eq!(session.side_names(), &expected);
++    assert_eq!(listed(&mut session).sides, expected);
+ }
+diff --git a/crates/session/tests/start_from_disk.rs b/crates/session/tests/start_from_disk.rs
+index 340f32d..09f09d1 100644
+--- a/crates/session/tests/start_from_disk.rs
++++ b/crates/session/tests/start_from_disk.rs
+@@ -6,7 +6,7 @@ use yamt_conflict_repo::{
+     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
+ };
+ use yamt_session::{
+-    DiskResult, FileList, FileStatus, MergeSession, Middle, SideContent, UnsupportedReason,
++    DiskResult, FileStatus, MergeSession, Middle, SideContent, StopList, UnsupportedReason,
+ };
+ 
+ const TEXT: &str = "f.txt";
+@@ -14,6 +14,8 @@ const DELETED: &str = "gone.txt";
+ const BINARY: &str = "logo.bin";
+ const LINK: &str = "link";
+ 
++mod listing;
++use listing::listed;
+ mod samples;
+ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
+ 
+@@ -58,13 +60,13 @@ fn zdiff3() -> TempDir {
+     merged(&[("merge.conflictStyle", "zdiff3")], None)
+ }
+ 
+-fn first_list(dir: &TempDir) -> (MergeSession, FileList) {
++fn first_list(dir: &TempDir) -> (MergeSession, StopList) {
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    let list = session.refresh().unwrap();
++    let list = listed(&mut session);
+     (session, list)
+ }
+ 
+-fn changes(list: &FileList) -> Vec<(&str, &DiskResult)> {
++fn changes(list: &StopList) -> Vec<(&str, &DiskResult)> {
+     let changes = list.disk_changes.iter();
+     changes
+         .map(|change| (change.path.as_str(), &change.result))
+@@ -403,7 +405,7 @@ fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
+ 
+     let mut session = MergeSession::open(dir.path()).unwrap();
+ 
+-    assert_eq!(session.refresh().unwrap().disk_changes, []);
++    assert_eq!(listed(&mut session).disk_changes, []);
+     let finished = session.finish(TEXT, "merged\n", DiskVersion(0));
+     assert!(
+         matches!(finished, Err(Error::ReadFailed { .. })),
+@@ -411,7 +413,7 @@ fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
+     );
+     fs::set_permissions(&path, fs::Permissions::from_mode(READ_WRITE)).unwrap();
+     assert_eq!(
+-        changes(&session.refresh().unwrap()),
++        changes(&listed(&mut session)),
+         [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
+     );
+ }
+diff --git a/crates/session/tests/take.rs b/crates/session/tests/take.rs
+index afcedd5..a8f43cf 100644
+--- a/crates/session/tests/take.rs
++++ b/crates/session/tests/take.rs
+@@ -7,6 +7,8 @@ use std::path::Path;
+ use yamt_conflict_repo::{FileKind, TempDir, conflict_repo, git, git_ok};
+ use yamt_session::{DiskVersion, FileStatus, MergeSession, Side, WriteReply};
+ 
++mod listing;
++use listing::listed;
+ mod every_kind;
+ use every_kind::{
+     BINARY, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT, REMOTE_DELETED, SUBMODULE, TEXT,
+@@ -43,7 +45,7 @@ fn stage_zero_of(unmerged: &str, path: &str, side: Side) -> String {
+ fn opened(dir: &TempDir) -> (MergeSession, String) {
+     let before = unmerged(dir);
+     let mut session = MergeSession::open(dir.path()).unwrap();
+-    session.refresh().unwrap();
++    listed(&mut session);
+     (session, before)
+ }
+ 
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index 9ef4fb7..f3b52e3 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -3,7 +3,6 @@ import type {
+   Antialiasing,
+   ContinueReply,
+   DiskVersion,
+-  FileList,
+   FileMergeData,
+   FileSides,
+   KeysChange,
+@@ -11,7 +10,6 @@ import type {
+   RepositoryAnswer,
+   SettingsRead,
+   Side,
+-  SideNames,
+   SourceResult,
+   StoredSettings,
+   Theme,
+@@ -25,15 +23,12 @@ export type WriteRequest = {
+ };
+ 
+ export interface ChunkSource {
+-  listFiles(): Promise<SourceResult<FileList>>;
+   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
+   finishFile(request: WriteRequest): Promise<SourceResult<WriteReply>>;
+   saveFile(request: WriteRequest): Promise<SourceResult<WriteReply>>;
+   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   describeFile(path: string): Promise<SourceResult<FileSides>>;
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+-  sideNames(): Promise<SideNames>;
+-  abortMerge(): Promise<SourceResult<null>>;
+   listStop(): Promise<SourceResult<Listing>>;
+   continueOperation(): Promise<SourceResult<ContinueReply>>;
+   abortOperation(): Promise<SourceResult<null>>;
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index dffb9b3..912428a 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -4,15 +4,12 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
+ 
+ /** Commands */
+ export const commands = {
+-	listFiles: () => typedError<FileList, IpcError>(__TAURI_INVOKE("list_files")),
+ 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
+ 	finishFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("finish_file", { path, text, diskVersion })),
+ 	saveFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("save_file", { path, text, diskVersion })),
+ 	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
+ 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
+ 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
+-	sideNames: () => typedError<SideNames, IpcError>(__TAURI_INVOKE("side_names")),
+-	abortMerge: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_merge")),
+ 	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
+ 	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
+ 	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
+@@ -94,7 +91,7 @@ export type DiskResult = { kind: "Staged" } |
+ /**  Not staged, by design: a `working-tree-encoding` file or a submodule that is not checked out. */
+ { kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
+ 
+-/**  Counts the settles of one file's disk changes; a view is built from one version. */
++/**  Counts the settles of one file's disk changes, from the session's first version; a view is built from one version. */
+ export type DiskVersion = number;
+ 
+ export type Eol = "Lf" | "CrLf" | "Mixed";
+@@ -105,14 +102,6 @@ export type FileEntry = {
+ 	unsupported: UnsupportedReason | null,
+ };
+ 
+-/**  The files as git sees them, the disk changes settled while looking, and whether a merge is in progress. */
+-export type FileList = {
+-	files: FileEntry[],
+-	disk_changes: DiskChange[],
+-	/**  A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74). */
+-	merging: boolean,
+-};
+-
+ export type FileMergeData = {
+ 	path: string,
+ 	middle: Middle,
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 206af8c..bd1483a 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -84,12 +84,6 @@ export type SettingsRead = {
+   readonly stored: StoredSettings;
+ };
+ 
+-export type FileList = {
+-  readonly files: readonly FileEntry[];
+-  readonly diskChanges: readonly DiskChange[];
+-  readonly merging: boolean;
+-};
+-
+ export type OperationView = Generated.OperationView;
+ 
+ export type ProgressView = Generated.ProgressView;
+@@ -229,10 +223,6 @@ export function toSides(dto: Generated.FileSides): FileSides {
+   return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
+ }
+ 
+-export function toFileList(dto: Generated.FileList): FileList {
+-  return { files: dto.files, diskChanges: dto.disk_changes, merging: dto.merging };
+-}
+-
+ export function toListing(dto: Generated.Listing): Listing {
+   if (dto.kind === "MovedOn") {
+     return dto;
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index cc62667..d70139a 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -1,8 +1,9 @@
+ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
++import type { ChunkSource } from "./ChunkSource";
+ import { createFixtureSource, loadFixture } from "./fixture";
+-import type { DiskVersion, FileList, Side, SourceResult } from "./index";
++import type { DiskChange, DiskVersion, FileEntry, Side, SourceResult } from "./index";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
+@@ -32,8 +33,14 @@ function valueOf<T>(result: SourceResult<T>): T {
+   return result.value;
+ }
+ 
+-async function listed(log: Log, files?: Readonly<Record<string, unknown>>): Promise<FileList> {
+-  return valueOf(await createFixtureSource(log, NO_QUERY, files).listFiles());
++type Listed = { files: readonly FileEntry[]; diskChanges: readonly DiskChange[] };
++
++async function listedBy(source: ChunkSource): Promise<Listed> {
++  const listing = valueOf(await source.listStop());
++  if (listing.kind !== "Files") {
++    throw new Error("expected files, got MovedOn");
++  }
++  return { files: listing.files, diskChanges: listing.diskChanges };
+ }
+ 
+ async function versionOf(
+@@ -145,7 +152,7 @@ afterEach(() => {
+ });
+ 
+ test("the committed fixtures list 12 files, sorted by path, the remembered one remembered, the rest unresolved, with no disk changes", async () => {
+-  const { files, diskChanges } = await listed(quietLog().log);
++  const { files, diskChanges } = await listedBy(createFixtureSource(quietLog().log, NO_QUERY));
+ 
+   expect(files.map((file) => file.path)).toEqual([
+     "language-tools-script-setup.ts",
+@@ -183,9 +190,7 @@ test("each committed fixture loads with its JSON's chunk count, its stages middl
+ 
+ test("each unresolved committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
+   const source = createFixtureSource(quietLog().log, NO_QUERY);
+-  const unresolved = valueOf(await source.listFiles()).files.filter(
+-    (file) => file.status === "Unresolved",
+-  );
++  const unresolved = (await listedBy(source)).files.filter((file) => file.status === "Unresolved");
+   let conflicts = 0;
+   for (const { path } of unresolved) {
+     for (const { kind, waiting } of valueOf(await source.loadFile(path)).chunks) {
+@@ -275,10 +280,7 @@ test("in-memory records are listed sorted by path and keep every field", async (
+   };
+   const source = createFixtureSource(quietLog().log, NO_QUERY, files);
+ 
+-  expect((await listed(quietLog().log, files)).files.map((file) => file.path)).toEqual([
+-    "a.ts",
+-    "z.ts",
+-  ]);
++  expect((await listedBy(source)).files.map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
+   expect(await source.loadFile("a.ts")).toEqual({
+     ok: true,
+     value: { ...loaded("a.ts"), eol: "CrLf" },
+@@ -626,10 +628,9 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
+   expect(await source.resetFile("nope.ts", version)).toEqual(failure);
+   expect(await source.describeFile("nope.ts")).toEqual(failure);
+   expect(await source.takeSide("nope.ts", "remote", version)).toEqual(failure);
+-  expect(valueOf(await source.listFiles())).toEqual({
++  expect(await listedBy(source)).toEqual({
+     files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
+     diskChanges: [],
+-    merging: true,
+   });
+   expect(entries).toEqual([]);
+ });
+@@ -668,25 +669,11 @@ test("finish marks the file resolved and logs its text once; reset returns it un
+     ok: true,
+     value: { kind: "Written", files: unresolved },
+   });
+-  expect(valueOf(await source.listFiles())).toEqual({
+-    files: unresolved,
+-    diskChanges: [],
+-    merging: true,
+-  });
++  expect(await listedBy(source)).toEqual({ files: unresolved, diskChanges: [] });
+   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
+   expect(entries).toHaveLength(1);
+ });
+ 
+-test("abortMerge answers done and logs the abort once; the fixtures stay listed as a merge", async () => {
+-  const { log, entries } = quietLog();
+-  const source = createFixtureSource(log, NO_QUERY, { "a.json": record("a.ts") });
+-
+-  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
+-
+-  expect(entries).toEqual([{ level: "info", event: "fixture.abort_merge", fields: {} }]);
+-  expect(valueOf(await source.listFiles()).merging).toBe(true);
+-});
+-
+ test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {
+   const { log, entries } = quietLog();
+   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+@@ -712,7 +699,7 @@ test("save writes the file, logs its text, length and lines, and leaves it unres
+       fields: { path: "a.ts", text: "one\ntwo\nthree", length: 13, lines: 3 },
+     },
+   ]);
+-  expect(valueOf(await source.listFiles()).files).toEqual(unresolved);
++  expect((await listedBy(source)).files).toEqual(unresolved);
+ });
+ 
+ test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
+@@ -737,7 +724,7 @@ test("takeSide marks the file resolved and logs the side; reset returns it unres
+ 
+   await source.resetFile("b.ts", version);
+ 
+-  expect(valueOf(await source.listFiles()).files.map((file) => file.status)).toEqual([
++  expect((await listedBy(source)).files.map((file) => file.status)).toEqual([
+     "Unresolved",
+     "Unresolved",
+   ]);
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index bf2db0c..9f40f5f 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -245,7 +245,6 @@ export function createFixtureSource(
+   });
+ 
+   return {
+-    listFiles: stops.listFiles,
+     listStop: stops.listStop,
+     continueOperation: stops.continueOperation,
+     abortOperation: stops.abortOperation,
+@@ -256,13 +255,6 @@ export function createFixtureSource(
+     async describeFile(path) {
+       return describeRecord(path, records.fixtures.get(path));
+     },
+-    async sideNames() {
+-      return { local: null, remote: null };
+-    },
+-    async abortMerge() {
+-      log.info("fixture.abort_merge", {});
+-      return { ok: true, value: null };
+-    },
+     ...fixtureWrites(log, records),
+     ...createFixtureSettings(),
+   };
+diff --git a/frontend/src/ipc/fixtureOperations.test.ts b/frontend/src/ipc/fixtureOperations.test.ts
+index 8016ab9..c13a744 100644
+--- a/frontend/src/ipc/fixtureOperations.test.ts
++++ b/frontend/src/ipc/fixtureOperations.test.ts
+@@ -52,24 +52,21 @@ async function operationAt(source: ChunkSource): Promise<OperationView | null> {
+   return (await filesListed(source)).operation;
+ }
+ 
+-test.each<[string, OperationKind, boolean]>([
+-  ["", "Merge", true],
+-  ["?operation=merge", "Merge", true],
+-  ["?operation=squash", "SquashMerge", false],
+-  ["?operation=rebase", "Rebase", false],
+-  ["?operation=cherry-pick", "CherryPick", false],
+-  ["?operation=revert", "Revert", false],
+-  ["?operation=am", "Am", false],
+-  ["?operation=unknown", "Merge", true],
+-])("%j lists the fixtures under that operation: %s", async (search, kind, merging) => {
+-  const source = sourceAt(search);
+-
+-  const listing = await filesListed(source);
++test.each<[string, OperationKind]>([
++  ["", "Merge"],
++  ["?operation=merge", "Merge"],
++  ["?operation=squash", "SquashMerge"],
++  ["?operation=rebase", "Rebase"],
++  ["?operation=cherry-pick", "CherryPick"],
++  ["?operation=revert", "Revert"],
++  ["?operation=am", "Am"],
++  ["?operation=unknown", "Merge"],
++])("%j lists the fixtures under that operation: %s", async (search, kind) => {
++  const listing = await filesListed(sourceAt(search));
+ 
+   expect(listing.operation?.kind).toBe(kind);
+   expect(listing.files).toEqual([{ path: "a.ts", status: "Unresolved", unsupported: null }]);
+   expect(listing.diskChanges).toEqual([]);
+-  expect(valueOf(await source.listFiles()).merging).toBe(merging);
+ });
+ 
+ test.each<[string, ProgressView | undefined]>([
+@@ -120,16 +117,11 @@ async function resolvedAndContinued(source: ChunkSource): Promise<unknown[]> {
+ }
+ 
+ async function everyStopCommand(source: ChunkSource): Promise<SourceResult<unknown>[]> {
+-  return [
+-    await source.listStop(),
+-    await source.listFiles(),
+-    await source.continueOperation(),
+-    await source.abortOperation(),
+-  ];
++  return [await source.listStop(), await source.continueOperation(), await source.abortOperation()];
+ }
+ 
+ function everyCommandRefused(kind: "MergeFinished" | "MergeAborted"): SourceResult<unknown>[] {
+-  return Array.from({ length: 4 }, () => ({ ok: false, failure: { kind } }));
++  return Array.from({ length: 3 }, () => ({ ok: false, failure: { kind } }));
+ }
+ 
+ test("a rebase advances 1 → 2 → 3, lists the files unresolved again each time, then finishes once", async () => {
+@@ -154,7 +146,6 @@ test("?empty makes the second step a stop without files, with git's edit message
+ 
+   const stopped = valueOf(await source.continueOperation());
+   const empty = await filesListed(source);
+-  const files = valueOf(await source.listFiles()).files;
+   const third = valueOf(await source.continueOperation());
+ 
+   expect(stopped).toEqual({
+@@ -162,7 +153,7 @@ test("?empty makes the second step a stop without files, with git's edit message
+     message:
+       "Stopped at 8b4e7d0...  Show reminders on the board\nYou can amend the commit now, with\n\n  git commit --amend\n\nOnce you are satisfied with your changes, run\n\n  git rebase --continue\n",
+   });
+-  expect([empty.files, empty.operation?.kind, files]).toEqual([[], "Rebase", []]);
++  expect([empty.files, empty.operation?.kind]).toEqual([[], "Rebase"]);
+   expect(third).toEqual({
+     kind: "Stopped",
+     message: "CONFLICT (content): Merge conflict at step 3 of 3",
+@@ -197,6 +188,5 @@ test("none lists no operation and has nothing to continue or abort", async () =>
+   expect(await operationAt(source)).toBeNull();
+   expect(await source.continueOperation()).toEqual(nothing);
+   expect(await source.abortOperation()).toEqual(nothing);
+-  expect(valueOf(await source.listFiles()).merging).toBe(false);
+   expect(entries).toEqual([]);
+ });
+diff --git a/frontend/src/ipc/fixtureOperations.ts b/frontend/src/ipc/fixtureOperations.ts
+index 28a3ef2..3fee626 100644
+--- a/frontend/src/ipc/fixtureOperations.ts
++++ b/frontend/src/ipc/fixtureOperations.ts
+@@ -39,10 +39,7 @@ type StopFiles = {
+ };
+ 
+ /** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
+-type FixtureStops = Pick<
+-  ChunkSource,
+-  "listFiles" | "listStop" | "continueOperation" | "abortOperation"
+->;
++type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation">;
+ 
+ /** How the app answers every command once git finished or aborted the operation. */
+ type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
+@@ -139,15 +136,8 @@ function stoppedMessage(at: Sequence): string {
+   ].join("\n");
+ }
+ 
+-function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFiles" | "listStop"> {
++function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listStop"> {
+   return {
+-    async listFiles() {
+-      if (at.ended !== null) {
+-        return refused(at.ended);
+-      }
+-      const merging = at.operation === "merge";
+-      return { ok: true, value: { files: listedAt(at, files), diskChanges: [], merging } };
+-    },
+     async listStop() {
+       if (at.ended !== null) {
+         return refused(at.ended);
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index fbba6cc..d77194f 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -12,7 +12,6 @@ export type {
+   DiskResult,
+   DiskVersion,
+   FileEntry,
+-  FileList,
+   FileMergeData,
+   FileSides,
+   HostEvent,
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index b327212..f8f1138 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -5,15 +5,12 @@ import type { DiskVersion, StoredSettings } from "./domain";
+ import { createTauriServerHost, createTauriSource, forwardLog } from "./tauri";
+ 
+ const commands = vi.hoisted(() => ({
+-  listFiles: vi.fn(),
+   loadFile: vi.fn(),
+   finishFile: vi.fn(),
+   saveFile: vi.fn(),
+   resetFile: vi.fn(),
+   describeFile: vi.fn(),
+   takeSide: vi.fn(),
+-  sideNames: vi.fn(),
+-  abortMerge: vi.fn(),
+   listStop: vi.fn(),
+   continueOperation: vi.fn(),
+   abortOperation: vi.fn(),
+@@ -105,59 +102,10 @@ beforeEach(() => {
+   vi.resetAllMocks();
+ });
+ 
+-test("listFiles returns the app's entries, disk changes and merge state, and its failure unchanged", async () => {
+-  const git: Generated.IpcError = { kind: "Git", message: "git ls-files failed" };
+-  commands.listFiles.mockResolvedValueOnce({
+-    status: "ok",
+-    data: { files: ENTRIES, disk_changes: [CHANGE], merging: true },
+-  });
+-  commands.listFiles.mockResolvedValueOnce({
+-    status: "ok",
+-    data: { files: ENTRIES, disk_changes: [], merging: false },
+-  });
+-  commands.listFiles.mockResolvedValueOnce({ status: "error", error: git });
+-  const source = createTauriSource();
++test("a string error from listStop rejects the call with that message", async () => {
++  commands.listStop.mockResolvedValue({ status: "error", error: "list_stop not allowed" });
+ 
+-  expect(await source.listFiles()).toEqual({
+-    ok: true,
+-    value: { files: ENTRIES, diskChanges: [CHANGE], merging: true },
+-  });
+-  expect(await source.listFiles()).toEqual({
+-    ok: true,
+-    value: { files: ENTRIES, diskChanges: [], merging: false },
+-  });
+-  expect(await source.listFiles()).toEqual({ ok: false, failure: git });
+-});
+-
+-test("a string error from listFiles rejects the call with that message", async () => {
+-  commands.listFiles.mockResolvedValue({ status: "error", error: "list_files not allowed" });
+-
+-  await expect(createTauriSource().listFiles()).rejects.toThrow(
+-    new Error("list_files not allowed"),
+-  );
+-});
+-
+-test("abortMerge answers null, and git's refusal or a later abort as the failure unchanged", async () => {
+-  const refused: Generated.IpcError = { kind: "Git", message: "Entry 'a.ts' not uptodate" };
+-  const aborted: Generated.IpcError = { kind: "MergeAborted" };
+-  commands.abortMerge.mockResolvedValueOnce({ status: "ok", data: null });
+-  commands.abortMerge.mockResolvedValueOnce({ status: "error", error: refused });
+-  commands.abortMerge.mockResolvedValueOnce({ status: "error", error: aborted });
+-  const source = createTauriSource();
+-
+-  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
+-  expect(await source.abortMerge()).toEqual({ ok: false, failure: refused });
+-  expect(await source.abortMerge()).toEqual({ ok: false, failure: aborted });
+-});
+-
+-test("sideNames returns the app's names and rejects a failure naming its kind", async () => {
+-  const names: Generated.SideNames = { local: { kind: "Branch", name: "main" }, remote: null };
+-  commands.sideNames.mockResolvedValueOnce({ status: "ok", data: names });
+-  commands.sideNames.mockResolvedValueOnce({ status: "error", error: { kind: "MergeAborted" } });
+-  const source = createTauriSource();
+-
+-  expect(await source.sideNames()).toEqual(names);
+-  await expect(source.sideNames()).rejects.toThrow(new Error("side_names failed: MergeAborted"));
++  await expect(createTauriSource().listStop()).rejects.toThrow(new Error("list_stop not allowed"));
+ });
+ 
+ test("listStop turns the app's files list into domain data and passes MovedOn and a failure on", async () => {
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index 6f7f042..c9f1dc7 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -10,7 +10,6 @@ import {
+ import type { ChunkSource, SettingsSource } from "./ChunkSource";
+ import {
+   toDomain,
+-  toFileList,
+   toListing,
+   toSettingsRead,
+   toSides,
+@@ -94,10 +93,6 @@ function createTauriStops(): Pick<
+ 
+ export function createTauriSource(): ChunkSource {
+   return {
+-    async listFiles() {
+-      const result = toResult(await commands.listFiles());
+-      return result.ok ? { ok: true, value: toFileList(result.value) } : result;
+-    },
+     async loadFile(path) {
+       const result = toResult(await commands.loadFile(path));
+       return result.ok ? { ok: true, value: toDomain(result.value) } : result;
+@@ -118,16 +113,6 @@ export function createTauriSource(): ChunkSource {
+     async takeSide(path, side, diskVersion) {
+       return toResult(await commands.takeSide(path, side, diskVersion));
+     },
+-    async sideNames() {
+-      const result = toResult(await commands.sideNames());
+-      if (!result.ok) {
+-        throw new Error(`side_names failed: ${result.failure.kind}`);
+-      }
+-      return result.value;
+-    },
+-    async abortMerge() {
+-      return toResult(await commands.abortMerge());
+-    },
+     ...createTauriStops(),
+     ...createTauriSettings(),
+   };
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index 3284cd5..671fd18 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -62,15 +62,12 @@ function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
+   return {
+     listStop: () =>
+       Promise.resolve(answers.shift() ?? { ok: false, failure: { kind: "GitRunning" } }),
+-    listFiles: notUsed,
+     loadFile: notUsed,
+     finishFile: notUsed,
+     saveFile: notUsed,
+     resetFile: notUsed,
+     describeFile: notUsed,
+     takeSide: notUsed,
+-    sideNames: notUsed,
+-    abortMerge: notUsed,
+     continueOperation: notUsed,
+     abortOperation: notUsed,
+     loadSettings: notUsed,
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index e0918bc..590dc77 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -118,7 +118,6 @@ function writeTarget(
+   const sent: WriteRequest[] = [];
+   const lists: string[] = [];
+   const source: ChunkSource = {
+-    listFiles: notUsed,
+     loadFile: (path) => {
+       loads.push(path);
+       return (
+@@ -136,8 +135,6 @@ function writeTarget(
+     resetFile: (path, diskVersion) => calls.resetFile?.(path, diskVersion) ?? notUsed(),
+     describeFile: notUsed,
+     takeSide: (path, side, diskVersion) => calls.takeSide?.(path, side, diskVersion) ?? notUsed(),
+-    sideNames: notUsed,
+-    abortMerge: notUsed,
+     listStop: notUsed,
+     continueOperation: notUsed,
+     abortOperation: notUsed,
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index ee3f856..31bf329 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -67,7 +67,6 @@ function notUsed(): Promise<never> {
+ 
+ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
+   return {
+-    listFiles: notUsed,
+     loadFile: notUsed,
+     finishFile: (request) => {
+       finishes.push(request);
+@@ -77,8 +76,6 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
+     resetFile: notUsed,
+     describeFile: notUsed,
+     takeSide: notUsed,
+-    sideNames: notUsed,
+-    abortMerge: notUsed,
+     listStop: notUsed,
+     continueOperation: notUsed,
+     abortOperation: () => {
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 64d6f78..bb40d6b 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -130,7 +130,6 @@ async function dataFor(path: string): Promise<FileMergeData> {
+ function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
+   const pending: PendingLoad[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.reject(new Error("not used")),
+     loadFile: (path) =>
+       new Promise((resolve, reject) => {
+         pending.push({ path, resolve, reject });
+@@ -140,8 +139,6 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     resetFile: () => Promise.reject(new Error("not used")),
+     describeFile: () => Promise.reject(new Error("not used")),
+     takeSide: () => Promise.reject(new Error("not used")),
+-    sideNames: () => Promise.resolve({ local: null, remote: null }),
+-    abortMerge: () => Promise.reject(new Error("not used")),
+     listStop: () => Promise.resolve(listing(files)),
+     continueOperation: () => Promise.reject(new Error("not used")),
+     abortOperation: () => Promise.reject(new Error("not used")),
+@@ -1065,7 +1062,6 @@ function choiceSource(
+ ): { source: ChunkSource; calls: string[] } {
+   const calls: string[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.reject(new Error("not used")),
+     loadFile: async (path) => {
+       calls.push(`loadFile ${path}`);
+       return ok(await dataFor(path));
+@@ -1087,8 +1083,6 @@ function choiceSource(
+       );
+       return Promise.resolve(written(taken));
+     },
+-    sideNames: () => Promise.resolve({ local: null, remote: null }),
+-    abortMerge: () => Promise.reject(new Error("not used")),
+     listStop: () => Promise.resolve(listing(files)),
+     continueOperation: () => Promise.reject(new Error("not used")),
+     abortOperation: () => Promise.reject(new Error("not used")),
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 3ac54c3..a0d967c 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move, becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, stopped → `MovedOn`, a panicked worker → `MovedOn`; `lock_when_git_is_done` makes the close ending wait for git; `abort()` is the old `git merge --abort`; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; `abort_merge` destroys the window, and the two async commands destroy it only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; the two async commands take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()`/`ending_when_git_is_done` — the close ending through `lock_when_git_is_done`, as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index c96692b..cb7fa0e 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -1,9 +1,7 @@
+ use std::sync::Mutex;
+ 
+ use tauri::{Manager, Runtime, State, WebviewWindow};
+-use yamt_session::{
+-    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
+-};
++use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, WriteReply};
+ 
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
+@@ -12,15 +10,12 @@ use crate::{servers, settings};
+ 
+ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+-        list_files,
+         load_file,
+         finish_file,
+         save_file,
+         reset_file,
+         describe_file,
+         take_side,
+-        side_names,
+-        abort_merge::<tauri::Wry>,
+         list_stop,
+         continue_operation::<tauri::Wry>,
+         abort_operation::<tauri::Wry>,
+@@ -56,20 +51,6 @@ pub(crate) fn with_session<R: Runtime>(
+         })
+ }
+ 
+-#[tauri::command]
+-#[specta::specta]
+-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn list_files(state: State<'_, MergeState>) -> Result<FileList, IpcError> {
+-    Ok(lock(&state).session()?.refresh()?)
+-}
+-
+-#[tauri::command]
+-#[specta::specta]
+-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-fn side_names(state: State<'_, MergeState>) -> Result<SideNames, IpcError> {
+-    Ok(lock(&state).session()?.side_names().clone())
+-}
+-
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+@@ -139,21 +120,6 @@ fn close_window<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
+     }
+ }
+ 
+-#[tauri::command]
+-#[specta::specta]
+-#[expect(
+-    clippy::needless_pass_by_value,
+-    reason = "tauri passes arguments by value"
+-)]
+-fn abort_merge<R: Runtime>(
+-    window: WebviewWindow<R>,
+-    state: State<'_, MergeState>,
+-) -> Result<(), IpcError> {
+-    lock(&state).abort()?;
+-    close_window(&window, "aborted");
+-    Ok(())
+-}
+-
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+@@ -224,38 +190,43 @@ mod tests {
+         json!({ "kind": "Written", "files": entries(statuses) })
+     }
+ 
++    fn listed(window: &Window) -> Value {
++        let listed = window.invoke("list_stop", json!({})).unwrap();
++        assert_eq!(listed["kind"], "Files", "{listed}");
++        listed
++    }
++
++    fn files_and_changes(listed: &Value) -> (Value, Value) {
++        (listed["files"].clone(), listed["disk_changes"].clone())
++    }
++
+     #[test]
+-    fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
++    fn list_stop_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
+         let window = open_window();
+         let unresolved = "Unresolved";
+-        let listed =
+-            |statuses| json!({ "files": entries(statuses), "disk_changes": [], "merging": true });
+         assert_eq!(
+-            window.invoke("list_files", json!({})),
+-            Ok(listed([unresolved, unresolved, unresolved]))
++            files_and_changes(&listed(&window)),
++            (entries([unresolved, unresolved, unresolved]), json!([]))
+         );
+         git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
+         assert_eq!(
+-            window.invoke("list_files", json!({})),
+-            Ok(listed([unresolved, "Resolved", unresolved]))
++            files_and_changes(&listed(&window)),
++            (entries([unresolved, "Resolved", unresolved]), json!([]))
+         );
+     }
+ 
+     #[test]
+-    fn list_files_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
++    fn list_stop_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
+         let window = open_window();
+         fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
+         let staged = json!({ "path": "view.vue", "result": { "kind": "Staged" } });
+         let after = entries(["Unresolved", "Unresolved", "Resolved"]);
+ 
+-        let listed = window.invoke("list_files", json!({}));
++        let listed = listed(&window);
+         let args = json!({ "path": "view.vue", "text": "mine\n", "diskVersion": 0 });
+         let finished = window.invoke("finish_file", args);
+ 
+-        assert_eq!(
+-            listed,
+-            Ok(json!({ "files": after, "disk_changes": [staged], "merging": true }))
+-        );
++        assert_eq!(files_and_changes(&listed), (after.clone(), json!([staged])));
+         let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
+         assert_eq!(finished, Ok(changed));
+         assert_eq!(
+@@ -265,13 +236,13 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn side_names_names_both_branches_of_the_merge() {
++    fn list_stop_names_both_branches_of_the_merge() {
+         let window = open_window();
+         let names = json!({
+             "local": { "kind": "Branch", "name": "local" },
+             "remote": { "kind": "Branch", "name": "remote" },
+         });
+-        assert_eq!(window.invoke("side_names", json!({})), Ok(names));
++        assert_eq!(listed(&window)["sides"], names);
+     }
+ 
+     #[test]
+@@ -337,8 +308,10 @@ mod tests {
+             text.as_bytes()
+         );
+         assert_eq!(window.unmerged(), unmerged_before);
+-        let listed = json!({ "files": entries(unresolved), "disk_changes": [], "merging": true });
+-        assert_eq!(window.invoke("list_files", json!({})), Ok(listed));
++        assert_eq!(
++            files_and_changes(&listed(&window)),
++            (entries(unresolved), json!([]))
++        );
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/merge.rs b/src-tauri/src/merge.rs
+index a0e91f3..505da42 100644
+--- a/src-tauri/src/merge.rs
++++ b/src-tauri/src/merge.rs
+@@ -4,8 +4,8 @@ use std::thread;
+ use std::time::Duration;
+ 
+ use yamt_session::{
+-    Continued, DiskChange, FileEntry, MergeSession, OperationKind, OperationView, Refreshed,
+-    SideNames, StopList,
++    Continued, DiskChange, DiskVersion, FileEntry, MergeSession, OperationKind, OperationView,
++    Refreshed, SideNames, StopList,
+ };
+ 
+ use crate::ipc_error::IpcError;
+@@ -17,9 +17,11 @@ pub(crate) enum Merge {
+     Held(Box<MergeSession>),
+     /// git aborts or continues; the session is with the worker.
+     Running(OperationKind),
+-    /// git moved on to another stop: the old session is dropped; the next list opens the new one.
++    /// git moved on to another stop: the old session is dropped; the next list opens the new one,
++    /// its disk versions above the old session's highest (#1383).
+     MovedOn {
+         root: PathBuf,
++        highest_disk_version: DiskVersion,
+     },
+     Aborted(OperationKind),
+     Finished(OperationKind),
+@@ -79,16 +81,15 @@ impl Merge {
+         }
+     }
+ 
+-    pub(crate) fn abort(&mut self) -> Result<(), IpcError> {
+-        self.session()?.abort_merge()?;
+-        *self = Merge::Aborted(OperationKind::Merge);
+-        Ok(())
+-    }
+-
+     /// After a move, opens the new stop first; a list that finds git moved on drops the session.
+     pub(crate) fn list_stop(&mut self) -> Result<Listing, IpcError> {
+-        if let Merge::MovedOn { root } = self {
+-            *self = Merge::Held(Box::new(MergeSession::open(root)?));
++        if let Merge::MovedOn {
++            root,
++            highest_disk_version,
++        } = self
++        {
++            let session = MergeSession::open_after(root, *highest_disk_version)?;
++            *self = Merge::Held(Box::new(session));
+         }
+         let session = self.session()?;
+         match session.refresh_stop()? {
+@@ -104,8 +105,7 @@ impl Merge {
+                 sides,
+             }),
+             Refreshed::MovedOn => {
+-                let root = session.root().to_path_buf();
+-                *self = Merge::MovedOn { root };
++                *self = moved_on(session);
+                 Ok(Listing::MovedOn)
+             }
+         }
+@@ -137,6 +137,13 @@ impl Merge {
+     }
+ }
+ 
++fn moved_on(session: &MergeSession) -> Merge {
++    Merge::MovedOn {
++        root: session.root().to_path_buf(),
++        highest_disk_version: session.highest_disk_version(),
++    }
++}
++
+ /// Runs `work` on a blocking worker while the merge is `Running`. git's refusal puts the session
+ /// back; a worker that panicked leaves `MovedOn`, so the next list opens the stop git is at.
+ async fn on_worker<T, F>(state: &MergeState, work: F) -> Result<(Box<MergeSession>, T), IpcError>
+@@ -145,7 +152,7 @@ where
+     F: FnOnce(&mut MergeSession) -> yamt_session::Result<T> + Send + 'static,
+ {
+     let mut session = lock(state).hand_to_worker()?;
+-    let root = session.root().to_path_buf();
++    let after_a_panic = moved_on(&session);
+     let worker = tauri::async_runtime::spawn_blocking(move || {
+         let result = work(&mut session);
+         (session, result)
+@@ -157,7 +164,7 @@ where
+             Err(error.into())
+         }
+         Err(error) => {
+-            *lock(state) = Merge::MovedOn { root };
++            *lock(state) = after_a_panic;
+             Err(IpcError::Git {
+                 message: format!("yamt's worker stopped while git ran: {error}"),
+             })
+@@ -183,8 +190,7 @@ pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueRep
+             Ok(ContinueReply::Finished)
+         }
+         Continued::Stopped { message } => {
+-            let root = session.root().to_path_buf();
+-            *merge = Merge::MovedOn { root };
++            *merge = moved_on(&session);
+             Ok(ContinueReply::Stopped { message })
+         }
+     }
+diff --git a/src-tauri/src/merge/tests.rs b/src-tauri/src/merge/tests.rs
+index 55f6588..b5e3001 100644
+--- a/src-tauri/src/merge/tests.rs
++++ b/src-tauri/src/merge/tests.rs
+@@ -41,11 +41,10 @@ fn merge_aborted() -> Result<Value, Value> {
+     Err(json!({ "kind": "MergeAborted" }))
+ }
+ 
+-fn merge_commands() -> [(&'static str, Value); 12] {
++fn merge_commands() -> [(&'static str, Value); 9] {
+     let path = json!({ "path": CRLF_PATH });
+     let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
+     [
+-        ("list_files", json!({})),
+         ("list_stop", json!({})),
+         ("load_file", path.clone()),
+         ("describe_file", path),
+@@ -56,8 +55,6 @@ fn merge_commands() -> [(&'static str, Value); 12] {
+             "take_side",
+             json!({ "path": CRLF_PATH, "side": "remote", "diskVersion": 0 }),
+         ),
+-        ("side_names", json!({})),
+-        ("abort_merge", json!({})),
+         ("continue_operation", json!({})),
+         ("abort_operation", json!({})),
+     ]
+@@ -74,7 +71,7 @@ fn ending(exit: Exit, message: &str) -> Ending {
+ fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
+     let window = open_window();
+ 
+-    assert_eq!(window.invoke("abort_merge", json!({})), Ok(Value::Null));
++    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
+ 
+     for (command, args) in merge_commands() {
+         assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
+@@ -90,7 +87,7 @@ fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing()
+ #[test]
+ fn the_ending_after_an_abort_is_status_one_and_stages_no_file_changed_since() {
+     let window = open_window();
+-    window.invoke("abort_merge", json!({})).unwrap();
++    window.invoke("abort_operation", json!({})).unwrap();
+     fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
+     let index_before = window.git_text(&["ls-files", "-s"]);
+ 
+@@ -109,7 +106,7 @@ fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
+     fs::write(&added, "saved again\n").unwrap();
+     let status_before = window.git_text(&["status", "--porcelain"]);
+ 
+-    let refused = window.invoke("abort_merge", json!({})).unwrap_err();
++    let refused = window.invoke("abort_operation", json!({})).unwrap_err();
+ 
+     assert_eq!(refused["kind"], "Git", "{refused}");
+     let message = refused["message"].as_str().unwrap();
+@@ -118,8 +115,8 @@ fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
+         "{message}"
+     );
+     assert_eq!(window.git_text(&["status", "--porcelain"]), status_before);
+-    let listed = window.invoke("list_files", json!({})).unwrap();
+-    assert_eq!(listed["merging"], true, "{listed}");
++    let listed = window.invoke("list_stop", json!({})).unwrap();
++    assert_eq!(listed["operation"]["kind"], "Merge", "{listed}");
+     assert_eq!(
+         window.ending().message.as_deref(),
+         Some("2 of 3 files still unresolved")
+@@ -131,7 +128,11 @@ fn rebase_window() -> Window {
+ }
+ 
+ fn resolved_step(window: &Window) {
+-    let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": 0 });
++    let loaded = window
++        .invoke("load_file", json!({ "path": STEP_TWO_FILE }))
++        .unwrap();
++    let version = &loaded["disk_version"];
++    let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": version });
+     let written = window.invoke("finish_file", args).unwrap();
+     assert_eq!(written["kind"], "Written", "{written}");
+ }
+@@ -219,7 +220,7 @@ fn a_close_while_git_continues_waits_for_git_and_counts_the_stop_git_moved_on_to
+     );
+ }
+ 
+-// Disk versions restart at every stop: a Save meant for step 1 would land on step 2's file.
++// A Save meant for step 1 would land on step 2's file.
+ #[test]
+ fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_finishes() {
+     let window = rebase_window();
+@@ -236,7 +237,6 @@ fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_fi
+     let save = json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": 0 });
+     let moved_on = Err(json!({ "kind": "StopMovedOn" }));
+     assert_eq!(window.invoke("save_file", save), moved_on);
+-    assert_eq!(window.invoke("list_files", json!({})), moved_on);
+     assert_eq!(fs::read(&file).unwrap(), at_step_two);
+     assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
+ 
+@@ -248,6 +248,42 @@ fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_fi
+     assert_eq!(window.ending(), ending(Exit::Success, "rebase finished"));
+ }
+ 
++// A Save meant for step 1, sent after the window listed step 2, would land on step 2's file when
++// the new stop's disk versions start where the old stop's did (#1383).
++#[test]
++fn after_the_next_stop_is_listed_a_save_with_the_old_stop_s_version_writes_nothing() {
++    let window = rebase_window();
++    let file = window.repo.path().join(STEP_TWO_FILE);
++    fs::write(&file, "resolved\n").unwrap();
++    let settled = window.invoke("list_stop", json!({})).unwrap();
++    assert_eq!(
++        settled["disk_changes"][0]["result"]["kind"], "Staged",
++        "{settled}"
++    );
++    let old_version = window
++        .invoke("load_file", json!({ "path": STEP_TWO_FILE }))
++        .unwrap()["disk_version"]
++        .clone();
++    assert_eq!(old_version, 1);
++    let stopped = window.invoke("continue_operation", json!({})).unwrap();
++    assert_eq!(stopped["kind"], "Stopped", "{stopped}");
++    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
++    let at_step_two = fs::read(&file).unwrap();
++    let unmerged = window.git_text(&["ls-files", "-u"]);
++
++    let save =
++        json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": old_version });
++    let saved = window.invoke("save_file", save);
++
++    assert_eq!(saved, Err(json!({ "kind": "StopMovedOn" })));
++    assert_eq!(fs::read(&file).unwrap(), at_step_two);
++    assert_eq!(window.git_text(&["ls-files", "-u"]), unmerged);
++    let loaded = window
++        .invoke("load_file", json!({ "path": STEP_TWO_FILE }))
++        .unwrap();
++    assert_eq!(loaded["disk_version"], 2);
++}
++
+ #[test]
+ fn a_continue_git_refuses_answers_git_s_text_and_keeps_the_stop_open() {
+     let window = rebase_window();
+@@ -280,7 +316,7 @@ fn a_worker_that_panics_leaves_moved_on_and_answers_a_git_error() {
+         message.starts_with("yamt's worker stopped while git ran"),
+         "{message}"
+     );
+-    assert!(matches!(&*lock(&state), Merge::MovedOn { root: moved } if *moved == root));
++    assert!(matches!(&*lock(&state), Merge::MovedOn { root: moved, .. } if *moved == root));
+ }
+ 
+ #[test]
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index e739ada..0080e79 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -1,7 +1,7 @@
+ use std::path::Path;
+ use std::process::ExitCode;
+ 
+-use yamt_session::{MergeSession, OperationKind};
++use yamt_session::{MergeSession, OperationKind, Refreshed};
+ 
+ use crate::merge::{Merge, MergeState, lock_when_git_is_done};
+ 
+@@ -59,7 +59,7 @@ pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
+ pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
+     match merge {
+         Merge::Held(session) => held_merge_ending(session),
+-        Merge::MovedOn { root } => moved_on_ending(root),
++        Merge::MovedOn { root, .. } => moved_on_ending(root),
+         Merge::Aborted(kind) => Ending {
+             exit: Exit::Unresolved,
+             message: Some(format!("{} aborted", operation_name(*kind))),
+@@ -86,11 +86,16 @@ fn operation_name(kind: OperationKind) -> &'static str {
+     }
+ }
+ 
++/// git's view at close: the stop's list, or the stop git moved on to (plan §2 #41).
+ fn held_merge_ending(session: &mut MergeSession) -> Ending {
+-    if let Err(error) = session.refresh() {
+-        tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
++    match session.refresh_stop() {
++        Ok(Refreshed::Files(_)) => unresolved_ending(session),
++        Ok(Refreshed::MovedOn) => moved_on_ending(session.root()),
++        Err(error) => {
++            tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
++            unresolved_ending(session)
++        }
+     }
+-    unresolved_ending(session)
+ }
+ 
+ /// The stop git moved on to, as git lists it: opened only to count, nothing settled or staged.
+@@ -181,27 +186,34 @@ mod tests {
+         assert_eq!(names, expected);
+     }
+ 
+-    // Settling the old stop's files at close would stage a file the user never saw at the new stop.
+-    #[test]
+-    fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
+-        let step_one = ConflictFile {
+-            path: STEP_TWO_FILE,
+-            kind: FileKind::Regular,
+-            base: Some(b"one\n"),
+-            local: Some(b"local-1\n"),
+-            remote: Some(b"remote-1\n"),
+-        };
+-        let repo = operation_repo(Run::Rebase, &[step_one]).unwrap();
+-        let root = repo.path();
++    const STEP_ONE: ConflictFile<'static> = ConflictFile {
++        path: STEP_TWO_FILE,
++        kind: FileKind::Regular,
++        base: Some(b"one\n"),
++        local: Some(b"local-1\n"),
++        remote: Some(b"remote-1\n"),
++    };
++
++    /// Continues the rebase in a terminal to step 2 and edits its file by hand; git's unmerged list then.
++    fn continued_in_a_terminal(root: &Path) -> Vec<u8> {
+         std::fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
+         git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
+         let continued = git(root, &["rebase", "--continue"]).unwrap();
+         assert!(!continued.status.success());
+         std::fs::write(root.join(STEP_TWO_FILE), "edited by hand\n").unwrap();
+-        let unmerged = git_ok(root, &["ls-files", "-u"]).unwrap();
++        git_ok(root, &["ls-files", "-u"]).unwrap()
++    }
++
++    // Settling the old stop's files at close would stage a file the user never saw at the new stop.
++    #[test]
++    fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
++        let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
++        let root = repo.path();
++        let unmerged = continued_in_a_terminal(root);
+ 
+         let ending = closed(Merge::MovedOn {
+             root: root.to_path_buf(),
++            highest_disk_version: DiskVersion(0),
+         });
+ 
+         assert_eq!(
+@@ -211,6 +223,22 @@ mod tests {
+         assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
+     }
+ 
++    #[test]
++    fn closing_a_session_git_moved_on_from_counts_the_new_stop_s_files_and_stages_nothing() {
++        let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
++        let root = repo.path();
++        let mut session = MergeSession::open(root).unwrap();
++        let unmerged = continued_in_a_terminal(root);
++
++        let ending = held_merge_ending(&mut session);
++
++        assert_eq!(
++            ending.message.as_deref(),
++            Some("1 of 1 files still unresolved")
++        );
++        assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
++    }
++
+     #[test]
+     fn conflict_repository_opens_a_merge_of_its_files() {
+         let repo = conflict_repo(&[
+-- 
+2.56.0
+

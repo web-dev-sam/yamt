@@ -1,17 +1,15 @@
 use serde::Serialize;
 use specta::Type;
-use yamt_gitio::{Oid, Repo};
+use yamt_gitio::{Oid, Operation, Rebase, Repo, Stop};
 
 use crate::Result;
+use crate::orientation::Orientation;
 use crate::session::LOG_TARGET;
-use crate::sides::Side;
 
-const HEAD: &str = "HEAD";
-pub(crate) const MERGE_HEAD: &str = "MERGE_HEAD";
-const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
 const QUOTE: char = '\'';
 
-/// What one side of the merge is: a branch, else a commit.
+/// What one side of the operation is: a branch, a commit, the commit a revert undoes, or the
+/// patch `git am` applies.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind")]
 pub enum SideName {
@@ -23,57 +21,99 @@ pub enum SideName {
         subject: String,
         message: String,
     },
+    Revert {
+        short_id: String,
+        subject: String,
+        message: String,
+    },
+    Patch {
+        subject: String,
+        message: String,
+    },
 }
 
-/// Both sides' names, read once when the session opens; `None` when nothing names that side.
+/// Both panes' names, read once when the session opens; `None` when nothing names that side.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct SideNames {
     pub local: Option<SideName>,
     pub remote: Option<SideName>,
 }
 
-pub(crate) fn read_side_names(repo: &Repo) -> SideNames {
-    SideNames {
-        local: name_or_warn(Side::Local, checked_out(repo)),
-        remote: name_or_warn(Side::Remote, merged_in(repo)),
+impl SideNames {
+    pub(crate) fn read(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
+        let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
+        let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
+        let (local, remote) = orientation.panes(ours, theirs);
+        SideNames { local, remote }
     }
 }
 
-fn name_or_warn(side: Side, read: Result<Option<SideName>>) -> Option<SideName> {
+/// The name `read` gave; a git failure drops only this name (plan §2 #50, #62), with a warning naming `label`.
+pub(crate) fn name_or_warn(
+    label: &'static str,
+    read: Result<Option<SideName>>,
+) -> Option<SideName> {
     match read {
         Ok(name) => name,
         Err(error) => {
-            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", ?side, %error, "this side's name is left out");
+            tracing::warn!(target: LOG_TARGET, event = "side_name_unread", name = label, %error, "this name is left out");
             None
         }
     }
 }
 
-fn checked_out(repo: &Repo) -> Result<Option<SideName>> {
+/// HEAD's branch, else HEAD's commit (a rebase detaches HEAD).
+pub(crate) fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<SideName>> {
     if let Some(branch) = repo.current_branch()? {
         return Ok(Some(SideName::Branch {
             name: text(&branch),
         }));
     }
-    match repo.commit_named(HEAD)? {
-        Some(commit) => Ok(Some(commit_name(repo, &commit)?)),
+    named(repo, head, commit_name)
+}
+
+/// What git's theirs side is the change of, per operation (plan §2 #87).
+pub(crate) fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
+    let Some(operation) = operation else {
+        return Ok(None);
+    };
+    match operation {
+        Operation::Merge { merging }
+        | Operation::Rebase(Rebase {
+            redoing_merge: Some(merging),
+            ..
+        }) => Ok(Some(merge_head_name(repo, merging)?)),
+        Operation::SquashMerge { merging } => named(repo, merging.as_ref(), merge_head_name),
+        Operation::Rebase(Rebase {
+            redoing_merge: None,
+            replaying: commit,
+            ..
+        })
+        | Operation::CherryPick {
+            picking: commit, ..
+        } => named(repo, commit.as_ref(), commit_name),
+        Operation::Revert { reverting, .. } => named(repo, reverting.as_ref(), revert_name),
+        Operation::Am {
+            subject, message, ..
+        } => Ok(Some(SideName::Patch {
+            subject: text(subject),
+            message: message_text(message),
+        })),
+    }
+}
+
+pub(crate) fn named(
+    repo: &Repo,
+    commit: Option<&Oid>,
+    name: fn(&Repo, &Oid) -> Result<SideName>,
+) -> Result<Option<SideName>> {
+    match commit {
+        Some(commit) => Ok(Some(name(repo, commit)?)),
         None => Ok(None),
     }
 }
 
-fn merged_in(repo: &Repo) -> Result<Option<SideName>> {
-    if let Some(commit) = repo.commit_named(MERGE_HEAD)? {
-        return Ok(Some(merge_head_name(repo, &commit)?));
-    }
-    for head in REPLAYED_HEADS {
-        if let Some(commit) = repo.commit_named(head)? {
-            return Ok(Some(commit_name(repo, &commit)?));
-        }
-    }
-    Ok(None)
-}
-
-fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+pub(crate) fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let branches: Vec<String> = repo
         .branches_at(commit)?
         .iter()
@@ -94,12 +134,21 @@ fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     }
 }
 
-fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+pub(crate) fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
     let summary = repo.commit_summary(commit)?;
     Ok(SideName::Commit {
         short_id: text(&summary.short_id),
         subject: text(&summary.subject),
-        message: text(&summary.message).trim().to_owned(),
+        message: message_text(&summary.message),
+    })
+}
+
+fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+    let summary = repo.commit_summary(commit)?;
+    Ok(SideName::Revert {
+        short_id: text(&summary.short_id),
+        subject: text(&summary.subject),
+        message: message_text(&summary.message),
     })
 }
 
@@ -110,8 +159,13 @@ fn quoted_name(message: &str) -> Option<&str> {
     Some(name)
 }
 
-fn text(bytes: &[u8]) -> String {
+pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// A commit's or a patch's message as shown: without the blank lines around it.
+pub(crate) fn message_text(message: &[u8]) -> String {
+    text(message).trim().to_owned()
 }
 
 #[cfg(test)]

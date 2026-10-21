@@ -66,6 +66,7 @@ function merged({
         ? {
             kind: "Markers",
             open: "<<<<<<< ours",
+            first: "local",
             between: ["======="],
             close: ">>>>>>> theirs",
           }

@@ -10,6 +10,7 @@ import {
   type SourceResult,
   type WriteReply,
 } from "./domain";
+import { createFixtureStops } from "./fixtureOperations";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
@@ -99,10 +100,12 @@ const WAITING: v.GenericSchema<Generated.Waiting> = v.variant("kind", [
   v.object({
     kind: v.literal("Markers"),
     open: v.string(),
+    first: memberOf(SIDES),
     between: v.array(v.string()),
     close: v.string(),
   }),
   v.object({ kind: v.literal("AsShown") }),
+  v.object({ kind: v.literal("Remembered") }),
 ]);
 
 const MERGE_CHUNK = v.object({
@@ -174,11 +177,11 @@ function describeRecord(path: string, data: FileMergeData | undefined): SourceRe
 }
 
 function entries({ fixtures, finished }: Records): FileEntry[] {
-  return [...fixtures.keys()].map((path): FileEntry => ({
-    path,
-    status: finished.has(path) ? "Resolved" : "Unresolved",
-    unsupported: null,
-  }));
+  return [...fixtures.entries()].map(([path, data]): FileEntry => {
+    const remembered = data.chunks.some((chunk) => chunk.waiting.kind === "Remembered");
+    const unresolved = remembered ? "Remembered" : "Unresolved";
+    return { path, status: finished.has(path) ? "Resolved" : unresolved, unsupported: null };
+  });
 }
 
 function updateKnown(records: Records, path: string, update: () => void): SourceResult<WriteReply> {
@@ -232,27 +235,25 @@ function fixtureWrites(
 
 export function createFixtureSource(
   log: Log,
+  search: string,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
 ): ChunkSource {
   const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
+  const stops = createFixtureStops(log, search, {
+    listed: () => entries(records),
+    unresolveAll: () => records.finished.clear(),
+  });
 
   return {
-    async listFiles() {
-      return { ok: true, value: { files: entries(records), diskChanges: [], merging: true } };
-    },
+    listStop: stops.listStop,
+    continueOperation: stops.continueOperation,
+    abortOperation: stops.abortOperation,
     async loadFile(path) {
       const data = records.fixtures.get(path);
       return data === undefined ? unknownPath(path) : { ok: true, value: data };
     },
     async describeFile(path) {
       return describeRecord(path, records.fixtures.get(path));
-    },
-    async sideNames() {
-      return { local: null, remote: null };
-    },
-    async abortMerge() {
-      log.info("fixture.abort_merge", {});
-      return { ok: true, value: null };
     },
     ...fixtureWrites(log, records),
     ...createFixtureSettings(),

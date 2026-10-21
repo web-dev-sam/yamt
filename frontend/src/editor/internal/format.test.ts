@@ -78,6 +78,7 @@ function chunkRecord(middleLen: number): unknown {
     waiting: {
       kind: "Markers",
       open: "<<<<<<< ours",
+      first: "local",
       between: ["======="],
       close: ">>>>>>> theirs",
     },

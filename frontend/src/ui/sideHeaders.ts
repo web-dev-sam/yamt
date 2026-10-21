@@ -20,6 +20,13 @@ export function sideHeader(side: Side, names: SideNames): SideHeader {
     }
     case "Commit":
       return { text: `${label}: ${name.short_id} ${name.subject}`, tooltip: name.message };
+    case "Revert":
+      return {
+        text: `${label}: revert of ${name.short_id} ${name.subject}`,
+        tooltip: name.message,
+      };
+    case "Patch":
+      return { text: `${label}: patch: ${name.subject}`, tooltip: name.message };
     default: {
       const _exhaustive: never = name;
       return _exhaustive;

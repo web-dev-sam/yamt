@@ -1,0 +1,647 @@
+From 0a09bb1fbcb44d4567a8400f7294ca5fe0aa30d8 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 14:37:26 +0200
+Subject: [PATCH] feat(ui): mark a remembered resolution; never ask about its
+ conflicts
+
+FileMark shows 'remembered' in list and tree; MergeSummary counts
+remembered conflicts apart; Mark resolved asks only about the others.
+
+Refs plan #90
+---
+ frontend/src/editor/internal/apply.test.ts  |  84 +++++++++++++---
+ frontend/src/editor/internal/sides.test.ts  |  14 +--
+ frontend/src/editor/internal/status.test.ts | 103 ++++++++++++++++++++
+ frontend/src/editor/internal/status.ts      |  19 +++-
+ frontend/src/ui/FileList.vue                |  10 +-
+ frontend/src/ui/FileMark.vue                |  28 ++++++
+ frontend/src/ui/FileTree.vue                |  10 +-
+ frontend/src/ui/deletedSide.test.ts         |   6 +-
+ frontend/src/ui/question.test.ts            |  29 ++++--
+ frontend/src/ui/question.ts                 |   4 +-
+ frontend/src/ui/summaryLabel.test.ts        |  18 +++-
+ frontend/src/ui/summaryLabel.ts             |  12 ++-
+ 12 files changed, 276 insertions(+), 61 deletions(-)
+ create mode 100644 frontend/src/editor/internal/status.test.ts
+ create mode 100644 frontend/src/ui/FileMark.vue
+
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 2f8881f..dbbc926 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -212,8 +212,16 @@ test("apply local: the change gets the left text, resolves, and loses colour and
+   expect(decoratedLines(applied.state)).not.toContain(3);
+   expect(arrowLines(start, "local")).toContain(3);
+   expect(arrowLines(applied, "local")).not.toContain(3);
+-  expect(summarize(start.state.field(start.field))).toEqual({ changes: 8, conflicts: 1 });
+-  expect(summarize(applied.state.field(applied.field))).toEqual({ changes: 7, conflicts: 1 });
++  expect(summarize(start.state.field(start.field))).toEqual({
++    changes: 8,
++    conflicts: 1,
++    remembered: 0,
++  });
++  expect(summarize(applied.state.field(applied.field))).toEqual({
++    changes: 7,
++    conflicts: 1,
++    remembered: 0,
++  });
+   expect(applyOne(applied, chunkAt(applied, 0), "local")).toEqual([]);
+   expect(applyOne(start, chunkAt(start, 0), "remote")).toEqual([]);
+ });
+@@ -237,13 +245,21 @@ test("a conflict applied from both sides holds local then remote text", async ()
+   const both = run(local, applyOne(local, conflict, "remote"));
+ 
+   expect(statuses(local)[8]).toBe("applied pending");
+-  expect(summarize(local.state.field(local.field))).toEqual({ changes: 8, conflicts: 1 });
++  expect(summarize(local.state.field(local.field))).toEqual({
++    changes: 8,
++    conflicts: 1,
++    remembered: 0,
++  });
+   expect(arrowLines(local, "local")).not.toContain(129);
+   expect(arrowLines(local, "remote")).toContain(141);
+   expect(decoratedLines(local.state)).toContain(129);
+   expect(centerText(both, 8)).toBe(sideText(both, 8, "local") + sideText(both, 8, "remote"));
+   expect(statuses(both)[8]).toBe("applied applied");
+-  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
++  expect(summarize(both.state.field(both.field))).toEqual({
++    changes: 8,
++    conflicts: 0,
++    remembered: 0,
++  });
+   expect(arrowLines(both, "remote")).not.toContain(141);
+   expect(decoratedLines(both.state)).not.toContain(129);
+ });
+@@ -261,7 +277,11 @@ test("ignore keeps the text and resolves a change or a half-applied conflict", a
+   expect(arrowLines(done, "local")).not.toContain(22);
+   expect(centerText(settled, 8)).toBe(sideText(settled, 8, "remote"));
+   expect(statuses(settled)[8]).toBe("ignored applied");
+-  expect(summarize(settled.state.field(settled.field))).toEqual({ changes: 7, conflicts: 0 });
++  expect(summarize(settled.state.field(settled.field))).toEqual({
++    changes: 7,
++    conflicts: 0,
++    remembered: 0,
++  });
+   expect(ignoreOne(settled, chunkAt(settled, 8), "local")).toEqual([]);
+ });
+ 
+@@ -417,7 +437,11 @@ test("bulk apply from the left resolves every LocalOnly change; one undo restore
+   for (const id of [0, 1, 2, 5, 7]) {
+     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "local"));
+   }
+-  expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 3, conflicts: 1 });
++  expect(summarize(bulk.state.field(bulk.field))).toEqual({
++    changes: 3,
++    conflicts: 1,
++    remembered: 0,
++  });
+   expect(bulkApplySteps({ target: bulk, side: "local", visible: allVisible(bulk) })).toEqual([]);
+   expect(undone.state.doc.toString()).toBe(start.state.doc.toString());
+   expect(statuses(undone)).toEqual(statuses(start));
+@@ -445,7 +469,11 @@ test("a BothSame change resolves from either arrow and from either bulk apply",
+   expect(arrowLines(merge, "remote")).toEqual([2]);
+   expect(fromRight.state.sliceDoc()).toBe("a\nB\nc\n");
+   expect(arrowLines(fromRight, "local")).toEqual([]);
+-  expect(summarize(fromRight.state.field(fromRight.field))).toEqual({ changes: 0, conflicts: 0 });
++  expect(summarize(fromRight.state.field(fromRight.field))).toEqual({
++    changes: 0,
++    conflicts: 0,
++    remembered: 0,
++  });
+   expect(statuses(bulkLeft)).toEqual(["applied applied"]);
+   expect(statuses(bulkRight)).toEqual(["applied applied"]);
+   expect(bulkRight.state.sliceDoc()).toBe("a\nB\nc\n");
+@@ -463,7 +491,11 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
+     expect(statuses(bulk)[id]).toBe("pending applied");
+     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "remote"));
+   }
+-  expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
++  expect(summarize(bulk.state.field(bulk.field))).toEqual({
++    changes: 5,
++    conflicts: 1,
++    remembered: 0,
++  });
+ });
+ 
+ test("bulk apply over touching spans whose last deletes an unterminated final line equals clicking each", async () => {
+@@ -503,7 +535,11 @@ test("deleting all of a change's lines in the middle pane ignores it", async ()
+   };
+ 
+   expect(statuses(deleted)[0]).toBe("ignored ignored");
+-  expect(summarize(deleted.state.field(deleted.field))).toEqual({ changes: 7, conflicts: 1 });
++  expect(summarize(deleted.state.field(deleted.field))).toEqual({
++    changes: 7,
++    conflicts: 1,
++    remembered: 0,
++  });
+   expect(statuses(command(deleted, undo))[0]).toBe("pending pending");
+ });
+ 
+@@ -855,12 +891,24 @@ test("an add/add file reopened from the disk: a one-sided apply stays a conflict
+ 
+   expect(paneText(local.state)).toBe(lines(["L0", "L1", ...SHARED, "}"], "Lf"));
+   expect(statuses(local)).toEqual(["applied pending", "pending pending"]);
+-  expect(summarize(local.state.field(local.field))).toEqual({ changes: 0, conflicts: 2 });
+-  expect(summarize(ignored.state.field(ignored.field))).toEqual({ changes: 0, conflicts: 1 });
++  expect(summarize(local.state.field(local.field))).toEqual({
++    changes: 0,
++    conflicts: 2,
++    remembered: 0,
++  });
++  expect(summarize(ignored.state.field(ignored.field))).toEqual({
++    changes: 0,
++    conflicts: 1,
++    remembered: 0,
++  });
+   expect(paneText(both.state)).toBe(
+     lines(["L0", "L1", ...SHARED, "L2", "L3", "L4", "L5", "R5", "R6", "R7", "}"], "Lf"),
+   );
+-  expect(summarize(both.state.field(both.field))).toEqual({ changes: 0, conflicts: 0 });
++  expect(summarize(both.state.field(both.field))).toEqual({
++    changes: 0,
++    conflicts: 0,
++    remembered: 0,
++  });
+ });
+ 
+ test("Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step", async () => {
+@@ -876,7 +924,11 @@ test("Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other
+   expect(centerText(both, 8)).toBe(sideText(both, 8, "local"));
+   expect(paneText(both.state)).toBe(paneText(plain.state));
+   expect(statuses(both)).toEqual(statuses(plain));
+-  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
++  expect(summarize(both.state.field(both.field))).toEqual({
++    changes: 8,
++    conflicts: 0,
++    remembered: 0,
++  });
+   expect(undoDepth(both.state)).toBe(undoDepth(start.state) + 1);
+   expect(paneText(undone.state)).toBe(paneText(start.state));
+   expect(statuses(undone)).toEqual(statuses(start));
+@@ -1006,7 +1058,11 @@ test("Ctrl/Cmd ignore on a conflict whose other side has no lines removes the bl
+ 
+   expect(paneText(done.state)).toBe("a\nc\n");
+   expect(statuses(done)).toEqual(["ignored applied"]);
+-  expect(summarize(done.state.field(done.field))).toEqual({ changes: 0, conflicts: 0 });
++  expect(summarize(done.state.field(done.field))).toEqual({
++    changes: 0,
++    conflicts: 0,
++    remembered: 0,
++  });
+ });
+ 
+ test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each", async () => {
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index 6d56a07..f400bed 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -245,14 +245,14 @@ test("× on a conflict's left side keeps the middle and the right side; « then
+   expect(arrows(ignored, "local").get(129)).toBeUndefined();
+   expect(arrows(ignored, "remote").get(141)).toBe("replace");
+   expect(decoratedLines(ignored.center)).toEqual(decoratedLines(start.center));
+-  expect(summary(ignored)).toEqual({ changes: 8, conflicts: 1 });
++  expect(summary(ignored)).toEqual({ changes: 8, conflicts: 1, remembered: 0 });
+   expect(centerText(replaced, CONFLICT)).toBe(sideText(replaced, CONFLICT, "remote"));
+   expect(status(replaced, CONFLICT)).toBe("ignored applied");
+   expect(arrows(replaced, "remote").get(141)).toBeUndefined();
+   expect(decoratedLines(replaced.center)).toEqual(
+     outside(decoratedLines(start.center), CONFLICT_MIDDLE_LINES),
+   );
+-  expect(summary(replaced)).toEqual({ changes: 8, conflicts: 0 });
++  expect(summary(replaced)).toEqual({ changes: 8, conflicts: 0, remembered: 0 });
+   expectOneUndoStep(start, ignored);
+   expectOneUndoStep(ignored, replaced);
+ });
+@@ -273,7 +273,7 @@ test("» then « on a conflict appends; the right arrow offers that only while t
+     sideText(both, CONFLICT, "local") + sideText(both, CONFLICT, "remote"),
+   );
+   expect(status(both, CONFLICT)).toBe("applied applied");
+-  expect(summary(both)).toEqual({ changes: 8, conflicts: 0 });
++  expect(summary(both)).toEqual({ changes: 8, conflicts: 0, remembered: 0 });
+   expectOneUndoStep(start, left);
+   expectOneUndoStep(left, both);
+ });
+@@ -288,7 +288,7 @@ test("applying a side of a conflict whose other side deleted the block resolves
+ 
+   expect(applied.center.sliceDoc()).toBe("a\nB\nc\n");
+   expect(status(applied, 0)).toBe("ignored applied");
+-  expect(summary(applied)).toEqual({ changes: 0, conflicts: 0 });
++  expect(summary(applied)).toEqual({ changes: 0, conflicts: 0, remembered: 0 });
+   expect(decoratedLines(applied.center)).toEqual([]);
+   expectOneUndoStep(start, applied);
+ });
+@@ -305,7 +305,7 @@ test("× and apply on a block that is not a conflict resolve the whole block", a
+   const sameApplied = click(same, 0, { kind: "apply", side: "local" });
+ 
+   expect(status(oneSided, LOCAL_ONLY)).toBe("ignored pending");
+-  expect(summary(oneSided)).toEqual({ changes: 7, conflicts: 1 });
++  expect(summary(oneSided)).toEqual({ changes: 7, conflicts: 1, remembered: 0 });
+   expect(status(sameIgnored, 0)).toBe("ignored ignored");
+   expect(sameIgnored.center.sliceDoc()).toBe("a\nb\nc\n");
+   expect(status(sameApplied, 0)).toBe("applied applied");
+@@ -314,7 +314,7 @@ test("× and apply on a block that is not a conflict resolve the whole block", a
+     expect([...arrows(resolved, "local"), ...arrows(resolved, "remote")]).toEqual([]);
+     expect(decoratedLines(resolved.left)).toEqual([]);
+     expect(decoratedLines(resolved.right)).toEqual([]);
+-    expect(summary(resolved)).toEqual({ changes: 0, conflicts: 0 });
++    expect(summary(resolved)).toEqual({ changes: 0, conflicts: 0, remembered: 0 });
+   }
+   expectOneUndoStep(magic, oneSided);
+   expectOneUndoStep(same, sameIgnored);
+@@ -330,7 +330,7 @@ test("deleting a whole open or half-applied conflict in the middle pane ignores
+     const deleted = mirrored(start, start.center.update({ changes: { from, to } }).state);
+ 
+     expect(status(deleted, CONFLICT)).toBe("ignored ignored");
+-    expect(summary(deleted)).toEqual({ changes: 8, conflicts: 0 });
++    expect(summary(deleted)).toEqual({ changes: 8, conflicts: 0, remembered: 0 });
+     expect(arrows(deleted, "remote").get(141)).toBeUndefined();
+     expect(decoratedLines(deleted.right)).toEqual(
+       outside(decoratedLines(start.right), CONFLICT_RIGHT_LINES),
+diff --git a/frontend/src/editor/internal/status.test.ts b/frontend/src/editor/internal/status.test.ts
+new file mode 100644
+index 0000000..9703de7
+--- /dev/null
++++ b/frontend/src/editor/internal/status.test.ts
+@@ -0,0 +1,103 @@
++import { Transaction } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { DEFAULT_KEYS, loadFixture, type Chunk } from "../../ipc";
++import { actionSteps, dispatchSteps, type ApplyTarget } from "./apply";
++import { chunkField } from "./chunkField";
++import { centerKind, paneState } from "./pane";
++import { paneDocs } from "./paneDocs";
++import type { Side } from "./side";
++import { summarize, type MergeSummary } from "./status";
++
++const REMEMBERED = 0;
++const PLAIN = 1;
++
++function conflict(id: number, line: number, waiting: Chunk["waiting"]): unknown {
++  const range = { start: line, len: 1 };
++  return {
++    chunk: { id, kind: "Conflict", base: range, local: range, remote: range },
++    middle: range,
++    words: {
++      chunk: id,
++      local: { changed: [], removals: [] },
++      remote: { changed: [], removals: [] },
++    },
++    waiting,
++  };
++}
++
++async function opened(): Promise<ApplyTarget> {
++  const record = {
++    path: "remembered.ts",
++    deleted: null,
++    middle: { kind: "Disk", text: "a\nrerere\nb\nL2\nc\n" },
++    local: "a\nL1\nb\nL2\nc\n",
++    remote: "a\nR1\nb\nR2\nc\n",
++    eol: "Lf",
++    disk_version: 0,
++    chunks: [
++      conflict(REMEMBERED, 1, { kind: "Remembered" }),
++      conflict(PLAIN, 3, { kind: "AsShown" }),
++    ],
++  };
++  const data = await loadFixture("remembered.ts", { "remembered.json": record });
++  const field = chunkField(data.chunks);
++  const docs = paneDocs(data);
++  const state = paneState({
++    kind: centerKind(false),
++    doc: docs.center,
++    eol: data.eol,
++    language: null,
++    settings: { preferences: { theme: "dark", keys: DEFAULT_KEYS }, platform: "Linux x86_64" },
++    extensions: [field],
++  });
++  return { state, field, sides: { local: docs.left, remote: docs.right } };
++}
++
++function decided(
++  merge: ApplyTarget,
++  kind: "apply" | "ignore",
++  side: Side,
++  id: number,
++): ApplyTarget {
++  const chunk = merge.state.field(merge.field)[id]?.chunk;
++  if (chunk === undefined) {
++    throw new Error(`no chunk ${id}`);
++  }
++  let { state } = merge;
++  dispatchSteps(
++    (spec) => {
++      state = state.update(spec, { annotations: Transaction.time.of(0) }).state;
++    },
++    actionSteps(merge, { kind, side, chunks: [chunk] }, "side"),
++  );
++  return { ...merge, state };
++}
++
++function summaryOf(merge: ApplyTarget): MergeSummary {
++  return summarize(merge.state.field(merge.field));
++}
++
++test("a conflict git rerere filled in counts as remembered, apart from a plain conflict (catches it counted as a conflict)", async () => {
++  expect(summaryOf(await opened())).toEqual({ changes: 0, conflicts: 1, remembered: 1 });
++});
++
++test("a side decided on a remembered conflict moves it out of remembered: half-decided it is a conflict, then resolved (catches it staying remembered)", async () => {
++  const applied = decided(await opened(), "apply", "local", REMEMBERED);
++  expect(summaryOf(applied)).toEqual({ changes: 0, conflicts: 2, remembered: 0 });
++
++  const ignored = decided(await opened(), "ignore", "remote", REMEMBERED);
++  expect(summaryOf(ignored)).toEqual({ changes: 0, conflicts: 2, remembered: 0 });
++
++  const settled = decided(applied, "ignore", "remote", REMEMBERED);
++  expect(summaryOf(settled)).toEqual({ changes: 0, conflicts: 1, remembered: 0 });
++});
++
++test("deciding the plain conflict leaves the remembered one counted as remembered", async () => {
++  const taken = decided(await opened(), "apply", "remote", PLAIN);
++  expect(summaryOf(decided(taken, "ignore", "local", PLAIN))).toEqual({
++    changes: 0,
++    conflicts: 0,
++    remembered: 1,
++  });
++});
+diff --git a/frontend/src/editor/internal/status.ts b/frontend/src/editor/internal/status.ts
+index be5f8c0..c9c1aa7 100644
+--- a/frontend/src/editor/internal/status.ts
++++ b/frontend/src/editor/internal/status.ts
+@@ -7,7 +7,11 @@ export type ChunkStatus = Readonly<Record<Side, SideStatus>>;
+ 
+ export type ChunkState = { readonly chunk: Chunk; readonly status: ChunkStatus };
+ 
+-export type MergeSummary = { readonly changes: number; readonly conflicts: number };
++export type MergeSummary = {
++  readonly changes: number;
++  readonly conflicts: number;
++  readonly remembered: number;
++};
+ 
+ export type ApplyMode = "replace" | "append";
+ 
+@@ -62,8 +66,17 @@ export function statusAfterIgnore(chunk: Chunk, status: ChunkStatus, side: Side)
+   return markConflictSideOrChange({ chunk, status, side, value: "ignored" });
+ }
+ 
++function isRememberedWaiting({ chunk, status }: ChunkState): boolean {
++  return (
++    chunk.kind === "Conflict" &&
++    chunk.waiting.kind === "Remembered" &&
++    SIDES.every((side) => status[side] === "pending")
++  );
++}
++
+ export function summarize(states: readonly ChunkState[]): MergeSummary {
+   const open = states.filter(({ chunk, status }) => !isResolved(chunk, status));
+-  const conflicts = open.filter(({ chunk }) => chunk.kind === "Conflict").length;
+-  return { changes: open.length - conflicts, conflicts };
++  const remembered = open.filter(isRememberedWaiting).length;
++  const conflicts = open.filter(({ chunk }) => chunk.kind === "Conflict").length - remembered;
++  return { changes: open.length - conflicts - remembered, conflicts, remembered };
+ }
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index c29f294..cf4f750 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -1,6 +1,5 @@
+ <script setup lang="ts">
+ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+-import Check from "~icons/lucide/check";
+ import ListIcon from "~icons/lucide/list";
+ import ListTree from "~icons/lucide/list-tree";
+ 
+@@ -8,6 +7,7 @@ import type { FileEntry } from "../ipc";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
+ import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
++import FileMark from "./FileMark.vue";
+ import { revealed, treeRows } from "./fileTree";
+ import FileTree from "./FileTree.vue";
+ import ResizeDots from "./ResizeDots.vue";
+@@ -111,13 +111,7 @@ function toggleFolder(path: string): void {
+         <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
+           {{ file.path }}
+         </span>
+-        <span
+-          v-if="file.status === 'Resolved'"
+-          class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+-        >
+-          <Check class="size-3.5" aria-hidden="true" />
+-          resolved
+-        </span>
++        <FileMark :status="file.status" />
+       </li>
+     </ul>
+     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
+diff --git a/frontend/src/ui/FileMark.vue b/frontend/src/ui/FileMark.vue
+new file mode 100644
+index 0000000..ad179e9
+--- /dev/null
++++ b/frontend/src/ui/FileMark.vue
+@@ -0,0 +1,28 @@
++<script setup lang="ts">
++import Check from "~icons/lucide/check";
++import History from "~icons/lucide/history";
++
++import type { FileEntry } from "../ipc";
++
++defineProps<{ status: FileEntry["status"] }>();
++
++const REMEMBERED_HINT =
++  "git rerere filled in a resolution you recorded before; review it, then Mark resolved";
++</script>
++
++<template>
++  <span v-if="status === 'Resolved'" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted">
++    <Check class="size-3.5" aria-hidden="true" />
++    resolved
++  </span>
++  <span
++    v-else-if="status === 'Remembered'"
++    role="img"
++    :title="REMEMBERED_HINT"
++    :aria-label="REMEMBERED_HINT"
++    class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
++  >
++    <History class="size-3.5" aria-hidden="true" />
++    remembered
++  </span>
++</template>
+diff --git a/frontend/src/ui/FileTree.vue b/frontend/src/ui/FileTree.vue
+index e39d401..1c00afa 100644
+--- a/frontend/src/ui/FileTree.vue
++++ b/frontend/src/ui/FileTree.vue
+@@ -1,10 +1,10 @@
+ <script setup lang="ts">
+ import type { Component } from "vue";
+-import Check from "~icons/lucide/check";
+ import ChevronDown from "~icons/lucide/chevron-down";
+ import ChevronRight from "~icons/lucide/chevron-right";
+ 
+ import { fileIcon } from "./fileIcon";
++import FileMark from "./FileMark.vue";
+ import type { TreeRow } from "./fileTree";
+ import { folderIcon } from "./folderIcon";
+ 
+@@ -85,13 +85,7 @@ function pressed(row: TreeRow): void {
+       >
+         {{ row.label }}
+       </span>
+-      <span
+-        v-if="row.kind === 'file' && row.file.status === 'Resolved'"
+-        class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+-      >
+-        <Check class="size-3.5" aria-hidden="true" />
+-        resolved
+-      </span>
++      <FileMark v-if="row.kind === 'file'" :status="row.file.status" />
+     </li>
+   </ul>
+ </template>
+diff --git a/frontend/src/ui/deletedSide.test.ts b/frontend/src/ui/deletedSide.test.ts
+index c83dcbc..8dec151 100644
+--- a/frontend/src/ui/deletedSide.test.ts
++++ b/frontend/src/ui/deletedSide.test.ts
+@@ -68,13 +68,13 @@ test.each<FileMergeData["middle"]["kind"]>(["Disk", "DiskNotText"])(
+ 
+ test("the kept text is applied while the middle must show it and still has changes", () => {
+   const kept = deletedSideView("remote", LOCAL, "Stages");
+-  expect(keptToApply(kept, { changes: 2, conflicts: 0 })).toBe("local");
+-  expect(keptToApply(kept, { changes: 0, conflicts: 0 })).toBeNull();
++  expect(keptToApply(kept, { changes: 2, conflicts: 0, remembered: 0 })).toBe("local");
++  expect(keptToApply(kept, { changes: 0, conflicts: 0, remembered: 0 })).toBeNull();
+   expect(keptToApply(kept, null)).toBeNull();
+ });
+ 
+ test("nothing is applied before a take, after a Delete, or after the disk resolved the file", () => {
+-  const changes = { changes: 2, conflicts: 0 };
++  const changes = { changes: 2, conflicts: 0, remembered: 0 };
+   expect(keptToApply(deletedSideView("remote", null, "Stages"), changes)).toBeNull();
+   expect(keptToApply(deletedSideView("remote", REMOTE, "Stages"), changes)).toBeNull();
+   expect(keptToApply(deletedSideView("remote", null, "Disk"), changes)).toBeNull();
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index cd68afe..1607b95 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -6,14 +6,28 @@ import { endsWithStop, exitMustAsk, finishMustAsk, questionText } from "./questi
+ 
+ const LINUX = "Linux x86_64";
+ 
+-function unprocessed(conflicts: number, changes: number): string {
+-  return questionText({ kind: "unprocessed", summary: { conflicts, changes } }, LINUX).message;
++function unprocessed(conflicts: number, changes: number, remembered = 0): string {
++  return questionText({ kind: "unprocessed", summary: { conflicts, changes, remembered } }, LINUX)
++    .message;
+ }
+ 
+ test("Mark resolved asks exactly when the summary counts a conflict or a change", () => {
+-  expect(finishMustAsk({ conflicts: 0, changes: 0 })).toBe(false);
+-  expect(finishMustAsk({ conflicts: 1, changes: 0 })).toBe(true);
+-  expect(finishMustAsk({ conflicts: 0, changes: 1 })).toBe(true);
++  expect(finishMustAsk({ conflicts: 0, changes: 0, remembered: 0 })).toBe(false);
++  expect(finishMustAsk({ conflicts: 1, changes: 0, remembered: 0 })).toBe(true);
++  expect(finishMustAsk({ conflicts: 0, changes: 1, remembered: 0 })).toBe(true);
++});
++
++test("Mark resolved never asks for conflicts git rerere filled in, but still asks for the others (catches a remembered conflict blocking with Unprocessed Changes)", () => {
++  expect(finishMustAsk({ conflicts: 0, changes: 0, remembered: 2 })).toBe(false);
++  expect(finishMustAsk({ conflicts: 1, changes: 0, remembered: 2 })).toBe(true);
++  expect(finishMustAsk({ conflicts: 0, changes: 1, remembered: 2 })).toBe(true);
++});
++
++test("the unprocessed sentence never mentions remembered conflicts", () => {
++  const message = unprocessed(1, 0, 3);
++  expect(message).toContain("1 unresolved conflict still remains.");
++  expect(message).not.toContain("3");
++  expect(message).not.toContain("remembered");
+ });
+ 
+ test("quitting asks exactly when some file has unsaved work", () => {
+@@ -38,7 +52,10 @@ test("the unprocessed sentence names only the non-zero counts with singular and
+ 
+ test("the unprocessed question carries WebStorm's title and buttons", () => {
+   expect(
+-    questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }, LINUX),
++    questionText(
++      { kind: "unprocessed", summary: { conflicts: 1, changes: 0, remembered: 0 } },
++      LINUX,
++    ),
+   ).toMatchObject({
+     title: "Unprocessed Changes",
+     list: { kind: "none" },
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index 53d928b..3445187 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -55,8 +55,8 @@ function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[])
+   };
+ }
+ 
+-export function finishMustAsk(summary: MergeSummary): boolean {
+-  return summary.conflicts > 0 || summary.changes > 0;
++export function finishMustAsk({ conflicts, changes }: MergeSummary): boolean {
++  return conflicts > 0 || changes > 0;
+ }
+ 
+ export function exitMustAsk(unsaved: readonly string[]): boolean {
+diff --git a/frontend/src/ui/summaryLabel.test.ts b/frontend/src/ui/summaryLabel.test.ts
+index 5160562..ffabcd1 100644
+--- a/frontend/src/ui/summaryLabel.test.ts
++++ b/frontend/src/ui/summaryLabel.test.ts
+@@ -3,9 +3,17 @@ import { expect, test } from "vitest";
+ import { summaryLabel } from "./summaryLabel";
+ 
+ test("summaryLabel counts open changes and conflicts, singular and plural", () => {
+-  expect(summaryLabel({ changes: 0, conflicts: 0 })).toBe("All changes processed");
+-  expect(summaryLabel({ changes: 1, conflicts: 0 })).toBe("1 change");
+-  expect(summaryLabel({ changes: 0, conflicts: 1 })).toBe("1 conflict");
+-  expect(summaryLabel({ changes: 3, conflicts: 1 })).toBe("3 changes · 1 conflict");
+-  expect(summaryLabel({ changes: 2, conflicts: 2 })).toBe("2 changes · 2 conflicts");
++  expect(summaryLabel({ changes: 0, conflicts: 0, remembered: 0 })).toBe("All changes processed");
++  expect(summaryLabel({ changes: 1, conflicts: 0, remembered: 0 })).toBe("1 change");
++  expect(summaryLabel({ changes: 0, conflicts: 1, remembered: 0 })).toBe("1 conflict");
++  expect(summaryLabel({ changes: 3, conflicts: 1, remembered: 0 })).toBe("3 changes · 1 conflict");
++  expect(summaryLabel({ changes: 2, conflicts: 2, remembered: 0 })).toBe("2 changes · 2 conflicts");
++});
++
++test("remembered conflicts are counted apart, last, and the word has no plural (catches them shown as conflicts or hidden)", () => {
++  expect(summaryLabel({ changes: 0, conflicts: 0, remembered: 1 })).toBe("1 remembered");
++  expect(summaryLabel({ changes: 0, conflicts: 0, remembered: 2 })).toBe("2 remembered");
++  expect(summaryLabel({ changes: 1, conflicts: 2, remembered: 1 })).toBe(
++    "1 change · 2 conflicts · 1 remembered",
++  );
+ });
+diff --git a/frontend/src/ui/summaryLabel.ts b/frontend/src/ui/summaryLabel.ts
+index 3acddd9..8a0cbad 100644
+--- a/frontend/src/ui/summaryLabel.ts
++++ b/frontend/src/ui/summaryLabel.ts
+@@ -1,15 +1,17 @@
+ import type { MergeSummary } from "./useMergeController";
+ 
+-function counted(count: number, noun: string): string | null {
++function counted(count: number, noun: string, plural: string): string | null {
+   if (count === 0) {
+     return null;
+   }
+-  return count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
++  return `${count} ${count === 1 ? noun : plural}`;
+ }
+ 
+ export function summaryLabel(summary: MergeSummary): string {
+-  const parts = [counted(summary.changes, "change"), counted(summary.conflicts, "conflict")].filter(
+-    (part) => part !== null,
+-  );
++  const parts = [
++    counted(summary.changes, "change", "changes"),
++    counted(summary.conflicts, "conflict", "conflicts"),
++    counted(summary.remembered, "remembered", "remembered"),
++  ].filter((part) => part !== null);
+   return parts.length === 0 ? "All changes processed" : parts.join(" · ");
+ }
+-- 
+2.56.0
+

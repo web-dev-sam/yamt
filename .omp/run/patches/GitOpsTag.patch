@@ -1,0 +1,200 @@
+From 5a504c09925768da5263a98db05ac1c0b30d99c0 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 17:44:59 +0200
+Subject: [PATCH] feat(ui): the operation as a gray tag at the bottom of the
+ file list
+
+REBASE, MERGE, CHERRY-PICK, ... in muted small caps text; the hover
+keeps the full line and the commit message, the accessible name the
+line. The right column's top row is gone.
+
+Refs plan #92, #1449
+---
+ frontend/src/ui/AGENTS.md                          |  2 +-
+ frontend/src/ui/App.vue                            | 10 +++++++---
+ frontend/src/ui/FileList.vue                       | 10 ++++++++--
+ .../ui/{OperationBar.vue => OperationLabel.vue}    |  7 ++++---
+ frontend/src/ui/operationText.test.ts              | 14 +++++++++++++-
+ frontend/src/ui/operationText.ts                   | 13 +++++++++++++
+ 6 files changed, 46 insertions(+), 10 deletions(-)
+ rename frontend/src/ui/{OperationBar.vue => OperationLabel.vue} (59%)
+
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 880baa4..76f64e6 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -10,7 +10,7 @@ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize h
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+-Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` — the writes, Abort, Continue, an open and every reload — goes once to `nextStop({ outside })` through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), the one path. `operationText.ts` holds every operation word (the top line and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
++Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` — the writes, Abort, Continue, an open and every reload — goes once to `nextStop({ outside })` through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), the one path. `operationText.ts` holds every operation word (the tag `operationTag`, the line `operationLine` and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationLabel.vue` is the tag (plan §2 #92): `FileList.vue`'s last row under the list or tree while git records an operation, `App.vue` passing the store's `operation`; its hover is the line's tooltip, its accessible name the line.
+ 
+ File marks (plan §2 #90): `FileMark.vue` renders a file's name and its mark in the list and the tree from one table per `FileStatus` (`Unresolved` none; `Resolved` the check and a muted name; `Remembered` the history icon with the rerere hint as its title and accessible name); `FileList.vue` and `FileTree.vue` pass only the status and the label.
+ 
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 883b1d8..cd2bdcc 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -7,7 +7,6 @@ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+-import OperationBar from "./OperationBar.vue";
+ import { allResolvedText } from "./operationText";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+@@ -67,9 +66,14 @@ onMounted(() => {
+ 
+ <template>
+   <div class="flex h-full gap-island p-island">
+-    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
++    <FileList
++      v-show="fileListShown"
++      :files="files"
++      :active="active"
++      :operation="operation"
++      @select="pick"
++    />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+-      <OperationBar v-if="operation !== null" :operation="operation" />
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar
+         v-if="emptyStop.barProblem !== null"
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index e65e761..99400c1 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -3,17 +3,22 @@ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ import ListIcon from "~icons/lucide/list";
+ import ListTree from "~icons/lucide/list-tree";
+ 
+-import type { FileEntry } from "../ipc";
++import type { FileEntry, OperationView } from "../ipc";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
+ import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
+ import FileMark from "./FileMark.vue";
+ import { revealed, treeRows } from "./fileTree";
+ import FileTree from "./FileTree.vue";
++import OperationLabel from "./OperationLabel.vue";
+ import ResizeDots from "./ResizeDots.vue";
+ import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
+ 
+-const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
++const props = defineProps<{
++  files: readonly FileEntry[];
++  active: string | null;
++  operation: OperationView | null;
++}>();
+ const emit = defineEmits<{ select: [path: string] }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+@@ -111,6 +116,7 @@ function toggleFolder(path: string): void {
+         <FileMark :status="file.status" :label="file.path" />
+       </li>
+     </ul>
++    <OperationLabel v-if="operation !== null" :operation="operation" />
+     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
+     <div
+       role="separator"
+diff --git a/frontend/src/ui/OperationBar.vue b/frontend/src/ui/OperationLabel.vue
+similarity index 59%
+rename from frontend/src/ui/OperationBar.vue
+rename to frontend/src/ui/OperationLabel.vue
+index 35c3f5a..dcc5993 100644
+--- a/frontend/src/ui/OperationBar.vue
++++ b/frontend/src/ui/OperationLabel.vue
+@@ -2,7 +2,7 @@
+ import { computed } from "vue";
+ 
+ import type { OperationView } from "../ipc";
+-import { operationLine } from "./operationText";
++import { operationLine, operationTag } from "./operationText";
+ 
+ const props = defineProps<{ operation: OperationView }>();
+ 
+@@ -13,8 +13,9 @@ const line = computed(() => operationLine(props.operation));
+   <p
+     role="status"
+     :title="line.tooltip"
+-    class="h-8 shrink-0 truncate rounded-md border border-info-border bg-info px-3 leading-7.5 text-fg"
++    :aria-label="line.text"
++    class="shrink-0 truncate px-3 pt-1.5 pb-1 text-xs font-semibold text-fg-muted"
+   >
+-    {{ line.text }}
++    {{ operationTag(operation.kind) }}
+   </p>
+ </template>
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+index 41e582a..25be596 100644
+--- a/frontend/src/ui/operationText.test.ts
++++ b/frontend/src/ui/operationText.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import type { OperationView, SideName } from "../ipc";
++import type { OperationKind, OperationView, SideName } from "../ipc";
+ import {
+   abortLabel,
+   abortMessage,
+@@ -8,6 +8,7 @@ import {
+   allResolvedText,
+   continueLabel,
+   operationLine,
++  operationTag,
+ } from "./operationText";
+ 
+ const MAIN: SideName = { kind: "Branch", name: "main" };
+@@ -34,6 +35,17 @@ const REBASE: OperationView = {
+   editor_steps_ahead: false,
+ };
+ 
++test.each<[OperationKind, string]>([
++  ["Merge", "MERGE"],
++  ["SquashMerge", "SQUASH MERGE"],
++  ["Rebase", "REBASE"],
++  ["CherryPick", "CHERRY-PICK"],
++  ["Revert", "REVERT"],
++  ["Am", "AM"],
++])("the tag of %s reads %s, as plan #92 words it", (kind, tag) => {
++  expect(operationTag(kind)).toBe(tag);
++});
++
+ test.each<[string, OperationView, string]>([
+   [
+     "a merge",
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+index 2f30049..eafb6f7 100644
+--- a/frontend/src/ui/operationText.ts
++++ b/frontend/src/ui/operationText.ts
+@@ -28,6 +28,15 @@ const TITLES: Readonly<Record<OperationKind, string>> = {
+   Am: "Patch Application",
+ };
+ 
++const TAGS: Readonly<Record<OperationKind, string>> = {
++  Merge: "MERGE",
++  SquashMerge: "SQUASH MERGE",
++  Rebase: "REBASE",
++  CherryPick: "CHERRY-PICK",
++  Revert: "REVERT",
++  Am: "AM",
++};
++
+ type StepKind = Exclude<OperationKind, "Merge" | "SquashMerge">;
+ 
+ const DONE_STEPS: Readonly<Record<StepKind, readonly [string, string]>> = {
+@@ -51,6 +60,10 @@ export function operationName(kind: OperationKind): string {
+   return NAMES[kind];
+ }
+ 
++export function operationTag(kind: OperationKind): string {
++  return TAGS[kind];
++}
++
+ function named(name: SideName | null): string | null {
+   if (name === null) {
+     return null;
+-- 
+2.56.0
+

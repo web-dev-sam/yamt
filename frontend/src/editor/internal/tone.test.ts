@@ -36,6 +36,7 @@ async function chunkWith(
             ? {
                 kind: "Markers",
                 open: "<<<<<<< ours",
+                first: "local",
                 between: ["======="],
                 close: ">>>>>>> theirs",
               }

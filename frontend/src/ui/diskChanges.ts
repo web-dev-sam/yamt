@@ -2,8 +2,9 @@ import type { ShallowRef } from "vue";
 
 import { log, type DiskChange } from "../ipc";
 import type { CloseGuard } from "./closeGuard";
-import type { Notice } from "./noticeText";
-import { clearProblemAbout, type Problem } from "./problem";
+import type { Stop } from "./currentStop";
+import type { DiskNotice, Notice } from "./noticeText";
+import type { EndsStop } from "./problem";
 import type { Taken } from "./sides";
 import { isShown, reload, takesASide, type Shown } from "./views";
 
@@ -13,7 +14,7 @@ export type DiskChangeTarget = Shown & {
   readonly guard: Pick<CloseGuard, "unsavedFiles">;
 };
 
-function logNotice({ path, result, editsDropped, when }: Notice): void {
+function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
   const { kind, ...details } = result;
   const fields = { path, result: kind, ...details, editsDropped, when };
   if (kind === "StageFailed") {
@@ -23,14 +24,15 @@ function logNotice({ path, result, editsDropped, when }: Notice): void {
   }
 }
 
-export async function applyDiskChanges(
+function noteDiskChanges(
   target: DiskChangeTarget,
   changes: readonly DiskChange[],
-  when: Notice["when"],
-): Promise<void> {
+  when: DiskNotice["when"],
+): readonly string[] {
   const unsaved = target.guard.unsavedFiles();
   const byPath = new Map(changes.map((change) => [change.path, change.result]));
-  const notices = [...byPath].map(([path, result]): Notice => ({
+  const notices = [...byPath].map(([path, result]): DiskNotice => ({
+    kind: "disk",
     path,
     result,
     editsDropped: unsaved.includes(path),
@@ -38,7 +40,7 @@ export async function applyDiskChanges(
   }));
   notices.forEach(logNotice);
   target.notices.value = [
-    ...target.notices.value.filter((notice) => !byPath.has(notice.path)),
+    ...target.notices.value.filter((notice) => notice.kind !== "disk" || !byPath.has(notice.path)),
     ...notices,
   ];
   const taken = new Map(target.taken.value);
@@ -49,15 +51,15 @@ export async function applyDiskChanges(
     }
   }
   target.taken.value = taken;
-  const shown = [...byPath.keys()].filter((path) => isShown(target, path));
-  await Promise.all(shown.map((path) => reload(target, path)));
+  return [...byPath.keys()].filter((path) => isShown(target, path));
 }
 
-export async function changedOnDisk(
-  target: DiskChangeTarget & { readonly problem: ShallowRef<Problem | null> },
-  path: string,
-  change: DiskChange,
+export async function applyDiskChanges(
+  target: DiskChangeTarget & EndsStop,
+  changes: readonly DiskChange[],
+  when: DiskNotice["when"],
+  stop: Readonly<Stop>,
 ): Promise<void> {
-  clearProblemAbout(target, path);
-  await applyDiskChanges(target, [change], "running");
+  const shown = noteDiskChanges(target, changes, when);
+  await Promise.all(shown.map((path) => reload(target, path, stop)));
 }

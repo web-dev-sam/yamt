@@ -1,0 +1,111 @@
+From b1e84d9f197197dbfe5eebbaf0eb980e60c1281a Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 13:40:46 +0200
+Subject: [PATCH] test(app): close-wait test drives the real ending function
+ (#1385)
+
+---
+ src-tauri/src/merge/tests.rs | 6 ++----
+ src-tauri/src/mock_window.rs | 9 ++-------
+ src-tauri/src/outcome.rs     | 7 ++++++-
+ src-tauri/src/window.rs      | 8 +++-----
+ 4 files changed, 13 insertions(+), 17 deletions(-)
+
+diff --git a/src-tauri/src/merge/tests.rs b/src-tauri/src/merge/tests.rs
+index e617d46..55f6588 100644
+--- a/src-tauri/src/merge/tests.rs
++++ b/src-tauri/src/merge/tests.rs
+@@ -9,10 +9,8 @@ use yamt_conflict_repo::{
+ };
+ 
+ use super::*;
+-use crate::mock_window::{
+-    CRLF_PATH, Window, ending_when_git_is_done, invoke_on, open_window, open_window_in,
+-};
+-use crate::outcome::{Ending, Exit};
++use crate::mock_window::{CRLF_PATH, Window, invoke_on, open_window, open_window_in};
++use crate::outcome::{Ending, Exit, ending_when_git_is_done};
+ 
+ const ADDED: &str = "added.ts";
+ const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
+diff --git a/src-tauri/src/mock_window.rs b/src-tauri/src/mock_window.rs
+index ded29d1..c87e361 100644
+--- a/src-tauri/src/mock_window.rs
++++ b/src-tauri/src/mock_window.rs
+@@ -9,8 +9,8 @@ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
+ use yamt_session::MergeSession;
+ 
+ use crate::commands::with_session;
+-use crate::merge::{MergeState, lock_when_git_is_done};
+-use crate::outcome::{Ending, ending_on_close};
++use crate::merge::MergeState;
++use crate::outcome::{Ending, ending_when_git_is_done};
+ 
+ pub(crate) const CRLF_PATH: &str = "crlf.ts";
+ 
+@@ -20,11 +20,6 @@ pub(crate) struct Window {
+     pub(crate) webview: WebviewWindow<MockRuntime>,
+ }
+ 
+-/// The ending `window.rs` computes when the window closes: once no worker runs git.
+-pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
+-    ending_on_close(&mut lock_when_git_is_done(state))
+-}
+-
+ pub(crate) fn file<'a>(
+     path: &'a str,
+     base: Option<&'a [u8]>,
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index 5d78bdf..e739ada 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -3,7 +3,7 @@ use std::process::ExitCode;
+ 
+ use yamt_session::{MergeSession, OperationKind};
+ 
+-use crate::merge::Merge;
++use crate::merge::{Merge, MergeState, lock_when_git_is_done};
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub(crate) enum Exit {
+@@ -50,6 +50,11 @@ pub(crate) fn startup(repo: &Path) -> Startup {
+     }
+ }
+ 
++/// The ending when the window closes: once no worker runs git.
++pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
++    ending_on_close(&mut lock_when_git_is_done(state))
++}
++
+ /// The ending of a merge no worker runs git for; see `merge::lock_when_git_is_done`.
+ pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
+     match merge {
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 56029ab..ef527f5 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -12,8 +12,8 @@ use yamt_session::MergeSession;
+ use yamt_settings::{StoredSettings, Theme};
+ 
+ use crate::commands::with_session;
+-use crate::merge::{MergeState, lock_when_git_is_done};
+-use crate::outcome::{Ending, ending_on_close};
++use crate::merge::MergeState;
++use crate::outcome::{Ending, ending_when_git_is_done};
+ use crate::servers::{self, HostState};
+ use crate::settings;
+ 
+@@ -56,9 +56,7 @@ fn open_and_wait(title: &str, session: Box<MergeSession>) -> tauri::Result<Endin
+     let mut close_watch = CloseWatch::new();
+     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
+     servers::lock(&handle.state::<HostState>()).stop_all();
+-    Ok(ending_on_close(&mut lock_when_git_is_done(
+-        &handle.state::<MergeState>(),
+-    )))
++    Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
+ }
+ 
+ fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {
+-- 
+2.56.0
+

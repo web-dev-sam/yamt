@@ -1,5 +1,5 @@
-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: the shared prelude
-# for building a scripted repository in "$dir" without any user or system git config (risk RK19).
+# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh and operations-repo.sh:
+# the shared prelude for building a scripted repository in "$dir" without any user or system git config (risk RK19).
 # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
 
 sandbox_name=$(basename "$0" .sh)
@@ -39,6 +39,13 @@ repo_git() {
     git -C "$dir" -c user.name=yamt -c user.email=yamt@example.invalid \
         -c commit.gpgsign=false -c core.autocrlf=false \
         -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
+}
+
+# $1: path in the repo, $2: printf format giving the content (\r, \0 allowed). Stages the file.
+write() {
+    mkdir -p "$(dirname "$dir/$1")"
+    printf "$2" >"$dir/$1"
+    repo_git add -- "$1"
 }
 
 # $1: how many files the merge in "$dir" must leave conflicted. Prints their paths; dies on any other count.

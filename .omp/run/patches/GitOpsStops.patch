@@ -1,0 +1,3110 @@
+From f096e5898a8f1116ea8e351d69726b83045bb438 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 13:05:14 +0200
+Subject: [PATCH] feat(ui): follow the stop; operation at the top; abort per
+ operation
+
+The window lists through list_stop; operation and names come with
+each list; a moved-on stop clears every per-stop state and opens the
+next one with a notice for dropped edits. Abort names its operation.
+
+Refs plan #87 #88 #89
+---
+ frontend/src/ipc/fixture.test.ts           |  44 ++--
+ frontend/src/ipc/fixture.ts                |   2 +-
+ frontend/src/ipc/fixtureOperations.test.ts |   2 +-
+ frontend/src/main.ts                       |   8 +-
+ frontend/src/ui/App.vue                    |   3 +
+ frontend/src/ui/MergeToolbar.vue           |  22 +-
+ frontend/src/ui/NoticeBar.vue              |  16 +-
+ frontend/src/ui/OperationBar.vue           |  20 ++
+ frontend/src/ui/ToolbarMenu.vue            |  13 +-
+ frontend/src/ui/aborting.test.ts           | 132 ++++++++++
+ frontend/src/ui/aborting.ts                |  36 +--
+ frontend/src/ui/diskChanges.ts             |  11 +-
+ frontend/src/ui/listing.test.ts            | 148 +++++++++++
+ frontend/src/ui/listing.ts                 |  49 ++--
+ frontend/src/ui/noticeText.test.ts         |  44 +++-
+ frontend/src/ui/noticeText.ts              |  56 ++++-
+ frontend/src/ui/operationText.test.ts      | 176 +++++++++++++
+ frontend/src/ui/operationText.ts           | 177 +++++++++++++
+ frontend/src/ui/problem.ts                 |  30 ++-
+ frontend/src/ui/problemText.test.ts        |  23 +-
+ frontend/src/ui/problemText.ts             |  17 +-
+ frontend/src/ui/question.test.ts           |  32 +++
+ frontend/src/ui/question.ts                |  29 ++-
+ frontend/src/ui/saving.test.ts             |  62 ++++-
+ frontend/src/ui/saving.ts                  |  58 ++++-
+ frontend/src/ui/stops.test.ts              | 205 +++++++++++++++
+ frontend/src/ui/stops.ts                   |  58 +++++
+ frontend/src/ui/store.test.ts              | 277 ++++++---------------
+ frontend/src/ui/store.ts                   |  59 +++--
+ frontend/src/ui/toolbarButtons.test.ts     |  44 +++-
+ frontend/src/ui/toolbarButtons.ts          |  28 ++-
+ 31 files changed, 1485 insertions(+), 396 deletions(-)
+ create mode 100644 frontend/src/ui/OperationBar.vue
+ create mode 100644 frontend/src/ui/aborting.test.ts
+ create mode 100644 frontend/src/ui/listing.test.ts
+ create mode 100644 frontend/src/ui/operationText.test.ts
+ create mode 100644 frontend/src/ui/operationText.ts
+ create mode 100644 frontend/src/ui/stops.test.ts
+ create mode 100644 frontend/src/ui/stops.ts
+
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index ab8b474..61b08f0 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -1,8 +1,8 @@
+ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { DiskVersion, FileList, Side, SourceResult } from "./domain";
+ import { createFixtureSource, loadFixture } from "./fixture";
++import type { DiskVersion, FileList, Side, SourceResult } from "./index";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
+@@ -12,6 +12,8 @@ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
+ 
+ const PATH_AND_CHUNKS = v.object({ path: v.string(), chunks: v.array(v.unknown()) });
+ 
++const NO_QUERY = "";
++
+ function quietLog(): { log: Log; entries: LogEntry[] } {
+   vi.spyOn(console, "info").mockImplementation(() => undefined);
+   const entries: LogEntry[] = [];
+@@ -29,7 +31,7 @@ function valueOf<T>(result: SourceResult<T>): T {
+ }
+ 
+ async function listed(log: Log, files?: Readonly<Record<string, unknown>>): Promise<FileList> {
+-  return valueOf(await createFixtureSource(log, files).listFiles());
++  return valueOf(await createFixtureSource(log, NO_QUERY, files).listFiles());
+ }
+ 
+ async function versionOf(
+@@ -163,7 +165,7 @@ test("the committed fixtures list 11 files, sorted by path, all unresolved, with
+ });
+ 
+ test("each committed fixture loads with its JSON's chunk count, its stages middle and version 0", async () => {
+-  const source = createFixtureSource(quietLog().log);
++  const source = createFixtureSource(quietLog().log, NO_QUERY);
+   const committed = Object.values(COMMITTED);
+   expect(committed).toHaveLength(11);
+   for (const json of committed) {
+@@ -176,7 +178,7 @@ test("each committed fixture loads with its JSON's chunk count, its stages middl
+ });
+ 
+ test("each committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
+-  const source = createFixtureSource(quietLog().log);
++  const source = createFixtureSource(quietLog().log, NO_QUERY);
+   let conflicts = 0;
+   for (const { path } of valueOf(await source.listFiles()).files) {
+     for (const { kind, waiting } of valueOf(await source.loadFile(path)).chunks) {
+@@ -197,7 +199,7 @@ test("each committed fixture's conflicts wait as markers and its other changes a
+ });
+ 
+ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
+-  const source = createFixtureSource(quietLog().log);
++  const source = createFixtureSource(quietLog().log, NO_QUERY);
+ 
+   const data = valueOf(await source.loadFile("vueuse-use-magic-keys.ts"));
+ 
+@@ -245,7 +247,7 @@ test("in-memory records are listed sorted by path and keep every field", async (
+     "z.json": record("z.ts"),
+     "a.json": { ...record("a.ts"), eol: "CrLf" },
+   };
+-  const source = createFixtureSource(quietLog().log, files);
++  const source = createFixtureSource(quietLog().log, NO_QUERY, files);
+ 
+   expect((await listed(quietLog().log, files)).files.map((file) => file.path)).toEqual([
+     "a.ts",
+@@ -260,7 +262,9 @@ test("in-memory records are listed sorted by path and keep every field", async (
+ test.each([{ kind: "SideLines" }, { kind: "AsShown" }, WAITING])(
+   "a chunk waiting as %j arrives as it is",
+   async (waiting) => {
+-    const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts", { waiting }) });
++    const source = createFixtureSource(quietLog().log, NO_QUERY, {
++      "a.json": record("a.ts", { waiting }),
++    });
+ 
+     expect(valueOf(await source.loadFile("a.ts")).chunks[0]?.waiting).toEqual(waiting);
+   },
+@@ -271,7 +275,7 @@ test("a middle from the disk, or not text on disk, and its disk version arrive a
+     "d.json": { ...record("d.ts"), middle: { kind: "Disk", text: "d\n" }, disk_version: 3 },
+     "n.json": { ...record("n.ts"), middle: { kind: "DiskNotText", found: "Link" }, chunks: [] },
+   };
+-  const source = createFixtureSource(quietLog().log, files);
++  const source = createFixtureSource(quietLog().log, NO_QUERY, files);
+ 
+   expect(valueOf(await source.loadFile("d.ts"))).toMatchObject({
+     middle: { kind: "Disk", text: "d\n" },
+@@ -287,7 +291,7 @@ test("a middle from the disk, or not text on disk, and its disk version arrive a
+ test.each<Side>(["local", "remote"])(
+   "a record deleted on the %s side keeps that side",
+   async (deleted) => {
+-    const source = createFixtureSource(quietLog().log, {
++    const source = createFixtureSource(quietLog().log, NO_QUERY, {
+       "a.json": { ...record("a.ts"), deleted },
+     });
+ 
+@@ -403,10 +407,10 @@ test.each([
+   ],
+   ["a missing waiting", record("x.ts", { waiting: undefined }), "chunks.0.waiting"],
+ ])("a record with %s is rejected naming the file", (_case, json, detail) => {
+-  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
++  expect(() => createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": json })).toThrow(
+     /^fixture bad\.json: /,
+   );
+-  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(detail);
++  expect(() => createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": json })).toThrow(detail);
+ });
+ 
+ test.each([
+@@ -462,13 +466,13 @@ test.each([
+   ["a non-integer chunk id", { chunk: { id: 0.25 } }, "chunks[0].chunk.id", 0.25],
+ ])("a record with %s is rejected naming the file and field", (_case, overrides, field, value) => {
+   expect(() =>
+-    createFixtureSource(quietLog().log, { "bad.json": record("x.ts", overrides) }),
++    createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": record("x.ts", overrides) }),
+   ).toThrow(`fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`);
+ });
+ 
+ test.each([-1, 0.5, 2 ** 53])("a record with disk version %s is rejected", (version) => {
+   expect(() =>
+-    createFixtureSource(quietLog().log, {
++    createFixtureSource(quietLog().log, NO_QUERY, {
+       "bad.json": { ...record("x.ts"), disk_version: version },
+     }),
+   ).toThrow(`fixture bad.json: disk_version must be a non-negative safe integer, got ${version}`);
+@@ -577,7 +581,7 @@ test.each([
+     "chunks[0].words.local.removals[1].text must not be empty",
+   ],
+ ])("a record with %s is rejected naming its words", (_case, json, message) => {
+-  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
++  expect(() => createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": json })).toThrow(
+     `fixture bad.json: ${message}`,
+   );
+ });
+@@ -585,7 +589,7 @@ test.each([
+ test("an unknown path is an UnknownPath failure naming it, and changes nothing", async () => {
+   const { log, entries } = quietLog();
+   const files = { "a.json": record("a.ts") };
+-  const source = createFixtureSource(log, files);
++  const source = createFixtureSource(log, NO_QUERY, files);
+   const version = await versionOf("a.ts", files);
+   const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
+ 
+@@ -607,7 +611,7 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
+ test("finish marks the file resolved and logs its text once; reset returns it unresolved", async () => {
+   const { log, entries } = quietLog();
+   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+-  const source = createFixtureSource(log, files);
++  const source = createFixtureSource(log, NO_QUERY, files);
+   const version = await versionOf("a.ts", files);
+ 
+   const finished = await source.finishFile({
+@@ -649,7 +653,7 @@ test("finish marks the file resolved and logs its text once; reset returns it un
+ 
+ test("abortMerge answers done and logs the abort once; the fixtures stay listed as a merge", async () => {
+   const { log, entries } = quietLog();
+-  const source = createFixtureSource(log, { "a.json": record("a.ts") });
++  const source = createFixtureSource(log, NO_QUERY, { "a.json": record("a.ts") });
+ 
+   expect(await source.abortMerge()).toEqual({ ok: true, value: null });
+ 
+@@ -660,7 +664,7 @@ test("abortMerge answers done and logs the abort once; the fixtures stay listed
+ test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {
+   const { log, entries } = quietLog();
+   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+-  const source = createFixtureSource(log, files);
++  const source = createFixtureSource(log, NO_QUERY, files);
+   const version = await versionOf("a.ts", files);
+   const unresolved = [
+     { path: "a.ts", status: "Unresolved", unsupported: null },
+@@ -688,7 +692,7 @@ test("save writes the file, logs its text, length and lines, and leaves it unres
+ test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
+   const { log, entries } = quietLog();
+   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
+-  const source = createFixtureSource(log, files);
++  const source = createFixtureSource(log, NO_QUERY, files);
+   const version = await versionOf("b.ts", files);
+ 
+   expect(await source.takeSide("b.ts", "remote", version)).toEqual({
+@@ -722,7 +726,7 @@ test.each([
+   ["one\n\n", 2],
+ ])("describeFile counts %j as %i lines, like the app", async (local, lines) => {
+   const { log } = quietLog();
+-  const source = createFixtureSource(log, { "a.json": { ...record("a.ts"), local } });
++  const source = createFixtureSource(log, NO_QUERY, { "a.json": { ...record("a.ts"), local } });
+ 
+   expect(await source.describeFile("a.ts")).toEqual({
+     ok: true,
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index b3aeb3a..50eec42 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -234,8 +234,8 @@ function fixtureWrites(
+ 
+ export function createFixtureSource(
+   log: Log,
++  search: string,
+   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
+-  search: string = typeof location === "undefined" ? "" : location.search,
+ ): ChunkSource {
+   const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
+   const stops = createFixtureStops(log, search, {
+diff --git a/frontend/src/ipc/fixtureOperations.test.ts b/frontend/src/ipc/fixtureOperations.test.ts
+index b072f5d..245ab61 100644
+--- a/frontend/src/ipc/fixtureOperations.test.ts
++++ b/frontend/src/ipc/fixtureOperations.test.ts
+@@ -30,7 +30,7 @@ function quietLog(): { log: Log; entries: LogEntry[] } {
+ }
+ 
+ function sourceAt(search: string, log: Log = quietLog().log): ChunkSource {
+-  return createFixtureSource(log, { "a.json": FILE }, search);
++  return createFixtureSource(log, search, { "a.json": FILE });
+ }
+ 
+ function valueOf<T>(result: SourceResult<T>): T {
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index e34d6c1..c87a55c 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -15,21 +15,19 @@ import { createAppStore } from "./ui/store";
+ import "./style.css";
+ 
+ const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++const SEARCH = window.location.search;
+ 
+ function serverHost(): ServerHost | null {
+   if (IN_APP) {
+     return createTauriServerHost();
+   }
+-  return new URLSearchParams(window.location.search).has("servers")
+-    ? createFixtureServerHost()
+-    : null;
++  return new URLSearchParams(SEARCH).has("servers") ? createFixtureServerHost() : null;
+ }
+ 
+-const source = IN_APP ? createTauriSource() : createFixtureSource(log);
++const source = IN_APP ? createTauriSource() : createFixtureSource(log, SEARCH);
+ const host = serverHost();
+ const servers = new LanguageServers(host);
+ const startTheme = document.documentElement.dataset["theme"] === "light" ? "light" : "dark";
+ const store = createAppStore(source, startTheme, servers, host);
+ void store.startUp();
+-void store.loadSideNames();
+ createApp(App).mount("#app");
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 3c79add..76c5e0a 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -7,6 +7,7 @@ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+ import NoticeBar from "./NoticeBar.vue";
++import OperationBar from "./OperationBar.vue";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import ServerLogView from "./ServerLogView.vue";
+@@ -22,6 +23,7 @@ const {
+   fileListShown,
+   problem,
+   notices,
++  operation,
+   question,
+   allResolved,
+   pick,
+@@ -63,6 +65,7 @@ onMounted(() => {
+   <div class="flex h-full gap-island p-island">
+     <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
++      <OperationBar v-if="operation !== null" :operation="operation" />
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+       <p
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index 7f1378b..eb92d5a 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -20,7 +20,6 @@ import ToolbarMenu from "./ToolbarMenu.vue";
+ import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
+ 
+ type IconButton = {
+-  readonly label: string;
+   readonly icon: Component;
+   readonly keepsKeyboard: boolean;
+   readonly run: () => void;
+@@ -44,16 +43,15 @@ const emit = defineEmits<{
+ 
+ const SECONDARY_BUTTON = 2;
+ 
+-const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortMerge } = useAppStore();
++const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortOperation } = useAppStore();
+ 
+ const menuAt = shallowRef<Point | null>(null);
+ 
+ const noSummary = computed(() => props.summary === null);
+-const abortRunning = computed(() => abortState.value === "running");
++const abortRunning = computed(() => abortState.value.kind === "running");
+ 
+ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+   abortMerge: {
+-    label: "Abort merge",
+     icon: GitPullRequestClosed,
+     keepsKeyboard: true,
+     run: () => {
+@@ -63,7 +61,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: abortRunning,
+   },
+   previous: {
+-    label: "Previous change",
+     icon: ArrowUp,
+     keepsKeyboard: true,
+     run: () => {
+@@ -73,7 +70,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: noSummary,
+   },
+   next: {
+-    label: "Next change",
+     icon: ArrowDown,
+     keepsKeyboard: true,
+     run: () => {
+@@ -83,7 +79,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: noSummary,
+   },
+   collapse: {
+-    label: "Collapse unchanged fragments",
+     icon: ChevronsDownUp,
+     keepsKeyboard: true,
+     run: toggleCollapsing,
+@@ -91,7 +86,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: noSummary,
+   },
+   applyLeft: {
+-    label: "Apply non-conflicting changes from the left",
+     icon: ChevronsRight,
+     keepsKeyboard: false,
+     run: () => {
+@@ -101,7 +95,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: noSummary,
+   },
+   applyRight: {
+-    label: "Apply non-conflicting changes from the right",
+     icon: ChevronsLeft,
+     keepsKeyboard: false,
+     run: () => {
+@@ -111,7 +104,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: noSummary,
+   },
+   undo: {
+-    label: "Undo",
+     icon: Undo2,
+     keepsKeyboard: false,
+     run: () => {
+@@ -121,7 +113,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+     disabled: noSummary,
+   },
+   redo: {
+-    label: "Redo",
+     icon: Redo2,
+     keepsKeyboard: false,
+     run: () => {
+@@ -133,7 +124,10 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+ };
+ 
+ const shown = computed(() =>
+-  shownButtons(abortState.value, hiddenButtons.value).map((id) => ({ id, ...ICON_BUTTONS[id] })),
++  shownButtons(abortState.value, hiddenButtons.value).map((button) => ({
++    ...button,
++    ...ICON_BUTTONS[button.id],
++  })),
+ );
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+@@ -148,7 +142,7 @@ function pressed(button: IconButton, event: MouseEvent): void {
+ // removing steps": https://html.spec.whatwg.org/multipage/interactive-elements.html#the-dialog-element).
+ async function abortKeepingKeyboard(): Promise<void> {
+   const before = document.activeElement;
+-  await abortMerge();
++  await abortOperation();
+   await nextTick();
+   if (document.activeElement === document.body && before instanceof HTMLElement) {
+     before.focus();
+@@ -206,6 +200,6 @@ function closeMenu(): void {
+     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
+     <ServerStatus class="ml-auto" :path="path" :problems="problems" />
+     <SettingsButton />
+-    <ToolbarMenu v-if="menuAt !== null" :at="menuAt" :buttons="ICON_BUTTONS" @close="closeMenu" />
++    <ToolbarMenu v-if="menuAt !== null" :at="menuAt" @close="closeMenu" />
+   </header>
+ </template>
+diff --git a/frontend/src/ui/NoticeBar.vue b/frontend/src/ui/NoticeBar.vue
+index 8f54d3d..5b5289d 100644
+--- a/frontend/src/ui/NoticeBar.vue
++++ b/frontend/src/ui/NoticeBar.vue
+@@ -2,30 +2,24 @@
+ import { computed } from "vue";
+ import X from "~icons/lucide/x";
+ 
+-import { noticeCloseLabel, noticeText, type Notice } from "./noticeText";
++import { noticeRow, type Notice } from "./noticeText";
+ 
+ const props = defineProps<{ notices: readonly Notice[] }>();
+-const emit = defineEmits<{ close: [path: string] }>();
++const emit = defineEmits<{ close: [key: string] }>();
+ 
+-const rows = computed(() =>
+-  props.notices.map((notice) => ({
+-    path: notice.path,
+-    text: noticeText(notice),
+-    closeLabel: noticeCloseLabel(notice.path),
+-  })),
+-);
++const rows = computed(() => props.notices.map((notice) => noticeRow(notice)));
+ </script>
+ 
+ <template>
+   <ul role="status" class="shrink-0 rounded-md border border-info-border bg-info text-fg">
+-    <li v-for="row in rows" :key="row.path" class="flex items-start gap-2 px-3 py-2">
++    <li v-for="row in rows" :key="row.key" class="flex items-start gap-2 px-3 py-2">
+       <p class="min-w-0 flex-1 wrap-break-word">{{ row.text }}</p>
+       <button
+         type="button"
+         title="Close"
+         :aria-label="row.closeLabel"
+         class="rounded p-0.5 hover:bg-info-border"
+-        @click="emit('close', row.path)"
++        @click="emit('close', row.key)"
+       >
+         <X class="size-4" aria-hidden="true" />
+       </button>
+diff --git a/frontend/src/ui/OperationBar.vue b/frontend/src/ui/OperationBar.vue
+new file mode 100644
+index 0000000..35c3f5a
+--- /dev/null
++++ b/frontend/src/ui/OperationBar.vue
+@@ -0,0 +1,20 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import type { OperationView } from "../ipc";
++import { operationLine } from "./operationText";
++
++const props = defineProps<{ operation: OperationView }>();
++
++const line = computed(() => operationLine(props.operation));
++</script>
++
++<template>
++  <p
++    role="status"
++    :title="line.tooltip"
++    class="h-8 shrink-0 truncate rounded-md border border-info-border bg-info px-3 leading-7.5 text-fg"
++  >
++    {{ line.text }}
++  </p>
++</template>
+diff --git a/frontend/src/ui/ToolbarMenu.vue b/frontend/src/ui/ToolbarMenu.vue
+index 628f713..6125f40 100644
+--- a/frontend/src/ui/ToolbarMenu.vue
++++ b/frontend/src/ui/ToolbarMenu.vue
+@@ -5,14 +5,11 @@ import Check from "~icons/lucide/check";
+ 
+ import { menuPosition, type Point, type Size } from "./menuPosition";
+ import { useAppStore } from "./store";
+-import { listedButtons, type ToolbarButtonId } from "./toolbarButtons";
++import { listedButtons, type ListedButton, type ToolbarButtonId } from "./toolbarButtons";
+ 
+-type Item = { readonly id: ToolbarButtonId; readonly label: string; readonly shown: boolean };
++type Item = ListedButton & { readonly shown: boolean };
+ 
+-const props = defineProps<{
+-  at: Point;
+-  buttons: Readonly<Record<ToolbarButtonId, { readonly label: string }>>;
+-}>();
++const props = defineProps<{ at: Point }>();
+ const emit = defineEmits<{ close: [] }>();
+ 
+ const { hiddenButtons, toggleButton, abortState } = useAppStore();
+@@ -25,9 +22,9 @@ useEventListener(window, "mousedown", pressedElsewhere, { capture: true });
+ useEventListener(window, "pointerdown", pressedElsewhere, { capture: true });
+ 
+ const items = computed(() =>
+-  listedButtons(abortState.value).map((id): Item => ({
++  listedButtons(abortState.value).map(({ id, label }): Item => ({
+     id,
+-    label: props.buttons[id].label,
++    label,
+     shown: !hiddenButtons.value.has(id),
+   })),
+ );
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+new file mode 100644
+index 0000000..b9c91b9
+--- /dev/null
++++ b/frontend/src/ui/aborting.test.ts
+@@ -0,0 +1,132 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef, type ShallowRef } from "vue";
++
++import type { OperationView, SourceFailure, SourceResult } from "../ipc";
++import { createAborting, type Aborting } from "./aborting";
++import { createAsking, type Asking } from "./asking";
++import type { Problem } from "./problem";
++import { problemText } from "./problemText";
++
++const LINUX = "Linux x86_64";
++
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: { kind: "Branch", name: "main" },
++  replaying: null,
++  progress: { step: 2, total: 3 },
++  editor_steps_ahead: false,
++};
++
++type Pressed = Aborting & {
++  readonly asking: Asking;
++  readonly operation: ShallowRef<OperationView | null>;
++  readonly problem: ShallowRef<Problem | null>;
++};
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function aborting(
++  abortOperation: () => Promise<SourceResult<null>>,
++  operation: OperationView | null = REBASE,
++): Pressed {
++  const asking = createAsking();
++  const target = {
++    source: { abortOperation },
++    asking,
++    operation: shallowRef(operation),
++    problem: shallowRef<Problem | null>(null),
++  };
++  return { ...target, ...createAborting(target) };
++}
++
++async function pressUnasked(abort: Pressed): Promise<void> {
++  const pressed = abort.abortOperation();
++  expect(abort.asking.question.value).toBeNull();
++  abort.asking.dismiss();
++  await pressed;
++}
++
++test("without a recorded operation there is no Abort: the state is none and a press asks nothing", async () => {
++  let aborts = 0;
++  const abort = aborting(() => {
++    aborts += 1;
++    return Promise.resolve({ ok: true, value: null });
++  }, null);
++
++  expect(abort.abortState.value).toEqual({ kind: "none" });
++  await pressUnasked(abort);
++  expect(aborts).toBe(0);
++});
++
++test("the state follows the operation git lists", () => {
++  const abort = aborting(() => Promise.resolve({ ok: true, value: null }), null);
++
++  abort.operation.value = REBASE;
++  expect(abort.abortState.value).toEqual({ kind: "ready", operation: REBASE });
++  abort.operation.value = null;
++  expect(abort.abortState.value).toEqual({ kind: "none" });
++});
++
++test("Abort asks about the operation and calls git only after a yes; No and Escape change nothing", async () => {
++  let aborts = 0;
++  const abort = aborting(() => {
++    aborts += 1;
++    return Promise.resolve({ ok: true, value: null });
++  });
++
++  const declined = abort.abortOperation();
++  expect(abort.asking.question.value).toEqual({ kind: "abort", operation: REBASE });
++  abort.asking.answer(false);
++  await declined;
++  const escaped = abort.abortOperation();
++  abort.asking.dismiss();
++  await escaped;
++  expect(aborts).toBe(0);
++  expect(abort.abortState.value.kind).toBe("ready");
++
++  const confirmed = abort.abortOperation();
++  abort.asking.answer(true);
++  await confirmed;
++
++  expect(aborts).toBe(1);
++  expect(abort.abortState.value).toEqual({ kind: "running", operation: REBASE });
++  expect(abort.problem.value).toBeNull();
++  await pressUnasked(abort);
++  expect(aborts).toBe(1);
++});
++
++test("git's refusal names the operation, logs it, and a later press asks again", async () => {
++  const lines: string[] = [];
++  vi.spyOn(console, "error").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  const refused: SourceFailure = { kind: "Git", message: "error: Entry 'a.ts' not uptodate." };
++  let aborts = 0;
++  const abort = aborting(() => {
++    aborts += 1;
++    return Promise.resolve({ ok: false, failure: refused });
++  });
++
++  const refusing = abort.abortOperation();
++  abort.asking.answer(true);
++  await refusing;
++
++  const problem = abort.problem.value;
++  expect(problem).toEqual({ action: "abort", operation: "Rebase", cause: refused });
++  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
++    "Could not abort the rebase: error: Entry 'a.ts' not uptodate.",
++  );
++  expect(lines).toEqual([
++    `[error] store.abort_failed {operation: "Rebase", kind: "Git", message: ${JSON.stringify(refused.message)}}`,
++  ]);
++  expect(abort.abortState.value.kind).toBe("ready");
++
++  const again = abort.abortOperation();
++  expect(abort.asking.question.value).toEqual({ kind: "abort", operation: REBASE });
++  abort.asking.answer(true);
++  await again;
++  expect(aborts).toBe(2);
++});
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index 96c1ba8..08ba6a1 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -1,43 +1,51 @@
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+-import type { ChunkSource } from "../ipc";
++import type { ChunkSource, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
+ import { attempt, report, type Problem } from "./problem";
+ 
+-export type AbortState = "noMerge" | "ready" | "running";
++export type AbortState =
++  | { readonly kind: "none" }
++  | { readonly kind: "ready" | "running"; readonly operation: OperationView };
+ 
+ type AbortTarget = {
+-  readonly source: ChunkSource;
+-  readonly asking: Asking;
+-  readonly merging: Readonly<ShallowRef<boolean>>;
++  readonly source: Pick<ChunkSource, "abortOperation">;
++  readonly asking: Pick<Asking, "ask">;
++  readonly operation: Readonly<ShallowRef<OperationView | null>>;
+   readonly problem: ShallowRef<Problem | null>;
+ };
+ 
+ export type Aborting = {
+   readonly abortState: ComputedRef<AbortState>;
+-  readonly abortMerge: () => Promise<void>;
++  readonly abortOperation: () => Promise<void>;
+ };
+ 
+ export function createAborting(target: AbortTarget): Aborting {
+   const running = shallowRef(false);
+   const abortState = computed((): AbortState => {
+-    if (!target.merging.value) {
+-      return "noMerge";
++    const operation = target.operation.value;
++    if (operation === null) {
++      return { kind: "none" };
+     }
+-    return running.value ? "running" : "ready";
++    return { kind: running.value ? "running" : "ready", operation };
+   });
+ 
+-  async function abortMerge(): Promise<void> {
+-    if (abortState.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
++  async function abortOperation(): Promise<void> {
++    const state = abortState.value;
++    if (state.kind !== "ready") {
++      return;
++    }
++    const { operation } = state;
++    if ((await target.asking.ask({ kind: "abort", operation })) !== "yes") {
+       return;
+     }
+     running.value = true;
+-    const outcome = await attempt(() => target.source.abortMerge());
++    const outcome = await attempt(() => target.source.abortOperation());
+     if (!outcome.ok) {
+       running.value = false;
+-      report(target, { action: "abort", cause: outcome.cause });
++      report(target, { action: "abort", operation: operation.kind, cause: outcome.cause });
+     }
+   }
+ 
+-  return { abortState, abortMerge };
++  return { abortState, abortOperation };
+ }
+diff --git a/frontend/src/ui/diskChanges.ts b/frontend/src/ui/diskChanges.ts
+index 3bca558..5187064 100644
+--- a/frontend/src/ui/diskChanges.ts
++++ b/frontend/src/ui/diskChanges.ts
+@@ -2,7 +2,7 @@ import type { ShallowRef } from "vue";
+ 
+ import { log, type DiskChange } from "../ipc";
+ import type { CloseGuard } from "./closeGuard";
+-import type { Notice } from "./noticeText";
++import type { DiskNotice, Notice } from "./noticeText";
+ import { clearProblemAbout, type Problem } from "./problem";
+ import type { Taken } from "./sides";
+ import { isShown, reload, takesASide, type Shown } from "./views";
+@@ -13,7 +13,7 @@ export type DiskChangeTarget = Shown & {
+   readonly guard: Pick<CloseGuard, "unsavedFiles">;
+ };
+ 
+-function logNotice({ path, result, editsDropped, when }: Notice): void {
++function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
+   const { kind, ...details } = result;
+   const fields = { path, result: kind, ...details, editsDropped, when };
+   if (kind === "StageFailed") {
+@@ -26,11 +26,12 @@ function logNotice({ path, result, editsDropped, when }: Notice): void {
+ export async function applyDiskChanges(
+   target: DiskChangeTarget,
+   changes: readonly DiskChange[],
+-  when: Notice["when"],
++  when: DiskNotice["when"],
+ ): Promise<void> {
+   const unsaved = target.guard.unsavedFiles();
+   const byPath = new Map(changes.map((change) => [change.path, change.result]));
+-  const notices = [...byPath].map(([path, result]): Notice => ({
++  const notices = [...byPath].map(([path, result]): DiskNotice => ({
++    kind: "disk",
+     path,
+     result,
+     editsDropped: unsaved.includes(path),
+@@ -38,7 +39,7 @@ export async function applyDiskChanges(
+   }));
+   notices.forEach(logNotice);
+   target.notices.value = [
+-    ...target.notices.value.filter((notice) => !byPath.has(notice.path)),
++    ...target.notices.value.filter((notice) => notice.kind !== "disk" || !byPath.has(notice.path)),
+     ...notices,
+   ];
+   const taken = new Map(target.taken.value);
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+new file mode 100644
+index 0000000..e18f8d7
+--- /dev/null
++++ b/frontend/src/ui/listing.test.ts
+@@ -0,0 +1,148 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef, type ShallowRef } from "vue";
++
++import type {
++  ChunkSource,
++  FileEntry,
++  FileMergeData,
++  FileSides,
++  Listing,
++  OperationView,
++  SideNames,
++  SourceResult,
++} from "../ipc";
++import { refreshFiles } from "./listing";
++import type { Notice } from "./noticeText";
++import type { Problem } from "./problem";
++import type { Taken } from "./sides";
++import type { StopEnd } from "./stops";
++
++type Listed = {
++  readonly source: ChunkSource;
++  readonly files: ShallowRef<readonly FileEntry[]>;
++  readonly operation: ShallowRef<OperationView | null>;
++  readonly sideNames: ShallowRef<SideNames>;
++  readonly opened: ShallowRef<readonly FileMergeData[]>;
++  readonly choices: ShallowRef<readonly FileSides[]>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly notices: ShallowRef<readonly Notice[]>;
++  readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
++  readonly guard: { unsavedFiles(): string[] };
++  readonly ends: StopEnd[];
++  nextStop(end: StopEnd): Promise<void>;
++};
++
++const FILES: readonly FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: { kind: "Branch", name: "main" },
++  replaying: null,
++  progress: { step: 2, total: 3 },
++  editor_steps_ahead: false,
++};
++const SIDES: SideNames = {
++  local: { kind: "Commit", short_id: "8b4e7d0", subject: "Show reminders", message: "Show" },
++  remote: { kind: "Branch", name: "main" },
++};
++const NO_NAMES: SideNames = { local: null, remote: null };
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function notUsed(): Promise<never> {
++  return Promise.reject(new Error("not used"));
++}
++
++function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
++  return {
++    listStop: () =>
++      Promise.resolve(answers.shift() ?? { ok: false, failure: { kind: "GitRunning" } }),
++    listFiles: notUsed,
++    loadFile: notUsed,
++    finishFile: notUsed,
++    saveFile: notUsed,
++    resetFile: notUsed,
++    describeFile: notUsed,
++    takeSide: notUsed,
++    sideNames: notUsed,
++    abortMerge: notUsed,
++    continueOperation: notUsed,
++    abortOperation: notUsed,
++    loadSettings: notUsed,
++    setTheme: notUsed,
++    setAntialiasing: notUsed,
++    setKeys: notUsed,
++    moveSettings: notUsed,
++    setServerAnswer: notUsed,
++    setServerSwitch: notUsed,
++    setAddedServers: notUsed,
++  };
++}
++
++function listedBy(answers: SourceResult<Listing>[]): Listed {
++  const ends: StopEnd[] = [];
++  return {
++    source: sourceListing(answers),
++    files: shallowRef<readonly FileEntry[]>([]),
++    operation: shallowRef<OperationView | null>(null),
++    sideNames: shallowRef<SideNames>(NO_NAMES),
++    opened: shallowRef<readonly FileMergeData[]>([]),
++    choices: shallowRef<readonly FileSides[]>([]),
++    problem: shallowRef<Problem | null>(null),
++    notices: shallowRef<readonly Notice[]>([]),
++    taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
++    guard: { unsavedFiles: () => [] },
++    ends,
++    nextStop: (end) => {
++      ends.push(end);
++      return Promise.resolve();
++    },
++  };
++}
++
++function files(operation: OperationView | null, sides: SideNames): SourceResult<Listing> {
++  return { ok: true, value: { kind: "Files", files: FILES, diskChanges: [], operation, sides } };
++}
++
++test("a list sets the files, the operation and both names from the one reply", async () => {
++  const target = listedBy([files(REBASE, SIDES), files(null, NO_NAMES)]);
++
++  expect(await refreshFiles(target, "start")).toBe(FILES);
++  expect([target.files.value, target.operation.value, target.sideNames.value]).toEqual([
++    FILES,
++    REBASE,
++    SIDES,
++  ]);
++
++  await refreshFiles(target, "running");
++  expect([target.operation.value, target.sideNames.value]).toEqual([null, NO_NAMES]);
++  expect(target.ends).toEqual([]);
++});
++
++test("a list that finds git at another stop goes to the next stop and sets nothing itself", async () => {
++  const target = listedBy([files(REBASE, SIDES), { ok: true, value: { kind: "MovedOn" } }]);
++  await refreshFiles(target, "start");
++
++  expect(await refreshFiles(target, "running")).toBeNull();
++
++  expect(target.ends).toEqual([{ kind: "outside" }]);
++  expect([target.files.value, target.operation.value, target.sideNames.value]).toEqual([
++    FILES,
++    REBASE,
++    SIDES,
++  ]);
++});
++
++test("a failed list is a list problem and keeps the operation and names it had", async () => {
++  vi.spyOn(console, "error").mockImplementation(() => undefined);
++  const target = listedBy([files(REBASE, SIDES)]);
++  await refreshFiles(target, "start");
++
++  expect(await refreshFiles(target, "running")).toBeNull();
++
++  expect(target.problem.value).toEqual({ action: "list", cause: { kind: "GitRunning" } });
++  expect([target.operation.value, target.sideNames.value]).toEqual([REBASE, SIDES]);
++  expect(target.ends).toEqual([]);
++});
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
+index 9115fc6..78e710b 100644
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
+@@ -1,43 +1,38 @@
+ import type { ShallowRef } from "vue";
+ 
+-import { log, type ChunkSource, type FileEntry, type SideNames } from "../ipc";
++import type { FileEntry, OperationView, SideNames } from "../ipc";
+ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+-import type { Notice } from "./noticeText";
+-import { attempt, report, unexpected } from "./problem";
++import type { DiskNotice } from "./noticeText";
++import { attempt, report } from "./problem";
++import type { StopEnd } from "./stops";
+ 
+-type Listing = DiskChangeTarget & {
++type ListTarget = DiskChangeTarget & {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+-  readonly merging: ShallowRef<boolean>;
+-};
+-
+-type SideNamesTarget = {
+-  readonly source: ChunkSource;
++  readonly operation: ShallowRef<OperationView | null>;
+   readonly sideNames: ShallowRef<SideNames>;
++  nextStop(end: StopEnd): Promise<void>;
+ };
+ 
+ export async function refreshFiles(
+-  listing: Listing,
+-  when: Notice["when"],
++  target: ListTarget,
++  when: DiskNotice["when"],
+ ): Promise<readonly FileEntry[] | null> {
+-  const listed = await attempt(() => listing.source.listFiles());
++  const listed = await attempt(() => target.source.listStop());
+   if (!listed.ok) {
+-    report(listing, { action: "list", cause: listed.cause });
++    report(target, { action: "list", cause: listed.cause });
+     return null;
+   }
+-  const { files, diskChanges, merging } = listed.value;
+-  listing.files.value = files;
+-  listing.merging.value = merging;
+-  if (listing.problem.value?.action === "list") {
+-    listing.problem.value = null;
++  if (listed.value.kind === "MovedOn") {
++    await target.nextStop({ kind: "outside" });
++    return null;
+   }
+-  await applyDiskChanges(listing, diskChanges, when);
++  const { files, diskChanges, operation, sides } = listed.value;
++  target.files.value = files;
++  target.operation.value = operation;
++  target.sideNames.value = sides;
++  if (target.problem.value?.action === "list") {
++    target.problem.value = null;
++  }
++  await applyDiskChanges(target, diskChanges, when);
+   return files;
+ }
+-
+-export async function loadSideNames(target: SideNamesTarget): Promise<void> {
+-  try {
+-    target.sideNames.value = await target.source.sideNames();
+-  } catch (error) {
+-    log.warn("store.side_names_failed", { ...unexpected(error) });
+-  }
+-}
+diff --git a/frontend/src/ui/noticeText.test.ts b/frontend/src/ui/noticeText.test.ts
+index db1a105..729fcd4 100644
+--- a/frontend/src/ui/noticeText.test.ts
++++ b/frontend/src/ui/noticeText.test.ts
+@@ -1,11 +1,11 @@
+ import { expect, test } from "vitest";
+ 
+ import type { DiskResult } from "../ipc";
+-import { noticeCloseLabel, noticeText, type Notice } from "./noticeText";
++import { noticeKey, noticeRow, type DiskNotice, type Notice } from "./noticeText";
+ 
+ const PATH = "src/a.ts";
+ 
+-const OPENINGS: readonly [Pick<Notice, "editsDropped" | "when">, string][] = [
++const OPENINGS: readonly [Pick<DiskNotice, "editsDropped" | "when">, string][] = [
+   [
+     { when: "running", editsDropped: true },
+     `${PATH} changed on disk; your edits in yamt were dropped`,
+@@ -27,9 +27,45 @@ test.each(
+     TAILS.map(([result, tail]) => [{ ...opening, result }, `${sentence} — ${tail}`] as const),
+   ),
+ )("%j reads %j", (fields, text) => {
+-  expect(noticeText({ path: PATH, ...fields })).toBe(text);
++  expect(noticeRow({ kind: "disk", path: PATH, ...fields }).text).toBe(text);
+ });
+ 
+ test("the close button names the file its notice is about", () => {
+-  expect(noticeCloseLabel(PATH)).toBe("Close the notice about src/a.ts");
++  const notice: Notice = {
++    kind: "disk",
++    path: PATH,
++    result: { kind: "Staged" },
++    editsDropped: false,
++    when: "running",
++  };
++
++  expect(noticeRow(notice).closeLabel).toBe("Close the notice about src/a.ts");
++});
++
++test("a stop moved on outside names the operation and every dropped file; without one it names git", () => {
++  const files = ["a.ts", "b.ts"];
++
++  expect(noticeRow({ kind: "movedOn", operation: "Rebase", files })).toEqual({
++    key: "movedOn",
++    text: "The rebase moved on outside yamt; your unsaved edits in a.ts, b.ts were dropped",
++    closeLabel: "Close the notice about the dropped edits",
++  });
++  expect(noticeRow({ kind: "movedOn", operation: "Am", files: ["a.ts"] }).text).toBe(
++    "The patch application moved on outside yamt; your unsaved edits in a.ts were dropped",
++  );
++  expect(noticeRow({ kind: "movedOn", operation: null, files: ["a.ts"] }).text).toBe(
++    "Git moved on outside yamt; your unsaved edits in a.ts were dropped",
++  );
++});
++
++test("a file named movedOn has its own key, apart from the moved-on notice", () => {
++  const file: Notice = {
++    kind: "disk",
++    path: "movedOn",
++    result: { kind: "Staged" },
++    editsDropped: false,
++    when: "running",
++  };
++
++  expect(noticeKey(file)).not.toBe(noticeKey({ kind: "movedOn", operation: null, files: [] }));
+ });
+diff --git a/frontend/src/ui/noticeText.ts b/frontend/src/ui/noticeText.ts
+index 6538187..a3fca9a 100644
+--- a/frontend/src/ui/noticeText.ts
++++ b/frontend/src/ui/noticeText.ts
+@@ -1,13 +1,25 @@
+-import type { DiskResult } from "../ipc";
++import type { DiskResult, OperationKind } from "../ipc";
++import { operationName } from "./operationText";
+ 
+-export type Notice = {
+-  readonly path: string;
+-  readonly result: DiskResult;
+-  readonly editsDropped: boolean;
+-  readonly when: "start" | "running";
+-};
++export type Notice =
++  | {
++      readonly kind: "disk";
++      readonly path: string;
++      readonly result: DiskResult;
++      readonly editsDropped: boolean;
++      readonly when: "start" | "running";
++    }
++  | {
++      readonly kind: "movedOn";
++      readonly operation: OperationKind | null;
++      readonly files: readonly string[];
++    };
+ 
+-function opening({ path, editsDropped, when }: Notice): string {
++export type DiskNotice = Extract<Notice, { kind: "disk" }>;
++
++type NoticeRow = { readonly key: string; readonly text: string; readonly closeLabel: string };
++
++function opening({ path, editsDropped, when }: DiskNotice): string {
+   switch (when) {
+     case "start":
+       return `${path} differs on disk from git's merge`;
+@@ -39,10 +51,30 @@ function outcome(result: DiskResult): string {
+   }
+ }
+ 
+-export function noticeText(notice: Notice): string {
+-  return `${opening(notice)} — ${outcome(notice.result)}`;
++export function noticeKey(notice: Notice): string {
++  return notice.kind === "disk" ? `disk:${notice.path}` : "movedOn";
+ }
+ 
+-export function noticeCloseLabel(path: string): string {
+-  return `Close the notice about ${path}`;
++export function noticeRow(notice: Notice): NoticeRow {
++  const key = noticeKey(notice);
++  switch (notice.kind) {
++    case "disk":
++      return {
++        key,
++        text: `${opening(notice)} — ${outcome(notice.result)}`,
++        closeLabel: `Close the notice about ${notice.path}`,
++      };
++    case "movedOn": {
++      const who = notice.operation === null ? "Git" : `The ${operationName(notice.operation)}`;
++      return {
++        key,
++        text: `${who} moved on outside yamt; your unsaved edits in ${notice.files.join(", ")} were dropped`,
++        closeLabel: "Close the notice about the dropped edits",
++      };
++    }
++    default: {
++      const _exhaustive: never = notice;
++      return _exhaustive;
++    }
++  }
+ }
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+new file mode 100644
+index 0000000..cb841a2
+--- /dev/null
++++ b/frontend/src/ui/operationText.test.ts
+@@ -0,0 +1,176 @@
++import { expect, test } from "vitest";
++
++import type { OperationView, SideName } from "../ipc";
++import { abortLabel, abortMessage, abortTitle, operationLine } from "./operationText";
++
++const MAIN: SideName = { kind: "Branch", name: "main" };
++const FEATURE: SideName = { kind: "Branch", name: "feature/reminders" };
++const FIX_LOGIN: SideName = {
++  kind: "Commit",
++  short_id: "3f2c1a0",
++  subject: "Fix login",
++  message: "Fix login\n\nThe session cookie expired too early.\n",
++};
++const ADD_CACHE: SideName = {
++  kind: "Revert",
++  short_id: "9b8e7d6",
++  subject: "Add cache",
++  message: "Add cache\n\nKeeps answers for a minute.",
++};
++
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: MAIN,
++  replaying: FIX_LOGIN,
++  progress: { step: 2, total: 5 },
++  editor_steps_ahead: false,
++};
++
++test.each<[string, OperationView, string]>([
++  [
++    "a merge",
++    { kind: "Merge", merging: FEATURE, into: MAIN },
++    "Merging feature/reminders into main",
++  ],
++  [
++    "a squash merge",
++    { kind: "SquashMerge", merging: FEATURE, into: MAIN },
++    "Squash-merging feature/reminders into main",
++  ],
++  ["a rebase", REBASE, "Rebasing feature onto main · 2 of 5"],
++  [
++    "a cherry-pick of several",
++    { kind: "CherryPick", picking: FIX_LOGIN, progress: { step: 1, total: 3 } },
++    "Cherry-picking 3f2c1a0 Fix login · 1 of 3",
++  ],
++  [
++    "a revert of several",
++    { kind: "Revert", reverting: ADD_CACHE, progress: { step: 1, total: 2 } },
++    "Reverting 9b8e7d6 Add cache · 1 of 2",
++  ],
++  [
++    "a patch series",
++    { kind: "Am", subject: "Fix typo", message: "Fix typo", progress: { step: 2, total: 4 } },
++    "Applying patch 2 of 4: Fix typo",
++  ],
++])("%s reads as plan #87 words it", (_case, operation, text) => {
++  expect(operationLine(operation).text).toBe(text);
++});
++
++test.each<[string, OperationView, string]>([
++  [
++    "a single cherry-pick",
++    { kind: "CherryPick", picking: FIX_LOGIN, progress: { step: 1, total: 1 } },
++    "Cherry-picking 3f2c1a0 Fix login",
++  ],
++  [
++    "a cherry-pick without a sequence",
++    { kind: "CherryPick", picking: FIX_LOGIN, progress: null },
++    "Cherry-picking 3f2c1a0 Fix login",
++  ],
++  [
++    "a single patch",
++    { kind: "Am", subject: "Fix typo", message: "Fix typo", progress: { step: 1, total: 1 } },
++    "Applying patch: Fix typo",
++  ],
++])("%s shows no count", (_case, operation, text) => {
++  expect(operationLine(operation).text).toBe(text);
++});
++
++test.each<[string, OperationView, string]>([
++  [
++    "a merge without what it merges",
++    { kind: "Merge", merging: null, into: MAIN },
++    "Merging into main",
++  ],
++  [
++    "a merge without HEAD's name",
++    { kind: "Merge", merging: FEATURE, into: null },
++    "Merging feature/reminders",
++  ],
++  [
++    "a rebase on a detached HEAD",
++    { ...REBASE, branch: null },
++    "Rebasing detached HEAD onto main · 2 of 5",
++  ],
++  ["a rebase without its upstream", { ...REBASE, onto: null }, "Rebasing feature · 2 of 5"],
++  [
++    "a revert without its commit",
++    { kind: "Revert", reverting: null, progress: { step: 1, total: 2 } },
++    "Reverting · 1 of 2",
++  ],
++  [
++    "a patch without a subject",
++    { kind: "Am", subject: "", message: "", progress: { step: 2, total: 4 } },
++    "Applying patch 2 of 4",
++  ],
++  [
++    "a commit without a subject",
++    { kind: "CherryPick", picking: { ...FIX_LOGIN, subject: "" }, progress: null },
++    "Cherry-picking 3f2c1a0",
++  ],
++])("%s drops only the missing part", (_case, operation, text) => {
++  expect(operationLine(operation).text).toBe(text);
++});
++
++test("the tooltip holds the line and the full message of the commit applied; a branch adds nothing", () => {
++  expect(operationLine(REBASE).tooltip).toBe(
++    "Rebasing feature onto main · 2 of 5\n\nFix login\n\nThe session cookie expired too early.",
++  );
++  expect(operationLine({ kind: "Merge", merging: FEATURE, into: MAIN }).tooltip).toBe(
++    "Merging feature/reminders into main",
++  );
++});
++
++test.each<[OperationView, string, string]>([
++  [{ kind: "Merge", merging: FEATURE, into: MAIN }, "Abort merge", "Abort Merge"],
++  [
++    { kind: "SquashMerge", merging: FEATURE, into: MAIN },
++    "Abort squash merge",
++    "Abort Squash Merge",
++  ],
++  [REBASE, "Abort rebase", "Abort Rebase"],
++  [{ kind: "CherryPick", picking: null, progress: null }, "Abort cherry-pick", "Abort Cherry-Pick"],
++  [{ kind: "Revert", reverting: null, progress: null }, "Abort revert", "Abort Revert"],
++  [
++    { kind: "Am", subject: "", message: "", progress: null },
++    "Abort patch application",
++    "Abort Patch Application",
++  ],
++])("%j is aborted by %j under the title %j", (operation, label, title) => {
++  expect(abortLabel(operation)).toBe(label);
++  expect(abortTitle(operation)).toBe(title);
++});
++
++test("a merge's abort message is plan #74's, word for word", () => {
++  expect(abortMessage({ kind: "Merge", merging: FEATURE, into: MAIN })).toBe(
++    "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
++  );
++});
++
++test.each<[OperationView, string]>([
++  [REBASE, " The 1 commit already replayed is undone too. "],
++  [
++    { ...REBASE, progress: { step: 4, total: 5 } },
++    " The 3 commits already replayed are undone too. ",
++  ],
++  [
++    { kind: "CherryPick", picking: FIX_LOGIN, progress: { step: 3, total: 3 } },
++    " The 2 commits already picked are undone too. ",
++  ],
++  [
++    { kind: "Am", subject: "", message: "", progress: { step: 3, total: 4 } },
++    " The 2 patches already applied are undone too. ",
++  ],
++])("the abort message counts the steps already done: %j", (operation, sentence) => {
++  expect(abortMessage(operation)).toContain(sentence);
++});
++
++test.each<OperationView>([
++  { ...REBASE, progress: { step: 1, total: 5 } },
++  { ...REBASE, progress: null },
++  { kind: "Revert", reverting: ADD_CACHE, progress: { step: 1, total: 2 } },
++])("the first step has nothing done to name: %j", (operation) => {
++  expect(abortMessage(operation)).not.toContain("undone too");
++});
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+new file mode 100644
+index 0000000..575e3ec
+--- /dev/null
++++ b/frontend/src/ui/operationText.ts
+@@ -0,0 +1,177 @@
++import type { OperationKind, OperationView, ProgressView, SideName } from "../ipc";
++
++type OperationLine = { readonly text: string; readonly tooltip: string };
++
++const NAMES: Readonly<Record<OperationKind, string>> = {
++  Merge: "merge",
++  SquashMerge: "squash merge",
++  Rebase: "rebase",
++  CherryPick: "cherry-pick",
++  Revert: "revert",
++  Am: "patch application",
++};
++
++const TITLES: Readonly<Record<OperationKind, string>> = {
++  Merge: "Merge",
++  SquashMerge: "Squash Merge",
++  Rebase: "Rebase",
++  CherryPick: "Cherry-Pick",
++  Revert: "Revert",
++  Am: "Patch Application",
++};
++
++const DONE_STEPS: Readonly<Record<OperationKind, readonly [string, string] | null>> = {
++  Merge: null,
++  SquashMerge: null,
++  Rebase: ["commit already replayed is", "commits already replayed are"],
++  CherryPick: ["commit already picked is", "commits already picked are"],
++  Revert: ["commit already reverted is", "commits already reverted are"],
++  Am: ["patch already applied is", "patches already applied are"],
++};
++
++const MERGE_VERBS: Readonly<Record<"Merge" | "SquashMerge", string>> = {
++  Merge: "Merging",
++  SquashMerge: "Squash-merging",
++};
++
++export function operationName(kind: OperationKind): string {
++  return NAMES[kind];
++}
++
++function named(name: SideName | null): string | null {
++  if (name === null) {
++    return null;
++  }
++  switch (name.kind) {
++    case "Branch":
++      return name.name;
++    case "Commit":
++    case "Revert":
++      return name.subject === "" ? name.short_id : `${name.short_id} ${name.subject}`;
++    case "Patch":
++      return name.subject;
++    default: {
++      const _exhaustive: never = name;
++      return _exhaustive;
++    }
++  }
++}
++
++function messageOf(name: SideName | null): readonly string[] {
++  return name === null || name.kind === "Branch" ? [] : [name.message.trim()];
++}
++
++function counted(progress: ProgressView | null): string {
++  return progress === null || progress.total === 1
++    ? ""
++    : ` · ${progress.step} of ${progress.total}`;
++}
++
++function joined(parts: readonly (string | null)[]): string {
++  return parts.filter((part) => part !== null && part !== "").join(" ");
++}
++
++function after(word: string, name: SideName | null): string | null {
++  const text = named(name);
++  return text === null ? null : `${word} ${text}`;
++}
++
++function patchLine(subject: string, progress: ProgressView | null): string {
++  const count =
++    progress === null || progress.total === 1 ? "" : ` ${progress.step} of ${progress.total}`;
++  return subject === "" ? `Applying patch${count}` : `Applying patch${count}: ${subject}`;
++}
++
++function lineText(operation: OperationView): string {
++  switch (operation.kind) {
++    case "Merge":
++    case "SquashMerge":
++      return joined([
++        MERGE_VERBS[operation.kind],
++        named(operation.merging),
++        after("into", operation.into),
++      ]);
++    case "Rebase": {
++      const branch = operation.branch ?? "detached HEAD";
++      return (
++        joined(["Rebasing", branch, after("onto", operation.onto)]) + counted(operation.progress)
++      );
++    }
++    case "CherryPick":
++      return joined(["Cherry-picking", named(operation.picking)]) + counted(operation.progress);
++    case "Revert":
++      return joined(["Reverting", named(operation.reverting)]) + counted(operation.progress);
++    case "Am":
++      return patchLine(operation.subject, operation.progress);
++    default: {
++      const _exhaustive: never = operation;
++      return _exhaustive;
++    }
++  }
++}
++
++function messages(operation: OperationView): readonly string[] {
++  switch (operation.kind) {
++    case "Merge":
++    case "SquashMerge":
++      return messageOf(operation.merging);
++    case "Rebase":
++      return messageOf(operation.replaying);
++    case "CherryPick":
++      return messageOf(operation.picking);
++    case "Revert":
++      return messageOf(operation.reverting);
++    case "Am":
++      return [operation.message.trim()];
++    default: {
++      const _exhaustive: never = operation;
++      return _exhaustive;
++    }
++  }
++}
++
++export function operationLine(operation: OperationView): OperationLine {
++  const text = lineText(operation);
++  const tooltip = [text, ...messages(operation)].filter((part) => part !== "").join("\n\n");
++  return { text, tooltip };
++}
++
++export function abortLabel(operation: OperationView): string {
++  return `Abort ${NAMES[operation.kind]}`;
++}
++
++export function abortTitle(operation: OperationView): string {
++  return `Abort ${TITLES[operation.kind]}`;
++}
++
++function stepsDone(operation: OperationView): number {
++  switch (operation.kind) {
++    case "Merge":
++    case "SquashMerge":
++      return 0;
++    case "Rebase":
++    case "CherryPick":
++    case "Revert":
++    case "Am":
++      return operation.progress === null ? 0 : operation.progress.step - 1;
++    default: {
++      const _exhaustive: never = operation;
++      return _exhaustive;
++    }
++  }
++}
++
++function doneSentence(operation: OperationView): string {
++  const done = stepsDone(operation);
++  const words = DONE_STEPS[operation.kind];
++  if (done === 0 || words === null) {
++    return "";
++  }
++  const [one, many] = words;
++  return done === 1 ? ` The 1 ${one} undone too.` : ` The ${done} ${many} undone too.`;
++}
++
++export function abortMessage(operation: OperationView): string {
++  const name = NAMES[operation.kind];
++  return `Every resolution and every save in this ${name} will be lost, and so will unsaved edits.${doneSentence(operation)} The repository goes back to how it was before the ${name}, and yamt closes.`;
++}
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 67da9a2..6da380c 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -1,6 +1,12 @@
+ import type { ShallowRef } from "vue";
+ 
+-import { log, type KeyProblem, type SourceFailure, type SourceResult } from "../ipc";
++import {
++  log,
++  type KeyProblem,
++  type OperationKind,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
+ 
+ type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
+ 
+@@ -14,7 +20,16 @@ export type ProblemCause = SourceFailure | Unexpected;
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+-  | { readonly action: "abort"; readonly cause: ProblemCause }
++  | {
++      readonly action: "abort";
++      readonly operation: OperationKind;
++      readonly cause: ProblemCause;
++    }
++  | {
++      readonly action: "stopped";
++      readonly operation: OperationKind | null;
++      readonly message: string;
++    }
+   | {
+       readonly action: "open" | "finish" | "save" | "take" | "reset";
+       readonly path: string;
+@@ -45,9 +60,17 @@ export function logProblem(problem: Problem): void {
+   const event = `store.${problem.action}_failed`;
+   switch (problem.action) {
+     case "list":
+-    case "abort":
+       log.error(event, { ...problem.cause });
+       return;
++    case "abort":
++      log.error(event, { operation: problem.operation, ...problem.cause });
++      return;
++    case "stopped":
++      log.info("store.stopped", {
++        operation: problem.operation ?? "none",
++        message: problem.message,
++      });
++      return;
+     case "settings": {
+       const { cause } = problem;
+       const fields = cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : cause;
+@@ -79,6 +102,7 @@ export function clearProblemAbout(target: Target, path: string): void {
+     problem === null ||
+     problem.action === "list" ||
+     problem.action === "abort" ||
++    problem.action === "stopped" ||
+     problem.action === "settings"
+   ) {
+     return;
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 3e3078f..dab8975 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -165,7 +165,28 @@ test.each([
+   ["NoOperation", "Git has no operation to continue or abort."],
+ ] as const)("%s says what git is at, whatever was tried", (kind, words) => {
+   expect(text({ action: "save", path: PATH, cause: { kind } })).toBe(words);
+-  expect(text({ action: "abort", cause: { kind } })).toBe(words);
++  expect(text({ action: "abort", operation: "Rebase", cause: { kind } })).toBe(words);
++});
++
++test.each([
++  ["Merge", "Could not abort the merge: error: Entry 'a.ts' not uptodate."],
++  ["Rebase", "Could not abort the rebase: error: Entry 'a.ts' not uptodate."],
++  ["Am", "Could not abort the patch application: error: Entry 'a.ts' not uptodate."],
++] as const)("an abort git refused names the %s", (operation, words) => {
++  const cause = { kind: "Git", message: "error: Entry 'a.ts' not uptodate.\n" } as const;
++
++  expect(text({ action: "abort", operation, cause })).toBe(words);
++});
++
++test("a stop with nothing to list shows git's message as it came, naming the operation or git", () => {
++  const message = "Rebasing (2/3)\rerror: could not apply cdc3800... card title\n";
++
++  expect(text({ action: "stopped", operation: "Rebase", message })).toBe(
++    "The rebase stopped: Rebasing (2/3)\rerror: could not apply cdc3800... card title",
++  );
++  expect(text({ action: "stopped", operation: null, message: "hook failed" })).toBe(
++    "Git stopped: hook failed",
++  );
+ });
+ 
+ test("key problems name the action, the key and what yamt does instead", () => {
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index ae5a35a..2ed1a64 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -1,7 +1,10 @@
+ import { keyLabel, type KeyProblem } from "../ipc";
+ import { ACTION_NAMES } from "./keyText";
++import { operationName } from "./operationText";
+ import type { Problem, ProblemCause } from "./problem";
+ 
++type CausedProblem = Exclude<Problem, { action: "stopped" }>;
++
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
+ const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
+@@ -15,7 +18,7 @@ const OPERATION_STATE_WORDS: Readonly<
+   NoOperation: "Git has no operation to continue or abort.",
+ };
+ 
+-function attempted(problem: Problem): string {
++function attempted(problem: CausedProblem): string {
+   switch (problem.action) {
+     case "list":
+       return "Could not list the conflicted files";
+@@ -32,7 +35,7 @@ function attempted(problem: Problem): string {
+     case "settings":
+       return "Could not use the settings file";
+     case "abort":
+-      return "Could not abort the merge";
++      return `Could not abort the ${operationName(problem.operation)}`;
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+@@ -88,7 +91,7 @@ function keyProblemText(path: string, problem: KeyProblem, platform: string): st
+   }
+ }
+ 
+-export function problemText(problem: Problem, platform: string): string {
++function causedText(problem: CausedProblem, platform: string): string {
+   const { cause } = problem;
+   switch (cause.kind) {
+     case "Git":
+@@ -126,3 +129,11 @@ export function problemText(problem: Problem, platform: string): string {
+     }
+   }
+ }
++
++export function problemText(problem: Problem, platform: string): string {
++  if (problem.action !== "stopped") {
++    return causedText(problem, platform);
++  }
++  const who = problem.operation === null ? "Git" : `The ${operationName(problem.operation)}`;
++  return `${who} stopped: ${problem.message.trim()}`;
++}
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index 3337f1e..3a79ae9 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -140,3 +140,35 @@ test("the servers question lists the found servers per project folder, the added
+     ],
+   });
+ });
++
++test("aborting a merge asks with plan #74's words, unchanged", () => {
++  const operation = { kind: "Merge", merging: null, into: null } as const;
++
++  expect(questionText({ kind: "abort", operation }, LINUX)).toEqual({
++    title: "Abort Merge",
++    message:
++      "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Abort Merge",
++    cancel: "Cancel",
++  });
++});
++
++test("aborting a rebase names it and counts the commits already replayed", () => {
++  const operation = {
++    kind: "Rebase",
++    branch: "feature",
++    onto: null,
++    replaying: null,
++    progress: { step: 3, total: 3 },
++    editor_steps_ahead: false,
++  } as const;
++
++  const text = questionText({ kind: "abort", operation }, LINUX);
++
++  expect([text.title, text.confirm]).toEqual(["Abort Rebase", "Abort Rebase"]);
++  expect(text.message).toBe(
++    "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The 2 commits already replayed are undone too. The repository goes back to how it was before the rebase, and yamt closes.",
++  );
++});
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index f06b2f3..15f8b40 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -1,14 +1,15 @@
+-import { keyLabel } from "../ipc";
++import { keyLabel, type OperationView } from "../ipc";
+ import type { ServerSpec } from "../lsp";
+ import type { Clash } from "./keymapEdit";
+ import { ACTION_NAMES } from "./keyText";
++import { abortMessage, abortTitle } from "./operationText";
+ import { projectLabel, serverLabel } from "./serverText";
+ import type { MergeSummary } from "./useMergeController";
+ 
+ export type Question =
+   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
+   | { readonly kind: "exit"; readonly files: readonly string[] }
+-  | { readonly kind: "abort" }
++  | { readonly kind: "abort"; readonly operation: OperationView }
+   | ({ readonly kind: "clash" } & Clash)
+   | {
+       readonly kind: "servers";
+@@ -30,16 +31,6 @@ export type QuestionText = {
+   readonly cancel: string;
+ };
+ 
+-const ABORT_TEXT: QuestionText = {
+-  title: "Abort Merge",
+-  message:
+-    "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
+-  list: { kind: "none" },
+-  note: null,
+-  confirm: "Abort Merge",
+-  cancel: "Cancel",
+-};
+-
+ function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
+   const folders = [...new Set(found.map((spec) => spec.project))];
+   const foundLines = folders.map((folder) => {
+@@ -75,6 +66,18 @@ function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
+   return `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`;
+ }
+ 
++function abortText(operation: OperationView): QuestionText {
++  const title = abortTitle(operation);
++  return {
++    title,
++    message: abortMessage(operation),
++    list: { kind: "none" },
++    note: null,
++    confirm: title,
++    cancel: "Cancel",
++  };
++}
++
+ export function questionText(question: Question, platform: string): QuestionText {
+   switch (question.kind) {
+     case "unprocessed":
+@@ -107,7 +110,7 @@ export function questionText(question: Question, platform: string): QuestionText
+     case "servers":
+       return serversText(question.found, question.added);
+     case "abort":
+-      return ABORT_TEXT;
++      return abortText(question.operation);
+     default: {
+       const _exhaustive: never = question;
+       return _exhaustive;
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index a75c111..63d5591 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -17,7 +17,15 @@ import {
+ import type { Notice } from "./noticeText";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+-import { afterWrite, claimWrite, createSaving, finish, whileWriting, type Writing } from "./saving";
++import {
++  afterWrite,
++  claimWrite,
++  createSaving,
++  dropClaims,
++  finish,
++  whileWriting,
++  type Writing,
++} from "./saving";
+ import type { Taken } from "./sides";
+ import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
+ 
+@@ -300,6 +308,54 @@ test("a save while a save of the same file runs is ignored; typing during the wr
+   expect(a.snapshot().unsaved).toBe(false);
+ });
+ 
++test("after dropClaims a save's and a finish's late replies change nothing, and a new claim on the path outlives the old one", async () => {
++  const saves: Answer[] = [];
++  const finishes: Answer[] = [];
++  const target = writeTarget([entry("a.ts"), entry("b.ts")], {
++    saveFile: () => answeredLater(saves),
++    finishFile: () => answeredLater(finishes),
++  });
++  const saving = createSaving(target);
++  const a = new Editor("a\n");
++  const b = new Editor("b\n");
++  a.text = "typed\n";
++  const saved = saving.save({ path: "a.ts", diskVersion: VERSION, handle: a.handle() });
++  const finished = finish(target, {
++    path: "b.ts",
++    diskVersion: VERSION,
++    summary: NOTHING_LEFT,
++    snapshot: b.snapshot(),
++  });
++  await vi.waitFor(() => {
++    expect([saves.length, finishes.length]).toEqual([1, 1]);
++  });
++  const before = target.files.value;
++
++  dropClaims(target);
++  expect(target.writing.size).toBe(0);
++  const releases: (() => void)[] = [];
++  const next = claimWrite(
++    target,
++    "a.ts",
++    () =>
++      new Promise<void>((resolve) => {
++        releases.push(resolve);
++      }),
++  );
++  saves[0]?.({ ok: false, failure: { kind: "StopMovedOn" } });
++  finishes[0]?.(written([resolvedEntry("b.ts")]));
++
++  expect(await finished).toBe(false);
++  await saved;
++  expect(target.writing.has("a.ts")).toBe(true);
++  expect(target.files.value).toBe(before);
++  expect(target.problem.value).toBeNull();
++  expect([a.marks, b.marks]).toEqual([[], []]);
++  releases[0]?.();
++  await next;
++  expect(target.writing.has("a.ts")).toBe(false);
++});
++
+ test("claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended", async () => {
+   const target: Writing = { writing: new Map() };
+   const ran: string[] = [];
+@@ -422,7 +478,7 @@ test("afterWrite takes git's list and says whether the write landed; a disk chan
+   expect(target.files.value).toEqual(files);
+   expect(target.loads).toEqual(["a.ts"]);
+   expect(target.notices.value).toEqual([
+-    { path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "running" },
++    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "running" },
+   ]);
+ });
+ 
+@@ -449,7 +505,7 @@ test("a save refused because the file changed on disk marks nothing saved and sh
+   expect(target.loads).toEqual(["a.ts"]);
+   expect(target.opened.value[0]).not.toBe(shown);
+   expect(target.notices.value).toEqual([
+-    { path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
++    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
+   ]);
+   expect(target.problem.value).toBeNull();
+ });
+diff --git a/frontend/src/ui/saving.ts b/frontend/src/ui/saving.ts
+index 942a643..6b35aef 100644
+--- a/frontend/src/ui/saving.ts
++++ b/frontend/src/ui/saving.ts
+@@ -11,8 +11,9 @@ import type {
+   MergeSummary,
+   ResultSnapshot,
+ } from "./useMergeController";
++import { reload } from "./views";
+ 
+-type Claim = { writes: number; overtaken: boolean };
++type Claim = { writes: number; overtaken: boolean; dropped: boolean };
+ 
+ export type Writing = { readonly writing: Map<string, Claim> };
+ 
+@@ -66,26 +67,34 @@ async function holding<T>(
+     return await write(claim);
+   } finally {
+     claim.writes -= 1;
+-    if (claim.writes === 0) {
++    if (claim.writes === 0 && target.writing.get(path) === claim) {
+       target.writing.delete(path);
+     }
+   }
+ }
+ 
+ function freeClaim(): Claim {
+-  return { writes: 0, overtaken: false };
++  return { writes: 0, overtaken: false, dropped: false };
+ }
+ 
+ export async function whileWriting<T>(
+   target: Writing,
+   path: string,
+-  write: () => Promise<T>,
++  write: (claim: Readonly<Claim>) => Promise<T>,
+ ): Promise<T> {
+   const claim = target.writing.get(path) ?? freeClaim();
+   claim.overtaken = true;
+   return holding(target, path, claim, write);
+ }
+ 
++export function dropClaims(target: Writing): void {
++  for (const claim of target.writing.values()) {
++    claim.overtaken = true;
++    claim.dropped = true;
++  }
++  target.writing.clear();
++}
++
+ export async function claimWrite(
+   target: Writing,
+   path: string,
+@@ -106,9 +115,13 @@ export async function finish(
+     return false;
+   }
+   const text = snapshot.asShown();
+-  const outcome = await whileWriting(target, path, () =>
+-    attempt(() => target.source.finishFile({ path, text, diskVersion })),
+-  );
++  const outcome = await whileWriting(target, path, async (claim) => {
++    const reply = await attempt(() => target.source.finishFile({ path, text, diskVersion }));
++    return claim.dropped ? null : reply;
++  });
++  if (outcome === null) {
++    return false;
++  }
+   if (!outcome.ok) {
+     report(target, { action: "finish", path, cause: outcome.cause });
+     return false;
+@@ -121,9 +134,35 @@ export async function finish(
+   return true;
+ }
+ 
++export async function reset(
++  target: SaveTarget,
++  path: string,
++  diskVersion: DiskVersion,
++): Promise<void> {
++  await whileWriting(target, path, async (claim) => {
++    const outcome = await attempt(() => target.source.resetFile(path, diskVersion));
++    if (claim.dropped) {
++      return;
++    }
++    if (!outcome.ok) {
++      report(target, { action: "reset", path, cause: outcome.cause });
++      return;
++    }
++    if (!(await afterWrite(target, path, outcome.value))) {
++      return;
++    }
++    target.choices.value = target.choices.value.filter((sides) => sides.path !== path);
++    target.taken.value = new Map([...target.taken.value].filter(([taken]) => taken !== path));
++    if (await reload(target, path)) {
++      clearProblemAbout(target, path);
++    }
++  });
++}
++
+ async function written(
+   target: SaveTarget,
+   { path, diskVersion, handle }: SaveRequest,
++  claim: Readonly<Claim>,
+ ): Promise<void> {
+   const snapshot = handle.snapshot();
+   if (snapshot === null || !snapshot.unsaved) {
+@@ -135,6 +174,9 @@ async function written(
+   const sent: WrittenText = resolved ? "asShown" : "fileText";
+   const text = snapshot[sent]();
+   const outcome = await attempt(() => target.source.saveFile({ path, text, diskVersion }));
++  if (claim.dropped) {
++    return;
++  }
+   if (!outcome.ok) {
+     report(target, { action: "save", path, cause: outcome.cause });
+     return;
+@@ -156,7 +198,7 @@ export function createSaving(target: SaveTarget): Saving {
+           formatOutcomes.value = new Map([...formatOutcomes.value, [request.path, formatted]]);
+         }
+         if (!claim.overtaken) {
+-          await written(target, request);
++          await written(target, request, claim);
+         }
+       }),
+   };
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+new file mode 100644
+index 0000000..1b36575
+--- /dev/null
++++ b/frontend/src/ui/stops.test.ts
+@@ -0,0 +1,205 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef, type ShallowRef } from "vue";
++
++import {
++  loadFixture,
++  type FileEntry,
++  type FileMergeData,
++  type FileSides,
++  type OperationView,
++} from "../ipc";
++import type { Notice } from "./noticeText";
++import type { Problem } from "./problem";
++import { problemText } from "./problemText";
++import { claimWrite } from "./saving";
++import type { Screen } from "./screen";
++import type { Taken } from "./sides";
++import { nextStop, type StopTarget } from "./stops";
++
++const LINUX = "Linux x86_64";
++const MAGIC_KEYS = await loadFixture("vueuse-use-magic-keys.ts");
++const LOGO: FileSides = {
++  path: "logo.png",
++  reason: "Binary",
++  local: { kind: "Binary", bytes: 10 },
++  remote: { kind: "Binary", bytes: 12 },
++  diskVersion: MAGIC_KEYS.diskVersion,
++};
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: { kind: "Branch", name: "main" },
++  replaying: null,
++  progress: { step: 1, total: 3 },
++  editor_steps_ahead: false,
++};
++const NEXT_STEP: OperationView = { ...REBASE, progress: { step: 2, total: 3 } };
++
++type Stop = StopTarget & {
++  readonly lists: number[];
++  readonly operation: ShallowRef<OperationView | null>;
++};
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function stopAt(
++  unsaved: readonly string[],
++  nextFiles: readonly FileEntry[] | null = [
++    { path: "c.ts", status: "Unresolved", unsupported: null },
++  ],
++): Stop {
++  const lists: number[] = [];
++  const stop: Stop = {
++    lists,
++    opened: shallowRef<readonly FileMergeData[]>([
++      { ...MAGIC_KEYS, path: "a.ts" },
++      { ...MAGIC_KEYS, path: "b.ts" },
++    ]),
++    choices: shallowRef<readonly FileSides[]>([LOGO]),
++    problem: shallowRef<Problem | null>({ action: "list", cause: { kind: "GitRunning" } }),
++    writing: new Map(),
++    taken: shallowRef<ReadonlyMap<string, Taken>>(new Map([[LOGO.path, { by: "disk" }]])),
++    notices: shallowRef<readonly Notice[]>([
++      {
++        kind: "disk",
++        path: "a.ts",
++        result: { kind: "Staged" },
++        editsDropped: false,
++        when: "start",
++      },
++    ]),
++    active: shallowRef<string | null>("a.ts"),
++    screen: shallowRef<Screen>({ kind: "serverLog", name: "oxlint" }),
++    operation: shallowRef<OperationView | null>(REBASE),
++    guard: { unsavedFiles: () => [...unsaved] },
++    latestOpen: 4,
++    loadFiles: () => {
++      lists.push(stop.latestOpen);
++      stop.operation.value = NEXT_STEP;
++      if (nextFiles !== null) {
++        stop.active.value = nextFiles[0]?.path ?? null;
++      }
++      return Promise.resolve(nextFiles);
++    },
++  };
++  return stop;
++}
++
++function quiet(): void {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++}
++
++test("a new stop drops every opened file, choice, side taken, notice, problem and the shown file, and shows the files", async () => {
++  quiet();
++  const stop = stopAt([]);
++  const seen: unknown[] = [];
++  const listing = stop.loadFiles.bind(stop);
++  stop.loadFiles = () => {
++    seen.push({
++      opened: stop.opened.value,
++      choices: stop.choices.value,
++      taken: stop.taken.value,
++      notices: stop.notices.value,
++      active: stop.active.value,
++      problem: stop.problem.value,
++      screen: stop.screen.value,
++    });
++    return listing();
++  };
++
++  await nextStop(stop, { kind: "outside" });
++
++  expect(seen).toEqual([
++    {
++      opened: [],
++      choices: [],
++      taken: new Map(),
++      notices: [],
++      active: null,
++      problem: null,
++      screen: { kind: "files" },
++    },
++  ]);
++});
++
++test("the list runs after the opens are bumped, so a load still running for the old stop lands nowhere", async () => {
++  quiet();
++  const stop = stopAt([]);
++
++  await nextStop(stop, { kind: "outside" });
++
++  expect(stop.lists).toEqual([5]);
++  expect(stop.active.value).toBe("c.ts");
++});
++
++test("a write still running for the old stop is dropped: its claim is gone and marked overtaken", async () => {
++  quiet();
++  const stop = stopAt([]);
++  const claims: { overtaken: boolean; dropped: boolean }[] = [];
++  const releases: (() => void)[] = [];
++  const writing = claimWrite(stop, "a.ts", async (claim) => {
++    await new Promise<void>((resolve) => {
++      releases.push(resolve);
++    });
++    claims.push({ overtaken: claim.overtaken, dropped: claim.dropped });
++  });
++
++  await nextStop(stop, { kind: "outside" });
++  expect(stop.writing.size).toBe(0);
++  releases[0]?.();
++  await writing;
++
++  expect(claims).toEqual([{ overtaken: true, dropped: true }]);
++});
++
++test("moved on outside with unsaved edits: one notice names the operation and every dropped file", async () => {
++  quiet();
++  const stop = stopAt(["a.ts", "b.ts"]);
++
++  await nextStop(stop, { kind: "outside" });
++
++  expect(stop.notices.value).toEqual([
++    { kind: "movedOn", operation: "Rebase", files: ["a.ts", "b.ts"] },
++  ]);
++});
++
++test("moved on outside without unsaved edits, or continued with them, gives no notice", async () => {
++  quiet();
++  const clean = stopAt([]);
++  const continued = stopAt(["a.ts"]);
++
++  await nextStop(clean, { kind: "outside" });
++  await nextStop(continued, { kind: "continued", message: "CONFLICT (content)" });
++
++  expect([clean.notices.value, continued.notices.value]).toEqual([[], []]);
++});
++
++test("continued to a stop that lists no file shows git's message, naming the new stop's operation", async () => {
++  quiet();
++  const stop = stopAt([], []);
++
++  await nextStop(stop, { kind: "continued", message: "error: could not apply 8b4e7d0\n" });
++
++  const problem = stop.problem.value;
++  expect(problem).toEqual({
++    action: "stopped",
++    operation: "Rebase",
++    message: "error: could not apply 8b4e7d0\n",
++  });
++  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
++    "The rebase stopped: error: could not apply 8b4e7d0",
++  );
++});
++
++test("continued to a stop with files, or one whose list failed, shows no message", async () => {
++  quiet();
++  const listed = stopAt([]);
++  const failed = stopAt([], null);
++
++  await nextStop(listed, { kind: "continued", message: "CONFLICT (content)" });
++  await nextStop(failed, { kind: "continued", message: "CONFLICT (content)" });
++
++  expect([listed.problem.value, failed.problem.value]).toEqual([null, null]);
++});
+diff --git a/frontend/src/ui/stops.ts b/frontend/src/ui/stops.ts
+new file mode 100644
+index 0000000..b0f820b
+--- /dev/null
++++ b/frontend/src/ui/stops.ts
+@@ -0,0 +1,58 @@
++import type { ShallowRef } from "vue";
++
++import { log, type FileEntry, type OperationView } from "../ipc";
++import type { CloseGuard } from "./closeGuard";
++import type { Notice } from "./noticeText";
++import { logProblem, type Problem } from "./problem";
++import { dropClaims, type Writing } from "./saving";
++import type { Screen } from "./screen";
++import type { Taken } from "./sides";
++import type { Shown } from "./views";
++
++export type StopEnd =
++  | { readonly kind: "outside" }
++  | { readonly kind: "continued"; readonly message: string };
++
++export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
++  Writing & {
++    readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
++    readonly notices: ShallowRef<readonly Notice[]>;
++    readonly active: ShallowRef<string | null>;
++    readonly screen: ShallowRef<Screen>;
++    readonly operation: Readonly<ShallowRef<OperationView | null>>;
++    readonly guard: Pick<CloseGuard, "unsavedFiles">;
++    latestOpen: number;
++    loadFiles(): Promise<readonly FileEntry[] | null>;
++  };
++
++function clearStop(target: StopTarget): void {
++  target.latestOpen += 1;
++  dropClaims(target);
++  target.opened.value = [];
++  target.choices.value = [];
++  target.taken.value = new Map();
++  target.notices.value = [];
++  target.active.value = null;
++  target.problem.value = null;
++  target.screen.value = { kind: "files" };
++}
++
++export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> {
++  const dropped = target.guard.unsavedFiles();
++  const before = target.operation.value?.kind ?? null;
++  log.info("stop.next", { end: end.kind, operation: before ?? "none", dropped: dropped.length });
++  clearStop(target);
++  if (end.kind === "outside" && dropped.length > 0) {
++    target.notices.value = [{ kind: "movedOn", operation: before, files: dropped }];
++  }
++  const listed = await target.loadFiles();
++  if (end.kind === "continued" && listed !== null && listed.length === 0) {
++    const stopped: Problem = {
++      action: "stopped",
++      operation: target.operation.value?.kind ?? null,
++      message: end.message,
++    };
++    logProblem(stopped);
++    target.problem.value = stopped;
++  }
++}
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index a6bddd5..23d2760 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -10,12 +10,13 @@ import {
+   type DiskResult,
+   type DiskVersion,
+   type FileEntry,
+-  type FileList,
++  type Listing,
+   type FileMergeData,
+   type FileSides,
+   type Key,
+   type SettingsRead,
+   type SettingsSource,
++  type OperationView,
+   type SideNames,
+   type SourceFailure,
+   type SourceResult,
+@@ -25,7 +26,6 @@ import {
+ import { LanguageServers } from "../lsp";
+ import { resultLine } from "./choiceText";
+ import type { FileWork } from "./closeGuard";
+-import { problemText } from "./problemText";
+ import { formatNote } from "./serverText";
+ import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
+ import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
+@@ -87,11 +87,19 @@ function ok<T>(value: T): SourceResult<T> {
+   return { ok: true, value };
+ }
+ 
++const MERGING: OperationView = { kind: "Merge", merging: null, into: null };
++
+ function listing(
+   files: readonly FileEntry[],
+   diskChanges: readonly DiskChange[] = [],
+-): SourceResult<FileList> {
+-  return ok({ files, diskChanges, merging: true });
++): SourceResult<Listing> {
++  return ok({
++    kind: "Files",
++    files,
++    diskChanges,
++    operation: MERGING,
++    sides: { local: null, remote: null },
++  });
+ }
+ 
+ function written(files: FileEntry[]): SourceResult<WriteReply> {
+@@ -121,7 +129,7 @@ async function dataFor(path: string): Promise<FileMergeData> {
+ function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
+   const pending: PendingLoad[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve(listing(files)),
++    listFiles: () => Promise.reject(new Error("not used")),
+     loadFile: (path) =>
+       new Promise((resolve, reject) => {
+         pending.push({ path, resolve, reject });
+@@ -133,7 +141,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     takeSide: () => Promise.reject(new Error("not used")),
+     sideNames: () => Promise.resolve({ local: null, remote: null }),
+     abortMerge: () => Promise.reject(new Error("not used")),
+-    listStop: () => Promise.reject(new Error("not used")),
++    listStop: () => Promise.resolve(listing(files)),
+     continueOperation: () => Promise.reject(new Error("not used")),
+     abortOperation: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+@@ -240,7 +248,7 @@ test("a rejected list opens nothing, resolves, and shows an Unexpected list prob
+   const { source, pending } = handSource([]);
+   const store = createAppStore({
+     ...source,
+-    listFiles: () => Promise.reject(new Error("repo gone")),
++    listStop: () => Promise.reject(new Error("repo gone")),
+   });
+ 
+   await expect(store.loadFiles()).resolves.toBeUndefined();
+@@ -693,7 +701,7 @@ test("a failed finish keeps the file shown, the list unresolved and the old save
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git add failed: index.lock exists" };
+   const { store, pending, a } = await openedStore({
+-    listFiles: () => Promise.resolve(listing([entry("a.ts"), entry("b.ts")])),
++    listStop: () => Promise.resolve(listing([entry("a.ts"), entry("b.ts")])),
+     finishFile: () => Promise.resolve({ ok: false, failure: git }),
+   });
+   const view = fakeView(store, "a.ts", "loaded\n");
+@@ -1056,7 +1064,7 @@ function choiceSource(
+ ): { source: ChunkSource; calls: string[] } {
+   const calls: string[] = [];
+   const source: ChunkSource = {
+-    listFiles: () => Promise.resolve(listing(files)),
++    listFiles: () => Promise.reject(new Error("not used")),
+     loadFile: async (path) => {
+       calls.push(`loadFile ${path}`);
+       return ok(await dataFor(path));
+@@ -1080,7 +1088,7 @@ function choiceSource(
+     },
+     sideNames: () => Promise.resolve({ local: null, remote: null }),
+     abortMerge: () => Promise.reject(new Error("not used")),
+-    listStop: () => Promise.reject(new Error("not used")),
++    listStop: () => Promise.resolve(listing(files)),
+     continueOperation: () => Promise.reject(new Error("not used")),
+     abortOperation: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+@@ -1092,7 +1100,7 @@ function choiceSource(
+ test("a list of files the editor cannot show opens the first one's choice and loads nothing", async () => {
+   spyConsole();
+   const { source, calls } = choiceSource({
+-    listFiles: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
++    listStop: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+   });
+   const store = createAppStore(source);
+ 
+@@ -1202,7 +1210,7 @@ test("a failed take keeps the list and the choice and names the file", async ()
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git rm failed" };
+   const { source } = choiceSource({
+-    listFiles: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
++    listStop: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+     takeSide: () => Promise.resolve({ ok: false, failure: git }),
+   });
+   const store = createAppStore(source);
+@@ -1376,7 +1384,7 @@ test("a list refresh changes the marks only: same file shown, same views, anothe
+   spyConsole();
+   let listed = [entry("a.ts"), entry("b.ts"), LOGO_ENTRY];
+   const unknown: SourceFailure = { kind: "UnknownPath", path: "gone.ts" };
+-  const { source } = choiceSource({ listFiles: () => Promise.resolve(listing(listed)) });
++  const { source } = choiceSource({ listStop: () => Promise.resolve(listing(listed)) });
+   const store = createAppStore({
+     ...source,
+     loadFile: async (path) =>
+@@ -1401,9 +1409,9 @@ test("a list refresh changes the marks only: same file shown, same views, anothe
+ test("a failed refresh is a list problem and keeps the marks; the next good one clears only that", async () => {
+   const lines = spyConsole();
+   const git: SourceFailure = { kind: "Git", message: "git ls-files failed" };
+-  let answer: SourceResult<FileList> = listing([entry("a.ts")]);
++  let answer: SourceResult<Listing> = listing([entry("a.ts")]);
+   const { source, pending } = handSource([]);
+-  const store = createAppStore({ ...source, listFiles: () => Promise.resolve(answer) });
++  const store = createAppStore({ ...source, listStop: () => Promise.resolve(answer) });
+   await openNow(store, pending, "a.ts");
+   await store.refreshFiles();
+   const marks = store.files.value;
+@@ -1425,37 +1433,6 @@ test("a failed refresh is a list problem and keeps the marks; the next good one
+   expect(store.active.value).toBe("a.ts");
+ });
+ 
+-test("both side names are asked for once; a failure leaves none and logs a warning", async () => {
+-  const warnings: string[] = [];
+-  vi.spyOn(console, "warn").mockImplementation((line: string) => {
+-    warnings.push(line);
+-  });
+-  const { source } = handSource([]);
+-  const names: SideNames = {
+-    local: { kind: "Branch", name: "local" },
+-    remote: { kind: "Commit", short_id: "1a2b3c4", subject: "Fix", message: "Fix\n\nbody" },
+-  };
+-  const named = createAppStore({ ...source, sideNames: () => Promise.resolve(names) });
+-
+-  expect(named.sideNames.value).toEqual({ local: null, remote: null });
+-
+-  await named.loadSideNames();
+-
+-  expect(named.sideNames.value).toEqual(names);
+-
+-  const failing = createAppStore({
+-    ...source,
+-    sideNames: () => Promise.reject(new Error("ipc down")),
+-  });
+-  await expect(failing.loadSideNames()).resolves.toBeUndefined();
+-
+-  expect(failing.sideNames.value).toEqual({ local: null, remote: null });
+-  expect(failing.problem.value).toBeNull();
+-  expect(warnings).toEqual([
+-    '[warn] store.side_names_failed {kind: "Unexpected", message: "ipc down"}',
+-  ]);
+-});
+-
+ const STAGED: DiskResult = { kind: "Staged" };
+ const TWO_LEFT: DiskResult = { kind: "MarkersLeft", conflicts: 2 };
+ 
+@@ -1485,7 +1462,7 @@ test.each([true, false])(
+   async (edited) => {
+     const lines = spyConsole();
+     let listed = listing([entry("a.ts"), LOGO_ENTRY]);
+-    const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
++    const { source, calls } = choiceSource({ listStop: () => Promise.resolve(listed) });
+     const store = createAppStore(source);
+     await store.loadFiles();
+     await store.takeSide("a.ts", "local", VERSION_0);
+@@ -1503,7 +1480,7 @@ test.each([true, false])(
+     expect(store.opened.value).toHaveLength(1);
+     expect(store.opened.value[0]).not.toBe(shown);
+     expect(store.notices.value).toEqual([
+-      { path: "a.ts", result: TWO_LEFT, editsDropped: edited, when: "running" },
++      { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: edited, when: "running" },
+     ]);
+     expect(store.taken.value).toEqual(new Map());
+     expect(store.unsavedFiles()).toEqual([]);
+@@ -1516,7 +1493,7 @@ test.each([true, false])(
+ test("a change to a file that is not shown gives only its notice and its mark", async () => {
+   spyConsole();
+   let listed = listing([entry("a.ts"), entry("b.ts")]);
+-  const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
++  const { source, calls } = choiceSource({ listStop: () => Promise.resolve(listed) });
+   const store = createAppStore(source);
+   await store.loadFiles();
+   const shown = store.opened.value;
+@@ -1530,7 +1507,7 @@ test("a change to a file that is not shown gives only its notice and its mark",
+   expect(store.choices.value).toEqual([]);
+   expect(store.taken.value).toEqual(new Map());
+   expect(store.notices.value).toEqual([
+-    { path: "b.ts", result: STAGED, editsDropped: false, when: "running" },
++    { kind: "disk", path: "b.ts", result: STAGED, editsDropped: false, when: "running" },
+   ]);
+   expect(store.problem.value).toBeNull();
+ });
+@@ -1538,8 +1515,7 @@ test("a change to a file that is not shown gives only its notice and its mark",
+ test("changes reported by the first list are start notices; the file then opens from the disk", async () => {
+   spyConsole();
+   const { source, calls } = choiceSource({
+-    listFiles: () =>
+-      Promise.resolve(listing([entry("a.ts")], [{ path: "a.ts", result: TWO_LEFT }])),
++    listStop: () => Promise.resolve(listing([entry("a.ts")], [{ path: "a.ts", result: TWO_LEFT }])),
+   });
+   const store = createAppStore(source);
+ 
+@@ -1548,7 +1524,7 @@ test("changes reported by the first list are start notices; the file then opens
+   expect(calls).toEqual(["loadFile a.ts"]);
+   expect(store.active.value).toBe("a.ts");
+   expect(store.notices.value).toEqual([
+-    { path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "start" },
++    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "start" },
+   ]);
+ });
+ 
+@@ -1560,7 +1536,7 @@ test("a newer change replaces the notice for its path; dismissNotice removes jus
+     { path: "b.ts", result: TWO_LEFT },
+     { path: "c.ts", result: STAGED },
+   ]);
+-  const { source } = choiceSource({ listFiles: () => Promise.resolve(listed) });
++  const { source } = choiceSource({ listStop: () => Promise.resolve(listed) });
+   const store = createAppStore(source);
+   await store.loadFiles();
+   listed = listing(files, [{ path: "b.ts", result: oneLeft }]);
+@@ -1568,14 +1544,14 @@ test("a newer change replaces the notice for its path; dismissNotice removes jus
+   await store.refreshFiles();
+ 
+   expect(store.notices.value).toEqual([
+-    { path: "c.ts", result: STAGED, editsDropped: false, when: "start" },
+-    { path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
++    { kind: "disk", path: "c.ts", result: STAGED, editsDropped: false, when: "start" },
++    { kind: "disk", path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
+   ]);
+ 
+-  store.dismissNotice("c.ts");
++  store.dismissNotice("disk:c.ts");
+ 
+   expect(store.notices.value).toEqual([
+-    { path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
++    { kind: "disk", path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
+   ]);
+ });
+ 
+@@ -1585,7 +1561,7 @@ test("a choice staged from the disk is taken by the disk, a deleted-side file is
+   let listed = listing(files);
+   const { source, calls } = choiceSource(
+     {
+-      listFiles: () => Promise.resolve(listed),
++      listStop: () => Promise.resolve(listed),
+       loadFile: async (path) => {
+         calls.push(`loadFile ${path}`);
+         return ok({ ...(await dataFor(path)), deleted: "remote" });
+@@ -1611,7 +1587,7 @@ test("a choice staged from the disk is taken by the disk, a deleted-side file is
+ test("a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled", async () => {
+   spyConsole();
+   const { source, calls } = choiceSource({
+-    listFiles: () =>
++    listStop: () =>
+       Promise.resolve(
+         listing(
+           [entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }],
+@@ -1632,7 +1608,7 @@ test("a choice file staged from the disk before start opens later taken by the d
+     "Changed on disk — staged as it is.",
+   );
+   expect(store.notices.value).toEqual([
+-    { path: LOGO, result: STAGED, editsDropped: false, when: "start" },
++    { kind: "disk", path: LOGO, result: STAGED, editsDropped: false, when: "start" },
+   ]);
+ });
+ 
+@@ -1644,7 +1620,7 @@ test("a change git could not stage is a warning notice, not a problem", async ()
+   spyConsole();
+   const failed: DiskResult = { kind: "StageFailed", message: "index.lock exists" };
+   const { source } = choiceSource({
+-    listFiles: () =>
++    listStop: () =>
+       Promise.resolve(listing([entry("a.ts"), entry("b.ts")], [{ path: "b.ts", result: failed }])),
+   });
+   const store = createAppStore(source);
+@@ -1653,7 +1629,7 @@ test("a change git could not stage is a warning notice, not a problem", async ()
+ 
+   expect(store.problem.value).toBeNull();
+   expect(store.notices.value).toEqual([
+-    { path: "b.ts", result: failed, editsDropped: false, when: "start" },
++    { kind: "disk", path: "b.ts", result: failed, editsDropped: false, when: "start" },
+   ]);
+   expect(warnings).toEqual([
+     '[warn] file.disk_changed {path: "b.ts", result: "StageFailed", message: "index.lock exists", editsDropped: false, when: "start"}',
+@@ -1686,7 +1662,7 @@ test("a finish refused because the file changed on disk saves nothing, stays, an
+   expect(calls).toEqual(["loadFile a.ts", "loadFile a.ts"]);
+   expect(store.opened.value[0]).not.toBe(shown);
+   expect(store.notices.value).toEqual([
+-    { path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
++    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
+   ]);
+   expect(store.problem.value).toBeNull();
+ });
+@@ -1712,7 +1688,7 @@ test.each(["take", "reset"] as const)(
+     expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
+     expect(store.taken.value).toEqual(new Map());
+     expect(store.notices.value).toEqual([
+-      { path: "a.ts", result: STAGED, editsDropped: false, when: "running" },
++      { kind: "disk", path: "a.ts", result: STAGED, editsDropped: false, when: "running" },
+     ]);
+   },
+ );
+@@ -1884,8 +1860,8 @@ test("start-up loads the file list and the settings; focus loads both again", as
+   const { source, sent } = settingsSource({
+     loadSettings: () => Promise.resolve(read({ ...LIGHT, keys: {} })),
+   });
+-  const lists = vi.fn(() => source.listFiles());
+-  const store = createAppStore({ ...source, listFiles: lists });
++  const lists = vi.fn(() => source.listStop());
++  const store = createAppStore({ ...source, listStop: lists });
+ 
+   await store.startUp();
+ 
+@@ -2541,139 +2517,48 @@ test("the format note: shown after a Save for the four refusals, hidden for the
+   }
+ });
+ 
+-function abortingStore(abortMerge: ChunkSource["abortMerge"]): {
+-  store: AppStore;
+-  pending: PendingLoad[];
+-} {
+-  const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
+-  return { store: createAppStore({ ...source, abortMerge }), pending };
+-}
+-
+-async function pressUnasked(store: AppStore): Promise<void> {
+-  const pressed = store.abortMerge();
+-  expect(store.question.value).toBeNull();
+-  store.dismissQuestion();
+-  await pressed;
+-}
+-
+-test("Abort merge calls git only after a yes; No and Escape change nothing", async () => {
++test("a focus list that finds git moved on outside drops the old stop, names the dropped edits, and opens the new stop's first file", async () => {
+   spyConsole();
+-  let aborts = 0;
+-  const { store } = abortingStore(() => {
+-    aborts += 1;
+-    return Promise.resolve(ok(null));
+-  });
+-  await store.refreshFiles();
+-
+-  const declined = store.abortMerge();
+-  expect(store.question.value).toEqual({ kind: "abort" });
+-  store.answer(false);
+-  await declined;
+-  const escaped = store.abortMerge();
+-  expect(store.question.value).toEqual({ kind: "abort" });
+-  store.dismissQuestion();
+-  await escaped;
+-
+-  expect(aborts).toBe(0);
+-  expect(store.abortState.value).toBe("ready");
+-  expect(store.problem.value).toBeNull();
+-
+-  const confirmed = store.abortMerge();
+-  store.answer(true);
+-  await confirmed;
+-
+-  expect(aborts).toBe(1);
+-  expect(store.abortState.value).toBe("running");
+-  expect(store.problem.value).toBeNull();
+-  await pressUnasked(store);
+-  expect(aborts).toBe(1);
+-});
+-
+-test("a press while the abort runs asks nothing and calls git no second time", async () => {
+-  spyConsole();
+-  const answers: ((result: SourceResult<null>) => void)[] = [];
+-  const { store } = abortingStore(
+-    () =>
+-      new Promise((resolve) => {
+-        answers.push(resolve);
+-      }),
+-  );
+-  await store.refreshFiles();
+-  const first = store.abortMerge();
+-  store.answer(true);
+-  await vi.waitFor(() => {
+-    expect(answers).toHaveLength(1);
+-  });
+-
+-  expect(store.abortState.value).toBe("running");
+-  await pressUnasked(store);
+-  answers[0]?.(ok(null));
+-  await first;
+-
+-  expect(answers).toHaveLength(1);
+-  expect(store.abortState.value).toBe("running");
+-});
+-
+-test("git's refusal shows its message, keeps files and opened views, and a later press asks again", async () => {
+-  const lines = spyConsole();
+-  const refused: SourceFailure = {
+-    kind: "Git",
+-    message: "error: Entry 'a.ts' not uptodate. Cannot merge.\n",
++  const rebase: OperationView = {
++    kind: "Rebase",
++    branch: "feature",
++    onto: null,
++    replaying: null,
++    progress: { step: 1, total: 3 },
++    editor_steps_ahead: false,
+   };
+-  let aborts = 0;
+-  const { store, pending } = abortingStore(() => {
+-    aborts += 1;
+-    return Promise.resolve({ ok: false, failure: refused });
++  const sides: SideNames = { local: { kind: "Branch", name: "x" }, remote: null };
++  const answers: SourceResult<Listing>[] = [
++    ok({ kind: "Files", files: [entry("a.ts")], diskChanges: [], operation: rebase, sides }),
++    ok({ kind: "MovedOn" }),
++    ok({
++      kind: "Files",
++      files: [entry("c.ts")],
++      diskChanges: [],
++      operation: { ...rebase, progress: { step: 2, total: 3 } },
++      sides: { local: null, remote: null },
++    }),
++  ];
++  const { source, calls } = choiceSource({
++    listStop: () => Promise.resolve(answers.shift() ?? ok({ kind: "MovedOn" })),
+   });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  const view = fakeView(store, "a.ts", "loaded\n");
++  view.text = "typed\n";
++  expect(store.operation.value).toBe(rebase);
++
+   await store.refreshFiles();
+-  await openNow(store, pending, "a.ts");
+-  const { files, opened } = store;
+-  const before = { files: files.value, opened: opened.value };
+ 
+-  const refusing = store.abortMerge();
+-  store.answer(true);
+-  await refusing;
+-
+-  const problem = store.problem.value;
+-  expect(problem).toEqual({ action: "abort", cause: refused });
+-  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
+-    "Could not abort the merge: error: Entry 'a.ts' not uptodate. Cannot merge.",
+-  );
+-  expect(lines.error).toEqual([
+-    `[error] store.abort_failed {kind: "Git", message: ${JSON.stringify(refused.message)}}`,
+-  ]);
+-  expect({ files: files.value, opened: opened.value }).toEqual(before);
+-  expect(files.value).toBe(before.files);
+-  expect(opened.value).toBe(before.opened);
+-  expect(store.active.value).toBe("a.ts");
+-  expect(store.abortState.value).toBe("ready");
+-
+-  const again = store.abortMerge();
+-  expect(store.question.value).toEqual({ kind: "abort" });
+-  store.answer(true);
+-  await again;
+-  expect(aborts).toBe(2);
+-});
+-
+-test("the abort state follows git's merging with each list and is noMerge before the first", async () => {
+-  spyConsole();
+-  const merging = [true, false];
+-  const { source } = handSource([entry("a.ts")]);
+-  const store = createAppStore({
+-    ...source,
+-    listFiles: () =>
+-      Promise.resolve(
+-        ok({ files: [entry("a.ts")], diskChanges: [], merging: merging.shift() ?? true }),
+-      ),
++  expect(calls).toEqual(["loadFile a.ts", "loadFile c.ts"]);
++  expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
++  expect(store.active.value).toBe("c.ts");
++  expect(store.operation.value?.kind === "Rebase" && store.operation.value.progress).toEqual({
++    step: 2,
++    total: 3,
+   });
+-
+-  expect(store.merging.value).toBe(false);
+-  expect(store.abortState.value).toBe("noMerge");
+-  await store.refreshFiles();
+-  expect(store.merging.value).toBe(true);
+-  expect(store.abortState.value).toBe("ready");
+-  await store.refreshFiles();
+-  expect(store.merging.value).toBe(false);
+-  expect(store.abortState.value).toBe("noMerge");
+-  await pressUnasked(store);
++  expect(store.sideNames.value).toEqual({ local: null, remote: null });
++  expect(store.notices.value).toEqual([{ kind: "movedOn", operation: "Rebase", files: ["a.ts"] }]);
++  store.dismissNotice("movedOn");
++  expect(store.notices.value).toEqual([]);
+ });
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 44f25d5..ee53494 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -6,6 +6,7 @@ import {
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
++  type OperationView,
+   type ServerHost,
+   type Side,
+   type SideNames,
+@@ -17,13 +18,13 @@ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { createCollapsing, type Collapsing } from "./collapsing";
+ import { fileListKey, type KeyPress } from "./fileListKey";
+-import { loadSideNames, refreshFiles } from "./listing";
++import { refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+-import type { Notice } from "./noticeText";
++import { noticeKey, type Notice } from "./noticeText";
+ import { createPaneSplit, type PaneSplitState } from "./paneSplit";
+ import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
+ import type { Question } from "./question";
+-import { afterWrite, createSaving, finish, whileWriting } from "./saving";
++import { afterWrite, createSaving, finish, reset, whileWriting } from "./saving";
+ import type { FinishRequest, Saving, Writing } from "./saving";
+ import type { Screen } from "./screen";
+ import { createServers, type Servers } from "./servers";
+@@ -31,13 +32,14 @@ import { createServerSetup, type ServerSetup } from "./serverSetup";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+ import type { SettingsActions, SettingsInUse } from "./settings";
+ import type { Taken } from "./sides";
++import { nextStop, type StopEnd } from "./stops";
+ import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
+ import type { Preferences } from "./useMergeController";
+ import { fetchView, isShown, reload } from "./views";
+ 
+ type Refs = {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+-  readonly merging: ShallowRef<boolean>;
++  readonly operation: ShallowRef<OperationView | null>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+   readonly choices: ShallowRef<readonly FileSides[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+@@ -57,20 +59,22 @@ type State = Refs &
+     readonly guard: CloseGuard;
+     latestOpen: number;
+     latestSettings: number;
++    loadFiles(): Promise<readonly FileEntry[] | null>;
++    nextStop(end: StopEnd): Promise<void>;
+   };
+ 
+ type Actions = CloseGuard &
+   SettingsActions & {
+     loadFiles(): Promise<void>;
+     refreshFiles(): Promise<void>;
+-    loadSideNames(): Promise<void>;
++    nextStop(end: StopEnd): Promise<void>;
+     open(path: string): Promise<void>;
+     pick(path: string): Promise<void>;
+     finish(request: FinishRequest): Promise<void>;
+     takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
+     reset(path: string, diskVersion: DiskVersion): Promise<void>;
+     dismissProblem(): void;
+-    dismissNotice(path: string): void;
++    dismissNotice(key: string): void;
+     openSettings(): void;
+     closeSettings(): void;
+     answer(yes: boolean): void;
+@@ -97,7 +101,7 @@ let store: AppStore | null = null;
+ function createRefs(startTheme: Theme): Refs {
+   return {
+     files: shallowRef<readonly FileEntry[]>([]),
+-    merging: shallowRef(false),
++    operation: shallowRef<OperationView | null>(null),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+     choices: shallowRef<readonly FileSides[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+@@ -128,6 +132,8 @@ export function createAppStore(
+     writing: new Map(),
+     latestOpen: 0,
+     latestSettings: 0,
++    loadFiles: () => loadFiles(state),
++    nextStop: (end) => nextStop(state, end),
+   };
+   const { files, settings } = refs;
+   const acts = actions(state, buttons, settingsActions(state));
+@@ -152,11 +158,13 @@ export function createAppStore(
+ 
+ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions): Actions {
+   return {
+-    loadFiles: () => loadFiles(state),
++    loadFiles: async () => {
++      await state.loadFiles();
++    },
+     refreshFiles: async () => {
+       await refreshFiles(state, "running");
+     },
+-    loadSideNames: () => loadSideNames(state),
++    nextStop: (end) => state.nextStop(end),
+     open: (path) => open(state, path),
+     pick: async (path) => {
+       state.screen.value = { kind: "files" };
+@@ -168,8 +176,8 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
+     dismissProblem: () => {
+       state.problem.value = null;
+     },
+-    dismissNotice: (path) => {
+-      state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
++    dismissNotice: (key) => {
++      state.notices.value = state.notices.value.filter((notice) => noticeKey(notice) !== key);
+     },
+     openSettings: () => {
+       state.screen.value = { kind: "settings" };
+@@ -188,12 +196,13 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
+   };
+ }
+ 
+-async function loadFiles(state: State): Promise<void> {
++async function loadFiles(state: State): Promise<readonly FileEntry[] | null> {
+   const listed = await refreshFiles(state, "start");
+   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
+   if (first !== undefined) {
+     await open(state, first.path);
+   }
++  return listed;
+ }
+ 
+ async function finishThenMoveOn(state: State, request: FinishRequest): Promise<void> {
+@@ -251,7 +260,13 @@ async function takeSide(
+   diskVersion: DiskVersion,
+ ): Promise<void> {
+   const opensBefore = state.latestOpen;
+-  const outcome = await attempt(() => state.source.takeSide(path, side, diskVersion));
++  const outcome = await whileWriting(state, path, async (claim) => {
++    const reply = await attempt(() => state.source.takeSide(path, side, diskVersion));
++    return claim.dropped ? null : reply;
++  });
++  if (outcome === null) {
++    return;
++  }
+   if (!outcome.ok) {
+     report(state, { action: "take", path, cause: outcome.cause });
+     return;
+@@ -267,24 +282,6 @@ async function takeSide(
+   await moveOn(state, path, opensBefore);
+ }
+ 
+-async function reset(state: State, path: string, diskVersion: DiskVersion): Promise<void> {
+-  await whileWriting(state, path, async () => {
+-    const outcome = await attempt(() => state.source.resetFile(path, diskVersion));
+-    if (!outcome.ok) {
+-      report(state, { action: "reset", path, cause: outcome.cause });
+-      return;
+-    }
+-    if (!(await afterWrite(state, path, outcome.value))) {
+-      return;
+-    }
+-    state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
+-    state.taken.value = new Map([...state.taken.value].filter(([taken]) => taken !== path));
+-    if (await reload(state, path)) {
+-      clearProblemAbout(state, path);
+-    }
+-  });
+-}
+-
+ export function useAppStore(): AppStore {
+   if (store === null) {
+     throw new Error("useAppStore() called before createAppStore()");
+diff --git a/frontend/src/ui/toolbarButtons.test.ts b/frontend/src/ui/toolbarButtons.test.ts
+index f2ea0b5..394ba2e 100644
+--- a/frontend/src/ui/toolbarButtons.test.ts
++++ b/frontend/src/ui/toolbarButtons.test.ts
+@@ -1,12 +1,15 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
++import type { OperationView } from "../ipc";
++import type { AbortState } from "./aborting";
+ import {
+   createHiddenButtons,
+   listedButtons,
+   shownButtons,
+   TOOLBAR_BUTTONS,
+   type HiddenButtons,
++  type ListedButton,
+   type ToolbarButtonId,
+ } from "./toolbarButtons";
+ 
+@@ -174,19 +177,38 @@ test("the toolbar order puts Abort merge first and the collapse toggle after Nex
+   ]);
+ });
+ 
+-test("the menu lists Abort merge only while git has a merge to abort", () => {
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: null,
++  replaying: null,
++  progress: null,
++  editor_steps_ahead: false,
++};
++
++const NONE: AbortState = { kind: "none" };
++const READY: AbortState = { kind: "ready", operation: REBASE };
++const RUNNING: AbortState = { kind: "running", operation: REBASE };
++
++function ids(buttons: readonly ListedButton[]): readonly ToolbarButtonId[] {
++  return buttons.map((button) => button.id);
++}
++
++test("the menu lists Abort only while git records an operation, labelled by it", () => {
+   const withoutAbort = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge");
+ 
+-  expect(listedButtons("noMerge")).toEqual(withoutAbort);
+-  expect(listedButtons("ready")).toEqual(TOOLBAR_BUTTONS);
+-  expect(listedButtons("running")).toEqual(TOOLBAR_BUTTONS);
++  expect(ids(listedButtons(NONE))).toEqual(withoutAbort);
++  expect(ids(listedButtons(READY))).toEqual(TOOLBAR_BUTTONS);
++  expect(ids(listedButtons(RUNNING))).toEqual(TOOLBAR_BUTTONS);
++  expect(listedButtons(READY)[0]).toEqual({ id: "abortMerge", label: "Abort rebase" });
++  expect(listedButtons(NONE)[0]).toEqual({ id: "previous", label: "Previous change" });
+ });
+ 
+-test("the toolbar shows Abort merge only while git has a merge to abort and the user shows it", () => {
++test("the toolbar shows Abort only while git records an operation and the user shows it", () => {
+   const userHidesUndo = new Set<ToolbarButtonId>(["undo"]);
+   const userHidesAbort = new Set<ToolbarButtonId>(["abortMerge", "undo"]);
+ 
+-  expect(shownButtons("ready", userHidesUndo)).toEqual([
++  expect(ids(shownButtons(READY, userHidesUndo))).toEqual([
+     "abortMerge",
+     "previous",
+     "next",
+@@ -195,11 +217,11 @@ test("the toolbar shows Abort merge only while git has a merge to abort and the
+     "applyRight",
+     "redo",
+   ]);
+-  expect(shownButtons("running", userHidesUndo)[0]).toBe("abortMerge");
+-  expect(shownButtons("noMerge", userHidesUndo)).not.toContain("abortMerge");
+-  expect(shownButtons("noMerge", userHidesUndo)).toHaveLength(6);
+-  expect(shownButtons("ready", userHidesAbort)).not.toContain("abortMerge");
+-  expect(shownButtons("ready", userHidesAbort)).toHaveLength(6);
++  expect(shownButtons(RUNNING, userHidesUndo)[0]?.id).toBe("abortMerge");
++  expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("abortMerge");
++  expect(shownButtons(NONE, userHidesUndo)).toHaveLength(6);
++  expect(ids(shownButtons(READY, userHidesAbort))).not.toContain("abortMerge");
++  expect(shownButtons(READY, userHidesAbort)).toHaveLength(6);
+ });
+ 
+ test.each([
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index e790c6a..cd2cc4a 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -2,6 +2,7 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import type { AbortState } from "./aborting";
++import { abortLabel } from "./operationText";
+ import { parseStored, storedValue } from "./windowStorage";
+ 
+ export const TOOLBAR_BUTTONS = [
+@@ -17,6 +18,8 @@ export const TOOLBAR_BUTTONS = [
+ 
+ export type ToolbarButtonId = (typeof TOOLBAR_BUTTONS)[number];
+ 
++export type ListedButton = { readonly id: ToolbarButtonId; readonly label: string };
++
+ export type HiddenButtons = {
+   readonly hidden: Readonly<Ref<ReadonlySet<ToolbarButtonId>>>;
+   readonly toggle: (id: ToolbarButtonId) => void;
+@@ -36,7 +39,17 @@ const OLD_FORMAT_IDS = [
+   "redo",
+ ] as const satisfies readonly ToolbarButtonId[];
+ 
+-// Abort merge, Undo and Redo start hidden until the user shows them (plan §2 #58, #74); the
++const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> = {
++  previous: "Previous change",
++  next: "Next change",
++  collapse: "Collapse unchanged fragments",
++  applyLeft: "Apply non-conflicting changes from the left",
++  applyRight: "Apply non-conflicting changes from the right",
++  undo: "Undo",
++  redo: "Redo",
++};
++
++// Abort, Undo and Redo start hidden until the user shows them (plan §2 #58, #74, #88); the
+ // keys of Undo and Redo still work.
+ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+   abortMerge: true,
+@@ -49,15 +62,20 @@ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+   redo: true,
+ };
+ 
+-export function listedButtons(abort: AbortState): readonly ToolbarButtonId[] {
+-  return TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" || abort !== "noMerge");
++export function listedButtons(abort: AbortState): readonly ListedButton[] {
++  return TOOLBAR_BUTTONS.flatMap((id): ListedButton[] => {
++    if (id !== "abortMerge") {
++      return [{ id, label: LABELS[id] }];
++    }
++    return abort.kind === "none" ? [] : [{ id, label: abortLabel(abort.operation) }];
++  });
+ }
+ 
+ export function shownButtons(
+   abort: AbortState,
+   hidden: ReadonlySet<ToolbarButtonId>,
+-): readonly ToolbarButtonId[] {
+-  return listedButtons(abort).filter((id) => !hidden.has(id));
++): readonly ListedButton[] {
++  return listedButtons(abort).filter((button) => !hidden.has(button.id));
+ }
+ 
+ function readHiddenList(names: readonly unknown[]): Decisions {
+-- 
+2.56.0
+

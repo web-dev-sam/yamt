@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use specta::Type;
-use yamt_gitio::Repo;
+use yamt_gitio::{Repo, Stop};
 
 use crate::decode::UnsupportedReason;
 use crate::disk::{
@@ -10,9 +10,10 @@ use crate::disk::{
     read_on_disk, settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
-use crate::merging::is_merging;
+use crate::orientation::Orientation;
+use crate::remembered::remembered_merge_data;
 use crate::side_names::SideNames;
-use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
+use crate::sides::{FileSides, SUBMODULE_MODE, Side, side_content};
 use crate::stages::CapturedStages;
 use crate::waiting::MarkerStyle;
 use crate::{Error, Result};
@@ -20,6 +21,8 @@ use crate::{Error, Result};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub enum FileStatus {
     Unresolved,
+    /// Unmerged for git, with the resolution git rerere replayed on disk, not yet reviewed (plan §2 #90).
+    Remembered,
     Resolved,
 }
 
@@ -28,15 +31,6 @@ pub struct FileEntry {
     pub path: String,
     pub status: FileStatus,
     pub unsupported: Option<UnsupportedReason>,
-}
-
-/// The files as git sees them, the disk changes settled while looking, and whether a merge is in progress.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
-pub struct FileList {
-    pub files: Vec<FileEntry>,
-    pub disk_changes: Vec<DiskChange>,
-    /// A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74).
-    pub merging: bool,
 }
 
 /// What a write did: written, or nothing written because the file changed on disk first.
@@ -58,6 +52,11 @@ pub struct MergeSession {
     pub(crate) repo: Repo,
     pub(crate) files: Vec<FileState>,
     pub(crate) side_names: SideNames,
+    pub(crate) stop: Stop,
+    /// Decided once at open from `stop` (plan §2 #86).
+    pub(crate) orientation: Orientation,
+    /// The disk version every file starts at: above every version an earlier session of this run gave out (#1383).
+    pub(crate) first_disk_version: DiskVersion,
 }
 
 pub(crate) struct FileState {
@@ -90,13 +89,24 @@ impl MergeSession {
         self.repo.root()
     }
 
+    /// What git was doing when the session opened.
     #[must_use]
-    pub fn side_names(&self) -> &SideNames {
-        &self.side_names
+    pub fn stop(&self) -> &Stop {
+        &self.stop
+    }
+
+    /// The highest disk version this session gave out; the session of git's next stop starts above it.
+    #[must_use]
+    pub fn highest_disk_version(&self) -> DiskVersion {
+        let first = self.first_disk_version;
+        self.files
+            .iter()
+            .map(|file| file.disk_version(first))
+            .fold(first, std::cmp::max)
     }
 
     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
-    pub fn refresh(&mut self) -> Result<FileList> {
+    pub(crate) fn settle_and_mark(&mut self) -> Result<Vec<DiskChange>> {
         let mut looked = Vec::new();
         for (index, file) in self.files.iter().enumerate() {
             match file.look(&self.repo) {
@@ -107,17 +117,7 @@ impl MergeSession {
         }
         let disk_changes = self.settle(looked);
         self.refresh_statuses()?;
-        Ok(FileList {
-            files: self.files(),
-            disk_changes,
-            merging: is_merging(&self.repo),
-        })
-    }
-
-    /// `git merge --abort`. The session must not be used for the merge afterwards.
-    pub fn abort_merge(&self) -> Result<()> {
-        self.repo.abort_merge()?;
-        Ok(())
+        Ok(disk_changes)
     }
 
     pub(crate) fn refresh_statuses(&mut self) -> Result<()> {
@@ -125,7 +125,7 @@ impl MergeSession {
         for file in &mut self.files {
             let is_unmerged = unmerged.iter().any(|entry| entry.path == file.path);
             file.status = if is_unmerged {
-                FileStatus::Unresolved
+                file.unmerged_status()
             } else {
                 FileStatus::Resolved
             };
@@ -152,10 +152,11 @@ impl MergeSession {
             decided.push((index, disk, found));
         }
         let staging = stage(&self.repo, &adds, &removes);
+        let first = self.first_disk_version;
         let mut changes = Vec::with_capacity(decided.len());
         for (index, disk, found) in decided {
             if let Some(file) = self.files.get_mut(index) {
-                changes.push(file.settled_as(disk, staging.result(&found)));
+                changes.push(file.settled_as(disk, staging.result(&found), first));
             }
         }
         changes
@@ -175,16 +176,28 @@ impl MergeSession {
     }
 
     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
+        let first = self.first_disk_version;
         let file = find_file(&mut self.files, path)?;
         let texts = file.require_text()?;
-        let version = file.disk_version();
+        let version = file.disk_version(first);
         let path = file.display_path();
+        let orientation = self.orientation;
         match &file.seen {
             Seen::ViewFromDisk(disk) => Ok(disk_merge_data(
                 &path,
                 texts,
                 disk,
                 file.marker_size,
+                orientation,
+                version,
+            )),
+            Seen::ViewRemembered { shown, git_output } => Ok(remembered_merge_data(
+                &path,
+                texts,
+                shown,
+                git_output,
+                file.marker_size,
+                orientation,
                 version,
             )),
             Seen::ViewFromStages(_) | Seen::GitOutput => Ok(merge_data(
@@ -193,29 +206,33 @@ impl MergeSession {
                 &texts.local,
                 &texts.remote,
                 texts.deleted,
-                &file.marker_style(),
+                &file.marker_style(orientation),
                 version,
             )),
         }
     }
 
     pub fn describe(&mut self, path: &str) -> Result<FileSides> {
+        let first = self.first_disk_version;
         let file = find_file(&mut self.files, path)?;
         let mut blobs = self.repo.blob_reader()?;
+        let orientation = self.orientation;
+        let pane = |side| file.stages.of(orientation.git_side(side));
         Ok(FileSides {
             path: file.display_path(),
             reason: file.unsupported_reason(),
-            local: side_content(&mut blobs, file.stages.local.as_ref())?,
-            remote: side_content(&mut blobs, file.stages.remote.as_ref())?,
-            disk_version: file.disk_version(),
+            local: side_content(&mut blobs, pane(Side::Local))?,
+            remote: side_content(&mut blobs, pane(Side::Remote))?,
+            disk_version: file.disk_version(first),
         })
     }
 
+    /// The files git still lists unmerged, remembered ones included.
     #[must_use]
     pub fn remaining(&self) -> usize {
         self.files
             .iter()
-            .filter(|file| file.status == FileStatus::Unresolved)
+            .filter(|file| file.status != FileStatus::Resolved)
             .count()
     }
 }
@@ -262,20 +279,32 @@ impl FileState {
         }
     }
 
-    pub(crate) fn disk_version(&self) -> DiskVersion {
+    /// The last settle's version, or `first` (the session's first disk version) before any settle.
+    pub(crate) fn disk_version(&self, first: DiskVersion) -> DiskVersion {
         self.settled
             .as_ref()
-            .map_or(DiskVersion(0), |settled| settled.version)
+            .map_or(first, |settled| settled.version)
     }
 
     /// The marker lines git wrote into this file, as found at open.
-    fn marker_style(&self) -> MarkerStyle {
+    fn marker_style(&self, orientation: Orientation) -> MarkerStyle {
         match &self.at_open {
             AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
-                MarkerStyle::found_in(bytes, self.marker_size)
+                MarkerStyle::found_in(bytes, self.marker_size, orientation)
             }
-            AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
-                MarkerStyle::fallback(self.marker_size)
+            AtOpen::Untouched(_)
+            | AtOpen::Changed(_)
+            | AtOpen::Remembered { .. }
+            | AtOpen::Unread => MarkerStyle::fallback(self.marker_size, orientation),
+        }
+    }
+
+    /// The status of a file git lists unmerged: `Remembered` while it shows rerere's resolution.
+    pub(crate) fn unmerged_status(&self) -> FileStatus {
+        match self.seen {
+            Seen::ViewRemembered { .. } => FileStatus::Remembered,
+            Seen::GitOutput | Seen::ViewFromStages(_) | Seen::ViewFromDisk(_) => {
+                FileStatus::Unresolved
             }
         }
     }
@@ -297,10 +326,10 @@ impl FileState {
         Ok((stage_failed || !self.seen.is(&disk)).then_some(disk))
     }
 
-    fn settled_as(&mut self, disk: OnDisk, result: DiskResult) -> DiskChange {
+    fn settled_as(&mut self, disk: OnDisk, result: DiskResult, first: DiskVersion) -> DiskChange {
         self.seen = Seen::ViewFromDisk(disk);
         self.settled = Some(Settled {
-            version: DiskVersion(self.disk_version().0.saturating_add(1)),
+            version: self.disk_version(first).next(),
             result: result.clone(),
         });
         DiskChange {

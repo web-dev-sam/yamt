@@ -1,0 +1,1175 @@
+From 0f396da625ff417be5114a4a288acab302086d06 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 13:18:24 +0200
+Subject: [PATCH] fix(app): close only after an ending; tested refusals,
+ panics, close-wait
+
+Merge::has_ended decides the window destroy; Listing wraps StopList;
+merge.rs tests move to merge/tests.rs; fixture mode answers
+MergeFinished/MergeAborted as the app does.
+
+Refs #1352-#1364
+---
+ frontend/src/ipc/fixture.ts                |   5 +-
+ frontend/src/ipc/fixtureOperations.test.ts |  23 +-
+ frontend/src/ipc/fixtureOperations.ts      |  79 +++--
+ scripts/conflict-repo.sh                   |   7 -
+ scripts/git-sandbox.sh                     |  11 +-
+ scripts/operations-repo.sh                 |   7 -
+ src-tauri/AGENTS.md                        |   2 +-
+ src-tauri/src/commands.rs                  |  26 +-
+ src-tauri/src/merge.rs                     | 311 ++--------------
+ src-tauri/src/merge/tests.rs               | 395 +++++++++++++++++++++
+ src-tauri/src/mock_window.rs               |  13 +-
+ 11 files changed, 524 insertions(+), 355 deletions(-)
+ create mode 100644 src-tauri/src/merge/tests.rs
+
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 50eec42..aa6b1c8 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -244,10 +244,7 @@ export function createFixtureSource(
+   });
+ 
+   return {
+-    async listFiles() {
+-      const value = { files: entries(records), diskChanges: [], merging: stops.merging };
+-      return { ok: true, value };
+-    },
++    listFiles: stops.listFiles,
+     listStop: stops.listStop,
+     continueOperation: stops.continueOperation,
+     abortOperation: stops.abortOperation,
+diff --git a/frontend/src/ipc/fixtureOperations.test.ts b/frontend/src/ipc/fixtureOperations.test.ts
+index 245ab61..3b93b9d 100644
+--- a/frontend/src/ipc/fixtureOperations.test.ts
++++ b/frontend/src/ipc/fixtureOperations.test.ts
+@@ -119,6 +119,19 @@ async function resolvedAndContinued(source: ChunkSource): Promise<unknown[]> {
+   return [reply.kind, files[0]?.status, progress, sides.local === replaying];
+ }
+ 
++async function everyStopCommand(source: ChunkSource): Promise<SourceResult<unknown>[]> {
++  return [
++    await source.listStop(),
++    await source.listFiles(),
++    await source.continueOperation(),
++    await source.abortOperation(),
++  ];
++}
++
++function everyCommandRefused(kind: "MergeFinished" | "MergeAborted"): SourceResult<unknown>[] {
++  return Array.from({ length: 4 }, () => ({ ok: false, failure: { kind } }));
++}
++
+ test("a rebase advances 1 → 2 → 3, lists the files unresolved again each time, then finishes once", async () => {
+   const { log, entries } = quietLog();
+   const source = sourceAt("?operation=rebase", log);
+@@ -133,25 +146,23 @@ test("a rebase advances 1 → 2 → 3, lists the files unresolved again each tim
+   expect(entries.filter((entry) => entry.event === "fixture.continue_finished")).toEqual([
+     { level: "info", event: "fixture.continue_finished", fields: { operation: "rebase" } },
+   ]);
+-  expect(await operationAt(source)).toBeNull();
+-  expect(await source.continueOperation()).toEqual({
+-    ok: false,
+-    failure: { kind: "MergeFinished" },
+-  });
++  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
+ });
+ 
+ test.each(["", "?operation=squash"])("%j finishes at the first Continue", async (search) => {
+   const source = sourceAt(search);
+ 
+   expect(await source.continueOperation()).toEqual({ ok: true, value: FINISHED });
++  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
+ });
+ 
+-test("abortOperation answers done and logs the abort once", async () => {
++test("abortOperation answers done, logs the abort once, then every command answers MergeAborted", async () => {
+   const { log, entries } = quietLog();
+   const source = sourceAt("?operation=revert", log);
+ 
+   expect(await source.abortOperation()).toEqual({ ok: true, value: null });
+ 
++  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeAborted"));
+   expect(entries).toEqual([
+     { level: "info", event: "fixture.abort_operation", fields: { operation: "revert" } },
+   ]);
+diff --git a/frontend/src/ipc/fixtureOperations.ts b/frontend/src/ipc/fixtureOperations.ts
+index 7a6f7de..dc688a3 100644
+--- a/frontend/src/ipc/fixtureOperations.ts
++++ b/frontend/src/ipc/fixtureOperations.ts
+@@ -1,5 +1,5 @@
+ import type { ChunkSource } from "./ChunkSource";
+-import type { FileEntry, OperationView, SideName, SourceResult } from "./domain";
++import type { FileEntry, OperationView, SideName, SourceFailure, SourceResult } from "./domain";
+ import type { Log } from "./log";
+ 
+ const OPERATIONS = ["merge", "squash", "rebase", "cherry-pick", "revert", "am", "none"] as const;
+@@ -39,23 +39,28 @@ type StopFiles = {
+ };
+ 
+ /** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
+-type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation"> & {
+-  /** Only a merge has `MERGE_HEAD`. */
+-  readonly merging: boolean;
+-};
++type FixtureStops = Pick<
++  ChunkSource,
++  "listFiles" | "listStop" | "continueOperation" | "abortOperation"
++>;
+ 
+-/** Where the chosen operation is: its step, or finished by the last Continue. */
++/** How the app answers every command once git finished or aborted the operation. */
++type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
++
++/** Where the chosen operation is: its step, or ended by the last Continue or Abort. */
+ type Sequence = {
+   readonly operation: FixtureOperation;
+   readonly rewords: boolean;
+   step: number;
+-  finished: boolean;
++  ended: Ended | null;
+ };
+ 
+-function nothingToRun<T>({ finished }: Sequence): SourceResult<T> {
+-  return { ok: false, failure: { kind: finished ? "MergeFinished" : "NoOperation" } };
++function refused<T>(failure: SourceFailure): SourceResult<T> {
++  return { ok: false, failure };
+ }
+ 
++const NO_OPERATION: SourceFailure = { kind: "NoOperation" };
++
+ function stepView(
+   operation: FixtureOperation,
+   step: number,
+@@ -98,32 +103,47 @@ function sequenceOf(search: string): Sequence {
+   const params = new URLSearchParams(search);
+   const chosen = params.get("operation");
+   const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
+-  return { operation, rewords: params.has("rewords"), step: 1, finished: false };
++  return { operation, rewords: params.has("rewords"), step: 1, ended: null };
+ }
+ 
+-function viewAt({ operation, step, rewords, finished }: Sequence): OperationView | null {
+-  return finished ? null : stepView(operation, step, rewords);
+-}
+-
+-export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
+-  const at = sequenceOf(search);
+-  const { operation } = at;
+-
++function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFiles" | "listStop"> {
+   return {
+-    merging: operation === "merge",
++    async listFiles() {
++      if (at.ended !== null) {
++        return refused(at.ended);
++      }
++      const merging = at.operation === "merge";
++      return { ok: true, value: { files: files.listed(), diskChanges: [], merging } };
++    },
+     async listStop() {
+-      const view = viewAt(at);
++      if (at.ended !== null) {
++        return refused(at.ended);
++      }
++      const view = stepView(at.operation, at.step, at.rewords);
+       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
+       const value = { files: files.listed(), diskChanges: [], operation: view, sides };
+       return { ok: true, value: { kind: "Files", ...value } };
+     },
++  };
++}
++
++function stopActions(
++  log: Log,
++  at: Sequence,
++  files: StopFiles,
++): Pick<ChunkSource, "continueOperation" | "abortOperation"> {
++  const { operation } = at;
++  return {
+     async continueOperation() {
+-      const view = viewAt(at);
++      if (at.ended !== null) {
++        return refused(at.ended);
++      }
++      const view = stepView(operation, at.step, at.rewords);
+       if (view === null) {
+-        return nothingToRun(at);
++        return refused(NO_OPERATION);
+       }
+       if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
+-        at.finished = true;
++        at.ended = { kind: "MergeFinished" };
+         log.info("fixture.continue_finished", { operation });
+         return { ok: true, value: { kind: "Finished" } };
+       }
+@@ -133,11 +153,20 @@ export function createFixtureStops(log: Log, search: string, files: StopFiles):
+       return { ok: true, value: { kind: "Stopped", message } };
+     },
+     async abortOperation() {
+-      if (viewAt(at) === null) {
+-        return nothingToRun(at);
++      if (at.ended !== null) {
++        return refused(at.ended);
+       }
++      if (stepView(operation, at.step, at.rewords) === null) {
++        return refused(NO_OPERATION);
++      }
++      at.ended = { kind: "MergeAborted" };
+       log.info("fixture.abort_operation", { operation });
+       return { ok: true, value: null };
+     },
+   };
+ }
++
++export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
++  const at = sequenceOf(search);
++  return { ...stopListings(at, files), ...stopActions(log, at, files) };
++}
+diff --git a/scripts/conflict-repo.sh b/scripts/conflict-repo.sh
+index 6a22f80..71d1920 100755
+--- a/scripts/conflict-repo.sh
++++ b/scripts/conflict-repo.sh
+@@ -15,13 +15,6 @@ expected_conflicts=$((${#golden_cases[@]} + 4))
+ require_empty_dir "$dir"
+ isolate_git_config
+ 
+-# $1: path in the repo, $2: printf format giving the content (\r, \0 allowed).
+-write() {
+-    mkdir -p "$(dirname "$dir/$1")"
+-    printf "$2" >"$dir/$1"
+-    repo_git add -- "$1"
+-}
+-
+ # $1: side (base, local or remote). Copies that side of every golden case to the case's original path;
+ # an empty base means add/add, so the file does not exist there.
+ put_golden() {
+diff --git a/scripts/git-sandbox.sh b/scripts/git-sandbox.sh
+index 42e48d0..c4d0cad 100644
+--- a/scripts/git-sandbox.sh
++++ b/scripts/git-sandbox.sh
+@@ -1,5 +1,5 @@
+-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh and lsp-servers.sh: the shared prelude
+-# for building a scripted repository in "$dir" without any user or system git config (risk RK19).
++# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh and operations-repo.sh:
++# the shared prelude for building a scripted repository in "$dir" without any user or system git config (risk RK19).
+ # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
+ 
+ sandbox_name=$(basename "$0" .sh)
+@@ -41,6 +41,13 @@ repo_git() {
+         -c core.attributesFile=/dev/null -c core.excludesFile=/dev/null "$@"
+ }
+ 
++# $1: path in the repo, $2: printf format giving the content (\r, \0 allowed). Stages the file.
++write() {
++    mkdir -p "$(dirname "$dir/$1")"
++    printf "$2" >"$dir/$1"
++    repo_git add -- "$1"
++}
++
+ # $1: how many files the merge in "$dir" must leave conflicted. Prints their paths; dies on any other count.
+ require_conflicts() {
+     local conflicted count
+diff --git a/scripts/operations-repo.sh b/scripts/operations-repo.sh
+index 22214c4..b2cd6d4 100755
+--- a/scripts/operations-repo.sh
++++ b/scripts/operations-repo.sh
+@@ -16,13 +16,6 @@ dir=$2
+ require_empty_dir "$dir"
+ isolate_git_config
+ 
+-# $1: path in the repo, $2: printf format giving the content (\0 allowed).
+-write() {
+-    mkdir -p "$(dirname "$dir/$1")"
+-    printf "$2" >"$dir/$1"
+-    repo_git add -- "$1"
+-}
+-
+ # $1: the commit message.
+ commit() {
+     repo_git commit -q -m "$1"
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 33a4e06..3ac54c3 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held`; `list_stop` opens the new stop after a move and becomes `MovedOn` when git moved on; `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, stopped → `MovedOn`, a panicked worker → `MovedOn`; `lock_when_git_is_done` makes the close ending wait for git; `abort()` is the old `git merge --abort`; plan §2 #74, #88, #89), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; `abort_merge`, `abort_operation` and a finished `continue_operation` destroy the window, which ends the event loop without a close request, so the page asks nothing; the two async commands take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread; used by the command tests in `commands.rs`, `merge.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move, becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, stopped → `MovedOn`, a panicked worker → `MovedOn`; `lock_when_git_is_done` makes the close ending wait for git; `abort()` is the old `git merge --abort`; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; `abort_merge` destroys the window, and the two async commands destroy it only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; the two async commands take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()`/`ending_when_git_is_done` — the close ending through `lock_when_git_is_done`, as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 82965ab..c96692b 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -169,9 +169,7 @@ async fn continue_operation<R: Runtime>(
+     window: WebviewWindow<R>,
+ ) -> Result<ContinueReply, IpcError> {
+     let reply = merge::continue_operation(&window.state()).await?;
+-    if reply == ContinueReply::Finished {
+-        close_window(&window, "finished");
+-    }
++    close_window_if_ended(&window, "finished");
+     Ok(reply)
+ }
+ 
+@@ -179,10 +177,16 @@ async fn continue_operation<R: Runtime>(
+ #[specta::specta]
+ async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
+     merge::abort_operation(&window.state()).await?;
+-    close_window(&window, "aborted");
++    close_window_if_ended(&window, "aborted");
+     Ok(())
+ }
+ 
++fn close_window_if_ended<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
++    if lock(&window.state()).has_ended() {
++        close_window(window, ended);
++    }
++}
++
+ #[tauri::command]
+ #[specta::specta]
+ fn log(entry: LogEntry) {
+@@ -194,19 +198,13 @@ mod tests {
+     use std::fs;
+ 
+     use serde_json::{Value, json};
+-    use tauri::Manager;
+     use yamt_conflict_repo::git_ok;
+ 
+-    use super::*;
+     use crate::frontend_log::tests::logged;
+     use crate::mock_window::{CRLF_PATH, Window, file, open_window, open_window_on};
+-    use crate::outcome::{Exit, ending_on_close};
++    use crate::outcome::Exit;
+ 
+     impl Window {
+-        fn exit_on_close(&self) -> Exit {
+-            ending_on_close(&mut lock(&self.app.state::<MergeState>())).exit
+-        }
+-
+         fn unmerged(&self) -> String {
+             String::from_utf8(git_ok(self.repo.path(), &["ls-files", "-u"]).unwrap()).unwrap()
+         }
+@@ -292,7 +290,7 @@ mod tests {
+             "{}",
+             window.unmerged()
+         );
+-        assert_eq!(window.exit_on_close(), Exit::Unresolved);
++        assert_eq!(window.ending().exit, Exit::Unresolved);
+     }
+ 
+     #[test]
+@@ -308,7 +306,7 @@ mod tests {
+                 .unwrap();
+         }
+         assert_eq!(window.unmerged(), "");
+-        assert_eq!(window.exit_on_close(), Exit::Success);
++        assert_eq!(window.ending().exit, Exit::Success);
+ 
+         let files = window.invoke("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 }));
+ 
+@@ -320,7 +318,7 @@ mod tests {
+         assert_eq!(window.unmerged().lines().collect::<Vec<_>>(), crlf_stages);
+         let worktree = fs::read_to_string(window.repo.path().join(CRLF_PATH)).unwrap();
+         assert!(worktree.contains("<<<<<<<"), "{worktree}");
+-        assert_eq!(window.exit_on_close(), Exit::Unresolved);
++        assert_eq!(window.ending().exit, Exit::Unresolved);
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/merge.rs b/src-tauri/src/merge.rs
+index f2ede3f..a0e91f3 100644
+--- a/src-tauri/src/merge.rs
++++ b/src-tauri/src/merge.rs
+@@ -5,7 +5,7 @@ use std::time::Duration;
+ 
+ use yamt_session::{
+     Continued, DiskChange, FileEntry, MergeSession, OperationKind, OperationView, Refreshed,
+-    SideNames,
++    SideNames, StopList,
+ };
+ 
+ use crate::ipc_error::IpcError;
+@@ -92,11 +92,16 @@ impl Merge {
+         }
+         let session = self.session()?;
+         match session.refresh_stop()? {
+-            Refreshed::Files(list) => Ok(Listing::Files {
+-                files: list.files,
+-                disk_changes: list.disk_changes,
+-                operation: list.operation,
+-                sides: list.sides,
++            Refreshed::Files(StopList {
++                files,
++                disk_changes,
++                operation,
++                sides,
++            }) => Ok(Listing::Files {
++                files,
++                disk_changes,
++                operation,
++                sides,
+             }),
+             Refreshed::MovedOn => {
+                 let root = session.root().to_path_buf();
+@@ -106,6 +111,14 @@ impl Merge {
+         }
+     }
+ 
++    /// git finished or aborted the operation: nothing is left for this window.
++    pub(crate) fn has_ended(&self) -> bool {
++        match self {
++            Merge::Finished(_) | Merge::Aborted(_) => true,
++            Merge::Held(_) | Merge::Running(_) | Merge::MovedOn { .. } => false,
++        }
++    }
++
+     fn hand_to_worker(&mut self) -> Result<Box<MergeSession>, IpcError> {
+         let kind = self
+             .session()?
+@@ -113,12 +126,12 @@ impl Merge {
+             .ok_or(IpcError::NoOperation)?;
+         match std::mem::replace(self, Merge::Running(kind)) {
+             Merge::Held(session) => Ok(session),
+-            other @ (Merge::Running(_)
++            refused @ (Merge::Running(_)
+             | Merge::MovedOn { .. }
+             | Merge::Aborted(_)
+             | Merge::Finished(_)) => {
+-                *self = other;
+-                Err(IpcError::GitRunning)
++                *self = refused;
++                self.hand_to_worker()
+             }
+         }
+     }
+@@ -178,282 +191,4 @@ pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueRep
+ }
+ 
+ #[cfg(test)]
+-mod tests {
+-    use std::{fs, thread};
+-
+-    use serde_json::{Value, json};
+-    use tauri::Manager;
+-    use yamt_conflict_repo::{
+-        ConflictFile, FileKind, Run, STEP_TWO_FILE, git, git_ok, install_hook, operation_repo,
+-    };
+-
+-    use super::*;
+-    use crate::mock_window::{CRLF_PATH, Window, invoke_on, open_window, open_window_in};
+-    use crate::outcome::{Ending, Exit, ending_on_close};
+-
+-    const ADDED: &str = "added.ts";
+-    const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
+-    /// Conflicts at step 1 and, whatever it was resolved to, again at step 2 of the rebase.
+-    const STEPS: [ConflictFile<'static>; 1] = [ConflictFile {
+-        path: STEP_TWO_FILE,
+-        kind: FileKind::Regular,
+-        base: Some(b"one\n"),
+-        local: Some(b"local-1\n"),
+-        remote: Some(b"remote-1\n"),
+-    }];
+-    const RELEASE: &str = ".git/release";
+-    const HOOK_WAITING_FOR_RELEASE: &str = "#!/bin/sh\ni=0\nwhile [ ! -e .git/release ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\n";
+-
+-    impl Window {
+-        fn ending(&self) -> Ending {
+-            ending_on_close(&mut lock(&self.app.state::<MergeState>()))
+-        }
+-
+-        fn git_text(&self, args: &[&str]) -> String {
+-            String::from_utf8(git_ok(self.repo.path(), args).unwrap()).unwrap()
+-        }
+-    }
+-
+-    fn merge_aborted() -> Result<Value, Value> {
+-        Err(json!({ "kind": "MergeAborted" }))
+-    }
+-
+-    fn merge_commands() -> [(&'static str, Value); 12] {
+-        let path = json!({ "path": CRLF_PATH });
+-        let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
+-        [
+-            ("list_files", json!({})),
+-            ("list_stop", json!({})),
+-            ("load_file", path.clone()),
+-            ("describe_file", path),
+-            ("finish_file", write.clone()),
+-            ("save_file", write),
+-            ("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 })),
+-            (
+-                "take_side",
+-                json!({ "path": CRLF_PATH, "side": "remote", "diskVersion": 0 }),
+-            ),
+-            ("side_names", json!({})),
+-            ("abort_merge", json!({})),
+-            ("continue_operation", json!({})),
+-            ("abort_operation", json!({})),
+-        ]
+-    }
+-
+-    #[test]
+-    fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
+-        let window = open_window();
+-
+-        assert_eq!(window.invoke("abort_merge", json!({})), Ok(Value::Null));
+-
+-        for (command, args) in merge_commands() {
+-            assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
+-        }
+-        assert_eq!(window.git_text(&["status", "--porcelain"]), "");
+-        assert_eq!(
+-            fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
+-            CRLF_AT_HEAD
+-        );
+-        assert!(window.invoke("servers_context", json!({})).is_ok());
+-    }
+-
+-    #[test]
+-    fn the_ending_after_an_abort_is_status_one_and_stages_no_file_changed_since() {
+-        let window = open_window();
+-        window.invoke("abort_merge", json!({})).unwrap();
+-        fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
+-        let index_before = window.git_text(&["ls-files", "-s"]);
+-
+-        let ending = window.ending();
+-
+-        let aborted = Ending {
+-            exit: Exit::Unresolved,
+-            message: Some("merge aborted".to_owned()),
+-        };
+-        assert_eq!(ending, aborted);
+-        assert_eq!(window.git_text(&["ls-files", "-s"]), index_before);
+-    }
+-
+-    #[test]
+-    fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
+-        let window = open_window();
+-        let added = window.repo.path().join(ADDED);
+-        fs::write(&added, "resolved\n").unwrap();
+-        git_ok(window.repo.path(), &["add", "--", ADDED]).unwrap();
+-        fs::write(&added, "saved again\n").unwrap();
+-        let status_before = window.git_text(&["status", "--porcelain"]);
+-
+-        let refused = window.invoke("abort_merge", json!({})).unwrap_err();
+-
+-        assert_eq!(refused["kind"], "Git", "{refused}");
+-        let message = refused["message"].as_str().unwrap();
+-        assert!(
+-            message.contains("error: Entry 'added.ts' not uptodate. Cannot merge."),
+-            "{message}"
+-        );
+-        assert_eq!(window.git_text(&["status", "--porcelain"]), status_before);
+-        let listed = window.invoke("list_files", json!({})).unwrap();
+-        assert_eq!(listed["merging"], true, "{listed}");
+-        assert_eq!(
+-            window.ending().message.as_deref(),
+-            Some("2 of 3 files still unresolved")
+-        );
+-    }
+-
+-    fn rebase_window() -> Window {
+-        open_window_in(operation_repo(Run::Rebase, &STEPS).unwrap())
+-    }
+-
+-    fn resolved_step(window: &Window) {
+-        let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": 0 });
+-        let written = window.invoke("finish_file", args).unwrap();
+-        assert_eq!(written["kind"], "Written", "{written}");
+-    }
+-
+-    fn assert_step_two_listed(listed: &Value) {
+-        let file = json!({ "path": STEP_TWO_FILE, "status": "Unresolved", "unsupported": null });
+-        assert_eq!(listed["kind"], "Files", "{listed}");
+-        assert_eq!(listed["files"], json!([file]), "{listed}");
+-        let progress = &listed["operation"]["progress"];
+-        assert_eq!(progress, &json!({ "step": 2, "total": 3 }), "{listed}");
+-    }
+-
+-    // A command run while git commits would read or write files git is rewriting for the next stop.
+-    #[test]
+-    fn while_git_runs_a_write_and_a_list_answer_git_running_and_the_next_stop_lands_as_moved_on() {
+-        let window = rebase_window();
+-        resolved_step(&window);
+-        install_hook(
+-            window.repo.path(),
+-            "prepare-commit-msg",
+-            HOOK_WAITING_FOR_RELEASE,
+-        )
+-        .unwrap();
+-        let state = window.app.state::<MergeState>();
+-        let git_running = Err(json!({ "kind": "GitRunning" }));
+-
+-        let reply = thread::scope(|scope| {
+-            let webview = &window.webview;
+-            let continuing =
+-                scope.spawn(move || invoke_on(webview, "continue_operation", json!({})));
+-            while !continuing.is_finished() && !matches!(*lock(&state), Merge::Running(_)) {
+-                thread::sleep(GIT_RUNNING_POLL);
+-            }
+-            let save = json!({ "path": STEP_TWO_FILE, "text": "mine\n", "diskVersion": 0 });
+-            assert_eq!(window.invoke("save_file", save), git_running);
+-            assert_eq!(window.invoke("list_stop", json!({})), git_running);
+-            assert!(!continuing.is_finished(), "git ran past the hook");
+-            fs::write(window.repo.path().join(RELEASE), "").unwrap();
+-            continuing.join().unwrap()
+-        });
+-
+-        assert_eq!(reply.unwrap()["kind"], "Stopped");
+-        assert!(matches!(*lock(&state), Merge::MovedOn { .. }));
+-    }
+-
+-    // Disk versions restart at every stop: a Save meant for step 1 would land on step 2's file.
+-    #[test]
+-    fn after_a_continue_stops_again_an_old_save_writes_nothing_and_the_next_list_is_step_two() {
+-        let window = rebase_window();
+-        resolved_step(&window);
+-        let file = window.repo.path().join(STEP_TWO_FILE);
+-
+-        let stopped = window.invoke("continue_operation", json!({})).unwrap();
+-
+-        assert_eq!(stopped["kind"], "Stopped", "{stopped}");
+-        let message = stopped["message"].as_str().unwrap();
+-        assert!(message.contains("CONFLICT"), "{message}");
+-        let at_step_two = fs::read(&file).unwrap();
+-        let save = json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": 0 });
+-        let moved_on = Err(json!({ "kind": "StopMovedOn" }));
+-        assert_eq!(window.invoke("save_file", save), moved_on);
+-        assert_eq!(window.invoke("list_files", json!({})), moved_on);
+-        assert_eq!(fs::read(&file).unwrap(), at_step_two);
+-        assert_step_two_listed(&window.invoke("list_stop", json!({})).unwrap());
+-    }
+-
+-    #[test]
+-    fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
+-        let window = rebase_window();
+-        let root = window.repo.path();
+-        fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
+-        git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
+-        assert!(
+-            !git(root, &["rebase", "--continue"])
+-                .unwrap()
+-                .status
+-                .success()
+-        );
+-
+-        let moved_on = window.invoke("list_stop", json!({}));
+-
+-        assert_eq!(moved_on, Ok(json!({ "kind": "MovedOn" })));
+-        let load = json!({ "path": STEP_TWO_FILE });
+-        assert_eq!(
+-            window.invoke("load_file", load),
+-            Err(json!({ "kind": "StopMovedOn" }))
+-        );
+-        assert_step_two_listed(&window.invoke("list_stop", json!({})).unwrap());
+-    }
+-
+-    #[test]
+-    fn a_rebase_aborted_answers_merge_aborted_to_every_command_and_ends_rebase_aborted() {
+-        let window = rebase_window();
+-
+-        assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
+-
+-        for (command, args) in merge_commands() {
+-            assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
+-        }
+-        assert_eq!(
+-            window.git_text(&["rev-parse", "--abbrev-ref", "HEAD"]),
+-            "remote\n"
+-        );
+-        assert!(!window.repo.path().join(".git/rebase-merge").exists());
+-        let aborted = Ending {
+-            exit: Exit::Unresolved,
+-            message: Some("rebase aborted".to_owned()),
+-        };
+-        assert_eq!(window.ending(), aborted);
+-    }
+-
+-    #[test]
+-    fn a_merge_continued_is_finished_every_command_answers_merge_finished_and_it_ends_with_zero() {
+-        let window = open_window();
+-        for path in ["added.ts", CRLF_PATH, "view.vue"] {
+-            let args = json!({ "path": path, "text": "done\n", "diskVersion": 0 });
+-            window.invoke("finish_file", args).unwrap();
+-        }
+-
+-        let finished = window.invoke("continue_operation", json!({}));
+-
+-        assert_eq!(finished, Ok(json!({ "kind": "Finished" })));
+-        let merge_finished = Err(json!({ "kind": "MergeFinished" }));
+-        for (command, args) in merge_commands() {
+-            assert_eq!(window.invoke(command, args), merge_finished, "{command}");
+-        }
+-        assert_eq!(
+-            window.git_text(&["rev-list", "--count", "--merges", "HEAD"]),
+-            "1\n"
+-        );
+-        let ending = Ending {
+-            exit: Exit::Success,
+-            message: Some("merge finished".to_owned()),
+-        };
+-        assert_eq!(window.ending(), ending);
+-    }
+-
+-    #[test]
+-    fn continue_and_abort_at_a_stop_git_records_no_operation_for_answer_no_operation() {
+-        let window = open_window_in(operation_repo(Run::StashPop, &STEPS).unwrap());
+-        let no_operation = Err(json!({ "kind": "NoOperation" }));
+-
+-        assert_eq!(window.invoke("continue_operation", json!({})), no_operation);
+-        assert_eq!(window.invoke("abort_operation", json!({})), no_operation);
+-
+-        assert_eq!(
+-            window.invoke("list_stop", json!({})).unwrap()["operation"],
+-            Value::Null
+-        );
+-    }
+-}
++mod tests;
+diff --git a/src-tauri/src/merge/tests.rs b/src-tauri/src/merge/tests.rs
+new file mode 100644
+index 0000000..e617d46
+--- /dev/null
++++ b/src-tauri/src/merge/tests.rs
+@@ -0,0 +1,395 @@
++use std::thread::{self, ScopedJoinHandle};
++use std::{fs, path::Path};
++
++use serde_json::{Value, json};
++use tauri::Manager;
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Run, STEP_TWO_FILE, edit_stop_repo, git, git_ok, install_hook,
++    operation_repo,
++};
++
++use super::*;
++use crate::mock_window::{
++    CRLF_PATH, Window, ending_when_git_is_done, invoke_on, open_window, open_window_in,
++};
++use crate::outcome::{Ending, Exit};
++
++const ADDED: &str = "added.ts";
++const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
++/// Conflicts at step 1 and, whatever it was resolved to, again at step 2 of the rebase.
++const STEPS: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: STEP_TWO_FILE,
++    kind: FileKind::Regular,
++    base: Some(b"one\n"),
++    local: Some(b"local-1\n"),
++    remote: Some(b"remote-1\n"),
++}];
++const PICKED: &str = "picked.ts";
++const RELEASE: &str = ".git/release";
++const HOOK_WAITING_FOR_RELEASE: &str = "#!/bin/sh\ni=0\nwhile [ ! -e .git/release ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\n";
++const CLOSE_WAIT: Duration = Duration::from_millis(300);
++
++impl Window {
++    fn git_text(&self, args: &[&str]) -> String {
++        String::from_utf8(git_ok(self.repo.path(), args).unwrap()).unwrap()
++    }
++
++    fn has_ended(&self) -> bool {
++        lock(&self.app.state::<MergeState>()).has_ended()
++    }
++}
++
++fn merge_aborted() -> Result<Value, Value> {
++    Err(json!({ "kind": "MergeAborted" }))
++}
++
++fn merge_commands() -> [(&'static str, Value); 12] {
++    let path = json!({ "path": CRLF_PATH });
++    let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
++    [
++        ("list_files", json!({})),
++        ("list_stop", json!({})),
++        ("load_file", path.clone()),
++        ("describe_file", path),
++        ("finish_file", write.clone()),
++        ("save_file", write),
++        ("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 })),
++        (
++            "take_side",
++            json!({ "path": CRLF_PATH, "side": "remote", "diskVersion": 0 }),
++        ),
++        ("side_names", json!({})),
++        ("abort_merge", json!({})),
++        ("continue_operation", json!({})),
++        ("abort_operation", json!({})),
++    ]
++}
++
++fn ending(exit: Exit, message: &str) -> Ending {
++    Ending {
++        exit,
++        message: Some(message.to_owned()),
++    }
++}
++
++#[test]
++fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
++    let window = open_window();
++
++    assert_eq!(window.invoke("abort_merge", json!({})), Ok(Value::Null));
++
++    for (command, args) in merge_commands() {
++        assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
++    }
++    assert_eq!(window.git_text(&["status", "--porcelain"]), "");
++    assert_eq!(
++        fs::read(window.repo.path().join(CRLF_PATH)).unwrap(),
++        CRLF_AT_HEAD
++    );
++    assert!(window.invoke("servers_context", json!({})).is_ok());
++}
++
++#[test]
++fn the_ending_after_an_abort_is_status_one_and_stages_no_file_changed_since() {
++    let window = open_window();
++    window.invoke("abort_merge", json!({})).unwrap();
++    fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
++    let index_before = window.git_text(&["ls-files", "-s"]);
++
++    let ended = window.ending();
++
++    assert_eq!(ended, ending(Exit::Unresolved, "merge aborted"));
++    assert_eq!(window.git_text(&["ls-files", "-s"]), index_before);
++}
++
++#[test]
++fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
++    let window = open_window();
++    let added = window.repo.path().join(ADDED);
++    fs::write(&added, "resolved\n").unwrap();
++    git_ok(window.repo.path(), &["add", "--", ADDED]).unwrap();
++    fs::write(&added, "saved again\n").unwrap();
++    let status_before = window.git_text(&["status", "--porcelain"]);
++
++    let refused = window.invoke("abort_merge", json!({})).unwrap_err();
++
++    assert_eq!(refused["kind"], "Git", "{refused}");
++    let message = refused["message"].as_str().unwrap();
++    assert!(
++        message.contains("error: Entry 'added.ts' not uptodate. Cannot merge."),
++        "{message}"
++    );
++    assert_eq!(window.git_text(&["status", "--porcelain"]), status_before);
++    let listed = window.invoke("list_files", json!({})).unwrap();
++    assert_eq!(listed["merging"], true, "{listed}");
++    assert_eq!(
++        window.ending().message.as_deref(),
++        Some("2 of 3 files still unresolved")
++    );
++}
++
++fn rebase_window() -> Window {
++    open_window_in(operation_repo(Run::Rebase, &STEPS).unwrap())
++}
++
++fn resolved_step(window: &Window) {
++    let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": 0 });
++    let written = window.invoke("finish_file", args).unwrap();
++    assert_eq!(written["kind"], "Written", "{written}");
++}
++
++fn assert_step_listed(listed: &Value, step: u32) {
++    let file = json!({ "path": STEP_TWO_FILE, "status": "Unresolved", "unsupported": null });
++    assert_eq!(listed["kind"], "Files", "{listed}");
++    assert_eq!(listed["files"], json!([file]), "{listed}");
++    let progress = &listed["operation"]["progress"];
++    assert_eq!(progress, &json!({ "step": step, "total": 3 }), "{listed}");
++}
++
++fn held_on_hook(window: &Window) {
++    install_hook(
++        window.repo.path(),
++        "prepare-commit-msg",
++        HOOK_WAITING_FOR_RELEASE,
++    )
++    .unwrap();
++}
++
++fn wait_until_git_runs(
++    state: &MergeState,
++    continuing: &ScopedJoinHandle<'_, Result<Value, Value>>,
++) {
++    while !continuing.is_finished() && !matches!(*lock(state), Merge::Running(_)) {
++        thread::sleep(GIT_RUNNING_POLL);
++    }
++    assert!(!continuing.is_finished(), "git ran past the hook");
++}
++
++fn released(root: &Path) {
++    fs::write(root.join(RELEASE), "").unwrap();
++}
++
++// A command run while git commits would read or write files git is rewriting for the next stop.
++#[test]
++fn while_git_runs_a_write_and_a_list_answer_git_running_and_the_next_stop_lands_as_moved_on() {
++    let window = rebase_window();
++    resolved_step(&window);
++    held_on_hook(&window);
++    let state = window.app.state::<MergeState>();
++    let git_running = Err(json!({ "kind": "GitRunning" }));
++
++    let reply = thread::scope(|scope| {
++        let webview = &window.webview;
++        let continuing = scope.spawn(move || invoke_on(webview, "continue_operation", json!({})));
++        wait_until_git_runs(&state, &continuing);
++        let save = json!({ "path": STEP_TWO_FILE, "text": "mine\n", "diskVersion": 0 });
++        assert_eq!(window.invoke("save_file", save), git_running);
++        assert_eq!(window.invoke("list_stop", json!({})), git_running);
++        assert!(!continuing.is_finished(), "git ran past the hook");
++        released(window.repo.path());
++        continuing.join().unwrap()
++    });
++
++    assert_eq!(reply.unwrap()["kind"], "Stopped");
++    assert!(matches!(*lock(&state), Merge::MovedOn { .. }));
++}
++
++// Closing mid-continue must not count the stop git is leaving, nor kill git.
++#[test]
++fn a_close_while_git_continues_waits_for_git_and_counts_the_stop_git_moved_on_to() {
++    let window = rebase_window();
++    resolved_step(&window);
++    held_on_hook(&window);
++    let state: &MergeState = &window.app.state::<MergeState>();
++
++    let ended = thread::scope(|scope| {
++        let webview = &window.webview;
++        let continuing = scope.spawn(move || invoke_on(webview, "continue_operation", json!({})));
++        wait_until_git_runs(state, &continuing);
++        let closing = scope.spawn(move || ending_when_git_is_done(state));
++        thread::sleep(CLOSE_WAIT);
++        let waited = !closing.is_finished();
++        released(window.repo.path());
++        assert!(waited, "the ending did not wait for git");
++        assert_eq!(continuing.join().unwrap().unwrap()["kind"], "Stopped");
++        closing.join().unwrap()
++    });
++
++    assert_eq!(
++        ended,
++        ending(Exit::Unresolved, "1 of 1 files still unresolved")
++    );
++}
++
++// Disk versions restart at every stop: a Save meant for step 1 would land on step 2's file.
++#[test]
++fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_finishes() {
++    let window = rebase_window();
++    resolved_step(&window);
++    let file = window.repo.path().join(STEP_TWO_FILE);
++
++    let stopped = window.invoke("continue_operation", json!({})).unwrap();
++
++    assert_eq!(stopped["kind"], "Stopped", "{stopped}");
++    let message = stopped["message"].as_str().unwrap();
++    assert!(message.contains("CONFLICT"), "{message}");
++    assert!(!window.has_ended());
++    let at_step_two = fs::read(&file).unwrap();
++    let save = json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": 0 });
++    let moved_on = Err(json!({ "kind": "StopMovedOn" }));
++    assert_eq!(window.invoke("save_file", save), moved_on);
++    assert_eq!(window.invoke("list_files", json!({})), moved_on);
++    assert_eq!(fs::read(&file).unwrap(), at_step_two);
++    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
++
++    resolved_step(&window);
++    let finished = window.invoke("continue_operation", json!({}));
++
++    assert_eq!(finished, Ok(json!({ "kind": "Finished" })));
++    assert!(window.has_ended());
++    assert_eq!(window.ending(), ending(Exit::Success, "rebase finished"));
++}
++
++#[test]
++fn a_continue_git_refuses_answers_git_s_text_and_keeps_the_stop_open() {
++    let window = rebase_window();
++
++    let refused = window.invoke("continue_operation", json!({})).unwrap_err();
++
++    assert_eq!(refused["kind"], "Git", "{refused}");
++    let message = refused["message"].as_str().unwrap();
++    assert!(message.contains("git add"), "{message}");
++    assert!(!window.has_ended());
++    let save = json!({ "path": STEP_TWO_FILE, "text": "mine\n", "diskVersion": 0 });
++    assert_eq!(window.invoke("save_file", save).unwrap()["kind"], "Written");
++    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 1);
++}
++
++#[test]
++fn a_worker_that_panics_leaves_moved_on_and_answers_a_git_error() {
++    let repo = operation_repo(Run::Rebase, &STEPS).unwrap();
++    let session = MergeSession::open(repo.path()).unwrap();
++    let root = session.root().to_path_buf();
++    let state: MergeState = Mutex::new(Merge::Held(Box::new(session)));
++    let panicking = |_: &mut MergeSession| -> yamt_session::Result<()> { panic!("worker panic") };
++
++    let answered = tauri::async_runtime::block_on(on_worker(&state, panicking));
++
++    let Err(IpcError::Git { message }) = answered else {
++        panic!("expected a Git error");
++    };
++    assert!(
++        message.starts_with("yamt's worker stopped while git ran"),
++        "{message}"
++    );
++    assert!(matches!(&*lock(&state), Merge::MovedOn { root: moved } if *moved == root));
++}
++
++#[test]
++fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
++    let window = rebase_window();
++    let root = window.repo.path();
++    fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
++    git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
++    assert!(
++        !git(root, &["rebase", "--continue"])
++            .unwrap()
++            .status
++            .success()
++    );
++
++    let moved_on = window.invoke("list_stop", json!({}));
++
++    assert_eq!(moved_on, Ok(json!({ "kind": "MovedOn" })));
++    let load = json!({ "path": STEP_TWO_FILE });
++    assert_eq!(
++        window.invoke("load_file", load),
++        Err(json!({ "kind": "StopMovedOn" }))
++    );
++    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
++}
++
++// A pick at an `edit` stop: its continue leaves the rebase at the edit, a stop without conflicts.
++#[test]
++fn a_continue_that_moves_on_to_a_stop_without_conflicts_lists_no_files_under_the_rebase() {
++    let picked = ConflictFile {
++        path: PICKED,
++        ..STEPS[0]
++    };
++    let repo = edit_stop_repo(&[picked]).unwrap();
++    assert!(
++        !git(repo.path(), &["cherry-pick", "local"])
++            .unwrap()
++            .status
++            .success()
++    );
++    let window = open_window_in(repo);
++    let args = json!({ "path": PICKED, "text": "picked\n", "diskVersion": 0 });
++    window.invoke("finish_file", args).unwrap();
++
++    let stopped = window.invoke("continue_operation", json!({})).unwrap();
++
++    assert_eq!(stopped["kind"], "Stopped", "{stopped}");
++    assert!(!window.has_ended());
++    for _ in 0..2 {
++        let listed = window.invoke("list_stop", json!({})).unwrap();
++        assert_eq!(listed["kind"], "Files", "{listed}");
++        assert_eq!(listed["files"], json!([]), "{listed}");
++        assert_eq!(listed["operation"]["kind"], "Rebase", "{listed}");
++    }
++}
++
++#[test]
++fn a_rebase_aborted_answers_merge_aborted_to_every_command_and_ends_rebase_aborted() {
++    let window = rebase_window();
++
++    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
++
++    assert!(window.has_ended());
++    for (command, args) in merge_commands() {
++        assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
++    }
++    assert_eq!(
++        window.git_text(&["rev-parse", "--abbrev-ref", "HEAD"]),
++        "remote\n"
++    );
++    assert!(!window.repo.path().join(".git/rebase-merge").exists());
++    assert_eq!(window.ending(), ending(Exit::Unresolved, "rebase aborted"));
++}
++
++#[test]
++fn a_merge_continued_is_finished_every_command_answers_merge_finished_and_it_ends_with_zero() {
++    let window = open_window();
++    for path in [ADDED, CRLF_PATH, "view.vue"] {
++        let args = json!({ "path": path, "text": "done\n", "diskVersion": 0 });
++        window.invoke("finish_file", args).unwrap();
++    }
++
++    let finished = window.invoke("continue_operation", json!({}));
++
++    assert_eq!(finished, Ok(json!({ "kind": "Finished" })));
++    assert!(window.has_ended());
++    let merge_finished = Err(json!({ "kind": "MergeFinished" }));
++    for (command, args) in merge_commands() {
++        assert_eq!(window.invoke(command, args), merge_finished, "{command}");
++    }
++    assert_eq!(
++        window.git_text(&["rev-list", "--count", "--merges", "HEAD"]),
++        "1\n"
++    );
++    assert_eq!(window.ending(), ending(Exit::Success, "merge finished"));
++}
++
++#[test]
++fn continue_and_abort_at_a_stop_git_records_no_operation_for_answer_no_operation() {
++    let window = open_window_in(operation_repo(Run::StashPop, &STEPS).unwrap());
++    let no_operation = Err(json!({ "kind": "NoOperation" }));
++
++    assert_eq!(window.invoke("continue_operation", json!({})), no_operation);
++    assert_eq!(window.invoke("abort_operation", json!({})), no_operation);
++
++    assert_eq!(
++        window.invoke("list_stop", json!({})).unwrap()["operation"],
++        Value::Null
++    );
++}
+diff --git a/src-tauri/src/mock_window.rs b/src-tauri/src/mock_window.rs
+index a19d19f..ded29d1 100644
+--- a/src-tauri/src/mock_window.rs
++++ b/src-tauri/src/mock_window.rs
+@@ -4,11 +4,13 @@ use tauri::test::{
+     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
+ };
+ use tauri::webview::InvokeRequest;
+-use tauri::{App, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
++use tauri::{App, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
+ use yamt_session::MergeSession;
+ 
+ use crate::commands::with_session;
++use crate::merge::{MergeState, lock_when_git_is_done};
++use crate::outcome::{Ending, ending_on_close};
+ 
+ pub(crate) const CRLF_PATH: &str = "crlf.ts";
+ 
+@@ -18,6 +20,11 @@ pub(crate) struct Window {
+     pub(crate) webview: WebviewWindow<MockRuntime>,
+ }
+ 
++/// The ending `window.rs` computes when the window closes: once no worker runs git.
++pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
++    ending_on_close(&mut lock_when_git_is_done(state))
++}
++
+ pub(crate) fn file<'a>(
+     path: &'a str,
+     base: Option<&'a [u8]>,
+@@ -65,6 +72,10 @@ impl Window {
+     pub(crate) fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
+         invoke_on(&self.webview, cmd, args)
+     }
++
++    pub(crate) fn ending(&self) -> Ending {
++        ending_when_git_is_done(&self.app.state::<MergeState>())
++    }
+ }
+ 
+ /// `Window::invoke` from another thread: the app itself is not `Sync`, its webview is.
+-- 
+2.56.0
+

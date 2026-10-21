@@ -1,43 +1,43 @@
 import type { ShallowRef } from "vue";
 
-import { log, type ChunkSource, type FileEntry, type SideNames } from "../ipc";
+import type { FileEntry, OperationView, SideNames } from "../ipc";
+import { landed, type Stop } from "./currentStop";
 import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
-import type { Notice } from "./noticeText";
-import { attempt, report, unexpected } from "./problem";
+import type { DiskNotice } from "./noticeText";
+import { attempt, report } from "./problem";
+import type { StopEnd } from "./stops";
 
-type Listing = DiskChangeTarget & {
+type ListTarget = DiskChangeTarget & {
+  readonly stop: Stop;
   readonly files: ShallowRef<readonly FileEntry[]>;
-  readonly merging: ShallowRef<boolean>;
-};
-
-type SideNamesTarget = {
-  readonly source: ChunkSource;
+  readonly operation: ShallowRef<OperationView | null>;
   readonly sideNames: ShallowRef<SideNames>;
+  nextStop(end: StopEnd): Promise<void>;
 };
 
 export async function refreshFiles(
-  listing: Listing,
-  when: Notice["when"],
+  target: ListTarget,
+  when: DiskNotice["when"],
 ): Promise<readonly FileEntry[] | null> {
-  const listed = await attempt(() => listing.source.listFiles());
+  const listed = await attempt(() => target.source.listStop());
   if (!listed.ok) {
-    report(listing, { action: "list", cause: listed.cause });
+    report(target, { action: "list", cause: listed.cause });
     return null;
   }
-  const { files, diskChanges, merging } = listed.value;
-  listing.files.value = files;
-  listing.merging.value = merging;
-  if (listing.problem.value?.action === "list") {
-    listing.problem.value = null;
+  if (listed.value.kind === "MovedOn") {
+    await target.nextStop({ kind: "outside" });
+    return null;
   }
-  await applyDiskChanges(listing, diskChanges, when);
-  return files;
-}
-
-export async function loadSideNames(target: SideNamesTarget): Promise<void> {
-  try {
-    target.sideNames.value = await target.source.sideNames();
-  } catch (error) {
-    log.warn("store.side_names_failed", { ...unexpected(error) });
+  const { files, diskChanges, operation, sides } = listed.value;
+  target.files.value = files;
+  target.operation.value = operation;
+  target.sideNames.value = sides;
+  if (target.problem.value?.action === "list") {
+    target.problem.value = null;
   }
+  const { stop } = target;
+  return landed(stop, async () => {
+    await applyDiskChanges(target, diskChanges, when, stop);
+    return files;
+  });
 }

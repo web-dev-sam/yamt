@@ -1,43 +1,63 @@
-import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+import { computed, type ComputedRef, type ShallowRef } from "vue";
 
-import type { ChunkSource } from "../ipc";
+import type { ChunkSource, OperationView } from "../ipc";
 import type { Asking } from "./asking";
-import { attempt, report, type Problem } from "./problem";
+import type { Stop } from "./currentStop";
+import type { GitRun } from "./gitRun";
+import { reportFailure, type EndsStop, type Problem } from "./problem";
 
-export type AbortState = "noMerge" | "ready" | "running";
+type AbortState =
+  | { readonly kind: "none" }
+  | { readonly kind: "ready" | "running"; readonly operation: OperationView };
 
-type AbortTarget = {
-  readonly source: ChunkSource;
-  readonly asking: Asking;
-  readonly merging: Readonly<ShallowRef<boolean>>;
+type AbortTarget = EndsStop & {
+  readonly stop: Stop;
+  readonly source: Pick<ChunkSource, "abortOperation">;
+  readonly asking: Pick<Asking, "ask">;
+  readonly operation: Readonly<ShallowRef<OperationView | null>>;
   readonly problem: ShallowRef<Problem | null>;
+  readonly gitRun: GitRun;
 };
 
 export type Aborting = {
   readonly abortState: ComputedRef<AbortState>;
-  readonly abortMerge: () => Promise<void>;
+  readonly abortOperation: () => Promise<void>;
 };
 
 export function createAborting(target: AbortTarget): Aborting {
-  const running = shallowRef(false);
+  const { running } = target.gitRun;
   const abortState = computed((): AbortState => {
-    if (!target.merging.value) {
-      return "noMerge";
+    const operation = target.operation.value;
+    if (operation === null) {
+      return { kind: "none" };
     }
-    return running.value ? "running" : "ready";
+    return { kind: running.value ? "running" : "ready", operation };
   });
 
-  async function abortMerge(): Promise<void> {
-    if (abortState.value !== "ready" || (await target.asking.ask({ kind: "abort" })) !== "yes") {
+  async function abortOperation(): Promise<void> {
+    const state = abortState.value;
+    if (state.kind !== "ready") {
       return;
     }
-    running.value = true;
-    const outcome = await attempt(() => target.source.abortMerge());
-    if (!outcome.ok) {
-      running.value = false;
-      report(target, { action: "abort", cause: outcome.cause });
+    const { operation } = state;
+    const { stop } = target;
+    if ((await target.asking.ask({ kind: "abort", operation })) !== "yes") {
+      return;
     }
+    await target.gitRun.run(stop, {
+      call: () => target.source.abortOperation(),
+      endsApp: () => true,
+      landing: async (outcome) => {
+        if (!outcome.ok) {
+          await reportFailure(target, {
+            action: "abort",
+            operation: operation.kind,
+            cause: outcome.cause,
+          });
+        }
+      },
+    });
   }
 
-  return { abortState, abortMerge };
+  return { abortState, abortOperation };
 }

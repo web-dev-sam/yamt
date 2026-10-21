@@ -1,0 +1,1846 @@
+From 9a9e6f3ab9a7f58f84e9f350c9c3dcd1fe9c9456 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 12:43:45 +0200
+Subject: [PATCH] feat(app): continue and abort off the main thread; follow the
+ next stop
+
+Merge gains Running, MovedOn, Aborted(kind) and Finished(kind); a
+write after a moved-on stop answers StopMovedOn. list_stop,
+continue_operation and abort_operation sit beside the old commands
+until the window moves over.
+
+Refs plan #88 #89
+---
+ crates/session/src/operation.rs            |   6 +
+ crates/session/tests/operations.rs         |  11 +
+ frontend/src/ipc/AGENTS.md                 |   2 +-
+ frontend/src/ipc/ChunkSource.ts            |   5 +
+ frontend/src/ipc/bindings.ts               |  20 +-
+ frontend/src/ipc/domain.ts                 |  26 ++
+ frontend/src/ipc/fixture.ts                |  12 +-
+ frontend/src/ipc/fixtureOperations.test.ts | 170 ++++++++++
+ frontend/src/ipc/fixtureOperations.ts      | 143 +++++++++
+ frontend/src/ipc/index.ts                  |   5 +
+ frontend/src/ipc/tauri.test.ts             |  56 ++++
+ frontend/src/ipc/tauri.ts                  |  20 ++
+ frontend/src/ui/problemText.test.ts        |  10 +
+ frontend/src/ui/problemText.ts             |  14 +
+ frontend/src/ui/saving.test.ts             |   3 +
+ frontend/src/ui/store.test.ts              |   6 +
+ scripts/operations-repo.sh                 | 179 +++++++++++
+ src-tauri/AGENTS.md                        |   2 +-
+ src-tauri/src/commands.rs                  |  44 ++-
+ src-tauri/src/ipc_error.rs                 |  33 +-
+ src-tauri/src/merge.rs                     | 342 ++++++++++++++++++++-
+ src-tauri/src/mock_window.rs               |  38 ++-
+ src-tauri/src/outcome.rs                   | 113 ++++++-
+ src-tauri/src/window.rs                    |  10 +-
+ 24 files changed, 1218 insertions(+), 52 deletions(-)
+ create mode 100644 frontend/src/ipc/fixtureOperations.test.ts
+ create mode 100644 frontend/src/ipc/fixtureOperations.ts
+ create mode 100755 scripts/operations-repo.sh
+
+diff --git a/crates/session/src/operation.rs b/crates/session/src/operation.rs
+index 090d8ce..e28e9cd 100644
+--- a/crates/session/src/operation.rs
++++ b/crates/session/src/operation.rs
+@@ -108,6 +108,12 @@ impl MergeSession {
+         }))
+     }
+ 
++    /// The operation of the stop this session opened, as read at open.
++    #[must_use]
++    pub fn operation_kind(&self) -> Option<OperationKind> {
++        self.stop.operation.as_ref().map(kind_of)
++    }
++
+     /// Re-reads the stop: none → `NoOperation`; another stop → `StopMovedOn`; else git's abort.
+     pub fn abort_operation(&mut self) -> Result<OperationKind> {
+         let operation = self.operation_still_here()?;
+diff --git a/crates/session/tests/operations.rs b/crates/session/tests/operations.rs
+index 8f25aa9..b7846b2 100644
+--- a/crates/session/tests/operations.rs
++++ b/crates/session/tests/operations.rs
+@@ -156,6 +156,17 @@ fn a_stash_pop_lists_no_operation_and_has_nothing_to_abort_or_continue() {
+     ));
+ }
+ 
++// Abort and Continue name what git does while it runs; a kind read again later could be another stop's.
++#[test]
++fn the_operation_kind_is_the_one_read_at_open() {
++    let (dir, rebase) = opened(Run::Rebase, &FILES);
++    git_ok(dir.path(), &["rebase", "--abort"]).unwrap();
++    let (_stash_dir, stash_pop) = opened(Run::StashPop, &FILES);
++
++    assert_eq!(rebase.operation_kind(), Some(OperationKind::Rebase));
++    assert_eq!(stash_pop.operation_kind(), None);
++}
++
+ // An operation aborted outside is git's view, not a move: the list goes on, without the operation.
+ #[test]
+ fn a_rebase_aborted_in_a_terminal_lists_git_s_view_without_an_operation() {
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 35fd355..bb7ef30 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -1 +1 @@
+-Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created; `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`.
++Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created; `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`; `createFixtureSource` reads the page's search by default).
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index 93489c3..9ef4fb7 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -1,11 +1,13 @@
+ import type {
+   AddedServer,
+   Antialiasing,
++  ContinueReply,
+   DiskVersion,
+   FileList,
+   FileMergeData,
+   FileSides,
+   KeysChange,
++  Listing,
+   RepositoryAnswer,
+   SettingsRead,
+   Side,
+@@ -32,6 +34,9 @@ export interface ChunkSource {
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   sideNames(): Promise<SideNames>;
+   abortMerge(): Promise<SourceResult<null>>;
++  listStop(): Promise<SourceResult<Listing>>;
++  continueOperation(): Promise<SourceResult<ContinueReply>>;
++  abortOperation(): Promise<SourceResult<null>>;
+   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+   setAntialiasing(
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index f0c1973..4a0602f 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -13,6 +13,9 @@ export const commands = {
+ 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
+ 	sideNames: () => typedError<SideNames, IpcError>(__TAURI_INVOKE("side_names")),
+ 	abortMerge: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_merge")),
++	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
++	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
++	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
+ 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
+ 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
+ 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
+@@ -76,6 +79,9 @@ export type ChunkKind =
+ /**  Local and remote changed these base lines differently. */
+ "Conflict";
+ 
++/**  What a Continue git accepted led to: the operation ended, or git stopped at another stop. */
++export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
++
+ export type DiskChange = {
+ 	path: string,
+ 	result: DiskResult,
+@@ -155,7 +161,7 @@ export type InlineRange<L> = {
+ 	len: number,
+ };
+ 
+-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" };
++export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" };
+ 
+ /**
+  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
+@@ -185,6 +191,9 @@ export type LineRange<L> = {
+ 	len: number,
+ };
+ 
++/**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
++export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" };
++
+ /**  0-based line index in the local text. */
+ export type LocalLine = number;
+ 
+@@ -214,6 +223,9 @@ export type MiddleLine = number;
+ /**  Why the file on disk cannot be shown as the middle text. */
+ export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
+ 
++/**  What git is doing, with the names of what it applies (plan §2 #87). */
++export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
++
+ /**
+  *  Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
+  *  names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute,
+@@ -230,6 +242,12 @@ export type ProgramFound = { kind: "Found"; path: string; place: ProgramPlace }
+ 
+ export type ProgramPlace = "Project" | "Path" | "Home";
+ 
++/**  Step `step` of `total`, 1 ≤ step ≤ total. */
++export type ProgressView = {
++	step: number,
++	total: number,
++};
++
+ /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
+ export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };
+ 
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index e00fdf5..206af8c 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -90,6 +90,24 @@ export type FileList = {
+   readonly merging: boolean;
+ };
+ 
++export type OperationView = Generated.OperationView;
++
++export type ProgressView = Generated.ProgressView;
++
++export type OperationKind = OperationView["kind"];
++
++export type Listing =
++  | {
++      readonly kind: "Files";
++      readonly files: readonly FileEntry[];
++      readonly diskChanges: readonly DiskChange[];
++      readonly operation: OperationView | null;
++      readonly sides: SideNames;
++    }
++  | { readonly kind: "MovedOn" };
++
++export type ContinueReply = Generated.ContinueReply;
++
+ export type FileMergeData = {
+   readonly path: string;
+   readonly middle: Generated.Middle;
+@@ -215,6 +233,14 @@ export function toFileList(dto: Generated.FileList): FileList {
+   return { files: dto.files, diskChanges: dto.disk_changes, merging: dto.merging };
+ }
+ 
++export function toListing(dto: Generated.Listing): Listing {
++  if (dto.kind === "MovedOn") {
++    return dto;
++  }
++  const { files, disk_changes: diskChanges, operation, sides } = dto;
++  return { kind: "Files", files, diskChanges, operation, sides };
++}
++
+ export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
+   const { languageServers } = dto.stored;
+   const stored = {
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 413c7e8..b3aeb3a 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -10,6 +10,7 @@ import {
+   type SourceResult,
+   type WriteReply,
+ } from "./domain";
++import { createFixtureStops } from "./fixtureOperations";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ 
+@@ -234,13 +235,22 @@ function fixtureWrites(
+ export function createFixtureSource(
+   log: Log,
+   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
++  search: string = typeof location === "undefined" ? "" : location.search,
+ ): ChunkSource {
+   const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
++  const stops = createFixtureStops(log, search, {
++    listed: () => entries(records),
++    unresolveAll: () => records.finished.clear(),
++  });
+ 
+   return {
+     async listFiles() {
+-      return { ok: true, value: { files: entries(records), diskChanges: [], merging: true } };
++      const value = { files: entries(records), diskChanges: [], merging: stops.merging };
++      return { ok: true, value };
+     },
++    listStop: stops.listStop,
++    continueOperation: stops.continueOperation,
++    abortOperation: stops.abortOperation,
+     async loadFile(path) {
+       const data = records.fixtures.get(path);
+       return data === undefined ? unknownPath(path) : { ok: true, value: data };
+diff --git a/frontend/src/ipc/fixtureOperations.test.ts b/frontend/src/ipc/fixtureOperations.test.ts
+new file mode 100644
+index 0000000..b072f5d
+--- /dev/null
++++ b/frontend/src/ipc/fixtureOperations.test.ts
+@@ -0,0 +1,170 @@
++import { expect, test, vi } from "vitest";
++
++import type { ChunkSource } from "./ChunkSource";
++import type { SourceResult } from "./domain";
++import { createFixtureSource } from "./fixture";
++import type { ContinueReply, Listing, OperationKind, OperationView, ProgressView } from "./index";
++import { createLog, type Log, type LogEntry } from "./log";
++
++const FIRST_STEP: ProgressView = { step: 1, total: 3 };
++const FINISHED: ContinueReply = { kind: "Finished" };
++
++const FILE = {
++  path: "a.ts",
++  middle: { kind: "Stages", text: "b\n" },
++  local: "l\n",
++  remote: "r\n",
++  deleted: null,
++  eol: "Lf",
++  chunks: [],
++  disk_version: 0,
++};
++
++function quietLog(): { log: Log; entries: LogEntry[] } {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const entries: LogEntry[] = [];
++  const log = createLog((entry) => {
++    entries.push(entry);
++  });
++  return { log, entries };
++}
++
++function sourceAt(search: string, log: Log = quietLog().log): ChunkSource {
++  return createFixtureSource(log, { "a.json": FILE }, search);
++}
++
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
++async function filesListed(source: ChunkSource): Promise<Extract<Listing, { kind: "Files" }>> {
++  const listing = valueOf(await source.listStop());
++  if (listing.kind !== "Files") {
++    throw new Error("expected files, got MovedOn");
++  }
++  return listing;
++}
++
++async function operationAt(source: ChunkSource): Promise<OperationView | null> {
++  return (await filesListed(source)).operation;
++}
++
++test.each<[string, OperationKind, boolean]>([
++  ["", "Merge", true],
++  ["?operation=merge", "Merge", true],
++  ["?operation=squash", "SquashMerge", false],
++  ["?operation=rebase", "Rebase", false],
++  ["?operation=cherry-pick", "CherryPick", false],
++  ["?operation=revert", "Revert", false],
++  ["?operation=am", "Am", false],
++  ["?operation=unknown", "Merge", true],
++])("%j lists the fixtures under that operation: %s", async (search, kind, merging) => {
++  const source = sourceAt(search);
++
++  const listing = await filesListed(source);
++
++  expect(listing.operation?.kind).toBe(kind);
++  expect(listing.files).toEqual([{ path: "a.ts", status: "Unresolved", unsupported: null }]);
++  expect(listing.diskChanges).toEqual([]);
++  expect(valueOf(await source.listFiles()).merging).toBe(merging);
++});
++
++test.each<[string, ProgressView | undefined]>([
++  ["?operation=rebase", FIRST_STEP],
++  ["?operation=cherry-pick", FIRST_STEP],
++  ["?operation=revert", FIRST_STEP],
++  ["?operation=am", FIRST_STEP],
++  ["?operation=merge", undefined],
++  ["?operation=squash", undefined],
++])("%j starts at its first step", async (search, progress) => {
++  const operation = await operationAt(sourceAt(search));
++
++  expect(operation !== null && "progress" in operation ? operation.progress : undefined).toEqual(
++    progress,
++  );
++});
++
++test("a rebase replays its own commit on the left and names the branch and what it goes onto", async () => {
++  const listing = await filesListed(sourceAt("?operation=rebase"));
++
++  expect(listing.operation).toEqual({
++    kind: "Rebase",
++    branch: "feature/reminders",
++    onto: { kind: "Branch", name: "main" },
++    replaying: listing.sides.local,
++    progress: FIRST_STEP,
++    editor_steps_ahead: false,
++  });
++  expect(listing.sides.local?.kind).toBe("Commit");
++  expect(listing.sides.remote).toBeNull();
++  expect((await operationAt(sourceAt("?operation=rebase&rewords"))) ?? {}).toMatchObject({
++    editor_steps_ahead: true,
++  });
++});
++
++test("a merge's sides stay unnamed as in today's fixtures", async () => {
++  expect((await filesListed(sourceAt(""))).sides).toEqual({ local: null, remote: null });
++});
++
++async function resolvedAndContinued(source: ChunkSource): Promise<unknown[]> {
++  const { diskVersion } = valueOf(await source.loadFile("a.ts"));
++  await source.finishFile({ path: "a.ts", text: "done\n", diskVersion });
++  const reply = valueOf(await source.continueOperation());
++  const { files, operation, sides } = await filesListed(source);
++  const replaying = operation?.kind === "Rebase" ? operation.replaying : null;
++  const progress = operation?.kind === "Rebase" ? operation.progress : null;
++  return [reply.kind, files[0]?.status, progress, sides.local === replaying];
++}
++
++test("a rebase advances 1 → 2 → 3, lists the files unresolved again each time, then finishes once", async () => {
++  const { log, entries } = quietLog();
++  const source = sourceAt("?operation=rebase", log);
++
++  const second = await resolvedAndContinued(source);
++  const third = await resolvedAndContinued(source);
++  const finished = await source.continueOperation();
++
++  expect(second).toEqual(["Stopped", "Unresolved", { step: 2, total: 3 }, true]);
++  expect(third).toEqual(["Stopped", "Unresolved", { step: 3, total: 3 }, true]);
++  expect(finished).toEqual({ ok: true, value: FINISHED });
++  expect(entries.filter((entry) => entry.event === "fixture.continue_finished")).toEqual([
++    { level: "info", event: "fixture.continue_finished", fields: { operation: "rebase" } },
++  ]);
++  expect(await operationAt(source)).toBeNull();
++  expect(await source.continueOperation()).toEqual({
++    ok: false,
++    failure: { kind: "MergeFinished" },
++  });
++});
++
++test.each(["", "?operation=squash"])("%j finishes at the first Continue", async (search) => {
++  const source = sourceAt(search);
++
++  expect(await source.continueOperation()).toEqual({ ok: true, value: FINISHED });
++});
++
++test("abortOperation answers done and logs the abort once", async () => {
++  const { log, entries } = quietLog();
++  const source = sourceAt("?operation=revert", log);
++
++  expect(await source.abortOperation()).toEqual({ ok: true, value: null });
++
++  expect(entries).toEqual([
++    { level: "info", event: "fixture.abort_operation", fields: { operation: "revert" } },
++  ]);
++});
++
++test("none lists no operation and has nothing to continue or abort", async () => {
++  const { log, entries } = quietLog();
++  const source = sourceAt("?operation=none", log);
++  const nothing = { ok: false, failure: { kind: "NoOperation" } };
++
++  expect(await operationAt(source)).toBeNull();
++  expect(await source.continueOperation()).toEqual(nothing);
++  expect(await source.abortOperation()).toEqual(nothing);
++  expect(valueOf(await source.listFiles()).merging).toBe(false);
++  expect(entries).toEqual([]);
++});
+diff --git a/frontend/src/ipc/fixtureOperations.ts b/frontend/src/ipc/fixtureOperations.ts
+new file mode 100644
+index 0000000..7a6f7de
+--- /dev/null
++++ b/frontend/src/ipc/fixtureOperations.ts
+@@ -0,0 +1,143 @@
++import type { ChunkSource } from "./ChunkSource";
++import type { FileEntry, OperationView, SideName, SourceResult } from "./domain";
++import type { Log } from "./log";
++
++const OPERATIONS = ["merge", "squash", "rebase", "cherry-pick", "revert", "am", "none"] as const;
++
++type FixtureOperation = (typeof OPERATIONS)[number];
++
++type CommitName = Extract<SideName, { kind: "Commit" }>;
++
++const MAIN: SideName = { kind: "Branch", name: "main" };
++const FEATURE = "feature/reminders";
++
++const COMMITS: readonly [CommitName, ...CommitName[]] = [
++  {
++    kind: "Commit",
++    short_id: "3f1c2a9",
++    subject: "Add reminder dates",
++    message: "Add reminder dates\n\nCards keep a due date.",
++  },
++  {
++    kind: "Commit",
++    short_id: "8b4e7d0",
++    subject: "Show reminders on the board",
++    message: "Show reminders on the board\n\nA bell marks a card that is due.",
++  },
++  {
++    kind: "Commit",
++    short_id: "c92a5e1",
++    subject: "Store reminders",
++    message: "Store reminders\n\nReminders survive a reload.",
++  },
++];
++
++/** The fixture files as listed now, and making every one unresolved again for the next step. */
++type StopFiles = {
++  readonly listed: () => FileEntry[];
++  readonly unresolveAll: () => void;
++};
++
++/** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
++type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation"> & {
++  /** Only a merge has `MERGE_HEAD`. */
++  readonly merging: boolean;
++};
++
++/** Where the chosen operation is: its step, or finished by the last Continue. */
++type Sequence = {
++  readonly operation: FixtureOperation;
++  readonly rewords: boolean;
++  step: number;
++  finished: boolean;
++};
++
++function nothingToRun<T>({ finished }: Sequence): SourceResult<T> {
++  return { ok: false, failure: { kind: finished ? "MergeFinished" : "NoOperation" } };
++}
++
++function stepView(
++  operation: FixtureOperation,
++  step: number,
++  rewords: boolean,
++): OperationView | null {
++  const commit = COMMITS[step - 1] ?? COMMITS[0];
++  const progress = { step, total: COMMITS.length };
++  const merging: SideName = { kind: "Branch", name: FEATURE };
++  switch (operation) {
++    case "merge":
++      return { kind: "Merge", merging, into: MAIN };
++    case "squash":
++      return { kind: "SquashMerge", merging, into: MAIN };
++    case "rebase":
++      return {
++        kind: "Rebase",
++        branch: FEATURE,
++        onto: MAIN,
++        replaying: commit,
++        progress,
++        editor_steps_ahead: rewords,
++      };
++    case "cherry-pick":
++      return { kind: "CherryPick", picking: commit, progress };
++    case "revert":
++      return { kind: "Revert", reverting: { ...commit, kind: "Revert" }, progress };
++    case "am":
++      return { kind: "Am", subject: commit.subject, message: commit.message, progress };
++    case "none":
++      return null;
++    default: {
++      const _exhaustive: never = operation;
++      return _exhaustive;
++    }
++  }
++}
++
++/** `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`. */
++function sequenceOf(search: string): Sequence {
++  const params = new URLSearchParams(search);
++  const chosen = params.get("operation");
++  const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
++  return { operation, rewords: params.has("rewords"), step: 1, finished: false };
++}
++
++function viewAt({ operation, step, rewords, finished }: Sequence): OperationView | null {
++  return finished ? null : stepView(operation, step, rewords);
++}
++
++export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
++  const at = sequenceOf(search);
++  const { operation } = at;
++
++  return {
++    merging: operation === "merge",
++    async listStop() {
++      const view = viewAt(at);
++      const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
++      const value = { files: files.listed(), diskChanges: [], operation: view, sides };
++      return { ok: true, value: { kind: "Files", ...value } };
++    },
++    async continueOperation() {
++      const view = viewAt(at);
++      if (view === null) {
++        return nothingToRun(at);
++      }
++      if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
++        at.finished = true;
++        log.info("fixture.continue_finished", { operation });
++        return { ok: true, value: { kind: "Finished" } };
++      }
++      at.step += 1;
++      files.unresolveAll();
++      const message = `CONFLICT (content): Merge conflict at step ${at.step} of ${COMMITS.length}`;
++      return { ok: true, value: { kind: "Stopped", message } };
++    },
++    async abortOperation() {
++      if (viewAt(at) === null) {
++        return nothingToRun(at);
++      }
++      log.info("fixture.abort_operation", { operation });
++      return { ok: true, value: null };
++    },
++  };
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 6266419..fbba6cc 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -7,6 +7,7 @@ export type {
+   AddedServer,
+   Antialiasing,
+   Chunk,
++  ContinueReply,
+   DiskChange,
+   DiskResult,
+   DiskVersion,
+@@ -17,9 +18,13 @@ export type {
+   HostEvent,
+   KeysChange,
+   LanguageServerSettings,
++  Listing,
+   NotText,
++  OperationKind,
++  OperationView,
+   ProgramFolders,
+   ProgramFound,
++  ProgressView,
+   ProjectFile,
+   RepositoryAnswer,
+   RunId,
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 170a1b2..b327212 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -14,6 +14,9 @@ const commands = vi.hoisted(() => ({
+   takeSide: vi.fn(),
+   sideNames: vi.fn(),
+   abortMerge: vi.fn(),
++  listStop: vi.fn(),
++  continueOperation: vi.fn(),
++  abortOperation: vi.fn(),
+   log: vi.fn(),
+   loadSettings: vi.fn(),
+   setTheme: vi.fn(),
+@@ -157,6 +160,59 @@ test("sideNames returns the app's names and rejects a failure naming its kind",
+   await expect(source.sideNames()).rejects.toThrow(new Error("side_names failed: MergeAborted"));
+ });
+ 
++test("listStop turns the app's files list into domain data and passes MovedOn and a failure on", async () => {
++  const operation: Generated.OperationView = {
++    kind: "Rebase",
++    branch: "feature",
++    onto: { kind: "Branch", name: "main" },
++    replaying: null,
++    progress: { step: 2, total: 3 },
++    editor_steps_ahead: false,
++  };
++  const sides: Generated.SideNames = { local: null, remote: { kind: "Branch", name: "main" } };
++  const files: Generated.FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
++  const change: Generated.DiskChange = { path: "a.ts", result: { kind: "Staged" } };
++  const listing = { kind: "Files", files, disk_changes: [change], operation, sides };
++  const running: Generated.IpcError = { kind: "GitRunning" };
++  commands.listStop.mockResolvedValueOnce({ status: "ok", data: listing });
++  commands.listStop.mockResolvedValueOnce({ status: "ok", data: { kind: "MovedOn" } });
++  commands.listStop.mockResolvedValueOnce({ status: "error", error: running });
++  const source = createTauriSource();
++
++  expect(await source.listStop()).toEqual({
++    ok: true,
++    value: { kind: "Files", files, diskChanges: [change], operation, sides },
++  });
++  expect(await source.listStop()).toEqual({ ok: true, value: { kind: "MovedOn" } });
++  expect(await source.listStop()).toEqual({ ok: false, failure: running });
++});
++
++test("continueOperation answers Finished or Stopped with git's message, and a failure unchanged", async () => {
++  const stopped: Generated.ContinueReply = { kind: "Stopped", message: "CONFLICT in b.ts" };
++  const refused: Generated.IpcError = { kind: "Git", message: "b.ts: needs merge" };
++  commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: stopped });
++  commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: { kind: "Finished" } });
++  commands.continueOperation.mockResolvedValueOnce({ status: "error", error: refused });
++  const source = createTauriSource();
++
++  expect(await source.continueOperation()).toEqual({ ok: true, value: stopped });
++  expect(await source.continueOperation()).toEqual({ ok: true, value: { kind: "Finished" } });
++  expect(await source.continueOperation()).toEqual({ ok: false, failure: refused });
++});
++
++test("abortOperation answers null, and a moved-on stop or no operation as the failure unchanged", async () => {
++  const movedOn: Generated.IpcError = { kind: "StopMovedOn" };
++  const none: Generated.IpcError = { kind: "NoOperation" };
++  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: null });
++  commands.abortOperation.mockResolvedValueOnce({ status: "error", error: movedOn });
++  commands.abortOperation.mockResolvedValueOnce({ status: "error", error: none });
++  const source = createTauriSource();
++
++  expect(await source.abortOperation()).toEqual({ ok: true, value: null });
++  expect(await source.abortOperation()).toEqual({ ok: false, failure: movedOn });
++  expect(await source.abortOperation()).toEqual({ ok: false, failure: none });
++});
++
+ test("loadFile turns the app's data into domain data: the middle range, not base", async () => {
+   commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index 8666548..6f7f042 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -11,6 +11,7 @@ import type { ChunkSource, SettingsSource } from "./ChunkSource";
+ import {
+   toDomain,
+   toFileList,
++  toListing,
+   toSettingsRead,
+   toSides,
+   toStartReply,
+@@ -73,6 +74,24 @@ function createTauriSettings(): SettingsSource {
+   };
+ }
+ 
++function createTauriStops(): Pick<
++  ChunkSource,
++  "listStop" | "continueOperation" | "abortOperation"
++> {
++  return {
++    async listStop() {
++      const result = toResult(await commands.listStop());
++      return result.ok ? { ok: true, value: toListing(result.value) } : result;
++    },
++    async continueOperation() {
++      return toResult(await commands.continueOperation());
++    },
++    async abortOperation() {
++      return toResult(await commands.abortOperation());
++    },
++  };
++}
++
+ export function createTauriSource(): ChunkSource {
+   return {
+     async listFiles() {
+@@ -109,6 +128,7 @@ export function createTauriSource(): ChunkSource {
+     async abortMerge() {
+       return toResult(await commands.abortMerge());
+     },
++    ...createTauriStops(),
+     ...createTauriSettings(),
+   };
+ }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 85431e5..3e3078f 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -158,6 +158,16 @@ test("an action after an abort says the merge was aborted", () => {
+   );
+ });
+ 
++test.each([
++  ["StopMovedOn", "The operation moved on; the list is being read again."],
++  ["GitRunning", "Git is still running; try again when it is done."],
++  ["MergeFinished", "The operation is finished."],
++  ["NoOperation", "Git has no operation to continue or abort."],
++] as const)("%s says what git is at, whatever was tried", (kind, words) => {
++  expect(text({ action: "save", path: PATH, cause: { kind } })).toBe(words);
++  expect(text({ action: "abort", cause: { kind } })).toBe(words);
++});
++
+ test("key problems name the action, the key and what yamt does instead", () => {
+   const said = problemText(
+     {
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index a49bebd..ae5a35a 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -6,6 +6,15 @@ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"
+ 
+ const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
+ 
++const OPERATION_STATE_WORDS: Readonly<
++  Record<"StopMovedOn" | "GitRunning" | "MergeFinished" | "NoOperation", string>
++> = {
++  StopMovedOn: "The operation moved on; the list is being read again.",
++  GitRunning: "Git is still running; try again when it is done.",
++  MergeFinished: "The operation is finished.",
++  NoOperation: "Git has no operation to continue or abort.",
++};
++
+ function attempted(problem: Problem): string {
+   switch (problem.action) {
+     case "list":
+@@ -102,6 +111,11 @@ export function problemText(problem: Problem, platform: string): string {
+       return `${attempted(problem)}: this system has no config folder to keep it in.`;
+     case "MergeAborted":
+       return `${attempted(problem)}: the merge was aborted.`;
++    case "StopMovedOn":
++    case "GitRunning":
++    case "MergeFinished":
++    case "NoOperation":
++      return OPERATION_STATE_WORDS[cause.kind];
+     case "Keys":
+       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
+     case "Unexpected":
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 67ede91..a75c111 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -113,6 +113,9 @@ function writeTarget(
+     takeSide: notUsed,
+     sideNames: notUsed,
+     abortMerge: notUsed,
++    listStop: notUsed,
++    continueOperation: notUsed,
++    abortOperation: notUsed,
+     loadSettings: notUsed,
+     setTheme: notUsed,
+     setAntialiasing: notUsed,
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 2f7c3a8..a6bddd5 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -133,6 +133,9 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     takeSide: () => Promise.reject(new Error("not used")),
+     sideNames: () => Promise.resolve({ local: null, remote: null }),
+     abortMerge: () => Promise.reject(new Error("not used")),
++    listStop: () => Promise.reject(new Error("not used")),
++    continueOperation: () => Promise.reject(new Error("not used")),
++    abortOperation: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+   };
+   return { source, pending };
+@@ -1077,6 +1080,9 @@ function choiceSource(
+     },
+     sideNames: () => Promise.resolve({ local: null, remote: null }),
+     abortMerge: () => Promise.reject(new Error("not used")),
++    listStop: () => Promise.reject(new Error("not used")),
++    continueOperation: () => Promise.reject(new Error("not used")),
++    abortOperation: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+     ...overrides,
+   };
+diff --git a/scripts/operations-repo.sh b/scripts/operations-repo.sh
+new file mode 100755
+index 0000000..22214c4
+--- /dev/null
++++ b/scripts/operations-repo.sh
+@@ -0,0 +1,179 @@
++#!/usr/bin/env bash
++# Usage: scripts/operations-repo.sh <run> <dir>
++# Builds a git repo in <dir> stopped on conflicts by one git operation, for the real-app runs of plan §2 #85-#91.
++# <run>: merge, squash, rebase, rebase-apply, rebase-interactive, cherry-pick, revert, am, stash-pop, rerere, hook.
++# The sequence runs (rebase*, cherry-pick, am) replay 3 own commits of `feature` onto `main`: commit 1 conflicts in
++# a text file, a binary file and a file `main` deleted; commit 2 in another text file; commit 3 applies cleanly.
++# Prints the conflicted paths. Uses no user or system git config while building (risk RK19); the repo's own config
++# names a committer and turns signing off, so yamt's Continue (run with the user's config) can commit.
++set -euo pipefail
++source "$(dirname "$0")/git-sandbox.sh"
++
++[ $# -eq 2 ] || die "usage: $0 <run> <dir>"
++run=$1
++dir=$2
++
++require_empty_dir "$dir"
++isolate_git_config
++
++# $1: path in the repo, $2: printf format giving the content (\0 allowed).
++write() {
++    mkdir -p "$(dirname "$dir/$1")"
++    printf "$2" >"$dir/$1"
++    repo_git add -- "$1"
++}
++
++# $1: the commit message.
++commit() {
++    repo_git commit -q -m "$1"
++}
++
++# $@: the git command that must stop on conflicts.
++stops() {
++    if repo_git "$@" >/dev/null 2>&1; then
++        die "git $* finished; expected it to stop on conflicts"
++    fi
++}
++
++init_repo() {
++    mkdir -p "$dir"
++    git -c init.defaultBranch=main init -q "$dir"
++    repo_git config user.name yamt
++    repo_git config user.email yamt@example.invalid
++    repo_git config commit.gpgsign false
++}
++
++# main and feature diverged from base; feature holds the 3 own commits.
++sequence_repo() {
++    init_repo
++    write src/board.ts 'export const columns = ["todo", "done"];\n'
++    write src/card.ts 'export const title = "Card";\n'
++    write assets/logo.bin 'LOGO\0base\n'
++    write docs/notes.md '# Notes\n\nbase notes\n'
++    commit base
++
++    repo_git checkout -q -b feature
++    write src/board.ts 'export const columns = ["todo", "doing", "done"];\n'
++    write assets/logo.bin 'LOGO\0feature\n'
++    write docs/notes.md '# Notes\n\nfeature notes\n'
++    repo_git commit -q -m "feature: board columns, logo and notes" -m "The board gets a doing column."
++    write src/card.ts 'export const title = "Reminder card";\n'
++    commit "feature: card title"
++    write src/reminders.ts 'export const reminders = [];\n'
++    commit "feature: reminders"
++
++    repo_git checkout -q main
++    write src/board.ts 'export const columns = ["backlog", "todo", "done"];\n'
++    write src/card.ts 'export const title = "Task";\n'
++    write assets/logo.bin 'LOGO\0main\n'
++    repo_git rm -q -- docs/notes.md
++    commit "main: backlog, task title, new logo; notes removed"
++}
++
++# a.txt and b.txt set by the commits a range revert undoes, then changed again on top.
++revert_repo() {
++    init_repo
++    write a.txt 'a0\n'
++    write b.txt 'b0\n'
++    commit base
++    write a.txt 'a1\n'
++    commit "set a"
++    write b.txt 'b1\n'
++    commit "set b"
++    write a.txt 'a2\n'
++    commit "change a again"
++    write b.txt 'b2\n'
++    commit "change b again"
++}
++
++# main and topic change src/board.ts differently.
++two_branch_repo() {
++    init_repo
++    write src/board.ts 'export const columns = ["todo", "done"];\n'
++    commit base
++    repo_git checkout -q -b topic
++    write src/board.ts 'export const columns = ["todo", "doing", "done"];\n'
++    commit "topic: doing column"
++    repo_git checkout -q main
++    write src/board.ts 'export const columns = ["backlog", "todo", "done"];\n'
++    commit "main: backlog column"
++}
++
++case "$run" in
++merge)
++    sequence_repo
++    stops merge --no-edit feature
++    expected=4
++    ;;
++squash)
++    sequence_repo
++    stops merge --squash feature
++    expected=4
++    ;;
++rebase)
++    sequence_repo
++    stops rebase main feature
++    expected=3
++    ;;
++rebase-apply)
++    sequence_repo
++    stops rebase --apply main feature
++    expected=3
++    ;;
++rebase-interactive)
++    sequence_repo
++    stops -c "sequence.editor=sed -i -e 3s/^pick/reword/" rebase -i main feature
++    expected=3
++    ;;
++cherry-pick)
++    sequence_repo
++    stops cherry-pick main..feature
++    expected=3
++    ;;
++revert)
++    revert_repo
++    stops revert --no-edit HEAD~4..HEAD~2
++    expected=1
++    ;;
++am)
++    sequence_repo
++    repo_git format-patch -q -o "$dir/.git/patches" main..feature >/dev/null
++    stops am -3 "$dir"/.git/patches/*.patch
++    expected=3
++    ;;
++stash-pop)
++    two_branch_repo
++    printf 'export const columns = ["todo", "review", "done"];\n' >"$dir/src/board.ts"
++    repo_git stash -q
++    repo_git checkout -q topic
++    stops stash pop
++    expected=1
++    ;;
++rerere)
++    two_branch_repo
++    repo_git config rerere.enabled true
++    repo_git config rerere.autoUpdate false
++    stops merge --no-edit topic
++    write src/board.ts 'export const columns = ["backlog", "todo", "doing", "done"];\n'
++    repo_git commit -q --no-edit
++    repo_git reset -q --hard HEAD^
++    stops merge --no-edit topic
++    expected=1
++    ;;
++hook)
++    two_branch_repo
++    repo_git config core.hooksPath .git/hooks
++    mkdir -p "$dir/.git/hooks"
++    printf '#!/bin/sh\necho "hook says no" >&2\nexit 1\n' >"$dir/.git/hooks/pre-commit"
++    chmod +x "$dir/.git/hooks/pre-commit"
++    stops merge --no-edit topic
++    expected=1
++    ;;
++*)
++    die "unknown run '$run'; one of: merge squash rebase rebase-apply rebase-interactive cherry-pick revert am stash-pop rerere hook"
++    ;;
++esac
++
++conflicted=$(require_conflicts "$expected")
++echo "operations-repo: $dir stopped in $run; conflicted files:"
++echo "$conflicted"
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index d670ec0..33a4e06 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; after an abort the close ending is 1 with `merge aborted`, reading and writing nothing), `merge.rs` (`Merge` = `Held(MergeSession)` | `Aborted`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `IpcError::MergeAborted` once aborted, `abort()` runs `git merge --abort` and becomes `Aborted` only on success, plan §2 #74), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`; `abort_merge` destroys the window after a successful abort, which ends the event loop without a close request, so the page asks nothing; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error`, plus `MergeAborted`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict repository opened in a mock-runtime window, `invoke` a command by name; used by the command tests in `commands.rs`, `merge.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held`; `list_stop` opens the new stop after a move and becomes `MovedOn` when git moved on; `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, stopped → `MovedOn`, a panicked worker → `MovedOn`; `lock_when_git_is_done` makes the close ending wait for git; `abort()` is the old `git merge --abort`; plan §2 #74, #88, #89), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; `abort_merge`, `abort_operation` and a finished `continue_operation` destroy the window, which ends the event loop without a close request, so the page asks nothing; the two async commands take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread; used by the command tests in `commands.rs`, `merge.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 6184084..82965ab 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -7,7 +7,7 @@ use yamt_session::{
+ 
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
+-use crate::merge::{Merge, MergeState, lock};
++use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
+ use crate::{servers, settings};
+ 
+ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+@@ -21,6 +21,9 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         take_side,
+         side_names,
+         abort_merge::<tauri::Wry>,
++        list_stop,
++        continue_operation::<tauri::Wry>,
++        abort_operation::<tauri::Wry>,
+         log,
+         settings::load_settings::<tauri::Wry>,
+         settings::set_theme::<tauri::Wry>,
+@@ -41,7 +44,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+ 
+ pub(crate) fn with_session<R: Runtime>(
+     builder: tauri::Builder<R>,
+-    session: MergeSession,
++    session: Box<MergeSession>,
+ ) -> tauri::Builder<R> {
+     servers::manage(builder, session.root())
+         .manage(Mutex::new(Merge::Held(session)))
+@@ -130,6 +133,12 @@ fn take_side(
+ 
+ // tauri 2.12 `WebviewWindow::destroy` "does not emit any events": no `CloseRequested`, so the page's
+ // unsaved-work question does not run; the last window gone ends `run_return`.
++fn close_window<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
++    if let Err(error) = window.destroy() {
++        tracing::warn!(%error, ended, "git is done but the window stays: closing it ends yamt");
++    }
++}
++
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(
+@@ -141,9 +150,36 @@ fn abort_merge<R: Runtime>(
+     state: State<'_, MergeState>,
+ ) -> Result<(), IpcError> {
+     lock(&state).abort()?;
+-    if let Err(error) = window.destroy() {
+-        tracing::warn!(%error, "the merge is aborted but the window stays: closing it ends yamt");
++    close_window(&window, "aborted");
++    Ok(())
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++fn list_stop(state: State<'_, MergeState>) -> Result<Listing, IpcError> {
++    lock(&state).list_stop()
++}
++
++// The merge state comes from the window: tauri-macros 2.7 checks an async command with a borrowed
++// argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
++#[tauri::command]
++#[specta::specta]
++async fn continue_operation<R: Runtime>(
++    window: WebviewWindow<R>,
++) -> Result<ContinueReply, IpcError> {
++    let reply = merge::continue_operation(&window.state()).await?;
++    if reply == ContinueReply::Finished {
++        close_window(&window, "finished");
+     }
++    Ok(reply)
++}
++
++#[tauri::command]
++#[specta::specta]
++async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
++    merge::abort_operation(&window.state()).await?;
++    close_window(&window, "aborted");
+     Ok(())
+ }
+ 
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index 4096889..e68fe99 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -33,6 +33,10 @@ pub enum IpcError {
+     },
+     NoConfigFolder,
+     MergeAborted,
++    StopMovedOn,
++    GitRunning,
++    MergeFinished,
++    NoOperation,
+ }
+ 
+ impl From<yamt_session::Error> for IpcError {
+@@ -54,11 +58,9 @@ impl From<yamt_session::Error> for IpcError {
+                 path,
+                 message: source.to_string(),
+             },
+-            error @ (yamt_session::Error::NoOperation
+-            | yamt_session::Error::StopMovedOn
+-            | yamt_session::Error::GitRefused { .. }) => IpcError::Git {
+-                message: error.to_string(),
+-            },
++            yamt_session::Error::NoOperation => IpcError::NoOperation,
++            yamt_session::Error::StopMovedOn => IpcError::StopMovedOn,
++            yamt_session::Error::GitRefused { message } => IpcError::Git { message },
+         }
+     }
+ }
+@@ -147,6 +149,27 @@ mod tests {
+         );
+     }
+ 
++    // A refusal read as "git refused: …" would say it twice under the window's "Could not continue".
++    #[test]
++    fn operation_errors_have_their_own_kinds_and_git_s_refusal_is_git_s_text() {
++        assert_eq!(
++            ipc_json(yamt_session::Error::NoOperation),
++            json!({ "kind": "NoOperation" })
++        );
++        assert_eq!(
++            ipc_json(yamt_session::Error::StopMovedOn),
++            json!({ "kind": "StopMovedOn" })
++        );
++        let message = "error: commit is not possible because you have unmerged files.";
++        let refused = yamt_session::Error::GitRefused {
++            message: message.to_owned(),
++        };
++        assert_eq!(
++            ipc_json(refused),
++            json!({ "kind": "Git", "message": message })
++        );
++    }
++
+     #[test]
+     fn settings_errors_serialise_with_their_kind_and_fields() {
+         let settings_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
+diff --git a/src-tauri/src/merge.rs b/src-tauri/src/merge.rs
+index a231240..f2ede3f 100644
+--- a/src-tauri/src/merge.rs
++++ b/src-tauri/src/merge.rs
+@@ -1,54 +1,208 @@
++use std::path::PathBuf;
+ use std::sync::{Mutex, MutexGuard, PoisonError};
++use std::thread;
++use std::time::Duration;
+ 
+-use yamt_session::MergeSession;
++use yamt_session::{
++    Continued, DiskChange, FileEntry, MergeSession, OperationKind, OperationView, Refreshed,
++    SideNames,
++};
+ 
+ use crate::ipc_error::IpcError;
+ 
+-/// The merge this run works on: held from the start until `git merge --abort` succeeds (plan §2 #74).
+-#[expect(
+-    clippy::large_enum_variant,
+-    reason = "one value per run, built once and kept in the app's state"
+-)]
++const GIT_RUNNING_POLL: Duration = Duration::from_millis(50);
++
++/// The stop this run works on (plan §2 #74, #88, #89).
+ pub(crate) enum Merge {
+-    Held(MergeSession),
+-    Aborted,
++    Held(Box<MergeSession>),
++    /// git aborts or continues; the session is with the worker.
++    Running(OperationKind),
++    /// git moved on to another stop: the old session is dropped; the next list opens the new one.
++    MovedOn {
++        root: PathBuf,
++    },
++    Aborted(OperationKind),
++    Finished(OperationKind),
+ }
+ 
+ pub(crate) type MergeState = Mutex<Merge>;
+ 
++/// The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it.
++#[derive(Debug, serde::Serialize, specta::Type)]
++#[serde(tag = "kind")]
++#[expect(
++    clippy::large_enum_variant,
++    reason = "one value per list, returned and serialized at once; never stored"
++)]
++pub enum Listing {
++    Files {
++        files: Vec<FileEntry>,
++        disk_changes: Vec<DiskChange>,
++        operation: Option<OperationView>,
++        sides: SideNames,
++    },
++    MovedOn,
++}
++
++/// What a Continue git accepted led to: the operation ended, or git stopped at another stop.
++#[derive(Debug, PartialEq, Eq, serde::Serialize, specta::Type)]
++#[serde(tag = "kind")]
++pub enum ContinueReply {
++    Finished,
++    Stopped { message: String },
++}
++
+ pub(crate) fn lock(state: &MergeState) -> MutexGuard<'_, Merge> {
+     state.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
++/// The merge once no worker runs git: a close waits for git rather than killing it.
++pub(crate) fn lock_when_git_is_done(state: &MergeState) -> MutexGuard<'_, Merge> {
++    loop {
++        let merge = lock(state);
++        if !matches!(*merge, Merge::Running(_)) {
++            return merge;
++        }
++        drop(merge);
++        thread::sleep(GIT_RUNNING_POLL);
++    }
++}
++
+ impl Merge {
+     pub(crate) fn session(&mut self) -> Result<&mut MergeSession, IpcError> {
+         match self {
+             Merge::Held(session) => Ok(session),
+-            Merge::Aborted => Err(IpcError::MergeAborted),
++            Merge::Running(_) => Err(IpcError::GitRunning),
++            Merge::MovedOn { .. } => Err(IpcError::StopMovedOn),
++            Merge::Aborted(_) => Err(IpcError::MergeAborted),
++            Merge::Finished(_) => Err(IpcError::MergeFinished),
+         }
+     }
+ 
+     pub(crate) fn abort(&mut self) -> Result<(), IpcError> {
+         self.session()?.abort_merge()?;
+-        *self = Merge::Aborted;
++        *self = Merge::Aborted(OperationKind::Merge);
+         Ok(())
+     }
++
++    /// After a move, opens the new stop first; a list that finds git moved on drops the session.
++    pub(crate) fn list_stop(&mut self) -> Result<Listing, IpcError> {
++        if let Merge::MovedOn { root } = self {
++            *self = Merge::Held(Box::new(MergeSession::open(root)?));
++        }
++        let session = self.session()?;
++        match session.refresh_stop()? {
++            Refreshed::Files(list) => Ok(Listing::Files {
++                files: list.files,
++                disk_changes: list.disk_changes,
++                operation: list.operation,
++                sides: list.sides,
++            }),
++            Refreshed::MovedOn => {
++                let root = session.root().to_path_buf();
++                *self = Merge::MovedOn { root };
++                Ok(Listing::MovedOn)
++            }
++        }
++    }
++
++    fn hand_to_worker(&mut self) -> Result<Box<MergeSession>, IpcError> {
++        let kind = self
++            .session()?
++            .operation_kind()
++            .ok_or(IpcError::NoOperation)?;
++        match std::mem::replace(self, Merge::Running(kind)) {
++            Merge::Held(session) => Ok(session),
++            other @ (Merge::Running(_)
++            | Merge::MovedOn { .. }
++            | Merge::Aborted(_)
++            | Merge::Finished(_)) => {
++                *self = other;
++                Err(IpcError::GitRunning)
++            }
++        }
++    }
++}
++
++/// Runs `work` on a blocking worker while the merge is `Running`. git's refusal puts the session
++/// back; a worker that panicked leaves `MovedOn`, so the next list opens the stop git is at.
++async fn on_worker<T, F>(state: &MergeState, work: F) -> Result<(Box<MergeSession>, T), IpcError>
++where
++    T: Send + 'static,
++    F: FnOnce(&mut MergeSession) -> yamt_session::Result<T> + Send + 'static,
++{
++    let mut session = lock(state).hand_to_worker()?;
++    let root = session.root().to_path_buf();
++    let worker = tauri::async_runtime::spawn_blocking(move || {
++        let result = work(&mut session);
++        (session, result)
++    });
++    match worker.await {
++        Ok((session, Ok(value))) => Ok((session, value)),
++        Ok((session, Err(error))) => {
++            *lock(state) = Merge::Held(session);
++            Err(error.into())
++        }
++        Err(error) => {
++            *lock(state) = Merge::MovedOn { root };
++            Err(IpcError::Git {
++                message: format!("yamt's worker stopped while git ran: {error}"),
++            })
++        }
++    }
++}
++
++/// git's abort of the operation (plan §2 #88); `Aborted` only after git succeeded.
++pub(crate) async fn abort_operation(state: &MergeState) -> Result<(), IpcError> {
++    let (_session, kind) = on_worker(state, MergeSession::abort_operation).await?;
++    *lock(state) = Merge::Aborted(kind);
++    Ok(())
++}
++
++/// git's continue (plan §2 #89): finished, or stopped at another stop (`MovedOn`).
++pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueReply, IpcError> {
++    let (session, continued) = on_worker(state, MergeSession::continue_operation).await?;
++    let mut merge = lock(state);
++    match continued {
++        Continued::Finished { kind, output } => {
++            tracing::info!(%output, "git finished the operation");
++            *merge = Merge::Finished(kind);
++            Ok(ContinueReply::Finished)
++        }
++        Continued::Stopped { message } => {
++            let root = session.root().to_path_buf();
++            *merge = Merge::MovedOn { root };
++            Ok(ContinueReply::Stopped { message })
++        }
++    }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+-    use std::fs;
++    use std::{fs, thread};
+ 
+     use serde_json::{Value, json};
+     use tauri::Manager;
+-    use yamt_conflict_repo::git_ok;
++    use yamt_conflict_repo::{
++        ConflictFile, FileKind, Run, STEP_TWO_FILE, git, git_ok, install_hook, operation_repo,
++    };
+ 
+     use super::*;
+-    use crate::mock_window::{CRLF_PATH, Window, open_window};
++    use crate::mock_window::{CRLF_PATH, Window, invoke_on, open_window, open_window_in};
+     use crate::outcome::{Ending, Exit, ending_on_close};
+ 
+     const ADDED: &str = "added.ts";
+     const CRLF_AT_HEAD: &[u8] = b"a\r\nlocal\r\n";
++    /// Conflicts at step 1 and, whatever it was resolved to, again at step 2 of the rebase.
++    const STEPS: [ConflictFile<'static>; 1] = [ConflictFile {
++        path: STEP_TWO_FILE,
++        kind: FileKind::Regular,
++        base: Some(b"one\n"),
++        local: Some(b"local-1\n"),
++        remote: Some(b"remote-1\n"),
++    }];
++    const RELEASE: &str = ".git/release";
++    const HOOK_WAITING_FOR_RELEASE: &str = "#!/bin/sh\ni=0\nwhile [ ! -e .git/release ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\n";
+ 
+     impl Window {
+         fn ending(&self) -> Ending {
+@@ -64,11 +218,12 @@ mod tests {
+         Err(json!({ "kind": "MergeAborted" }))
+     }
+ 
+-    fn merge_commands() -> [(&'static str, Value); 9] {
++    fn merge_commands() -> [(&'static str, Value); 12] {
+         let path = json!({ "path": CRLF_PATH });
+         let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
+         [
+             ("list_files", json!({})),
++            ("list_stop", json!({})),
+             ("load_file", path.clone()),
+             ("describe_file", path),
+             ("finish_file", write.clone()),
+@@ -80,6 +235,8 @@ mod tests {
+             ),
+             ("side_names", json!({})),
+             ("abort_merge", json!({})),
++            ("continue_operation", json!({})),
++            ("abort_operation", json!({})),
+         ]
+     }
+ 
+@@ -142,4 +299,161 @@ mod tests {
+             Some("2 of 3 files still unresolved")
+         );
+     }
++
++    fn rebase_window() -> Window {
++        open_window_in(operation_repo(Run::Rebase, &STEPS).unwrap())
++    }
++
++    fn resolved_step(window: &Window) {
++        let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": 0 });
++        let written = window.invoke("finish_file", args).unwrap();
++        assert_eq!(written["kind"], "Written", "{written}");
++    }
++
++    fn assert_step_two_listed(listed: &Value) {
++        let file = json!({ "path": STEP_TWO_FILE, "status": "Unresolved", "unsupported": null });
++        assert_eq!(listed["kind"], "Files", "{listed}");
++        assert_eq!(listed["files"], json!([file]), "{listed}");
++        let progress = &listed["operation"]["progress"];
++        assert_eq!(progress, &json!({ "step": 2, "total": 3 }), "{listed}");
++    }
++
++    // A command run while git commits would read or write files git is rewriting for the next stop.
++    #[test]
++    fn while_git_runs_a_write_and_a_list_answer_git_running_and_the_next_stop_lands_as_moved_on() {
++        let window = rebase_window();
++        resolved_step(&window);
++        install_hook(
++            window.repo.path(),
++            "prepare-commit-msg",
++            HOOK_WAITING_FOR_RELEASE,
++        )
++        .unwrap();
++        let state = window.app.state::<MergeState>();
++        let git_running = Err(json!({ "kind": "GitRunning" }));
++
++        let reply = thread::scope(|scope| {
++            let webview = &window.webview;
++            let continuing =
++                scope.spawn(move || invoke_on(webview, "continue_operation", json!({})));
++            while !continuing.is_finished() && !matches!(*lock(&state), Merge::Running(_)) {
++                thread::sleep(GIT_RUNNING_POLL);
++            }
++            let save = json!({ "path": STEP_TWO_FILE, "text": "mine\n", "diskVersion": 0 });
++            assert_eq!(window.invoke("save_file", save), git_running);
++            assert_eq!(window.invoke("list_stop", json!({})), git_running);
++            assert!(!continuing.is_finished(), "git ran past the hook");
++            fs::write(window.repo.path().join(RELEASE), "").unwrap();
++            continuing.join().unwrap()
++        });
++
++        assert_eq!(reply.unwrap()["kind"], "Stopped");
++        assert!(matches!(*lock(&state), Merge::MovedOn { .. }));
++    }
++
++    // Disk versions restart at every stop: a Save meant for step 1 would land on step 2's file.
++    #[test]
++    fn after_a_continue_stops_again_an_old_save_writes_nothing_and_the_next_list_is_step_two() {
++        let window = rebase_window();
++        resolved_step(&window);
++        let file = window.repo.path().join(STEP_TWO_FILE);
++
++        let stopped = window.invoke("continue_operation", json!({})).unwrap();
++
++        assert_eq!(stopped["kind"], "Stopped", "{stopped}");
++        let message = stopped["message"].as_str().unwrap();
++        assert!(message.contains("CONFLICT"), "{message}");
++        let at_step_two = fs::read(&file).unwrap();
++        let save = json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": 0 });
++        let moved_on = Err(json!({ "kind": "StopMovedOn" }));
++        assert_eq!(window.invoke("save_file", save), moved_on);
++        assert_eq!(window.invoke("list_files", json!({})), moved_on);
++        assert_eq!(fs::read(&file).unwrap(), at_step_two);
++        assert_step_two_listed(&window.invoke("list_stop", json!({})).unwrap());
++    }
++
++    #[test]
++    fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
++        let window = rebase_window();
++        let root = window.repo.path();
++        fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
++        git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
++        assert!(
++            !git(root, &["rebase", "--continue"])
++                .unwrap()
++                .status
++                .success()
++        );
++
++        let moved_on = window.invoke("list_stop", json!({}));
++
++        assert_eq!(moved_on, Ok(json!({ "kind": "MovedOn" })));
++        let load = json!({ "path": STEP_TWO_FILE });
++        assert_eq!(
++            window.invoke("load_file", load),
++            Err(json!({ "kind": "StopMovedOn" }))
++        );
++        assert_step_two_listed(&window.invoke("list_stop", json!({})).unwrap());
++    }
++
++    #[test]
++    fn a_rebase_aborted_answers_merge_aborted_to_every_command_and_ends_rebase_aborted() {
++        let window = rebase_window();
++
++        assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
++
++        for (command, args) in merge_commands() {
++            assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
++        }
++        assert_eq!(
++            window.git_text(&["rev-parse", "--abbrev-ref", "HEAD"]),
++            "remote\n"
++        );
++        assert!(!window.repo.path().join(".git/rebase-merge").exists());
++        let aborted = Ending {
++            exit: Exit::Unresolved,
++            message: Some("rebase aborted".to_owned()),
++        };
++        assert_eq!(window.ending(), aborted);
++    }
++
++    #[test]
++    fn a_merge_continued_is_finished_every_command_answers_merge_finished_and_it_ends_with_zero() {
++        let window = open_window();
++        for path in ["added.ts", CRLF_PATH, "view.vue"] {
++            let args = json!({ "path": path, "text": "done\n", "diskVersion": 0 });
++            window.invoke("finish_file", args).unwrap();
++        }
++
++        let finished = window.invoke("continue_operation", json!({}));
++
++        assert_eq!(finished, Ok(json!({ "kind": "Finished" })));
++        let merge_finished = Err(json!({ "kind": "MergeFinished" }));
++        for (command, args) in merge_commands() {
++            assert_eq!(window.invoke(command, args), merge_finished, "{command}");
++        }
++        assert_eq!(
++            window.git_text(&["rev-list", "--count", "--merges", "HEAD"]),
++            "1\n"
++        );
++        let ending = Ending {
++            exit: Exit::Success,
++            message: Some("merge finished".to_owned()),
++        };
++        assert_eq!(window.ending(), ending);
++    }
++
++    #[test]
++    fn continue_and_abort_at_a_stop_git_records_no_operation_for_answer_no_operation() {
++        let window = open_window_in(operation_repo(Run::StashPop, &STEPS).unwrap());
++        let no_operation = Err(json!({ "kind": "NoOperation" }));
++
++        assert_eq!(window.invoke("continue_operation", json!({})), no_operation);
++        assert_eq!(window.invoke("abort_operation", json!({})), no_operation);
++
++        assert_eq!(
++            window.invoke("list_stop", json!({})).unwrap()["operation"],
++            Value::Null
++        );
++    }
+ }
+diff --git a/src-tauri/src/mock_window.rs b/src-tauri/src/mock_window.rs
+index 6dd1311..a19d19f 100644
+--- a/src-tauri/src/mock_window.rs
++++ b/src-tauri/src/mock_window.rs
+@@ -15,7 +15,7 @@ pub(crate) const CRLF_PATH: &str = "crlf.ts";
+ pub(crate) struct Window {
+     pub(crate) repo: TempDir,
+     pub(crate) app: App<MockRuntime>,
+-    webview: WebviewWindow<MockRuntime>,
++    pub(crate) webview: WebviewWindow<MockRuntime>,
+ }
+ 
+ pub(crate) fn file<'a>(
+@@ -47,9 +47,12 @@ pub(crate) fn open_window() -> Window {
+ }
+ 
+ pub(crate) fn open_window_on(files: &[ConflictFile]) -> Window {
+-    let repo = conflict_repo(files).unwrap();
++    open_window_in(conflict_repo(files).unwrap())
++}
++
++pub(crate) fn open_window_in(repo: TempDir) -> Window {
+     let session = MergeSession::open(repo.path()).unwrap();
+-    let app = with_session(mock_builder(), session)
++    let app = with_session(mock_builder(), Box::new(session))
+         .build(mock_context(noop_assets()))
+         .unwrap();
+     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+@@ -60,15 +63,24 @@ pub(crate) fn open_window_on(files: &[ConflictFile]) -> Window {
+ 
+ impl Window {
+     pub(crate) fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
+-        let request = InvokeRequest {
+-            cmd: cmd.to_owned(),
+-            callback: CallbackFn(0),
+-            error: CallbackFn(1),
+-            url: self.webview.url().unwrap(),
+-            body: InvokeBody::Json(args),
+-            headers: tauri::http::HeaderMap::default(),
+-            invoke_key: INVOKE_KEY.to_owned(),
+-        };
+-        get_ipc_response(&self.webview, request).map(|body| body.deserialize().unwrap())
++        invoke_on(&self.webview, cmd, args)
+     }
+ }
++
++/// `Window::invoke` from another thread: the app itself is not `Sync`, its webview is.
++pub(crate) fn invoke_on(
++    webview: &WebviewWindow<MockRuntime>,
++    cmd: &str,
++    args: Value,
++) -> Result<Value, Value> {
++    let request = InvokeRequest {
++        cmd: cmd.to_owned(),
++        callback: CallbackFn(0),
++        error: CallbackFn(1),
++        url: webview.url().unwrap(),
++        body: InvokeBody::Json(args),
++        headers: tauri::http::HeaderMap::default(),
++        invoke_key: INVOKE_KEY.to_owned(),
++    };
++    get_ipc_response(webview, request).map(|body| body.deserialize().unwrap())
++}
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index 33f8561..5d78bdf 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -1,12 +1,10 @@
+ use std::path::Path;
+ use std::process::ExitCode;
+ 
+-use yamt_session::MergeSession;
++use yamt_session::{MergeSession, OperationKind};
+ 
+ use crate::merge::Merge;
+ 
+-const MERGE_ABORTED: &str = "merge aborted";
+-
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub(crate) enum Exit {
+     Success = 0,
+@@ -37,7 +35,7 @@ impl Ending {
+ }
+ 
+ pub(crate) enum Startup {
+-    Merge(MergeSession),
++    Merge(Box<MergeSession>),
+     Done(Ending),
+ }
+ 
+@@ -48,17 +46,38 @@ pub(crate) fn startup(repo: &Path) -> Startup {
+             exit: Exit::Success,
+             message: Some(format!("nothing to merge in {}", session.root().display())),
+         }),
+-        Ok(session) => Startup::Merge(session),
++        Ok(session) => Startup::Merge(Box::new(session)),
+     }
+ }
+ 
++/// The ending of a merge no worker runs git for; see `merge::lock_when_git_is_done`.
+ pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
+     match merge {
+         Merge::Held(session) => held_merge_ending(session),
+-        Merge::Aborted => Ending {
++        Merge::MovedOn { root } => moved_on_ending(root),
++        Merge::Aborted(kind) => Ending {
+             exit: Exit::Unresolved,
+-            message: Some(MERGE_ABORTED.to_owned()),
++            message: Some(format!("{} aborted", operation_name(*kind))),
+         },
++        Merge::Finished(kind) => Ending {
++            exit: Exit::Success,
++            message: Some(format!("{} finished", operation_name(*kind))),
++        },
++        Merge::Running(kind) => Ending::failure(format!(
++            "closed while git ran the {}",
++            operation_name(*kind)
++        )),
++    }
++}
++
++fn operation_name(kind: OperationKind) -> &'static str {
++    match kind {
++        OperationKind::Merge => "merge",
++        OperationKind::SquashMerge => "squash merge",
++        OperationKind::Rebase => "rebase",
++        OperationKind::CherryPick => "cherry-pick",
++        OperationKind::Revert => "revert",
++        OperationKind::Am => "patch application",
+     }
+ }
+ 
+@@ -66,6 +85,18 @@ fn held_merge_ending(session: &mut MergeSession) -> Ending {
+     if let Err(error) = session.refresh() {
+         tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+     }
++    unresolved_ending(session)
++}
++
++/// The stop git moved on to, as git lists it: opened only to count, nothing settled or staged.
++fn moved_on_ending(root: &Path) -> Ending {
++    match MergeSession::open(root) {
++        Ok(session) => unresolved_ending(&session),
++        Err(error) => Ending::failure(error.to_string()),
++    }
++}
++
++fn unresolved_ending(session: &MergeSession) -> Ending {
+     let unresolved = session.remaining();
+     if unresolved == 0 {
+         return Ending {
+@@ -84,7 +115,10 @@ fn held_merge_ending(session: &mut MergeSession) -> Ending {
+ 
+ #[cfg(test)]
+ mod tests {
+-    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
++    use yamt_conflict_repo::{
++        ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, git, git_ok,
++        operation_repo,
++    };
+     use yamt_session::DiskVersion;
+ 
+     use super::*;
+@@ -109,6 +143,69 @@ mod tests {
+         }
+     }
+ 
++    fn closed(mut merge: Merge) -> (Exit, String) {
++        let ending = ending_on_close(&mut merge);
++        (ending.exit, ending.message.unwrap_or_default())
++    }
++
++    #[test]
++    fn a_finished_operation_ends_with_zero_and_an_aborted_one_with_one_each_named() {
++        let finished = closed(Merge::Finished(OperationKind::Rebase));
++        let aborted = closed(Merge::Aborted(OperationKind::Rebase));
++        let merge_aborted = closed(Merge::Aborted(OperationKind::Merge));
++
++        assert_eq!(finished, (Exit::Success, "rebase finished".to_owned()));
++        assert_eq!(aborted, (Exit::Unresolved, "rebase aborted".to_owned()));
++        assert_eq!(
++            merge_aborted,
++            (Exit::Unresolved, "merge aborted".to_owned())
++        );
++        let names = [
++            OperationKind::SquashMerge,
++            OperationKind::CherryPick,
++            OperationKind::Revert,
++            OperationKind::Am,
++        ]
++        .map(|kind| closed(Merge::Finished(kind)).1);
++        let expected = [
++            "squash merge finished",
++            "cherry-pick finished",
++            "revert finished",
++            "patch application finished",
++        ];
++        assert_eq!(names, expected);
++    }
++
++    // Settling the old stop's files at close would stage a file the user never saw at the new stop.
++    #[test]
++    fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
++        let step_one = ConflictFile {
++            path: STEP_TWO_FILE,
++            kind: FileKind::Regular,
++            base: Some(b"one\n"),
++            local: Some(b"local-1\n"),
++            remote: Some(b"remote-1\n"),
++        };
++        let repo = operation_repo(Run::Rebase, &[step_one]).unwrap();
++        let root = repo.path();
++        std::fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
++        git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
++        let continued = git(root, &["rebase", "--continue"]).unwrap();
++        assert!(!continued.status.success());
++        std::fs::write(root.join(STEP_TWO_FILE), "edited by hand\n").unwrap();
++        let unmerged = git_ok(root, &["ls-files", "-u"]).unwrap();
++
++        let ending = closed(Merge::MovedOn {
++            root: root.to_path_buf(),
++        });
++
++        assert_eq!(
++            ending,
++            (Exit::Unresolved, "1 of 1 files still unresolved".to_owned())
++        );
++        assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
++    }
++
+     #[test]
+     fn conflict_repository_opens_a_merge_of_its_files() {
+         let repo = conflict_repo(&[
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 75b64a6..56029ab 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -12,7 +12,7 @@ use yamt_session::MergeSession;
+ use yamt_settings::{StoredSettings, Theme};
+ 
+ use crate::commands::with_session;
+-use crate::merge::{MergeState, lock};
++use crate::merge::{MergeState, lock_when_git_is_done};
+ use crate::outcome::{Ending, ending_on_close};
+ use crate::servers::{self, HostState};
+ use crate::settings;
+@@ -30,7 +30,7 @@ const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+ const PAGE_PING: &str = "true";
+ const PAGE_ANSWER: &str = "true";
+ 
+-pub(crate) fn run(session: MergeSession) -> Ending {
++pub(crate) fn run(session: Box<MergeSession>) -> Ending {
+     let title = window_title(session.root());
+     match open_and_wait(&title, session) {
+         Ok(ending) => ending,
+@@ -38,7 +38,7 @@ pub(crate) fn run(session: MergeSession) -> Ending {
+     }
+ }
+ 
+-fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
++fn open_and_wait(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
+     let app = with_session(tauri::Builder::default(), session).build(tauri::generate_context!())?;
+     let stored = start_settings(app.path());
+     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
+@@ -56,7 +56,9 @@ fn open_and_wait(title: &str, session: MergeSession) -> tauri::Result<Ending> {
+     let mut close_watch = CloseWatch::new();
+     app.run_return(move |app, event| close_watch.on_run_event(app, &event));
+     servers::lock(&handle.state::<HostState>()).stop_all();
+-    Ok(ending_on_close(&mut lock(&handle.state::<MergeState>())))
++    Ok(ending_on_close(&mut lock_when_git_is_done(
++        &handle.state::<MergeState>(),
++    )))
+ }
+ 
+ fn start_settings(paths: &PathResolver<tauri::Wry>) -> StoredSettings {
+-- 
+2.56.0
+

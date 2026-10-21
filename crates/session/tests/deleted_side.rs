@@ -8,6 +8,9 @@ use yamt_session::{
     DiskVersion, Eol, Error, FileStatus, MergeSession, Middle, Side, UnsupportedReason,
 };
 
+mod listing;
+use listing::listed;
+
 const LOCAL_DELETED: &str = "a_local_deleted.ts";
 const REMOTE_DELETED: &str = "b_remote_deleted.ts";
 const KEPT_BINARY: &str = "c_kept_binary.bin";
@@ -159,7 +162,7 @@ fn keep_or_delete_then_reset_brings_the_stages_and_the_file_at_open_back() {
         let worktree = fs::read(dir.path().join(LOCAL_DELETED)).unwrap();
         assert_eq!(worktree, KEPT, "{side:?}");
         assert_eq!(session.files()[0].status, FileStatus::Unresolved);
-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{side:?}");
+        assert_eq!(listed(&mut session).disk_changes, [], "{side:?}");
     }
 }
 

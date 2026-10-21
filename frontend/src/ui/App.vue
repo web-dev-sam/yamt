@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { useEventListener, useWindowFocus } from "@vueuse/core";
-import { onMounted, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 
 import { useAltHold } from "./altHold";
 import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
+import { allResolvedText } from "./operationText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import ServerLogView from "./ServerLogView.vue";
 import SettingsView from "./SettingsView.vue";
+import StopView from "./StopView.vue";
 import { useAppStore } from "./store";
 
 const {
@@ -20,8 +22,9 @@ const {
   active,
   screen,
   fileListShown,
-  problem,
+  emptyStop,
   notices,
+  operation,
   question,
   allResolved,
   pick,
@@ -40,6 +43,8 @@ const altHeld = useAltHold();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
+
+const resolvedLine = computed(() => allResolvedText(operation.value));
 
 watch(focused, (now) => {
   if (now) {
@@ -61,16 +66,26 @@ onMounted(() => {
 
 <template>
   <div class="flex h-full gap-island p-island">
-    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
+    <FileList
+      v-show="fileListShown"
+      :files="files"
+      :active="active"
+      :operation="operation"
+      @select="pick"
+    />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
-      <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+      <ProblemBar
+        v-if="emptyStop.barProblem !== null"
+        :problem="emptyStop.barProblem"
+        @close="dismissProblem"
+      />
       <p
         v-else-if="allResolved"
         role="status"
         class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-fg"
       >
-        All files are resolved. Close the window to finish the merge.
+        {{ resolvedLine }}
       </p>
       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         <MergeView
@@ -86,6 +101,7 @@ onMounted(() => {
           :sides="sides"
           :shown="sides.path === active && screen.kind === 'files'"
         />
+        <StopView v-if="emptyStop.stopView !== null" :message="emptyStop.stopView.message" />
         <SettingsView v-if="screen.kind === 'settings'" />
         <ServerLogView
           v-else-if="screen.kind === 'serverLog'"

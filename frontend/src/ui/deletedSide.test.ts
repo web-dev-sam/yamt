@@ -68,13 +68,13 @@ test.each<FileMergeData["middle"]["kind"]>(["Disk", "DiskNotText"])(
 
 test("the kept text is applied while the middle must show it and still has changes", () => {
   const kept = deletedSideView("remote", LOCAL, "Stages");
-  expect(keptToApply(kept, { changes: 2, conflicts: 0 })).toBe("local");
-  expect(keptToApply(kept, { changes: 0, conflicts: 0 })).toBeNull();
+  expect(keptToApply(kept, { changes: 2, conflicts: 0, remembered: 0 })).toBe("local");
+  expect(keptToApply(kept, { changes: 0, conflicts: 0, remembered: 0 })).toBeNull();
   expect(keptToApply(kept, null)).toBeNull();
 });
 
 test("nothing is applied before a take, after a Delete, or after the disk resolved the file", () => {
-  const changes = { changes: 2, conflicts: 0 };
+  const changes = { changes: 2, conflicts: 0, remembered: 0 };
   expect(keptToApply(deletedSideView("remote", null, "Stages"), changes)).toBeNull();
   expect(keptToApply(deletedSideView("remote", REMOTE, "Stages"), changes)).toBeNull();
   expect(keptToApply(deletedSideView("remote", null, "Disk"), changes)).toBeNull();

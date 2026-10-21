@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_session::{DiskResult, DiskVersion, Error, FileStatus, MergeSession, Side, WriteReply};
 
+mod listing;
+use listing::listed;
+
 const TEXT: &str = "src/cart.ts";
 const BINARY: &str = "assets/logo.bin";
 const DELETED: &str = "assets/removed.txt";
@@ -98,7 +101,7 @@ fn finish_with_a_held_index_lock_leaves_a_deleted_worktree_file_absent() {
     let dir = mixed_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
     fs::remove_file(dir.path().join(TEXT)).unwrap();
-    let deleted = session.refresh().unwrap().disk_changes.remove(0).result;
+    let deleted = listed(&mut session).disk_changes.remove(0).result;
     assert_eq!(deleted, DiskResult::Staged);
     let staged_before = staged(&dir, TEXT);
     let _lock = index_lock(&dir);

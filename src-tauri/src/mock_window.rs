@@ -4,18 +4,20 @@ use tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{App, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 use yamt_session::MergeSession;
 
 use crate::commands::with_session;
+use crate::merge::MergeState;
+use crate::outcome::{Ending, ending_when_git_is_done};
 
 pub(crate) const CRLF_PATH: &str = "crlf.ts";
 
 pub(crate) struct Window {
     pub(crate) repo: TempDir,
     pub(crate) app: App<MockRuntime>,
-    webview: WebviewWindow<MockRuntime>,
+    pub(crate) webview: WebviewWindow<MockRuntime>,
 }
 
 pub(crate) fn file<'a>(
@@ -47,9 +49,12 @@ pub(crate) fn open_window() -> Window {
 }
 
 pub(crate) fn open_window_on(files: &[ConflictFile]) -> Window {
-    let repo = conflict_repo(files).unwrap();
+    open_window_in(conflict_repo(files).unwrap())
+}
+
+pub(crate) fn open_window_in(repo: TempDir) -> Window {
     let session = MergeSession::open(repo.path()).unwrap();
-    let app = with_session(mock_builder(), session)
+    let app = with_session(mock_builder(), Box::new(session))
         .build(mock_context(noop_assets()))
         .unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
@@ -60,15 +65,28 @@ pub(crate) fn open_window_on(files: &[ConflictFile]) -> Window {
 
 impl Window {
     pub(crate) fn invoke(&self, cmd: &str, args: Value) -> Result<Value, Value> {
-        let request = InvokeRequest {
-            cmd: cmd.to_owned(),
-            callback: CallbackFn(0),
-            error: CallbackFn(1),
-            url: self.webview.url().unwrap(),
-            body: InvokeBody::Json(args),
-            headers: tauri::http::HeaderMap::default(),
-            invoke_key: INVOKE_KEY.to_owned(),
-        };
-        get_ipc_response(&self.webview, request).map(|body| body.deserialize().unwrap())
+        invoke_on(&self.webview, cmd, args)
     }
+
+    pub(crate) fn ending(&self) -> Ending {
+        ending_when_git_is_done(&self.app.state::<MergeState>())
+    }
+}
+
+/// `Window::invoke` from another thread: the app itself is not `Sync`, its webview is.
+pub(crate) fn invoke_on(
+    webview: &WebviewWindow<MockRuntime>,
+    cmd: &str,
+    args: Value,
+) -> Result<Value, Value> {
+    let request = InvokeRequest {
+        cmd: cmd.to_owned(),
+        callback: CallbackFn(0),
+        error: CallbackFn(1),
+        url: webview.url().unwrap(),
+        body: InvokeBody::Json(args),
+        headers: tauri::http::HeaderMap::default(),
+        invoke_key: INVOKE_KEY.to_owned(),
+    };
+    get_ipc_response(webview, request).map(|body| body.deserialize().unwrap())
 }

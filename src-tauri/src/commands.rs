@@ -1,26 +1,24 @@
 use std::sync::Mutex;
 
 use tauri::{Manager, Runtime, State, WebviewWindow};
-use yamt_session::{
-    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
-};
+use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, WriteReply};
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
-use crate::merge::{Merge, MergeState, lock};
+use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
 use crate::{servers, settings};
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
-        list_files,
         load_file,
         finish_file,
         save_file,
         reset_file,
         describe_file,
         take_side,
-        side_names,
-        abort_merge::<tauri::Wry>,
+        list_stop,
+        continue_operation::<tauri::Wry>,
+        abort_operation::<tauri::Wry>,
         log,
         settings::load_settings::<tauri::Wry>,
         settings::set_theme::<tauri::Wry>,
@@ -41,7 +39,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
 
 pub(crate) fn with_session<R: Runtime>(
     builder: tauri::Builder<R>,
-    session: MergeSession,
+    session: Box<MergeSession>,
 ) -> tauri::Builder<R> {
     servers::manage(builder, session.root())
         .manage(Mutex::new(Merge::Held(session)))
@@ -51,20 +49,6 @@ pub(crate) fn with_session<R: Runtime>(
         .on_page_load(|webview, page| {
             servers::stop_runs_on_page_start(&webview.state(), page.event());
         })
-}
-
-#[tauri::command]
-#[specta::specta]
-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn list_files(state: State<'_, MergeState>) -> Result<FileList, IpcError> {
-    Ok(lock(&state).session()?.refresh()?)
-}
-
-#[tauri::command]
-#[specta::specta]
-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn side_names(state: State<'_, MergeState>) -> Result<SideNames, IpcError> {
-    Ok(lock(&state).session()?.side_names().clone())
 }
 
 #[tauri::command]
@@ -130,21 +114,43 @@ fn take_side(
 
 // tauri 2.12 `WebviewWindow::destroy` "does not emit any events": no `CloseRequested`, so the page's
 // unsaved-work question does not run; the last window gone ends `run_return`.
+fn close_window<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
+    if let Err(error) = window.destroy() {
+        tracing::warn!(%error, ended, "git is done but the window stays: closing it ends yamt");
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "tauri passes arguments by value"
-)]
-fn abort_merge<R: Runtime>(
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+fn list_stop(state: State<'_, MergeState>) -> Result<Listing, IpcError> {
+    lock(&state).list_stop()
+}
+
+// The merge state comes from the window: tauri-macros 2.7 checks an async command with a borrowed
+// argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
+#[tauri::command]
+#[specta::specta]
+async fn continue_operation<R: Runtime>(
     window: WebviewWindow<R>,
-    state: State<'_, MergeState>,
-) -> Result<(), IpcError> {
-    lock(&state).abort()?;
-    if let Err(error) = window.destroy() {
-        tracing::warn!(%error, "the merge is aborted but the window stays: closing it ends yamt");
-    }
+) -> Result<ContinueReply, IpcError> {
+    let reply = merge::continue_operation(&window.state()).await?;
+    close_window_if_ended(&window, "finished");
+    Ok(reply)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
+    merge::abort_operation(&window.state()).await?;
+    close_window_if_ended(&window, "aborted");
     Ok(())
+}
+
+fn close_window_if_ended<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
+    if lock(&window.state()).has_ended() {
+        close_window(window, ended);
+    }
 }
 
 #[tauri::command]
@@ -158,19 +164,13 @@ mod tests {
     use std::fs;
 
     use serde_json::{Value, json};
-    use tauri::Manager;
     use yamt_conflict_repo::git_ok;
 
-    use super::*;
     use crate::frontend_log::tests::logged;
     use crate::mock_window::{CRLF_PATH, Window, file, open_window, open_window_on};
-    use crate::outcome::{Exit, ending_on_close};
+    use crate::outcome::Exit;
 
     impl Window {
-        fn exit_on_close(&self) -> Exit {
-            ending_on_close(&mut lock(&self.app.state::<MergeState>())).exit
-        }
-
         fn unmerged(&self) -> String {
             String::from_utf8(git_ok(self.repo.path(), &["ls-files", "-u"]).unwrap()).unwrap()
         }
@@ -190,38 +190,43 @@ mod tests {
         json!({ "kind": "Written", "files": entries(statuses) })
     }
 
+    fn listed(window: &Window) -> Value {
+        let listed = window.invoke("list_stop", json!({})).unwrap();
+        assert_eq!(listed["kind"], "Files", "{listed}");
+        listed
+    }
+
+    fn files_and_changes(listed: &Value) -> (Value, Value) {
+        (listed["files"].clone(), listed["disk_changes"].clone())
+    }
+
     #[test]
-    fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
+    fn list_stop_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
         let window = open_window();
         let unresolved = "Unresolved";
-        let listed =
-            |statuses| json!({ "files": entries(statuses), "disk_changes": [], "merging": true });
         assert_eq!(
-            window.invoke("list_files", json!({})),
-            Ok(listed([unresolved, unresolved, unresolved]))
+            files_and_changes(&listed(&window)),
+            (entries([unresolved, unresolved, unresolved]), json!([]))
         );
         git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
         assert_eq!(
-            window.invoke("list_files", json!({})),
-            Ok(listed([unresolved, "Resolved", unresolved]))
+            files_and_changes(&listed(&window)),
+            (entries([unresolved, "Resolved", unresolved]), json!([]))
         );
     }
 
     #[test]
-    fn list_files_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
+    fn list_stop_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
         let window = open_window();
         fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
         let staged = json!({ "path": "view.vue", "result": { "kind": "Staged" } });
         let after = entries(["Unresolved", "Unresolved", "Resolved"]);
 
-        let listed = window.invoke("list_files", json!({}));
+        let listed = listed(&window);
         let args = json!({ "path": "view.vue", "text": "mine\n", "diskVersion": 0 });
         let finished = window.invoke("finish_file", args);
 
-        assert_eq!(
-            listed,
-            Ok(json!({ "files": after, "disk_changes": [staged], "merging": true }))
-        );
+        assert_eq!(files_and_changes(&listed), (after.clone(), json!([staged])));
         let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
         assert_eq!(finished, Ok(changed));
         assert_eq!(
@@ -231,13 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn side_names_names_both_branches_of_the_merge() {
+    fn list_stop_names_both_branches_of_the_merge() {
         let window = open_window();
         let names = json!({
             "local": { "kind": "Branch", "name": "local" },
             "remote": { "kind": "Branch", "name": "remote" },
         });
-        assert_eq!(window.invoke("side_names", json!({})), Ok(names));
+        assert_eq!(listed(&window)["sides"], names);
     }
 
     #[test]
@@ -256,7 +261,7 @@ mod tests {
             "{}",
             window.unmerged()
         );
-        assert_eq!(window.exit_on_close(), Exit::Unresolved);
+        assert_eq!(window.ending().exit, Exit::Unresolved);
     }
 
     #[test]
@@ -272,7 +277,7 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(window.unmerged(), "");
-        assert_eq!(window.exit_on_close(), Exit::Success);
+        assert_eq!(window.ending().exit, Exit::Success);
 
         let files = window.invoke("reset_file", json!({ "path": CRLF_PATH, "diskVersion": 0 }));
 
@@ -284,7 +289,7 @@ mod tests {
         assert_eq!(window.unmerged().lines().collect::<Vec<_>>(), crlf_stages);
         let worktree = fs::read_to_string(window.repo.path().join(CRLF_PATH)).unwrap();
         assert!(worktree.contains("<<<<<<<"), "{worktree}");
-        assert_eq!(window.exit_on_close(), Exit::Unresolved);
+        assert_eq!(window.ending().exit, Exit::Unresolved);
     }
 
     #[test]
@@ -303,8 +308,10 @@ mod tests {
             text.as_bytes()
         );
         assert_eq!(window.unmerged(), unmerged_before);
-        let listed = json!({ "files": entries(unresolved), "disk_changes": [], "merging": true });
-        assert_eq!(window.invoke("list_files", json!({})), Ok(listed));
+        assert_eq!(
+            files_and_changes(&listed(&window)),
+            (entries(unresolved), json!([]))
+        );
     }
 
     #[test]

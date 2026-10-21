@@ -104,7 +104,13 @@ function chunkRecord(id: number, kind: Chunk["kind"], line: number): unknown {
     },
     waiting:
       kind === "Conflict"
-        ? { kind: "Markers", open: "<<<<<<< ours", between: ["======="], close: ">>>>>>> theirs" }
+        ? {
+            kind: "Markers",
+            open: "<<<<<<< ours",
+            first: "local",
+            between: ["======="],
+            close: ">>>>>>> theirs",
+          }
         : { kind: "SideLines" },
   };
 }

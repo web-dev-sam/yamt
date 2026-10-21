@@ -1,8 +1,9 @@
 import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { DiskVersion, FileList, Side, SourceResult } from "./domain";
+import type { ChunkSource } from "./ChunkSource";
 import { createFixtureSource, loadFixture } from "./fixture";
+import type { DiskChange, DiskVersion, FileEntry, Side, SourceResult } from "./index";
 import { createLog, type Log, type LogEntry } from "./log";
 
 const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
@@ -11,6 +12,10 @@ const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
 );
 
 const PATH_AND_CHUNKS = v.object({ path: v.string(), chunks: v.array(v.unknown()) });
+
+const NO_QUERY = "";
+
+const REMEMBERED = "remembered.ts";
 
 function quietLog(): { log: Log; entries: LogEntry[] } {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
@@ -28,8 +33,14 @@ function valueOf<T>(result: SourceResult<T>): T {
   return result.value;
 }
 
-async function listed(log: Log, files?: Readonly<Record<string, unknown>>): Promise<FileList> {
-  return valueOf(await createFixtureSource(log, files).listFiles());
+type Listed = { files: readonly FileEntry[]; diskChanges: readonly DiskChange[] };
+
+async function listedBy(source: ChunkSource): Promise<Listed> {
+  const listing = valueOf(await source.listStop());
+  if (listing.kind !== "Files") {
+    throw new Error("expected files, got MovedOn");
+  }
+  return { files: listing.files, diskChanges: listing.diskChanges };
 }
 
 async function versionOf(
@@ -68,6 +79,7 @@ const DOMAIN_WORDS = {
 const WAITING = {
   kind: "Markers",
   open: "<<<<<<< ours",
+  first: "local",
   between: ["||||||| base", "b", "======="],
   close: ">>>>>>> theirs",
 };
@@ -139,12 +151,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("the committed fixtures list 11 files, sorted by path, all unresolved, with no disk changes", async () => {
-  const { files, diskChanges } = await listed(quietLog().log);
+test("the committed fixtures list 12 files, sorted by path, the remembered one remembered, the rest unresolved, with no disk changes", async () => {
+  const { files, diskChanges } = await listedBy(createFixtureSource(quietLog().log, NO_QUERY));
 
   expect(files.map((file) => file.path)).toEqual([
     "language-tools-script-setup.ts",
     "nuxt-island-test.ts",
+    "remembered.ts",
     "tanstack-query-persist-provider.tsx",
     "tanstack-query-svelte-base-query.ts",
     "vite-modulepreload-polyfill.ts",
@@ -156,28 +169,30 @@ test("the committed fixtures list 11 files, sorted by path, all unresolved, with
     "word-marks.ts",
   ]);
   for (const file of files) {
-    expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
+    const status = file.path === REMEMBERED ? "Remembered" : "Unresolved";
+    expect(file).toEqual({ path: file.path, status, unsupported: null });
   }
   expect(diskChanges).toEqual([]);
 });
 
-test("each committed fixture loads with its JSON's chunk count, its stages middle and version 0", async () => {
-  const source = createFixtureSource(quietLog().log);
+test("each committed fixture loads with its JSON's chunk count, its stages middle (the remembered one its disk text) and version 0", async () => {
+  const source = createFixtureSource(quietLog().log, NO_QUERY);
   const committed = Object.values(COMMITTED);
-  expect(committed).toHaveLength(11);
+  expect(committed).toHaveLength(12);
   for (const json of committed) {
     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
     const data = valueOf(await source.loadFile(path));
     expect(data.chunks).toHaveLength(chunks.length);
-    expect(data.middle.kind).toBe("Stages");
+    expect(data.middle.kind).toBe(path === REMEMBERED ? "Disk" : "Stages");
     expect(data.diskVersion).toBe(0);
   }
 });
 
-test("each committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
-  const source = createFixtureSource(quietLog().log);
+test("each unresolved committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
+  const source = createFixtureSource(quietLog().log, NO_QUERY);
+  const unresolved = (await listedBy(source)).files.filter((file) => file.status === "Unresolved");
   let conflicts = 0;
-  for (const { path } of valueOf(await source.listFiles()).files) {
+  for (const { path } of unresolved) {
     for (const { kind, waiting } of valueOf(await source.loadFile(path)).chunks) {
       if (kind !== "Conflict") {
         expect(waiting).toEqual({ kind: "SideLines" });
@@ -195,8 +210,27 @@ test("each committed fixture's conflicts wait as markers and its other changes a
   expect(conflicts).toBeGreaterThanOrEqual(11);
 });
 
+test("the remembered fixture shows rerere's text with each block git wrote waiting as remembered, until finished; reset makes it remembered again", async () => {
+  const source = createFixtureSource(quietLog().log, NO_QUERY);
+  const data = valueOf(await source.loadFile(REMEMBERED));
+  const write = { path: REMEMBERED, text: "", diskVersion: data.diskVersion };
+
+  expect(data.middle).toEqual({
+    kind: "Disk",
+    text: expect.stringContaining('"backlog" | "todo" | "doing" | "done"'),
+  });
+  expect(data.chunks.map(({ kind, waiting, middle }) => ({ kind, waiting, middle }))).toEqual([
+    { kind: "Conflict", waiting: { kind: "Remembered" }, middle: { start: 0, len: 1 } },
+    { kind: "Conflict", waiting: { kind: "Remembered" }, middle: { start: 2, len: 1 } },
+  ]);
+  const finished = valueOf(await source.finishFile(write)).files;
+  expect(finished.find((file) => file.path === REMEMBERED)?.status).toBe("Resolved");
+  const reset = valueOf(await source.resetFile(REMEMBERED, data.diskVersion)).files;
+  expect(reset.find((file) => file.path === REMEMBERED)?.status).toBe("Remembered");
+});
+
 test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
-  const source = createFixtureSource(quietLog().log);
+  const source = createFixtureSource(quietLog().log, NO_QUERY);
 
   const data = valueOf(await source.loadFile("vueuse-use-magic-keys.ts"));
 
@@ -209,6 +243,7 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
     waiting: {
       kind: "Markers",
       open: "<<<<<<< ours",
+      first: "local",
       between: ["======="],
       close: ">>>>>>> theirs",
     },
@@ -243,22 +278,21 @@ test("in-memory records are listed sorted by path and keep every field", async (
     "z.json": record("z.ts"),
     "a.json": { ...record("a.ts"), eol: "CrLf" },
   };
-  const source = createFixtureSource(quietLog().log, files);
+  const source = createFixtureSource(quietLog().log, NO_QUERY, files);
 
-  expect((await listed(quietLog().log, files)).files.map((file) => file.path)).toEqual([
-    "a.ts",
-    "z.ts",
-  ]);
+  expect((await listedBy(source)).files.map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
   expect(await source.loadFile("a.ts")).toEqual({
     ok: true,
     value: { ...loaded("a.ts"), eol: "CrLf" },
   });
 });
 
-test.each([{ kind: "SideLines" }, { kind: "AsShown" }, WAITING])(
+test.each([{ kind: "SideLines" }, { kind: "AsShown" }, { kind: "Remembered" }, WAITING])(
   "a chunk waiting as %j arrives as it is",
   async (waiting) => {
-    const source = createFixtureSource(quietLog().log, { "a.json": record("a.ts", { waiting }) });
+    const source = createFixtureSource(quietLog().log, NO_QUERY, {
+      "a.json": record("a.ts", { waiting }),
+    });
 
     expect(valueOf(await source.loadFile("a.ts")).chunks[0]?.waiting).toEqual(waiting);
   },
@@ -269,7 +303,7 @@ test("a middle from the disk, or not text on disk, and its disk version arrive a
     "d.json": { ...record("d.ts"), middle: { kind: "Disk", text: "d\n" }, disk_version: 3 },
     "n.json": { ...record("n.ts"), middle: { kind: "DiskNotText", found: "Link" }, chunks: [] },
   };
-  const source = createFixtureSource(quietLog().log, files);
+  const source = createFixtureSource(quietLog().log, NO_QUERY, files);
 
   expect(valueOf(await source.loadFile("d.ts"))).toMatchObject({
     middle: { kind: "Disk", text: "d\n" },
@@ -285,7 +319,7 @@ test("a middle from the disk, or not text on disk, and its disk version arrive a
 test.each<Side>(["local", "remote"])(
   "a record deleted on the %s side keeps that side",
   async (deleted) => {
-    const source = createFixtureSource(quietLog().log, {
+    const source = createFixtureSource(quietLog().log, NO_QUERY, {
       "a.json": { ...record("a.ts"), deleted },
     });
 
@@ -368,22 +402,43 @@ test.each([
   ],
   [
     "markers without their close line",
-    record("x.ts", { waiting: { kind: "Markers", open: "<<<<<<< ours", between: [] } }),
+    record("x.ts", {
+      waiting: { kind: "Markers", open: "<<<<<<< ours", first: "local", between: [] },
+    }),
     "chunks.0.waiting.close",
   ],
   [
     "markers whose between is one string",
     record("x.ts", {
-      waiting: { kind: "Markers", open: "<<<<<<< ours", between: "=======", close: ">>>>>>>" },
+      waiting: {
+        kind: "Markers",
+        open: "<<<<<<< ours",
+        first: "local",
+        between: "=======",
+        close: ">>>>>>>",
+      },
     }),
     "chunks.0.waiting.between",
   ],
+  [
+    "markers whose first section is no side",
+    record("x.ts", {
+      waiting: {
+        kind: "Markers",
+        open: "<<<<<<< ours",
+        first: "ours",
+        between: ["======="],
+        close: ">>>>>>>",
+      },
+    }),
+    "chunks.0.waiting.first",
+  ],
   ["a missing waiting", record("x.ts", { waiting: undefined }), "chunks.0.waiting"],
 ])("a record with %s is rejected naming the file", (_case, json, detail) => {
-  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+  expect(() => createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": json })).toThrow(
     /^fixture bad\.json: /,
   );
-  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(detail);
+  expect(() => createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": json })).toThrow(detail);
 });
 
 test.each([
@@ -439,13 +494,13 @@ test.each([
   ["a non-integer chunk id", { chunk: { id: 0.25 } }, "chunks[0].chunk.id", 0.25],
 ])("a record with %s is rejected naming the file and field", (_case, overrides, field, value) => {
   expect(() =>
-    createFixtureSource(quietLog().log, { "bad.json": record("x.ts", overrides) }),
+    createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": record("x.ts", overrides) }),
   ).toThrow(`fixture bad.json: ${field} must be a non-negative safe integer, got ${value}`);
 });
 
 test.each([-1, 0.5, 2 ** 53])("a record with disk version %s is rejected", (version) => {
   expect(() =>
-    createFixtureSource(quietLog().log, {
+    createFixtureSource(quietLog().log, NO_QUERY, {
       "bad.json": { ...record("x.ts"), disk_version: version },
     }),
   ).toThrow(`fixture bad.json: disk_version must be a non-negative safe integer, got ${version}`);
@@ -554,7 +609,7 @@ test.each([
     "chunks[0].words.local.removals[1].text must not be empty",
   ],
 ])("a record with %s is rejected naming its words", (_case, json, message) => {
-  expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+  expect(() => createFixtureSource(quietLog().log, NO_QUERY, { "bad.json": json })).toThrow(
     `fixture bad.json: ${message}`,
   );
 });
@@ -562,7 +617,7 @@ test.each([
 test("an unknown path is an UnknownPath failure naming it, and changes nothing", async () => {
   const { log, entries } = quietLog();
   const files = { "a.json": record("a.ts") };
-  const source = createFixtureSource(log, files);
+  const source = createFixtureSource(log, NO_QUERY, files);
   const version = await versionOf("a.ts", files);
   const failure = { ok: false, failure: { kind: "UnknownPath", path: "nope.ts" } };
 
@@ -573,10 +628,9 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
   expect(await source.resetFile("nope.ts", version)).toEqual(failure);
   expect(await source.describeFile("nope.ts")).toEqual(failure);
   expect(await source.takeSide("nope.ts", "remote", version)).toEqual(failure);
-  expect(valueOf(await source.listFiles())).toEqual({
+  expect(await listedBy(source)).toEqual({
     files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
     diskChanges: [],
-    merging: true,
   });
   expect(entries).toEqual([]);
 });
@@ -584,7 +638,7 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
 test("finish marks the file resolved and logs its text once; reset returns it unresolved", async () => {
   const { log, entries } = quietLog();
   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
-  const source = createFixtureSource(log, files);
+  const source = createFixtureSource(log, NO_QUERY, files);
   const version = await versionOf("a.ts", files);
 
   const finished = await source.finishFile({
@@ -615,29 +669,15 @@ test("finish marks the file resolved and logs its text once; reset returns it un
     ok: true,
     value: { kind: "Written", files: unresolved },
   });
-  expect(valueOf(await source.listFiles())).toEqual({
-    files: unresolved,
-    diskChanges: [],
-    merging: true,
-  });
+  expect(await listedBy(source)).toEqual({ files: unresolved, diskChanges: [] });
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
-});
-
-test("abortMerge answers done and logs the abort once; the fixtures stay listed as a merge", async () => {
-  const { log, entries } = quietLog();
-  const source = createFixtureSource(log, { "a.json": record("a.ts") });
-
-  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
-
-  expect(entries).toEqual([{ level: "info", event: "fixture.abort_merge", fields: {} }]);
-  expect(valueOf(await source.listFiles()).merging).toBe(true);
 });
 
 test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {
   const { log, entries } = quietLog();
   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
-  const source = createFixtureSource(log, files);
+  const source = createFixtureSource(log, NO_QUERY, files);
   const version = await versionOf("a.ts", files);
   const unresolved = [
     { path: "a.ts", status: "Unresolved", unsupported: null },
@@ -659,13 +699,13 @@ test("save writes the file, logs its text, length and lines, and leaves it unres
       fields: { path: "a.ts", text: "one\ntwo\nthree", length: 13, lines: 3 },
     },
   ]);
-  expect(valueOf(await source.listFiles()).files).toEqual(unresolved);
+  expect((await listedBy(source)).files).toEqual(unresolved);
 });
 
 test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
   const { log, entries } = quietLog();
   const files = { "a.json": record("a.ts"), "b.json": record("b.ts") };
-  const source = createFixtureSource(log, files);
+  const source = createFixtureSource(log, NO_QUERY, files);
   const version = await versionOf("b.ts", files);
 
   expect(await source.takeSide("b.ts", "remote", version)).toEqual({
@@ -684,7 +724,7 @@ test("takeSide marks the file resolved and logs the side; reset returns it unres
 
   await source.resetFile("b.ts", version);
 
-  expect(valueOf(await source.listFiles()).files.map((file) => file.status)).toEqual([
+  expect((await listedBy(source)).files.map((file) => file.status)).toEqual([
     "Unresolved",
     "Unresolved",
   ]);
@@ -699,7 +739,7 @@ test.each([
   ["one\n\n", 2],
 ])("describeFile counts %j as %i lines, like the app", async (local, lines) => {
   const { log } = quietLog();
-  const source = createFixtureSource(log, { "a.json": { ...record("a.ts"), local } });
+  const source = createFixtureSource(log, NO_QUERY, { "a.json": { ...record("a.ts"), local } });
 
   expect(await source.describeFile("a.ts")).toEqual({
     ok: true,

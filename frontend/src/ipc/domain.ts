@@ -84,11 +84,23 @@ export type SettingsRead = {
   readonly stored: StoredSettings;
 };
 
-export type FileList = {
-  readonly files: readonly FileEntry[];
-  readonly diskChanges: readonly DiskChange[];
-  readonly merging: boolean;
-};
+export type OperationView = Generated.OperationView;
+
+export type ProgressView = Generated.ProgressView;
+
+export type OperationKind = OperationView["kind"];
+
+export type Listing =
+  | {
+      readonly kind: "Files";
+      readonly files: readonly FileEntry[];
+      readonly diskChanges: readonly DiskChange[];
+      readonly operation: OperationView | null;
+      readonly sides: SideNames;
+    }
+  | { readonly kind: "MovedOn" };
+
+export type ContinueReply = Generated.ContinueReply;
 
 export type FileMergeData = {
   readonly path: string;
@@ -211,8 +223,12 @@ export function toSides(dto: Generated.FileSides): FileSides {
   return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
 }
 
-export function toFileList(dto: Generated.FileList): FileList {
-  return { files: dto.files, diskChanges: dto.disk_changes, merging: dto.merging };
+export function toListing(dto: Generated.Listing): Listing {
+  if (dto.kind === "MovedOn") {
+    return dto;
+  }
+  const { files, disk_changes: diskChanges, operation, sides } = dto;
+  return { kind: "Files", files, diskChanges, operation, sides };
 }
 
 export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {

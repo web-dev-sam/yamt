@@ -1,11 +1,9 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use yamt_session::MergeSession;
+use yamt_session::{MergeSession, OperationKind, Refreshed};
 
-use crate::merge::Merge;
-
-const MERGE_ABORTED: &str = "merge aborted";
+use crate::merge::{Merge, MergeState, lock_when_git_is_done};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Exit {
@@ -37,7 +35,7 @@ impl Ending {
 }
 
 pub(crate) enum Startup {
-    Merge(MergeSession),
+    Merge(Box<MergeSession>),
     Done(Ending),
 }
 
@@ -48,24 +46,67 @@ pub(crate) fn startup(repo: &Path) -> Startup {
             exit: Exit::Success,
             message: Some(format!("nothing to merge in {}", session.root().display())),
         }),
-        Ok(session) => Startup::Merge(session),
+        Ok(session) => Startup::Merge(Box::new(session)),
     }
 }
 
+/// The ending when the window closes: once no worker runs git.
+pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
+    ending_on_close(&mut lock_when_git_is_done(state))
+}
+
+/// The ending of a merge no worker runs git for; see `merge::lock_when_git_is_done`.
 pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
     match merge {
         Merge::Held(session) => held_merge_ending(session),
-        Merge::Aborted => Ending {
+        Merge::MovedOn { root, .. } => moved_on_ending(root),
+        Merge::Aborted(kind) => Ending {
             exit: Exit::Unresolved,
-            message: Some(MERGE_ABORTED.to_owned()),
+            message: Some(format!("{} aborted", operation_name(*kind))),
         },
+        Merge::Finished(kind) => Ending {
+            exit: Exit::Success,
+            message: Some(format!("{} finished", operation_name(*kind))),
+        },
+        Merge::Running(kind) => Ending::failure(format!(
+            "closed while git ran the {}",
+            operation_name(*kind)
+        )),
     }
 }
 
-fn held_merge_ending(session: &mut MergeSession) -> Ending {
-    if let Err(error) = session.refresh() {
-        tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+fn operation_name(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Merge => "merge",
+        OperationKind::SquashMerge => "squash merge",
+        OperationKind::Rebase => "rebase",
+        OperationKind::CherryPick => "cherry-pick",
+        OperationKind::Revert => "revert",
+        OperationKind::Am => "patch application",
     }
+}
+
+/// git's view at close: the stop's list, or the stop git moved on to (plan §2 #41).
+fn held_merge_ending(session: &mut MergeSession) -> Ending {
+    match session.refresh_stop() {
+        Ok(Refreshed::Files(_)) => unresolved_ending(session),
+        Ok(Refreshed::MovedOn) => moved_on_ending(session.root()),
+        Err(error) => {
+            tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+            unresolved_ending(session)
+        }
+    }
+}
+
+/// The stop git moved on to, as git lists it: opened only to count, nothing settled or staged.
+fn moved_on_ending(root: &Path) -> Ending {
+    match MergeSession::open(root) {
+        Ok(session) => unresolved_ending(&session),
+        Err(error) => Ending::failure(error.to_string()),
+    }
+}
+
+fn unresolved_ending(session: &MergeSession) -> Ending {
     let unresolved = session.remaining();
     if unresolved == 0 {
         return Ending {
@@ -84,7 +125,10 @@ fn held_merge_ending(session: &mut MergeSession) -> Ending {
 
 #[cfg(test)]
 mod tests {
-    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
+    use yamt_conflict_repo::{
+        ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, git, git_ok,
+        operation_repo,
+    };
     use yamt_session::DiskVersion;
 
     use super::*;
@@ -107,6 +151,96 @@ mod tests {
             }
             Startup::Done(ending) => ending,
         }
+    }
+
+    fn closed(mut merge: Merge) -> (Exit, String) {
+        let ending = ending_on_close(&mut merge);
+        (ending.exit, ending.message.unwrap_or_default())
+    }
+
+    #[test]
+    fn a_finished_operation_ends_with_zero_and_an_aborted_one_with_one_each_named() {
+        let finished = closed(Merge::Finished(OperationKind::Rebase));
+        let aborted = closed(Merge::Aborted(OperationKind::Rebase));
+        let merge_aborted = closed(Merge::Aborted(OperationKind::Merge));
+
+        assert_eq!(finished, (Exit::Success, "rebase finished".to_owned()));
+        assert_eq!(aborted, (Exit::Unresolved, "rebase aborted".to_owned()));
+        assert_eq!(
+            merge_aborted,
+            (Exit::Unresolved, "merge aborted".to_owned())
+        );
+        let names = [
+            OperationKind::SquashMerge,
+            OperationKind::CherryPick,
+            OperationKind::Revert,
+            OperationKind::Am,
+        ]
+        .map(|kind| closed(Merge::Finished(kind)).1);
+        let expected = [
+            "squash merge finished",
+            "cherry-pick finished",
+            "revert finished",
+            "patch application finished",
+        ];
+        assert_eq!(names, expected);
+    }
+
+    const STEP_ONE: ConflictFile<'static> = ConflictFile {
+        path: STEP_TWO_FILE,
+        kind: FileKind::Regular,
+        base: Some(b"one\n"),
+        local: Some(b"local-1\n"),
+        remote: Some(b"remote-1\n"),
+    };
+
+    /// Continues the rebase in a terminal to step 2 and edits its file by hand; git's unmerged list then.
+    fn continued_in_a_terminal(root: &Path) -> Vec<u8> {
+        let continued = git(root, &["rebase", "--continue"]).unwrap();
+        assert!(!continued.status.success());
+        std::fs::write(root.join(STEP_TWO_FILE), "edited by hand\n").unwrap();
+        git_ok(root, &["ls-files", "-u"]).unwrap()
+    }
+
+    // Settling the old stop's files at close would stage a file the user never saw at the new stop.
+    #[test]
+    fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
+        let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
+        let root = repo.path();
+        std::fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
+        git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
+        let unmerged = continued_in_a_terminal(root);
+
+        let ending = closed(Merge::MovedOn {
+            root: root.to_path_buf(),
+            highest_disk_version: DiskVersion(0),
+        });
+
+        assert_eq!(
+            ending,
+            (Exit::Unresolved, "1 of 1 files still unresolved".to_owned())
+        );
+        assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
+    }
+
+    #[test]
+    fn closing_a_session_git_moved_on_from_counts_the_new_stop_s_files_and_stages_nothing() {
+        let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
+        let root = repo.path();
+        let mut session = MergeSession::open(root).unwrap();
+        session
+            .finish(STEP_TWO_FILE, "resolved\n", DiskVersion(0))
+            .unwrap();
+        assert_eq!(session.remaining(), 0);
+        let unmerged = continued_in_a_terminal(root);
+
+        let ending = held_merge_ending(&mut session);
+
+        assert_eq!(
+            ending.message.as_deref(),
+            Some("1 of 1 files still unresolved")
+        );
+        assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
     }
 
     #[test]

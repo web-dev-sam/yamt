@@ -6,8 +6,11 @@ mod disk;
 mod locate;
 mod markers;
 mod merge_data;
-mod merging;
 mod open;
+mod operation;
+mod orientation;
+mod remembered;
+mod scratch;
 mod seed;
 mod session;
 mod side_names;
@@ -21,7 +24,10 @@ pub use decode::{Eol, UnsupportedReason};
 pub use disk::{DiskChange, DiskResult, DiskVersion};
 pub use markers::DEFAULT_MARKER_SIZE;
 pub use merge_data::{FileMergeData, MergeChunk, Middle, MiddleLine, NotText, merge_data};
-pub use session::{FileEntry, FileList, FileStatus, MergeSession, WriteReply};
+pub use operation::{Continued, OperationKind, OperationView, ProgressView, Refreshed, StopList};
+pub use orientation::{GitSide, Orientation};
+pub use remembered::{Replayed, remembered_data};
+pub use session::{FileEntry, FileStatus, MergeSession, WriteReply};
 pub use side_names::{SideName, SideNames};
 pub use sides::{FileSides, Side, SideContent};
 pub use waiting::{MarkerStyle, Waiting};
@@ -32,6 +38,12 @@ pub enum Error {
     Git(#[from] yamt_gitio::Error),
     #[error("{path} is not a conflicted file of this merge")]
     UnknownPath { path: String },
+    #[error("git records no operation to abort or continue")]
+    NoOperation,
+    #[error("git has moved on from the stop this request was made at")]
+    StopMovedOn,
+    #[error("git refused: {message}")]
+    GitRefused { message: String },
     #[error("{path} cannot be merged as text: {reason:?}")]
     Unsupported {
         path: String,

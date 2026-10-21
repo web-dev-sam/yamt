@@ -4,6 +4,7 @@ use yamt_merge_core::{Chunk, LineRange, Options, WordChanges, compute_chunks, wo
 
 use crate::decode::{Eol, MAX_TEXT_BYTES, detect_eol, is_binary};
 use crate::disk::{DiskVersion, OnDisk};
+use crate::orientation::Orientation;
 use crate::seed::{Seeded, seed};
 use crate::sides::Side;
 use crate::waiting::{MarkerStyle, Waiting};
@@ -52,11 +53,21 @@ pub struct FileMergeData {
     pub disk_version: DiskVersion,
 }
 
+/// The texts in pane order: `local` is the left pane, whichever git side it shows.
 pub(crate) struct Texts {
     pub(crate) base: String,
     pub(crate) local: String,
     pub(crate) remote: String,
     pub(crate) deleted: Option<Side>,
+}
+
+impl Texts {
+    pub(crate) fn pane(&self, side: Side) -> &str {
+        match side {
+            Side::Local => &self.local,
+            Side::Remote => &self.remote,
+        }
+    }
 }
 
 #[must_use]
@@ -105,9 +116,21 @@ pub(crate) fn disk_merge_data(
     texts: &Texts,
     disk: &OnDisk,
     marker_size: usize,
+    orientation: Orientation,
     disk_version: DiskVersion,
 ) -> FileMergeData {
-    let (middle, eol, chunks) = match seeded_from_disk(disk, marker_size, texts) {
+    let seeded = seeded_from_disk(disk, marker_size, texts, orientation);
+    shown_merge_data(path, texts, seeded, disk_version)
+}
+
+/// The data of a file whose middle pane starts as the disk file, or says why it cannot.
+pub(crate) fn shown_merge_data(
+    path: &str,
+    texts: &Texts,
+    seeded: Result<Seeded, NotText>,
+    disk_version: DiskVersion,
+) -> FileMergeData {
+    let (middle, eol, chunks) = match seeded {
         Ok(seeded) => (
             Middle::Disk {
                 text: seeded.middle,
@@ -133,17 +156,22 @@ pub(crate) fn disk_merge_data(
     }
 }
 
-fn seeded_from_disk(disk: &OnDisk, marker_size: usize, texts: &Texts) -> Result<Seeded, NotText> {
+fn seeded_from_disk(
+    disk: &OnDisk,
+    marker_size: usize,
+    texts: &Texts,
+    orientation: Orientation,
+) -> Result<Seeded, NotText> {
     let bytes = match disk {
         OnDisk::File(bytes) => bytes,
         OnDisk::Missing => return Err(NotText::Deleted),
         OnDisk::Link(_) => return Err(NotText::Link),
         OnDisk::Submodule(_) | OnDisk::Other => return Err(NotText::Directory),
     };
-    Ok(seed(disk_text(bytes)?, marker_size, texts))
+    Ok(seed(disk_text(bytes)?, marker_size, texts, orientation))
 }
 
-fn disk_text(bytes: &[u8]) -> Result<&str, NotText> {
+pub(crate) fn disk_text(bytes: &[u8]) -> Result<&str, NotText> {
     if is_binary(bytes) {
         return Err(NotText::Binary);
     }

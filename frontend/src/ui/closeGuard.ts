@@ -2,7 +2,7 @@ import type { ShallowRef } from "vue";
 
 import { log, onWindowClose, type FileMergeData } from "../ipc";
 import type { Asking } from "./asking";
-import { unexpected } from "./problem";
+import { report, unexpected, type Problem } from "./problem";
 import { exitMustAsk } from "./question";
 
 export type FileWork = { unsaved(): boolean };
@@ -15,10 +15,15 @@ export type CloseGuard = {
   readonly watchWindowClose: () => Promise<void>;
 };
 
-export function createCloseGuard(
-  asking: Asking,
-  opened: Readonly<ShallowRef<readonly FileMergeData[]>>,
-): CloseGuard {
+type GuardTarget = {
+  readonly asking: Asking;
+  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
+  readonly problem: ShallowRef<Problem | null>;
+  readonly running: Readonly<ShallowRef<boolean>>;
+};
+
+export function createCloseGuard(target: GuardTarget): CloseGuard {
+  const { asking, opened } = target;
   const work = new Map<string, FileWork>();
 
   function unsavedFiles(): string[] {
@@ -28,6 +33,10 @@ export function createCloseGuard(
   }
 
   async function mayClose(): Promise<boolean> {
+    if (target.running.value) {
+      report(target, { action: "close" });
+      return false;
+    }
     const files = unsavedFiles();
     return !exitMustAsk(files) || (await asking.ask({ kind: "exit", files })) === "yes";
   }

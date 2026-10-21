@@ -70,6 +70,7 @@ async function synthetic(
             ? {
                 kind: "Markers",
                 open: "<<<<<<< ours",
+                first: "local",
                 between: ["======="],
                 close: ">>>>>>> theirs",
               }
@@ -244,14 +245,14 @@ test("× on a conflict's left side keeps the middle and the right side; « then 
   expect(arrows(ignored, "local").get(129)).toBeUndefined();
   expect(arrows(ignored, "remote").get(141)).toBe("replace");
   expect(decoratedLines(ignored.center)).toEqual(decoratedLines(start.center));
-  expect(summary(ignored)).toEqual({ changes: 8, conflicts: 1 });
+  expect(summary(ignored)).toEqual({ changes: 8, conflicts: 1, remembered: 0 });
   expect(centerText(replaced, CONFLICT)).toBe(sideText(replaced, CONFLICT, "remote"));
   expect(status(replaced, CONFLICT)).toBe("ignored applied");
   expect(arrows(replaced, "remote").get(141)).toBeUndefined();
   expect(decoratedLines(replaced.center)).toEqual(
     outside(decoratedLines(start.center), CONFLICT_MIDDLE_LINES),
   );
-  expect(summary(replaced)).toEqual({ changes: 8, conflicts: 0 });
+  expect(summary(replaced)).toEqual({ changes: 8, conflicts: 0, remembered: 0 });
   expectOneUndoStep(start, ignored);
   expectOneUndoStep(ignored, replaced);
 });
@@ -272,7 +273,7 @@ test("» then « on a conflict appends; the right arrow offers that only while t
     sideText(both, CONFLICT, "local") + sideText(both, CONFLICT, "remote"),
   );
   expect(status(both, CONFLICT)).toBe("applied applied");
-  expect(summary(both)).toEqual({ changes: 8, conflicts: 0 });
+  expect(summary(both)).toEqual({ changes: 8, conflicts: 0, remembered: 0 });
   expectOneUndoStep(start, left);
   expectOneUndoStep(left, both);
 });
@@ -287,7 +288,7 @@ test("applying a side of a conflict whose other side deleted the block resolves 
 
   expect(applied.center.sliceDoc()).toBe("a\nB\nc\n");
   expect(status(applied, 0)).toBe("ignored applied");
-  expect(summary(applied)).toEqual({ changes: 0, conflicts: 0 });
+  expect(summary(applied)).toEqual({ changes: 0, conflicts: 0, remembered: 0 });
   expect(decoratedLines(applied.center)).toEqual([]);
   expectOneUndoStep(start, applied);
 });
@@ -304,7 +305,7 @@ test("× and apply on a block that is not a conflict resolve the whole block", a
   const sameApplied = click(same, 0, { kind: "apply", side: "local" });
 
   expect(status(oneSided, LOCAL_ONLY)).toBe("ignored pending");
-  expect(summary(oneSided)).toEqual({ changes: 7, conflicts: 1 });
+  expect(summary(oneSided)).toEqual({ changes: 7, conflicts: 1, remembered: 0 });
   expect(status(sameIgnored, 0)).toBe("ignored ignored");
   expect(sameIgnored.center.sliceDoc()).toBe("a\nb\nc\n");
   expect(status(sameApplied, 0)).toBe("applied applied");
@@ -313,7 +314,7 @@ test("× and apply on a block that is not a conflict resolve the whole block", a
     expect([...arrows(resolved, "local"), ...arrows(resolved, "remote")]).toEqual([]);
     expect(decoratedLines(resolved.left)).toEqual([]);
     expect(decoratedLines(resolved.right)).toEqual([]);
-    expect(summary(resolved)).toEqual({ changes: 0, conflicts: 0 });
+    expect(summary(resolved)).toEqual({ changes: 0, conflicts: 0, remembered: 0 });
   }
   expectOneUndoStep(magic, oneSided);
   expectOneUndoStep(same, sameIgnored);
@@ -329,7 +330,7 @@ test("deleting a whole open or half-applied conflict in the middle pane ignores 
     const deleted = mirrored(start, start.center.update({ changes: { from, to } }).state);
 
     expect(status(deleted, CONFLICT)).toBe("ignored ignored");
-    expect(summary(deleted)).toEqual({ changes: 8, conflicts: 0 });
+    expect(summary(deleted)).toEqual({ changes: 8, conflicts: 0, remembered: 0 });
     expect(arrows(deleted, "remote").get(141)).toBeUndefined();
     expect(decoratedLines(deleted.right)).toEqual(
       outside(decoratedLines(start.right), CONFLICT_RIGHT_LINES),

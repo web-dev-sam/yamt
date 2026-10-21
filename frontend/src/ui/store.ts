@@ -1,4 +1,4 @@
-import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+import { computed, shallowReactive, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import {
   type ChunkSource,
@@ -6,6 +6,7 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
+  type OperationView,
   type ServerHost,
   type Side,
   type SideNames,
@@ -16,28 +17,32 @@ import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
+import { createContinuing, type Continuing } from "./continuing";
+import { emptyStop, type EmptyStop } from "./emptyStop";
 import { fileListKey, type KeyPress } from "./fileListKey";
-import { loadSideNames, refreshFiles } from "./listing";
+import { createGitRun, type GitRun } from "./gitRun";
+import { refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
-import type { Notice } from "./noticeText";
+import { noticeKey, type Notice } from "./noticeText";
 import { createPaneSplit, type PaneSplitState } from "./paneSplit";
-import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
+import { logProblem, reportFailure, type Problem } from "./problem";
 import type { Question } from "./question";
-import { afterWrite, createSaving, finish, whileWriting } from "./saving";
-import type { FinishRequest, Saving, Writing } from "./saving";
+import { createSaving, finish, reset, take } from "./saving";
+import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
 import type { Screen } from "./screen";
 import { createServers, type Servers } from "./servers";
 import { createServerSetup, type ServerSetup } from "./serverSetup";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import type { Taken } from "./sides";
+import { nextStop, type StopEnd } from "./stops";
 import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
-import type { Preferences } from "./useMergeController";
-import { fetchView, isShown, reload } from "./views";
+import type { FormatOutcome, Preferences } from "./useMergeController";
+import { fetchView, isShown } from "./views";
 
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
-  readonly merging: ShallowRef<boolean>;
+  readonly operation: ShallowRef<OperationView | null>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
   readonly choices: ShallowRef<readonly FileSides[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
@@ -46,6 +51,7 @@ type Refs = {
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
   readonly screen: ShallowRef<Screen>;
+  readonly formatOutcomes: FormatOutcomes;
   readonly settings: ShallowRef<SettingsInUse>;
   readonly fileListShown: ShallowRef<boolean>;
 };
@@ -55,22 +61,27 @@ type State = Refs &
     readonly source: ChunkSource;
     readonly asking: Asking;
     readonly guard: CloseGuard;
+    readonly gitRun: GitRun;
+    readonly stopMessage: ShallowRef<string | null>;
     latestOpen: number;
     latestSettings: number;
+    readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
+    readonly refreshFiles: () => Promise<void>;
+    readonly nextStop: (end: StopEnd) => Promise<void>;
   };
 
 type Actions = CloseGuard &
   SettingsActions & {
     loadFiles(): Promise<void>;
     refreshFiles(): Promise<void>;
-    loadSideNames(): Promise<void>;
+    nextStop(end: StopEnd): Promise<void>;
     open(path: string): Promise<void>;
     pick(path: string): Promise<void>;
     finish(request: FinishRequest): Promise<void>;
     takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
     reset(path: string, diskVersion: DiskVersion): Promise<void>;
     dismissProblem(): void;
-    dismissNotice(path: string): void;
+    dismissNotice(key: string): void;
     openSettings(): void;
     closeSettings(): void;
     answer(yes: boolean): void;
@@ -82,10 +93,12 @@ type Actions = CloseGuard &
 export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
   readonly question: ComputedRef<Question | null>;
   readonly allResolved: ComputedRef<boolean>;
+  readonly emptyStop: ComputedRef<EmptyStop>;
   readonly preferences: ComputedRef<Preferences>;
   readonly hiddenButtons: HiddenButtons["hidden"];
 } & Actions &
   Aborting &
+  Continuing &
   Collapsing &
   PaneSplitState &
   Saving &
@@ -97,7 +110,7 @@ let store: AppStore | null = null;
 function createRefs(startTheme: Theme): Refs {
   return {
     files: shallowRef<readonly FileEntry[]>([]),
-    merging: shallowRef(false),
+    operation: shallowRef<OperationView | null>(null),
     opened: shallowRef<readonly FileMergeData[]>([]),
     choices: shallowRef<readonly FileSides[]>([]),
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
@@ -106,9 +119,33 @@ function createRefs(startTheme: Theme): Refs {
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
     screen: shallowRef<Screen>({ kind: "files" }),
+    formatOutcomes: shallowRef<ReadonlyMap<string, FormatOutcome>>(new Map()),
     settings: shallowRef(startSettings(startTheme)),
     fileListShown: shallowRef(true),
   };
+}
+
+function createState(refs: Refs, source: ChunkSource): State {
+  const asking = createAsking();
+  const gitRun = createGitRun();
+  const state: State = {
+    ...refs,
+    source,
+    asking,
+    guard: createCloseGuard({ ...refs, asking, running: gitRun.running }),
+    gitRun,
+    stopMessage: shallowRef(null),
+    writing: shallowReactive(new Map()),
+    stop: { dropped: false },
+    latestOpen: 0,
+    latestSettings: 0,
+    loadFiles: () => loadFiles(state),
+    refreshFiles: async () => {
+      await refreshFiles(state, "running");
+    },
+    nextStop: (end) => nextStop(state, end),
+  };
+  return state;
 }
 
 export function createAppStore(
@@ -118,24 +155,24 @@ export function createAppStore(
   host: ServerHost | null,
 ): AppStore {
   const refs = createRefs(startTheme);
-  const asking = createAsking();
+  const state = createState(refs, source);
   const buttons = createHiddenButtons();
-  const state: State = {
-    ...refs,
-    source,
-    asking,
-    guard: createCloseGuard(asking, refs.opened),
-    writing: new Map(),
-    latestOpen: 0,
-    latestSettings: 0,
-  };
   const { files, settings } = refs;
   const acts = actions(state, buttons, settingsActions(state));
   store = {
     ...refs,
-    question: asking.question,
+    question: state.asking.question,
     allResolved: computed(
       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
+    ),
+    emptyStop: computed(() =>
+      emptyStop({
+        operation: refs.operation.value,
+        files: files.value,
+        screen: refs.screen.value,
+        problem: refs.problem.value,
+        stopMessage: state.stopMessage.value,
+      }),
     ),
     preferences: computed(() => preferencesOf(settings.value)),
     hiddenButtons: buttons.hidden,
@@ -143,6 +180,7 @@ export function createAppStore(
     ...createCollapsing(),
     ...createPaneSplit(),
     ...createAborting(state),
+    ...createContinuing(state),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
     ...createServerSetup({ ...state, ...acts, host, servers }),
@@ -152,24 +190,25 @@ export function createAppStore(
 
 function actions(state: State, buttons: HiddenButtons, settings: SettingsActions): Actions {
   return {
-    loadFiles: () => loadFiles(state),
-    refreshFiles: async () => {
-      await refreshFiles(state, "running");
+    loadFiles: async () => {
+      await state.loadFiles();
     },
-    loadSideNames: () => loadSideNames(state),
+    refreshFiles: state.refreshFiles,
+    nextStop: state.nextStop,
     open: (path) => open(state, path),
     pick: async (path) => {
       state.screen.value = { kind: "files" };
       await open(state, path);
     },
-    finish: (request) => finishThenMoveOn(state, request),
-    takeSide: (path, side, diskVersion) => takeSide(state, path, side, diskVersion),
+    finish: (request) => thenMoveOn(state, request.path, () => finish(state, request)),
+    takeSide: (path, side, diskVersion) =>
+      thenMoveOn(state, path, () => take(state, path, side, diskVersion)),
     reset: (path, diskVersion) => reset(state, path, diskVersion),
     dismissProblem: () => {
       state.problem.value = null;
     },
-    dismissNotice: (path) => {
-      state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
+    dismissNotice: (key) => {
+      state.notices.value = state.notices.value.filter((notice) => noticeKey(notice) !== key);
     },
     openSettings: () => {
       state.screen.value = { kind: "settings" };
@@ -188,18 +227,23 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
   };
 }
 
-async function loadFiles(state: State): Promise<void> {
+async function loadFiles(state: State): Promise<readonly FileEntry[] | null> {
   const listed = await refreshFiles(state, "start");
   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
   if (first !== undefined) {
     await open(state, first.path);
   }
+  return listed;
 }
 
-async function finishThenMoveOn(state: State, request: FinishRequest): Promise<void> {
+async function thenMoveOn(
+  state: State,
+  path: string,
+  write: () => Promise<boolean>,
+): Promise<void> {
   const opensBefore = state.latestOpen;
-  if (await finish(state, request)) {
-    await moveOn(state, request.path, opensBefore);
+  if (await write()) {
+    await moveOn(state, path, opensBefore);
   }
 }
 
@@ -223,9 +267,10 @@ async function load(state: State, path: string): Promise<void> {
   const current = ticket === state.latestOpen;
   if (!view.ok) {
     const failure: Problem = { action: "open", path, cause: view.cause };
-    logProblem(failure);
     if (current) {
-      state.problem.value = failure;
+      await reportFailure(state, failure);
+    } else {
+      logProblem(failure);
     }
     return;
   }
@@ -242,47 +287,6 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
   if (next !== null) {
     await open(state, next);
   }
-}
-
-async function takeSide(
-  state: State,
-  path: string,
-  side: Side,
-  diskVersion: DiskVersion,
-): Promise<void> {
-  const opensBefore = state.latestOpen;
-  const outcome = await attempt(() => state.source.takeSide(path, side, diskVersion));
-  if (!outcome.ok) {
-    report(state, { action: "take", path, cause: outcome.cause });
-    return;
-  }
-  if (!(await afterWrite(state, path, outcome.value))) {
-    return;
-  }
-  state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
-  clearProblemAbout(state, path);
-  if (state.opened.value.some((file) => file.path === path)) {
-    await reload(state, path);
-  }
-  await moveOn(state, path, opensBefore);
-}
-
-async function reset(state: State, path: string, diskVersion: DiskVersion): Promise<void> {
-  await whileWriting(state, path, async () => {
-    const outcome = await attempt(() => state.source.resetFile(path, diskVersion));
-    if (!outcome.ok) {
-      report(state, { action: "reset", path, cause: outcome.cause });
-      return;
-    }
-    if (!(await afterWrite(state, path, outcome.value))) {
-      return;
-    }
-    state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
-    state.taken.value = new Map([...state.taken.value].filter(([taken]) => taken !== path));
-    if (await reload(state, path)) {
-      clearProblemAbout(state, path);
-    }
-  });
 }
 
 export function useAppStore(): AppStore {

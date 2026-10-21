@@ -4,15 +4,15 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	listFiles: () => typedError<FileList, IpcError>(__TAURI_INVOKE("list_files")),
 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
 	finishFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("finish_file", { path, text, diskVersion })),
 	saveFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("save_file", { path, text, diskVersion })),
 	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
-	sideNames: () => typedError<SideNames, IpcError>(__TAURI_INVOKE("side_names")),
-	abortMerge: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_merge")),
+	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
+	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
+	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
@@ -76,6 +76,9 @@ export type ChunkKind =
 /**  Local and remote changed these base lines differently. */
 "Conflict";
 
+/**  What a Continue git accepted led to: the operation ended, or git stopped at another stop. */
+export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
+
 export type DiskChange = {
 	path: string,
 	result: DiskResult,
@@ -88,7 +91,7 @@ export type DiskResult = { kind: "Staged" } |
 /**  Not staged, by design: a `working-tree-encoding` file or a submodule that is not checked out. */
 { kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
 
-/**  Counts the settles of one file's disk changes; a view is built from one version. */
+/**  Counts the settles of one file's disk changes, from the session's first version; a view is built from one version. */
 export type DiskVersion = number;
 
 export type Eol = "Lf" | "CrLf" | "Mixed";
@@ -97,14 +100,6 @@ export type FileEntry = {
 	path: string,
 	status: FileStatus,
 	unsupported: UnsupportedReason | null,
-};
-
-/**  The files as git sees them, the disk changes settled while looking, and whether a merge is in progress. */
-export type FileList = {
-	files: FileEntry[],
-	disk_changes: DiskChange[],
-	/**  A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74). */
-	merging: boolean,
 };
 
 export type FileMergeData = {
@@ -126,7 +121,9 @@ export type FileSides = {
 	disk_version: DiskVersion,
 };
 
-export type FileStatus = "Unresolved" | "Resolved";
+export type FileStatus = "Unresolved" | 
+/**  Unmerged for git, with the resolution git rerere replayed on disk, not yet reviewed (plan §2 #90). */
+"Remembered" | "Resolved";
 
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
@@ -155,7 +152,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -184,6 +181,9 @@ export type LineRange<L> = {
 	/**  Number of lines in the range. */
 	len: number,
 };
+
+/**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
+export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" };
 
 /**  0-based line index in the local text. */
 export type LocalLine = number;
@@ -214,6 +214,9 @@ export type MiddleLine = number;
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
+/**  What git is doing, with the names of what it applies (plan §2 #87). */
+export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
+
 /**
  *  Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
  *  names separated by `/` (`node_modules/.bin`, `.venv/Scripts`, `go/bin`); an entry that is empty, absolute,
@@ -229,6 +232,12 @@ export type ProgramFolders = {
 export type ProgramFound = { kind: "Found"; path: string; place: ProgramPlace } | { kind: "NotFound"; searched: string[] };
 
 export type ProgramPlace = "Project" | "Path" | "Home";
+
+/**  Step `step` of `total`, 1 ≤ step ≤ total. */
+export type ProgressView = {
+	step: number,
+	total: number,
+};
 
 /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
 export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };
@@ -272,10 +281,13 @@ export type Side = "local" | "remote";
 
 export type SideContent = { kind: "Missing" } | { kind: "Text"; lines: number } | { kind: "Binary"; bytes: number } | { kind: "NonUtf8"; bytes: number } | { kind: "TooLarge"; bytes: number } | { kind: "Link"; target: string } | { kind: "Commit"; id: string };
 
-/**  What one side of the merge is: a branch, else a commit. */
-export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
+/**
+ *  What one side of the operation is: a branch, a commit, the commit a revert undoes, or the
+ *  patch `git am` applies.
+ */
+export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | { kind: "Revert"; short_id: string; subject: string; message: string } | { kind: "Patch"; subject: string; message: string };
 
-/**  Both sides' names, read once when the session opens; `None` when nothing names that side. */
+/**  Both panes' names, read once when the session opens; `None` when nothing names that side. */
 export type SideNames = {
 	local: SideName | null,
 	remote: SideName | null,
@@ -314,12 +326,18 @@ export type Waiting =
 /**  One side changed these lines, or both the same way: written applied, as git wrote it. */
 { kind: "SideLines" } | 
 /**
- *  A conflict: `open`, the local section, `between` (base section if any, then the separator),
- *  the remote section, `close`. Lines without line breaks.
+ *  A conflict as git writes it: `open`, the section of the pane `first` (git's ours: HEAD),
+ *  `between` (base section if any, then the separator), the other pane's section, `close`.
+ *  Lines without line breaks.
  */
-{ kind: "Markers"; open: string; between: string[]; close: string } | 
+{ kind: "Markers"; open: string; first: Side; between: string[]; close: string } | 
 /**  A region yamt could not place: written as the Result shows it. */
-{ kind: "AsShown" };
+{ kind: "AsShown" } | 
+/**
+ *  A conflict git rerere resolved from a resolution recorded before: written as the Result
+ *  shows it, rerere's text unless the user changed it (plan §2 #90).
+ */
+{ kind: "Remembered" };
 
 /**  Where one chunk's sides differ from base. */
 export type WordChanges = {

@@ -7,7 +7,11 @@ export type ChunkStatus = Readonly<Record<Side, SideStatus>>;
 
 export type ChunkState = { readonly chunk: Chunk; readonly status: ChunkStatus };
 
-export type MergeSummary = { readonly changes: number; readonly conflicts: number };
+export type MergeSummary = {
+  readonly changes: number;
+  readonly conflicts: number;
+  readonly remembered: number;
+};
 
 export type ApplyMode = "replace" | "append";
 
@@ -62,8 +66,17 @@ export function statusAfterIgnore(chunk: Chunk, status: ChunkStatus, side: Side)
   return markConflictSideOrChange({ chunk, status, side, value: "ignored" });
 }
 
+function isRememberedWaiting({ chunk, status }: ChunkState): boolean {
+  return (
+    chunk.kind === "Conflict" &&
+    chunk.waiting.kind === "Remembered" &&
+    SIDES.every((side) => status[side] === "pending")
+  );
+}
+
 export function summarize(states: readonly ChunkState[]): MergeSummary {
   const open = states.filter(({ chunk, status }) => !isResolved(chunk, status));
-  const conflicts = open.filter(({ chunk }) => chunk.kind === "Conflict").length;
-  return { changes: open.length - conflicts, conflicts };
+  const remembered = open.filter(isRememberedWaiting).length;
+  const conflicts = open.filter(({ chunk }) => chunk.kind === "Conflict").length - remembered;
+  return { changes: open.length - conflicts - remembered, conflicts, remembered };
 }

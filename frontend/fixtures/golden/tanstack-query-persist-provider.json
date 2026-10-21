@@ -279,6 +279,7 @@
       "waiting": {
         "kind": "Markers",
         "open": "<<<<<<< ours",
+        "first": "local",
         "between": [
           "======="
         ],

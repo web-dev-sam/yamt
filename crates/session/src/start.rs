@@ -1,5 +1,3 @@
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -11,7 +9,8 @@ use yamt_gitio::{
 use crate::Result;
 use crate::decode::is_binary;
 use crate::disk::OnDisk;
-use crate::markers::{DEFAULT_MARKER_SIZE, views};
+use crate::markers::{DEFAULT_MARKER_SIZE, Piece, open_regions, parse, split_lines, views};
+use crate::scratch::ScratchDir;
 use crate::session::LOG_TARGET;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE};
 use crate::stages::CapturedStages;
@@ -22,9 +21,6 @@ const HISTOGRAM_SINCE: GitVersion = GitVersion {
     major: 2,
     minor: 44,
 };
-const SCRATCH_ATTEMPTS: u32 = 1000;
-#[cfg(unix)]
-const SCRATCH_MODE: u32 = 0o700;
 
 /// The gitattributes that decide what git wrote to a conflicted path.
 pub(crate) struct Attributes {
@@ -49,7 +45,7 @@ pub(crate) enum MergeDriver {
 pub(crate) struct StartFile<'a> {
     pub(crate) path: &'a Path,
     pub(crate) stages: &'a CapturedStages,
-    /// base, local and remote bytes of a regular file with at least one side.
+    /// base, ours and theirs bytes, in git's order, of a regular file with at least one side.
     pub(crate) sides: Option<&'a [Vec<u8>; 3]>,
     pub(crate) attributes: &'a Attributes,
     pub(crate) disk: &'a OnDisk,
@@ -61,6 +57,17 @@ pub(crate) enum StartLook {
     Changed,
     /// Untouched when the worktree file, cleaned by git, hashes to this blob.
     BlobOf(Oid),
+    /// rerere replayed a resolution over git's merge output (plan §2 #90).
+    Remembered {
+        git_output: Vec<u8>,
+    },
+}
+
+/// What open found for a path, once every `BlobOf` is hashed.
+pub(crate) enum Found {
+    Untouched,
+    Changed,
+    Remembered { git_output: Vec<u8> },
 }
 
 enum GitWrote<'a> {
@@ -79,12 +86,20 @@ pub(crate) struct StartCheck<'r> {
     repo: &'r Repo,
     scratch: Option<ScratchDir>,
     histogram: Option<bool>,
+    rerere: RerereTracked,
     merge_file_runs: u32,
     started: Instant,
 }
 
-/// A directory under the system temp directory, removed when dropped.
-struct ScratchDir(PathBuf);
+/// The paths rerere tracks at this stop, read once, when the first file looks resolved at open.
+enum RerereTracked {
+    NotRead,
+    /// rerere is not enabled, or recorded nothing at this stop.
+    Off,
+    Paths(Vec<PathBuf>),
+    /// rerere may be enabled, but what it tracks could not be read: any path may have been replayed.
+    Unknown,
+}
 
 impl Attributes {
     pub(crate) fn from_git(found: &MergeAttributes, config: &MergeConfig) -> Attributes {
@@ -137,20 +152,20 @@ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
     if file.attributes.encoded || file.stages.has_mode(SUBMODULE_MODE) {
         return GitWrote::NotWritten;
     }
-    let local = match (&file.stages.local, &file.stages.remote) {
+    let ours = match (&file.stages.ours, &file.stages.theirs) {
         (None, None) => return GitWrote::Nothing,
         // merge-ort.c, modify/delete: "Version %s of %s left in tree" — the kept side.
         (Some(kept), None) | (None, Some(kept)) => return GitWrote::Stage(kept),
-        (Some(local), Some(_)) => local,
+        (Some(ours), Some(_)) => ours,
     };
     // merge-ort.c `handle_content_merge`: two symlinks keep ours; merge-ll.c `ll_binary_merge`:
     // "For the final merge, it is 'ours' by default", also when any version is binary.
     if file.stages.has_mode(SYMLINK_MODE) {
-        return GitWrote::Stage(local);
+        return GitWrote::Stage(ours);
     }
     let union = match file.attributes.driver {
         MergeDriver::Custom => return GitWrote::Unknown,
-        MergeDriver::Binary => return GitWrote::Stage(local),
+        MergeDriver::Binary => return GitWrote::Stage(ours),
         MergeDriver::Text => false,
         MergeDriver::Union => true,
     };
@@ -158,7 +173,7 @@ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
         Some(sides) if !sides.iter().any(|side| is_binary(side)) => {
             GitWrote::Merged { sides, union }
         }
-        Some(_) | None => GitWrote::Stage(local),
+        Some(_) | None => GitWrote::Stage(ours),
     }
 }
 
@@ -168,6 +183,7 @@ impl<'r> StartCheck<'r> {
             repo,
             scratch: None,
             histogram: None,
+            rerere: RerereTracked::NotRead,
             merge_file_runs: 0,
             started: Instant::now(),
         }
@@ -193,6 +209,12 @@ impl<'r> StartCheck<'r> {
             Ok(output) if views(disk, marker_size) == views(&output, marker_size) => {
                 StartLook::Untouched
             }
+            Ok(output)
+                if looks_resolved(&output, disk, marker_size)
+                    && has_replayed(&mut self.rerere, self.repo, file.path) =>
+            {
+                StartLook::Remembered { git_output: output }
+            }
             Ok(_) => StartLook::Changed,
             Err(error) => {
                 let path = file.path.to_string_lossy();
@@ -213,7 +235,7 @@ impl<'r> StartCheck<'r> {
             Some(scratch) => scratch,
             None => ScratchDir::create().map_err(|error| error.to_string())?,
         };
-        let [base, local, remote] = sides;
+        let [base, ours, theirs] = sides;
         let options = MergeFileOptions {
             marker_size,
             union,
@@ -222,7 +244,7 @@ impl<'r> StartCheck<'r> {
         self.merge_file_runs += 1;
         let merged = self
             .repo
-            .merge_file(&scratch.0, base, local, remote, &options);
+            .merge_file(&scratch.0, base, ours, theirs, &options);
         self.scratch = Some(scratch);
         merged.map_err(|error| error.to_string())
     }
@@ -237,13 +259,13 @@ impl<'r> StartCheck<'r> {
         Ok(histogram)
     }
 
-    /// Whether each path is untouched, in the order of `looks`.
-    pub(crate) fn untouched(self, looks: &[(&Path, StartLook)]) -> Vec<bool> {
+    /// What was found for each path, in the order of `looks`.
+    pub(crate) fn found(self, looks: Vec<(&Path, StartLook)>) -> Vec<Found> {
         let mut hashed_paths = Vec::new();
-        for (path, look) in looks {
+        for (path, look) in &looks {
             match look {
                 StartLook::BlobOf(_) => hashed_paths.push(*path),
-                StartLook::Untouched | StartLook::Changed => {}
+                StartLook::Untouched | StartLook::Changed | StartLook::Remembered { .. } => {}
             }
         }
         let hashes = match self.repo.hash_objects(&hashed_paths) {
@@ -254,20 +276,28 @@ impl<'r> StartCheck<'r> {
             }
         };
         let mut hashes = hashes.map(Vec::into_iter);
-        let mut untouched = Vec::with_capacity(looks.len());
+        let mut found = Vec::with_capacity(looks.len());
         for (_, look) in looks {
-            untouched.push(match look {
-                StartLook::Untouched => true,
-                StartLook::Changed => false,
-                StartLook::BlobOf(expected) => match &mut hashes {
-                    Some(hashes) => hashes.next().is_some_and(|hash| hash == *expected),
-                    None => true,
-                },
+            found.push(match look {
+                StartLook::Untouched => Found::Untouched,
+                StartLook::Changed => Found::Changed,
+                StartLook::Remembered { git_output } => Found::Remembered { git_output },
+                StartLook::BlobOf(expected) => {
+                    let untouched = match &mut hashes {
+                        Some(hashes) => hashes.next().is_some_and(|hash| hash == expected),
+                        None => true,
+                    };
+                    if untouched {
+                        Found::Untouched
+                    } else {
+                        Found::Changed
+                    }
+                }
             });
         }
         let elapsed_ms = self.started.elapsed().as_millis();
         tracing::debug!(target: LOG_TARGET, event = "start_checked", merge_file_runs = self.merge_file_runs, hashed = hashed_paths.len(), elapsed_ms, "compared the worktree with what git wrote");
-        untouched
+        found
     }
 }
 
@@ -302,64 +332,64 @@ fn same(expected: &[u8], found: &[u8]) -> StartLook {
     }
 }
 
-impl ScratchDir {
-    fn create() -> io::Result<ScratchDir> {
-        let temp = std::env::temp_dir();
-        let process = std::process::id();
-        for attempt in 0..SCRATCH_ATTEMPTS {
-            let dir = temp.join(format!("yamt-merge-file-{process}-{attempt}"));
-            match create_private_dir(&dir) {
-                Ok(()) => return Ok(ScratchDir(dir)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => return Err(error),
+/// rerere replayed a resolution into `path`: rerere is enabled and `MERGE_RR` no longer lists it.
+fn has_replayed(rerere: &mut RerereTracked, repo: &Repo, path: &Path) -> bool {
+    if let RerereTracked::NotRead = rerere {
+        *rerere = match repo.rerere_tracked() {
+            Ok(Some(paths)) => RerereTracked::Paths(paths),
+            Ok(None) => RerereTracked::Off,
+            Err(error) => {
+                tracing::warn!(target: LOG_TARGET, event = "rerere_unread", %error, "every file that looks resolved counts as remembered");
+                RerereTracked::Unknown
             }
-        }
-        Err(io::Error::from(io::ErrorKind::AlreadyExists))
+        };
+    }
+    match rerere {
+        RerereTracked::Paths(paths) => !paths.iter().any(|tracked| tracked == path),
+        RerereTracked::Unknown => true,
+        RerereTracked::NotRead | RerereTracked::Off => false,
     }
 }
 
-#[cfg(unix)]
-fn create_private_dir(dir: &Path) -> io::Result<()> {
-    use std::os::unix::fs::DirBuilderExt;
-    fs::DirBuilder::new().mode(SCRATCH_MODE).create(dir)
-}
-
-// Windows: a new folder inherits the ACL of the user's temp folder, which only the user (and the
-// system and administrators) may read.
-#[cfg(not(unix))]
-fn create_private_dir(dir: &Path) -> io::Result<()> {
-    fs::create_dir(dir)
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        if let Err(error) = fs::remove_dir_all(&self.0) {
-            let dir = self.0.display();
-            tracing::warn!(target: LOG_TARGET, event = "scratch_not_removed", %dir, %error, "temporary merge inputs were left behind");
-        }
-    }
+/// git's merge output has conflict blocks and the disk file has no marker line left.
+fn looks_resolved(git_output: &[u8], disk: &[u8], marker_size: usize) -> bool {
+    let has_block = parse(&split_lines(git_output), marker_size)
+        .iter()
+        .any(|piece| matches!(piece, Piece::Block(_)));
+    has_block && open_regions(&parse(&split_lines(disk), marker_size)) == 0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    const GIT_OUTPUT: &[u8] =
+        b"top\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+
     #[test]
-    fn the_scratch_dir_is_removed_when_dropped() {
-        let scratch = ScratchDir::create().unwrap();
-        let dir = scratch.0.clone();
-        assert!(dir.is_dir());
-        drop(scratch);
-        assert!(!dir.exists());
+    fn a_file_without_markers_over_git_output_with_a_block_looks_resolved() {
+        let resolved = b"top\nlocal and remote\nbottom\n";
+
+        assert!(looks_resolved(GIT_OUTPUT, resolved, DEFAULT_MARKER_SIZE));
     }
 
-    #[cfg(unix)]
+    // Catches a file still holding git's markers taken for a replayed resolution.
     #[test]
-    fn the_scratch_dir_is_readable_by_its_owner_only() {
-        use std::os::unix::fs::PermissionsExt;
-        const PERMISSION_BITS: u32 = 0o777;
-        let scratch = ScratchDir::create().unwrap();
-        let mode = fs::metadata(&scratch.0).unwrap().permissions().mode();
-        assert_eq!(mode & PERMISSION_BITS, SCRATCH_MODE);
+    fn a_file_with_markers_left_does_not_look_resolved() {
+        let edited = b"top, edited\n<<<<<<< ours\nlocal\n=======\nremote\n>>>>>>> theirs\nbottom\n";
+
+        assert!(!looks_resolved(GIT_OUTPUT, edited, DEFAULT_MARKER_SIZE));
+    }
+
+    // Catches a file git merged without a conflict block taken for a replayed resolution.
+    #[test]
+    fn without_a_block_in_git_output_nothing_looks_resolved() {
+        let merged = b"top\nlocal\nbottom\n";
+
+        assert!(!looks_resolved(
+            merged,
+            b"top\nedited\nbottom\n",
+            DEFAULT_MARKER_SIZE
+        ));
     }
 }

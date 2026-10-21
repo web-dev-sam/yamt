@@ -5,9 +5,12 @@ use std::fs;
 use yamt_conflict_repo::{ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok};
 use yamt_session::{DiskChange, DiskResult, MergeSession};
 
+mod listing;
+use listing::listed;
+
 fn opened(dir: &TempDir) -> MergeSession {
     let mut session = MergeSession::open(dir.path()).unwrap();
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     session
 }
 
@@ -53,7 +56,7 @@ fn a_working_tree_encoding_file_is_never_staged() {
     let mut session = opened(&dir);
     fs::write(dir.path().join(ENCODED), utf16("resolved\n")).unwrap();
 
-    let changed = session.refresh().unwrap();
+    let changed = listed(&mut session);
 
     assert_eq!(changed.disk_changes, left_as_is(ENCODED));
     assert!(unmerged(&dir).contains(ENCODED));
@@ -81,7 +84,7 @@ fn a_submodule_no_longer_checked_out_is_left_as_is() {
     let unmerged_before = unmerged(&dir);
     fs::remove_dir_all(submodule.join(".git")).unwrap();
 
-    let changed = session.refresh().unwrap();
+    let changed = listed(&mut session);
 
     assert_eq!(changed.disk_changes, left_as_is(SUBMODULE));
     assert_eq!(unmerged(&dir), unmerged_before);

@@ -44,6 +44,33 @@ test.each<Side>(["local", "remote"])("no name leaves the plain %s header", (side
   });
 });
 
+test("a revert names the commit it undoes; hovering shows that commit's message", () => {
+  const reverted: SideName = {
+    kind: "Revert",
+    short_id: "1a2b3c4",
+    subject: "Fix parser crash",
+    message: "Fix parser crash\n\nThe lexer read past the end of the input.",
+  };
+
+  expect(sideHeader("remote", { local: null, remote: reverted })).toEqual({
+    text: "Remote (theirs): revert of 1a2b3c4 Fix parser crash",
+    tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
+  });
+});
+
+test("a patch shows its subject; hovering shows its message", () => {
+  const patch: SideName = {
+    kind: "Patch",
+    subject: "Fix typo",
+    message: "Fix typo\n\nIn the README.",
+  };
+
+  expect(sideHeader("remote", { local: null, remote: patch })).toEqual({
+    text: "Remote (theirs): patch: Fix typo",
+    tooltip: "Fix typo\n\nIn the README.",
+  });
+});
+
 test("each header reads its own side's name; the unnamed side stays plain", () => {
   const onlyLocal: SideNames = { local: COMMIT, remote: null };
   const onlyRemote: SideNames = { local: null, remote: { kind: "Branch", name: "minor" } };

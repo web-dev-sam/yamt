@@ -20,6 +20,7 @@ const CLOSE = ">>>>>>> theirs";
 const MARKERS: Chunk["waiting"] = {
   kind: "Markers",
   open: OPEN,
+  first: "local",
   between: [SEPARATOR],
   close: CLOSE,
 };
@@ -118,6 +119,7 @@ test.each([
     const diff3: Chunk["waiting"] = {
       kind: "Markers",
       open: "<<<<<<< HEAD",
+      first: "local",
       between: ["||||||| base", "base", SEPARATOR],
       close: ">>>>>>> feature",
     };
@@ -190,6 +192,25 @@ test("a half-decided conflict keeps its markers: the decided section holds the R
   expect(written(ignored)).toBe(`a\n${OPEN}\nL\n${SEPARATOR}\nb\n${CLOSE}\nz\n`);
 });
 
+test("a conflict whose first section is the remote pane's (git's ours, as in a rebase) writes the remote lines first", async () => {
+  const remoteFirst: Chunk["waiting"] = {
+    kind: "Markers",
+    open: OPEN,
+    first: "remote",
+    between: [SEPARATOR],
+    close: CLOSE,
+  };
+  const merge = await opened(
+    { middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR1\nR2\nz\n" },
+    [{ ...CONFLICT, waiting: remoteFirst }],
+  );
+  const local = decided(merge, "apply", "local");
+  const typed = updated(local, { changes: { from: 2, insert: "typed " } });
+
+  expect(written(merge)).toBe(`a\n${OPEN}\nR1\nR2\n${SEPARATOR}\nL\n${CLOSE}\nz\n`);
+  expect(written(typed)).toBe(`a\n${OPEN}\nR1\nR2\n${SEPARATOR}\ntyped L\n${CLOSE}\nz\n`);
+});
+
 test("a change at the end of a file without a final line break keeps the file without one", async () => {
   const conflict = await opened({ middle: "a\nb", local: "a\nL", remote: "a\nR" }, [
     { kind: "Conflict", middle: [1, 1], local: [1, 1], remote: [1, 1] },
@@ -246,6 +267,29 @@ test("a region yamt could not place is written as shown, typing included", async
 
   expect(written(merge)).toBe(merge.state.doc.toString());
   expect(written(typed)).toBe(["a", OPEN, "typed x", SEPARATOR, "y", CLOSE, "z", ""].join("\n"));
+});
+
+test("a conflict git rerere filled in is written as shown: rerere's text, typing, or an applied side", async () => {
+  const remembered = await opened(
+    { middle: "a\nboth\nz\n", local: "a\nL\nz\n", remote: "a\nR\nz\n" },
+    [
+      {
+        kind: "Conflict",
+        middle: [1, 1],
+        local: [1, 1],
+        remote: [1, 1],
+        waiting: { kind: "Remembered" },
+      },
+    ],
+  );
+  const typed = updated(remembered, {
+    changes: { from: remembered.state.doc.line(2).from, insert: "typed " },
+  });
+  const local = decided(remembered, "apply", "local");
+
+  expect(written(remembered)).toBe("a\nboth\nz\n");
+  expect(written(typed)).toBe("a\ntyped both\nz\n");
+  expect(written(local)).toBe("a\nL\nz\n");
 });
 
 test("a line break deleted at a waiting change's edge is written back, so no marker shares a line", async () => {

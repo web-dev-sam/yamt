@@ -6,32 +6,16 @@ use std::process::Command;
 
 use crate::blob::{BlobReader, CAT_FILE};
 use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
-use crate::run::{Access, GIT_TIMEOUT, git_command, run};
+use crate::run::{Access, GIT_TIMEOUT, git_command, git_command_as_user, run};
 use crate::{Error, Result, StageEntry};
 
 const REV_PARSE: &str = "rev-parse";
-const BRANCH: &str = "branch";
-const LOG: &str = "log";
 const HASH_OBJECT: &str = "hash-object";
-const MERGE_MSG: &str = "MERGE_MSG";
-const REBASE_STATE_DIRS: [&str; 2] = ["rebase-merge", "rebase-apply"];
 const UNRESOLVED_NAME_STATUS: i32 = 1;
-const NON_SYMBOLIC_SHORT_NAME: &str =
-    "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
-const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
-const COMMIT_SUMMARY_FIELDS: usize = 3;
 
 pub struct Repo {
     root: PathBuf,
     git: PathBuf,
-}
-
-/// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CommitSummary {
-    pub short_id: Vec<u8>,
-    pub subject: Vec<u8>,
-    pub message: Vec<u8>,
 }
 
 impl Repo {
@@ -66,95 +50,26 @@ impl Repo {
         Ok(Some(Oid::parse(&hex)?))
     }
 
-    /// The branch HEAD is on (`branch --show-current`); `None` when HEAD is detached.
-    pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
-        let command = self.command(Access::Read, &[BRANCH, "--show-current"]);
-        let output = run(command, None, GIT_TIMEOUT)?;
-        if output.is_empty() {
-            return Ok(None);
+    pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
+        let [path] = self.git_paths([name])?;
+        Ok(path)
+    }
+
+    /// One `rev-parse --git-path` call for every name (git-rev-parse(1): the path inside the git directory,
+    /// relative to the cwd); the paths in the order of `names`.
+    pub(crate) fn git_paths<const N: usize>(&self, names: [&str; N]) -> Result<[PathBuf; N]> {
+        let mut command = self.command(Access::Read, &[REV_PARSE]);
+        for name in names {
+            command.args(["--git-path", name]);
         }
-        Ok(Some(without_final_newline(BRANCH, output)?))
-    }
-
-    pub fn branches_at(&self, commit: &Oid) -> Result<Vec<Vec<u8>>> {
-        let args = [
-            "for-each-ref",
-            NON_SYMBOLIC_SHORT_NAME,
-            "--points-at",
-            commit.as_str(),
-            "refs/heads",
-            "refs/remotes",
-        ];
-        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
-        let names = output.split(|&byte| byte == b'\n');
-        Ok(names
-            .filter(|name| !name.is_empty())
-            .map(<[u8]>::to_vec)
-            .collect())
-    }
-
-    pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
-        let path = self.git_path(MERGE_MSG)?;
-        match fs::read(&path) {
-            Ok(message) => Ok(Some(message)),
-            Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(source) => Err(Error::ReadFailed { path, source }),
-        }
-    }
-
-    /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
-    pub fn rebase_in_progress(&self) -> Result<bool> {
-        for name in REBASE_STATE_DIRS {
-            let path = self.git_path(name)?;
-            match path.try_exists() {
-                Ok(true) => return Ok(true),
-                Ok(false) => {}
-                Err(source) => return Err(Error::ReadFailed { path, source }),
-            }
-        }
-        Ok(false)
-    }
-
-    /// `git merge --abort`; git's own refusal comes back as `Error::GitFailed` with its stderr.
-    pub fn abort_merge(&self) -> Result<()> {
-        run(
-            self.command(Access::Write, &["merge", "--abort"]),
-            None,
-            GIT_TIMEOUT,
-        )?;
-        Ok(())
-    }
-
-    // git-rev-parse(1) `--git-path`: the path inside the git directory, relative to the cwd.
-    fn git_path(&self, name: &str) -> Result<PathBuf> {
-        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", name]);
-        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
-        Ok(self.root.join(path_from_git(&git_path)))
-    }
-
-    pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
-        let args = [
-            LOG,
-            "-1",
-            "--no-show-signature",
-            SHORT_ID_SUBJECT_MESSAGE,
-            commit.as_str(),
-            "--",
-        ];
-        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
-        let fields: Vec<&[u8]> = output
-            .splitn(COMMIT_SUMMARY_FIELDS, |&byte| byte == b'\0')
+        let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+        let paths: Vec<PathBuf> = output
+            .split(|&byte| byte == b'\n')
+            .map(|line| self.root.join(path_from_git(line)))
             .collect();
-        let [short_id, subject, message] = fields.as_slice() else {
-            return Err(Error::UnexpectedOutput {
-                command: LOG,
-                output: String::from_utf8_lossy(&output).into_owned(),
-            });
-        };
-        Ok(CommitSummary {
-            short_id: short_id.to_vec(),
-            subject: subject.to_vec(),
-            message: message.to_vec(),
+        paths.try_into().map_err(|paths| Error::UnexpectedOutput {
+            command: REV_PARSE,
+            output: format!("{paths:?}"),
         })
     }
 
@@ -267,6 +182,11 @@ impl Repo {
     pub(crate) fn command(&self, access: Access, args: &[&str]) -> Command {
         git_command(&self.git, &self.root, access, args)
     }
+
+    /// A command as the user's terminal would run it (`git_command_as_user`): Abort and Continue only.
+    pub(crate) fn command_as_user(&self, args: &[&str]) -> Command {
+        git_command_as_user(&self.git, &self.root, args)
+    }
 }
 
 // git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
@@ -277,7 +197,25 @@ fn is_unresolved_name(error: &Error) -> bool {
     )
 }
 
-fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {
+pub(crate) fn exists(path: &Path) -> Result<bool> {
+    path.try_exists().map_err(|source| Error::ReadFailed {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+pub(crate) fn read_if_present(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(Error::ReadFailed {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+pub(crate) fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {
     if output.pop() == Some(b'\n') {
         return Ok(output);
     }

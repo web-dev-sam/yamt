@@ -33,6 +33,7 @@ fn chunk_summary(session: &mut MergeSession, path: &str) -> Result<String> {
 fn status_name(status: FileStatus) -> &'static str {
     match status {
         FileStatus::Unresolved => "Unresolved",
+        FileStatus::Remembered => "Remembered",
         FileStatus::Resolved => "Resolved",
     }
 }

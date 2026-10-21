@@ -1,0 +1,40 @@
+From f458b663f76dd8662ef967a962a5e68329c81143 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 18:15:46 +0200
+Subject: [PATCH] feat(ui): the git am tag reads PATCHES
+
+Refs #1452
+---
+ frontend/src/ui/operationText.test.ts | 2 +-
+ frontend/src/ui/operationText.ts      | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+index 25be596..8742a9e 100644
+--- a/frontend/src/ui/operationText.test.ts
++++ b/frontend/src/ui/operationText.test.ts
+@@ -41,7 +41,7 @@ test.each<[OperationKind, string]>([
+   ["Rebase", "REBASE"],
+   ["CherryPick", "CHERRY-PICK"],
+   ["Revert", "REVERT"],
+-  ["Am", "AM"],
++  ["Am", "PATCHES"],
+ ])("the tag of %s reads %s, as plan #92 words it", (kind, tag) => {
+   expect(operationTag(kind)).toBe(tag);
+ });
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+index eafb6f7..6f80459 100644
+--- a/frontend/src/ui/operationText.ts
++++ b/frontend/src/ui/operationText.ts
+@@ -34,7 +34,7 @@ const TAGS: Readonly<Record<OperationKind, string>> = {
+   Rebase: "REBASE",
+   CherryPick: "CHERRY-PICK",
+   Revert: "REVERT",
+-  Am: "AM",
++  Am: "PATCHES",
+ };
+ 
+ type StepKind = Exclude<OperationKind, "Merge" | "SquashMerge">;
+-- 
+2.56.0
+

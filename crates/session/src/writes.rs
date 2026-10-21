@@ -40,9 +40,7 @@ impl MergeSession {
             return Err(error.into());
         }
         file.status = FileStatus::Resolved;
-        file.seen = file
-            .seen
-            .after_own_write(OnDisk::File(result.as_bytes().to_vec()));
+        file.seen.note_own_write(result.as_bytes().to_vec());
         Ok(self.written_reply())
     }
 
@@ -60,9 +58,7 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         write_text(&self.repo, file, text)?;
-        file.seen = file
-            .seen
-            .after_own_write(OnDisk::File(text.as_bytes().to_vec()));
+        file.seen.note_own_write(text.as_bytes().to_vec());
         Ok(self.written_reply())
     }
 
@@ -78,7 +74,7 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         let index_before = index_before(&self.repo, file)?;
-        let chosen = file.stages.side(side);
+        let chosen = file.stages.of(self.orientation.git_side(side));
         match chosen {
             Some(entry) => self.repo.resolve_with(entry)?,
             None => self.repo.remove_paths(&[file.path.as_path()])?,
@@ -120,25 +116,29 @@ impl MergeSession {
         if let Err(error) = worktree {
             if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
                 warn_rollback_failed("reset_restore_failed", path, &restore_error);
-                file.status = FileStatus::Unresolved;
+                file.status = file.unmerged_status();
             }
             return Err(error);
         }
-        file.status = FileStatus::Unresolved;
         match reset_to {
             Some(reset_to) => file.seen = reset_to.seen,
             None => read_back(&self.repo, file),
         }
+        file.status = file.unmerged_status();
         Ok(self.written_reply())
     }
 
     /// The change that stops a write to `path`: one settled after the window's `disk_version`,
-    /// or one found now, which is settled before returning.
+    /// or one found now, which is settled before returning. A version below this session's first
+    /// comes from an earlier stop's session: `StopMovedOn` (#1383).
     fn changed_on_disk(
         &mut self,
         path: &str,
         disk_version: DiskVersion,
     ) -> Result<Option<DiskChange>> {
+        if disk_version < self.first_disk_version {
+            return Err(Error::StopMovedOn);
+        }
         let index = file_index(&self.files, path)?;
         let file = find_file(&mut self.files, path)?;
         if let Some(Settled { version, result }) = &file.settled
@@ -189,7 +189,7 @@ fn restore_index(repo: &Repo, file: &FileState, before: IndexBefore) -> Result<(
 
 fn index_before(repo: &Repo, file: &FileState) -> Result<IndexBefore> {
     match file.status {
-        FileStatus::Unresolved => Ok(IndexBefore::Conflicted),
+        FileStatus::Unresolved | FileStatus::Remembered => Ok(IndexBefore::Conflicted),
         FileStatus::Resolved => Ok(IndexBefore::Resolved(repo.index_records(&file.path)?)),
     }
 }

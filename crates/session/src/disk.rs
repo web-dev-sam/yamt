@@ -10,9 +10,15 @@ use crate::markers::{open_regions, parse, split_lines};
 use crate::session::LOG_TARGET;
 use crate::{Error, Result};
 
-/// Counts the settles of one file's disk changes; a view is built from one version.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+/// Counts the settles of one file's disk changes, from the session's first version; a view is built from one version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 pub struct DiskVersion(pub u32);
+
+impl DiskVersion {
+    pub(crate) fn next(self) -> DiskVersion {
+        DiskVersion(self.0.saturating_add(1))
+    }
+}
 
 /// What yamt did with a file that changed on disk.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -53,6 +59,12 @@ pub(crate) enum Seen {
     GitOutput,
     ViewFromStages(OnDisk),
     ViewFromDisk(OnDisk),
+    /// The regular file rerere filled in at open, or yamt's own write over it, shown for review with
+    /// each block of what git's merge wrote (plan §2 #90).
+    ViewRemembered {
+        shown: Vec<u8>,
+        git_output: Vec<u8>,
+    },
 }
 
 /// The file as this run of yamt found it at open: what Reset puts back (plan §2 #66).
@@ -61,6 +73,12 @@ pub(crate) enum AtOpen {
     Untouched(OnDisk),
     /// Different from what git wrote.
     Changed(OnDisk),
+    /// git's output had conflict blocks, the file has none, and rerere no longer tracks the path: the
+    /// resolution rerere replayed (plan §2 #90).
+    Remembered {
+        remembered: Vec<u8>,
+        git_output: Vec<u8>,
+    },
     Unread,
 }
 
@@ -93,14 +111,20 @@ impl Seen {
         match self {
             Seen::GitOutput => false,
             Seen::ViewFromStages(seen) | Seen::ViewFromDisk(seen) => seen == disk,
+            Seen::ViewRemembered { shown, .. } => {
+                matches!(disk, OnDisk::File(bytes) if bytes == shown)
+            }
         }
     }
 
-    /// What yamt has seen once it wrote `written` itself; the view stays.
-    pub(crate) fn after_own_write(&self, written: OnDisk) -> Seen {
+    /// Notes that yamt wrote the file `written` itself; the view stays.
+    pub(crate) fn note_own_write(&mut self, written: Vec<u8>) {
         match self {
-            Seen::ViewFromDisk(_) => Seen::ViewFromDisk(written),
-            Seen::ViewFromStages(_) | Seen::GitOutput => Seen::ViewFromStages(written),
+            Seen::ViewFromDisk(disk) => *disk = OnDisk::File(written),
+            Seen::ViewRemembered { shown, .. } => *shown = written,
+            Seen::ViewFromStages(_) | Seen::GitOutput => {
+                *self = Seen::ViewFromStages(OnDisk::File(written));
+            }
         }
     }
 }
@@ -117,17 +141,36 @@ impl AtOpen {
     pub(crate) fn first_seen(&self) -> Seen {
         match self {
             AtOpen::Untouched(disk) => Seen::ViewFromStages(disk.clone()),
+            AtOpen::Remembered {
+                remembered,
+                git_output,
+            } => Seen::ViewRemembered {
+                shown: remembered.clone(),
+                git_output: git_output.clone(),
+            },
             AtOpen::Changed(_) | AtOpen::Unread => Seen::GitOutput,
         }
     }
 
     /// The regular file, or its absence, that Reset writes back, seen in the stages view when git
-    /// wrote it and in the disk view otherwise; `None` when only git can rebuild the entry (a link,
-    /// a submodule, something else, or unread at open).
+    /// wrote it, in the remembered view when rerere did and in the disk view otherwise; `None` when
+    /// only git can rebuild the entry (a link, a submodule, something else, or unread at open).
     pub(crate) fn reset_to(&self) -> Option<ResetTo> {
         let (disk, seen) = match self {
             AtOpen::Untouched(disk) => (disk, Seen::ViewFromStages(disk.clone())),
             AtOpen::Changed(disk) => (disk, Seen::ViewFromDisk(disk.clone())),
+            AtOpen::Remembered {
+                remembered,
+                git_output,
+            } => {
+                return Some(ResetTo {
+                    bytes: Some(remembered.clone()),
+                    seen: Seen::ViewRemembered {
+                        shown: remembered.clone(),
+                        git_output: git_output.clone(),
+                    },
+                });
+            }
             AtOpen::Unread => return None,
         };
         let bytes = match disk {

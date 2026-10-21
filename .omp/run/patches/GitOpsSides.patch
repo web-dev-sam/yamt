@@ -1,0 +1,2631 @@
+From e63bb1dafdc8400a8ad203d2a500f8ef0cf6cab5 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 11:54:18 +0200
+Subject: [PATCH] feat(session): own work on the left, sides named per
+ operation
+
+Orientation from Repo::stop() decides once per stop which git side
+each pane shows; disk and index stay in git's order (Markers.first).
+SideName gains Revert and Patch.
+
+Refs plan #86 #87
+---
+ crates/cli/src/fixture.rs                     |   4 +-
+ crates/gitio/src/entry.rs                     |  15 +-
+ crates/gitio/tests/repo.rs                    |   6 +-
+ crates/session/AGENTS.md                      |   2 +-
+ crates/session/src/lib.rs                     |   2 +
+ crates/session/src/locate.rs                  |  99 +++++++--
+ crates/session/src/merge_data.rs              |  23 +-
+ crates/session/src/merging.rs                 |   3 +-
+ crates/session/src/open.rs                    |  60 ++++--
+ crates/session/src/orientation.rs             |  94 +++++++++
+ crates/session/src/seed.rs                    |  35 ++--
+ crates/session/src/session.rs                 |  36 +++-
+ crates/session/src/side_names.rs              |  95 ++++++---
+ crates/session/src/stages.rs                  |  23 +-
+ crates/session/src/start.rs                   |  16 +-
+ crates/session/src/waiting.rs                 | 123 ++++++-----
+ crates/session/src/writes.rs                  |   2 +-
+ crates/session/tests/orientation.rs           | 196 ++++++++++++++++++
+ crates/session/tests/save_round_trip.rs       |  49 +----
+ crates/session/tests/side_names.rs            | 120 ++++++++++-
+ crates/session/tests/window/mod.rs            |  56 +++++
+ .../golden/language-tools-script-setup.json   |   1 +
+ .../fixtures/golden/nuxt-island-test.json     |   3 +
+ .../tanstack-query-persist-provider.json      |   1 +
+ .../tanstack-query-svelte-base-query.json     |   1 +
+ .../golden/vite-modulepreload-polyfill.json   |   1 +
+ .../golden/vue-core-compiler-von.json         |   1 +
+ .../golden/vue-core-playground-app.json       |   1 +
+ .../golden/vue-core-script-context.json       |   1 +
+ .../golden/vue-router-playground-app.json     |   1 +
+ .../golden/vueuse-use-magic-keys.json         |   1 +
+ frontend/fixtures/showcase/word-marks.json    |   8 +
+ frontend/src/editor/internal/apply.test.ts    |   1 +
+ .../src/editor/internal/chunkField.test.ts    |   1 +
+ .../src/editor/internal/decorations.test.ts   |   1 +
+ frontend/src/editor/internal/fileText.test.ts |  21 ++
+ frontend/src/editor/internal/fileText.ts      |  11 +-
+ frontend/src/editor/internal/foldRuns.test.ts |   1 +
+ frontend/src/editor/internal/format.test.ts   |   1 +
+ frontend/src/editor/internal/pane.test.ts     |   1 +
+ .../src/editor/internal/savedPoint.test.ts    |   8 +-
+ frontend/src/editor/internal/sides.test.ts    |   1 +
+ frontend/src/editor/internal/tone.test.ts     |   1 +
+ frontend/src/editor/internal/words.test.ts    |   1 +
+ frontend/src/editor/problems.browser.test.ts  |   1 +
+ frontend/src/ipc/bindings.ts                  |  16 +-
+ frontend/src/ipc/fixture.test.ts              |  27 ++-
+ frontend/src/ipc/fixture.ts                   |   1 +
+ frontend/src/ipc/tauri.test.ts                |   1 +
+ frontend/src/ui/sideHeaders.test.ts           |  27 +++
+ frontend/src/ui/sideHeaders.ts                |   7 +
+ 51 files changed, 960 insertions(+), 248 deletions(-)
+ create mode 100644 crates/session/src/orientation.rs
+ create mode 100644 crates/session/tests/orientation.rs
+ create mode 100644 crates/session/tests/window/mod.rs
+
+diff --git a/crates/cli/src/fixture.rs b/crates/cli/src/fixture.rs
+index 2fb695a..86c1d48 100644
+--- a/crates/cli/src/fixture.rs
++++ b/crates/cli/src/fixture.rs
+@@ -1,6 +1,6 @@
+ use std::path::Path;
+ 
+-use yamt_session::{DEFAULT_MARKER_SIZE, DiskVersion, MarkerStyle, merge_data};
++use yamt_session::{DEFAULT_MARKER_SIZE, DiskVersion, MarkerStyle, Side, merge_data};
+ 
+ use crate::case::Case;
+ use crate::{Result, print};
+@@ -14,7 +14,7 @@ pub(crate) fn fixture(case_dir: &Path) -> Result<()> {
+         &case.local,
+         &case.remote,
+         None,
+-        &MarkerStyle::fallback(DEFAULT_MARKER_SIZE),
++        &MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Side::Local),
+         DiskVersion(0),
+     );
+     print(&(serde_json::to_string_pretty(&data)? + "\n"))
+diff --git a/crates/gitio/src/entry.rs b/crates/gitio/src/entry.rs
+index d59b70c..823e99e 100644
+--- a/crates/gitio/src/entry.rs
++++ b/crates/gitio/src/entry.rs
+@@ -30,19 +30,20 @@ impl Oid {
+     }
+ }
+ 
++/// An index stage, named as git names it: 1 base, 2 ours (HEAD), 3 theirs.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+ pub enum Stage {
+     Base,
+-    Local,
+-    Remote,
++    Ours,
++    Theirs,
+ }
+ 
+ impl Stage {
+     fn from_index_number(number: &str) -> Option<Stage> {
+         match number {
+             "1" => Some(Stage::Base),
+-            "2" => Some(Stage::Local),
+-            "3" => Some(Stage::Remote),
++            "2" => Some(Stage::Ours),
++            "3" => Some(Stage::Theirs),
+             _ => None,
+         }
+     }
+@@ -50,8 +51,8 @@ impl Stage {
+     fn index_number(self) -> u8 {
+         match self {
+             Stage::Base => 1,
+-            Stage::Local => 2,
+-            Stage::Remote => 3,
++            Stage::Ours => 2,
++            Stage::Theirs => 3,
+         }
+     }
+ }
+@@ -167,7 +168,7 @@ mod tests {
+         let expected = StageEntry {
+             mode: 0o100_644,
+             oid: Oid::parse(OID).unwrap(),
+-            stage: Stage::Local,
++            stage: Stage::Ours,
+             path: PathBuf::from("dir/a b.txt"),
+         };
+         assert_eq!(entries, vec![expected]);
+diff --git a/crates/gitio/tests/repo.rs b/crates/gitio/tests/repo.rs
+index b985367..d2ab24c 100644
+--- a/crates/gitio/tests/repo.rs
++++ b/crates/gitio/tests/repo.rs
+@@ -39,7 +39,7 @@ fn modify_modify_conflict_lists_three_stages_with_hashed_oids() {
+ 
+     let entries = repo.unmerged().unwrap();
+ 
+-    let expected_stages = [Stage::Base, Stage::Local, Stage::Remote];
++    let expected_stages = [Stage::Base, Stage::Ours, Stage::Theirs];
+     assert_eq!(stages_of(&entries), expected_stages);
+     for (entry, text) in entries.iter().zip([BASE, LOCAL, REMOTE]) {
+         assert_eq!(entry.path, Path::new(FILE));
+@@ -55,7 +55,7 @@ fn add_add_conflict_has_only_local_and_remote_stages() {
+ 
+     let entries = repo.unmerged().unwrap();
+ 
+-    assert_eq!(stages_of(&entries), [Stage::Local, Stage::Remote]);
++    assert_eq!(stages_of(&entries), [Stage::Ours, Stage::Theirs]);
+ }
+ 
+ #[test]
+@@ -65,7 +65,7 @@ fn delete_modify_conflict_has_base_and_the_modifying_side() {
+ 
+     let entries = repo.unmerged().unwrap();
+ 
+-    assert_eq!(stages_of(&entries), [Stage::Base, Stage::Remote]);
++    assert_eq!(stages_of(&entries), [Stage::Base, Stage::Theirs]);
+ }
+ 
+ #[test]
+diff --git a/crates/session/AGENTS.md b/crates/session/AGENTS.md
+index 52a1985..79679e0 100644
+--- a/crates/session/AGENTS.md
++++ b/crates/session/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Unread`; set once in `open.rs`, never written again). Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in local, remote and base (a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `side_names.rs` names both sides, read once at `open`: what is checked out (HEAD's branch, else HEAD's commit) and what is merged in; a git failure there only drops that side's name (plan §2 #50, #62). `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts); `describe.rs` and `take.rs` share the `every_kind/` fixture.
++Owner skill: `skill://rust-conventions`; contract: `skill://ipc-contract`. The only crate that knows both `merge-core` and `gitio`; owns decode (UTF-8, EOL, binary), captured stages (`stages.rs`, keyed by git's side: `GitSide::{Ours, Theirs}`), opening (`open.rs`), finish/save/take/reset (`writes.rs`), and describe/take for files the editor cannot show (`sides.rs`, plan §2 #36). Panes and git's sides are different types (plan §2 #86): `orientation.rs` decides once at `open`, from `Repo::stop()`, which git side the left pane (`Side::Local`, own work) shows — theirs for a rebase replaying a commit (`Rebase { redoing_merge: None }`), ours for everything else — and every pane-ordered value goes through it: `Texts`, chunks, words, `deleted`, `UnsupportedReason::{LocalDeleted, RemoteDeleted}`, describe, take (`stages.of(orientation.git_side(side))`), names; what git owns stays in git's order (the start check re-runs git's merge, a disk block's first section is ours, Save writes ours' section first through `Waiting::Markers.first`, reset and `checkout -m`). `MergeSession::stop()` is the stop read at open. A text file deleted on one side loads with `FileMergeData.deleted` and base as the deleted side's text (plan §2 #47). The disk is the truth (plan §2 #52/#53): each file remembers what yamt last saw on disk and which view that selects (`disk.rs` `Seen`: `GitOutput`, `ViewFromStages`, `ViewFromDisk`); finish and save record the bytes they wrote (`Seen::after_own_write`: the view stays, `GitOutput` becomes `ViewFromStages`), take reads the file back (a failed read-back is a warning, the next look settles it); a path unreadable at `open` starts as `GitOutput`. Each file also keeps what this run found at open (`disk.rs` `AtOpen`: `Untouched`, `Changed`, `Unread`; set once in `open.rs`, never written again). Save (plan §2 #65, #69) is finish without `git add`: it skips bytes already on disk, never changes `DiskVersion` or `settled`, and never comes back as a `DiskChange`. Reset (plan §2 #66) puts the captured stages back and then the file from `AtOpen`: a regular file's bytes (a link there is removed first) or its absence; a link, submodule, other entry or `Unread` → `checkout -m` where git can, then read back; a folder or submodule at the path is `NotAFile` before the index is touched; afterwards `Untouched` selects the stages view, `Changed` the disk view. `waiting.rs` tells the window what each chunk looks like on disk while a side waits (`Waiting`: `SideLines`, `Markers` from `MarkerStyle` — the first block of the file at open, else `ours`/`theirs` merge style, with `first` = the pane showing git's ours — or from an exactly located block's own lines, `AsShown` for an inexact block or raw region). `refresh` settles every difference in `disk.rs` (no marker lines → one batched `git add` / `update-index --force-remove`; marker lines → `MarkersLeft` and the view becomes the disk; a `working-tree-encoding` file or a submodule no longer checked out → `LeftAsIs`), then re-reads `ls-files -u` (plan §2 #49); finish/save/take/reset first look at their file and refuse a changed one or a stale `DiskVersion` with `WriteReply::ChangedOnDisk`; finish and save never write through a link or into a directory (`Error::NotAFile`). `markers.rs` reads git's markers from bytes, `locate.rs` finds each open block or raw region in the panes showing ours and theirs and in base (git-order line ranges stay untyped until the orientation turns them into `LocalLine`/`RemoteLine`; a side's last line without a line break counts as ended, as git ends it before a marker), `seed.rs` builds the middle text and one conflict per open block from the disk (base ranges disjoint), `start.rs` compares each file with what git wrote at `open` (`git merge-file`, `hash-object`, attributes, the merge driver resolved as merge-ll.c does from `merge.default` and the configured `merge.<name>.driver`s). `side_names.rs` names both sides, read once at `open` per git side and placed by the orientation (plan §2 #87): ours is HEAD (its branch, else its commit); theirs per operation — a merge or `rebase -r`'s merge step `MERGE_HEAD` (#50's branch rule), a squash merge its merged commit by the same rule, a rebase `REBASE_HEAD`'s commit, a cherry-pick `CHERRY_PICK_HEAD`'s commit, a revert `SideName::Revert` of `REVERT_HEAD`, `am` `SideName::Patch`, nothing recorded none; a git failure there only drops that side's name (plan §2 #50, #62). `merging.rs` decides for each `refresh` whether a `git merge` is in progress (`FileList.merging`: `MERGE_HEAD` and no rebase stopped; a git failure there warns `merge_state_unread` and gives `false`, never failing the list), which `abort_merge` undoes with `git merge --abort` (plan §2 #74, `tests/merging.rs`). Finish, take and reset are all or nothing: a failed stage or file write leaves worktree and index as they were. Tests: scripted conflict repos in `tests/` proving `skill://risk-register` RK1/RK3/RK5/RK6/RK16/RK17/RK18, and `disk_is_truth.rs` / `start_from_disk.rs` / `left_as_is.rs`; `save.rs` (save, reset) and `save_round_trip.rs` (every golden saved with everything waiting opens again with the same conflicts; the window's Save builder is `tests/window/`); `orientation.rs` (a rebase's panes, take, Keep/Delete, binary describe/take, Save byte-equal to git's file; every other operation keeps HEAD on the left) and `side_names.rs` (every operation's names) run on `conflict-repo`'s `operation_repo`; `describe.rs` and `take.rs` share the `every_kind/` fixture.
+diff --git a/crates/session/src/lib.rs b/crates/session/src/lib.rs
+index 539a933..ab38d81 100644
+--- a/crates/session/src/lib.rs
++++ b/crates/session/src/lib.rs
+@@ -8,6 +8,7 @@ mod markers;
+ mod merge_data;
+ mod merging;
+ mod open;
++mod orientation;
+ mod seed;
+ mod session;
+ mod side_names;
+@@ -21,6 +22,7 @@ pub use decode::{Eol, UnsupportedReason};
+ pub use disk::{DiskChange, DiskResult, DiskVersion};
+ pub use markers::DEFAULT_MARKER_SIZE;
+ pub use merge_data::{FileMergeData, MergeChunk, Middle, MiddleLine, NotText, merge_data};
++pub use orientation::GitSide;
+ pub use session::{FileEntry, FileList, FileStatus, MergeSession, WriteReply};
+ pub use side_names::{SideName, SideNames};
+ pub use sides::{FileSides, Side, SideContent};
+diff --git a/crates/session/src/locate.rs b/crates/session/src/locate.rs
+index b3f88a3..3b4e9f3 100644
+--- a/crates/session/src/locate.rs
++++ b/crates/session/src/locate.rs
+@@ -4,6 +4,7 @@ use yamt_merge_core::{BaseLine, LineMap, LineRange, LocalLine, RemoteLine, line_
+ 
+ use crate::markers::{Block, Piece};
+ use crate::merge_data::Texts;
++use crate::orientation::{GitSide, Orientation};
+ 
+ /// One side's reading of the disk text with raw regions left out (`\r\n` read as `\n`, every line
+ /// ended), and the line where each piece starts in it.
+@@ -20,10 +21,12 @@ pub(crate) struct Located {
+     pub(crate) exact: bool,
+ }
+ 
+-/// Line maps from the ours and theirs views of the disk to local and remote, and from those to base.
++/// Line maps from the ours and theirs views of the disk to the panes showing ours and theirs
++/// (untyped git-order lines until `located` orients them), and from local and remote to base.
+ pub(crate) struct Maps {
+-    ours_to_local: LineMap,
+-    theirs_to_remote: LineMap,
++    orientation: Orientation,
++    ours_to_pane: LineMap,
++    theirs_to_pane: LineMap,
+     local_to_base: LineMap,
+     remote_to_base: LineMap,
+ }
+@@ -61,10 +64,17 @@ pub(crate) fn side_view(
+ }
+ 
+ impl Maps {
+-    pub(crate) fn new(ours: &SideView, theirs: &SideView, texts: &Texts) -> Maps {
++    pub(crate) fn new(
++        ours: &SideView,
++        theirs: &SideView,
++        texts: &Texts,
++        orientation: Orientation,
++    ) -> Maps {
++        let pane_of = |side| side_text(texts.pane(orientation.pane(side)));
+         Maps {
+-            ours_to_local: line_map(&ours.text, &side_text(&texts.local)),
+-            theirs_to_remote: line_map(&theirs.text, &side_text(&texts.remote)),
++            orientation,
++            ours_to_pane: line_map(&ours.text, &pane_of(GitSide::Ours)),
++            theirs_to_pane: line_map(&theirs.text, &pane_of(GitSide::Theirs)),
+             local_to_base: line_map(&texts.local, &texts.base),
+             remote_to_base: line_map(&texts.remote, &texts.base),
+         }
+@@ -74,27 +84,32 @@ impl Maps {
+         let ours = ours_start..ours_start + line_number(block.ours.len());
+         let theirs = theirs_start..theirs_start + line_number(block.theirs.len());
+         match (
+-            self.ours_to_local.exact(ours.clone()),
+-            self.theirs_to_remote.exact(theirs.clone()),
++            self.ours_to_pane.exact(ours.clone()),
++            self.theirs_to_pane.exact(theirs.clone()),
+         ) {
+-            (Some(local), Some(remote)) => Located {
+-                local: local_lines(local),
+-                remote: remote_lines(remote),
+-                exact: true,
+-            },
+-            (None, _) | (_, None) => Located {
+-                local: local_lines(self.ours_to_local.covering(ours)),
+-                remote: remote_lines(self.theirs_to_remote.covering(theirs)),
+-                exact: false,
+-            },
++            (Some(ours), Some(theirs)) => self.located(ours, theirs, true),
++            (None, _) | (_, None) => self.located(
++                self.ours_to_pane.covering(ours),
++                self.theirs_to_pane.covering(theirs),
++                false,
++            ),
+         }
+     }
+ 
+     pub(crate) fn raw(&self, ours_start: u32, theirs_start: u32) -> Located {
++        self.located(
++            self.ours_to_pane.covering(ours_start..ours_start),
++            self.theirs_to_pane.covering(theirs_start..theirs_start),
++            false,
++        )
++    }
++
++    fn located(&self, ours: Range<u32>, theirs: Range<u32>, exact: bool) -> Located {
++        let (left, right) = self.orientation.panes(ours, theirs);
+         Located {
+-            local: local_lines(self.ours_to_local.covering(ours_start..ours_start)),
+-            remote: remote_lines(self.theirs_to_remote.covering(theirs_start..theirs_start)),
+-            exact: false,
++            local: local_lines(left),
++            remote: remote_lines(right),
++            exact,
+         }
+     }
+ 
+@@ -149,9 +164,47 @@ pub(crate) fn line_number(count: usize) -> u32 {
+ mod tests {
+     use crate::markers::DEFAULT_MARKER_SIZE;
+     use crate::merge_data::Texts;
++    use crate::orientation::{OURS_LEFT, Orientation, THEIRS_LEFT};
+     use crate::seed::seed;
+     use crate::waiting::Waiting;
+ 
++    const OURS_THEN_THEIRS: &str = "a\n<<<<<<< HEAD\nO1\nO2\n=======\nT\n>>>>>>> theirs\nz\n";
++
++    fn texts(local: &str, remote: &str) -> Texts {
++        Texts {
++            base: "a\nb\nz\n".to_owned(),
++            local: local.to_owned(),
++            remote: remote.to_owned(),
++            deleted: None,
++        }
++    }
++
++    fn located(disk: &str, texts: &Texts, orientation: Orientation) -> [(u32, u32); 2] {
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, texts, orientation);
++        let [chunk] = &seeded.chunks[..] else {
++            panic!("expected one chunk: {:?}", seeded.chunks);
++        };
++        let (local, remote) = (chunk.chunk.local, chunk.chunk.remote);
++        [(local.start.0, local.len), (remote.start.0, remote.len)]
++    }
++
++    #[test]
++    fn a_block_s_sections_are_located_in_the_panes_showing_ours_and_theirs() {
++        let ours = "a\nO1\nO2\nz\n";
++        let theirs = "a\nT\nz\n";
++
++        let ours_left = located(OURS_THEN_THEIRS, &texts(ours, theirs), OURS_LEFT);
++        let theirs_left = located(OURS_THEN_THEIRS, &texts(theirs, ours), THEIRS_LEFT);
++
++        assert_eq!(ours_left, [(1, 2), (1, 1)]);
++        assert_eq!(theirs_left, [(1, 1), (1, 2)]);
++        let edited = OURS_THEN_THEIRS.replace("O1\n", "O1, edited\n");
++        assert_eq!(
++            located(&edited, &texts(theirs, ours), THEIRS_LEFT)[0],
++            (1, 1)
++        );
++    }
++
+     #[test]
+     fn a_section_holding_a_side_s_last_line_without_a_line_break_is_located_exactly() {
+         let texts = Texts {
+@@ -162,7 +215,7 @@ mod tests {
+         };
+         let disk = "a\n<<<<<<< ours\nL\n||||||| base\nb\n=======\nR\n>>>>>>> theirs\n";
+ 
+-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+ 
+         assert_eq!(seeded.middle, "a\nb");
+         let [chunk] = &seeded.chunks[..] else {
+@@ -186,7 +239,7 @@ mod tests {
+             };
+             let disk = "<<<<<<< ours\nL\nR\n>>>>>>> theirs\n";
+ 
+-            let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++            let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+ 
+             let [chunk] = &seeded.chunks[..] else {
+                 panic!("expected one chunk: {:?}", seeded.chunks);
+diff --git a/crates/session/src/merge_data.rs b/crates/session/src/merge_data.rs
+index 21178b6..3b1357e 100644
+--- a/crates/session/src/merge_data.rs
++++ b/crates/session/src/merge_data.rs
+@@ -4,6 +4,7 @@ use yamt_merge_core::{Chunk, LineRange, Options, WordChanges, compute_chunks, wo
+ 
+ use crate::decode::{Eol, MAX_TEXT_BYTES, detect_eol, is_binary};
+ use crate::disk::{DiskVersion, OnDisk};
++use crate::orientation::Orientation;
+ use crate::seed::{Seeded, seed};
+ use crate::sides::Side;
+ use crate::waiting::{MarkerStyle, Waiting};
+@@ -52,6 +53,7 @@ pub struct FileMergeData {
+     pub disk_version: DiskVersion,
+ }
+ 
++/// The texts in pane order: `local` is the left pane, whichever git side it shows.
+ pub(crate) struct Texts {
+     pub(crate) base: String,
+     pub(crate) local: String,
+@@ -59,6 +61,15 @@ pub(crate) struct Texts {
+     pub(crate) deleted: Option<Side>,
+ }
+ 
++impl Texts {
++    pub(crate) fn pane(&self, side: Side) -> &str {
++        match side {
++            Side::Local => &self.local,
++            Side::Remote => &self.remote,
++        }
++    }
++}
++
+ #[must_use]
+ pub fn merge_data(
+     path: &str,
+@@ -105,9 +116,10 @@ pub(crate) fn disk_merge_data(
+     texts: &Texts,
+     disk: &OnDisk,
+     marker_size: usize,
++    orientation: Orientation,
+     disk_version: DiskVersion,
+ ) -> FileMergeData {
+-    let (middle, eol, chunks) = match seeded_from_disk(disk, marker_size, texts) {
++    let (middle, eol, chunks) = match seeded_from_disk(disk, marker_size, texts, orientation) {
+         Ok(seeded) => (
+             Middle::Disk {
+                 text: seeded.middle,
+@@ -133,14 +145,19 @@ pub(crate) fn disk_merge_data(
+     }
+ }
+ 
+-fn seeded_from_disk(disk: &OnDisk, marker_size: usize, texts: &Texts) -> Result<Seeded, NotText> {
++fn seeded_from_disk(
++    disk: &OnDisk,
++    marker_size: usize,
++    texts: &Texts,
++    orientation: Orientation,
++) -> Result<Seeded, NotText> {
+     let bytes = match disk {
+         OnDisk::File(bytes) => bytes,
+         OnDisk::Missing => return Err(NotText::Deleted),
+         OnDisk::Link(_) => return Err(NotText::Link),
+         OnDisk::Submodule(_) | OnDisk::Other => return Err(NotText::Directory),
+     };
+-    Ok(seed(disk_text(bytes)?, marker_size, texts))
++    Ok(seed(disk_text(bytes)?, marker_size, texts, orientation))
+ }
+ 
+ fn disk_text(bytes: &[u8]) -> Result<&str, NotText> {
+diff --git a/crates/session/src/merging.rs b/crates/session/src/merging.rs
+index a6a48b6..10fe1dc 100644
+--- a/crates/session/src/merging.rs
++++ b/crates/session/src/merging.rs
+@@ -1,7 +1,8 @@
+ use yamt_gitio::Repo;
+ 
+ use crate::session::LOG_TARGET;
+-use crate::side_names::MERGE_HEAD;
++
++const MERGE_HEAD: &str = "MERGE_HEAD";
+ 
+ pub(crate) fn is_merging(repo: &Repo) -> bool {
+     match merge_in_progress(repo) {
+diff --git a/crates/session/src/open.rs b/crates/session/src/open.rs
+index 72d4e9b..69045c6 100644
+--- a/crates/session/src/open.rs
++++ b/crates/session/src/open.rs
+@@ -6,6 +6,7 @@ use crate::Result;
+ use crate::decode::{UnsupportedReason, decode_sides};
+ use crate::disk::{AtOpen, MarkerRule, OnDisk, read_on_disk, warn_unread};
+ use crate::merge_data::Texts;
++use crate::orientation::{GitSide, Orientation};
+ use crate::session::{Content, FileState, FileStatus, MergeSession};
+ use crate::side_names::read_side_names;
+ use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
+@@ -17,9 +18,9 @@ enum Stored {
+     Submodule,
+     Symlink,
+     BothDeleted,
+-    /// base, local and remote bytes; a deleted side holds base.
++    /// base, ours and theirs bytes, in git's order; a deleted side holds base.
+     Regular {
+-        deleted: Option<Side>,
++        deleted: Option<GitSide>,
+         sides: [Vec<u8>; 3],
+     },
+ }
+@@ -27,16 +28,20 @@ enum Stored {
+ impl MergeSession {
+     pub fn open(cwd: &Path) -> Result<MergeSession> {
+         let repo = Repo::discover(cwd)?;
++        let stop = repo.stop()?;
++        let orientation = Orientation::of(&stop);
+         let groups = group_by_path(repo.unmerged()?);
+         let paths: Vec<&Path> = groups.iter().map(|(path, _)| path.as_path()).collect();
+         let attributes = repo.attributes(&paths)?;
+         let config = repo.merge_config()?;
+-        let files = open_files(&repo, groups, &attributes, &config)?;
+-        let side_names = read_side_names(&repo);
++        let files = open_files(&repo, groups, &attributes, &config, orientation)?;
++        let side_names = read_side_names(&repo, &stop, orientation);
+         Ok(MergeSession {
+             repo,
+             files,
+-            side_names,
++            side_names: Box::new(side_names),
++            stop,
++            orientation,
+         })
+     }
+ }
+@@ -57,6 +62,7 @@ fn open_files(
+     groups: Vec<(PathBuf, CapturedStages)>,
+     attributes: &[MergeAttributes],
+     config: &MergeConfig,
++    orientation: Orientation,
+ ) -> Result<Vec<FileState>> {
+     let mut blobs = repo.blob_reader()?;
+     let mut check = StartCheck::new(repo);
+@@ -64,7 +70,15 @@ fn open_files(
+     let mut looks = Vec::with_capacity(groups.len());
+     for ((path, stages), found) in groups.into_iter().zip(attributes) {
+         let attributes = Attributes::from_git(found, config);
+-        let (file, look) = open_file(repo, &mut blobs, &mut check, path, stages, &attributes)?;
++        let (file, look) = open_file(
++            repo,
++            &mut blobs,
++            &mut check,
++            path,
++            stages,
++            &attributes,
++            orientation,
++        )?;
+         opened.push(file);
+         looks.push(look);
+     }
+@@ -85,6 +99,7 @@ fn open_file(
+     path: PathBuf,
+     stages: CapturedStages,
+     attributes: &Attributes,
++    orientation: Orientation,
+ ) -> Result<(Opened, StartLook)> {
+     let stored = stored(blobs, &stages)?;
+     let (disk, look) = match read_on_disk(repo, &path, stages.has_mode(SUBMODULE_MODE)) {
+@@ -108,7 +123,7 @@ fn open_file(
+             (None, StartLook::Changed)
+         }
+     };
+-    let content = content(&path, stored);
++    let content = content(&path, stored, orientation);
+     let opened = Opened {
+         rule: marker_rule(&content, attributes),
+         path,
+@@ -146,18 +161,18 @@ fn stored(blobs: &mut BlobReader, stages: &CapturedStages) -> Result<Stored> {
+     if stages.has_mode(SYMLINK_MODE) {
+         return Ok(Stored::Symlink);
+     }
+-    let deleted = match (&stages.local, &stages.remote) {
++    let deleted = match (&stages.ours, &stages.theirs) {
+         (Some(_), Some(_)) => None,
+-        (None, Some(_)) => Some(Side::Local),
+-        (Some(_), None) => Some(Side::Remote),
++        (None, Some(_)) => Some(GitSide::Ours),
++        (Some(_), None) => Some(GitSide::Theirs),
+         (None, None) => return Ok(Stored::BothDeleted),
+     };
+     let base = stage_bytes(blobs, stages.base.as_ref(), b"")?;
+-    let local = stage_bytes(blobs, stages.local.as_ref(), &base)?;
+-    let remote = stage_bytes(blobs, stages.remote.as_ref(), &base)?;
++    let ours = stage_bytes(blobs, stages.ours.as_ref(), &base)?;
++    let theirs = stage_bytes(blobs, stages.theirs.as_ref(), &base)?;
+     Ok(Stored::Regular {
+         deleted,
+-        sides: [base, local, remote],
++        sides: [base, ours, theirs],
+     })
+ }
+ 
+@@ -172,7 +187,7 @@ fn stage_bytes(
+     }
+ }
+ 
+-fn content(path: &Path, stored: Stored) -> Content {
++fn content(path: &Path, stored: Stored, orientation: Orientation) -> Content {
+     if path.to_str().is_none() {
+         return Content::Unsupported(UnsupportedReason::NonUtf8);
+     }
+@@ -180,15 +195,18 @@ fn content(path: &Path, stored: Stored) -> Content {
+         Stored::Submodule => return Content::Unsupported(UnsupportedReason::Submodule),
+         Stored::Symlink => return Content::Unsupported(UnsupportedReason::Symlink),
+         Stored::BothDeleted => return Content::Unsupported(UnsupportedReason::LocalDeleted),
+-        Stored::Regular { deleted, sides } => (deleted, sides),
++        Stored::Regular { deleted, sides } => (deleted.map(|side| orientation.pane(side)), sides),
+     };
+     match decode_sides(sides) {
+-        Ok([base, local, remote]) => Content::Text(Texts {
+-            base,
+-            local,
+-            remote,
+-            deleted,
+-        }),
++        Ok([base, ours, theirs]) => {
++            let (local, remote) = orientation.panes(ours, theirs);
++            Content::Text(Texts {
++                base,
++                local,
++                remote,
++                deleted,
++            })
++        }
+         Err(reason) => Content::Unsupported(deleted_reason(deleted).unwrap_or(reason)),
+     }
+ }
+diff --git a/crates/session/src/orientation.rs b/crates/session/src/orientation.rs
+new file mode 100644
+index 0000000..b35c7f5
+--- /dev/null
++++ b/crates/session/src/orientation.rs
+@@ -0,0 +1,94 @@
++use yamt_gitio::{Operation, Rebase, Stop};
++
++use crate::sides::Side;
++
++/// One of git's two sides of a conflict: index stage 2 (ours, HEAD) or 3 (theirs). Never a pane.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum GitSide {
++    Ours,
++    Theirs,
++}
++
++/// Which git side the left pane (Local) shows; the right pane shows the other (plan §2 #86).
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) struct Orientation {
++    left: GitSide,
++}
++
++impl Orientation {
++    /// Own work on the left: a rebase replays the user's commits as git's theirs onto HEAD.
++    pub(crate) fn of(stop: &Stop) -> Orientation {
++        let left = match &stop.operation {
++            Some(Operation::Rebase(Rebase {
++                redoing_merge: None,
++                ..
++            })) => GitSide::Theirs,
++            Some(
++                Operation::Rebase(Rebase {
++                    redoing_merge: Some(_),
++                    ..
++                })
++                | Operation::Merge { .. }
++                | Operation::SquashMerge { .. }
++                | Operation::CherryPick { .. }
++                | Operation::Revert { .. }
++                | Operation::Am { .. },
++            )
++            | None => GitSide::Ours,
++        };
++        Orientation { left }
++    }
++
++    pub(crate) fn git_side(self, pane: Side) -> GitSide {
++        match (pane, self.left) {
++            (Side::Local, left) => left,
++            (Side::Remote, GitSide::Ours) => GitSide::Theirs,
++            (Side::Remote, GitSide::Theirs) => GitSide::Ours,
++        }
++    }
++
++    pub(crate) fn pane(self, side: GitSide) -> Side {
++        if side == self.left {
++            Side::Local
++        } else {
++            Side::Remote
++        }
++    }
++
++    /// `ours` and `theirs` as (left, right).
++    pub(crate) fn panes<T>(self, ours: T, theirs: T) -> (T, T) {
++        match self.left {
++            GitSide::Ours => (ours, theirs),
++            GitSide::Theirs => (theirs, ours),
++        }
++    }
++}
++
++#[cfg(test)]
++pub(crate) const OURS_LEFT: Orientation = Orientation {
++    left: GitSide::Ours,
++};
++
++#[cfg(test)]
++pub(crate) const THEIRS_LEFT: Orientation = Orientation {
++    left: GitSide::Theirs,
++};
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn each_pane_and_its_git_side_map_back_to_each_other_in_both_orientations() {
++        for orientation in [OURS_LEFT, THEIRS_LEFT] {
++            for pane in [Side::Local, Side::Remote] {
++                assert_eq!(orientation.pane(orientation.git_side(pane)), pane);
++            }
++        }
++        assert_eq!(THEIRS_LEFT.git_side(Side::Local), GitSide::Theirs);
++        assert_eq!(THEIRS_LEFT.git_side(Side::Remote), GitSide::Ours);
++        assert_eq!(OURS_LEFT.git_side(Side::Remote), GitSide::Theirs);
++        assert_eq!(THEIRS_LEFT.panes("ours", "theirs"), ("theirs", "ours"));
++        assert_eq!(OURS_LEFT.panes("ours", "theirs"), ("ours", "theirs"));
++    }
++}
+diff --git a/crates/session/src/seed.rs b/crates/session/src/seed.rs
+index 33437d2..1fe63d9 100644
+--- a/crates/session/src/seed.rs
++++ b/crates/session/src/seed.rs
+@@ -6,6 +6,8 @@ use crate::decode::{Eol, detect_eol};
+ use crate::locate::{Located, Maps, line_number, side_view};
+ use crate::markers::{Block, Piece, parse, split_lines};
+ use crate::merge_data::{MergeChunk, MiddleLine, Texts};
++use crate::orientation::{GitSide, Orientation};
++use crate::sides::Side;
+ use crate::waiting::{Waiting, block_markers};
+ 
+ /// The middle pane's starting text built from a worktree file, and its open conflicts.
+@@ -20,6 +22,8 @@ struct MiddleText<'a> {
+     disk_lines: &'a [&'a str],
+     base_lines: Vec<&'a str>,
+     eol: Eol,
++    /// The pane showing git's ours, whose section a block holds first.
++    ours_pane: Side,
+     text: String,
+     line_count: u32,
+     previous_base_end: u32,
+@@ -28,16 +32,22 @@ struct MiddleText<'a> {
+     placed: Vec<(LineRange<MiddleLine>, Waiting)>,
+ }
+ 
+-pub(crate) fn seed(disk: &str, marker_size: usize, texts: &Texts) -> Seeded {
++pub(crate) fn seed(
++    disk: &str,
++    marker_size: usize,
++    texts: &Texts,
++    orientation: Orientation,
++) -> Seeded {
+     let disk_lines: Vec<&str> = disk.split_inclusive('\n').collect();
+     let pieces = parse(&split_lines(disk.as_bytes()), marker_size);
+     let ours = side_view(&disk_lines, &pieces, |block| &block.ours);
+     let theirs = side_view(&disk_lines, &pieces, |block| &block.theirs);
+-    let maps = Maps::new(&ours, &theirs, texts);
++    let maps = Maps::new(&ours, &theirs, texts, orientation);
+     let mut middle = MiddleText {
+         disk_lines: &disk_lines,
+         base_lines: texts.base.split_inclusive('\n').collect(),
+         eol: detect_eol(disk),
++        ours_pane: orientation.pane(GitSide::Ours),
+         text: String::with_capacity(disk.len()),
+         line_count: 0,
+         previous_base_end: 0,
+@@ -101,7 +111,7 @@ impl MiddleText<'_> {
+         let waiting = match block {
+             Some(block) if located.exact => {
+                 self.push_base_lines(base);
+-                block_markers(self.disk_lines, block)
++                block_markers(self.disk_lines, block, self.ours_pane)
+             }
+             Some(_) | None => {
+                 self.push_disk_lines(disk_lines);
+@@ -168,6 +178,7 @@ fn end_open_line(text: &mut String, eol: Eol) {
+ mod tests {
+     use super::*;
+     use crate::markers::DEFAULT_MARKER_SIZE;
++    use crate::orientation::OURS_LEFT;
+ 
+     const BASE: &str = include_str!("../tests/markers/base.txt");
+     const OURS: &str = include_str!("../tests/markers/ours.txt");
+@@ -240,7 +251,7 @@ mod tests {
+         for (style, second_block) in [(ZDIFF3, SECOND_BLOCK_ZDIFF3), (MERGE, SECOND_BLOCK_MERGE)] {
+             let disk = style.replace(second_block, "eight-theirs\n");
+ 
+-            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
++            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
+ 
+             assert_eq!(seeded.middle, WORKED_MIDDLE);
+             assert_eq!(ranges(&seeded), [[(2, 3), (2, 4), (2, 4)]]);
+@@ -256,7 +267,7 @@ mod tests {
+         let first_block = "<<<<<<< HEAD\none\nTWO\nshared-a\nthree-ours\n||||||| 8409db1\none\ntwo\nthree\n=======\nONE\ntwo\nshared-a\nthree-theirs\n>>>>>>> theirs\n";
+         let disk = ZDIFF3.replace(first_block, "one\nTWO\nshared-a\nthree-ours\n");
+ 
+-        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
++        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
+ 
+         assert_eq!(ranges(&seeded), [[(11, 1), (11, 1), (11, 1)]]);
+         assert_eq!(with_local_applied(&seeded, OURS), OURS);
+@@ -271,7 +282,7 @@ mod tests {
+     fn an_edit_inside_the_ours_section_leaves_the_block_raw_with_covering_ranges() {
+         let disk = MERGE.replace("three-ours\n", "three-ours, edited\n");
+ 
+-        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts());
++        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
+ 
+         let raw_block = "<<<<<<< HEAD\none\nTWO\nshared-a\nthree-ours, edited\n=======\nONE\ntwo\nshared-a\nthree-theirs\n>>>>>>> theirs\n";
+         assert!(
+@@ -299,7 +310,7 @@ mod tests {
+         let texts = texts("a\nb\nc\n", "a\nc\n", "a\nB\nc\n");
+         let disk = "a\n<<<<<<< ours\n=======\nB\n>>>>>>> theirs\nc\n";
+ 
+-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+ 
+         assert_eq!(seeded.middle, "a\nb\nc\n");
+         assert_eq!(ranges(&seeded), [[(1, 1), (1, 0), (1, 1)]]);
+@@ -315,7 +326,7 @@ mod tests {
+         );
+         let disk = "DUP\nnew\nmid\n<<<<<<< ours\ndup\n=======\nother\n>>>>>>> theirs\nend\n";
+ 
+-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+ 
+         assert_eq!(seeded.middle, "DUP\nnew\nmid\nbase\nend\n");
+         assert_eq!(ranges(&seeded), [[(3, 1), (2, 1), (3, 1)]]);
+@@ -337,7 +348,7 @@ mod tests {
+         let disk =
+             "{\n  \"a\": 1,\n<<<<<<< ours\n  \"x\": 2\n=======\n  \"y\": 3\n>>>>>>> theirs\n}\n";
+ 
+-        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts);
++        let seeded = seed(disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+ 
+         assert_eq!(seeded.middle, "{\n  \"a\": 1,\n  \"a\": 1\n}\n}\n");
+         assert_eq!(ranges(&seeded), [[(2, 2), (2, 1), (2, 1)]]);
+@@ -361,7 +372,7 @@ mod tests {
+             block("L2", "R2")
+         );
+ 
+-        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts);
++        let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+ 
+         assert_eq!(seeded.middle, "a\nX\ns1\ns2\ns3\ns4\nz\n");
+         assert_eq!(base_ranges(&seeded), [(1, 1), (2, 0)]);
+@@ -380,7 +391,7 @@ mod tests {
+         let crlf_stages = texts(&crlf(BASE), &crlf(OURS), &crlf(THEIRS));
+ 
+         for stages in [crlf_stages, sample_texts()] {
+-            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &stages);
++            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &stages, OURS_LEFT);
+ 
+             assert_eq!(seeded.middle, crlf(WORKED_MIDDLE));
+             assert_eq!(seeded.eol, Eol::CrLf);
+@@ -390,7 +401,7 @@ mod tests {
+ 
+     #[test]
+     fn settled_text_only_gives_no_chunk_and_the_text_as_it_is() {
+-        let seeded = seed(OURS, DEFAULT_MARKER_SIZE, &sample_texts());
++        let seeded = seed(OURS, DEFAULT_MARKER_SIZE, &sample_texts(), OURS_LEFT);
+         assert_eq!(seeded.middle, OURS);
+         assert_eq!(seeded.chunks, Vec::new());
+         assert_eq!(seeded.eol, Eol::Lf);
+diff --git a/crates/session/src/session.rs b/crates/session/src/session.rs
+index eec67d1..8f266f5 100644
+--- a/crates/session/src/session.rs
++++ b/crates/session/src/session.rs
+@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
+ 
+ use serde::Serialize;
+ use specta::Type;
+-use yamt_gitio::Repo;
++use yamt_gitio::{Repo, Stop};
+ 
+ use crate::decode::UnsupportedReason;
+ use crate::disk::{
+@@ -11,8 +11,9 @@ use crate::disk::{
+ };
+ use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
+ use crate::merging::is_merging;
++use crate::orientation::{GitSide, Orientation};
+ use crate::side_names::SideNames;
+-use crate::sides::{FileSides, SUBMODULE_MODE, side_content};
++use crate::sides::{FileSides, SUBMODULE_MODE, Side, side_content};
+ use crate::stages::CapturedStages;
+ use crate::waiting::MarkerStyle;
+ use crate::{Error, Result};
+@@ -57,7 +58,12 @@ pub(crate) const LOG_TARGET: &str = "session";
+ pub struct MergeSession {
+     pub(crate) repo: Repo,
+     pub(crate) files: Vec<FileState>,
+-    pub(crate) side_names: SideNames,
++    // Boxed so that src-tauri's `Startup` and `Merge` enums keep the sizes their
++    // clippy::large_enum_variant checks expect.
++    pub(crate) side_names: Box<SideNames>,
++    pub(crate) stop: Stop,
++    /// Decided once at open from `stop` (plan §2 #86).
++    pub(crate) orientation: Orientation,
+ }
+ 
+ pub(crate) struct FileState {
+@@ -95,6 +101,12 @@ impl MergeSession {
+         &self.side_names
+     }
+ 
++    /// What git was doing when the session opened.
++    #[must_use]
++    pub fn stop(&self) -> &Stop {
++        &self.stop
++    }
++
+     /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
+     pub fn refresh(&mut self) -> Result<FileList> {
+         let mut looked = Vec::new();
+@@ -179,12 +191,14 @@ impl MergeSession {
+         let texts = file.require_text()?;
+         let version = file.disk_version();
+         let path = file.display_path();
++        let orientation = self.orientation;
+         match &file.seen {
+             Seen::ViewFromDisk(disk) => Ok(disk_merge_data(
+                 &path,
+                 texts,
+                 disk,
+                 file.marker_size,
++                orientation,
+                 version,
+             )),
+             Seen::ViewFromStages(_) | Seen::GitOutput => Ok(merge_data(
+@@ -193,7 +207,7 @@ impl MergeSession {
+                 &texts.local,
+                 &texts.remote,
+                 texts.deleted,
+-                &file.marker_style(),
++                &file.marker_style(orientation.pane(GitSide::Ours)),
+                 version,
+             )),
+         }
+@@ -202,11 +216,13 @@ impl MergeSession {
+     pub fn describe(&mut self, path: &str) -> Result<FileSides> {
+         let file = find_file(&mut self.files, path)?;
+         let mut blobs = self.repo.blob_reader()?;
++        let orientation = self.orientation;
++        let pane = |side| file.stages.of(orientation.git_side(side));
+         Ok(FileSides {
+             path: file.display_path(),
+             reason: file.unsupported_reason(),
+-            local: side_content(&mut blobs, file.stages.local.as_ref())?,
+-            remote: side_content(&mut blobs, file.stages.remote.as_ref())?,
++            local: side_content(&mut blobs, pane(Side::Local))?,
++            remote: side_content(&mut blobs, pane(Side::Remote))?,
+             disk_version: file.disk_version(),
+         })
+     }
+@@ -268,14 +284,14 @@ impl FileState {
+             .map_or(DiskVersion(0), |settled| settled.version)
+     }
+ 
+-    /// The marker lines git wrote into this file, as found at open.
+-    fn marker_style(&self) -> MarkerStyle {
++    /// The marker lines git wrote into this file, as found at open; `ours_pane` shows git's ours.
++    fn marker_style(&self, ours_pane: Side) -> MarkerStyle {
+         match &self.at_open {
+             AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
+-                MarkerStyle::found_in(bytes, self.marker_size)
++                MarkerStyle::found_in(bytes, self.marker_size, ours_pane)
+             }
+             AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
+-                MarkerStyle::fallback(self.marker_size)
++                MarkerStyle::fallback(self.marker_size, ours_pane)
+             }
+         }
+     }
+diff --git a/crates/session/src/side_names.rs b/crates/session/src/side_names.rs
+index ab96159..6e48dbe 100644
+--- a/crates/session/src/side_names.rs
++++ b/crates/session/src/side_names.rs
+@@ -1,17 +1,15 @@
+ use serde::Serialize;
+ use specta::Type;
+-use yamt_gitio::{Oid, Repo};
++use yamt_gitio::{Oid, Operation, Rebase, Repo, Stop};
+ 
+ use crate::Result;
++use crate::orientation::{GitSide, Orientation};
+ use crate::session::LOG_TARGET;
+-use crate::sides::Side;
+ 
+-const HEAD: &str = "HEAD";
+-pub(crate) const MERGE_HEAD: &str = "MERGE_HEAD";
+-const REPLAYED_HEADS: [&str; 2] = ["CHERRY_PICK_HEAD", "REBASE_HEAD"];
+ const QUOTE: char = '\'';
+ 
+-/// What one side of the merge is: a branch, else a commit.
++/// What one side of the operation is: a branch, a commit, the commit a revert undoes, or the
++/// patch `git am` applies.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(tag = "kind")]
+ pub enum SideName {
+@@ -23,23 +21,32 @@ pub enum SideName {
+         subject: String,
+         message: String,
+     },
++    Revert {
++        short_id: String,
++        subject: String,
++        message: String,
++    },
++    Patch {
++        subject: String,
++        message: String,
++    },
+ }
+ 
+-/// Both sides' names, read once when the session opens; `None` when nothing names that side.
++/// Both panes' names, read once when the session opens; `None` when nothing names that side.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct SideNames {
+     pub local: Option<SideName>,
+     pub remote: Option<SideName>,
+ }
+ 
+-pub(crate) fn read_side_names(repo: &Repo) -> SideNames {
+-    SideNames {
+-        local: name_or_warn(Side::Local, checked_out(repo)),
+-        remote: name_or_warn(Side::Remote, merged_in(repo)),
+-    }
++pub(crate) fn read_side_names(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
++    let ours = name_or_warn(GitSide::Ours, checked_out(repo, stop.head.as_ref()));
++    let theirs = name_or_warn(GitSide::Theirs, applied(repo, stop.operation.as_ref()));
++    let (local, remote) = orientation.panes(ours, theirs);
++    SideNames { local, remote }
+ }
+ 
+-fn name_or_warn(side: Side, read: Result<Option<SideName>>) -> Option<SideName> {
++fn name_or_warn(side: GitSide, read: Result<Option<SideName>>) -> Option<SideName> {
+     match read {
+         Ok(name) => name,
+         Err(error) => {
+@@ -49,28 +56,55 @@ fn name_or_warn(side: Side, read: Result<Option<SideName>>) -> Option<SideName>
+     }
+ }
+ 
+-fn checked_out(repo: &Repo) -> Result<Option<SideName>> {
++/// HEAD's branch, else HEAD's commit (a rebase detaches HEAD).
++fn checked_out(repo: &Repo, head: Option<&Oid>) -> Result<Option<SideName>> {
+     if let Some(branch) = repo.current_branch()? {
+         return Ok(Some(SideName::Branch {
+             name: text(&branch),
+         }));
+     }
+-    match repo.commit_named(HEAD)? {
+-        Some(commit) => Ok(Some(commit_name(repo, &commit)?)),
+-        None => Ok(None),
++    named(repo, head, commit_name)
++}
++
++/// What git's theirs side is the change of, per operation (plan §2 #87).
++fn applied(repo: &Repo, operation: Option<&Operation>) -> Result<Option<SideName>> {
++    let Some(operation) = operation else {
++        return Ok(None);
++    };
++    match operation {
++        Operation::Merge { merging }
++        | Operation::Rebase(Rebase {
++            redoing_merge: Some(merging),
++            ..
++        }) => Ok(Some(merge_head_name(repo, merging)?)),
++        Operation::SquashMerge { merging } => named(repo, merging.as_ref(), merge_head_name),
++        Operation::Rebase(Rebase {
++            redoing_merge: None,
++            replaying: commit,
++            ..
++        })
++        | Operation::CherryPick {
++            picking: commit, ..
++        } => named(repo, commit.as_ref(), commit_name),
++        Operation::Revert { reverting, .. } => named(repo, reverting.as_ref(), revert_name),
++        Operation::Am {
++            subject, message, ..
++        } => Ok(Some(SideName::Patch {
++            subject: text(subject),
++            message: text(message).trim().to_owned(),
++        })),
+     }
+ }
+ 
+-fn merged_in(repo: &Repo) -> Result<Option<SideName>> {
+-    if let Some(commit) = repo.commit_named(MERGE_HEAD)? {
+-        return Ok(Some(merge_head_name(repo, &commit)?));
++fn named(
++    repo: &Repo,
++    commit: Option<&Oid>,
++    name: fn(&Repo, &Oid) -> Result<SideName>,
++) -> Result<Option<SideName>> {
++    match commit {
++        Some(commit) => Ok(Some(name(repo, commit)?)),
++        None => Ok(None),
+     }
+-    for head in REPLAYED_HEADS {
+-        if let Some(commit) = repo.commit_named(head)? {
+-            return Ok(Some(commit_name(repo, &commit)?));
+-        }
+-    }
+-    Ok(None)
+ }
+ 
+ fn merge_head_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+@@ -103,6 +137,15 @@ fn commit_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
+     })
+ }
+ 
++fn revert_name(repo: &Repo, commit: &Oid) -> Result<SideName> {
++    let summary = repo.commit_summary(commit)?;
++    Ok(SideName::Revert {
++        short_id: text(&summary.short_id),
++        subject: text(&summary.subject),
++        message: text(&summary.message).trim().to_owned(),
++    })
++}
++
+ fn quoted_name(message: &str) -> Option<&str> {
+     let first_line = message.lines().next()?;
+     let (_, after_quote) = first_line.split_once(QUOTE)?;
+diff --git a/crates/session/src/stages.rs b/crates/session/src/stages.rs
+index ba10a77..1d64aaf 100644
+--- a/crates/session/src/stages.rs
++++ b/crates/session/src/stages.rs
+@@ -2,47 +2,48 @@ use std::path::PathBuf;
+ 
+ use yamt_gitio::{Stage, StageEntry};
+ 
+-use crate::sides::{SUBMODULE_MODE, Side};
++use crate::orientation::GitSide;
++use crate::sides::SUBMODULE_MODE;
+ 
+ #[derive(Default)]
+ pub(crate) struct CapturedStages {
+     pub(crate) base: Option<StageEntry>,
+-    pub(crate) local: Option<StageEntry>,
+-    pub(crate) remote: Option<StageEntry>,
++    pub(crate) ours: Option<StageEntry>,
++    pub(crate) theirs: Option<StageEntry>,
+ }
+ 
+ impl CapturedStages {
+-    pub(crate) fn side(&self, side: Side) -> Option<&StageEntry> {
++    pub(crate) fn of(&self, side: GitSide) -> Option<&StageEntry> {
+         match side {
+-            Side::Local => self.local.as_ref(),
+-            Side::Remote => self.remote.as_ref(),
++            GitSide::Ours => self.ours.as_ref(),
++            GitSide::Theirs => self.theirs.as_ref(),
+         }
+     }
+ 
+     fn insert(&mut self, entry: StageEntry) {
+         match entry.stage {
+             Stage::Base => self.base = Some(entry),
+-            Stage::Local => self.local = Some(entry),
+-            Stage::Remote => self.remote = Some(entry),
++            Stage::Ours => self.ours = Some(entry),
++            Stage::Theirs => self.theirs = Some(entry),
+         }
+     }
+ 
+     pub(crate) fn can_rebuild_markers(&self) -> bool {
+         // `checkout -m` refuses a path without both sides: "does not have all necessary versions" (git builtin/checkout.c, observed on git 2.56).
+-        let has_both_sides = self.local.is_some() && self.remote.is_some();
++        let has_both_sides = self.ours.is_some() && self.theirs.is_some();
+         // A gitlink stage is a commit, not a blob: "fatal: unable to read blob object" (exit 128, observed on git 2.56).
+         has_both_sides && !self.has_mode(SUBMODULE_MODE)
+     }
+ 
+     pub(crate) fn has_mode(&self, mode: u32) -> bool {
+-        [&self.base, &self.local, &self.remote]
++        [&self.base, &self.ours, &self.theirs]
+             .into_iter()
+             .flatten()
+             .any(|entry| entry.mode == mode)
+     }
+ 
+     pub(crate) fn entries(&self) -> Vec<StageEntry> {
+-        [&self.base, &self.local, &self.remote]
++        [&self.base, &self.ours, &self.theirs]
+             .into_iter()
+             .flatten()
+             .cloned()
+diff --git a/crates/session/src/start.rs b/crates/session/src/start.rs
+index e94e1db..0305713 100644
+--- a/crates/session/src/start.rs
++++ b/crates/session/src/start.rs
+@@ -49,7 +49,7 @@ pub(crate) enum MergeDriver {
+ pub(crate) struct StartFile<'a> {
+     pub(crate) path: &'a Path,
+     pub(crate) stages: &'a CapturedStages,
+-    /// base, local and remote bytes of a regular file with at least one side.
++    /// base, ours and theirs bytes, in git's order, of a regular file with at least one side.
+     pub(crate) sides: Option<&'a [Vec<u8>; 3]>,
+     pub(crate) attributes: &'a Attributes,
+     pub(crate) disk: &'a OnDisk,
+@@ -137,20 +137,20 @@ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
+     if file.attributes.encoded || file.stages.has_mode(SUBMODULE_MODE) {
+         return GitWrote::NotWritten;
+     }
+-    let local = match (&file.stages.local, &file.stages.remote) {
++    let ours = match (&file.stages.ours, &file.stages.theirs) {
+         (None, None) => return GitWrote::Nothing,
+         // merge-ort.c, modify/delete: "Version %s of %s left in tree" — the kept side.
+         (Some(kept), None) | (None, Some(kept)) => return GitWrote::Stage(kept),
+-        (Some(local), Some(_)) => local,
++        (Some(ours), Some(_)) => ours,
+     };
+     // merge-ort.c `handle_content_merge`: two symlinks keep ours; merge-ll.c `ll_binary_merge`:
+     // "For the final merge, it is 'ours' by default", also when any version is binary.
+     if file.stages.has_mode(SYMLINK_MODE) {
+-        return GitWrote::Stage(local);
++        return GitWrote::Stage(ours);
+     }
+     let union = match file.attributes.driver {
+         MergeDriver::Custom => return GitWrote::Unknown,
+-        MergeDriver::Binary => return GitWrote::Stage(local),
++        MergeDriver::Binary => return GitWrote::Stage(ours),
+         MergeDriver::Text => false,
+         MergeDriver::Union => true,
+     };
+@@ -158,7 +158,7 @@ fn git_wrote<'a>(file: &StartFile<'a>) -> GitWrote<'a> {
+         Some(sides) if !sides.iter().any(|side| is_binary(side)) => {
+             GitWrote::Merged { sides, union }
+         }
+-        Some(_) | None => GitWrote::Stage(local),
++        Some(_) | None => GitWrote::Stage(ours),
+     }
+ }
+ 
+@@ -213,7 +213,7 @@ impl<'r> StartCheck<'r> {
+             Some(scratch) => scratch,
+             None => ScratchDir::create().map_err(|error| error.to_string())?,
+         };
+-        let [base, local, remote] = sides;
++        let [base, ours, theirs] = sides;
+         let options = MergeFileOptions {
+             marker_size,
+             union,
+@@ -222,7 +222,7 @@ impl<'r> StartCheck<'r> {
+         self.merge_file_runs += 1;
+         let merged = self
+             .repo
+-            .merge_file(&scratch.0, base, local, remote, &options);
++            .merge_file(&scratch.0, base, ours, theirs, &options);
+         self.scratch = Some(scratch);
+         merged.map_err(|error| error.to_string())
+     }
+diff --git a/crates/session/src/waiting.rs b/crates/session/src/waiting.rs
+index 0696dd3..c56d75d 100644
+--- a/crates/session/src/waiting.rs
++++ b/crates/session/src/waiting.rs
+@@ -4,6 +4,7 @@ use yamt_gitio::{OURS_LABEL, THEIRS_LABEL};
+ use yamt_merge_core::{Chunk, ChunkKind};
+ 
+ use crate::markers::{Block, Piece, parse, split_lines};
++use crate::sides::Side;
+ 
+ /// What Save writes for this change while a side of it still waits (plan §2 #69).
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+@@ -11,10 +12,12 @@ use crate::markers::{Block, Piece, parse, split_lines};
+ pub enum Waiting {
+     /// One side changed these lines, or both the same way: written applied, as git wrote it.
+     SideLines,
+-    /// A conflict: `open`, the local section, `between` (base section if any, then the separator),
+-    /// the remote section, `close`. Lines without line breaks.
++    /// A conflict as git writes it: `open`, the section of the pane `first` (git's ours: HEAD),
++    /// `between` (base section if any, then the separator), the other pane's section, `close`.
++    /// Lines without line breaks.
+     Markers {
+         open: String,
++        first: Side,
+         between: Vec<String>,
+         close: String,
+     },
+@@ -22,7 +25,8 @@ pub enum Waiting {
+     AsShown,
+ }
+ 
+-/// The marker lines git writes around a conflict in one file, without line breaks.
++/// The marker lines git writes around a conflict in one file, without line breaks, and the pane
++/// showing git's ours, whose section git writes first.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct MarkerStyle {
+     open: String,
+@@ -30,14 +34,15 @@ pub struct MarkerStyle {
+     base: Option<String>,
+     separator: String,
+     close: String,
++    ours_pane: Side,
+ }
+ 
+ impl MarkerStyle {
+     /// The marker lines of the first block in `disk`, else the `fallback`.
+     #[must_use]
+-    pub fn found_in(disk: &[u8], marker_size: usize) -> MarkerStyle {
++    pub fn found_in(disk: &[u8], marker_size: usize, ours_pane: Side) -> MarkerStyle {
+         let Ok(text) = std::str::from_utf8(disk) else {
+-            return MarkerStyle::fallback(marker_size);
++            return MarkerStyle::fallback(marker_size, ours_pane);
+         };
+         let lines: Vec<&str> = text.split_inclusive('\n').collect();
+         let pieces = parse(&split_lines(disk), marker_size);
+@@ -46,20 +51,21 @@ impl MarkerStyle {
+             Piece::Settled(_) | Piece::Raw(_) => None,
+         });
+         match first_block {
+-            Some(block) => style_of(&lines, block),
+-            None => MarkerStyle::fallback(marker_size),
++            Some(block) => style_of(&lines, block, ours_pane),
++            None => MarkerStyle::fallback(marker_size, ours_pane),
+         }
+     }
+ 
+     /// Merge style with the labels `Repo::merge_file` passes to `git merge-file` (gitio
+     /// `merge_file.rs`).
+     #[must_use]
+-    pub fn fallback(marker_size: usize) -> MarkerStyle {
++    pub fn fallback(marker_size: usize, ours_pane: Side) -> MarkerStyle {
+         MarkerStyle {
+             open: format!("{} {OURS_LABEL}", "<".repeat(marker_size)),
+             base: None,
+             separator: "=".repeat(marker_size),
+             close: format!("{} {THEIRS_LABEL}", ">".repeat(marker_size)),
++            ours_pane,
+         }
+     }
+ 
+@@ -83,6 +89,7 @@ impl MarkerStyle {
+         between.push(self.separator.clone());
+         Waiting::Markers {
+             open: self.open.clone(),
++            first: self.ours_pane,
+             between,
+             close: self.close.clone(),
+         }
+@@ -90,22 +97,24 @@ impl MarkerStyle {
+ }
+ 
+ /// The marker lines of `block`, copied as they are from the file's `lines`.
+-pub(crate) fn block_markers(lines: &[&str], block: &Block) -> Waiting {
++pub(crate) fn block_markers(lines: &[&str], block: &Block, ours_pane: Side) -> Waiting {
+     let between = (block.ours.end..block.theirs.start).map(|at| line_text(lines, at));
+     Waiting::Markers {
+         open: line_text(lines, block.whole.start),
++        first: ours_pane,
+         between: between.collect(),
+         close: line_text(lines, block.whole.end - 1),
+     }
+ }
+ 
+-fn style_of(lines: &[&str], block: &Block) -> MarkerStyle {
++fn style_of(lines: &[&str], block: &Block, ours_pane: Side) -> MarkerStyle {
+     let has_base = block.ours.end + 1 < block.theirs.start;
+     MarkerStyle {
+         open: line_text(lines, block.whole.start),
+         base: has_base.then(|| line_text(lines, block.ours.end)),
+         separator: line_text(lines, block.theirs.start - 1),
+         close: line_text(lines, block.whole.end - 1),
++        ours_pane,
+     }
+ }
+ 
+@@ -131,6 +140,7 @@ mod tests {
+     use super::*;
+     use crate::markers::DEFAULT_MARKER_SIZE;
+     use crate::merge_data::Texts;
++    use crate::orientation::{OURS_LEFT, THEIRS_LEFT};
+     use crate::seed::seed;
+ 
+     const MERGE: &[u8] = include_bytes!("../tests/markers/style-merge.txt");
+@@ -149,9 +159,14 @@ mod tests {
+             base: base.map(str::to_owned),
+             separator: separator.to_owned(),
+             close: close.to_owned(),
++            ours_pane: Side::Local,
+         }
+     }
+ 
++    fn found_in(disk: &[u8], marker_size: usize) -> MarkerStyle {
++        MarkerStyle::found_in(disk, marker_size, Side::Local)
++    }
++
+     #[test]
+     fn the_style_is_copied_from_the_first_block_in_every_style_size_and_line_ending() {
+         let merge = style("<<<<<<< HEAD", None, "=======", ">>>>>>> theirs");
+@@ -161,26 +176,23 @@ mod tests {
+             "=======",
+             ">>>>>>> theirs",
+         );
+-        assert_eq!(MarkerStyle::found_in(MERGE, DEFAULT_MARKER_SIZE), merge);
+-        assert_eq!(MarkerStyle::found_in(DIFF3, DEFAULT_MARKER_SIZE), diff3);
+-        assert_eq!(
+-            MarkerStyle::found_in(ZDIFF3.as_bytes(), DEFAULT_MARKER_SIZE),
+-            diff3
+-        );
++        assert_eq!(found_in(MERGE, DEFAULT_MARKER_SIZE), merge);
++        assert_eq!(found_in(DIFF3, DEFAULT_MARKER_SIZE), diff3);
++        assert_eq!(found_in(ZDIFF3.as_bytes(), DEFAULT_MARKER_SIZE), diff3);
+         let crlf = style(
+             "<<<<<<< HEAD",
+             Some("||||||| 8956f4f"),
+             "=======",
+             ">>>>>>> theirs",
+         );
+-        assert_eq!(MarkerStyle::found_in(CRLF, DEFAULT_MARKER_SIZE), crlf);
++        assert_eq!(found_in(CRLF, DEFAULT_MARKER_SIZE), crlf);
+         let size_12 = style(
+             "<<<<<<<<<<<< HEAD",
+             Some("|||||||||||| e87a625"),
+             "============",
+             ">>>>>>>>>>>> theirs",
+         );
+-        assert_eq!(MarkerStyle::found_in(SIZE_12, SIZE_12_MARKERS), size_12);
++        assert_eq!(found_in(SIZE_12, SIZE_12_MARKERS), size_12);
+     }
+ 
+     #[test]
+@@ -191,20 +203,14 @@ mod tests {
+             "============",
+             ">>>>>>>>>>>> theirs",
+         );
+-        assert_eq!(MarkerStyle::fallback(SIZE_12_MARKERS), fallback);
+         assert_eq!(
+-            MarkerStyle::found_in(SIZE_12, DEFAULT_MARKER_SIZE).open,
+-            "<<<<<<< ours"
+-        );
+-        assert_eq!(
+-            MarkerStyle::found_in(b"no markers\n", SIZE_12_MARKERS),
++            MarkerStyle::fallback(SIZE_12_MARKERS, Side::Local),
+             fallback
+         );
++        assert_eq!(found_in(SIZE_12, DEFAULT_MARKER_SIZE).open, "<<<<<<< ours");
++        assert_eq!(found_in(b"no markers\n", SIZE_12_MARKERS), fallback);
+         let latin1 = b"<<<<<<< \xe9\nx\n=======\ny\n>>>>>>> theirs\n";
+-        assert_eq!(
+-            MarkerStyle::found_in(latin1, DEFAULT_MARKER_SIZE).open,
+-            "<<<<<<< ours"
+-        );
++        assert_eq!(found_in(latin1, DEFAULT_MARKER_SIZE).open, "<<<<<<< ours");
+     }
+ 
+     fn chunk(kind: ChunkKind, base: LineRange<BaseLine>) -> Chunk {
+@@ -233,18 +239,20 @@ mod tests {
+                 len: 3,
+             },
+         );
+-        let diff3 = MarkerStyle::found_in(DIFF3, DEFAULT_MARKER_SIZE);
++        let diff3 = found_in(DIFF3, DEFAULT_MARKER_SIZE);
+         let expected = Waiting::Markers {
+             open: "<<<<<<< HEAD".to_owned(),
++            first: Side::Local,
+             between: ["||||||| 8409db1", "one", "two", "three", "======="]
+                 .map(str::to_owned)
+                 .to_vec(),
+             close: ">>>>>>> theirs".to_owned(),
+         };
+         assert_eq!(diff3.waiting(&conflict, &base_lines), expected);
+-        let merge = MarkerStyle::fallback(DEFAULT_MARKER_SIZE);
++        let merge = MarkerStyle::fallback(DEFAULT_MARKER_SIZE, Side::Remote);
+         let expected = Waiting::Markers {
+             open: "<<<<<<< ours".to_owned(),
++            first: Side::Remote,
+             between: vec!["=======".to_owned()],
+             close: ">>>>>>> theirs".to_owned(),
+         };
+@@ -257,7 +265,7 @@ mod tests {
+             start: BaseLine(0),
+             len: 1,
+         };
+-        let diff3 = MarkerStyle::found_in(DIFF3, DEFAULT_MARKER_SIZE);
++        let diff3 = found_in(DIFF3, DEFAULT_MARKER_SIZE);
+         for kind in [
+             ChunkKind::LocalOnly,
+             ChunkKind::RemoteOnly,
+@@ -273,42 +281,51 @@ mod tests {
+     fn rebuilt_block(waiting: &Waiting, local: &[&str], remote: &[&str]) -> String {
+         let Waiting::Markers {
+             open,
++            first,
+             between,
+             close,
+         } = waiting
+         else {
+             panic!("expected markers, got {waiting:?}");
+         };
++        let (first, second) = match first {
++            Side::Local => (local, remote),
++            Side::Remote => (remote, local),
++        };
+         let mut block = vec![open.as_str()];
+-        block.extend(local.iter().map(|line| without_line_break(line)));
++        block.extend(first.iter().map(|line| without_line_break(line)));
+         block.extend(between.iter().map(String::as_str));
+-        block.extend(remote.iter().map(|line| without_line_break(line)));
++        block.extend(second.iter().map(|line| without_line_break(line)));
+         block.push(close);
+         block.join("\n") + "\n"
+     }
+ 
+     #[test]
+     fn an_exact_block_s_markers_and_its_section_lines_rebuild_the_block_exactly() {
+-        let texts = Texts {
+-            base: BASE.to_owned(),
+-            local: OURS.to_owned(),
+-            remote: THEIRS.to_owned(),
+-            deleted: None,
+-        };
+-        let seeded = seed(ZDIFF3, DEFAULT_MARKER_SIZE, &texts);
+-        let local: Vec<&str> = OURS.split_inclusive('\n').collect();
+-        let remote: Vec<&str> = THEIRS.split_inclusive('\n').collect();
+-        let blocks = [2..17, 22..29];
+-        let disk: Vec<&str> = ZDIFF3.split_inclusive('\n').collect();
++        for (orientation, local, remote) in [(OURS_LEFT, OURS, THEIRS), (THEIRS_LEFT, THEIRS, OURS)]
++        {
++            let texts = Texts {
++                base: BASE.to_owned(),
++                local: local.to_owned(),
++                remote: remote.to_owned(),
++                deleted: None,
++            };
++            let seeded = seed(ZDIFF3, DEFAULT_MARKER_SIZE, &texts, orientation);
++            let local: Vec<&str> = local.split_inclusive('\n').collect();
++            let remote: Vec<&str> = remote.split_inclusive('\n').collect();
++            let blocks = [2..17, 22..29];
++            let disk: Vec<&str> = ZDIFF3.split_inclusive('\n').collect();
+ 
+-        assert_eq!(seeded.chunks.len(), blocks.len());
+-        for (chunk, block) in seeded.chunks.iter().zip(blocks) {
+-            let local_lines =
+-                chunk.chunk.local.start.0 as usize..chunk.chunk.local.end().0 as usize;
+-            let remote_lines =
+-                chunk.chunk.remote.start.0 as usize..chunk.chunk.remote.end().0 as usize;
+-            let rebuilt = rebuilt_block(&chunk.waiting, &local[local_lines], &remote[remote_lines]);
+-            assert_eq!(rebuilt, disk[block].concat());
++            assert_eq!(seeded.chunks.len(), blocks.len());
++            for (chunk, block) in seeded.chunks.iter().zip(blocks) {
++                let local_lines =
++                    chunk.chunk.local.start.0 as usize..chunk.chunk.local.end().0 as usize;
++                let remote_lines =
++                    chunk.chunk.remote.start.0 as usize..chunk.chunk.remote.end().0 as usize;
++                let (local, remote) = (&local[local_lines], &remote[remote_lines]);
++                let rebuilt = rebuilt_block(&chunk.waiting, local, remote);
++                assert_eq!(rebuilt, disk[block].concat());
++            }
+         }
+     }
+ 
+@@ -324,7 +341,7 @@ mod tests {
+         let raw = ZDIFF3.replace("eight-theirs\n>>>>>>> theirs\n", "eight-theirs\n");
+ 
+         for disk in [edited, raw] {
+-            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts);
++            let seeded = seed(&disk, DEFAULT_MARKER_SIZE, &texts, OURS_LEFT);
+             let waiting: Vec<&Waiting> = seeded.chunks.iter().map(|chunk| &chunk.waiting).collect();
+             assert!(waiting.contains(&&Waiting::AsShown), "{waiting:?}");
+         }
+diff --git a/crates/session/src/writes.rs b/crates/session/src/writes.rs
+index 94b24ca..1eb355b 100644
+--- a/crates/session/src/writes.rs
++++ b/crates/session/src/writes.rs
+@@ -78,7 +78,7 @@ impl MergeSession {
+         }
+         let file = find_file(&mut self.files, path)?;
+         let index_before = index_before(&self.repo, file)?;
+-        let chosen = file.stages.side(side);
++        let chosen = file.stages.of(self.orientation.git_side(side));
+         match chosen {
+             Some(entry) => self.repo.resolve_with(entry)?,
+             None => self.repo.remove_paths(&[file.path.as_path()])?,
+diff --git a/crates/session/tests/orientation.rs b/crates/session/tests/orientation.rs
+new file mode 100644
+index 0000000..f63f79c
+--- /dev/null
++++ b/crates/session/tests/orientation.rs
+@@ -0,0 +1,196 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Run, TempDir, git_ok, hash_object, operation_repo,
++};
++use yamt_merge_core::ChunkKind;
++use yamt_session::{DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent};
++
++mod window;
++use window::{lines, middle_text, saved_with_everything_waiting};
++
++const TEXT: &str = "a_text.txt";
++const GONE: &str = "b_gone.txt";
++const PICTURE: &str = "c_picture.bin";
++const BASE_TEXT: &str = "one\ntwo\nthree\nfour\nfive\nsix\nseven\n";
++const HEAD_TEXT: &str = "one\nTWO-head\nthree\nfour\nfive\nsix\nseven\n";
++/// The replayed commit's text: own work in a rebase.
++const OWN_TEXT: &str = "one\nTWO-own\nthree\nfour\nfive\nsix\nSEVEN-own\n";
++const HEAD_GONE: &[u8] = b"kept, changed by HEAD\n";
++const HEAD_PICTURE: &[u8] = b"\0HEAD's picture";
++const OWN_PICTURE: &[u8] = b"\0own picture";
++
++/// `local` is HEAD's side and `remote` the applied commit's, as `operation_repo` takes them.
++const TEXT_FILE: ConflictFile<'static> = ConflictFile {
++    path: TEXT,
++    kind: FileKind::Regular,
++    base: Some(BASE_TEXT.as_bytes()),
++    local: Some(HEAD_TEXT.as_bytes()),
++    remote: Some(OWN_TEXT.as_bytes()),
++};
++
++const FILES: &[ConflictFile<'static>] = &[
++    TEXT_FILE,
++    ConflictFile {
++        path: GONE,
++        kind: FileKind::Regular,
++        base: Some(b"kept\n"),
++        local: Some(HEAD_GONE),
++        remote: None,
++    },
++    ConflictFile {
++        path: PICTURE,
++        kind: FileKind::Regular,
++        base: Some(b"\0base picture"),
++        local: Some(HEAD_PICTURE),
++        remote: Some(OWN_PICTURE),
++    },
++];
++
++fn rebase() -> TempDir {
++    operation_repo(Run::Rebase, FILES).unwrap()
++}
++
++fn staged_oid(root: &Path, path: &str) -> String {
++    let staged = String::from_utf8(git_ok(root, &["ls-files", "-s", "--", path]).unwrap()).unwrap();
++    let [_mode, oid, stage_and_path] = staged.split(' ').collect::<Vec<_>>()[..] else {
++        panic!("one stage-0 entry expected: {staged:?}");
++    };
++    assert_eq!(stage_and_path, format!("0\t{path}\n"));
++    oid.to_owned()
++}
++
++fn chunk_kinds(data: &FileMergeData) -> Vec<ChunkKind> {
++    data.chunks.iter().map(|chunk| chunk.chunk.kind).collect()
++}
++
++#[test]
++fn a_rebase_shows_the_replayed_commit_on_the_left_with_its_own_change_as_local_only() {
++    let dir = rebase();
++    let mut session = MergeSession::open(dir.path()).unwrap();
++
++    let data = session.load(TEXT).unwrap();
++
++    assert_eq!(data.local, OWN_TEXT);
++    assert_eq!(data.remote, HEAD_TEXT);
++    assert_eq!(
++        chunk_kinds(&data),
++        [ChunkKind::Conflict, ChunkKind::LocalOnly]
++    );
++}
++
++#[test]
++fn taking_local_in_a_rebase_stages_the_replayed_commit_s_blob() {
++    let dir = rebase();
++    let root = dir.path();
++    let mut session = MergeSession::open(root).unwrap();
++
++    session.take(TEXT, Side::Local, DiskVersion(0)).unwrap();
++
++    let own_blob = hash_object(root, OWN_TEXT.as_bytes()).unwrap();
++    assert_eq!(staged_oid(root, TEXT), own_blob);
++    assert_eq!(fs::read_to_string(root.join(TEXT)).unwrap(), OWN_TEXT);
++}
++
++#[test]
++fn a_file_the_replayed_commit_deleted_is_deleted_on_the_left_and_keep_keeps_head_s_change() {
++    let dir = rebase();
++    let root = dir.path();
++    let mut session = MergeSession::open(root).unwrap();
++
++    assert_eq!(session.load(GONE).unwrap().deleted, Some(Side::Local));
++    session.take(GONE, Side::Remote, DiskVersion(0)).unwrap();
++    assert_eq!(fs::read(root.join(GONE)).unwrap(), HEAD_GONE);
++    assert_eq!(
++        staged_oid(root, GONE),
++        hash_object(root, HEAD_GONE).unwrap()
++    );
++
++    session.reset(GONE, DiskVersion(0)).unwrap();
++    session.take(GONE, Side::Local, DiskVersion(0)).unwrap();
++    assert!(!root.join(GONE).exists());
++    assert_eq!(git_ok(root, &["ls-files", "-s", "--", GONE]).unwrap(), b"");
++}
++
++#[test]
++fn a_binary_file_s_sides_are_described_and_taken_in_pane_order() {
++    let dir = rebase();
++    let root = dir.path();
++    let mut session = MergeSession::open(root).unwrap();
++
++    let sides = session.describe(PICTURE).unwrap();
++    session.take(PICTURE, Side::Local, DiskVersion(0)).unwrap();
++
++    let size = |bytes: &[u8]| SideContent::Binary {
++        bytes: bytes.len() as u64,
++    };
++    assert_eq!(sides.local, size(OWN_PICTURE));
++    assert_eq!(sides.remote, size(HEAD_PICTURE));
++    let own_blob = hash_object(root, OWN_PICTURE).unwrap();
++    assert_eq!(staged_oid(root, PICTURE), own_blob);
++}
++
++#[test]
++fn saving_a_rebase_s_waiting_conflict_writes_git_s_file_byte_for_byte_in_both_styles() {
++    for style in ["merge", "zdiff3"] {
++        let dir = rebase();
++        let root = dir.path();
++        let conflict_style = format!("--conflict={style}");
++        git_ok(root, &["checkout", &conflict_style, "--", TEXT]).unwrap();
++        let git_wrote = fs::read_to_string(root.join(TEXT)).unwrap();
++        let mut session = MergeSession::open(root).unwrap();
++        let data = session.load(TEXT).unwrap();
++        assert!(matches!(data.middle, Middle::Stages { .. }), "{style}");
++
++        let saved = saved_with_everything_waiting(&data);
++        session.save(TEXT, &saved, data.disk_version).unwrap();
++
++        assert_eq!(
++            fs::read_to_string(root.join(TEXT)).unwrap(),
++            git_wrote,
++            "{style}"
++        );
++    }
++}
++
++#[test]
++fn a_disk_view_block_is_written_back_as_it_was_and_its_left_section_is_own_work() {
++    let dir = rebase();
++    let root = dir.path();
++    let git_wrote = fs::read_to_string(root.join(TEXT)).unwrap();
++    let edited = git_wrote.replacen("one\n", "ONE, by hand\n", 1);
++    fs::write(root.join(TEXT), &edited).unwrap();
++    let mut session = MergeSession::open(root).unwrap();
++    session.refresh().unwrap();
++
++    let data = session.load(TEXT).unwrap();
++
++    assert!(matches!(data.middle, Middle::Disk { .. }), "{data:?}");
++    assert_eq!(saved_with_everything_waiting(&data), edited);
++    let [chunk] = &data.chunks[..] else {
++        panic!("one block expected: {:?}", data.chunks);
++    };
++    let local: Vec<&str> = data.local.split('\n').collect();
++    let left = (chunk.chunk.local.start.0, chunk.chunk.local.len);
++    assert_eq!(lines(&local, left), ["TWO-own"]);
++    assert!(middle_text(&data).starts_with("ONE, by hand\n"));
++}
++
++#[test]
++fn every_other_operation_keeps_head_on_the_left() {
++    for run in [Run::Merge, Run::CherryPick, Run::Revert, Run::RebaseMerges] {
++        let dir = operation_repo(run, &[TEXT_FILE]).unwrap();
++        let root = dir.path();
++        let mut session = MergeSession::open(root).unwrap();
++
++        let data = session.load(TEXT).unwrap();
++        session.take(TEXT, Side::Local, DiskVersion(0)).unwrap();
++
++        assert_eq!(data.local, HEAD_TEXT, "{run:?}");
++        let head_blob = hash_object(root, HEAD_TEXT.as_bytes()).unwrap();
++        assert_eq!(staged_oid(root, TEXT), head_blob, "{run:?}");
++    }
++}
+diff --git a/crates/session/tests/save_round_trip.rs b/crates/session/tests/save_round_trip.rs
+index dd64d4d..47f4f49 100644
+--- a/crates/session/tests/save_round_trip.rs
++++ b/crates/session/tests/save_round_trip.rs
+@@ -9,6 +9,8 @@ use yamt_session::{FileMergeData, MergeChunk, MergeSession, Middle, Waiting, Wri
+ 
+ mod samples;
+ use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
++mod window;
++use window::{middle_text, saved_with_everything_waiting};
+ 
+ const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/golden");
+ const SAMPLE: &str = "sample.txt";
+@@ -75,53 +77,6 @@ fn loaded_again(dir: &TempDir, path: &str) -> FileMergeData {
+     session.load(path).unwrap()
+ }
+ 
+-fn middle_text(data: &FileMergeData) -> &str {
+-    match &data.middle {
+-        Middle::Stages { text } | Middle::Disk { text } => text,
+-        Middle::DiskNotText { found } => panic!("not text: {found:?}"),
+-    }
+-}
+-
+-fn lines<T: Copy>(lines: &[T], range: (u32, u32)) -> Vec<T> {
+-    lines[range.0 as usize..(range.0 + range.1) as usize].to_vec()
+-}
+-
+-/// What the window's file builder writes with every change still waiting on both sides.
+-fn saved_with_everything_waiting(data: &FileMergeData) -> String {
+-    let mut middle: Vec<&str> = middle_text(data).split('\n').collect();
+-    let local: Vec<&str> = data.local.split('\n').collect();
+-    let remote: Vec<&str> = data.remote.split('\n').collect();
+-    for chunk in data.chunks.iter().rev() {
+-        let local = lines(&local, (chunk.chunk.local.start.0, chunk.chunk.local.len));
+-        let remote = lines(
+-            &remote,
+-            (chunk.chunk.remote.start.0, chunk.chunk.remote.len),
+-        );
+-        let written = match (&chunk.waiting, chunk.chunk.kind) {
+-            (Waiting::SideLines, ChunkKind::RemoteOnly) => remote,
+-            (Waiting::SideLines, _) => local,
+-            (
+-                Waiting::Markers {
+-                    open,
+-                    between,
+-                    close,
+-                },
+-                _,
+-            ) => {
+-                let between = between.iter().map(String::as_str);
+-                let mut block = vec![open.as_str()];
+-                block.extend(local.into_iter().chain(between).chain(remote));
+-                block.push(close);
+-                block
+-            }
+-            (Waiting::AsShown, _) => continue,
+-        };
+-        let start = chunk.middle.start.0 as usize;
+-        middle.splice(start..start + chunk.middle.len as usize, written);
+-    }
+-    middle.join("\n")
+-}
+-
+ type Ranges = ((u32, u32), (u32, u32));
+ 
+ fn conflict_ranges(chunks: &[MergeChunk]) -> Vec<Ranges> {
+diff --git a/crates/session/tests/side_names.rs b/crates/session/tests/side_names.rs
+index 583f38e..5590a88 100644
+--- a/crates/session/tests/side_names.rs
++++ b/crates/session/tests/side_names.rs
+@@ -4,20 +4,30 @@ use std::fs;
+ use std::path::Path;
+ use std::process::Command;
+ 
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, Run, TempDir, diverged_repo, git, git_ok, operation_repo,
++};
+ use yamt_session::{MergeSession, SideName, SideNames};
+ 
+ const FILE: &str = "cart.ts";
++const STEP_ONE_MESSAGE: &str = "step 1\n\nThe first step's body.";
+ 
+-fn diverged() -> TempDir {
+-    diverged_repo(&[ConflictFile {
++fn cart() -> ConflictFile<'static> {
++    ConflictFile {
+         path: FILE,
+         kind: FileKind::Regular,
+         base: Some(b"one\n"),
+         local: Some(b"local\n"),
+         remote: Some(b"remote\n"),
+-    }])
+-    .unwrap()
++    }
++}
++
++fn diverged() -> TempDir {
++    diverged_repo(&[cart()]).unwrap()
++}
++
++fn stopped(run: Run) -> TempDir {
++    operation_repo(run, &[cart()]).unwrap()
+ }
+ 
+ fn require_conflict(root: &Path, args: &[&str]) {
+@@ -204,15 +214,109 @@ fn a_cherry_pick_names_the_branch_and_the_picked_commit() {
+ }
+ 
+ #[test]
+-fn a_rebase_names_the_commit_it_stands_on_and_the_replayed_commit() {
++fn a_rebase_names_the_replayed_commit_on_the_left_and_the_commit_it_stands_on_on_the_right() {
+     let dir = diverged();
+     let root = dir.path();
+     let local = stdout_line(root, &["rev-parse", "local"]);
+     require_conflict(root, &["rebase", "remote"]);
+ 
+     let expected = SideNames {
+-        local: Some(commit(root, "remote", "remote", "remote")),
+-        remote: Some(commit(root, &local, "local", "local")),
++        local: Some(commit(root, &local, "local", "local")),
++        remote: Some(commit(root, "remote", "remote", "remote")),
++    };
++    assert_eq!(side_names_of(root), expected);
++}
++
++#[test]
++fn both_rebase_backends_name_the_replayed_step_on_the_left() {
++    for run in [Run::Rebase, Run::RebaseApply] {
++        let dir = stopped(run);
++        let root = dir.path();
++
++        let expected = SideNames {
++            local: Some(commit(root, "remote~2", "step 1", STEP_ONE_MESSAGE)),
++            remote: Some(commit(root, "HEAD", "local", "local")),
++        };
++        assert_eq!(side_names_of(root), expected, "{run:?}");
++    }
++}
++
++#[test]
++fn a_rebase_redoing_a_merge_keeps_head_on_the_left_and_names_the_merged_branch() {
++    let dir = stopped(Run::RebaseMerges);
++    let root = dir.path();
++
++    let expected = SideNames {
++        local: Some(commit(root, "HEAD", "onto", "onto")),
++        remote: Some(branch("remote")),
++    };
++    assert_eq!(side_names_of(root), expected);
++}
++
++#[test]
++fn a_squash_merge_names_the_merged_branch() {
++    let dir = stopped(Run::SquashMerge);
++
++    let expected = SideNames {
++        local: Some(branch("local")),
++        remote: Some(branch("remote")),
++    };
++    assert_eq!(side_names_of(dir.path()), expected);
++}
++
++#[test]
++fn a_squash_merge_of_a_commit_no_branch_points_at_names_the_commit() {
++    let dir = diverged();
++    let root = dir.path();
++    let remote = stdout_line(root, &["rev-parse", "remote"]);
++    git_ok(root, &["branch", "--quiet", "-D", "remote"]).unwrap();
++    require_conflict(root, &["merge", "--squash", &remote]);
++
++    let expected = SideNames {
++        local: Some(branch("local")),
++        remote: Some(commit(root, &remote, "remote", "remote")),
++    };
++    assert_eq!(side_names_of(root), expected);
++}
++
++#[test]
++fn a_revert_names_the_reverted_commit_as_a_revert() {
++    let dir = stopped(Run::Revert);
++    let root = dir.path();
++
++    let expected = SideNames {
++        local: Some(branch("main")),
++        remote: Some(SideName::Revert {
++            short_id: short_id_as_gitio_reads_config(root, "HEAD~1"),
++            subject: "step 1".to_owned(),
++            message: STEP_ONE_MESSAGE.to_owned(),
++        }),
++    };
++    assert_eq!(side_names_of(root), expected);
++}
++
++#[test]
++fn am_names_the_patch_by_its_subject_and_message() {
++    let dir = stopped(Run::Am);
++
++    let expected = SideNames {
++        local: Some(branch("local")),
++        remote: Some(SideName::Patch {
++            subject: "step 1".to_owned(),
++            message: STEP_ONE_MESSAGE.to_owned(),
++        }),
++    };
++    assert_eq!(side_names_of(dir.path()), expected);
++}
++
++#[test]
++fn a_cherry_pick_from_a_range_names_the_picked_step() {
++    let dir = stopped(Run::CherryPickRange);
++    let root = dir.path();
++
++    let expected = SideNames {
++        local: Some(branch("local")),
++        remote: Some(commit(root, "remote~2", "step 1", STEP_ONE_MESSAGE)),
+     };
+     assert_eq!(side_names_of(root), expected);
+ }
+diff --git a/crates/session/tests/window/mod.rs b/crates/session/tests/window/mod.rs
+new file mode 100644
+index 0000000..bdbb614
+--- /dev/null
++++ b/crates/session/tests/window/mod.rs
+@@ -0,0 +1,56 @@
++//! What the window writes on Save (`editor/internal/fileText.ts`), for tests that compare it with git's file.
++
++use yamt_merge_core::ChunkKind;
++use yamt_session::{FileMergeData, Middle, Side, Waiting};
++
++pub fn middle_text(data: &FileMergeData) -> &str {
++    match &data.middle {
++        Middle::Stages { text } | Middle::Disk { text } => text,
++        Middle::DiskNotText { found } => panic!("not text: {found:?}"),
++    }
++}
++
++pub fn lines<T: Copy>(lines: &[T], range: (u32, u32)) -> Vec<T> {
++    lines[range.0 as usize..(range.0 + range.1) as usize].to_vec()
++}
++
++/// What the window's file builder writes with every change still waiting on both sides.
++pub fn saved_with_everything_waiting(data: &FileMergeData) -> String {
++    let mut middle: Vec<&str> = middle_text(data).split('\n').collect();
++    let local: Vec<&str> = data.local.split('\n').collect();
++    let remote: Vec<&str> = data.remote.split('\n').collect();
++    for chunk in data.chunks.iter().rev() {
++        let local = lines(&local, (chunk.chunk.local.start.0, chunk.chunk.local.len));
++        let remote = lines(
++            &remote,
++            (chunk.chunk.remote.start.0, chunk.chunk.remote.len),
++        );
++        let written = match (&chunk.waiting, chunk.chunk.kind) {
++            (Waiting::SideLines, ChunkKind::RemoteOnly) => remote,
++            (Waiting::SideLines, _) => local,
++            (
++                Waiting::Markers {
++                    open,
++                    first,
++                    between,
++                    close,
++                },
++                _,
++            ) => {
++                let (first, second) = match first {
++                    Side::Local => (local, remote),
++                    Side::Remote => (remote, local),
++                };
++                let between = between.iter().map(String::as_str);
++                let mut block = vec![open.as_str()];
++                block.extend(first.into_iter().chain(between).chain(second));
++                block.push(close);
++                block
++            }
++            (Waiting::AsShown, _) => continue,
++        };
++        let start = chunk.middle.start.0 as usize;
++        middle.splice(start..start + chunk.middle.len as usize, written);
++    }
++    middle.join("\n")
++}
+diff --git a/frontend/fixtures/golden/language-tools-script-setup.json b/frontend/fixtures/golden/language-tools-script-setup.json
+index e364e2c..07eab5a 100644
+--- a/frontend/fixtures/golden/language-tools-script-setup.json
++++ b/frontend/fixtures/golden/language-tools-script-setup.json
+@@ -423,6 +423,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/nuxt-island-test.json b/frontend/fixtures/golden/nuxt-island-test.json
+index a1b5e92..e4a2efa 100644
+--- a/frontend/fixtures/golden/nuxt-island-test.json
++++ b/frontend/fixtures/golden/nuxt-island-test.json
+@@ -89,6 +89,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -213,6 +214,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -1571,6 +1573,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/tanstack-query-persist-provider.json b/frontend/fixtures/golden/tanstack-query-persist-provider.json
+index aabac5b..10f915a 100644
+--- a/frontend/fixtures/golden/tanstack-query-persist-provider.json
++++ b/frontend/fixtures/golden/tanstack-query-persist-provider.json
+@@ -279,6 +279,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/tanstack-query-svelte-base-query.json b/frontend/fixtures/golden/tanstack-query-svelte-base-query.json
+index b51265b..162a23d 100644
+--- a/frontend/fixtures/golden/tanstack-query-svelte-base-query.json
++++ b/frontend/fixtures/golden/tanstack-query-svelte-base-query.json
+@@ -44,6 +44,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/vite-modulepreload-polyfill.json b/frontend/fixtures/golden/vite-modulepreload-polyfill.json
+index 58c30f1..1f39a61 100644
+--- a/frontend/fixtures/golden/vite-modulepreload-polyfill.json
++++ b/frontend/fixtures/golden/vite-modulepreload-polyfill.json
+@@ -79,6 +79,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/vue-core-compiler-von.json b/frontend/fixtures/golden/vue-core-compiler-von.json
+index 96b7ab6..38eb854 100644
+--- a/frontend/fixtures/golden/vue-core-compiler-von.json
++++ b/frontend/fixtures/golden/vue-core-compiler-von.json
+@@ -97,6 +97,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/vue-core-playground-app.json b/frontend/fixtures/golden/vue-core-playground-app.json
+index ef3ba6c..7395f41 100644
+--- a/frontend/fixtures/golden/vue-core-playground-app.json
++++ b/frontend/fixtures/golden/vue-core-playground-app.json
+@@ -402,6 +402,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/vue-core-script-context.json b/frontend/fixtures/golden/vue-core-script-context.json
+index 496954e..3a08b3c 100644
+--- a/frontend/fixtures/golden/vue-core-script-context.json
++++ b/frontend/fixtures/golden/vue-core-script-context.json
+@@ -236,6 +236,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/vue-router-playground-app.json b/frontend/fixtures/golden/vue-router-playground-app.json
+index 3ac9e68..9c70e93 100644
+--- a/frontend/fixtures/golden/vue-router-playground-app.json
++++ b/frontend/fixtures/golden/vue-router-playground-app.json
+@@ -367,6 +367,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/golden/vueuse-use-magic-keys.json b/frontend/fixtures/golden/vueuse-use-magic-keys.json
+index 0cd14aa..d13f4c4 100644
+--- a/frontend/fixtures/golden/vueuse-use-magic-keys.json
++++ b/frontend/fixtures/golden/vueuse-use-magic-keys.json
+@@ -460,6 +460,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/fixtures/showcase/word-marks.json b/frontend/fixtures/showcase/word-marks.json
+index f963a08..91a6a63 100644
+--- a/frontend/fixtures/showcase/word-marks.json
++++ b/frontend/fixtures/showcase/word-marks.json
+@@ -2270,6 +2270,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2325,6 +2326,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2378,6 +2380,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2456,6 +2459,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2509,6 +2513,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2567,6 +2572,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2651,6 +2657,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+@@ -2912,6 +2919,7 @@
+       "waiting": {
+         "kind": "Markers",
+         "open": "<<<<<<< ours",
++        "first": "local",
+         "between": [
+           "======="
+         ],
+diff --git a/frontend/src/editor/internal/apply.test.ts b/frontend/src/editor/internal/apply.test.ts
+index 9abbc47..2f8881f 100644
+--- a/frontend/src/editor/internal/apply.test.ts
++++ b/frontend/src/editor/internal/apply.test.ts
+@@ -32,6 +32,7 @@ type Act = (merge: ApplyTarget, chunk: Chunk) => Steps;
+ const MARKERS = {
+   kind: "Markers",
+   open: "<<<<<<< ours",
++  first: "local",
+   between: ["======="],
+   close: ">>>>>>> theirs",
+ };
+diff --git a/frontend/src/editor/internal/chunkField.test.ts b/frontend/src/editor/internal/chunkField.test.ts
+index 442e55e..332541c 100644
+--- a/frontend/src/editor/internal/chunkField.test.ts
++++ b/frontend/src/editor/internal/chunkField.test.ts
+@@ -39,6 +39,7 @@ async function synthetic(
+       waiting: {
+         kind: "Markers",
+         open: "<<<<<<< ours",
++        first: "local",
+         between: ["======="],
+         close: ">>>>>>> theirs",
+       },
+diff --git a/frontend/src/editor/internal/decorations.test.ts b/frontend/src/editor/internal/decorations.test.ts
+index 8d4d558..6a96a94 100644
+--- a/frontend/src/editor/internal/decorations.test.ts
++++ b/frontend/src/editor/internal/decorations.test.ts
+@@ -85,6 +85,7 @@ async function synthetic(
+             ? {
+                 kind: "Markers",
+                 open: "<<<<<<< ours",
++                first: "local",
+                 between: ["======="],
+                 close: ">>>>>>> theirs",
+               }
+diff --git a/frontend/src/editor/internal/fileText.test.ts b/frontend/src/editor/internal/fileText.test.ts
+index 4680bdd..1492c4c 100644
+--- a/frontend/src/editor/internal/fileText.test.ts
++++ b/frontend/src/editor/internal/fileText.test.ts
+@@ -20,6 +20,7 @@ const CLOSE = ">>>>>>> theirs";
+ const MARKERS: Chunk["waiting"] = {
+   kind: "Markers",
+   open: OPEN,
++  first: "local",
+   between: [SEPARATOR],
+   close: CLOSE,
+ };
+@@ -118,6 +119,7 @@ test.each([
+     const diff3: Chunk["waiting"] = {
+       kind: "Markers",
+       open: "<<<<<<< HEAD",
++      first: "local",
+       between: ["||||||| base", "base", SEPARATOR],
+       close: ">>>>>>> feature",
+     };
+@@ -190,6 +192,25 @@ test("a half-decided conflict keeps its markers: the decided section holds the R
+   expect(written(ignored)).toBe(`a\n${OPEN}\nL\n${SEPARATOR}\nb\n${CLOSE}\nz\n`);
+ });
+ 
++test("a conflict whose first section is the remote pane's (git's ours, as in a rebase) writes the remote lines first", async () => {
++  const remoteFirst: Chunk["waiting"] = {
++    kind: "Markers",
++    open: OPEN,
++    first: "remote",
++    between: [SEPARATOR],
++    close: CLOSE,
++  };
++  const merge = await opened(
++    { middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR1\nR2\nz\n" },
++    [{ ...CONFLICT, waiting: remoteFirst }],
++  );
++  const local = decided(merge, "apply", "local");
++  const typed = updated(local, { changes: { from: 2, insert: "typed " } });
++
++  expect(written(merge)).toBe(`a\n${OPEN}\nR1\nR2\n${SEPARATOR}\nL\n${CLOSE}\nz\n`);
++  expect(written(typed)).toBe(`a\n${OPEN}\nR1\nR2\n${SEPARATOR}\ntyped L\n${CLOSE}\nz\n`);
++});
++
+ test("a change at the end of a file without a final line break keeps the file without one", async () => {
+   const conflict = await opened({ middle: "a\nb", local: "a\nL", remote: "a\nR" }, [
+     { kind: "Conflict", middle: [1, 1], local: [1, 1], remote: [1, 1] },
+diff --git a/frontend/src/editor/internal/fileText.ts b/frontend/src/editor/internal/fileText.ts
+index 069afbf..ed25115 100644
+--- a/frontend/src/editor/internal/fileText.ts
++++ b/frontend/src/editor/internal/fileText.ts
+@@ -2,7 +2,7 @@ import { ChangeSet, type EditorState, type StateField, type Text } from "@codemi
+ 
+ import { sideLines, wholeLines, type SideDocs } from "./apply";
+ import type { ChunkSpan } from "./chunkField";
+-import { sideChanged, SIDES, type Side } from "./side";
++import { otherSide, sideChanged, SIDES, type Side } from "./side";
+ import { isResolved, isSideOpen, type ChunkState } from "./status";
+ 
+ export function dropsShownText({ chunk, status }: ChunkState): boolean {
+@@ -44,7 +44,14 @@ function writtenLines(span: ChunkSpan, doc: Text, sides: SideDocs): string[] | n
+   const remote = isSideOpen(chunk, status, "remote")
+     ? sideLines(sides.remote, chunk.remote)
+     : shown;
+-  return [waiting.open, ...local, ...waiting.between, ...remote, waiting.close];
++  const sections: Readonly<Record<Side, string[]>> = { local, remote };
++  return [
++    waiting.open,
++    ...sections[waiting.first],
++    ...waiting.between,
++    ...sections[otherSide(waiting.first)],
++    waiting.close,
++  ];
+ }
+ 
+ export function fileText(
+diff --git a/frontend/src/editor/internal/foldRuns.test.ts b/frontend/src/editor/internal/foldRuns.test.ts
+index 8c2759a..f53ebc5 100644
+--- a/frontend/src/editor/internal/foldRuns.test.ts
++++ b/frontend/src/editor/internal/foldRuns.test.ts
+@@ -48,6 +48,7 @@ async function synthetic(
+         waiting: {
+           kind: "Markers",
+           open: "<<<<<<< ours",
++          first: "local",
+           between: ["======="],
+           close: ">>>>>>> theirs",
+         },
+diff --git a/frontend/src/editor/internal/format.test.ts b/frontend/src/editor/internal/format.test.ts
+index 5330beb..f3236b5 100644
+--- a/frontend/src/editor/internal/format.test.ts
++++ b/frontend/src/editor/internal/format.test.ts
+@@ -78,6 +78,7 @@ function chunkRecord(middleLen: number): unknown {
+     waiting: {
+       kind: "Markers",
+       open: "<<<<<<< ours",
++      first: "local",
+       between: ["======="],
+       close: ">>>>>>> theirs",
+     },
+diff --git a/frontend/src/editor/internal/pane.test.ts b/frontend/src/editor/internal/pane.test.ts
+index 1672d59..cf2b683 100644
+--- a/frontend/src/editor/internal/pane.test.ts
++++ b/frontend/src/editor/internal/pane.test.ts
+@@ -197,6 +197,7 @@ async function tintedLeft(): Promise<EditorState> {
+           waiting: {
+             kind: "Markers",
+             open: "<<<<<<< ours",
++            first: "local",
+             between: ["======="],
+             close: ">>>>>>> theirs",
+           },
+diff --git a/frontend/src/editor/internal/savedPoint.test.ts b/frontend/src/editor/internal/savedPoint.test.ts
+index 0a0a974..d6339b4 100644
+--- a/frontend/src/editor/internal/savedPoint.test.ts
++++ b/frontend/src/editor/internal/savedPoint.test.ts
+@@ -104,7 +104,13 @@ function chunkRecord(id: number, kind: Chunk["kind"], line: number): unknown {
+     },
+     waiting:
+       kind === "Conflict"
+-        ? { kind: "Markers", open: "<<<<<<< ours", between: ["======="], close: ">>>>>>> theirs" }
++        ? {
++            kind: "Markers",
++            open: "<<<<<<< ours",
++            first: "local",
++            between: ["======="],
++            close: ">>>>>>> theirs",
++          }
+         : { kind: "SideLines" },
+   };
+ }
+diff --git a/frontend/src/editor/internal/sides.test.ts b/frontend/src/editor/internal/sides.test.ts
+index 0028f92..6d56a07 100644
+--- a/frontend/src/editor/internal/sides.test.ts
++++ b/frontend/src/editor/internal/sides.test.ts
+@@ -70,6 +70,7 @@ async function synthetic(
+             ? {
+                 kind: "Markers",
+                 open: "<<<<<<< ours",
++                first: "local",
+                 between: ["======="],
+                 close: ">>>>>>> theirs",
+               }
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index cd69d00..9257774 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -36,6 +36,7 @@ async function chunkWith(
+             ? {
+                 kind: "Markers",
+                 open: "<<<<<<< ours",
++                first: "local",
+                 between: ["======="],
+                 close: ">>>>>>> theirs",
+               }
+diff --git a/frontend/src/editor/internal/words.test.ts b/frontend/src/editor/internal/words.test.ts
+index a1a25ef..466b3d9 100644
+--- a/frontend/src/editor/internal/words.test.ts
++++ b/frontend/src/editor/internal/words.test.ts
+@@ -66,6 +66,7 @@ function merged({
+         ? {
+             kind: "Markers",
+             open: "<<<<<<< ours",
++            first: "local",
+             between: ["======="],
+             close: ">>>>>>> theirs",
+           }
+diff --git a/frontend/src/editor/problems.browser.test.ts b/frontend/src/editor/problems.browser.test.ts
+index f570381..44a9219 100644
+--- a/frontend/src/editor/problems.browser.test.ts
++++ b/frontend/src/editor/problems.browser.test.ts
+@@ -102,6 +102,7 @@ async function data(): Promise<FileMergeData> {
+           waiting: {
+             kind: "Markers",
+             open: "<<<<<<< ours",
++            first: "local",
+             between: ["======="],
+             close: ">>>>>>> theirs",
+           },
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index 42c2ea5..f0c1973 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -272,10 +272,13 @@ export type Side = "local" | "remote";
+ 
+ export type SideContent = { kind: "Missing" } | { kind: "Text"; lines: number } | { kind: "Binary"; bytes: number } | { kind: "NonUtf8"; bytes: number } | { kind: "TooLarge"; bytes: number } | { kind: "Link"; target: string } | { kind: "Commit"; id: string };
+ 
+-/**  What one side of the merge is: a branch, else a commit. */
+-export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string };
++/**
++ *  What one side of the operation is: a branch, a commit, the commit a revert undoes, or the
++ *  patch `git am` applies.
++ */
++export type SideName = { kind: "Branch"; name: string } | { kind: "Commit"; short_id: string; subject: string; message: string } | { kind: "Revert"; short_id: string; subject: string; message: string } | { kind: "Patch"; subject: string; message: string };
+ 
+-/**  Both sides' names, read once when the session opens; `None` when nothing names that side. */
++/**  Both panes' names, read once when the session opens; `None` when nothing names that side. */
+ export type SideNames = {
+ 	local: SideName | null,
+ 	remote: SideName | null,
+@@ -314,10 +317,11 @@ export type Waiting =
+ /**  One side changed these lines, or both the same way: written applied, as git wrote it. */
+ { kind: "SideLines" } | 
+ /**
+- *  A conflict: `open`, the local section, `between` (base section if any, then the separator),
+- *  the remote section, `close`. Lines without line breaks.
++ *  A conflict as git writes it: `open`, the section of the pane `first` (git's ours: HEAD),
++ *  `between` (base section if any, then the separator), the other pane's section, `close`.
++ *  Lines without line breaks.
+  */
+-{ kind: "Markers"; open: string; between: string[]; close: string } | 
++{ kind: "Markers"; open: string; first: Side; between: string[]; close: string } | 
+ /**  A region yamt could not place: written as the Result shows it. */
+ { kind: "AsShown" };
+ 
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index 23cca69..ab8b474 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -68,6 +68,7 @@ const DOMAIN_WORDS = {
+ const WAITING = {
+   kind: "Markers",
+   open: "<<<<<<< ours",
++  first: "local",
+   between: ["||||||| base", "b", "======="],
+   close: ">>>>>>> theirs",
+ };
+@@ -209,6 +210,7 @@ test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", as
+     waiting: {
+       kind: "Markers",
+       open: "<<<<<<< ours",
++      first: "local",
+       between: ["======="],
+       close: ">>>>>>> theirs",
+     },
+@@ -368,16 +370,37 @@ test.each([
+   ],
+   [
+     "markers without their close line",
+-    record("x.ts", { waiting: { kind: "Markers", open: "<<<<<<< ours", between: [] } }),
++    record("x.ts", {
++      waiting: { kind: "Markers", open: "<<<<<<< ours", first: "local", between: [] },
++    }),
+     "chunks.0.waiting.close",
+   ],
+   [
+     "markers whose between is one string",
+     record("x.ts", {
+-      waiting: { kind: "Markers", open: "<<<<<<< ours", between: "=======", close: ">>>>>>>" },
++      waiting: {
++        kind: "Markers",
++        open: "<<<<<<< ours",
++        first: "local",
++        between: "=======",
++        close: ">>>>>>>",
++      },
+     }),
+     "chunks.0.waiting.between",
+   ],
++  [
++    "markers whose first section is no side",
++    record("x.ts", {
++      waiting: {
++        kind: "Markers",
++        open: "<<<<<<< ours",
++        first: "ours",
++        between: ["======="],
++        close: ">>>>>>>",
++      },
++    }),
++    "chunks.0.waiting.first",
++  ],
+   ["a missing waiting", record("x.ts", { waiting: undefined }), "chunks.0.waiting"],
+ ])("a record with %s is rejected naming the file", (_case, json, detail) => {
+   expect(() => createFixtureSource(quietLog().log, { "bad.json": json })).toThrow(
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 1057335..413c7e8 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -99,6 +99,7 @@ const WAITING: v.GenericSchema<Generated.Waiting> = v.variant("kind", [
+   v.object({
+     kind: v.literal("Markers"),
+     open: v.string(),
++    first: memberOf(SIDES),
+     between: v.array(v.string()),
+     close: v.string(),
+   }),
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index 7c4dfaa..170a1b2 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -48,6 +48,7 @@ const LINE = { start: 0, len: 1 };
+ const MARKERS: Generated.Waiting = {
+   kind: "Markers",
+   open: "<<<<<<< ours",
++  first: "local",
+   between: ["||||||| base", "b", "======="],
+   close: ">>>>>>> theirs",
+ };
+diff --git a/frontend/src/ui/sideHeaders.test.ts b/frontend/src/ui/sideHeaders.test.ts
+index 37c5d05..2b16e0d 100644
+--- a/frontend/src/ui/sideHeaders.test.ts
++++ b/frontend/src/ui/sideHeaders.test.ts
+@@ -44,6 +44,33 @@ test.each<Side>(["local", "remote"])("no name leaves the plain %s header", (side
+   });
+ });
+ 
++test("a revert names the commit it undoes; hovering shows that commit's message", () => {
++  const reverted: SideName = {
++    kind: "Revert",
++    short_id: "1a2b3c4",
++    subject: "Fix parser crash",
++    message: "Fix parser crash\n\nThe lexer read past the end of the input.",
++  };
++
++  expect(sideHeader("remote", { local: null, remote: reverted })).toEqual({
++    text: "Remote (theirs): revert of 1a2b3c4 Fix parser crash",
++    tooltip: "Fix parser crash\n\nThe lexer read past the end of the input.",
++  });
++});
++
++test("a patch shows its subject; hovering shows its message", () => {
++  const patch: SideName = {
++    kind: "Patch",
++    subject: "Fix typo",
++    message: "Fix typo\n\nIn the README.",
++  };
++
++  expect(sideHeader("remote", { local: null, remote: patch })).toEqual({
++    text: "Remote (theirs): patch: Fix typo",
++    tooltip: "Fix typo\n\nIn the README.",
++  });
++});
++
+ test("each header reads its own side's name; the unnamed side stays plain", () => {
+   const onlyLocal: SideNames = { local: COMMIT, remote: null };
+   const onlyRemote: SideNames = { local: null, remote: { kind: "Branch", name: "minor" } };
+diff --git a/frontend/src/ui/sideHeaders.ts b/frontend/src/ui/sideHeaders.ts
+index 8a1c21a..ac54689 100644
+--- a/frontend/src/ui/sideHeaders.ts
++++ b/frontend/src/ui/sideHeaders.ts
+@@ -20,6 +20,13 @@ export function sideHeader(side: Side, names: SideNames): SideHeader {
+     }
+     case "Commit":
+       return { text: `${label}: ${name.short_id} ${name.subject}`, tooltip: name.message };
++    case "Revert":
++      return {
++        text: `${label}: revert of ${name.short_id} ${name.subject}`,
++        tooltip: name.message,
++      };
++    case "Patch":
++      return { text: `${label}: patch: ${name.subject}`, tooltip: name.message };
+     default: {
+       const _exhaustive: never = name;
+       return _exhaustive;
+-- 
+2.56.0
+
