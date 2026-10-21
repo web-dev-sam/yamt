@@ -171,10 +171,17 @@ test.each<[OperationView, string, string]>([
   expect(abortTitle(operation)).toBe(title);
 });
 
-test("a merge's abort message is plan #74's, word for word", () => {
-  expect(abortMessage({ kind: "Merge", merging: FEATURE, into: MAIN })).toBe(
+test.each<[OperationView, string]>([
+  [
+    { kind: "Merge", merging: FEATURE, into: MAIN },
     "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
-  );
+  ],
+  [
+    { kind: "SquashMerge", merging: FEATURE, into: MAIN },
+    "Every resolution and every save in this squash merge will be lost, and so will unsaved edits. The repository goes back to how it was before the squash merge, and yamt closes.",
+  ],
+])("a merge's abort message is plan #74's, word for word: %j", (operation, message) => {
+  expect(abortMessage(operation)).toBe(message);
 });
 
 test.each<[OperationView, string]>([
