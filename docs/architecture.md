@@ -712,7 +712,7 @@ snapshot then marks its own saved point (`markSaved`).
 
 ### 5.2 `editor/` — public surface is one class
 
-````ts
+```ts
 export class MergeController {
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), minimap (the Result's minimap shown at build, plan §2 #81), servers: LanguageServers | null (plan §2 #70) }
   setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the dark flag and the side, find and middle keymaps in all three panes (plan §2 #57)
@@ -732,6 +732,7 @@ export class MergeController {
   onSummaryChange(listener: (s: MergeSummary) => void): void;
   destroy(): void;
 }
+```
 
 The compare window's class (plan §2 #96), `editor/compare.ts`, beside it:
 
@@ -739,23 +740,21 @@ The compare window's class (plan §2 #96), `editor/compare.ts`, beside it:
 export class CompareController {
   constructor(texts: TabTexts, hosts: CompareHosts, options: CompareOptions, events: CompareEvents); // hosts { left, right, strip }; options { preferences, language: TabLanguage, columnLimit }; events { settled(columns), detected(language | null), refused(column) }
   showComparison(comparison: Comparison): boolean; // false = versions not current, dropped
-  setLanguage(language: TabLanguage): void;         // both columns
+  setLanguage(language: TabLanguage): void; // both columns
   setPreferences(preferences: Preferences): void;
-  formatLanguage(): "JSON" | "XML" | null;          // the pick, else Auto's finding; null = Format disabled
-  format(): FormatReport;                           // per column formatted | unchanged | failed { message, line }; one `yamt.format` whole-document replace each
-  moveToChange(direction: Direction): void;         // the toolbar arrows, no wrap
-  historyKey(event: KeyboardEvent): boolean;        // undo/redo in the column that has the keyboard
+  formatLanguage(): "JSON" | "XML" | null; // the pick, else Auto's finding; null = Format disabled
+  format(): FormatReport; // per column formatted | unchanged | failed { message, line }; one `yamt.format` whole-document replace each
+  moveToChange(direction: Direction): void; // the toolbar arrows, no wrap
+  historyKey(event: KeyboardEvent): boolean; // undo/redo in the column that has the keyboard
   holdsText(): boolean;
-  settleNow(): readonly ColumnText[];               // the unsent columns (close, tab close)
+  settleNow(): readonly ColumnText[]; // the unsent columns (close, tab close)
   destroy(): void;
 }
-````
+```
 
 Two `"center"` panes (own history, keymap, find, theme and language compartments), one strip of bands (`CompareStrip`,
 the same `placedBand` rule as the merge strips), the locked scroll through the generalised `ScrollSync<P>`, the colours
 from `changeTone` (WebStorm's 2-way rule). Format and Auto are the pure scanners of plan §2 #98.
-
-````
 
 Per-change apply/ignore is internal: its callers are the icons in the strips (a click or a drag over
 several, plan §2 #45; with Ctrl/Cmd both sides of a conflict, #55), Ctrl/Cmd+click and
@@ -930,7 +929,7 @@ export type WaveEnds =
   | { kind: "through"; enters; leaves }; // where a pane meets its strips
 export function wavePhase(waveLeft: number, ends: WaveEnds): WavePhase; // { offset, period } of a pane's mask (plan §2 #64): on the centre line heading down at a strip it leaves into (WAVE_DOWN_X = 5), heading up where it enters (WAVE_UP_X = 15); "through" stretches to k+½ waves, the period rounded so MASK_PERIODS (64) waves are whole CSS px, pinned at the middle of the span
 // WAVE_STROKE_PX = 1, WAVE_HOVER_STROKE_PX = 2: the wave's strokes in the panes and the strips
-````
+```
 
 `editor/internal/geometry.ts` turns chunk ranges into `Span`s and each run's displayed wave into a top
 (via `lineBlockAt`); `Frame` caches these rows with the scroll sync's anchors until the document, the
