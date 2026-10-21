@@ -1,15 +1,50 @@
 {
-  "GitOpsRead": {
-    "agent": "rust-impl",
+  "GitOpsReadBoundary": {
+    "agent": "boundary-reviewer",
     "brief": "docs/slices/briefs/3.J-read.md",
+    "owned": []
+  },
+  "GitOpsSides": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-sides.md",
     "owned": [
-      "crates/gitio/src/operation.rs",
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/src/lib.rs",
-      "crates/gitio/tests/operations.rs",
-      "crates/gitio/AGENTS.md",
+      "crates/gitio/src/entry.rs",
+      "crates/gitio/tests/repo.rs",
+      "crates/session/**",
       "crates/conflict-repo/**",
-      "crates/gitio/src/todo.rs"
+      "crates/cli/**",
+      "frontend/src/editor/internal/fileText.ts",
+      "frontend/src/editor/internal/fileText.test.ts",
+      "frontend/src/ui/sideHeaders.ts",
+      "frontend/src/ui/sideHeaders.test.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/domain.test.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/words.ts",
+      "frontend/src/ipc/words.test.ts",
+      "frontend/fixtures/**",
+      "frontend/src/editor/problems.browser.test.ts",
+      "frontend/src/editor/internal/apply.test.ts",
+      "frontend/src/editor/internal/chunkField.test.ts",
+      "frontend/src/editor/internal/decorations.test.ts",
+      "frontend/src/editor/internal/foldRuns.test.ts",
+      "frontend/src/editor/internal/format.test.ts",
+      "frontend/src/editor/internal/pane.test.ts",
+      "frontend/src/editor/internal/savedPoint.test.ts",
+      "frontend/src/editor/internal/sides.test.ts",
+      "frontend/src/editor/internal/tone.test.ts",
+      "frontend/src/editor/internal/words.test.ts"
     ]
+  },
+  "GitOpsReadCorrectness": {
+    "agent": "correctness-reviewer",
+    "brief": "docs/slices/briefs/3.J-read.md",
+    "owned": []
   }
 }
