@@ -1,24 +1,7 @@
 {
-  "GitOpsCleanupRustR2": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-cleanup-rust-rework-1.md",
-    "owned": [
-      "src-tauri/src/merge.rs",
-      "src-tauri/src/merge/tests.rs",
-      "src-tauri/AGENTS.md"
-    ]
-  },
-  "GitOpsCleanupWebR2": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.J-cleanup-web-rework-1.md",
-    "owned": [
-      "frontend/src/ui/continuing.ts",
-      "frontend/src/ui/continuing.test.ts",
-      "frontend/src/ui/summaryLabel.ts",
-      "frontend/src/ui/summaryLabel.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/AGENTS.md"
-    ]
+  "GitOpsVerify": {
+    "agent": "verifier",
+    "brief": "docs/slices/briefs/3.J-verify.md",
+    "owned": []
   }
 }

@@ -1,0 +1,116 @@
+From d85100291d31b2c2436a6292ab1843a35d4d8028 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 15:30:44 +0200
+Subject: [PATCH] fix(app): a refusal that says git moved on leaves MovedOn
+
+on_worker sets MovedOn for StopMovedOn from the worker, so the
+window's one list opens git's stop instead of answering MovedOn again
+and ending the stop twice.
+
+Refs #1440
+---
+ src-tauri/AGENTS.md          |  2 +-
+ src-tauri/src/merge.rs       |  9 +++++++--
+ src-tauri/src/merge/tests.rs | 38 ++++++++++++++++++++++++++++++++----
+ 3 files changed, 42 insertions(+), 7 deletions(-)
+
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index bf74d91..cd56f71 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`: `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]`), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `window.rs` (the one window; reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop, `stop_all` so no language server outlives a normal close, then the ending once git is done), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, plus `MergeAborted`, `GitRunning`, `MergeFinished`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`). Two `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings` and `lsp-host` only, never on `gitio` (arch-check).
+diff --git a/src-tauri/src/merge.rs b/src-tauri/src/merge.rs
+index 804c068..ced5719 100644
+--- a/src-tauri/src/merge.rs
++++ b/src-tauri/src/merge.rs
+@@ -145,7 +145,8 @@ fn moved_on(session: &MergeSession) -> Merge {
+ }
+ 
+ /// Runs `work` on a blocking worker while the merge is `Running`. git's refusal puts the session
+-/// back; a worker that panicked leaves `MovedOn` and answers `StopMovedOn`, so the window opens the stop git is at.
++/// back; a stop git left meanwhile (`StopMovedOn`) or a worker that panicked leaves `MovedOn`, so the
++/// next list opens the stop git is at.
+ async fn on_worker<T, F>(state: &MergeState, work: F) -> Result<(Box<MergeSession>, T), IpcError>
+ where
+     T: Send + 'static,
+@@ -160,7 +161,11 @@ where
+     match worker.await {
+         Ok((session, Ok(value))) => Ok((session, value)),
+         Ok((session, Err(error))) => {
+-            *lock(state) = Merge::Held(session);
++            *lock(state) = if matches!(error, yamt_session::Error::StopMovedOn) {
++                moved_on(&session)
++            } else {
++                Merge::Held(session)
++            };
+             Err(error.into())
+         }
+         Err(error) => {
+diff --git a/src-tauri/src/merge/tests.rs b/src-tauri/src/merge/tests.rs
+index 92a7182..cbda30b 100644
+--- a/src-tauri/src/merge/tests.rs
++++ b/src-tauri/src/merge/tests.rs
+@@ -317,10 +317,7 @@ fn a_worker_that_panics_leaves_moved_on_and_answers_stop_moved_on() {
+     assert!(matches!(lock(&state).session(), Err(IpcError::StopMovedOn)));
+ }
+ 
+-#[test]
+-fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
+-    let window = rebase_window();
+-    let root = window.repo.path();
++fn continued_outside(root: &Path) {
+     fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
+     git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
+     assert!(
+@@ -329,6 +326,12 @@ fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_th
+             .status
+             .success()
+     );
++}
++
++#[test]
++fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
++    let window = rebase_window();
++    continued_outside(window.repo.path());
+ 
+     let moved_on = window.invoke("list_stop", json!({}));
+ 
+@@ -341,6 +344,33 @@ fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_th
+     assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
+ }
+ 
++// The window sends a `StopMovedOn` to its next list once; that list must open the stop git is at.
++#[test]
++fn an_abort_after_git_moved_on_outside_answers_stop_moved_on_and_the_next_list_opens_the_new_stop()
++{
++    let window = rebase_window();
++    continued_outside(window.repo.path());
++
++    let aborted = window.invoke("abort_operation", json!({}));
++
++    assert_eq!(aborted, Err(json!({ "kind": "StopMovedOn" })));
++    assert!(!window.has_ended());
++    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
++}
++
++#[test]
++fn a_continue_after_git_moved_on_outside_answers_stop_moved_on_and_the_next_list_opens_the_new_stop()
++ {
++    let window = rebase_window();
++    continued_outside(window.repo.path());
++
++    let continued = window.invoke("continue_operation", json!({}));
++
++    assert_eq!(continued, Err(json!({ "kind": "StopMovedOn" })));
++    assert!(!window.has_ended());
++    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
++}
++
+ // A pick at an `edit` stop: its continue leaves the rebase at the edit, a stop without conflicts.
+ #[test]
+ fn a_continue_that_moves_on_to_a_stop_without_conflicts_lists_no_files_under_the_rebase() {
+-- 
+2.56.0
+

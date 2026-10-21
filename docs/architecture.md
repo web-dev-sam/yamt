@@ -358,9 +358,10 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   `tauri::State<Mutex<Host>>` (the language-server host, plan §2 #70), never locked together. `Merge::session()` is the
   one state → error mapping: `Running` → `GitRunning`, `MovedOn` → `StopMovedOn`, `Aborted` → `MergeAborted`,
   `Finished` → `MergeFinished`. Continue and Abort hand the session to a `spawn_blocking` worker (`on_worker`), so the
-  main thread never waits on git; the state is `Running` meanwhile, git's refusal puts the session back (`Held`), a
-  worker panic leaves `MovedOn` with the version from before the hand-over and answers `StopMovedOn`, which the window
-  takes to the next stop (#1435).
+  main thread never waits on git; the state is `Running` meanwhile. git's refusal puts the session back (`Held`); a
+  refusal that says git moved on (`StopMovedOn`, #1440) and a worker panic leave `MovedOn` (the version from before the
+  hand-over) and answer `StopMovedOn`, so the window's one `nextStop` lists the stop git is at (#1435, plan §2 note
+  after #91).
 - Commands (thin, typed with `tauri-specta`; plan §2 #41): `list_stop() -> Result<Listing>` (`Listing = Files { files,
   disk_changes, operation, sides } | MovedOn`; in `MovedOn` it first opens the next stop with `open_after`, then lists
   through `refresh_stop`: settles disk changes and re-reads git's unmerged entries, so the marks are git's view, plan

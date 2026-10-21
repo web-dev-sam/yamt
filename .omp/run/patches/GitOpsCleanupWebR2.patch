@@ -1,0 +1,119 @@
+From ca74e42e98739ff19b0c643dc6c73340de5ec47c Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 15:30:44 +0200
+Subject: [PATCH] fix(ui): Continue's moved-on refusal goes through
+ reportFailure; label order checked
+
+Refs #1438 #1439
+---
+ frontend/src/ui/AGENTS.md          |  4 ++--
+ frontend/src/ui/continuing.test.ts |  6 +++++-
+ frontend/src/ui/continuing.ts      |  8 ++------
+ frontend/src/ui/summaryLabel.ts    | 19 ++++++++++++++++---
+ 4 files changed, 25 insertions(+), 12 deletions(-)
+
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 5be0071..880baa4 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -10,7 +10,7 @@ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize h
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+-Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` goes to `nextStop({ outside })` — the writes, Abort, an open and every reload through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), Continue in `continuing.ts`. `operationText.ts` holds every operation word (the top line and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
++Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` — the writes, Abort, Continue, an open and every reload — goes once to `nextStop({ outside })` through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), the one path. `operationText.ts` holds every operation word (the top line and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
+ 
+ File marks (plan §2 #90): `FileMark.vue` renders a file's name and its mark in the list and the tree from one table per `FileStatus` (`Unresolved` none; `Resolved` the check and a muted name; `Remembered` the history icon with the rerere hint as its title and accessible name); `FileList.vue` and `FileTree.vue` pass only the status and the label.
+ 
+@@ -18,4 +18,4 @@ Git running (plan §2 #74, #89): `gitRun.ts` `createGitRun` is the one owner of
+ 
+ Abort (plan §2 #74, #88): `aborting.ts` holds the action; `AbortState` is `none` / `ready` / `running` with the listed `operation`. A refusal is the `abort` problem, naming the operation, never cleared by a path. The button is the toolbar's first icon button (#58), labelled per operation: `toolbarButtons.ts` `listedButtons(operation)` leaves it and Continue out of the menu and the toolbar while git records no operation; whether the user hid one is a separate fact, `hiddenButtons`, which starts Abort hidden.
+ 
+-Continue (plan §2 #89): `continuing.ts` holds `ContinueState` (`noOperation` / `filesLeft` — any file not `Resolved`, a `Remembered` one too — / `writing` / `ready` / `running`), the questions (unsaved files, rewords) and the action: `Stopped` goes to `nextStop`, `StopMovedOn` to `nextStop({ outside })`, a `Git` refusal is the `continue` problem and lists again. `operationText.ts` `continueAction` is the one exhaustive rule for its verb (a merge commits), object and label. `OperationButtons.vue` (Continue, and Abort where there is no toolbar) sits in the choice view's, the deleted-side view's and the stop view's header rows and in the toolbar. `StopView.vue` is the merge area of an empty stop: `emptyStop.ts` `emptyStop` (pure) decides it from the operation, the list, the screen, the problem and `stopMessage` — shown on the files screen with git's message, which never goes to the bar while the stop is empty; the store exposes it as `emptyStop`, App only binds it.
++Continue (plan §2 #89): `continuing.ts` holds `ContinueState` (`noOperation` / `filesLeft` — any file not `Resolved`, a `Remembered` one too — / `writing` / `ready` / `running`), the questions (unsaved files, rewords) and the action: `Stopped` goes to `nextStop`; every refusal goes through `reportFailure` (`StopMovedOn` to `nextStop({ outside })`, any other the `continue` problem), and a `Git` refusal lists again. `operationText.ts` `continueAction` is the one exhaustive rule for its verb (a merge commits), object and label. `OperationButtons.vue` (Continue, and Abort where there is no toolbar) sits in the choice view's, the deleted-side view's and the stop view's header rows and in the toolbar. `StopView.vue` is the merge area of an empty stop: `emptyStop.ts` `emptyStop` (pure) decides it from the operation, the list, the screen, the problem and `stopMessage` — shown on the files screen with git's message, which never goes to the bar while the stop is empty; the store exposes it as `emptyStop`, App only binds it.
+diff --git a/frontend/src/ui/continuing.test.ts b/frontend/src/ui/continuing.test.ts
+index 81c7ad3..368bcfd 100644
+--- a/frontend/src/ui/continuing.test.ts
++++ b/frontend/src/ui/continuing.test.ts
+@@ -291,11 +291,15 @@ test("another failure is reported through problemText without reading the list a
+   expect([press.lists, press.continueState.value]).toEqual([[], "ready"]);
+ });
+ 
+-test("StopMovedOn goes on to the stop git is at instead of showing a problem", async () => {
++test("StopMovedOn is logged and goes on to the stop git is at once, instead of showing a problem", async () => {
++  const lines = quiet();
+   const press = continuing();
+ 
+   await answered(press, { ok: false, failure: { kind: "StopMovedOn" } });
+ 
++  expect(lines).toEqual([
++    `[error] store.continue_failed {operation: "Rebase", kind: "StopMovedOn"}`,
++  ]);
+   expect([press.ends, press.problem.value, press.lists]).toEqual([[{ kind: "outside" }], null, []]);
+   expect(press.continueState.value).toBe("ready");
+ });
+diff --git a/frontend/src/ui/continuing.ts b/frontend/src/ui/continuing.ts
+index 94de3d1..3f5a6e9 100644
+--- a/frontend/src/ui/continuing.ts
++++ b/frontend/src/ui/continuing.ts
+@@ -12,7 +12,7 @@ import type { CloseGuard } from "./closeGuard";
+ import type { Stop } from "./currentStop";
+ import type { GitRun } from "./gitRun";
+ import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
+-import { report, type Outcome, type Problem, type ProblemCause } from "./problem";
++import { reportFailure, type Outcome, type Problem, type ProblemCause } from "./problem";
+ import type { Question } from "./question";
+ import type { StopEnd } from "./stops";
+ 
+@@ -71,11 +71,7 @@ async function refused(
+   operation: OperationView,
+   cause: ProblemCause,
+ ): Promise<void> {
+-  if (cause.kind === "StopMovedOn") {
+-    await target.nextStop({ kind: "outside" });
+-    return;
+-  }
+-  report(target, { action: "continue", operation: operation.kind, cause });
++  await reportFailure(target, { action: "continue", operation: operation.kind, cause });
+   if (cause.kind === "Git") {
+     await target.refreshFiles();
+   }
+diff --git a/frontend/src/ui/summaryLabel.ts b/frontend/src/ui/summaryLabel.ts
+index fe90ad1..b9edf8f 100644
+--- a/frontend/src/ui/summaryLabel.ts
++++ b/frontend/src/ui/summaryLabel.ts
+@@ -1,15 +1,28 @@
+ import type { MergeSummary } from "./useMergeController";
+ 
++type Key = keyof MergeSummary;
++
+ type Words = { readonly one: string; readonly many: string };
+ 
+-const SUMMARY_WORDS: Readonly<Record<keyof MergeSummary, Words>> = {
++type EveryKeyOnce<Order, Unlisted extends Key = Key> = Order extends readonly [
++  infer First extends Unlisted,
++  ...infer Rest,
++]
++  ? readonly [First, ...EveryKeyOnce<Rest, Exclude<Unlisted, First>>]
++  : Order extends readonly []
++    ? [Unlisted] extends [never]
++      ? Order
++      : never
++    : never;
++
++const LABEL_ORDER = ["changes", "conflicts", "remembered"] as const;
++
++const SUMMARY_WORDS: Readonly<Record<EveryKeyOnce<typeof LABEL_ORDER>[number], Words>> = {
+   changes: { one: "change", many: "changes" },
+   conflicts: { one: "conflict", many: "conflicts" },
+   remembered: { one: "remembered", many: "remembered" },
+ };
+ 
+-const LABEL_ORDER: readonly (keyof MergeSummary)[] = ["changes", "conflicts", "remembered"];
+-
+ export function summaryLabel(summary: MergeSummary): string {
+   const parts = LABEL_ORDER.filter((key) => summary[key] !== 0).map((key) => {
+     const count = summary[key];
+-- 
+2.56.0
+
