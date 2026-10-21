@@ -1,1 +1,10 @@
-{}
+{
+  "GitOpsPatchesTag": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-patches-tag.md",
+    "owned": [
+      "frontend/src/ui/operationText.ts",
+      "frontend/src/ui/operationText.test.ts"
+    ]
+  }
+}
