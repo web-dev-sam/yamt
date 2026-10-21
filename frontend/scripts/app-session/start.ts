@@ -31,7 +31,7 @@ type StartApp = Extract<Command, { kind: "start-app" }>;
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
-  readonly repoDir: string;
+  readonly repoDir: string | null;
   readonly binary: string;
   readonly args: readonly string[];
 };
@@ -75,7 +75,7 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   if (command.opens.kind === "raw") {
-    return { home, configDir, repoDir: "", binary, args: ["--raw"] };
+    return { home, configDir, repoDir: null, binary, args: ["--raw"] };
   }
   const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
   if (command.opens.kind === "fresh") {

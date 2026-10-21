@@ -13,6 +13,7 @@ import { allResolvedText } from "./operationText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import ServerLogView from "./ServerLogView.vue";
+import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
 import StopView from "./StopView.vue";
 import { useAppStore } from "./store";
@@ -31,7 +32,6 @@ const {
   allResolved,
   pick,
   refocus,
-  settings,
   dismissProblem,
   dismissNotice,
   answer,
@@ -42,6 +42,7 @@ const {
 
 const focused = useWindowFocus();
 const altHeld = useAltHold();
+useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
@@ -54,13 +55,6 @@ watch(focused, (now) => {
     void refocus();
   }
 });
-watch(
-  () => settings.value.theme,
-  (theme) => {
-    document.documentElement.dataset["theme"] = theme;
-  },
-  { immediate: true },
-);
 
 onMounted(() => {
   void watchWindowClose();

@@ -1,4 +1,4 @@
-import type { ShallowRef } from "vue";
+import { watch, type ShallowRef } from "vue";
 
 import type { SettingsActions, SettingsInUse } from "./settings";
 
@@ -29,4 +29,15 @@ export function useSettingsStore(): SettingsStore {
     throw new Error("useSettingsStore() called before registerSettingsStore()");
   }
   return registered;
+}
+
+export function useThemeAttribute(): void {
+  const { settings } = useSettingsStore();
+  watch(
+    () => settings.value.theme,
+    (theme) => {
+      document.documentElement.dataset["theme"] = theme;
+    },
+    { immediate: true },
+  );
 }

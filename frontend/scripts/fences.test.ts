@@ -271,22 +271,24 @@ test("a compare file importing the merge store, App.vue or lsp/ violates PM7", (
       text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
     },
     {
-      path: "src/ui/TabList.vue",
+      path: "src/ui/CompareTabList.vue",
       text: `<script setup lang="ts">\nimport "./store.ts";\n</script>`,
     },
     {
-      path: "src/ui/LanguagePicker.vue",
+      path: "src/ui/CompareLanguagePicker.vue",
       text: `<script setup lang="ts">\nimport "../lsp";\n</script>`,
     },
     { path: "src/ui/useCompareController.ts", text: `import type { X } from "../lsp/index.ts";` },
+    { path: "src/ui/useCompareFormat.test.ts", text: `import "./store";` },
   ];
 
   expect(violationsOf(files)).toEqual([
     { rule: "PM7", file: "src/ui/compareStore.ts", specifier: "./store" },
     { rule: "PM7", file: "src/ui/CompareApp.vue", specifier: "./App.vue" },
-    { rule: "PM7", file: "src/ui/TabList.vue", specifier: "./store.ts" },
-    { rule: "PM7", file: "src/ui/LanguagePicker.vue", specifier: "../lsp" },
+    { rule: "PM7", file: "src/ui/CompareTabList.vue", specifier: "./store.ts" },
+    { rule: "PM7", file: "src/ui/CompareLanguagePicker.vue", specifier: "../lsp" },
     { rule: "PM7", file: "src/ui/useCompareController.ts", specifier: "../lsp/index.ts" },
+    { rule: "PM7", file: "src/ui/useCompareFormat.test.ts", specifier: "./store" },
   ]);
 });
 
@@ -297,6 +299,7 @@ test("merge files importing the store and compare files importing their own neig
       text: `<script setup lang="ts">\nimport "./store";\n</script>`,
     },
     { path: "src/ui/compareStore.ts", text: `import "./settingsStore";\nimport "./storeless";` },
+    { path: "src/ui/TabList.vue", text: `<script setup lang="ts">\nimport "./store";\n</script>` },
     {
       path: "src/ui/CompareView.vue",
       text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,

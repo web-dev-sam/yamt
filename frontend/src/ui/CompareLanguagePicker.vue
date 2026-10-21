@@ -4,13 +4,13 @@ import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
 
 import type { TabLanguage } from "../ipc";
-import { languageLabel } from "./compareTabs";
+import { languageLabel, type Detected } from "./compareTabs";
 import { languageNames } from "./useCompareController";
 import { useDropdownMenu } from "./useDropdownMenu";
 
 type Item = { readonly label: string; readonly language: TabLanguage };
 
-const props = defineProps<{ language: TabLanguage; detected: string | null }>();
+const props = defineProps<{ language: TabLanguage; detected: Detected }>();
 const emit = defineEmits<{ pick: [language: TabLanguage] }>();
 
 const ITEMS: readonly Item[] = [

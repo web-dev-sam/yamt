@@ -5,9 +5,8 @@ import X from "~icons/lucide/x";
 
 import type { TabEntry, TabId } from "../ipc";
 import { languageLabel } from "./compareTabs";
-import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
-import ResizeDots from "./ResizeDots.vue";
-import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
+import PanelWidthHandle from "./PanelWidthHandle.vue";
+import { usePanelWidth } from "./usePanelWidth";
 
 type Renaming = { readonly tab: TabId; readonly draft: string };
 
@@ -24,35 +23,15 @@ const emit = defineEmits<{
 }>();
 
 const list = useTemplateRef<HTMLElement>("list");
-const { width, setWidth, resetWidth } = createFileListWidth();
-const resize = useColumnDrag({
-  accepts: (event) => event.target === event.currentTarget,
-  press: startResize,
-  reset: resetWidth,
-});
+const { widthStyle, resize } = usePanelWidth(list);
 const renaming = shallowRef<Renaming | null>(null);
 
-const widthStyle = computed(() =>
-  width.value === null ? FILE_LIST_BOUNDS : { ...FILE_LIST_BOUNDS, width: `${width.value}px` },
-);
 const rows = computed(() =>
   props.tabs.map((tab) => ({
     tab,
-    language: languageLabel(tab.language, props.detected.get(tab.id) ?? null),
+    language: languageLabel(tab.language, props.detected.get(tab.id)),
   })),
 );
-
-function startResize(): ColumnDrag | null {
-  if (list.value === null) {
-    return null;
-  }
-  const pressWidth = list.value.getBoundingClientRect().width;
-  return {
-    moveBy: (dx) => {
-      setWidth(pressWidth + dx, window.innerWidth);
-    },
-  };
-}
 
 function startRename(tab: TabEntry): void {
   renaming.value = { tab: tab.id, draft: tab.name };
@@ -147,15 +126,6 @@ function cancelRename(): void {
         </button>
       </li>
     </ul>
-    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Tab list width"
-      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
-      v-on="resize.listeners"
-    >
-      <ResizeDots class="absolute inset-0 m-auto size-fit" :state="resize.dots.value" />
-    </div>
+    <PanelWidthHandle label="Tab list width" :handle="resize" />
   </aside>
 </template>

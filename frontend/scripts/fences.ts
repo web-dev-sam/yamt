@@ -31,8 +31,7 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
-const COMPARE_FILE =
-  /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|TabList\.vue|LanguagePicker\.vue|useCompareController(?:\.test)?\.ts)$/;
+const COMPARE_FILE = /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|useCompare[^/]*\.ts)$/;
 const MERGE_ROOT_FILES: Record<string, true> = {
   "src/ui/store": true,
   "src/ui/store.ts": true,

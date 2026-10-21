@@ -34,6 +34,7 @@ const LINUX = "Linux x86_64";
 const LIMIT = 8 * 1024 * 1024;
 const GONE: SourceFailure = { kind: "ReadFailed", path: "/data/tabs.json", message: "denied" };
 const UNKNOWN: SourceFailure = { kind: "UnknownTab", tab: 4 };
+const MICROTASKS = 10;
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -177,6 +178,53 @@ test("add, show, rename and language write the mirror from each reply (catches a
     { name: "payloads", language: { kind: "auto" } },
   ]);
 });
+
+test("a tab's view is kept once shown, in the list's order, with its latest entry, until it closes (catches views built for unopened tabs or kept after a close)", async () => {
+  const store = await started();
+  const first = tabAt(store, 0);
+  expect(store.visited.value.map((entry) => entry.id)).toEqual([first]);
+
+  await store.addTab();
+  await store.addTab();
+  const [second, third] = [tabAt(store, 1), tabAt(store, 2)];
+  await store.showTab(first);
+  expect(store.visited.value.map((entry) => entry.id)).toEqual([first, second, third]);
+
+  await store.closeTab(second);
+  await store.renameTab(third, "later");
+  expect(store.visited.value).toEqual(store.tabs.value);
+  expect(store.visited.value.map((entry) => entry.name)).toEqual(["Compare 1", "later"]);
+});
+
+test("after a restart only the shown tab gets a view (catches every stored tab mounted at start)", async () => {
+  const before = await started();
+  await before.addTab();
+  const list = { tabs: before.tabs.value, shown: tabAt(before, 0) };
+  const store = await started((fixture) => ({
+    openCompare: async () => {
+      const start = await fixture.openCompare();
+      return start.ok ? { ...start, value: { ...start.value, list } } : start;
+    },
+  }));
+
+  expect(store.tabs.value).toBe(list.tabs);
+  expect(store.visited.value).toEqual([list.tabs[0]]);
+});
+
+test.each([
+  ["showTab", (store, tab) => store.showTab(tab)],
+  ["addTab", (store) => store.addTab()],
+] satisfies [string, Act][])(
+  "%s from the settings view shows the tabs again (catches a tab switch hidden behind the settings)",
+  async (_call, act) => {
+    const store = await started();
+    store.openSettings();
+
+    await act(store, tabAt(store, 0));
+
+    expect(store.screen.value).toEqual({ kind: "files" });
+  },
+);
 
 test("a rename shows only once its reply arrives (catches an optimistic edit of the mirror)", async () => {
   const held = gate();
@@ -395,6 +443,62 @@ test("flushAll sends each unsent column once and resolves only when every reply 
 
   expect(sent).toEqual([`${first} left l 1`, `${first} right r 1`, `${second} left s 1`]);
   expect(firstHandle.asked).toEqual(["unsent"]);
+});
+
+test("a second close request while the first flush runs waits for that same flush, sending nothing twice (catches a window closed under a running write)", async () => {
+  spyConsole();
+  const held = gate();
+  const sent: string[] = [];
+  const store = await started((fixture) => ({
+    setColumn: async (write) => {
+      sent.push(write.text);
+      await held.opened;
+      return fixture.setColumn(write);
+    },
+  }));
+  const tab = tabAt(store, 0);
+  store.track(tab, handle(true, [await sendOf(store, tab, "once")]));
+  let flushed = false;
+
+  const first = store.flushAll();
+  const second = store.flushAll();
+  void second.then(() => {
+    flushed = true;
+  });
+  await Promise.resolve();
+  expect(second).toBe(first);
+  expect([flushed, sent]).toEqual([false, ["once"]]);
+  held.open();
+  await second;
+
+  await store.flushAll();
+  expect(sent).toEqual(["once", "once"]);
+});
+
+test("flushAll waits for a save already in flight though nothing is left unsent (catches a close before a settle's write landed)", async () => {
+  spyConsole();
+  const held = gate();
+  const store = await started((fixture) => ({
+    setColumn: async (write) => {
+      await held.opened;
+      return fixture.setColumn(write);
+    },
+  }));
+  const tab = tabAt(store, 0);
+  const saving = store.saveColumn(tab, await sendOf(store, tab, "settled"));
+  let flushed = false;
+
+  const flushing = store.flushAll().then(() => {
+    flushed = true;
+  });
+  for (let tick = 0; tick < MICROTASKS; tick += 1) {
+    await Promise.resolve();
+  }
+  expect(flushed).toBe(false);
+  held.open();
+  await flushing;
+
+  expect((await saving)?.versions.left).toBe(1);
 });
 
 test("a failed flush is shown and logged, never thrown (catches a close stopped by one bad column)", async () => {

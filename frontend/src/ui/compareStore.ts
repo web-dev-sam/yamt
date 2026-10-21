@@ -43,6 +43,7 @@ export type CompareStore = SettingsStore &
   CompareNotices & {
     readonly tabs: Readonly<ShallowRef<readonly TabEntry[]>>;
     readonly shown: Readonly<ShallowRef<TabId | null>>;
+    readonly visited: Readonly<ShallowRef<readonly TabEntry[]>>;
     readonly columnLimit: Readonly<ShallowRef<number>>;
     readonly detected: Readonly<ShallowRef<ReadonlyMap<TabId, string | null>>>;
     readonly problem: Readonly<ShallowRef<Problem | null>>;
@@ -72,6 +73,7 @@ export type CompareStore = SettingsStore &
 type Refs = {
   readonly tabs: ShallowRef<readonly TabEntry[]>;
   readonly shown: ShallowRef<TabId | null>;
+  readonly visited: ShallowRef<readonly TabEntry[]>;
   readonly columnLimit: ShallowRef<number>;
   readonly detected: ShallowRef<ReadonlyMap<TabId, string | null>>;
   readonly problem: ShallowRef<Problem | null>;
@@ -85,6 +87,8 @@ type State = Refs & {
   readonly source: CompareSource;
   readonly asking: Asking;
   readonly tracked: Map<TabId, TrackedTab>;
+  readonly saving: Set<Promise<unknown>>;
+  closing: Promise<void> | null;
   latestSettings: number;
 };
 
@@ -94,6 +98,7 @@ function createRefs(startTheme: Theme): Refs {
   return {
     tabs: shallowRef<readonly TabEntry[]>([]),
     shown: shallowRef<TabId | null>(null),
+    visited: shallowRef<readonly TabEntry[]>([]),
     columnLimit: shallowRef(0),
     detected: shallowRef<ReadonlyMap<TabId, string | null>>(new Map()),
     problem: shallowRef<Problem | null>(null),
@@ -111,6 +116,8 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
     source,
     asking: createAsking(),
     tracked: new Map(),
+    saving: new Set(),
+    closing: null,
     latestSettings: 0,
   };
   const settings = settingsActions(state);
@@ -158,8 +165,10 @@ function chromeActions(
 }
 
 function adoptList(state: State, { tabs, shown }: TabList): void {
+  const seen = new Set(state.visited.value.map((tab) => tab.id));
   state.tabs.value = tabs;
   state.shown.value = shown;
+  state.visited.value = tabs.filter((tab) => tab.id === shown || seen.has(tab.id));
   if (state.problem.value?.action === "tabs") {
     state.problem.value = null;
   }
@@ -212,9 +221,11 @@ function tabActions(
   const { source } = state;
   return {
     addTab: async () => {
+      state.screen.value = { kind: "files" };
       await changeTabs(state, () => source.addTab());
     },
     showTab: async (tab) => {
+      state.screen.value = { kind: "files" };
       await changeTabs(state, () => source.showTab(tab));
     },
     closeTab: (tab) => closeTab(state, tab),
@@ -240,7 +251,10 @@ async function loadTab(state: State, tab: TabId): Promise<TabTexts | null> {
 async function saveColumn(state: State, tab: TabId, send: ColumnSend): Promise<Comparison | null> {
   const { column } = send;
   const name = tabName(state.tabs.value, tab);
-  const outcome = await attempt(() => state.source.setColumn({ tab, ...send }));
+  const writing = attempt(() => state.source.setColumn({ tab, ...send }));
+  state.saving.add(writing);
+  const outcome = await writing;
+  state.saving.delete(writing);
   if (!outcome.ok) {
     report(state, { action: "saveTab", tab, column, name, cause: outcome.cause });
     return null;
@@ -250,6 +264,14 @@ async function saveColumn(state: State, tab: TabId, send: ColumnSend): Promise<C
     state.problem.value = null;
   }
   return outcome.value;
+}
+
+async function flushAll(state: State): Promise<void> {
+  const sends = [...state.tracked].flatMap(([tab, handle]) =>
+    handle.unsent().map((send) => saveColumn(state, tab, send)),
+  );
+  await Promise.all([...sends, ...state.saving]);
+  state.closing = null;
 }
 
 function columnActions(
@@ -266,12 +288,7 @@ function columnActions(
         }
       };
     },
-    flushAll: async () => {
-      const sends = [...state.tracked].flatMap(([tab, handle]) =>
-        handle.unsent().map((send) => saveColumn(state, tab, send)),
-      );
-      await Promise.all(sends);
-    },
+    flushAll: () => (state.closing ??= flushAll(state)),
   };
 }
 
