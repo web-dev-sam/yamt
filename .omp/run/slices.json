@@ -37,28 +37,12 @@
       "frontend/src/editor/internal/words.test.ts"
     ]
   },
-  "GitOpsReadR1-2": {
+  "GitOpsReadR2": {
     "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-read-rework-1.md",
+    "brief": "docs/slices/briefs/3.J-read-rework-2.md",
     "owned": [
-      "crates/gitio/src/operation.rs",
       "crates/gitio/src/repo.rs",
-      "crates/gitio/src/todo.rs",
-      "crates/gitio/src/lib.rs",
-      "crates/gitio/tests/operations.rs",
-      "crates/gitio/AGENTS.md"
-    ]
-  },
-  "GitOpsReadR1": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-read-rework-1.md",
-    "owned": [
-      "crates/gitio/src/operation.rs",
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/src/todo.rs",
-      "crates/gitio/src/lib.rs",
-      "crates/gitio/tests/operations.rs",
-      "crates/gitio/AGENTS.md"
+      "crates/gitio/src/operation.rs"
     ]
   }
 }
