@@ -1,39 +1,16 @@
 {
-  "GitOpsRetire": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-retire.md",
+  "GitOpsContinueR2": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-continue-rework-2.md",
     "owned": [
-      "crates/gitio/**",
-      "crates/session/**",
-      "crates/cli/**",
-      "crates/conflict-repo/**",
-      "src-tauri/src/merge.rs",
-      "src-tauri/src/merge/tests.rs",
-      "src-tauri/src/commands.rs",
-      "src-tauri/src/outcome.rs",
-      "src-tauri/src/ipc_error.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/src/main.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/src/mock_window.rs",
-      "src-tauri/src/args.rs",
-      "src-tauri/src/frontend_log.rs",
-      "src-tauri/src/bin/export-bindings.rs",
-      "src-tauri/AGENTS.md",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/ChunkSource.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/fixtureOperations.ts",
-      "frontend/src/ipc/fixtureOperations.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/tauri.ts",
-      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ui/stops.ts",
+      "frontend/src/ui/emptyStop.ts",
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/stops.test.ts",
+      "frontend/src/ui/emptyStop.test.ts",
       "frontend/src/ui/saving.test.ts",
       "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/stops.test.ts",
-      "frontend/src/ui/listing.test.ts"
+      "frontend/src/ui/AGENTS.md"
     ]
   }
 }
