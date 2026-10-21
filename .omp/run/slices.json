@@ -1,9 +1,4 @@
 {
-  "GitOpsRememberedR1Correctness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-remembered-rework-1.md",
-    "owned": []
-  },
   "GitOpsRememberedR1Boundary": {
     "agent": "boundary-reviewer",
     "brief": "docs/slices/briefs/3.J-remembered-rework-1.md",
@@ -46,6 +41,13 @@
       "frontend/src/ui/AGENTS.md",
       "frontend/src/ipc/fixtureOperations.ts",
       "frontend/src/ipc/fixtureOperations.test.ts"
+    ]
+  },
+  "GitOpsRememberedR2": {
+    "agent": "rust-impl",
+    "brief": "docs/slices/briefs/3.J-remembered-rework-2.md",
+    "owned": [
+      "crates/session/**"
     ]
   }
 }

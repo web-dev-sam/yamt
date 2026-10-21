@@ -75,3 +75,5 @@ Please run `just check`, `just mutants` on the changed lines, and the src-tauri 
 ## Mutants (`just mutants 5976577`)
 
 90 — 54 caught, 24 unviable, 12 missed: conflict-repo rerere.rs (7, fixture); gitio rerere.rs:51 `is_found_or_unset -> true`; session remembered.rs:138 overlap guard `-> true` and `< -> <=`; session scratch.rs:22 AlreadyExists guard `-> true`, scratch.rs:40 `create_private_dir -> Ok(())` (moved code from start.rs).
+
+## Boundary re-check: fail — #1392–#1399 fixed; new block #1417 (a third line-ending rule). Correctness re-check: pass (#1418/#1419 dropped).
