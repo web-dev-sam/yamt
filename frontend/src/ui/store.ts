@@ -18,7 +18,7 @@ import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
 import { createContinuing, type Continuing } from "./continuing";
-import { emptyStop, keepStopMessage, type EmptyStop } from "./emptyStop";
+import { emptyStop, type EmptyStop } from "./emptyStop";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { createGitRun, type GitRun } from "./gitRun";
 import { refreshFiles } from "./listing";
@@ -143,7 +143,7 @@ function createState(refs: Refs, source: ChunkSource): State {
     refreshFiles: async () => {
       await refreshFiles(state, "running");
     },
-    nextStop: (end) => keepStopMessage(state, () => nextStop(state, end)),
+    nextStop: (end) => nextStop(state, end),
   };
   return state;
 }

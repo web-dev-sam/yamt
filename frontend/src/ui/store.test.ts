@@ -45,7 +45,7 @@ type FakeView = {
 };
 
 const MAGIC_KEYS = "vueuse-use-magic-keys.ts";
-const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+const NOTHING_LEFT = { conflicts: 0, changes: 0, remembered: 0 };
 const NO_SETTINGS: SettingsSource = {
   loadSettings: () => Promise.reject(new Error("not used")),
   setTheme: () => Promise.reject(new Error("not used")),
@@ -664,7 +664,7 @@ test("a finish with work left asks; Back writes nothing and stays, Save writes t
   );
   const store = createAppStore(source);
   await store.loadFiles();
-  const summary = { conflicts: 1, changes: 2 };
+  const summary = { conflicts: 1, changes: 2, remembered: 0 };
 
   const back = store.finish({
     path: "a.ts",

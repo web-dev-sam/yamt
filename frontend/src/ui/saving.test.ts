@@ -38,7 +38,7 @@ type Answer = (reply: SourceResult<WriteReply>) => void;
 
 const MAGIC_KEYS = await loadFixture("vueuse-use-magic-keys.ts");
 const VERSION = MAGIC_KEYS.diskVersion;
-const NOTHING_LEFT = { conflicts: 0, changes: 0 };
+const NOTHING_LEFT = { conflicts: 0, changes: 0, remembered: 0 };
 const OXFMT: FormatOutcome = { kind: "formatted", server: "oxfmt" };
 const TWO_LEFT: DiskResult = { kind: "MarkersLeft", conflicts: 2 };
 

@@ -131,6 +131,7 @@ function stopAt(
     active: shallowRef<string | null>("a.ts"),
     screen: shallowRef<Screen>({ kind: "serverLog", name: "oxlint" }),
     operation: shallowRef<OperationView | null>(operation),
+    stopMessage: shallowRef<string | null>("the old stop's message"),
     asking: createAsking(),
     guard: { unsavedFiles: () => [...unsaved] },
     latestOpen: 4,
@@ -165,6 +166,7 @@ test("a new stop drops every opened file, choice, side taken, notice, problem an
       formatOutcomes: stop.formatOutcomes.value,
       active: stop.active.value,
       problem: stop.problem.value,
+      stopMessage: stop.stopMessage.value,
       screen: stop.screen.value,
     });
     return listing();
@@ -181,6 +183,7 @@ test("a new stop drops every opened file, choice, side taken, notice, problem an
       formatOutcomes: new Map(),
       active: null,
       problem: null,
+      stopMessage: null,
       screen: { kind: "files" },
     },
   ]);
@@ -240,7 +243,7 @@ test("moved on outside without unsaved edits, or continued with them, gives no n
   expect([clean.notices.value, continued.notices.value]).toEqual([[], []]);
 });
 
-test("continued to a stop that lists no file shows git's message, naming the new stop's operation", async () => {
+test("continued to a stop that lists no file shows git's message, naming the new stop's operation, and keeps it for the stop view", async () => {
   quiet();
   const stop = stopAt([], { files: [], operation: CHERRY_PICK });
 
@@ -252,6 +255,7 @@ test("continued to a stop that lists no file shows git's message, naming the new
     operation: "CherryPick",
     message: "error: could not apply 8b4e7d0\n",
   });
+  expect(stop.stopMessage.value).toBe("error: could not apply 8b4e7d0\n");
   expect(problem === null ? null : problemText(problem, LINUX)).toBe(
     "The cherry-pick stopped: error: could not apply 8b4e7d0",
   );
@@ -266,6 +270,7 @@ test("continued to a stop with files, or one whose list failed, shows no message
   await nextStop(failed, { kind: "continued", message: "CONFLICT (content)" });
 
   expect([listed.problem.value, failed.problem.value]).toEqual([null, null]);
+  expect([listed.stopMessage.value, failed.stopMessage.value]).toEqual([null, null]);
 });
 
 test("moved on outside to a stop that lists no file shows no message", async () => {
@@ -275,6 +280,7 @@ test("moved on outside to a stop that lists no file shows no message", async () 
   await nextStop(stop, { kind: "outside" });
 
   expect(stop.problem.value).toBeNull();
+  expect(stop.stopMessage.value).toBeNull();
 });
 
 test("moved on outside from a stop that recorded no operation: the notice says Git moved on", async () => {
@@ -294,7 +300,7 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
   const finishing = finish(stop, {
     path: "a.ts",
     diskVersion: MAGIC_KEYS.diskVersion,
-    summary: { conflicts: 1, changes: 0 },
+    summary: { conflicts: 1, changes: 0, remembered: 0 },
     snapshot: { asShown: () => "the old stop's text\n", markSaved: () => undefined },
   });
   expect(stop.asking.question.value?.kind).toBe("unprocessed");

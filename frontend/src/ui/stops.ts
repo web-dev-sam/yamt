@@ -23,6 +23,7 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
     readonly screen: ShallowRef<Screen>;
     readonly formatOutcomes: FormatOutcomes;
     readonly operation: Readonly<ShallowRef<OperationView | null>>;
+    readonly stopMessage: ShallowRef<string | null>;
     readonly asking: Pick<Asking, "question" | "dismiss">;
     readonly guard: Pick<CloseGuard, "unsavedFiles">;
     latestOpen: number;
@@ -43,6 +44,7 @@ function clearStop(target: StopTarget): void {
   target.formatOutcomes.value = new Map();
   target.active.value = null;
   target.problem.value = null;
+  target.stopMessage.value = null;
   target.screen.value = { kind: "files" };
 }
 
@@ -56,6 +58,7 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> 
   }
   const listed = await target.loadFiles();
   if (end.kind === "continued" && listed !== null && listed.length === 0) {
+    target.stopMessage.value = end.message;
     report(target, {
       action: "stopped",
       operation: target.operation.value?.kind ?? null,

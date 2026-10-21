@@ -1,8 +1,7 @@
 import { expect, test } from "vitest";
-import { shallowRef } from "vue";
 
 import type { FileEntry, OperationView } from "../ipc";
-import { emptyStop, keepStopMessage, type StopFacts } from "./emptyStop";
+import { emptyStop, type StopFacts } from "./emptyStop";
 import type { Problem } from "./problem";
 
 const REBASE: OperationView = {
@@ -71,22 +70,4 @@ test("a later close or continue problem goes to the bar and leaves git's message
       barProblem: problem,
     });
   }
-});
-
-test("the next stop keeps git's message only when it ends at a stopped problem, and forgets the old one meanwhile", async () => {
-  const target = { problem: shallowRef<Problem | null>(null), stopMessage: shallowRef("old") };
-  const during: (string | null)[] = [];
-
-  await keepStopMessage(target, () => {
-    during.push(target.stopMessage.value);
-    target.problem.value = STOPPED;
-    return Promise.resolve();
-  });
-  expect([during, target.stopMessage.value]).toEqual([[null], `${MESSAGE}\n`]);
-
-  await keepStopMessage(target, () => {
-    target.problem.value = CLOSE;
-    return Promise.resolve();
-  });
-  expect(target.stopMessage.value).toBeNull();
 });
