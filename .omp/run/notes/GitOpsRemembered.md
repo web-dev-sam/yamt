@@ -83,3 +83,7 @@ Checks for Main on the merged tree: `just check`, `just bindings-check`, `just m
 ## Mutants (`just mutants a28eed5`)
 
 Rust 76 — 43 caught, 29 unviable, 4 missed: conflict-repo rerere.rs:31 (delete field remote), rerere.rs:54 (delete !) — fixture; session remembered.rs:51 `looks_resolved -> true`, remembered.rs:54 `&& -> ||` in looks_resolved. TS changed lines 22 — 20 killed, 2 survived: fixture.ts:108 `Remembered` valibot schema (`v.object({})`, literal "").
+
+## Boundary review (GitOpsRememberedBoundary): pass
+
+Shoulds #1392–#1397, nits #1398/#1399 (promoted; #1397 docs part to the orchestrator).

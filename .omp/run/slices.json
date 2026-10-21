@@ -42,11 +42,6 @@
       "frontend/src/ui/currentStop.test.ts"
     ]
   },
-  "GitOpsRememberedBoundary": {
-    "agent": "boundary-reviewer",
-    "brief": "docs/slices/briefs/3.J-remembered.md",
-    "owned": []
-  },
   "GitOpsRememberedCorrectness": {
     "agent": "correctness-reviewer",
     "brief": "docs/slices/briefs/3.J-remembered.md",
