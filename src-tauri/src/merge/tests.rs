@@ -317,10 +317,7 @@ fn a_worker_that_panics_leaves_moved_on_and_answers_stop_moved_on() {
     assert!(matches!(lock(&state).session(), Err(IpcError::StopMovedOn)));
 }
 
-#[test]
-fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
-    let window = rebase_window();
-    let root = window.repo.path();
+fn continued_outside(root: &Path) {
     fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
     git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
     assert!(
@@ -329,6 +326,12 @@ fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_th
             .status
             .success()
     );
+}
+
+#[test]
+fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_the_new_stop() {
+    let window = rebase_window();
+    continued_outside(window.repo.path());
 
     let moved_on = window.invoke("list_stop", json!({}));
 
@@ -338,6 +341,33 @@ fn a_list_after_a_terminal_rebase_continue_is_moved_on_and_the_next_one_lists_th
         window.invoke("load_file", load),
         Err(json!({ "kind": "StopMovedOn" }))
     );
+    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
+}
+
+// The window sends a `StopMovedOn` to its next list once; that list must open the stop git is at.
+#[test]
+fn an_abort_after_git_moved_on_outside_answers_stop_moved_on_and_the_next_list_opens_the_new_stop()
+{
+    let window = rebase_window();
+    continued_outside(window.repo.path());
+
+    let aborted = window.invoke("abort_operation", json!({}));
+
+    assert_eq!(aborted, Err(json!({ "kind": "StopMovedOn" })));
+    assert!(!window.has_ended());
+    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
+}
+
+#[test]
+fn a_continue_after_git_moved_on_outside_answers_stop_moved_on_and_the_next_list_opens_the_new_stop()
+ {
+    let window = rebase_window();
+    continued_outside(window.repo.path());
+
+    let continued = window.invoke("continue_operation", json!({}));
+
+    assert_eq!(continued, Err(json!({ "kind": "StopMovedOn" })));
+    assert!(!window.has_ended());
     assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
 }
 

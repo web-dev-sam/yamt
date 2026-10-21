@@ -145,7 +145,8 @@ fn moved_on(session: &MergeSession) -> Merge {
 }
 
 /// Runs `work` on a blocking worker while the merge is `Running`. git's refusal puts the session
-/// back; a worker that panicked leaves `MovedOn` and answers `StopMovedOn`, so the window opens the stop git is at.
+/// back; a stop git left meanwhile (`StopMovedOn`) or a worker that panicked leaves `MovedOn`, so the
+/// next list opens the stop git is at.
 async fn on_worker<T, F>(state: &MergeState, work: F) -> Result<(Box<MergeSession>, T), IpcError>
 where
     T: Send + 'static,
@@ -160,7 +161,11 @@ where
     match worker.await {
         Ok((session, Ok(value))) => Ok((session, value)),
         Ok((session, Err(error))) => {
-            *lock(state) = Merge::Held(session);
+            *lock(state) = if matches!(error, yamt_session::Error::StopMovedOn) {
+                moved_on(&session)
+            } else {
+                Merge::Held(session)
+            };
             Err(error.into())
         }
         Err(error) => {
