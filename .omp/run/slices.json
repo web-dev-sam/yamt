@@ -1,1 +1,15 @@
-{}
+{
+  "GitOpsTag": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-operation-tag.md",
+    "owned": [
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/FileList.vue",
+      "frontend/src/ui/OperationBar.vue",
+      "frontend/src/ui/OperationLabel.vue",
+      "frontend/src/ui/operationText.ts",
+      "frontend/src/ui/operationText.test.ts",
+      "frontend/src/ui/AGENTS.md"
+    ]
+  }
+}
