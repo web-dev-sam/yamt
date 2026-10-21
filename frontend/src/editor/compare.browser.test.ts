@@ -2,7 +2,7 @@ import "../style.css";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
-import { createFixtureCompareSource, DEFAULT_KEYS, log, type TabTexts } from "../ipc";
+import { DEFAULT_KEYS, loadCompareFixture } from "../ipc";
 import { CompareController, type CompareEvents, type CompareHosts } from "./index";
 import type { CompareOptions } from "./index";
 import { found } from "./paneHarness";
@@ -107,19 +107,6 @@ const CASE = {
   ],
 };
 
-async function texts(): Promise<TabTexts> {
-  const source = createFixtureCompareSource(log, "?raw=probe", { "probe.json": CASE });
-  const start = await source.openCompare();
-  if (!start.ok) {
-    throw new Error("the fixture compare did not open");
-  }
-  const tab = await source.loadTab(start.value.list.shown);
-  if (!tab.ok) {
-    throw new Error("the fixture compare lost its tab");
-  }
-  return tab.value;
-}
-
 function box(style: string): HTMLDivElement {
   const node = document.createElement("div");
   node.setAttribute("style", style);
@@ -159,7 +146,8 @@ const controllers: CompareController[] = [];
 
 async function opened(): Promise<{ hosts: CompareHosts; controller: CompareController }> {
   const hosts = mount();
-  const controller = new CompareController(await texts(), hosts, OPTIONS, EVENTS);
+  const texts = await loadCompareFixture("probe", { "probe.json": CASE });
+  const controller = new CompareController(texts, hosts, OPTIONS, EVENTS);
   controllers.push(controller);
   return { hosts, controller };
 }

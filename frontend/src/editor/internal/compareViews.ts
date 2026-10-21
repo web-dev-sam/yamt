@@ -75,6 +75,7 @@ export function keyboardColumn(views: ColumnViews): Column | null {
 export function revealDifference(view: EditorView, direction: Direction): void {
   const { state } = view;
   const target = nextDifference(
+    state.doc,
     state.field(differenceField).spans,
     toDocPos(state.selection.main.head),
     direction,

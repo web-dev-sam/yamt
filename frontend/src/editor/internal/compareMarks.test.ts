@@ -2,7 +2,7 @@ import { Text } from "@codemirror/state";
 import type { DecorationSet } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureCompareSource, log, type Difference } from "../../ipc";
+import { loadCompareFixture, type Difference } from "../../ipc";
 import { columnMarks } from "./compareMarks";
 
 const LEFT = "same\nold word!\ngone\nend\n";
@@ -43,16 +43,7 @@ const CASE = {
 };
 
 async function differences(): Promise<readonly Difference[]> {
-  const source = createFixtureCompareSource(log, "?raw=case", { "case.json": CASE });
-  const start = await source.openCompare();
-  if (!start.ok) {
-    throw new Error("fixture compare did not open");
-  }
-  const tab = await source.loadTab(start.value.list.shown);
-  if (!tab.ok) {
-    throw new Error("fixture compare lost its tab");
-  }
-  return tab.value.comparison.differences;
+  return (await loadCompareFixture("case", { "case.json": CASE })).comparison.differences;
 }
 
 function painted(doc: Text, set: DecorationSet): string[] {

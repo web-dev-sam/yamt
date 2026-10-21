@@ -60,7 +60,7 @@ export type {
 } from "./domain";
 export { nextColumnVersion } from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
-export { createFixtureCompareSource } from "./fixtureCompare";
+export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
 export { createFixtureServerHost } from "./fixtureServers";
 export {
   bindingsOf,

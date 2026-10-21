@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { TabList } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
 import { nextColumnVersion, type SourceResult, type TabId } from "./domain";
-import { createFixtureCompareSource } from "./fixtureCompare";
+import { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
 import { createLog, type Log, type LogEntry } from "./log";
 
 const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
@@ -121,6 +121,24 @@ test.each(["?raw", "?raw="])(
 test("an unknown ?raw case fails the start naming it and the known ones", () => {
   expect(() => createFixtureCompareSource(quietLog().log, "?raw=nope")).toThrow(
     "no compare fixture nope; known: json-payload, typescript, words",
+  );
+});
+
+test("loadCompareFixture reads a committed or an in-memory case as tab 1 and rejects an unknown name", async () => {
+  const words = committedCase("words");
+  const loaded = await loadCompareFixture("words");
+  const inMemory = { left: "a\n", right: "b\n", differences: [] };
+
+  expect(loaded.left).toBe(words.left);
+  expect(loaded.right).toBe(words.right);
+  expect(loaded.comparison.differences).toEqual(words.differences);
+  expect(await loadCompareFixture("case", { "case.json": inMemory })).toEqual({
+    left: "a\n",
+    right: "b\n",
+    comparison: { versions: { left: 0, right: 0 }, differences: [] },
+  });
+  await expect(loadCompareFixture("nope", { "case.json": inMemory })).rejects.toThrow(
+    "no compare fixture nope; known: case",
   );
 });
 

@@ -12,6 +12,7 @@ import {
   type Difference,
   type TabLanguage,
   type TabList,
+  type TabTexts,
 } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
 import type { SourceResult } from "./domain";
@@ -94,12 +95,14 @@ function addTab(tabs: Tabs): FixtureTab {
   return tab;
 }
 
-function firstTabs(search: string, cases: ReadonlyMap<string, Case>): Tabs {
+function firstTabs(
+  raw: string | null,
+  cases: ReadonlyMap<string, Case>,
+): { readonly tabs: Tabs; readonly first: FixtureTab } {
   const tabs: Tabs = { list: [], shown: FIRST_TAB_ID, nextId: FIRST_TAB_ID };
   const first = addTab(tabs);
-  const raw = new URLSearchParams(search).get("raw");
   if (raw === null || raw === "") {
-    return tabs;
+    return { tabs, first };
   }
   const shown = cases.get(raw);
   if (shown === undefined) {
@@ -107,7 +110,7 @@ function firstTabs(search: string, cases: ReadonlyMap<string, Case>): Tabs {
   }
   first.texts.left = shown.left;
   first.texts.right = shown.right;
-  return tabs;
+  return { tabs, first };
 }
 
 function tabListDto(tabs: Tabs): Generated.TabList {
@@ -141,6 +144,12 @@ function differencesOf(
 ): readonly Difference[] | undefined {
   return [...cases.values()].find((each) => each.left === texts.left && each.right === texts.right)
     ?.differences;
+}
+
+function tabTexts(cases: ReadonlyMap<string, Case>, { texts, versions }: FixtureTab): TabTexts {
+  const differences = differencesOf(cases, texts) ?? [];
+  const comparison = { versions: toColumnVersions(versions), differences };
+  return { left: texts.left, right: texts.right, comparison };
 }
 
 function closeTab(tabs: Tabs, tab: number): SourceResult<TabList> {
@@ -219,18 +228,14 @@ export function createFixtureCompareSource(
   files: Readonly<Record<string, unknown>> = CASE_FILES,
 ): CompareSource {
   const cases = parseCases(files);
-  const tabs = firstTabs(search, cases);
+  const { tabs } = firstTabs(new URLSearchParams(search).get("raw"), cases);
   return {
     async openCompare() {
       const start = { list: tabListDto(tabs), column_limit: COLUMN_LIMIT_BYTES };
       return { ok: true, value: toCompareStart(start) };
     },
     async loadTab(tab) {
-      return withTab(tabs, tab, ({ texts, versions }) => {
-        const differences = differencesOf(cases, texts) ?? [];
-        const comparison = { versions: toColumnVersions(versions), differences };
-        return { ok: true, value: { left: texts.left, right: texts.right, comparison } };
-      });
+      return withTab(tabs, tab, (found) => ({ ok: true, value: tabTexts(cases, found) }));
     },
     async setColumn(write) {
       return setColumn({ log, cases, tabs }, write);
@@ -238,4 +243,12 @@ export function createFixtureCompareSource(
     ...tabActions(tabs),
     ...createFixtureSettings(),
   };
+}
+
+export async function loadCompareFixture(
+  name: string,
+  files: Readonly<Record<string, unknown>> = CASE_FILES,
+): Promise<TabTexts> {
+  const cases = parseCases(files);
+  return tabTexts(cases, firstTabs(name, cases).first);
 }

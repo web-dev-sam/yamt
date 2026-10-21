@@ -2,7 +2,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { expect, test } from "vitest";
 
-import { createFixtureCompareSource, log, type Difference } from "../../ipc";
+import { loadCompareFixture } from "../../ipc";
 import { differenceField, showDifferences } from "./compareFields";
 import { columnMarks } from "./compareMarks";
 
@@ -24,22 +24,10 @@ const CASE = {
   ],
 };
 
-async function differences(): Promise<readonly Difference[]> {
-  const source = createFixtureCompareSource(log, "?raw=case", { "case.json": CASE });
-  const start = await source.openCompare();
-  if (!start.ok) {
-    throw new Error("fixture compare did not open");
-  }
-  const tab = await source.loadTab(start.value.list.shown);
-  if (!tab.ok) {
-    throw new Error("fixture compare lost its tab");
-  }
-  return tab.value.comparison.differences;
-}
-
 async function shown(): Promise<EditorState> {
   const state = EditorState.create({ doc: LEFT, extensions: differenceField });
-  const marks = columnMarks(state.doc, await differences(), "left");
+  const { comparison } = await loadCompareFixture("case", { "case.json": CASE });
+  const marks = columnMarks(state.doc, comparison.differences, "left");
   return state.update({ effects: showDifferences.of(marks) }).state;
 }
 
