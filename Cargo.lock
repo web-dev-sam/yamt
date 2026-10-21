@@ -4595,7 +4595,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-app"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "gtk",
  "serde",
@@ -4615,7 +4615,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-cli"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "proptest",
  "serde_json",
@@ -4628,7 +4628,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-conflict-repo"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "tempfile",
  "thiserror 2.0.21",
@@ -4636,7 +4636,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-gitio"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "tempfile",
  "thiserror 2.0.21",
@@ -4646,7 +4646,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-lsp-host"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "serde",
  "specta",
@@ -4656,7 +4656,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-merge-core"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "imara-diff",
  "proptest",
@@ -4666,7 +4666,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-session"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "serde",
  "specta",
@@ -4679,7 +4679,7 @@ dependencies = [
 
 [[package]]
 name = "yamt-settings"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "serde",
  "serde_json",

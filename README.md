@@ -24,13 +24,13 @@ _A three-way merge window like the one in JetBrains IDEs, for every git conflict
 
 Download from the [releases page](../../releases):
 
-- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.4.1_amd64.deb`)
+- **Linux**: the `.AppImage` or the `.deb`. The `.deb` (`sudo apt install ./yamt_0.4.2_amd64.deb`)
   puts `yamt` on your PATH. For the AppImage, put it there yourself.
 
   Without AppImageLauncher:
 
   ```sh
-  install -Dm755 yamt_0.4.1_amd64.AppImage ~/.local/bin/yamt
+  install -Dm755 yamt_0.4.2_amd64.AppImage ~/.local/bin/yamt
   ```
 
   With AppImageLauncher (it stops a copy outside its folder with a dialog): let it integrate the
@@ -38,8 +38,8 @@ Download from the [releases page](../../releases):
   file:
 
   ```sh
-  ail-cli integrate yamt_0.4.1_amd64.AppImage
-  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.4.1_amd64_*.AppImage ~/.local/bin/yamt
+  ail-cli integrate yamt_0.4.2_amd64.AppImage
+  mkdir -p ~/.local/bin && ln -sf ~/Applications/yamt_0.4.2_amd64_*.AppImage ~/.local/bin/yamt
   ```
 
   If `yamt` is then not found, `~/.local/bin` is not on your PATH: add

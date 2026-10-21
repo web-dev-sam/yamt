@@ -1,1 +1,7 @@
-{}
+{
+  "Release042Verify": {
+    "agent": "verifier",
+    "brief": "docs/slices/briefs/release-0.4.2-verify.md",
+    "owned": []
+  }
+}

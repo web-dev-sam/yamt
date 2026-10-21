@@ -7,11 +7,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-22
+
 ### Added
 
 - A gray tag at the bottom of the file list names what git is doing — MERGE, SQUASH MERGE, REBASE, CHERRY-PICK,
-  REVERT or PATCHES (`git am`); hover it for what is applied onto what, how far a sequence is ("Rebasing feature onto main · 2 of 5")
-  and the full commit message.
+  REVERT or PATCHES (`git am`); hover it for what is applied onto what, how far a sequence is ("Rebasing feature
+  onto main · 2 of 5") and the full commit message.
 - **Continue** (Continue rebase / cherry-pick / revert / applying patches, Commit merge for a merge) right after Mark
   resolved: once every file is resolved it runs git's own continue with git's prepared commit message and shows the
   next stop's conflicts without a restart; when git finishes, yamt closes with status 0. It asks first about unsaved
@@ -258,7 +260,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.4.1...HEAD
+[Unreleased]: ../../compare/v0.4.2...HEAD
+[0.4.2]: ../../compare/v0.4.1...v0.4.2
 [0.4.1]: ../../compare/v0.4.0...v0.4.1
 [0.4.0]: ../../compare/v0.3.2...v0.4.0
 [0.3.2]: ../../compare/v0.3.1...v0.3.2
