@@ -1,21 +1,14 @@
 import "../theme.css";
-import { bandPath, type Span } from "../../connectors";
+import type { Span } from "../../connectors";
 import type { Column } from "../../ipc";
-import { crossesStrip } from "./gap";
+import { placedBand } from "./gap";
+import { dropMissing, keepEditorFocus } from "./strips";
 import type { ChangeTone } from "./tone";
 
 export type CompareRow = Readonly<Record<Column, Span>> & { readonly tone: ChangeTone };
 export type StripPanes = Readonly<Record<Column, { readonly documentTop: number }>>;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-
-function shiftedSpan({ top, bottom }: Span, by: number): Span {
-  return { top: top + by, bottom: bottom + by };
-}
-
-function keepEditorFocus(event: MouseEvent): void {
-  event.preventDefault();
-}
 
 export class CompareStrip {
   readonly #strip: SVGSVGElement;
@@ -31,14 +24,15 @@ export class CompareStrip {
   paint(panes: StripPanes, rows: readonly CompareRow[]): void {
     const strip = this.#strip;
     const stripTop = strip.getBoundingClientRect().top;
-    const width = strip.clientWidth;
-    const height = strip.clientHeight;
+    const shifts = {
+      left: panes.left.documentTop - stripTop,
+      right: panes.right.documentTop - stripTop,
+    };
+    const size = { width: strip.clientWidth, height: strip.clientHeight };
     const kept = new Set<string>();
     rows.forEach((row, index) => {
-      const left = shiftedSpan(row.left, panes.left.documentTop - stripTop);
-      const right = shiftedSpan(row.right, panes.right.documentTop - stripTop);
-      const top = Math.min(left.top, right.top);
-      if (!crossesStrip(top, Math.max(left.bottom, right.bottom), height)) {
+      const d = placedBand(row.left, row.right, shifts, size);
+      if (d === null) {
         return;
       }
       const key = `${index} ${row.tone}`;
@@ -50,14 +44,11 @@ export class CompareStrip {
         this.#bands.set(key, path);
         this.#layer.append(path);
       }
-      path.setAttribute("d", bandPath({ left, right }, width));
+      path.setAttribute("d", d);
     });
-    for (const [key, path] of this.#bands) {
-      if (!kept.has(key)) {
-        path.remove();
-        this.#bands.delete(key);
-      }
-    }
+    dropMissing(this.#bands, kept, (path) => {
+      path.remove();
+    });
   }
 
   destroy(): void {

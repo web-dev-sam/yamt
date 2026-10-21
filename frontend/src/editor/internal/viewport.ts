@@ -64,3 +64,14 @@ export function revealScrollTop(
   const offset = fits ? Math.min(height / REVEAL_PARTS, height - gap - changeHeight) : gap;
   return Math.max(0, span.top - offset + paddingTop);
 }
+
+export function revealSpan(view: EditorView, span: Span): void {
+  const scrollTop = revealScrollTop(span, {
+    area: visibleArea(view),
+    lineHeight: view.defaultLineHeight,
+    paddingTop: view.documentPadding.top,
+  });
+  if (scrollTop !== null) {
+    view.scrollDOM.scrollTop = scrollTop;
+  }
+}

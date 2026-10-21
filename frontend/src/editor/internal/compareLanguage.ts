@@ -1,8 +1,8 @@
-import type { EditorState } from "@codemirror/state";
+import type { EditorState, Text } from "@codemirror/state";
 
 import type { Column, TabLanguage } from "../../ipc";
 import { isFormatLanguage, type FormatLanguage } from "./compareFormat";
-import { detectLanguage } from "./detectLanguage";
+import { detectLanguage, OPENING_CHARS } from "./detectLanguage";
 import { languageNamed, loadLanguage, type LanguageView } from "./language";
 import { languageCompartment } from "./pane";
 
@@ -10,6 +10,20 @@ type LanguageColumn = LanguageView & { readonly state: EditorState };
 type Finding = { readonly name: string | null };
 
 const LOG_PATH = "compare";
+const NOT_SPACE = /\S/;
+
+export function columnOpening(doc: Text): string {
+  let offset = 0;
+  for (const iter = doc.iter(); !iter.next().done;) {
+    const found = iter.value.search(NOT_SPACE);
+    if (found !== -1) {
+      const start = offset + found;
+      return doc.sliceString(start, start + OPENING_CHARS);
+    }
+    offset += iter.value.length;
+  }
+  return "";
+}
 
 export class CompareLanguage {
   readonly #columns: Readonly<Record<Column, LanguageColumn>>;
@@ -59,7 +73,7 @@ export class CompareLanguage {
 
   #detect(): void {
     const { left, right } = this.#columns;
-    const name = detectLanguage(left.state.sliceDoc(), right.state.sliceDoc());
+    const name = detectLanguage(columnOpening(left.state.doc), columnOpening(right.state.doc));
     if (this.#finding === null || this.#finding.name !== name) {
       this.#finding = { name };
       this.#detected(name);

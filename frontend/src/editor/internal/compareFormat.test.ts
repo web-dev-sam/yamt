@@ -1,14 +1,15 @@
 import { history, undo, undoDepth } from "@codemirror/commands";
-import { EditorState, type TransactionSpec } from "@codemirror/state";
-import { expect, test } from "vitest";
+import { EditorState, type Extension, type TransactionSpec } from "@codemirror/state";
+import { expect, test, vi } from "vitest";
 
+import { columnLimit } from "./columnBytes";
 import { formatColumns, type FormatTarget } from "./compareFormat";
 
 type Held = FormatTarget & { state: EditorState };
 
-function column(text: string): Held {
+function column(text: string, extensions: Extension = []): Held {
   const held: Held = {
-    state: EditorState.create({ doc: text, extensions: history() }),
+    state: EditorState.create({ doc: text, extensions: [history(), extensions] }),
     dispatch(spec: TransactionSpec) {
       held.state = held.state.update(spec).state;
     },
@@ -68,4 +69,16 @@ test("an already formatted column reports unchanged and adds no undo step", () =
   expect(xml.right).toEqual({ kind: "formatted" });
   expect(right.state.sliceDoc()).toBe("<a>\n  <b>x</b>\n</a>\n");
   expect(xml.left).toEqual({ kind: "unchanged" });
+});
+
+test("a formatted text past the column limit is refused and reported unchanged", () => {
+  const refused = vi.fn<() => void>();
+  const left = column(MINIFIED, columnLimit(MINIFIED.length, refused));
+
+  const report = formatColumns({ left, right: column(MINIFIED) }, "JSON");
+
+  expect(refused).toHaveBeenCalledTimes(1);
+  expect(report).toEqual({ left: { kind: "unchanged" }, right: { kind: "formatted" } });
+  expect(left.state.sliceDoc()).toBe(MINIFIED);
+  expect(undoDepth(left.state)).toBe(0);
 });

@@ -29,17 +29,18 @@ export function isFormatLanguage(name: string): name is FormatLanguage {
 }
 
 function formatColumn(target: FormatTarget, language: FormatLanguage): ColumnFormat {
+  const { doc } = target.state;
   const result = FORMATTERS[language](target.state.sliceDoc());
-  if (result.kind === "formatted") {
-    target.dispatch({
-      changes: { from: 0, to: target.state.doc.length, insert: result.text },
-      selection: EditorSelection.cursor(0),
-      userEvent: "yamt.format",
-      annotations: isolateHistory.of("full"),
-    });
-    return { kind: "formatted" };
+  if (result.kind !== "formatted") {
+    return result;
   }
-  return result;
+  target.dispatch({
+    changes: { from: 0, to: doc.length, insert: result.text },
+    selection: EditorSelection.cursor(0),
+    userEvent: "yamt.format",
+    annotations: isolateHistory.of("full"),
+  });
+  return { kind: target.state.doc === doc ? "unchanged" : "formatted" };
 }
 
 export function formatColumns(

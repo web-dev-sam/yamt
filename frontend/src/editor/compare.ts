@@ -3,19 +3,14 @@ import type { ViewUpdate } from "@codemirror/view";
 
 import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
 import { showDifferences } from "./internal/compareFields";
+import { keyboardColumn, revealDifference } from "./internal/compareFocus";
 import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
 import { CompareFrame } from "./internal/compareFrame";
 import { CompareLanguage } from "./internal/compareLanguage";
 import { columnMarks } from "./internal/compareMarks";
 import { Settle } from "./internal/compareSettle";
 import { CompareStrip } from "./internal/compareStrip";
-import {
-  COLUMNS,
-  createColumnViews,
-  keyboardColumn,
-  revealDifference,
-} from "./internal/compareViews";
-import type { ColumnViews } from "./internal/compareViews";
+import { COLUMNS, createColumnViews, type ColumnViews } from "./internal/compareViews";
 import { historyCommand } from "./internal/historyKey";
 import type { Direction } from "./internal/navigation";
 import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";

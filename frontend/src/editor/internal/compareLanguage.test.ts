@@ -1,9 +1,10 @@
 import { language } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
-import { EditorState, type TransactionSpec } from "@codemirror/state";
+import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
 import { expect, test, vi } from "vitest";
 
-import { CompareLanguage } from "./compareLanguage";
+import { columnOpening, CompareLanguage } from "./compareLanguage";
+import { OPENING_CHARS } from "./detectLanguage";
 import { languageNames } from "./language";
 import { languageCompartment } from "./pane";
 
@@ -98,4 +99,24 @@ test("languageNames lists every language-data name once, in alphabetical order",
     expect(names[index]?.localeCompare(name)).toBeLessThan(0);
   }
   expect(names).toEqual(expect.arrayContaining(["JSON", "XML", "TypeScript", "Python"]));
+});
+
+test("Auto reads each column's opening only, past any leading blank lines", () => {
+  const blank = Array.from({ length: OPENING_CHARS }, () => "  ");
+  const body = Array.from({ length: OPENING_CHARS }, (_, line) => `  "k${line}": ${line},`);
+  const doc = Text.of([...blank, '{"a": 1,', ...body, "}", ""]);
+  const detected = vi.fn<(name: string | null) => void>();
+
+  const opening = columnOpening(doc);
+  const auto = new CompareLanguage(
+    { kind: "auto" },
+    { left: column("\n \n"), right: column(doc.toString()) },
+    detected,
+  );
+
+  expect(opening).toHaveLength(OPENING_CHARS);
+  expect(opening.startsWith('{"a": 1,\n  "k0": 0,')).toBe(true);
+  expect(columnOpening(Text.of(["  ", "\t", ""]))).toBe("");
+  expect(detected.mock.calls).toEqual([["JSON"]]);
+  auto.destroy();
 });

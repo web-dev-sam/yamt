@@ -1,8 +1,7 @@
 import { nextColumnVersion, type Column, type ColumnVersions } from "../../ipc";
+import { COLUMNS } from "./compareViews";
 
 export const SETTLE_PAUSE_MS = 300;
-
-const COLUMNS = ["left", "right"] as const satisfies readonly Column[];
 
 export class Settle {
   #versions: ColumnVersions;

@@ -1,10 +1,12 @@
 import "../style.css";
+import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
-import { DEFAULT_KEYS, loadCompareFixture } from "../ipc";
+import { DEFAULT_KEYS, loadCompareFixture, nextColumnVersion, type TabTexts } from "../ipc";
 import { CompareController, type CompareEvents, type CompareHosts } from "./index";
 import type { CompareOptions } from "./index";
+import { SETTLE_PAUSE_MS } from "./internal/compareSettle";
 import { found } from "./paneHarness";
 
 const WIDTH = 1200;
@@ -21,6 +23,8 @@ const BELOW_DIFFERENCES = /^const line(5[7-9]|[67]\d) = \d+;$/;
 const HALF = 0.5;
 const SCREENSHOTS = "/tmp/yamt-compare";
 const MOUNTED = "data-compare-probe";
+const CHANGED_LINE = 11;
+const OLD = "const value = old(a, b);";
 const OPTIONS: CompareOptions = {
   preferences: { theme: "dark", keys: DEFAULT_KEYS },
   language: { kind: "auto" },
@@ -144,12 +148,14 @@ function middleLineText(host: HTMLElement): string | null {
 
 const controllers: CompareController[] = [];
 
-async function opened(): Promise<{ hosts: CompareHosts; controller: CompareController }> {
+async function opened(
+  events: CompareEvents = EVENTS,
+): Promise<{ hosts: CompareHosts; controller: CompareController; texts: TabTexts }> {
   const hosts = mount();
   const texts = await loadCompareFixture("probe", { "probe.json": CASE });
-  const controller = new CompareController(texts, hosts, OPTIONS, EVENTS);
+  const controller = new CompareController(texts, hosts, OPTIONS, events);
   controllers.push(controller);
-  return { hosts, controller };
+  return { hosts, controller, texts };
 }
 
 function cursorLine(): string | null {
@@ -174,6 +180,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   controllers.splice(0).forEach((controller) => controller.destroy());
   document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
   delete document.documentElement.dataset["theme"];
@@ -296,4 +303,64 @@ test("the columns and the strip follow the theme, dark then light", async () => 
 
   expect(light[0]).not.toBe(dark[0]);
   expect(light[1]).not.toBe(dark[1]);
+});
+
+function tintedLines(hosts: CompareHosts): number[] {
+  return [hosts.left, hosts.right].map(
+    (host) => host.querySelectorAll(".cm-line.chunk-band.chunk-modified").length,
+  );
+}
+
+function typeAtLine(host: HTMLElement, line: number, text: string): void {
+  const editor = found(host.querySelector<HTMLElement>(".cm-editor"), "editor");
+  const view = EditorView.findFromDOM(editor);
+  if (view === null) {
+    throw new Error("no view");
+  }
+  const at = view.state.doc.line(line).from;
+  view.dispatch({ changes: { from: at, insert: text }, userEvent: "input.type" });
+}
+
+test("edits settle with the next version, only a reply for the current versions is shown, and destroy stops the timer", async () => {
+  const settled = vi.fn<CompareEvents["settled"]>();
+  const { hosts, controller, texts } = await opened({ ...EVENTS, settled });
+  const start = texts.comparison.versions;
+  const firstOnly = await loadCompareFixture("first", {
+    "first.json": { ...CASE, differences: CASE.differences.slice(0, 1) },
+  });
+  const edited = { left: nextColumnVersion(start.left), right: start.right };
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+  typeAtLine(hosts.left, CHANGED_LINE, "x");
+  vi.advanceTimersByTime(SETTLE_PAUSE_MS - 1);
+  const early = settled.mock.calls.length;
+  vi.advanceTimersByTime(SETTLE_PAUSE_MS);
+
+  expect(early).toBe(0);
+  expect(settled.mock.calls).toEqual([
+    [[{ column: "left", text: CASE.left.replace(OLD, `x${OLD}`), version: edited.left }]],
+  ]);
+  const before = tintedLines(hosts);
+  expect(controller.showComparison({ ...firstOnly.comparison, versions: start })).toBe(false);
+  expect(tintedLines(hosts)).toEqual(before);
+  expect(controller.showComparison({ ...firstOnly.comparison, versions: edited })).toBe(true);
+  expect([before, tintedLines(hosts)]).toEqual([
+    [2, 2],
+    [1, 1],
+  ]);
+
+  typeAtLine(hosts.left, CHANGED_LINE, "y");
+  expect(controller.settleNow()).toEqual([
+    {
+      column: "left",
+      text: CASE.left.replace(OLD, `yx${OLD}`),
+      version: nextColumnVersion(edited.left),
+    },
+  ]);
+
+  typeAtLine(hosts.left, CHANGED_LINE, "z");
+  controllers.splice(controllers.indexOf(controller), 1);
+  controller.destroy();
+  vi.advanceTimersByTime(SETTLE_PAUSE_MS * 2);
+  expect(settled).toHaveBeenCalledTimes(1);
 });

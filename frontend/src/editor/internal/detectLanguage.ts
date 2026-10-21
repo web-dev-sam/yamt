@@ -1,7 +1,7 @@
 import { LanguageDescription } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
 
-const OPENING_CHARS = 4096;
+export const OPENING_CHARS = 4096;
 const HTML = /^<(?:!doctype\s+html|html)(?![\w:.-])/i;
 const TAG = /^<(?:!--|[A-Za-z])/;
 const JSON_OBJECT = /^\{\s*["}]/;
