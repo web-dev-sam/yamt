@@ -43,12 +43,8 @@
       "frontend/src/ui/problem.ts",
       "frontend/src/ui/problem.test.ts",
       "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts"
+      "frontend/src/ipc/fixture.test.ts",
+      "frontend/src/ipc/fixtureOperations.test.ts"
     ]
-  },
-  "GitOpsRunAppCorrectness": {
-    "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-run-app.md",
-    "owned": []
   }
 }

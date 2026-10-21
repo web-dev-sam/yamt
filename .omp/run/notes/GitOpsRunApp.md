@@ -109,3 +109,7 @@ Rust 32 — 7 caught, 22 unviable, 3 missed: commands.rs:137 `close_window` → 
 ## Boundary review (GitOpsRunAppBoundary): fail
 
 Blocks #1352–#1354 (#1354 → row 6); shoulds #1355–#1357 promoted.
+
+## Correctness review (GitOpsRunAppCorrectness): fail
+
+Blocks #1358–#1361 (two from the survivors; `close_window` survivor dropped as a call without a decision); shoulds #1362–#1364 promoted.
