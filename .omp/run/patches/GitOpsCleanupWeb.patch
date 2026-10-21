@@ -1,0 +1,686 @@
+From b56f16e8037de886638fd1eb71bfbe7bc624f633 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 15:21:46 +0200
+Subject: [PATCH] fix(ui): a moved-on refusal ends the stop; one table per mark
+ and label
+
+reportFailure takes StopMovedOn to nextStop instead of listing again
+(a list in MovedOn opens the new stop and answers Files, so the old
+views looped). FileMark renders the name and its mark from one table;
+summaryLabel walks one word table.
+
+Refs #1422 #1423 #1424 #1425 #1426 #1435
+---
+ frontend/src/ipc/AGENTS.md                 |  2 +-
+ frontend/src/ui/AGENTS.md                  |  4 +-
+ frontend/src/ui/FileList.vue               |  5 +--
+ frontend/src/ui/FileMark.vue               | 42 ++++++++++++------
+ frontend/src/ui/FileTree.vue               |  9 +---
+ frontend/src/ui/aborting.test.ts           | 16 +++----
+ frontend/src/ui/aborting.ts                |  4 +-
+ frontend/src/ui/continuing.ts              |  5 ++-
+ frontend/src/ui/diskChanges.ts             |  4 +-
+ frontend/src/ui/listing.test.ts            |  2 -
+ frontend/src/ui/listing.ts                 | 17 ++++----
+ frontend/src/ui/problem.ts                 | 10 +++--
+ frontend/src/ui/saving.test.ts             | 24 +++++------
+ frontend/src/ui/saving.ts                  |  4 +-
+ frontend/src/ui/stops.test.ts              |  2 +-
+ frontend/src/ui/store.test.ts              | 50 ++++++++++++++++++++++
+ frontend/src/ui/summaryLabel.ts            | 25 ++++++-----
+ frontend/src/ui/useMergeController.test.ts | 29 +++++++------
+ frontend/src/ui/views.ts                   |  4 +-
+ 19 files changed, 162 insertions(+), 96 deletions(-)
+
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index bb7ef30..b269e0c 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -1 +1 @@
+-Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created; `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`; `createFixtureSource` reads the page's search by default).
++Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created; `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`, `?empty`); `createFixtureSource` takes the page's search as a required parameter.
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 7f933fd..5be0071 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -10,7 +10,9 @@ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize h
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+-Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. A failure answered `StopMovedOn` is reported through `problem.ts` `reportFailure`, which lists again. `operationText.ts` holds every operation word (the top line and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
++Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` goes to `nextStop({ outside })` — the writes, Abort, an open and every reload through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), Continue in `continuing.ts`. `operationText.ts` holds every operation word (the top line and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationBar.vue` shows the top line above the notices while git records an operation.
++
++File marks (plan §2 #90): `FileMark.vue` renders a file's name and its mark in the list and the tree from one table per `FileStatus` (`Unresolved` none; `Resolved` the check and a muted name; `Remembered` the history icon with the rerere hint as its title and accessible name); `FileList.vue` and `FileTree.vue` pass only the status and the label.
+ 
+ Git running (plan §2 #74, #89): `gitRun.ts` `createGitRun` is the one owner of "git is running": `run(stop, { call, endsApp, landing })` sets `running`, calls through `landed`, lands the reply while still running, and clears it unless the reply is a success that ends the app (`endsApp`: every Abort success, Continue's `Finished`). Abort, Continue and `closeGuard.ts` only read `running`; while it is set `mayClose` refuses with the `close` problem and asks nothing.
+ 
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index cf4f750..e65e761 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -108,10 +108,7 @@ function toggleFolder(path: string): void {
+         @click="emit('select', file.path)"
+       >
+         <component :is="fileIcon(file.path)" class="size-4 shrink-0" aria-hidden="true" />
+-        <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
+-          {{ file.path }}
+-        </span>
+-        <FileMark :status="file.status" />
++        <FileMark :status="file.status" :label="file.path" />
+       </li>
+     </ul>
+     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
+diff --git a/frontend/src/ui/FileMark.vue b/frontend/src/ui/FileMark.vue
+index ad179e9..5bea39d 100644
+--- a/frontend/src/ui/FileMark.vue
++++ b/frontend/src/ui/FileMark.vue
+@@ -1,28 +1,46 @@
+ <script setup lang="ts">
++import { computed, type Component } from "vue";
+ import Check from "~icons/lucide/check";
+ import History from "~icons/lucide/history";
+ 
+ import type { FileEntry } from "../ipc";
+ 
+-defineProps<{ status: FileEntry["status"] }>();
++type Mark = {
++  readonly icon: Component;
++  readonly word: string;
++  readonly hint: string | null;
++  readonly mutesName: boolean;
++};
+ 
+-const REMEMBERED_HINT =
+-  "git rerere filled in a resolution you recorded before; review it, then Mark resolved";
++const props = defineProps<{ status: FileEntry["status"]; label: string }>();
++
++const MARKS: Readonly<Record<FileEntry["status"], Mark | null>> = {
++  Unresolved: null,
++  Resolved: { icon: Check, word: "resolved", hint: null, mutesName: true },
++  Remembered: {
++    icon: History,
++    word: "remembered",
++    hint: "git rerere filled in a resolution you recorded before; review it, then Mark resolved",
++    mutesName: false,
++  },
++};
++
++const mark = computed(() => MARKS[props.status]);
++const hint = computed(() => mark.value?.hint ?? undefined);
+ </script>
+ 
+ <template>
+-  <span v-if="status === 'Resolved'" class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted">
+-    <Check class="size-3.5" aria-hidden="true" />
+-    resolved
++  <span class="truncate" :class="{ 'text-fg-muted': mark?.mutesName === true }">
++    {{ label }}
+   </span>
+   <span
+-    v-else-if="status === 'Remembered'"
+-    role="img"
+-    :title="REMEMBERED_HINT"
+-    :aria-label="REMEMBERED_HINT"
++    v-if="mark !== null"
++    :role="hint === undefined ? undefined : 'img'"
++    :title="hint"
++    :aria-label="hint"
+     class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
+   >
+-    <History class="size-3.5" aria-hidden="true" />
+-    remembered
++    <component :is="mark.icon" class="size-3.5" aria-hidden="true" />
++    {{ mark.word }}
+   </span>
+ </template>
+diff --git a/frontend/src/ui/FileTree.vue b/frontend/src/ui/FileTree.vue
+index 1c00afa..54b7dac 100644
+--- a/frontend/src/ui/FileTree.vue
++++ b/frontend/src/ui/FileTree.vue
+@@ -79,13 +79,8 @@ function pressed(row: TreeRow): void {
+         </template>
+       </span>
+       <component :is="rowIcon(row)" class="size-4 shrink-0" aria-hidden="true" />
+-      <span
+-        class="truncate"
+-        :class="{ 'text-fg-muted': row.kind === 'file' && row.file.status === 'Resolved' }"
+-      >
+-        {{ row.label }}
+-      </span>
+-      <FileMark v-if="row.kind === 'file'" :status="row.file.status" />
++      <FileMark v-if="row.kind === 'file'" :status="row.file.status" :label="row.label" />
++      <span v-else class="truncate">{{ row.label }}</span>
+     </li>
+   </ul>
+ </template>
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+index 9202474..9fbdadf 100644
+--- a/frontend/src/ui/aborting.test.ts
++++ b/frontend/src/ui/aborting.test.ts
+@@ -24,7 +24,7 @@ type Pressed = Aborting & {
+   readonly asking: Asking;
+   readonly operation: ShallowRef<OperationView | null>;
+   readonly problem: ShallowRef<Problem | null>;
+-  readonly lists: string[];
++  readonly ends: string[];
+   stop: Stop;
+ };
+ 
+@@ -37,17 +37,17 @@ function aborting(
+   operation: OperationView | null = REBASE,
+ ): Pressed {
+   const asking = createAsking();
+-  const lists: string[] = [];
++  const ends: string[] = [];
+   const target = {
+     source: { abortOperation },
+     asking,
+     operation: shallowRef(operation),
+     problem: shallowRef<Problem | null>(null),
+-    lists,
++    ends,
+     stop: { dropped: false },
+     gitRun: createGitRun(),
+-    refreshFiles: () => {
+-      lists.push("list");
++    nextStop: (end: { readonly kind: "outside" }) => {
++      ends.push(end.kind);
+       return Promise.resolve();
+     },
+   };
+@@ -143,7 +143,7 @@ test("git's refusal names the operation, logs it, and a later press asks again",
+   expect(aborts).toBe(2);
+ });
+ 
+-test("an abort git answers StopMovedOn lists again, so the window goes on to the new stop", async () => {
++test("an abort git answers StopMovedOn goes on to the new stop and shows no problem", async () => {
+   vi.spyOn(console, "error").mockImplementation(() => undefined);
+   const abort = aborting(() => Promise.resolve({ ok: false, failure: { kind: "StopMovedOn" } }));
+ 
+@@ -151,7 +151,7 @@ test("an abort git answers StopMovedOn lists again, so the window goes on to the
+   abort.asking.answer(true);
+   await refusing;
+ 
+-  expect(abort.lists).toEqual(["list"]);
++  expect([abort.problem.value, abort.ends]).toEqual([null, ["outside"]]);
+   expect(abort.abortState.value.kind).toBe("ready");
+ });
+ 
+@@ -173,6 +173,6 @@ test("an abort answered after its stop was dropped reports nothing and lists not
+   answers[0]?.({ ok: false, failure: { kind: "StopMovedOn" } });
+   await pressed;
+ 
+-  expect([abort.problem.value, abort.lists]).toEqual([null, []]);
++  expect([abort.problem.value, abort.ends]).toEqual([null, []]);
+   expect(abort.abortState.value.kind).toBe("ready");
+ });
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index ae95868..145803f 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -4,13 +4,13 @@ import type { ChunkSource, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
+ import type { Stop } from "./currentStop";
+ import type { GitRun } from "./gitRun";
+-import { reportFailure, type Problem, type Relist } from "./problem";
++import { reportFailure, type EndsStop, type Problem } from "./problem";
+ 
+ type AbortState =
+   | { readonly kind: "none" }
+   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
+ 
+-type AbortTarget = Relist & {
++type AbortTarget = EndsStop & {
+   readonly stop: Stop;
+   readonly source: Pick<ChunkSource, "abortOperation">;
+   readonly asking: Pick<Asking, "ask">;
+diff --git a/frontend/src/ui/continuing.ts b/frontend/src/ui/continuing.ts
+index 0390ad0..94de3d1 100644
+--- a/frontend/src/ui/continuing.ts
++++ b/frontend/src/ui/continuing.ts
+@@ -12,13 +12,13 @@ import type { CloseGuard } from "./closeGuard";
+ import type { Stop } from "./currentStop";
+ import type { GitRun } from "./gitRun";
+ import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
+-import { report, type Outcome, type Problem, type ProblemCause, type Relist } from "./problem";
++import { report, type Outcome, type Problem, type ProblemCause } from "./problem";
+ import type { Question } from "./question";
+ import type { StopEnd } from "./stops";
+ 
+ export type ContinueState = "noOperation" | "filesLeft" | "writing" | "ready" | "running";
+ 
+-type ContinueTarget = Relist & {
++type ContinueTarget = {
+   readonly stop: Stop;
+   readonly writing: ShallowReactive<ReadonlyMap<string, unknown>>;
+   readonly gitRun: GitRun;
+@@ -29,6 +29,7 @@ type ContinueTarget = Relist & {
+   readonly operation: Readonly<ShallowRef<OperationView | null>>;
+   readonly problem: ShallowRef<Problem | null>;
+   nextStop(end: StopEnd): Promise<void>;
++  refreshFiles(): Promise<void>;
+ };
+ 
+ export type Continuing = {
+diff --git a/frontend/src/ui/diskChanges.ts b/frontend/src/ui/diskChanges.ts
+index ce2e312..1e7b711 100644
+--- a/frontend/src/ui/diskChanges.ts
++++ b/frontend/src/ui/diskChanges.ts
+@@ -4,7 +4,7 @@ import { log, type DiskChange } from "../ipc";
+ import type { CloseGuard } from "./closeGuard";
+ import type { Stop } from "./currentStop";
+ import type { DiskNotice, Notice } from "./noticeText";
+-import type { Relist } from "./problem";
++import type { EndsStop } from "./problem";
+ import type { Taken } from "./sides";
+ import { isShown, reload, takesASide, type Shown } from "./views";
+ 
+@@ -55,7 +55,7 @@ function noteDiskChanges(
+ }
+ 
+ export async function applyDiskChanges(
+-  target: DiskChangeTarget & Relist,
++  target: DiskChangeTarget & EndsStop,
+   changes: readonly DiskChange[],
+   when: DiskNotice["when"],
+   stop: Readonly<Stop>,
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index 671fd18..81f046b 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -32,7 +32,6 @@ type Listed = {
+   readonly ends: StopEnd[];
+   stop: Stop;
+   nextStop(end: StopEnd): Promise<void>;
+-  refreshFiles(): Promise<void>;
+ };
+ 
+ const FILES: readonly FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
+@@ -100,7 +99,6 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
+       ends.push(end);
+       return Promise.resolve();
+     },
+-    refreshFiles: notUsed,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
+index e7597bd..24ae0a6 100644
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
+@@ -4,17 +4,16 @@ import type { FileEntry, OperationView, SideNames } from "../ipc";
+ import { landed, type Stop } from "./currentStop";
+ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+ import type { DiskNotice } from "./noticeText";
+-import { attempt, report, type Relist } from "./problem";
++import { attempt, report } from "./problem";
+ import type { StopEnd } from "./stops";
+ 
+-type ListTarget = DiskChangeTarget &
+-  Relist & {
+-    readonly stop: Stop;
+-    readonly files: ShallowRef<readonly FileEntry[]>;
+-    readonly operation: ShallowRef<OperationView | null>;
+-    readonly sideNames: ShallowRef<SideNames>;
+-    nextStop(end: StopEnd): Promise<void>;
+-  };
++type ListTarget = DiskChangeTarget & {
++  readonly stop: Stop;
++  readonly files: ShallowRef<readonly FileEntry[]>;
++  readonly operation: ShallowRef<OperationView | null>;
++  readonly sideNames: ShallowRef<SideNames>;
++  nextStop(end: StopEnd): Promise<void>;
++};
+ 
+ export async function refreshFiles(
+   target: ListTarget,
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index b8fa347..67081fc 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -44,7 +44,7 @@ export type Outcome<T> =
+ 
+ type Target = { readonly problem: ShallowRef<Problem | null> };
+ 
+-export type Relist = { refreshFiles(): Promise<void> };
++export type EndsStop = { nextStop(end: { readonly kind: "outside" }): Promise<void> };
+ 
+ export function unexpected(error: unknown): Unexpected {
+   return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
+@@ -104,13 +104,15 @@ export function report(target: Target, failure: Problem): void {
+ }
+ 
+ export async function reportFailure(
+-  target: Target & Relist,
++  target: Target & EndsStop,
+   failure: Extract<Problem, { readonly cause: ProblemCause }>,
+ ): Promise<void> {
+-  report(target, failure);
+   if (failure.cause.kind === "StopMovedOn") {
+-    await target.refreshFiles();
++    logProblem(failure);
++    await target.nextStop({ kind: "outside" });
++    return;
+   }
++  report(target, failure);
+ }
+ 
+ export function clearProblemAbout(target: Target, path: string): void {
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index c4b39c5..63a8530 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -106,7 +106,7 @@ type Target = Parameters<typeof finish>[0] &
+   Parameters<typeof createSaving>[0] & {
+     readonly loads: string[];
+     readonly sent: WriteRequest[];
+-    readonly lists: string[];
++    readonly ends: string[];
+   };
+ 
+ function writeTarget(
+@@ -116,7 +116,7 @@ function writeTarget(
+ ): Target {
+   const loads: string[] = [];
+   const sent: WriteRequest[] = [];
+-  const lists: string[] = [];
++  const ends: string[] = [];
+   const source: ChunkSource = {
+     loadFile: (path) => {
+       loads.push(path);
+@@ -151,7 +151,7 @@ function writeTarget(
+     source,
+     loads,
+     sent,
+-    lists,
++    ends,
+     files: shallowRef(files),
+     opened: shallowRef<readonly FileMergeData[]>([{ ...MAGIC_KEYS, path: "a.ts" }]),
+     choices: shallowRef<readonly FileSides[]>([]),
+@@ -168,8 +168,8 @@ function writeTarget(
+     writing: new Map(),
+     stop: { dropped: false },
+     asking: { ask: () => Promise.resolve("yes") },
+-    refreshFiles: () => {
+-      lists.push("list");
++    nextStop: (end) => {
++      ends.push(end.kind);
+       return Promise.resolve();
+     },
+   };
+@@ -654,7 +654,7 @@ test.each(
+ 
+   const after = shownState(target);
+   expect(Object.keys(after).filter((key) => after[key] !== before[key])).toEqual([]);
+-  expect([editor.marks, target.loads, target.lists]).toEqual([[], [], []]);
++  expect([editor.marks, target.loads, target.ends]).toEqual([[], [], []]);
+ });
+ 
+ test("a format answer after dropStop records no format note and writes nothing", async () => {
+@@ -706,7 +706,7 @@ test.each<[string, SourceResult<FileMergeData>]>([
+     loads[0]?.(loaded);
+     await reloading;
+ 
+-    expect([target.opened.value, target.problem.value, target.lists]).toEqual([[], null, []]);
++    expect([target.opened.value, target.problem.value, target.ends]).toEqual([[], null, []]);
+   },
+ );
+ 
+@@ -738,11 +738,11 @@ test("a reset whose reload is still waiting when the stop is dropped keeps the n
+ 
+   expect(target.problem.value).toBe(newStopProblem);
+   expect(target.opened.value).toBe(opened);
+-  expect(target.lists).toEqual([]);
++  expect(target.ends).toEqual([]);
+ });
+ 
+ test.each(WRITES)(
+-  "a %s git answers StopMovedOn is reported and lists again, which goes on to the new stop",
++  "a %s git answers StopMovedOn goes on to the new stop and shows no problem",
+   async (_write, start) => {
+     vi.spyOn(console, "error").mockImplementation(() => undefined);
+     const movedOn: SourceResult<WriteReply> = { ok: false, failure: { kind: "StopMovedOn" } };
+@@ -753,10 +753,6 @@ test.each(WRITES)(
+ 
+     await start(target, typedEditor());
+ 
+-    const { problem } = target;
+-    expect(problem.value !== null && "cause" in problem.value ? problem.value.cause : null).toEqual(
+-      { kind: "StopMovedOn" },
+-    );
+-    expect(target.lists).toEqual(["list"]);
++    expect([target.problem.value, target.ends]).toEqual([null, ["outside"]]);
+   },
+ );
+diff --git a/frontend/src/ui/saving.ts b/frontend/src/ui/saving.ts
+index 6089140..9307a25 100644
+--- a/frontend/src/ui/saving.ts
++++ b/frontend/src/ui/saving.ts
+@@ -4,7 +4,7 @@ import type { DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../
+ import type { Asking } from "./asking";
+ import { landed, type Stop } from "./currentStop";
+ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+-import { attempt, clearProblemAbout, reportFailure, type Problem, type Relist } from "./problem";
++import { attempt, clearProblemAbout, reportFailure, type EndsStop, type Problem } from "./problem";
+ import { finishMustAsk, type Question } from "./question";
+ import type {
+   FormatOutcome,
+@@ -19,7 +19,7 @@ type Claim = { writes: number; overtaken: boolean };
+ export type Writing = { readonly writing: ShallowReactive<Map<string, Claim>>; stop: Stop };
+ 
+ type WriteTarget = DiskChangeTarget &
+-  Relist & {
++  EndsStop & {
+     readonly files: ShallowRef<readonly FileEntry[]>;
+     readonly problem: ShallowRef<Problem | null>;
+   };
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 3365463..ad8bddf 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -143,7 +143,7 @@ function stopAt(
+       }
+       return Promise.resolve(next.files);
+     },
+-    refreshFiles: notUsed,
++    nextStop: notUsed,
+   };
+   return stop;
+ }
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 0c67c44..79dcab0 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -2558,6 +2558,56 @@ test("a focus list that finds git moved on outside drops the old stop, names the
+   expect(store.notices.value).toEqual([]);
+ });
+ 
++test.each(["save", "take"] as const)(
++  "a %s git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once",
++  async (write) => {
++    const lines = spyConsole();
++    const movedOn: SourceResult<never> = { ok: false, failure: { kind: "StopMovedOn" } };
++    const answers: SourceResult<Listing>[] = [
++      listing([entry("a.ts"), LOGO_ENTRY]),
++      listing([entry("c.ts")]),
++    ];
++    const { source, calls } = choiceSource({
++      listStop: () => {
++        calls.push("listStop");
++        return Promise.resolve(answers.shift() ?? listing([entry("c.ts")]));
++      },
++      saveFile: () => {
++        calls.push("saveFile");
++        return Promise.resolve(movedOn);
++      },
++      takeSide: () => {
++        calls.push("takeSide");
++        return Promise.resolve(movedOn);
++      },
++    });
++    const store = createAppStore(source);
++    await store.loadFiles();
++    const view = fakeView(store, "a.ts", "loaded\n");
++    view.text = "typed\n";
++
++    await (write === "save"
++      ? store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) })
++      : store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion));
++
++    expect(calls).toEqual([
++      "listStop",
++      "loadFile a.ts",
++      write === "save" ? "saveFile" : "takeSide",
++      "listStop",
++      "loadFile c.ts",
++    ]);
++    expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
++    expect(store.active.value).toBe("c.ts");
++    expect(store.notices.value).toEqual([{ kind: "movedOn", operation: "Merge", files: ["a.ts"] }]);
++    expect(store.problem.value).toBeNull();
++    const path = write === "save" ? "a.ts" : LOGO;
++    expect(lines.error).toEqual([
++      `[error] store.${write}_failed {path: "${path}", kind: "StopMovedOn"}`,
++    ]);
++  },
++);
++
+ test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
+   spyConsole();
+   const rebase: OperationView = {
+diff --git a/frontend/src/ui/summaryLabel.ts b/frontend/src/ui/summaryLabel.ts
+index 8a0cbad..fe90ad1 100644
+--- a/frontend/src/ui/summaryLabel.ts
++++ b/frontend/src/ui/summaryLabel.ts
+@@ -1,17 +1,20 @@
+ import type { MergeSummary } from "./useMergeController";
+ 
+-function counted(count: number, noun: string, plural: string): string | null {
+-  if (count === 0) {
+-    return null;
+-  }
+-  return `${count} ${count === 1 ? noun : plural}`;
+-}
++type Words = { readonly one: string; readonly many: string };
++
++const SUMMARY_WORDS: Readonly<Record<keyof MergeSummary, Words>> = {
++  changes: { one: "change", many: "changes" },
++  conflicts: { one: "conflict", many: "conflicts" },
++  remembered: { one: "remembered", many: "remembered" },
++};
++
++const LABEL_ORDER: readonly (keyof MergeSummary)[] = ["changes", "conflicts", "remembered"];
+ 
+ export function summaryLabel(summary: MergeSummary): string {
+-  const parts = [
+-    counted(summary.changes, "change", "changes"),
+-    counted(summary.conflicts, "conflict", "conflicts"),
+-    counted(summary.remembered, "remembered", "remembered"),
+-  ].filter((part) => part !== null);
++  const parts = LABEL_ORDER.filter((key) => summary[key] !== 0).map((key) => {
++    const count = summary[key];
++    const { one, many } = SUMMARY_WORDS[key];
++    return `${count} ${count === 1 ? one : many}`;
++  });
+   return parts.length === 0 ? "All changes processed" : parts.join(" · ");
+ }
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index 065ebfd..32e9be1 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -3,10 +3,15 @@ import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef }
+ 
+ import { bindingsOf, DEFAULT_KEYS, loadFixture, type FileMergeData } from "../ipc";
+ import { LanguageServers } from "../lsp";
+-import { useMergeController, type MergeHandle, type Preferences } from "./useMergeController";
++import {
++  useMergeController,
++  type MergeHandle,
++  type MergeSummary,
++  type Preferences,
++} from "./useMergeController";
+ 
+ type Counts = { errors: number; warnings: number; other: number };
+-type Summary = { conflicts: number; changes: number };
++type Summary = MergeSummary;
+ 
+ const editor = vi.hoisted(() => {
+   const state = {
+@@ -19,7 +24,7 @@ const editor = vi.hoisted(() => {
+     minimap: new Array<string>(),
+     servers: new Array<unknown>(),
+     counts: { errors: 0, warnings: 0, other: 0 },
+-    summary: { conflicts: 0, changes: 0 },
++    summary: { conflicts: 0, changes: 0, remembered: 0 },
+     countsListener: (_counts: Counts): void => {},
+     summaryListener: (_summary: Summary): void => {},
+     unsavedListener: (_unsaved: boolean): void => {},
+@@ -99,7 +104,7 @@ afterEach(() => {
+     minimap: [],
+     servers: [],
+     counts: { errors: 0, warnings: 0, other: 0 },
+-    summary: { conflicts: 0, changes: 0 },
++    summary: { conflicts: 0, changes: 0, remembered: 0 },
+     countsListener: () => {},
+     summaryListener: () => {},
+     unsavedListener: () => {},
+@@ -350,26 +355,26 @@ test("problems: the editor's counts when built, then each change it reports; nul
+ });
+ 
+ test("summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change", async () => {
+-  editor.state.summary = { conflicts: 2, changes: 5 };
++  editor.state.summary = { conflicts: 2, changes: 5, remembered: 1 };
+   const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+   const { scope, handle } = mount(data);
+   await nextTick();
+ 
+-  expect(handle.summary.value).toEqual({ conflicts: 2, changes: 5 });
++  expect(handle.summary.value).toEqual({ conflicts: 2, changes: 5, remembered: 1 });
+ 
+-  editor.state.summaryListener({ conflicts: 1, changes: 5 });
++  editor.state.summaryListener({ conflicts: 1, changes: 5, remembered: 1 });
+ 
+-  expect(handle.summary.value).toEqual({ conflicts: 1, changes: 5 });
++  expect(handle.summary.value).toEqual({ conflicts: 1, changes: 5, remembered: 1 });
+ 
+-  editor.state.summary = { conflicts: 3, changes: 3 };
++  editor.state.summary = { conflicts: 3, changes: 3, remembered: 0 };
+   data.value = await fileData("b\n");
+   await nextTick();
+ 
+-  expect(handle.summary.value).toEqual({ conflicts: 3, changes: 3 });
++  expect(handle.summary.value).toEqual({ conflicts: 3, changes: 3, remembered: 0 });
+ 
+-  editor.state.summaryListener({ conflicts: 0, changes: 3 });
++  editor.state.summaryListener({ conflicts: 0, changes: 3, remembered: 0 });
+ 
+-  expect(handle.summary.value).toEqual({ conflicts: 0, changes: 3 });
++  expect(handle.summary.value).toEqual({ conflicts: 0, changes: 3, remembered: 0 });
+ 
+   scope.stop();
+ 
+diff --git a/frontend/src/ui/views.ts b/frontend/src/ui/views.ts
+index 5a6208e..73065ec 100644
+--- a/frontend/src/ui/views.ts
++++ b/frontend/src/ui/views.ts
+@@ -2,7 +2,7 @@ import type { ShallowRef } from "vue";
+ 
+ import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
+ import { landed, type Stop } from "./currentStop";
+-import { attempt, reportFailure, type Outcome, type Problem, type Relist } from "./problem";
++import { attempt, reportFailure, type EndsStop, type Outcome, type Problem } from "./problem";
+ 
+ export type Shown = {
+   readonly source: ChunkSource;
+@@ -53,7 +53,7 @@ export async function fetchView(shown: Shown, path: string): Promise<Outcome<()
+ }
+ 
+ export async function reload(
+-  target: Shown & Relist,
++  target: Shown & EndsStop,
+   path: string,
+   stop: Readonly<Stop>,
+ ): Promise<boolean> {
+-- 
+2.56.0
+
