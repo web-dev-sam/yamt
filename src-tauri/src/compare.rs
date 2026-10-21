@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use tauri::path::PathResolver;
-use tauri::{Manager, Runtime, State, WebviewWindow};
+use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_compare::{
     Column, ColumnVersion, CompareStart, Comparison, LoadedTab, TabId, TabLanguage, TabList,
     TabStore, TabTexts, comparison, tab_texts,
@@ -20,16 +19,12 @@ fn lock(state: &CompareState) -> MutexGuard<'_, TabStore> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The store in `<data_dir>/yamt/compare/`, or the line `yamt --raw` ends with.
-pub(crate) fn open_store<R: Runtime>(paths: &PathResolver<R>) -> Result<TabStore, String> {
-    let data_dir = paths
-        .data_dir()
-        .map_err(|error| format!("no data folder: {error}"))?;
-    open_store_in(&data_dir)
-}
-
-pub(crate) fn open_store_in(data_dir: &Path) -> Result<TabStore, String> {
-    TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))
+/// Opens the store in `<data_dir>/yamt/compare/` and hands it to the app as its `CompareState`,
+/// or answers the line `yamt --raw` ends with.
+pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, data_dir: &Path) -> Result<(), String> {
+    let store = TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))?;
+    app.manage(Mutex::new(store));
+    Ok(())
 }
 
 fn compare_folder(data_dir: &Path) -> PathBuf {
@@ -38,12 +33,12 @@ fn compare_folder(data_dir: &Path) -> PathBuf {
 
 fn start_failure(error: &yamt_compare::Error) -> String {
     match error {
-        yamt_compare::Error::Broken { path, message }
-        | yamt_compare::Error::ReadFailed { path, message } => format!(
+        yamt_compare::Error::ReadFailed { path, message } => format!(
             "the stored compare tabs {} cannot be read: {message}; nothing was changed",
             path.display()
         ),
         yamt_compare::Error::Locked { .. }
+        | yamt_compare::Error::Broken { .. }
         | yamt_compare::Error::NewerFormat { .. }
         | yamt_compare::Error::WriteFailed { .. }
         | yamt_compare::Error::UnknownTab { .. }
@@ -169,7 +164,7 @@ mod tests {
     use yamt_conflict_repo::TempDir;
 
     use super::*;
-    use crate::mock_window::open_compare_window;
+    use crate::mock_window::{compare_app, open_compare_window};
 
     fn tab(id: u32, name: &str, language: &Value, holds_text: bool) -> Value {
         json!({ "id": id, "name": name, "language": language, "holds_text": holds_text })
@@ -277,6 +272,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_worker_that_panics_answers_worker_stopped_and_the_store_still_answers() {
+        let window = open_compare_window();
+        let panicking =
+            |_: &mut TabStore| -> yamt_compare::Result<LoadedTab> { panic!("worker panic") };
+
+        let answered =
+            tauri::async_runtime::block_on(on_worker(window.webview.clone(), panicking, tab_texts))
+                .err();
+
+        assert!(
+            matches!(answered, Some(IpcError::WorkerStopped)),
+            "{answered:?}"
+        );
+        assert!(window.invoke("load_tab", json!({ "tab": 1 })).is_ok());
+    }
+
+    fn store_opened_in(data_dir: &Path) -> Result<(), String> {
+        manage_store_in(&compare_app(), data_dir)
+    }
+
     fn tabs_file(data: &TempDir, text: &str) -> PathBuf {
         let folder = compare_folder(data.path());
         fs::create_dir_all(&folder).unwrap();
@@ -287,11 +303,10 @@ mod tests {
 
     #[test]
     fn a_second_open_of_the_same_data_folder_says_another_window_is_open() {
-        let data = TempDir::new().unwrap();
-        let _held = open_store_in(data.path()).unwrap();
-        let folder = compare_folder(data.path());
+        let held = open_compare_window();
+        let folder = compare_folder(held.data.path());
         assert_eq!(
-            open_store_in(data.path()).unwrap_err(),
+            store_opened_in(held.data.path()).unwrap_err(),
             format!("another yamt --raw window is open ({})", folder.display())
         );
     }
@@ -301,7 +316,7 @@ mod tests {
         let data = TempDir::new().unwrap();
         let path = tabs_file(&data, r#"{"format":1,"shown":1,"nextId":2,"tabs":[]}"#);
         assert_eq!(
-            open_store_in(data.path()).unwrap_err(),
+            store_opened_in(data.path()).unwrap_err(),
             format!(
                 "the stored compare tabs {} cannot be read: `tabs` is empty; nothing was changed",
                 path.display()
@@ -314,7 +329,7 @@ mod tests {
         let data = TempDir::new().unwrap();
         let path = tabs_file(&data, r#"{"format":2}"#);
         assert_eq!(
-            open_store_in(data.path()).unwrap_err(),
+            store_opened_in(data.path()).unwrap_err(),
             format!(
                 "the stored compare tabs {} were written by a newer yamt (format 2)",
                 path.display()

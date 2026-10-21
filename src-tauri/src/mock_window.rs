@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use serde_json::Value;
 use tauri::ipc::{CallbackFn, InvokeBody};
 use tauri::test::{
@@ -11,7 +9,7 @@ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 use yamt_session::MergeSession;
 
 use crate::commands::{with_compare, with_session};
-use crate::compare::open_store_in;
+use crate::compare::manage_store_in;
 use crate::merge::MergeState;
 use crate::outcome::{Ending, ending_when_git_is_done};
 
@@ -83,13 +81,16 @@ pub(crate) struct CompareWindow {
     _app: App<MockRuntime>,
 }
 
+pub(crate) fn compare_app() -> App<MockRuntime> {
+    with_compare(mock_builder())
+        .build(mock_context(noop_assets()))
+        .unwrap()
+}
+
 pub(crate) fn open_compare_window() -> CompareWindow {
     let data = TempDir::new().unwrap();
-    let store = open_store_in(data.path()).unwrap();
-    let app = with_compare(mock_builder())
-        .build(mock_context(noop_assets()))
-        .unwrap();
-    app.manage(Mutex::new(store));
+    let app = compare_app();
+    manage_store_in(&app, data.path()).unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
         .build()
         .unwrap();

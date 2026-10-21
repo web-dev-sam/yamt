@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -77,11 +76,14 @@ fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> 
 
 fn open_compare() -> tauri::Result<Ending> {
     let app = with_compare(tauri::Builder::default()).build(context())?;
-    let store = match compare::open_store(app.path()) {
-        Ok(store) => store,
-        Err(problem) => return Ok(Ending::failure(problem)),
-    };
-    app.manage(Mutex::new(store));
+    let managed = app
+        .path()
+        .data_dir()
+        .map_err(|error| format!("no data folder: {error}"))
+        .and_then(|data_dir| compare::manage_store_in(&app, &data_dir));
+    if let Err(problem) = managed {
+        return Ok(Ending::failure(problem));
+    }
     open_and_wait(app, COMPARE_TITLE, WindowKind::Compare)?;
     Ok(Ending {
         exit: Exit::Success,
