@@ -1,7 +1,1 @@
-{
-  "GitOpsTagVerify": {
-    "agent": "verifier",
-    "brief": "docs/slices/briefs/3.J-tag-verify.md",
-    "owned": []
-  }
-}
+{}
