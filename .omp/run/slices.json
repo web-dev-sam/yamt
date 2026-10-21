@@ -1,7 +1,9 @@
 {
-  "GitOpsVerify": {
-    "agent": "verifier",
-    "brief": "docs/slices/briefs/3.J-verify.md",
-    "owned": []
+  "GitOpsRevertText": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-revert-text.md",
+    "owned": [
+      "frontend/src/ui/operationText.test.ts"
+    ]
   }
 }
