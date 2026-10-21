@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import type { OperationView, SideName } from "../ipc";
+import type { OperationKind, OperationView, SideName } from "../ipc";
 import {
   abortLabel,
   abortMessage,
@@ -8,6 +8,7 @@ import {
   allResolvedText,
   continueLabel,
   operationLine,
+  operationTag,
 } from "./operationText";
 
 const MAIN: SideName = { kind: "Branch", name: "main" };
@@ -33,6 +34,17 @@ const REBASE: OperationView = {
   progress: { step: 2, total: 5 },
   editor_steps_ahead: false,
 };
+
+test.each<[OperationKind, string]>([
+  ["Merge", "MERGE"],
+  ["SquashMerge", "SQUASH MERGE"],
+  ["Rebase", "REBASE"],
+  ["CherryPick", "CHERRY-PICK"],
+  ["Revert", "REVERT"],
+  ["Am", "AM"],
+])("the tag of %s reads %s, as plan #92 words it", (kind, tag) => {
+  expect(operationTag(kind)).toBe(tag);
+});
 
 test.each<[string, OperationView, string]>([
   [

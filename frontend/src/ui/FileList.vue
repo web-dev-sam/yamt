@@ -3,17 +3,22 @@ import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import ListIcon from "~icons/lucide/list";
 import ListTree from "~icons/lucide/list-tree";
 
-import type { FileEntry } from "../ipc";
+import type { FileEntry, OperationView } from "../ipc";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
 import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
 import FileMark from "./FileMark.vue";
 import { revealed, treeRows } from "./fileTree";
 import FileTree from "./FileTree.vue";
+import OperationLabel from "./OperationLabel.vue";
 import ResizeDots from "./ResizeDots.vue";
 import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
 
-const props = defineProps<{ files: readonly FileEntry[]; active: string | null }>();
+const props = defineProps<{
+  files: readonly FileEntry[];
+  active: string | null;
+  operation: OperationView | null;
+}>();
 const emit = defineEmits<{ select: [path: string] }>();
 
 const list = useTemplateRef<HTMLElement>("list");
@@ -111,6 +116,7 @@ function toggleFolder(path: string): void {
         <FileMark :status="file.status" :label="file.path" />
       </li>
     </ul>
+    <OperationLabel v-if="operation !== null" :operation="operation" />
     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
     <div
       role="separator"

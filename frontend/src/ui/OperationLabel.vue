@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import type { OperationView } from "../ipc";
-import { operationLine } from "./operationText";
+import { operationLine, operationTag } from "./operationText";
 
 const props = defineProps<{ operation: OperationView }>();
 
@@ -13,8 +13,9 @@ const line = computed(() => operationLine(props.operation));
   <p
     role="status"
     :title="line.tooltip"
-    class="h-8 shrink-0 truncate rounded-md border border-info-border bg-info px-3 leading-7.5 text-fg"
+    :aria-label="line.text"
+    class="shrink-0 truncate px-3 pt-1.5 pb-1 text-xs font-semibold text-fg-muted"
   >
-    {{ line.text }}
+    {{ operationTag(operation.kind) }}
   </p>
 </template>

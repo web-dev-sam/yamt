@@ -28,6 +28,15 @@ const TITLES: Readonly<Record<OperationKind, string>> = {
   Am: "Patch Application",
 };
 
+const TAGS: Readonly<Record<OperationKind, string>> = {
+  Merge: "MERGE",
+  SquashMerge: "SQUASH MERGE",
+  Rebase: "REBASE",
+  CherryPick: "CHERRY-PICK",
+  Revert: "REVERT",
+  Am: "AM",
+};
+
 type StepKind = Exclude<OperationKind, "Merge" | "SquashMerge">;
 
 const DONE_STEPS: Readonly<Record<StepKind, readonly [string, string]>> = {
@@ -49,6 +58,10 @@ export const CONTINUING_TEXT =
 
 export function operationName(kind: OperationKind): string {
   return NAMES[kind];
+}
+
+export function operationTag(kind: OperationKind): string {
+  return TAGS[kind];
 }
 
 function named(name: SideName | null): string | null {

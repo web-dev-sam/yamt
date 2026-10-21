@@ -7,7 +7,6 @@ import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
-import OperationBar from "./OperationBar.vue";
 import { allResolvedText } from "./operationText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
@@ -67,9 +66,14 @@ onMounted(() => {
 
 <template>
   <div class="flex h-full gap-island p-island">
-    <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
+    <FileList
+      v-show="fileListShown"
+      :files="files"
+      :active="active"
+      :operation="operation"
+      @select="pick"
+    />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
-      <OperationBar v-if="operation !== null" :operation="operation" />
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar
         v-if="emptyStop.barProblem !== null"
