@@ -1082,7 +1082,8 @@ export function useMergeController(
 ```
 
 It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data), readOnly)`, pipes
-`onSummaryChange` into a `shallowRef`, and is the only place `editor/` is imported from `ui/`.
+`onSummaryChange` into a `shallowRef`, and is the merge root's only place `editor/` is imported from `ui/` (the compare
+root's is `useCompareController.ts`).
 
 **The compare window's root** (`yamt --raw`, plan §2 #94; fence PM7: these files never import `store.ts`, `App.vue` or
 `lsp/`): `main.ts` mounts `CompareApp.vue` instead of `App.vue` when `<html data-window="compare">` (app) or `?raw`
