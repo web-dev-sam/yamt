@@ -1,0 +1,1872 @@
+From 47f1f0ea717ba3bab068b0a222f7a58be110e895 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 14:09:58 +0200
+Subject: [PATCH] feat(ui): Continue for every operation; no close while git
+ runs
+
+Continue runs git's own continue and goes on to the next stop;
+unsaved edits and editor steps ask first; Continue and Abort also sit
+in the choice, deleted-side and empty-stop rows. Stop and landed move
+to currentStop.ts (#1386).
+
+Refs plan #89
+---
+ frontend/src/ui/App.vue                |  18 +-
+ frontend/src/ui/ChoiceView.vue         |   2 +
+ frontend/src/ui/MergeToolbar.vue       |  15 +-
+ frontend/src/ui/MergeView.vue          |   2 +
+ frontend/src/ui/OperationButtons.vue   |  46 ++++
+ frontend/src/ui/StopView.vue           |  24 ++
+ frontend/src/ui/aborting.test.ts       |   3 +-
+ frontend/src/ui/aborting.ts            |  21 +-
+ frontend/src/ui/closeGuard.test.ts     |  56 +++++
+ frontend/src/ui/closeGuard.ts          |  19 +-
+ frontend/src/ui/continuing.test.ts     | 325 +++++++++++++++++++++++++
+ frontend/src/ui/continuing.ts          | 133 ++++++++++
+ frontend/src/ui/currentStop.ts         |   6 +
+ frontend/src/ui/diskChanges.ts         |  16 +-
+ frontend/src/ui/listing.test.ts        |   2 +-
+ frontend/src/ui/listing.ts             |   8 +-
+ frontend/src/ui/operationText.test.ts  |  33 ++-
+ frontend/src/ui/operationText.ts       |  35 +++
+ frontend/src/ui/problem.ts             |  18 +-
+ frontend/src/ui/problemText.test.ts    |  15 ++
+ frontend/src/ui/problemText.ts         |  11 +-
+ frontend/src/ui/question.test.ts       |  43 +++-
+ frontend/src/ui/question.ts            |  58 ++++-
+ frontend/src/ui/saving.test.ts         |  33 ++-
+ frontend/src/ui/saving.ts              |  42 +---
+ frontend/src/ui/stops.test.ts          |   2 +-
+ frontend/src/ui/store.test.ts          |  74 ++++++
+ frontend/src/ui/store.ts               |  12 +-
+ frontend/src/ui/toolbarButtons.test.ts |  41 +++-
+ frontend/src/ui/toolbarButtons.ts      |  18 +-
+ frontend/src/ui/views.ts               |  20 +-
+ 31 files changed, 1036 insertions(+), 115 deletions(-)
+ create mode 100644 frontend/src/ui/OperationButtons.vue
+ create mode 100644 frontend/src/ui/StopView.vue
+ create mode 100644 frontend/src/ui/closeGuard.test.ts
+ create mode 100644 frontend/src/ui/continuing.test.ts
+ create mode 100644 frontend/src/ui/continuing.ts
+ create mode 100644 frontend/src/ui/currentStop.ts
+
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 76c5e0a..dea3569 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts">
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+-import { onMounted, watch } from "vue";
++import { computed, onMounted, watch } from "vue";
+ 
+ import { useAltHold } from "./altHold";
+ import ChoiceView from "./ChoiceView.vue";
+@@ -8,10 +8,12 @@ import FileList from "./FileList.vue";
+ import MergeView from "./MergeView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import OperationBar from "./OperationBar.vue";
++import { allResolvedText } from "./operationText";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import ServerLogView from "./ServerLogView.vue";
+ import SettingsView from "./SettingsView.vue";
++import StopView from "./StopView.vue";
+ import { useAppStore } from "./store";
+ 
+ const {
+@@ -43,6 +45,15 @@ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+ });
+ 
++const stopShown = computed(
++  () => operation.value !== null && files.value.length === 0 && screen.value.kind === "files",
++);
++const stopped = computed(() =>
++  stopShown.value && problem.value?.action === "stopped" ? problem.value.message.trim() : null,
++);
++const barProblem = computed(() => (stopped.value === null ? problem.value : null));
++const resolvedLine = computed(() => allResolvedText(operation.value));
++
+ watch(focused, (now) => {
+   if (now) {
+     void refocus();
+@@ -67,13 +78,13 @@ onMounted(() => {
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <OperationBar v-if="operation !== null" :operation="operation" />
+       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+-      <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
++      <ProblemBar v-if="barProblem !== null" :problem="barProblem" @close="dismissProblem" />
+       <p
+         v-else-if="allResolved"
+         role="status"
+         class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-fg"
+       >
+-        All files are resolved. Close the window to finish the merge.
++        {{ resolvedLine }}
+       </p>
+       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+         <MergeView
+@@ -89,6 +100,7 @@ onMounted(() => {
+           :sides="sides"
+           :shown="sides.path === active && screen.kind === 'files'"
+         />
++        <StopView v-if="stopShown" :message="stopped" />
+         <SettingsView v-if="screen.kind === 'settings'" />
+         <ServerLogView
+           v-else-if="screen.kind === 'serverLog'"
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index 55978a6..96c0949 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -3,6 +3,7 @@ import { computed, useTemplateRef } from "vue";
+ 
+ import type { FileSides, Side } from "../ipc";
+ import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
++import OperationButtons from "./OperationButtons.vue";
+ import PaneDivider from "./PaneDivider.vue";
+ import { paneColumns, type PaneWidths } from "./paneSplit";
+ import ServerStatus from "./ServerStatus.vue";
+@@ -72,6 +73,7 @@ function paneWidths(): PaneWidths | null {
+     :class="{ invisible: !shown }"
+   >
+     <header class="flex h-10 shrink-0 items-center justify-end px-2">
++      <OperationButtons :abort="true" />
+       <ServerStatus class="ml-auto" :path="null" :problems="null" />
+       <SettingsButton />
+     </header>
+diff --git a/frontend/src/ui/MergeToolbar.vue b/frontend/src/ui/MergeToolbar.vue
+index eb92d5a..49239aa 100644
+--- a/frontend/src/ui/MergeToolbar.vue
++++ b/frontend/src/ui/MergeToolbar.vue
+@@ -10,12 +10,13 @@ import Redo2 from "~icons/lucide/redo-2";
+ import Undo2 from "~icons/lucide/undo-2";
+ 
+ import type { Point } from "./menuPosition";
++import OperationButtons from "./OperationButtons.vue";
+ import { finishMustAsk } from "./question";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { useAppStore } from "./store";
+ import { summaryLabel } from "./summaryLabel";
+-import { shownButtons, type ToolbarButtonId } from "./toolbarButtons";
++import { shownButtons, type IconButtonId } from "./toolbarButtons";
+ import ToolbarMenu from "./ToolbarMenu.vue";
+ import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
+ 
+@@ -50,7 +51,7 @@ const menuAt = shallowRef<Point | null>(null);
+ const noSummary = computed(() => props.summary === null);
+ const abortRunning = computed(() => abortState.value.kind === "running");
+ 
+-const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
++const ICON_BUTTONS: Readonly<Record<IconButtonId, IconButton>> = {
+   abortMerge: {
+     icon: GitPullRequestClosed,
+     keepsKeyboard: true,
+@@ -123,11 +124,12 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
+   },
+ };
+ 
++const listed = computed(() => shownButtons(abortState.value, hiddenButtons.value));
++const continueShown = computed(() => listed.value.some((button) => button.id === "continue"));
+ const shown = computed(() =>
+-  shownButtons(abortState.value, hiddenButtons.value).map((button) => ({
+-    ...button,
+-    ...ICON_BUTTONS[button.id],
+-  })),
++  listed.value.flatMap((button) =>
++    button.id === "continue" ? [] : [{ ...button, ...ICON_BUTTONS[button.id] }],
++  ),
+ );
+ const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
+ const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
+@@ -183,6 +185,7 @@ function closeMenu(): void {
+     >
+       Mark resolved
+     </button>
++    <OperationButtons v-if="continueShown" class="mr-2" :abort="false" />
+     <button
+       v-for="button in shown"
+       :key="button.id"
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 0ede281..683e6d3 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -7,6 +7,7 @@ import { DELETE, DELETED_LINE, DELETED_SENTENCE, KEEP, notTextLine } from "./cho
+ import type { FileWork } from "./closeGuard";
+ import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSide";
+ import MergeToolbar from "./MergeToolbar.vue";
++import OperationButtons from "./OperationButtons.vue";
+ import PaneDivider from "./PaneDivider.vue";
+ import { paneColumns, type PaneWidths } from "./paneSplit";
+ import ServerStatus from "./ServerStatus.vue";
+@@ -199,6 +200,7 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+       @finish="markResolved"
+     />
+     <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
++      <OperationButtons :abort="true" />
+       <ServerStatus class="ml-auto" :path="null" :problems="null" />
+       <SettingsButton />
+     </header>
+diff --git a/frontend/src/ui/OperationButtons.vue b/frontend/src/ui/OperationButtons.vue
+new file mode 100644
+index 0000000..789bfba
+--- /dev/null
++++ b/frontend/src/ui/OperationButtons.vue
+@@ -0,0 +1,46 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import { abortLabel, continueLabel } from "./operationText";
++import { useAppStore } from "./store";
++
++defineProps<{ abort: boolean }>();
++
++const { operation, continueState, continueHover, continueOperation, abortState, abortOperation } =
++  useAppStore();
++
++const continueText = computed(() =>
++  operation.value === null ? "" : continueLabel(operation.value),
++);
++const abortText = computed(() => (operation.value === null ? "" : abortLabel(operation.value)));
++const ready = computed(() => continueState.value === "ready");
++</script>
++
++<template>
++  <div v-if="operation !== null" class="flex shrink-0 items-center gap-2">
++    <span :title="continueHover ?? continueText">
++      <button
++        type="button"
++        :disabled="!ready"
++        class="rounded border px-3.5 py-1 disabled:pointer-events-none"
++        :class="
++          ready
++            ? 'border-primary bg-primary text-on-primary hover:brightness-110'
++            : 'border-control-border text-fg-muted'
++        "
++        @click="continueOperation"
++      >
++        {{ continueText }}
++      </button>
++    </span>
++    <button
++      v-if="abort"
++      type="button"
++      :disabled="abortState.kind !== 'ready'"
++      class="rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
++      @click="abortOperation"
++    >
++      {{ abortText }}
++    </button>
++  </div>
++</template>
+diff --git a/frontend/src/ui/StopView.vue b/frontend/src/ui/StopView.vue
+new file mode 100644
+index 0000000..9505686
+--- /dev/null
++++ b/frontend/src/ui/StopView.vue
+@@ -0,0 +1,24 @@
++<script setup lang="ts">
++import OperationButtons from "./OperationButtons.vue";
++import ServerStatus from "./ServerStatus.vue";
++import SettingsButton from "./SettingsButton.vue";
++
++defineProps<{ message: string | null }>();
++</script>
++
++<template>
++  <div class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island">
++    <header class="flex h-10 shrink-0 items-center justify-end px-2">
++      <ServerStatus class="ml-auto" :path="null" :problems="null" />
++      <SettingsButton />
++    </header>
++    <section class="flex min-h-0 flex-1 flex-col items-start gap-3 rounded-island bg-panel p-3">
++      <p>Git stopped without conflicts.</p>
++      <pre
++        v-if="message !== null && message !== ''"
++        class="max-w-full overflow-auto opaque-scroller font-mono whitespace-pre-wrap"
++        >{{ message }}</pre>
++      <OperationButtons :abort="true" />
++    </section>
++  </div>
++</template>
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+index ddb12d8..4ea1294 100644
+--- a/frontend/src/ui/aborting.test.ts
++++ b/frontend/src/ui/aborting.test.ts
+@@ -4,9 +4,9 @@ import { shallowRef, type ShallowRef } from "vue";
+ import type { OperationView, SourceFailure, SourceResult } from "../ipc";
+ import { createAborting, type Aborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
++import type { Stop } from "./currentStop";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+-import type { Stop } from "./saving";
+ 
+ const LINUX = "Linux x86_64";
+ 
+@@ -44,6 +44,7 @@ function aborting(
+     problem: shallowRef<Problem | null>(null),
+     lists,
+     stop: { dropped: false },
++    running: shallowRef(false),
+     refreshFiles: () => {
+       lists.push("list");
+       return Promise.resolve();
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index 0140353..6ef46b5 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -1,21 +1,22 @@
+-import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++import { computed, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type { ChunkSource, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
++import { landed, type Stop } from "./currentStop";
+ import { attempt, reportFailure, type Problem, type Relist } from "./problem";
+-import { landed, type Writing } from "./saving";
+ 
+ export type AbortState =
+   | { readonly kind: "none" }
+   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
+ 
+-type AbortTarget = Relist &
+-  Pick<Writing, "stop"> & {
+-    readonly source: Pick<ChunkSource, "abortOperation">;
+-    readonly asking: Pick<Asking, "ask">;
+-    readonly operation: Readonly<ShallowRef<OperationView | null>>;
+-    readonly problem: ShallowRef<Problem | null>;
+-  };
++type AbortTarget = Relist & {
++  readonly stop: Stop;
++  readonly source: Pick<ChunkSource, "abortOperation">;
++  readonly asking: Pick<Asking, "ask">;
++  readonly operation: Readonly<ShallowRef<OperationView | null>>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly running: ShallowRef<boolean>;
++};
+ 
+ export type Aborting = {
+   readonly abortState: ComputedRef<AbortState>;
+@@ -23,7 +24,7 @@ export type Aborting = {
+ };
+ 
+ export function createAborting(target: AbortTarget): Aborting {
+-  const running = shallowRef(false);
++  const { running } = target;
+   const abortState = computed((): AbortState => {
+     const operation = target.operation.value;
+     if (operation === null) {
+diff --git a/frontend/src/ui/closeGuard.test.ts b/frontend/src/ui/closeGuard.test.ts
+new file mode 100644
+index 0000000..7061abc
+--- /dev/null
++++ b/frontend/src/ui/closeGuard.test.ts
+@@ -0,0 +1,56 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef } from "vue";
++
++import { loadFixture, type FileMergeData } from "../ipc";
++import { createAsking } from "./asking";
++import { createCloseGuard } from "./closeGuard";
++import type { Problem } from "./problem";
++
++const MAGIC_KEYS = await loadFixture("vueuse-use-magic-keys.ts");
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function guarded(unsaved: boolean) {
++  const asking = createAsking();
++  const target = {
++    asking,
++    opened: shallowRef<readonly FileMergeData[]>([{ ...MAGIC_KEYS, path: "a.ts" }]),
++    problem: shallowRef<Problem | null>(null),
++    running: shallowRef(false),
++  };
++  const guard = createCloseGuard(target);
++  guard.track("a.ts", { unsaved: () => unsaved });
++  return { ...target, guard };
++}
++
++test("while git runs a Continue or an Abort the close is refused with the problem, never a question", async () => {
++  const lines: string[] = [];
++  vi.spyOn(console, "info").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  const window = guarded(true);
++  window.running.value = true;
++
++  expect(await window.guard.mayClose()).toBe(false);
++
++  expect(window.asking.question.value).toBeNull();
++  expect(window.problem.value).toEqual({ action: "close" });
++  expect(lines).toEqual(['[info] store.close_refused {reason: "git_running"}']);
++});
++
++test("once git is done the close asks about unsaved edits again, and closes without any", async () => {
++  const window = guarded(true);
++  window.running.value = true;
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  await window.guard.mayClose();
++  window.running.value = false;
++
++  const asked = window.guard.mayClose();
++  expect(window.asking.question.value).toEqual({ kind: "exit", files: ["a.ts"] });
++  window.asking.answer(true);
++  expect(await asked).toBe(true);
++
++  expect(await guarded(false).guard.mayClose()).toBe(true);
++});
+diff --git a/frontend/src/ui/closeGuard.ts b/frontend/src/ui/closeGuard.ts
+index baae914..29d8e44 100644
+--- a/frontend/src/ui/closeGuard.ts
++++ b/frontend/src/ui/closeGuard.ts
+@@ -2,7 +2,7 @@ import type { ShallowRef } from "vue";
+ 
+ import { log, onWindowClose, type FileMergeData } from "../ipc";
+ import type { Asking } from "./asking";
+-import { unexpected } from "./problem";
++import { report, unexpected, type Problem } from "./problem";
+ import { exitMustAsk } from "./question";
+ 
+ export type FileWork = { unsaved(): boolean };
+@@ -15,10 +15,15 @@ export type CloseGuard = {
+   readonly watchWindowClose: () => Promise<void>;
+ };
+ 
+-export function createCloseGuard(
+-  asking: Asking,
+-  opened: Readonly<ShallowRef<readonly FileMergeData[]>>,
+-): CloseGuard {
++type GuardTarget = {
++  readonly asking: Asking;
++  readonly opened: Readonly<ShallowRef<readonly FileMergeData[]>>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly running: Readonly<ShallowRef<boolean>>;
++};
++
++export function createCloseGuard(target: GuardTarget): CloseGuard {
++  const { asking, opened } = target;
+   const work = new Map<string, FileWork>();
+ 
+   function unsavedFiles(): string[] {
+@@ -28,6 +33,10 @@ export function createCloseGuard(
+   }
+ 
+   async function mayClose(): Promise<boolean> {
++    if (target.running.value) {
++      report(target, { action: "close" });
++      return false;
++    }
+     const files = unsavedFiles();
+     return !exitMustAsk(files) || (await asking.ask({ kind: "exit", files })) === "yes";
+   }
+diff --git a/frontend/src/ui/continuing.test.ts b/frontend/src/ui/continuing.test.ts
+new file mode 100644
+index 0000000..70fbb22
+--- /dev/null
++++ b/frontend/src/ui/continuing.test.ts
+@@ -0,0 +1,325 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowReactive, shallowRef, type ShallowRef } from "vue";
++
++import type { ContinueReply, FileEntry, OperationView, SourceFailure, SourceResult } from "../ipc";
++import { createAsking, type Asking } from "./asking";
++import { createContinuing, type ContinueState, type Continuing } from "./continuing";
++import type { Stop } from "./currentStop";
++import type { Problem } from "./problem";
++import { problemText } from "./problemText";
++import { claimWrite } from "./saving";
++import type { StopEnd } from "./stops";
++
++const LINUX = "Linux x86_64";
++
++const REBASE: OperationView = {
++  kind: "Rebase",
++  branch: "feature",
++  onto: { kind: "Branch", name: "main" },
++  replaying: null,
++  progress: { step: 1, total: 3 },
++  editor_steps_ahead: false,
++};
++const REWORDS: OperationView = { ...REBASE, editor_steps_ahead: true };
++const MERGE: OperationView = { kind: "Merge", merging: null, into: null };
++
++const RESOLVED: FileEntry = { path: "a.ts", status: "Resolved", unsupported: null };
++const LEFT: FileEntry = { path: "b.ts", status: "Unresolved", unsupported: null };
++
++type Reply = SourceResult<ContinueReply>;
++
++type Pressed = Continuing & {
++  readonly asking: Asking;
++  readonly files: ShallowRef<readonly FileEntry[]>;
++  readonly operation: ShallowRef<OperationView | null>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly running: ShallowRef<boolean>;
++  readonly writing: Map<string, { writes: number; overtaken: boolean }>;
++  readonly calls: number[];
++  readonly ends: StopEnd[];
++  readonly lists: string[];
++  readonly answers: ((reply: Reply) => void)[];
++  unsaved: string[];
++  stop: Stop;
++};
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function quiet(): string[] {
++  const lines: string[] = [];
++  for (const level of ["info", "error"] as const) {
++    vi.spyOn(console, level).mockImplementation((line: string) => {
++      lines.push(line);
++    });
++  }
++  return lines;
++}
++
++function continuing(
++  operation: OperationView | null = REBASE,
++  files: readonly FileEntry[] = [RESOLVED],
++): Pressed {
++  const calls: number[] = [];
++  const answers: ((reply: Reply) => void)[] = [];
++  const ends: StopEnd[] = [];
++  const lists: string[] = [];
++  const unsaved: string[] = [];
++  const target = {
++    asking: createAsking(),
++    files: shallowRef(files),
++    operation: shallowRef(operation),
++    problem: shallowRef<Problem | null>(null),
++    running: shallowRef(false),
++    writing: shallowReactive(new Map<string, { writes: number; overtaken: boolean }>()),
++    calls,
++    ends,
++    lists,
++    answers,
++    unsaved,
++    stop: { dropped: false },
++    source: {
++      continueOperation: (): Promise<Reply> => {
++        calls.push(calls.length + 1);
++        return new Promise((resolve) => {
++          answers.push(resolve);
++        });
++      },
++    },
++    guard: { unsavedFiles: () => [...target.unsaved] },
++    nextStop: (end: StopEnd) => {
++      ends.push(end);
++      return Promise.resolve();
++    },
++    refreshFiles: () => {
++      lists.push("list");
++      return Promise.resolve();
++    },
++  };
++  return Object.assign(target, createContinuing(target));
++}
++
++async function answered(press: Pressed, reply: Reply): Promise<void> {
++  const pressed = press.continueOperation();
++  await vi.waitFor(() => {
++    expect(press.answers).toHaveLength(press.calls.length);
++    expect(press.calls.length).toBeGreaterThan(0);
++  });
++  expect(press.continueState.value).toBe("running");
++  press.answers.at(-1)?.(reply);
++  await pressed;
++}
++
++test("no recorded operation is noOperation, and a press calls nothing", async () => {
++  const press = continuing(null);
++
++  expect(press.continueState.value).toBe("noOperation");
++  expect(press.continueHover.value).toBeNull();
++  await press.continueOperation();
++  expect([press.calls, press.asking.question.value]).toEqual([[], null]);
++});
++
++test("files git lists as not resolved make it filesLeft, counted in the hover, and a press calls nothing", async () => {
++  const press = continuing(REBASE, [RESOLVED, LEFT, { ...LEFT, path: "c.ts" }]);
++
++  expect(press.continueState.value).toBe("filesLeft");
++  expect(press.continueHover.value).toBe("2 files are not resolved yet");
++  press.files.value = [RESOLVED, LEFT];
++  expect(press.continueHover.value).toBe("1 file is not resolved yet");
++  await press.continueOperation();
++  expect(press.calls).toEqual([]);
++});
++
++test("a held write claim makes it writing until the write is done", async () => {
++  const press = continuing();
++  const done: (() => void)[] = [];
++  const writing = claimWrite(
++    press,
++    "a.ts",
++    () =>
++      new Promise<void>((resolve) => {
++        done.push(resolve);
++      }),
++  );
++
++  expect(press.continueState.value).toBe("writing");
++  expect(press.continueHover.value).toBe("Saving…");
++  await press.continueOperation();
++  expect(press.calls).toEqual([]);
++  done[0]?.();
++  await writing;
++  expect(press.continueState.value).toBe("ready");
++});
++
++test("every file resolved, no write and git idle is ready, with no hover; a stop without files is ready too", () => {
++  expect(continuing().continueState.value).toBe("ready");
++  expect(continuing().continueHover.value).toBeNull();
++  expect(continuing(REBASE, []).continueState.value).toBe("ready");
++});
++
++test("while git runs, Continue is running with the terminal hover and a second press calls nothing", async () => {
++  const press = continuing();
++  const pressed = press.continueOperation();
++  await vi.waitFor(() => {
++    expect(press.calls).toEqual([1]);
++  });
++
++  expect(press.continueState.value).toBe("running");
++  expect(press.continueHover.value).toBe(
++    "Continuing… (if nothing happens, git may be asking for something in the terminal that started yamt)",
++  );
++  await press.continueOperation();
++  expect(press.calls).toEqual([1]);
++  press.answers[0]?.({ ok: true, value: { kind: "Stopped", message: "" } });
++  await pressed;
++});
++
++test.each([
++  ["No", (asking: Asking) => asking.answer(false)],
++  ["Escape", (asking: Asking) => asking.dismiss()],
++])("unsaved edits ask first, naming the files; %s calls nothing", async (_name, decline) => {
++  const press = continuing();
++  press.unsaved = ["a.ts", "b.ts"];
++
++  const pressed = press.continueOperation();
++  expect(press.asking.question.value).toEqual({
++    kind: "continueUnsaved",
++    operation: "Rebase",
++    files: ["a.ts", "b.ts"],
++  });
++  decline(press.asking);
++  await pressed;
++
++  expect([press.calls, press.continueState.value]).toEqual([[], "ready"]);
++});
++
++test("the reword question comes only with editor_steps_ahead, after the unsaved one; No calls nothing", async () => {
++  const press = continuing(REWORDS);
++  press.unsaved = ["a.ts"];
++
++  const declined = press.continueOperation();
++  expect(press.asking.question.value?.kind).toBe("continueUnsaved");
++  press.asking.answer(true);
++  await vi.waitFor(() => {
++    expect(press.asking.question.value).toEqual({ kind: "rewords" });
++  });
++  press.asking.answer(false);
++  await declined;
++  expect(press.calls).toEqual([]);
++
++  press.unsaved = [];
++  const confirmed = press.continueOperation();
++  expect(press.asking.question.value).toEqual({ kind: "rewords" });
++  press.asking.answer(true);
++  await vi.waitFor(() => {
++    expect(press.calls).toEqual([1]);
++  });
++  press.answers[0]?.({ ok: true, value: { kind: "Stopped", message: "" } });
++  await confirmed;
++});
++
++test("without editor steps and without unsaved edits Continue asks nothing", async () => {
++  const press = continuing(MERGE);
++  const pressed = press.continueOperation();
++
++  expect(press.asking.question.value).toBeNull();
++  await vi.waitFor(() => {
++    expect(press.calls).toEqual([1]);
++  });
++  press.answers[0]?.({ ok: true, value: { kind: "Stopped", message: "" } });
++  await pressed;
++});
++
++test("Stopped goes to the next stop with git's message, and only then is Continue ready again", async () => {
++  const press = continuing();
++  let stateAtNextStop: ContinueState | null = null;
++  Object.assign(press, {
++    nextStop: (end: StopEnd) => {
++      press.ends.push(end);
++      stateAtNextStop = press.continueState.value;
++      return Promise.resolve();
++    },
++  });
++
++  await answered(press, {
++    ok: true,
++    value: { kind: "Stopped", message: "CONFLICT (content): Merge conflict in b.ts" },
++  });
++
++  expect(press.ends).toEqual([
++    { kind: "continued", message: "CONFLICT (content): Merge conflict in b.ts" },
++  ]);
++  expect(stateAtNextStop).toBe("running");
++  expect(press.continueState.value).toBe("ready");
++  expect(press.problem.value).toBeNull();
++});
++
++test("git's refusal is the problem naming the operation, the list is read again and Continue is ready again", async () => {
++  const lines = quiet();
++  const refused: SourceFailure = { kind: "Git", message: "hook says no\n" };
++  const press = continuing();
++
++  await answered(press, { ok: false, failure: refused });
++
++  const problem = press.problem.value;
++  expect(problem).toEqual({ action: "continue", operation: "Rebase", cause: refused });
++  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
++    "Could not continue the rebase: hook says no",
++  );
++  expect(lines).toEqual([
++    `[error] store.continue_failed {operation: "Rebase", kind: "Git", message: "hook says no\\n"}`,
++  ]);
++  expect([press.lists, press.ends, press.continueState.value]).toEqual([["list"], [], "ready"]);
++});
++
++test("another failure is reported through problemText without reading the list again", async () => {
++  quiet();
++  const press = continuing(MERGE);
++
++  await answered(press, { ok: false, failure: { kind: "GitRunning" } });
++
++  expect(press.problem.value).toEqual({
++    action: "continue",
++    operation: "Merge",
++    cause: { kind: "GitRunning" },
++  });
++  expect([press.lists, press.continueState.value]).toEqual([[], "ready"]);
++});
++
++test("StopMovedOn goes on to the stop git is at instead of showing a problem", async () => {
++  const press = continuing();
++
++  await answered(press, { ok: false, failure: { kind: "StopMovedOn" } });
++
++  expect([press.ends, press.problem.value, press.lists]).toEqual([[{ kind: "outside" }], null, []]);
++  expect(press.continueState.value).toBe("ready");
++});
++
++test("Finished is logged and Continue stays running: the window is closing", async () => {
++  const lines = quiet();
++  const press = continuing();
++
++  await answered(press, { ok: true, value: { kind: "Finished" } });
++
++  expect(lines).toEqual(['[info] continue.finished {operation: "Rebase"}']);
++  expect([press.ends, press.problem.value, press.continueState.value]).toEqual([
++    [],
++    null,
++    "running",
++  ]);
++});
++
++test("a reply after its stop was dropped changes nothing but the running state", async () => {
++  const press = continuing();
++  const pressed = press.continueOperation();
++  await vi.waitFor(() => {
++    expect(press.calls).toEqual([1]);
++  });
++  press.stop.dropped = true;
++  press.answers[0]?.({ ok: false, failure: { kind: "Git", message: "late" } });
++  await pressed;
++
++  expect([press.problem.value, press.ends, press.lists]).toEqual([null, [], []]);
++  expect(press.continueState.value).toBe("ready");
++});
+diff --git a/frontend/src/ui/continuing.ts b/frontend/src/ui/continuing.ts
+new file mode 100644
+index 0000000..dfe2527
+--- /dev/null
++++ b/frontend/src/ui/continuing.ts
+@@ -0,0 +1,133 @@
++import { computed, type ComputedRef, type ShallowRef } from "vue";
++
++import { log, type ChunkSource, type FileEntry, type OperationView } from "../ipc";
++import type { Asking } from "./asking";
++import type { CloseGuard } from "./closeGuard";
++import { landed, type Stop } from "./currentStop";
++import { attempt, report, type Problem, type ProblemCause, type Relist } from "./problem";
++import type { Question } from "./question";
++import type { StopEnd } from "./stops";
++
++export type ContinueState = "noOperation" | "filesLeft" | "writing" | "ready" | "running";
++
++type ContinueTarget = Relist & {
++  readonly stop: Stop;
++  readonly writing: ReadonlyMap<string, unknown>;
++  readonly running: ShallowRef<boolean>;
++  readonly source: Pick<ChunkSource, "continueOperation">;
++  readonly asking: Pick<Asking, "ask">;
++  readonly guard: Pick<CloseGuard, "unsavedFiles">;
++  readonly files: Readonly<ShallowRef<readonly FileEntry[]>>;
++  readonly operation: Readonly<ShallowRef<OperationView | null>>;
++  readonly problem: ShallowRef<Problem | null>;
++  nextStop(end: StopEnd): Promise<void>;
++};
++
++export type Continuing = {
++  readonly continueState: ComputedRef<ContinueState>;
++  readonly continueHover: ComputedRef<string | null>;
++  readonly continueOperation: () => Promise<void>;
++};
++
++function hoverText(state: ContinueState, filesLeft: number): string | null {
++  switch (state) {
++    case "noOperation":
++    case "ready":
++      return null;
++    case "filesLeft":
++      return filesLeft === 1
++        ? "1 file is not resolved yet"
++        : `${filesLeft} files are not resolved yet`;
++    case "writing":
++      return "Saving…";
++    case "running":
++      return "Continuing… (if nothing happens, git may be asking for something in the terminal that started yamt)";
++    default: {
++      const _exhaustive: never = state;
++      return _exhaustive;
++    }
++  }
++}
++
++async function confirmed(target: ContinueTarget, operation: OperationView): Promise<boolean> {
++  const files = target.guard.unsavedFiles();
++  const unsaved = { kind: "continueUnsaved", operation: operation.kind, files } satisfies Question;
++  if (files.length > 0 && (await target.asking.ask(unsaved)) !== "yes") {
++    return false;
++  }
++  const rewords = operation.kind === "Rebase" && operation.editor_steps_ahead;
++  return !rewords || (await target.asking.ask({ kind: "rewords" })) === "yes";
++}
++
++async function refused(
++  target: ContinueTarget,
++  operation: OperationView,
++  cause: ProblemCause,
++): Promise<void> {
++  if (cause.kind === "StopMovedOn") {
++    await target.nextStop({ kind: "outside" });
++    return;
++  }
++  report(target, { action: "continue", operation: operation.kind, cause });
++  if (cause.kind === "Git") {
++    await target.refreshFiles();
++  }
++}
++
++async function continued(
++  target: ContinueTarget,
++  operation: OperationView,
++  stop: Readonly<Stop>,
++): Promise<void> {
++  target.running.value = true;
++  const outcome = await landed(stop, () => attempt(() => target.source.continueOperation()));
++  if (outcome === null) {
++    target.running.value = false;
++    return;
++  }
++  if (!outcome.ok) {
++    await refused(target, operation, outcome.cause);
++  } else if (outcome.value.kind === "Stopped") {
++    await target.nextStop({ kind: "continued", message: outcome.value.message });
++  } else {
++    log.info("continue.finished", { operation: operation.kind });
++    return;
++  }
++  target.running.value = false;
++}
++
++export function createContinuing(target: ContinueTarget): Continuing {
++  const filesLeft = computed(
++    () => target.files.value.filter((file) => file.status !== "Resolved").length,
++  );
++  const continueState = computed((): ContinueState => {
++    if (target.operation.value === null) {
++      return "noOperation";
++    }
++    if (target.running.value) {
++      return "running";
++    }
++    if (filesLeft.value > 0) {
++      return "filesLeft";
++    }
++    return target.writing.size > 0 ? "writing" : "ready";
++  });
++
++  async function continueOperation(): Promise<void> {
++    const operation = target.operation.value;
++    if (operation === null || continueState.value !== "ready") {
++      return;
++    }
++    const { stop } = target;
++    if (!(await confirmed(target, operation))) {
++      return;
++    }
++    await continued(target, operation, stop);
++  }
++
++  return {
++    continueState,
++    continueHover: computed(() => hoverText(continueState.value, filesLeft.value)),
++    continueOperation,
++  };
++}
+diff --git a/frontend/src/ui/currentStop.ts b/frontend/src/ui/currentStop.ts
+new file mode 100644
+index 0000000..4cd369f
+--- /dev/null
++++ b/frontend/src/ui/currentStop.ts
+@@ -0,0 +1,6 @@
++export type Stop = { dropped: boolean };
++
++export async function landed<T>(stop: Readonly<Stop>, call: () => Promise<T>): Promise<T | null> {
++  const reply = await call();
++  return stop.dropped ? null : reply;
++}
+diff --git a/frontend/src/ui/diskChanges.ts b/frontend/src/ui/diskChanges.ts
+index 0a3b168..ce2e312 100644
+--- a/frontend/src/ui/diskChanges.ts
++++ b/frontend/src/ui/diskChanges.ts
+@@ -2,9 +2,11 @@ import type { ShallowRef } from "vue";
+ 
+ import { log, type DiskChange } from "../ipc";
+ import type { CloseGuard } from "./closeGuard";
++import type { Stop } from "./currentStop";
+ import type { DiskNotice, Notice } from "./noticeText";
++import type { Relist } from "./problem";
+ import type { Taken } from "./sides";
+-import { isShown, takesASide, type Shown } from "./views";
++import { isShown, reload, takesASide, type Shown } from "./views";
+ 
+ export type DiskChangeTarget = Shown & {
+   readonly notices: ShallowRef<readonly Notice[]>;
+@@ -22,7 +24,7 @@ function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
+   }
+ }
+ 
+-export function noteDiskChanges(
++function noteDiskChanges(
+   target: DiskChangeTarget,
+   changes: readonly DiskChange[],
+   when: DiskNotice["when"],
+@@ -51,3 +53,13 @@ export function noteDiskChanges(
+   target.taken.value = taken;
+   return [...byPath.keys()].filter((path) => isShown(target, path));
+ }
++
++export async function applyDiskChanges(
++  target: DiskChangeTarget & Relist,
++  changes: readonly DiskChange[],
++  when: DiskNotice["when"],
++  stop: Readonly<Stop>,
++): Promise<void> {
++  const shown = noteDiskChanges(target, changes, when);
++  await Promise.all(shown.map((path) => reload(target, path, stop)));
++}
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index b154ae1..3284cd5 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -11,10 +11,10 @@ import type {
+   SideNames,
+   SourceResult,
+ } from "../ipc";
++import type { Stop } from "./currentStop";
+ import { refreshFiles } from "./listing";
+ import type { Notice } from "./noticeText";
+ import type { Problem } from "./problem";
+-import type { Stop } from "./saving";
+ import type { Taken } from "./sides";
+ import type { StopEnd } from "./stops";
+ 
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
+index 7adbcbe..e7597bd 100644
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
+@@ -1,15 +1,15 @@
+ import type { ShallowRef } from "vue";
+ 
+ import type { FileEntry, OperationView, SideNames } from "../ipc";
+-import type { DiskChangeTarget } from "./diskChanges";
++import { landed, type Stop } from "./currentStop";
++import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+ import type { DiskNotice } from "./noticeText";
+ import { attempt, report, type Relist } from "./problem";
+-import { applyDiskChanges, landed, type Writing } from "./saving";
+ import type { StopEnd } from "./stops";
+ 
+ type ListTarget = DiskChangeTarget &
+-  Relist &
+-  Pick<Writing, "stop"> & {
++  Relist & {
++    readonly stop: Stop;
+     readonly files: ShallowRef<readonly FileEntry[]>;
+     readonly operation: ShallowRef<OperationView | null>;
+     readonly sideNames: ShallowRef<SideNames>;
+diff --git a/frontend/src/ui/operationText.test.ts b/frontend/src/ui/operationText.test.ts
+index b7094aa..ce63218 100644
+--- a/frontend/src/ui/operationText.test.ts
++++ b/frontend/src/ui/operationText.test.ts
+@@ -1,7 +1,14 @@
+ import { expect, test } from "vitest";
+ 
+ import type { OperationView, SideName } from "../ipc";
+-import { abortLabel, abortMessage, abortTitle, operationLine } from "./operationText";
++import {
++  abortLabel,
++  abortMessage,
++  abortTitle,
++  allResolvedText,
++  continueLabel,
++  operationLine,
++} from "./operationText";
+ 
+ const MAIN: SideName = { kind: "Branch", name: "main" };
+ const FEATURE: SideName = { kind: "Branch", name: "feature/reminders" };
+@@ -195,3 +202,27 @@ test.each<OperationView>([
+ ])("the first step has nothing done to name: %j", (operation) => {
+   expect(abortMessage(operation)).not.toContain("undone too");
+ });
++
++test.each<[OperationView, string]>([
++  [REBASE, "Continue rebase"],
++  [{ kind: "CherryPick", picking: FIX_LOGIN, progress: null }, "Continue cherry-pick"],
++  [{ kind: "Revert", reverting: ADD_CACHE, progress: null }, "Continue revert"],
++  [{ kind: "Am", subject: "", message: "", progress: null }, "Continue applying patches"],
++  [{ kind: "Merge", merging: FEATURE, into: MAIN }, "Commit merge"],
++  [{ kind: "SquashMerge", merging: FEATURE, into: MAIN }, "Commit merge"],
++])("Continue is labelled per operation (a merge commits): %j", (operation, label) => {
++  expect(continueLabel(operation)).toBe(label);
++});
++
++test("the all-resolved line names the next step, and without an operation keeps its old words", () => {
++  expect(allResolvedText(REBASE)).toBe("All files are resolved. Continue rebase to let git go on.");
++  expect(allResolvedText({ kind: "Am", subject: "", message: "", progress: null })).toBe(
++    "All files are resolved. Continue applying patches to let git go on.",
++  );
++  expect(allResolvedText({ kind: "SquashMerge", merging: FEATURE, into: MAIN })).toBe(
++    "All files are resolved. Commit merge to commit it.",
++  );
++  expect(allResolvedText(null)).toBe(
++    "All files are resolved. Close the window to finish the merge.",
++  );
++});
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+index 8be6ddf..2d7f3a1 100644
+--- a/frontend/src/ui/operationText.ts
++++ b/frontend/src/ui/operationText.ts
+@@ -2,6 +2,8 @@ import type { OperationKind, OperationView, ProgressView, SideName } from "../ip
+ 
+ type OperationLine = { readonly text: string; readonly tooltip: string };
+ 
++type ContinueAction = { readonly verb: "Continue" | "Commit"; readonly object: string };
++
+ const NAMES: Readonly<Record<OperationKind, string>> = {
+   Merge: "merge",
+   SquashMerge: "squash merge",
+@@ -140,6 +142,39 @@ export function abortLabel(operation: OperationView): string {
+   return `Abort ${NAMES[operation.kind]}`;
+ }
+ 
++export function continueLabel(operation: OperationView): string {
++  switch (operation.kind) {
++    case "Merge":
++    case "SquashMerge":
++      return "Commit merge";
++    case "Am":
++      return "Continue applying patches";
++    case "Rebase":
++    case "CherryPick":
++    case "Revert":
++      return `Continue ${NAMES[operation.kind]}`;
++    default: {
++      const _exhaustive: never = operation;
++      return _exhaustive;
++    }
++  }
++}
++
++export function continueAction(kind: OperationKind): ContinueAction {
++  const verb = kind === "Merge" || kind === "SquashMerge" ? "Commit" : "Continue";
++  return { verb, object: `the ${NAMES[kind]}` };
++}
++
++export function allResolvedText(operation: OperationView | null): string {
++  if (operation === null) {
++    return "All files are resolved. Close the window to finish the merge.";
++  }
++  const next = continueLabel(operation);
++  return continueAction(operation.kind).verb === "Commit"
++    ? `All files are resolved. ${next} to commit it.`
++    : `All files are resolved. ${next} to let git go on.`;
++}
++
+ export function abortTitle(operation: OperationView): string {
+   return `Abort ${TITLES[operation.kind]}`;
+ }
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 10305c7..b8fa347 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -21,10 +21,11 @@ export type ProblemCause = SourceFailure | Unexpected;
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+   | {
+-      readonly action: "abort";
++      readonly action: "abort" | "continue";
+       readonly operation: OperationKind;
+       readonly cause: ProblemCause;
+     }
++  | { readonly action: "close" }
+   | {
+       readonly action: "stopped";
+       readonly operation: OperationKind | null;
+@@ -65,8 +66,12 @@ export function logProblem(problem: Problem): void {
+       log.error(event, { ...problem.cause });
+       return;
+     case "abort":
++    case "continue":
+       log.error(event, { operation: problem.operation, ...problem.cause });
+       return;
++    case "close":
++      log.info("store.close_refused", { reason: "git_running" });
++      return;
+     case "stopped":
+       log.info("store.stopped", {
+         operation: problem.operation ?? "none",
+@@ -110,16 +115,7 @@ export async function reportFailure(
+ 
+ export function clearProblemAbout(target: Target, path: string): void {
+   const problem = target.problem.value;
+-  if (
+-    problem === null ||
+-    problem.action === "list" ||
+-    problem.action === "abort" ||
+-    problem.action === "stopped" ||
+-    problem.action === "settings"
+-  ) {
+-    return;
+-  }
+-  if (problem.path === path) {
++  if (problem !== null && "path" in problem && problem.path === path) {
+     target.problem.value = null;
+   }
+ }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index dab8975..e44bed9 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -178,6 +178,21 @@ test.each([
+   expect(text({ action: "abort", operation, cause })).toBe(words);
+ });
+ 
++test.each([
++  ["Rebase", "Could not continue the rebase: hook says no"],
++  ["CherryPick", "Could not continue the cherry-pick: hook says no"],
++  ["Merge", "Could not commit the merge: hook says no"],
++  ["SquashMerge", "Could not commit the squash merge: hook says no"],
++] as const)("a Continue git refused names the %s and keeps git's words", (operation, words) => {
++  const cause = { kind: "Git", message: "hook says no\n" } as const;
++
++  expect(text({ action: "continue", operation, cause })).toBe(words);
++});
++
++test("a close refused while git runs says to wait for git", () => {
++  expect(text({ action: "close" })).toBe("Git is still running; close yamt when it is done.");
++});
++
+ test("a stop with nothing to list shows git's message as it came, naming the operation or git", () => {
+   const message = "Rebasing (2/3)\rerror: could not apply cdc3800... card title\n";
+ 
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 2ed1a64..b3e5c2b 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -1,9 +1,9 @@
+ import { keyLabel, type KeyProblem } from "../ipc";
+ import { ACTION_NAMES } from "./keyText";
+-import { operationName } from "./operationText";
++import { continueAction, operationName } from "./operationText";
+ import type { Problem, ProblemCause } from "./problem";
+ 
+-type CausedProblem = Exclude<Problem, { action: "stopped" }>;
++type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
+ 
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
+@@ -36,6 +36,10 @@ function attempted(problem: CausedProblem): string {
+       return "Could not use the settings file";
+     case "abort":
+       return `Could not abort the ${operationName(problem.operation)}`;
++    case "continue": {
++      const { verb, object } = continueAction(problem.operation);
++      return `Could not ${verb.toLowerCase()} ${object}`;
++    }
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+@@ -131,6 +135,9 @@ function causedText(problem: CausedProblem, platform: string): string {
+ }
+ 
+ export function problemText(problem: Problem, platform: string): string {
++  if (problem.action === "close") {
++    return "Git is still running; close yamt when it is done.";
++  }
+   if (problem.action !== "stopped") {
+     return causedText(problem, platform);
+   }
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index 3a79ae9..cd68afe 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import { parseKey } from "../ipc";
+ import { serverKey, type ServerSpec } from "../lsp";
+-import { exitMustAsk, finishMustAsk, questionText } from "./question";
++import { endsWithStop, exitMustAsk, finishMustAsk, questionText } from "./question";
+ 
+ const LINUX = "Linux x86_64";
+ 
+@@ -172,3 +172,44 @@ test("aborting a rebase names it and counts the commits already replayed", () =>
+     "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The 2 commits already replayed are undone too. The repository goes back to how it was before the rebase, and yamt closes.",
+   );
+ });
++
++test("Continue with unsaved edits names the files and continues or commits by the operation", () => {
++  const files = ["src/App.vue", "a.ts"];
++
++  expect(questionText({ kind: "continueUnsaved", operation: "Rebase", files }, LINUX)).toEqual({
++    title: "Unsaved Changes",
++    message:
++      "These files have changes that are not saved to disk. Continue the rebase without saving them?",
++    list: { kind: "files", files },
++    note: null,
++    confirm: "Continue Without Saving",
++    cancel: "Cancel",
++  });
++  expect(questionText({ kind: "continueUnsaved", operation: "Merge", files }, LINUX)).toMatchObject(
++    {
++      message:
++        "These files have changes that are not saved to disk. Commit the merge without saving them?",
++      confirm: "Commit Without Saving",
++    },
++  );
++});
++
++test("the reword question says the message stays as git prepares it (plan §2 #91)", () => {
++  expect(questionText({ kind: "rewords" }, LINUX)).toEqual({
++    title: "Commit Messages",
++    message:
++      "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Continue rebase",
++    cancel: "Cancel",
++  });
++});
++
++test("both Continue questions are about the stop and end with it; the exit question does not", () => {
++  expect(endsWithStop({ kind: "continueUnsaved", operation: "Rebase", files: ["a.ts"] })).toBe(
++    true,
++  );
++  expect(endsWithStop({ kind: "rewords" })).toBe(true);
++  expect(endsWithStop({ kind: "exit", files: ["a.ts"] })).toBe(false);
++});
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index cd36710..53d928b 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -1,8 +1,8 @@
+-import { keyLabel, type OperationView } from "../ipc";
++import { keyLabel, type OperationKind, type OperationView } from "../ipc";
+ import type { ServerSpec } from "../lsp";
+ import type { Clash } from "./keymapEdit";
+ import { ACTION_NAMES } from "./keyText";
+-import { abortMessage, abortTitle } from "./operationText";
++import { abortMessage, abortTitle, continueAction } from "./operationText";
+ import { projectLabel, serverLabel } from "./serverText";
+ import type { MergeSummary } from "./useMergeController";
+ 
+@@ -10,6 +10,12 @@ export type Question =
+   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
+   | { readonly kind: "exit"; readonly files: readonly string[] }
+   | { readonly kind: "abort"; readonly operation: OperationView }
++  | {
++      readonly kind: "continueUnsaved";
++      readonly operation: OperationKind;
++      readonly files: readonly string[];
++    }
++  | { readonly kind: "rewords" }
+   | ({ readonly kind: "clash" } & Clash)
+   | {
+       readonly kind: "servers";
+@@ -61,6 +67,8 @@ export function endsWithStop(question: Question): boolean {
+   switch (question.kind) {
+     case "unprocessed":
+     case "abort":
++    case "continueUnsaved":
++    case "rewords":
+       return true;
+     case "exit":
+     case "clash":
+@@ -73,13 +81,20 @@ export function endsWithStop(question: Question): boolean {
+   }
+ }
+ 
+-function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
++function unprocessedText({ conflicts, changes }: MergeSummary): QuestionText {
+   const parts = [
+     ...(conflicts > 0 ? [`${conflicts} unresolved conflict${conflicts === 1 ? "" : "s"}`] : []),
+     ...(changes > 0 ? [`${changes} unprocessed change${changes === 1 ? "" : "s"}`] : []),
+   ];
+   const verb = conflicts + changes === 1 ? "remains" : "remain";
+-  return `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`;
++  return {
++    title: "Unprocessed Changes",
++    message: `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`,
++    list: { kind: "none" },
++    note: null,
++    confirm: "Save Current Result",
++    cancel: "Back to Resolving",
++  };
+ }
+ 
+ function abortText(operation: OperationView): QuestionText {
+@@ -94,17 +109,32 @@ function abortText(operation: OperationView): QuestionText {
+   };
+ }
+ 
++function continueUnsavedText(operation: OperationKind, files: readonly string[]): QuestionText {
++  const { verb, object } = continueAction(operation);
++  return {
++    title: "Unsaved Changes",
++    message: `These files have changes that are not saved to disk. ${verb} ${object} without saving them?`,
++    list: { kind: "files", files },
++    note: null,
++    confirm: `${verb} Without Saving`,
++    cancel: "Cancel",
++  };
++}
++
++const REWORDS_TEXT: QuestionText = {
++  title: "Commit Messages",
++  message:
++    "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
++  list: { kind: "none" },
++  note: null,
++  confirm: "Continue rebase",
++  cancel: "Cancel",
++};
++
+ export function questionText(question: Question, platform: string): QuestionText {
+   switch (question.kind) {
+     case "unprocessed":
+-      return {
+-        title: "Unprocessed Changes",
+-        message: unprocessedSentence(question.summary),
+-        list: { kind: "none" },
+-        note: null,
+-        confirm: "Save Current Result",
+-        cancel: "Back to Resolving",
+-      };
++      return unprocessedText(question.summary);
+     case "exit":
+       return {
+         title: "Unsaved Changes",
+@@ -127,6 +157,10 @@ export function questionText(question: Question, platform: string): QuestionText
+       return serversText(question.found, question.added);
+     case "abort":
+       return abortText(question.operation);
++    case "continueUnsaved":
++      return continueUnsavedText(question.operation, question.files);
++    case "rewords":
++      return REWORDS_TEXT;
+     default: {
+       const _exhaustive: never = question;
+       return _exhaustive;
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index b821753..e0918bc 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -14,12 +14,12 @@ import {
+   type WriteReply,
+   type WriteRequest,
+ } from "../ipc";
++import { applyDiskChanges } from "./diskChanges";
+ import type { Notice } from "./noticeText";
+ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+ import {
+   afterWrite,
+-  applyDiskChanges,
+   claimWrite,
+   createSaving,
+   dropStop,
+@@ -713,6 +713,37 @@ test.each<[string, SourceResult<FileMergeData>]>([
+   },
+ );
+ 
++test("a reset whose reload is still waiting when the stop is dropped keeps the new stop's open problem", async () => {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const loads: ((view: SourceResult<FileMergeData>) => void)[] = [];
++  const target = writeTarget([entry("a.ts")], {
++    resetFile: () => Promise.resolve(written([entry("a.ts")])),
++    loadFile: () =>
++      new Promise((resolve) => {
++        loads.push(resolve);
++      }),
++  });
++  const resetting = reset(target, "a.ts", VERSION);
++  await vi.waitFor(() => {
++    expect(target.loads).toEqual(["a.ts"]);
++  });
++
++  dropStop(target);
++  const newStopProblem: Problem = {
++    action: "open",
++    path: "a.ts",
++    cause: { kind: "Git", message: "the new stop's" },
++  };
++  target.problem.value = newStopProblem;
++  const opened = target.opened.value;
++  loads[0]?.({ ok: true, value: { ...MAGIC_KEYS, path: "a.ts" } });
++  await resetting;
++
++  expect(target.problem.value).toBe(newStopProblem);
++  expect(target.opened.value).toBe(opened);
++  expect(target.lists).toEqual([]);
++});
++
+ test.each(WRITES)(
+   "a %s git answers StopMovedOn is reported and lists again, which goes on to the new stop",
+   async (_write, start) => {
+diff --git a/frontend/src/ui/saving.ts b/frontend/src/ui/saving.ts
+index 52eac50..5bb342b 100644
+--- a/frontend/src/ui/saving.ts
++++ b/frontend/src/ui/saving.ts
+@@ -1,9 +1,9 @@
+ import type { ShallowRef } from "vue";
+ 
+-import type { DiskChange, DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
++import type { DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../ipc";
+ import type { Asking } from "./asking";
+-import { noteDiskChanges, type DiskChangeTarget } from "./diskChanges";
+-import type { DiskNotice } from "./noticeText";
++import { landed, type Stop } from "./currentStop";
++import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+ import { attempt, clearProblemAbout, reportFailure, type Problem, type Relist } from "./problem";
+ import { finishMustAsk, type Question } from "./question";
+ import type {
+@@ -12,9 +12,7 @@ import type {
+   MergeSummary,
+   ResultSnapshot,
+ } from "./useMergeController";
+-import { fetchView, type Shown } from "./views";
+-
+-export type Stop = { dropped: boolean };
++import { reload } from "./views";
+ 
+ type Claim = { writes: number; overtaken: boolean };
+ 
+@@ -45,38 +43,6 @@ export type FormatOutcomes = ShallowRef<ReadonlyMap<string, FormatOutcome>>;
+ 
+ export type Saving = { save(request: SaveRequest): Promise<void> };
+ 
+-export async function landed<T>(stop: Readonly<Stop>, call: () => Promise<T>): Promise<T | null> {
+-  const reply = await call();
+-  return stop.dropped ? null : reply;
+-}
+-
+-async function reload(
+-  target: Shown & Relist,
+-  path: string,
+-  stop: Readonly<Stop>,
+-): Promise<boolean> {
+-  const view = await landed(stop, () => fetchView(target, path));
+-  if (view === null) {
+-    return false;
+-  }
+-  if (!view.ok) {
+-    await reportFailure(target, { action: "open", path, cause: view.cause });
+-    return false;
+-  }
+-  view.value();
+-  return true;
+-}
+-
+-export async function applyDiskChanges(
+-  target: DiskChangeTarget & Relist,
+-  changes: readonly DiskChange[],
+-  when: DiskNotice["when"],
+-  stop: Readonly<Stop>,
+-): Promise<void> {
+-  const shown = noteDiskChanges(target, changes, when);
+-  await Promise.all(shown.map((path) => reload(target, path, stop)));
+-}
+-
+ export async function afterWrite(
+   target: WriteTarget,
+   path: string,
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 6b3f260..c1e2029 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -311,7 +311,7 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
+ test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
+   quiet();
+   const stop = stopAt([]);
+-  const { abortOperation } = createAborting(stop);
++  const { abortOperation } = createAborting(Object.assign(stop, { running: shallowRef(false) }));
+   const pressed = abortOperation();
+   expect(stop.asking.question.value?.kind).toBe("abort");
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 23d2760..0fc9b3a 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -2562,3 +2562,77 @@ test("a focus list that finds git moved on outside drops the old stop, names the
+   store.dismissNotice("movedOn");
+   expect(store.notices.value).toEqual([]);
+ });
++
++test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
++  spyConsole();
++  const rebase: OperationView = {
++    kind: "Rebase",
++    branch: "feature",
++    onto: null,
++    replaying: null,
++    progress: { step: 1, total: 3 },
++    editor_steps_ahead: false,
++  };
++  const step2: OperationView = { ...rebase, progress: { step: 2, total: 3 } };
++  const sides: SideNames = { local: null, remote: null };
++  const answers: SourceResult<Listing>[] = [
++    ok({
++      kind: "Files",
++      files: [resolvedEntry("a.ts")],
++      diskChanges: [],
++      operation: rebase,
++      sides,
++    }),
++    ok({ kind: "Files", files: [entry("c.ts")], diskChanges: [], operation: step2, sides }),
++  ];
++  const { source, calls } = choiceSource({
++    listStop: () => {
++      calls.push("listStop");
++      return Promise.resolve(answers.shift() ?? ok({ kind: "MovedOn" }));
++    },
++    continueOperation: () => {
++      calls.push("continueOperation");
++      return Promise.resolve(ok({ kind: "Stopped", message: "CONFLICT in c.ts" }));
++    },
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  expect(store.continueState.value).toBe("ready");
++
++  await store.continueOperation();
++
++  expect(calls).toEqual([
++    "listStop",
++    "loadFile a.ts",
++    "continueOperation",
++    "listStop",
++    "loadFile c.ts",
++  ]);
++  expect(store.files.value).toEqual([entry("c.ts")]);
++  expect(store.operation.value).toBe(step2);
++  expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
++  expect(store.active.value).toBe("c.ts");
++  expect(store.problem.value).toBeNull();
++  expect(store.continueState.value).toBe("filesLeft");
++});
++
++test("a take git refuses stays on the file: no move to the next unresolved one", async () => {
++  spyConsole();
++  const refused: SourceFailure = { kind: "Git", message: "index.lock exists" };
++  const { source, calls } = choiceSource({
++    listStop: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
++    takeSide: (path, side) => {
++      calls.push(`takeSide ${path} ${side}`);
++      return Promise.resolve({ ok: false, failure: refused });
++    },
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  expect(store.active.value).toBe(LOGO);
++
++  await store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion);
++
++  expect(calls).toEqual([`describeFile ${LOGO}`, `takeSide ${LOGO} local`]);
++  expect(store.active.value).toBe(LOGO);
++  expect(store.problem.value).toEqual({ action: "take", path: LOGO, cause: refused });
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 0a4f697..8c4ad9b 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -1,4 +1,4 @@
+-import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++import { computed, shallowReactive, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import {
+   type ChunkSource,
+@@ -17,6 +17,7 @@ import { createAborting, type Aborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
+ import { createCloseGuard, type CloseGuard } from "./closeGuard";
+ import { createCollapsing, type Collapsing } from "./collapsing";
++import { createContinuing, type Continuing } from "./continuing";
+ import { fileListKey, type KeyPress } from "./fileListKey";
+ import { refreshFiles } from "./listing";
+ import { nextUnresolved } from "./nextFile";
+@@ -58,6 +59,7 @@ type State = Refs &
+     readonly source: ChunkSource;
+     readonly asking: Asking;
+     readonly guard: CloseGuard;
++    readonly running: ShallowRef<boolean>;
+     latestOpen: number;
+     latestSettings: number;
+     readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
+@@ -92,6 +94,7 @@ export type AppStore = { readonly [K in keyof Refs]: Readonly<Refs[K]> } & {
+   readonly hiddenButtons: HiddenButtons["hidden"];
+ } & Actions &
+   Aborting &
++  Continuing &
+   Collapsing &
+   PaneSplitState &
+   Saving &
+@@ -120,12 +123,14 @@ function createRefs(startTheme: Theme): Refs {
+ 
+ function createState(refs: Refs, source: ChunkSource): State {
+   const asking = createAsking();
++  const running = shallowRef(false);
+   const state: State = {
+     ...refs,
+     source,
+     asking,
+-    guard: createCloseGuard(asking, refs.opened),
+-    writing: new Map(),
++    guard: createCloseGuard({ asking, opened: refs.opened, problem: refs.problem, running }),
++    running,
++    writing: shallowReactive(new Map()),
+     stop: { dropped: false },
+     latestOpen: 0,
+     latestSettings: 0,
+@@ -161,6 +166,7 @@ export function createAppStore(
+     ...createCollapsing(),
+     ...createPaneSplit(),
+     ...createAborting(state),
++    ...createContinuing(state),
+     ...createSaving(state),
+     ...createServers(refs.screen, servers),
+     ...createServerSetup({ ...state, ...acts, host, servers }),
+diff --git a/frontend/src/ui/toolbarButtons.test.ts b/frontend/src/ui/toolbarButtons.test.ts
+index 394ba2e..e4f68b4 100644
+--- a/frontend/src/ui/toolbarButtons.test.ts
++++ b/frontend/src/ui/toolbarButtons.test.ts
+@@ -164,8 +164,9 @@ test("stored decisions drop ids yamt does not know and values that are not true
+   expect(storedDecisions(storage)).toEqual({ abortMerge: false, previous: true, undo: false });
+ });
+ 
+-test("the toolbar order puts Abort merge first and the collapse toggle after Next change", () => {
++test("the toolbar order puts Continue and Abort merge first and the collapse toggle after Next change", () => {
+   expect(TOOLBAR_BUTTONS).toEqual([
++    "continue",
+     "abortMerge",
+     "previous",
+     "next",
+@@ -189,26 +190,36 @@ const REBASE: OperationView = {
+ const NONE: AbortState = { kind: "none" };
+ const READY: AbortState = { kind: "ready", operation: REBASE };
+ const RUNNING: AbortState = { kind: "running", operation: REBASE };
++const MERGE: OperationView = { kind: "Merge", merging: null, into: null };
+ 
+ function ids(buttons: readonly ListedButton[]): readonly ToolbarButtonId[] {
+   return buttons.map((button) => button.id);
+ }
+ 
+-test("the menu lists Abort only while git records an operation, labelled by it", () => {
+-  const withoutAbort = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge");
++test("the menu lists Continue and Abort only while git records an operation, labelled by it", () => {
++  const withoutOperation = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" && id !== "continue");
+ 
+-  expect(ids(listedButtons(NONE))).toEqual(withoutAbort);
++  expect(ids(listedButtons(NONE))).toEqual(withoutOperation);
+   expect(ids(listedButtons(READY))).toEqual(TOOLBAR_BUTTONS);
+   expect(ids(listedButtons(RUNNING))).toEqual(TOOLBAR_BUTTONS);
+-  expect(listedButtons(READY)[0]).toEqual({ id: "abortMerge", label: "Abort rebase" });
++  expect(listedButtons(READY).slice(0, 2)).toEqual([
++    { id: "continue", label: "Continue rebase" },
++    { id: "abortMerge", label: "Abort rebase" },
++  ]);
++  expect(listedButtons({ kind: "ready", operation: MERGE })[0]).toEqual({
++    id: "continue",
++    label: "Commit merge",
++  });
+   expect(listedButtons(NONE)[0]).toEqual({ id: "previous", label: "Previous change" });
+ });
+ 
+-test("the toolbar shows Abort only while git records an operation and the user shows it", () => {
++test("the toolbar shows Continue and Abort only while git records an operation and the user shows them", () => {
+   const userHidesUndo = new Set<ToolbarButtonId>(["undo"]);
+   const userHidesAbort = new Set<ToolbarButtonId>(["abortMerge", "undo"]);
++  const userHidesContinue = new Set<ToolbarButtonId>(["continue"]);
+ 
+   expect(ids(shownButtons(READY, userHidesUndo))).toEqual([
++    "continue",
+     "abortMerge",
+     "previous",
+     "next",
+@@ -217,11 +228,25 @@ test("the toolbar shows Abort only while git records an operation and the user s
+     "applyRight",
+     "redo",
+   ]);
+-  expect(shownButtons(RUNNING, userHidesUndo)[0]?.id).toBe("abortMerge");
++  expect(ids(shownButtons(RUNNING, userHidesUndo)).slice(0, 2)).toEqual(["continue", "abortMerge"]);
+   expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("abortMerge");
++  expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("continue");
+   expect(shownButtons(NONE, userHidesUndo)).toHaveLength(6);
+   expect(ids(shownButtons(READY, userHidesAbort))).not.toContain("abortMerge");
+-  expect(shownButtons(READY, userHidesAbort)).toHaveLength(6);
++  expect(shownButtons(READY, userHidesAbort)).toHaveLength(7);
++  expect(ids(shownButtons(READY, userHidesContinue))).not.toContain("continue");
++});
++
++test("Continue starts shown, its toggle is stored like the others, and the Abort merge decision stays", () => {
++  const storage = memoryStorage({ [KEY]: '{"abortMerge":false}' });
++  const buttons = createHiddenButtons(storage);
++  expect(hiddenList(buttons)).toEqual(["undo", "redo"]);
++
++  buttons.toggle("continue");
++
++  expect(hiddenList(buttons)).toEqual(["continue", "undo", "redo"]);
++  expect(storedDecisions(storage)).toEqual({ abortMerge: false, continue: true });
++  expect(hiddenList(createHiddenButtons(storage))).toEqual(["continue", "undo", "redo"]);
+ });
+ 
+ test.each([
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index cd2cc4a..f89463d 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -2,10 +2,11 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import type { AbortState } from "./aborting";
+-import { abortLabel } from "./operationText";
++import { abortLabel, continueLabel } from "./operationText";
+ import { parseStored, storedValue } from "./windowStorage";
+ 
+ export const TOOLBAR_BUTTONS = [
++  "continue",
+   "abortMerge",
+   "previous",
+   "next",
+@@ -20,6 +21,10 @@ export type ToolbarButtonId = (typeof TOOLBAR_BUTTONS)[number];
+ 
+ export type ListedButton = { readonly id: ToolbarButtonId; readonly label: string };
+ 
++type OperationButtonId = "continue" | "abortMerge";
++
++export type IconButtonId = Exclude<ToolbarButtonId, "continue">;
++
+ export type HiddenButtons = {
+   readonly hidden: Readonly<Ref<ReadonlySet<ToolbarButtonId>>>;
+   readonly toggle: (id: ToolbarButtonId) => void;
+@@ -39,7 +44,7 @@ const OLD_FORMAT_IDS = [
+   "redo",
+ ] as const satisfies readonly ToolbarButtonId[];
+ 
+-const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> = {
++const LABELS: Readonly<Record<Exclude<ToolbarButtonId, OperationButtonId>, string>> = {
+   previous: "Previous change",
+   next: "Next change",
+   collapse: "Collapse unchanged fragments",
+@@ -52,6 +57,7 @@ const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> =
+ // Abort, Undo and Redo start hidden until the user shows them (plan §2 #58, #74, #88); the
+ // keys of Undo and Redo still work.
+ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
++  continue: false,
+   abortMerge: true,
+   previous: false,
+   next: false,
+@@ -64,10 +70,14 @@ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+ 
+ export function listedButtons(abort: AbortState): readonly ListedButton[] {
+   return TOOLBAR_BUTTONS.flatMap((id): ListedButton[] => {
+-    if (id !== "abortMerge") {
++    if (id !== "continue" && id !== "abortMerge") {
+       return [{ id, label: LABELS[id] }];
+     }
+-    return abort.kind === "none" ? [] : [{ id, label: abortLabel(abort.operation) }];
++    if (abort.kind === "none") {
++      return [];
++    }
++    const { operation } = abort;
++    return [{ id, label: id === "continue" ? continueLabel(operation) : abortLabel(operation) }];
+   });
+ }
+ 
+diff --git a/frontend/src/ui/views.ts b/frontend/src/ui/views.ts
+index 9040bac..5a6208e 100644
+--- a/frontend/src/ui/views.ts
++++ b/frontend/src/ui/views.ts
+@@ -1,7 +1,8 @@
+ import type { ShallowRef } from "vue";
+ 
+ import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
+-import { attempt, type Outcome, type Problem } from "./problem";
++import { landed, type Stop } from "./currentStop";
++import { attempt, reportFailure, type Outcome, type Problem, type Relist } from "./problem";
+ 
+ export type Shown = {
+   readonly source: ChunkSource;
+@@ -50,3 +51,20 @@ export async function fetchView(shown: Shown, path: string): Promise<Outcome<()
+   const data = await attempt(() => shown.source.loadFile(path));
+   return data.ok ? { ok: true, value: () => putOpened(shown, data.value) } : data;
+ }
++
++export async function reload(
++  target: Shown & Relist,
++  path: string,
++  stop: Readonly<Stop>,
++): Promise<boolean> {
++  const view = await landed(stop, () => fetchView(target, path));
++  if (view === null) {
++    return false;
++  }
++  if (!view.ok) {
++    await reportFailure(target, { action: "open", path, cause: view.cause });
++    return false;
++  }
++  view.value();
++  return true;
++}
+-- 
+2.56.0
+

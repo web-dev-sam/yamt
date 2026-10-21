@@ -1,47 +1,4 @@
 {
-  "GitOpsContinue": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.J-continue.md",
-    "owned": [
-      "frontend/src/ui/continuing.ts",
-      "frontend/src/ui/continuing.test.ts",
-      "frontend/src/ui/toolbarButtons.ts",
-      "frontend/src/ui/toolbarButtons.test.ts",
-      "frontend/src/ui/question.ts",
-      "frontend/src/ui/question.test.ts",
-      "frontend/src/ui/closeGuard.ts",
-      "frontend/src/ui/closeGuard.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/operationText.ts",
-      "frontend/src/ui/operationText.test.ts",
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/OperationButtons.vue",
-      "frontend/src/ui/StopView.vue",
-      "frontend/src/ui/MergeToolbar.vue",
-      "frontend/src/ui/ToolbarMenu.vue",
-      "frontend/src/ui/App.vue",
-      "frontend/src/ui/ChoiceView.vue",
-      "frontend/src/ui/MergeView.vue",
-      "frontend/src/ui/saving.ts",
-      "frontend/src/ui/saving.test.ts",
-      "frontend/src/ui/listing.ts",
-      "frontend/src/ui/listing.test.ts",
-      "frontend/src/ui/aborting.ts",
-      "frontend/src/ui/aborting.test.ts",
-      "frontend/src/ui/stops.ts",
-      "frontend/src/ui/stops.test.ts",
-      "frontend/src/ui/views.ts",
-      "frontend/src/ui/views.test.ts",
-      "frontend/src/ui/diskChanges.ts",
-      "frontend/src/ui/diskChanges.test.ts",
-      "frontend/src/ui/currentStop.ts",
-      "frontend/src/ui/currentStop.test.ts"
-    ]
-  },
   "GitOpsRememberedR1": {
     "agent": "rust-impl",
     "brief": "docs/slices/briefs/3.J-remembered-rework-1.md",
@@ -53,5 +10,10 @@
       "tests/showcase/**",
       "frontend/fixtures/**"
     ]
+  },
+  "GitOpsContinueBoundary": {
+    "agent": "boundary-reviewer",
+    "brief": "docs/slices/briefs/3.J-continue.md",
+    "owned": []
   }
 }
