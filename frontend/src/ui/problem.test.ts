@@ -1,6 +1,17 @@
 import { afterEach, expect, test, vi } from "vitest";
 
+import { createFixtureCompareSource, log, type TabId } from "../ipc";
 import { logProblem, type Problem } from "./problem";
+
+const TAB = await openedTab();
+
+async function openedTab(): Promise<TabId> {
+  const reply = await createFixtureCompareSource(log, "", {}).openCompare();
+  if (!reply.ok) {
+    throw new Error("the fixture opened no tab");
+  }
+  return reply.value.list.shown;
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -25,7 +36,13 @@ test.each([
     '[error] store.loadTab_failed {name: "Compare 2", kind: "WorkerStopped"}',
   ],
   [
-    { action: "saveTab", name: "Compare 2", cause: { kind: "ColumnTooLarge", limit: 8 } },
+    {
+      action: "saveTab",
+      tab: TAB,
+      column: "right",
+      name: "Compare 2",
+      cause: { kind: "ColumnTooLarge", limit: 8 },
+    },
     '[error] store.saveTab_failed {name: "Compare 2", kind: "ColumnTooLarge", limit: 8}',
   ],
 ] satisfies [Problem, string][])(

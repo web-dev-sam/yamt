@@ -21,12 +21,16 @@ export type CompareNotice =
 
 const BYTES_PER_MIB = 1_048_576;
 
+export function columnLimitText(limit: number): string {
+  return `a column holds up to ${limit / BYTES_PER_MIB} MiB`;
+}
+
 function what(notice: CompareNotice): string {
   switch (notice.kind) {
     case "format":
       return `not valid ${notice.language} (line ${notice.line}): ${notice.message}`;
     case "refused":
-      return `not pasted — a column holds up to ${notice.limit / BYTES_PER_MIB} MiB`;
+      return `not pasted — ${columnLimitText(notice.limit)}`;
     default: {
       const _exhaustive: never = notice;
       return _exhaustive;

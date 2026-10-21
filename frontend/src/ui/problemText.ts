@@ -1,4 +1,5 @@
 import { keyLabel, type KeyProblem } from "../ipc";
+import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, operationName } from "./operationText";
 import type { Problem, ProblemCause } from "./problem";
@@ -8,7 +9,6 @@ type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
 
 const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
-const BYTES_PER_MIB = 1_048_576;
 
 const OPERATION_STATE_WORDS: Readonly<
   Record<"StopMovedOn" | "GitRunning" | "MergeFinished" | "NoOperation", string>
@@ -144,7 +144,7 @@ function causedText(problem: CausedProblem, platform: string): string {
     case "Keys":
       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
     case "ColumnTooLarge":
-      return `${attempted(problem)}: a column holds up to ${cause.limit / BYTES_PER_MIB} MiB.`;
+      return `${attempted(problem)}: ${columnLimitText(cause.limit)}.`;
     default: {
       const _exhaustive: never = cause;
       return _exhaustive;

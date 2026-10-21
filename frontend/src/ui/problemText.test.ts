@@ -1,12 +1,28 @@
 import { expect, test } from "vitest";
 
-import { parseKey, type Key, type SourceFailure } from "../ipc";
+import {
+  createFixtureCompareSource,
+  log,
+  parseKey,
+  type Key,
+  type SourceFailure,
+  type TabId,
+} from "../ipc";
 import type { Problem, ProblemCause } from "./problem";
 import { problemText } from "./problemText";
 
 const PATH = "src/a.ts";
 const SETTINGS = "/home/me/.config/yamt/settings.json";
 const LINUX = "Linux x86_64";
+const TAB = await openedTab();
+
+async function openedTab(): Promise<TabId> {
+  const reply = await createFixtureCompareSource(log, "", {}).openCompare();
+  if (!reply.ok) {
+    throw new Error("the fixture opened no tab");
+  }
+  return reply.value.list.shown;
+}
 
 function onFinish(cause: ProblemCause): Problem {
   return { action: "finish", path: PATH, cause };
@@ -184,14 +200,23 @@ test("a stopped worker says to try again", () => {
 test.each([
   [{ action: "tabs" }, "Could not update the tabs: boom"],
   [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
-  [{ action: "saveTab", name: "Compare 2" }, "Could not save Compare 2: boom"],
+  [
+    { action: "saveTab", tab: TAB, column: "left", name: "Compare 2" },
+    "Could not save Compare 2: boom",
+  ],
 ] as const)("a failed compare call %o says what failed, naming the tab", (failed, words) => {
   expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
 });
 
 test("a save to a tab another call closed says the tab was closed", () => {
   expect(
-    text({ action: "saveTab", name: "Compare 2", cause: { kind: "UnknownTab", tab: 2 } }),
+    text({
+      action: "saveTab",
+      tab: TAB,
+      column: "right",
+      name: "Compare 2",
+      cause: { kind: "UnknownTab", tab: 2 },
+    }),
   ).toBe("Could not save Compare 2: that tab was closed.");
 });
 

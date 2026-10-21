@@ -2,10 +2,12 @@ import type { ShallowRef } from "vue";
 
 import {
   log,
+  type Column,
   type KeyProblem,
   type OperationKind,
   type SourceFailure,
   type SourceResult,
+  type TabId,
 } from "../ipc";
 
 type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
@@ -38,8 +40,11 @@ export type Problem =
     }
   | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
   | { readonly action: "tabs"; readonly cause: ProblemCause }
+  | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
   | {
-      readonly action: "loadTab" | "saveTab";
+      readonly action: "saveTab";
+      readonly tab: TabId;
+      readonly column: Column;
       readonly name: string;
       readonly cause: ProblemCause;
     };

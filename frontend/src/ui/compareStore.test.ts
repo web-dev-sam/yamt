@@ -18,6 +18,7 @@ import {
   type CompareStore,
   type TrackedTab,
 } from "./compareStore";
+import type { KeyPress } from "./fileListKey";
 import { problemText } from "./problemText";
 import { useSettingsStore } from "./settingsStore";
 
@@ -406,6 +407,8 @@ test("a failed flush is shown and logged, never thrown (catches a close stopped 
 
   expect(store.problem.value).toEqual({
     action: "saveTab",
+    tab,
+    column: "left",
     name: "Compare 1",
     cause: { kind: "Unexpected", message: "ipc gone" },
   });
@@ -481,10 +484,62 @@ test("saveColumn writes the column and returns the comparison, or null naming th
   expect(await late).toBeNull();
   expect(store.problem.value).toEqual({
     action: "saveTab",
+    tab: second,
+    column: "right",
     name: "Compare 2",
     cause: { kind: "UnknownTab", tab: second },
   });
   expect(store.tabs.value.map((entry) => entry.id)).toEqual([first]);
+});
+
+test("a successful save clears that column's save problem only (catches a stale 'Could not save' after the column saved)", async () => {
+  spyConsole();
+  let failing = true;
+  const store = await started((fixture) => ({
+    setColumn: (write) => (failing ? failed(GONE) : fixture.setColumn(write)),
+  }));
+  await store.addTab();
+  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
+  const left = await sendOf(store, first, "a");
+  const right: ColumnSend = { ...left, column: "right" };
+
+  await store.saveColumn(first, left);
+  failing = false;
+  await store.saveColumn(first, right);
+  await store.saveColumn(second, await sendOf(store, second, "b"));
+  expect(store.problem.value).toMatchObject({ action: "saveTab", tab: first, column: "left" });
+
+  await store.saveColumn(first, left);
+  expect(store.problem.value).toBeNull();
+});
+
+test("a Format on a tab replaces its earlier Format notices, keeping refused edits and other tabs' (catches a stale 'not valid JSON' after a good Format)", async () => {
+  const store = await started();
+  await store.addTab();
+  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
+  const json: ColumnFormatFailure = {
+    column: "left",
+    language: "JSON",
+    message: "Expected ',' or '}'",
+    line: 3,
+  };
+
+  store.refused(first, "right");
+  store.reportFormat(second, [json]);
+  store.reportFormat(first, [json]);
+  store.reportFormat(first, []);
+
+  expect(store.notices.value.map((row) => row.text)).toEqual([
+    "Compare 1, right: not pasted — a column holds up to 8 MiB",
+    "Compare 2, left: not valid JSON (line 3): Expected ',' or '}'",
+  ]);
+
+  store.reportFormat(second, [{ ...json, column: "right" }]);
+
+  expect(store.notices.value.map((row) => row.text)).toEqual([
+    "Compare 1, right: not pasted — a column holds up to 8 MiB",
+    "Compare 2, right: not valid JSON (line 3): Expected ',' or '}'",
+  ]);
 });
 
 test("a refused edit and a Format failure show their words; a second one for the column replaces the first (catches piled-up notices)", async () => {
@@ -568,4 +623,35 @@ test("a shown problem closes on request (catches a problem bar that cannot close
   store.dismissProblem();
 
   expect(store.problem.value).toBeNull();
+});
+
+test("the bound key toggles the tab panel through the shared rule, never while a question waits (catches a compare window that cannot hide its tabs)", async () => {
+  const store = await started();
+  const tab = tabAt(store, 0);
+  await holdingText(store, tab);
+  let prevents = 0;
+  const ctrlB: KeyPress = {
+    key: "b",
+    code: "KeyB",
+    ctrlKey: true,
+    metaKey: false,
+    altKey: false,
+    shiftKey: false,
+    defaultPrevented: false,
+    preventDefault: () => {
+      prevents += 1;
+    },
+  };
+
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
+
+  const closing = store.closeTab(tab);
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
+  store.answer(false);
+  await closing;
+
+  store.fileListKey(ctrlB, LINUX);
+  expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
 });
