@@ -1,10 +1,7 @@
 {
-  "GitOpsTagR1": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.J-operation-tag-rework-1.md",
-    "owned": [
-      "frontend/src/ui/OperationLabel.vue",
-      "frontend/src/ui/AGENTS.md"
-    ]
+  "GitOpsTagVerify": {
+    "agent": "verifier",
+    "brief": "docs/slices/briefs/3.J-tag-verify.md",
+    "owned": []
   }
 }
