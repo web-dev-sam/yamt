@@ -17,7 +17,15 @@ import {
 import type { Notice } from "./noticeText";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
-import { afterWrite, claimWrite, createSaving, finish, whileWriting, type Writing } from "./saving";
+import {
+  afterWrite,
+  claimWrite,
+  createSaving,
+  dropClaims,
+  finish,
+  whileWriting,
+  type Writing,
+} from "./saving";
 import type { Taken } from "./sides";
 import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
 
@@ -300,6 +308,54 @@ test("a save while a save of the same file runs is ignored; typing during the wr
   expect(a.snapshot().unsaved).toBe(false);
 });
 
+test("after dropClaims a save's and a finish's late replies change nothing, and a new claim on the path outlives the old one", async () => {
+  const saves: Answer[] = [];
+  const finishes: Answer[] = [];
+  const target = writeTarget([entry("a.ts"), entry("b.ts")], {
+    saveFile: () => answeredLater(saves),
+    finishFile: () => answeredLater(finishes),
+  });
+  const saving = createSaving(target);
+  const a = new Editor("a\n");
+  const b = new Editor("b\n");
+  a.text = "typed\n";
+  const saved = saving.save({ path: "a.ts", diskVersion: VERSION, handle: a.handle() });
+  const finished = finish(target, {
+    path: "b.ts",
+    diskVersion: VERSION,
+    summary: NOTHING_LEFT,
+    snapshot: b.snapshot(),
+  });
+  await vi.waitFor(() => {
+    expect([saves.length, finishes.length]).toEqual([1, 1]);
+  });
+  const before = target.files.value;
+
+  dropClaims(target);
+  expect(target.writing.size).toBe(0);
+  const releases: (() => void)[] = [];
+  const next = claimWrite(
+    target,
+    "a.ts",
+    () =>
+      new Promise<void>((resolve) => {
+        releases.push(resolve);
+      }),
+  );
+  saves[0]?.({ ok: false, failure: { kind: "StopMovedOn" } });
+  finishes[0]?.(written([resolvedEntry("b.ts")]));
+
+  expect(await finished).toBe(false);
+  await saved;
+  expect(target.writing.has("a.ts")).toBe(true);
+  expect(target.files.value).toBe(before);
+  expect(target.problem.value).toBeNull();
+  expect([a.marks, b.marks]).toEqual([[], []]);
+  releases[0]?.();
+  await next;
+  expect(target.writing.has("a.ts")).toBe(false);
+});
+
 test("claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended", async () => {
   const target: Writing = { writing: new Map() };
   const ran: string[] = [];
@@ -422,7 +478,7 @@ test("afterWrite takes git's list and says whether the write landed; a disk chan
   expect(target.files.value).toEqual(files);
   expect(target.loads).toEqual(["a.ts"]);
   expect(target.notices.value).toEqual([
-    { path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "running" },
+    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "running" },
   ]);
 });
 
@@ -449,7 +505,7 @@ test("a save refused because the file changed on disk marks nothing saved and sh
   expect(target.loads).toEqual(["a.ts"]);
   expect(target.opened.value[0]).not.toBe(shown);
   expect(target.notices.value).toEqual([
-    { path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
+    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
   ]);
   expect(target.problem.value).toBeNull();
 });

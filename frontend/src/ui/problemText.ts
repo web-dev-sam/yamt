@@ -1,6 +1,9 @@
 import { keyLabel, type KeyProblem } from "../ipc";
 import { ACTION_NAMES } from "./keyText";
+import { operationName } from "./operationText";
 import type { Problem, ProblemCause } from "./problem";
+
+type CausedProblem = Exclude<Problem, { action: "stopped" }>;
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
 
@@ -15,7 +18,7 @@ const OPERATION_STATE_WORDS: Readonly<
   NoOperation: "Git has no operation to continue or abort.",
 };
 
-function attempted(problem: Problem): string {
+function attempted(problem: CausedProblem): string {
   switch (problem.action) {
     case "list":
       return "Could not list the conflicted files";
@@ -32,7 +35,7 @@ function attempted(problem: Problem): string {
     case "settings":
       return "Could not use the settings file";
     case "abort":
-      return "Could not abort the merge";
+      return `Could not abort the ${operationName(problem.operation)}`;
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;
@@ -88,7 +91,7 @@ function keyProblemText(path: string, problem: KeyProblem, platform: string): st
   }
 }
 
-export function problemText(problem: Problem, platform: string): string {
+function causedText(problem: CausedProblem, platform: string): string {
   const { cause } = problem;
   switch (cause.kind) {
     case "Git":
@@ -125,4 +128,12 @@ export function problemText(problem: Problem, platform: string): string {
       return _exhaustive;
     }
   }
+}
+
+export function problemText(problem: Problem, platform: string): string {
+  if (problem.action !== "stopped") {
+    return causedText(problem, platform);
+  }
+  const who = problem.operation === null ? "Git" : `The ${operationName(problem.operation)}`;
+  return `${who} stopped: ${problem.message.trim()}`;
 }

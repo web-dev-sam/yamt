@@ -2,7 +2,7 @@ import type { ShallowRef } from "vue";
 
 import { log, type DiskChange } from "../ipc";
 import type { CloseGuard } from "./closeGuard";
-import type { Notice } from "./noticeText";
+import type { DiskNotice, Notice } from "./noticeText";
 import { clearProblemAbout, type Problem } from "./problem";
 import type { Taken } from "./sides";
 import { isShown, reload, takesASide, type Shown } from "./views";
@@ -13,7 +13,7 @@ export type DiskChangeTarget = Shown & {
   readonly guard: Pick<CloseGuard, "unsavedFiles">;
 };
 
-function logNotice({ path, result, editsDropped, when }: Notice): void {
+function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
   const { kind, ...details } = result;
   const fields = { path, result: kind, ...details, editsDropped, when };
   if (kind === "StageFailed") {
@@ -26,11 +26,12 @@ function logNotice({ path, result, editsDropped, when }: Notice): void {
 export async function applyDiskChanges(
   target: DiskChangeTarget,
   changes: readonly DiskChange[],
-  when: Notice["when"],
+  when: DiskNotice["when"],
 ): Promise<void> {
   const unsaved = target.guard.unsavedFiles();
   const byPath = new Map(changes.map((change) => [change.path, change.result]));
-  const notices = [...byPath].map(([path, result]): Notice => ({
+  const notices = [...byPath].map(([path, result]): DiskNotice => ({
+    kind: "disk",
     path,
     result,
     editsDropped: unsaved.includes(path),
@@ -38,7 +39,7 @@ export async function applyDiskChanges(
   }));
   notices.forEach(logNotice);
   target.notices.value = [
-    ...target.notices.value.filter((notice) => !byPath.has(notice.path)),
+    ...target.notices.value.filter((notice) => notice.kind !== "disk" || !byPath.has(notice.path)),
     ...notices,
   ];
   const taken = new Map(target.taken.value);

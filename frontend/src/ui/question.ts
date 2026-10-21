@@ -1,14 +1,15 @@
-import { keyLabel } from "../ipc";
+import { keyLabel, type OperationView } from "../ipc";
 import type { ServerSpec } from "../lsp";
 import type { Clash } from "./keymapEdit";
 import { ACTION_NAMES } from "./keyText";
+import { abortMessage, abortTitle } from "./operationText";
 import { projectLabel, serverLabel } from "./serverText";
 import type { MergeSummary } from "./useMergeController";
 
 export type Question =
   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
   | { readonly kind: "exit"; readonly files: readonly string[] }
-  | { readonly kind: "abort" }
+  | { readonly kind: "abort"; readonly operation: OperationView }
   | ({ readonly kind: "clash" } & Clash)
   | {
       readonly kind: "servers";
@@ -28,16 +29,6 @@ export type QuestionText = {
   readonly note: string | null;
   readonly confirm: string;
   readonly cancel: string;
-};
-
-const ABORT_TEXT: QuestionText = {
-  title: "Abort Merge",
-  message:
-    "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
-  list: { kind: "none" },
-  note: null,
-  confirm: "Abort Merge",
-  cancel: "Cancel",
 };
 
 function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
@@ -75,6 +66,18 @@ function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
   return `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`;
 }
 
+function abortText(operation: OperationView): QuestionText {
+  const title = abortTitle(operation);
+  return {
+    title,
+    message: abortMessage(operation),
+    list: { kind: "none" },
+    note: null,
+    confirm: title,
+    cancel: "Cancel",
+  };
+}
+
 export function questionText(question: Question, platform: string): QuestionText {
   switch (question.kind) {
     case "unprocessed":
@@ -107,7 +110,7 @@ export function questionText(question: Question, platform: string): QuestionText
     case "servers":
       return serversText(question.found, question.added);
     case "abort":
-      return ABORT_TEXT;
+      return abortText(question.operation);
     default: {
       const _exhaustive: never = question;
       return _exhaustive;

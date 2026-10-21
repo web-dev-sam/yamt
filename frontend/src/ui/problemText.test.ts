@@ -165,7 +165,28 @@ test.each([
   ["NoOperation", "Git has no operation to continue or abort."],
 ] as const)("%s says what git is at, whatever was tried", (kind, words) => {
   expect(text({ action: "save", path: PATH, cause: { kind } })).toBe(words);
-  expect(text({ action: "abort", cause: { kind } })).toBe(words);
+  expect(text({ action: "abort", operation: "Rebase", cause: { kind } })).toBe(words);
+});
+
+test.each([
+  ["Merge", "Could not abort the merge: error: Entry 'a.ts' not uptodate."],
+  ["Rebase", "Could not abort the rebase: error: Entry 'a.ts' not uptodate."],
+  ["Am", "Could not abort the patch application: error: Entry 'a.ts' not uptodate."],
+] as const)("an abort git refused names the %s", (operation, words) => {
+  const cause = { kind: "Git", message: "error: Entry 'a.ts' not uptodate.\n" } as const;
+
+  expect(text({ action: "abort", operation, cause })).toBe(words);
+});
+
+test("a stop with nothing to list shows git's message as it came, naming the operation or git", () => {
+  const message = "Rebasing (2/3)\rerror: could not apply cdc3800... card title\n";
+
+  expect(text({ action: "stopped", operation: "Rebase", message })).toBe(
+    "The rebase stopped: Rebasing (2/3)\rerror: could not apply cdc3800... card title",
+  );
+  expect(text({ action: "stopped", operation: null, message: "hook failed" })).toBe(
+    "Git stopped: hook failed",
+  );
 });
 
 test("key problems name the action, the key and what yamt does instead", () => {

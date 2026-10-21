@@ -1,12 +1,15 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
+import type { OperationView } from "../ipc";
+import type { AbortState } from "./aborting";
 import {
   createHiddenButtons,
   listedButtons,
   shownButtons,
   TOOLBAR_BUTTONS,
   type HiddenButtons,
+  type ListedButton,
   type ToolbarButtonId,
 } from "./toolbarButtons";
 
@@ -174,19 +177,38 @@ test("the toolbar order puts Abort merge first and the collapse toggle after Nex
   ]);
 });
 
-test("the menu lists Abort merge only while git has a merge to abort", () => {
+const REBASE: OperationView = {
+  kind: "Rebase",
+  branch: "feature",
+  onto: null,
+  replaying: null,
+  progress: null,
+  editor_steps_ahead: false,
+};
+
+const NONE: AbortState = { kind: "none" };
+const READY: AbortState = { kind: "ready", operation: REBASE };
+const RUNNING: AbortState = { kind: "running", operation: REBASE };
+
+function ids(buttons: readonly ListedButton[]): readonly ToolbarButtonId[] {
+  return buttons.map((button) => button.id);
+}
+
+test("the menu lists Abort only while git records an operation, labelled by it", () => {
   const withoutAbort = TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge");
 
-  expect(listedButtons("noMerge")).toEqual(withoutAbort);
-  expect(listedButtons("ready")).toEqual(TOOLBAR_BUTTONS);
-  expect(listedButtons("running")).toEqual(TOOLBAR_BUTTONS);
+  expect(ids(listedButtons(NONE))).toEqual(withoutAbort);
+  expect(ids(listedButtons(READY))).toEqual(TOOLBAR_BUTTONS);
+  expect(ids(listedButtons(RUNNING))).toEqual(TOOLBAR_BUTTONS);
+  expect(listedButtons(READY)[0]).toEqual({ id: "abortMerge", label: "Abort rebase" });
+  expect(listedButtons(NONE)[0]).toEqual({ id: "previous", label: "Previous change" });
 });
 
-test("the toolbar shows Abort merge only while git has a merge to abort and the user shows it", () => {
+test("the toolbar shows Abort only while git records an operation and the user shows it", () => {
   const userHidesUndo = new Set<ToolbarButtonId>(["undo"]);
   const userHidesAbort = new Set<ToolbarButtonId>(["abortMerge", "undo"]);
 
-  expect(shownButtons("ready", userHidesUndo)).toEqual([
+  expect(ids(shownButtons(READY, userHidesUndo))).toEqual([
     "abortMerge",
     "previous",
     "next",
@@ -195,11 +217,11 @@ test("the toolbar shows Abort merge only while git has a merge to abort and the 
     "applyRight",
     "redo",
   ]);
-  expect(shownButtons("running", userHidesUndo)[0]).toBe("abortMerge");
-  expect(shownButtons("noMerge", userHidesUndo)).not.toContain("abortMerge");
-  expect(shownButtons("noMerge", userHidesUndo)).toHaveLength(6);
-  expect(shownButtons("ready", userHidesAbort)).not.toContain("abortMerge");
-  expect(shownButtons("ready", userHidesAbort)).toHaveLength(6);
+  expect(shownButtons(RUNNING, userHidesUndo)[0]?.id).toBe("abortMerge");
+  expect(ids(shownButtons(NONE, userHidesUndo))).not.toContain("abortMerge");
+  expect(shownButtons(NONE, userHidesUndo)).toHaveLength(6);
+  expect(ids(shownButtons(READY, userHidesAbort))).not.toContain("abortMerge");
+  expect(shownButtons(READY, userHidesAbort)).toHaveLength(6);
 });
 
 test.each([

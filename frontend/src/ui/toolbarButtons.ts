@@ -2,6 +2,7 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 
 import type { AbortState } from "./aborting";
+import { abortLabel } from "./operationText";
 import { parseStored, storedValue } from "./windowStorage";
 
 export const TOOLBAR_BUTTONS = [
@@ -16,6 +17,8 @@ export const TOOLBAR_BUTTONS = [
 ] as const;
 
 export type ToolbarButtonId = (typeof TOOLBAR_BUTTONS)[number];
+
+export type ListedButton = { readonly id: ToolbarButtonId; readonly label: string };
 
 export type HiddenButtons = {
   readonly hidden: Readonly<Ref<ReadonlySet<ToolbarButtonId>>>;
@@ -36,7 +39,17 @@ const OLD_FORMAT_IDS = [
   "redo",
 ] as const satisfies readonly ToolbarButtonId[];
 
-// Abort merge, Undo and Redo start hidden until the user shows them (plan §2 #58, #74); the
+const LABELS: Readonly<Record<Exclude<ToolbarButtonId, "abortMerge">, string>> = {
+  previous: "Previous change",
+  next: "Next change",
+  collapse: "Collapse unchanged fragments",
+  applyLeft: "Apply non-conflicting changes from the left",
+  applyRight: "Apply non-conflicting changes from the right",
+  undo: "Undo",
+  redo: "Redo",
+};
+
+// Abort, Undo and Redo start hidden until the user shows them (plan §2 #58, #74, #88); the
 // keys of Undo and Redo still work.
 const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
   abortMerge: true,
@@ -49,15 +62,20 @@ const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
   redo: true,
 };
 
-export function listedButtons(abort: AbortState): readonly ToolbarButtonId[] {
-  return TOOLBAR_BUTTONS.filter((id) => id !== "abortMerge" || abort !== "noMerge");
+export function listedButtons(abort: AbortState): readonly ListedButton[] {
+  return TOOLBAR_BUTTONS.flatMap((id): ListedButton[] => {
+    if (id !== "abortMerge") {
+      return [{ id, label: LABELS[id] }];
+    }
+    return abort.kind === "none" ? [] : [{ id, label: abortLabel(abort.operation) }];
+  });
 }
 
 export function shownButtons(
   abort: AbortState,
   hidden: ReadonlySet<ToolbarButtonId>,
-): readonly ToolbarButtonId[] {
-  return listedButtons(abort).filter((id) => !hidden.has(id));
+): readonly ListedButton[] {
+  return listedButtons(abort).filter((button) => !hidden.has(button.id));
 }
 
 function readHiddenList(names: readonly unknown[]): Decisions {

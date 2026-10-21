@@ -1,6 +1,12 @@
 import type { ShallowRef } from "vue";
 
-import { log, type KeyProblem, type SourceFailure, type SourceResult } from "../ipc";
+import {
+  log,
+  type KeyProblem,
+  type OperationKind,
+  type SourceFailure,
+  type SourceResult,
+} from "../ipc";
 
 type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
 
@@ -14,7 +20,16 @@ export type ProblemCause = SourceFailure | Unexpected;
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
-  | { readonly action: "abort"; readonly cause: ProblemCause }
+  | {
+      readonly action: "abort";
+      readonly operation: OperationKind;
+      readonly cause: ProblemCause;
+    }
+  | {
+      readonly action: "stopped";
+      readonly operation: OperationKind | null;
+      readonly message: string;
+    }
   | {
       readonly action: "open" | "finish" | "save" | "take" | "reset";
       readonly path: string;
@@ -45,8 +60,16 @@ export function logProblem(problem: Problem): void {
   const event = `store.${problem.action}_failed`;
   switch (problem.action) {
     case "list":
-    case "abort":
       log.error(event, { ...problem.cause });
+      return;
+    case "abort":
+      log.error(event, { operation: problem.operation, ...problem.cause });
+      return;
+    case "stopped":
+      log.info("store.stopped", {
+        operation: problem.operation ?? "none",
+        message: problem.message,
+      });
       return;
     case "settings": {
       const { cause } = problem;
@@ -79,6 +102,7 @@ export function clearProblemAbout(target: Target, path: string): void {
     problem === null ||
     problem.action === "list" ||
     problem.action === "abort" ||
+    problem.action === "stopped" ||
     problem.action === "settings"
   ) {
     return;

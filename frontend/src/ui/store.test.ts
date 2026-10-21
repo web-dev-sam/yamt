@@ -10,12 +10,13 @@ import {
   type DiskResult,
   type DiskVersion,
   type FileEntry,
-  type FileList,
+  type Listing,
   type FileMergeData,
   type FileSides,
   type Key,
   type SettingsRead,
   type SettingsSource,
+  type OperationView,
   type SideNames,
   type SourceFailure,
   type SourceResult,
@@ -25,7 +26,6 @@ import {
 import { LanguageServers } from "../lsp";
 import { resultLine } from "./choiceText";
 import type { FileWork } from "./closeGuard";
-import { problemText } from "./problemText";
 import { formatNote } from "./serverText";
 import { createAppStore as createStoreWithTheme, useAppStore, type AppStore } from "./store";
 import type { FormatOutcome, MergeHandle, ResultSnapshot } from "./useMergeController";
@@ -87,11 +87,19 @@ function ok<T>(value: T): SourceResult<T> {
   return { ok: true, value };
 }
 
+const MERGING: OperationView = { kind: "Merge", merging: null, into: null };
+
 function listing(
   files: readonly FileEntry[],
   diskChanges: readonly DiskChange[] = [],
-): SourceResult<FileList> {
-  return ok({ files, diskChanges, merging: true });
+): SourceResult<Listing> {
+  return ok({
+    kind: "Files",
+    files,
+    diskChanges,
+    operation: MERGING,
+    sides: { local: null, remote: null },
+  });
 }
 
 function written(files: FileEntry[]): SourceResult<WriteReply> {
@@ -121,7 +129,7 @@ async function dataFor(path: string): Promise<FileMergeData> {
 function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
   const pending: PendingLoad[] = [];
   const source: ChunkSource = {
-    listFiles: () => Promise.resolve(listing(files)),
+    listFiles: () => Promise.reject(new Error("not used")),
     loadFile: (path) =>
       new Promise((resolve, reject) => {
         pending.push({ path, resolve, reject });
@@ -133,7 +141,7 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     takeSide: () => Promise.reject(new Error("not used")),
     sideNames: () => Promise.resolve({ local: null, remote: null }),
     abortMerge: () => Promise.reject(new Error("not used")),
-    listStop: () => Promise.reject(new Error("not used")),
+    listStop: () => Promise.resolve(listing(files)),
     continueOperation: () => Promise.reject(new Error("not used")),
     abortOperation: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
@@ -240,7 +248,7 @@ test("a rejected list opens nothing, resolves, and shows an Unexpected list prob
   const { source, pending } = handSource([]);
   const store = createAppStore({
     ...source,
-    listFiles: () => Promise.reject(new Error("repo gone")),
+    listStop: () => Promise.reject(new Error("repo gone")),
   });
 
   await expect(store.loadFiles()).resolves.toBeUndefined();
@@ -693,7 +701,7 @@ test("a failed finish keeps the file shown, the list unresolved and the old save
   const lines = spyConsole();
   const git: SourceFailure = { kind: "Git", message: "git add failed: index.lock exists" };
   const { store, pending, a } = await openedStore({
-    listFiles: () => Promise.resolve(listing([entry("a.ts"), entry("b.ts")])),
+    listStop: () => Promise.resolve(listing([entry("a.ts"), entry("b.ts")])),
     finishFile: () => Promise.resolve({ ok: false, failure: git }),
   });
   const view = fakeView(store, "a.ts", "loaded\n");
@@ -1056,7 +1064,7 @@ function choiceSource(
 ): { source: ChunkSource; calls: string[] } {
   const calls: string[] = [];
   const source: ChunkSource = {
-    listFiles: () => Promise.resolve(listing(files)),
+    listFiles: () => Promise.reject(new Error("not used")),
     loadFile: async (path) => {
       calls.push(`loadFile ${path}`);
       return ok(await dataFor(path));
@@ -1080,7 +1088,7 @@ function choiceSource(
     },
     sideNames: () => Promise.resolve({ local: null, remote: null }),
     abortMerge: () => Promise.reject(new Error("not used")),
-    listStop: () => Promise.reject(new Error("not used")),
+    listStop: () => Promise.resolve(listing(files)),
     continueOperation: () => Promise.reject(new Error("not used")),
     abortOperation: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
@@ -1092,7 +1100,7 @@ function choiceSource(
 test("a list of files the editor cannot show opens the first one's choice and loads nothing", async () => {
   spyConsole();
   const { source, calls } = choiceSource({
-    listFiles: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+    listStop: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
   });
   const store = createAppStore(source);
 
@@ -1202,7 +1210,7 @@ test("a failed take keeps the list and the choice and names the file", async () 
   const lines = spyConsole();
   const git: SourceFailure = { kind: "Git", message: "git rm failed" };
   const { source } = choiceSource({
-    listFiles: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
+    listStop: () => Promise.resolve(listing([LOGO_ENTRY, REMOVED_ENTRY])),
     takeSide: () => Promise.resolve({ ok: false, failure: git }),
   });
   const store = createAppStore(source);
@@ -1376,7 +1384,7 @@ test("a list refresh changes the marks only: same file shown, same views, anothe
   spyConsole();
   let listed = [entry("a.ts"), entry("b.ts"), LOGO_ENTRY];
   const unknown: SourceFailure = { kind: "UnknownPath", path: "gone.ts" };
-  const { source } = choiceSource({ listFiles: () => Promise.resolve(listing(listed)) });
+  const { source } = choiceSource({ listStop: () => Promise.resolve(listing(listed)) });
   const store = createAppStore({
     ...source,
     loadFile: async (path) =>
@@ -1401,9 +1409,9 @@ test("a list refresh changes the marks only: same file shown, same views, anothe
 test("a failed refresh is a list problem and keeps the marks; the next good one clears only that", async () => {
   const lines = spyConsole();
   const git: SourceFailure = { kind: "Git", message: "git ls-files failed" };
-  let answer: SourceResult<FileList> = listing([entry("a.ts")]);
+  let answer: SourceResult<Listing> = listing([entry("a.ts")]);
   const { source, pending } = handSource([]);
-  const store = createAppStore({ ...source, listFiles: () => Promise.resolve(answer) });
+  const store = createAppStore({ ...source, listStop: () => Promise.resolve(answer) });
   await openNow(store, pending, "a.ts");
   await store.refreshFiles();
   const marks = store.files.value;
@@ -1423,37 +1431,6 @@ test("a failed refresh is a list problem and keeps the marks; the next good one 
   expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
   expect(store.problem.value).toBeNull();
   expect(store.active.value).toBe("a.ts");
-});
-
-test("both side names are asked for once; a failure leaves none and logs a warning", async () => {
-  const warnings: string[] = [];
-  vi.spyOn(console, "warn").mockImplementation((line: string) => {
-    warnings.push(line);
-  });
-  const { source } = handSource([]);
-  const names: SideNames = {
-    local: { kind: "Branch", name: "local" },
-    remote: { kind: "Commit", short_id: "1a2b3c4", subject: "Fix", message: "Fix\n\nbody" },
-  };
-  const named = createAppStore({ ...source, sideNames: () => Promise.resolve(names) });
-
-  expect(named.sideNames.value).toEqual({ local: null, remote: null });
-
-  await named.loadSideNames();
-
-  expect(named.sideNames.value).toEqual(names);
-
-  const failing = createAppStore({
-    ...source,
-    sideNames: () => Promise.reject(new Error("ipc down")),
-  });
-  await expect(failing.loadSideNames()).resolves.toBeUndefined();
-
-  expect(failing.sideNames.value).toEqual({ local: null, remote: null });
-  expect(failing.problem.value).toBeNull();
-  expect(warnings).toEqual([
-    '[warn] store.side_names_failed {kind: "Unexpected", message: "ipc down"}',
-  ]);
 });
 
 const STAGED: DiskResult = { kind: "Staged" };
@@ -1485,7 +1462,7 @@ test.each([true, false])(
   async (edited) => {
     const lines = spyConsole();
     let listed = listing([entry("a.ts"), LOGO_ENTRY]);
-    const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
+    const { source, calls } = choiceSource({ listStop: () => Promise.resolve(listed) });
     const store = createAppStore(source);
     await store.loadFiles();
     await store.takeSide("a.ts", "local", VERSION_0);
@@ -1503,7 +1480,7 @@ test.each([true, false])(
     expect(store.opened.value).toHaveLength(1);
     expect(store.opened.value[0]).not.toBe(shown);
     expect(store.notices.value).toEqual([
-      { path: "a.ts", result: TWO_LEFT, editsDropped: edited, when: "running" },
+      { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: edited, when: "running" },
     ]);
     expect(store.taken.value).toEqual(new Map());
     expect(store.unsavedFiles()).toEqual([]);
@@ -1516,7 +1493,7 @@ test.each([true, false])(
 test("a change to a file that is not shown gives only its notice and its mark", async () => {
   spyConsole();
   let listed = listing([entry("a.ts"), entry("b.ts")]);
-  const { source, calls } = choiceSource({ listFiles: () => Promise.resolve(listed) });
+  const { source, calls } = choiceSource({ listStop: () => Promise.resolve(listed) });
   const store = createAppStore(source);
   await store.loadFiles();
   const shown = store.opened.value;
@@ -1530,7 +1507,7 @@ test("a change to a file that is not shown gives only its notice and its mark", 
   expect(store.choices.value).toEqual([]);
   expect(store.taken.value).toEqual(new Map());
   expect(store.notices.value).toEqual([
-    { path: "b.ts", result: STAGED, editsDropped: false, when: "running" },
+    { kind: "disk", path: "b.ts", result: STAGED, editsDropped: false, when: "running" },
   ]);
   expect(store.problem.value).toBeNull();
 });
@@ -1538,8 +1515,7 @@ test("a change to a file that is not shown gives only its notice and its mark", 
 test("changes reported by the first list are start notices; the file then opens from the disk", async () => {
   spyConsole();
   const { source, calls } = choiceSource({
-    listFiles: () =>
-      Promise.resolve(listing([entry("a.ts")], [{ path: "a.ts", result: TWO_LEFT }])),
+    listStop: () => Promise.resolve(listing([entry("a.ts")], [{ path: "a.ts", result: TWO_LEFT }])),
   });
   const store = createAppStore(source);
 
@@ -1548,7 +1524,7 @@ test("changes reported by the first list are start notices; the file then opens 
   expect(calls).toEqual(["loadFile a.ts"]);
   expect(store.active.value).toBe("a.ts");
   expect(store.notices.value).toEqual([
-    { path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "start" },
+    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: false, when: "start" },
   ]);
 });
 
@@ -1560,7 +1536,7 @@ test("a newer change replaces the notice for its path; dismissNotice removes jus
     { path: "b.ts", result: TWO_LEFT },
     { path: "c.ts", result: STAGED },
   ]);
-  const { source } = choiceSource({ listFiles: () => Promise.resolve(listed) });
+  const { source } = choiceSource({ listStop: () => Promise.resolve(listed) });
   const store = createAppStore(source);
   await store.loadFiles();
   listed = listing(files, [{ path: "b.ts", result: oneLeft }]);
@@ -1568,14 +1544,14 @@ test("a newer change replaces the notice for its path; dismissNotice removes jus
   await store.refreshFiles();
 
   expect(store.notices.value).toEqual([
-    { path: "c.ts", result: STAGED, editsDropped: false, when: "start" },
-    { path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
+    { kind: "disk", path: "c.ts", result: STAGED, editsDropped: false, when: "start" },
+    { kind: "disk", path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
   ]);
 
-  store.dismissNotice("c.ts");
+  store.dismissNotice("disk:c.ts");
 
   expect(store.notices.value).toEqual([
-    { path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
+    { kind: "disk", path: "b.ts", result: oneLeft, editsDropped: false, when: "running" },
   ]);
 });
 
@@ -1585,7 +1561,7 @@ test("a choice staged from the disk is taken by the disk, a deleted-side file is
   let listed = listing(files);
   const { source, calls } = choiceSource(
     {
-      listFiles: () => Promise.resolve(listed),
+      listStop: () => Promise.resolve(listed),
       loadFile: async (path) => {
         calls.push(`loadFile ${path}`);
         return ok({ ...(await dataFor(path)), deleted: "remote" });
@@ -1611,7 +1587,7 @@ test("a choice staged from the disk is taken by the disk, a deleted-side file is
 test("a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled", async () => {
   spyConsole();
   const { source, calls } = choiceSource({
-    listFiles: () =>
+    listStop: () =>
       Promise.resolve(
         listing(
           [entry("a.ts"), { ...LOGO_ENTRY, status: "Resolved" }],
@@ -1632,7 +1608,7 @@ test("a choice file staged from the disk before start opens later taken by the d
     "Changed on disk — staged as it is.",
   );
   expect(store.notices.value).toEqual([
-    { path: LOGO, result: STAGED, editsDropped: false, when: "start" },
+    { kind: "disk", path: LOGO, result: STAGED, editsDropped: false, when: "start" },
   ]);
 });
 
@@ -1644,7 +1620,7 @@ test("a change git could not stage is a warning notice, not a problem", async ()
   spyConsole();
   const failed: DiskResult = { kind: "StageFailed", message: "index.lock exists" };
   const { source } = choiceSource({
-    listFiles: () =>
+    listStop: () =>
       Promise.resolve(listing([entry("a.ts"), entry("b.ts")], [{ path: "b.ts", result: failed }])),
   });
   const store = createAppStore(source);
@@ -1653,7 +1629,7 @@ test("a change git could not stage is a warning notice, not a problem", async ()
 
   expect(store.problem.value).toBeNull();
   expect(store.notices.value).toEqual([
-    { path: "b.ts", result: failed, editsDropped: false, when: "start" },
+    { kind: "disk", path: "b.ts", result: failed, editsDropped: false, when: "start" },
   ]);
   expect(warnings).toEqual([
     '[warn] file.disk_changed {path: "b.ts", result: "StageFailed", message: "index.lock exists", editsDropped: false, when: "start"}',
@@ -1686,7 +1662,7 @@ test("a finish refused because the file changed on disk saves nothing, stays, an
   expect(calls).toEqual(["loadFile a.ts", "loadFile a.ts"]);
   expect(store.opened.value[0]).not.toBe(shown);
   expect(store.notices.value).toEqual([
-    { path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
+    { kind: "disk", path: "a.ts", result: TWO_LEFT, editsDropped: true, when: "running" },
   ]);
   expect(store.problem.value).toBeNull();
 });
@@ -1712,7 +1688,7 @@ test.each(["take", "reset"] as const)(
     expect(store.files.value).toEqual([resolvedEntry("a.ts")]);
     expect(store.taken.value).toEqual(new Map());
     expect(store.notices.value).toEqual([
-      { path: "a.ts", result: STAGED, editsDropped: false, when: "running" },
+      { kind: "disk", path: "a.ts", result: STAGED, editsDropped: false, when: "running" },
     ]);
   },
 );
@@ -1884,8 +1860,8 @@ test("start-up loads the file list and the settings; focus loads both again", as
   const { source, sent } = settingsSource({
     loadSettings: () => Promise.resolve(read({ ...LIGHT, keys: {} })),
   });
-  const lists = vi.fn(() => source.listFiles());
-  const store = createAppStore({ ...source, listFiles: lists });
+  const lists = vi.fn(() => source.listStop());
+  const store = createAppStore({ ...source, listStop: lists });
 
   await store.startUp();
 
@@ -2541,139 +2517,48 @@ test("the format note: shown after a Save for the four refusals, hidden for the 
   }
 });
 
-function abortingStore(abortMerge: ChunkSource["abortMerge"]): {
-  store: AppStore;
-  pending: PendingLoad[];
-} {
-  const { source, pending } = handSource([entry("a.ts"), entry("b.ts")]);
-  return { store: createAppStore({ ...source, abortMerge }), pending };
-}
-
-async function pressUnasked(store: AppStore): Promise<void> {
-  const pressed = store.abortMerge();
-  expect(store.question.value).toBeNull();
-  store.dismissQuestion();
-  await pressed;
-}
-
-test("Abort merge calls git only after a yes; No and Escape change nothing", async () => {
+test("a focus list that finds git moved on outside drops the old stop, names the dropped edits, and opens the new stop's first file", async () => {
   spyConsole();
-  let aborts = 0;
-  const { store } = abortingStore(() => {
-    aborts += 1;
-    return Promise.resolve(ok(null));
-  });
-  await store.refreshFiles();
-
-  const declined = store.abortMerge();
-  expect(store.question.value).toEqual({ kind: "abort" });
-  store.answer(false);
-  await declined;
-  const escaped = store.abortMerge();
-  expect(store.question.value).toEqual({ kind: "abort" });
-  store.dismissQuestion();
-  await escaped;
-
-  expect(aborts).toBe(0);
-  expect(store.abortState.value).toBe("ready");
-  expect(store.problem.value).toBeNull();
-
-  const confirmed = store.abortMerge();
-  store.answer(true);
-  await confirmed;
-
-  expect(aborts).toBe(1);
-  expect(store.abortState.value).toBe("running");
-  expect(store.problem.value).toBeNull();
-  await pressUnasked(store);
-  expect(aborts).toBe(1);
-});
-
-test("a press while the abort runs asks nothing and calls git no second time", async () => {
-  spyConsole();
-  const answers: ((result: SourceResult<null>) => void)[] = [];
-  const { store } = abortingStore(
-    () =>
-      new Promise((resolve) => {
-        answers.push(resolve);
-      }),
-  );
-  await store.refreshFiles();
-  const first = store.abortMerge();
-  store.answer(true);
-  await vi.waitFor(() => {
-    expect(answers).toHaveLength(1);
-  });
-
-  expect(store.abortState.value).toBe("running");
-  await pressUnasked(store);
-  answers[0]?.(ok(null));
-  await first;
-
-  expect(answers).toHaveLength(1);
-  expect(store.abortState.value).toBe("running");
-});
-
-test("git's refusal shows its message, keeps files and opened views, and a later press asks again", async () => {
-  const lines = spyConsole();
-  const refused: SourceFailure = {
-    kind: "Git",
-    message: "error: Entry 'a.ts' not uptodate. Cannot merge.\n",
+  const rebase: OperationView = {
+    kind: "Rebase",
+    branch: "feature",
+    onto: null,
+    replaying: null,
+    progress: { step: 1, total: 3 },
+    editor_steps_ahead: false,
   };
-  let aborts = 0;
-  const { store, pending } = abortingStore(() => {
-    aborts += 1;
-    return Promise.resolve({ ok: false, failure: refused });
+  const sides: SideNames = { local: { kind: "Branch", name: "x" }, remote: null };
+  const answers: SourceResult<Listing>[] = [
+    ok({ kind: "Files", files: [entry("a.ts")], diskChanges: [], operation: rebase, sides }),
+    ok({ kind: "MovedOn" }),
+    ok({
+      kind: "Files",
+      files: [entry("c.ts")],
+      diskChanges: [],
+      operation: { ...rebase, progress: { step: 2, total: 3 } },
+      sides: { local: null, remote: null },
+    }),
+  ];
+  const { source, calls } = choiceSource({
+    listStop: () => Promise.resolve(answers.shift() ?? ok({ kind: "MovedOn" })),
   });
+  const store = createAppStore(source);
+  await store.loadFiles();
+  const view = fakeView(store, "a.ts", "loaded\n");
+  view.text = "typed\n";
+  expect(store.operation.value).toBe(rebase);
+
   await store.refreshFiles();
-  await openNow(store, pending, "a.ts");
-  const { files, opened } = store;
-  const before = { files: files.value, opened: opened.value };
 
-  const refusing = store.abortMerge();
-  store.answer(true);
-  await refusing;
-
-  const problem = store.problem.value;
-  expect(problem).toEqual({ action: "abort", cause: refused });
-  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
-    "Could not abort the merge: error: Entry 'a.ts' not uptodate. Cannot merge.",
-  );
-  expect(lines.error).toEqual([
-    `[error] store.abort_failed {kind: "Git", message: ${JSON.stringify(refused.message)}}`,
-  ]);
-  expect({ files: files.value, opened: opened.value }).toEqual(before);
-  expect(files.value).toBe(before.files);
-  expect(opened.value).toBe(before.opened);
-  expect(store.active.value).toBe("a.ts");
-  expect(store.abortState.value).toBe("ready");
-
-  const again = store.abortMerge();
-  expect(store.question.value).toEqual({ kind: "abort" });
-  store.answer(true);
-  await again;
-  expect(aborts).toBe(2);
-});
-
-test("the abort state follows git's merging with each list and is noMerge before the first", async () => {
-  spyConsole();
-  const merging = [true, false];
-  const { source } = handSource([entry("a.ts")]);
-  const store = createAppStore({
-    ...source,
-    listFiles: () =>
-      Promise.resolve(
-        ok({ files: [entry("a.ts")], diskChanges: [], merging: merging.shift() ?? true }),
-      ),
+  expect(calls).toEqual(["loadFile a.ts", "loadFile c.ts"]);
+  expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
+  expect(store.active.value).toBe("c.ts");
+  expect(store.operation.value?.kind === "Rebase" && store.operation.value.progress).toEqual({
+    step: 2,
+    total: 3,
   });
-
-  expect(store.merging.value).toBe(false);
-  expect(store.abortState.value).toBe("noMerge");
-  await store.refreshFiles();
-  expect(store.merging.value).toBe(true);
-  expect(store.abortState.value).toBe("ready");
-  await store.refreshFiles();
-  expect(store.merging.value).toBe(false);
-  expect(store.abortState.value).toBe("noMerge");
-  await pressUnasked(store);
+  expect(store.sideNames.value).toEqual({ local: null, remote: null });
+  expect(store.notices.value).toEqual([{ kind: "movedOn", operation: "Rebase", files: ["a.ts"] }]);
+  store.dismissNotice("movedOn");
+  expect(store.notices.value).toEqual([]);
 });

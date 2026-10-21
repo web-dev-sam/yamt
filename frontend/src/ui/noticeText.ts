@@ -1,13 +1,25 @@
-import type { DiskResult } from "../ipc";
+import type { DiskResult, OperationKind } from "../ipc";
+import { operationName } from "./operationText";
 
-export type Notice = {
-  readonly path: string;
-  readonly result: DiskResult;
-  readonly editsDropped: boolean;
-  readonly when: "start" | "running";
-};
+export type Notice =
+  | {
+      readonly kind: "disk";
+      readonly path: string;
+      readonly result: DiskResult;
+      readonly editsDropped: boolean;
+      readonly when: "start" | "running";
+    }
+  | {
+      readonly kind: "movedOn";
+      readonly operation: OperationKind | null;
+      readonly files: readonly string[];
+    };
 
-function opening({ path, editsDropped, when }: Notice): string {
+export type DiskNotice = Extract<Notice, { kind: "disk" }>;
+
+type NoticeRow = { readonly key: string; readonly text: string; readonly closeLabel: string };
+
+function opening({ path, editsDropped, when }: DiskNotice): string {
   switch (when) {
     case "start":
       return `${path} differs on disk from git's merge`;
@@ -39,10 +51,30 @@ function outcome(result: DiskResult): string {
   }
 }
 
-export function noticeText(notice: Notice): string {
-  return `${opening(notice)} — ${outcome(notice.result)}`;
+export function noticeKey(notice: Notice): string {
+  return notice.kind === "disk" ? `disk:${notice.path}` : "movedOn";
 }
 
-export function noticeCloseLabel(path: string): string {
-  return `Close the notice about ${path}`;
+export function noticeRow(notice: Notice): NoticeRow {
+  const key = noticeKey(notice);
+  switch (notice.kind) {
+    case "disk":
+      return {
+        key,
+        text: `${opening(notice)} — ${outcome(notice.result)}`,
+        closeLabel: `Close the notice about ${notice.path}`,
+      };
+    case "movedOn": {
+      const who = notice.operation === null ? "Git" : `The ${operationName(notice.operation)}`;
+      return {
+        key,
+        text: `${who} moved on outside yamt; your unsaved edits in ${notice.files.join(", ")} were dropped`,
+        closeLabel: "Close the notice about the dropped edits",
+      };
+    }
+    default: {
+      const _exhaustive: never = notice;
+      return _exhaustive;
+    }
+  }
 }

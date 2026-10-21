@@ -140,3 +140,35 @@ test("the servers question lists the found servers per project folder, the added
     ],
   });
 });
+
+test("aborting a merge asks with plan #74's words, unchanged", () => {
+  const operation = { kind: "Merge", merging: null, into: null } as const;
+
+  expect(questionText({ kind: "abort", operation }, LINUX)).toEqual({
+    title: "Abort Merge",
+    message:
+      "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
+    list: { kind: "none" },
+    note: null,
+    confirm: "Abort Merge",
+    cancel: "Cancel",
+  });
+});
+
+test("aborting a rebase names it and counts the commits already replayed", () => {
+  const operation = {
+    kind: "Rebase",
+    branch: "feature",
+    onto: null,
+    replaying: null,
+    progress: { step: 3, total: 3 },
+    editor_steps_ahead: false,
+  } as const;
+
+  const text = questionText({ kind: "abort", operation }, LINUX);
+
+  expect([text.title, text.confirm]).toEqual(["Abort Rebase", "Abort Rebase"]);
+  expect(text.message).toBe(
+    "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The 2 commits already replayed are undone too. The repository goes back to how it was before the rebase, and yamt closes.",
+  );
+});

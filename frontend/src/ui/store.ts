@@ -6,6 +6,7 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
+  type OperationView,
   type ServerHost,
   type Side,
   type SideNames,
@@ -17,13 +18,13 @@ import { createAsking, type Asking } from "./asking";
 import { createCloseGuard, type CloseGuard } from "./closeGuard";
 import { createCollapsing, type Collapsing } from "./collapsing";
 import { fileListKey, type KeyPress } from "./fileListKey";
-import { loadSideNames, refreshFiles } from "./listing";
+import { refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
-import type { Notice } from "./noticeText";
+import { noticeKey, type Notice } from "./noticeText";
 import { createPaneSplit, type PaneSplitState } from "./paneSplit";
 import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
 import type { Question } from "./question";
-import { afterWrite, createSaving, finish, whileWriting } from "./saving";
+import { afterWrite, createSaving, finish, reset, whileWriting } from "./saving";
 import type { FinishRequest, Saving, Writing } from "./saving";
 import type { Screen } from "./screen";
 import { createServers, type Servers } from "./servers";
@@ -31,13 +32,14 @@ import { createServerSetup, type ServerSetup } from "./serverSetup";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import type { Taken } from "./sides";
+import { nextStop, type StopEnd } from "./stops";
 import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
 import type { Preferences } from "./useMergeController";
 import { fetchView, isShown, reload } from "./views";
 
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
-  readonly merging: ShallowRef<boolean>;
+  readonly operation: ShallowRef<OperationView | null>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
   readonly choices: ShallowRef<readonly FileSides[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
@@ -57,20 +59,22 @@ type State = Refs &
     readonly guard: CloseGuard;
     latestOpen: number;
     latestSettings: number;
+    loadFiles(): Promise<readonly FileEntry[] | null>;
+    nextStop(end: StopEnd): Promise<void>;
   };
 
 type Actions = CloseGuard &
   SettingsActions & {
     loadFiles(): Promise<void>;
     refreshFiles(): Promise<void>;
-    loadSideNames(): Promise<void>;
+    nextStop(end: StopEnd): Promise<void>;
     open(path: string): Promise<void>;
     pick(path: string): Promise<void>;
     finish(request: FinishRequest): Promise<void>;
     takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<void>;
     reset(path: string, diskVersion: DiskVersion): Promise<void>;
     dismissProblem(): void;
-    dismissNotice(path: string): void;
+    dismissNotice(key: string): void;
     openSettings(): void;
     closeSettings(): void;
     answer(yes: boolean): void;
@@ -97,7 +101,7 @@ let store: AppStore | null = null;
 function createRefs(startTheme: Theme): Refs {
   return {
     files: shallowRef<readonly FileEntry[]>([]),
-    merging: shallowRef(false),
+    operation: shallowRef<OperationView | null>(null),
     opened: shallowRef<readonly FileMergeData[]>([]),
     choices: shallowRef<readonly FileSides[]>([]),
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
@@ -128,6 +132,8 @@ export function createAppStore(
     writing: new Map(),
     latestOpen: 0,
     latestSettings: 0,
+    loadFiles: () => loadFiles(state),
+    nextStop: (end) => nextStop(state, end),
   };
   const { files, settings } = refs;
   const acts = actions(state, buttons, settingsActions(state));
@@ -152,11 +158,13 @@ export function createAppStore(
 
 function actions(state: State, buttons: HiddenButtons, settings: SettingsActions): Actions {
   return {
-    loadFiles: () => loadFiles(state),
+    loadFiles: async () => {
+      await state.loadFiles();
+    },
     refreshFiles: async () => {
       await refreshFiles(state, "running");
     },
-    loadSideNames: () => loadSideNames(state),
+    nextStop: (end) => state.nextStop(end),
     open: (path) => open(state, path),
     pick: async (path) => {
       state.screen.value = { kind: "files" };
@@ -168,8 +176,8 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
     dismissProblem: () => {
       state.problem.value = null;
     },
-    dismissNotice: (path) => {
-      state.notices.value = state.notices.value.filter((notice) => notice.path !== path);
+    dismissNotice: (key) => {
+      state.notices.value = state.notices.value.filter((notice) => noticeKey(notice) !== key);
     },
     openSettings: () => {
       state.screen.value = { kind: "settings" };
@@ -188,12 +196,13 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
   };
 }
 
-async function loadFiles(state: State): Promise<void> {
+async function loadFiles(state: State): Promise<readonly FileEntry[] | null> {
   const listed = await refreshFiles(state, "start");
   const first = listed?.find((file) => file.unsupported === null) ?? listed?.[0];
   if (first !== undefined) {
     await open(state, first.path);
   }
+  return listed;
 }
 
 async function finishThenMoveOn(state: State, request: FinishRequest): Promise<void> {
@@ -251,7 +260,13 @@ async function takeSide(
   diskVersion: DiskVersion,
 ): Promise<void> {
   const opensBefore = state.latestOpen;
-  const outcome = await attempt(() => state.source.takeSide(path, side, diskVersion));
+  const outcome = await whileWriting(state, path, async (claim) => {
+    const reply = await attempt(() => state.source.takeSide(path, side, diskVersion));
+    return claim.dropped ? null : reply;
+  });
+  if (outcome === null) {
+    return;
+  }
   if (!outcome.ok) {
     report(state, { action: "take", path, cause: outcome.cause });
     return;
@@ -265,24 +280,6 @@ async function takeSide(
     await reload(state, path);
   }
   await moveOn(state, path, opensBefore);
-}
-
-async function reset(state: State, path: string, diskVersion: DiskVersion): Promise<void> {
-  await whileWriting(state, path, async () => {
-    const outcome = await attempt(() => state.source.resetFile(path, diskVersion));
-    if (!outcome.ok) {
-      report(state, { action: "reset", path, cause: outcome.cause });
-      return;
-    }
-    if (!(await afterWrite(state, path, outcome.value))) {
-      return;
-    }
-    state.choices.value = state.choices.value.filter((sides) => sides.path !== path);
-    state.taken.value = new Map([...state.taken.value].filter(([taken]) => taken !== path));
-    if (await reload(state, path)) {
-      clearProblemAbout(state, path);
-    }
-  });
 }
 
 export function useAppStore(): AppStore {

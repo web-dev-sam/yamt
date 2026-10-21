@@ -234,8 +234,8 @@ function fixtureWrites(
 
 export function createFixtureSource(
   log: Log,
+  search: string,
   files: Readonly<Record<string, unknown>> = FIXTURE_FILES,
-  search: string = typeof location === "undefined" ? "" : location.search,
 ): ChunkSource {
   const records: Records = { fixtures: parseFixtures(files), finished: new Set() };
   const stops = createFixtureStops(log, search, {

@@ -20,7 +20,6 @@ import ToolbarMenu from "./ToolbarMenu.vue";
 import type { Direction, MergeSummary, ProblemCounts } from "./useMergeController";
 
 type IconButton = {
-  readonly label: string;
   readonly icon: Component;
   readonly keepsKeyboard: boolean;
   readonly run: () => void;
@@ -44,16 +43,15 @@ const emit = defineEmits<{
 
 const SECONDARY_BUTTON = 2;
 
-const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortMerge } = useAppStore();
+const { hiddenButtons, collapsing, toggleCollapsing, abortState, abortOperation } = useAppStore();
 
 const menuAt = shallowRef<Point | null>(null);
 
 const noSummary = computed(() => props.summary === null);
-const abortRunning = computed(() => abortState.value === "running");
+const abortRunning = computed(() => abortState.value.kind === "running");
 
 const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
   abortMerge: {
-    label: "Abort merge",
     icon: GitPullRequestClosed,
     keepsKeyboard: true,
     run: () => {
@@ -63,7 +61,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: abortRunning,
   },
   previous: {
-    label: "Previous change",
     icon: ArrowUp,
     keepsKeyboard: true,
     run: () => {
@@ -73,7 +70,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: noSummary,
   },
   next: {
-    label: "Next change",
     icon: ArrowDown,
     keepsKeyboard: true,
     run: () => {
@@ -83,7 +79,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: noSummary,
   },
   collapse: {
-    label: "Collapse unchanged fragments",
     icon: ChevronsDownUp,
     keepsKeyboard: true,
     run: toggleCollapsing,
@@ -91,7 +86,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: noSummary,
   },
   applyLeft: {
-    label: "Apply non-conflicting changes from the left",
     icon: ChevronsRight,
     keepsKeyboard: false,
     run: () => {
@@ -101,7 +95,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: noSummary,
   },
   applyRight: {
-    label: "Apply non-conflicting changes from the right",
     icon: ChevronsLeft,
     keepsKeyboard: false,
     run: () => {
@@ -111,7 +104,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: noSummary,
   },
   undo: {
-    label: "Undo",
     icon: Undo2,
     keepsKeyboard: false,
     run: () => {
@@ -121,7 +113,6 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
     disabled: noSummary,
   },
   redo: {
-    label: "Redo",
     icon: Redo2,
     keepsKeyboard: false,
     run: () => {
@@ -133,7 +124,10 @@ const ICON_BUTTONS: Readonly<Record<ToolbarButtonId, IconButton>> = {
 };
 
 const shown = computed(() =>
-  shownButtons(abortState.value, hiddenButtons.value).map((id) => ({ id, ...ICON_BUTTONS[id] })),
+  shownButtons(abortState.value, hiddenButtons.value).map((button) => ({
+    ...button,
+    ...ICON_BUTTONS[button.id],
+  })),
 );
 const remaining = computed(() => (props.summary === null ? "" : summaryLabel(props.summary)));
 const nothingLeft = computed(() => props.summary !== null && !finishMustAsk(props.summary));
@@ -148,7 +142,7 @@ function pressed(button: IconButton, event: MouseEvent): void {
 // removing steps": https://html.spec.whatwg.org/multipage/interactive-elements.html#the-dialog-element).
 async function abortKeepingKeyboard(): Promise<void> {
   const before = document.activeElement;
-  await abortMerge();
+  await abortOperation();
   await nextTick();
   if (document.activeElement === document.body && before instanceof HTMLElement) {
     before.focus();
@@ -206,6 +200,6 @@ function closeMenu(): void {
     <span class="ml-3 text-fg-muted" role="status">{{ remaining }}</span>
     <ServerStatus class="ml-auto" :path="path" :problems="problems" />
     <SettingsButton />
-    <ToolbarMenu v-if="menuAt !== null" :at="menuAt" :buttons="ICON_BUTTONS" @close="closeMenu" />
+    <ToolbarMenu v-if="menuAt !== null" :at="menuAt" @close="closeMenu" />
   </header>
 </template>

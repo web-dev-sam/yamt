@@ -30,7 +30,7 @@ function quietLog(): { log: Log; entries: LogEntry[] } {
 }
 
 function sourceAt(search: string, log: Log = quietLog().log): ChunkSource {
-  return createFixtureSource(log, { "a.json": FILE }, search);
+  return createFixtureSource(log, search, { "a.json": FILE });
 }
 
 function valueOf<T>(result: SourceResult<T>): T {

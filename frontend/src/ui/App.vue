@@ -7,6 +7,7 @@ import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
 import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
+import OperationBar from "./OperationBar.vue";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import ServerLogView from "./ServerLogView.vue";
@@ -22,6 +23,7 @@ const {
   fileListShown,
   problem,
   notices,
+  operation,
   question,
   allResolved,
   pick,
@@ -63,6 +65,7 @@ onMounted(() => {
   <div class="flex h-full gap-island p-island">
     <FileList v-show="fileListShown" :files="files" :active="active" @select="pick" />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+      <OperationBar v-if="operation !== null" :operation="operation" />
       <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
       <p
