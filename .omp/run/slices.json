@@ -1,17 +1,4 @@
 {
-  "GitOpsCleanupRust": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-cleanup-rust.md",
-    "owned": [
-      "crates/session/**",
-      "crates/gitio/**",
-      "src-tauri/src/merge.rs",
-      "src-tauri/src/merge/tests.rs",
-      "src-tauri/src/outcome.rs",
-      "crates/*/AGENTS.md",
-      "src-tauri/AGENTS.md"
-    ]
-  },
   "GitOpsCleanupWeb": {
     "agent": "web-impl",
     "brief": "docs/slices/briefs/3.J-cleanup-web.md",
@@ -19,5 +6,15 @@
       "frontend/src/ui/**",
       "frontend/src/ipc/AGENTS.md"
     ]
+  },
+  "GitOpsCleanupRustBoundary": {
+    "agent": "boundary-reviewer",
+    "brief": "docs/slices/briefs/3.J-cleanup-rust.md",
+    "owned": []
+  },
+  "GitOpsCleanupRustCorrectness": {
+    "agent": "correctness-reviewer",
+    "brief": "docs/slices/briefs/3.J-cleanup-rust.md",
+    "owned": []
   }
 }
