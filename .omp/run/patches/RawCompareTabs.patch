@@ -1,0 +1,1766 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index d93a748..4ad9ca1 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4607,6 +4607,7 @@ dependencies = [
+  "tauri-specta",
+  "tracing",
+  "tracing-subscriber",
++ "yamt-compare",
+  "yamt-conflict-repo",
+  "yamt-lsp-host",
+  "yamt-session",
+@@ -4626,6 +4627,18 @@ dependencies = [
+  "yamt-session",
+ ]
+ 
++[[package]]
++name = "yamt-compare"
++version = "0.4.2"
++dependencies = [
++ "serde",
++ "serde_json",
++ "specta",
++ "tempfile",
++ "thiserror 2.0.21",
++ "yamt-merge-core",
++]
++
+ [[package]]
+ name = "yamt-conflict-repo"
+ version = "0.4.2"
+diff --git a/Cargo.toml b/Cargo.toml
+index 966b20e..137f3a8 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -8,6 +8,7 @@ members = [
+   "crates/conflict-repo",
+   "crates/settings",
+   "crates/lsp-host",
++  "crates/compare",
+   "src-tauri",
+ ]
+ 
+@@ -24,6 +25,7 @@ yamt-session = { path = "crates/session" }
+ yamt-conflict-repo = { path = "crates/conflict-repo" }
+ yamt-settings = { path = "crates/settings" }
+ yamt-lsp-host = { path = "crates/lsp-host" }
++yamt-compare = { path = "crates/compare" }
+ thiserror = "2.0.21"
+ serde = { version = "1.0.229", features = ["derive"] }
+ serde_json = "1.0.151"
+diff --git a/crates/compare/AGENTS.md b/crates/compare/AGENTS.md
+new file mode 100644
+index 0000000..d698781
+--- /dev/null
++++ b/crates/compare/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. The compare window's stored tabs (plan §2 #93, #95, #97): `lib.rs` (the IPC types `TabId`, `Column`, `ColumnVersion(s)`, `TabLanguage`, `TabEntry`, `TabList`, `CompareStart`, `Comparison`, `TabTexts`; `MAX_COLUMN_BYTES` 8 MiB, the merge window's per-file limit; `Error`; `LoadedTab` — a tab's two texts as `Arc<str>` plus their versions, cloned out of the store so `comparison`/`tab_texts` run `yamt_merge_core::compare` after the caller released the store's lock), `store.rs` (`TabStore`: open, start, load_tab, set_column, add/close/rename/set_language/show; versions in memory only, 0 per tab at open; `tabs.json` written only when it changed, a failed write changes nothing in memory), `index.rs` (`tabs.json` format 1: `format`, `shown`, `nextId`, `tabs` [`id`, `number`, `name`, `language`]; refused as `Broken` when it does not parse, has no tabs, repeats an id, holds an id not below `nextId`, or shows a tab it does not list; `NewerFormat` above 1; the tab rules: number 1 + the highest, ids from `nextId`, closing shows the next else the previous, the last closed leaves a new "Compare 1"), `files.rs` (in the data folder: `<id>-left.txt`/`<id>-right.txt` plain UTF-8, missing = empty; `lock` held with `File::try_lock` for the store's life; every write a `<name>.tmp` + rename; column and temp files of tabs not in the index removed at open, every other file left alone). A broken or newer `tabs.json` is refused before anything in the folder is written. Dependencies: `yamt-merge-core` (the one `yamt-*`, `just arch-check`), `serde`, `serde_json`, `specta`, `thiserror`; never `tauri`. Tests: `tests/opening.rs`, `tests/tabs.rs`, `tests/columns.rs` on real temp folders.
+diff --git a/crates/compare/Cargo.toml b/crates/compare/Cargo.toml
+new file mode 100644
+index 0000000..6be80d2
+--- /dev/null
++++ b/crates/compare/Cargo.toml
+@@ -0,0 +1,19 @@
++[package]
++name = "yamt-compare"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++yamt-merge-core.workspace = true
++serde.workspace = true
++serde_json.workspace = true
++specta.workspace = true
++thiserror.workspace = true
++
++[dev-dependencies]
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/compare/src/files.rs b/crates/compare/src/files.rs
+new file mode 100644
+index 0000000..dec24bb
+--- /dev/null
++++ b/crates/compare/src/files.rs
+@@ -0,0 +1,145 @@
++use std::collections::HashSet;
++use std::fs::{self, File, OpenOptions, TryLockError};
++use std::io::{self, ErrorKind};
++use std::path::{Path, PathBuf};
++use std::sync::Arc;
++
++use crate::{Column, Error, MAX_COLUMN_BYTES, Result, TabId};
++
++pub(crate) const INDEX_FILE: &str = "tabs.json";
++const LOCK_FILE: &str = "lock";
++const TEMP_SUFFIX: &str = ".tmp";
++const LEFT_SUFFIX: &str = "-left.txt";
++const RIGHT_SUFFIX: &str = "-right.txt";
++
++pub(crate) fn column_path(dir: &Path, tab: TabId, column: Column) -> PathBuf {
++    let suffix = match column {
++        Column::Left => LEFT_SUFFIX,
++        Column::Right => RIGHT_SUFFIX,
++    };
++    dir.join(format!("{}{suffix}", tab.0))
++}
++
++/// The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
++/// (`File::try_lock`, flock(2) / `LockFileEx`).
++pub(crate) fn take_lock(dir: &Path) -> Result<File> {
++    let path = dir.join(LOCK_FILE);
++    let file = OpenOptions::new()
++        .create(true)
++        .truncate(false)
++        .write(true)
++        .open(&path)
++        .map_err(|error| write_failed(&path, &error))?;
++    match file.try_lock() {
++        Ok(()) => Ok(file),
++        Err(TryLockError::WouldBlock) => Err(Error::Locked {
++            path: dir.to_owned(),
++        }),
++        Err(TryLockError::Error(error)) => Err(write_failed(&path, &error)),
++    }
++}
++
++/// Through a temporary file beside `path` and a rename, so a kill leaves the old or the new text.
++pub(crate) fn write_atomically(path: &Path, text: &str) -> Result<()> {
++    let mut temp = path.as_os_str().to_owned();
++    temp.push(TEMP_SUFFIX);
++    let temp = PathBuf::from(temp);
++    let written = fs::write(&temp, text).and_then(|()| fs::rename(&temp, path));
++    if let Err(error) = written {
++        fs::remove_file(&temp).ok();
++        return Err(write_failed(path, &error));
++    }
++    Ok(())
++}
++
++/// A missing file is an empty column.
++pub(crate) fn read_column(path: &Path) -> Result<Arc<str>> {
++    let bytes = match fs::read(path) {
++        Ok(bytes) => bytes,
++        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Arc::from("")),
++        Err(error) => return Err(read_failed(path, error.to_string())),
++    };
++    require_within_limit(bytes.len())?;
++    let text = String::from_utf8(bytes).map_err(|error| read_failed(path, error.to_string()))?;
++    Ok(Arc::from(text))
++}
++
++pub(crate) fn require_within_limit(bytes: usize) -> Result<()> {
++    if bytes > MAX_COLUMN_BYTES as usize {
++        return Err(Error::TooLarge { bytes });
++    }
++    Ok(())
++}
++
++pub(crate) fn has_text_on_disk(dir: &Path, tab: TabId) -> bool {
++    [Column::Left, Column::Right].into_iter().any(|column| {
++        fs::metadata(column_path(dir, tab, column)).is_ok_and(|metadata| metadata.len() > 0)
++    })
++}
++
++/// A file left behind here (a failed removal) is an orphan the next open removes.
++pub(crate) fn remove_columns(dir: &Path, tab: TabId) {
++    for column in [Column::Left, Column::Right] {
++        fs::remove_file(column_path(dir, tab, column)).ok();
++    }
++}
++
++/// Column files and their temporary files whose tab is not in `tabs`; every other file stays.
++pub(crate) fn remove_orphans(dir: &Path, tabs: &HashSet<TabId>) -> Result<()> {
++    let entries = fs::read_dir(dir).map_err(|error| read_failed(dir, error.to_string()))?;
++    for entry in entries {
++        let entry = entry.map_err(|error| read_failed(dir, error.to_string()))?;
++        let name = entry.file_name();
++        let Some(tab) = name.to_str().and_then(column_file_tab) else {
++            continue;
++        };
++        if !tabs.contains(&tab) {
++            let path = entry.path();
++            fs::remove_file(&path).map_err(|error| write_failed(&path, &error))?;
++        }
++    }
++    Ok(())
++}
++
++fn column_file_tab(name: &str) -> Option<TabId> {
++    let name = name.strip_suffix(TEMP_SUFFIX).unwrap_or(name);
++    let id = name
++        .strip_suffix(LEFT_SUFFIX)
++        .or_else(|| name.strip_suffix(RIGHT_SUFFIX))?;
++    id.parse().ok().map(TabId)
++}
++
++pub(crate) fn read_failed(path: &Path, message: String) -> Error {
++    Error::ReadFailed {
++        path: path.to_owned(),
++        message,
++    }
++}
++
++pub(crate) fn write_failed(path: &Path, error: &io::Error) -> Error {
++    Error::WriteFailed {
++        path: path.to_owned(),
++        message: error.to_string(),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn column_and_temp_names_give_their_tab() {
++        assert_eq!(column_file_tab("12-left.txt"), Some(TabId(12)));
++        assert_eq!(column_file_tab("3-right.txt"), Some(TabId(3)));
++        assert_eq!(column_file_tab("3-right.txt.tmp"), Some(TabId(3)));
++    }
++
++    #[test]
++    fn other_names_are_no_column_files() {
++        assert_eq!(column_file_tab("tabs.json"), None);
++        assert_eq!(column_file_tab("tabs.json.tmp"), None);
++        assert_eq!(column_file_tab("notes-left.txt"), None);
++        assert_eq!(column_file_tab("3-middle.txt"), None);
++        assert_eq!(column_file_tab("lock"), None);
++    }
++}
+diff --git a/crates/compare/src/index.rs b/crates/compare/src/index.rs
+new file mode 100644
+index 0000000..ba71dfe
+--- /dev/null
++++ b/crates/compare/src/index.rs
+@@ -0,0 +1,241 @@
++use std::collections::HashSet;
++use std::fs;
++use std::io::ErrorKind;
++use std::path::Path;
++
++use serde::{Deserialize, Serialize};
++
++use crate::files::{read_failed, write_atomically};
++use crate::{Error, Result, TabId, TabLanguage};
++
++const FORMAT: u32 = 1;
++const FIRST_ID: TabId = TabId(1);
++
++/// `tabs.json`: the tabs in their order, the shown one, and the id the next tab gets.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(crate) struct Index {
++    format: u32,
++    pub(crate) shown: TabId,
++    next_id: TabId,
++    pub(crate) tabs: Vec<StoredTab>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++pub(crate) struct StoredTab {
++    pub(crate) id: TabId,
++    number: u32,
++    pub(crate) name: String,
++    pub(crate) language: TabLanguage,
++}
++
++#[derive(Deserialize)]
++struct FormatOnly {
++    format: u32,
++}
++
++impl Index {
++    pub(crate) fn first() -> Index {
++        let mut index = Index {
++            format: FORMAT,
++            shown: FIRST_ID,
++            next_id: FIRST_ID,
++            tabs: Vec::new(),
++        };
++        index.add_tab();
++        index
++    }
++
++    /// Appends "Compare <number>" with a number above every tab's, and shows it.
++    pub(crate) fn add_tab(&mut self) {
++        let number = self.tabs.iter().map(|tab| tab.number).max().unwrap_or(0) + 1;
++        let id = self.next_id;
++        self.next_id = TabId(id.0 + 1);
++        self.tabs.push(StoredTab {
++            id,
++            number,
++            name: format!("Compare {number}"),
++            language: TabLanguage::Auto,
++        });
++        self.shown = id;
++    }
++
++    /// The next tab is shown when the shown one goes, else the previous; the last one gone leaves a new tab.
++    pub(crate) fn close_tab(&mut self, tab: TabId) -> Result<()> {
++        let position = self.position(tab)?;
++        self.tabs.remove(position);
++        if self.tabs.is_empty() {
++            self.add_tab();
++        } else if self.shown == tab {
++            let shown_at = position.min(self.tabs.len() - 1);
++            if let Some(shown) = self.tabs.get(shown_at) {
++                self.shown = shown.id;
++            }
++        }
++        Ok(())
++    }
++
++    pub(crate) fn tab_mut(&mut self, tab: TabId) -> Result<&mut StoredTab> {
++        self.tabs
++            .iter_mut()
++            .find(|stored| stored.id == tab)
++            .ok_or(Error::UnknownTab { tab })
++    }
++
++    pub(crate) fn require_tab(&self, tab: TabId) -> Result<()> {
++        self.position(tab).map(|_| ())
++    }
++
++    pub(crate) fn ids(&self) -> HashSet<TabId> {
++        self.tabs.iter().map(|tab| tab.id).collect()
++    }
++
++    fn position(&self, tab: TabId) -> Result<usize> {
++        self.tabs
++            .iter()
++            .position(|stored| stored.id == tab)
++            .ok_or(Error::UnknownTab { tab })
++    }
++
++    /// What makes a parsed index unusable: an id repeated, at or above `nextId`, or a shown tab not listed.
++    fn problem(&self) -> Option<String> {
++        if self.tabs.is_empty() {
++            return Some("`tabs` is empty".to_owned());
++        }
++        let mut seen = HashSet::new();
++        for tab in &self.tabs {
++            if !seen.insert(tab.id) {
++                return Some(format!("the tab id {} appears twice", tab.id.0));
++            }
++            if tab.id.0 >= self.next_id.0 {
++                return Some(format!(
++                    "the tab id {} is not below `nextId` {}",
++                    tab.id.0, self.next_id.0
++                ));
++            }
++        }
++        if !seen.contains(&self.shown) {
++            return Some(format!("the shown tab {} is not in `tabs`", self.shown.0));
++        }
++        None
++    }
++}
++
++/// `None` when there is no `tabs.json` at `path`.
++pub(crate) fn read_index(path: &Path) -> Result<Option<Index>> {
++    match fs::read(path) {
++        Ok(bytes) => parsed(path, &bytes).map(Some),
++        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
++        Err(error) => Err(read_failed(path, error.to_string())),
++    }
++}
++
++fn parsed(path: &Path, bytes: &[u8]) -> Result<Index> {
++    let broken = |message: String| Error::Broken {
++        path: path.to_owned(),
++        message,
++    };
++    let FormatOnly { format } =
++        serde_json::from_slice(bytes).map_err(|error| broken(error.to_string()))?;
++    if format > FORMAT {
++        return Err(Error::NewerFormat {
++            path: path.to_owned(),
++            format,
++        });
++    }
++    if format != FORMAT {
++        return Err(broken(format!("format {format} is not {FORMAT}")));
++    }
++    let index: Index = serde_json::from_slice(bytes).map_err(|error| broken(error.to_string()))?;
++    match index.problem() {
++        Some(message) => Err(broken(message)),
++        None => Ok(index),
++    }
++}
++
++pub(crate) fn write_index(path: &Path, index: &Index) -> Result<()> {
++    let mut text = serde_json::to_string_pretty(index).map_err(|error| Error::WriteFailed {
++        path: path.to_owned(),
++        message: error.to_string(),
++    })?;
++    text.push('\n');
++    write_atomically(path, &text)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn index_of(json: &str) -> Result<Index> {
++        parsed(Path::new("tabs.json"), json.as_bytes())
++    }
++
++    fn problem_of(json: &str) -> String {
++        match index_of(json) {
++            Err(Error::Broken { message, .. }) => message,
++            other => panic!("expected Broken, got {other:?}"),
++        }
++    }
++
++    #[test]
++    fn the_first_index_has_compare_1_shown() {
++        let index = Index::first();
++        assert_eq!(index.shown, FIRST_ID);
++        assert_eq!(index.next_id, TabId(2));
++        assert_eq!(index.tabs.len(), 1);
++        assert_eq!(index.tabs[0].name, "Compare 1");
++        assert_eq!(index.tabs[0].number, 1);
++        assert!(index.problem().is_none());
++    }
++
++    #[test]
++    fn an_index_without_tabs_is_broken() {
++        let message = problem_of(r#"{"format":1,"shown":1,"nextId":2,"tabs":[]}"#);
++        assert_eq!(message, "`tabs` is empty");
++    }
++
++    #[test]
++    fn a_repeated_id_is_broken() {
++        let tab = r#"{"id":1,"number":1,"name":"a","language":{"kind":"auto"}}"#;
++        let message = problem_of(&format!(
++            r#"{{"format":1,"shown":1,"nextId":2,"tabs":[{tab},{tab}]}}"#
++        ));
++        assert_eq!(message, "the tab id 1 appears twice");
++    }
++
++    #[test]
++    fn an_id_at_next_id_is_broken_so_ids_never_repeat() {
++        let message = problem_of(
++            r#"{"format":1,"shown":2,"nextId":2,"tabs":[{"id":2,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
++        );
++        assert_eq!(message, "the tab id 2 is not below `nextId` 2");
++    }
++
++    #[test]
++    fn a_shown_tab_not_listed_is_broken() {
++        let message = problem_of(
++            r#"{"format":1,"shown":5,"nextId":6,"tabs":[{"id":1,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
++        );
++        assert_eq!(message, "the shown tab 5 is not in `tabs`");
++    }
++
++    #[test]
++    fn format_0_is_broken_not_newer() {
++        let message = problem_of(r#"{"format":0}"#);
++        assert_eq!(message, "format 0 is not 1");
++    }
++
++    #[test]
++    fn a_picked_language_reads_back() {
++        let index = index_of(
++            r#"{"format":1,"shown":1,"nextId":2,"tabs":[{"id":1,"number":1,"name":"a","language":{"kind":"picked","name":"JSON"}}]}"#,
++        )
++        .unwrap();
++        assert_eq!(
++            index.tabs[0].language,
++            TabLanguage::Picked {
++                name: "JSON".to_owned()
++            }
++        );
++    }
++}
+diff --git a/crates/compare/src/lib.rs b/crates/compare/src/lib.rs
+new file mode 100644
+index 0000000..3a700de
+--- /dev/null
++++ b/crates/compare/src/lib.rs
+@@ -0,0 +1,239 @@
++//! The compare window's stored tabs: their list, both columns' texts, and the differences between them.
++#![forbid(unsafe_code)]
++#![warn(missing_docs)]
++
++mod files;
++mod index;
++mod store;
++
++use std::path::PathBuf;
++use std::sync::Arc;
++
++use serde::{Deserialize, Serialize};
++use specta::Type;
++use yamt_merge_core::{Difference, compare};
++
++pub use crate::store::TabStore;
++
++/// A tab's identity; ids never repeat within a data folder.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
++pub struct TabId(pub u32);
++
++/// One of a tab's two texts: the left is the base the right is compared against.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++#[serde(rename_all = "lowercase")]
++pub enum Column {
++    /// The base.
++    Left,
++    /// The text compared against the left.
++    Right,
++}
++
++/// Counts one column's sends from the window; starts at 0 per tab when the store opens.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
++pub struct ColumnVersion(pub u32);
++
++/// The versions of a tab's two texts.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct ColumnVersions {
++    /// The left text's version.
++    pub left: ColumnVersion,
++    /// The right text's version.
++    pub right: ColumnVersion,
++}
++
++/// The language a tab shows both columns in.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum TabLanguage {
++    /// Detected by the window from the texts.
++    Auto,
++    /// Picked by the user.
++    Picked {
++        /// A window language name, opaque here.
++        name: String,
++    },
++}
++
++/// One tab as the window lists it.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct TabEntry {
++    /// The tab's id.
++    pub id: TabId,
++    /// The tab's name.
++    pub name: String,
++    /// The tab's language.
++    pub language: TabLanguage,
++    /// Either column holds text.
++    pub holds_text: bool,
++}
++
++/// Every tab in the stored order, and the one shown.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct TabList {
++    /// The tabs in the stored order.
++    pub tabs: Vec<TabEntry>,
++    /// The shown tab, always one of `tabs`.
++    pub shown: TabId,
++}
++
++/// What the window gets when it starts.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct CompareStart {
++    /// The tabs.
++    pub list: TabList,
++    /// The most bytes a column holds (`MAX_COLUMN_BYTES`).
++    pub column_limit: u32,
++}
++
++/// The differences between a tab's two texts, and the versions they were computed from.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct Comparison {
++    /// The versions of the two texts compared.
++    pub versions: ColumnVersions,
++    /// The differences, sorted and disjoint.
++    pub differences: Vec<Difference>,
++}
++
++/// A tab's two texts and their comparison.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct TabTexts {
++    /// The left text.
++    pub left: String,
++    /// The right text.
++    pub right: String,
++    /// The comparison of the two.
++    pub comparison: Comparison,
++}
++
++/// The most bytes a column holds: the merge window's per-file limit (`session`'s `MAX_TEXT_BYTES`).
++pub const MAX_COLUMN_BYTES: u32 = 8 * 1024 * 1024;
++
++/// Why a store operation failed.
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    /// Another process holds the lock file.
++    #[error("another yamt --raw window is open ({})", path.display())]
++    Locked {
++        /// The data folder.
++        path: PathBuf,
++    },
++    /// `tabs.json` does not read as format 1.
++    #[error("the stored compare tabs {} cannot be read: {message}; nothing was changed", path.display())]
++    Broken {
++        /// The `tabs.json` path.
++        path: PathBuf,
++        /// What is wrong, with line and column where serde has them.
++        message: String,
++    },
++    /// `tabs.json` was written by a newer yamt.
++    #[error("the stored compare tabs {} were written by a newer yamt (format {format})", path.display())]
++    NewerFormat {
++        /// The `tabs.json` path.
++        path: PathBuf,
++        /// The format the file names.
++        format: u32,
++    },
++    /// A file could not be read, or a column file is not UTF-8.
++    #[error("cannot read {}: {message}", path.display())]
++    ReadFailed {
++        /// The file.
++        path: PathBuf,
++        /// The cause.
++        message: String,
++    },
++    /// A file could not be written or removed.
++    #[error("cannot write {}: {message}", path.display())]
++    WriteFailed {
++        /// The file.
++        path: PathBuf,
++        /// The cause.
++        message: String,
++    },
++    /// No tab has this id.
++    #[error("no compare tab has the id {}", tab.0)]
++    UnknownTab {
++        /// The id asked for.
++        tab: TabId,
++    },
++    /// A column, sent or on disk, holds more than `MAX_COLUMN_BYTES`.
++    #[error("a column of {bytes} bytes is over the limit of {MAX_COLUMN_BYTES} bytes")]
++    TooLarge {
++        /// The column's size.
++        bytes: usize,
++    },
++}
++
++/// Results of this crate.
++pub type Result<T, E = Error> = std::result::Result<T, E>;
++
++/// One tab's two texts and their versions, shared with the store (no copy), so the diff runs outside its lock.
++#[derive(Clone, Debug)]
++pub struct LoadedTab {
++    left: Arc<str>,
++    right: Arc<str>,
++    versions: ColumnVersions,
++}
++
++impl LoadedTab {
++    pub(crate) fn new(left: Arc<str>, right: Arc<str>) -> LoadedTab {
++        LoadedTab {
++            left,
++            right,
++            versions: ColumnVersions {
++                left: ColumnVersion(0),
++                right: ColumnVersion(0),
++            },
++        }
++    }
++
++    pub(crate) fn holds_text(&self) -> bool {
++        !self.left.is_empty() || !self.right.is_empty()
++    }
++
++    pub(crate) fn version(&self, column: Column) -> ColumnVersion {
++        match column {
++            Column::Left => self.versions.left,
++            Column::Right => self.versions.right,
++        }
++    }
++
++    pub(crate) fn with_column(
++        &self,
++        column: Column,
++        text: Arc<str>,
++        version: ColumnVersion,
++    ) -> LoadedTab {
++        let mut changed = self.clone();
++        match column {
++            Column::Left => {
++                changed.left = text;
++                changed.versions.left = version;
++            }
++            Column::Right => {
++                changed.right = text;
++                changed.versions.right = version;
++            }
++        }
++        changed
++    }
++}
++
++/// The differences between the tab's two texts (`yamt_merge_core::compare`) and their versions.
++#[must_use]
++pub fn comparison(loaded: &LoadedTab) -> Comparison {
++    Comparison {
++        versions: loaded.versions,
++        differences: compare(&loaded.left, &loaded.right),
++    }
++}
++
++/// The tab's two texts and `comparison(loaded)`.
++#[must_use]
++pub fn tab_texts(loaded: &LoadedTab) -> TabTexts {
++    TabTexts {
++        left: loaded.left.to_string(),
++        right: loaded.right.to_string(),
++        comparison: comparison(loaded),
++    }
++}
+diff --git a/crates/compare/src/store.rs b/crates/compare/src/store.rs
+new file mode 100644
+index 0000000..cf4d91a
+--- /dev/null
++++ b/crates/compare/src/store.rs
+@@ -0,0 +1,169 @@
++use std::collections::HashMap;
++use std::fs::{self, File};
++use std::path::{Path, PathBuf};
++use std::sync::Arc;
++
++use crate::files::{
++    INDEX_FILE, column_path, has_text_on_disk, read_column, remove_columns, remove_orphans,
++    require_within_limit, take_lock, write_atomically, write_failed,
++};
++use crate::index::{Index, read_index, write_index};
++use crate::{
++    Column, ColumnVersion, CompareStart, LoadedTab, MAX_COLUMN_BYTES, Result, TabEntry, TabId,
++    TabLanguage, TabList,
++};
++
++/// The stored tabs of one data folder, held by one process at a time.
++#[derive(Debug)]
++pub struct TabStore {
++    dir: PathBuf,
++    index: Index,
++    loaded: HashMap<TabId, LoadedTab>,
++    _lock: File,
++}
++
++impl TabStore {
++    /// Creates `dir`, takes its lock, reads `tabs.json` (or writes a first one) and removes the
++    /// column files of tabs it does not list.
++    pub fn open(dir: &Path) -> Result<TabStore> {
++        let index_path = dir.join(INDEX_FILE);
++        // Read before the lock, so a broken store gets no lock file, and again under it: the window
++        // that held the lock may have written the index until it ended.
++        read_index(&index_path)?;
++        fs::create_dir_all(dir).map_err(|error| write_failed(dir, &error))?;
++        let lock = take_lock(dir)?;
++        let index = if let Some(index) = read_index(&index_path)? {
++            index
++        } else {
++            let index = Index::first();
++            write_index(&index_path, &index)?;
++            index
++        };
++        remove_orphans(dir, &index.ids())?;
++        Ok(TabStore {
++            dir: dir.to_owned(),
++            index,
++            loaded: HashMap::new(),
++            _lock: lock,
++        })
++    }
++
++    /// The tabs and the column limit.
++    #[must_use]
++    pub fn start(&self) -> CompareStart {
++        CompareStart {
++            list: self.list(),
++            column_limit: MAX_COLUMN_BYTES,
++        }
++    }
++
++    /// Reads the tab's two column files the first time; later calls return the same texts.
++    pub fn load_tab(&mut self, tab: TabId) -> Result<LoadedTab> {
++        if let Some(loaded) = self.loaded.get(&tab) {
++            return Ok(loaded.clone());
++        }
++        self.index.require_tab(tab)?;
++        let left = read_column(&column_path(&self.dir, tab, Column::Left))?;
++        let right = read_column(&column_path(&self.dir, tab, Column::Right))?;
++        let loaded = LoadedTab::new(left, right);
++        self.loaded.insert(tab, loaded.clone());
++        Ok(loaded)
++    }
++
++    /// Stores and writes one column when `version` is above the stored one; otherwise stores
++    /// nothing. Returns the texts and versions now stored.
++    pub fn set_column(
++        &mut self,
++        tab: TabId,
++        column: Column,
++        text: String,
++        version: ColumnVersion,
++    ) -> Result<LoadedTab> {
++        let stored = self.load_tab(tab)?;
++        if version <= stored.version(column) {
++            return Ok(stored);
++        }
++        require_within_limit(text.len())?;
++        write_atomically(&column_path(&self.dir, tab, column), &text)?;
++        let changed = stored.with_column(column, Arc::from(text), version);
++        self.loaded.insert(tab, changed.clone());
++        Ok(changed)
++    }
++
++    /// Appends a new tab and shows it.
++    pub fn add_tab(&mut self) -> Result<TabList> {
++        let mut next = self.index.clone();
++        next.add_tab();
++        self.commit(next)?;
++        Ok(self.list())
++    }
++
++    /// Removes the tab from `tabs.json`, then its column files.
++    pub fn close_tab(&mut self, tab: TabId) -> Result<TabList> {
++        let mut next = self.index.clone();
++        next.close_tab(tab)?;
++        self.commit(next)?;
++        self.loaded.remove(&tab);
++        remove_columns(&self.dir, tab);
++        Ok(self.list())
++    }
++
++    /// Renames the tab to `name` trimmed; a name that trims to nothing keeps the old one.
++    pub fn rename_tab(&mut self, tab: TabId, name: &str) -> Result<TabList> {
++        let mut next = self.index.clone();
++        let stored = next.tab_mut(tab)?;
++        let name = name.trim();
++        if !name.is_empty() {
++            name.clone_into(&mut stored.name);
++        }
++        self.commit(next)?;
++        Ok(self.list())
++    }
++
++    /// Sets the tab's language.
++    pub fn set_language(&mut self, tab: TabId, language: TabLanguage) -> Result<TabList> {
++        let mut next = self.index.clone();
++        next.tab_mut(tab)?.language = language;
++        self.commit(next)?;
++        Ok(self.list())
++    }
++
++    /// Shows the tab.
++    pub fn show_tab(&mut self, tab: TabId) -> Result<TabList> {
++        let mut next = self.index.clone();
++        next.require_tab(tab)?;
++        next.shown = tab;
++        self.commit(next)?;
++        Ok(self.list())
++    }
++
++    /// Writes `next` when it differs from the index in memory, then keeps it; a failed write keeps the old one.
++    fn commit(&mut self, next: Index) -> Result<()> {
++        if next != self.index {
++            write_index(&self.dir.join(INDEX_FILE), &next)?;
++            self.index = next;
++        }
++        Ok(())
++    }
++
++    fn list(&self) -> TabList {
++        let tabs = self
++            .index
++            .tabs
++            .iter()
++            .map(|stored| TabEntry {
++                id: stored.id,
++                name: stored.name.clone(),
++                language: stored.language.clone(),
++                holds_text: self.loaded.get(&stored.id).map_or_else(
++                    || has_text_on_disk(&self.dir, stored.id),
++                    LoadedTab::holds_text,
++                ),
++            })
++            .collect();
++        TabList {
++            tabs,
++            shown: self.index.shown,
++        }
++    }
++}
+diff --git a/crates/compare/tests/columns.rs b/crates/compare/tests/columns.rs
+new file mode 100644
+index 0000000..20f6562
+--- /dev/null
++++ b/crates/compare/tests/columns.rs
+@@ -0,0 +1,374 @@
++#![cfg(test)]
++
++use std::fs::{self, File};
++use std::path::{Path, PathBuf};
++use std::time::{Duration, SystemTime};
++
++use yamt_compare::{
++    Column, ColumnVersion, ColumnVersions, Error, MAX_COLUMN_BYTES, TabId, TabStore, TabTexts,
++    comparison, tab_texts,
++};
++
++const LONG_AGO: Duration = Duration::from_secs(1_000_000);
++
++fn column_file(dir: &Path, tab: TabId, column: &str) -> PathBuf {
++    dir.join(format!("{}-{column}.txt", tab.0))
++}
++
++fn first_tab(dir: &Path) -> (TabStore, TabId) {
++    let store = TabStore::open(dir).unwrap();
++    let tab = store.start().list.shown;
++    (store, tab)
++}
++
++fn texts(store: &mut TabStore, tab: TabId) -> TabTexts {
++    tab_texts(&store.load_tab(tab).unwrap())
++}
++
++fn versions(left: u32, right: u32) -> ColumnVersions {
++    ColumnVersions {
++        left: ColumnVersion(left),
++        right: ColumnVersion(right),
++    }
++}
++
++fn aged(path: &Path) -> SystemTime {
++    let then = SystemTime::UNIX_EPOCH + LONG_AGO;
++    File::options()
++        .write(true)
++        .open(path)
++        .unwrap()
++        .set_modified(then)
++        .unwrap();
++    then
++}
++
++fn modified(path: &Path) -> SystemTime {
++    fs::metadata(path).unwrap().modified().unwrap()
++}
++
++fn holds_text(store: &TabStore, tab: TabId) -> bool {
++    let list = store.start().list;
++    list.tabs
++        .iter()
++        .find(|entry| entry.id == tab)
++        .unwrap()
++        .holds_text
++}
++
++#[test]
++fn set_column_writes_that_column_and_returns_both_texts_and_versions() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    store
++        .set_column(tab, Column::Right, "right\n".to_owned(), ColumnVersion(1))
++        .unwrap();
++    let loaded = store
++        .set_column(tab, Column::Left, "left\n".to_owned(), ColumnVersion(3))
++        .unwrap();
++    let texts = tab_texts(&loaded);
++    assert_eq!(texts.left, "left\n");
++    assert_eq!(texts.right, "right\n");
++    assert_eq!(texts.comparison.versions, versions(3, 1));
++    assert_eq!(
++        fs::read_to_string(column_file(dir.path(), tab, "left")).unwrap(),
++        "left\n"
++    );
++    assert_eq!(
++        fs::read_to_string(column_file(dir.path(), tab, "right")).unwrap(),
++        "right\n"
++    );
++}
++
++#[test]
++fn set_column_rewrites_only_that_columns_file_not_the_other_nor_the_index() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    store
++        .set_column(tab, Column::Left, "a".to_owned(), ColumnVersion(1))
++        .unwrap();
++    store
++        .set_column(tab, Column::Right, "b".to_owned(), ColumnVersion(1))
++        .unwrap();
++    let right = column_file(dir.path(), tab, "right");
++    let index = dir.path().join("tabs.json");
++    let index_bytes = fs::read(&index).unwrap();
++    let (right_then, index_then) = (aged(&right), aged(&index));
++    store
++        .set_column(tab, Column::Left, "c".to_owned(), ColumnVersion(2))
++        .unwrap();
++    assert_eq!(modified(&right), right_then);
++    assert_eq!(fs::read(&right).unwrap(), b"b");
++    assert_eq!(modified(&index), index_then);
++    assert_eq!(fs::read(&index).unwrap(), index_bytes);
++    assert_eq!(
++        fs::read(column_file(dir.path(), tab, "left")).unwrap(),
++        b"c"
++    );
++}
++
++#[test]
++fn a_stale_or_equal_version_stores_nothing_and_replies_with_the_stored_versions() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    store
++        .set_column(tab, Column::Left, "new".to_owned(), ColumnVersion(2))
++        .unwrap();
++    let left = column_file(dir.path(), tab, "left");
++    let then = aged(&left);
++    for stale in [ColumnVersion(1), ColumnVersion(2)] {
++        let reply = store
++            .set_column(tab, Column::Left, "old".to_owned(), stale)
++            .unwrap();
++        let texts = tab_texts(&reply);
++        assert_eq!(texts.left, "new");
++        assert_eq!(texts.comparison.versions, versions(2, 0));
++    }
++    assert_eq!(modified(&left), then);
++    assert_eq!(texts(&mut store, tab).left, "new");
++}
++
++#[test]
++fn versions_start_at_0_for_every_tab_at_open() {
++    let dir = tempfile::tempdir().unwrap();
++    {
++        let (mut store, tab) = first_tab(dir.path());
++        store
++            .set_column(tab, Column::Right, "r".to_owned(), ColumnVersion(9))
++            .unwrap();
++    }
++    let (mut store, tab) = first_tab(dir.path());
++    assert_eq!(texts(&mut store, tab).comparison.versions, versions(0, 0));
++    let reply = store
++        .set_column(tab, Column::Right, "s".to_owned(), ColumnVersion(1))
++        .unwrap();
++    assert_eq!(tab_texts(&reply).right, "s");
++}
++
++fn send(store: &mut TabStore, tab: TabId, column: Column, text: &str) {
++    store
++        .set_column(tab, column, text.to_owned(), ColumnVersion(1))
++        .unwrap();
++}
++
++#[test]
++fn a_restart_reads_back_both_texts_of_every_tab() {
++    let dir = tempfile::tempdir().unwrap();
++    let second = {
++        let (mut store, first) = first_tab(dir.path());
++        send(&mut store, first, Column::Left, "{\"a\": 1}\n");
++        send(&mut store, first, Column::Right, "{\"a\": 2}\n");
++        let second = store.add_tab().unwrap().shown;
++        send(&mut store, second, Column::Right, "ünïcode\n");
++        second
++    };
++    let (mut store, _) = first_tab(dir.path());
++    let first = store.start().list.tabs[0].id;
++    let first_texts = texts(&mut store, first);
++    assert_eq!(
++        (first_texts.left.as_str(), first_texts.right.as_str()),
++        ("{\"a\": 1}\n", "{\"a\": 2}\n")
++    );
++    let second_texts = texts(&mut store, second);
++    assert_eq!(
++        (second_texts.left.as_str(), second_texts.right.as_str()),
++        ("", "ünïcode\n")
++    );
++}
++
++#[test]
++fn a_missing_column_file_reads_as_an_empty_column() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    fs::write(column_file(dir.path(), tab, "left"), "only left").unwrap();
++    let texts = texts(&mut store, tab);
++    assert_eq!(texts.left, "only left");
++    assert_eq!(texts.right, "");
++}
++
++#[test]
++fn load_tab_reads_the_files_once() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    let left = column_file(dir.path(), tab, "left");
++    fs::write(&left, "first").unwrap();
++    assert_eq!(texts(&mut store, tab).left, "first");
++    fs::write(&left, "changed behind the store").unwrap();
++    assert_eq!(texts(&mut store, tab).left, "first");
++}
++
++#[test]
++fn a_column_over_the_limit_is_too_large_and_nothing_is_written_or_stored() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    store
++        .set_column(tab, Column::Left, "kept".to_owned(), ColumnVersion(1))
++        .unwrap();
++    let over = MAX_COLUMN_BYTES as usize + 1;
++    let result = store.set_column(tab, Column::Left, "x".repeat(over), ColumnVersion(2));
++    assert!(matches!(result, Err(Error::TooLarge { bytes }) if bytes == over));
++    assert_eq!(
++        fs::read(column_file(dir.path(), tab, "left")).unwrap(),
++        b"kept"
++    );
++    let texts = texts(&mut store, tab);
++    assert_eq!(texts.left, "kept");
++    assert_eq!(texts.comparison.versions, versions(1, 0));
++    let result = store.set_column(tab, Column::Right, "x".repeat(over), ColumnVersion(1));
++    assert!(matches!(result, Err(Error::TooLarge { .. })));
++    assert!(!column_file(dir.path(), tab, "right").exists());
++}
++
++#[test]
++fn a_column_exactly_at_the_limit_is_stored() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    let full = "x".repeat(MAX_COLUMN_BYTES as usize);
++    store
++        .set_column(tab, Column::Right, full, ColumnVersion(1))
++        .unwrap();
++    drop(store);
++    let (mut store, tab) = first_tab(dir.path());
++    assert_eq!(
++        texts(&mut store, tab).right.len(),
++        MAX_COLUMN_BYTES as usize
++    );
++}
++
++#[test]
++fn a_column_file_over_the_limit_is_too_large_at_load() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    let over = MAX_COLUMN_BYTES as usize + 1;
++    fs::write(column_file(dir.path(), tab, "right"), "x".repeat(over)).unwrap();
++    assert!(matches!(store.load_tab(tab), Err(Error::TooLarge { bytes }) if bytes == over));
++}
++
++#[test]
++fn a_non_utf8_column_file_fails_at_load_and_no_other_call_rewrites_it() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    let left = column_file(dir.path(), tab, "left");
++    let bytes = b"caf\xe9\n";
++    fs::write(&left, bytes).unwrap();
++    assert!(matches!(store.load_tab(tab), Err(Error::ReadFailed { path, .. }) if path == left));
++    for column in [Column::Left, Column::Right] {
++        let result = store.set_column(tab, column, "text".to_owned(), ColumnVersion(1));
++        assert!(matches!(result, Err(Error::ReadFailed { .. })));
++    }
++    store.rename_tab(tab, "renamed").unwrap();
++    store.add_tab().unwrap();
++    store.show_tab(tab).unwrap();
++    drop(store);
++    TabStore::open(dir.path()).unwrap();
++    assert_eq!(fs::read(&left).unwrap(), bytes);
++    assert!(!column_file(dir.path(), tab, "right").exists());
++}
++
++#[test]
++fn holds_text_comes_from_the_file_sizes_before_a_load_and_from_the_texts_after() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    assert!(!holds_text(&store, tab));
++    fs::write(column_file(dir.path(), tab, "left"), "").unwrap();
++    assert!(!holds_text(&store, tab));
++    fs::write(column_file(dir.path(), tab, "right"), "r").unwrap();
++    assert!(holds_text(&store, tab));
++    store.load_tab(tab).unwrap();
++    assert!(holds_text(&store, tab));
++    store
++        .set_column(tab, Column::Right, String::new(), ColumnVersion(1))
++        .unwrap();
++    assert!(!holds_text(&store, tab));
++    store
++        .set_column(tab, Column::Left, "l".to_owned(), ColumnVersion(1))
++        .unwrap();
++    assert!(holds_text(&store, tab));
++}
++
++#[test]
++fn holds_text_of_an_unloaded_tab_reads_no_text() {
++    let dir = tempfile::tempdir().unwrap();
++    let (store, tab) = first_tab(dir.path());
++    fs::write(column_file(dir.path(), tab, "left"), b"\xff not utf-8").unwrap();
++    assert!(holds_text(&store, tab));
++}
++
++#[test]
++fn set_column_on_a_tab_never_loaded_keeps_the_other_columns_file_text() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    fs::write(column_file(dir.path(), tab, "left"), "on disk").unwrap();
++    let reply = store
++        .set_column(tab, Column::Right, "typed".to_owned(), ColumnVersion(1))
++        .unwrap();
++    let texts = tab_texts(&reply);
++    assert_eq!(
++        (texts.left.as_str(), texts.right.as_str()),
++        ("on disk", "typed")
++    );
++}
++
++#[test]
++fn comparison_is_merge_core_compare_on_the_two_texts() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    let left = "a\nb\nc\nd\n";
++    let right = "a\nB\nc\nd\ne\n";
++    store
++        .set_column(tab, Column::Left, left.to_owned(), ColumnVersion(1))
++        .unwrap();
++    let loaded = store
++        .set_column(tab, Column::Right, right.to_owned(), ColumnVersion(4))
++        .unwrap();
++    let expected = yamt_merge_core::compare(left, right);
++    assert_eq!(expected.len(), 2);
++    let comparison = comparison(&loaded);
++    assert_eq!(comparison.differences, expected);
++    assert_eq!(comparison.versions, versions(1, 4));
++    assert_eq!(tab_texts(&loaded).comparison, comparison);
++}
++
++#[cfg(unix)]
++#[test]
++fn a_failed_write_changes_nothing_in_memory() {
++    use std::os::unix::fs::PermissionsExt;
++
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    store
++        .set_column(tab, Column::Left, "kept".to_owned(), ColumnVersion(1))
++        .unwrap();
++    let read_only = fs::Permissions::from_mode(0o500);
++    fs::set_permissions(dir.path(), read_only).unwrap();
++    let column = store.set_column(tab, Column::Left, "lost".to_owned(), ColumnVersion(2));
++    let renamed = store.rename_tab(tab, "lost");
++    let added = store.add_tab();
++    fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o700)).unwrap();
++    assert!(matches!(column, Err(Error::WriteFailed { .. })));
++    assert!(matches!(renamed, Err(Error::WriteFailed { .. })));
++    assert!(matches!(added, Err(Error::WriteFailed { .. })));
++    let texts = texts(&mut store, tab);
++    assert_eq!(texts.left, "kept");
++    assert_eq!(texts.comparison.versions, versions(1, 0));
++    let list = store.start().list;
++    assert_eq!(list.tabs.len(), 1);
++    assert_eq!(list.tabs[0].name, "Compare 1");
++    let reply = store
++        .set_column(tab, Column::Left, "now".to_owned(), ColumnVersion(2))
++        .unwrap();
++    assert_eq!(tab_texts(&reply).left, "now");
++}
++
++#[test]
++fn a_failed_rename_removes_its_temporary_file() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    store.load_tab(tab).unwrap();
++    let left = column_file(dir.path(), tab, "left");
++    fs::create_dir(&left).unwrap();
++    fs::write(left.join("in the way"), "").unwrap();
++    let result = store.set_column(tab, Column::Left, "text".to_owned(), ColumnVersion(1));
++    assert!(matches!(result, Err(Error::WriteFailed { path, .. }) if path == left));
++    assert!(!dir.path().join(format!("{}-left.txt.tmp", tab.0)).exists());
++}
+diff --git a/crates/compare/tests/opening.rs b/crates/compare/tests/opening.rs
+new file mode 100644
+index 0000000..e014215
+--- /dev/null
++++ b/crates/compare/tests/opening.rs
+@@ -0,0 +1,190 @@
++#![cfg(test)]
++
++use std::collections::BTreeMap;
++use std::fs;
++use std::path::Path;
++
++use serde_json::{Value, json};
++use yamt_compare::{Error, MAX_COLUMN_BYTES, TabId, TabLanguage, TabStore};
++
++const ONE_TAB: &str = r#"{"format":1,"shown":3,"nextId":4,"tabs":[{"id":3,"number":1,"name":"Compare 1","language":{"kind":"auto"}}]}"#;
++
++fn files_in(dir: &Path) -> BTreeMap<String, Vec<u8>> {
++    fs::read_dir(dir)
++        .unwrap()
++        .map(|entry| {
++            let entry = entry.unwrap();
++            let name = entry.file_name().into_string().unwrap();
++            (name, fs::read(entry.path()).unwrap())
++        })
++        .collect()
++}
++
++fn names_in(dir: &Path) -> Vec<String> {
++    let mut names: Vec<String> = fs::read_dir(dir)
++        .unwrap()
++        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
++        .collect();
++    names.sort();
++    names
++}
++
++#[test]
++fn the_first_open_creates_the_folder_compare_1_and_its_tabs_json() {
++    let home = tempfile::tempdir().unwrap();
++    let dir = home.path().join("yamt").join("compare");
++    let store = TabStore::open(&dir).unwrap();
++    let start = store.start();
++    assert_eq!(start.column_limit, MAX_COLUMN_BYTES);
++    assert_eq!(start.list.tabs.len(), 1);
++    let tab = &start.list.tabs[0];
++    assert_eq!((tab.id, tab.name.as_str()), (TabId(1), "Compare 1"));
++    assert_eq!(tab.language, TabLanguage::Auto);
++    assert!(!tab.holds_text);
++    assert_eq!(start.list.shown, TabId(1));
++    let index: Value = serde_json::from_slice(&fs::read(dir.join("tabs.json")).unwrap()).unwrap();
++    let expected = json!({
++        "format": 1, "shown": 1, "nextId": 2,
++        "tabs": [{ "id": 1, "number": 1, "name": "Compare 1", "language": { "kind": "auto" } }],
++    });
++    assert_eq!(index, expected);
++    assert_eq!(names_in(&dir), ["lock", "tabs.json"]);
++}
++
++#[test]
++fn an_existing_tabs_json_is_read_not_replaced() {
++    let dir = tempfile::tempdir().unwrap();
++    fs::write(dir.path().join("tabs.json"), ONE_TAB).unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    assert_eq!(store.start().list.shown, TabId(3));
++    assert_eq!(
++        fs::read_to_string(dir.path().join("tabs.json")).unwrap(),
++        ONE_TAB
++    );
++    assert_eq!(store.add_tab().unwrap().shown, TabId(4));
++}
++
++#[test]
++fn broken_json_is_broken_with_its_line_and_nothing_in_the_folder_changes() {
++    let dir = tempfile::tempdir().unwrap();
++    let broken = "{\n  \"format\": 1,\n  \"shown\": 1,,\n}\n";
++    fs::write(dir.path().join("tabs.json"), broken).unwrap();
++    fs::write(
++        dir.path().join("7-left.txt"),
++        "an orphan stays while broken",
++    )
++    .unwrap();
++    let before = files_in(dir.path());
++    let result = TabStore::open(dir.path());
++    match result {
++        Err(Error::Broken { path, message }) => {
++            assert_eq!(path, dir.path().join("tabs.json"));
++            assert!(message.contains("line 3"), "{message}");
++        }
++        other => panic!("expected Broken, got {other:?}"),
++    }
++    assert_eq!(files_in(dir.path()), before);
++}
++
++#[test]
++fn a_shape_that_is_not_format_1_is_broken() {
++    let dir = tempfile::tempdir().unwrap();
++    let wrong = r#"{"format":1,"shown":1,"nextId":2,"tabs":[{"id":1,"name":"no number"}]}"#;
++    fs::write(dir.path().join("tabs.json"), wrong).unwrap();
++    assert!(matches!(
++        TabStore::open(dir.path()),
++        Err(Error::Broken { .. })
++    ));
++    assert_eq!(names_in(dir.path()), ["tabs.json"]);
++}
++
++#[test]
++fn format_2_is_newer_format_and_nothing_in_the_folder_changes() {
++    let dir = tempfile::tempdir().unwrap();
++    let newer = r#"{"format":2,"somethingNew":true}"#;
++    fs::write(dir.path().join("tabs.json"), newer).unwrap();
++    fs::write(dir.path().join("9-right.txt"), "kept").unwrap();
++    let before = files_in(dir.path());
++    let result = TabStore::open(dir.path());
++    assert!(
++        matches!(result, Err(Error::NewerFormat { format: 2, path }) if path == dir.path().join("tabs.json"))
++    );
++    assert_eq!(files_in(dir.path()), before);
++}
++
++#[test]
++fn a_second_open_while_the_first_lives_is_locked_and_opens_after_it_is_dropped() {
++    let dir = tempfile::tempdir().unwrap();
++    let first = TabStore::open(dir.path()).unwrap();
++    let second = TabStore::open(dir.path());
++    assert!(matches!(second, Err(Error::Locked { path }) if path == dir.path()));
++    drop(first);
++    let reopened = TabStore::open(dir.path()).unwrap();
++    assert_eq!(reopened.start().list.tabs.len(), 1);
++}
++
++#[test]
++fn a_locked_open_writes_nothing() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut first = TabStore::open(dir.path()).unwrap();
++    let closed = first.add_tab().unwrap().shown;
++    first.close_tab(closed).unwrap();
++    fs::write(dir.path().join(format!("{}-left.txt", closed.0)), "orphan").unwrap();
++    let before = files_in(dir.path());
++    assert!(matches!(
++        TabStore::open(dir.path()),
++        Err(Error::Locked { .. })
++    ));
++    assert_eq!(files_in(dir.path()), before);
++}
++
++#[test]
++fn orphan_column_and_temp_files_are_removed_and_foreign_files_kept() {
++    let dir = tempfile::tempdir().unwrap();
++    fs::write(dir.path().join("tabs.json"), ONE_TAB).unwrap();
++    for name in [
++        "3-left.txt",
++        "3-right.txt",
++        "3-left.txt.tmp",
++        "tabs.json.tmp",
++        "notes.txt",
++        "x-left.txt",
++    ] {
++        fs::write(dir.path().join(name), name).unwrap();
++    }
++    for orphan in ["1-left.txt", "2-right.txt", "12-right.txt.tmp"] {
++        fs::write(dir.path().join(orphan), "closed").unwrap();
++    }
++    fs::create_dir(dir.path().join("5-left.txt.d")).unwrap();
++    TabStore::open(dir.path()).unwrap();
++    let names = names_in(dir.path());
++    let expected = [
++        "3-left.txt",
++        "3-left.txt.tmp",
++        "3-right.txt",
++        "5-left.txt.d",
++        "lock",
++        "notes.txt",
++        "tabs.json",
++        "tabs.json.tmp",
++        "x-left.txt",
++    ];
++    assert_eq!(names, expected);
++}
++
++#[test]
++fn no_temp_file_is_left_after_a_write() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let tab = store.start().list.shown;
++    store.rename_tab(tab, "renamed").unwrap();
++    store
++        .set_column(
++            tab,
++            yamt_compare::Column::Left,
++            "x".to_owned(),
++            yamt_compare::ColumnVersion(1),
++        )
++        .unwrap();
++    assert_eq!(names_in(dir.path()), ["1-left.txt", "lock", "tabs.json"]);
++}
+diff --git a/crates/compare/tests/tabs.rs b/crates/compare/tests/tabs.rs
+new file mode 100644
+index 0000000..1acf473
+--- /dev/null
++++ b/crates/compare/tests/tabs.rs
+@@ -0,0 +1,247 @@
++#![cfg(test)]
++
++use std::fs::{self, File};
++use std::path::Path;
++use std::time::{Duration, SystemTime};
++
++use yamt_compare::{Error, TabId, TabLanguage, TabList, TabStore};
++
++fn names(list: &TabList) -> Vec<&str> {
++    list.tabs.iter().map(|tab| tab.name.as_str()).collect()
++}
++
++fn id_of(list: &TabList, name: &str) -> TabId {
++    list.tabs
++        .iter()
++        .find(|tab| tab.name == name)
++        .map(|tab| tab.id)
++        .unwrap()
++}
++
++fn with_three_tabs(dir: &Path) -> (TabStore, TabList) {
++    let mut store = TabStore::open(dir).unwrap();
++    store.add_tab().unwrap();
++    let list = store.add_tab().unwrap();
++    assert_eq!(names(&list), ["Compare 1", "Compare 2", "Compare 3"]);
++    (store, list)
++}
++
++const LONG_AGO: Duration = Duration::from_secs(1_000_000);
++
++fn age(path: &Path) -> SystemTime {
++    let then = SystemTime::UNIX_EPOCH + LONG_AGO;
++    File::options()
++        .write(true)
++        .open(path)
++        .unwrap()
++        .set_modified(then)
++        .unwrap();
++    then
++}
++
++fn modified(path: &Path) -> SystemTime {
++    fs::metadata(path).unwrap().modified().unwrap()
++}
++
++#[test]
++fn a_new_tab_is_appended_last_and_shown() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let list = store.add_tab().unwrap();
++    assert_eq!(names(&list), ["Compare 1", "Compare 2"]);
++    assert_eq!(list.shown, list.tabs[1].id);
++    assert_eq!(list.tabs[1].language, TabLanguage::Auto);
++    assert!(!list.tabs[1].holds_text);
++    assert_ne!(list.tabs[0].id, list.tabs[1].id);
++}
++
++#[test]
++fn closing_compare_2_of_three_numbers_the_next_tab_4_not_a_reused_2() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    store.close_tab(id_of(&list, "Compare 2")).unwrap();
++    let list = store.add_tab().unwrap();
++    assert_eq!(names(&list), ["Compare 1", "Compare 3", "Compare 4"]);
++}
++
++#[test]
++fn closing_all_but_compare_1_numbers_the_next_tab_2() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    store.close_tab(id_of(&list, "Compare 2")).unwrap();
++    store.close_tab(id_of(&list, "Compare 3")).unwrap();
++    let list = store.add_tab().unwrap();
++    assert_eq!(names(&list), ["Compare 1", "Compare 2"]);
++}
++
++#[test]
++fn ids_never_repeat_even_when_numbers_do() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    let closed = id_of(&list, "Compare 3");
++    store.close_tab(closed).unwrap();
++    let list = store.add_tab().unwrap();
++    assert_eq!(names(&list), ["Compare 1", "Compare 2", "Compare 3"]);
++    assert_ne!(id_of(&list, "Compare 3"), closed);
++}
++
++#[test]
++fn closing_the_last_tab_leaves_a_fresh_compare_1_with_a_new_id() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let first = store.start().list.tabs[0].id;
++    store.rename_tab(first, "kept").unwrap();
++    let json = TabLanguage::Picked {
++        name: "JSON".to_owned(),
++    };
++    store.set_language(first, json).unwrap();
++    let list = store.close_tab(first).unwrap();
++    assert_eq!(names(&list), ["Compare 1"]);
++    assert_ne!(list.tabs[0].id, first);
++    assert_eq!(list.shown, list.tabs[0].id);
++    assert_eq!(list.tabs[0].language, TabLanguage::Auto);
++}
++
++#[test]
++fn closing_the_shown_tab_shows_the_next_one() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    store.show_tab(id_of(&list, "Compare 2")).unwrap();
++    let after = store.close_tab(id_of(&list, "Compare 2")).unwrap();
++    assert_eq!(after.shown, id_of(&list, "Compare 3"));
++}
++
++#[test]
++fn closing_the_shown_last_tab_shows_the_previous_one() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    let after = store.close_tab(id_of(&list, "Compare 3")).unwrap();
++    assert_eq!(after.shown, id_of(&list, "Compare 2"));
++}
++
++#[test]
++fn closing_a_hidden_tab_keeps_the_shown_one() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    let after = store.close_tab(id_of(&list, "Compare 1")).unwrap();
++    assert_eq!(after.shown, id_of(&list, "Compare 3"));
++    assert_eq!(names(&after), ["Compare 2", "Compare 3"]);
++}
++
++#[test]
++fn closing_a_tab_deletes_both_its_column_files() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let list = store.add_tab().unwrap();
++    let closed = list.tabs[1].id;
++    for column in ["left", "right"] {
++        fs::write(
++            dir.path().join(format!("{}-{column}.txt", closed.0)),
++            "text",
++        )
++        .unwrap();
++    }
++    store.close_tab(closed).unwrap();
++    assert!(!dir.path().join(format!("{}-left.txt", closed.0)).exists());
++    assert!(!dir.path().join(format!("{}-right.txt", closed.0)).exists());
++    let index = fs::read_to_string(dir.path().join("tabs.json")).unwrap();
++    assert!(!index.contains("Compare 2"));
++}
++
++#[test]
++fn rename_trims_the_name() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let tab = store.start().list.shown;
++    let list = store.rename_tab(tab, "  payloads \t").unwrap();
++    assert_eq!(names(&list), ["payloads"]);
++}
++
++#[test]
++fn rename_with_spaces_only_keeps_the_name_and_writes_nothing() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let tab = store.start().list.shown;
++    let index = dir.path().join("tabs.json");
++    let then = age(&index);
++    let list = store.rename_tab(tab, "   ").unwrap();
++    assert_eq!(names(&list), ["Compare 1"]);
++    assert_eq!(modified(&index), then);
++}
++
++#[test]
++fn showing_the_shown_tab_again_does_not_rewrite_the_index() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let tab = store.start().list.shown;
++    let index = dir.path().join("tabs.json");
++    let then = age(&index);
++    store.show_tab(tab).unwrap();
++    store.set_language(tab, TabLanguage::Auto).unwrap();
++    assert_eq!(modified(&index), then);
++}
++
++#[test]
++fn show_tab_changes_the_shown_tab() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, list) = with_three_tabs(dir.path());
++    let after = store.show_tab(id_of(&list, "Compare 1")).unwrap();
++    assert_eq!(after.shown, id_of(&list, "Compare 1"));
++    assert_eq!(store.start().list.shown, id_of(&list, "Compare 1"));
++}
++
++#[test]
++fn set_language_picks_and_returns_to_auto() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let tab = store.start().list.shown;
++    let json = TabLanguage::Picked {
++        name: "JSON".to_owned(),
++    };
++    let list = store.set_language(tab, json.clone()).unwrap();
++    assert_eq!(list.tabs[0].language, json);
++    let list = store.set_language(tab, TabLanguage::Auto).unwrap();
++    assert_eq!(list.tabs[0].language, TabLanguage::Auto);
++}
++
++#[test]
++fn every_operation_on_an_unknown_id_is_unknown_tab() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let unknown = TabId(42);
++    let is_unknown = |result: Result<TabList, Error>| matches!(result, Err(Error::UnknownTab { tab }) if tab == unknown);
++    assert!(is_unknown(store.close_tab(unknown)));
++    assert!(is_unknown(store.rename_tab(unknown, "x")));
++    assert!(is_unknown(store.rename_tab(unknown, " ")));
++    assert!(is_unknown(store.set_language(unknown, TabLanguage::Auto)));
++    assert!(is_unknown(store.show_tab(unknown)));
++    assert!(matches!(
++        store.load_tab(unknown),
++        Err(Error::UnknownTab { tab }) if tab == unknown
++    ));
++    assert_eq!(names(&store.start().list), ["Compare 1"]);
++}
++
++#[test]
++fn a_restart_reads_back_order_names_languages_and_the_shown_tab() {
++    let dir = tempfile::tempdir().unwrap();
++    let before = {
++        let (mut store, list) = with_three_tabs(dir.path());
++        store
++            .rename_tab(id_of(&list, "Compare 2"), "payloads")
++            .unwrap();
++        let json = TabLanguage::Picked {
++            name: "JSON".to_owned(),
++        };
++        store.set_language(id_of(&list, "Compare 3"), json).unwrap();
++        store.show_tab(id_of(&list, "Compare 1")).unwrap()
++    };
++    let mut store = TabStore::open(dir.path()).unwrap();
++    assert_eq!(store.start().list, before);
++    let list = store.add_tab().unwrap();
++    assert_eq!(
++        names(&list),
++        ["Compare 1", "payloads", "Compare 3", "Compare 4"]
++    );
++    assert!(before.tabs.iter().all(|tab| tab.id != list.shown));
++}
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index f1799d3..62ab17a 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -34,10 +34,17 @@ if [ -n "$forbidden_in_lsp_host" ]; then
+     failed=1
+ fi
+ 
++compare_deps=$(normal_deps yamt-compare)
++forbidden_in_compare=$(grep -E '^(yamt-|tauri(-|$))' <<<"$compare_deps" | grep -vxE 'yamt-(compare|merge-core)' || true)
++if [ -n "$forbidden_in_compare" ]; then
++    echo "arch-check: yamt-compare depends on yamt-merge-core only among yamt crates, and never on tauri, not:" $forbidden_in_compare >&2
++    failed=1
++fi
++
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host)' || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings and yamt-lsp-host only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host and yamt-compare only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 176a1df..bc88102 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -27,6 +27,7 @@ tauri-build.workspace = true
+ yamt-session.workspace = true
+ yamt-settings.workspace = true
+ yamt-lsp-host.workspace = true
++yamt-compare.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+ specta-typescript.workspace = true
