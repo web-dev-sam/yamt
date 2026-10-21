@@ -8,7 +8,8 @@
       "crates/gitio/src/lib.rs",
       "crates/gitio/tests/operations.rs",
       "crates/gitio/AGENTS.md",
-      "crates/conflict-repo/**"
+      "crates/conflict-repo/**",
+      "crates/gitio/src/todo.rs"
     ]
   }
 }
