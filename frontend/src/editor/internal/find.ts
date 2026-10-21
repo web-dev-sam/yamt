@@ -8,7 +8,15 @@ import {
   searchPanelOpen,
   setSearchQuery,
 } from "@codemirror/search";
-import { Compartment, Facet, StateEffect, StateField, type Extension } from "@codemirror/state";
+import {
+  Compartment,
+  Facet,
+  StateEffect,
+  StateField,
+  type EditorState,
+  type Extension,
+  type TransactionSpec,
+} from "@codemirror/state";
 import {
   EditorView,
   keymap,
@@ -26,7 +34,6 @@ import xIcon from "~icons/lucide/x?raw";
 import { keyLabel, type KeyAction, type KeyBindings } from "../../ipc";
 import { findLabel, labelOutdated, matches, matchFrom, selectMatch, stepMatch } from "./findMatch";
 import type { FindDirection } from "./findMatch";
-import type { PaneViews } from "./geometry";
 import { cmKeys } from "./keys";
 
 const FIND_BAR_HEIGHT_PX = 29;
@@ -57,8 +64,12 @@ const findSpace = StateField.define<boolean>({
     EditorView.editorAttributes.from(field, (shown) => (shown ? { class: "find-space" } : {})),
 });
 
-export function syncFindSpace(views: PaneViews): void {
-  const panes = [views.left, views.center, views.right];
+export type FindSpaceView = {
+  readonly state: EditorState;
+  dispatch(spec: TransactionSpec): void;
+};
+
+export function syncFindSpace(panes: readonly FindSpaceView[]): void {
   const shown = panes.some((view) => searchPanelOpen(view.state));
   for (const view of panes) {
     if (view.state.field(findSpace) !== shown) {

@@ -7,7 +7,7 @@ import { pushCovered } from "./covered";
 import { coveredAction, type IconDrag } from "./drag";
 import { syncFindSpace } from "./find";
 import { waveStarts, type FoldFields } from "./folds";
-import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
+import { chunkRows, PANES, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
 import type { ChunkRow, WaveRow } from "./geometry";
 import { Minimap } from "./minimap";
 import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
@@ -15,7 +15,7 @@ import type { Strips } from "./strips";
 
 type Layout = {
   readonly rows: readonly ChunkRow[];
-  readonly anchors: readonly Anchor[];
+  readonly anchors: readonly Anchor<Pane>[];
   readonly waves: readonly WaveRow[];
 };
 
@@ -30,14 +30,14 @@ type FrameParts = {
 
 export class Frame {
   readonly #parts: FrameParts;
-  readonly #scroll: ScrollSync;
+  readonly #scroll: ScrollSync<Pane>;
   readonly #minimap: Minimap;
   #frameId: number | null = null;
   #layoutCache: Layout | null = null;
 
   constructor(parts: FrameParts) {
     this.#parts = parts;
-    this.#scroll = new ScrollSync(parts.views, () => {
+    this.#scroll = new ScrollSync(parts.views, PANES, () => {
       this.request();
     });
     this.#minimap = new Minimap({
@@ -82,7 +82,7 @@ export class Frame {
     this.#frameId ??= requestAnimationFrame(() => {
       this.#frameId = null;
       const { views, drag, strips } = this.#parts;
-      syncFindSpace(views);
+      syncFindSpace([views.left, views.center, views.right]);
       const layout = this.layout();
       this.#scroll.sync(layout.anchors);
       const press = drag.press;
