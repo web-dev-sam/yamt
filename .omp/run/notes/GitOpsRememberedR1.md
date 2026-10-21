@@ -71,3 +71,7 @@ All five blocks and the promoted shoulds are fixed. Each new test for blocks 1â€
 - A stash pop or similar while rerere is on and a stale `MERGE_RR` exists still reads as "replayed". That scenario is the `[INFERENCE]` in #1402 and is not handled.
 
 Please run `just check`, `just mutants` on the changed lines, and the src-tauri tests on the merged tree.
+
+## Mutants (`just mutants 5976577`)
+
+90 â€” 54 caught, 24 unviable, 12 missed: conflict-repo rerere.rs (7, fixture); gitio rerere.rs:51 `is_found_or_unset -> true`; session remembered.rs:138 overlap guard `-> true` and `< -> <=`; session scratch.rs:22 AlreadyExists guard `-> true`, scratch.rs:40 `create_private_dir -> Ok(())` (moved code from start.rs).

@@ -110,3 +110,11 @@ open_risks
 ```
 
 Main should run `just check`, `just map-check` (after the doc lines above) and `just mutants` on `ui/{continuing,closeGuard,toolbarButtons,question,problem,problemText,operationText,aborting,views,diskChanges,saving,currentStop}.ts`.
+
+## Boundary review (GitOpsContinueBoundary): fail
+
+Blocks #1407/#1408; shoulds #1409–#1413 promoted.
+
+## Correctness review (GitOpsContinueCorrectness): pass
+
+Shoulds #1414–#1416 promoted; survivors all dropped (module-level constants killed by tests, unreachable defaults, type-narrowing guards).
