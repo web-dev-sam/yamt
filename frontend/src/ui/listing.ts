@@ -4,17 +4,16 @@ import type { FileEntry, OperationView, SideNames } from "../ipc";
 import { landed, type Stop } from "./currentStop";
 import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
 import type { DiskNotice } from "./noticeText";
-import { attempt, report, type Relist } from "./problem";
+import { attempt, report } from "./problem";
 import type { StopEnd } from "./stops";
 
-type ListTarget = DiskChangeTarget &
-  Relist & {
-    readonly stop: Stop;
-    readonly files: ShallowRef<readonly FileEntry[]>;
-    readonly operation: ShallowRef<OperationView | null>;
-    readonly sideNames: ShallowRef<SideNames>;
-    nextStop(end: StopEnd): Promise<void>;
-  };
+type ListTarget = DiskChangeTarget & {
+  readonly stop: Stop;
+  readonly files: ShallowRef<readonly FileEntry[]>;
+  readonly operation: ShallowRef<OperationView | null>;
+  readonly sideNames: ShallowRef<SideNames>;
+  nextStop(end: StopEnd): Promise<void>;
+};
 
 export async function refreshFiles(
   target: ListTarget,

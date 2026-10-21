@@ -2,7 +2,7 @@ import type { ShallowRef } from "vue";
 
 import { log, type ChunkSource, type FileEntry, type FileMergeData, type FileSides } from "../ipc";
 import { landed, type Stop } from "./currentStop";
-import { attempt, reportFailure, type Outcome, type Problem, type Relist } from "./problem";
+import { attempt, reportFailure, type EndsStop, type Outcome, type Problem } from "./problem";
 
 export type Shown = {
   readonly source: ChunkSource;
@@ -53,7 +53,7 @@ export async function fetchView(shown: Shown, path: string): Promise<Outcome<() 
 }
 
 export async function reload(
-  target: Shown & Relist,
+  target: Shown & EndsStop,
   path: string,
   stop: Readonly<Stop>,
 ): Promise<boolean> {

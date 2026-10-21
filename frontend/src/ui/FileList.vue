@@ -108,10 +108,7 @@ function toggleFolder(path: string): void {
         @click="emit('select', file.path)"
       >
         <component :is="fileIcon(file.path)" class="size-4 shrink-0" aria-hidden="true" />
-        <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
-          {{ file.path }}
-        </span>
-        <FileMark :status="file.status" />
+        <FileMark :status="file.status" :label="file.path" />
       </li>
     </ul>
     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->

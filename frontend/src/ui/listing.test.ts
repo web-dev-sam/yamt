@@ -32,7 +32,6 @@ type Listed = {
   readonly ends: StopEnd[];
   stop: Stop;
   nextStop(end: StopEnd): Promise<void>;
-  refreshFiles(): Promise<void>;
 };
 
 const FILES: readonly FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
@@ -100,7 +99,6 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
       ends.push(end);
       return Promise.resolve();
     },
-    refreshFiles: notUsed,
   };
 }
 

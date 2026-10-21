@@ -24,7 +24,7 @@ type Pressed = Aborting & {
   readonly asking: Asking;
   readonly operation: ShallowRef<OperationView | null>;
   readonly problem: ShallowRef<Problem | null>;
-  readonly lists: string[];
+  readonly ends: string[];
   stop: Stop;
 };
 
@@ -37,17 +37,17 @@ function aborting(
   operation: OperationView | null = REBASE,
 ): Pressed {
   const asking = createAsking();
-  const lists: string[] = [];
+  const ends: string[] = [];
   const target = {
     source: { abortOperation },
     asking,
     operation: shallowRef(operation),
     problem: shallowRef<Problem | null>(null),
-    lists,
+    ends,
     stop: { dropped: false },
     gitRun: createGitRun(),
-    refreshFiles: () => {
-      lists.push("list");
+    nextStop: (end: { readonly kind: "outside" }) => {
+      ends.push(end.kind);
       return Promise.resolve();
     },
   };
@@ -143,7 +143,7 @@ test("git's refusal names the operation, logs it, and a later press asks again",
   expect(aborts).toBe(2);
 });
 
-test("an abort git answers StopMovedOn lists again, so the window goes on to the new stop", async () => {
+test("an abort git answers StopMovedOn goes on to the new stop and shows no problem", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const abort = aborting(() => Promise.resolve({ ok: false, failure: { kind: "StopMovedOn" } }));
 
@@ -151,7 +151,7 @@ test("an abort git answers StopMovedOn lists again, so the window goes on to the
   abort.asking.answer(true);
   await refusing;
 
-  expect(abort.lists).toEqual(["list"]);
+  expect([abort.problem.value, abort.ends]).toEqual([null, ["outside"]]);
   expect(abort.abortState.value.kind).toBe("ready");
 });
 
@@ -173,6 +173,6 @@ test("an abort answered after its stop was dropped reports nothing and lists not
   answers[0]?.({ ok: false, failure: { kind: "StopMovedOn" } });
   await pressed;
 
-  expect([abort.problem.value, abort.lists]).toEqual([null, []]);
+  expect([abort.problem.value, abort.ends]).toEqual([null, []]);
   expect(abort.abortState.value.kind).toBe("ready");
 });

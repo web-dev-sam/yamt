@@ -4,7 +4,7 @@ import type { DiskVersion, FileEntry, Side, WriteReply, WriteRequest } from "../
 import type { Asking } from "./asking";
 import { landed, type Stop } from "./currentStop";
 import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
-import { attempt, clearProblemAbout, reportFailure, type Problem, type Relist } from "./problem";
+import { attempt, clearProblemAbout, reportFailure, type EndsStop, type Problem } from "./problem";
 import { finishMustAsk, type Question } from "./question";
 import type {
   FormatOutcome,
@@ -19,7 +19,7 @@ type Claim = { writes: number; overtaken: boolean };
 export type Writing = { readonly writing: ShallowReactive<Map<string, Claim>>; stop: Stop };
 
 type WriteTarget = DiskChangeTarget &
-  Relist & {
+  EndsStop & {
     readonly files: ShallowRef<readonly FileEntry[]>;
     readonly problem: ShallowRef<Problem | null>;
   };

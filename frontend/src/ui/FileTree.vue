@@ -79,13 +79,8 @@ function pressed(row: TreeRow): void {
         </template>
       </span>
       <component :is="rowIcon(row)" class="size-4 shrink-0" aria-hidden="true" />
-      <span
-        class="truncate"
-        :class="{ 'text-fg-muted': row.kind === 'file' && row.file.status === 'Resolved' }"
-      >
-        {{ row.label }}
-      </span>
-      <FileMark v-if="row.kind === 'file'" :status="row.file.status" />
+      <FileMark v-if="row.kind === 'file'" :status="row.file.status" :label="row.label" />
+      <span v-else class="truncate">{{ row.label }}</span>
     </li>
   </ul>
 </template>

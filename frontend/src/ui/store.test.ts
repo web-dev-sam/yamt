@@ -2558,6 +2558,56 @@ test("a focus list that finds git moved on outside drops the old stop, names the
   expect(store.notices.value).toEqual([]);
 });
 
+test.each(["save", "take"] as const)(
+  "a %s git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once",
+  async (write) => {
+    const lines = spyConsole();
+    const movedOn: SourceResult<never> = { ok: false, failure: { kind: "StopMovedOn" } };
+    const answers: SourceResult<Listing>[] = [
+      listing([entry("a.ts"), LOGO_ENTRY]),
+      listing([entry("c.ts")]),
+    ];
+    const { source, calls } = choiceSource({
+      listStop: () => {
+        calls.push("listStop");
+        return Promise.resolve(answers.shift() ?? listing([entry("c.ts")]));
+      },
+      saveFile: () => {
+        calls.push("saveFile");
+        return Promise.resolve(movedOn);
+      },
+      takeSide: () => {
+        calls.push("takeSide");
+        return Promise.resolve(movedOn);
+      },
+    });
+    const store = createAppStore(source);
+    await store.loadFiles();
+    const view = fakeView(store, "a.ts", "loaded\n");
+    view.text = "typed\n";
+
+    await (write === "save"
+      ? store.save({ path: "a.ts", diskVersion: VERSION_0, handle: editorHandle(view) })
+      : store.takeSide(LOGO, "local", LOGO_SIDES.diskVersion));
+
+    expect(calls).toEqual([
+      "listStop",
+      "loadFile a.ts",
+      write === "save" ? "saveFile" : "takeSide",
+      "listStop",
+      "loadFile c.ts",
+    ]);
+    expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
+    expect(store.active.value).toBe("c.ts");
+    expect(store.notices.value).toEqual([{ kind: "movedOn", operation: "Merge", files: ["a.ts"] }]);
+    expect(store.problem.value).toBeNull();
+    const path = write === "save" ? "a.ts" : LOGO;
+    expect(lines.error).toEqual([
+      `[error] store.${write}_failed {path: "${path}", kind: "StopMovedOn"}`,
+    ]);
+  },
+);
+
 test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
   spyConsole();
   const rebase: OperationView = {

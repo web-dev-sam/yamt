@@ -12,13 +12,13 @@ import type { CloseGuard } from "./closeGuard";
 import type { Stop } from "./currentStop";
 import type { GitRun } from "./gitRun";
 import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
-import { report, type Outcome, type Problem, type ProblemCause, type Relist } from "./problem";
+import { report, type Outcome, type Problem, type ProblemCause } from "./problem";
 import type { Question } from "./question";
 import type { StopEnd } from "./stops";
 
 export type ContinueState = "noOperation" | "filesLeft" | "writing" | "ready" | "running";
 
-type ContinueTarget = Relist & {
+type ContinueTarget = {
   readonly stop: Stop;
   readonly writing: ShallowReactive<ReadonlyMap<string, unknown>>;
   readonly gitRun: GitRun;
@@ -29,6 +29,7 @@ type ContinueTarget = Relist & {
   readonly operation: Readonly<ShallowRef<OperationView | null>>;
   readonly problem: ShallowRef<Problem | null>;
   nextStop(end: StopEnd): Promise<void>;
+  refreshFiles(): Promise<void>;
 };
 
 export type Continuing = {

@@ -106,7 +106,7 @@ type Target = Parameters<typeof finish>[0] &
   Parameters<typeof createSaving>[0] & {
     readonly loads: string[];
     readonly sent: WriteRequest[];
-    readonly lists: string[];
+    readonly ends: string[];
   };
 
 function writeTarget(
@@ -116,7 +116,7 @@ function writeTarget(
 ): Target {
   const loads: string[] = [];
   const sent: WriteRequest[] = [];
-  const lists: string[] = [];
+  const ends: string[] = [];
   const source: ChunkSource = {
     loadFile: (path) => {
       loads.push(path);
@@ -151,7 +151,7 @@ function writeTarget(
     source,
     loads,
     sent,
-    lists,
+    ends,
     files: shallowRef(files),
     opened: shallowRef<readonly FileMergeData[]>([{ ...MAGIC_KEYS, path: "a.ts" }]),
     choices: shallowRef<readonly FileSides[]>([]),
@@ -168,8 +168,8 @@ function writeTarget(
     writing: new Map(),
     stop: { dropped: false },
     asking: { ask: () => Promise.resolve("yes") },
-    refreshFiles: () => {
-      lists.push("list");
+    nextStop: (end) => {
+      ends.push(end.kind);
       return Promise.resolve();
     },
   };
@@ -654,7 +654,7 @@ test.each(
 
   const after = shownState(target);
   expect(Object.keys(after).filter((key) => after[key] !== before[key])).toEqual([]);
-  expect([editor.marks, target.loads, target.lists]).toEqual([[], [], []]);
+  expect([editor.marks, target.loads, target.ends]).toEqual([[], [], []]);
 });
 
 test("a format answer after dropStop records no format note and writes nothing", async () => {
@@ -706,7 +706,7 @@ test.each<[string, SourceResult<FileMergeData>]>([
     loads[0]?.(loaded);
     await reloading;
 
-    expect([target.opened.value, target.problem.value, target.lists]).toEqual([[], null, []]);
+    expect([target.opened.value, target.problem.value, target.ends]).toEqual([[], null, []]);
   },
 );
 
@@ -738,11 +738,11 @@ test("a reset whose reload is still waiting when the stop is dropped keeps the n
 
   expect(target.problem.value).toBe(newStopProblem);
   expect(target.opened.value).toBe(opened);
-  expect(target.lists).toEqual([]);
+  expect(target.ends).toEqual([]);
 });
 
 test.each(WRITES)(
-  "a %s git answers StopMovedOn is reported and lists again, which goes on to the new stop",
+  "a %s git answers StopMovedOn goes on to the new stop and shows no problem",
   async (_write, start) => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const movedOn: SourceResult<WriteReply> = { ok: false, failure: { kind: "StopMovedOn" } };
@@ -753,10 +753,6 @@ test.each(WRITES)(
 
     await start(target, typedEditor());
 
-    const { problem } = target;
-    expect(problem.value !== null && "cause" in problem.value ? problem.value.cause : null).toEqual(
-      { kind: "StopMovedOn" },
-    );
-    expect(target.lists).toEqual(["list"]);
+    expect([target.problem.value, target.ends]).toEqual([null, ["outside"]]);
   },
 );

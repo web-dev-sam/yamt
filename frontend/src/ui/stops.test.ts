@@ -143,7 +143,7 @@ function stopAt(
       }
       return Promise.resolve(next.files);
     },
-    refreshFiles: notUsed,
+    nextStop: notUsed,
   };
   return stop;
 }

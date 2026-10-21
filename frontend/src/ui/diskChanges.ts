@@ -4,7 +4,7 @@ import { log, type DiskChange } from "../ipc";
 import type { CloseGuard } from "./closeGuard";
 import type { Stop } from "./currentStop";
 import type { DiskNotice, Notice } from "./noticeText";
-import type { Relist } from "./problem";
+import type { EndsStop } from "./problem";
 import type { Taken } from "./sides";
 import { isShown, reload, takesASide, type Shown } from "./views";
 
@@ -55,7 +55,7 @@ function noteDiskChanges(
 }
 
 export async function applyDiskChanges(
-  target: DiskChangeTarget & Relist,
+  target: DiskChangeTarget & EndsStop,
   changes: readonly DiskChange[],
   when: DiskNotice["when"],
   stop: Readonly<Stop>,

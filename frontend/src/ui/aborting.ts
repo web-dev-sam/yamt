@@ -4,13 +4,13 @@ import type { ChunkSource, OperationView } from "../ipc";
 import type { Asking } from "./asking";
 import type { Stop } from "./currentStop";
 import type { GitRun } from "./gitRun";
-import { reportFailure, type Problem, type Relist } from "./problem";
+import { reportFailure, type EndsStop, type Problem } from "./problem";
 
 type AbortState =
   | { readonly kind: "none" }
   | { readonly kind: "ready" | "running"; readonly operation: OperationView };
 
-type AbortTarget = Relist & {
+type AbortTarget = EndsStop & {
   readonly stop: Stop;
   readonly source: Pick<ChunkSource, "abortOperation">;
   readonly asking: Pick<Asking, "ask">;

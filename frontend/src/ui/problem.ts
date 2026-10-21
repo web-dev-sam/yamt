@@ -44,7 +44,7 @@ export type Outcome<T> =
 
 type Target = { readonly problem: ShallowRef<Problem | null> };
 
-export type Relist = { refreshFiles(): Promise<void> };
+export type EndsStop = { nextStop(end: { readonly kind: "outside" }): Promise<void> };
 
 export function unexpected(error: unknown): Unexpected {
   return { kind: "Unexpected", message: error instanceof Error ? error.message : String(error) };
@@ -104,13 +104,15 @@ export function report(target: Target, failure: Problem): void {
 }
 
 export async function reportFailure(
-  target: Target & Relist,
+  target: Target & EndsStop,
   failure: Extract<Problem, { readonly cause: ProblemCause }>,
 ): Promise<void> {
-  report(target, failure);
   if (failure.cause.kind === "StopMovedOn") {
-    await target.refreshFiles();
+    logProblem(failure);
+    await target.nextStop({ kind: "outside" });
+    return;
   }
+  report(target, failure);
 }
 
 export function clearProblemAbout(target: Target, path: string): void {
