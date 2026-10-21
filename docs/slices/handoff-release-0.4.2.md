@@ -11,8 +11,9 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
   a sed command macOS's sed reads differently. Test code only: the release builds run no tests and the apps are
   unaffected. Fixed on `main` (`90361db`, `6116026`); the full check passes here. macOS itself can only be proven by CI
   after the push.
-- **Not pushed yet:** the README rewrite and the test fix on `main`. The `v0.4.2` tag stays at `fb0d4ea`; its CI mark
-  stays red. Redoing the tag only for that would rebuild every file with identical app code; not needed.
+- **Not pushed yet:** the test fix, and your shell-function section copied into `.readmer/readme.json` (it was only
+  in the generated `README.md`, so the next regeneration would have dropped it). The `v0.4.2` tag stays at `fb0d4ea`;
+  its CI mark stays red. Redoing the tag only for that would rebuild every file with identical app code; not needed.
 
 ## Remaining steps
 
