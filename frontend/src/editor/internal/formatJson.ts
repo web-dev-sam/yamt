@@ -2,14 +2,12 @@ import { FormatFailure, type FormatResult, formatWith, type Layout, SPACE } from
 
 type Close = "}" | "]";
 
-const NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
-const ESCAPE = /\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})/y;
 const LITERALS = ["true", "false", "null"];
 const FIRST_PRINTABLE = 0x20;
 
 export function formatJson(text: string): FormatResult {
-  return formatWith(text, (layout) => {
-    new JsonScan(text, layout).run();
+  return formatWith(text, (body, layout) => {
+    new JsonScan(body, layout).run();
   });
 }
 
@@ -17,6 +15,8 @@ class JsonScan {
   readonly #text: string;
   readonly #layout: Layout;
   readonly #open: Close[] = [];
+  readonly #number = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+  readonly #escape = /\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})/y;
   #at = 0;
 
   constructor(text: string, layout: Layout) {
@@ -32,7 +32,7 @@ class JsonScan {
       if (next === ",") {
         this.#at += 1;
         this.#layout.text(",");
-        this.#layout.lineAt(this.#open.length);
+        this.#layout.lineAt(this.#open.length, this.#at);
         if (close === "}") {
           this.#key();
         }
@@ -40,7 +40,7 @@ class JsonScan {
       } else if (next === close) {
         this.#at += 1;
         this.#open.pop();
-        this.#layout.lineAt(this.#open.length);
+        this.#layout.lineAt(this.#open.length, this.#at);
         this.#layout.text(close);
       } else {
         this.#fail(`Expected ',' or '${close}'`);
@@ -70,7 +70,7 @@ class JsonScan {
       }
       this.#layout.text(opened);
       this.#open.push(close);
-      this.#layout.lineAt(this.#open.length);
+      this.#layout.lineAt(this.#open.length, this.#at);
       if (close === "}") {
         this.#key();
       }
@@ -102,8 +102,8 @@ class JsonScan {
       this.#token(literal);
       return;
     }
-    NUMBER.lastIndex = this.#at;
-    const number = NUMBER.exec(this.#text);
+    this.#number.lastIndex = this.#at;
+    const number = this.#number.exec(this.#text);
     if (number === null) {
       this.#fail("Expected a value");
     }
@@ -130,9 +130,9 @@ class JsonScan {
   }
 
   #escapeEnd(backslash: number): number {
-    ESCAPE.lastIndex = backslash;
-    if (ESCAPE.test(this.#text)) {
-      return ESCAPE.lastIndex;
+    this.#escape.lastIndex = backslash;
+    if (this.#escape.test(this.#text)) {
+      return this.#escape.lastIndex;
     }
     return this.#fail("Invalid escape in a string", backslash);
   }

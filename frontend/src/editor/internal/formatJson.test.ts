@@ -156,3 +156,35 @@ test("formatJson: 100,000 nested arrays are scanned without throwing (catches a 
 
   expect(formatJson(unclosed)).toEqual({ kind: "failed", message: "Expected ',' or ']'", line: 1 });
 });
+
+test("formatJson: valid input nested past the output cap fails instead of throwing (catches the indent not counted in the output length)", () => {
+  for (const depth of [6_000, 32_768]) {
+    const result = formatJson("[".repeat(depth) + "]".repeat(depth));
+
+    expect(result.kind === "formatted" ? result.text.length : result).toEqual({
+      kind: "failed",
+      message: "The formatted text is too long",
+      line: 1,
+    });
+  }
+});
+
+test("formatJson: no sticky regex lives at module level, so its lastIndex belongs to one scan (catches NUMBER or ESCAPE moved back to module level)", () => {
+  const sources = import.meta.glob<string>("./formatJson.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  const source = sources["./formatJson.ts"] ?? "";
+
+  expect(source).toContain("class JsonScan");
+  expect(source).not.toMatch(/^const \w+ = \/.*\/\w*y\w*;$/m);
+});
+
+test("formatJson: a leading byte order mark is kept and the scan starts after it (catches the mark handed to the scan)", () => {
+  expect(formatJson('\uFEFF {"a":[1]}\n')).toEqual({
+    kind: "formatted",
+    text: '\uFEFF{\n  "a": [\n    1\n  ]\n}\n',
+  });
+  expect(formatJson('\uFEFF{\n  "a": 1\n}')).toEqual({ kind: "unchanged" });
+});

@@ -39,7 +39,22 @@ test("formatXml: declaration, comment, CDATA, DOCTYPE with an internal subset an
 
   expect(formatXml(input)).toEqual({
     kind: "formatted",
-    text: `<?xml version="1.0" encoding="UTF-8"?>\n${doctype}\n<!-- top -->\n<note>\n  <?pi x?>\n  <!--c-->\n  <![CDATA[ <raw> ]]>\n  ${leaf}\n</note>`,
+    text: `<?xml version="1.0" encoding="UTF-8"?>\n${doctype}\n<!-- top -->\n<note><?pi x?><!--c--><![CDATA[ <raw> ]]>${leaf}</note>`,
+  });
+});
+
+test("formatXml: a CDATA section beside a child element is character data, so the element is mixed content kept verbatim (catches CDATA counted as text only outside the root)", () => {
+  expect(formatXml("<a><b/><![CDATA[x]]></a>")).toEqual({ kind: "unchanged" });
+});
+
+test("formatXml: a processing instruction inside the DOCTYPE's internal subset is skipped like a comment (catches only comments skipped there)", () => {
+  expect(formatXml("<!DOCTYPE a [<?p ]?>]><a/>")).toEqual({
+    kind: "formatted",
+    text: "<!DOCTYPE a [<?p ]?>]>\n<a/>",
+  });
+  expect(formatXml("<!DOCTYPE a [<?p it's?>]><a/>")).toEqual({
+    kind: "formatted",
+    text: "<!DOCTYPE a [<?p it's?>]>\n<a/>",
   });
 });
 
@@ -169,4 +184,24 @@ test("formatXml: 100,000 nested elements are scanned without throwing", () => {
     message: "Element <a> is not closed",
     line: 1,
   });
+});
+
+test("formatXml: no sticky regex lives at module level, so its lastIndex belongs to one scan (catches NAME moved back to module level)", () => {
+  const sources = import.meta.glob<string>("./formatXml.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  });
+  const source = sources["./formatXml.ts"] ?? "";
+
+  expect(source).toContain("class XmlScan");
+  expect(source).not.toMatch(/^const \w+ = \/.*\/\w*y\w*;$/m);
+});
+
+test("formatXml: a leading byte order mark is kept and the scan starts after it (catches the mark handed to the scan)", () => {
+  expect(formatXml("\uFEFF\n<a><b/></a>")).toEqual({
+    kind: "formatted",
+    text: "\uFEFF<a>\n  <b/>\n</a>",
+  });
+  expect(formatXml("\uFEFF<a/>\n")).toEqual({ kind: "unchanged" });
 });

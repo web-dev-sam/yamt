@@ -14,7 +14,6 @@ type XmlEvent =
   | { readonly kind: "open"; readonly from: number; readonly to: number; readonly element: Element }
   | { readonly kind: "close" | "node"; readonly from: number; readonly to: number };
 
-const NAME = /[A-Za-z_:\u0080-\uFFFF][\w.\-:\u0080-\uFFFF]*/y;
 const PRESERVE = /[ \t\r\n]xml:space[ \t\r\n]*=[ \t\r\n]*(["'])preserve\1/;
 const DOCTYPE = "<!DOCTYPE";
 const END_TAG = "</";
@@ -27,8 +26,8 @@ const DELIMITED = [
 ] as const;
 
 export function formatXml(text: string): FormatResult {
-  return formatWith(text, (layout) => {
-    layXml(text, new XmlScan(text).run(), layout);
+  return formatWith(text, (body, layout) => {
+    layXml(body, new XmlScan(body).run(), layout);
   });
 }
 
@@ -40,7 +39,7 @@ function layXml(text: string, events: readonly XmlEvent[], layout: Layout): void
       depth -= 1;
     }
     if (index > 0) {
-      layout.lineAt(depth);
+      layout.lineAt(depth, event.from);
     }
     const element = event.kind === "open" ? event.element : null;
     if (element !== null && (element.preserve || !element.children || element.text)) {
@@ -60,6 +59,7 @@ class XmlScan {
   readonly #text: string;
   readonly #events: XmlEvent[] = [];
   readonly #open: Element[] = [];
+  readonly #name = /[A-Za-z_:\u0080-\uFFFF][\w.\-:\u0080-\uFFFF]*/y;
   #rooted = false;
   #at = 0;
 
@@ -109,7 +109,7 @@ class XmlScan {
     const at = this.#at;
     const delimited = DELIMITED.find(({ opener }) => this.#text.startsWith(opener, at));
     if (delimited !== undefined) {
-      if (delimited.opener === CDATA && this.#open.length === 0) {
+      if (delimited.opener === CDATA) {
         this.#holdText(at);
       }
       const closed = this.#text.indexOf(delimited.closer, at + delimited.opener.length);
@@ -139,6 +139,8 @@ class XmlScan {
         at = this.#text.indexOf(char, at + 1);
       } else if (subset && this.#text.startsWith("<!--", at)) {
         at = this.#text.indexOf("-->", at);
+      } else if (subset && this.#text.startsWith("<?", at)) {
+        at = this.#text.indexOf("?>", at);
       } else if (char === "[" || char === "]") {
         subset = char === "[";
       } else if (char === ">" && !subset) {
@@ -233,7 +235,7 @@ class XmlScan {
   }
 
   #nameAt(at: number): string | null {
-    NAME.lastIndex = at;
-    return NAME.exec(this.#text)?.[0] ?? null;
+    this.#name.lastIndex = at;
+    return this.#name.exec(this.#text)?.[0] ?? null;
   }
 }
