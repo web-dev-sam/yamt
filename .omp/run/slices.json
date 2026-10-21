@@ -18,17 +18,9 @@
       "frontend/src/ipc/fixture.test.ts"
     ]
   },
-  "GitOpsStopsBoundary": {
-    "agent": "boundary-reviewer",
+  "GitOpsStopsCorrectness": {
+    "agent": "correctness-reviewer",
     "brief": "docs/slices/briefs/3.J-stops.md",
     "owned": []
-  },
-  "GitOpsRunCoreR2": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-run-core-rework-2.md",
-    "owned": [
-      "crates/gitio/**",
-      "crates/conflict-repo/**"
-    ]
   }
 }

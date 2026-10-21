@@ -1,0 +1,123 @@
+From 8aaf9cca2e19f7f7d7dda621293c46ebc13666bb Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 13:14:28 +0200
+Subject: [PATCH] fix(gitio): a squash chain's conflicted fixup asks before
+ Continue (#1366); test the child-run helper's failure (#1367)
+
+---
+ crates/conflict-repo/src/lib.rs | 11 +++++++++++
+ crates/gitio/AGENTS.md          |  2 +-
+ crates/gitio/src/operation.rs   | 11 ++++++++---
+ crates/gitio/tests/edit_stop.rs | 32 ++++++++++++++++++++++++++++++++
+ 4 files changed, 52 insertions(+), 4 deletions(-)
+
+diff --git a/crates/conflict-repo/src/lib.rs b/crates/conflict-repo/src/lib.rs
+index 3d5a788..df753c8 100644
+--- a/crates/conflict-repo/src/lib.rs
++++ b/crates/conflict-repo/src/lib.rs
+@@ -332,4 +332,15 @@ mod tests {
+ 
+         ran.unwrap_or_else(|error| panic!("{error}"));
+     }
++
++    // An `--exact` name that matches no test runs nothing, and the child still exits 0 with "0 passed".
++    #[test]
++    fn a_child_that_ran_no_test_is_an_error() {
++        let ran = run_ignored_in_child(&["tests::no_such_test"], |_| {});
++
++        assert!(
++            matches!(ran, Err(Error::ChildTestsFailed { .. })),
++            "{ran:?}"
++        );
++    }
+ }
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index 18ab1a0..ed3fd32 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -1,5 +1,5 @@
+ Owner skill: `skill://rust-conventions` (RS14–RS15 subprocess rules). Git subprocess layer only: explicit argv, bytes in/out, never depends on `yamt-merge-core`. Tests are integration tests against real temp repositories in `tests/`.
+ 
+-What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo).
++What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`), in `rebase-merge/current-fixups` (the squash chain this stop is in: git opens the editor at the end of a chain with a squash) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo, a conflicted `fixup` ending a chain with and without a squash).
+ 
+ Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
+diff --git a/crates/gitio/src/operation.rs b/crates/gitio/src/operation.rs
+index 2208bc9..76b5d8d 100644
+--- a/crates/gitio/src/operation.rs
++++ b/crates/gitio/src/operation.rs
+@@ -79,7 +79,8 @@ pub struct Rebase {
+     /// `MERGE_HEAD` while `rebase -r` re-does a merge commit.
+     pub redoing_merge: Option<Oid>,
+     pub progress: Option<Progress>,
+-    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) at this stop or left in the todo.
++    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) at this stop, earlier in its squash chain, or
++    /// left in the todo.
+     pub editor_steps_ahead: bool,
+ }
+ 
+@@ -198,8 +199,12 @@ impl Repo {
+             self.commit_named("REBASE_HEAD")?
+         };
+         let todo = read_if_present(&rebase_merge.join("git-rebase-todo"))?.unwrap_or_default();
+-        let editor_steps_ahead =
+-            has_editor_steps(&todo) || stopped_step.is_some_and(is_editor_step);
++        // `current-fixups` lists the chain's `squash`/`fixup` steps so far; git opens the editor at the end of a
++        // chain with a squash (observed on git 2.56, `tests/edit_stop.rs`).
++        let chain = read_if_present(&rebase_merge.join("current-fixups"))?.unwrap_or_default();
++        let editor_steps_ahead = has_editor_steps(&todo)
++            || has_editor_steps(&chain)
++            || stopped_step.is_some_and(is_editor_step);
+         let progress = progress_in(rebase_merge, "msgnum", "end")?;
+         let rebase = self.rebase(rebase_merge, replaying, progress, editor_steps_ahead)?;
+         Ok(Operation::Rebase(rebase))
+diff --git a/crates/gitio/tests/edit_stop.rs b/crates/gitio/tests/edit_stop.rs
+index 5f4a8b0..b62788d 100644
+--- a/crates/gitio/tests/edit_stop.rs
++++ b/crates/gitio/tests/edit_stop.rs
+@@ -19,6 +19,15 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+ }];
+ const REWORD_STEP_TWO_DROP_THREE: &str = "sequence.editor=sed -i -e 2s/^pick/reword/ -e 3d";
+ 
++/// Step 2 joins step 1's chain as `chain_step`, and step 3 becomes a `fixup` of `local`, which conflicts.
++fn chain_sequence_editor(chain_step: &str, root: &Path) -> String {
++    let local = oid(root, "local");
++    let local = local.as_str();
++    format!(
++        "sequence.editor=sed -i -e 2s/^pick/{chain_step}/ -e '3s/^pick [0-9a-f]*/fixup {local}/'"
++    )
++}
++
+ fn oid(root: &Path, revision: &str) -> Oid {
+     let output = git_ok(root, &["rev-parse", "--verify", revision]).unwrap();
+     Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
+@@ -158,3 +167,26 @@ fn a_conflicted_reword_stop_with_an_empty_todo_has_an_editor_step_ahead() {
+     assert_eq!(rebase.replaying, Some(oid(root, "remote~1")));
+     assert!(rebase.editor_steps_ahead);
+ }
++
++// Continuing this stop, git opens the editor (git 2.56): with the squash, on the chain's message "This is a combination of
++// 3 commits" with step 1's and step 2's messages; with fixups only, on step 1's message alone.
++#[test]
++fn a_conflicted_fixup_has_an_editor_step_ahead_only_in_a_chain_with_a_squash() {
++    for (chain_step, expected) in [("squash", true), ("fixup", false)] {
++        let dir = ready_repo(Run::Rebase, &FILES).unwrap();
++        let root = dir.path();
++        let sequence_editor = chain_sequence_editor(chain_step, root);
++        conflicted(
++            root,
++            &["-c", &sequence_editor, "rebase", "-i", "main", "remote"],
++        );
++        let done = fs::read_to_string(git_path(root, "rebase-merge/done")).unwrap();
++        assert!(done.lines().last().unwrap().starts_with("fixup "), "{done}");
++        let repo = Repo::discover(root).unwrap();
++
++        let rebase = rebase_of(&repo);
++
++        assert_eq!(rebase.replaying, Some(oid(root, "local")));
++        assert_eq!(rebase.editor_steps_ahead, expected, "{chain_step}");
++    }
++}
+-- 
+2.56.0
+

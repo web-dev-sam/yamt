@@ -95,3 +95,7 @@ Row 6 is built and every brief check passes. The one exception is the exit statu
 - Abort and Continue on a stop with no editable file (choice, deleted-side and empty headers) are row 8. In the app, the first file shown at a rebase stop was the deleted-side `docs/notes.md`, which has no toolbar, so Abort needed another file opened first.
 
 Main should run `just check`, `just map-check` (after the doc lines above), and `just mutants` on `ui/{stops,operationText,listing,aborting,saving,toolbarButtons,noticeText,problemText,question,problem}.ts` and `ipc/fixture.ts`.
+
+## Boundary review (GitOpsStopsBoundary): fail
+
+Blocks #1369/#1370; shoulds #1371–#1373, nits #1374/#1375. Mutants on changed lines: `.omp/run/notes/GitOpsStops-mutants.md`.
