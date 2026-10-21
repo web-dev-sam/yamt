@@ -97,12 +97,11 @@ fn interactive(run: Run, root: &Path, sequence_editor: &str) -> Result<()> {
 
 /// The `git -c` value that edits the todo in place with `scripts`, each in single quotes. BSD sed (macOS) reads the
 /// argument after a bare `-i` as the backup suffix, so the suffix is attached: `-i.orig` works with GNU sed too.
+#[must_use]
 pub fn sed_sequence_editor(scripts: &[&str]) -> String {
-    let mut value = String::from("sequence.editor=sed -i.orig");
-    for script in scripts {
-        value.push_str(&format!(" -e '{script}'"));
-    }
-    value
+    let mut command = vec![String::from("sed -i.orig")];
+    command.extend(scripts.iter().map(|script| format!("-e '{script}'")));
+    format!("sequence.editor={}", command.join(" "))
 }
 
 /// A rebase of branch `remote` onto `main` stopped, without a conflict, at an `edit` of step 1: HEAD is step 1.
