@@ -1,0 +1,610 @@
+diff --git a/crates/cli/tests/commands.rs b/crates/cli/tests/commands.rs
+index ff026dd..b67dd48 100644
+--- a/crates/cli/tests/commands.rs
++++ b/crates/cli/tests/commands.rs
+@@ -3,38 +3,19 @@
+ use std::ffi::OsStr;
+ use std::fs;
+ use std::path::Path;
+-use std::process::Command;
+ 
+ use serde_json::{Value, json};
+ use tempfile::TempDir;
+ use yamt_conflict_repo::{ConflictFile, FileKind, conflict_repo};
+ 
++mod yamt_cli;
++
++use yamt_cli::{Output, path, yamt_cli};
++
+ const BASE: &str = "a\nb\nc\nd\ne\nf\ng\nh\ni\n";
+ const LOCAL: &str = "a\nB\nc\nd\ne\nf\ng\nL\ni\n";
+ const REMOTE: &str = "a\nb\nc\nd\nE\nf\ng\nR\ni\n";
+ 
+-struct Output {
+-    code: i32,
+-    stdout: String,
+-    stderr: String,
+-}
+-
+-fn yamt_cli<S: AsRef<OsStr>>(args: &[S]) -> Output {
+-    let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
+-        .args(args)
+-        .output()
+-        .unwrap();
+-    Output {
+-        code: output.status.code().unwrap(),
+-        stdout: String::from_utf8(output.stdout).unwrap(),
+-        stderr: String::from_utf8(output.stderr).unwrap(),
+-    }
+-}
+-
+-fn path(path: &Path) -> &str {
+-    path.to_str().unwrap()
+-}
+-
+ fn write_case(root: &Path, name: &str, extension: &str) -> std::path::PathBuf {
+     let dir = root.join(name);
+     fs::create_dir(&dir).unwrap();
+@@ -324,65 +305,6 @@ fn fixture_refuses_a_git_output_not_made_from_the_case_s_sides() {
+     );
+ }
+ 
+-fn write_compare_case(root: &Path) -> std::path::PathBuf {
+-    let dir = root.join("pair");
+-    fs::create_dir(&dir).unwrap();
+-    fs::write(dir.join("left.txt"), LOCAL).unwrap();
+-    fs::write(dir.join("right.txt"), REMOTE).unwrap();
+-    dir
+-}
+-
+-// Catches the compare fixtures losing a text or the differences, or changing between two runs of
+-// `just fixtures` (which `just fixtures-check` would report as a stale file).
+-#[test]
+-fn compare_prints_both_texts_and_their_differences_the_same_way_twice() {
+-    let root = TempDir::new().unwrap();
+-    let case = write_compare_case(root.path());
+-
+-    let output = yamt_cli(&["compare", path(&case)]);
+-
+-    assert_eq!(output.code, 0, "{}", output.stderr);
+-    assert!(output.stdout.ends_with("}\n"));
+-    let data: Value = serde_json::from_str(&output.stdout).unwrap();
+-    assert_eq!(data["left"], LOCAL);
+-    assert_eq!(data["right"], REMOTE);
+-    let ranges: Vec<(&Value, &Value)> = data["differences"]
+-        .as_array()
+-        .unwrap()
+-        .iter()
+-        .map(|difference| (&difference["left"], &difference["right"]))
+-        .collect();
+-    let line = |start: u32| json!({ "start": start, "len": 1 });
+-    assert_eq!(
+-        ranges,
+-        [
+-            (&line(1), &line(1)),
+-            (&line(4), &line(4)),
+-            (&line(7), &line(7))
+-        ]
+-    );
+-    assert_eq!(yamt_cli(&["compare", path(&case)]).stdout, output.stdout);
+-}
+-
+-// Catches a missing column read as empty text, which would show every line as inserted.
+-#[test]
+-fn compare_fails_with_a_read_error_without_right_txt() {
+-    let root = TempDir::new().unwrap();
+-    let case = write_compare_case(root.path());
+-    let right = case.join("right.txt");
+-    fs::remove_file(&right).unwrap();
+-
+-    let output = yamt_cli(&["compare", path(&case)]);
+-
+-    assert_eq!(output.code, 1);
+-    assert_eq!(output.stdout, "");
+-    let os_error = fs::read(&right).unwrap_err();
+-    assert_eq!(
+-        output.stderr,
+-        format!("yamt-cli: cannot read {}: {os_error}\n", path(&right))
+-    );
+-}
+-
+ #[test]
+ fn scan_lists_each_conflicted_file_with_chunk_counts_or_reason_and_remaining() {
+     let repo = conflict_repo(&[
+diff --git a/crates/cli/tests/compare.rs b/crates/cli/tests/compare.rs
+new file mode 100644
+index 0000000..e78f151
+--- /dev/null
++++ b/crates/cli/tests/compare.rs
+@@ -0,0 +1,74 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use serde_json::{Value, json};
++use tempfile::TempDir;
++
++mod yamt_cli;
++
++use yamt_cli::{path, yamt_cli};
++
++const LEFT: &str = "a\nb\nc\nd\ne\nf\ng\nh\ni\n";
++const RIGHT: &str = "a\nB\nc\nX\nd\ne\ng\nH\ni\n";
++
++fn write_compare_case(root: &Path) -> PathBuf {
++    let dir = root.join("pair");
++    fs::create_dir(&dir).unwrap();
++    fs::write(dir.join("left.txt"), LEFT).unwrap();
++    fs::write(dir.join("right.txt"), RIGHT).unwrap();
++    dir
++}
++
++// Catches the compare fixtures losing a text or the differences, swapping the columns, or changing
++// between two runs of `just fixtures` (which `just fixtures-check` would report as a stale file).
++#[test]
++fn compare_prints_both_texts_and_their_differences_the_same_way_twice() {
++    let root = TempDir::new().unwrap();
++    let case = write_compare_case(root.path());
++
++    let output = yamt_cli(&["compare", path(&case)]);
++
++    assert_eq!(output.code, 0, "{}", output.stderr);
++    assert!(output.stdout.ends_with("}\n"));
++    let data: Value = serde_json::from_str(&output.stdout).unwrap();
++    assert_eq!(data["left"], LEFT);
++    assert_eq!(data["right"], RIGHT);
++    let ranges: Vec<(&Value, &Value)> = data["differences"]
++        .as_array()
++        .unwrap()
++        .iter()
++        .map(|difference| (&difference["left"], &difference["right"]))
++        .collect();
++    let lines = |start: u32, len: u32| json!({ "start": start, "len": len });
++    assert_eq!(
++        ranges,
++        [
++            (&lines(1, 1), &lines(1, 1)),
++            (&lines(3, 0), &lines(3, 1)),
++            (&lines(5, 1), &lines(6, 0)),
++            (&lines(7, 1), &lines(7, 1))
++        ]
++    );
++    assert_eq!(yamt_cli(&["compare", path(&case)]).stdout, output.stdout);
++}
++
++// Catches a missing column read as empty text, which would show every line as inserted.
++#[test]
++fn compare_fails_with_a_read_error_without_right_txt() {
++    let root = TempDir::new().unwrap();
++    let case = write_compare_case(root.path());
++    let right = case.join("right.txt");
++    fs::remove_file(&right).unwrap();
++
++    let output = yamt_cli(&["compare", path(&case)]);
++
++    assert_eq!(output.code, 1);
++    assert_eq!(output.stdout, "");
++    let os_error = fs::read(&right).unwrap_err();
++    assert_eq!(
++        output.stderr,
++        format!("yamt-cli: cannot read {}: {os_error}\n", path(&right))
++    );
++}
+diff --git a/crates/cli/tests/yamt_cli/mod.rs b/crates/cli/tests/yamt_cli/mod.rs
+new file mode 100644
+index 0000000..7823e3b
+--- /dev/null
++++ b/crates/cli/tests/yamt_cli/mod.rs
+@@ -0,0 +1,25 @@
++use std::ffi::OsStr;
++use std::path::Path;
++use std::process::Command;
++
++pub struct Output {
++    pub code: i32,
++    pub stdout: String,
++    pub stderr: String,
++}
++
++pub fn yamt_cli<S: AsRef<OsStr>>(args: &[S]) -> Output {
++    let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
++        .args(args)
++        .output()
++        .unwrap();
++    Output {
++        code: output.status.code().unwrap(),
++        stdout: String::from_utf8(output.stdout).unwrap(),
++        stderr: String::from_utf8(output.stderr).unwrap(),
++    }
++}
++
++pub fn path(path: &Path) -> &str {
++    path.to_str().unwrap()
++}
+diff --git a/crates/merge-core/src/word.rs b/crates/merge-core/src/word.rs
+index dbe414d..e240efa 100644
+--- a/crates/merge-core/src/word.rs
++++ b/crates/merge-core/src/word.rs
+@@ -12,22 +12,24 @@ use crate::line::{
+ use crate::line_pairs::{LinePosition, line_pairs};
+ use crate::token::{Token, TokenKind, line_tokens};
+ 
+-/// Base text one side removed, and the place in that side where it would sit.
++/// Text the compared-with text has that this side lacks, and the place in this side where it
++/// would sit.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct Removal<L> {
+-    /// The zero-width place in the side where the removed text would sit.
++    /// The zero-width place in this side where the missing text would sit.
+     pub at: InlinePoint<L>,
+-    /// The removed base text, every line break written `\n`; never empty.
++    /// The missing text, every line break written `\n`; never empty.
+     pub text: String,
+ }
+ 
+-/// One side of a chunk compared with base, line by line.
++/// One side compared with another text, line by line.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct SideWordChanges<L> {
+-    /// Side text that is not in base: sorted by line then start, disjoint, never empty,
+-    /// never across a line break.
++    /// Side text that is not in the compared-with text: sorted by line then start, disjoint,
++    /// never empty, never across a line break.
+     pub changed: Vec<InlineRange<L>>,
+-    /// Base text this side removed with nothing new in its place: sorted by place, at most one per place.
++    /// Compared-with text this side lacks with nothing new in its place: sorted by place, at
++    /// most one per place.
+     pub removals: Vec<Removal<L>>,
+ }
+ 
+diff --git a/crates/merge-core/tests/compare.rs b/crates/merge-core/tests/compare.rs
+index b94e004..88c946d 100644
+--- a/crates/merge-core/tests/compare.rs
++++ b/crates/merge-core/tests/compare.rs
+@@ -9,79 +9,30 @@ use yamt_merge_core::{
+     compute_chunks,
+ };
+ 
+-const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
+-const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
++mod texts;
++
++use texts::{LAST_LINE, content, doc, edits};
++
+ const MAX_LINES: usize = 10;
+ const MAX_EDITS: usize = 5;
+ const CASES: u32 = 512;
+ const WORDS: [&str; 5] = ["alpha", "beta", "gamma", "delta", "omega"];
+ const NEW_WORD: &str = "CHANGED";
+ 
+-#[derive(Clone, Debug)]
+-enum Edit {
+-    Insert(String),
+-    Delete,
+-    Replace(String),
+-}
+-
+-#[derive(Clone, Debug)]
+-struct Doc {
+-    lines: Vec<String>,
+-    last: String,
+-}
+-
+-impl Doc {
+-    fn text(&self) -> String {
+-        self.lines.concat() + &self.last
+-    }
+-
+-    fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
+-        let mut lines = self.lines.clone();
+-        for (at, edit) in edits {
+-            match edit {
+-                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
+-                Edit::Delete if !lines.is_empty() => {
+-                    lines.remove(at.index(lines.len()));
+-                }
+-                Edit::Replace(line) if !lines.is_empty() => {
+-                    let replaced = at.index(lines.len());
+-                    lines[replaced].clone_from(line);
+-                }
+-                Edit::Delete | Edit::Replace(_) => {}
+-            }
+-        }
+-        Doc {
+-            lines,
+-            last: last.unwrap_or_else(|| self.last.clone()),
+-        }
+-    }
+-}
+-
+ #[derive(Clone, Debug)]
+ struct Pair {
+     left: String,
+     right: String,
+ }
+ 
+-fn doc() -> impl Strategy<Value = Doc> {
+-    (vec(LINE, 0..MAX_LINES), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
+-}
+-
+-fn edits() -> impl Strategy<Value = Vec<(Index, Edit)>> {
+-    let edit = prop_oneof![
+-        LINE.prop_map(Edit::Insert),
+-        Just(Edit::Delete),
+-        LINE.prop_map(Edit::Replace),
+-    ];
+-    vec((any::<Index>(), edit), 0..MAX_EDITS)
+-}
+-
+ fn pair() -> impl Strategy<Value = Pair> {
+-    let edited = (doc(), edits(), option::of(LAST_LINE)).prop_map(|(left, edits, last)| Pair {
+-        right: left.edited(&edits, last).text(),
+-        left: left.text(),
+-    });
+-    let independent = (doc(), doc()).prop_map(|(left, right)| Pair {
++    let edited = (doc(MAX_LINES), edits(MAX_EDITS), option::of(LAST_LINE)).prop_map(
++        |(left, edits, last)| Pair {
++            right: left.edited(&edits, last).text(),
++            left: left.text(),
++        },
++    );
++    let independent = (doc(MAX_LINES), doc(MAX_LINES)).prop_map(|(left, right)| Pair {
+         left: left.text(),
+         right: right.text(),
+     });
+@@ -92,12 +43,6 @@ fn lines(text: &str) -> Vec<&str> {
+     text.split_inclusive('\n').collect()
+ }
+ 
+-fn content(line: &str) -> &str {
+-    line.strip_suffix("\r\n")
+-        .or_else(|| line.strip_suffix('\n'))
+-        .unwrap_or(line)
+-}
+-
+ fn width(line: &str) -> u32 {
+     u32::try_from(content(line).encode_utf16().count()).unwrap()
+ }
+@@ -208,7 +153,7 @@ proptest! {
+ 
+     // Catches a difference reported for equal texts (e.g. a line break counted as a change).
+     #[test]
+-    fn comparing_a_text_with_itself_finds_nothing(text in doc()) {
++    fn comparing_a_text_with_itself_finds_nothing(text in doc(MAX_LINES)) {
+         let text = text.text();
+         prop_assert!(compare(&text, &text).is_empty());
+     }
+diff --git a/crates/merge-core/tests/texts/mod.rs b/crates/merge-core/tests/texts/mod.rs
+new file mode 100644
+index 0000000..dda18ad
+--- /dev/null
++++ b/crates/merge-core/tests/texts/mod.rs
+@@ -0,0 +1,65 @@
++use proptest::collection::vec;
++use proptest::prelude::*;
++use proptest::sample::Index;
++
++const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
++pub const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
++
++#[derive(Clone, Debug)]
++pub enum Edit {
++    Insert(String),
++    Delete,
++    Replace(String),
++}
++
++#[derive(Clone, Debug)]
++pub struct Doc {
++    lines: Vec<String>,
++    last: String,
++}
++
++impl Doc {
++    pub fn text(&self) -> String {
++        self.lines.concat() + &self.last
++    }
++
++    pub fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
++        let mut lines = self.lines.clone();
++        for (at, edit) in edits {
++            match edit {
++                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
++                Edit::Delete if !lines.is_empty() => {
++                    lines.remove(at.index(lines.len()));
++                }
++                Edit::Replace(line) if !lines.is_empty() => {
++                    let replaced = at.index(lines.len());
++                    lines[replaced].clone_from(line);
++                }
++                Edit::Delete | Edit::Replace(_) => {}
++            }
++        }
++        Doc {
++            lines,
++            last: last.unwrap_or_else(|| self.last.clone()),
++        }
++    }
++}
++
++pub fn doc(max_lines: usize) -> impl Strategy<Value = Doc> {
++    (vec(LINE, 0..max_lines), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
++}
++
++pub fn edits(max_edits: usize) -> impl Strategy<Value = Vec<(Index, Edit)>> {
++    let edit = prop_oneof![
++        LINE.prop_map(Edit::Insert),
++        Just(Edit::Delete),
++        LINE.prop_map(Edit::Replace),
++    ];
++    vec((any::<Index>(), edit), 0..max_edits)
++}
++
++pub fn content(line: &str) -> &str {
++    line.strip_suffix("\r\n")
++        .or_else(|| line.strip_suffix('\n'))
++        .unwrap_or(line)
++}
+diff --git a/crates/merge-core/tests/word_invariants.rs b/crates/merge-core/tests/word_invariants.rs
+index 8f99138..63324fd 100644
+--- a/crates/merge-core/tests/word_invariants.rs
++++ b/crates/merge-core/tests/word_invariants.rs
+@@ -1,58 +1,18 @@
+-use proptest::collection::vec;
+ use proptest::option;
+ use proptest::prelude::*;
+-use proptest::sample::Index;
+ use yamt_merge_core::{
+     BaseLine, Chunk, ChunkId, ChunkKind, LineRange, LocalLine, Options, RemoteLine,
+     SideWordChanges, compute_chunks, word_changes,
+ };
+ 
+-const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
+-const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
++mod texts;
++
++use texts::{LAST_LINE, content, doc, edits};
++
+ const MAX_LINES: usize = 8;
+ const MAX_EDITS: usize = 4;
+ const CASES: u32 = 512;
+ 
+-#[derive(Clone, Debug)]
+-enum Edit {
+-    Insert(String),
+-    Delete,
+-    Replace(String),
+-}
+-
+-#[derive(Clone, Debug)]
+-struct Doc {
+-    lines: Vec<String>,
+-    last: String,
+-}
+-
+-impl Doc {
+-    fn text(&self) -> String {
+-        self.lines.concat() + &self.last
+-    }
+-
+-    fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
+-        let mut lines = self.lines.clone();
+-        for (at, edit) in edits {
+-            match edit {
+-                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
+-                Edit::Delete if !lines.is_empty() => {
+-                    lines.remove(at.index(lines.len()));
+-                }
+-                Edit::Replace(line) if !lines.is_empty() => {
+-                    let replaced = at.index(lines.len());
+-                    lines[replaced].clone_from(line);
+-                }
+-                Edit::Delete | Edit::Replace(_) => {}
+-            }
+-        }
+-        Doc {
+-            lines,
+-            last: last.unwrap_or_else(|| self.last.clone()),
+-        }
+-    }
+-}
+-
+ #[derive(Clone, Debug)]
+ struct Triple {
+     base: String,
+@@ -60,25 +20,12 @@ struct Triple {
+     remote: String,
+ }
+ 
+-fn doc() -> impl Strategy<Value = Doc> {
+-    (vec(LINE, 0..MAX_LINES), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
+-}
+-
+-fn edits() -> impl Strategy<Value = Vec<(Index, Edit)>> {
+-    let edit = prop_oneof![
+-        LINE.prop_map(Edit::Insert),
+-        Just(Edit::Delete),
+-        LINE.prop_map(Edit::Replace),
+-    ];
+-    vec((any::<Index>(), edit), 0..MAX_EDITS)
+-}
+-
+ fn triple() -> impl Strategy<Value = Triple> {
+     (
+-        doc(),
+-        edits(),
++        doc(MAX_LINES),
++        edits(MAX_EDITS),
+         option::of(LAST_LINE),
+-        edits(),
++        edits(MAX_EDITS),
+         option::of(LAST_LINE),
+     )
+         .prop_map(
+@@ -90,12 +37,6 @@ fn triple() -> impl Strategy<Value = Triple> {
+         )
+ }
+ 
+-fn content(line: &str) -> &str {
+-    line.strip_suffix("\r\n")
+-        .or_else(|| line.strip_suffix('\n'))
+-        .unwrap_or(line)
+-}
+-
+ #[derive(Debug, PartialEq)]
+ struct PlainSide {
+     ranges: Vec<(u32, u32, u32)>,
+@@ -306,7 +247,7 @@ proptest! {
+     }
+ 
+     #[test]
+-    fn identical_texts_give_no_marks(text in doc()) {
++    fn identical_texts_give_no_marks(text in doc(MAX_LINES)) {
+         let text = text.text();
+         prop_assert!(word_changes(&text, &text, &text, &compute_chunks(&text, &text, &text, &Options::default())).is_empty());
+         let whole = whole_text_chunk(&text);
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index 912428a..f473d7a 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -245,11 +245,14 @@ export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Te
+ /**  0-based line index in the remote text. */
+ export type RemoteLine = number;
+ 
+-/**  Base text one side removed, and the place in that side where it would sit. */
++/**
++ *  Text the compared-with text has that this side lacks, and the place in this side where it
++ *  would sit.
++ */
+ export type Removal<L> = {
+-	/**  The zero-width place in the side where the removed text would sit. */
++	/**  The zero-width place in this side where the missing text would sit. */
+ 	at: InlinePoint<L>,
+-	/**  The removed base text, every line break written `\n`; never empty. */
++	/**  The missing text, every line break written `\n`; never empty. */
+ 	text: string,
+ };
+ 
+@@ -293,14 +296,17 @@ export type SideNames = {
+ 	remote: SideName | null,
+ };
+ 
+-/**  One side of a chunk compared with base, line by line. */
++/**  One side compared with another text, line by line. */
+ export type SideWordChanges<L> = {
+ 	/**
+-	 *  Side text that is not in base: sorted by line then start, disjoint, never empty,
+-	 *  never across a line break.
++	 *  Side text that is not in the compared-with text: sorted by line then start, disjoint,
++	 *  never empty, never across a line break.
+ 	 */
+ 	changed: InlineRange<L>[],
+-	/**  Base text this side removed with nothing new in its place: sorted by place, at most one per place. */
++	/**
++	 *  Compared-with text this side lacks with nothing new in its place: sorted by place, at
++	 *  most one per place.
++	 */
+ 	removals: Removal<L>[],
+ };
+ 

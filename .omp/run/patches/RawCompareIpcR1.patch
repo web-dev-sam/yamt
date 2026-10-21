@@ -1,0 +1,310 @@
+diff --git a/frontend/src/ipc/CompareSource.ts b/frontend/src/ipc/CompareSource.ts
+index 0112d53..faa9f4b 100644
+--- a/frontend/src/ipc/CompareSource.ts
++++ b/frontend/src/ipc/CompareSource.ts
+@@ -3,12 +3,11 @@ import type {
+   ColumnWrite,
+   CompareStart,
+   Comparison,
+-  TabId,
+   TabLanguage,
+   TabList,
+   TabTexts,
+ } from "./compareDomain";
+-import type { SourceResult } from "./domain";
++import type { SourceResult, TabId } from "./domain";
+ 
+ export interface CompareSource extends SettingsSource {
+   openCompare(): Promise<SourceResult<CompareStart>>;
+diff --git a/frontend/src/ipc/compareDomain.ts b/frontend/src/ipc/compareDomain.ts
+index 2716fa4..211f13b 100644
+--- a/frontend/src/ipc/compareDomain.ts
++++ b/frontend/src/ipc/compareDomain.ts
+@@ -14,11 +14,8 @@ import {
+ import { invalid, isNonNegativeInteger } from "./validate";
+ import { toSideWords, type SideWords } from "./words";
+ 
+-export type { ColumnVersion, LeftLine, RightLine, TabId } from "./domain";
+-export type Column = "left" | "right";
+-export type TabLanguage =
+-  | { readonly kind: "auto" }
+-  | { readonly kind: "picked"; readonly name: string };
++export type Column = Generated.Column;
++export type TabLanguage = Readonly<Generated.TabLanguage>;
+ export type TabEntry = {
+   readonly id: TabId;
+   readonly name: string;
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 1a7f501..9a5990f 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -132,22 +132,29 @@ const FILE_MERGE_DATA = v.object({
+   disk_version: v.number(),
+ } satisfies SchemaOf<Generated.FileMergeData>);
+ 
+-function parseFixture(file: string, json: unknown): FileMergeData {
+-  const parsed = v.safeParse(FILE_MERGE_DATA, json);
++export function parsedFixture<O, T>(
++  schema: v.GenericSchema<unknown, O>,
++  name: string,
++  json: unknown,
++  convert: (parsed: O) => T,
++): T {
++  const parsed = v.safeParse(schema, json);
+   if (!parsed.success) {
+-    throw new Error(`fixture ${file}: ${v.summarize(parsed.issues)}`);
++    throw new Error(`${name}: ${v.summarize(parsed.issues)}`);
+   }
+   try {
+-    return toDomain(parsed.output);
++    return convert(parsed.output);
+   } catch (error) {
+-    throw new Error(`fixture ${file}: ${error instanceof Error ? error.message : String(error)}`, {
++    throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`, {
+       cause: error,
+     });
+   }
+ }
+ 
+ function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, FileMergeData> {
+-  const parsed = Object.entries(files).map(([file, json]) => parseFixture(file, json));
++  const parsed = Object.entries(files).map(([file, json]) =>
++    parsedFixture(FILE_MERGE_DATA, `fixture ${file}`, json, toDomain),
++  );
+   parsed.sort((a, b) => a.path.localeCompare(b.path));
+   return new Map(parsed.map((data) => [data.path, data]));
+ }
+diff --git a/frontend/src/ipc/fixtureCompare.test.ts b/frontend/src/ipc/fixtureCompare.test.ts
+index 0cfe4a5..ca4f38d 100644
+--- a/frontend/src/ipc/fixtureCompare.test.ts
++++ b/frontend/src/ipc/fixtureCompare.test.ts
+@@ -1,9 +1,9 @@
+ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { TabId, TabList } from "./compareDomain";
++import type { TabList } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+-import { nextColumnVersion, type SourceResult } from "./domain";
++import { nextColumnVersion, type SourceResult, type TabId } from "./domain";
+ import { createFixtureCompareSource } from "./fixtureCompare";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+@@ -100,6 +100,24 @@ test("?raw=json-payload puts the case into tab 1 and loadTab returns its differe
+   expect(texts.comparison.differences).toHaveLength(4);
+ });
+ 
++test.each(["?raw", "?raw="])(
++  "%s without a case starts one empty Compare 1 (catches a bare ?raw read as a case name)",
++  async (search) => {
++    const source = createFixtureCompareSource(quietLog().log, search);
++
++    const start = valueOf(await source.openCompare());
++
++    expect(start.list.tabs).toEqual([
++      { id: 1, name: "Compare 1", language: { kind: "auto" }, holdsText: false },
++    ]);
++    expect(valueOf(await source.loadTab(start.list.shown))).toEqual({
++      left: "",
++      right: "",
++      comparison: { versions: { left: 0, right: 0 }, differences: [] },
++    });
++  },
++);
++
+ test("an unknown ?raw case fails the start naming it and the known ones", () => {
+   expect(() => createFixtureCompareSource(quietLog().log, "?raw=nope")).toThrow(
+     "no compare fixture nope; known: json-payload, typescript, words",
+@@ -265,6 +283,33 @@ test("texts matching no case log compare.fixture_miss once and answer no differe
+   expect(entries).toHaveLength(1);
+ });
+ 
++test("an edited left column after ?raw=words answers no differences (catches matching the right column only)", async () => {
++  const { log, entries } = quietLog();
++  const words = committedCase("words");
++  const source = createFixtureCompareSource(log, "?raw=words");
++  const tab = await firstTab(source);
++  const { versions } = valueOf(await source.loadTab(tab)).comparison;
++  const edited = `${words.left}edited\n`;
++
++  const miss = valueOf(
++    await source.setColumn({
++      tab,
++      column: "left",
++      text: edited,
++      version: nextColumnVersion(versions.left),
++    }),
++  );
++
++  expect(miss.differences).toEqual([]);
++  expect(entries).toEqual([
++    {
++      level: "info",
++      event: "compare.fixture_miss",
++      fields: { tab, left: edited.length, right: words.right.length },
++    },
++  ]);
++});
++
+ test("every tab command answers UnknownTab for an id that is not listed", async () => {
+   const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
+   const tab = await firstTab(source);
+diff --git a/frontend/src/ipc/fixtureCompare.ts b/frontend/src/ipc/fixtureCompare.ts
+index 3f0c74c..3453945 100644
+--- a/frontend/src/ipc/fixtureCompare.ts
++++ b/frontend/src/ipc/fixtureCompare.ts
+@@ -15,7 +15,7 @@ import {
+ } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+ import type { SourceResult } from "./domain";
+-import { LINE_RANGE, SIDE_WORD_CHANGES } from "./fixture";
++import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ 
+@@ -65,25 +65,15 @@ const CASE = v.object({
+   right: v.string(),
+ });
+ 
+-function parseCase(file: string, json: unknown): Case {
+-  const parsed = v.safeParse(CASE, json);
+-  if (!parsed.success) {
+-    throw new Error(`compare fixture ${file}: ${v.summarize(parsed.issues)}`);
+-  }
+-  const { left, right, differences } = parsed.output;
+-  try {
+-    return { left, right, differences: toDifferences(differences) };
+-  } catch (error) {
+-    const message = error instanceof Error ? error.message : String(error);
+-    throw new Error(`compare fixture ${file}: ${message}`, { cause: error });
+-  }
+-}
+-
+ function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
+   return new Map(
+     Object.entries(files).map(([file, json]) => [
+       file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
+-      parseCase(file, json),
++      parsedFixture(CASE, `compare fixture ${file}`, json, ({ left, right, differences }) => ({
++        left,
++        right,
++        differences: toDifferences(differences),
++      })),
+     ]),
+   );
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index c3f7442..14e3031 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -6,16 +6,12 @@ export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
+ export type { CompareSource } from "./CompareSource";
+ export type {
+   Column,
+-  ColumnVersion,
+   ColumnVersions,
+   ColumnWrite,
+   CompareStart,
+   Comparison,
+   Difference,
+-  LeftLine,
+-  RightLine,
+   TabEntry,
+-  TabId,
+   TabLanguage,
+   TabList,
+   TabTexts,
+@@ -24,6 +20,7 @@ export type {
+   AddedServer,
+   Antialiasing,
+   Chunk,
++  ColumnVersion,
+   ContinueReply,
+   DiskChange,
+   DiskResult,
+@@ -34,6 +31,7 @@ export type {
+   HostEvent,
+   KeysChange,
+   LanguageServerSettings,
++  LeftLine,
+   Listing,
+   NotText,
+   OperationKind,
+@@ -43,6 +41,7 @@ export type {
+   ProgressView,
+   ProjectFile,
+   RepositoryAnswer,
++  RightLine,
+   RunId,
+   ServerCommand,
+   ServerContext,
+@@ -55,6 +54,7 @@ export type {
+   SourceResult,
+   StartReply,
+   StoredSettings,
++  TabId,
+   Theme,
+   WriteReply,
+ } from "./domain";
+diff --git a/frontend/src/ipc/tauriCompare.ts b/frontend/src/ipc/tauriCompare.ts
+index 63260bf..34b7a82 100644
+--- a/frontend/src/ipc/tauriCompare.ts
++++ b/frontend/src/ipc/tauriCompare.ts
+@@ -1,41 +1,41 @@
+ import { commands } from "./bindings";
+ import { toComparison, toCompareStart, toTabList, toTabTexts } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+-import type { SourceResult } from "./domain";
+ import { createTauriSettings, toResult } from "./tauri";
+ 
+-function converted<D, T>(result: SourceResult<D>, convert: (dto: D) => T): SourceResult<T> {
+-  return result.ok ? { ok: true, value: convert(result.value) } : result;
+-}
+-
+ export function createTauriCompareSource(): CompareSource {
+   return {
+     async openCompare() {
+-      return converted(toResult(await commands.openCompare()), toCompareStart);
++      const result = toResult(await commands.openCompare());
++      return result.ok ? { ok: true, value: toCompareStart(result.value) } : result;
+     },
+     async loadTab(tab) {
+-      return converted(toResult(await commands.loadTab(tab)), toTabTexts);
++      const result = toResult(await commands.loadTab(tab));
++      return result.ok ? { ok: true, value: toTabTexts(result.value) } : result;
+     },
+     async setColumn({ tab, column, text, version }) {
+-      return converted(
+-        toResult(await commands.setColumn(tab, column, text, version)),
+-        toComparison,
+-      );
++      const result = toResult(await commands.setColumn(tab, column, text, version));
++      return result.ok ? { ok: true, value: toComparison(result.value) } : result;
+     },
+     async addTab() {
+-      return converted(toResult(await commands.addTab()), toTabList);
++      const result = toResult(await commands.addTab());
++      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
+     },
+     async closeTab(tab) {
+-      return converted(toResult(await commands.closeTab(tab)), toTabList);
++      const result = toResult(await commands.closeTab(tab));
++      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
+     },
+     async renameTab(tab, name) {
+-      return converted(toResult(await commands.renameTab(tab, name)), toTabList);
++      const result = toResult(await commands.renameTab(tab, name));
++      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
+     },
+     async setTabLanguage(tab, language) {
+-      return converted(toResult(await commands.setTabLanguage(tab, language)), toTabList);
++      const result = toResult(await commands.setTabLanguage(tab, language));
++      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
+     },
+     async showTab(tab) {
+-      return converted(toResult(await commands.showTab(tab)), toTabList);
++      const result = toResult(await commands.showTab(tab));
++      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
+     },
+     ...createTauriSettings(),
+   };

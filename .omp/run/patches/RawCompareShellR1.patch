@@ -1,0 +1,193 @@
+diff --git a/src-tauri/src/compare.rs b/src-tauri/src/compare.rs
+index 162cd62..8cb3f0f 100644
+--- a/src-tauri/src/compare.rs
++++ b/src-tauri/src/compare.rs
+@@ -1,8 +1,7 @@
+ use std::path::{Path, PathBuf};
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+-use tauri::path::PathResolver;
+-use tauri::{Manager, Runtime, State, WebviewWindow};
++use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_compare::{
+     Column, ColumnVersion, CompareStart, Comparison, LoadedTab, TabId, TabLanguage, TabList,
+     TabStore, TabTexts, comparison, tab_texts,
+@@ -20,16 +19,12 @@ fn lock(state: &CompareState) -> MutexGuard<'_, TabStore> {
+     state.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
+-/// The store in `<data_dir>/yamt/compare/`, or the line `yamt --raw` ends with.
+-pub(crate) fn open_store<R: Runtime>(paths: &PathResolver<R>) -> Result<TabStore, String> {
+-    let data_dir = paths
+-        .data_dir()
+-        .map_err(|error| format!("no data folder: {error}"))?;
+-    open_store_in(&data_dir)
+-}
+-
+-pub(crate) fn open_store_in(data_dir: &Path) -> Result<TabStore, String> {
+-    TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))
++/// Opens the store in `<data_dir>/yamt/compare/` and hands it to the app as its `CompareState`,
++/// or answers the line `yamt --raw` ends with.
++pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, data_dir: &Path) -> Result<(), String> {
++    let store = TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))?;
++    app.manage(Mutex::new(store));
++    Ok(())
+ }
+ 
+ fn compare_folder(data_dir: &Path) -> PathBuf {
+@@ -38,12 +33,12 @@ fn compare_folder(data_dir: &Path) -> PathBuf {
+ 
+ fn start_failure(error: &yamt_compare::Error) -> String {
+     match error {
+-        yamt_compare::Error::Broken { path, message }
+-        | yamt_compare::Error::ReadFailed { path, message } => format!(
++        yamt_compare::Error::ReadFailed { path, message } => format!(
+             "the stored compare tabs {} cannot be read: {message}; nothing was changed",
+             path.display()
+         ),
+         yamt_compare::Error::Locked { .. }
++        | yamt_compare::Error::Broken { .. }
+         | yamt_compare::Error::NewerFormat { .. }
+         | yamt_compare::Error::WriteFailed { .. }
+         | yamt_compare::Error::UnknownTab { .. }
+@@ -169,7 +164,7 @@ mod tests {
+     use yamt_conflict_repo::TempDir;
+ 
+     use super::*;
+-    use crate::mock_window::open_compare_window;
++    use crate::mock_window::{compare_app, open_compare_window};
+ 
+     fn tab(id: u32, name: &str, language: &Value, holds_text: bool) -> Value {
+         json!({ "id": id, "name": name, "language": language, "holds_text": holds_text })
+@@ -277,6 +272,27 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn a_worker_that_panics_answers_worker_stopped_and_the_store_still_answers() {
++        let window = open_compare_window();
++        let panicking =
++            |_: &mut TabStore| -> yamt_compare::Result<LoadedTab> { panic!("worker panic") };
++
++        let answered =
++            tauri::async_runtime::block_on(on_worker(window.webview.clone(), panicking, tab_texts))
++                .err();
++
++        assert!(
++            matches!(answered, Some(IpcError::WorkerStopped)),
++            "{answered:?}"
++        );
++        assert!(window.invoke("load_tab", json!({ "tab": 1 })).is_ok());
++    }
++
++    fn store_opened_in(data_dir: &Path) -> Result<(), String> {
++        manage_store_in(&compare_app(), data_dir)
++    }
++
+     fn tabs_file(data: &TempDir, text: &str) -> PathBuf {
+         let folder = compare_folder(data.path());
+         fs::create_dir_all(&folder).unwrap();
+@@ -287,11 +303,10 @@ mod tests {
+ 
+     #[test]
+     fn a_second_open_of_the_same_data_folder_says_another_window_is_open() {
+-        let data = TempDir::new().unwrap();
+-        let _held = open_store_in(data.path()).unwrap();
+-        let folder = compare_folder(data.path());
++        let held = open_compare_window();
++        let folder = compare_folder(held.data.path());
+         assert_eq!(
+-            open_store_in(data.path()).unwrap_err(),
++            store_opened_in(held.data.path()).unwrap_err(),
+             format!("another yamt --raw window is open ({})", folder.display())
+         );
+     }
+@@ -301,7 +316,7 @@ mod tests {
+         let data = TempDir::new().unwrap();
+         let path = tabs_file(&data, r#"{"format":1,"shown":1,"nextId":2,"tabs":[]}"#);
+         assert_eq!(
+-            open_store_in(data.path()).unwrap_err(),
++            store_opened_in(data.path()).unwrap_err(),
+             format!(
+                 "the stored compare tabs {} cannot be read: `tabs` is empty; nothing was changed",
+                 path.display()
+@@ -314,7 +329,7 @@ mod tests {
+         let data = TempDir::new().unwrap();
+         let path = tabs_file(&data, r#"{"format":2}"#);
+         assert_eq!(
+-            open_store_in(data.path()).unwrap_err(),
++            store_opened_in(data.path()).unwrap_err(),
+             format!(
+                 "the stored compare tabs {} were written by a newer yamt (format 2)",
+                 path.display()
+diff --git a/src-tauri/src/mock_window.rs b/src-tauri/src/mock_window.rs
+index c727a57..0d7822a 100644
+--- a/src-tauri/src/mock_window.rs
++++ b/src-tauri/src/mock_window.rs
+@@ -1,5 +1,3 @@
+-use std::sync::Mutex;
+-
+ use serde_json::Value;
+ use tauri::ipc::{CallbackFn, InvokeBody};
+ use tauri::test::{
+@@ -11,7 +9,7 @@ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
+ use yamt_session::MergeSession;
+ 
+ use crate::commands::{with_compare, with_session};
+-use crate::compare::open_store_in;
++use crate::compare::manage_store_in;
+ use crate::merge::MergeState;
+ use crate::outcome::{Ending, ending_when_git_is_done};
+ 
+@@ -83,13 +81,16 @@ pub(crate) struct CompareWindow {
+     _app: App<MockRuntime>,
+ }
+ 
++pub(crate) fn compare_app() -> App<MockRuntime> {
++    with_compare(mock_builder())
++        .build(mock_context(noop_assets()))
++        .unwrap()
++}
++
+ pub(crate) fn open_compare_window() -> CompareWindow {
+     let data = TempDir::new().unwrap();
+-    let store = open_store_in(data.path()).unwrap();
+-    let app = with_compare(mock_builder())
+-        .build(mock_context(noop_assets()))
+-        .unwrap();
+-    app.manage(Mutex::new(store));
++    let app = compare_app();
++    manage_store_in(&app, data.path()).unwrap();
+     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+         .build()
+         .unwrap();
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 29b6d37..dc23be8 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -1,5 +1,4 @@
+ use std::path::Path;
+-use std::sync::Mutex;
+ use std::sync::mpsc::{self, Receiver, Sender};
+ use std::time::{Duration, Instant};
+ 
+@@ -77,11 +76,14 @@ fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending>
+ 
+ fn open_compare() -> tauri::Result<Ending> {
+     let app = with_compare(tauri::Builder::default()).build(context())?;
+-    let store = match compare::open_store(app.path()) {
+-        Ok(store) => store,
+-        Err(problem) => return Ok(Ending::failure(problem)),
+-    };
+-    app.manage(Mutex::new(store));
++    let managed = app
++        .path()
++        .data_dir()
++        .map_err(|error| format!("no data folder: {error}"))
++        .and_then(|data_dir| compare::manage_store_in(&app, &data_dir));
++    if let Err(problem) = managed {
++        return Ok(Ending::failure(problem));
++    }
+     open_and_wait(app, COMPARE_TITLE, WindowKind::Compare)?;
+     Ok(Ending {
+         exit: Exit::Success,

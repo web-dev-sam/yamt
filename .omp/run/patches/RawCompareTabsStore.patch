@@ -1,0 +1,1279 @@
+diff --git a/frontend/src/ui/compareStore.test.ts b/frontend/src/ui/compareStore.test.ts
+new file mode 100644
+index 0000000..8c083f1
+--- /dev/null
++++ b/frontend/src/ui/compareStore.test.ts
+@@ -0,0 +1,571 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  log,
++  nextColumnVersion,
++  type Comparison,
++  type CompareSource,
++  type SourceFailure,
++  type SourceResult,
++  type TabId,
++} from "../ipc";
++import {
++  createCompareStore,
++  useCompareStore,
++  type ColumnFormatFailure,
++  type ColumnSend,
++  type CompareStore,
++  type TrackedTab,
++} from "./compareStore";
++import { problemText } from "./problemText";
++import { useSettingsStore } from "./settingsStore";
++
++type Gate = { readonly opened: Promise<null>; readonly open: () => void };
++
++type Edit = (fixture: CompareSource) => Partial<CompareSource>;
++
++type Handle = TrackedTab & { readonly asked: string[] };
++
++type Act = (store: CompareStore, tab: TabId) => Promise<void>;
++
++const LINUX = "Linux x86_64";
++const LIMIT = 8 * 1024 * 1024;
++const GONE: SourceFailure = { kind: "ReadFailed", path: "/data/tabs.json", message: "denied" };
++const UNKNOWN: SourceFailure = { kind: "UnknownTab", tab: 4 };
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function spyConsole(): { info: string[]; error: string[] } {
++  const lines = { info: new Array<string>(), error: new Array<string>() };
++  vi.spyOn(console, "info").mockImplementation((line: string) => {
++    lines.info.push(line);
++  });
++  vi.spyOn(console, "error").mockImplementation((line: string) => {
++    lines.error.push(line);
++  });
++  return lines;
++}
++
++function gate(): Gate {
++  const opens: ((value: null) => void)[] = [];
++  const opened = new Promise<null>((resolve) => {
++    opens.push(resolve);
++  });
++  return {
++    opened,
++    open: () => {
++      for (const open of opens) {
++        open(null);
++      }
++    },
++  };
++}
++
++function failed(failure: SourceFailure): Promise<SourceResult<never>> {
++  return Promise.resolve({ ok: false, failure });
++}
++
++function compareSource(): CompareSource {
++  return createFixtureCompareSource(log, "", {});
++}
++
++async function started(edit: Edit = () => ({})): Promise<CompareStore> {
++  const fixture = compareSource();
++  const store = createCompareStore({ ...fixture, ...edit(fixture) }, "dark");
++  await store.startUp();
++  return store;
++}
++
++function tabAt(store: CompareStore, index: number): TabId {
++  const entry = store.tabs.value[index];
++  if (entry === undefined) {
++    throw new Error(`no tab at ${index}`);
++  }
++  return entry.id;
++}
++
++async function sendOf(store: CompareStore, tab: TabId, text: string): Promise<ColumnSend> {
++  const loaded = await store.loadTab(tab);
++  if (loaded === null) {
++    throw new Error("the tab did not load");
++  }
++  return { column: "left", text, version: nextColumnVersion(loaded.comparison.versions.left) };
++}
++
++async function holdingText(store: CompareStore, tab: TabId): Promise<void> {
++  spyConsole();
++  await store.saveColumn(tab, await sendOf(store, tab, "kept"));
++  await store.showTab(tab);
++}
++
++function handle(holdsText: boolean, unsent: readonly ColumnSend[] = []): Handle {
++  const asked: string[] = [];
++  return {
++    asked,
++    unsent: () => {
++      asked.push("unsent");
++      return unsent;
++    },
++    holdsText: () => {
++      asked.push("holdsText");
++      return holdsText;
++    },
++  };
++}
++
++test("the window's components get no store before the root creates one (catches a store read before main.ts made it)", () => {
++  expect(() => useCompareStore()).toThrow("useCompareStore() called before createCompareStore()");
++});
++
++test("start-up lists the stored tabs, sets the column limit and loads the settings (catches a limit or list left unset)", async () => {
++  const fixture = compareSource();
++  const store = createCompareStore(fixture, "dark");
++
++  expect([store.tabs.value, store.shown.value, store.columnLimit.value]).toEqual([[], null, 0]);
++  expect([store.fileListShown.value, store.screen.value]).toEqual([true, { kind: "files" }]);
++
++  await store.startUp();
++
++  expect(store.tabs.value).toEqual([
++    { id: store.shown.value, name: "Compare 1", language: { kind: "auto" }, holdsText: false },
++  ]);
++  expect(store.columnLimit.value).toBe(LIMIT);
++  expect(store.settings.value.read?.path).toBe("/fixture/settings.json");
++  expect([store.problem.value, store.notices.value, store.detected.value]).toEqual([
++    null,
++    [],
++    new Map(),
++  ]);
++  expect(useCompareStore()).toBe(store);
++  expect(useSettingsStore()).toBe(store);
++});
++
++test("a failed start shows the problem and lists nothing (catches a failure read as an empty list)", async () => {
++  const lines = spyConsole();
++  const store = await started(() => ({ openCompare: () => failed(GONE) }));
++
++  expect([store.tabs.value, store.shown.value, store.columnLimit.value]).toEqual([[], null, 0]);
++  expect(store.problem.value).toEqual({ action: "tabs", cause: GONE });
++  expect(problemText({ action: "tabs", cause: GONE }, LINUX)).toBe(
++    "Could not update the tabs: reading /data/tabs.json failed: denied",
++  );
++  expect(lines.error).toEqual([
++    '[error] store.tabs_failed {kind: "ReadFailed", path: "/data/tabs.json", message: "denied"}',
++  ]);
++});
++
++test("add, show, rename and language write the mirror from each reply (catches a reply not adopted)", async () => {
++  const store = await started();
++  const first = tabAt(store, 0);
++
++  await store.addTab();
++  const second = tabAt(store, 1);
++  expect(store.tabs.value.map((entry) => entry.name)).toEqual(["Compare 1", "Compare 2"]);
++  expect(store.shown.value).toBe(second);
++
++  await store.showTab(first);
++  expect(store.shown.value).toBe(first);
++
++  await store.renameTab(second, "payloads");
++  await store.setLanguage(first, { kind: "picked", name: "TypeScript" });
++  expect(store.tabs.value.map(({ name, language }) => ({ name, language }))).toEqual([
++    { name: "Compare 1", language: { kind: "picked", name: "TypeScript" } },
++    { name: "payloads", language: { kind: "auto" } },
++  ]);
++});
++
++test("a rename shows only once its reply arrives (catches an optimistic edit of the mirror)", async () => {
++  const held = gate();
++  const store = await started((fixture) => ({
++    renameTab: async (tab, name) => {
++      const reply = await fixture.renameTab(tab, name);
++      await held.opened;
++      return reply;
++    },
++  }));
++  const before = store.tabs.value;
++
++  const renaming = store.renameTab(tabAt(store, 0), "later");
++  await Promise.resolve();
++  expect(store.tabs.value).toBe(before);
++
++  held.open();
++  await renaming;
++  expect(store.tabs.value.map((entry) => entry.name)).toEqual(["later"]);
++});
++
++test.each([
++  ["addTab", { addTab: () => failed(UNKNOWN) }, (store) => store.addTab()],
++  ["showTab", { showTab: () => failed(UNKNOWN) }, (store, tab) => store.showTab(tab)],
++  ["renameTab", { renameTab: () => failed(UNKNOWN) }, (store, tab) => store.renameTab(tab, "x")],
++  [
++    "setLanguage",
++    { setTabLanguage: () => failed(UNKNOWN) },
++    (store, tab) => store.setLanguage(tab, { kind: "picked", name: "XML" }),
++  ],
++  ["closeTab", { closeTab: () => failed(UNKNOWN) }, (store, tab) => store.closeTab(tab)],
++] satisfies [string, Partial<CompareSource>, Act][])(
++  "a failed %s leaves the mirror as it was and shows the problem (catches a failure clearing the list)",
++  async (_call, failing, act) => {
++    spyConsole();
++    const store = await started(() => failing);
++    const tabs = store.tabs.value;
++    const shown = store.shown.value;
++
++    await act(store, tabAt(store, 0));
++
++    expect(store.tabs.value).toBe(tabs);
++    expect(store.shown.value).toBe(shown);
++    expect(store.problem.value).toEqual({ action: "tabs", cause: UNKNOWN });
++  },
++);
++
++test("a tab closed in another call is shown with its words, nothing listed again (catches a silent UnknownTab)", async () => {
++  spyConsole();
++  let starts = 0;
++  const store = await started((fixture) => ({
++    openCompare: () => {
++      starts += 1;
++      return fixture.openCompare();
++    },
++    closeTab: (tab) => failed({ kind: "UnknownTab", tab }),
++  }));
++
++  await store.closeTab(tabAt(store, 0));
++
++  expect(starts).toBe(1);
++  const shown = store.problem.value;
++  expect(shown === null ? null : problemText(shown, LINUX)).toBe(
++    "Could not update the tabs: that tab was closed.",
++  );
++});
++
++test("a tab reply clears a tabs problem but not a column's (catches a stale tabs problem or a lost save problem)", async () => {
++  spyConsole();
++  let failing = true;
++  const store = await started((fixture) => ({
++    addTab: () => (failing ? failed(GONE) : fixture.addTab()),
++    setColumn: () => failed(GONE),
++  }));
++  const tab = tabAt(store, 0);
++
++  await store.addTab();
++  expect(store.problem.value?.action).toBe("tabs");
++  failing = false;
++  await store.addTab();
++  expect(store.problem.value).toBeNull();
++
++  await store.saveColumn(tab, await sendOf(store, tab, "a"));
++  await store.addTab();
++  expect(store.problem.value?.action).toBe("saveTab");
++});
++
++test("closing a tab with text asks; No and Escape keep it, Yes closes it (catches a close without the question)", async () => {
++  let closes = 0;
++  const store = await started((fixture) => ({
++    closeTab: (tab) => {
++      closes += 1;
++      return fixture.closeTab(tab);
++    },
++  }));
++  const tab = tabAt(store, 0);
++  await holdingText(store, tab);
++
++  const no = store.closeTab(tab);
++  expect(store.question.value).toEqual({ kind: "closeTab", name: "Compare 1" });
++  store.answer(false);
++  await no;
++  const dismissed = store.closeTab(tab);
++  store.dismissQuestion();
++  await dismissed;
++  expect(closes).toBe(0);
++  expect(store.tabs.value.map((entry) => entry.id)).toEqual([tab]);
++
++  const yes = store.closeTab(tab);
++  store.answer(true);
++  await yes;
++  expect(closes).toBe(1);
++  expect(store.question.value).toBeNull();
++  expect(store.tabs.value.map((entry) => entry.id)).not.toContain(tab);
++});
++
++test("an empty tab closes at once, never asking (catches a question for a tab with nothing to lose)", async () => {
++  const store = await started();
++  await store.addTab();
++
++  await store.closeTab(tabAt(store, 1));
++
++  expect(store.question.value).toBeNull();
++  expect(store.tabs.value.map((entry) => entry.name)).toEqual(["Compare 1"]);
++});
++
++test("a tab no longer listed is not closed again (catches a second close sent for a gone tab)", async () => {
++  let closes = 0;
++  const store = await started((fixture) => ({
++    closeTab: (tab) => {
++      closes += 1;
++      return fixture.closeTab(tab);
++    },
++  }));
++  await store.addTab();
++  const second = tabAt(store, 1);
++  await store.closeTab(second);
++
++  await store.closeTab(second);
++
++  expect(closes).toBe(1);
++  expect(store.problem.value).toBeNull();
++});
++
++test("the mounted tab's holdsText wins over the stored entry's, both ways (catches the entry read for a mounted tab)", async () => {
++  const store = await started();
++  const first = tabAt(store, 0);
++  await holdingText(store, first);
++  await store.addTab();
++  const second = tabAt(store, 1);
++  const emptied = handle(false, [await sendOf(store, first, "unsent")]);
++  store.track(first, emptied);
++  store.track(second, handle(true));
++
++  await store.closeTab(first);
++  expect(store.question.value).toBeNull();
++  expect(store.tabs.value.map((entry) => entry.name)).toEqual(["Compare 2"]);
++  expect(emptied.asked).toEqual(["holdsText"]);
++
++  const asking = store.closeTab(second);
++  expect(store.question.value).toEqual({ kind: "closeTab", name: "Compare 2" });
++  store.answer(false);
++  await asking;
++});
++
++test("a closed tab is no longer flushed; one that failed to close still is (catches untracking on the wrong outcome)", async () => {
++  spyConsole();
++  let failing = false;
++  const sent: TabId[] = [];
++  const store = await started((fixture) => ({
++    closeTab: (tab) => (failing ? failed(GONE) : fixture.closeTab(tab)),
++    setColumn: (write) => {
++      sent.push(write.tab);
++      return fixture.setColumn(write);
++    },
++  }));
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++  store.track(first, handle(false, [await sendOf(store, first, "a")]));
++  store.track(second, handle(false, [await sendOf(store, second, "b")]));
++
++  await store.closeTab(first);
++  failing = true;
++  await store.closeTab(second);
++  await store.flushAll();
++
++  expect(sent).toEqual([second]);
++});
++
++test("flushAll sends each unsent column once and resolves only when every reply came (catches a close before the write)", async () => {
++  spyConsole();
++  const held = gate();
++  const sent: string[] = [];
++  const store = await started((fixture) => ({
++    setColumn: async (write) => {
++      sent.push(`${write.tab} ${write.column} ${write.text} ${write.version}`);
++      await held.opened;
++      return fixture.setColumn(write);
++    },
++  }));
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++  const left = await sendOf(store, first, "l");
++  const firstHandle = handle(true, [left, { ...left, column: "right", text: "r" }]);
++  store.track(first, firstHandle);
++  store.track(second, handle(true, [await sendOf(store, second, "s")]));
++  let flushed = false;
++
++  const flushing = store.flushAll().then(() => {
++    flushed = true;
++  });
++  await Promise.resolve();
++  expect(flushed).toBe(false);
++  held.open();
++  await flushing;
++
++  expect(sent).toEqual([`${first} left l 1`, `${first} right r 1`, `${second} left s 1`]);
++  expect(firstHandle.asked).toEqual(["unsent"]);
++});
++
++test("a failed flush is shown and logged, never thrown (catches a close stopped by one bad column)", async () => {
++  const lines = spyConsole();
++  const store = await started(() => ({ setColumn: () => Promise.reject(new Error("ipc gone")) }));
++  const tab = tabAt(store, 0);
++  store.track(tab, handle(true, [await sendOf(store, tab, "x")]));
++
++  await store.flushAll();
++
++  expect(store.problem.value).toEqual({
++    action: "saveTab",
++    name: "Compare 1",
++    cause: { kind: "Unexpected", message: "ipc gone" },
++  });
++  expect(lines.error).toEqual([
++    '[error] store.saveTab_failed {name: "Compare 1", kind: "Unexpected", message: "ipc gone"}',
++  ]);
++});
++
++test("untracking removes only the handle it returned (catches a remount's handle dropped by the old one)", async () => {
++  spyConsole();
++  const sent: string[] = [];
++  const store = await started((fixture) => ({
++    setColumn: (write) => {
++      sent.push(write.text);
++      return fixture.setColumn(write);
++    },
++  }));
++  const tab = tabAt(store, 0);
++  const untrackOld = store.track(tab, handle(true, [await sendOf(store, tab, "old")]));
++  const untrackNew = store.track(tab, handle(true, [await sendOf(store, tab, "new")]));
++
++  untrackOld();
++  await store.flushAll();
++  untrackNew();
++  await store.flushAll();
++
++  expect(sent).toEqual(["new"]);
++});
++
++test("loadTab returns the stored texts, or null with the tab's problem (catches a failure passed on as texts)", async () => {
++  const lines = spyConsole();
++  let failing = false;
++  const store = await started((fixture) => ({
++    loadTab: (tab) => (failing ? failed({ kind: "UnknownTab", tab }) : fixture.loadTab(tab)),
++  }));
++  const tab = tabAt(store, 0);
++
++  expect(await store.loadTab(tab)).toMatchObject({ left: "", right: "" });
++  failing = true;
++
++  expect(await store.loadTab(tab)).toBeNull();
++  const failure = { action: "loadTab", name: "Compare 1", cause: { kind: "UnknownTab", tab } };
++  expect(store.problem.value).toEqual(failure);
++  expect(lines.error).toEqual([
++    `[error] store.loadTab_failed {name: "Compare 1", kind: "UnknownTab", tab: ${tab}}`,
++  ]);
++});
++
++test("saveColumn writes the column and returns the comparison, or null naming the tab as it was called (catches a save naming no tab)", async () => {
++  spyConsole();
++  const held = gate();
++  const writes: string[] = [];
++  const store = await started((fixture) => ({
++    setColumn: async (write) => {
++      writes.push(`${write.tab} ${write.column} ${write.text} ${write.version}`);
++      if (write.text === "late") {
++        await held.opened;
++      }
++      return fixture.setColumn(write);
++    },
++  }));
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++  const right: ColumnSend = { ...(await sendOf(store, second, "b")), column: "right" };
++
++  const comparison: Comparison | null = await store.saveColumn(second, right);
++  expect(comparison?.versions).toEqual({ left: 0, right: 1 });
++  expect(writes).toEqual([`${second} right b 1`]);
++
++  const late = store.saveColumn(second, { ...right, text: "late" });
++  await store.closeTab(second);
++  held.open();
++  expect(await late).toBeNull();
++  expect(store.problem.value).toEqual({
++    action: "saveTab",
++    name: "Compare 2",
++    cause: { kind: "UnknownTab", tab: second },
++  });
++  expect(store.tabs.value.map((entry) => entry.id)).toEqual([first]);
++});
++
++test("a refused edit and a Format failure show their words; a second one for the column replaces the first (catches piled-up notices)", async () => {
++  const store = await started();
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++  const json: ColumnFormatFailure = {
++    column: "left",
++    language: "JSON",
++    message: "Expected ',' or '}'",
++    line: 3,
++  };
++
++  store.refused(second, "right");
++  store.reportFormat(second, [json, { ...json, column: "right", language: "XML", line: 9 }]);
++  store.refused(first, "right");
++
++  expect(store.notices.value.map((row) => row.text)).toEqual([
++    "Compare 2, left: not valid JSON (line 3): Expected ',' or '}'",
++    "Compare 2, right: not valid XML (line 9): Expected ',' or '}'",
++    "Compare 1, right: not pasted — a column holds up to 8 MiB",
++  ]);
++
++  store.refused(second, "left");
++  store.reportFormat(first, [{ ...json, column: "right", line: 1 }]);
++
++  expect(store.notices.value.map((row) => row.text)).toEqual([
++    "Compare 2, right: not valid XML (line 9): Expected ',' or '}'",
++    "Compare 2, left: not pasted — a column holds up to 8 MiB",
++    "Compare 1, right: not valid JSON (line 1): Expected ',' or '}'",
++  ]);
++});
++
++test("closing a notice removes only that notice (catches every notice closed at once)", async () => {
++  const store = await started();
++  const tab = tabAt(store, 0);
++  store.refused(tab, "left");
++  store.refused(tab, "right");
++  const [left] = store.notices.value;
++
++  store.dismissNotice(left?.key ?? "");
++
++  expect(store.notices.value.map((row) => row.text)).toEqual([
++    "Compare 1, right: not pasted — a column holds up to 8 MiB",
++  ]);
++});
++
++test("Auto's finding is kept per tab (catches one tab's finding wiping another's)", async () => {
++  const store = await started();
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++
++  store.setDetected(first, "JSON");
++  store.setDetected(second, null);
++  store.setDetected(first, "XML");
++
++  expect(store.detected.value).toEqual(
++    new Map<TabId, string | null>([
++      [first, "XML"],
++      [second, null],
++    ]),
++  );
++});
++
++test("the gear switches the screen, and the settings in use reach the preferences (catches a settings view that never opens)", async () => {
++  const store = await started();
++
++  store.openSettings();
++  expect(store.screen.value).toEqual({ kind: "settings" });
++  await store.setTheme("light");
++  expect(store.preferences.value.theme).toBe("light");
++  store.closeSettings();
++  expect(store.screen.value).toEqual({ kind: "files" });
++});
++
++test("a shown problem closes on request (catches a problem bar that cannot close)", async () => {
++  spyConsole();
++  const store = await started(() => ({ addTab: () => failed(GONE) }));
++  await store.addTab();
++
++  store.dismissProblem();
++
++  expect(store.problem.value).toBeNull();
++});
+diff --git a/frontend/src/ui/compareStore.ts b/frontend/src/ui/compareStore.ts
+new file mode 100644
+index 0000000..6360898
+--- /dev/null
++++ b/frontend/src/ui/compareStore.ts
+@@ -0,0 +1,293 @@
++import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++
++import type {
++  Column,
++  ColumnVersion,
++  CompareSource,
++  Comparison,
++  SourceResult,
++  TabEntry,
++  TabId,
++  TabLanguage,
++  TabList,
++  TabTexts,
++  Theme,
++} from "../ipc";
++import { createAsking, type Asking } from "./asking";
++import { compareNoticeRow, tabName, type CompareNotice } from "./compareText";
++import type { NoticeRow } from "./noticeText";
++import { attempt, report, type Problem } from "./problem";
++import type { Question } from "./question";
++import type { Screen } from "./screen";
++import { preferencesOf, settingsActions, startSettings } from "./settings";
++import type { SettingsActions, SettingsInUse } from "./settings";
++import { registerSettingsStore, type SettingsStore } from "./settingsStore";
++import type { Preferences } from "./useMergeController";
++
++export type ColumnSend = {
++  readonly column: Column;
++  readonly text: string;
++  readonly version: ColumnVersion;
++};
++
++export type ColumnFormatFailure = {
++  readonly column: Column;
++  readonly language: string;
++  readonly message: string;
++  readonly line: number;
++};
++
++export type TrackedTab = {
++  readonly unsent: () => readonly ColumnSend[];
++  readonly holdsText: () => boolean;
++};
++
++export type CompareStore = SettingsStore & {
++  readonly tabs: Readonly<ShallowRef<readonly TabEntry[]>>;
++  readonly shown: Readonly<ShallowRef<TabId | null>>;
++  readonly columnLimit: Readonly<ShallowRef<number>>;
++  readonly detected: Readonly<ShallowRef<ReadonlyMap<TabId, string | null>>>;
++  readonly problem: Readonly<ShallowRef<Problem | null>>;
++  readonly notices: Readonly<ShallowRef<readonly NoticeRow[]>>;
++  readonly question: ComputedRef<Question | null>;
++  readonly screen: Readonly<ShallowRef<Screen>>;
++  readonly fileListShown: ShallowRef<boolean>;
++  readonly preferences: ComputedRef<Preferences>;
++  startUp(): Promise<void>;
++  loadSettings(): Promise<void>;
++  addTab(): Promise<void>;
++  showTab(tab: TabId): Promise<void>;
++  closeTab(tab: TabId): Promise<void>;
++  renameTab(tab: TabId, name: string): Promise<void>;
++  setLanguage(tab: TabId, language: TabLanguage): Promise<void>;
++  loadTab(tab: TabId): Promise<TabTexts | null>;
++  saveColumn(tab: TabId, send: ColumnSend): Promise<Comparison | null>;
++  track(tab: TabId, handle: TrackedTab): () => void;
++  flushAll(): Promise<void>;
++  reportFormat(tab: TabId, failures: readonly ColumnFormatFailure[]): void;
++  refused(tab: TabId, column: Column): void;
++  setDetected(tab: TabId, language: string | null): void;
++  dismissNotice(key: string): void;
++  dismissProblem(): void;
++  answer(yes: boolean): void;
++  dismissQuestion(): void;
++};
++
++type Refs = {
++  readonly tabs: ShallowRef<readonly TabEntry[]>;
++  readonly shown: ShallowRef<TabId | null>;
++  readonly columnLimit: ShallowRef<number>;
++  readonly detected: ShallowRef<ReadonlyMap<TabId, string | null>>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly notices: ShallowRef<readonly NoticeRow[]>;
++  readonly screen: ShallowRef<Screen>;
++  readonly settings: ShallowRef<SettingsInUse>;
++  readonly fileListShown: ShallowRef<boolean>;
++};
++
++type State = Refs & {
++  readonly source: CompareSource;
++  readonly asking: Asking;
++  readonly tracked: Map<TabId, TrackedTab>;
++  latestSettings: number;
++};
++
++let store: CompareStore | null = null;
++
++function createRefs(startTheme: Theme): Refs {
++  return {
++    tabs: shallowRef<readonly TabEntry[]>([]),
++    shown: shallowRef<TabId | null>(null),
++    columnLimit: shallowRef(0),
++    detected: shallowRef<ReadonlyMap<TabId, string | null>>(new Map()),
++    problem: shallowRef<Problem | null>(null),
++    notices: shallowRef<readonly NoticeRow[]>([]),
++    screen: shallowRef<Screen>({ kind: "files" }),
++    settings: shallowRef(startSettings(startTheme)),
++    fileListShown: shallowRef(true),
++  };
++}
++
++export function createCompareStore(source: CompareSource, startTheme: Theme): CompareStore {
++  const refs = createRefs(startTheme);
++  const state: State = {
++    ...refs,
++    source,
++    asking: createAsking(),
++    tracked: new Map(),
++    latestSettings: 0,
++  };
++  const settings = settingsActions(state);
++  const created: CompareStore = {
++    ...refs,
++    question: state.asking.question,
++    preferences: computed(() => preferencesOf(refs.settings.value)),
++    ...settings,
++    startUp: () => startUp(state, settings),
++    ...tabActions(state),
++    ...columnActions(state),
++    ...chromeActions(state),
++    dismissProblem: () => {
++      refs.problem.value = null;
++    },
++    answer: state.asking.answer,
++    dismissQuestion: state.asking.dismiss,
++    openSettings: () => {
++      refs.screen.value = { kind: "settings" };
++    },
++    closeSettings: () => {
++      refs.screen.value = { kind: "files" };
++    },
++  };
++  store = created;
++  registerSettingsStore(created);
++  return created;
++}
++
++function adoptList(state: State, { tabs, shown }: TabList): void {
++  state.tabs.value = tabs;
++  state.shown.value = shown;
++  if (state.problem.value?.action === "tabs") {
++    state.problem.value = null;
++  }
++}
++
++async function startUp(state: State, settings: SettingsActions): Promise<void> {
++  const [outcome] = await Promise.all([
++    attempt(() => state.source.openCompare()),
++    settings.loadSettings(),
++  ]);
++  if (!outcome.ok) {
++    report(state, { action: "tabs", cause: outcome.cause });
++    return;
++  }
++  state.columnLimit.value = outcome.value.columnLimit;
++  adoptList(state, outcome.value.list);
++}
++
++async function changeTabs(
++  state: State,
++  call: () => Promise<SourceResult<TabList>>,
++): Promise<boolean> {
++  const outcome = await attempt(call);
++  if (!outcome.ok) {
++    report(state, { action: "tabs", cause: outcome.cause });
++    return false;
++  }
++  adoptList(state, outcome.value);
++  return true;
++}
++
++async function closeTab(state: State, tab: TabId): Promise<void> {
++  const entry = state.tabs.value.find((each) => each.id === tab);
++  if (entry === undefined) {
++    return;
++  }
++  const handle = state.tracked.get(tab);
++  const holdsText = handle === undefined ? entry.holdsText : handle.holdsText();
++  if (holdsText && (await state.asking.ask({ kind: "closeTab", name: entry.name })) !== "yes") {
++    return;
++  }
++  if (await changeTabs(state, () => state.source.closeTab(tab))) {
++    state.tracked.delete(tab);
++  }
++}
++
++function tabActions(
++  state: State,
++): Pick<CompareStore, "addTab" | "showTab" | "closeTab" | "renameTab" | "setLanguage"> {
++  const { source } = state;
++  return {
++    addTab: async () => {
++      await changeTabs(state, () => source.addTab());
++    },
++    showTab: async (tab) => {
++      await changeTabs(state, () => source.showTab(tab));
++    },
++    closeTab: (tab) => closeTab(state, tab),
++    renameTab: async (tab, name) => {
++      await changeTabs(state, () => source.renameTab(tab, name));
++    },
++    setLanguage: async (tab, language) => {
++      await changeTabs(state, () => source.setTabLanguage(tab, language));
++    },
++  };
++}
++
++async function loadTab(state: State, tab: TabId): Promise<TabTexts | null> {
++  const name = tabName(state.tabs.value, tab);
++  const outcome = await attempt(() => state.source.loadTab(tab));
++  if (!outcome.ok) {
++    report(state, { action: "loadTab", name, cause: outcome.cause });
++    return null;
++  }
++  return outcome.value;
++}
++
++async function saveColumn(state: State, tab: TabId, send: ColumnSend): Promise<Comparison | null> {
++  const name = tabName(state.tabs.value, tab);
++  const outcome = await attempt(() => state.source.setColumn({ tab, ...send }));
++  if (!outcome.ok) {
++    report(state, { action: "saveTab", name, cause: outcome.cause });
++    return null;
++  }
++  return outcome.value;
++}
++
++function columnActions(
++  state: State,
++): Pick<CompareStore, "loadTab" | "saveColumn" | "track" | "flushAll"> {
++  return {
++    loadTab: (tab) => loadTab(state, tab),
++    saveColumn: (tab, send) => saveColumn(state, tab, send),
++    track: (tab, handle) => {
++      state.tracked.set(tab, handle);
++      return () => {
++        if (state.tracked.get(tab) === handle) {
++          state.tracked.delete(tab);
++        }
++      };
++    },
++    flushAll: async () => {
++      const sends = [...state.tracked].flatMap(([tab, handle]) =>
++        handle.unsent().map((send) => saveColumn(state, tab, send)),
++      );
++      await Promise.all(sends);
++    },
++  };
++}
++
++function showNotice(state: State, notice: CompareNotice): void {
++  const row = compareNoticeRow(notice);
++  state.notices.value = [...state.notices.value.filter((each) => each.key !== row.key), row];
++}
++
++function chromeActions(
++  state: State,
++): Pick<CompareStore, "reportFormat" | "refused" | "setDetected" | "dismissNotice"> {
++  return {
++    reportFormat: (tab, failures) => {
++      const name = tabName(state.tabs.value, tab);
++      for (const failure of failures) {
++        showNotice(state, { kind: "format", tab, name, ...failure });
++      }
++    },
++    refused: (tab, column) => {
++      const name = tabName(state.tabs.value, tab);
++      showNotice(state, { kind: "refused", tab, name, column, limit: state.columnLimit.value });
++    },
++    setDetected: (tab, language) => {
++      state.detected.value = new Map(state.detected.value).set(tab, language);
++    },
++    dismissNotice: (key) => {
++      state.notices.value = state.notices.value.filter((row) => row.key !== key);
++    },
++  };
++}
++
++export function useCompareStore(): CompareStore {
++  if (store === null) {
++    throw new Error("useCompareStore() called before createCompareStore()");
++  }
++  return store;
++}
+diff --git a/frontend/src/ui/compareTabs.test.ts b/frontend/src/ui/compareTabs.test.ts
+new file mode 100644
+index 0000000..48b380c
+--- /dev/null
++++ b/frontend/src/ui/compareTabs.test.ts
+@@ -0,0 +1,12 @@
++import { expect, test } from "vitest";
++
++import { languageLabel } from "./compareTabs";
++
++test("Auto shows what it found, or plain text when it found nothing (catches Auto shown without its finding)", () => {
++  expect(languageLabel({ kind: "auto" }, "JSON")).toBe("Auto · JSON");
++  expect(languageLabel({ kind: "auto" }, null)).toBe("Auto · Plain text");
++});
++
++test("a picked language shows its name only, whatever Auto found (catches Auto's finding over the user's pick)", () => {
++  expect(languageLabel({ kind: "picked", name: "TypeScript" }, "JSON")).toBe("TypeScript");
++});
+diff --git a/frontend/src/ui/compareTabs.ts b/frontend/src/ui/compareTabs.ts
+new file mode 100644
+index 0000000..00a826f
+--- /dev/null
++++ b/frontend/src/ui/compareTabs.ts
+@@ -0,0 +1,14 @@
++import type { TabLanguage } from "../ipc";
++
++export function languageLabel(language: TabLanguage, detected: string | null): string {
++  switch (language.kind) {
++    case "auto":
++      return `Auto · ${detected ?? "Plain text"}`;
++    case "picked":
++      return language.name;
++    default: {
++      const _exhaustive: never = language;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/compareText.test.ts b/frontend/src/ui/compareText.test.ts
+new file mode 100644
+index 0000000..89fd32c
+--- /dev/null
++++ b/frontend/src/ui/compareText.test.ts
+@@ -0,0 +1,76 @@
++import { expect, test } from "vitest";
++
++import { createFixtureCompareSource, log, type TabEntry, type TabId } from "../ipc";
++import { compareNoticeRow, tabName } from "./compareText";
++
++const { tabs } = await listed();
++const [ENTRY] = tabs;
++
++async function listed(): Promise<{ readonly tabs: readonly TabEntry[] }> {
++  const source = createFixtureCompareSource(log, "", {});
++  await source.addTab();
++  const reply = await source.addTab();
++  if (!reply.ok) {
++    throw new Error("the fixture did not add a tab");
++  }
++  return reply.value;
++}
++
++function tabOf(entry: TabEntry | undefined): TabId {
++  if (entry === undefined) {
++    throw new Error("no tab");
++  }
++  return entry.id;
++}
++
++test("a Format failure names the tab, the column, the language, the line and the parser's message (catches a notice without its column)", () => {
++  expect(
++    compareNoticeRow({
++      kind: "format",
++      tab: tabOf(ENTRY),
++      name: "Compare 2",
++      column: "left",
++      language: "JSON",
++      message: "Expected ',' or '}'",
++      line: 3,
++    }),
++  ).toEqual({
++    key: `${tabOf(ENTRY)}:left`,
++    text: "Compare 2, left: not valid JSON (line 3): Expected ',' or '}'",
++    closeLabel: "Close the notice about Compare 2, left",
++  });
++});
++
++test("a refused edit names the column and the limit in MiB (catches the limit written in bytes)", () => {
++  const notice = {
++    kind: "refused",
++    tab: tabOf(ENTRY),
++    name: "Compare 2",
++    column: "right",
++    limit: 8_388_608,
++  } as const;
++
++  expect(compareNoticeRow(notice)).toEqual({
++    key: `${tabOf(ENTRY)}:right`,
++    text: "Compare 2, right: not pasted — a column holds up to 8 MiB",
++    closeLabel: "Close the notice about Compare 2, right",
++  });
++  expect(compareNoticeRow({ ...notice, limit: 4_194_304 }).text).toBe(
++    "Compare 2, right: not pasted — a column holds up to 4 MiB",
++  );
++});
++
++test("notices about one tab's column share a key whatever they say; other tabs and columns differ (catches a key per kind)", () => {
++  const where = { tab: tabOf(ENTRY), name: "Compare 1", column: "left" } as const;
++  const refused = compareNoticeRow({ kind: "refused", ...where, limit: 1 }).key;
++  const format = { kind: "format", ...where, language: "XML", message: "m", line: 1 } as const;
++
++  expect(compareNoticeRow(format).key).toBe(refused);
++  expect(compareNoticeRow({ ...format, column: "right" }).key).not.toBe(refused);
++  expect(compareNoticeRow({ ...format, tab: tabOf(tabs[1]) }).key).not.toBe(refused);
++});
++
++test("a tab's name comes from the list, a tab not listed is named by its id (catches a missing tab named by another's name)", () => {
++  expect(tabName(tabs, tabOf(tabs[1]))).toBe("Compare 2");
++  expect(tabName(tabs.slice(1), tabOf(ENTRY))).toBe(`Tab ${tabOf(ENTRY)}`);
++});
+diff --git a/frontend/src/ui/compareText.ts b/frontend/src/ui/compareText.ts
+new file mode 100644
+index 0000000..94053d7
+--- /dev/null
++++ b/frontend/src/ui/compareText.ts
+@@ -0,0 +1,48 @@
++import type { Column, TabEntry, TabId } from "../ipc";
++import type { NoticeRow } from "./noticeText";
++
++export type CompareNotice =
++  | {
++      readonly kind: "format";
++      readonly tab: TabId;
++      readonly name: string;
++      readonly column: Column;
++      readonly language: string;
++      readonly message: string;
++      readonly line: number;
++    }
++  | {
++      readonly kind: "refused";
++      readonly tab: TabId;
++      readonly name: string;
++      readonly column: Column;
++      readonly limit: number;
++    };
++
++const BYTES_PER_MIB = 1_048_576;
++
++function what(notice: CompareNotice): string {
++  switch (notice.kind) {
++    case "format":
++      return `not valid ${notice.language} (line ${notice.line}): ${notice.message}`;
++    case "refused":
++      return `not pasted — a column holds up to ${notice.limit / BYTES_PER_MIB} MiB`;
++    default: {
++      const _exhaustive: never = notice;
++      return _exhaustive;
++    }
++  }
++}
++
++export function compareNoticeRow(notice: CompareNotice): NoticeRow {
++  const where = `${notice.name}, ${notice.column}`;
++  return {
++    key: `${notice.tab}:${notice.column}`,
++    text: `${where}: ${what(notice)}`,
++    closeLabel: `Close the notice about ${where}`,
++  };
++}
++
++export function tabName(tabs: readonly TabEntry[], tab: TabId): string {
++  return tabs.find((entry) => entry.id === tab)?.name ?? `Tab ${tab}`;
++}
+diff --git a/frontend/src/ui/problem.test.ts b/frontend/src/ui/problem.test.ts
+new file mode 100644
+index 0000000..af12078
+--- /dev/null
++++ b/frontend/src/ui/problem.test.ts
+@@ -0,0 +1,49 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import { logProblem, type Problem } from "./problem";
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function logged(problem: Problem): string[] {
++  const lines: string[] = [];
++  vi.spyOn(console, "error").mockImplementation((line: string) => {
++    lines.push(line);
++  });
++  logProblem(problem);
++  return lines;
++}
++
++test.each([
++  [
++    { action: "tabs", cause: { kind: "UnknownTab", tab: 3 } },
++    '[error] store.tabs_failed {kind: "UnknownTab", tab: 3}',
++  ],
++  [
++    { action: "loadTab", name: "Compare 2", cause: { kind: "WorkerStopped" } },
++    '[error] store.loadTab_failed {name: "Compare 2", kind: "WorkerStopped"}',
++  ],
++  [
++    { action: "saveTab", name: "Compare 2", cause: { kind: "ColumnTooLarge", limit: 8 } },
++    '[error] store.saveTab_failed {name: "Compare 2", kind: "ColumnTooLarge", limit: 8}',
++  ],
++] satisfies [Problem, string][])(
++  "a failed compare call is logged with the tab's name and the cause: %o (catches a log line without its tab)",
++  (problem, line) => {
++    expect(logged(problem)).toEqual([line]);
++  },
++);
++
++test("a settings failure logs its cause, and only the file's path for key problems (catches a log line without the cause)", () => {
++  expect(
++    logged({ action: "settings", cause: { kind: "Unexpected", message: "ipc gone" } }),
++  ).toEqual(['[error] store.settings_failed {kind: "Unexpected", message: "ipc gone"}']);
++  vi.restoreAllMocks();
++  expect(
++    logged({
++      action: "settings",
++      cause: { kind: "Keys", path: "/home/me/settings.json", problems: [] },
++    }),
++  ).toEqual(['[error] store.settings_failed {kind: "Keys", path: "/home/me/settings.json"}']);
++});
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 67081fc..110154c 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -36,7 +36,13 @@ export type Problem =
+       readonly path: string;
+       readonly cause: ProblemCause;
+     }
+-  | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread };
++  | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
++  | { readonly action: "tabs"; readonly cause: ProblemCause }
++  | {
++      readonly action: "loadTab" | "saveTab";
++      readonly name: string;
++      readonly cause: ProblemCause;
++    };
+ 
+ export type Outcome<T> =
+   | { readonly ok: true; readonly value: T }
+@@ -59,10 +65,15 @@ export async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<
+   }
+ }
+ 
++function settingsFields(cause: ProblemCause | KeysUnread): Record<string, string | number> {
++  return cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : { ...cause };
++}
++
+ export function logProblem(problem: Problem): void {
+   const event = `store.${problem.action}_failed`;
+   switch (problem.action) {
+     case "list":
++    case "tabs":
+       log.error(event, { ...problem.cause });
+       return;
+     case "abort":
+@@ -78,12 +89,9 @@ export function logProblem(problem: Problem): void {
+         message: problem.message,
+       });
+       return;
+-    case "settings": {
+-      const { cause } = problem;
+-      const fields = cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : cause;
+-      log.error(event, { ...fields });
++    case "settings":
++      log.error(event, settingsFields(problem.cause));
+       return;
+-    }
+     case "open":
+     case "finish":
+     case "save":
+@@ -91,6 +99,10 @@ export function logProblem(problem: Problem): void {
+     case "reset":
+       log.error(event, { path: problem.path, ...problem.cause });
+       return;
++    case "loadTab":
++    case "saveTab":
++      log.error(event, { name: problem.name, ...problem.cause });
++      return;
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 56845da..2b84361 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -181,6 +181,20 @@ test("a stopped worker says to try again", () => {
+   );
+ });
+ 
++test.each([
++  [{ action: "tabs" }, "Could not update the tabs: boom"],
++  [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
++  [{ action: "saveTab", name: "Compare 2" }, "Could not save Compare 2: boom"],
++] as const)("a failed compare call %o says what failed, naming the tab", (failed, words) => {
++  expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
++});
++
++test("a save to a tab another call closed says the tab was closed", () => {
++  expect(
++    text({ action: "saveTab", name: "Compare 2", cause: { kind: "UnknownTab", tab: 2 } }),
++  ).toBe("Could not save Compare 2: that tab was closed.");
++});
++
+ test.each([
+   ["StopMovedOn", "The operation moved on; the list is being read again."],
+   ["GitRunning", "Git is still running; try again when it is done."],
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 68cc4a8..dfde769 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -50,6 +50,12 @@ function attempted(problem: CausedProblem): string {
+       const { verb, object } = continueAction(problem.operation);
+       return `Could not ${verb.toLowerCase()} ${object}`;
+     }
++    case "tabs":
++      return "Could not update the tabs";
++    case "loadTab":
++      return `Could not load ${problem.name}`;
++    case "saveTab":
++      return `Could not save ${problem.name}`;
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index 1607b95..5133afa 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -230,3 +230,17 @@ test("both Continue questions are about the stop and end with it; the exit quest
+   expect(endsWithStop({ kind: "rewords" })).toBe(true);
+   expect(endsWithStop({ kind: "exit", files: ["a.ts"] })).toBe(false);
+ });
++
++test("closing a tab that holds text asks with its name, Yes or No, and never ends with a stop (catches a question that does not name the tab)", () => {
++  const question = { kind: "closeTab", name: "Compare 2" } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Close Tab",
++    message: "Close Compare 2? Its text is lost.",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Yes",
++    cancel: "No",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index 3445187..7098586 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -21,7 +21,8 @@ export type Question =
+       readonly kind: "servers";
+       readonly found: readonly ServerSpec[];
+       readonly added: readonly ServerSpec[];
+-    };
++    }
++  | { readonly kind: "closeTab"; readonly name: string };
+ 
+ type QuestionList =
+   | { readonly kind: "none" }
+@@ -73,6 +74,7 @@ export function endsWithStop(question: Question): boolean {
+     case "exit":
+     case "clash":
+     case "servers":
++    case "closeTab":
+       return false;
+     default: {
+       const _exhaustive: never = question;
+@@ -131,6 +133,17 @@ const REWORDS_TEXT: QuestionText = {
+   cancel: "Cancel",
+ };
+ 
++function closeTabText(name: string): QuestionText {
++  return {
++    title: "Close Tab",
++    message: `Close ${name}? Its text is lost.`,
++    list: { kind: "none" },
++    note: null,
++    confirm: "Yes",
++    cancel: "No",
++  };
++}
++
+ export function questionText(question: Question, platform: string): QuestionText {
+   switch (question.kind) {
+     case "unprocessed":
+@@ -161,6 +174,8 @@ export function questionText(question: Question, platform: string): QuestionText
+       return continueUnsavedText(question.operation, question.files);
+     case "rewords":
+       return REWORDS_TEXT;
++    case "closeTab":
++      return closeTabText(question.name);
+     default: {
+       const _exhaustive: never = question;
+       return _exhaustive;
