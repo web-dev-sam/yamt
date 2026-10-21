@@ -18,9 +18,48 @@
       "frontend/src/ipc/fixture.test.ts"
     ]
   },
-  "GitOpsStopsCorrectness": {
+  "GitOpsRunCoreR2Correctness": {
     "agent": "correctness-reviewer",
-    "brief": "docs/slices/briefs/3.J-stops.md",
+    "brief": "docs/slices/briefs/3.J-run-core-rework-2.md",
     "owned": []
+  },
+  "GitOpsStopsR1": {
+    "agent": "web-impl",
+    "brief": "docs/slices/briefs/3.J-stops-rework-1.md",
+    "owned": [
+      "frontend/src/ui/store.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/listing.ts",
+      "frontend/src/ui/listing.test.ts",
+      "frontend/src/ui/aborting.ts",
+      "frontend/src/ui/aborting.test.ts",
+      "frontend/src/ui/stops.ts",
+      "frontend/src/ui/stops.test.ts",
+      "frontend/src/ui/operationText.ts",
+      "frontend/src/ui/operationText.test.ts",
+      "frontend/src/ui/question.ts",
+      "frontend/src/ui/question.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/noticeText.ts",
+      "frontend/src/ui/noticeText.test.ts",
+      "frontend/src/ui/diskChanges.ts",
+      "frontend/src/ui/diskChanges.test.ts",
+      "frontend/src/ui/saving.ts",
+      "frontend/src/ui/saving.test.ts",
+      "frontend/src/ui/toolbarButtons.ts",
+      "frontend/src/ui/toolbarButtons.test.ts",
+      "frontend/src/ui/asking.ts",
+      "frontend/src/ui/asking.test.ts",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/MergeToolbar.vue",
+      "frontend/src/ui/ToolbarMenu.vue",
+      "frontend/src/ui/NoticeBar.vue",
+      "frontend/src/ui/OperationBar.vue",
+      "frontend/src/ui/ServerStatus.vue",
+      "frontend/src/ui/AGENTS.md"
+    ]
   }
 }

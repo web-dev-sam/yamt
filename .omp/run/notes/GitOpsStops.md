@@ -99,3 +99,7 @@ Main should run `just check`, `just map-check` (after the doc lines above), and 
 ## Boundary review (GitOpsStopsBoundary): fail
 
 Blocks #1369/#1370; shoulds #1371–#1373, nits #1374/#1375. Mutants on changed lines: `.omp/run/notes/GitOpsStops-mutants.md`.
+
+## Correctness review (GitOpsStopsCorrectness): fail
+
+Blocks #1376–#1378; shoulds #1379–#1381, nit #1382; orchestrator #1383 → row 9. Dropped survivors: see the review's `checked` (unreachable defaults, logs, path-less notices).
