@@ -70,6 +70,14 @@ row keeps `git difftool`/file-pair diffs out of scope and admits one 2-way view:
   for free, the gear. None of the merge buttons (apply, reset, mark resolved, abort, continue, servers).
 - **File list key**: Ctrl/Cmd+B hides and shows the tab panel as it does the file list; its width is the file list's.
 
+## Defaults decided after the design (orchestrator, OR13; plan §2 #93; the owner may veto)
+
+- **A second `yamt --raw`** while one is open refuses with a message naming the open one (bringing that window to the
+  front would need a new dependency).
+- **A broken or newer stored-tabs file**: `yamt --raw` refuses to start and names the file; nothing is overwritten.
+- **Visited tabs stay loaded** until closed: switching is instant and keeps scroll and undo.
+- **Line endings**: pasted CRLF becomes LF in the columns, so CRLF against LF never shows as a difference.
+
 ## Facts for the design (sourced)
 
 - **Arguments**: `src-tauri/src/args.rs` — `Invocation::{Merge { repo }, Help, Version}`, `parse`, `USAGE`; an unknown
