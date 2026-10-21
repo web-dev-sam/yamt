@@ -1,0 +1,570 @@
+diff --git a/frontend/src/ui/compareNotices.ts b/frontend/src/ui/compareNotices.ts
+new file mode 100644
+index 0000000..f4dd4b4
+--- /dev/null
++++ b/frontend/src/ui/compareNotices.ts
+@@ -0,0 +1,58 @@
++import type { ShallowRef } from "vue";
++
++import type { Column, TabEntry, TabId } from "../ipc";
++import { compareNoticeRow, tabName, type CompareNotice } from "./compareText";
++import type { NoticeRow } from "./noticeText";
++
++export type ColumnFormatFailure = {
++  readonly column: Column;
++  readonly language: string;
++  readonly message: string;
++  readonly line: number;
++};
++
++export type ShownNotice = NoticeRow & { readonly notice: CompareNotice };
++
++type NoticeTarget = {
++  readonly notices: ShallowRef<readonly ShownNotice[]>;
++  readonly tabs: Readonly<ShallowRef<readonly TabEntry[]>>;
++  readonly columnLimit: Readonly<ShallowRef<number>>;
++};
++
++export type CompareNotices = {
++  /** The outcome of one Format on `tab`: called after every Format, with an empty list when it succeeded. */
++  reportFormat(tab: TabId, failures: readonly ColumnFormatFailure[]): void;
++  refused(tab: TabId, column: Column): void;
++  dismissNotice(key: string): void;
++};
++
++function withNotice(shown: readonly ShownNotice[], notice: CompareNotice): ShownNotice[] {
++  const row = { ...compareNoticeRow(notice), notice };
++  return [...shown.filter((each) => each.key !== row.key), row];
++}
++
++export function createCompareNotices(target: NoticeTarget): CompareNotices {
++  return {
++    reportFormat: (tab, failures) => {
++      const name = tabName(target.tabs.value, tab);
++      target.notices.value = failures.reduce(
++        (shown, failure) => withNotice(shown, { kind: "format", tab, name, ...failure }),
++        target.notices.value.filter(({ notice }) => notice.kind !== "format" || notice.tab !== tab),
++      );
++    },
++    refused: (tab, column) => {
++      const name = tabName(target.tabs.value, tab);
++      const limit = target.columnLimit.value;
++      target.notices.value = withNotice(target.notices.value, {
++        kind: "refused",
++        tab,
++        name,
++        column,
++        limit,
++      });
++    },
++    dismissNotice: (key) => {
++      target.notices.value = target.notices.value.filter((row) => row.key !== key);
++    },
++  };
++}
+diff --git a/frontend/src/ui/compareStore.test.ts b/frontend/src/ui/compareStore.test.ts
+index 8c083f1..5a86cbc 100644
+--- a/frontend/src/ui/compareStore.test.ts
++++ b/frontend/src/ui/compareStore.test.ts
+@@ -18,6 +18,7 @@ import {
+   type CompareStore,
+   type TrackedTab,
+ } from "./compareStore";
++import type { KeyPress } from "./fileListKey";
+ import { problemText } from "./problemText";
+ import { useSettingsStore } from "./settingsStore";
+ 
+@@ -406,6 +407,8 @@ test("a failed flush is shown and logged, never thrown (catches a close stopped
+ 
+   expect(store.problem.value).toEqual({
+     action: "saveTab",
++    tab,
++    column: "left",
+     name: "Compare 1",
+     cause: { kind: "Unexpected", message: "ipc gone" },
+   });
+@@ -481,12 +484,64 @@ test("saveColumn writes the column and returns the comparison, or null naming th
+   expect(await late).toBeNull();
+   expect(store.problem.value).toEqual({
+     action: "saveTab",
++    tab: second,
++    column: "right",
+     name: "Compare 2",
+     cause: { kind: "UnknownTab", tab: second },
+   });
+   expect(store.tabs.value.map((entry) => entry.id)).toEqual([first]);
+ });
+ 
++test("a successful save clears that column's save problem only (catches a stale 'Could not save' after the column saved)", async () => {
++  spyConsole();
++  let failing = true;
++  const store = await started((fixture) => ({
++    setColumn: (write) => (failing ? failed(GONE) : fixture.setColumn(write)),
++  }));
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++  const left = await sendOf(store, first, "a");
++  const right: ColumnSend = { ...left, column: "right" };
++
++  await store.saveColumn(first, left);
++  failing = false;
++  await store.saveColumn(first, right);
++  await store.saveColumn(second, await sendOf(store, second, "b"));
++  expect(store.problem.value).toMatchObject({ action: "saveTab", tab: first, column: "left" });
++
++  await store.saveColumn(first, left);
++  expect(store.problem.value).toBeNull();
++});
++
++test("a Format on a tab replaces its earlier Format notices, keeping refused edits and other tabs' (catches a stale 'not valid JSON' after a good Format)", async () => {
++  const store = await started();
++  await store.addTab();
++  const [first, second] = [tabAt(store, 0), tabAt(store, 1)];
++  const json: ColumnFormatFailure = {
++    column: "left",
++    language: "JSON",
++    message: "Expected ',' or '}'",
++    line: 3,
++  };
++
++  store.refused(first, "right");
++  store.reportFormat(second, [json]);
++  store.reportFormat(first, [json]);
++  store.reportFormat(first, []);
++
++  expect(store.notices.value.map((row) => row.text)).toEqual([
++    "Compare 1, right: not pasted — a column holds up to 8 MiB",
++    "Compare 2, left: not valid JSON (line 3): Expected ',' or '}'",
++  ]);
++
++  store.reportFormat(second, [{ ...json, column: "right" }]);
++
++  expect(store.notices.value.map((row) => row.text)).toEqual([
++    "Compare 1, right: not pasted — a column holds up to 8 MiB",
++    "Compare 2, right: not valid JSON (line 3): Expected ',' or '}'",
++  ]);
++});
++
+ test("a refused edit and a Format failure show their words; a second one for the column replaces the first (catches piled-up notices)", async () => {
+   const store = await started();
+   await store.addTab();
+@@ -569,3 +624,34 @@ test("a shown problem closes on request (catches a problem bar that cannot close
+ 
+   expect(store.problem.value).toBeNull();
+ });
++
++test("the bound key toggles the tab panel through the shared rule, never while a question waits (catches a compare window that cannot hide its tabs)", async () => {
++  const store = await started();
++  const tab = tabAt(store, 0);
++  await holdingText(store, tab);
++  let prevents = 0;
++  const ctrlB: KeyPress = {
++    key: "b",
++    code: "KeyB",
++    ctrlKey: true,
++    metaKey: false,
++    altKey: false,
++    shiftKey: false,
++    defaultPrevented: false,
++    preventDefault: () => {
++      prevents += 1;
++    },
++  };
++
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
++
++  const closing = store.closeTab(tab);
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
++  store.answer(false);
++  await closing;
++
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
++});
+diff --git a/frontend/src/ui/compareStore.ts b/frontend/src/ui/compareStore.ts
+index 6360898..f5d4c56 100644
+--- a/frontend/src/ui/compareStore.ts
++++ b/frontend/src/ui/compareStore.ts
+@@ -14,7 +14,9 @@ import type {
+   Theme,
+ } from "../ipc";
+ import { createAsking, type Asking } from "./asking";
+-import { compareNoticeRow, tabName, type CompareNotice } from "./compareText";
++import { createCompareNotices, type CompareNotices, type ShownNotice } from "./compareNotices";
++import { tabName } from "./compareText";
++import { fileListKey, type KeyPress } from "./fileListKey";
+ import type { NoticeRow } from "./noticeText";
+ import { attempt, report, type Problem } from "./problem";
+ import type { Question } from "./question";
+@@ -30,48 +32,42 @@ export type ColumnSend = {
+   readonly version: ColumnVersion;
+ };
+ 
+-export type ColumnFormatFailure = {
+-  readonly column: Column;
+-  readonly language: string;
+-  readonly message: string;
+-  readonly line: number;
+-};
++export type { ColumnFormatFailure } from "./compareNotices";
+ 
+ export type TrackedTab = {
+   readonly unsent: () => readonly ColumnSend[];
+   readonly holdsText: () => boolean;
+ };
+ 
+-export type CompareStore = SettingsStore & {
+-  readonly tabs: Readonly<ShallowRef<readonly TabEntry[]>>;
+-  readonly shown: Readonly<ShallowRef<TabId | null>>;
+-  readonly columnLimit: Readonly<ShallowRef<number>>;
+-  readonly detected: Readonly<ShallowRef<ReadonlyMap<TabId, string | null>>>;
+-  readonly problem: Readonly<ShallowRef<Problem | null>>;
+-  readonly notices: Readonly<ShallowRef<readonly NoticeRow[]>>;
+-  readonly question: ComputedRef<Question | null>;
+-  readonly screen: Readonly<ShallowRef<Screen>>;
+-  readonly fileListShown: ShallowRef<boolean>;
+-  readonly preferences: ComputedRef<Preferences>;
+-  startUp(): Promise<void>;
+-  loadSettings(): Promise<void>;
+-  addTab(): Promise<void>;
+-  showTab(tab: TabId): Promise<void>;
+-  closeTab(tab: TabId): Promise<void>;
+-  renameTab(tab: TabId, name: string): Promise<void>;
+-  setLanguage(tab: TabId, language: TabLanguage): Promise<void>;
+-  loadTab(tab: TabId): Promise<TabTexts | null>;
+-  saveColumn(tab: TabId, send: ColumnSend): Promise<Comparison | null>;
+-  track(tab: TabId, handle: TrackedTab): () => void;
+-  flushAll(): Promise<void>;
+-  reportFormat(tab: TabId, failures: readonly ColumnFormatFailure[]): void;
+-  refused(tab: TabId, column: Column): void;
+-  setDetected(tab: TabId, language: string | null): void;
+-  dismissNotice(key: string): void;
+-  dismissProblem(): void;
+-  answer(yes: boolean): void;
+-  dismissQuestion(): void;
+-};
++export type CompareStore = SettingsStore &
++  CompareNotices & {
++    readonly tabs: Readonly<ShallowRef<readonly TabEntry[]>>;
++    readonly shown: Readonly<ShallowRef<TabId | null>>;
++    readonly columnLimit: Readonly<ShallowRef<number>>;
++    readonly detected: Readonly<ShallowRef<ReadonlyMap<TabId, string | null>>>;
++    readonly problem: Readonly<ShallowRef<Problem | null>>;
++    readonly notices: Readonly<ShallowRef<readonly NoticeRow[]>>;
++    readonly question: ComputedRef<Question | null>;
++    readonly screen: Readonly<ShallowRef<Screen>>;
++    readonly fileListShown: ShallowRef<boolean>;
++    readonly preferences: ComputedRef<Preferences>;
++    startUp(): Promise<void>;
++    loadSettings(): Promise<void>;
++    addTab(): Promise<void>;
++    showTab(tab: TabId): Promise<void>;
++    closeTab(tab: TabId): Promise<void>;
++    renameTab(tab: TabId, name: string): Promise<void>;
++    setLanguage(tab: TabId, language: TabLanguage): Promise<void>;
++    loadTab(tab: TabId): Promise<TabTexts | null>;
++    saveColumn(tab: TabId, send: ColumnSend): Promise<Comparison | null>;
++    track(tab: TabId, handle: TrackedTab): () => void;
++    flushAll(): Promise<void>;
++    setDetected(tab: TabId, language: string | null): void;
++    fileListKey(event: KeyPress, platform: string): void;
++    dismissProblem(): void;
++    answer(yes: boolean): void;
++    dismissQuestion(): void;
++  };
+ 
+ type Refs = {
+   readonly tabs: ShallowRef<readonly TabEntry[]>;
+@@ -79,7 +75,7 @@ type Refs = {
+   readonly columnLimit: ShallowRef<number>;
+   readonly detected: ShallowRef<ReadonlyMap<TabId, string | null>>;
+   readonly problem: ShallowRef<Problem | null>;
+-  readonly notices: ShallowRef<readonly NoticeRow[]>;
++  readonly notices: ShallowRef<readonly ShownNotice[]>;
+   readonly screen: ShallowRef<Screen>;
+   readonly settings: ShallowRef<SettingsInUse>;
+   readonly fileListShown: ShallowRef<boolean>;
+@@ -101,7 +97,7 @@ function createRefs(startTheme: Theme): Refs {
+     columnLimit: shallowRef(0),
+     detected: shallowRef<ReadonlyMap<TabId, string | null>>(new Map()),
+     problem: shallowRef<Problem | null>(null),
+-    notices: shallowRef<readonly NoticeRow[]>([]),
++    notices: shallowRef<readonly ShownNotice[]>([]),
+     screen: shallowRef<Screen>({ kind: "files" }),
+     settings: shallowRef(startSettings(startTheme)),
+     fileListShown: shallowRef(true),
+@@ -126,12 +122,8 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
+     startUp: () => startUp(state, settings),
+     ...tabActions(state),
+     ...columnActions(state),
++    ...createCompareNotices(state),
+     ...chromeActions(state),
+-    dismissProblem: () => {
+-      refs.problem.value = null;
+-    },
+-    answer: state.asking.answer,
+-    dismissQuestion: state.asking.dismiss,
+     openSettings: () => {
+       refs.screen.value = { kind: "settings" };
+     },
+@@ -144,6 +136,27 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
+   return created;
+ }
+ 
++function chromeActions(
++  state: State,
++): Pick<
++  CompareStore,
++  "dismissProblem" | "setDetected" | "fileListKey" | "answer" | "dismissQuestion"
++> {
++  return {
++    dismissProblem: () => {
++      state.problem.value = null;
++    },
++    setDetected: (tab, language) => {
++      state.detected.value = new Map(state.detected.value).set(tab, language);
++    },
++    fileListKey: (event, platform) => {
++      fileListKey(state, event, platform);
++    },
++    answer: state.asking.answer,
++    dismissQuestion: state.asking.dismiss,
++  };
++}
++
+ function adoptList(state: State, { tabs, shown }: TabList): void {
+   state.tabs.value = tabs;
+   state.shown.value = shown;
+@@ -225,12 +238,17 @@ async function loadTab(state: State, tab: TabId): Promise<TabTexts | null> {
+ }
+ 
+ async function saveColumn(state: State, tab: TabId, send: ColumnSend): Promise<Comparison | null> {
++  const { column } = send;
+   const name = tabName(state.tabs.value, tab);
+   const outcome = await attempt(() => state.source.setColumn({ tab, ...send }));
+   if (!outcome.ok) {
+-    report(state, { action: "saveTab", name, cause: outcome.cause });
++    report(state, { action: "saveTab", tab, column, name, cause: outcome.cause });
+     return null;
+   }
++  const problem = state.problem.value;
++  if (problem?.action === "saveTab" && problem.tab === tab && problem.column === column) {
++    state.problem.value = null;
++  }
+   return outcome.value;
+ }
+ 
+@@ -257,34 +275,6 @@ function columnActions(
+   };
+ }
+ 
+-function showNotice(state: State, notice: CompareNotice): void {
+-  const row = compareNoticeRow(notice);
+-  state.notices.value = [...state.notices.value.filter((each) => each.key !== row.key), row];
+-}
+-
+-function chromeActions(
+-  state: State,
+-): Pick<CompareStore, "reportFormat" | "refused" | "setDetected" | "dismissNotice"> {
+-  return {
+-    reportFormat: (tab, failures) => {
+-      const name = tabName(state.tabs.value, tab);
+-      for (const failure of failures) {
+-        showNotice(state, { kind: "format", tab, name, ...failure });
+-      }
+-    },
+-    refused: (tab, column) => {
+-      const name = tabName(state.tabs.value, tab);
+-      showNotice(state, { kind: "refused", tab, name, column, limit: state.columnLimit.value });
+-    },
+-    setDetected: (tab, language) => {
+-      state.detected.value = new Map(state.detected.value).set(tab, language);
+-    },
+-    dismissNotice: (key) => {
+-      state.notices.value = state.notices.value.filter((row) => row.key !== key);
+-    },
+-  };
+-}
+-
+ export function useCompareStore(): CompareStore {
+   if (store === null) {
+     throw new Error("useCompareStore() called before createCompareStore()");
+diff --git a/frontend/src/ui/compareText.ts b/frontend/src/ui/compareText.ts
+index 94053d7..a24cd7a 100644
+--- a/frontend/src/ui/compareText.ts
++++ b/frontend/src/ui/compareText.ts
+@@ -21,12 +21,16 @@ export type CompareNotice =
+ 
+ const BYTES_PER_MIB = 1_048_576;
+ 
++export function columnLimitText(limit: number): string {
++  return `a column holds up to ${limit / BYTES_PER_MIB} MiB`;
++}
++
+ function what(notice: CompareNotice): string {
+   switch (notice.kind) {
+     case "format":
+       return `not valid ${notice.language} (line ${notice.line}): ${notice.message}`;
+     case "refused":
+-      return `not pasted — a column holds up to ${notice.limit / BYTES_PER_MIB} MiB`;
++      return `not pasted — ${columnLimitText(notice.limit)}`;
+     default: {
+       const _exhaustive: never = notice;
+       return _exhaustive;
+diff --git a/frontend/src/ui/problem.test.ts b/frontend/src/ui/problem.test.ts
+index af12078..720c5cc 100644
+--- a/frontend/src/ui/problem.test.ts
++++ b/frontend/src/ui/problem.test.ts
+@@ -1,7 +1,18 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
++import { createFixtureCompareSource, log, type TabId } from "../ipc";
+ import { logProblem, type Problem } from "./problem";
+ 
++const TAB = await openedTab();
++
++async function openedTab(): Promise<TabId> {
++  const reply = await createFixtureCompareSource(log, "", {}).openCompare();
++  if (!reply.ok) {
++    throw new Error("the fixture opened no tab");
++  }
++  return reply.value.list.shown;
++}
++
+ afterEach(() => {
+   vi.restoreAllMocks();
+ });
+@@ -25,7 +36,13 @@ test.each([
+     '[error] store.loadTab_failed {name: "Compare 2", kind: "WorkerStopped"}',
+   ],
+   [
+-    { action: "saveTab", name: "Compare 2", cause: { kind: "ColumnTooLarge", limit: 8 } },
++    {
++      action: "saveTab",
++      tab: TAB,
++      column: "right",
++      name: "Compare 2",
++      cause: { kind: "ColumnTooLarge", limit: 8 },
++    },
+     '[error] store.saveTab_failed {name: "Compare 2", kind: "ColumnTooLarge", limit: 8}',
+   ],
+ ] satisfies [Problem, string][])(
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 110154c..8e8957e 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -2,10 +2,12 @@ import type { ShallowRef } from "vue";
+ 
+ import {
+   log,
++  type Column,
+   type KeyProblem,
+   type OperationKind,
+   type SourceFailure,
+   type SourceResult,
++  type TabId,
+ } from "../ipc";
+ 
+ type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
+@@ -38,8 +40,11 @@ export type Problem =
+     }
+   | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
+   | { readonly action: "tabs"; readonly cause: ProblemCause }
++  | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
+   | {
+-      readonly action: "loadTab" | "saveTab";
++      readonly action: "saveTab";
++      readonly tab: TabId;
++      readonly column: Column;
+       readonly name: string;
+       readonly cause: ProblemCause;
+     };
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 2b84361..ba266eb 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -1,12 +1,28 @@
+ import { expect, test } from "vitest";
+ 
+-import { parseKey, type Key, type SourceFailure } from "../ipc";
++import {
++  createFixtureCompareSource,
++  log,
++  parseKey,
++  type Key,
++  type SourceFailure,
++  type TabId,
++} from "../ipc";
+ import type { Problem, ProblemCause } from "./problem";
+ import { problemText } from "./problemText";
+ 
+ const PATH = "src/a.ts";
+ const SETTINGS = "/home/me/.config/yamt/settings.json";
+ const LINUX = "Linux x86_64";
++const TAB = await openedTab();
++
++async function openedTab(): Promise<TabId> {
++  const reply = await createFixtureCompareSource(log, "", {}).openCompare();
++  if (!reply.ok) {
++    throw new Error("the fixture opened no tab");
++  }
++  return reply.value.list.shown;
++}
+ 
+ function onFinish(cause: ProblemCause): Problem {
+   return { action: "finish", path: PATH, cause };
+@@ -184,14 +200,23 @@ test("a stopped worker says to try again", () => {
+ test.each([
+   [{ action: "tabs" }, "Could not update the tabs: boom"],
+   [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
+-  [{ action: "saveTab", name: "Compare 2" }, "Could not save Compare 2: boom"],
++  [
++    { action: "saveTab", tab: TAB, column: "left", name: "Compare 2" },
++    "Could not save Compare 2: boom",
++  ],
+ ] as const)("a failed compare call %o says what failed, naming the tab", (failed, words) => {
+   expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
+ });
+ 
+ test("a save to a tab another call closed says the tab was closed", () => {
+   expect(
+-    text({ action: "saveTab", name: "Compare 2", cause: { kind: "UnknownTab", tab: 2 } }),
++    text({
++      action: "saveTab",
++      tab: TAB,
++      column: "right",
++      name: "Compare 2",
++      cause: { kind: "UnknownTab", tab: 2 },
++    }),
+   ).toBe("Could not save Compare 2: that tab was closed.");
+ });
+ 
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index dfde769..8f5b4c4 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -1,4 +1,5 @@
+ import { keyLabel, type KeyProblem } from "../ipc";
++import { columnLimitText } from "./compareText";
+ import { ACTION_NAMES } from "./keyText";
+ import { continueAction, operationName } from "./operationText";
+ import type { Problem, ProblemCause } from "./problem";
+@@ -8,7 +9,6 @@ type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
+ const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
+-const BYTES_PER_MIB = 1_048_576;
+ 
+ const OPERATION_STATE_WORDS: Readonly<
+   Record<"StopMovedOn" | "GitRunning" | "MergeFinished" | "NoOperation", string>
+@@ -144,7 +144,7 @@ function causedText(problem: CausedProblem, platform: string): string {
+     case "Keys":
+       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
+     case "ColumnTooLarge":
+-      return `${attempted(problem)}: a column holds up to ${cause.limit / BYTES_PER_MIB} MiB.`;
++      return `${attempted(problem)}: ${columnLimitText(cause.limit)}.`;
+     default: {
+       const _exhaustive: never = cause;
+       return _exhaustive;

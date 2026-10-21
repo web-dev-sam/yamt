@@ -1,0 +1,1653 @@
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index d397fd4..1567fd0 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -1,4 +1,4 @@
+-Owner skills: `skill://cm6-rules`, `skill://ts-conventions`. Framework-free: no `vue`, no `@vueuse`, no `@tauri-apps` (oxlint). Public surface is `index.ts` (`MergeController`); everything else in `internal/`. Layout tests run in the Vitest browser project (WebKit); the browser tests mount the three panes and two strips through `paneHarness.ts` (the app's grid inside `will-change: transform` wrappers), imported by tests only.
++Owner skills: `skill://cm6-rules`, `skill://ts-conventions`. Framework-free: no `vue`, no `@vueuse`, no `@tauri-apps` (oxlint). Public surface is `index.ts` (`MergeController`, and `CompareController` from `compare.ts`); everything else in `internal/`. Layout tests run in the Vitest browser project (WebKit); the browser tests mount the three panes and two strips through `paneHarness.ts` (the app's grid inside `will-change: transform` wrappers), imported by tests only.
+ 
+ An editable Result is one document of `lsp/` (plan §2 #67, #70): `internal/serverDoc.ts` opens it on `LanguageServers`, says changed on each edit and closes it on destroy; `problems.ts` keeps the versions handed out and shows each server's problems through `@codemirror/lint` in the middle pane only (tooltips in `document.body`), relying on `lsp/` never to hand it an answer older than the last one shown, and leaves the diagnostics untouched when an answer changes nothing shown (an open tooltip stays); `format.ts` splits a formatter's result on any line break and applies it as yamt's own line diff (`lineDiff.ts`), each old line paired with a new one and changed only in the characters that differ, extra lines inserted or deleted whole, in one `yamt.format` transaction.
+ 
+@@ -9,3 +9,5 @@ Removal tooltip (plan §2 #73): each side pane's removal bar (`words.ts` `Remova
+ Minimap (plan §2 #81): `Frame` owns `internal/minimap.ts` (`Minimap`), one `.minimap` box (a `<canvas>` and a `.minimap-slider`) appended to the right pane's `view.dom`, outside `scrollDOM`/`contentDOM`, so no pane handler sees its presses; `display: none` while `MergeOptions.minimap`/`showMinimap` say no, and then `changed` and `paint` return at once and every tile is dropped. It paints in `Frame`'s frame after `ScrollSync.sync`, from the Result's `scrollTop` and `minimapLayout.ts` (VS Code's `MinimapLayout.create`; rows by `rowOfTop`/`topOfRow`): the slider moves on every frame, the canvas is redrawn only when its window, padding rows, size, tiles or edges changed. Code rows come from `minimapTiles.ts` (`MinimapTiles`: 128 Result rows per detached canvas through `ImageData`, `minimapPixels.ts` glyphs, `minimapRows.ts` syntax colours and theme tokens read once per show or theme change; dropped by `staleTiles`), each row looked up at its middle; a collapsed run's row is a wave line. Edges (`minimapMarks.ts`): problems left, waiting changes right, cached until rows move or diagnostics arrive. `minimapPointer.ts`: `mousedown` is prevented and stopped (focus and selection stay), a press puts its row's top in the Result's middle, the slider drags with pointer capture, a wheel scrolls the Result; each ends in `ScrollSync.follow("center")`.
+ 
+ Far scrolls (#1240, plan §2 #82): every pane carries `exactScroll` (`internal/exactScroll.ts`, beside `cutOnce.ts`, the other WebKitGTK quirk). A scroll event whose position shows none of CodeMirror's rendered lines (the pure `farTop`, node-tested) is turned into a CodeMirror scroll request (`placeTop` + `EditorView.scrollIntoView`; the `scrollHandler` writes that exact `scrollTop`), so CodeMirror renders the target before its measure; without it WebKitGTK pulls such a jump back while the viewport is swapped inside CodeMirror's scroll handler (a minimap press, a follower write, a script). Code that scrolls a pane keeps writing `scrollTop`.
++
++Compare (plan §2 #93, #96, #98): `compare.ts` (`CompareController`, re-exported by `index.ts`) is the second public class, two `"center"` panes built by `internal/compareViews.ts` (each with `differenceField`, `columnLimit`, the removal tooltip, `everyPane`), never a flag through `MergeController`'s parts. `compareFrame.ts` (`CompareFrame`) is its once-per-frame paint: find space over both columns, rows and anchors cached until `differenceField` or the measured heights change (never per scroll, plan §2 #51), `ScrollSync<Column>` over `COLUMNS`, then `compareStrip.ts` (keyed `chunk-<tone> chunk-band` paths, `mousedown` prevented). `compareFormat.ts` formats each column alone as one whole-document `yamt.format` replace (`isolateHistory`: one undo step, never joined with typing); `compareLanguage.ts` keeps the tab's language and Auto's finding (`detected` only when it changed) and puts it into both `languageCompartment`s. `ScrollSync`, `syncFindSpace` and `loadLanguage` take any list of panes; the merge `Frame` passes `PANES` and its three views.
+diff --git a/frontend/src/editor/compare.browser.test.ts b/frontend/src/editor/compare.browser.test.ts
+new file mode 100644
+index 0000000..88e00b6
+--- /dev/null
++++ b/frontend/src/editor/compare.browser.test.ts
+@@ -0,0 +1,311 @@
++import "../style.css";
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { page, userEvent } from "vitest/browser";
++
++import { createFixtureCompareSource, DEFAULT_KEYS, log, type TabTexts } from "../ipc";
++import { CompareController, type CompareEvents, type CompareHosts } from "./index";
++import type { CompareOptions } from "./index";
++import { found } from "./paneHarness";
++
++const WIDTH = 1200;
++const HEIGHT = 700;
++const PANE_PX = 500;
++const WAIT_MS = 3000;
++const LINES = 80;
++const DELETED = { start: 30, len: 5 };
++const INSERTED_AT = 50;
++const INSERTED = 12;
++const SHIFT = INSERTED - DELETED.len;
++const MIDDLE_LINE = 60;
++const BELOW_DIFFERENCES = /^const line(5[7-9]|[67]\d) = \d+;$/;
++const HALF = 0.5;
++const SCREENSHOTS = "/tmp/yamt-compare";
++const MOUNTED = "data-compare-probe";
++const OPTIONS: CompareOptions = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  language: { kind: "auto" },
++  columnLimit: 8_388_608,
++};
++const EVENTS: CompareEvents = { settled: () => {}, detected: () => {}, refused: () => {} };
++
++function common(line: number): string {
++  return `const line${line} = ${line};`;
++}
++
++function leftText(): string {
++  const lines = Array.from({ length: LINES }, (_, line) => {
++    if (line === 10) {
++      return "const value = old(a, b);";
++    }
++    if (line === 20) {
++      return "call(x);";
++    }
++    return line >= DELETED.start && line < DELETED.start + DELETED.len
++      ? `gone ${line}`
++      : common(line);
++  });
++  return [...lines, ""].join("\n");
++}
++
++function rightText(): string {
++  const lines: string[] = [];
++  for (let line = 0; line < LINES; line += 1) {
++    if (line === INSERTED_AT) {
++      lines.push(...Array.from({ length: INSERTED }, (_, added) => `added ${added}`));
++    }
++    if (line === 10) {
++      lines.push("const value = new(a);");
++    } else if (line === 20) {
++      lines.push("call(x, y);");
++    } else if (line < DELETED.start || line >= DELETED.start + DELETED.len) {
++      lines.push(common(line));
++    }
++  }
++  return [...lines, ""].join("\n");
++}
++
++const NO_WORDS = { changed: [], removals: [] };
++const CASE = {
++  left: leftText(),
++  right: rightText(),
++  differences: [
++    {
++      left: { start: 10, len: 1 },
++      right: { start: 10, len: 1 },
++      words: {
++        left: {
++          changed: [
++            { line: 10, start: 14, len: 3 },
++            { line: 10, start: 19, len: 3 },
++          ],
++          removals: [],
++        },
++        right: {
++          changed: [{ line: 10, start: 14, len: 3 }],
++          removals: [{ at: { line: 10, column: 19 }, text: ", b" }],
++        },
++      },
++    },
++    {
++      left: { start: 20, len: 1 },
++      right: { start: 20, len: 1 },
++      words: {
++        left: { changed: [], removals: [{ at: { line: 20, column: 6 }, text: ", y" }] },
++        right: { changed: [{ line: 20, start: 6, len: 3 }], removals: [] },
++      },
++    },
++    {
++      left: DELETED,
++      right: { start: DELETED.start, len: 0 },
++      words: { left: NO_WORDS, right: NO_WORDS },
++    },
++    {
++      left: { start: INSERTED_AT, len: 0 },
++      right: { start: INSERTED_AT - DELETED.len, len: INSERTED },
++      words: { left: NO_WORDS, right: NO_WORDS },
++    },
++  ],
++};
++
++async function texts(): Promise<TabTexts> {
++  const source = createFixtureCompareSource(log, "?raw=probe", { "probe.json": CASE });
++  const start = await source.openCompare();
++  if (!start.ok) {
++    throw new Error("the fixture compare did not open");
++  }
++  const tab = await source.loadTab(start.value.list.shown);
++  if (!tab.ok) {
++    throw new Error("the fixture compare lost its tab");
++  }
++  return tab.value;
++}
++
++function box(style: string): HTMLDivElement {
++  const node = document.createElement("div");
++  node.setAttribute("style", style);
++  return node;
++}
++
++function mount(): CompareHosts {
++  const wrapper = box(
++    `position: fixed; inset: 40px 0 auto 0; height: ${PANE_PX}px; display: grid; grid-template-columns: 1fr 40px 1fr; will-change: transform`,
++  );
++  wrapper.setAttribute(MOUNTED, "");
++  const pane = `min-width: 0; min-height: 0; height: ${PANE_PX}px`;
++  const strip = document.createElementNS("http://www.w3.org/2000/svg", "svg");
++  strip.setAttribute("style", "display: block; width: 100%; height: 100%");
++  const layer = box("min-height: 0; will-change: transform");
++  layer.append(strip);
++  const hosts = { left: box(pane), right: box(pane), strip };
++  wrapper.append(hosts.left, layer, hosts.right);
++  document.body.append(wrapper);
++  return hosts;
++}
++
++function scroller(host: HTMLElement): HTMLElement {
++  return found(host.querySelector<HTMLElement>(".cm-scroller"), "scroller");
++}
++
++function middleLineText(host: HTMLElement): string | null {
++  const area = scroller(host).getBoundingClientRect();
++  const hit = document.elementFromPoint(
++    area.left + area.width * HALF,
++    area.top + area.height * HALF,
++  );
++  return hit?.closest(".cm-line")?.textContent ?? null;
++}
++
++const controllers: CompareController[] = [];
++
++async function opened(): Promise<{ hosts: CompareHosts; controller: CompareController }> {
++  const hosts = mount();
++  const controller = new CompareController(await texts(), hosts, OPTIONS, EVENTS);
++  controllers.push(controller);
++  return { hosts, controller };
++}
++
++function cursorLine(): string | null {
++  const node = document.getSelection()?.focusNode ?? null;
++  const element = node instanceof Element ? node : (node?.parentElement ?? null);
++  return element?.closest(".cm-line")?.textContent ?? null;
++}
++
++async function stripBands(hosts: CompareHosts): Promise<Element[]> {
++  return vi.waitFor(
++    () => {
++      const shown = [...hosts.strip.querySelectorAll("path.chunk-band")];
++      expect(shown).toHaveLength(2);
++      return shown;
++    },
++    { timeout: WAIT_MS },
++  );
++}
++
++beforeEach(async () => {
++  await page.viewport(WIDTH, HEIGHT);
++});
++
++afterEach(() => {
++  controllers.splice(0).forEach((controller) => controller.destroy());
++  document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
++  delete document.documentElement.dataset["theme"];
++});
++
++test("the strip holds one band per difference on screen, in each difference's tone", async () => {
++  const { hosts } = await opened();
++  const bands = await stripBands(hosts);
++
++  expect(bands.map((band) => band.getAttribute("class"))).toEqual([
++    "chunk-modified chunk-band",
++    "chunk-modified chunk-band",
++  ]);
++  expect(bands.every((band) => (band.getAttribute("d") ?? "") !== "")).toBe(true);
++});
++
++test("both columns tint their lines, mark their words and draw removal bars", async () => {
++  const { hosts } = await opened();
++
++  for (const host of [hosts.left, hosts.right]) {
++    expect(host.querySelectorAll(".cm-line.chunk-band.chunk-modified")).toHaveLength(2);
++    expect(host.querySelectorAll(".chunk-word-modified").length).toBeGreaterThan(0);
++    expect(host.querySelectorAll(".chunk-removal")).toHaveLength(1);
++  }
++  expect(hosts.left.querySelector(".chunk-word-modified")?.textContent).toBe("old");
++});
++
++test("hovering a removal bar shows the text the column lacks", async () => {
++  const { hosts } = await opened();
++  const bar = found(hosts.right.querySelector<HTMLElement>(".chunk-removal"), "bar");
++
++  await userEvent.hover(bar);
++  const tooltip = await vi.waitFor(
++    () => found(document.querySelector<HTMLElement>(".removal-tooltip"), "tooltip"),
++    { timeout: WAIT_MS },
++  );
++
++  expect(tooltip.textContent).toBe(", b");
++});
++
++test("scrolling the left column moves the right one through the differences' anchors", async () => {
++  const { hosts } = await opened();
++  await stripBands(hosts);
++  const left = scroller(hosts.left);
++  const right = scroller(hosts.right);
++  const line = found(hosts.left.querySelector(".cm-line"), "line").getBoundingClientRect();
++
++  left.scrollTop = (MIDDLE_LINE + HALF) * line.height - PANE_PX * HALF;
++  const shown = await vi.waitFor(
++    () => {
++      const text = middleLineText(hosts.left);
++      expect(text).toMatch(BELOW_DIFFERENCES);
++      expect(middleLineText(hosts.right)).toBe(text);
++      return text;
++    },
++    { timeout: WAIT_MS },
++  );
++
++  expect(shown).toBe(common(MIDDLE_LINE));
++  expect(right.scrollTop - left.scrollTop).toBeCloseTo(SHIFT * line.height, 0);
++});
++
++test("the toolbar arrows step the left column's cursor to each difference, no wrap", async () => {
++  const { hosts, controller } = await opened();
++
++  controller.moveToChange("down");
++  const first = cursorLine();
++  controller.moveToChange("down");
++  controller.moveToChange("down");
++  const third = cursorLine();
++  controller.moveToChange("down");
++  controller.moveToChange("down");
++  const past = cursorLine();
++  controller.moveToChange("up");
++  const back = cursorLine();
++
++  expect(hosts.left.contains(document.activeElement)).toBe(true);
++  expect(first).toBe("const value = old(a, b);");
++  expect(third).toBe(`gone ${DELETED.start}`);
++  expect(past).toBe(common(INSERTED_AT));
++  expect(back).toBe(`gone ${DELETED.start}`);
++});
++
++test("the find bar in one column gives both columns the same space above line 1", async () => {
++  const { hosts } = await opened();
++  const content = found(hosts.left.querySelector<HTMLElement>(".cm-content"), "left content");
++
++  await userEvent.click(content);
++  await userEvent.keyboard("{Control>}f{/Control}");
++  await vi.waitFor(
++    () => {
++      expect(hosts.left.querySelector(".find-bar")).not.toBeNull();
++      expect(hosts.right.querySelector(".cm-editor.find-space")).not.toBeNull();
++      expect(hosts.left.querySelector(".cm-editor.find-space")).not.toBeNull();
++    },
++    { timeout: WAIT_MS },
++  );
++  const rightContent = found(hosts.right.querySelector<HTMLElement>(".cm-content"), "right");
++
++  expect(hosts.right.querySelector(".find-bar")).toBeNull();
++  expect(getComputedStyle(rightContent).paddingTop).toBe(getComputedStyle(content).paddingTop);
++});
++
++test("the columns and the strip follow the theme, dark then light", async () => {
++  const { hosts, controller } = await opened();
++  const [band] = await stripBands(hosts);
++  const dark = [
++    getComputedStyle(scroller(hosts.left)).backgroundColor,
++    getComputedStyle(found(band, "band")).fill,
++  ];
++  await page.screenshot({ path: `${SCREENSHOTS}/compare-dark.png` });
++
++  document.documentElement.dataset["theme"] = "light";
++  controller.setPreferences({ theme: "light", keys: DEFAULT_KEYS });
++  const light = [
++    getComputedStyle(scroller(hosts.left)).backgroundColor,
++    getComputedStyle(found(band, "band")).fill,
++  ];
++  await page.screenshot({ path: `${SCREENSHOTS}/compare-light.png` });
++
++  expect(light[0]).not.toBe(dark[0]);
++  expect(light[1]).not.toBe(dark[1]);
++});
+diff --git a/frontend/src/editor/compare.ts b/frontend/src/editor/compare.ts
+new file mode 100644
+index 0000000..9ce9b8e
+--- /dev/null
++++ b/frontend/src/editor/compare.ts
+@@ -0,0 +1,173 @@
++import { redo, undo } from "@codemirror/commands";
++import type { ViewUpdate } from "@codemirror/view";
++
++import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
++import { showDifferences } from "./internal/compareFields";
++import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
++import { CompareFrame } from "./internal/compareFrame";
++import { CompareLanguage } from "./internal/compareLanguage";
++import { columnMarks } from "./internal/compareMarks";
++import { Settle } from "./internal/compareSettle";
++import { CompareStrip } from "./internal/compareStrip";
++import {
++  COLUMNS,
++  createColumnViews,
++  keyboardColumn,
++  revealDifference,
++} from "./internal/compareViews";
++import type { ColumnViews } from "./internal/compareViews";
++import { historyCommand } from "./internal/historyKey";
++import type { Direction } from "./internal/navigation";
++import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
++
++export type { ColumnFormat, FormatReport } from "./internal/compareFormat";
++export { FORMAT_LANGUAGES } from "./internal/compareFormat";
++export { languageNames } from "./internal/language";
++
++export type CompareHosts = {
++  readonly left: HTMLElement;
++  readonly right: HTMLElement;
++  readonly strip: SVGSVGElement;
++};
++
++export type CompareOptions = {
++  readonly preferences: Preferences;
++  readonly language: TabLanguage;
++  readonly columnLimit: number;
++};
++
++export type ColumnText = {
++  readonly column: Column;
++  readonly text: string;
++  readonly version: ColumnVersion;
++};
++
++export type CompareEvents = {
++  readonly settled: (columns: readonly ColumnText[]) => void;
++  readonly detected: (language: string | null) => void;
++  readonly refused: (column: Column) => void;
++};
++
++const NOTHING_FORMATTED: FormatReport = {
++  left: { kind: "unchanged" },
++  right: { kind: "unchanged" },
++};
++
++export class CompareController {
++  readonly #events: CompareEvents;
++  readonly #settle: Settle;
++  readonly #views: ColumnViews;
++  readonly #strip: CompareStrip;
++  readonly #frame: CompareFrame;
++  readonly #language: CompareLanguage;
++  #settings: PaneSettings;
++
++  constructor(
++    texts: TabTexts,
++    hosts: CompareHosts,
++    options: CompareOptions,
++    events: CompareEvents,
++  ) {
++    this.#events = events;
++    this.#settings = { preferences: options.preferences, platform: navigator.platform };
++    this.#settle = new Settle(texts.comparison.versions, (columns) => {
++      this.#settled(columns);
++    });
++    this.#views = createColumnViews(texts, hosts, {
++      settings: this.#settings,
++      columnLimit: options.columnLimit,
++      refused: events.refused,
++      updated: (column, update) => {
++        this.#updated(column, update);
++      },
++    });
++    this.#strip = new CompareStrip(hosts.strip);
++    this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
++    this.showComparison(texts.comparison);
++    this.#language = new CompareLanguage(options.language, this.#views, events.detected);
++    this.#frame.request();
++  }
++
++  #updated(column: Column, update: ViewUpdate): void {
++    if (update.docChanged) {
++      this.#settle.edited(column);
++    }
++    this.#frame.changed(update);
++  }
++
++  #settled(columns: readonly Column[]): void {
++    this.#events.settled(columns.map((column) => this.#columnText(column)));
++    this.#language.settled();
++  }
++
++  #columnText(column: Column): ColumnText {
++    const text = this.#views[column].state.sliceDoc();
++    return { column, text, version: this.#settle.versions()[column] };
++  }
++
++  showComparison(comparison: Comparison): boolean {
++    if (!this.#settle.accepts(comparison.versions)) {
++      return false;
++    }
++    for (const column of COLUMNS) {
++      const view = this.#views[column];
++      const marks = columnMarks(view.state.doc, comparison.differences, column);
++      view.dispatch({ effects: showDifferences.of(marks) });
++    }
++    return true;
++  }
++
++  setLanguage(language: TabLanguage): void {
++    this.#language.set(language);
++  }
++
++  setPreferences(preferences: Preferences): void {
++    this.#settings = { ...this.#settings, preferences };
++    const effects = preferenceEffects("center", this.#settings);
++    for (const column of COLUMNS) {
++      this.#views[column].dispatch({ effects });
++    }
++  }
++
++  formatLanguage(): FormatLanguage | null {
++    return this.#language.formatLanguage();
++  }
++
++  format(): FormatReport {
++    const language = this.formatLanguage();
++    return language === null ? NOTHING_FORMATTED : formatColumns(this.#views, language);
++  }
++
++  moveToChange(direction: Direction): void {
++    revealDifference(this.#views[keyboardColumn(this.#views) ?? "left"], direction);
++  }
++
++  historyKey(event: KeyboardEvent): boolean {
++    const column = keyboardColumn(this.#views);
++    const { preferences, platform } = this.#settings;
++    const command = column === null ? null : historyCommand(event, platform, preferences.keys);
++    if (column === null || command === null) {
++      return false;
++    }
++    event.preventDefault();
++    return command === "undo" ? undo(this.#views[column]) : redo(this.#views[column]);
++  }
++
++  holdsText(): boolean {
++    return COLUMNS.some((column) => this.#views[column].state.doc.length > 0);
++  }
++
++  settleNow(): readonly ColumnText[] {
++    return this.#settle.settleNow().map((column) => this.#columnText(column));
++  }
++
++  destroy(): void {
++    this.#settle.destroy();
++    this.#language.destroy();
++    this.#frame.destroy();
++    for (const column of COLUMNS) {
++      this.#views[column].destroy();
++    }
++    this.#strip.destroy();
++  }
++}
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 4c3f7e7..460bba7 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -31,6 +31,9 @@ import type { IconPress } from "./internal/stripIcons";
+ import { Strips } from "./internal/strips";
+ import { visibleLines } from "./internal/viewport";
+ 
++export { CompareController, FORMAT_LANGUAGES, languageNames } from "./compare";
++export type { ColumnFormat, ColumnText, CompareEvents, FormatReport } from "./compare";
++export type { CompareHosts, CompareOptions } from "./compare";
+ export type { Direction } from "./internal/navigation";
+ export type { FormatOutcome } from "./internal/format";
+ export type { Preferences } from "./internal/pane";
+@@ -97,7 +100,8 @@ export class MergeController {
+     });
+     this.#frame.request();
+     if (description !== null && description.support === undefined) {
+-      void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
++      const { left, center, right } = this.#views;
++      void loadLanguage(description, data.path, [left, center, right], () => this.#destroyed);
+     }
+     const result = { path: data.path, readOnly: this.#readOnly };
+     this.#server = openResult(options.servers, result, () => this.#views, this.#field);
+diff --git a/frontend/src/editor/internal/compareFormat.test.ts b/frontend/src/editor/internal/compareFormat.test.ts
+new file mode 100644
+index 0000000..c7f802e
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFormat.test.ts
+@@ -0,0 +1,71 @@
++import { history, undo, undoDepth } from "@codemirror/commands";
++import { EditorState, type TransactionSpec } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { formatColumns, type FormatTarget } from "./compareFormat";
++
++type Held = FormatTarget & { state: EditorState };
++
++function column(text: string): Held {
++  const held: Held = {
++    state: EditorState.create({ doc: text, extensions: history() }),
++    dispatch(spec: TransactionSpec) {
++      held.state = held.state.update(spec).state;
++    },
++  };
++  return held;
++}
++
++function undone(held: Held): void {
++  undo({
++    state: held.state,
++    dispatch: (tr) => {
++      held.state = tr.state;
++    },
++  });
++}
++
++const MINIFIED = '{"b":1,"a":[1,2],"c":{"d":null}}\n';
++const PRETTY = '{\n  "b": 1,\n  "a": [\n    1,\n    2\n  ],\n  "c": {\n    "d": null\n  }\n}\n';
++
++test("one undo restores a formatted column, cursor at the start", () => {
++  const left = column(MINIFIED);
++  const right = column(MINIFIED);
++
++  const report = formatColumns({ left, right }, "JSON");
++
++  expect(report).toEqual({ left: { kind: "formatted" }, right: { kind: "formatted" } });
++  expect(left.state.sliceDoc()).toBe(PRETTY);
++  expect(left.state.selection.main.head).toBe(0);
++  expect(undoDepth(left.state)).toBe(1);
++  undone(left);
++  expect(left.state.sliceDoc()).toBe(MINIFIED);
++});
++
++test("a failing column is left alone and named with its line while the other is formatted", () => {
++  const broken = '{\n  "a": 1\n  "b": 2\n}\n';
++  const left = column(broken);
++  const right = column(MINIFIED);
++
++  const report = formatColumns({ left, right }, "JSON");
++
++  expect(report.left).toMatchObject({ kind: "failed", line: 3 });
++  expect(report.right).toEqual({ kind: "formatted" });
++  expect(left.state.sliceDoc()).toBe(broken);
++  expect(undoDepth(left.state)).toBe(0);
++  expect(right.state.sliceDoc()).toBe(PRETTY);
++});
++
++test("an already formatted column reports unchanged and adds no undo step", () => {
++  const left = column(PRETTY);
++  const right = column("<a><b>x</b></a>\n");
++
++  const json = formatColumns({ left, right: column(PRETTY) }, "JSON");
++  const xml = formatColumns({ left: column("<a>\n  <b>x</b>\n</a>\n"), right }, "XML");
++
++  expect(json.left).toEqual({ kind: "unchanged" });
++  expect(undoDepth(left.state)).toBe(0);
++  expect(xml.right).toEqual({ kind: "formatted" });
++  expect(right.state.sliceDoc()).toBe("<a>\n  <b>x</b>\n</a>\n");
++  expect(xml.left).toEqual({ kind: "unchanged" });
++});
+diff --git a/frontend/src/editor/internal/compareFormat.ts b/frontend/src/editor/internal/compareFormat.ts
+new file mode 100644
+index 0000000..ca06d38
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFormat.ts
+@@ -0,0 +1,52 @@
++import { isolateHistory } from "@codemirror/commands";
++import { EditorSelection, type EditorState, type TransactionSpec } from "@codemirror/state";
++
++import type { Column } from "../../ipc";
++import { formatJson } from "./formatJson";
++import type { FormatResult } from "./formatResult";
++import { formatXml } from "./formatXml";
++
++export const FORMAT_LANGUAGES = ["JSON", "XML"] as const;
++export type FormatLanguage = (typeof FORMAT_LANGUAGES)[number];
++
++export type ColumnFormat =
++  | { readonly kind: "formatted" | "unchanged" }
++  | { readonly kind: "failed"; readonly message: string; readonly line: number };
++export type FormatReport = Readonly<Record<Column, ColumnFormat>>;
++
++export type FormatTarget = {
++  readonly state: EditorState;
++  dispatch(spec: TransactionSpec): void;
++};
++
++const FORMATTERS: Readonly<Record<FormatLanguage, (text: string) => FormatResult>> = {
++  JSON: formatJson,
++  XML: formatXml,
++};
++
++export function isFormatLanguage(name: string): name is FormatLanguage {
++  return Object.hasOwn(FORMATTERS, name);
++}
++
++function formatColumn(target: FormatTarget, language: FormatLanguage): ColumnFormat {
++  const result = FORMATTERS[language](target.state.sliceDoc());
++  if (result.kind === "formatted") {
++    target.dispatch({
++      changes: { from: 0, to: target.state.doc.length, insert: result.text },
++      selection: EditorSelection.cursor(0),
++      userEvent: "yamt.format",
++      annotations: isolateHistory.of("full"),
++    });
++    return { kind: "formatted" };
++  }
++  return result;
++}
++
++export function formatColumns(
++  targets: Readonly<Record<Column, FormatTarget>>,
++  language: FormatLanguage,
++): FormatReport {
++  const left = formatColumn(targets.left, language);
++  const right = formatColumn(targets.right, language);
++  return { left, right };
++}
+diff --git a/frontend/src/editor/internal/compareFrame.test.ts b/frontend/src/editor/internal/compareFrame.test.ts
+new file mode 100644
+index 0000000..d853fd5
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFrame.test.ts
+@@ -0,0 +1,107 @@
++import { EditorState, type TransactionSpec } from "@codemirror/state";
++import { Decoration } from "@codemirror/view";
++import { afterEach, expect, test, vi } from "vitest";
++
++import type { Span } from "../../connectors";
++import { differenceField, showDifferences } from "./compareFields";
++import { CompareFrame } from "./compareFrame";
++import type { DiffSpan } from "./compareMarks";
++import type { CompareRow } from "./compareStrip";
++import { toDocPos } from "./docPos";
++import { find } from "./find";
++
++const LINE_PX = 20;
++const TEXT = Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\n");
++
++type FakeColumn = {
++  state: EditorState;
++  dispatch(spec: TransactionSpec): void;
++  readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
++  readonly documentPadding: { readonly top: number };
++  readonly documentTop: number;
++  lineBlockAt(pos: number): Span;
++};
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++function fakeColumn(
++  measured: { count: number },
++  changed: (startState: EditorState, state: EditorState) => void,
++): FakeColumn {
++  const state = EditorState.create({ doc: TEXT, extensions: [differenceField, find] });
++  const line = state.doc.line(5);
++  const marks = { bands: Decoration.none, words: Decoration.none };
++  const spans: readonly DiffSpan[] = [
++    { from: toDocPos(line.from), to: toDocPos(line.to + 1), tone: "modified" },
++  ];
++  const column: FakeColumn = {
++    state: state.update({ effects: showDifferences.of({ ...marks, spans }) }).state,
++    dispatch(spec) {
++      const startState = column.state;
++      column.state = startState.update(spec).state;
++      changed(startState, column.state);
++    },
++    scrollDOM: Object.assign(new EventTarget(), { scrollTop: 0, clientHeight: 10 * LINE_PX }),
++    documentPadding: { top: 0 },
++    documentTop: 0,
++    lineBlockAt(pos) {
++      measured.count += 1;
++      const number = column.state.doc.lineAt(pos).number;
++      return { top: (number - 1) * LINE_PX, bottom: number * LINE_PX };
++    },
++  };
++  return column;
++}
++
++test("a scroll paints the strip from the cached rows; an edit measures them again", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  function runFrames(): void {
++    for (const frame of frames.splice(0)) {
++      frame();
++    }
++  }
++  const measured = { count: 0 };
++  const painted: (readonly CompareRow[])[] = [];
++  const holder: { frame: CompareFrame | null } = { frame: null };
++  function changed(startState: EditorState, state: EditorState): void {
++    holder.frame?.changed({ startState, state, geometryChanged: false });
++  }
++  const views = { left: fakeColumn(measured, changed), right: fakeColumn(measured, changed) };
++  const frame = new CompareFrame({
++    views,
++    strip: {
++      paint: (_panes, rows) => {
++        painted.push(rows);
++      },
++    },
++  });
++  holder.frame = frame;
++
++  frame.request();
++  runFrames();
++  const atStart = measured.count;
++  views.left.scrollDOM.scrollTop = 300;
++  views.left.scrollDOM.dispatchEvent(new Event("scroll"));
++  runFrames();
++  views.left.dispatch({ selection: { anchor: 3 } });
++  runFrames();
++  const afterScroll = measured.count;
++  views.left.dispatch({ changes: { from: 0, insert: "new\n" } });
++  runFrames();
++
++  expect(atStart).toBeGreaterThan(0);
++  expect(afterScroll).toBe(atStart);
++  expect(views.right.scrollDOM.scrollTop).toBe(300);
++  expect(painted).toHaveLength(3);
++  expect(painted[1]).toBe(painted[0]);
++  expect(measured.count).toBeGreaterThan(afterScroll);
++  expect(painted[2]?.[0]).toEqual({
++    left: { top: 5 * LINE_PX, bottom: 6 * LINE_PX },
++    right: { top: 4 * LINE_PX, bottom: 5 * LINE_PX },
++    tone: "modified",
++  });
++});
+diff --git a/frontend/src/editor/internal/compareFrame.ts b/frontend/src/editor/internal/compareFrame.ts
+new file mode 100644
+index 0000000..5434dfc
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFrame.ts
+@@ -0,0 +1,94 @@
++import { searchPanelOpen } from "@codemirror/search";
++import type { ViewUpdate } from "@codemirror/view";
++
++import type { Span } from "../../connectors";
++import type { Column } from "../../ipc";
++import { differenceField } from "./compareFields";
++import type { CompareRow, CompareStrip } from "./compareStrip";
++import { COLUMNS } from "./compareViews";
++import { syncFindSpace, type FindSpaceView } from "./find";
++import { rangeSpan, rowsChanged } from "./geometry";
++import { contentEnd, ScrollSync, type Anchor, type ScrollPane } from "./scrollSync";
++
++type FrameView = ScrollPane &
++  FindSpaceView & {
++    readonly documentTop: number;
++    lineBlockAt(pos: number): Span;
++  };
++type FrameViews = Readonly<Record<Column, FrameView>>;
++
++type CompareLayout = {
++  readonly rows: readonly CompareRow[];
++  readonly anchors: readonly Anchor<Column>[];
++};
++
++function columnSpan(view: FrameView, range: { readonly from: number; readonly to: number }): Span {
++  return rangeSpan(view.state.doc, range, (pos) => view.lineBlockAt(pos));
++}
++
++function measure({ left, right }: FrameViews): CompareLayout {
++  const rightSpans = right.state.field(differenceField).spans;
++  const rows = left.state.field(differenceField).spans.flatMap((span, index) => {
++    const other = rightSpans[index];
++    return other === undefined
++      ? []
++      : [{ left: columnSpan(left, span), right: columnSpan(right, other), tone: span.tone }];
++  });
++  const edges = rows.flatMap((row) => [
++    { left: row.left.top, right: row.right.top },
++    { left: row.left.bottom, right: row.right.bottom },
++  ]);
++  const ends = { left: contentEnd(left), right: contentEnd(right) };
++  return { rows, anchors: [{ left: 0, right: 0 }, ...edges, ends] };
++}
++
++export class CompareFrame {
++  readonly #views: FrameViews;
++  readonly #strip: Pick<CompareStrip, "paint">;
++  readonly #scroll: ScrollSync<Column>;
++  #frameId: number | null = null;
++  #layoutCache: CompareLayout | null = null;
++
++  constructor({
++    views,
++    strip,
++  }: {
++    readonly views: FrameViews;
++    readonly strip: Pick<CompareStrip, "paint">;
++  }) {
++    this.#views = views;
++    this.#strip = strip;
++    this.#scroll = new ScrollSync(views, COLUMNS, () => {
++      this.request();
++    });
++  }
++
++  changed(update: Pick<ViewUpdate, "geometryChanged" | "startState" | "state">): void {
++    const moved = rowsChanged(update, [differenceField]);
++    if (moved) {
++      this.#layoutCache = null;
++    }
++    if (moved || searchPanelOpen(update.startState) !== searchPanelOpen(update.state)) {
++      this.request();
++    }
++  }
++
++  request(): void {
++    this.#frameId ??= requestAnimationFrame(() => {
++      this.#frameId = null;
++      const views = this.#views;
++      syncFindSpace([views.left, views.right]);
++      this.#layoutCache ??= measure(views);
++      const layout = this.#layoutCache;
++      this.#scroll.sync(layout.anchors);
++      this.#strip.paint(views, layout.rows);
++    });
++  }
++
++  destroy(): void {
++    if (this.#frameId !== null) {
++      cancelAnimationFrame(this.#frameId);
++    }
++    this.#scroll.destroy();
++  }
++}
+diff --git a/frontend/src/editor/internal/compareLanguage.test.ts b/frontend/src/editor/internal/compareLanguage.test.ts
+new file mode 100644
+index 0000000..49eb152
+--- /dev/null
++++ b/frontend/src/editor/internal/compareLanguage.test.ts
+@@ -0,0 +1,101 @@
++import { language } from "@codemirror/language";
++import { languages } from "@codemirror/language-data";
++import { EditorState, type TransactionSpec } from "@codemirror/state";
++import { expect, test, vi } from "vitest";
++
++import { CompareLanguage } from "./compareLanguage";
++import { languageNames } from "./language";
++import { languageCompartment } from "./pane";
++
++type Held = { state: EditorState; dispatch(spec: TransactionSpec): void };
++
++function column(text: string): Held {
++  const held: Held = {
++    state: EditorState.create({ doc: text, extensions: languageCompartment.of([]) }),
++    dispatch(spec) {
++      held.state = held.state.update(spec).state;
++    },
++  };
++  return held;
++}
++
++function typed(held: Held, text: string): void {
++  held.dispatch({ changes: { from: 0, to: held.state.doc.length, insert: text } });
++}
++
++function shownLanguage(held: Held): string | null {
++  return held.state.facet(language)?.name ?? null;
++}
++
++test("Auto finds JSON at build, fires once for it, colours both columns and offers JSON's Format", async () => {
++  const left = column('{"a": 1}\n');
++  const right = column("");
++  const detected = vi.fn<(name: string | null) => void>();
++
++  const auto = new CompareLanguage({ kind: "auto" }, { left, right }, detected);
++  auto.settled();
++  typed(right, '{"b": 2}\n');
++  auto.settled();
++
++  expect(detected.mock.calls).toEqual([["JSON"]]);
++  expect(auto.formatLanguage()).toBe("JSON");
++  await vi.waitFor(() => {
++    expect([shownLanguage(left), shownLanguage(right)]).toEqual(["json", "json"]);
++  });
++
++  typed(left, "<a/>\n");
++  auto.settled();
++
++  expect(detected.mock.calls).toEqual([["JSON"], ["XML"]]);
++  expect(auto.formatLanguage()).toBe("XML");
++  auto.destroy();
++});
++
++test("plain text is reported once as no language and leaves the columns uncoloured", () => {
++  const left = column("just words\n");
++  const right = column("more words\n");
++  const detected = vi.fn<(name: string | null) => void>();
++
++  const auto = new CompareLanguage({ kind: "auto" }, { left, right }, detected);
++  auto.settled();
++
++  expect(detected.mock.calls).toEqual([[null]]);
++  expect(auto.formatLanguage()).toBeNull();
++  expect(shownLanguage(left)).toBeNull();
++});
++
++test("a picked language never fires detected, and Format follows the pick, not the text", async () => {
++  const left = column('{"a": 1}\n');
++  const right = column('{"a": 2}\n');
++  const detected = vi.fn<(name: string | null) => void>();
++
++  const picked = new CompareLanguage({ kind: "picked", name: "XML" }, { left, right }, detected);
++  picked.settled();
++
++  expect(picked.formatLanguage()).toBe("XML");
++  await vi.waitFor(() => {
++    expect(shownLanguage(right)).toBe("xml");
++  });
++
++  picked.set({ kind: "picked", name: "TypeScript" });
++  picked.settled();
++
++  expect(picked.formatLanguage()).toBeNull();
++  expect(detected).not.toHaveBeenCalled();
++
++  picked.set({ kind: "auto" });
++
++  expect(detected.mock.calls).toEqual([["JSON"]]);
++  picked.destroy();
++});
++
++test("languageNames lists every language-data name once, in alphabetical order", () => {
++  const names = languageNames();
++
++  expect(names).toHaveLength(languages.length);
++  expect(new Set(names)).toEqual(new Set(languages.map((description) => description.name)));
++  for (const [index, name] of names.slice(1).entries()) {
++    expect(names[index]?.localeCompare(name)).toBeLessThan(0);
++  }
++  expect(names).toEqual(expect.arrayContaining(["JSON", "XML", "TypeScript", "Python"]));
++});
+diff --git a/frontend/src/editor/internal/compareLanguage.ts b/frontend/src/editor/internal/compareLanguage.ts
+new file mode 100644
+index 0000000..d1d5816
+--- /dev/null
++++ b/frontend/src/editor/internal/compareLanguage.ts
+@@ -0,0 +1,91 @@
++import type { EditorState } from "@codemirror/state";
++
++import type { Column, TabLanguage } from "../../ipc";
++import { isFormatLanguage, type FormatLanguage } from "./compareFormat";
++import { detectLanguage } from "./detectLanguage";
++import { languageNamed, loadLanguage, type LanguageView } from "./language";
++import { languageCompartment } from "./pane";
++
++type LanguageColumn = LanguageView & { readonly state: EditorState };
++type Finding = { readonly name: string | null };
++
++const LOG_PATH = "compare";
++
++export class CompareLanguage {
++  readonly #columns: Readonly<Record<Column, LanguageColumn>>;
++  readonly #detected: (name: string | null) => void;
++  #language: TabLanguage = { kind: "auto" };
++  #finding: Finding | null = null;
++  #shown: string | null = null;
++  #destroyed = false;
++
++  constructor(
++    language: TabLanguage,
++    columns: Readonly<Record<Column, LanguageColumn>>,
++    detected: (name: string | null) => void,
++  ) {
++    this.#columns = columns;
++    this.#detected = detected;
++    this.set(language);
++  }
++
++  set(language: TabLanguage): void {
++    this.#language = language;
++    if (language.kind === "auto") {
++      this.#detect();
++    }
++    this.#show();
++  }
++
++  settled(): void {
++    if (this.#language.kind === "auto") {
++      this.#detect();
++      this.#show();
++    }
++  }
++
++  formatLanguage(): FormatLanguage | null {
++    const name = this.#current();
++    return name !== null && isFormatLanguage(name) ? name : null;
++  }
++
++  destroy(): void {
++    this.#destroyed = true;
++  }
++
++  #current(): string | null {
++    return this.#language.kind === "auto" ? (this.#finding?.name ?? null) : this.#language.name;
++  }
++
++  #detect(): void {
++    const { left, right } = this.#columns;
++    const name = detectLanguage(left.state.sliceDoc(), right.state.sliceDoc());
++    if (this.#finding === null || this.#finding.name !== name) {
++      this.#finding = { name };
++      this.#detected(name);
++    }
++  }
++
++  #show(): void {
++    const name = this.#current();
++    if (name === this.#shown) {
++      return;
++    }
++    this.#shown = name;
++    const columns = [this.#columns.left, this.#columns.right];
++    const description = name === null ? null : languageNamed(name);
++    if (description === null || description.support !== undefined) {
++      const effects = languageCompartment.reconfigure(description?.support?.language ?? []);
++      for (const column of columns) {
++        column.dispatch({ effects });
++      }
++      return;
++    }
++    void loadLanguage(
++      description,
++      LOG_PATH,
++      columns,
++      () => this.#destroyed || this.#shown !== name,
++    );
++  }
++}
+diff --git a/frontend/src/editor/internal/compareStrip.ts b/frontend/src/editor/internal/compareStrip.ts
+new file mode 100644
+index 0000000..4f89e7a
+--- /dev/null
++++ b/frontend/src/editor/internal/compareStrip.ts
+@@ -0,0 +1,67 @@
++import "../theme.css";
++import { bandPath, type Span } from "../../connectors";
++import type { Column } from "../../ipc";
++import { crossesStrip } from "./gap";
++import type { ChangeTone } from "./tone";
++
++export type CompareRow = Readonly<Record<Column, Span>> & { readonly tone: ChangeTone };
++export type StripPanes = Readonly<Record<Column, { readonly documentTop: number }>>;
++
++const SVG_NS = "http://www.w3.org/2000/svg";
++
++function shiftedSpan({ top, bottom }: Span, by: number): Span {
++  return { top: top + by, bottom: bottom + by };
++}
++
++function keepEditorFocus(event: MouseEvent): void {
++  event.preventDefault();
++}
++
++export class CompareStrip {
++  readonly #strip: SVGSVGElement;
++  readonly #layer = document.createElementNS(SVG_NS, "g");
++  readonly #bands = new Map<string, SVGPathElement>();
++
++  constructor(strip: SVGSVGElement) {
++    this.#strip = strip;
++    strip.replaceChildren(this.#layer);
++    strip.addEventListener("mousedown", keepEditorFocus);
++  }
++
++  paint(panes: StripPanes, rows: readonly CompareRow[]): void {
++    const strip = this.#strip;
++    const stripTop = strip.getBoundingClientRect().top;
++    const width = strip.clientWidth;
++    const height = strip.clientHeight;
++    const kept = new Set<string>();
++    rows.forEach((row, index) => {
++      const left = shiftedSpan(row.left, panes.left.documentTop - stripTop);
++      const right = shiftedSpan(row.right, panes.right.documentTop - stripTop);
++      const top = Math.min(left.top, right.top);
++      if (!crossesStrip(top, Math.max(left.bottom, right.bottom), height)) {
++        return;
++      }
++      const key = `${index} ${row.tone}`;
++      kept.add(key);
++      let path = this.#bands.get(key);
++      if (path === undefined) {
++        path = document.createElementNS(SVG_NS, "path");
++        path.setAttribute("class", `chunk-${row.tone} chunk-band`);
++        this.#bands.set(key, path);
++        this.#layer.append(path);
++      }
++      path.setAttribute("d", bandPath({ left, right }, width));
++    });
++    for (const [key, path] of this.#bands) {
++      if (!kept.has(key)) {
++        path.remove();
++        this.#bands.delete(key);
++      }
++    }
++  }
++
++  destroy(): void {
++    this.#strip.removeEventListener("mousedown", keepEditorFocus);
++    this.#strip.replaceChildren();
++  }
++}
+diff --git a/frontend/src/editor/internal/compareViews.ts b/frontend/src/editor/internal/compareViews.ts
+new file mode 100644
+index 0000000..c03eeea
+--- /dev/null
++++ b/frontend/src/editor/internal/compareViews.ts
+@@ -0,0 +1,98 @@
++import { Text } from "@codemirror/state";
++import { EditorView, type ViewUpdate } from "@codemirror/view";
++
++import type { Column } from "../../ipc";
++import { columnLimit } from "./columnBytes";
++import { differenceField } from "./compareFields";
++import { nextDifference } from "./compareNavigation";
++import { toDocPos } from "./docPos";
++import { rangeSpan } from "./geometry";
++import type { Direction } from "./navigation";
++import { createPane, type PaneSettings } from "./pane";
++import { everyPane } from "./paneViews";
++import { removalTooltip } from "./removalTooltip";
++import { revealScrollTop, visibleArea } from "./viewport";
++
++export type ColumnViews = Readonly<Record<Column, EditorView>>;
++
++export type ColumnWiring = {
++  readonly settings: PaneSettings;
++  readonly columnLimit: number;
++  readonly refused: (column: Column) => void;
++  readonly updated: (column: Column, update: ViewUpdate) => void;
++};
++
++export const COLUMNS = ["left", "right"] as const satisfies readonly Column[];
++
++const LINE_BREAK = /\r\n?|\n/;
++
++function createColumn(
++  column: Column,
++  { text, parent }: { readonly text: string; readonly parent: HTMLElement },
++  wiring: ColumnWiring,
++): EditorView {
++  return createPane({
++    kind: "center",
++    doc: Text.of(text.split(LINE_BREAK)),
++    eol: "Lf",
++    language: null,
++    settings: wiring.settings,
++    parent,
++    extensions: [
++      differenceField,
++      columnLimit(wiring.columnLimit, () => {
++        wiring.refused(column);
++      }),
++      removalTooltip(),
++      everyPane(),
++      EditorView.updateListener.of((update) => {
++        wiring.updated(column, update);
++      }),
++    ],
++  });
++}
++
++export function createColumnViews(
++  texts: Readonly<Record<Column, string>>,
++  hosts: Readonly<Record<Column, HTMLElement>>,
++  wiring: ColumnWiring,
++): ColumnViews {
++  return {
++    left: createColumn("left", { text: texts.left, parent: hosts.left }, wiring),
++    right: createColumn("right", { text: texts.right, parent: hosts.right }, wiring),
++  };
++}
++
++export function keyboardColumn(views: ColumnViews): Column | null {
++  return (
++    COLUMNS.find((column) => {
++      const view = views[column];
++      return view.dom.contains(view.root.activeElement);
++    }) ?? null
++  );
++}
++
++export function revealDifference(view: EditorView, direction: Direction): void {
++  const { state } = view;
++  const target = nextDifference(
++    state.field(differenceField).spans,
++    toDocPos(state.selection.main.head),
++    direction,
++  );
++  if (target === null) {
++    return;
++  }
++  view.dispatch({ selection: { anchor: target.from } });
++  const span = rangeSpan(state.doc, target, (pos) => view.lineBlockAt(pos));
++  const top = revealScrollTop(span, {
++    area: visibleArea(view),
++    lineHeight: view.defaultLineHeight,
++    paddingTop: view.documentPadding.top,
++  });
++  if (top !== null) {
++    view.scrollDOM.scrollTop = top;
++  }
++  if (!view.hasFocus) {
++    view.focus();
++  }
++}
+diff --git a/frontend/src/editor/internal/find.ts b/frontend/src/editor/internal/find.ts
+index a221874..6529fcc 100644
+--- a/frontend/src/editor/internal/find.ts
++++ b/frontend/src/editor/internal/find.ts
+@@ -8,7 +8,15 @@ import {
+   searchPanelOpen,
+   setSearchQuery,
+ } from "@codemirror/search";
+-import { Compartment, Facet, StateEffect, StateField, type Extension } from "@codemirror/state";
++import {
++  Compartment,
++  Facet,
++  StateEffect,
++  StateField,
++  type EditorState,
++  type Extension,
++  type TransactionSpec,
++} from "@codemirror/state";
+ import {
+   EditorView,
+   keymap,
+@@ -26,7 +34,6 @@ import xIcon from "~icons/lucide/x?raw";
+ import { keyLabel, type KeyAction, type KeyBindings } from "../../ipc";
+ import { findLabel, labelOutdated, matches, matchFrom, selectMatch, stepMatch } from "./findMatch";
+ import type { FindDirection } from "./findMatch";
+-import type { PaneViews } from "./geometry";
+ import { cmKeys } from "./keys";
+ 
+ const FIND_BAR_HEIGHT_PX = 29;
+@@ -57,8 +64,12 @@ const findSpace = StateField.define<boolean>({
+     EditorView.editorAttributes.from(field, (shown) => (shown ? { class: "find-space" } : {})),
+ });
+ 
+-export function syncFindSpace(views: PaneViews): void {
+-  const panes = [views.left, views.center, views.right];
++export type FindSpaceView = {
++  readonly state: EditorState;
++  dispatch(spec: TransactionSpec): void;
++};
++
++export function syncFindSpace(panes: readonly FindSpaceView[]): void {
+   const shown = panes.some((view) => searchPanelOpen(view.state));
+   for (const view of panes) {
+     if (view.state.field(findSpace) !== shown) {
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index a241161..7f1be77 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -7,7 +7,7 @@ import { pushCovered } from "./covered";
+ import { coveredAction, type IconDrag } from "./drag";
+ import { syncFindSpace } from "./find";
+ import { waveStarts, type FoldFields } from "./folds";
+-import { chunkRows, rowsChanged, waveRows, type PaneViews } from "./geometry";
++import { chunkRows, PANES, rowsChanged, waveRows, type Pane, type PaneViews } from "./geometry";
+ import type { ChunkRow, WaveRow } from "./geometry";
+ import { Minimap } from "./minimap";
+ import { anchorsOf, contentEnds, ScrollSync, type Anchor } from "./scrollSync";
+@@ -15,7 +15,7 @@ import type { Strips } from "./strips";
+ 
+ type Layout = {
+   readonly rows: readonly ChunkRow[];
+-  readonly anchors: readonly Anchor[];
++  readonly anchors: readonly Anchor<Pane>[];
+   readonly waves: readonly WaveRow[];
+ };
+ 
+@@ -30,14 +30,14 @@ type FrameParts = {
+ 
+ export class Frame {
+   readonly #parts: FrameParts;
+-  readonly #scroll: ScrollSync;
++  readonly #scroll: ScrollSync<Pane>;
+   readonly #minimap: Minimap;
+   #frameId: number | null = null;
+   #layoutCache: Layout | null = null;
+ 
+   constructor(parts: FrameParts) {
+     this.#parts = parts;
+-    this.#scroll = new ScrollSync(parts.views, () => {
++    this.#scroll = new ScrollSync(parts.views, PANES, () => {
+       this.request();
+     });
+     this.#minimap = new Minimap({
+@@ -82,7 +82,7 @@ export class Frame {
+     this.#frameId ??= requestAnimationFrame(() => {
+       this.#frameId = null;
+       const { views, drag, strips } = this.#parts;
+-      syncFindSpace(views);
++      syncFindSpace([views.left, views.center, views.right]);
+       const layout = this.layout();
+       this.#scroll.sync(layout.anchors);
+       const press = drag.press;
+diff --git a/frontend/src/editor/internal/language.ts b/frontend/src/editor/internal/language.ts
+index 6b30736..f0089c0 100644
+--- a/frontend/src/editor/internal/language.ts
++++ b/frontend/src/editor/internal/language.ts
+@@ -1,20 +1,34 @@
+ import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
+ import { languages } from "@codemirror/language-data";
++import type { TransactionSpec } from "@codemirror/state";
+ 
+ import { log } from "../../ipc";
+-import type { PaneViews } from "./geometry";
+ import { languageCompartment } from "./pane";
+ 
++export type LanguageView = { dispatch(spec: TransactionSpec): void };
++
++const LANGUAGE_NAMES: readonly string[] = languages
++  .map((description) => description.name)
++  .sort((a, b) => a.localeCompare(b));
++
+ export function languageOf(path: string): LanguageDescription | null {
+   const basename = path.slice(path.lastIndexOf("/") + 1);
+   return LanguageDescription.matchFilename(languages, basename);
+ }
+ 
++export function languageNamed(name: string): LanguageDescription | null {
++  return LanguageDescription.matchLanguageName(languages, name, false);
++}
++
++export function languageNames(): readonly string[] {
++  return LANGUAGE_NAMES;
++}
++
+ export async function loadLanguage(
+   description: LanguageDescription,
+   path: string,
+-  views: PaneViews,
+-  destroyed: () => boolean,
++  views: readonly LanguageView[],
++  stale: () => boolean,
+ ): Promise<void> {
+   let support: LanguageSupport;
+   try {
+@@ -24,11 +38,11 @@ export async function loadLanguage(
+     log.warn("language.load_failed", { path, language: description.name, reason });
+     return;
+   }
+-  if (destroyed()) {
++  if (stale()) {
+     return;
+   }
+   const effects = languageCompartment.reconfigure(support.language);
+-  for (const view of [views.left, views.center, views.right]) {
++  for (const view of views) {
+     view.dispatch({ effects });
+   }
+ }
+diff --git a/frontend/src/editor/internal/paneViews.ts b/frontend/src/editor/internal/paneViews.ts
+index 0f8aed6..0eb1ab5 100644
+--- a/frontend/src/editor/internal/paneViews.ts
++++ b/frontend/src/editor/internal/paneViews.ts
+@@ -37,7 +37,7 @@ export type PaneWiring = {
+   readonly act: (action: ChunkAction) => void;
+ };
+ 
+-function everyPane(): Extension {
++export function everyPane(): Extension {
+   return [
+     // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
+     // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.
+diff --git a/frontend/src/editor/internal/scrollSync.test.ts b/frontend/src/editor/internal/scrollSync.test.ts
+index 25517ae..f6b98d3 100644
+--- a/frontend/src/editor/internal/scrollSync.test.ts
++++ b/frontend/src/editor/internal/scrollSync.test.ts
+@@ -1,8 +1,8 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import type { Span } from "../../connectors";
+-import type { Pane } from "./geometry";
+-import { anchorsOf, ScrollSync, targets, type Anchor } from "./scrollSync";
++import { PANES, type Pane } from "./geometry";
++import { anchorsOf, ScrollSync, targets as paneTargets, type Anchor } from "./scrollSync";
+ 
+ const LINE_PX = 20;
+ 
+@@ -16,10 +16,15 @@ function row(left: Lines, center: Lines, right: Lines): Record<Pane, Span> {
+   return { left: span(left), center: span(center), right: span(right) };
+ }
+ 
+-function ends(left: number, center: number, right: number): Anchor {
++function ends(left: number, center: number, right: number): Anchor<Pane> {
+   return { left: left * LINE_PX, center: center * LINE_PX, right: right * LINE_PX };
+ }
+ 
++function targets(anchors: readonly Anchor<Pane>[], source: Pane, y: number): Anchor<Pane> {
++  const at = paneTargets(anchors, source, y);
++  return { left: at("left"), center: at("center"), right: at("right") };
++}
++
+ test("without chunks every pane follows line for line", () => {
+   const anchors = anchorsOf([], ends(100, 100, 100));
+ 
+@@ -153,7 +158,7 @@ test("follow('center') makes the next sync write both sides though the middle di
+   vi.stubGlobal("cancelAnimationFrame", () => {});
+   const views = { left: fakePane(0), center: fakePane(0), right: fakePane(0) };
+   let requested = 0;
+-  const sync = new ScrollSync(views, () => {
++  const sync = new ScrollSync(views, PANES, () => {
+     requested += 1;
+   });
+   const anchors = anchorsOf([], ends(100, 100, 100));
+@@ -179,3 +184,29 @@ test("follow('center') makes the next sync write both sides though the middle di
+   sync.sync(anchors);
+   expect(tops(views)).toEqual([500, 300, 300]);
+ });
++
++test("two columns follow each other through their difference's anchors, the source left where it was", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  const sync = new ScrollSync(views, ["left", "right"], () => {});
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 5 * LINE_PX, right: 5 * LINE_PX },
++    { left: 10 * LINE_PX, right: 17 * LINE_PX },
++    { left: 20 * LINE_PX, right: 27 * LINE_PX },
++  ];
++
++  scrolled(views.left, 50);
++  sync.sync(anchors);
++  const leftLed = [views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop];
++  for (const frame of frames.splice(0)) {
++    frame();
++  }
++  scrolled(views.right, 300);
++  sync.sync(anchors);
++
++  expect(leftLed).toEqual([50, 120]);
++  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([160, 300]);
++});
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index c1b5a64..51a2dbe 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -1,56 +1,58 @@
+-import type { EditorView } from "@codemirror/view";
++import type { EditorState } from "@codemirror/state";
+ 
+ import type { Span } from "../../connectors";
+-import { PANES, type Pane, type PaneViews } from "./geometry";
++import type { Pane, PaneViews } from "./geometry";
+ 
+-export type Anchor = Readonly<Record<Pane, number>>;
++export type Anchor<P extends string> = Readonly<Record<P, number>>;
+ type SpanRow = Readonly<Record<Pane, Span>>;
+-type ScrollPane = {
++export type ScrollPane = {
+   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+   readonly documentPadding: { readonly top: number };
+ };
+ 
+ const ANCHOR_AT = 0.5;
+ 
+-function shifted(anchor: Anchor, by: number): Anchor {
+-  return { left: anchor.left + by, center: anchor.center + by, right: anchor.right + by };
+-}
+-
+-function edge(row: SpanRow, side: keyof Span): Anchor {
++function edge(row: SpanRow, side: keyof Span): Anchor<Pane> {
+   return { left: row.left[side], center: row.center[side], right: row.right[side] };
+ }
+ 
+-export function anchorsOf(rows: readonly SpanRow[], ends: Anchor): Anchor[] {
++export function anchorsOf(rows: readonly SpanRow[], ends: Anchor<Pane>): Anchor<Pane>[] {
+   const start = { left: 0, center: 0, right: 0 };
+   return [start, ...rows.flatMap((row) => [edge(row, "top"), edge(row, "bottom")]), ends];
+ }
+ 
+-export function targets(anchors: readonly Anchor[], source: Pane, y: number): Anchor {
+-  let before: Anchor | undefined;
++function shifted<P extends string>(anchor: Anchor<P>, by: number): (pane: P) => number {
++  return (pane) => anchor[pane] + by;
++}
++
++export function targets<P extends string>(
++  anchors: readonly Anchor<P>[],
++  source: P,
++  y: number,
++): (pane: P) => number {
++  let before: Anchor<P> | undefined;
+   for (const after of anchors) {
+     if (after[source] >= y) {
+       if (before === undefined || after[source] === y) {
+         return shifted(after, y - after[source]);
+       }
+-      const t = (y - before[source]) / (after[source] - before[source]);
+-      return {
+-        left: before.left + (after.left - before.left) * t,
+-        center: before.center + (after.center - before.center) * t,
+-        right: before.right + (after.right - before.right) * t,
+-      };
++      const from = before;
++      const t = (y - from[source]) / (after[source] - from[source]);
++      return (pane) => from[pane] + (after[pane] - from[pane]) * t;
+     }
+     before = after;
+   }
+-  return before === undefined
+-    ? { left: y, center: y, right: y }
+-    : shifted(before, y - before[source]);
++  return before === undefined ? () => y : shifted(before, y - before[source]);
+ }
+ 
+-function contentEnd(view: EditorView): number {
++export function contentEnd(view: {
++  readonly state: EditorState;
++  lineBlockAt(pos: number): Span;
++}): number {
+   return view.lineBlockAt(view.state.doc.length).bottom;
+ }
+ 
+-export function contentEnds(views: PaneViews): Anchor {
++export function contentEnds(views: PaneViews): Anchor<Pane> {
+   return {
+     left: contentEnd(views.left),
+     center: contentEnd(views.center),
+@@ -63,19 +65,25 @@ function middle(view: ScrollPane): number {
+   return scrollTop + clientHeight * ANCHOR_AT - view.documentPadding.top;
+ }
+ 
+-export class ScrollSync {
+-  readonly #views: Readonly<Record<Pane, ScrollPane>>;
++export class ScrollSync<P extends string> {
++  readonly #views: Readonly<Record<P, ScrollPane>>;
++  readonly #panes: readonly P[];
+   readonly #requestFrame: () => void;
+   readonly #listeners = new AbortController();
+-  #source: Pane | null = null;
+-  #echoes: readonly Pane[] = [];
++  #source: P | null = null;
++  #echoes: readonly P[] = [];
+   #clearEchoes: number | null = null;
+-  #syncedTops: Readonly<Record<Pane, number>> | null = null;
++  #syncedTops: ReadonlyMap<P, number> | null = null;
+ 
+-  constructor(views: Readonly<Record<Pane, ScrollPane>>, requestFrame: () => void) {
++  constructor(
++    views: Readonly<Record<P, ScrollPane>>,
++    panes: readonly P[],
++    requestFrame: () => void,
++  ) {
+     this.#views = views;
++    this.#panes = panes;
+     this.#requestFrame = requestFrame;
+-    for (const pane of PANES) {
++    for (const pane of panes) {
+       views[pane].scrollDOM.addEventListener(
+         "scroll",
+         () => {
+@@ -89,30 +97,26 @@ export class ScrollSync {
+     }
+   }
+ 
+-  follow(source: Pane): void {
++  follow(source: P): void {
+     this.#source = source;
+     this.#syncedTops = null;
+     this.#requestFrame();
+   }
+ 
+-  sync(anchors: readonly Anchor[]): void {
++  sync(anchors: readonly Anchor<P>[]): void {
+     const source = this.#source;
+     this.#source = null;
+     const views = this.#views;
+-    if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.[source]) {
++    if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.get(source)) {
+       return;
+     }
+     const at = targets(anchors, source, middle(views[source]));
+-    const followers = PANES.filter((pane) => pane !== source);
++    const followers = this.#panes.filter((pane) => pane !== source);
+     for (const pane of followers) {
+       const { scrollDOM, documentPadding } = views[pane];
+-      scrollDOM.scrollTop = at[pane] + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
++      scrollDOM.scrollTop = at(pane) + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
+     }
+-    this.#syncedTops = {
+-      left: views.left.scrollDOM.scrollTop,
+-      center: views.center.scrollDOM.scrollTop,
+-      right: views.right.scrollDOM.scrollTop,
+-    };
++    this.#syncedTops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
+     this.#echoes = followers;
+     if (this.#clearEchoes !== null) {
+       cancelAnimationFrame(this.#clearEchoes);
