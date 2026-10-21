@@ -36,13 +36,5 @@
       "frontend/src/editor/internal/tone.test.ts",
       "frontend/src/editor/internal/words.test.ts"
     ]
-  },
-  "GitOpsReadR2": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.J-read-rework-2.md",
-    "owned": [
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/src/operation.rs"
-    ]
   }
 }

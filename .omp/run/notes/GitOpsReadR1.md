@@ -68,3 +68,8 @@ open_risks
 ## Re-checks
 
 Boundary: fail — #1313/#1314/#1319/#1320/#1322 fixed; new block #1325 (one-path-per-name rule twice) → fix round 2. Correctness: pass, no findings; mutants `just mutants 26e0ed5`: 28 — 23 caught, 5 unviable, 0 missed.
+
+
+## Fix round 2 (GitOpsReadR2, `ae295f6`)
+
+`git_paths<const N>` holds the one-path-per-name rule (#1325). Mutants `just mutants 5d8f4c9`: 4 — 2 caught, 2 unviable. Boundary re-check: pass, no findings.

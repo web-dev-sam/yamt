@@ -1,0 +1,87 @@
+From ae295f6f4ef295be173e64c869927d0b36a2a662 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 21 Oct 2026 11:43:45 +0200
+Subject: [PATCH] refactor(gitio): one home for one-path-per-name in git_paths
+ (#1325)
+
+---
+ crates/gitio/src/operation.rs | 20 +++++++-------------
+ crates/gitio/src/repo.rs      | 21 ++++++++++-----------
+ 2 files changed, 17 insertions(+), 24 deletions(-)
+
+diff --git a/crates/gitio/src/operation.rs b/crates/gitio/src/operation.rs
+index 6fbb7ca..e3ebce1 100644
+--- a/crates/gitio/src/operation.rs
++++ b/crates/gitio/src/operation.rs
+@@ -134,19 +134,13 @@ impl Repo {
+     }
+ 
+     fn state_paths(&self) -> Result<StatePaths> {
+-        let paths = self.git_paths(&STATE_PATHS)?;
+-        match paths.as_slice() {
+-            [rebase_merge, rebase_apply, sequencer, squash_msg] => Ok(StatePaths {
+-                rebase_merge: rebase_merge.clone(),
+-                rebase_apply: rebase_apply.clone(),
+-                sequencer: sequencer.clone(),
+-                squash_msg: squash_msg.clone(),
+-            }),
+-            _ => Err(Error::UnexpectedOutput {
+-                command: "rev-parse",
+-                output: format!("{paths:?}"),
+-            }),
+-        }
++        let [rebase_merge, rebase_apply, sequencer, squash_msg] = self.git_paths(STATE_PATHS)?;
++        Ok(StatePaths {
++            rebase_merge,
++            rebase_apply,
++            sequencer,
++            squash_msg,
++        })
+     }
+ 
+     // The order of git's own `wt_status_get_state` (wt-status.c): a rebase or `am` first, even
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 1c588dc..65a07c6 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -118,27 +118,26 @@ impl Repo {
+     }
+ 
+     fn git_path(&self, name: &str) -> Result<PathBuf> {
+-        match self.git_paths(&[name])?.as_slice() {
+-            [path] => Ok(path.clone()),
+-            paths => Err(Error::UnexpectedOutput {
+-                command: REV_PARSE,
+-                output: format!("{paths:?}"),
+-            }),
+-        }
++        let [path] = self.git_paths([name])?;
++        Ok(path)
+     }
+ 
+     /// One `rev-parse --git-path` call for every name (git-rev-parse(1): the path inside the git directory,
+     /// relative to the cwd); the paths in the order of `names`.
+-    pub(crate) fn git_paths(&self, names: &[&str]) -> Result<Vec<PathBuf>> {
++    pub(crate) fn git_paths<const N: usize>(&self, names: [&str; N]) -> Result<[PathBuf; N]> {
+         let mut command = self.command(Access::Read, &[REV_PARSE]);
+         for name in names {
+             command.args(["--git-path", name]);
+         }
+         let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+-        let lines = output.split(|&byte| byte == b'\n');
+-        Ok(lines
++        let paths: Vec<PathBuf> = output
++            .split(|&byte| byte == b'\n')
+             .map(|line| self.root.join(path_from_git(line)))
+-            .collect())
++            .collect();
++        paths.try_into().map_err(|paths| Error::UnexpectedOutput {
++            command: REV_PARSE,
++            output: format!("{paths:?}"),
++        })
+     }
+ 
+     pub fn commit_summary(&self, commit: &Oid) -> Result<CommitSummary> {
+-- 
+2.56.0
+
