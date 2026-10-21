@@ -1,0 +1,317 @@
+diff --git a/frontend/src/editor/internal/formatJson.test.ts b/frontend/src/editor/internal/formatJson.test.ts
+index 2df448b..e8be176 100644
+--- a/frontend/src/editor/internal/formatJson.test.ts
++++ b/frontend/src/editor/internal/formatJson.test.ts
+@@ -156,3 +156,35 @@ test("formatJson: 100,000 nested arrays are scanned without throwing (catches a
+ 
+   expect(formatJson(unclosed)).toEqual({ kind: "failed", message: "Expected ',' or ']'", line: 1 });
+ });
++
++test("formatJson: valid input nested past the output cap fails instead of throwing (catches the indent not counted in the output length)", () => {
++  for (const depth of [6_000, 32_768]) {
++    const result = formatJson("[".repeat(depth) + "]".repeat(depth));
++
++    expect(result.kind === "formatted" ? result.text.length : result).toEqual({
++      kind: "failed",
++      message: "The formatted text is too long",
++      line: 1,
++    });
++  }
++});
++
++test("formatJson: no sticky regex lives at module level, so its lastIndex belongs to one scan (catches NUMBER or ESCAPE moved back to module level)", () => {
++  const sources = import.meta.glob<string>("./formatJson.ts", {
++    query: "?raw",
++    import: "default",
++    eager: true,
++  });
++  const source = sources["./formatJson.ts"] ?? "";
++
++  expect(source).toContain("class JsonScan");
++  expect(source).not.toMatch(/^const \w+ = \/.*\/\w*y\w*;$/m);
++});
++
++test("formatJson: a leading byte order mark is kept and the scan starts after it (catches the mark handed to the scan)", () => {
++  expect(formatJson('\uFEFF {"a":[1]}\n')).toEqual({
++    kind: "formatted",
++    text: '\uFEFF{\n  "a": [\n    1\n  ]\n}\n',
++  });
++  expect(formatJson('\uFEFF{\n  "a": 1\n}')).toEqual({ kind: "unchanged" });
++});
+diff --git a/frontend/src/editor/internal/formatJson.ts b/frontend/src/editor/internal/formatJson.ts
+index 97f338c..d599adb 100644
+--- a/frontend/src/editor/internal/formatJson.ts
++++ b/frontend/src/editor/internal/formatJson.ts
+@@ -2,14 +2,12 @@ import { FormatFailure, type FormatResult, formatWith, type Layout, SPACE } from
+ 
+ type Close = "}" | "]";
+ 
+-const NUMBER = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
+-const ESCAPE = /\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})/y;
+ const LITERALS = ["true", "false", "null"];
+ const FIRST_PRINTABLE = 0x20;
+ 
+ export function formatJson(text: string): FormatResult {
+-  return formatWith(text, (layout) => {
+-    new JsonScan(text, layout).run();
++  return formatWith(text, (body, layout) => {
++    new JsonScan(body, layout).run();
+   });
+ }
+ 
+@@ -17,6 +15,8 @@ class JsonScan {
+   readonly #text: string;
+   readonly #layout: Layout;
+   readonly #open: Close[] = [];
++  readonly #number = /-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/y;
++  readonly #escape = /\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})/y;
+   #at = 0;
+ 
+   constructor(text: string, layout: Layout) {
+@@ -32,7 +32,7 @@ class JsonScan {
+       if (next === ",") {
+         this.#at += 1;
+         this.#layout.text(",");
+-        this.#layout.lineAt(this.#open.length);
++        this.#layout.lineAt(this.#open.length, this.#at);
+         if (close === "}") {
+           this.#key();
+         }
+@@ -40,7 +40,7 @@ class JsonScan {
+       } else if (next === close) {
+         this.#at += 1;
+         this.#open.pop();
+-        this.#layout.lineAt(this.#open.length);
++        this.#layout.lineAt(this.#open.length, this.#at);
+         this.#layout.text(close);
+       } else {
+         this.#fail(`Expected ',' or '${close}'`);
+@@ -70,7 +70,7 @@ class JsonScan {
+       }
+       this.#layout.text(opened);
+       this.#open.push(close);
+-      this.#layout.lineAt(this.#open.length);
++      this.#layout.lineAt(this.#open.length, this.#at);
+       if (close === "}") {
+         this.#key();
+       }
+@@ -102,8 +102,8 @@ class JsonScan {
+       this.#token(literal);
+       return;
+     }
+-    NUMBER.lastIndex = this.#at;
+-    const number = NUMBER.exec(this.#text);
++    this.#number.lastIndex = this.#at;
++    const number = this.#number.exec(this.#text);
+     if (number === null) {
+       this.#fail("Expected a value");
+     }
+@@ -130,9 +130,9 @@ class JsonScan {
+   }
+ 
+   #escapeEnd(backslash: number): number {
+-    ESCAPE.lastIndex = backslash;
+-    if (ESCAPE.test(this.#text)) {
+-      return ESCAPE.lastIndex;
++    this.#escape.lastIndex = backslash;
++    if (this.#escape.test(this.#text)) {
++      return this.#escape.lastIndex;
+     }
+     return this.#fail("Invalid escape in a string", backslash);
+   }
+diff --git a/frontend/src/editor/internal/formatResult.ts b/frontend/src/editor/internal/formatResult.ts
+index c570d8b..12c5eb6 100644
+--- a/frontend/src/editor/internal/formatResult.ts
++++ b/frontend/src/editor/internal/formatResult.ts
+@@ -4,6 +4,8 @@ export type FormatResult =
+   | { readonly kind: "failed"; readonly message: string; readonly line: number };
+ 
+ const INDENT = "  ";
++const MAX_FORMATTED_CHARS = 64_000_000;
++const BOM = "\uFEFF";
+ 
+ export const SPACE: Readonly<Record<string, true>> = {
+   " ": true,
+@@ -23,38 +25,54 @@ export class FormatFailure extends Error {
+ 
+ export class Layout {
+   readonly #pieces: (string | number)[] = [];
++  #length = 0;
++  #tooLongAt: number | null = null;
+ 
+   text(piece: string): void {
+     this.#pieces.push(piece);
++    this.#length += piece.length;
+   }
+ 
+-  lineAt(depth: number): void {
++  lineAt(depth: number, at: number): void {
+     this.#pieces.push(depth);
++    this.#length += 1 + INDENT.length * depth;
++    if (this.#length > MAX_FORMATTED_CHARS) {
++      this.#tooLongAt ??= at;
++    }
+   }
+ 
+-  toString(): string {
++  build(): string {
++    if (this.#tooLongAt !== null) {
++      throw new FormatFailure("The formatted text is too long", this.#tooLongAt);
++    }
+     return this.#pieces
+       .map((piece) => (typeof piece === "number" ? `\n${INDENT.repeat(piece)}` : piece))
+       .join("");
+   }
+ }
+ 
+-export function formatWith(input: string, lay: (layout: Layout) => void): FormatResult {
+-  const end = textEnd(input);
++export function formatWith(
++  input: string,
++  lay: (text: string, layout: Layout) => void,
++): FormatResult {
++  const bom = input.startsWith(BOM) ? BOM : "";
++  const body = input.slice(bom.length);
++  const end = textEnd(body);
+   if (end === 0) {
+     return { kind: "unchanged" };
+   }
+   const layout = new Layout();
++  layout.text(bom);
+   try {
+-    lay(layout);
++    lay(body, layout);
++    const text = layout.build() + (body.includes("\n", end) ? "\n" : "");
++    return text === input ? { kind: "unchanged" } : { kind: "formatted", text };
+   } catch (error) {
+     if (error instanceof FormatFailure) {
+-      return { kind: "failed", message: error.message, line: lineOf(input, error.at) };
++      return { kind: "failed", message: error.message, line: lineOf(body, error.at) };
+     }
+     throw error;
+   }
+-  const text = layout.toString() + (input.includes("\n", end) ? "\n" : "");
+-  return text === input ? { kind: "unchanged" } : { kind: "formatted", text };
+ }
+ 
+ function textEnd(input: string): number {
+diff --git a/frontend/src/editor/internal/formatXml.test.ts b/frontend/src/editor/internal/formatXml.test.ts
+index ad315ed..5cb0bdc 100644
+--- a/frontend/src/editor/internal/formatXml.test.ts
++++ b/frontend/src/editor/internal/formatXml.test.ts
+@@ -39,7 +39,22 @@ test("formatXml: declaration, comment, CDATA, DOCTYPE with an internal subset an
+ 
+   expect(formatXml(input)).toEqual({
+     kind: "formatted",
+-    text: `<?xml version="1.0" encoding="UTF-8"?>\n${doctype}\n<!-- top -->\n<note>\n  <?pi x?>\n  <!--c-->\n  <![CDATA[ <raw> ]]>\n  ${leaf}\n</note>`,
++    text: `<?xml version="1.0" encoding="UTF-8"?>\n${doctype}\n<!-- top -->\n<note><?pi x?><!--c--><![CDATA[ <raw> ]]>${leaf}</note>`,
++  });
++});
++
++test("formatXml: a CDATA section beside a child element is character data, so the element is mixed content kept verbatim (catches CDATA counted as text only outside the root)", () => {
++  expect(formatXml("<a><b/><![CDATA[x]]></a>")).toEqual({ kind: "unchanged" });
++});
++
++test("formatXml: a processing instruction inside the DOCTYPE's internal subset is skipped like a comment (catches only comments skipped there)", () => {
++  expect(formatXml("<!DOCTYPE a [<?p ]?>]><a/>")).toEqual({
++    kind: "formatted",
++    text: "<!DOCTYPE a [<?p ]?>]>\n<a/>",
++  });
++  expect(formatXml("<!DOCTYPE a [<?p it's?>]><a/>")).toEqual({
++    kind: "formatted",
++    text: "<!DOCTYPE a [<?p it's?>]>\n<a/>",
+   });
+ });
+ 
+@@ -170,3 +185,23 @@ test("formatXml: 100,000 nested elements are scanned without throwing", () => {
+     line: 1,
+   });
+ });
++
++test("formatXml: no sticky regex lives at module level, so its lastIndex belongs to one scan (catches NAME moved back to module level)", () => {
++  const sources = import.meta.glob<string>("./formatXml.ts", {
++    query: "?raw",
++    import: "default",
++    eager: true,
++  });
++  const source = sources["./formatXml.ts"] ?? "";
++
++  expect(source).toContain("class XmlScan");
++  expect(source).not.toMatch(/^const \w+ = \/.*\/\w*y\w*;$/m);
++});
++
++test("formatXml: a leading byte order mark is kept and the scan starts after it (catches the mark handed to the scan)", () => {
++  expect(formatXml("\uFEFF\n<a><b/></a>")).toEqual({
++    kind: "formatted",
++    text: "\uFEFF<a>\n  <b/>\n</a>",
++  });
++  expect(formatXml("\uFEFF<a/>\n")).toEqual({ kind: "unchanged" });
++});
+diff --git a/frontend/src/editor/internal/formatXml.ts b/frontend/src/editor/internal/formatXml.ts
+index a0e1b58..f8f8c87 100644
+--- a/frontend/src/editor/internal/formatXml.ts
++++ b/frontend/src/editor/internal/formatXml.ts
+@@ -14,7 +14,6 @@ type XmlEvent =
+   | { readonly kind: "open"; readonly from: number; readonly to: number; readonly element: Element }
+   | { readonly kind: "close" | "node"; readonly from: number; readonly to: number };
+ 
+-const NAME = /[A-Za-z_:\u0080-\uFFFF][\w.\-:\u0080-\uFFFF]*/y;
+ const PRESERVE = /[ \t\r\n]xml:space[ \t\r\n]*=[ \t\r\n]*(["'])preserve\1/;
+ const DOCTYPE = "<!DOCTYPE";
+ const END_TAG = "</";
+@@ -27,8 +26,8 @@ const DELIMITED = [
+ ] as const;
+ 
+ export function formatXml(text: string): FormatResult {
+-  return formatWith(text, (layout) => {
+-    layXml(text, new XmlScan(text).run(), layout);
++  return formatWith(text, (body, layout) => {
++    layXml(body, new XmlScan(body).run(), layout);
+   });
+ }
+ 
+@@ -40,7 +39,7 @@ function layXml(text: string, events: readonly XmlEvent[], layout: Layout): void
+       depth -= 1;
+     }
+     if (index > 0) {
+-      layout.lineAt(depth);
++      layout.lineAt(depth, event.from);
+     }
+     const element = event.kind === "open" ? event.element : null;
+     if (element !== null && (element.preserve || !element.children || element.text)) {
+@@ -60,6 +59,7 @@ class XmlScan {
+   readonly #text: string;
+   readonly #events: XmlEvent[] = [];
+   readonly #open: Element[] = [];
++  readonly #name = /[A-Za-z_:\u0080-\uFFFF][\w.\-:\u0080-\uFFFF]*/y;
+   #rooted = false;
+   #at = 0;
+ 
+@@ -109,7 +109,7 @@ class XmlScan {
+     const at = this.#at;
+     const delimited = DELIMITED.find(({ opener }) => this.#text.startsWith(opener, at));
+     if (delimited !== undefined) {
+-      if (delimited.opener === CDATA && this.#open.length === 0) {
++      if (delimited.opener === CDATA) {
+         this.#holdText(at);
+       }
+       const closed = this.#text.indexOf(delimited.closer, at + delimited.opener.length);
+@@ -139,6 +139,8 @@ class XmlScan {
+         at = this.#text.indexOf(char, at + 1);
+       } else if (subset && this.#text.startsWith("<!--", at)) {
+         at = this.#text.indexOf("-->", at);
++      } else if (subset && this.#text.startsWith("<?", at)) {
++        at = this.#text.indexOf("?>", at);
+       } else if (char === "[" || char === "]") {
+         subset = char === "[";
+       } else if (char === ">" && !subset) {
+@@ -233,7 +235,7 @@ class XmlScan {
+   }
+ 
+   #nameAt(at: number): string | null {
+-    NAME.lastIndex = at;
+-    return NAME.exec(this.#text)?.[0] ?? null;
++    this.#name.lastIndex = at;
++    return this.#name.exec(this.#text)?.[0] ?? null;
+   }
+ }
