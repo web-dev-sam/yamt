@@ -2,12 +2,17 @@ import type * as Generated from "./bindings";
 import { invalid, isNonNegativeInteger } from "./validate";
 import { toSideWords, type SideWords } from "./words";
 
+export type TabId = number & { readonly __brand: "TabId" };
+export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
+export type LeftLine = number & { readonly __brand: "LeftLine" };
+export type RightLine = number & { readonly __brand: "RightLine" };
+
 type MiddleLine = number & { readonly __brand: "MiddleLine" };
 export type DiskVersion = number & { readonly __brand: "DiskVersion" };
 type LocalLine = number & { readonly __brand: "LocalLine" };
 type RemoteLine = number & { readonly __brand: "RemoteLine" };
 type ChunkId = number & { readonly __brand: "ChunkId" };
-type LineRange<L> = { readonly start: L; readonly len: number };
+export type LineRange<L> = { readonly start: L; readonly len: number };
 type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideWords<RemoteLine> };
 
 export type Chunk = {
@@ -143,6 +148,30 @@ function isRunId(n: number): n is RunId {
   return isNonNegativeInteger(n);
 }
 
+export function isTabId(n: number): n is TabId {
+  return isNonNegativeInteger(n);
+}
+
+export function isColumnVersion(n: number): n is ColumnVersion {
+  return isNonNegativeInteger(n);
+}
+
+export function isLeftLine(n: number): n is LeftLine {
+  return isNonNegativeInteger(n);
+}
+
+export function isRightLine(n: number): n is RightLine {
+  return isNonNegativeInteger(n);
+}
+
+export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
+  const next = version + 1;
+  if (!isColumnVersion(next)) {
+    throw invalid("version", next);
+  }
+  return next;
+}
+
 function toWords({
   words,
   chunkId,
@@ -161,7 +190,7 @@ function toWords({
   };
 }
 
-function toRange<L extends number>({
+export function toRange<L extends number>({
   range,
   isLine,
   field,

@@ -29,7 +29,7 @@ type CommandResult<T> =
   | { status: "ok"; data: T }
   | { status: "error"; error: SourceFailure | string | number | boolean | null | undefined };
 
-function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+export function toResult<T>(result: CommandResult<T>): SourceResult<T> {
   if (result.status === "ok") {
     return { ok: true, value: result.data };
   }
@@ -44,7 +44,7 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
 }
 
-function createTauriSettings(): SettingsSource {
+export function createTauriSettings(): SettingsSource {
   return {
     async loadSettings(current) {
       return toSettingsResult(await commands.loadSettings(current));

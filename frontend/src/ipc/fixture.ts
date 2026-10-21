@@ -55,7 +55,7 @@ function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.Gener
   );
 }
 
-const LINE_RANGE = v.object({
+export const LINE_RANGE = v.object({
   start: v.number(),
   len: v.number(),
 } satisfies SchemaOf<Generated.LineRange<number>>);
@@ -84,7 +84,7 @@ const REMOVAL = v.object({
   text: v.string(),
 } satisfies SchemaOf<Generated.Removal<number>>);
 
-const SIDE_WORD_CHANGES = v.object({
+export const SIDE_WORD_CHANGES = v.object({
   changed: v.array(INLINE_RANGE),
   removals: v.array(REMOVAL),
 } satisfies SchemaOf<Generated.SideWordChanges<number>>);

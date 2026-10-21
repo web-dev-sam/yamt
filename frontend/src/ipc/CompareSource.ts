@@ -1,0 +1,22 @@
+import type { SettingsSource } from "./ChunkSource";
+import type {
+  ColumnWrite,
+  CompareStart,
+  Comparison,
+  TabId,
+  TabLanguage,
+  TabList,
+  TabTexts,
+} from "./compareDomain";
+import type { SourceResult } from "./domain";
+
+export interface CompareSource extends SettingsSource {
+  openCompare(): Promise<SourceResult<CompareStart>>;
+  loadTab(tab: TabId): Promise<SourceResult<TabTexts>>;
+  setColumn(write: ColumnWrite): Promise<SourceResult<Comparison>>;
+  addTab(): Promise<SourceResult<TabList>>;
+  closeTab(tab: TabId): Promise<SourceResult<TabList>>;
+  renameTab(tab: TabId, name: string): Promise<SourceResult<TabList>>;
+  setTabLanguage(tab: TabId, language: TabLanguage): Promise<SourceResult<TabList>>;
+  showTab(tab: TabId): Promise<SourceResult<TabList>>;
+}
