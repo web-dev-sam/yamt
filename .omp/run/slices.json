@@ -35,24 +35,5 @@
       "frontend/src/ui/stops.test.ts",
       "frontend/src/ui/listing.test.ts"
     ]
-  },
-  "GitOpsRememberedWindow": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.J-remembered-window.md",
-    "owned": [
-      "frontend/src/editor/**",
-      "frontend/src/ui/FileMark.vue",
-      "frontend/src/ui/FileList.vue",
-      "frontend/src/ui/FileTree.vue",
-      "frontend/src/ui/question.ts",
-      "frontend/src/ui/question.test.ts",
-      "frontend/src/ui/summaryLabel.ts",
-      "frontend/src/ui/summaryLabel.test.ts",
-      "frontend/src/ui/useMergeController.ts",
-      "frontend/src/ui/useMergeController.test.ts",
-      "frontend/src/ui/fileMark.ts",
-      "frontend/src/ui/fileMark.test.ts",
-      "frontend/src/ui/deletedSide.test.ts"
-    ]
   }
 }
