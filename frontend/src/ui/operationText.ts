@@ -20,9 +20,9 @@ const TITLES: Readonly<Record<OperationKind, string>> = {
   Am: "Patch Application",
 };
 
-const DONE_STEPS: Readonly<Record<OperationKind, readonly [string, string] | null>> = {
-  Merge: null,
-  SquashMerge: null,
+type StepKind = Exclude<OperationKind, "Merge" | "SquashMerge">;
+
+const DONE_STEPS: Readonly<Record<StepKind, readonly [string, string]>> = {
   Rebase: ["commit already replayed is", "commits already replayed are"],
   CherryPick: ["commit already picked is", "commits already picked are"],
   Revert: ["commit already reverted is", "commits already reverted are"],
@@ -144,31 +144,30 @@ export function abortTitle(operation: OperationView): string {
   return `Abort ${TITLES[operation.kind]}`;
 }
 
-function stepsDone(operation: OperationView): number {
+function stepsSentence(kind: StepKind, progress: ProgressView | null): string {
+  const done = progress === null ? 0 : progress.step - 1;
+  if (done === 0) {
+    return "";
+  }
+  const [one, many] = DONE_STEPS[kind];
+  return done === 1 ? ` The 1 ${one} undone too.` : ` The ${done} ${many} undone too.`;
+}
+
+function doneSentence(operation: OperationView): string {
   switch (operation.kind) {
     case "Merge":
     case "SquashMerge":
-      return 0;
+      return "";
     case "Rebase":
     case "CherryPick":
     case "Revert":
     case "Am":
-      return operation.progress === null ? 0 : operation.progress.step - 1;
+      return stepsSentence(operation.kind, operation.progress);
     default: {
       const _exhaustive: never = operation;
       return _exhaustive;
     }
   }
-}
-
-function doneSentence(operation: OperationView): string {
-  const done = stepsDone(operation);
-  const words = DONE_STEPS[operation.kind];
-  if (done === 0 || words === null) {
-    return "";
-  }
-  const [one, many] = words;
-  return done === 1 ? ` The 1 ${one} undone too.` : ` The ${done} ${many} undone too.`;
 }
 
 export function abortMessage(operation: OperationView): string {

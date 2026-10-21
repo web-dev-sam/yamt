@@ -6,6 +6,7 @@ import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
 import type { Problem } from "./problem";
 import { problemText } from "./problemText";
+import type { Stop } from "./saving";
 
 const LINUX = "Linux x86_64";
 
@@ -22,6 +23,8 @@ type Pressed = Aborting & {
   readonly asking: Asking;
   readonly operation: ShallowRef<OperationView | null>;
   readonly problem: ShallowRef<Problem | null>;
+  readonly lists: string[];
+  stop: Stop;
 };
 
 afterEach(() => {
@@ -33,13 +36,20 @@ function aborting(
   operation: OperationView | null = REBASE,
 ): Pressed {
   const asking = createAsking();
+  const lists: string[] = [];
   const target = {
     source: { abortOperation },
     asking,
     operation: shallowRef(operation),
     problem: shallowRef<Problem | null>(null),
+    lists,
+    stop: { dropped: false },
+    refreshFiles: () => {
+      lists.push("list");
+      return Promise.resolve();
+    },
   };
-  return { ...target, ...createAborting(target) };
+  return Object.assign(target, createAborting(target));
 }
 
 async function pressUnasked(abort: Pressed): Promise<void> {
@@ -129,4 +139,38 @@ test("git's refusal names the operation, logs it, and a later press asks again",
   abort.asking.answer(true);
   await again;
   expect(aborts).toBe(2);
+});
+
+test("an abort git answers StopMovedOn lists again, so the window goes on to the new stop", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const abort = aborting(() => Promise.resolve({ ok: false, failure: { kind: "StopMovedOn" } }));
+
+  const refusing = abort.abortOperation();
+  abort.asking.answer(true);
+  await refusing;
+
+  expect(abort.lists).toEqual(["list"]);
+  expect(abort.abortState.value.kind).toBe("ready");
+});
+
+test("an abort answered after its stop was dropped reports nothing and lists nothing", async () => {
+  const answers: ((reply: SourceResult<null>) => void)[] = [];
+  const abort = aborting(
+    () =>
+      new Promise((resolve) => {
+        answers.push(resolve);
+      }),
+  );
+
+  const pressed = abort.abortOperation();
+  abort.asking.answer(true);
+  await vi.waitFor(() => {
+    expect(answers).toHaveLength(1);
+  });
+  abort.stop.dropped = true;
+  answers[0]?.({ ok: false, failure: { kind: "StopMovedOn" } });
+  await pressed;
+
+  expect([abort.problem.value, abort.lists]).toEqual([null, []]);
+  expect(abort.abortState.value.kind).toBe("ready");
 });

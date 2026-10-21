@@ -57,6 +57,22 @@ export function exitMustAsk(unsaved: readonly string[]): boolean {
   return unsaved.length > 0;
 }
 
+export function endsWithStop(question: Question): boolean {
+  switch (question.kind) {
+    case "unprocessed":
+    case "abort":
+      return true;
+    case "exit":
+    case "clash":
+    case "servers":
+      return false;
+    default: {
+      const _exhaustive: never = question;
+      return _exhaustive;
+    }
+  }
+}
+
 function unprocessedSentence({ conflicts, changes }: MergeSummary): string {
   const parts = [
     ...(conflicts > 0 ? [`${conflicts} unresolved conflict${conflicts === 1 ? "" : "s"}`] : []),

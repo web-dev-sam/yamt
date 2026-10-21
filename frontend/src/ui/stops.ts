@@ -1,10 +1,12 @@
 import type { ShallowRef } from "vue";
 
 import { log, type FileEntry, type OperationView } from "../ipc";
+import type { Asking } from "./asking";
 import type { CloseGuard } from "./closeGuard";
 import type { Notice } from "./noticeText";
-import { logProblem, type Problem } from "./problem";
-import { dropClaims, type Writing } from "./saving";
+import { report } from "./problem";
+import { endsWithStop } from "./question";
+import { dropStop, type FormatOutcomes, type Writing } from "./saving";
 import type { Screen } from "./screen";
 import type { Taken } from "./sides";
 import type { Shown } from "./views";
@@ -19,7 +21,9 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
     readonly notices: ShallowRef<readonly Notice[]>;
     readonly active: ShallowRef<string | null>;
     readonly screen: ShallowRef<Screen>;
+    readonly formatOutcomes: FormatOutcomes;
     readonly operation: Readonly<ShallowRef<OperationView | null>>;
+    readonly asking: Pick<Asking, "question" | "dismiss">;
     readonly guard: Pick<CloseGuard, "unsavedFiles">;
     latestOpen: number;
     loadFiles(): Promise<readonly FileEntry[] | null>;
@@ -27,11 +31,16 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
 
 function clearStop(target: StopTarget): void {
   target.latestOpen += 1;
-  dropClaims(target);
+  dropStop(target);
+  const question = target.asking.question.value;
+  if (question !== null && endsWithStop(question)) {
+    target.asking.dismiss();
+  }
   target.opened.value = [];
   target.choices.value = [];
   target.taken.value = new Map();
   target.notices.value = [];
+  target.formatOutcomes.value = new Map();
   target.active.value = null;
   target.problem.value = null;
   target.screen.value = { kind: "files" };
@@ -47,12 +56,10 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> 
   }
   const listed = await target.loadFiles();
   if (end.kind === "continued" && listed !== null && listed.length === 0) {
-    const stopped: Problem = {
+    report(target, {
       action: "stopped",
       operation: target.operation.value?.kind ?? null,
       message: end.message,
-    };
-    logProblem(stopped);
-    target.problem.value = stopped;
+    });
   }
 }

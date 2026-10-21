@@ -123,6 +123,27 @@ test("the tooltip holds the line and the full message of the commit applied; a b
   );
 });
 
+test("a patch whose progress git did not record has a line without a count", () => {
+  expect(
+    operationLine({ kind: "Am", subject: "Fix typo", message: "Fix typo", progress: null }).text,
+  ).toBe("Applying patch: Fix typo");
+});
+
+test("a patch's tooltip holds the line and the patch message trimmed; an empty message adds nothing", () => {
+  const progress = { step: 2, total: 4 };
+  expect(
+    operationLine({
+      kind: "Am",
+      subject: "Fix typo",
+      message: "\nFix typo\n\nThe label said 'Sumbit'.\n\n",
+      progress,
+    }).tooltip,
+  ).toBe("Applying patch 2 of 4: Fix typo\n\nFix typo\n\nThe label said 'Sumbit'.");
+  expect(operationLine({ kind: "Am", subject: "", message: " \n", progress }).tooltip).toBe(
+    "Applying patch 2 of 4",
+  );
+});
+
 test.each<[OperationView, string, string]>([
   [{ kind: "Merge", merging: FEATURE, into: MAIN }, "Abort merge", "Abort Merge"],
   [

@@ -22,10 +22,10 @@ import { refreshFiles } from "./listing";
 import { nextUnresolved } from "./nextFile";
 import { noticeKey, type Notice } from "./noticeText";
 import { createPaneSplit, type PaneSplitState } from "./paneSplit";
-import { attempt, clearProblemAbout, logProblem, report, type Problem } from "./problem";
+import { logProblem, reportFailure, type Problem } from "./problem";
 import type { Question } from "./question";
-import { afterWrite, createSaving, finish, reset, whileWriting } from "./saving";
-import type { FinishRequest, Saving, Writing } from "./saving";
+import { createSaving, finish, reset, take } from "./saving";
+import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
 import type { Screen } from "./screen";
 import { createServers, type Servers } from "./servers";
 import { createServerSetup, type ServerSetup } from "./serverSetup";
@@ -34,8 +34,8 @@ import type { SettingsActions, SettingsInUse } from "./settings";
 import type { Taken } from "./sides";
 import { nextStop, type StopEnd } from "./stops";
 import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
-import type { Preferences } from "./useMergeController";
-import { fetchView, isShown, reload } from "./views";
+import type { FormatOutcome, Preferences } from "./useMergeController";
+import { fetchView, isShown } from "./views";
 
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
@@ -48,6 +48,7 @@ type Refs = {
   readonly active: ShallowRef<string | null>;
   readonly problem: ShallowRef<Problem | null>;
   readonly screen: ShallowRef<Screen>;
+  readonly formatOutcomes: FormatOutcomes;
   readonly settings: ShallowRef<SettingsInUse>;
   readonly fileListShown: ShallowRef<boolean>;
 };
@@ -59,8 +60,9 @@ type State = Refs &
     readonly guard: CloseGuard;
     latestOpen: number;
     latestSettings: number;
-    loadFiles(): Promise<readonly FileEntry[] | null>;
-    nextStop(end: StopEnd): Promise<void>;
+    readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
+    readonly refreshFiles: () => Promise<void>;
+    readonly nextStop: (end: StopEnd) => Promise<void>;
   };
 
 type Actions = CloseGuard &
@@ -110,9 +112,30 @@ function createRefs(startTheme: Theme): Refs {
     active: shallowRef<string | null>(null),
     problem: shallowRef<Problem | null>(null),
     screen: shallowRef<Screen>({ kind: "files" }),
+    formatOutcomes: shallowRef<ReadonlyMap<string, FormatOutcome>>(new Map()),
     settings: shallowRef(startSettings(startTheme)),
     fileListShown: shallowRef(true),
   };
+}
+
+function createState(refs: Refs, source: ChunkSource): State {
+  const asking = createAsking();
+  const state: State = {
+    ...refs,
+    source,
+    asking,
+    guard: createCloseGuard(asking, refs.opened),
+    writing: new Map(),
+    stop: { dropped: false },
+    latestOpen: 0,
+    latestSettings: 0,
+    loadFiles: () => loadFiles(state),
+    refreshFiles: async () => {
+      await refreshFiles(state, "running");
+    },
+    nextStop: (end) => nextStop(state, end),
+  };
+  return state;
 }
 
 export function createAppStore(
@@ -122,24 +145,13 @@ export function createAppStore(
   host: ServerHost | null,
 ): AppStore {
   const refs = createRefs(startTheme);
-  const asking = createAsking();
+  const state = createState(refs, source);
   const buttons = createHiddenButtons();
-  const state: State = {
-    ...refs,
-    source,
-    asking,
-    guard: createCloseGuard(asking, refs.opened),
-    writing: new Map(),
-    latestOpen: 0,
-    latestSettings: 0,
-    loadFiles: () => loadFiles(state),
-    nextStop: (end) => nextStop(state, end),
-  };
   const { files, settings } = refs;
   const acts = actions(state, buttons, settingsActions(state));
   store = {
     ...refs,
-    question: asking.question,
+    question: state.asking.question,
     allResolved: computed(
       () => files.value.length > 0 && files.value.every((file) => file.status === "Resolved"),
     ),
@@ -161,17 +173,16 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
     loadFiles: async () => {
       await state.loadFiles();
     },
-    refreshFiles: async () => {
-      await refreshFiles(state, "running");
-    },
-    nextStop: (end) => state.nextStop(end),
+    refreshFiles: state.refreshFiles,
+    nextStop: state.nextStop,
     open: (path) => open(state, path),
     pick: async (path) => {
       state.screen.value = { kind: "files" };
       await open(state, path);
     },
-    finish: (request) => finishThenMoveOn(state, request),
-    takeSide: (path, side, diskVersion) => takeSide(state, path, side, diskVersion),
+    finish: (request) => thenMoveOn(state, request.path, () => finish(state, request)),
+    takeSide: (path, side, diskVersion) =>
+      thenMoveOn(state, path, () => take(state, path, side, diskVersion)),
     reset: (path, diskVersion) => reset(state, path, diskVersion),
     dismissProblem: () => {
       state.problem.value = null;
@@ -205,10 +216,14 @@ async function loadFiles(state: State): Promise<readonly FileEntry[] | null> {
   return listed;
 }
 
-async function finishThenMoveOn(state: State, request: FinishRequest): Promise<void> {
+async function thenMoveOn(
+  state: State,
+  path: string,
+  write: () => Promise<boolean>,
+): Promise<void> {
   const opensBefore = state.latestOpen;
-  if (await finish(state, request)) {
-    await moveOn(state, request.path, opensBefore);
+  if (await write()) {
+    await moveOn(state, path, opensBefore);
   }
 }
 
@@ -232,9 +247,10 @@ async function load(state: State, path: string): Promise<void> {
   const current = ticket === state.latestOpen;
   if (!view.ok) {
     const failure: Problem = { action: "open", path, cause: view.cause };
-    logProblem(failure);
     if (current) {
-      state.problem.value = failure;
+      await reportFailure(state, failure);
+    } else {
+      logProblem(failure);
     }
     return;
   }
@@ -251,35 +267,6 @@ async function moveOn(state: State, path: string, opensBefore: number): Promise<
   if (next !== null) {
     await open(state, next);
   }
-}
-
-async function takeSide(
-  state: State,
-  path: string,
-  side: Side,
-  diskVersion: DiskVersion,
-): Promise<void> {
-  const opensBefore = state.latestOpen;
-  const outcome = await whileWriting(state, path, async (claim) => {
-    const reply = await attempt(() => state.source.takeSide(path, side, diskVersion));
-    return claim.dropped ? null : reply;
-  });
-  if (outcome === null) {
-    return;
-  }
-  if (!outcome.ok) {
-    report(state, { action: "take", path, cause: outcome.cause });
-    return;
-  }
-  if (!(await afterWrite(state, path, outcome.value))) {
-    return;
-  }
-  state.taken.value = new Map([...state.taken.value, [path, { by: "side", side }]]);
-  clearProblemAbout(state, path);
-  if (state.opened.value.some((file) => file.path === path)) {
-    await reload(state, path);
-  }
-  await moveOn(state, path, opensBefore);
 }
 
 export function useAppStore(): AppStore {

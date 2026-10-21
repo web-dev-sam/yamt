@@ -14,6 +14,7 @@ import type {
 import { refreshFiles } from "./listing";
 import type { Notice } from "./noticeText";
 import type { Problem } from "./problem";
+import type { Stop } from "./saving";
 import type { Taken } from "./sides";
 import type { StopEnd } from "./stops";
 
@@ -29,7 +30,9 @@ type Listed = {
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
   readonly guard: { unsavedFiles(): string[] };
   readonly ends: StopEnd[];
+  stop: Stop;
   nextStop(end: StopEnd): Promise<void>;
+  refreshFiles(): Promise<void>;
 };
 
 const FILES: readonly FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
@@ -95,10 +98,12 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
     guard: { unsavedFiles: () => [] },
     ends,
+    stop: { dropped: false },
     nextStop: (end) => {
       ends.push(end);
       return Promise.resolve();
     },
+    refreshFiles: notUsed,
   };
 }
 
