@@ -47,7 +47,7 @@ pub fn saved_with_everything_waiting(data: &FileMergeData) -> String {
                 block.push(close);
                 block
             }
-            (Waiting::AsShown, _) => continue,
+            (Waiting::AsShown | Waiting::Remembered, _) => continue,
         };
         let start = chunk.middle.start.0 as usize;
         middle.splice(start..start + chunk.middle.len as usize, written);

@@ -14,6 +14,8 @@ const PATH_AND_CHUNKS = v.object({ path: v.string(), chunks: v.array(v.unknown()
 
 const NO_QUERY = "";
 
+const REMEMBERED = "remembered.ts";
+
 function quietLog(): { log: Log; entries: LogEntry[] } {
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   const entries: LogEntry[] = [];
@@ -142,12 +144,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-test("the committed fixtures list 11 files, sorted by path, all unresolved, with no disk changes", async () => {
+test("the committed fixtures list 12 files, sorted by path, the remembered one remembered, the rest unresolved, with no disk changes", async () => {
   const { files, diskChanges } = await listed(quietLog().log);
 
   expect(files.map((file) => file.path)).toEqual([
     "language-tools-script-setup.ts",
     "nuxt-island-test.ts",
+    "remembered.ts",
     "tanstack-query-persist-provider.tsx",
     "tanstack-query-svelte-base-query.ts",
     "vite-modulepreload-polyfill.ts",
@@ -159,28 +162,32 @@ test("the committed fixtures list 11 files, sorted by path, all unresolved, with
     "word-marks.ts",
   ]);
   for (const file of files) {
-    expect(file).toEqual({ path: file.path, status: "Unresolved", unsupported: null });
+    const status = file.path === REMEMBERED ? "Remembered" : "Unresolved";
+    expect(file).toEqual({ path: file.path, status, unsupported: null });
   }
   expect(diskChanges).toEqual([]);
 });
 
-test("each committed fixture loads with its JSON's chunk count, its stages middle and version 0", async () => {
+test("each committed fixture loads with its JSON's chunk count, its stages middle (the remembered one its disk text) and version 0", async () => {
   const source = createFixtureSource(quietLog().log, NO_QUERY);
   const committed = Object.values(COMMITTED);
-  expect(committed).toHaveLength(11);
+  expect(committed).toHaveLength(12);
   for (const json of committed) {
     const { path, chunks } = v.parse(PATH_AND_CHUNKS, json);
     const data = valueOf(await source.loadFile(path));
     expect(data.chunks).toHaveLength(chunks.length);
-    expect(data.middle.kind).toBe("Stages");
+    expect(data.middle.kind).toBe(path === REMEMBERED ? "Disk" : "Stages");
     expect(data.diskVersion).toBe(0);
   }
 });
 
-test("each committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
+test("each unresolved committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
   const source = createFixtureSource(quietLog().log, NO_QUERY);
+  const unresolved = valueOf(await source.listFiles()).files.filter(
+    (file) => file.status === "Unresolved",
+  );
   let conflicts = 0;
-  for (const { path } of valueOf(await source.listFiles()).files) {
+  for (const { path } of unresolved) {
     for (const { kind, waiting } of valueOf(await source.loadFile(path)).chunks) {
       if (kind !== "Conflict") {
         expect(waiting).toEqual({ kind: "SideLines" });
@@ -196,6 +203,25 @@ test("each committed fixture's conflicts wait as markers and its other changes a
     }
   }
   expect(conflicts).toBeGreaterThanOrEqual(11);
+});
+
+test("the remembered fixture shows rerere's text with each block git wrote waiting as remembered, until finished; reset makes it remembered again", async () => {
+  const source = createFixtureSource(quietLog().log, NO_QUERY);
+  const data = valueOf(await source.loadFile(REMEMBERED));
+  const write = { path: REMEMBERED, text: "", diskVersion: data.diskVersion };
+
+  expect(data.middle).toEqual({
+    kind: "Disk",
+    text: expect.stringContaining('"backlog" | "todo" | "doing" | "done"'),
+  });
+  expect(data.chunks.map(({ kind, waiting, middle }) => ({ kind, waiting, middle }))).toEqual([
+    { kind: "Conflict", waiting: { kind: "Remembered" }, middle: { start: 0, len: 1 } },
+    { kind: "Conflict", waiting: { kind: "Remembered" }, middle: { start: 2, len: 1 } },
+  ]);
+  const finished = valueOf(await source.finishFile(write)).files;
+  expect(finished.find((file) => file.path === REMEMBERED)?.status).toBe("Resolved");
+  const reset = valueOf(await source.resetFile(REMEMBERED, data.diskVersion)).files;
+  expect(reset.find((file) => file.path === REMEMBERED)?.status).toBe("Remembered");
 });
 
 test("a conflict of vueuse-use-magic-keys.ts arrives intact, with its words", async () => {
@@ -259,7 +285,7 @@ test("in-memory records are listed sorted by path and keep every field", async (
   });
 });
 
-test.each([{ kind: "SideLines" }, { kind: "AsShown" }, WAITING])(
+test.each([{ kind: "SideLines" }, { kind: "AsShown" }, { kind: "Remembered" }, WAITING])(
   "a chunk waiting as %j arrives as it is",
   async (waiting) => {
     const source = createFixtureSource(quietLog().log, NO_QUERY, {

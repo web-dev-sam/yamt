@@ -9,6 +9,7 @@ export function dropsShownText({ chunk, status }: ChunkState): boolean {
   const { waiting } = chunk;
   switch (waiting.kind) {
     case "AsShown":
+    case "Remembered":
       return false;
     case "SideLines":
       return !isResolved(chunk, status);

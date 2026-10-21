@@ -12,6 +12,7 @@ use crate::disk::{
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
 use crate::merging::is_merging;
 use crate::orientation::Orientation;
+use crate::remembered::remembered_merge_data;
 use crate::side_names::SideNames;
 use crate::sides::{FileSides, SUBMODULE_MODE, Side, side_content};
 use crate::stages::CapturedStages;
@@ -21,6 +22,8 @@ use crate::{Error, Result};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub enum FileStatus {
     Unresolved,
+    /// Unmerged for git, with the resolution git rerere replayed on disk, not yet reviewed (plan §2 #90).
+    Remembered,
     Resolved,
 }
 
@@ -143,7 +146,7 @@ impl MergeSession {
         for file in &mut self.files {
             let is_unmerged = unmerged.iter().any(|entry| entry.path == file.path);
             file.status = if is_unmerged {
-                FileStatus::Unresolved
+                file.unmerged_status()
             } else {
                 FileStatus::Resolved
             };
@@ -207,6 +210,15 @@ impl MergeSession {
                 orientation,
                 version,
             )),
+            Seen::ViewRemembered(shown) => Ok(remembered_merge_data(
+                &path,
+                texts,
+                shown,
+                file.at_open.git_output().unwrap_or_default(),
+                file.marker_size,
+                orientation,
+                version,
+            )),
             Seen::ViewFromStages(_) | Seen::GitOutput => Ok(merge_data(
                 &path,
                 &texts.base,
@@ -233,11 +245,12 @@ impl MergeSession {
         })
     }
 
+    /// The files git still lists unmerged, remembered ones included.
     #[must_use]
     pub fn remaining(&self) -> usize {
         self.files
             .iter()
-            .filter(|file| file.status == FileStatus::Unresolved)
+            .filter(|file| file.status != FileStatus::Resolved)
             .count()
     }
 }
@@ -293,11 +306,23 @@ impl FileState {
     /// The marker lines git wrote into this file, as found at open.
     fn marker_style(&self, orientation: Orientation) -> MarkerStyle {
         match &self.at_open {
-            AtOpen::Untouched(OnDisk::File(bytes)) | AtOpen::Changed(OnDisk::File(bytes)) => {
-                MarkerStyle::found_in(bytes, self.marker_size, orientation)
-            }
+            AtOpen::Untouched(OnDisk::File(bytes))
+            | AtOpen::Changed(OnDisk::File(bytes))
+            | AtOpen::Remembered {
+                git_output: bytes, ..
+            } => MarkerStyle::found_in(bytes, self.marker_size, orientation),
             AtOpen::Untouched(_) | AtOpen::Changed(_) | AtOpen::Unread => {
                 MarkerStyle::fallback(self.marker_size, orientation)
+            }
+        }
+    }
+
+    /// The status of a file git lists unmerged: `Remembered` while it shows rerere's resolution.
+    pub(crate) fn unmerged_status(&self) -> FileStatus {
+        match self.seen {
+            Seen::ViewRemembered(_) => FileStatus::Remembered,
+            Seen::GitOutput | Seen::ViewFromStages(_) | Seen::ViewFromDisk(_) => {
+                FileStatus::Unresolved
             }
         }
     }

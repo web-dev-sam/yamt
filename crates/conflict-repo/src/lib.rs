@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod operation;
+mod rerere;
 
 use std::fs;
 use std::io::Write;
@@ -11,6 +12,7 @@ use std::process::{Command, Output, Stdio};
 pub use operation::{
     Run, STEP_ONE_MESSAGE, STEP_TWO_FILE, edit_stop_repo, operation_repo, ready_repo, start,
 };
+pub use rerere::{Remembered, Replay, rerere_repo};
 pub use tempfile::TempDir;
 
 #[derive(Debug, thiserror::Error)]

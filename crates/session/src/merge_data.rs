@@ -119,7 +119,18 @@ pub(crate) fn disk_merge_data(
     orientation: Orientation,
     disk_version: DiskVersion,
 ) -> FileMergeData {
-    let (middle, eol, chunks) = match seeded_from_disk(disk, marker_size, texts, orientation) {
+    let seeded = seeded_from_disk(disk, marker_size, texts, orientation);
+    shown_merge_data(path, texts, seeded, disk_version)
+}
+
+/// The data of a file whose middle pane starts as the disk file, or says why it cannot.
+pub(crate) fn shown_merge_data(
+    path: &str,
+    texts: &Texts,
+    seeded: Result<Seeded, NotText>,
+    disk_version: DiskVersion,
+) -> FileMergeData {
+    let (middle, eol, chunks) = match seeded {
         Ok(seeded) => (
             Middle::Disk {
                 text: seeded.middle,
@@ -160,7 +171,7 @@ fn seeded_from_disk(
     Ok(seed(disk_text(bytes)?, marker_size, texts, orientation))
 }
 
-fn disk_text(bytes: &[u8]) -> Result<&str, NotText> {
+pub(crate) fn disk_text(bytes: &[u8]) -> Result<&str, NotText> {
     if is_binary(bytes) {
         return Err(NotText::Binary);
     }

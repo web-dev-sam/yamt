@@ -12,6 +12,7 @@ use crate::Result;
 use crate::decode::is_binary;
 use crate::disk::OnDisk;
 use crate::markers::{DEFAULT_MARKER_SIZE, views};
+use crate::remembered::{RerereTracked, looks_resolved};
 use crate::session::LOG_TARGET;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE};
 use crate::stages::CapturedStages;
@@ -61,6 +62,17 @@ pub(crate) enum StartLook {
     Changed,
     /// Untouched when the worktree file, cleaned by git, hashes to this blob.
     BlobOf(Oid),
+    /// rerere replayed a resolution over git's merge output (plan §2 #90).
+    Remembered {
+        git_output: Vec<u8>,
+    },
+}
+
+/// What open found for a path, once every `BlobOf` is hashed.
+pub(crate) enum Found {
+    Untouched,
+    Changed,
+    Remembered { git_output: Vec<u8> },
 }
 
 enum GitWrote<'a> {
@@ -79,6 +91,7 @@ pub(crate) struct StartCheck<'r> {
     repo: &'r Repo,
     scratch: Option<ScratchDir>,
     histogram: Option<bool>,
+    rerere: RerereTracked,
     merge_file_runs: u32,
     started: Instant,
 }
@@ -168,6 +181,7 @@ impl<'r> StartCheck<'r> {
             repo,
             scratch: None,
             histogram: None,
+            rerere: RerereTracked::Unread,
             merge_file_runs: 0,
             started: Instant::now(),
         }
@@ -192,6 +206,12 @@ impl<'r> StartCheck<'r> {
         match self.merged(sides, marker_size, union) {
             Ok(output) if views(disk, marker_size) == views(&output, marker_size) => {
                 StartLook::Untouched
+            }
+            Ok(output)
+                if looks_resolved(&output, disk, marker_size)
+                    && self.rerere.has_replayed(self.repo, file.path) =>
+            {
+                StartLook::Remembered { git_output: output }
             }
             Ok(_) => StartLook::Changed,
             Err(error) => {
@@ -237,13 +257,13 @@ impl<'r> StartCheck<'r> {
         Ok(histogram)
     }
 
-    /// Whether each path is untouched, in the order of `looks`.
-    pub(crate) fn untouched(self, looks: &[(&Path, StartLook)]) -> Vec<bool> {
+    /// What was found for each path, in the order of `looks`.
+    pub(crate) fn found(self, looks: Vec<(&Path, StartLook)>) -> Vec<Found> {
         let mut hashed_paths = Vec::new();
-        for (path, look) in looks {
+        for (path, look) in &looks {
             match look {
                 StartLook::BlobOf(_) => hashed_paths.push(*path),
-                StartLook::Untouched | StartLook::Changed => {}
+                StartLook::Untouched | StartLook::Changed | StartLook::Remembered { .. } => {}
             }
         }
         let hashes = match self.repo.hash_objects(&hashed_paths) {
@@ -254,20 +274,28 @@ impl<'r> StartCheck<'r> {
             }
         };
         let mut hashes = hashes.map(Vec::into_iter);
-        let mut untouched = Vec::with_capacity(looks.len());
+        let mut found = Vec::with_capacity(looks.len());
         for (_, look) in looks {
-            untouched.push(match look {
-                StartLook::Untouched => true,
-                StartLook::Changed => false,
-                StartLook::BlobOf(expected) => match &mut hashes {
-                    Some(hashes) => hashes.next().is_some_and(|hash| hash == *expected),
-                    None => true,
-                },
+            found.push(match look {
+                StartLook::Untouched => Found::Untouched,
+                StartLook::Changed => Found::Changed,
+                StartLook::Remembered { git_output } => Found::Remembered { git_output },
+                StartLook::BlobOf(expected) => {
+                    let untouched = match &mut hashes {
+                        Some(hashes) => hashes.next().is_some_and(|hash| hash == expected),
+                        None => true,
+                    };
+                    if untouched {
+                        Found::Untouched
+                    } else {
+                        Found::Changed
+                    }
+                }
             });
         }
         let elapsed_ms = self.started.elapsed().as_millis();
         tracing::debug!(target: LOG_TARGET, event = "start_checked", merge_file_runs = self.merge_file_runs, hashed = hashed_paths.len(), elapsed_ms, "compared the worktree with what git wrote");
-        untouched
+        found
     }
 }
 

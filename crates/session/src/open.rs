@@ -11,7 +11,7 @@ use crate::session::{Content, FileState, FileStatus, MergeSession};
 use crate::side_names::read_side_names;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
 use crate::stages::{CapturedStages, group_by_path};
-use crate::start::{Attributes, StartCheck, StartFile, StartLook};
+use crate::start::{Attributes, Found, StartCheck, StartFile, StartLook};
 
 /// What the index holds for a path, with the blobs of a regular file read.
 enum Stored {
@@ -84,10 +84,10 @@ fn open_files(
     }
     let paths = opened.iter().map(|file| file.path.as_path());
     let looks: Vec<(&Path, StartLook)> = paths.zip(looks).collect();
-    let untouched = check.untouched(&looks);
+    let found = check.found(looks);
     let mut files = Vec::with_capacity(opened.len());
-    for (file, untouched) in opened.into_iter().zip(untouched) {
-        files.push(file_state(file, untouched));
+    for (file, found) in opened.into_iter().zip(found) {
+        files.push(file_state(file, found));
     }
     Ok(files)
 }
@@ -135,13 +135,17 @@ fn open_file(
     Ok((opened, look))
 }
 
-fn file_state(opened: Opened, untouched: bool) -> FileState {
-    let at_open = match opened.disk {
-        Some(disk) if untouched => AtOpen::Untouched(disk),
-        Some(disk) => AtOpen::Changed(disk),
-        None => AtOpen::Unread,
+fn file_state(opened: Opened, found: Found) -> FileState {
+    let at_open = match (opened.disk, found) {
+        (Some(disk), Found::Untouched) => AtOpen::Untouched(disk),
+        (Some(OnDisk::File(remembered)), Found::Remembered { git_output }) => AtOpen::Remembered {
+            remembered,
+            git_output,
+        },
+        (Some(disk), Found::Changed | Found::Remembered { .. }) => AtOpen::Changed(disk),
+        (None, _) => AtOpen::Unread,
     };
-    FileState {
+    let mut file = FileState {
         path: opened.path,
         stages: opened.stages,
         status: FileStatus::Unresolved,
@@ -151,7 +155,9 @@ fn file_state(opened: Opened, untouched: bool) -> FileState {
         seen: at_open.first_seen(),
         settled: None,
         at_open,
-    }
+    };
+    file.status = file.unmerged_status();
+    file
 }
 
 fn stored(blobs: &mut BlobReader, stages: &CapturedStages) -> Result<Stored> {

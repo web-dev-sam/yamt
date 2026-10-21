@@ -105,6 +105,7 @@ const WAITING: v.GenericSchema<Generated.Waiting> = v.variant("kind", [
     close: v.string(),
   }),
   v.object({ kind: v.literal("AsShown") }),
+  v.object({ kind: v.literal("Remembered") }),
 ]);
 
 const MERGE_CHUNK = v.object({
@@ -176,11 +177,11 @@ function describeRecord(path: string, data: FileMergeData | undefined): SourceRe
 }
 
 function entries({ fixtures, finished }: Records): FileEntry[] {
-  return [...fixtures.keys()].map((path): FileEntry => ({
-    path,
-    status: finished.has(path) ? "Resolved" : "Unresolved",
-    unsupported: null,
-  }));
+  return [...fixtures.entries()].map(([path, data]): FileEntry => {
+    const remembered = data.chunks.some((chunk) => chunk.waiting.kind === "Remembered");
+    const unresolved = remembered ? "Remembered" : "Unresolved";
+    return { path, status: finished.has(path) ? "Resolved" : unresolved, unsupported: null };
+  });
 }
 
 function updateKnown(records: Records, path: string, update: () => void): SourceResult<WriteReply> {

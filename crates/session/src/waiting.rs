@@ -24,6 +24,9 @@ pub enum Waiting {
     },
     /// A region yamt could not place: written as the Result shows it.
     AsShown,
+    /// A conflict git rerere resolved from a resolution recorded before: written as the Result
+    /// shows it, rerere's text unless the user changed it (plan §2 #90).
+    Remembered,
 }
 
 /// The marker lines git writes around a conflict in one file, without line breaks, and which pane

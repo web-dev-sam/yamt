@@ -269,6 +269,29 @@ test("a region yamt could not place is written as shown, typing included", async
   expect(written(typed)).toBe(["a", OPEN, "typed x", SEPARATOR, "y", CLOSE, "z", ""].join("\n"));
 });
 
+test("a conflict git rerere filled in is written as shown: rerere's text, typing, or an applied side", async () => {
+  const remembered = await opened(
+    { middle: "a\nboth\nz\n", local: "a\nL\nz\n", remote: "a\nR\nz\n" },
+    [
+      {
+        kind: "Conflict",
+        middle: [1, 1],
+        local: [1, 1],
+        remote: [1, 1],
+        waiting: { kind: "Remembered" },
+      },
+    ],
+  );
+  const typed = updated(remembered, {
+    changes: { from: remembered.state.doc.line(2).from, insert: "typed " },
+  });
+  const local = decided(remembered, "apply", "local");
+
+  expect(written(remembered)).toBe("a\nboth\nz\n");
+  expect(written(typed)).toBe("a\ntyped both\nz\n");
+  expect(written(local)).toBe("a\nL\nz\n");
+});
+
 test("a line break deleted at a waiting change's edge is written back, so no marker shares a line", async () => {
   const merge = await opened(
     { middle: "a\nb\nz\n", local: "a\nL\nz\n", remote: "a\nR1\nR2\nz\n" },

@@ -42,3 +42,10 @@ test("an active file not in the list, or none, starts from the top", () => {
   expect(nextUnresolved(FILES, "gone.ts")).toBe("a.ts");
   expect(nextUnresolved(FILES, null)).toBe("a.ts");
 });
+
+test("a file git rerere filled in is not resolved yet: Next file goes there", () => {
+  const files = [file("a.ts", "Unresolved"), file("b.ts", "Resolved"), file("c.ts", "Remembered")];
+
+  expect(nextUnresolved(files, "a.ts")).toBe("c.ts");
+  expect(nextUnresolved(files, "c.ts")).toBe("a.ts");
+});

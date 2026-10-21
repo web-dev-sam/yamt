@@ -272,6 +272,34 @@ fn fixture_prints_file_merge_data_named_after_the_case() {
     }
 }
 
+// Catches a remembered showcase case printed as the stages view, which fixture mode would list as a
+// plain conflict.
+#[test]
+fn fixture_of_a_case_with_a_remembered_text_prints_the_remembered_view() {
+    const GIT_OUTPUT: &str =
+        "a\nB\nc\nd\nE\nf\ng\n<<<<<<< ours\nL\n=======\nR\n>>>>>>> theirs\ni\n";
+    const REMEMBERED: &str = "a\nB\nc\nd\nE\nf\ng\nL and R\ni\n";
+    let root = TempDir::new().unwrap();
+    let case = write_case(root.path(), "cart", "ts");
+    fs::write(case.join("remembered.ts"), REMEMBERED).unwrap();
+    fs::write(case.join("git-output.ts"), GIT_OUTPUT).unwrap();
+
+    let output = yamt_cli(&["fixture", path(&case)]);
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let data: Value = serde_json::from_str(&output.stdout).unwrap();
+    assert_eq!(
+        data["middle"],
+        json!({ "kind": "Disk", "text": REMEMBERED })
+    );
+    let chunks = data["chunks"].as_array().unwrap();
+    assert_eq!(chunks.len(), 1);
+    assert_eq!(chunks[0]["waiting"], json!({ "kind": "Remembered" }));
+    assert_eq!(chunks[0]["chunk"]["kind"], "Conflict");
+    assert_eq!(chunks[0]["middle"], json!({ "start": 7, "len": 1 }));
+    assert_eq!(chunks[0]["chunk"]["base"], json!({ "start": 7, "len": 1 }));
+}
+
 #[test]
 fn scan_lists_each_conflicted_file_with_chunk_counts_or_reason_and_remaining() {
     let repo = conflict_repo(&[

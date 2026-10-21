@@ -40,9 +40,7 @@ impl MergeSession {
             return Err(error.into());
         }
         file.status = FileStatus::Resolved;
-        file.seen = file
-            .seen
-            .after_own_write(OnDisk::File(result.as_bytes().to_vec()));
+        file.seen = file.seen.after_own_write(result.as_bytes().to_vec());
         Ok(self.written_reply())
     }
 
@@ -60,9 +58,7 @@ impl MergeSession {
         }
         let file = find_file(&mut self.files, path)?;
         write_text(&self.repo, file, text)?;
-        file.seen = file
-            .seen
-            .after_own_write(OnDisk::File(text.as_bytes().to_vec()));
+        file.seen = file.seen.after_own_write(text.as_bytes().to_vec());
         Ok(self.written_reply())
     }
 
@@ -120,15 +116,15 @@ impl MergeSession {
         if let Err(error) = worktree {
             if let Err(restore_error) = restore_index(&self.repo, file, index_before) {
                 warn_rollback_failed("reset_restore_failed", path, &restore_error);
-                file.status = FileStatus::Unresolved;
+                file.status = file.unmerged_status();
             }
             return Err(error);
         }
-        file.status = FileStatus::Unresolved;
         match reset_to {
             Some(reset_to) => file.seen = reset_to.seen,
             None => read_back(&self.repo, file),
         }
+        file.status = file.unmerged_status();
         Ok(self.written_reply())
     }
 
@@ -189,7 +185,7 @@ fn restore_index(repo: &Repo, file: &FileState, before: IndexBefore) -> Result<(
 
 fn index_before(repo: &Repo, file: &FileState) -> Result<IndexBefore> {
     match file.status {
-        FileStatus::Unresolved => Ok(IndexBefore::Conflicted),
+        FileStatus::Unresolved | FileStatus::Remembered => Ok(IndexBefore::Conflicted),
         FileStatus::Resolved => Ok(IndexBefore::Resolved(repo.index_records(&file.path)?)),
     }
 }

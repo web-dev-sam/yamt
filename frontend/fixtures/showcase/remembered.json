@@ -1,0 +1,110 @@
+{
+  "path": "remembered.ts",
+  "middle": {
+    "kind": "Disk",
+    "text": "export type Column = \"backlog\" | \"todo\" | \"doing\" | \"done\";\n\nexport const columns: Column[] = [\"backlog\", \"todo\", \"doing\", \"done\"];\n\nexport function title(column: Column): string {\n  return column.charAt(0).toUpperCase() + column.slice(1);\n}\n"
+  },
+  "local": "export type Column = \"backlog\" | \"todo\" | \"done\";\n\nexport const columns: Column[] = [\"backlog\", \"todo\", \"done\"];\n\nexport function title(column: Column): string {\n  return column.toUpperCase();\n}\n",
+  "remote": "export type Column = \"todo\" | \"doing\" | \"done\";\n\nexport const columns: Column[] = [\"todo\", \"doing\", \"done\"];\n\nexport function title(column: Column): string {\n  return column.charAt(0).toUpperCase() + column.slice(1);\n}\n",
+  "deleted": null,
+  "eol": "Lf",
+  "chunks": [
+    {
+      "chunk": {
+        "id": 0,
+        "kind": "Conflict",
+        "base": {
+          "start": 0,
+          "len": 1
+        },
+        "local": {
+          "start": 0,
+          "len": 1
+        },
+        "remote": {
+          "start": 0,
+          "len": 1
+        }
+      },
+      "middle": {
+        "start": 0,
+        "len": 1
+      },
+      "words": {
+        "chunk": 0,
+        "local": {
+          "changed": [
+            {
+              "line": 0,
+              "start": 22,
+              "len": 12
+            }
+          ],
+          "removals": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 0,
+              "start": 31,
+              "len": 10
+            }
+          ],
+          "removals": []
+        }
+      },
+      "waiting": {
+        "kind": "Remembered"
+      }
+    },
+    {
+      "chunk": {
+        "id": 1,
+        "kind": "Conflict",
+        "base": {
+          "start": 2,
+          "len": 1
+        },
+        "local": {
+          "start": 2,
+          "len": 1
+        },
+        "remote": {
+          "start": 2,
+          "len": 1
+        }
+      },
+      "middle": {
+        "start": 2,
+        "len": 1
+      },
+      "words": {
+        "chunk": 1,
+        "local": {
+          "changed": [
+            {
+              "line": 2,
+              "start": 35,
+              "len": 11
+            }
+          ],
+          "removals": []
+        },
+        "remote": {
+          "changed": [
+            {
+              "line": 2,
+              "start": 43,
+              "len": 9
+            }
+          ],
+          "removals": []
+        }
+      },
+      "waiting": {
+        "kind": "Remembered"
+      }
+    }
+  ],
+  "disk_version": 0
+}

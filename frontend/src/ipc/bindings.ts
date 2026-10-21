@@ -132,7 +132,9 @@ export type FileSides = {
 	disk_version: DiskVersion,
 };
 
-export type FileStatus = "Unresolved" | "Resolved";
+export type FileStatus = "Unresolved" | 
+/**  Unmerged for git, with the resolution git rerere replayed on disk, not yet reviewed (plan §2 #90). */
+"Remembered" | "Resolved";
 
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
@@ -341,7 +343,12 @@ export type Waiting =
  */
 { kind: "Markers"; open: string; first: Side; between: string[]; close: string } | 
 /**  A region yamt could not place: written as the Result shows it. */
-{ kind: "AsShown" };
+{ kind: "AsShown" } | 
+/**
+ *  A conflict git rerere resolved from a resolution recorded before: written as the Result
+ *  shows it, rerere's text unless the user changed it (plan §2 #90).
+ */
+{ kind: "Remembered" };
 
 /**  Where one chunk's sides differ from base. */
 export type WordChanges = {
