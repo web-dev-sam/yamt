@@ -9,8 +9,10 @@ use yamt_merge_core::{
     compute_chunks,
 };
 
-const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
-const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
+mod texts;
+
+use texts::{LAST_LINE, content, doc, edits};
+
 const MAX_LINES: usize = 10;
 const MAX_EDITS: usize = 5;
 const CASES: u32 = 512;
@@ -18,70 +20,19 @@ const WORDS: [&str; 5] = ["alpha", "beta", "gamma", "delta", "omega"];
 const NEW_WORD: &str = "CHANGED";
 
 #[derive(Clone, Debug)]
-enum Edit {
-    Insert(String),
-    Delete,
-    Replace(String),
-}
-
-#[derive(Clone, Debug)]
-struct Doc {
-    lines: Vec<String>,
-    last: String,
-}
-
-impl Doc {
-    fn text(&self) -> String {
-        self.lines.concat() + &self.last
-    }
-
-    fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
-        let mut lines = self.lines.clone();
-        for (at, edit) in edits {
-            match edit {
-                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
-                Edit::Delete if !lines.is_empty() => {
-                    lines.remove(at.index(lines.len()));
-                }
-                Edit::Replace(line) if !lines.is_empty() => {
-                    let replaced = at.index(lines.len());
-                    lines[replaced].clone_from(line);
-                }
-                Edit::Delete | Edit::Replace(_) => {}
-            }
-        }
-        Doc {
-            lines,
-            last: last.unwrap_or_else(|| self.last.clone()),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 struct Pair {
     left: String,
     right: String,
 }
 
-fn doc() -> impl Strategy<Value = Doc> {
-    (vec(LINE, 0..MAX_LINES), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
-}
-
-fn edits() -> impl Strategy<Value = Vec<(Index, Edit)>> {
-    let edit = prop_oneof![
-        LINE.prop_map(Edit::Insert),
-        Just(Edit::Delete),
-        LINE.prop_map(Edit::Replace),
-    ];
-    vec((any::<Index>(), edit), 0..MAX_EDITS)
-}
-
 fn pair() -> impl Strategy<Value = Pair> {
-    let edited = (doc(), edits(), option::of(LAST_LINE)).prop_map(|(left, edits, last)| Pair {
-        right: left.edited(&edits, last).text(),
-        left: left.text(),
-    });
-    let independent = (doc(), doc()).prop_map(|(left, right)| Pair {
+    let edited = (doc(MAX_LINES), edits(MAX_EDITS), option::of(LAST_LINE)).prop_map(
+        |(left, edits, last)| Pair {
+            right: left.edited(&edits, last).text(),
+            left: left.text(),
+        },
+    );
+    let independent = (doc(MAX_LINES), doc(MAX_LINES)).prop_map(|(left, right)| Pair {
         left: left.text(),
         right: right.text(),
     });
@@ -90,12 +41,6 @@ fn pair() -> impl Strategy<Value = Pair> {
 
 fn lines(text: &str) -> Vec<&str> {
     text.split_inclusive('\n').collect()
-}
-
-fn content(line: &str) -> &str {
-    line.strip_suffix("\r\n")
-        .or_else(|| line.strip_suffix('\n'))
-        .unwrap_or(line)
 }
 
 fn width(line: &str) -> u32 {
@@ -208,7 +153,7 @@ proptest! {
 
     // Catches a difference reported for equal texts (e.g. a line break counted as a change).
     #[test]
-    fn comparing_a_text_with_itself_finds_nothing(text in doc()) {
+    fn comparing_a_text_with_itself_finds_nothing(text in doc(MAX_LINES)) {
         let text = text.text();
         prop_assert!(compare(&text, &text).is_empty());
     }

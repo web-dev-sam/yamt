@@ -3,37 +3,18 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use yamt_conflict_repo::{ConflictFile, FileKind, conflict_repo};
 
+mod yamt_cli;
+
+use yamt_cli::{Output, path, yamt_cli};
+
 const BASE: &str = "a\nb\nc\nd\ne\nf\ng\nh\ni\n";
 const LOCAL: &str = "a\nB\nc\nd\ne\nf\ng\nL\ni\n";
 const REMOTE: &str = "a\nb\nc\nd\nE\nf\ng\nR\ni\n";
-
-struct Output {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-fn yamt_cli<S: AsRef<OsStr>>(args: &[S]) -> Output {
-    let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
-        .args(args)
-        .output()
-        .unwrap();
-    Output {
-        code: output.status.code().unwrap(),
-        stdout: String::from_utf8(output.stdout).unwrap(),
-        stderr: String::from_utf8(output.stderr).unwrap(),
-    }
-}
-
-fn path(path: &Path) -> &str {
-    path.to_str().unwrap()
-}
 
 fn write_case(root: &Path, name: &str, extension: &str) -> std::path::PathBuf {
     let dir = root.join(name);
@@ -321,65 +302,6 @@ fn fixture_refuses_a_git_output_not_made_from_the_case_s_sides() {
     assert_eq!(
         output.stderr,
         "yamt-cli: cart is not a golden case: git-output.ts was not made from these sides\n"
-    );
-}
-
-fn write_compare_case(root: &Path) -> std::path::PathBuf {
-    let dir = root.join("pair");
-    fs::create_dir(&dir).unwrap();
-    fs::write(dir.join("left.txt"), LOCAL).unwrap();
-    fs::write(dir.join("right.txt"), REMOTE).unwrap();
-    dir
-}
-
-// Catches the compare fixtures losing a text or the differences, or changing between two runs of
-// `just fixtures` (which `just fixtures-check` would report as a stale file).
-#[test]
-fn compare_prints_both_texts_and_their_differences_the_same_way_twice() {
-    let root = TempDir::new().unwrap();
-    let case = write_compare_case(root.path());
-
-    let output = yamt_cli(&["compare", path(&case)]);
-
-    assert_eq!(output.code, 0, "{}", output.stderr);
-    assert!(output.stdout.ends_with("}\n"));
-    let data: Value = serde_json::from_str(&output.stdout).unwrap();
-    assert_eq!(data["left"], LOCAL);
-    assert_eq!(data["right"], REMOTE);
-    let ranges: Vec<(&Value, &Value)> = data["differences"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|difference| (&difference["left"], &difference["right"]))
-        .collect();
-    let line = |start: u32| json!({ "start": start, "len": 1 });
-    assert_eq!(
-        ranges,
-        [
-            (&line(1), &line(1)),
-            (&line(4), &line(4)),
-            (&line(7), &line(7))
-        ]
-    );
-    assert_eq!(yamt_cli(&["compare", path(&case)]).stdout, output.stdout);
-}
-
-// Catches a missing column read as empty text, which would show every line as inserted.
-#[test]
-fn compare_fails_with_a_read_error_without_right_txt() {
-    let root = TempDir::new().unwrap();
-    let case = write_compare_case(root.path());
-    let right = case.join("right.txt");
-    fs::remove_file(&right).unwrap();
-
-    let output = yamt_cli(&["compare", path(&case)]);
-
-    assert_eq!(output.code, 1);
-    assert_eq!(output.stdout, "");
-    let os_error = fs::read(&right).unwrap_err();
-    assert_eq!(
-        output.stderr,
-        format!("yamt-cli: cannot read {}: {os_error}\n", path(&right))
     );
 }
 

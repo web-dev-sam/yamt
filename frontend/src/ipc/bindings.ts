@@ -245,11 +245,14 @@ export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Te
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
 
-/**  Base text one side removed, and the place in that side where it would sit. */
+/**
+ *  Text the compared-with text has that this side lacks, and the place in this side where it
+ *  would sit.
+ */
 export type Removal<L> = {
-	/**  The zero-width place in the side where the removed text would sit. */
+	/**  The zero-width place in this side where the missing text would sit. */
 	at: InlinePoint<L>,
-	/**  The removed base text, every line break written `\n`; never empty. */
+	/**  The missing text, every line break written `\n`; never empty. */
 	text: string,
 };
 
@@ -293,14 +296,17 @@ export type SideNames = {
 	remote: SideName | null,
 };
 
-/**  One side of a chunk compared with base, line by line. */
+/**  One side compared with another text, line by line. */
 export type SideWordChanges<L> = {
 	/**
-	 *  Side text that is not in base: sorted by line then start, disjoint, never empty,
-	 *  never across a line break.
+	 *  Side text that is not in the compared-with text: sorted by line then start, disjoint,
+	 *  never empty, never across a line break.
 	 */
 	changed: InlineRange<L>[],
-	/**  Base text this side removed with nothing new in its place: sorted by place, at most one per place. */
+	/**
+	 *  Compared-with text this side lacks with nothing new in its place: sorted by place, at
+	 *  most one per place.
+	 */
 	removals: Removal<L>[],
 };
 
