@@ -38,11 +38,16 @@
       "frontend/src/ui/App.vue",
       "frontend/src/ui/MergeToolbar.vue",
       "frontend/src/ui/ToolbarMenu.vue",
-      "frontend/src/main.ts"
+      "frontend/src/main.ts",
+      "frontend/src/ui/NoticeBar.vue",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ipc/fixture.ts",
+      "frontend/src/ipc/fixture.test.ts"
     ]
   },
-  "GitOpsRunAppBoundary": {
-    "agent": "boundary-reviewer",
+  "GitOpsRunAppCorrectness": {
+    "agent": "correctness-reviewer",
     "brief": "docs/slices/briefs/3.J-run-app.md",
     "owned": []
   }

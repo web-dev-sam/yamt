@@ -101,3 +101,11 @@ The app now runs Continue and Abort for every operation on a worker thread, so t
 - The `prepare-commit-msg` hold relies on git running that hook during `rebase --continue`; the test's `!continuing.is_finished()` check confirmed it does with this git.
 
 Run on the merged tree: `just check`, `just map-check` (after the doc lines above), and `just mutants` on `merge.rs`, `outcome.rs` and `fixtureOperations.ts`.
+
+## Mutants (`just mutants 1f82662`)
+
+Rust 32 — 7 caught, 22 unviable, 3 missed: commands.rs:137 `close_window` → (), commands.rs:172 `==` → `!=` in continue_operation, merge.rs:63 delete `!` in lock_when_git_is_done. TS on changed lines: fixture data/default survivors dropped (#1351).
+
+## Boundary review (GitOpsRunAppBoundary): fail
+
+Blocks #1352–#1354 (#1354 → row 6); shoulds #1355–#1357 promoted.
