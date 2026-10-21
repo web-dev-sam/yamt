@@ -1,0 +1,1198 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index b269e0c..e9c11ee 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -1 +1 @@
+-Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created; `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`, `?empty`); `createFixtureSource` takes the page's search as a required parameter.
++Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created (the compare window's guards and `nextColumnVersion` included); `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`, `?empty`); `createFixtureSource` takes the page's search as a required parameter. The compare window (`yamt --raw`, plan §2 #93–#97) has its own `CompareSource` (`CompareSource.ts`): domain shapes and their conversions in `compareDomain.ts`, the app's in `tauriCompare.ts`, fixture mode's in memory in `fixtureCompare.ts` (`?raw=<case>` loads `fixtures/compare/<case>.json` into tab 1; the tab rules mirror `crates/compare`).
+diff --git a/frontend/src/ipc/CompareSource.ts b/frontend/src/ipc/CompareSource.ts
+new file mode 100644
+index 0000000..0112d53
+--- /dev/null
++++ b/frontend/src/ipc/CompareSource.ts
+@@ -0,0 +1,22 @@
++import type { SettingsSource } from "./ChunkSource";
++import type {
++  ColumnWrite,
++  CompareStart,
++  Comparison,
++  TabId,
++  TabLanguage,
++  TabList,
++  TabTexts,
++} from "./compareDomain";
++import type { SourceResult } from "./domain";
++
++export interface CompareSource extends SettingsSource {
++  openCompare(): Promise<SourceResult<CompareStart>>;
++  loadTab(tab: TabId): Promise<SourceResult<TabTexts>>;
++  setColumn(write: ColumnWrite): Promise<SourceResult<Comparison>>;
++  addTab(): Promise<SourceResult<TabList>>;
++  closeTab(tab: TabId): Promise<SourceResult<TabList>>;
++  renameTab(tab: TabId, name: string): Promise<SourceResult<TabList>>;
++  setTabLanguage(tab: TabId, language: TabLanguage): Promise<SourceResult<TabList>>;
++  showTab(tab: TabId): Promise<SourceResult<TabList>>;
++}
+diff --git a/frontend/src/ipc/compareDomain.test.ts b/frontend/src/ipc/compareDomain.test.ts
+new file mode 100644
+index 0000000..aa3678a
+--- /dev/null
++++ b/frontend/src/ipc/compareDomain.test.ts
+@@ -0,0 +1,120 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import {
++  toColumnVersions,
++  toComparison,
++  toCompareStart,
++  toTabList,
++  toTabTexts,
++} from "./compareDomain";
++import { nextColumnVersion } from "./domain";
++
++const DIFFERENCE: Generated.Difference = {
++  left: { start: 2, len: 1 },
++  right: { start: 3, len: 0 },
++  words: {
++    left: { changed: [{ line: 2, start: 4, len: 3 }], removals: [] },
++    right: { changed: [], removals: [{ at: { line: 3, column: 1 }, text: "x" }] },
++  },
++};
++
++const LIST: Generated.TabList = {
++  tabs: [
++    { id: 1, name: "Compare 1", language: { kind: "auto" }, holds_text: true },
++    { id: 4, name: "json", language: { kind: "picked", name: "JSON" }, holds_text: false },
++  ],
++  shown: 4,
++};
++
++const TEXTS: Generated.TabTexts = {
++  left: "a\n",
++  right: "b\n",
++  comparison: { versions: { left: 3, right: 7 }, differences: [DIFFERENCE] },
++};
++
++test("a start and a tab's texts convert every field, camelCased, with both columns' words", () => {
++  expect(toCompareStart({ list: LIST, column_limit: 8_388_608 })).toEqual({
++    list: {
++      tabs: [
++        { id: 1, name: "Compare 1", language: { kind: "auto" }, holdsText: true },
++        { id: 4, name: "json", language: { kind: "picked", name: "JSON" }, holdsText: false },
++      ],
++      shown: 4,
++    },
++    columnLimit: 8_388_608,
++  });
++  expect(toTabTexts(TEXTS)).toEqual({
++    left: "a\n",
++    right: "b\n",
++    comparison: {
++      versions: { left: 3, right: 7 },
++      differences: [
++        {
++          left: { start: 2, len: 1 },
++          right: { start: 3, len: 0 },
++          words: {
++            left: { changed: [{ line: 2, start: 4, len: 3 }], removals: [] },
++            right: { changed: [], removals: [{ at: { line: 3, column: 1 }, text: "x" }] },
++          },
++        },
++      ],
++    },
++  });
++});
++
++test.each([-1, 0.5])("a tab id or the shown tab of %s is refused, naming the field", (bad) => {
++  const [first, second] = LIST.tabs;
++  if (first === undefined || second === undefined) {
++    throw new Error("the list lost its tabs");
++  }
++  expect(() => toTabList({ ...LIST, tabs: [first, { ...second, id: bad }] })).toThrow(
++    `tabs[1].id must be a non-negative safe integer, got ${bad}`,
++  );
++  expect(() => toTabList({ ...LIST, shown: bad })).toThrow(
++    `shown must be a non-negative safe integer, got ${bad}`,
++  );
++});
++
++test.each([-1, 0.5])("a column limit of %s is refused", (bad) => {
++  expect(() => toCompareStart({ list: LIST, column_limit: bad })).toThrow(
++    `column_limit must be a non-negative safe integer, got ${bad}`,
++  );
++});
++
++test.each([-1, 0.5])("a column version of %s is refused on either column", (bad) => {
++  expect(() => toColumnVersions({ left: bad, right: 0 })).toThrow(
++    `versions.left must be a non-negative safe integer, got ${bad}`,
++  );
++  expect(() => toColumnVersions({ left: 0, right: bad })).toThrow(
++    `versions.right must be a non-negative safe integer, got ${bad}`,
++  );
++});
++
++function comparison(difference: Generated.Difference): Generated.Comparison {
++  return { versions: { left: 0, right: 0 }, differences: [DIFFERENCE, difference] };
++}
++
++test.each([-1, 0.5])("a line of %s is refused in either column's range or words", (bad) => {
++  expect(() => toComparison(comparison({ ...DIFFERENCE, left: { start: bad, len: 1 } }))).toThrow(
++    `differences[1].left.start must be a non-negative safe integer, got ${bad}`,
++  );
++  expect(() => toComparison(comparison({ ...DIFFERENCE, right: { start: bad, len: 0 } }))).toThrow(
++    `differences[1].right.start must be a non-negative safe integer, got ${bad}`,
++  );
++  const leftWords = { changed: [{ line: bad, start: 0, len: 1 }], removals: [] };
++  expect(() =>
++    toComparison(comparison({ ...DIFFERENCE, words: { ...DIFFERENCE.words, left: leftWords } })),
++  ).toThrow(`differences[1].words.left.changed[0].line must be a non-negative safe integer`);
++  const rightWords = { changed: [], removals: [{ at: { line: bad, column: 0 }, text: "x" }] };
++  expect(() =>
++    toComparison(comparison({ ...DIFFERENCE, words: { ...DIFFERENCE.words, right: rightWords } })),
++  ).toThrow(`differences[1].words.right.removals[0].at.line must be a non-negative safe integer`);
++});
++
++test("nextColumnVersion adds one", () => {
++  const { left, right } = toColumnVersions({ left: 0, right: 41 });
++
++  expect(nextColumnVersion(left)).toBe(1);
++  expect(nextColumnVersion(right)).toBe(42);
++});
+diff --git a/frontend/src/ipc/compareDomain.ts b/frontend/src/ipc/compareDomain.ts
+new file mode 100644
+index 0000000..2716fa4
+--- /dev/null
++++ b/frontend/src/ipc/compareDomain.ts
+@@ -0,0 +1,117 @@
++import type * as Generated from "./bindings";
++import {
++  isColumnVersion,
++  isLeftLine,
++  isRightLine,
++  isTabId,
++  toRange,
++  type ColumnVersion,
++  type LeftLine,
++  type LineRange,
++  type RightLine,
++  type TabId,
++} from "./domain";
++import { invalid, isNonNegativeInteger } from "./validate";
++import { toSideWords, type SideWords } from "./words";
++
++export type { ColumnVersion, LeftLine, RightLine, TabId } from "./domain";
++export type Column = "left" | "right";
++export type TabLanguage =
++  | { readonly kind: "auto" }
++  | { readonly kind: "picked"; readonly name: string };
++export type TabEntry = {
++  readonly id: TabId;
++  readonly name: string;
++  readonly language: TabLanguage;
++  readonly holdsText: boolean;
++};
++export type TabList = { readonly tabs: readonly TabEntry[]; readonly shown: TabId };
++export type CompareStart = { readonly list: TabList; readonly columnLimit: number };
++export type ColumnVersions = Readonly<Record<Column, ColumnVersion>>;
++export type Difference = {
++  readonly left: LineRange<LeftLine>;
++  readonly right: LineRange<RightLine>;
++  readonly words: { readonly left: SideWords<LeftLine>; readonly right: SideWords<RightLine> };
++};
++export type Comparison = {
++  readonly versions: ColumnVersions;
++  readonly differences: readonly Difference[];
++};
++export type TabTexts = {
++  readonly left: string;
++  readonly right: string;
++  readonly comparison: Comparison;
++};
++export type ColumnWrite = {
++  readonly tab: TabId;
++  readonly column: Column;
++  readonly text: string;
++  readonly version: ColumnVersion;
++};
++
++function toTabId(n: number, field: string): TabId {
++  if (!isTabId(n)) {
++    throw invalid(field, n);
++  }
++  return n;
++}
++
++function toColumnVersion(n: number, field: string): ColumnVersion {
++  if (!isColumnVersion(n)) {
++    throw invalid(field, n);
++  }
++  return n;
++}
++
++export function toTabList(dto: Generated.TabList): TabList {
++  return {
++    tabs: dto.tabs.map(({ id, name, language, holds_text: holdsText }, index) => ({
++      id: toTabId(id, `tabs[${index}].id`),
++      name,
++      language,
++      holdsText,
++    })),
++    shown: toTabId(dto.shown, "shown"),
++  };
++}
++
++export function toCompareStart(dto: Generated.CompareStart): CompareStart {
++  const { column_limit: columnLimit } = dto;
++  if (!isNonNegativeInteger(columnLimit)) {
++    throw invalid("column_limit", columnLimit);
++  }
++  return { list: toTabList(dto.list), columnLimit };
++}
++
++export function toColumnVersions(dto: Generated.ColumnVersions): ColumnVersions {
++  return {
++    left: toColumnVersion(dto.left, "versions.left"),
++    right: toColumnVersion(dto.right, "versions.right"),
++  };
++}
++
++export function toDifferences(dtos: readonly Generated.Difference[]): Difference[] {
++  return dtos.map(({ left, right, words }, index) => {
++    const field = `differences[${index}]`;
++    return {
++      left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
++      right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
++      words: {
++        left: toSideWords({ side: words.left, isLine: isLeftLine, field: `${field}.words.left` }),
++        right: toSideWords({
++          side: words.right,
++          isLine: isRightLine,
++          field: `${field}.words.right`,
++        }),
++      },
++    };
++  });
++}
++
++export function toComparison(dto: Generated.Comparison): Comparison {
++  return { versions: toColumnVersions(dto.versions), differences: toDifferences(dto.differences) };
++}
++
++export function toTabTexts(dto: Generated.TabTexts): TabTexts {
++  return { left: dto.left, right: dto.right, comparison: toComparison(dto.comparison) };
++}
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index bd1483a..fa75a08 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -2,12 +2,17 @@ import type * as Generated from "./bindings";
+ import { invalid, isNonNegativeInteger } from "./validate";
+ import { toSideWords, type SideWords } from "./words";
+ 
++export type TabId = number & { readonly __brand: "TabId" };
++export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
++export type LeftLine = number & { readonly __brand: "LeftLine" };
++export type RightLine = number & { readonly __brand: "RightLine" };
++
+ type MiddleLine = number & { readonly __brand: "MiddleLine" };
+ export type DiskVersion = number & { readonly __brand: "DiskVersion" };
+ type LocalLine = number & { readonly __brand: "LocalLine" };
+ type RemoteLine = number & { readonly __brand: "RemoteLine" };
+ type ChunkId = number & { readonly __brand: "ChunkId" };
+-type LineRange<L> = { readonly start: L; readonly len: number };
++export type LineRange<L> = { readonly start: L; readonly len: number };
+ type ChunkWords = { readonly local: SideWords<LocalLine>; readonly remote: SideWords<RemoteLine> };
+ 
+ export type Chunk = {
+@@ -143,6 +148,30 @@ function isRunId(n: number): n is RunId {
+   return isNonNegativeInteger(n);
+ }
+ 
++export function isTabId(n: number): n is TabId {
++  return isNonNegativeInteger(n);
++}
++
++export function isColumnVersion(n: number): n is ColumnVersion {
++  return isNonNegativeInteger(n);
++}
++
++export function isLeftLine(n: number): n is LeftLine {
++  return isNonNegativeInteger(n);
++}
++
++export function isRightLine(n: number): n is RightLine {
++  return isNonNegativeInteger(n);
++}
++
++export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
++  const next = version + 1;
++  if (!isColumnVersion(next)) {
++    throw invalid("version", next);
++  }
++  return next;
++}
++
+ function toWords({
+   words,
+   chunkId,
+@@ -161,7 +190,7 @@ function toWords({
+   };
+ }
+ 
+-function toRange<L extends number>({
++export function toRange<L extends number>({
+   range,
+   isLine,
+   field,
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 9f40f5f..1a7f501 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -55,7 +55,7 @@ function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.Gener
+   );
+ }
+ 
+-const LINE_RANGE = v.object({
++export const LINE_RANGE = v.object({
+   start: v.number(),
+   len: v.number(),
+ } satisfies SchemaOf<Generated.LineRange<number>>);
+@@ -84,7 +84,7 @@ const REMOVAL = v.object({
+   text: v.string(),
+ } satisfies SchemaOf<Generated.Removal<number>>);
+ 
+-const SIDE_WORD_CHANGES = v.object({
++export const SIDE_WORD_CHANGES = v.object({
+   changed: v.array(INLINE_RANGE),
+   removals: v.array(REMOVAL),
+ } satisfies SchemaOf<Generated.SideWordChanges<number>>);
+diff --git a/frontend/src/ipc/fixtureCompare.test.ts b/frontend/src/ipc/fixtureCompare.test.ts
+new file mode 100644
+index 0000000..0cfe4a5
+--- /dev/null
++++ b/frontend/src/ipc/fixtureCompare.test.ts
+@@ -0,0 +1,312 @@
++import * as v from "valibot";
++import { afterEach, expect, test, vi } from "vitest";
++
++import type { TabId, TabList } from "./compareDomain";
++import type { CompareSource } from "./CompareSource";
++import { nextColumnVersion, type SourceResult } from "./domain";
++import { createFixtureCompareSource } from "./fixtureCompare";
++import { createLog, type Log, type LogEntry } from "./log";
++
++const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
++  "../../fixtures/compare/*.json",
++  { eager: true, import: "default" },
++);
++
++const CASE_TEXTS = v.object({ left: v.string(), right: v.string(), differences: v.unknown() });
++
++const NO_QUERY = "";
++
++const LIMIT = 8_388_608;
++
++const EURO_BYTES = 3;
++
++function quietLog(): { log: Log; entries: LogEntry[] } {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const entries: LogEntry[] = [];
++  const log = createLog((entry) => {
++    entries.push(entry);
++  });
++  return { log, entries };
++}
++
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
++function committedCase(name: string): v.InferOutput<typeof CASE_TEXTS> {
++  return v.parse(CASE_TEXTS, COMMITTED[`../../fixtures/compare/${name}.json`]);
++}
++
++function names(list: TabList): string[] {
++  return list.tabs.map((tab) => tab.name);
++}
++
++function idOf(list: TabList, name: string): TabId {
++  const tab = list.tabs.find((each) => each.name === name);
++  if (tab === undefined) {
++    throw new Error(`no tab ${name} in ${names(list).join(", ")}`);
++  }
++  return tab.id;
++}
++
++async function firstTab(source: CompareSource): Promise<TabId> {
++  return valueOf(await source.openCompare()).list.shown;
++}
++
++async function withThree(source: CompareSource): Promise<TabList> {
++  await source.addTab();
++  return valueOf(await source.addTab());
++}
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++test("the first start shows one empty Compare 1 and the limit (catches a start without a tab)", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++
++  const start = valueOf(await source.openCompare());
++
++  expect(start).toEqual({
++    list: {
++      tabs: [{ id: 1, name: "Compare 1", language: { kind: "auto" }, holdsText: false }],
++      shown: 1,
++    },
++    columnLimit: LIMIT,
++  });
++  expect(valueOf(await source.loadTab(start.list.shown))).toEqual({
++    left: "",
++    right: "",
++    comparison: { versions: { left: 0, right: 0 }, differences: [] },
++  });
++});
++
++test("?raw=json-payload puts the case into tab 1 and loadTab returns its differences (catches an ignored ?raw)", async () => {
++  const payload = committedCase("json-payload");
++  const source = createFixtureCompareSource(quietLog().log, "?raw=json-payload");
++
++  const start = valueOf(await source.openCompare());
++  const texts = valueOf(await source.loadTab(start.list.shown));
++
++  expect(start.list.tabs).toEqual([
++    { id: 1, name: "Compare 1", language: { kind: "auto" }, holdsText: true },
++  ]);
++  expect(texts.left).toBe(payload.left);
++  expect(texts.right).toBe(payload.right);
++  expect(texts.comparison.differences).toEqual(payload.differences);
++  expect(texts.comparison.differences).toHaveLength(4);
++});
++
++test("an unknown ?raw case fails the start naming it and the known ones", () => {
++  expect(() => createFixtureCompareSource(quietLog().log, "?raw=nope")).toThrow(
++    "no compare fixture nope; known: json-payload, typescript, words",
++  );
++});
++
++test("a new tab's number is above every open tab's, and ids never repeat (catches counting tabs)", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const three = await withThree(source);
++
++  await source.closeTab(idOf(three, "Compare 2"));
++  const afterMiddle = valueOf(await source.addTab());
++
++  expect(names(afterMiddle)).toEqual(["Compare 1", "Compare 3", "Compare 4"]);
++  expect(afterMiddle.tabs.map((tab) => tab.id)).toEqual([1, 3, 4]);
++  expect(afterMiddle.shown).toBe(4);
++
++  await source.closeTab(idOf(afterMiddle, "Compare 4"));
++  const afterLast = valueOf(await source.addTab());
++
++  expect(names(afterLast)).toEqual(["Compare 1", "Compare 3", "Compare 4"]);
++  expect(afterLast.tabs.map((tab) => tab.id)).toEqual([1, 3, 5]);
++});
++
++test("closing the shown tab shows the next, the last shown the previous, the last tab leaves a fresh Compare 1", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const three = await withThree(source);
++  await source.showTab(idOf(three, "Compare 2"));
++
++  const next = valueOf(await source.closeTab(idOf(three, "Compare 2")));
++  expect(next.shown).toBe(idOf(three, "Compare 3"));
++
++  const previous = valueOf(await source.closeTab(idOf(three, "Compare 3")));
++  expect(previous.shown).toBe(idOf(three, "Compare 1"));
++
++  const fresh = valueOf(await source.closeTab(idOf(three, "Compare 1")));
++  expect(fresh).toEqual({
++    tabs: [{ id: 4, name: "Compare 1", language: { kind: "auto" }, holdsText: false }],
++    shown: 4,
++  });
++});
++
++test("closing a tab that is not shown keeps the shown one", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const three = await withThree(source);
++
++  const closed = valueOf(await source.closeTab(idOf(three, "Compare 1")));
++
++  expect(names(closed)).toEqual(["Compare 2", "Compare 3"]);
++  expect(closed.shown).toBe(idOf(three, "Compare 3"));
++});
++
++test("a rename is trimmed and spaces only keep the old name (catches an untrimmed or emptied name)", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const tab = await firstTab(source);
++
++  expect(names(valueOf(await source.renameTab(tab, "  payload  ")))).toEqual(["payload"]);
++  expect(names(valueOf(await source.renameTab(tab, "   ")))).toEqual(["payload"]);
++});
++
++test("a picked language and a shown tab are kept", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const first = await firstTab(source);
++  await source.addTab();
++
++  const picked = valueOf(await source.setTabLanguage(first, { kind: "picked", name: "JSON" }));
++  const shown = valueOf(await source.showTab(first));
++
++  expect(picked.tabs[0]?.language).toEqual({ kind: "picked", name: "JSON" });
++  expect(picked.tabs[1]?.language).toEqual({ kind: "auto" });
++  expect(shown.shown).toBe(first);
++});
++
++test("setColumn with a version not above the stored one stores nothing and replies with the stored versions", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const tab = await firstTab(source);
++  const { versions } = valueOf(await source.loadTab(tab)).comparison;
++  const one = nextColumnVersion(versions.left);
++
++  const stored = valueOf(await source.setColumn({ tab, column: "left", text: "x", version: one }));
++  const sameVersion = valueOf(
++    await source.setColumn({ tab, column: "left", text: "y", version: one }),
++  );
++  const older = valueOf(
++    await source.setColumn({ tab, column: "left", text: "z", version: versions.left }),
++  );
++
++  expect(stored.versions).toEqual({ left: 1, right: 0 });
++  expect(sameVersion.versions).toEqual({ left: 1, right: 0 });
++  expect(older.versions).toEqual({ left: 1, right: 0 });
++  expect(valueOf(await source.loadTab(tab)).left).toBe("x");
++  expect(valueOf(await source.openCompare()).list.tabs[0]?.holdsText).toBe(true);
++});
++
++test("a column over the limit in UTF-8 bytes is ColumnTooLarge and stores nothing, though its UTF-16 length is under it", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const tab = await firstTab(source);
++  const { versions } = valueOf(await source.loadTab(tab)).comparison;
++  const text = "€".repeat(Math.floor(LIMIT / EURO_BYTES) + 1);
++  expect(text.length).toBeLessThan(LIMIT);
++
++  const refused = await source.setColumn({
++    tab,
++    column: "right",
++    text,
++    version: nextColumnVersion(versions.right),
++  });
++
++  expect(refused).toEqual({ ok: false, failure: { kind: "ColumnTooLarge", limit: LIMIT } });
++  expect(valueOf(await source.loadTab(tab)).comparison.versions).toEqual({ left: 0, right: 0 });
++});
++
++test("a column of exactly the limit is stored", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const tab = await firstTab(source);
++  const { versions } = valueOf(await source.loadTab(tab)).comparison;
++
++  const stored = await source.setColumn({
++    tab,
++    column: "right",
++    text: "a".repeat(LIMIT),
++    version: nextColumnVersion(versions.right),
++  });
++
++  expect(valueOf(stored).versions).toEqual({ left: 0, right: 1 });
++});
++
++test("texts matching no case log compare.fixture_miss once and answer no differences; a match answers the case's", async () => {
++  const { log, entries } = quietLog();
++  const words = committedCase("words");
++  const source = createFixtureCompareSource(log, NO_QUERY);
++  const tab = await firstTab(source);
++  const { versions } = valueOf(await source.loadTab(tab)).comparison;
++
++  const miss = valueOf(
++    await source.setColumn({
++      tab,
++      column: "left",
++      text: words.left,
++      version: nextColumnVersion(versions.left),
++    }),
++  );
++
++  expect(miss.differences).toEqual([]);
++  expect(entries).toEqual([
++    {
++      level: "info",
++      event: "compare.fixture_miss",
++      fields: { tab, left: words.left.length, right: 0 },
++    },
++  ]);
++
++  const hit = valueOf(
++    await source.setColumn({
++      tab,
++      column: "right",
++      text: words.right,
++      version: nextColumnVersion(versions.right),
++    }),
++  );
++
++  expect(hit.differences).toEqual(words.differences);
++  expect(entries).toHaveLength(1);
++});
++
++test("every tab command answers UnknownTab for an id that is not listed", async () => {
++  const source = createFixtureCompareSource(quietLog().log, NO_QUERY);
++  const tab = await firstTab(source);
++  const { versions } = valueOf(await source.loadTab(tab)).comparison;
++  const fresh = valueOf(await source.addTab()).shown;
++  await source.closeTab(fresh);
++  const unknown = { ok: false, failure: { kind: "UnknownTab", tab: fresh } };
++  const version = nextColumnVersion(versions.left);
++
++  expect(await source.loadTab(fresh)).toEqual(unknown);
++  expect(await source.setColumn({ tab: fresh, column: "left", text: "x", version })).toEqual(
++    unknown,
++  );
++  expect(await source.closeTab(fresh)).toEqual(unknown);
++  expect(await source.renameTab(fresh, "x")).toEqual(unknown);
++  expect(await source.setTabLanguage(fresh, { kind: "auto" })).toEqual(unknown);
++  expect(await source.showTab(fresh)).toEqual(unknown);
++});
++
++test.each([
++  ["a missing right", { left: "a\n", differences: [] }, 'Invalid key: Expected "right"'],
++  ["a text that is not a string", { left: 1, right: "", differences: [] }, "left"],
++  [
++    "a negative left line",
++    {
++      left: "a\n",
++      right: "b\n",
++      differences: [
++        {
++          left: { start: -1, len: 1 },
++          right: { start: 0, len: 1 },
++          words: { left: { changed: [], removals: [] }, right: { changed: [], removals: [] } },
++        },
++      ],
++    },
++    "differences[0].left.start must be a non-negative safe integer, got -1",
++  ],
++])("a case file with %s fails the parse, naming the file", (_case, json, detail) => {
++  const files = { "bad.json": json };
++
++  expect(() => createFixtureCompareSource(quietLog().log, NO_QUERY, files)).toThrow(
++    /^compare fixture bad\.json: /,
++  );
++  expect(() => createFixtureCompareSource(quietLog().log, NO_QUERY, files)).toThrow(detail);
++});
+diff --git a/frontend/src/ipc/fixtureCompare.ts b/frontend/src/ipc/fixtureCompare.ts
+new file mode 100644
+index 0000000..3f0c74c
+--- /dev/null
++++ b/frontend/src/ipc/fixtureCompare.ts
+@@ -0,0 +1,251 @@
++import * as v from "valibot";
++
++import type * as Generated from "./bindings";
++import {
++  toColumnVersions,
++  toCompareStart,
++  toDifferences,
++  toTabList,
++  type Column,
++  type ColumnWrite,
++  type Comparison,
++  type Difference,
++  type TabLanguage,
++  type TabList,
++} from "./compareDomain";
++import type { CompareSource } from "./CompareSource";
++import type { SourceResult } from "./domain";
++import { LINE_RANGE, SIDE_WORD_CHANGES } from "./fixture";
++import { createFixtureSettings } from "./fixtureSettings";
++import type { Log } from "./log";
++
++type Case = {
++  readonly left: string;
++  readonly right: string;
++  readonly differences: readonly Difference[];
++};
++
++type FixtureTab = {
++  readonly id: number;
++  readonly number: number;
++  name: string;
++  language: TabLanguage;
++  readonly texts: Record<Column, string>;
++  readonly versions: Record<Column, number>;
++};
++
++type Tabs = { readonly list: FixtureTab[]; shown: number; nextId: number };
++
++type Context = {
++  readonly log: Log;
++  readonly cases: ReadonlyMap<string, Case>;
++  readonly tabs: Tabs;
++};
++
++// Stryker disable all: Vite needs import.meta.glob arguments as literals
++const CASE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
++  "../../fixtures/compare/*.json",
++  { eager: true, import: "default" },
++);
++// Stryker restore all
++
++const COLUMN_LIMIT_BYTES = 8_388_608;
++
++const FIRST_TAB_ID = 1;
++
++const CASE = v.object({
++  differences: v.array(
++    v.object({
++      left: LINE_RANGE,
++      right: LINE_RANGE,
++      words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
++    }),
++  ),
++  left: v.string(),
++  right: v.string(),
++});
++
++function parseCase(file: string, json: unknown): Case {
++  const parsed = v.safeParse(CASE, json);
++  if (!parsed.success) {
++    throw new Error(`compare fixture ${file}: ${v.summarize(parsed.issues)}`);
++  }
++  const { left, right, differences } = parsed.output;
++  try {
++    return { left, right, differences: toDifferences(differences) };
++  } catch (error) {
++    const message = error instanceof Error ? error.message : String(error);
++    throw new Error(`compare fixture ${file}: ${message}`, { cause: error });
++  }
++}
++
++function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
++  return new Map(
++    Object.entries(files).map(([file, json]) => [
++      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
++      parseCase(file, json),
++    ]),
++  );
++}
++
++function addTab(tabs: Tabs): FixtureTab {
++  const number = Math.max(0, ...tabs.list.map((tab) => tab.number)) + 1;
++  const tab: FixtureTab = {
++    id: tabs.nextId,
++    number,
++    name: `Compare ${number}`,
++    language: { kind: "auto" },
++    texts: { left: "", right: "" },
++    versions: { left: 0, right: 0 },
++  };
++  tabs.nextId += 1;
++  tabs.list.push(tab);
++  tabs.shown = tab.id;
++  return tab;
++}
++
++function firstTabs(search: string, cases: ReadonlyMap<string, Case>): Tabs {
++  const tabs: Tabs = { list: [], shown: FIRST_TAB_ID, nextId: FIRST_TAB_ID };
++  const first = addTab(tabs);
++  const raw = new URLSearchParams(search).get("raw");
++  if (raw === null || raw === "") {
++    return tabs;
++  }
++  const shown = cases.get(raw);
++  if (shown === undefined) {
++    throw new Error(`no compare fixture ${raw}; known: ${[...cases.keys()].join(", ")}`);
++  }
++  first.texts.left = shown.left;
++  first.texts.right = shown.right;
++  return tabs;
++}
++
++function tabListDto(tabs: Tabs): Generated.TabList {
++  return {
++    tabs: tabs.list.map(({ id, name, language, texts }) => ({
++      id,
++      name,
++      language,
++      holds_text: texts.left !== "" || texts.right !== "",
++    })),
++    shown: tabs.shown,
++  };
++}
++
++function listed(tabs: Tabs): SourceResult<TabList> {
++  return { ok: true, value: toTabList(tabListDto(tabs)) };
++}
++
++function withTab<T>(
++  tabs: Tabs,
++  tab: number,
++  act: (found: FixtureTab) => SourceResult<T>,
++): SourceResult<T> {
++  const found = tabs.list.find((each) => each.id === tab);
++  return found === undefined ? { ok: false, failure: { kind: "UnknownTab", tab } } : act(found);
++}
++
++function differencesOf(
++  cases: ReadonlyMap<string, Case>,
++  texts: Readonly<Record<Column, string>>,
++): readonly Difference[] | undefined {
++  return [...cases.values()].find((each) => each.left === texts.left && each.right === texts.right)
++    ?.differences;
++}
++
++function closeTab(tabs: Tabs, tab: number): SourceResult<TabList> {
++  const position = tabs.list.findIndex((each) => each.id === tab);
++  if (position === -1) {
++    return { ok: false, failure: { kind: "UnknownTab", tab } };
++  }
++  tabs.list.splice(position, 1);
++  const next = tabs.list[Math.min(position, tabs.list.length - 1)];
++  if (next === undefined) {
++    addTab(tabs);
++  } else if (tabs.shown === tab) {
++    tabs.shown = next.id;
++  }
++  return listed(tabs);
++}
++
++function setColumn({ log, cases, tabs }: Context, write: ColumnWrite): SourceResult<Comparison> {
++  return withTab(tabs, write.tab, (found) => {
++    const { column, text, version } = write;
++    if (version > found.versions[column]) {
++      if (new TextEncoder().encode(text).length > COLUMN_LIMIT_BYTES) {
++        return { ok: false, failure: { kind: "ColumnTooLarge", limit: COLUMN_LIMIT_BYTES } };
++      }
++      found.texts[column] = text;
++      found.versions[column] = version;
++    }
++    const differences = differencesOf(cases, found.texts);
++    if (differences === undefined) {
++      const { left, right } = found.texts;
++      log.info("compare.fixture_miss", { tab: found.id, left: left.length, right: right.length });
++    }
++    const versions = toColumnVersions(found.versions);
++    return { ok: true, value: { versions, differences: differences ?? [] } };
++  });
++}
++
++function tabActions(
++  tabs: Tabs,
++): Pick<CompareSource, "addTab" | "closeTab" | "renameTab" | "setTabLanguage" | "showTab"> {
++  return {
++    async addTab() {
++      addTab(tabs);
++      return listed(tabs);
++    },
++    async closeTab(tab) {
++      return closeTab(tabs, tab);
++    },
++    async renameTab(tab, name) {
++      return withTab(tabs, tab, (found) => {
++        const trimmed = name.trim();
++        if (trimmed !== "") {
++          found.name = trimmed;
++        }
++        return listed(tabs);
++      });
++    },
++    async setTabLanguage(tab, language) {
++      return withTab(tabs, tab, (found) => {
++        found.language = language;
++        return listed(tabs);
++      });
++    },
++    async showTab(tab) {
++      return withTab(tabs, tab, () => {
++        tabs.shown = tab;
++        return listed(tabs);
++      });
++    },
++  };
++}
++
++export function createFixtureCompareSource(
++  log: Log,
++  search: string,
++  files: Readonly<Record<string, unknown>> = CASE_FILES,
++): CompareSource {
++  const cases = parseCases(files);
++  const tabs = firstTabs(search, cases);
++  return {
++    async openCompare() {
++      const start = { list: tabListDto(tabs), column_limit: COLUMN_LIMIT_BYTES };
++      return { ok: true, value: toCompareStart(start) };
++    },
++    async loadTab(tab) {
++      return withTab(tabs, tab, ({ texts, versions }) => {
++        const differences = differencesOf(cases, texts) ?? [];
++        const comparison = { versions: toColumnVersions(versions), differences };
++        return { ok: true, value: { left: texts.left, right: texts.right, comparison } };
++      });
++    },
++    async setColumn(write) {
++      return setColumn({ log, cases, tabs }, write);
++    },
++    ...tabActions(tabs),
++    ...createFixtureSettings(),
++  };
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index d77194f..70fbf08 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -3,6 +3,23 @@ import { forwardLog } from "./tauri";
+ import { guardWindowClose } from "./window";
+ 
+ export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
++export type { CompareSource } from "./CompareSource";
++export type {
++  Column,
++  ColumnVersion,
++  ColumnVersions,
++  ColumnWrite,
++  CompareStart,
++  Comparison,
++  Difference,
++  LeftLine,
++  RightLine,
++  TabEntry,
++  TabId,
++  TabLanguage,
++  TabList,
++  TabTexts,
++} from "./compareDomain";
+ export type {
+   AddedServer,
+   Antialiasing,
+@@ -41,7 +58,9 @@ export type {
+   Theme,
+   WriteReply,
+ } from "./domain";
++export { nextColumnVersion } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
++export { createFixtureCompareSource } from "./fixtureCompare";
+ export { createFixtureServerHost } from "./fixtureServers";
+ export {
+   bindingsOf,
+@@ -63,6 +82,7 @@ export {
+   type KeysRead,
+ } from "./keys";
+ export { createTauriServerHost, createTauriSource } from "./tauri";
++export { createTauriCompareSource } from "./tauriCompare";
+ export type { ServerHost } from "./ServerHost";
+ 
+ const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index c9f1dc7..f7ca33e 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -29,7 +29,7 @@ type CommandResult<T> =
+   | { status: "ok"; data: T }
+   | { status: "error"; error: SourceFailure | string | number | boolean | null | undefined };
+ 
+-function toResult<T>(result: CommandResult<T>): SourceResult<T> {
++export function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+   if (result.status === "ok") {
+     return { ok: true, value: result.data };
+   }
+@@ -44,7 +44,7 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
+   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
+ }
+ 
+-function createTauriSettings(): SettingsSource {
++export function createTauriSettings(): SettingsSource {
+   return {
+     async loadSettings(current) {
+       return toSettingsResult(await commands.loadSettings(current));
+diff --git a/frontend/src/ipc/tauriCompare.test.ts b/frontend/src/ipc/tauriCompare.test.ts
+new file mode 100644
+index 0000000..d99cdec
+--- /dev/null
++++ b/frontend/src/ipc/tauriCompare.test.ts
+@@ -0,0 +1,132 @@
++import { beforeEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import { toColumnVersions, toTabList } from "./compareDomain";
++import { createTauriCompareSource } from "./tauriCompare";
++
++const commands = vi.hoisted(() => ({
++  openCompare: vi.fn(),
++  loadTab: vi.fn(),
++  setColumn: vi.fn(),
++  addTab: vi.fn(),
++  closeTab: vi.fn(),
++  renameTab: vi.fn(),
++  setTabLanguage: vi.fn(),
++  showTab: vi.fn(),
++}));
++
++vi.mock("./bindings", () => ({ commands }));
++
++vi.mock("@tauri-apps/api/core", () => ({ Channel: class {} }));
++
++const LIST: Generated.TabList = {
++  tabs: [{ id: 2, name: "Compare 1", language: { kind: "auto" }, holds_text: true }],
++  shown: 2,
++};
++
++const DOMAIN_LIST = {
++  tabs: [{ id: 2, name: "Compare 1", language: { kind: "auto" }, holdsText: true }],
++  shown: 2,
++};
++
++const COMPARISON: Generated.Comparison = {
++  versions: { left: 1, right: 5 },
++  differences: [
++    {
++      left: { start: 0, len: 1 },
++      right: { start: 0, len: 2 },
++      words: {
++        left: { changed: [{ line: 0, start: 1, len: 2 }], removals: [] },
++        right: { changed: [], removals: [{ at: { line: 1, column: 0 }, text: "y" }] },
++      },
++    },
++  ],
++};
++
++const UNKNOWN: Generated.IpcError = { kind: "UnknownTab", tab: 9 };
++
++beforeEach(() => {
++  vi.resetAllMocks();
++});
++
++test("openCompare and loadTab turn the app's replies into domain data", async () => {
++  commands.openCompare.mockResolvedValue({
++    status: "ok",
++    data: { list: LIST, column_limit: 8_388_608 },
++  });
++  commands.loadTab.mockResolvedValue({
++    status: "ok",
++    data: { left: "a\n", right: "b\nc\n", comparison: COMPARISON },
++  });
++  const source = createTauriCompareSource();
++  const tab = toTabList(LIST).shown;
++
++  expect(await source.openCompare()).toEqual({
++    ok: true,
++    value: { list: DOMAIN_LIST, columnLimit: 8_388_608 },
++  });
++  expect(await source.loadTab(tab)).toEqual({
++    ok: true,
++    value: { left: "a\n", right: "b\nc\n", comparison: COMPARISON },
++  });
++  expect(commands.loadTab).toHaveBeenCalledWith(2);
++});
++
++test("setColumn sends the tab, column, text and version and returns the comparison", async () => {
++  commands.setColumn.mockResolvedValue({ status: "ok", data: COMPARISON });
++  const tab = toTabList(LIST).shown;
++  const version = toColumnVersions({ left: 3, right: 0 }).left;
++
++  const reply = await createTauriCompareSource().setColumn({
++    tab,
++    column: "right",
++    text: "b\n",
++    version,
++  });
++
++  expect(reply).toEqual({ ok: true, value: COMPARISON });
++  expect(commands.setColumn).toHaveBeenCalledWith(2, "right", "b\n", 3);
++});
++
++test("each tab command returns the list in domain data, or the app's error unchanged", async () => {
++  const tab = toTabList(LIST).shown;
++  const source = createTauriCompareSource();
++  for (const command of [
++    commands.addTab,
++    commands.closeTab,
++    commands.renameTab,
++    commands.setTabLanguage,
++    commands.showTab,
++  ]) {
++    command.mockResolvedValueOnce({ status: "ok", data: LIST });
++    command.mockResolvedValueOnce({ status: "error", error: UNKNOWN });
++  }
++
++  for (let round = 0; round < 2; round += 1) {
++    const expected =
++      round === 0 ? { ok: true, value: DOMAIN_LIST } : { ok: false, failure: UNKNOWN };
++    expect(await source.addTab()).toEqual(expected);
++    expect(await source.closeTab(tab)).toEqual(expected);
++    expect(await source.renameTab(tab, "x")).toEqual(expected);
++    expect(await source.setTabLanguage(tab, { kind: "picked", name: "JSON" })).toEqual(expected);
++    expect(await source.showTab(tab)).toEqual(expected);
++  }
++  expect(commands.renameTab).toHaveBeenCalledWith(2, "x");
++  expect(commands.setTabLanguage).toHaveBeenCalledWith(2, { kind: "picked", name: "JSON" });
++});
++
++test("a reply with a fractional tab id is refused, naming the field", async () => {
++  commands.showTab.mockResolvedValue({ status: "ok", data: { ...LIST, shown: 1.5 } });
++
++  await expect(createTauriCompareSource().showTab(toTabList(LIST).shown)).rejects.toThrow(
++    "shown must be a non-negative safe integer, got 1.5",
++  );
++});
++
++test("a string error from Tauri's IPC layer rejects the call with that message", async () => {
++  commands.openCompare.mockResolvedValue({ status: "error", error: "open_compare not allowed" });
++
++  await expect(createTauriCompareSource().openCompare()).rejects.toThrow(
++    new Error("open_compare not allowed"),
++  );
++});
+diff --git a/frontend/src/ipc/tauriCompare.ts b/frontend/src/ipc/tauriCompare.ts
+new file mode 100644
+index 0000000..63260bf
+--- /dev/null
++++ b/frontend/src/ipc/tauriCompare.ts
+@@ -0,0 +1,42 @@
++import { commands } from "./bindings";
++import { toComparison, toCompareStart, toTabList, toTabTexts } from "./compareDomain";
++import type { CompareSource } from "./CompareSource";
++import type { SourceResult } from "./domain";
++import { createTauriSettings, toResult } from "./tauri";
++
++function converted<D, T>(result: SourceResult<D>, convert: (dto: D) => T): SourceResult<T> {
++  return result.ok ? { ok: true, value: convert(result.value) } : result;
++}
++
++export function createTauriCompareSource(): CompareSource {
++  return {
++    async openCompare() {
++      return converted(toResult(await commands.openCompare()), toCompareStart);
++    },
++    async loadTab(tab) {
++      return converted(toResult(await commands.loadTab(tab)), toTabTexts);
++    },
++    async setColumn({ tab, column, text, version }) {
++      return converted(
++        toResult(await commands.setColumn(tab, column, text, version)),
++        toComparison,
++      );
++    },
++    async addTab() {
++      return converted(toResult(await commands.addTab()), toTabList);
++    },
++    async closeTab(tab) {
++      return converted(toResult(await commands.closeTab(tab)), toTabList);
++    },
++    async renameTab(tab, name) {
++      return converted(toResult(await commands.renameTab(tab, name)), toTabList);
++    },
++    async setTabLanguage(tab, language) {
++      return converted(toResult(await commands.setTabLanguage(tab, language)), toTabList);
++    },
++    async showTab(tab) {
++      return converted(toResult(await commands.showTab(tab)), toTabList);
++    },
++    ...createTauriSettings(),
++  };
++}
