@@ -1,11 +1,11 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::blob::{BlobReader, CAT_FILE};
 use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
-use crate::operation::read_if_present;
 use crate::run::{Access, GIT_TIMEOUT, git_command, run};
 use crate::{Error, Result, StageEntry};
 
@@ -100,11 +100,8 @@ impl Repo {
     /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
     pub fn rebase_in_progress(&self) -> Result<bool> {
         for name in REBASE_STATE_DIRS {
-            let path = self.git_path(name)?;
-            match path.try_exists() {
-                Ok(true) => return Ok(true),
-                Ok(false) => {}
-                Err(source) => return Err(Error::ReadFailed { path, source }),
+            if exists(&self.git_path(name)?)? {
+                return Ok(true);
             }
         }
         Ok(false)
@@ -120,14 +117,18 @@ impl Repo {
         Ok(())
     }
 
-    // git-rev-parse(1) `--git-path`: the path inside the git directory, relative to the cwd.
     fn git_path(&self, name: &str) -> Result<PathBuf> {
-        let command = self.command(Access::Read, &[REV_PARSE, "--git-path", name]);
-        let git_path = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
-        Ok(self.root.join(path_from_git(&git_path)))
+        match self.git_paths(&[name])?.as_slice() {
+            [path] => Ok(path.clone()),
+            paths => Err(Error::UnexpectedOutput {
+                command: REV_PARSE,
+                output: format!("{paths:?}"),
+            }),
+        }
     }
 
-    /// One `rev-parse --git-path` call for every name; the paths in the order of `names`.
+    /// One `rev-parse --git-path` call for every name (git-rev-parse(1): the path inside the git directory,
+    /// relative to the cwd); the paths in the order of `names`.
     pub(crate) fn git_paths(&self, names: &[&str]) -> Result<Vec<PathBuf>> {
         let mut command = self.command(Access::Read, &[REV_PARSE]);
         for name in names {
@@ -283,6 +284,24 @@ fn is_unresolved_name(error: &Error) -> bool {
         error,
         Error::GitFailed { status: Some(UNRESOLVED_NAME_STATUS), stderr, .. } if stderr.is_empty()
     )
+}
+
+pub(crate) fn exists(path: &Path) -> Result<bool> {
+    path.try_exists().map_err(|source| Error::ReadFailed {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+pub(crate) fn read_if_present(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(Error::ReadFailed {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 fn without_final_newline(command: &'static str, mut output: Vec<u8>) -> Result<Vec<u8>> {

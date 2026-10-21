@@ -1,9 +1,7 @@
-use std::fs;
-use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::entry::Oid;
-use crate::repo::Repo;
+use crate::repo::{Repo, exists, read_if_present};
 use crate::run::{Access, GIT_TIMEOUT, run};
 use crate::todo::{commands, first_command, has_editor_steps};
 use crate::{Error, Result};
@@ -22,7 +20,8 @@ pub struct Stop {
 
 impl Stop {
     /// What makes this stop this stop: the operation's kind, the commit (or patch number) it applies, and HEAD.
-    /// Progress and the todo list are not part of it, so `git rebase --edit-todo` is the same stop.
+    /// Continue, Abort and the moved-on check compare this, never the whole `Stop`: progress and the todo list
+    /// are not part of it, so `git rebase --edit-todo` is the same stop.
     #[must_use]
     pub fn id(&self) -> StopId {
         let mut stop = self.clone();
@@ -117,6 +116,12 @@ struct StatePaths {
     squash_msg: PathBuf,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SequenceStep {
+    Pick,
+    Revert,
+}
+
 impl Repo {
     /// What git is doing now; `operation: None` when git records nothing (no conflict operation, stash pop/apply,
     /// `checkout -m`). Git failures are `Err`, as every `Repo` read.
@@ -200,39 +205,53 @@ impl Repo {
     }
 
     fn sequence_or_squash(&self, paths: &StatePaths) -> Result<Option<Operation>> {
-        let todo = read_if_present(&paths.sequencer.join("todo"))?;
-        let progress = match &todo {
-            Some(todo) => self.sequence_progress(&paths.sequencer, todo)?,
-            None => None,
+        let todo = read_if_present(&paths.sequencer.join("todo"))?.unwrap_or_default();
+        let next = first_command(&todo).and_then(sequence_step);
+        let Some((step, applying)) = self.applied_step(next)? else {
+            return self.squash_merge(&paths.squash_msg);
         };
+        let progress = if next == Some(step) {
+            self.sequence_progress(&paths.sequencer, &todo)?
+        } else {
+            None
+        };
+        Ok(Some(match step {
+            SequenceStep::Pick => Operation::CherryPick {
+                picking: applying,
+                progress,
+            },
+            SequenceStep::Revert => Operation::Revert {
+                reverting: applying,
+                progress,
+            },
+        }))
+    }
+
+    fn applied_step(
+        &self,
+        next: Option<SequenceStep>,
+    ) -> Result<Option<(SequenceStep, Option<Oid>)>> {
         if let Some(picking) = self.commit_named("CHERRY_PICK_HEAD")? {
-            let picking = Some(picking);
-            return Ok(Some(Operation::CherryPick { picking, progress }));
+            return Ok(Some((SequenceStep::Pick, Some(picking))));
         }
         if let Some(reverting) = self.commit_named("REVERT_HEAD")? {
-            let reverting = Some(reverting);
-            return Ok(Some(Operation::Revert {
-                reverting,
-                progress,
-            }));
+            return Ok(Some((SequenceStep::Revert, Some(reverting))));
         }
-        match todo.as_deref().and_then(first_command) {
-            Some(b"pick" | b"p") => Ok(Some(Operation::CherryPick {
-                picking: None,
-                progress,
-            })),
-            Some(b"revert") => Ok(Some(Operation::Revert {
-                reverting: None,
-                progress,
-            })),
-            Some(_) | None => self.squash_merge(&paths.squash_msg),
-        }
+        Ok(next.map(|step| (step, None)))
     }
 
     // The stopped command is still `todo`'s first line and git keeps no `done` file
-    // (`cherry_pick_range_progress_moves_from_one_to_two_of_three`); every earlier step made one commit.
+    // (`cherry_pick_range_progress_moves_from_one_to_two_of_three`); every earlier step made one commit,
+    // unless the range runs with `--no-commit` (`opts` as sequencer.c `save_opts` writes it).
     fn sequence_progress(&self, sequencer: &Path, todo: &[u8]) -> Result<Option<Progress>> {
-        let Some(start) = read_oid(&sequencer.join("head"))? else {
+        let opts = read_if_present(&sequencer.join("opts"))?.unwrap_or_default();
+        if makes_no_commits(&opts) {
+            return Ok(None);
+        }
+        let Some(saved_head) = read_oid(&sequencer.join("head"))? else {
+            return Ok(None);
+        };
+        let Some(start) = self.commit_named(saved_head.as_str())? else {
             return Ok(None);
         };
         let done = self.commits_since(&start)?;
@@ -300,29 +319,24 @@ fn branch_name(head_name: &[u8]) -> Option<Vec<u8>> {
     Some(branch.to_vec())
 }
 
+fn sequence_step(command: &[u8]) -> Option<SequenceStep> {
+    match command {
+        b"pick" | b"p" => Some(SequenceStep::Pick),
+        b"revert" => Some(SequenceStep::Revert),
+        _ => None,
+    }
+}
+
+fn makes_no_commits(opts: &[u8]) -> bool {
+    opts.split(|&byte| byte == b'\n')
+        .any(|line| line.trim_ascii() == b"no-commit = true")
+}
+
 fn first_line(message: &[u8]) -> &[u8] {
     message
         .split(|&byte| byte == b'\n')
         .next()
         .unwrap_or_default()
-}
-
-fn exists(path: &Path) -> Result<bool> {
-    path.try_exists().map_err(|source| Error::ReadFailed {
-        path: path.to_path_buf(),
-        source,
-    })
-}
-
-pub(crate) fn read_if_present(path: &Path) -> Result<Option<Vec<u8>>> {
-    match fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
-        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(source) => Err(Error::ReadFailed {
-            path: path.to_path_buf(),
-            source,
-        }),
-    }
 }
 
 #[cfg(test)]
@@ -390,5 +404,12 @@ mod tests {
         assert_eq!(number_in(b" 2\n"), Some(2));
         assert_eq!(number_in(b"two"), None);
         assert_eq!(number_in(b"-1"), None);
+    }
+
+    #[test]
+    fn only_a_no_commit_option_set_to_true_makes_no_commits() {
+        assert!(makes_no_commits(b"[options]\n\tno-commit = true\n"));
+        assert!(!makes_no_commits(b"[options]\n\tsignoff = true\n"));
+        assert!(!makes_no_commits(b""));
     }
 }

@@ -1,9 +1,9 @@
 #![cfg(test)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, TempDir, diverged_repo, git, git_ok, operation_repo,
+    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, git, git_ok, operation_repo,
 };
 use yamt_gitio::{Oid, Operation, Progress, Rebase, Repo, Stop};
 
@@ -15,8 +15,6 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     remote: Some(b"remote\n"),
 }];
 
-const REBASE_TODO: &str = "rebase-merge/git-rebase-todo";
-
 fn stopped(run: Run) -> (TempDir, Repo) {
     let dir = operation_repo(run, &FILES).unwrap();
     let repo = Repo::discover(dir.path()).unwrap();
@@ -26,6 +24,11 @@ fn stopped(run: Run) -> (TempDir, Repo) {
 fn oid(root: &Path, revision: &str) -> Oid {
     let output = git_ok(root, &["rev-parse", "--verify", revision]).unwrap();
     Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
+}
+
+fn git_path(root: &Path, name: &str) -> PathBuf {
+    let path = git_ok(root, &["rev-parse", "--git-path", name]).unwrap();
+    root.join(String::from_utf8(path).unwrap().trim_end())
 }
 
 fn operation(repo: &Repo) -> Operation {
@@ -175,6 +178,62 @@ fn revert_range_reads_the_reverted_commit_and_the_sequence_progress() {
             reverting,
             progress
         }
+    );
+}
+
+// A pick range started on an unborn branch saves the zero oid as its start.
+#[test]
+fn a_sequence_start_that_is_not_a_commit_gives_no_progress() {
+    let (dir, repo) = stopped(Run::CherryPickRange);
+    let zero = "0000000000000000000000000000000000000000\n";
+    std::fs::write(git_path(dir.path(), "sequencer/head"), zero).unwrap();
+    let picking = Some(oid(dir.path(), "remote~2"));
+    let progress = None;
+    assert_eq!(
+        operation(&repo),
+        Operation::CherryPick { picking, progress }
+    );
+}
+
+// The sequencer's todo belongs to the stopped range, not to the single revert run inside it.
+#[test]
+fn a_single_revert_inside_a_stopped_pick_range_has_no_progress() {
+    let (dir, repo) = stopped(Run::CherryPickRange);
+    std::fs::write(dir.path().join("cart.ts"), "resolved\n").unwrap();
+    git_ok(dir.path(), &["commit", "--quiet", "--all", "--no-edit"]).unwrap();
+    let reverting = Some(oid(dir.path(), "local~1"));
+
+    let revert = git(dir.path(), &["revert", "--no-edit", "local~1"]).unwrap();
+
+    assert!(!revert.status.success(), "the revert did not stop");
+    let progress = None;
+    assert_eq!(
+        operation(&repo),
+        Operation::Revert {
+            reverting,
+            progress
+        }
+    );
+}
+
+// `cherry-pick -n` makes no commits, so `sequencer/head..HEAD` does not count the steps done.
+#[test]
+fn a_no_commit_pick_range_has_no_progress() {
+    let (dir, repo) = stopped(Run::CherryPickRange);
+    let root = dir.path();
+    git_ok(root, &["cherry-pick", "--abort"]).unwrap();
+    git_ok(root, &["checkout", "--quiet", "-b", "other", "main"]).unwrap();
+    std::fs::write(root.join(STEP_TWO_FILE), "other\n").unwrap();
+    git_ok(root, &["commit", "--quiet", "--all", "-m", "other"]).unwrap();
+
+    let pick = git(root, &["cherry-pick", "-n", "main..remote"]).unwrap();
+
+    assert!(!pick.status.success(), "the pick range did not stop");
+    let progress = None;
+    let picking = None;
+    assert_eq!(
+        operation(&repo),
+        Operation::CherryPick { picking, progress }
     );
 }
 
@@ -334,25 +393,28 @@ fn a_refused_continue_keeps_the_id() {
     }
 }
 
+// A plain rebase's `Stop` does not change when a pick is dropped; dropping the reword changes `editor_steps_ahead`.
 #[test]
 fn edit_todo_dropping_a_later_step_keeps_the_id() {
-    let (dir, repo) = stopped(Run::Rebase);
+    let (dir, repo) = stopped(Run::RebaseInteractive);
     let first = repo.stop().unwrap();
-    let drop_step_three = "sequence.editor=sed -i -e 2d";
+    let drop_the_reword = "sequence.editor=sed -i -e /^reword/d";
 
     git_ok(
         dir.path(),
-        &["-c", drop_step_three, "rebase", "--edit-todo"],
+        &["-c", drop_the_reword, "rebase", "--edit-todo"],
     )
     .unwrap();
 
     let edited = repo.stop().unwrap();
-    let todo_path = git_ok(dir.path(), &["rev-parse", "--git-path", REBASE_TODO]).unwrap();
-    let todo_path = dir
-        .path()
-        .join(String::from_utf8(todo_path).unwrap().trim_end());
-    let todo = std::fs::read_to_string(todo_path).unwrap();
-    assert!(!todo.contains("step 3"), "{todo}");
+    let steps_ahead = |stop: &Stop| {
+        let Some(Operation::Rebase(rebase)) = &stop.operation else {
+            panic!("{stop:?} is not a rebase");
+        };
+        rebase.editor_steps_ahead
+    };
+    assert!(steps_ahead(&first));
+    assert!(!steps_ahead(&edited));
     assert_eq!(edited.id(), first.id());
 }
 
