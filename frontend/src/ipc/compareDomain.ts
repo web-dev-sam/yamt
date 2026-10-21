@@ -14,11 +14,8 @@ import {
 import { invalid, isNonNegativeInteger } from "./validate";
 import { toSideWords, type SideWords } from "./words";
 
-export type { ColumnVersion, LeftLine, RightLine, TabId } from "./domain";
-export type Column = "left" | "right";
-export type TabLanguage =
-  | { readonly kind: "auto" }
-  | { readonly kind: "picked"; readonly name: string };
+export type Column = Generated.Column;
+export type TabLanguage = Readonly<Generated.TabLanguage>;
 export type TabEntry = {
   readonly id: TabId;
   readonly name: string;

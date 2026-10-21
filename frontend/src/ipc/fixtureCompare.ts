@@ -15,7 +15,7 @@ import {
 } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
 import type { SourceResult } from "./domain";
-import { LINE_RANGE, SIDE_WORD_CHANGES } from "./fixture";
+import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
@@ -65,25 +65,15 @@ const CASE = v.object({
   right: v.string(),
 });
 
-function parseCase(file: string, json: unknown): Case {
-  const parsed = v.safeParse(CASE, json);
-  if (!parsed.success) {
-    throw new Error(`compare fixture ${file}: ${v.summarize(parsed.issues)}`);
-  }
-  const { left, right, differences } = parsed.output;
-  try {
-    return { left, right, differences: toDifferences(differences) };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`compare fixture ${file}: ${message}`, { cause: error });
-  }
-}
-
 function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
   return new Map(
     Object.entries(files).map(([file, json]) => [
       file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
-      parseCase(file, json),
+      parsedFixture(CASE, `compare fixture ${file}`, json, ({ left, right, differences }) => ({
+        left,
+        right,
+        differences: toDifferences(differences),
+      })),
     ]),
   );
 }

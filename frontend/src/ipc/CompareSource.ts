@@ -3,12 +3,11 @@ import type {
   ColumnWrite,
   CompareStart,
   Comparison,
-  TabId,
   TabLanguage,
   TabList,
   TabTexts,
 } from "./compareDomain";
-import type { SourceResult } from "./domain";
+import type { SourceResult, TabId } from "./domain";
 
 export interface CompareSource extends SettingsSource {
   openCompare(): Promise<SourceResult<CompareStart>>;

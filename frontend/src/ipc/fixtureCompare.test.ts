@@ -1,9 +1,9 @@
 import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { TabId, TabList } from "./compareDomain";
+import type { TabList } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
-import { nextColumnVersion, type SourceResult } from "./domain";
+import { nextColumnVersion, type SourceResult, type TabId } from "./domain";
 import { createFixtureCompareSource } from "./fixtureCompare";
 import { createLog, type Log, type LogEntry } from "./log";
 
@@ -99,6 +99,24 @@ test("?raw=json-payload puts the case into tab 1 and loadTab returns its differe
   expect(texts.comparison.differences).toEqual(payload.differences);
   expect(texts.comparison.differences).toHaveLength(4);
 });
+
+test.each(["?raw", "?raw="])(
+  "%s without a case starts one empty Compare 1 (catches a bare ?raw read as a case name)",
+  async (search) => {
+    const source = createFixtureCompareSource(quietLog().log, search);
+
+    const start = valueOf(await source.openCompare());
+
+    expect(start.list.tabs).toEqual([
+      { id: 1, name: "Compare 1", language: { kind: "auto" }, holdsText: false },
+    ]);
+    expect(valueOf(await source.loadTab(start.list.shown))).toEqual({
+      left: "",
+      right: "",
+      comparison: { versions: { left: 0, right: 0 }, differences: [] },
+    });
+  },
+);
 
 test("an unknown ?raw case fails the start naming it and the known ones", () => {
   expect(() => createFixtureCompareSource(quietLog().log, "?raw=nope")).toThrow(
@@ -263,6 +281,33 @@ test("texts matching no case log compare.fixture_miss once and answer no differe
 
   expect(hit.differences).toEqual(words.differences);
   expect(entries).toHaveLength(1);
+});
+
+test("an edited left column after ?raw=words answers no differences (catches matching the right column only)", async () => {
+  const { log, entries } = quietLog();
+  const words = committedCase("words");
+  const source = createFixtureCompareSource(log, "?raw=words");
+  const tab = await firstTab(source);
+  const { versions } = valueOf(await source.loadTab(tab)).comparison;
+  const edited = `${words.left}edited\n`;
+
+  const miss = valueOf(
+    await source.setColumn({
+      tab,
+      column: "left",
+      text: edited,
+      version: nextColumnVersion(versions.left),
+    }),
+  );
+
+  expect(miss.differences).toEqual([]);
+  expect(entries).toEqual([
+    {
+      level: "info",
+      event: "compare.fixture_miss",
+      fields: { tab, left: edited.length, right: words.right.length },
+    },
+  ]);
 });
 
 test("every tab command answers UnknownTab for an id that is not listed", async () => {

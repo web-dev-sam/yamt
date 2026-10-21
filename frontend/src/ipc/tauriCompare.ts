@@ -1,41 +1,41 @@
 import { commands } from "./bindings";
 import { toComparison, toCompareStart, toTabList, toTabTexts } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
-import type { SourceResult } from "./domain";
 import { createTauriSettings, toResult } from "./tauri";
-
-function converted<D, T>(result: SourceResult<D>, convert: (dto: D) => T): SourceResult<T> {
-  return result.ok ? { ok: true, value: convert(result.value) } : result;
-}
 
 export function createTauriCompareSource(): CompareSource {
   return {
     async openCompare() {
-      return converted(toResult(await commands.openCompare()), toCompareStart);
+      const result = toResult(await commands.openCompare());
+      return result.ok ? { ok: true, value: toCompareStart(result.value) } : result;
     },
     async loadTab(tab) {
-      return converted(toResult(await commands.loadTab(tab)), toTabTexts);
+      const result = toResult(await commands.loadTab(tab));
+      return result.ok ? { ok: true, value: toTabTexts(result.value) } : result;
     },
     async setColumn({ tab, column, text, version }) {
-      return converted(
-        toResult(await commands.setColumn(tab, column, text, version)),
-        toComparison,
-      );
+      const result = toResult(await commands.setColumn(tab, column, text, version));
+      return result.ok ? { ok: true, value: toComparison(result.value) } : result;
     },
     async addTab() {
-      return converted(toResult(await commands.addTab()), toTabList);
+      const result = toResult(await commands.addTab());
+      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
     },
     async closeTab(tab) {
-      return converted(toResult(await commands.closeTab(tab)), toTabList);
+      const result = toResult(await commands.closeTab(tab));
+      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
     },
     async renameTab(tab, name) {
-      return converted(toResult(await commands.renameTab(tab, name)), toTabList);
+      const result = toResult(await commands.renameTab(tab, name));
+      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
     },
     async setTabLanguage(tab, language) {
-      return converted(toResult(await commands.setTabLanguage(tab, language)), toTabList);
+      const result = toResult(await commands.setTabLanguage(tab, language));
+      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
     },
     async showTab(tab) {
-      return converted(toResult(await commands.showTab(tab)), toTabList);
+      const result = toResult(await commands.showTab(tab));
+      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
     },
     ...createTauriSettings(),
   };
