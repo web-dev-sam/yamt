@@ -12,6 +12,7 @@ _A three-way merge window like the one in JetBrains IDEs, for every git conflict
 &nbsp;
 
 ## Why does this exist?
+
 1. JetBrains IDE's three-pane merge window is the only merge tool I find usable. VS Code's merge editor, its extensions and the TUI mergetools all felt unintuitive.
 2. They all start from the `<<<<<<<` conflict markers. Once git has collapsed a merge into markers the base is gone, so you can see _that_ two sides differ but not _what each side changed_. yamt never parses a conflict marker: it reads the base, your side and theirs from git's index and diffs them itself.
 3. `git mergetool` opens one file at a time, and real merges touch many files. yamt takes over the whole merge: every conflicted file in one window, your side on the left, theirs on the right, the result in the middle.
@@ -88,6 +89,26 @@ yamt runs the language servers your project already has (it ships none): the res
 git config --global alias.resolve '!yamt'
 git resolve
 ```
+
+Even easier: let git open yamt by itself. Add this to `~/.bashrc` or `~/.zshrc`, and a plain `git merge`, `git pull`, `git rebase`, `git cherry-pick` or `git revert` that stops with conflicts opens the window; the command then ends with yamt's exit status.
+
+```sh
+git() {
+  command git "$@"
+  local code=$?
+  case "$1" in
+    merge | pull | rebase | cherry-pick | revert)
+      if [ "$code" -ne 0 ] && [ -t 1 ] && [ -n "$(command git ls-files -u 2>/dev/null)" ]; then
+        yamt
+        return
+      fi
+      ;;
+  esac
+  return "$code"
+}
+```
+
+It only acts in a terminal you type in: scripts, editors and piped output run git untouched.
 
 `git mergetool` is not the way to start yamt: it runs the tool once per file, while yamt handles all files in one window.
 
