@@ -55,8 +55,8 @@ function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[])
   };
 }
 
-export function finishMustAsk(summary: MergeSummary): boolean {
-  return summary.conflicts > 0 || summary.changes > 0;
+export function finishMustAsk({ conflicts, changes }: MergeSummary): boolean {
+  return conflicts > 0 || changes > 0;
 }
 
 export function exitMustAsk(unsaved: readonly string[]): boolean {

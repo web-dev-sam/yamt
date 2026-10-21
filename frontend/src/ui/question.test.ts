@@ -6,14 +6,28 @@ import { endsWithStop, exitMustAsk, finishMustAsk, questionText } from "./questi
 
 const LINUX = "Linux x86_64";
 
-function unprocessed(conflicts: number, changes: number): string {
-  return questionText({ kind: "unprocessed", summary: { conflicts, changes } }, LINUX).message;
+function unprocessed(conflicts: number, changes: number, remembered = 0): string {
+  return questionText({ kind: "unprocessed", summary: { conflicts, changes, remembered } }, LINUX)
+    .message;
 }
 
 test("Mark resolved asks exactly when the summary counts a conflict or a change", () => {
-  expect(finishMustAsk({ conflicts: 0, changes: 0 })).toBe(false);
-  expect(finishMustAsk({ conflicts: 1, changes: 0 })).toBe(true);
-  expect(finishMustAsk({ conflicts: 0, changes: 1 })).toBe(true);
+  expect(finishMustAsk({ conflicts: 0, changes: 0, remembered: 0 })).toBe(false);
+  expect(finishMustAsk({ conflicts: 1, changes: 0, remembered: 0 })).toBe(true);
+  expect(finishMustAsk({ conflicts: 0, changes: 1, remembered: 0 })).toBe(true);
+});
+
+test("Mark resolved never asks for conflicts git rerere filled in, but still asks for the others (catches a remembered conflict blocking with Unprocessed Changes)", () => {
+  expect(finishMustAsk({ conflicts: 0, changes: 0, remembered: 2 })).toBe(false);
+  expect(finishMustAsk({ conflicts: 1, changes: 0, remembered: 2 })).toBe(true);
+  expect(finishMustAsk({ conflicts: 0, changes: 1, remembered: 2 })).toBe(true);
+});
+
+test("the unprocessed sentence never mentions remembered conflicts", () => {
+  const message = unprocessed(1, 0, 3);
+  expect(message).toContain("1 unresolved conflict still remains.");
+  expect(message).not.toContain("3");
+  expect(message).not.toContain("remembered");
 });
 
 test("quitting asks exactly when some file has unsaved work", () => {
@@ -38,7 +52,10 @@ test("the unprocessed sentence names only the non-zero counts with singular and 
 
 test("the unprocessed question carries WebStorm's title and buttons", () => {
   expect(
-    questionText({ kind: "unprocessed", summary: { conflicts: 1, changes: 0 } }, LINUX),
+    questionText(
+      { kind: "unprocessed", summary: { conflicts: 1, changes: 0, remembered: 0 } },
+      LINUX,
+    ),
   ).toMatchObject({
     title: "Unprocessed Changes",
     list: { kind: "none" },

@@ -212,8 +212,16 @@ test("apply local: the change gets the left text, resolves, and loses colour and
   expect(decoratedLines(applied.state)).not.toContain(3);
   expect(arrowLines(start, "local")).toContain(3);
   expect(arrowLines(applied, "local")).not.toContain(3);
-  expect(summarize(start.state.field(start.field))).toEqual({ changes: 8, conflicts: 1 });
-  expect(summarize(applied.state.field(applied.field))).toEqual({ changes: 7, conflicts: 1 });
+  expect(summarize(start.state.field(start.field))).toEqual({
+    changes: 8,
+    conflicts: 1,
+    remembered: 0,
+  });
+  expect(summarize(applied.state.field(applied.field))).toEqual({
+    changes: 7,
+    conflicts: 1,
+    remembered: 0,
+  });
   expect(applyOne(applied, chunkAt(applied, 0), "local")).toEqual([]);
   expect(applyOne(start, chunkAt(start, 0), "remote")).toEqual([]);
 });
@@ -237,13 +245,21 @@ test("a conflict applied from both sides holds local then remote text", async ()
   const both = run(local, applyOne(local, conflict, "remote"));
 
   expect(statuses(local)[8]).toBe("applied pending");
-  expect(summarize(local.state.field(local.field))).toEqual({ changes: 8, conflicts: 1 });
+  expect(summarize(local.state.field(local.field))).toEqual({
+    changes: 8,
+    conflicts: 1,
+    remembered: 0,
+  });
   expect(arrowLines(local, "local")).not.toContain(129);
   expect(arrowLines(local, "remote")).toContain(141);
   expect(decoratedLines(local.state)).toContain(129);
   expect(centerText(both, 8)).toBe(sideText(both, 8, "local") + sideText(both, 8, "remote"));
   expect(statuses(both)[8]).toBe("applied applied");
-  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
+  expect(summarize(both.state.field(both.field))).toEqual({
+    changes: 8,
+    conflicts: 0,
+    remembered: 0,
+  });
   expect(arrowLines(both, "remote")).not.toContain(141);
   expect(decoratedLines(both.state)).not.toContain(129);
 });
@@ -261,7 +277,11 @@ test("ignore keeps the text and resolves a change or a half-applied conflict", a
   expect(arrowLines(done, "local")).not.toContain(22);
   expect(centerText(settled, 8)).toBe(sideText(settled, 8, "remote"));
   expect(statuses(settled)[8]).toBe("ignored applied");
-  expect(summarize(settled.state.field(settled.field))).toEqual({ changes: 7, conflicts: 0 });
+  expect(summarize(settled.state.field(settled.field))).toEqual({
+    changes: 7,
+    conflicts: 0,
+    remembered: 0,
+  });
   expect(ignoreOne(settled, chunkAt(settled, 8), "local")).toEqual([]);
 });
 
@@ -417,7 +437,11 @@ test("bulk apply from the left resolves every LocalOnly change; one undo restore
   for (const id of [0, 1, 2, 5, 7]) {
     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "local"));
   }
-  expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 3, conflicts: 1 });
+  expect(summarize(bulk.state.field(bulk.field))).toEqual({
+    changes: 3,
+    conflicts: 1,
+    remembered: 0,
+  });
   expect(bulkApplySteps({ target: bulk, side: "local", visible: allVisible(bulk) })).toEqual([]);
   expect(undone.state.doc.toString()).toBe(start.state.doc.toString());
   expect(statuses(undone)).toEqual(statuses(start));
@@ -445,7 +469,11 @@ test("a BothSame change resolves from either arrow and from either bulk apply", 
   expect(arrowLines(merge, "remote")).toEqual([2]);
   expect(fromRight.state.sliceDoc()).toBe("a\nB\nc\n");
   expect(arrowLines(fromRight, "local")).toEqual([]);
-  expect(summarize(fromRight.state.field(fromRight.field))).toEqual({ changes: 0, conflicts: 0 });
+  expect(summarize(fromRight.state.field(fromRight.field))).toEqual({
+    changes: 0,
+    conflicts: 0,
+    remembered: 0,
+  });
   expect(statuses(bulkLeft)).toEqual(["applied applied"]);
   expect(statuses(bulkRight)).toEqual(["applied applied"]);
   expect(bulkRight.state.sliceDoc()).toBe("a\nB\nc\n");
@@ -463,7 +491,11 @@ test("bulk apply from the right inserts every RemoteOnly change in place", async
     expect(statuses(bulk)[id]).toBe("pending applied");
     expect(centerText(bulk, id)).toBe(sideText(bulk, id, "remote"));
   }
-  expect(summarize(bulk.state.field(bulk.field))).toEqual({ changes: 5, conflicts: 1 });
+  expect(summarize(bulk.state.field(bulk.field))).toEqual({
+    changes: 5,
+    conflicts: 1,
+    remembered: 0,
+  });
 });
 
 test("bulk apply over touching spans whose last deletes an unterminated final line equals clicking each", async () => {
@@ -503,7 +535,11 @@ test("deleting all of a change's lines in the middle pane ignores it", async () 
   };
 
   expect(statuses(deleted)[0]).toBe("ignored ignored");
-  expect(summarize(deleted.state.field(deleted.field))).toEqual({ changes: 7, conflicts: 1 });
+  expect(summarize(deleted.state.field(deleted.field))).toEqual({
+    changes: 7,
+    conflicts: 1,
+    remembered: 0,
+  });
   expect(statuses(command(deleted, undo))[0]).toBe("pending pending");
 });
 
@@ -855,12 +891,24 @@ test("an add/add file reopened from the disk: a one-sided apply stays a conflict
 
   expect(paneText(local.state)).toBe(lines(["L0", "L1", ...SHARED, "}"], "Lf"));
   expect(statuses(local)).toEqual(["applied pending", "pending pending"]);
-  expect(summarize(local.state.field(local.field))).toEqual({ changes: 0, conflicts: 2 });
-  expect(summarize(ignored.state.field(ignored.field))).toEqual({ changes: 0, conflicts: 1 });
+  expect(summarize(local.state.field(local.field))).toEqual({
+    changes: 0,
+    conflicts: 2,
+    remembered: 0,
+  });
+  expect(summarize(ignored.state.field(ignored.field))).toEqual({
+    changes: 0,
+    conflicts: 1,
+    remembered: 0,
+  });
   expect(paneText(both.state)).toBe(
     lines(["L0", "L1", ...SHARED, "L2", "L3", "L4", "L5", "R5", "R6", "R7", "}"], "Lf"),
   );
-  expect(summarize(both.state.field(both.field))).toEqual({ changes: 0, conflicts: 0 });
+  expect(summarize(both.state.field(both.field))).toEqual({
+    changes: 0,
+    conflicts: 0,
+    remembered: 0,
+  });
 });
 
 test("Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step", async () => {
@@ -876,7 +924,11 @@ test("Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other
   expect(centerText(both, 8)).toBe(sideText(both, 8, "local"));
   expect(paneText(both.state)).toBe(paneText(plain.state));
   expect(statuses(both)).toEqual(statuses(plain));
-  expect(summarize(both.state.field(both.field))).toEqual({ changes: 8, conflicts: 0 });
+  expect(summarize(both.state.field(both.field))).toEqual({
+    changes: 8,
+    conflicts: 0,
+    remembered: 0,
+  });
   expect(undoDepth(both.state)).toBe(undoDepth(start.state) + 1);
   expect(paneText(undone.state)).toBe(paneText(start.state));
   expect(statuses(undone)).toEqual(statuses(start));
@@ -1006,7 +1058,11 @@ test("Ctrl/Cmd ignore on a conflict whose other side has no lines removes the bl
 
   expect(paneText(done.state)).toBe("a\nc\n");
   expect(statuses(done)).toEqual(["ignored applied"]);
-  expect(summarize(done.state.field(done.field))).toEqual({ changes: 0, conflicts: 0 });
+  expect(summarize(done.state.field(done.field))).toEqual({
+    changes: 0,
+    conflicts: 0,
+    remembered: 0,
+  });
 });
 
 test("a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each", async () => {

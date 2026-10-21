@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import type { Component } from "vue";
-import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
 import ChevronRight from "~icons/lucide/chevron-right";
 
 import { fileIcon } from "./fileIcon";
+import FileMark from "./FileMark.vue";
 import type { TreeRow } from "./fileTree";
 import { folderIcon } from "./folderIcon";
 
@@ -85,13 +85,7 @@ function pressed(row: TreeRow): void {
       >
         {{ row.label }}
       </span>
-      <span
-        v-if="row.kind === 'file' && row.file.status === 'Resolved'"
-        class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
-      >
-        <Check class="size-3.5" aria-hidden="true" />
-        resolved
-      </span>
+      <FileMark v-if="row.kind === 'file'" :status="row.file.status" />
     </li>
   </ul>
 </template>

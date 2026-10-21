@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, shallowRef, useTemplateRef, watch } from "vue";
-import Check from "~icons/lucide/check";
 import ListIcon from "~icons/lucide/list";
 import ListTree from "~icons/lucide/list-tree";
 
@@ -8,6 +7,7 @@ import type { FileEntry } from "../ipc";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
 import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
+import FileMark from "./FileMark.vue";
 import { revealed, treeRows } from "./fileTree";
 import FileTree from "./FileTree.vue";
 import ResizeDots from "./ResizeDots.vue";
@@ -111,13 +111,7 @@ function toggleFolder(path: string): void {
         <span class="truncate" :class="{ 'text-fg-muted': file.status === 'Resolved' }">
           {{ file.path }}
         </span>
-        <span
-          v-if="file.status === 'Resolved'"
-          class="ml-auto flex shrink-0 items-center gap-1 text-fg-muted"
-        >
-          <Check class="size-3.5" aria-hidden="true" />
-          resolved
-        </span>
+        <FileMark :status="file.status" />
       </li>
     </ul>
     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
