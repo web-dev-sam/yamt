@@ -52,24 +52,21 @@ async function operationAt(source: ChunkSource): Promise<OperationView | null> {
   return (await filesListed(source)).operation;
 }
 
-test.each<[string, OperationKind, boolean]>([
-  ["", "Merge", true],
-  ["?operation=merge", "Merge", true],
-  ["?operation=squash", "SquashMerge", false],
-  ["?operation=rebase", "Rebase", false],
-  ["?operation=cherry-pick", "CherryPick", false],
-  ["?operation=revert", "Revert", false],
-  ["?operation=am", "Am", false],
-  ["?operation=unknown", "Merge", true],
-])("%j lists the fixtures under that operation: %s", async (search, kind, merging) => {
-  const source = sourceAt(search);
-
-  const listing = await filesListed(source);
+test.each<[string, OperationKind]>([
+  ["", "Merge"],
+  ["?operation=merge", "Merge"],
+  ["?operation=squash", "SquashMerge"],
+  ["?operation=rebase", "Rebase"],
+  ["?operation=cherry-pick", "CherryPick"],
+  ["?operation=revert", "Revert"],
+  ["?operation=am", "Am"],
+  ["?operation=unknown", "Merge"],
+])("%j lists the fixtures under that operation: %s", async (search, kind) => {
+  const listing = await filesListed(sourceAt(search));
 
   expect(listing.operation?.kind).toBe(kind);
   expect(listing.files).toEqual([{ path: "a.ts", status: "Unresolved", unsupported: null }]);
   expect(listing.diskChanges).toEqual([]);
-  expect(valueOf(await source.listFiles()).merging).toBe(merging);
 });
 
 test.each<[string, ProgressView | undefined]>([
@@ -120,16 +117,11 @@ async function resolvedAndContinued(source: ChunkSource): Promise<unknown[]> {
 }
 
 async function everyStopCommand(source: ChunkSource): Promise<SourceResult<unknown>[]> {
-  return [
-    await source.listStop(),
-    await source.listFiles(),
-    await source.continueOperation(),
-    await source.abortOperation(),
-  ];
+  return [await source.listStop(), await source.continueOperation(), await source.abortOperation()];
 }
 
 function everyCommandRefused(kind: "MergeFinished" | "MergeAborted"): SourceResult<unknown>[] {
-  return Array.from({ length: 4 }, () => ({ ok: false, failure: { kind } }));
+  return Array.from({ length: 3 }, () => ({ ok: false, failure: { kind } }));
 }
 
 test("a rebase advances 1 → 2 → 3, lists the files unresolved again each time, then finishes once", async () => {
@@ -154,7 +146,6 @@ test("?empty makes the second step a stop without files, with git's edit message
 
   const stopped = valueOf(await source.continueOperation());
   const empty = await filesListed(source);
-  const files = valueOf(await source.listFiles()).files;
   const third = valueOf(await source.continueOperation());
 
   expect(stopped).toEqual({
@@ -162,7 +153,7 @@ test("?empty makes the second step a stop without files, with git's edit message
     message:
       "Stopped at 8b4e7d0...  Show reminders on the board\nYou can amend the commit now, with\n\n  git commit --amend\n\nOnce you are satisfied with your changes, run\n\n  git rebase --continue\n",
   });
-  expect([empty.files, empty.operation?.kind, files]).toEqual([[], "Rebase", []]);
+  expect([empty.files, empty.operation?.kind]).toEqual([[], "Rebase"]);
   expect(third).toEqual({
     kind: "Stopped",
     message: "CONFLICT (content): Merge conflict at step 3 of 3",
@@ -197,6 +188,5 @@ test("none lists no operation and has nothing to continue or abort", async () =>
   expect(await operationAt(source)).toBeNull();
   expect(await source.continueOperation()).toEqual(nothing);
   expect(await source.abortOperation()).toEqual(nothing);
-  expect(valueOf(await source.listFiles()).merging).toBe(false);
   expect(entries).toEqual([]);
 });

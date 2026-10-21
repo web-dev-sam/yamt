@@ -39,11 +39,13 @@ pub struct SideNames {
     pub remote: Option<SideName>,
 }
 
-pub(crate) fn read_side_names(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
-    let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
-    let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
-    let (local, remote) = orientation.panes(ours, theirs);
-    SideNames { local, remote }
+impl SideNames {
+    pub(crate) fn read(repo: &Repo, stop: &Stop, orientation: Orientation) -> SideNames {
+        let ours = name_or_warn("ours", checked_out(repo, stop.head.as_ref()));
+        let theirs = name_or_warn("theirs", applied(repo, stop.operation.as_ref()));
+        let (local, remote) = orientation.panes(ours, theirs);
+        SideNames { local, remote }
+    }
 }
 
 /// The name `read` gave; a git failure drops only this name (plan §2 #50, #62), with a warning naming `label`.

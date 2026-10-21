@@ -12,6 +12,9 @@ use yamt_session::{
     DiskVersion, FileMergeData, MergeSession, Middle, Side, SideContent, SideName, Waiting,
 };
 
+mod listing;
+use listing::listed;
+
 mod window;
 use window::{lines, middle_text, saved_with_everything_waiting};
 
@@ -167,7 +170,7 @@ fn a_disk_view_block_is_written_back_as_it_was_and_its_left_section_is_own_work(
     let edited = git_wrote.replacen("one\n", "ONE, by hand\n", 1);
     fs::write(root.join(TEXT), &edited).unwrap();
     let mut session = MergeSession::open(root).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
 
     let data = session.load(TEXT).unwrap();
 
@@ -238,7 +241,7 @@ fn a_conflicted_squash_step_shows_its_own_commit_on_the_left_and_names_both_side
         (data.local.as_str(), data.remote.as_str()),
         ("remote\n", "local\n")
     );
-    let names = session.side_names();
+    let names = listed(&mut session).sides;
     assert_eq!(commit_subject(names.local.as_ref()), Some("step 2"));
     assert_eq!(commit_subject(names.remote.as_ref()), Some("step 1"));
 }

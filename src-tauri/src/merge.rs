@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use yamt_session::{
-    Continued, DiskChange, FileEntry, MergeSession, OperationKind, OperationView, Refreshed,
-    SideNames, StopList,
+    Continued, DiskChange, DiskVersion, FileEntry, MergeSession, OperationKind, OperationView,
+    Refreshed, SideNames, StopList,
 };
 
 use crate::ipc_error::IpcError;
@@ -17,9 +17,11 @@ pub(crate) enum Merge {
     Held(Box<MergeSession>),
     /// git aborts or continues; the session is with the worker.
     Running(OperationKind),
-    /// git moved on to another stop: the old session is dropped; the next list opens the new one.
+    /// git moved on to another stop: the old session is dropped; the next list opens the new one,
+    /// its disk versions above the old session's highest (#1383).
     MovedOn {
         root: PathBuf,
+        highest_disk_version: DiskVersion,
     },
     Aborted(OperationKind),
     Finished(OperationKind),
@@ -79,16 +81,15 @@ impl Merge {
         }
     }
 
-    pub(crate) fn abort(&mut self) -> Result<(), IpcError> {
-        self.session()?.abort_merge()?;
-        *self = Merge::Aborted(OperationKind::Merge);
-        Ok(())
-    }
-
     /// After a move, opens the new stop first; a list that finds git moved on drops the session.
     pub(crate) fn list_stop(&mut self) -> Result<Listing, IpcError> {
-        if let Merge::MovedOn { root } = self {
-            *self = Merge::Held(Box::new(MergeSession::open(root)?));
+        if let Merge::MovedOn {
+            root,
+            highest_disk_version,
+        } = self
+        {
+            let session = MergeSession::open_after(root, *highest_disk_version)?;
+            *self = Merge::Held(Box::new(session));
         }
         let session = self.session()?;
         match session.refresh_stop()? {
@@ -104,8 +105,7 @@ impl Merge {
                 sides,
             }),
             Refreshed::MovedOn => {
-                let root = session.root().to_path_buf();
-                *self = Merge::MovedOn { root };
+                *self = moved_on(session);
                 Ok(Listing::MovedOn)
             }
         }
@@ -137,6 +137,13 @@ impl Merge {
     }
 }
 
+fn moved_on(session: &MergeSession) -> Merge {
+    Merge::MovedOn {
+        root: session.root().to_path_buf(),
+        highest_disk_version: session.highest_disk_version(),
+    }
+}
+
 /// Runs `work` on a blocking worker while the merge is `Running`. git's refusal puts the session
 /// back; a worker that panicked leaves `MovedOn`, so the next list opens the stop git is at.
 async fn on_worker<T, F>(state: &MergeState, work: F) -> Result<(Box<MergeSession>, T), IpcError>
@@ -145,7 +152,7 @@ where
     F: FnOnce(&mut MergeSession) -> yamt_session::Result<T> + Send + 'static,
 {
     let mut session = lock(state).hand_to_worker()?;
-    let root = session.root().to_path_buf();
+    let after_a_panic = moved_on(&session);
     let worker = tauri::async_runtime::spawn_blocking(move || {
         let result = work(&mut session);
         (session, result)
@@ -157,7 +164,7 @@ where
             Err(error.into())
         }
         Err(error) => {
-            *lock(state) = Merge::MovedOn { root };
+            *lock(state) = after_a_panic;
             Err(IpcError::Git {
                 message: format!("yamt's worker stopped while git ran: {error}"),
             })
@@ -183,8 +190,7 @@ pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueRep
             Ok(ContinueReply::Finished)
         }
         Continued::Stopped { message } => {
-            let root = session.root().to_path_buf();
-            *merge = Merge::MovedOn { root };
+            *merge = moved_on(&session);
             Ok(ContinueReply::Stopped { message })
         }
     }

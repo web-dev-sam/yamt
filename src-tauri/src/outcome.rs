@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use yamt_session::{MergeSession, OperationKind};
+use yamt_session::{MergeSession, OperationKind, Refreshed};
 
 use crate::merge::{Merge, MergeState, lock_when_git_is_done};
 
@@ -59,7 +59,7 @@ pub(crate) fn ending_when_git_is_done(state: &MergeState) -> Ending {
 pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
     match merge {
         Merge::Held(session) => held_merge_ending(session),
-        Merge::MovedOn { root } => moved_on_ending(root),
+        Merge::MovedOn { root, .. } => moved_on_ending(root),
         Merge::Aborted(kind) => Ending {
             exit: Exit::Unresolved,
             message: Some(format!("{} aborted", operation_name(*kind))),
@@ -86,11 +86,16 @@ fn operation_name(kind: OperationKind) -> &'static str {
     }
 }
 
+/// git's view at close: the stop's list, or the stop git moved on to (plan §2 #41).
 fn held_merge_ending(session: &mut MergeSession) -> Ending {
-    if let Err(error) = session.refresh() {
-        tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+    match session.refresh_stop() {
+        Ok(Refreshed::Files(_)) => unresolved_ending(session),
+        Ok(Refreshed::MovedOn) => moved_on_ending(session.root()),
+        Err(error) => {
+            tracing::warn!(%error, "exit status from the session's statuses: git could not list the unmerged files");
+            unresolved_ending(session)
+        }
     }
-    unresolved_ending(session)
 }
 
 /// The stop git moved on to, as git lists it: opened only to count, nothing settled or staged.
@@ -181,32 +186,55 @@ mod tests {
         assert_eq!(names, expected);
     }
 
-    // Settling the old stop's files at close would stage a file the user never saw at the new stop.
-    #[test]
-    fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
-        let step_one = ConflictFile {
-            path: STEP_TWO_FILE,
-            kind: FileKind::Regular,
-            base: Some(b"one\n"),
-            local: Some(b"local-1\n"),
-            remote: Some(b"remote-1\n"),
-        };
-        let repo = operation_repo(Run::Rebase, &[step_one]).unwrap();
-        let root = repo.path();
+    const STEP_ONE: ConflictFile<'static> = ConflictFile {
+        path: STEP_TWO_FILE,
+        kind: FileKind::Regular,
+        base: Some(b"one\n"),
+        local: Some(b"local-1\n"),
+        remote: Some(b"remote-1\n"),
+    };
+
+    /// Continues the rebase in a terminal to step 2 and edits its file by hand; git's unmerged list then.
+    fn continued_in_a_terminal(root: &Path) -> Vec<u8> {
         std::fs::write(root.join(STEP_TWO_FILE), "resolved\n").unwrap();
         git_ok(root, &["add", "--", STEP_TWO_FILE]).unwrap();
         let continued = git(root, &["rebase", "--continue"]).unwrap();
         assert!(!continued.status.success());
         std::fs::write(root.join(STEP_TWO_FILE), "edited by hand\n").unwrap();
-        let unmerged = git_ok(root, &["ls-files", "-u"]).unwrap();
+        git_ok(root, &["ls-files", "-u"]).unwrap()
+    }
+
+    // Settling the old stop's files at close would stage a file the user never saw at the new stop.
+    #[test]
+    fn closing_after_a_move_counts_the_new_stop_s_unmerged_files_and_stages_nothing() {
+        let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
+        let root = repo.path();
+        let unmerged = continued_in_a_terminal(root);
 
         let ending = closed(Merge::MovedOn {
             root: root.to_path_buf(),
+            highest_disk_version: DiskVersion(0),
         });
 
         assert_eq!(
             ending,
             (Exit::Unresolved, "1 of 1 files still unresolved".to_owned())
+        );
+        assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
+    }
+
+    #[test]
+    fn closing_a_session_git_moved_on_from_counts_the_new_stop_s_files_and_stages_nothing() {
+        let repo = operation_repo(Run::Rebase, &[STEP_ONE]).unwrap();
+        let root = repo.path();
+        let mut session = MergeSession::open(root).unwrap();
+        let unmerged = continued_in_a_terminal(root);
+
+        let ending = held_merge_ending(&mut session);
+
+        assert_eq!(
+            ending.message.as_deref(),
+            Some("1 of 1 files still unresolved")
         );
         assert_eq!(git_ok(root, &["ls-files", "-u"]).unwrap(), unmerged);
     }

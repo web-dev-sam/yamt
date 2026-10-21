@@ -62,15 +62,12 @@ function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
   return {
     listStop: () =>
       Promise.resolve(answers.shift() ?? { ok: false, failure: { kind: "GitRunning" } }),
-    listFiles: notUsed,
     loadFile: notUsed,
     finishFile: notUsed,
     saveFile: notUsed,
     resetFile: notUsed,
     describeFile: notUsed,
     takeSide: notUsed,
-    sideNames: notUsed,
-    abortMerge: notUsed,
     continueOperation: notUsed,
     abortOperation: notUsed,
     loadSettings: notUsed,

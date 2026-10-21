@@ -1,8 +1,9 @@
 import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
+import type { ChunkSource } from "./ChunkSource";
 import { createFixtureSource, loadFixture } from "./fixture";
-import type { DiskVersion, FileList, Side, SourceResult } from "./index";
+import type { DiskChange, DiskVersion, FileEntry, Side, SourceResult } from "./index";
 import { createLog, type Log, type LogEntry } from "./log";
 
 const COMMITTED: Readonly<Record<string, unknown>> = import.meta.glob(
@@ -32,8 +33,14 @@ function valueOf<T>(result: SourceResult<T>): T {
   return result.value;
 }
 
-async function listed(log: Log, files?: Readonly<Record<string, unknown>>): Promise<FileList> {
-  return valueOf(await createFixtureSource(log, NO_QUERY, files).listFiles());
+type Listed = { files: readonly FileEntry[]; diskChanges: readonly DiskChange[] };
+
+async function listedBy(source: ChunkSource): Promise<Listed> {
+  const listing = valueOf(await source.listStop());
+  if (listing.kind !== "Files") {
+    throw new Error("expected files, got MovedOn");
+  }
+  return { files: listing.files, diskChanges: listing.diskChanges };
 }
 
 async function versionOf(
@@ -145,7 +152,7 @@ afterEach(() => {
 });
 
 test("the committed fixtures list 12 files, sorted by path, the remembered one remembered, the rest unresolved, with no disk changes", async () => {
-  const { files, diskChanges } = await listed(quietLog().log);
+  const { files, diskChanges } = await listedBy(createFixtureSource(quietLog().log, NO_QUERY));
 
   expect(files.map((file) => file.path)).toEqual([
     "language-tools-script-setup.ts",
@@ -183,9 +190,7 @@ test("each committed fixture loads with its JSON's chunk count, its stages middl
 
 test("each unresolved committed fixture's conflicts wait as markers and its other changes as side lines", async () => {
   const source = createFixtureSource(quietLog().log, NO_QUERY);
-  const unresolved = valueOf(await source.listFiles()).files.filter(
-    (file) => file.status === "Unresolved",
-  );
+  const unresolved = (await listedBy(source)).files.filter((file) => file.status === "Unresolved");
   let conflicts = 0;
   for (const { path } of unresolved) {
     for (const { kind, waiting } of valueOf(await source.loadFile(path)).chunks) {
@@ -275,10 +280,7 @@ test("in-memory records are listed sorted by path and keep every field", async (
   };
   const source = createFixtureSource(quietLog().log, NO_QUERY, files);
 
-  expect((await listed(quietLog().log, files)).files.map((file) => file.path)).toEqual([
-    "a.ts",
-    "z.ts",
-  ]);
+  expect((await listedBy(source)).files.map((file) => file.path)).toEqual(["a.ts", "z.ts"]);
   expect(await source.loadFile("a.ts")).toEqual({
     ok: true,
     value: { ...loaded("a.ts"), eol: "CrLf" },
@@ -626,10 +628,9 @@ test("an unknown path is an UnknownPath failure naming it, and changes nothing",
   expect(await source.resetFile("nope.ts", version)).toEqual(failure);
   expect(await source.describeFile("nope.ts")).toEqual(failure);
   expect(await source.takeSide("nope.ts", "remote", version)).toEqual(failure);
-  expect(valueOf(await source.listFiles())).toEqual({
+  expect(await listedBy(source)).toEqual({
     files: [{ path: "a.ts", status: "Unresolved", unsupported: null }],
     diskChanges: [],
-    merging: true,
   });
   expect(entries).toEqual([]);
 });
@@ -668,23 +669,9 @@ test("finish marks the file resolved and logs its text once; reset returns it un
     ok: true,
     value: { kind: "Written", files: unresolved },
   });
-  expect(valueOf(await source.listFiles())).toEqual({
-    files: unresolved,
-    diskChanges: [],
-    merging: true,
-  });
+  expect(await listedBy(source)).toEqual({ files: unresolved, diskChanges: [] });
   expect(valueOf(await source.loadFile("a.ts"))).toEqual(loaded("a.ts"));
   expect(entries).toHaveLength(1);
-});
-
-test("abortMerge answers done and logs the abort once; the fixtures stay listed as a merge", async () => {
-  const { log, entries } = quietLog();
-  const source = createFixtureSource(log, NO_QUERY, { "a.json": record("a.ts") });
-
-  expect(await source.abortMerge()).toEqual({ ok: true, value: null });
-
-  expect(entries).toEqual([{ level: "info", event: "fixture.abort_merge", fields: {} }]);
-  expect(valueOf(await source.listFiles()).merging).toBe(true);
 });
 
 test("save writes the file, logs its text, length and lines, and leaves it unresolved", async () => {
@@ -712,7 +699,7 @@ test("save writes the file, logs its text, length and lines, and leaves it unres
       fields: { path: "a.ts", text: "one\ntwo\nthree", length: 13, lines: 3 },
     },
   ]);
-  expect(valueOf(await source.listFiles()).files).toEqual(unresolved);
+  expect((await listedBy(source)).files).toEqual(unresolved);
 });
 
 test("takeSide marks the file resolved and logs the side; reset returns it unresolved", async () => {
@@ -737,7 +724,7 @@ test("takeSide marks the file resolved and logs the side; reset returns it unres
 
   await source.resetFile("b.ts", version);
 
-  expect(valueOf(await source.listFiles()).files.map((file) => file.status)).toEqual([
+  expect((await listedBy(source)).files.map((file) => file.status)).toEqual([
     "Unresolved",
     "Unresolved",
   ]);

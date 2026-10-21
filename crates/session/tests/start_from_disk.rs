@@ -6,7 +6,7 @@ use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git, git_ok, hash_object,
 };
 use yamt_session::{
-    DiskResult, FileList, FileStatus, MergeSession, Middle, SideContent, UnsupportedReason,
+    DiskResult, FileStatus, MergeSession, Middle, SideContent, StopList, UnsupportedReason,
 };
 
 const TEXT: &str = "f.txt";
@@ -14,6 +14,8 @@ const DELETED: &str = "gone.txt";
 const BINARY: &str = "logo.bin";
 const LINK: &str = "link";
 
+mod listing;
+use listing::listed;
 mod samples;
 use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
 
@@ -58,13 +60,13 @@ fn zdiff3() -> TempDir {
     merged(&[("merge.conflictStyle", "zdiff3")], None)
 }
 
-fn first_list(dir: &TempDir) -> (MergeSession, FileList) {
+fn first_list(dir: &TempDir) -> (MergeSession, StopList) {
     let mut session = MergeSession::open(dir.path()).unwrap();
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
     (session, list)
 }
 
-fn changes(list: &FileList) -> Vec<(&str, &DiskResult)> {
+fn changes(list: &StopList) -> Vec<(&str, &DiskResult)> {
     let changes = list.disk_changes.iter();
     changes
         .map(|change| (change.path.as_str(), &change.result))
@@ -403,7 +405,7 @@ fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
 
     let mut session = MergeSession::open(dir.path()).unwrap();
 
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     let finished = session.finish(TEXT, "merged\n", DiskVersion(0));
     assert!(
         matches!(finished, Err(Error::ReadFailed { .. })),
@@ -411,7 +413,7 @@ fn a_file_unreadable_at_start_opens_and_is_settled_once_it_can_be_read() {
     );
     fs::set_permissions(&path, fs::Permissions::from_mode(READ_WRITE)).unwrap();
     assert_eq!(
-        changes(&session.refresh().unwrap()),
+        changes(&listed(&mut session)),
         [(TEXT, &DiskResult::MarkersLeft { conflicts: 2 })]
     );
 }

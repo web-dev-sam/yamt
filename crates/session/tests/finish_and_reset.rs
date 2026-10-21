@@ -7,6 +7,9 @@ use yamt_session::{
     DiskChange, DiskResult, DiskVersion, Eol, Error, FileStatus, MergeSession, UnsupportedReason,
 };
 
+mod listing;
+use listing::listed;
+
 const FILE: &str = "src/cart.ts";
 const OTHER: &str = "src/other.ts";
 
@@ -242,10 +245,10 @@ fn a_finished_file_changed_again_is_staged_again_with_its_new_bytes() {
     let dir = two_file_conflict();
     let mut session = MergeSession::open(dir.path()).unwrap();
     session.finish(FILE, "merged\n", DiskVersion(0)).unwrap();
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     fs::write(dir.path().join(FILE), "user\n").unwrap();
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     let staged = DiskChange {
         path: FILE.to_owned(),

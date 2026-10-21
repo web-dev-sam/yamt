@@ -84,12 +84,6 @@ export type SettingsRead = {
   readonly stored: StoredSettings;
 };
 
-export type FileList = {
-  readonly files: readonly FileEntry[];
-  readonly diskChanges: readonly DiskChange[];
-  readonly merging: boolean;
-};
-
 export type OperationView = Generated.OperationView;
 
 export type ProgressView = Generated.ProgressView;
@@ -227,10 +221,6 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
 export function toSides(dto: Generated.FileSides): FileSides {
   const { disk_version: diskVersion, ...sides } = dto;
   return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
-}
-
-export function toFileList(dto: Generated.FileList): FileList {
-  return { files: dto.files, diskChanges: dto.disk_changes, merging: dto.merging };
 }
 
 export function toListing(dto: Generated.Listing): Listing {

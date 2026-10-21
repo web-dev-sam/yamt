@@ -9,8 +9,11 @@ use yamt_conflict_repo::{
 };
 use yamt_session::{
     Continued, DiskVersion, Error, FileStatus, MergeSession, OperationKind, OperationView,
-    ProgressView, Refreshed, SideName, StopList,
+    ProgressView, Refreshed, SideName,
 };
+
+mod listing;
+use listing::listed;
 
 const CART: &str = "cart.ts";
 const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
@@ -41,13 +44,6 @@ fn opened(run: Run, files: &[ConflictFile]) -> (TempDir, MergeSession) {
     let dir = operation_repo(run, files).unwrap();
     let session = MergeSession::open(dir.path()).unwrap();
     (dir, session)
-}
-
-fn listed(session: &mut MergeSession) -> StopList {
-    match session.refresh_stop().unwrap() {
-        Refreshed::Files(list) => list,
-        Refreshed::MovedOn => panic!("moved on"),
-    }
 }
 
 fn finished_every_file(session: &mut MergeSession) {
@@ -136,7 +132,6 @@ fn a_list_at_the_same_stop_has_the_rebase_with_its_names_and_progress() {
     };
     assert_eq!(list.operation, Some(expected));
     assert_eq!(list.files.len(), 1);
-    assert_eq!(&list.sides, session.side_names());
     let Some(SideName::Commit { message, .. }) = &list.sides.local else {
         panic!("{:?}", list.sides);
     };

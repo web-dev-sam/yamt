@@ -12,7 +12,6 @@ export type {
   DiskResult,
   DiskVersion,
   FileEntry,
-  FileList,
   FileMergeData,
   FileSides,
   HostEvent,

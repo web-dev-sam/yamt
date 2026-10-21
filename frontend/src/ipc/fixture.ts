@@ -245,7 +245,6 @@ export function createFixtureSource(
   });
 
   return {
-    listFiles: stops.listFiles,
     listStop: stops.listStop,
     continueOperation: stops.continueOperation,
     abortOperation: stops.abortOperation,
@@ -255,13 +254,6 @@ export function createFixtureSource(
     },
     async describeFile(path) {
       return describeRecord(path, records.fixtures.get(path));
-    },
-    async sideNames() {
-      return { local: null, remote: null };
-    },
-    async abortMerge() {
-      log.info("fixture.abort_merge", {});
-      return { ok: true, value: null };
     },
     ...fixtureWrites(log, records),
     ...createFixtureSettings(),

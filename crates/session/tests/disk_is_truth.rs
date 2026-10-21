@@ -8,7 +8,7 @@ use yamt_conflict_repo::{
     ConflictFile, FileKind, Setup, TempDir, conflict_repo_with, git_ok, hash_object,
 };
 use yamt_session::{
-    DiskChange, DiskResult, DiskVersion, FileList, FileStatus, MergeSession, Middle, NotText, Side,
+    DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession, Middle, NotText, Side, StopList,
     WriteReply,
 };
 
@@ -18,7 +18,9 @@ const BINARY: &str = "logo.bin";
 const LINK: &str = "link";
 const SUBMODULE: &str = "vendor/lib";
 
+mod listing;
 mod samples;
+use listing::listed;
 use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
 
 const USER_TEXT: &[u8] = b"written by the user\n";
@@ -71,11 +73,11 @@ fn merged() -> TempDir {
 
 fn opened(dir: &TempDir) -> MergeSession {
     let mut session = MergeSession::open(dir.path()).unwrap();
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     session
 }
 
-fn changes(list: &FileList) -> Vec<(&str, &DiskResult)> {
+fn changes(list: &StopList) -> Vec<(&str, &DiskResult)> {
     let changes = list.disk_changes.iter();
     changes
         .map(|change| (change.path.as_str(), &change.result))
@@ -128,8 +130,8 @@ fn a_regenerated_file_without_markers_is_staged_once() {
     let mut session = opened(&dir);
     write(&dir, TEXT, USER_TEXT);
 
-    let first = session.refresh().unwrap();
-    let second = session.refresh().unwrap();
+    let first = listed(&mut session);
+    let second = listed(&mut session);
 
     assert_eq!(changes(&first), [(TEXT, &DiskResult::Staged)]);
     assert!(!unmerged(&dir).contains(TEXT), "{}", unmerged(&dir));
@@ -150,7 +152,7 @@ fn one_of_two_blocks_resolved_on_disk_leaves_one_conflict_over_its_base_lines() 
             with_block_resolved(&git_output, 1, "eight-theirs\n").as_bytes(),
         );
 
-        let list = session.refresh().unwrap();
+        let list = listed(&mut session);
         let data = session.load(TEXT).unwrap();
 
         let markers_left = DiskResult::MarkersLeft { conflicts: 1 };
@@ -184,7 +186,7 @@ fn the_first_block_resolved_on_disk_leaves_the_second_one_open() {
         with_block_resolved(&git_output, 0, "one\nTWO\nshared-a\nthree-ours\n").as_bytes(),
     );
 
-    session.refresh().unwrap();
+    listed(&mut session);
     let data = session.load(TEXT).unwrap();
 
     let [chunk] = data.chunks.as_slice() else {
@@ -203,7 +205,7 @@ fn a_file_deleted_on_disk_is_staged_as_deleted_and_loads_as_deleted() {
     let mut session = opened(&dir);
     fs::remove_file(dir.path().join(TEXT)).unwrap();
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     assert_eq!(changes(&list), [(TEXT, &DiskResult::Staged)]);
     assert_eq!(staged(&dir, TEXT), "");
@@ -244,7 +246,7 @@ fn a_change_not_yet_seen_stops_finish_take_and_reset_and_is_staged_instead() {
 
         assert_eq!(read(&dir, TEXT), USER_TEXT);
         assert_eq!(staged(&dir, TEXT), stage_zero_blob(&dir, TEXT, USER_TEXT));
-        assert_eq!(session.refresh().unwrap().disk_changes, []);
+        assert_eq!(listed(&mut session).disk_changes, []);
     }
 }
 
@@ -253,7 +255,7 @@ fn a_write_from_a_view_older_than_the_last_settle_changes_nothing() {
     let dir = merged();
     let mut session = opened(&dir);
     write(&dir, TEXT, USER_TEXT);
-    session.refresh().unwrap();
+    listed(&mut session);
     let staged_before = staged(&dir, TEXT);
 
     let reply = session.finish(TEXT, "merged\n", DiskVersion(0)).unwrap();
@@ -273,11 +275,11 @@ fn yamt_reads_its_own_writes_back_so_they_are_never_reported_also_with_autocrlf(
         let mut session = opened(&dir);
 
         session.finish(TEXT, "a\nb\n", DiskVersion(0)).unwrap();
-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
+        assert_eq!(listed(&mut session).disk_changes, [], "{config:?}");
         session.take(TEXT, Side::Remote, DiskVersion(0)).unwrap();
-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
+        assert_eq!(listed(&mut session).disk_changes, [], "{config:?}");
         session.reset(TEXT, DiskVersion(0)).unwrap();
-        assert_eq!(session.refresh().unwrap().disk_changes, [], "{config:?}");
+        assert_eq!(listed(&mut session).disk_changes, [], "{config:?}");
         assert!(text(read(&dir, TEXT)).contains("<<<<<<<"));
     }
 }
@@ -294,15 +296,15 @@ fn finish_writes_nothing_through_a_link_or_into_a_directory_and_creates_a_missin
     let worktree_file = dir.path().join(TEXT);
     fs::remove_file(&worktree_file).unwrap();
     symlink(&target, &worktree_file).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
 
     let through_link = session.finish(TEXT, "merged\n", DiskVersion(1));
     fs::remove_file(&worktree_file).unwrap();
     fs::create_dir(&worktree_file).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
     let into_directory = session.finish(TEXT, "merged\n", DiskVersion(2));
     fs::remove_dir(&worktree_file).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
     let created = session.finish(TEXT, "merged\n", DiskVersion(3)).unwrap();
 
     for refused in [through_link, into_directory] {
@@ -335,7 +337,7 @@ fn a_binary_a_symlink_and_a_submodule_are_staged_by_any_change() {
     .unwrap();
     let head = text(git_ok(&submodule, &["rev-parse", "HEAD"]).unwrap());
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     let expected = [
         #[cfg(unix)]
@@ -375,7 +377,7 @@ fn a_held_index_lock_fails_the_staging_reports_every_file_and_is_retried() {
     let lock = dir.path().join(".git/index.lock");
     fs::write(&lock, "").unwrap();
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     let [(text_path, markers_left), (binary, failed)] = changes(&list)[..] else {
         panic!("{list:?}");
@@ -388,7 +390,7 @@ fn a_held_index_lock_fails_the_staging_reports_every_file_and_is_retried() {
     assert_eq!(*markers_left, DiskResult::MarkersLeft { conflicts: 1 });
     assert_eq!(read(&dir, BINARY), b"\0new");
     fs::remove_file(lock).unwrap();
-    let retried = session.refresh().unwrap();
+    let retried = listed(&mut session);
     assert_eq!(changes(&retried), [(BINARY, &DiskResult::Staged)]);
     assert_eq!(status_of(&session, BINARY), FileStatus::Resolved);
 }
@@ -400,7 +402,7 @@ fn an_unchanged_disk_reports_nothing_and_writes_nothing_to_git() {
     let index = dir.path().join(".git/index");
     let before = fs::metadata(&index).unwrap().modified().unwrap();
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     assert_eq!(list.disk_changes, []);
     assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), before);

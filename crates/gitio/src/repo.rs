@@ -11,7 +11,6 @@ use crate::{Error, Result, StageEntry};
 
 const REV_PARSE: &str = "rev-parse";
 const HASH_OBJECT: &str = "hash-object";
-const REBASE_STATE_DIRS: [&str; 2] = ["rebase-merge", "rebase-apply"];
 const UNRESOLVED_NAME_STATUS: i32 = 1;
 
 pub struct Repo {
@@ -49,26 +48,6 @@ impl Repo {
         let line = without_final_newline(REV_PARSE, output)?;
         let hex = String::from_utf8_lossy(&line);
         Ok(Some(Oid::parse(&hex)?))
-    }
-
-    /// A rebase is stopped here: `rebase-merge` or `rebase-apply` exists in the git directory.
-    pub fn rebase_in_progress(&self) -> Result<bool> {
-        for name in REBASE_STATE_DIRS {
-            if exists(&self.git_path(name)?)? {
-                return Ok(true);
-            }
-        }
-        Ok(false)
-    }
-
-    /// `git merge --abort`; git's own refusal comes back as `Error::GitFailed` with its stderr.
-    pub fn abort_merge(&self) -> Result<()> {
-        run(
-            self.command(Access::Write, &["merge", "--abort"]),
-            None,
-            GIT_TIMEOUT,
-        )?;
-        Ok(())
     }
 
     pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {

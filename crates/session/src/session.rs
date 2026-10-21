@@ -10,7 +10,6 @@ use crate::disk::{
     read_on_disk, settlement, stage, warn_unread,
 };
 use crate::merge_data::{FileMergeData, Texts, disk_merge_data, merge_data};
-use crate::merging::is_merging;
 use crate::orientation::Orientation;
 use crate::remembered::remembered_merge_data;
 use crate::side_names::SideNames;
@@ -34,15 +33,6 @@ pub struct FileEntry {
     pub unsupported: Option<UnsupportedReason>,
 }
 
-/// The files as git sees them, the disk changes settled while looking, and whether a merge is in progress.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
-pub struct FileList {
-    pub files: Vec<FileEntry>,
-    pub disk_changes: Vec<DiskChange>,
-    /// A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74).
-    pub merging: bool,
-}
-
 /// What a write did: written, or nothing written because the file changed on disk first.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind")]
@@ -61,12 +51,13 @@ pub(crate) const LOG_TARGET: &str = "session";
 pub struct MergeSession {
     pub(crate) repo: Repo,
     pub(crate) files: Vec<FileState>,
-    // Boxed so that src-tauri's `Startup` and `Merge` enums keep the sizes their
-    // clippy::large_enum_variant checks expect.
-    pub(crate) side_names: Box<SideNames>,
+    /// Both panes' names, read once at open.
+    pub(crate) side_names: SideNames,
     pub(crate) stop: Stop,
     /// Decided once at open from `stop` (plan §2 #86).
     pub(crate) orientation: Orientation,
+    /// The disk version every file starts at: above every version an earlier session of this run gave out (#1383).
+    pub(crate) first_disk_version: DiskVersion,
 }
 
 pub(crate) struct FileState {
@@ -99,28 +90,23 @@ impl MergeSession {
         self.repo.root()
     }
 
-    #[must_use]
-    pub fn side_names(&self) -> &SideNames {
-        &self.side_names
-    }
-
     /// What git was doing when the session opened.
     #[must_use]
     pub fn stop(&self) -> &Stop {
         &self.stop
     }
 
-    /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
-    pub fn refresh(&mut self) -> Result<FileList> {
-        let disk_changes = self.settle_and_mark()?;
-        Ok(FileList {
-            files: self.files(),
-            disk_changes,
-            merging: is_merging(&self.repo),
-        })
+    /// The highest disk version this session gave out; the session of git's next stop starts above it.
+    #[must_use]
+    pub fn highest_disk_version(&self) -> DiskVersion {
+        let first = self.first_disk_version;
+        self.files
+            .iter()
+            .map(|file| file.disk_version(first))
+            .fold(first, std::cmp::max)
     }
 
-    /// `refresh`'s two steps: settle the disk changes, then re-read git's marks.
+    /// Settles every file that changed on disk since yamt last saw it, then re-reads git's marks.
     pub(crate) fn settle_and_mark(&mut self) -> Result<Vec<DiskChange>> {
         let mut looked = Vec::new();
         for (index, file) in self.files.iter().enumerate() {
@@ -133,12 +119,6 @@ impl MergeSession {
         let disk_changes = self.settle(looked);
         self.refresh_statuses()?;
         Ok(disk_changes)
-    }
-
-    /// `git merge --abort`. The session must not be used for the merge afterwards.
-    pub fn abort_merge(&self) -> Result<()> {
-        self.repo.abort_merge()?;
-        Ok(())
     }
 
     pub(crate) fn refresh_statuses(&mut self) -> Result<()> {
@@ -173,10 +153,11 @@ impl MergeSession {
             decided.push((index, disk, found));
         }
         let staging = stage(&self.repo, &adds, &removes);
+        let first = self.first_disk_version;
         let mut changes = Vec::with_capacity(decided.len());
         for (index, disk, found) in decided {
             if let Some(file) = self.files.get_mut(index) {
-                changes.push(file.settled_as(disk, staging.result(&found)));
+                changes.push(file.settled_as(disk, staging.result(&found), first));
             }
         }
         changes
@@ -196,9 +177,10 @@ impl MergeSession {
     }
 
     pub fn load(&mut self, path: &str) -> Result<FileMergeData> {
+        let first = self.first_disk_version;
         let file = find_file(&mut self.files, path)?;
         let texts = file.require_text()?;
-        let version = file.disk_version();
+        let version = file.disk_version(first);
         let path = file.display_path();
         let orientation = self.orientation;
         match &file.seen {
@@ -232,6 +214,7 @@ impl MergeSession {
     }
 
     pub fn describe(&mut self, path: &str) -> Result<FileSides> {
+        let first = self.first_disk_version;
         let file = find_file(&mut self.files, path)?;
         let mut blobs = self.repo.blob_reader()?;
         let orientation = self.orientation;
@@ -241,7 +224,7 @@ impl MergeSession {
             reason: file.unsupported_reason(),
             local: side_content(&mut blobs, pane(Side::Local))?,
             remote: side_content(&mut blobs, pane(Side::Remote))?,
-            disk_version: file.disk_version(),
+            disk_version: file.disk_version(first),
         })
     }
 
@@ -297,10 +280,11 @@ impl FileState {
         }
     }
 
-    pub(crate) fn disk_version(&self) -> DiskVersion {
+    /// The last settle's version, or `first` (the session's first disk version) before any settle.
+    pub(crate) fn disk_version(&self, first: DiskVersion) -> DiskVersion {
         self.settled
             .as_ref()
-            .map_or(DiskVersion(0), |settled| settled.version)
+            .map_or(first, |settled| settled.version)
     }
 
     /// The marker lines git wrote into this file, as found at open.
@@ -343,10 +327,10 @@ impl FileState {
         Ok((stage_failed || !self.seen.is(&disk)).then_some(disk))
     }
 
-    fn settled_as(&mut self, disk: OnDisk, result: DiskResult) -> DiskChange {
+    fn settled_as(&mut self, disk: OnDisk, result: DiskResult, first: DiskVersion) -> DiskChange {
         self.seen = Seen::ViewFromDisk(disk);
         self.settled = Some(Settled {
-            version: DiskVersion(self.disk_version().0.saturating_add(1)),
+            version: DiskVersion(self.disk_version(first).0.saturating_add(1)),
             result: result.clone(),
         });
         DiskChange {

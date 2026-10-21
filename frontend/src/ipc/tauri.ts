@@ -10,7 +10,6 @@ import {
 import type { ChunkSource, SettingsSource } from "./ChunkSource";
 import {
   toDomain,
-  toFileList,
   toListing,
   toSettingsRead,
   toSides,
@@ -94,10 +93,6 @@ function createTauriStops(): Pick<
 
 export function createTauriSource(): ChunkSource {
   return {
-    async listFiles() {
-      const result = toResult(await commands.listFiles());
-      return result.ok ? { ok: true, value: toFileList(result.value) } : result;
-    },
     async loadFile(path) {
       const result = toResult(await commands.loadFile(path));
       return result.ok ? { ok: true, value: toDomain(result.value) } : result;
@@ -117,16 +112,6 @@ export function createTauriSource(): ChunkSource {
     },
     async takeSide(path, side, diskVersion) {
       return toResult(await commands.takeSide(path, side, diskVersion));
-    },
-    async sideNames() {
-      const result = toResult(await commands.sideNames());
-      if (!result.ok) {
-        throw new Error(`side_names failed: ${result.failure.kind}`);
-      }
-      return result.value;
-    },
-    async abortMerge() {
-      return toResult(await commands.abortMerge());
     },
     ...createTauriStops(),
     ...createTauriSettings(),

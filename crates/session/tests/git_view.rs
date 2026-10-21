@@ -3,6 +3,9 @@
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo, git_ok};
 use yamt_session::{DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession};
 
+mod listing;
+use listing::listed;
+
 const FIRST: &str = "a.ts";
 const SECOND: &str = "b.ts";
 
@@ -40,7 +43,7 @@ fn a_file_added_outside_after_start_reads_as_resolved() {
     git_ok(dir.path(), &["add", FIRST]).unwrap();
     assert_eq!(session.remaining(), 2);
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     let after = expected(&[(FIRST, Resolved), (SECOND, Unresolved)]);
     assert_eq!(statuses(&session), after);
@@ -57,7 +60,7 @@ fn a_finished_file_checked_out_with_markers_outside_reads_as_unresolved() {
     session.finish(SECOND, "done\n", DiskVersion(0)).unwrap();
     git_ok(dir.path(), &["checkout", "-m", FIRST]).unwrap();
 
-    let list = session.refresh().unwrap();
+    let list = listed(&mut session);
 
     assert_eq!(
         statuses(&session),
@@ -78,7 +81,7 @@ fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
     let mut session = MergeSession::open(dir.path()).unwrap();
     git_ok(dir.path(), &["checkout", "-m", SECOND]).unwrap();
 
-    session.refresh().unwrap();
+    listed(&mut session);
 
     assert_eq!(
         statuses(&session),
@@ -87,14 +90,14 @@ fn a_file_that_was_not_conflicted_at_start_is_never_listed() {
 }
 
 #[test]
-fn refresh_with_a_broken_index_is_a_git_error_and_keeps_the_statuses() {
+fn a_list_with_a_broken_index_is_a_git_error_and_keeps_the_statuses() {
     let dir = two_conflicts();
     let mut session = MergeSession::open(dir.path()).unwrap();
     session.finish(FIRST, "done\n", DiskVersion(0)).unwrap();
     let before = statuses(&session);
     std::fs::write(dir.path().join(".git/index"), "not an index").unwrap();
 
-    let error = session.refresh().unwrap_err();
+    let error = session.refresh_stop().unwrap_err();
 
     assert!(matches!(error, yamt_session::Error::Git(_)), "{error:?}");
     assert_eq!(statuses(&session), before);

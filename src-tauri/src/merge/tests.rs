@@ -41,11 +41,10 @@ fn merge_aborted() -> Result<Value, Value> {
     Err(json!({ "kind": "MergeAborted" }))
 }
 
-fn merge_commands() -> [(&'static str, Value); 12] {
+fn merge_commands() -> [(&'static str, Value); 9] {
     let path = json!({ "path": CRLF_PATH });
     let write = json!({ "path": CRLF_PATH, "text": "mine\r\n", "diskVersion": 0 });
     [
-        ("list_files", json!({})),
         ("list_stop", json!({})),
         ("load_file", path.clone()),
         ("describe_file", path),
@@ -56,8 +55,6 @@ fn merge_commands() -> [(&'static str, Value); 12] {
             "take_side",
             json!({ "path": CRLF_PATH, "side": "remote", "diskVersion": 0 }),
         ),
-        ("side_names", json!({})),
-        ("abort_merge", json!({})),
         ("continue_operation", json!({})),
         ("abort_operation", json!({})),
     ]
@@ -74,7 +71,7 @@ fn ending(exit: Exit, message: &str) -> Ending {
 fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
     let window = open_window();
 
-    assert_eq!(window.invoke("abort_merge", json!({})), Ok(Value::Null));
+    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
 
     for (command, args) in merge_commands() {
         assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
@@ -90,7 +87,7 @@ fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing()
 #[test]
 fn the_ending_after_an_abort_is_status_one_and_stages_no_file_changed_since() {
     let window = open_window();
-    window.invoke("abort_merge", json!({})).unwrap();
+    window.invoke("abort_operation", json!({})).unwrap();
     fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
     let index_before = window.git_text(&["ls-files", "-s"]);
 
@@ -109,7 +106,7 @@ fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
     fs::write(&added, "saved again\n").unwrap();
     let status_before = window.git_text(&["status", "--porcelain"]);
 
-    let refused = window.invoke("abort_merge", json!({})).unwrap_err();
+    let refused = window.invoke("abort_operation", json!({})).unwrap_err();
 
     assert_eq!(refused["kind"], "Git", "{refused}");
     let message = refused["message"].as_str().unwrap();
@@ -118,8 +115,8 @@ fn an_abort_git_refuses_answers_git_s_message_and_keeps_the_merge() {
         "{message}"
     );
     assert_eq!(window.git_text(&["status", "--porcelain"]), status_before);
-    let listed = window.invoke("list_files", json!({})).unwrap();
-    assert_eq!(listed["merging"], true, "{listed}");
+    let listed = window.invoke("list_stop", json!({})).unwrap();
+    assert_eq!(listed["operation"]["kind"], "Merge", "{listed}");
     assert_eq!(
         window.ending().message.as_deref(),
         Some("2 of 3 files still unresolved")
@@ -131,7 +128,11 @@ fn rebase_window() -> Window {
 }
 
 fn resolved_step(window: &Window) {
-    let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": 0 });
+    let loaded = window
+        .invoke("load_file", json!({ "path": STEP_TWO_FILE }))
+        .unwrap();
+    let version = &loaded["disk_version"];
+    let args = json!({ "path": STEP_TWO_FILE, "text": "resolved\n", "diskVersion": version });
     let written = window.invoke("finish_file", args).unwrap();
     assert_eq!(written["kind"], "Written", "{written}");
 }
@@ -219,7 +220,7 @@ fn a_close_while_git_continues_waits_for_git_and_counts_the_stop_git_moved_on_to
     );
 }
 
-// Disk versions restart at every stop: a Save meant for step 1 would land on step 2's file.
+// A Save meant for step 1 would land on step 2's file.
 #[test]
 fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_finishes() {
     let window = rebase_window();
@@ -236,7 +237,6 @@ fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_fi
     let save = json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": 0 });
     let moved_on = Err(json!({ "kind": "StopMovedOn" }));
     assert_eq!(window.invoke("save_file", save), moved_on);
-    assert_eq!(window.invoke("list_files", json!({})), moved_on);
     assert_eq!(fs::read(&file).unwrap(), at_step_two);
     assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
 
@@ -246,6 +246,42 @@ fn a_rebase_continued_stops_at_step_two_where_an_old_save_writes_nothing_then_fi
     assert_eq!(finished, Ok(json!({ "kind": "Finished" })));
     assert!(window.has_ended());
     assert_eq!(window.ending(), ending(Exit::Success, "rebase finished"));
+}
+
+// A Save meant for step 1, sent after the window listed step 2, would land on step 2's file when
+// the new stop's disk versions start where the old stop's did (#1383).
+#[test]
+fn after_the_next_stop_is_listed_a_save_with_the_old_stop_s_version_writes_nothing() {
+    let window = rebase_window();
+    let file = window.repo.path().join(STEP_TWO_FILE);
+    fs::write(&file, "resolved\n").unwrap();
+    let settled = window.invoke("list_stop", json!({})).unwrap();
+    assert_eq!(
+        settled["disk_changes"][0]["result"]["kind"], "Staged",
+        "{settled}"
+    );
+    let old_version = window
+        .invoke("load_file", json!({ "path": STEP_TWO_FILE }))
+        .unwrap()["disk_version"]
+        .clone();
+    assert_eq!(old_version, 1);
+    let stopped = window.invoke("continue_operation", json!({})).unwrap();
+    assert_eq!(stopped["kind"], "Stopped", "{stopped}");
+    assert_step_listed(&window.invoke("list_stop", json!({})).unwrap(), 2);
+    let at_step_two = fs::read(&file).unwrap();
+    let unmerged = window.git_text(&["ls-files", "-u"]);
+
+    let save =
+        json!({ "path": STEP_TWO_FILE, "text": "step 1's edit\n", "diskVersion": old_version });
+    let saved = window.invoke("save_file", save);
+
+    assert_eq!(saved, Err(json!({ "kind": "StopMovedOn" })));
+    assert_eq!(fs::read(&file).unwrap(), at_step_two);
+    assert_eq!(window.git_text(&["ls-files", "-u"]), unmerged);
+    let loaded = window
+        .invoke("load_file", json!({ "path": STEP_TWO_FILE }))
+        .unwrap();
+    assert_eq!(loaded["disk_version"], 2);
 }
 
 #[test]
@@ -280,7 +316,7 @@ fn a_worker_that_panics_leaves_moved_on_and_answers_a_git_error() {
         message.starts_with("yamt's worker stopped while git ran"),
         "{message}"
     );
-    assert!(matches!(&*lock(&state), Merge::MovedOn { root: moved } if *moved == root));
+    assert!(matches!(&*lock(&state), Merge::MovedOn { root: moved, .. } if *moved == root));
 }
 
 #[test]

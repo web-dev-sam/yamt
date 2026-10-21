@@ -7,6 +7,8 @@ use yamt_conflict_repo::{ConflictFile, FileKind, Setup, TempDir, conflict_repo_w
 use yamt_merge_core::{ChunkKind, LineRange};
 use yamt_session::{FileMergeData, MergeChunk, MergeSession, Middle, Waiting, WriteReply};
 
+mod listing;
+use listing::listed;
 mod samples;
 use samples::{BASE, OURS, THEIRS, WORKED_MIDDLE, with_block_resolved};
 mod window;
@@ -66,14 +68,14 @@ fn repo(path: &str, sides: [&[u8]; 3], style: &str) -> TempDir {
 
 fn opened(dir: &TempDir) -> MergeSession {
     let mut session = MergeSession::open(dir.path()).unwrap();
-    assert_eq!(session.refresh().unwrap().disk_changes, []);
+    assert_eq!(listed(&mut session).disk_changes, []);
     session
 }
 
 /// A second run of yamt on the repository: open, the first look, and the file's data.
 fn loaded_again(dir: &TempDir, path: &str) -> FileMergeData {
     let mut session = MergeSession::open(dir.path()).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
     session.load(path).unwrap()
 }
 

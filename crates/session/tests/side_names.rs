@@ -10,6 +10,9 @@ use yamt_conflict_repo::{
 };
 use yamt_session::{MergeSession, SideName, SideNames};
 
+mod listing;
+use listing::listed;
+
 const FILE: &str = "cart.ts";
 
 fn cart() -> ConflictFile<'static> {
@@ -55,7 +58,7 @@ fn short_id_as_gitio_reads_config(root: &Path, revision: &str) -> String {
 }
 
 fn side_names_of(root: &Path) -> SideNames {
-    MergeSession::open(root).unwrap().side_names().clone()
+    listed(&mut MergeSession::open(root).unwrap()).sides
 }
 
 fn branch(name: &str) -> SideName {
@@ -331,11 +334,11 @@ fn a_conflict_from_stash_pop_names_only_the_branch() {
     git_ok(root, &["checkout", "--quiet", "local"]).unwrap();
     require_conflict(root, &["stash", "pop"]);
 
-    let session = MergeSession::open(root).unwrap();
+    let mut session = MergeSession::open(root).unwrap();
     assert_eq!(session.files().len(), 1);
     let expected = SideNames {
         local: Some(branch("local")),
         remote: None,
     };
-    assert_eq!(session.side_names(), &expected);
+    assert_eq!(listed(&mut session).sides, expected);
 }

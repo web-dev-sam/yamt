@@ -94,7 +94,7 @@ pub enum Continued {
 
 impl MergeSession {
     /// Reads the stop first: another stop than the one opened → `MovedOn`, nothing settled or staged.
-    /// Otherwise `refresh`'s settle and git's marks, plus the operation as read now and the names read at open.
+    /// Otherwise settles the disk changes and re-reads git's marks, plus the operation as read now and the names read at open.
     pub fn refresh_stop(&mut self) -> Result<Refreshed> {
         let now = self.repo.stop()?;
         if self.has_moved_on_to(&now) {
@@ -105,7 +105,7 @@ impl MergeSession {
             files: self.files(),
             disk_changes,
             operation: view(&self.repo, &now),
-            sides: (*self.side_names).clone(),
+            sides: self.side_names.clone(),
         }))
     }
 

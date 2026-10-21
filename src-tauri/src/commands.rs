@@ -1,9 +1,7 @@
 use std::sync::Mutex;
 
 use tauri::{Manager, Runtime, State, WebviewWindow};
-use yamt_session::{
-    DiskVersion, FileList, FileMergeData, FileSides, MergeSession, Side, SideNames, WriteReply,
-};
+use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, WriteReply};
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
@@ -12,15 +10,12 @@ use crate::{servers, settings};
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
-        list_files,
         load_file,
         finish_file,
         save_file,
         reset_file,
         describe_file,
         take_side,
-        side_names,
-        abort_merge::<tauri::Wry>,
         list_stop,
         continue_operation::<tauri::Wry>,
         abort_operation::<tauri::Wry>,
@@ -54,20 +49,6 @@ pub(crate) fn with_session<R: Runtime>(
         .on_page_load(|webview, page| {
             servers::stop_runs_on_page_start(&webview.state(), page.event());
         })
-}
-
-#[tauri::command]
-#[specta::specta]
-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn list_files(state: State<'_, MergeState>) -> Result<FileList, IpcError> {
-    Ok(lock(&state).session()?.refresh()?)
-}
-
-#[tauri::command]
-#[specta::specta]
-#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-fn side_names(state: State<'_, MergeState>) -> Result<SideNames, IpcError> {
-    Ok(lock(&state).session()?.side_names().clone())
 }
 
 #[tauri::command]
@@ -141,21 +122,6 @@ fn close_window<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
 
 #[tauri::command]
 #[specta::specta]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "tauri passes arguments by value"
-)]
-fn abort_merge<R: Runtime>(
-    window: WebviewWindow<R>,
-    state: State<'_, MergeState>,
-) -> Result<(), IpcError> {
-    lock(&state).abort()?;
-    close_window(&window, "aborted");
-    Ok(())
-}
-
-#[tauri::command]
-#[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 fn list_stop(state: State<'_, MergeState>) -> Result<Listing, IpcError> {
     lock(&state).list_stop()
@@ -224,38 +190,43 @@ mod tests {
         json!({ "kind": "Written", "files": entries(statuses) })
     }
 
+    fn listed(window: &Window) -> Value {
+        let listed = window.invoke("list_stop", json!({})).unwrap();
+        assert_eq!(listed["kind"], "Files", "{listed}");
+        listed
+    }
+
+    fn files_and_changes(listed: &Value) -> (Value, Value) {
+        (listed["files"].clone(), listed["disk_changes"].clone())
+    }
+
     #[test]
-    fn list_files_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
+    fn list_stop_returns_every_conflicted_file_as_git_sees_it_and_no_disk_change() {
         let window = open_window();
         let unresolved = "Unresolved";
-        let listed =
-            |statuses| json!({ "files": entries(statuses), "disk_changes": [], "merging": true });
         assert_eq!(
-            window.invoke("list_files", json!({})),
-            Ok(listed([unresolved, unresolved, unresolved]))
+            files_and_changes(&listed(&window)),
+            (entries([unresolved, unresolved, unresolved]), json!([]))
         );
         git_ok(window.repo.path(), &["add", CRLF_PATH]).unwrap();
         assert_eq!(
-            window.invoke("list_files", json!({})),
-            Ok(listed([unresolved, "Resolved", unresolved]))
+            files_and_changes(&listed(&window)),
+            (entries([unresolved, "Resolved", unresolved]), json!([]))
         );
     }
 
     #[test]
-    fn list_files_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
+    fn list_stop_stages_a_file_changed_on_disk_and_finish_from_an_older_view_changes_nothing() {
         let window = open_window();
         fs::write(window.repo.path().join("view.vue"), "<d/>\n").unwrap();
         let staged = json!({ "path": "view.vue", "result": { "kind": "Staged" } });
         let after = entries(["Unresolved", "Unresolved", "Resolved"]);
 
-        let listed = window.invoke("list_files", json!({}));
+        let listed = listed(&window);
         let args = json!({ "path": "view.vue", "text": "mine\n", "diskVersion": 0 });
         let finished = window.invoke("finish_file", args);
 
-        assert_eq!(
-            listed,
-            Ok(json!({ "files": after, "disk_changes": [staged], "merging": true }))
-        );
+        assert_eq!(files_and_changes(&listed), (after.clone(), json!([staged])));
         let changed = json!({ "kind": "ChangedOnDisk", "files": after, "change": staged });
         assert_eq!(finished, Ok(changed));
         assert_eq!(
@@ -265,13 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn side_names_names_both_branches_of_the_merge() {
+    fn list_stop_names_both_branches_of_the_merge() {
         let window = open_window();
         let names = json!({
             "local": { "kind": "Branch", "name": "local" },
             "remote": { "kind": "Branch", "name": "remote" },
         });
-        assert_eq!(window.invoke("side_names", json!({})), Ok(names));
+        assert_eq!(listed(&window)["sides"], names);
     }
 
     #[test]
@@ -337,8 +308,10 @@ mod tests {
             text.as_bytes()
         );
         assert_eq!(window.unmerged(), unmerged_before);
-        let listed = json!({ "files": entries(unresolved), "disk_changes": [], "merging": true });
-        assert_eq!(window.invoke("list_files", json!({})), Ok(listed));
+        assert_eq!(
+            files_and_changes(&listed(&window)),
+            (entries(unresolved), json!([]))
+        );
     }
 
     #[test]

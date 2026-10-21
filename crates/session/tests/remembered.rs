@@ -7,10 +7,11 @@ use yamt_conflict_repo::{
 };
 use yamt_merge_core::{BaseLine, ChunkKind, LineRange, LocalLine, RemoteLine};
 use yamt_session::{
-    DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession, Middle, MiddleLine, Refreshed,
-    StopList, Waiting,
+    DiskChange, DiskResult, DiskVersion, FileStatus, MergeSession, Middle, MiddleLine, Waiting,
 };
 
+mod listing;
+use listing::listed;
 mod window;
 use window::saved_with_everything_waiting;
 
@@ -47,13 +48,6 @@ fn remembered_repo(fresh: &[ConflictFile], replay: Replay) -> (TempDir, MergeSes
     let dir = rerere_repo(&REMEMBERED, fresh, replay).unwrap();
     let session = MergeSession::open(dir.path()).unwrap();
     (dir, session)
-}
-
-fn listed(session: &mut MergeSession) -> StopList {
-    match session.refresh_stop().unwrap() {
-        Refreshed::Files(list) => list,
-        Refreshed::MovedOn => panic!("moved on"),
-    }
 }
 
 fn status_of(session: &MergeSession, path: &str) -> FileStatus {

@@ -118,7 +118,6 @@ function writeTarget(
   const sent: WriteRequest[] = [];
   const lists: string[] = [];
   const source: ChunkSource = {
-    listFiles: notUsed,
     loadFile: (path) => {
       loads.push(path);
       return (
@@ -136,8 +135,6 @@ function writeTarget(
     resetFile: (path, diskVersion) => calls.resetFile?.(path, diskVersion) ?? notUsed(),
     describeFile: notUsed,
     takeSide: (path, side, diskVersion) => calls.takeSide?.(path, side, diskVersion) ?? notUsed(),
-    sideNames: notUsed,
-    abortMerge: notUsed,
     listStop: notUsed,
     continueOperation: notUsed,
     abortOperation: notUsed,

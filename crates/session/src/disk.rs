@@ -10,8 +10,8 @@ use crate::markers::{open_regions, parse, split_lines};
 use crate::session::LOG_TARGET;
 use crate::{Error, Result};
 
-/// Counts the settles of one file's disk changes; a view is built from one version.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+/// Counts the settles of one file's disk changes, from the session's first version; a view is built from one version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
 pub struct DiskVersion(pub u32);
 
 /// What yamt did with a file that changed on disk.

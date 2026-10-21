@@ -4,15 +4,12 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-	listFiles: () => typedError<FileList, IpcError>(__TAURI_INVOKE("list_files")),
 	loadFile: (path: string) => typedError<FileMergeData, IpcError>(__TAURI_INVOKE("load_file", { path })),
 	finishFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("finish_file", { path, text, diskVersion })),
 	saveFile: (path: string, text: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("save_file", { path, text, diskVersion })),
 	resetFile: (path: string, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("reset_file", { path, diskVersion })),
 	describeFile: (path: string) => typedError<FileSides, IpcError>(__TAURI_INVOKE("describe_file", { path })),
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
-	sideNames: () => typedError<SideNames, IpcError>(__TAURI_INVOKE("side_names")),
-	abortMerge: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_merge")),
 	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
 	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
 	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
@@ -94,7 +91,7 @@ export type DiskResult = { kind: "Staged" } |
 /**  Not staged, by design: a `working-tree-encoding` file or a submodule that is not checked out. */
 { kind: "LeftAsIs" } | { kind: "StageFailed"; message: string };
 
-/**  Counts the settles of one file's disk changes; a view is built from one version. */
+/**  Counts the settles of one file's disk changes, from the session's first version; a view is built from one version. */
 export type DiskVersion = number;
 
 export type Eol = "Lf" | "CrLf" | "Mixed";
@@ -103,14 +100,6 @@ export type FileEntry = {
 	path: string,
 	status: FileStatus,
 	unsupported: UnsupportedReason | null,
-};
-
-/**  The files as git sees them, the disk changes settled while looking, and whether a merge is in progress. */
-export type FileList = {
-	files: FileEntry[],
-	disk_changes: DiskChange[],
-	/**  A `git merge` stopped on conflicts is in progress (`MERGE_HEAD`, no rebase): what Abort merge undoes (plan §2 #74). */
-	merging: boolean,
 };
 
 export type FileMergeData = {

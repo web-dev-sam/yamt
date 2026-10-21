@@ -4,11 +4,11 @@ use yamt_gitio::{BlobReader, MergeAttributes, MergeConfig, Repo, StageEntry};
 
 use crate::Result;
 use crate::decode::{UnsupportedReason, decode_sides};
-use crate::disk::{AtOpen, MarkerRule, OnDisk, read_on_disk, warn_unread};
+use crate::disk::{AtOpen, DiskVersion, MarkerRule, OnDisk, read_on_disk, warn_unread};
 use crate::merge_data::Texts;
 use crate::orientation::{GitSide, Orientation};
 use crate::session::{Content, FileState, FileStatus, MergeSession};
-use crate::side_names::read_side_names;
+use crate::side_names::SideNames;
 use crate::sides::{SUBMODULE_MODE, SYMLINK_MODE, Side};
 use crate::stages::{CapturedStages, group_by_path};
 use crate::start::{Attributes, Found, StartCheck, StartFile, StartLook};
@@ -27,6 +27,16 @@ enum Stored {
 
 impl MergeSession {
     pub fn open(cwd: &Path) -> Result<MergeSession> {
+        MergeSession::open_from(cwd, DiskVersion(0))
+    }
+
+    /// Opens the stop git is at now with every disk version above `previous`, the highest of the
+    /// session this one follows: a write meant for the earlier stop never matches (#1383).
+    pub fn open_after(cwd: &Path, previous: DiskVersion) -> Result<MergeSession> {
+        MergeSession::open_from(cwd, DiskVersion(previous.0.saturating_add(1)))
+    }
+
+    fn open_from(cwd: &Path, first_disk_version: DiskVersion) -> Result<MergeSession> {
         let repo = Repo::discover(cwd)?;
         let stop = repo.stop()?;
         let orientation = Orientation::of(&stop);
@@ -35,13 +45,14 @@ impl MergeSession {
         let attributes = repo.attributes(&paths)?;
         let config = repo.merge_config()?;
         let files = open_files(&repo, groups, &attributes, &config, orientation)?;
-        let side_names = read_side_names(&repo, &stop, orientation);
+        let side_names = SideNames::read(&repo, &stop, orientation);
         Ok(MergeSession {
             repo,
             files,
-            side_names: Box::new(side_names),
+            side_names,
             stop,
             orientation,
+            first_disk_version,
         })
     }
 }

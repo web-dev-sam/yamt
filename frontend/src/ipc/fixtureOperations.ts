@@ -39,10 +39,7 @@ type StopFiles = {
 };
 
 /** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
-type FixtureStops = Pick<
-  ChunkSource,
-  "listFiles" | "listStop" | "continueOperation" | "abortOperation"
->;
+type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation">;
 
 /** How the app answers every command once git finished or aborted the operation. */
 type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
@@ -139,15 +136,8 @@ function stoppedMessage(at: Sequence): string {
   ].join("\n");
 }
 
-function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listFiles" | "listStop"> {
+function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listStop"> {
   return {
-    async listFiles() {
-      if (at.ended !== null) {
-        return refused(at.ended);
-      }
-      const merging = at.operation === "merge";
-      return { ok: true, value: { files: listedAt(at, files), diskChanges: [], merging } };
-    },
     async listStop() {
       if (at.ended !== null) {
         return refused(at.ended);

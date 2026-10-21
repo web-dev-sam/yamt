@@ -67,7 +67,6 @@ function notUsed(): Promise<never> {
 
 function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
   return {
-    listFiles: notUsed,
     loadFile: notUsed,
     finishFile: (request) => {
       finishes.push(request);
@@ -77,8 +76,6 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
     resetFile: notUsed,
     describeFile: notUsed,
     takeSide: notUsed,
-    sideNames: notUsed,
-    abortMerge: notUsed,
     listStop: notUsed,
     continueOperation: notUsed,
     abortOperation: () => {

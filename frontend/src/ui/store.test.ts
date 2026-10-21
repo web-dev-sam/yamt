@@ -130,7 +130,6 @@ async function dataFor(path: string): Promise<FileMergeData> {
 function handSource(files: FileEntry[]): { source: ChunkSource; pending: PendingLoad[] } {
   const pending: PendingLoad[] = [];
   const source: ChunkSource = {
-    listFiles: () => Promise.reject(new Error("not used")),
     loadFile: (path) =>
       new Promise((resolve, reject) => {
         pending.push({ path, resolve, reject });
@@ -140,8 +139,6 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     resetFile: () => Promise.reject(new Error("not used")),
     describeFile: () => Promise.reject(new Error("not used")),
     takeSide: () => Promise.reject(new Error("not used")),
-    sideNames: () => Promise.resolve({ local: null, remote: null }),
-    abortMerge: () => Promise.reject(new Error("not used")),
     listStop: () => Promise.resolve(listing(files)),
     continueOperation: () => Promise.reject(new Error("not used")),
     abortOperation: () => Promise.reject(new Error("not used")),
@@ -1065,7 +1062,6 @@ function choiceSource(
 ): { source: ChunkSource; calls: string[] } {
   const calls: string[] = [];
   const source: ChunkSource = {
-    listFiles: () => Promise.reject(new Error("not used")),
     loadFile: async (path) => {
       calls.push(`loadFile ${path}`);
       return ok(await dataFor(path));
@@ -1087,8 +1083,6 @@ function choiceSource(
       );
       return Promise.resolve(written(taken));
     },
-    sideNames: () => Promise.resolve({ local: null, remote: null }),
-    abortMerge: () => Promise.reject(new Error("not used")),
     listStop: () => Promise.resolve(listing(files)),
     continueOperation: () => Promise.reject(new Error("not used")),
     abortOperation: () => Promise.reject(new Error("not used")),

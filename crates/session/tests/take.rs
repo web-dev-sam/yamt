@@ -7,6 +7,8 @@ use std::path::Path;
 use yamt_conflict_repo::{FileKind, TempDir, conflict_repo, git, git_ok};
 use yamt_session::{DiskVersion, FileStatus, MergeSession, Side, WriteReply};
 
+mod listing;
+use listing::listed;
 mod every_kind;
 use every_kind::{
     BINARY, LATIN1, LOCAL_COMMIT, LOCAL_DELETED, REMOTE_COMMIT, REMOTE_DELETED, SUBMODULE, TEXT,
@@ -43,7 +45,7 @@ fn stage_zero_of(unmerged: &str, path: &str, side: Side) -> String {
 fn opened(dir: &TempDir) -> (MergeSession, String) {
     let before = unmerged(dir);
     let mut session = MergeSession::open(dir.path()).unwrap();
-    session.refresh().unwrap();
+    listed(&mut session);
     (session, before)
 }
 

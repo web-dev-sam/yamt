@@ -129,12 +129,16 @@ impl MergeSession {
     }
 
     /// The change that stops a write to `path`: one settled after the window's `disk_version`,
-    /// or one found now, which is settled before returning.
+    /// or one found now, which is settled before returning. A version below this session's first
+    /// comes from an earlier stop's session: `StopMovedOn` (#1383).
     fn changed_on_disk(
         &mut self,
         path: &str,
         disk_version: DiskVersion,
     ) -> Result<Option<DiskChange>> {
+        if disk_version < self.first_disk_version {
+            return Err(Error::StopMovedOn);
+        }
         let index = file_index(&self.files, path)?;
         let file = find_file(&mut self.files, path)?;
         if let Some(Settled { version, result }) = &file.settled

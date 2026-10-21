@@ -3,7 +3,6 @@ import type {
   Antialiasing,
   ContinueReply,
   DiskVersion,
-  FileList,
   FileMergeData,
   FileSides,
   KeysChange,
@@ -11,7 +10,6 @@ import type {
   RepositoryAnswer,
   SettingsRead,
   Side,
-  SideNames,
   SourceResult,
   StoredSettings,
   Theme,
@@ -25,15 +23,12 @@ export type WriteRequest = {
 };
 
 export interface ChunkSource {
-  listFiles(): Promise<SourceResult<FileList>>;
   loadFile(path: string): Promise<SourceResult<FileMergeData>>;
   finishFile(request: WriteRequest): Promise<SourceResult<WriteReply>>;
   saveFile(request: WriteRequest): Promise<SourceResult<WriteReply>>;
   resetFile(path: string, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   describeFile(path: string): Promise<SourceResult<FileSides>>;
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
-  sideNames(): Promise<SideNames>;
-  abortMerge(): Promise<SourceResult<null>>;
   listStop(): Promise<SourceResult<Listing>>;
   continueOperation(): Promise<SourceResult<ContinueReply>>;
   abortOperation(): Promise<SourceResult<null>>;
