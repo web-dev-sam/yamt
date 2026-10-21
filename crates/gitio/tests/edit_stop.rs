@@ -19,6 +19,15 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
 }];
 const REWORD_STEP_TWO_DROP_THREE: &str = "sequence.editor=sed -i -e 2s/^pick/reword/ -e 3d";
 
+/// Step 2 joins step 1's chain as `chain_step`, and step 3 becomes a `fixup` of `local`, which conflicts.
+fn chain_sequence_editor(chain_step: &str, root: &Path) -> String {
+    let local = oid(root, "local");
+    let local = local.as_str();
+    format!(
+        "sequence.editor=sed -i -e 2s/^pick/{chain_step}/ -e '3s/^pick [0-9a-f]*/fixup {local}/'"
+    )
+}
+
 fn oid(root: &Path, revision: &str) -> Oid {
     let output = git_ok(root, &["rev-parse", "--verify", revision]).unwrap();
     Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
@@ -157,4 +166,27 @@ fn a_conflicted_reword_stop_with_an_empty_todo_has_an_editor_step_ahead() {
 
     assert_eq!(rebase.replaying, Some(oid(root, "remote~1")));
     assert!(rebase.editor_steps_ahead);
+}
+
+// Continuing this stop, git opens the editor (git 2.56): with the squash, on the chain's message "This is a combination of
+// 3 commits" with step 1's and step 2's messages; with fixups only, on step 1's message alone.
+#[test]
+fn a_conflicted_fixup_has_an_editor_step_ahead_only_in_a_chain_with_a_squash() {
+    for (chain_step, expected) in [("squash", true), ("fixup", false)] {
+        let dir = ready_repo(Run::Rebase, &FILES).unwrap();
+        let root = dir.path();
+        let sequence_editor = chain_sequence_editor(chain_step, root);
+        conflicted(
+            root,
+            &["-c", &sequence_editor, "rebase", "-i", "main", "remote"],
+        );
+        let done = fs::read_to_string(git_path(root, "rebase-merge/done")).unwrap();
+        assert!(done.lines().last().unwrap().starts_with("fixup "), "{done}");
+        let repo = Repo::discover(root).unwrap();
+
+        let rebase = rebase_of(&repo);
+
+        assert_eq!(rebase.replaying, Some(oid(root, "local")));
+        assert_eq!(rebase.editor_steps_ahead, expected, "{chain_step}");
+    }
 }

@@ -332,4 +332,15 @@ mod tests {
 
         ran.unwrap_or_else(|error| panic!("{error}"));
     }
+
+    // An `--exact` name that matches no test runs nothing, and the child still exits 0 with "0 passed".
+    #[test]
+    fn a_child_that_ran_no_test_is_an_error() {
+        let ran = run_ignored_in_child(&["tests::no_such_test"], |_| {});
+
+        assert!(
+            matches!(ran, Err(Error::ChildTestsFailed { .. })),
+            "{ran:?}"
+        );
+    }
 }

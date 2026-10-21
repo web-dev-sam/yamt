@@ -79,7 +79,8 @@ pub struct Rebase {
     /// `MERGE_HEAD` while `rebase -r` re-does a merge commit.
     pub redoing_merge: Option<Oid>,
     pub progress: Option<Progress>,
-    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) at this stop or left in the todo.
+    /// A `reword`, `squash` or `fixup -c` (any spelling git accepts) at this stop, earlier in its squash chain, or
+    /// left in the todo.
     pub editor_steps_ahead: bool,
 }
 
@@ -198,8 +199,12 @@ impl Repo {
             self.commit_named("REBASE_HEAD")?
         };
         let todo = read_if_present(&rebase_merge.join("git-rebase-todo"))?.unwrap_or_default();
-        let editor_steps_ahead =
-            has_editor_steps(&todo) || stopped_step.is_some_and(is_editor_step);
+        // `current-fixups` lists the chain's `squash`/`fixup` steps so far; git opens the editor at the end of a
+        // chain with a squash (observed on git 2.56, `tests/edit_stop.rs`).
+        let chain = read_if_present(&rebase_merge.join("current-fixups"))?.unwrap_or_default();
+        let editor_steps_ahead = has_editor_steps(&todo)
+            || has_editor_steps(&chain)
+            || stopped_step.is_some_and(is_editor_step);
         let progress = progress_in(rebase_merge, "msgnum", "end")?;
         let rebase = self.rebase(rebase_merge, replaying, progress, editor_steps_ahead)?;
         Ok(Operation::Rebase(rebase))
