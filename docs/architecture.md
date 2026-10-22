@@ -110,6 +110,7 @@ Rules (each one is enforced, not advised — §8 says by what):
 | `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
 | The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94) | `frontend/scripts/fences.ts` PM7 + its failing-path test |
+| Only `ui/linuxPaste.ts` reads the clipboard through WebKit: no other file reads a `clipboardData` or calls `navigator.clipboard.read`/`readText` (plan §2 #99) | `frontend/scripts/clipboardFence.ts` PM8 (called by `fences.ts`) + its failing-path test |
 | `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --features bindings --bin export-bindings` output                                | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
 | No `unwrap`/`expect`/`panic!` outside tests in Rust                                                                                                          | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed                                                     |
 | No `any`, no non-null assertions, no `as` casts outside `ipc/fixture.ts`                                                                                     | oxlint `no-explicit-any`, `no-non-null-assertion`, `consistent-type-assertions: never` (override for the fixture parser)        |
@@ -1114,7 +1115,7 @@ fires this event before that read), reads `"primary"` when the paste follows a m
 and `"clipboard"` otherwise, and — once the text arrives, if the paste's target still holds the focus — dispatches a
 new bubbling `ClipboardEvent("paste")` with the text in memory, so CodeMirror's own paste (undo, `transactionFilter`s
 such as the 8 MiB column limit) runs unchanged; an `<input>`/`<textarea>` nobody handled gets `insertText`. `null`,
-`""` or a failed read (logged `paste.read_failed`) pastes nothing. Fence `#99` (`scripts/fences.ts`): no other file
+`""` or a failed read (logged `paste.read_failed`) pastes nothing. Fence PM8 (`scripts/clipboardFence.ts`): no other file
 reads `clipboardData` or `navigator.clipboard.read*`.
 
 ### 5.5 Frontend file and component conventions (house rules)
