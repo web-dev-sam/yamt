@@ -4,10 +4,12 @@ import { join, posix } from "node:path";
 import { parse } from "@vue/compiler-sfc";
 import ts from "typescript";
 
+import { clipboardViolations } from "./clipboardFence";
+
 export type SourceFile = { readonly path: string; readonly text: string };
 
 export type FenceViolation = {
-  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "#99";
+  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8";
   readonly file: string;
   readonly specifier: string;
   readonly reason: string;
@@ -38,10 +40,6 @@ const MERGE_ROOT_FILES: Record<string, true> = {
   "src/ui/App": true,
   "src/ui/App.vue": true,
 };
-const CLIPBOARD_READER = "src/ui/linuxPaste.ts";
-const CLIPBOARD_DATA = "clipboardData";
-const CLIPBOARD = "clipboard";
-const CLIPBOARD_READS: Record<string, true> = { read: true, readText: true };
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -123,68 +121,6 @@ function compareFinding(file: string, target: string): Finding | undefined {
     return { rule: "PM7", reason: "the compare window never imports lsp/" };
   }
   return undefined;
-}
-
-function nameOf(node: ts.Node | undefined): string | undefined {
-  if (node !== undefined && (ts.isIdentifier(node) || ts.isStringLiteralLike(node))) {
-    return node.text;
-  }
-  if (node !== undefined && ts.isPropertyAccessExpression(node)) {
-    return node.name.text;
-  }
-  return node !== undefined && ts.isElementAccessExpression(node)
-    ? nameOf(node.argumentExpression)
-    : undefined;
-}
-
-function readsClipboard(name: string | undefined, owner: ts.Node | undefined): boolean {
-  return (
-    name === CLIPBOARD_DATA ||
-    (name !== undefined && Object.hasOwn(CLIPBOARD_READS, name) && nameOf(owner) === CLIPBOARD)
-  );
-}
-
-function isClipboardRead(node: ts.Node): boolean {
-  if (ts.isPropertyAccessExpression(node)) {
-    return readsClipboard(node.name.text, node.expression);
-  }
-  if (ts.isElementAccessExpression(node)) {
-    return readsClipboard(nameOf(node.argumentExpression), node.expression);
-  }
-  if (ts.isBindingElement(node)) {
-    const declaration = node.parent.parent;
-    const owner = ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
-    return readsClipboard(nameOf(node.propertyName ?? node.name), owner);
-  }
-  return false;
-}
-
-function clipboardReads(text: string): string[] {
-  const source = ts.createSourceFile("script.ts", text, ts.ScriptTarget.Latest, true);
-  const reads: string[] = [];
-  function visit(node: ts.Node): void {
-    if (isClipboardRead(node)) {
-      reads.push(node.getText(source));
-    }
-    ts.forEachChild(node, visit);
-  }
-  visit(source);
-  return reads;
-}
-
-function clipboardViolations(file: SourceFile, texts: readonly string[]): FenceViolation[] {
-  if (file.path === CLIPBOARD_READER) {
-    return [];
-  }
-  return texts.flatMap(clipboardReads).map(
-    (read) =>
-      ({
-        rule: "#99",
-        file: file.path,
-        specifier: read,
-        reason: "only ui/linuxPaste.ts reads the clipboard (plan §2 #99)",
-      }) satisfies FenceViolation,
-  );
 }
 
 function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {

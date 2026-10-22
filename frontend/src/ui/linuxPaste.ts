@@ -18,12 +18,13 @@ export function takeLinuxPastes(target: Window, read: ReadClipboard): void {
       event.preventDefault();
       event.stopImmediatePropagation();
       const pasted = event.target;
+      const focused = target.document.activeElement;
       if (!(pasted instanceof Node)) {
         return;
       }
       read(afterMiddleRelease() ? "primary" : "clipboard").then(
         (text) => {
-          deliver(target.document, pasted, text);
+          deliver(target.document, { pasted, focused }, text);
         },
         (error: unknown) => {
           log.warn("paste.read_failed", { ...unexpected(error) });
@@ -54,16 +55,29 @@ function middleReleases(target: Window): () => boolean {
   return () => released;
 }
 
-function deliver(document: Document, pasted: Node, text: string | null): void {
-  const focused = document.activeElement?.contains(pasted) ?? false;
-  if (text === null || text === "" || !focused) {
+function deliver(
+  document: Document,
+  { pasted, focused }: { pasted: Node; focused: Element | null },
+  text: string | null,
+): void {
+  if (
+    text === null ||
+    text === "" ||
+    focused === null ||
+    focused === document.body ||
+    document.activeElement !== focused
+  ) {
     return;
   }
   const clipboardData = new DataTransfer();
   clipboardData.setData("text/plain", text);
   const paste = new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true });
-  const handled = !pasted.dispatchEvent(paste);
-  if (!handled && (pasted instanceof HTMLInputElement || pasted instanceof HTMLTextAreaElement)) {
+  const receiver = pasted.isConnected ? pasted : focused;
+  const handled = !receiver.dispatchEvent(paste);
+  if (
+    !handled &&
+    (receiver instanceof HTMLInputElement || receiver instanceof HTMLTextAreaElement)
+  ) {
     document.execCommand("insertText", false, text);
   }
 }

@@ -51,6 +51,8 @@ export type Theme = Generated.Theme;
 
 export type Antialiasing = Generated.Antialiasing;
 
+export type ClipboardSelection = Generated.ClipboardSelection;
+
 export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
 
 export type StoredSettings = Omit<Generated.StoredSettings, "languageServers"> & {
