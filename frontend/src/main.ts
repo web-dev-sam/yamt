@@ -7,7 +7,9 @@ import {
   createTauriCompareSource,
   createTauriServerHost,
   createTauriSource,
+  isLinux,
   log,
+  readClipboard,
   type ServerHost,
   type Theme,
 } from "./ipc";
@@ -15,6 +17,7 @@ import { LanguageServers } from "./lsp";
 import App from "./ui/App.vue";
 import CompareApp from "./ui/CompareApp.vue";
 import { createCompareStore } from "./ui/compareStore";
+import { takeLinuxPastes } from "./ui/linuxPaste";
 import { createAppStore } from "./ui/store";
 
 import "./style.css";
@@ -45,6 +48,9 @@ function startMerge(startTheme: Theme): void {
   createApp(App).mount("#app");
 }
 
+if (IN_APP && isLinux(navigator.platform)) {
+  takeLinuxPastes(window, readClipboard);
+}
 const { dataset } = document.documentElement;
 const startTheme = dataset["theme"] === "light" ? "light" : "dark";
 const comparing = IN_APP ? dataset["window"] === "compare" : new URLSearchParams(SEARCH).has("raw");

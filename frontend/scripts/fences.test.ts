@@ -308,3 +308,48 @@ test("merge files importing the store and compare files importing their own neig
 
   expect(violationsOf(files)).toEqual([]);
 });
+
+test("reading clipboardData or navigator.clipboard outside ui/linuxPaste.ts violates #99", () => {
+  const files = [
+    {
+      path: "src/editor/internal/paste.ts",
+      text: `view.dom.addEventListener("paste", (event) => event.clipboardData?.getData("text/plain"));`,
+    },
+    { path: "src/ui/copy.ts", text: `const text = await navigator.clipboard.readText();` },
+    {
+      path: "src/ipc/items.ts",
+      text: `const items = await window.navigator["clipboard"]["read"]();`,
+    },
+    {
+      path: "src/ui/Field.vue",
+      text: `<script setup lang="ts">\nfunction onPaste({ clipboardData }: ClipboardEvent) {}\n</script>`,
+    },
+    { path: "src/lsp/internal/take.ts", text: `const { readText } = navigator.clipboard;` },
+    { path: "src/ui/data.ts", text: `const data = event["clipboardData"];` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "#99", file: "src/editor/internal/paste.ts", specifier: "event.clipboardData" },
+    { rule: "#99", file: "src/ui/copy.ts", specifier: "navigator.clipboard.readText" },
+    { rule: "#99", file: "src/ipc/items.ts", specifier: `window.navigator["clipboard"]["read"]` },
+    { rule: "#99", file: "src/ui/Field.vue", specifier: "clipboardData" },
+    { rule: "#99", file: "src/lsp/internal/take.ts", specifier: "readText" },
+    { rule: "#99", file: "src/ui/data.ts", specifier: `event["clipboardData"]` },
+  ]);
+});
+
+test("ui/linuxPaste.ts reading, and writing the clipboard or a paste's data anywhere, violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/linuxPaste.ts",
+      text: `const text = event.clipboardData?.getData("text/plain");`,
+    },
+    { path: "src/ui/ServerMenu.ts", text: `await navigator.clipboard.writeText(command);` },
+    {
+      path: "src/ui/paste.ts",
+      text: `new ClipboardEvent("paste", { clipboardData, bubbles: true });\nconst read = file.read();`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});

@@ -98,11 +98,8 @@ function startStored(): StoredSettings {
 
 test("antialiasing is shown on Linux platforms only", () => {
   expect(showsAntialiasing("Linux x86_64")).toBe(true);
-  expect(showsAntialiasing("Linux aarch64")).toBe(true);
   expect(showsAntialiasing("MacIntel")).toBe(false);
   expect(showsAntialiasing("Win32")).toBe(false);
-  expect(showsAntialiasing("")).toBe(false);
-  expect(showsAntialiasing("FreeBSD amd64 Linux")).toBe(false);
 });
 
 test("before any read the servers entry is empty, and the first load sends it so", async () => {

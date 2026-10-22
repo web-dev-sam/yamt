@@ -62,6 +62,7 @@ export {
   bindingsOf,
   DEFAULT_KEYS,
   isLetter,
+  isLinux,
   isMac,
   KEY_ACTIONS,
   keyLabel,
@@ -77,7 +78,12 @@ export {
   type KeyProblem,
   type KeysRead,
 } from "./keys";
-export { createTauriServerHost, createTauriSource } from "./tauri";
+export {
+  createTauriServerHost,
+  createTauriSource,
+  readClipboard,
+  type ClipboardSelection,
+} from "./tauri";
 export { createTauriCompareSource } from "./tauriCompare";
 export type { ServerHost } from "./ServerHost";
 export type { SideWords } from "./words";

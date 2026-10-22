@@ -2,6 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
 
 import {
   commands,
+  type ClipboardSelection,
   type HostEvent,
   type LogValue,
   type ProgramFolders as ProgramFoldersDto,
@@ -138,6 +139,12 @@ export function createTauriServerHost(): ServerHost {
       commands.findProgram(program, project, foldersDto(folders)),
     projectFiles: (paths) => commands.projectFiles([...paths]),
   };
+}
+
+export type { ClipboardSelection };
+
+export function readClipboard(selection: ClipboardSelection): Promise<string | null> {
+  return commands.readClipboard(selection);
 }
 
 function foldersDto(folders: ProgramFolders): ProgramFoldersDto {

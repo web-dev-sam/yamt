@@ -2,6 +2,7 @@ import type { ShallowRef } from "vue";
 
 import {
   bindingsOf,
+  isLinux,
   KEY_ACTIONS,
   keyText,
   type AddedServer,
@@ -71,7 +72,7 @@ export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
 }
 
 export function showsAntialiasing(platform: string): boolean {
-  return platform.startsWith("Linux");
+  return isLinux(platform);
 }
 
 function storedSettings({
