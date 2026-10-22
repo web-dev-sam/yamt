@@ -923,10 +923,16 @@ rules 1–4, acceptance, non-goals and the cause (WebKitGTK 2.54's `Clipboard::f
 of -1 entries; upstream bug 324466, fixed on WebKit main, in no release): `docs/slices/request-paste-crash.md`. Built
 on `feat/raw-compare`: the fix sits in the window set-up the compare feature reshaped, and pasting is that window's
 main use.
+Slice graph (no question, OR13): 1 → 2 → 3 → 4. Row 3 needs row 2's generated command. Middle-button source
+(PRIMARY everywhere) decided as the Linux and WebStorm convention; reported to the owner as a default he may veto.
+Architecture, project map, ipc-contract and changelog: orchestrator, once before row 4.
 
-| row | slice                                                                                                                          | owner    | status  | evidence |
-| --- | ------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | -------- |
-| 1   | design: every path into the crash, the guard's home, Linux-only cost (`briefs/3.F-paste-crash-design.md`) (`PasteCrashDesign`) | designer | running |          |
+| row | slice                                                                                                                                               | owner     | status  | evidence                                                                                                                                                                                                                               |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design: every path into the crash, the guard's home, Linux-only cost (`briefs/3.F-paste-crash-design.md`) (`PasteCrashDesign`)                      | designer  | done    | option B chosen (plan §2 #99): the window cancels every trusted paste and reads the text through GTK's text request; every path (keys, key themes, menu, middle button, fields) fires the DOM paste first. Notes `PasteCrashDesign.md` |
+| 2   | 3.F-clipboard (`briefs/3.F-clipboard.md`): `read_clipboard(selection)` in `src-tauri/src/clipboard.rs` (`PasteCrashClipboard`)                      | rust-impl | running |                                                                                                                                                                                                                                        |
+| 3   | 3.F-paste (`briefs/3.F-paste.md`): `ui/linuxPaste.ts`, `isLinux`, `readClipboard`, the fence, both windows install it (`PasteCrashWindow`; needs 2) | web-impl  | pending |                                                                                                                                                                                                                                        |
+| 4   | final run: `just check`, `just mutants <before row 2>`, the request's acceptance in the real app on a private display (`PasteCrashVerify`)          | verifier  | pending |                                                                                                                                                                                                                                        |
 
 ## Open product questions
 
