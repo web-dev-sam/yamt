@@ -20,6 +20,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Ctrl/Cmd+B hides the panel.
   - Tabs, their names, texts and languages and the shown tab are kept between runs, also after a crash.
 
+### Fixed
+
+- On Linux, pasting no longer crashes yamt when the clipboard cannot be read — the program that copied has quit, nothing
+  was ever copied, or it does not answer. Such a paste now pastes nothing (a fault in the system's web engine,
+  WebKitGTK 2.54). A middle-click pastes the selected text everywhere, as in other Linux programs.
+
 ## [0.4.2] - 2026-10-22
 
 ### Added

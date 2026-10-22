@@ -1106,6 +1106,17 @@ section (the settings seam `ui/settingsStore.ts`, which both stores register); `
 column first. `ui/useCompareController.ts` is the compare root's only `editor/` importer (settle → `saveColumn` →
 `showComparison`, Format failures → `reportFormat`, `track`).
 
+**Pasting on Linux** (plan §2 #99; both windows): `main.ts` calls `takeLinuxPastes(window, readClipboard)`
+(`ui/linuxPaste.ts`) when the Tauri source runs and `isLinux(navigator.platform)` (`ipc/keys.ts`, beside `isMac`; also
+behind `showsAntialiasing`). A capture-phase `paste` listener cancels and stops every trusted paste without touching
+its `clipboardData` (WebKitGTK 2.54 crashes reading a pasteboard whose formats GTK cannot list, and every WebKit paste
+fires this event before that read), reads `"primary"` when the paste follows a middle-button `mouseup` in the same task
+and `"clipboard"` otherwise, and — once the text arrives, if the paste's target still holds the focus — dispatches a
+new bubbling `ClipboardEvent("paste")` with the text in memory, so CodeMirror's own paste (undo, `transactionFilter`s
+such as the 8 MiB column limit) runs unchanged; an `<input>`/`<textarea>` nobody handled gets `insertText`. `null`,
+`""` or a failed read (logged `paste.read_failed`) pastes nothing. Fence `#99` (`scripts/fences.ts`): no other file
+reads `clipboardData` or `navigator.clipboard.read*`.
+
 ### 5.5 Frontend file and component conventions (house rules)
 
 File structure is Rust-typical: `editor/index.ts` is the `lib.rs` (sole public surface),
