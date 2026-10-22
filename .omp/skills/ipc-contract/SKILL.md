@@ -68,6 +68,8 @@ open_compare()                    -> CompareStart { list: TabList { tabs, shown 
 load_tab(tab: TabId)              -> TabTexts { left, right, comparison }   async: the store locked only to read, the diff on a worker after
 set_column(tab, column, text, version) -> Comparison { versions, differences }   async: stores one column (a version not above the stored one stores nothing), then diffs it against the other
 add_tab() / close_tab(tab) / rename_tab(tab, name) / set_tab_language(tab, language) / show_tab(tab) -> TabList
+# both windows (plan §2 #99): the one way the window reads the clipboard, on Linux only
+read_clipboard(selection: ClipboardSelection)    -> Option<String>   async: GTK's text request on the main thread, awaited off it; None = unreadable or no text (paste nothing); never asks for the format list (WebKitGTK 2.54 crashes on a failed one); other systems None
 ```
 
 Plan §2 #37/#41. No `quit_if_done`: after the last file the app stays open, and closing the window

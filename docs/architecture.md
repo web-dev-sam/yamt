@@ -446,6 +446,12 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   lock is released; a worker panic answers `WorkerStopped` and the lock recovers), `add_tab`, `close_tab(tab)`,
   `rename_tab(tab, name)`, `set_tab_language(tab, language)`, `show_tab(tab)` (each `-> TabList`). The merge commands are
   registered there too and answer Tauri's "state not managed"; the compare page never calls them.
+- **Pasting on Linux** (`clipboard.rs`, plan §2 #99): `read_clipboard(selection: ClipboardSelection) -> Option<String>`
+  (`ClipboardSelection = Clipboard | Primary`), registered for both windows, no managed state. GTK's text request is
+  started on the main thread (`run_on_main_thread`) and its answer awaited on a `spawn_blocking` thread, so a hung
+  owner never blocks the window; `None` = no owner, no text, unreadable, or the main thread gone; other systems always
+  `None`. Never asks GTK for the clipboard's format list: WebKitGTK 2.54.0/2.54.1 crash reading a failed one
+  (`Clipboard::formats`, upstream bug 324466), which is why the window takes every paste on Linux (§5.4 `linuxPaste.ts`).
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]` / `yamt --raw`
   (`--raw` with `--repo` is a usage error);
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
