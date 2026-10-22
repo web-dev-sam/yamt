@@ -178,7 +178,7 @@ connectors ◄── editor                 (model/ is empty and unused)
 - [PM5] No module imports a sibling's `internal/` (bare `**/internal` included); no import cycles. Detector: oxlint overrides + `frontend/scripts/fences.test.ts`; `import/no-cycle` everywhere.
 - [PM6] Every non-test source file under `frontend/src/` (except `ipc/bindings.ts`), `frontend/scripts/`, `scripts/`, `crates/merge-core/src/` is named in this map, and every IPC command / ChunkSource and CompareSource method is named in architecture (and ipc-contract). Detector: `just map-check`.
 - [PM7] The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94). Detector: `frontend/scripts/fences.ts` + `fences.test.ts`.
-- [PM8] Only `ui/linuxPaste.ts` reads the clipboard through WebKit: no other file reads a `clipboardData` or calls `navigator.clipboard.read`/`readText` (plan §2 #99: WebKitGTK 2.54 crashes reading an unreadable clipboard; writes stay free). Detector: `frontend/scripts/clipboardFence.ts` (called by `fences.ts`) + its failing-path test.
+- [PM8] Only `ui/linuxPaste.ts` reads the clipboard through WebKit: no other file reads a `clipboardData` or calls `navigator.clipboard.read`/`readText` (plan §2 #99: WebKitGTK 2.54 crashes reading an unreadable clipboard; writes stay free; its node test, which reads its fakes' data, is exempt too). Detector: `frontend/scripts/clipboardFence.ts` (called by `fences.ts`) + its failing-path test.
 
 ## State ownership (vision 2)
 

@@ -221,7 +221,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
         edges.push({ specifier, file: resolved });
       }
     }
-    violations.push(...clipboardViolations(file, texts));
+    violations.push(...clipboardViolations(file.path, texts));
     graph.set(file.path, edges);
   }
   return [...violations, ...cycleViolations(graph)];

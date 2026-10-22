@@ -1,6 +1,11 @@
 import ts from "typescript";
 
-import type { FenceViolation, SourceFile } from "./fences";
+type ClipboardViolation = {
+  readonly rule: "PM8";
+  readonly file: string;
+  readonly specifier: string;
+  readonly reason: string;
+};
 
 const CLIPBOARD_READERS: Record<string, true> = {
   "src/ui/linuxPaste.ts": true,
@@ -57,17 +62,14 @@ function clipboardReads(text: string): string[] {
   return reads;
 }
 
-export function clipboardViolations(file: SourceFile, texts: readonly string[]): FenceViolation[] {
-  if (Object.hasOwn(CLIPBOARD_READERS, file.path)) {
+export function clipboardViolations(path: string, texts: readonly string[]): ClipboardViolation[] {
+  if (Object.hasOwn(CLIPBOARD_READERS, path)) {
     return [];
   }
-  return texts.flatMap(clipboardReads).map(
-    (read) =>
-      ({
-        rule: "PM8",
-        file: file.path,
-        specifier: read,
-        reason: "only ui/linuxPaste.ts reads the clipboard through WebKit (plan §2 #99)",
-      }) satisfies FenceViolation,
-  );
+  return texts.flatMap(clipboardReads).map((read) => ({
+    rule: "PM8",
+    file: path,
+    specifier: read,
+    reason: "only ui/linuxPaste.ts reads the clipboard through WebKit (plan §2 #99)",
+  }));
 }
