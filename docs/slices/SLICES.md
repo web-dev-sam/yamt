@@ -915,6 +915,19 @@ Architecture, project map, README and changelog: orchestrator, once before row 1
 | 12  | final run (`briefs/3.C-verify.md`): `just check`, `just mutants 8db7609`, WebKit and the real app per the request's acceptance incl. a real close within 300 ms (#1551), an over-limit paste (#1554), typing speed in a large column (`RawCompareVerify`) | verifier  | done     | `0081695`: gate pass (1925 web tests, map/arch ok); Rust mutants 150: 86 caught, 64 unviable; Stryker survivors judged (#1557 dropped). WebKit 4a–4f and real app 5a–5g pass: WM close 2.5 ms after typing → exit 0, text back; `kill -9` → text back; 2nd window exit 2; merge repo untouched; over-8 MiB paste refused (synthetic); 7.1 MiB column: 1 late frame of 200, bands 2.2 s after the last key. Notes `RawCompareVerify.md`                    |
 | 12' | paste-crash check (`briefs/3.C-verify-paste.md`): X clipboard Ctrl+V segfault seen in row 12 (`RawComparePasteCheck`)                                                                                                                                     | verifier  | done     | pre-existing at `8db7609`, same frames; only when the clipboard's owner process is gone; a live owner never crashes (12 pastes, both builds) (#1559). Not this feature's; a separate bug. Notes `RawComparePasteCheck.md`                                                                                                                                                                                                                                 |
 
+## Paste crash — pasting must never crash yamt (session 26, branch `feat/raw-compare`)
+
+Owner request (2026-10-22, #1561): "fix that crash" — the paste segfault from rows 12/12' above, older than the
+compare window and in both windows. No product question (rule 2: an unreadable clipboard pastes nothing). Intent,
+rules 1–4, acceptance, non-goals and the cause (WebKitGTK 2.54's `Clipboard::formats` reads GTK's failed format list
+of -1 entries; upstream bug 324466, fixed on WebKit main, in no release): `docs/slices/request-paste-crash.md`. Built
+on `feat/raw-compare`: the fix sits in the window set-up the compare feature reshaped, and pasting is that window's
+main use.
+
+| row | slice                                                                                                                          | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | -------- |
+| 1   | design: every path into the crash, the guard's home, Linux-only cost (`briefs/3.F-paste-crash-design.md`) (`PasteCrashDesign`) | designer | running |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
