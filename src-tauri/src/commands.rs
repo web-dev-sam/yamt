@@ -6,7 +6,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{compare, servers, settings};
+use crate::{clipboard, compare, servers, settings};
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
@@ -42,6 +42,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         compare::rename_tab,
         compare::set_tab_language,
         compare::show_tab,
+        clipboard::read_clipboard::<tauri::Wry>,
     ])
 }
 

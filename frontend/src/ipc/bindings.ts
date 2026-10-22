@@ -38,6 +38,11 @@ export const commands = {
 	renameTab: (tab: TabId, name: string) => typedError<TabList, IpcError>(__TAURI_INVOKE("rename_tab", { tab, name })),
 	setTabLanguage: (tab: TabId, language: TabLanguage) => typedError<TabList, IpcError>(__TAURI_INVOKE("set_tab_language", { tab, language })),
 	showTab: (tab: TabId) => typedError<TabList, IpcError>(__TAURI_INVOKE("show_tab", { tab })),
+	/**
+	 *  The selection's text, or `None` when it cannot be read; on Linux through GTK's text request,
+	 *  which never asks for the format list that `WebKitGTK` 2.54 crashes on (plan §2 #99).
+	 */
+	readClipboard: (selection: ClipboardSelection) => __TAURI_INVOKE<string | null>("read_clipboard", { selection }),
 };
 
 /* Types */
@@ -83,6 +88,8 @@ export type ChunkKind =
 "BothSame" | 
 /**  Local and remote changed these base lines differently. */
 "Conflict";
+
+export type ClipboardSelection = "clipboard" | "primary";
 
 /**  One of a tab's two texts: the left is the base the right is compared against. */
 export type Column = 

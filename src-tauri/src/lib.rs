@@ -4,6 +4,7 @@
 #[cfg(target_os = "linux")]
 mod appimage;
 mod args;
+mod clipboard;
 mod commands;
 mod compare;
 #[cfg(target_os = "linux")]

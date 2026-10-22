@@ -923,6 +923,7 @@ rules 1–4, acceptance, non-goals and the cause (WebKitGTK 2.54's `Clipboard::f
 of -1 entries; upstream bug 324466, fixed on WebKit main, in no release): `docs/slices/request-paste-crash.md`. Built
 on `feat/raw-compare`: the fix sits in the window set-up the compare feature reshaped, and pasting is that window's
 main use.
+
 Slice graph (no question, OR13): 1 → 2 → 3 → 4. Row 3 needs row 2's generated command. Middle-button source
 (PRIMARY everywhere) decided as the Linux and WebStorm convention; reported to the owner as a default he may veto.
 Architecture, project map, ipc-contract and changelog: orchestrator, once before row 4.
