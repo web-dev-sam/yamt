@@ -1,7 +1,7 @@
 import type { EditorState, Range, Text } from "@codemirror/state";
 import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
 
-import type { Chunk } from "../../ipc";
+import type { Chunk, SideWords } from "../../ipc";
 import type { Side } from "./side";
 import { chunkTone, type Tone } from "./tone";
 
@@ -51,23 +51,31 @@ export function removalAt(state: EditorState, pos: number): string | null {
   return null;
 }
 
+export function wordDecorations(
+  doc: Text,
+  words: SideWords<number>,
+  tone: Tone,
+): Range<Decoration>[] {
+  const mark = Decoration.mark({ class: `chunk-word-${tone}` });
+  const marks = words.changed.map((range) => {
+    const from = doc.line(range.line + 1).from + range.start;
+    return mark.range(from, from + range.len);
+  });
+  const bars = words.removals.map((removal) =>
+    Decoration.widget({ widget: new RemovalPoint(tone, removal.text) }).range(
+      doc.line(removal.at.line + 1).from + removal.at.column,
+    ),
+  );
+  return [...marks, ...bars];
+}
+
 export function sideWordDecorations(
   doc: Text,
   chunks: readonly Chunk[],
   side: Side,
 ): DecorationSet {
-  const decorations: Range<Decoration>[] = [];
-  for (const chunk of chunks) {
-    const tone = chunkTone(chunk, side);
-    const mark = Decoration.mark({ class: `chunk-word-${tone}` });
-    for (const range of chunk.words[side].changed) {
-      const from = doc.line(range.line + 1).from + range.start;
-      decorations.push(mark.range(from, from + range.len));
-    }
-    for (const removal of chunk.words[side].removals) {
-      const bar = Decoration.widget({ widget: new RemovalPoint(tone, removal.text) });
-      decorations.push(bar.range(doc.line(removal.at.line + 1).from + removal.at.column));
-    }
-  }
+  const decorations = chunks.flatMap((chunk) =>
+    wordDecorations(doc, chunk.words[side], chunkTone(chunk, side)),
+  );
   return Decoration.set(decorations, true);
 }

@@ -17,7 +17,11 @@ export type Notice =
 
 export type DiskNotice = Extract<Notice, { kind: "disk" }>;
 
-type NoticeRow = { readonly key: string; readonly text: string; readonly closeLabel: string };
+export type NoticeRow = {
+  readonly key: string;
+  readonly text: string;
+  readonly closeLabel: string;
+};
 
 function opening({ path, editsDropped, when }: DiskNotice): string {
   switch (when) {

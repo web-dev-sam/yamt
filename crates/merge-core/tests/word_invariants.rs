@@ -1,57 +1,17 @@
-use proptest::collection::vec;
 use proptest::option;
 use proptest::prelude::*;
-use proptest::sample::Index;
 use yamt_merge_core::{
     BaseLine, Chunk, ChunkId, ChunkKind, LineRange, LocalLine, Options, RemoteLine,
     SideWordChanges, compute_chunks, word_changes,
 };
 
-const LINE: &str = "[ab_é😀 \t(;\r]{0,6}(\n|\r\n)";
-const LAST_LINE: &str = "[ab_é😀 \t(;]{0,4}";
+mod texts;
+
+use texts::{LAST_LINE, content, doc, edits};
+
 const MAX_LINES: usize = 8;
 const MAX_EDITS: usize = 4;
 const CASES: u32 = 512;
-
-#[derive(Clone, Debug)]
-enum Edit {
-    Insert(String),
-    Delete,
-    Replace(String),
-}
-
-#[derive(Clone, Debug)]
-struct Doc {
-    lines: Vec<String>,
-    last: String,
-}
-
-impl Doc {
-    fn text(&self) -> String {
-        self.lines.concat() + &self.last
-    }
-
-    fn edited(&self, edits: &[(Index, Edit)], last: Option<String>) -> Doc {
-        let mut lines = self.lines.clone();
-        for (at, edit) in edits {
-            match edit {
-                Edit::Insert(line) => lines.insert(at.index(lines.len() + 1), line.clone()),
-                Edit::Delete if !lines.is_empty() => {
-                    lines.remove(at.index(lines.len()));
-                }
-                Edit::Replace(line) if !lines.is_empty() => {
-                    let replaced = at.index(lines.len());
-                    lines[replaced].clone_from(line);
-                }
-                Edit::Delete | Edit::Replace(_) => {}
-            }
-        }
-        Doc {
-            lines,
-            last: last.unwrap_or_else(|| self.last.clone()),
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 struct Triple {
@@ -60,25 +20,12 @@ struct Triple {
     remote: String,
 }
 
-fn doc() -> impl Strategy<Value = Doc> {
-    (vec(LINE, 0..MAX_LINES), LAST_LINE).prop_map(|(lines, last)| Doc { lines, last })
-}
-
-fn edits() -> impl Strategy<Value = Vec<(Index, Edit)>> {
-    let edit = prop_oneof![
-        LINE.prop_map(Edit::Insert),
-        Just(Edit::Delete),
-        LINE.prop_map(Edit::Replace),
-    ];
-    vec((any::<Index>(), edit), 0..MAX_EDITS)
-}
-
 fn triple() -> impl Strategy<Value = Triple> {
     (
-        doc(),
-        edits(),
+        doc(MAX_LINES),
+        edits(MAX_EDITS),
         option::of(LAST_LINE),
-        edits(),
+        edits(MAX_EDITS),
         option::of(LAST_LINE),
     )
         .prop_map(
@@ -88,12 +35,6 @@ fn triple() -> impl Strategy<Value = Triple> {
                 base: base.text(),
             },
         )
-}
-
-fn content(line: &str) -> &str {
-    line.strip_suffix("\r\n")
-        .or_else(|| line.strip_suffix('\n'))
-        .unwrap_or(line)
 }
 
 #[derive(Debug, PartialEq)]
@@ -306,7 +247,7 @@ proptest! {
     }
 
     #[test]
-    fn identical_texts_give_no_marks(text in doc()) {
+    fn identical_texts_give_no_marks(text in doc(MAX_LINES)) {
         let text = text.text();
         prop_assert!(word_changes(&text, &text, &text, &compute_chunks(&text, &text, &text, &Options::default())).is_empty());
         let whole = whole_text_chunk(&text);

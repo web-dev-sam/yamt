@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import Settings from "~icons/lucide/settings";
 
-import { useAppStore } from "./store";
+import { useSettingsStore } from "./settingsStore";
 
-const { openSettings } = useAppStore();
+const { openSettings } = useSettingsStore();
 </script>
 
 <template>

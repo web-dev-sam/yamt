@@ -2,10 +2,12 @@ import type { ShallowRef } from "vue";
 
 import {
   log,
+  type Column,
   type KeyProblem,
   type OperationKind,
   type SourceFailure,
   type SourceResult,
+  type TabId,
 } from "../ipc";
 
 type Unexpected = { readonly kind: "Unexpected"; readonly message: string };
@@ -36,7 +38,16 @@ export type Problem =
       readonly path: string;
       readonly cause: ProblemCause;
     }
-  | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread };
+  | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
+  | { readonly action: "tabs"; readonly cause: ProblemCause }
+  | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
+  | {
+      readonly action: "saveTab";
+      readonly tab: TabId;
+      readonly column: Column;
+      readonly name: string;
+      readonly cause: ProblemCause;
+    };
 
 export type Outcome<T> =
   | { readonly ok: true; readonly value: T }
@@ -59,10 +70,15 @@ export async function attempt<T>(call: () => Promise<SourceResult<T>>): Promise<
   }
 }
 
+function settingsFields(cause: ProblemCause | KeysUnread): Record<string, string | number> {
+  return cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : { ...cause };
+}
+
 export function logProblem(problem: Problem): void {
   const event = `store.${problem.action}_failed`;
   switch (problem.action) {
     case "list":
+    case "tabs":
       log.error(event, { ...problem.cause });
       return;
     case "abort":
@@ -78,18 +94,19 @@ export function logProblem(problem: Problem): void {
         message: problem.message,
       });
       return;
-    case "settings": {
-      const { cause } = problem;
-      const fields = cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : cause;
-      log.error(event, { ...fields });
+    case "settings":
+      log.error(event, settingsFields(problem.cause));
       return;
-    }
     case "open":
     case "finish":
     case "save":
     case "take":
     case "reset":
       log.error(event, { path: problem.path, ...problem.cause });
+      return;
+    case "loadTab":
+    case "saveTab":
+      log.error(event, { name: problem.name, ...problem.cause });
       return;
     default: {
       const _exhaustive: never = problem;

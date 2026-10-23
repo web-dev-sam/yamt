@@ -97,6 +97,11 @@ export function isMac(platform: string): boolean {
   return /Mac/.test(platform);
 }
 
+// WebKitGTK reports `navigator.platform` as "Linux <machine>" (plan §2 #60).
+export function isLinux(platform: string): boolean {
+  return platform.startsWith("Linux");
+}
+
 export function parseKey(text: string): Key | null {
   let rest = text;
   const held: Record<Modifier, boolean> = { mod: false, macCtrl: false, alt: false, shift: false };

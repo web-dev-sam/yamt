@@ -1,0 +1,684 @@
+diff --git i/frontend/scripts/fences.test.ts w/frontend/scripts/fences.test.ts
+index 7c48380..02808e9 100644
+--- i/frontend/scripts/fences.test.ts
++++ w/frontend/scripts/fences.test.ts
+@@ -308,3 +308,48 @@ test("merge files importing the store and compare files importing their own neig
+ 
+   expect(violationsOf(files)).toEqual([]);
+ });
++
++test("reading clipboardData or navigator.clipboard outside ui/linuxPaste.ts violates #99", () => {
++  const files = [
++    {
++      path: "src/editor/internal/paste.ts",
++      text: `view.dom.addEventListener("paste", (event) => event.clipboardData?.getData("text/plain"));`,
++    },
++    { path: "src/ui/copy.ts", text: `const text = await navigator.clipboard.readText();` },
++    {
++      path: "src/ipc/items.ts",
++      text: `const items = await window.navigator["clipboard"]["read"]();`,
++    },
++    {
++      path: "src/ui/Field.vue",
++      text: `<script setup lang="ts">\nfunction onPaste({ clipboardData }: ClipboardEvent) {}\n</script>`,
++    },
++    { path: "src/lsp/internal/take.ts", text: `const { readText } = navigator.clipboard;` },
++    { path: "src/ui/data.ts", text: `const data = event["clipboardData"];` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "#99", file: "src/editor/internal/paste.ts", specifier: "event.clipboardData" },
++    { rule: "#99", file: "src/ui/copy.ts", specifier: "navigator.clipboard.readText" },
++    { rule: "#99", file: "src/ipc/items.ts", specifier: `window.navigator["clipboard"]["read"]` },
++    { rule: "#99", file: "src/ui/Field.vue", specifier: "clipboardData" },
++    { rule: "#99", file: "src/lsp/internal/take.ts", specifier: "readText" },
++    { rule: "#99", file: "src/ui/data.ts", specifier: `event["clipboardData"]` },
++  ]);
++});
++
++test("ui/linuxPaste.ts reading, and writing the clipboard or a paste's data anywhere, violate nothing", () => {
++  const files = [
++    {
++      path: "src/ui/linuxPaste.ts",
++      text: `const text = event.clipboardData?.getData("text/plain");`,
++    },
++    { path: "src/ui/ServerMenu.ts", text: `await navigator.clipboard.writeText(command);` },
++    {
++      path: "src/ui/paste.ts",
++      text: `new ClipboardEvent("paste", { clipboardData, bubbles: true });\nconst read = file.read();`,
++    },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
+diff --git i/frontend/scripts/fences.ts w/frontend/scripts/fences.ts
+index 29f2510..d7db73e 100644
+--- i/frontend/scripts/fences.ts
++++ w/frontend/scripts/fences.ts
+@@ -7,7 +7,7 @@ import ts from "typescript";
+ export type SourceFile = { readonly path: string; readonly text: string };
+ 
+ export type FenceViolation = {
+-  readonly rule: "PM2" | "PM3" | "PM5" | "PM7";
++  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "#99";
+   readonly file: string;
+   readonly specifier: string;
+   readonly reason: string;
+@@ -38,6 +38,10 @@ const MERGE_ROOT_FILES: Record<string, true> = {
+   "src/ui/App": true,
+   "src/ui/App.vue": true,
+ };
++const CLIPBOARD_READER = "src/ui/linuxPaste.ts";
++const CLIPBOARD_DATA = "clipboardData";
++const CLIPBOARD = "clipboard";
++const CLIPBOARD_READS: Record<string, true> = { read: true, readText: true };
+ 
+ function scriptTexts(file: SourceFile): string[] {
+   if (!file.path.endsWith(".vue")) {
+@@ -121,6 +125,68 @@ function compareFinding(file: string, target: string): Finding | undefined {
+   return undefined;
+ }
+ 
++function nameOf(node: ts.Node | undefined): string | undefined {
++  if (node !== undefined && (ts.isIdentifier(node) || ts.isStringLiteralLike(node))) {
++    return node.text;
++  }
++  if (node !== undefined && ts.isPropertyAccessExpression(node)) {
++    return node.name.text;
++  }
++  return node !== undefined && ts.isElementAccessExpression(node)
++    ? nameOf(node.argumentExpression)
++    : undefined;
++}
++
++function readsClipboard(name: string | undefined, owner: ts.Node | undefined): boolean {
++  return (
++    name === CLIPBOARD_DATA ||
++    (name !== undefined && Object.hasOwn(CLIPBOARD_READS, name) && nameOf(owner) === CLIPBOARD)
++  );
++}
++
++function isClipboardRead(node: ts.Node): boolean {
++  if (ts.isPropertyAccessExpression(node)) {
++    return readsClipboard(node.name.text, node.expression);
++  }
++  if (ts.isElementAccessExpression(node)) {
++    return readsClipboard(nameOf(node.argumentExpression), node.expression);
++  }
++  if (ts.isBindingElement(node)) {
++    const declaration = node.parent.parent;
++    const owner = ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
++    return readsClipboard(nameOf(node.propertyName ?? node.name), owner);
++  }
++  return false;
++}
++
++function clipboardReads(text: string): string[] {
++  const source = ts.createSourceFile("script.ts", text, ts.ScriptTarget.Latest, true);
++  const reads: string[] = [];
++  function visit(node: ts.Node): void {
++    if (isClipboardRead(node)) {
++      reads.push(node.getText(source));
++    }
++    ts.forEachChild(node, visit);
++  }
++  visit(source);
++  return reads;
++}
++
++function clipboardViolations(file: SourceFile, texts: readonly string[]): FenceViolation[] {
++  if (file.path === CLIPBOARD_READER) {
++    return [];
++  }
++  return texts.flatMap(clipboardReads).map(
++    (read) =>
++      ({
++        rule: "#99",
++        file: file.path,
++        specifier: read,
++        reason: "only ui/linuxPaste.ts reads the clipboard (plan §2 #99)",
++      }) satisfies FenceViolation,
++  );
++}
++
+ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
+   type Visit = { readonly index: number; low: number };
+   const visits = new Map<string, Visit>();
+@@ -197,7 +263,8 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+   for (const file of files) {
+     const module = MODULE_OF.exec(file.path)?.[1];
+     const edges: Edge[] = [];
+-    const specifiers = scriptTexts(file).flatMap((text) =>
++    const texts = scriptTexts(file);
++    const specifiers = texts.flatMap((text) =>
+       ts.preProcessFile(text, true, true).importedFiles.map((reference) => reference.fileName),
+     );
+     for (const specifier of specifiers) {
+@@ -218,6 +285,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+         edges.push({ specifier, file: resolved });
+       }
+     }
++    violations.push(...clipboardViolations(file, texts));
+     graph.set(file.path, edges);
+   }
+   return [...violations, ...cycleViolations(graph)];
+diff --git i/frontend/src/ipc/AGENTS.md w/frontend/src/ipc/AGENTS.md
+index e9c11ee..d4e4c5c 100644
+--- i/frontend/src/ipc/AGENTS.md
++++ w/frontend/src/ipc/AGENTS.md
+@@ -1 +1,3 @@
+ Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created (the compare window's guards and `nextColumnVersion` included); `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`, `?empty`); `createFixtureSource` takes the page's search as a required parameter. The compare window (`yamt --raw`, plan §2 #93–#97) has its own `CompareSource` (`CompareSource.ts`): domain shapes and their conversions in `compareDomain.ts`, the app's in `tauriCompare.ts`, fixture mode's in memory in `fixtureCompare.ts` (`?raw=<case>` loads `fixtures/compare/<case>.json` into tab 1; the tab rules mirror `crates/compare`).
++
++`tauri.ts` `readClipboard(selection)` is the window's one way to read the clipboard (plan §2 #99): the shell's GTK text request, `null` for unreadable or no text; only `ui/linuxPaste.ts` calls it, on Linux. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+diff --git i/frontend/src/ipc/index.ts w/frontend/src/ipc/index.ts
+index 022fbe5..f6c1f53 100644
+--- i/frontend/src/ipc/index.ts
++++ w/frontend/src/ipc/index.ts
+@@ -62,6 +62,7 @@ export {
+   bindingsOf,
+   DEFAULT_KEYS,
+   isLetter,
++  isLinux,
+   isMac,
+   KEY_ACTIONS,
+   keyLabel,
+@@ -77,7 +78,12 @@ export {
+   type KeyProblem,
+   type KeysRead,
+ } from "./keys";
+-export { createTauriServerHost, createTauriSource } from "./tauri";
++export {
++  createTauriServerHost,
++  createTauriSource,
++  readClipboard,
++  type ClipboardSelection,
++} from "./tauri";
+ export { createTauriCompareSource } from "./tauriCompare";
+ export type { ServerHost } from "./ServerHost";
+ export type { SideWords } from "./words";
+diff --git i/frontend/src/ipc/keys.test.ts w/frontend/src/ipc/keys.test.ts
+index a719bd3..3002612 100644
+--- i/frontend/src/ipc/keys.test.ts
++++ w/frontend/src/ipc/keys.test.ts
+@@ -5,6 +5,8 @@ import {
+   bindingsOf,
+   DEFAULT_KEYS,
+   KEY_ACTIONS,
++  isLinux,
++  isMac,
+   keyLabel,
+   keyOfEvent,
+   keyText,
+@@ -54,6 +56,17 @@ function pressed(platform: string, press: Press): string | null {
+   return found === null ? null : keyText(found);
+ }
+ 
++test("Linux and macOS are told apart by navigator.platform's start and CodeMirror's Mac test", () => {
++  expect(isLinux("Linux x86_64")).toBe(true);
++  expect(isLinux("Linux aarch64")).toBe(true);
++  expect(isLinux("MacIntel")).toBe(false);
++  expect(isLinux("Win32")).toBe(false);
++  expect(isLinux("")).toBe(false);
++  expect(isLinux("FreeBSD amd64 Linux")).toBe(false);
++  expect(isMac(MAC)).toBe(true);
++  expect(isMac(LINUX)).toBe(false);
++});
++
+ test("the actions are listed in the settings order", () => {
+   expect(KEY_ACTIONS).toEqual([
+     "apply",
+diff --git i/frontend/src/ipc/keys.ts w/frontend/src/ipc/keys.ts
+index 3c2963b..8f5ff70 100644
+--- i/frontend/src/ipc/keys.ts
++++ w/frontend/src/ipc/keys.ts
+@@ -97,6 +97,11 @@ export function isMac(platform: string): boolean {
+   return /Mac/.test(platform);
+ }
+ 
++// WebKitGTK reports `navigator.platform` as "Linux <machine>" (plan §2 #60).
++export function isLinux(platform: string): boolean {
++  return platform.startsWith("Linux");
++}
++
+ export function parseKey(text: string): Key | null {
+   let rest = text;
+   const held: Record<Modifier, boolean> = { mod: false, macCtrl: false, alt: false, shift: false };
+diff --git i/frontend/src/ipc/tauri.ts w/frontend/src/ipc/tauri.ts
+index f7ca33e..fe9a9ce 100644
+--- i/frontend/src/ipc/tauri.ts
++++ w/frontend/src/ipc/tauri.ts
+@@ -2,6 +2,7 @@ import { Channel } from "@tauri-apps/api/core";
+ 
+ import {
+   commands,
++  type ClipboardSelection,
+   type HostEvent,
+   type LogValue,
+   type ProgramFolders as ProgramFoldersDto,
+@@ -140,6 +141,12 @@ export function createTauriServerHost(): ServerHost {
+   };
+ }
+ 
++export type { ClipboardSelection };
++
++export function readClipboard(selection: ClipboardSelection): Promise<string | null> {
++  return commands.readClipboard(selection);
++}
++
+ function foldersDto(folders: ProgramFolders): ProgramFoldersDto {
+   return { project: [...folders.project], home: [...folders.home] };
+ }
+diff --git i/frontend/src/main.ts w/frontend/src/main.ts
+index b69e6c6..9158cf2 100644
+--- i/frontend/src/main.ts
++++ w/frontend/src/main.ts
+@@ -7,7 +7,9 @@ import {
+   createTauriCompareSource,
+   createTauriServerHost,
+   createTauriSource,
++  isLinux,
+   log,
++  readClipboard,
+   type ServerHost,
+   type Theme,
+ } from "./ipc";
+@@ -15,6 +17,7 @@ import { LanguageServers } from "./lsp";
+ import App from "./ui/App.vue";
+ import CompareApp from "./ui/CompareApp.vue";
+ import { createCompareStore } from "./ui/compareStore";
++import { takeLinuxPastes } from "./ui/linuxPaste";
+ import { createAppStore } from "./ui/store";
+ 
+ import "./style.css";
+@@ -45,6 +48,9 @@ function startMerge(startTheme: Theme): void {
+   createApp(App).mount("#app");
+ }
+ 
++if (IN_APP && isLinux(navigator.platform)) {
++  takeLinuxPastes(window, readClipboard);
++}
+ const { dataset } = document.documentElement;
+ const startTheme = dataset["theme"] === "light" ? "light" : "dark";
+ const comparing = IN_APP ? dataset["window"] === "compare" : new URLSearchParams(SEARCH).has("raw");
+diff --git i/frontend/src/ui/AGENTS.md w/frontend/src/ui/AGENTS.md
+index f3335fb..4a4a8d5 100644
+--- i/frontend/src/ui/AGENTS.md
++++ w/frontend/src/ui/AGENTS.md
+@@ -23,3 +23,5 @@ Git running (plan §2 #74, #89): `gitRun.ts` `createGitRun` is the one owner of
+ Abort (plan §2 #74, #88): `aborting.ts` holds the action; `AbortState` is `none` / `ready` / `running` with the listed `operation`. A refusal is the `abort` problem, naming the operation, never cleared by a path. The button is the toolbar's first icon button (#58), labelled per operation: `toolbarButtons.ts` `listedButtons(operation)` leaves it and Continue out of the menu and the toolbar while git records no operation; whether the user hid one is a separate fact, `hiddenButtons`, which starts Abort hidden.
+ 
+ Continue (plan §2 #89): `continuing.ts` holds `ContinueState` (`noOperation` / `filesLeft` — any file not `Resolved`, a `Remembered` one too — / `writing` / `ready` / `running`), the questions (unsaved files, rewords) and the action: `Stopped` goes to `nextStop`; every refusal goes through `reportFailure` (`StopMovedOn` to `nextStop({ outside })`, any other the `continue` problem), and a `Git` refusal lists again. `operationText.ts` `continueAction` is the one exhaustive rule for its verb (a merge commits), object and label. `OperationButtons.vue` (Continue, and Abort where there is no toolbar) sits in the choice view's, the deleted-side view's and the stop view's header rows and in the toolbar. `StopView.vue` is the merge area of an empty stop: `emptyStop.ts` `emptyStop` (pure) decides it from the operation, the list, the screen, the problem and `stopMessage` — shown on the files screen with git's message, which never goes to the bar while the stop is empty; the store exposes it as `emptyStop`, App only binds it.
++
++Paste on Linux (plan §2 #99): `linuxPaste.ts` `takeLinuxPastes`, installed once by `main.ts` for both roots only with the Tauri source on Linux (`isLinux`), cancels every trusted `paste` in the capture phase before WebKitGTK reads its pasteboard, reads the text through `readClipboard` (the selection after a middle-button release in the same task, else the clipboard) and dispatches the paste again with the text in memory on the target that still has the focus; a field nobody handled gets `insertText`. An unreadable clipboard (`null`) or empty text pastes nothing. No other file reads the clipboard: `clipboardData` and `navigator.clipboard.read`/`readText` anywhere else fail `scripts/fences.ts` (rule #99).
+diff --git i/frontend/src/ui/linuxPaste.test.ts w/frontend/src/ui/linuxPaste.test.ts
+new file mode 100644
+index 0000000..a59c32e
+--- /dev/null
++++ w/frontend/src/ui/linuxPaste.test.ts
+@@ -0,0 +1,254 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import type { ClipboardSelection } from "../ipc";
++import { takeLinuxPastes } from "./linuxPaste";
++
++class FakeNode extends EventTarget {
++  constructor(readonly parent: FakeNode | null = null) {
++    super();
++  }
++
++  contains(other: unknown): boolean {
++    for (let node = other instanceof FakeNode ? other : null; node !== null; node = node.parent) {
++      if (node === this) {
++        return true;
++      }
++    }
++    return false;
++  }
++}
++
++class FakeInput extends FakeNode {}
++
++class FakeTextArea extends FakeNode {}
++
++class FakeClipboardEvent extends Event {}
++
++type Heard = {
++  readonly type: string;
++  readonly listener: (event: unknown) => void;
++  options: unknown;
++};
++
++type Answer = { resolve: (text: string | null) => void; reject: (error: unknown) => void };
++
++const page = {
++  heard: new Array<Heard>(),
++  tasks: new Array<() => void>(),
++  written: new Array<[string, string]>(),
++  inserted: new Array<unknown[]>(),
++  reads: new Array<ClipboardSelection>(),
++  answers: new Array<Answer>(),
++  document: { activeElement: new FakeNode() },
++};
++
++const body = new FakeNode();
++const editor = new FakeNode(body);
++const line = new FakeNode(editor);
++
++beforeEach(() => {
++  page.heard = [];
++  page.tasks = [];
++  page.written = [];
++  page.inserted = [];
++  page.reads = [];
++  page.answers = [];
++  page.document = { activeElement: body };
++  vi.stubGlobal("Node", FakeNode);
++  vi.stubGlobal("HTMLInputElement", FakeInput);
++  vi.stubGlobal("HTMLTextAreaElement", FakeTextArea);
++  vi.stubGlobal("ClipboardEvent", FakeClipboardEvent);
++  vi.stubGlobal(
++    "DataTransfer",
++    class {
++      setData(format: string, text: string): void {
++        page.written.push([format, text]);
++      }
++    },
++  );
++  vi.stubGlobal("window", {
++    document: {
++      get activeElement() {
++        return page.document.activeElement;
++      },
++      execCommand: (...args: unknown[]) => page.inserted.push(args),
++    },
++    addEventListener: (type: string, listener: (event: unknown) => void, options: unknown) => {
++      page.heard.push({ type, listener, options });
++    },
++    setTimeout: (task: () => void) => page.tasks.push(task),
++  });
++  takeLinuxPastes(window, (selection) => {
++    page.reads.push(selection);
++    return new Promise((resolve, reject) => {
++      page.answers.push({ resolve, reject });
++    });
++  });
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++function heard(type: string): Heard {
++  const found = page.heard.find((entry) => entry.type === type);
++  if (found === undefined) {
++    throw new Error(`no ${type} listener`);
++  }
++  return found;
++}
++
++function paste(target: FakeNode, isTrusted = true) {
++  const event = {
++    isTrusted,
++    target,
++    preventDefault: vi.fn(),
++    stopImmediatePropagation: vi.fn(),
++    get clipboardData(): never {
++      throw new Error("the paste's own data was read");
++    },
++  };
++  heard("paste").listener(event);
++  return event;
++}
++
++function release(button: number): void {
++  heard("mouseup").listener({ button });
++}
++
++async function answer(text: string | null): Promise<void> {
++  const last = page.answers.at(-1);
++  if (last === undefined) {
++    throw new Error("nothing was read");
++  }
++  last.resolve(text);
++  await Promise.resolve();
++}
++
++function dispatchedOn(target: FakeNode, handled: boolean): Event[] {
++  const events: Event[] = [];
++  target.addEventListener("paste", (event) => {
++    events.push(event);
++    if (handled) {
++      event.preventDefault();
++    }
++  });
++  return events;
++}
++
++test("both listeners are on the window in the capture phase", () => {
++  expect(page.heard.map(({ type, options }) => ({ type, options }))).toEqual([
++    { type: "mouseup", options: { capture: true, passive: true } },
++    { type: "paste", options: { capture: true } },
++  ]);
++});
++
++test("a trusted paste is cancelled and stopped without its data being read, then the clipboard is read", () => {
++  const event = paste(editor);
++
++  expect(event.preventDefault).toHaveBeenCalledOnce();
++  expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
++  expect(page.reads).toEqual(["clipboard"]);
++});
++
++test("an untrusted paste, the window's own, passes untouched and reads nothing", () => {
++  const event = paste(editor, false);
++
++  expect(event.preventDefault).not.toHaveBeenCalled();
++  expect(event.stopImmediatePropagation).not.toHaveBeenCalled();
++  expect(page.reads).toEqual([]);
++});
++
++test("a paste in the middle button's release task reads the selection; the next task's reads the clipboard", () => {
++  release(1);
++  paste(editor);
++  for (const task of page.tasks.splice(0)) {
++    task();
++  }
++  paste(editor);
++
++  expect(page.reads).toEqual(["primary", "clipboard"]);
++});
++
++test.each([0, 2])("a release of button %i leaves the clipboard", (button) => {
++  release(button);
++  paste(editor);
++
++  expect(page.reads).toEqual(["clipboard"]);
++});
++
++test("the text is pasted again on the still focused target, bubbling and cancelable, as text/plain", async () => {
++  page.document.activeElement = editor;
++  const events = dispatchedOn(line, true);
++  paste(line);
++  await answer("one\ntwo\nthree");
++
++  expect(events).toHaveLength(1);
++  expect(events[0]).toBeInstanceOf(FakeClipboardEvent);
++  expect(events[0]).toMatchObject({ type: "paste", bubbles: true, cancelable: true });
++  expect(page.written).toEqual([["text/plain", "one\ntwo\nthree"]]);
++  expect(page.inserted).toEqual([]);
++});
++
++test.each([
++  ["an input", new FakeInput(body)],
++  ["a textarea", new FakeTextArea(body)],
++])("%s nobody handled gets the text typed in", async (_name, field) => {
++  page.document.activeElement = field;
++  const events = dispatchedOn(field, false);
++  paste(field);
++  await answer("name");
++
++  expect(events).toHaveLength(1);
++  expect(page.inserted).toEqual([["insertText", false, "name"]]);
++});
++
++test("a field that handled the paste, or an element that is no field, gets nothing typed", async () => {
++  const field = new FakeInput(body);
++  page.document.activeElement = field;
++  dispatchedOn(field, true);
++  paste(field);
++  await answer("name");
++  page.document.activeElement = editor;
++  dispatchedOn(editor, false);
++  paste(editor);
++  await answer("text");
++
++  expect(page.written).toEqual([
++    ["text/plain", "name"],
++    ["text/plain", "text"],
++  ]);
++  expect(page.inserted).toEqual([]);
++});
++
++test.each([null, ""])("an answer of %j pastes nothing", async (text) => {
++  page.document.activeElement = editor;
++  const events = dispatchedOn(editor, false);
++  paste(editor);
++  await answer(text);
++
++  expect(events).toEqual([]);
++  expect(page.written).toEqual([]);
++});
++
++test("a target that lost the focus before the answer gets nothing", async () => {
++  const field = new FakeInput(body);
++  page.document.activeElement = field;
++  const events = dispatchedOn(field, false);
++  paste(field);
++  page.document.activeElement = editor;
++  await answer("late");
++
++  expect(events).toEqual([]);
++  expect(page.inserted).toEqual([]);
++});
++
++test("a failed read pastes nothing", async () => {
++  page.document.activeElement = editor;
++  const events = dispatchedOn(editor, false);
++  paste(editor);
++  page.answers.at(-1)?.reject(new Error("command missing"));
++  await Promise.resolve();
++
++  expect(events).toEqual([]);
++});
+diff --git i/frontend/src/ui/linuxPaste.ts w/frontend/src/ui/linuxPaste.ts
+new file mode 100644
+index 0000000..263ba36
+--- /dev/null
++++ w/frontend/src/ui/linuxPaste.ts
+@@ -0,0 +1,69 @@
++import { log, type ClipboardSelection } from "../ipc";
++import { unexpected } from "./problem";
++
++type ReadClipboard = (selection: ClipboardSelection) => Promise<string | null>;
++
++const MIDDLE_BUTTON = 1;
++
++export function takeLinuxPastes(target: Window, read: ReadClipboard): void {
++  const afterMiddleRelease = middleReleases(target);
++  // WebKitGTK 2.54 crashes reading a pasteboard whose formats GTK cannot list (bug 324466); a cancelled
++  // `paste` event stops every paste before that read (Editor.cpp:1660-1666, 1676-1681).
++  target.addEventListener(
++    "paste",
++    (event) => {
++      if (!event.isTrusted) {
++        return;
++      }
++      event.preventDefault();
++      event.stopImmediatePropagation();
++      const pasted = event.target;
++      if (!(pasted instanceof Node)) {
++        return;
++      }
++      read(afterMiddleRelease() ? "primary" : "clipboard").then(
++        (text) => {
++          deliver(target.document, pasted, text);
++        },
++        (error: unknown) => {
++          log.warn("paste.read_failed", { ...unexpected(error) });
++        },
++      );
++    },
++    { capture: true },
++  );
++}
++
++// WebKit pastes the selection on a middle release right after dispatching its `mouseup`, in the same
++// task (EventHandler.cpp:1325-1340, 2636-2638 at webkitgtk-2.54.1).
++function middleReleases(target: Window): () => boolean {
++  let released = false;
++  target.addEventListener(
++    "mouseup",
++    (event) => {
++      if (event.button !== MIDDLE_BUTTON) {
++        return;
++      }
++      released = true;
++      target.setTimeout(() => {
++        released = false;
++      });
++    },
++    { capture: true, passive: true },
++  );
++  return () => released;
++}
++
++function deliver(document: Document, pasted: Node, text: string | null): void {
++  const focused = document.activeElement?.contains(pasted) ?? false;
++  if (text === null || text === "" || !focused) {
++    return;
++  }
++  const clipboardData = new DataTransfer();
++  clipboardData.setData("text/plain", text);
++  const paste = new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true });
++  const handled = !pasted.dispatchEvent(paste);
++  if (!handled && (pasted instanceof HTMLInputElement || pasted instanceof HTMLTextAreaElement)) {
++    document.execCommand("insertText", false, text);
++  }
++}
+diff --git i/frontend/src/ui/settings.test.ts w/frontend/src/ui/settings.test.ts
+index 658e247..851f584 100644
+--- i/frontend/src/ui/settings.test.ts
++++ w/frontend/src/ui/settings.test.ts
+@@ -98,11 +98,8 @@ function startStored(): StoredSettings {
+ 
+ test("antialiasing is shown on Linux platforms only", () => {
+   expect(showsAntialiasing("Linux x86_64")).toBe(true);
+-  expect(showsAntialiasing("Linux aarch64")).toBe(true);
+   expect(showsAntialiasing("MacIntel")).toBe(false);
+   expect(showsAntialiasing("Win32")).toBe(false);
+-  expect(showsAntialiasing("")).toBe(false);
+-  expect(showsAntialiasing("FreeBSD amd64 Linux")).toBe(false);
+ });
+ 
+ test("before any read the servers entry is empty, and the first load sends it so", async () => {
+diff --git i/frontend/src/ui/settings.ts w/frontend/src/ui/settings.ts
+index d8758a6..d793329 100644
+--- i/frontend/src/ui/settings.ts
++++ w/frontend/src/ui/settings.ts
+@@ -2,6 +2,7 @@ import type { ShallowRef } from "vue";
+ 
+ import {
+   bindingsOf,
++  isLinux,
+   KEY_ACTIONS,
+   keyText,
+   type AddedServer,
+@@ -71,7 +72,7 @@ export function preferencesOf({ theme, keys }: SettingsInUse): Preferences {
+ }
+ 
+ export function showsAntialiasing(platform: string): boolean {
+-  return platform.startsWith("Linux");
++  return isLinux(platform);
+ }
+ 
+ function storedSettings({

@@ -1,0 +1,256 @@
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index cd2bdcc..3246ffc 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -5,8 +5,10 @@ import { computed, onMounted, watch } from "vue";
+ import { useAltHold } from "./altHold";
+ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
++import LanguageServerSettings from "./LanguageServerSettings.vue";
+ import MergeView from "./MergeView.vue";
+ import NoticeBar from "./NoticeBar.vue";
++import { noticeRow } from "./noticeText";
+ import { allResolvedText } from "./operationText";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+@@ -45,6 +47,7 @@ useEventListener(window, "keydown", (event) => {
+ });
+ 
+ const resolvedLine = computed(() => allResolvedText(operation.value));
++const noticeRows = computed(() => notices.value.map((notice) => noticeRow(notice)));
+ 
+ watch(focused, (now) => {
+   if (now) {
+@@ -74,7 +77,7 @@ onMounted(() => {
+       @select="pick"
+     />
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+-      <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
++      <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
+       <ProblemBar
+         v-if="emptyStop.barProblem !== null"
+         :problem="emptyStop.barProblem"
+@@ -102,7 +105,12 @@ onMounted(() => {
+           :shown="sides.path === active && screen.kind === 'files'"
+         />
+         <StopView v-if="emptyStop.stopView !== null" :message="emptyStop.stopView.message" />
+-        <SettingsView v-if="screen.kind === 'settings'" />
++        <SettingsView v-if="screen.kind === 'settings'">
++          <section aria-labelledby="settings-servers">
++            <h3 id="settings-servers" class="mb-2 font-semibold">Language servers</h3>
++            <LanguageServerSettings />
++          </section>
++        </SettingsView>
+         <ServerLogView
+           v-else-if="screen.kind === 'serverLog'"
+           :key="screen.name"
+diff --git a/frontend/src/ui/KeymapList.vue b/frontend/src/ui/KeymapList.vue
+index 4a9c3cd..a19866a 100644
+--- a/frontend/src/ui/KeymapList.vue
++++ b/frontend/src/ui/KeymapList.vue
+@@ -12,7 +12,7 @@ import {
+   type KeymapCommand,
+ } from "./keyText";
+ import { ARROW_STEPS } from "./menuKeys";
+-import { useAppStore } from "./store";
++import { useSettingsStore } from "./settingsStore";
+ import { useDropdownMenu } from "./useDropdownMenu";
+ 
+ type Recording = {
+@@ -21,7 +21,7 @@ type Recording = {
+   readonly initial: Key | null;
+ };
+ 
+-const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useAppStore();
++const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useSettingsStore();
+ const list = useTemplateRef<HTMLDivElement>("list");
+ const menu = useTemplateRef<HTMLUListElement[]>("menu");
+ const {
+diff --git a/frontend/src/ui/NoticeBar.vue b/frontend/src/ui/NoticeBar.vue
+index 5b5289d..2bf041f 100644
+--- a/frontend/src/ui/NoticeBar.vue
++++ b/frontend/src/ui/NoticeBar.vue
+@@ -1,13 +1,10 @@
+ <script setup lang="ts">
+-import { computed } from "vue";
+ import X from "~icons/lucide/x";
+ 
+-import { noticeRow, type Notice } from "./noticeText";
++import type { NoticeRow } from "./noticeText";
+ 
+-const props = defineProps<{ notices: readonly Notice[] }>();
++defineProps<{ rows: readonly NoticeRow[] }>();
+ const emit = defineEmits<{ close: [key: string] }>();
+-
+-const rows = computed(() => props.notices.map((notice) => noticeRow(notice)));
+ </script>
+ 
+ <template>
+diff --git a/frontend/src/ui/SettingsButton.vue b/frontend/src/ui/SettingsButton.vue
+index 176255f..4d1bcc5 100644
+--- a/frontend/src/ui/SettingsButton.vue
++++ b/frontend/src/ui/SettingsButton.vue
+@@ -1,9 +1,9 @@
+ <script setup lang="ts">
+ import Settings from "~icons/lucide/settings";
+ 
+-import { useAppStore } from "./store";
++import { useSettingsStore } from "./settingsStore";
+ 
+-const { openSettings } = useAppStore();
++const { openSettings } = useSettingsStore();
+ </script>
+ 
+ <template>
+diff --git a/frontend/src/ui/SettingsView.vue b/frontend/src/ui/SettingsView.vue
+index 3c2b8f9..8b105b6 100644
+--- a/frontend/src/ui/SettingsView.vue
++++ b/frontend/src/ui/SettingsView.vue
+@@ -5,9 +5,8 @@ import ArrowLeft from "~icons/lucide/arrow-left";
+ import type { Antialiasing, Theme } from "../ipc";
+ import ChoiceButtons from "./ChoiceButtons.vue";
+ import KeymapList from "./KeymapList.vue";
+-import LanguageServerSettings from "./LanguageServerSettings.vue";
+ import { showsAntialiasing } from "./settings";
+-import { useAppStore } from "./store";
++import { useSettingsStore } from "./settingsStore";
+ 
+ const THEMES: readonly { readonly value: Theme; readonly label: string }[] = [
+   { value: "dark", label: "Dark" },
+@@ -20,7 +19,7 @@ const ANTIALIASINGS: readonly { readonly value: Antialiasing; readonly label: st
+ ];
+ const ON_LINUX = showsAntialiasing(navigator.platform);
+ 
+-const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useAppStore();
++const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useSettingsStore();
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const pathText = shallowRef("");
+ const focusedBefore = document.activeElement;
+@@ -91,10 +90,7 @@ async function moveToDefault(): Promise<void> {
+         <h3 id="settings-keymap" class="mb-2 font-semibold">Keymap</h3>
+         <KeymapList />
+       </section>
+-      <section aria-labelledby="settings-servers">
+-        <h3 id="settings-servers" class="mb-2 font-semibold">Language servers</h3>
+-        <LanguageServerSettings />
+-      </section>
++      <slot />
+       <section aria-labelledby="settings-file">
+         <h3 id="settings-file" class="mb-2 font-semibold">Settings file</h3>
+         <form class="flex gap-2" @submit.prevent="moveSettings(pathText)">
+diff --git a/frontend/src/ui/noticeText.ts b/frontend/src/ui/noticeText.ts
+index a3fca9a..198ba61 100644
+--- a/frontend/src/ui/noticeText.ts
++++ b/frontend/src/ui/noticeText.ts
+@@ -17,7 +17,11 @@ export type Notice =
+ 
+ export type DiskNotice = Extract<Notice, { kind: "disk" }>;
+ 
+-type NoticeRow = { readonly key: string; readonly text: string; readonly closeLabel: string };
++export type NoticeRow = {
++  readonly key: string;
++  readonly text: string;
++  readonly closeLabel: string;
++};
+ 
+ function opening({ path, editsDropped, when }: DiskNotice): string {
+   switch (when) {
+diff --git a/frontend/src/ui/settingsStore.test.ts b/frontend/src/ui/settingsStore.test.ts
+new file mode 100644
+index 0000000..c65a5a2
+--- /dev/null
++++ b/frontend/src/ui/settingsStore.test.ts
+@@ -0,0 +1,35 @@
++import { expect, test } from "vitest";
++import { shallowRef } from "vue";
++
++import { startSettings } from "./settings";
++import { registerSettingsStore, useSettingsStore, type SettingsStore } from "./settingsStore";
++
++async function nothing(): Promise<void> {}
++
++function nothingShown(): void {}
++
++function settingsStore(): SettingsStore {
++  return {
++    settings: shallowRef(startSettings("dark")),
++    openSettings: nothingShown,
++    closeSettings: nothingShown,
++    setTheme: nothing,
++    setAntialiasing: nothing,
++    moveSettings: nothing,
++    addKey: nothing,
++    changeKey: nothing,
++    removeKey: nothing,
++    removeAllKeys: nothing,
++    resetKeys: nothing,
++  };
++}
++
++test("the settings view gets the store its window root registered, and nothing before that", () => {
++  expect(() => useSettingsStore()).toThrow(
++    "useSettingsStore() called before registerSettingsStore()",
++  );
++
++  const store = settingsStore();
++  registerSettingsStore(store);
++  expect(useSettingsStore()).toBe(store);
++});
+diff --git a/frontend/src/ui/settingsStore.ts b/frontend/src/ui/settingsStore.ts
+new file mode 100644
+index 0000000..91ab6e1
+--- /dev/null
++++ b/frontend/src/ui/settingsStore.ts
+@@ -0,0 +1,32 @@
++import type { ShallowRef } from "vue";
++
++import type { SettingsActions, SettingsInUse } from "./settings";
++
++export type SettingsStore = Pick<
++  SettingsActions,
++  | "setTheme"
++  | "setAntialiasing"
++  | "moveSettings"
++  | "addKey"
++  | "changeKey"
++  | "removeKey"
++  | "removeAllKeys"
++  | "resetKeys"
++> & {
++  readonly settings: Readonly<ShallowRef<SettingsInUse>>;
++  openSettings(): void;
++  closeSettings(): void;
++};
++
++let registered: SettingsStore | null = null;
++
++export function registerSettingsStore(store: SettingsStore): void {
++  registered = store;
++}
++
++export function useSettingsStore(): SettingsStore {
++  if (registered === null) {
++    throw new Error("useSettingsStore() called before registerSettingsStore()");
++  }
++  return registered;
++}
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index ac51745..ed1ad7c 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -34,6 +34,7 @@ import { createServers, type Servers } from "./servers";
+ import { createServerSetup, type ServerSetup } from "./serverSetup";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+ import type { SettingsActions, SettingsInUse } from "./settings";
++import { registerSettingsStore } from "./settingsStore";
+ import type { Taken } from "./sides";
+ import { nextStop, type StopEnd } from "./stops";
+ import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
+@@ -185,6 +186,7 @@ export function createAppStore(
+     ...createServers(refs.screen, servers),
+     ...createServerSetup({ ...state, ...acts, host, servers }),
+   };
++  registerSettingsStore(store);
+   return store;
+ }
+ 

@@ -1,0 +1,898 @@
+diff --git a/frontend/src/editor/internal/columnBytes.test.ts b/frontend/src/editor/internal/columnBytes.test.ts
+new file mode 100644
+index 0000000..e7d4a34
+--- /dev/null
++++ b/frontend/src/editor/internal/columnBytes.test.ts
+@@ -0,0 +1,50 @@
++import { EditorState } from "@codemirror/state";
++import { expect, test, vi } from "vitest";
++
++import { columnLimit, utf8Length } from "./columnBytes";
++
++const EURO = "€";
++
++function column(doc: string, limit: number): { state: EditorState; refused: () => void } {
++  const refused = vi.fn<() => void>();
++  return { state: EditorState.create({ doc, extensions: columnLimit(limit, refused) }), refused };
++}
++
++test("utf8Length counts what TextEncoder writes, for one- to four-byte characters and a lone surrogate", () => {
++  const encoder = new TextEncoder();
++  for (const text of ["", "abc", "é", EURO, "😀", "a😀é€\n", "\ud800", "x\udc00y"]) {
++    expect(utf8Length(text)).toBe(encoder.encode(text).length);
++  }
++});
++
++test("a three-byte character that passes the limit is refused and reported", () => {
++  const { state, refused } = column("ab", 4);
++
++  const after = state.update({ changes: { from: 2, insert: EURO } }).state;
++
++  expect(after.doc.toString()).toBe("ab");
++  expect(refused).toHaveBeenCalledOnce();
++});
++
++test("an edit that reaches the limit exactly is accepted; one byte more is refused", () => {
++  const { state, refused } = column("ab", 5);
++
++  const full = state.update({ changes: { from: 2, insert: EURO } }).state;
++  const over = full.update({ changes: { from: 0, insert: "x" } }).state;
++
++  expect(full.doc.toString()).toBe(`ab${EURO}`);
++  expect(over.doc.toString()).toBe(`ab${EURO}`);
++  expect(refused).toHaveBeenCalledOnce();
++});
++
++test("the count follows each change: removed bytes make room, line breaks count one", () => {
++  const { state, refused } = column(`${EURO}\n${EURO}`, 7);
++
++  const replaced = state.update({ changes: { from: 0, to: 1, insert: "ab" } }).state;
++  const filled = replaced.update({ changes: { from: 0, insert: "c" } }).state;
++  const over = filled.update({ changes: { from: 0, insert: "d" } }).state;
++
++  expect(filled.doc.toString()).toBe(`cab\n${EURO}`);
++  expect(over.doc.toString()).toBe(`cab\n${EURO}`);
++  expect(refused).toHaveBeenCalledOnce();
++});
+diff --git a/frontend/src/editor/internal/columnBytes.ts b/frontend/src/editor/internal/columnBytes.ts
+new file mode 100644
+index 0000000..8fe7d5e
+--- /dev/null
++++ b/frontend/src/editor/internal/columnBytes.ts
+@@ -0,0 +1,75 @@
++import {
++  EditorState,
++  StateField,
++  type Extension,
++  type Text,
++  type Transaction,
++} from "@codemirror/state";
++
++const ONE_BYTE_BELOW = 0x80;
++const TWO_BYTES_BELOW = 0x800;
++const HIGH_SURROGATE_FIRST = 0xd800;
++const HIGH_SURROGATE_LAST = 0xdbff;
++const LOW_SURROGATE_FIRST = 0xdc00;
++const LOW_SURROGATE_LAST = 0xdfff;
++const TWO_BYTES = 2;
++const PAIR_BYTES = 4;
++const WIDE_BYTES = 3;
++
++export function utf8Length(text: string): number {
++  let bytes = 0;
++  for (let index = 0; index < text.length; index++) {
++    const code = text.charCodeAt(index);
++    if (code < ONE_BYTE_BELOW) {
++      bytes += 1;
++    } else if (code < TWO_BYTES_BELOW) {
++      bytes += TWO_BYTES;
++    } else if (
++      code >= HIGH_SURROGATE_FIRST &&
++      code <= HIGH_SURROGATE_LAST &&
++      text.charCodeAt(index + 1) >= LOW_SURROGATE_FIRST &&
++      text.charCodeAt(index + 1) <= LOW_SURROGATE_LAST
++    ) {
++      bytes += PAIR_BYTES;
++      index++;
++    } else {
++      bytes += WIDE_BYTES;
++    }
++  }
++  return bytes;
++}
++
++function textBytes(text: Text, from: number, to: number): number {
++  let bytes = 0;
++  for (const iter = text.iterRange(from, to); !iter.next().done;) {
++    bytes += utf8Length(iter.value);
++  }
++  return bytes;
++}
++
++function addedBytes(tr: Transaction): number {
++  let added = 0;
++  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
++    added += textBytes(inserted, 0, inserted.length) - textBytes(tr.startState.doc, fromA, toA);
++  });
++  return added;
++}
++
++export function columnLimit(limit: number, refused: () => void): Extension {
++  const count = StateField.define<number>({
++    create: (state) => textBytes(state.doc, 0, state.doc.length),
++    update: (bytes, tr) => (tr.docChanged ? bytes + addedBytes(tr) : bytes),
++  });
++  const filter = EditorState.transactionFilter.of((tr) => {
++    if (!tr.docChanged) {
++      return tr;
++    }
++    const added = addedBytes(tr);
++    if (added > 0 && tr.startState.field(count) + added > limit) {
++      refused();
++      return [];
++    }
++    return tr;
++  });
++  return [count, filter];
++}
+diff --git a/frontend/src/editor/internal/compareFields.test.ts b/frontend/src/editor/internal/compareFields.test.ts
+new file mode 100644
+index 0000000..d8d4b6d
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFields.test.ts
+@@ -0,0 +1,93 @@
++import { EditorState } from "@codemirror/state";
++import { EditorView } from "@codemirror/view";
++import { expect, test } from "vitest";
++
++import { createFixtureCompareSource, log, type Difference } from "../../ipc";
++import { differenceField, showDifferences } from "./compareFields";
++import { columnMarks } from "./compareMarks";
++
++const LEFT = "a\nold word\nb\n";
++const RIGHT = "a\nnew word\nb\n";
++
++const CASE = {
++  left: LEFT,
++  right: RIGHT,
++  differences: [
++    {
++      left: { start: 1, len: 1 },
++      right: { start: 1, len: 1 },
++      words: {
++        left: { changed: [{ line: 1, start: 0, len: 3 }], removals: [] },
++        right: { changed: [{ line: 1, start: 0, len: 3 }], removals: [] },
++      },
++    },
++  ],
++};
++
++async function differences(): Promise<readonly Difference[]> {
++  const source = createFixtureCompareSource(log, "?raw=case", { "case.json": CASE });
++  const start = await source.openCompare();
++  if (!start.ok) {
++    throw new Error("fixture compare did not open");
++  }
++  const tab = await source.loadTab(start.value.list.shown);
++  if (!tab.ok) {
++    throw new Error("fixture compare lost its tab");
++  }
++  return tab.value.comparison.differences;
++}
++
++async function shown(): Promise<EditorState> {
++  const state = EditorState.create({ doc: LEFT, extensions: differenceField });
++  const marks = columnMarks(state.doc, await differences(), "left");
++  return state.update({ effects: showDifferences.of(marks) }).state;
++}
++
++function typed(state: EditorState, at: number, insert: string): EditorState {
++  return state.update({ changes: { from: at, insert } }).state;
++}
++
++function spanTexts(state: EditorState): string[] {
++  return state.field(differenceField).spans.map(({ from, to }) => state.sliceDoc(from, to));
++}
++
++function painted(state: EditorState): string[] {
++  const found: string[] = [];
++  for (const source of state.facet(EditorView.decorations)) {
++    if (typeof source !== "function") {
++      source.between(0, state.doc.length, (from, to, decoration) => {
++        const text = from < to ? ` ${state.sliceDoc(from, to)}` : "";
++        found.push(`${state.doc.lineAt(from).number} ${String(decoration.spec.class)}${text}`);
++      });
++    }
++  }
++  return found;
++}
++
++test("typing inside a difference grows it; typing at the start of the next line stays outside", async () => {
++  const start = await shown();
++  const inside = typed(start, LEFT.indexOf("old"), "x");
++  const after = typed(inside, inside.doc.line(3).from, "y");
++
++  expect(spanTexts(inside)).toEqual(["xold word\n"]);
++  expect(spanTexts(after)).toEqual(["xold word\n"]);
++  expect(after.doc.line(3).text).toBe("yb");
++});
++
++test("bands and word marks follow their text through an edit above them", async () => {
++  const state = typed(await shown(), 0, "zz\n");
++
++  expect(painted(state)).toEqual(["3 chunk-modified chunk-band", "3 chunk-word-modified old"]);
++  expect(spanTexts(state)).toEqual(["old word\n"]);
++});
++
++test("a new comparison replaces the spans, bands and word marks", async () => {
++  const state = await shown();
++  const cleared = state.update({
++    effects: showDifferences.of(columnMarks(state.doc, [], "left")),
++  }).state;
++
++  expect(painted(state)).toHaveLength(2);
++  expect(cleared.field(differenceField).spans).toEqual([]);
++  expect(painted(cleared)).toEqual([]);
++});
+diff --git a/frontend/src/editor/internal/compareFields.ts b/frontend/src/editor/internal/compareFields.ts
+new file mode 100644
+index 0000000..eecc190
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFields.ts
+@@ -0,0 +1,38 @@
++import { StateEffect, StateField } from "@codemirror/state";
++import { Decoration, EditorView } from "@codemirror/view";
++
++import type { ColumnMarks } from "./compareMarks";
++import { toDocPos } from "./docPos";
++
++export const showDifferences = StateEffect.define<ColumnMarks>();
++
++export const differenceField = StateField.define<ColumnMarks>({
++  create: () => ({ spans: [], bands: Decoration.none, words: Decoration.none }),
++  update(marks, tr) {
++    let shown: ColumnMarks | null = null;
++    for (const effect of tr.effects) {
++      if (effect.is(showDifferences)) {
++        shown = effect.value;
++      }
++    }
++    if (shown !== null) {
++      return shown;
++    }
++    if (!tr.docChanged) {
++      return marks;
++    }
++    return {
++      spans: marks.spans.map(({ from, to, tone }) => ({
++        from: toDocPos(tr.changes.mapPos(from, -1)),
++        to: toDocPos(tr.changes.mapPos(to, -1)),
++        tone,
++      })),
++      bands: marks.bands.map(tr.changes),
++      words: marks.words.map(tr.changes),
++    };
++  },
++  provide: (field) => [
++    EditorView.decorations.from(field, (marks) => marks.bands),
++    EditorView.decorations.from(field, (marks) => marks.words),
++  ],
++});
+diff --git a/frontend/src/editor/internal/compareMarks.test.ts b/frontend/src/editor/internal/compareMarks.test.ts
+new file mode 100644
+index 0000000..b3dd707
+--- /dev/null
++++ b/frontend/src/editor/internal/compareMarks.test.ts
+@@ -0,0 +1,134 @@
++import { Text } from "@codemirror/state";
++import type { DecorationSet } from "@codemirror/view";
++import { expect, test } from "vitest";
++
++import { createFixtureCompareSource, log, type Difference } from "../../ipc";
++import { columnMarks } from "./compareMarks";
++
++const LEFT = "same\nold word!\ngone\nend\n";
++const RIGHT = "same\nnew word\nend\nadded\n";
++
++const CASE = {
++  left: LEFT,
++  right: RIGHT,
++  differences: [
++    {
++      left: { start: 1, len: 1 },
++      right: { start: 1, len: 1 },
++      words: {
++        left: {
++          changed: [
++            { line: 1, start: 0, len: 3 },
++            { line: 1, start: 8, len: 1 },
++          ],
++          removals: [],
++        },
++        right: {
++          changed: [{ line: 1, start: 0, len: 3 }],
++          removals: [{ at: { line: 1, column: 8 }, text: "!" }],
++        },
++      },
++    },
++    {
++      left: { start: 2, len: 1 },
++      right: { start: 2, len: 0 },
++      words: { left: { changed: [], removals: [] }, right: { changed: [], removals: [] } },
++    },
++    {
++      left: { start: 4, len: 0 },
++      right: { start: 3, len: 1 },
++      words: { left: { changed: [], removals: [] }, right: { changed: [], removals: [] } },
++    },
++  ],
++};
++
++async function differences(): Promise<readonly Difference[]> {
++  const source = createFixtureCompareSource(log, "?raw=case", { "case.json": CASE });
++  const start = await source.openCompare();
++  if (!start.ok) {
++    throw new Error("fixture compare did not open");
++  }
++  const tab = await source.loadTab(start.value.list.shown);
++  if (!tab.ok) {
++    throw new Error("fixture compare lost its tab");
++  }
++  return tab.value.comparison.differences;
++}
++
++function painted(doc: Text, set: DecorationSet): string[] {
++  const found: string[] = [];
++  set.between(0, doc.length, (from, to, decoration) => {
++    const line = doc.lineAt(from);
++    if (decoration.spec.widget === undefined) {
++      const text = from < to ? ` ${doc.sliceString(from, to)}` : "";
++      found.push(`${line.number} ${String(decoration.spec.class)}${text}`);
++    } else {
++      const className = String(decoration.spec.widget.className);
++      const around = `${doc.sliceString(line.from, from)}|${doc.sliceString(from, line.to)}`;
++      found.push(`${line.number} ${className} ${around}`);
++    }
++  });
++  return found;
++}
++
++test("an empty left side is inserted and an empty right side deleted, in both columns and their bands", async () => {
++  const found = await differences();
++  const left = columnMarks(Text.of(LEFT.split("\n")), found, "left");
++  const right = columnMarks(Text.of(RIGHT.split("\n")), found, "right");
++
++  expect(left.spans.map(({ tone }) => tone)).toEqual(["modified", "deleted", "inserted"]);
++  expect(right.spans.map(({ tone }) => tone)).toEqual(["modified", "deleted", "inserted"]);
++  expect(painted(Text.of(LEFT.split("\n")), left.bands)).toEqual([
++    "2 chunk-modified chunk-band",
++    "3 chunk-deleted chunk-band",
++    "5 chunk-marker-inserted chunk-point-above",
++  ]);
++  expect(painted(Text.of(RIGHT.split("\n")), right.bands)).toEqual([
++    "2 chunk-modified chunk-band",
++    "3 chunk-marker-deleted chunk-point-above",
++    "4 chunk-inserted chunk-band",
++  ]);
++});
++
++test("each column's spans cover its own lines of every difference", async () => {
++  const found = await differences();
++  const left = columnMarks(Text.of(LEFT.split("\n")), found, "left");
++  const right = columnMarks(Text.of(RIGHT.split("\n")), found, "right");
++
++  expect(left.spans.map(({ from, to }) => LEFT.slice(from, to))).toEqual([
++    "old word!\n",
++    "gone\n",
++    "",
++  ]);
++  expect(left.spans.at(-1)?.from).toBe(LEFT.length);
++  expect(right.spans.map(({ from, to }) => RIGHT.slice(from, to))).toEqual([
++    "new word\n",
++    "",
++    "added\n",
++  ]);
++  expect(right.spans[1]?.from).toBe(RIGHT.indexOf("end"));
++});
++
++test("word marks and removal bars sit on their own words in both columns, in the difference's tone", async () => {
++  const found = await differences();
++  const left = Text.of(LEFT.split("\n"));
++  const right = Text.of(RIGHT.split("\n"));
++
++  expect(painted(left, columnMarks(left, found, "left").words)).toEqual([
++    "2 chunk-word-modified old",
++    "2 chunk-word-modified !",
++  ]);
++  expect(painted(right, columnMarks(right, found, "right").words)).toEqual([
++    "2 chunk-word-modified new",
++    "2 chunk-removal chunk-removal-modified new word|",
++  ]);
++});
++
++test("no differences leave a column without spans, bands or marks", () => {
++  const doc = Text.of(LEFT.split("\n"));
++  const marks = columnMarks(doc, [], "left");
++
++  expect(marks.spans).toEqual([]);
++  expect(painted(doc, marks.bands)).toEqual([]);
++  expect(painted(doc, marks.words)).toEqual([]);
++});
+diff --git a/frontend/src/editor/internal/compareMarks.ts b/frontend/src/editor/internal/compareMarks.ts
+new file mode 100644
+index 0000000..13cbfb7
+--- /dev/null
++++ b/frontend/src/editor/internal/compareMarks.ts
+@@ -0,0 +1,34 @@
++import type { Range, Text } from "@codemirror/state";
++import { Decoration, type DecorationSet } from "@codemirror/view";
++
++import type { Column, Difference } from "../../ipc";
++import { bandDecorations } from "./decorations";
++import { toDocPos, type DocPos } from "./docPos";
++import { lineSpan } from "./lineSpan";
++import { changeTone, type ChangeTone } from "./tone";
++import { wordDecorations } from "./words";
++
++export type DiffSpan = { readonly from: DocPos; readonly to: DocPos; readonly tone: ChangeTone };
++export type ColumnMarks = {
++  readonly spans: readonly DiffSpan[];
++  readonly bands: DecorationSet;
++  readonly words: DecorationSet;
++};
++
++export function columnMarks(
++  doc: Text,
++  differences: readonly Difference[],
++  column: Column,
++): ColumnMarks {
++  const spans: DiffSpan[] = [];
++  const words: Range<Decoration>[] = [];
++  for (const difference of differences) {
++    const { from, to } = lineSpan(doc, difference[column]);
++    const tone = changeTone(difference.left.len, difference.right.len);
++    spans.push({ from: toDocPos(from), to: toDocPos(to), tone });
++    for (const word of wordDecorations(doc, difference.words[column], tone)) {
++      words.push(word);
++    }
++  }
++  return { spans, bands: bandDecorations(doc, spans), words: Decoration.set(words, true) };
++}
+diff --git a/frontend/src/editor/internal/compareNavigation.test.ts b/frontend/src/editor/internal/compareNavigation.test.ts
+new file mode 100644
+index 0000000..39841a0
+--- /dev/null
++++ b/frontend/src/editor/internal/compareNavigation.test.ts
+@@ -0,0 +1,31 @@
++import { expect, test } from "vitest";
++
++import type { DiffSpan } from "./compareMarks";
++import { nextDifference } from "./compareNavigation";
++import { toDocPos } from "./docPos";
++
++const FIRST: DiffSpan = { from: toDocPos(5), to: toDocPos(15), tone: "modified" };
++const SECOND: DiffSpan = { from: toDocPos(15), to: toDocPos(20), tone: "deleted" };
++const LAST: DiffSpan = { from: toDocPos(24), to: toDocPos(24), tone: "inserted" };
++const SPANS = [FIRST, SECOND, LAST];
++
++test("down goes to the first difference starting after the cursor", () => {
++  expect(nextDifference(SPANS, toDocPos(0), "down")).toBe(FIRST);
++  expect(nextDifference(SPANS, toDocPos(5), "down")).toBe(SECOND);
++  expect(nextDifference(SPANS, toDocPos(10), "down")).toBe(SECOND);
++  expect(nextDifference(SPANS, toDocPos(15), "down")).toBe(LAST);
++});
++
++test("up goes to the last difference ending before the cursor, never the one the cursor is in", () => {
++  expect(nextDifference(SPANS, toDocPos(24), "up")).toBe(SECOND);
++  expect(nextDifference(SPANS, toDocPos(18), "up")).toBe(FIRST);
++  expect(nextDifference(SPANS, toDocPos(15), "up")).toBe(FIRST);
++  expect(nextDifference(SPANS, toDocPos(30), "up")).toBe(LAST);
++});
++
++test("past the last or before the first difference there is nowhere to go: no wrap", () => {
++  expect(nextDifference(SPANS, toDocPos(24), "down")).toBeNull();
++  expect(nextDifference(SPANS, toDocPos(5), "up")).toBeNull();
++  expect(nextDifference(SPANS, toDocPos(10), "up")).toBeNull();
++  expect(nextDifference([], toDocPos(0), "down")).toBeNull();
++});
+diff --git a/frontend/src/editor/internal/compareNavigation.ts b/frontend/src/editor/internal/compareNavigation.ts
+new file mode 100644
+index 0000000..05cc8ec
+--- /dev/null
++++ b/frontend/src/editor/internal/compareNavigation.ts
+@@ -0,0 +1,20 @@
++import type { DiffSpan } from "./compareMarks";
++import type { DocPos } from "./docPos";
++import type { Direction } from "./navigation";
++
++export function nextDifference(
++  spans: readonly DiffSpan[],
++  cursor: DocPos,
++  direction: Direction,
++): DiffSpan | null {
++  switch (direction) {
++    case "down":
++      return spans.find((span) => span.from > cursor) ?? null;
++    case "up":
++      return spans.findLast((span) => span.from < cursor && span.to <= cursor) ?? null;
++    default: {
++      const _exhaustive: never = direction;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/compareSettle.test.ts b/frontend/src/editor/internal/compareSettle.test.ts
+new file mode 100644
+index 0000000..5050d43
+--- /dev/null
++++ b/frontend/src/editor/internal/compareSettle.test.ts
+@@ -0,0 +1,116 @@
++import { expect, test, vi } from "vitest";
++
++import {
++  createFixtureCompareSource,
++  log,
++  nextColumnVersion,
++  type Column,
++  type ColumnVersions,
++} from "../../ipc";
++import { SETTLE_PAUSE_MS, Settle, type Timers } from "./compareSettle";
++
++type FakeTimers = {
++  readonly timers: Timers;
++  readonly advance: (ms: number) => void;
++  readonly pending: () => number;
++};
++
++function fakeTimers(): FakeTimers {
++  let now = 0;
++  let nextId = 1;
++  const due = new Map<number, { readonly at: number; readonly run: () => void }>();
++  return {
++    timers: {
++      set: (run, ms) => {
++        const id = nextId++;
++        due.set(id, { at: now + ms, run });
++        return id;
++      },
++      clear: (id) => {
++        due.delete(id);
++      },
++    },
++    advance: (ms) => {
++      now += ms;
++      for (const [id, timer] of due) {
++        if (timer.at <= now) {
++          due.delete(id);
++          timer.run();
++        }
++      }
++    },
++    pending: () => due.size,
++  };
++}
++
++async function startVersions(): Promise<ColumnVersions> {
++  const source = createFixtureCompareSource(log, "", {});
++  const start = await source.openCompare();
++  if (!start.ok) {
++    throw new Error("fixture compare did not open");
++  }
++  const tab = await source.loadTab(start.value.list.shown);
++  if (!tab.ok) {
++    throw new Error("fixture compare lost its tab");
++  }
++  return tab.value.comparison.versions;
++}
++
++test("one settle after the pause, with exactly the columns edited since the last one", async () => {
++  const fake = fakeTimers();
++  const settled = vi.fn<(columns: readonly Column[]) => void>();
++  const settle = new Settle(await startVersions(), settled, fake.timers);
++
++  settle.edited("left");
++  fake.advance(SETTLE_PAUSE_MS - 1);
++  settle.edited("left");
++  fake.advance(SETTLE_PAUSE_MS - 1);
++  expect(settled).not.toHaveBeenCalled();
++  fake.advance(1);
++  expect(settled.mock.calls).toEqual([[["left"]]]);
++
++  settle.edited("right");
++  fake.advance(SETTLE_PAUSE_MS);
++  expect(settled.mock.calls).toEqual([[["left"]], [["right"]]]);
++});
++
++test("an edit raises only its own column's version; a reply with an old right version is refused", async () => {
++  const start = await startVersions();
++  const settle = new Settle(start, () => {}, fakeTimers().timers);
++
++  settle.edited("right");
++
++  expect(settle.versions()).toEqual({ left: start.left, right: nextColumnVersion(start.right) });
++  expect(settle.accepts(start)).toBe(false);
++  expect(settle.accepts({ left: start.left, right: nextColumnVersion(start.right) })).toBe(true);
++  expect(
++    settle.accepts({ left: nextColumnVersion(start.left), right: settle.versions().right }),
++  ).toBe(false);
++});
++
++test("settleNow hands over the edited columns and cancels the pause", async () => {
++  const fake = fakeTimers();
++  const settled = vi.fn<(columns: readonly Column[]) => void>();
++  const settle = new Settle(await startVersions(), settled, fake.timers);
++
++  settle.edited("right");
++  settle.edited("left");
++
++  expect(settle.settleNow()).toEqual(["left", "right"]);
++  expect(fake.pending()).toBe(0);
++  expect(settle.settleNow()).toEqual([]);
++  fake.advance(SETTLE_PAUSE_MS);
++  expect(settled).not.toHaveBeenCalled();
++});
++
++test("destroy cancels the pause and forgets the edits", async () => {
++  const fake = fakeTimers();
++  const settled = vi.fn<(columns: readonly Column[]) => void>();
++  const settle = new Settle(await startVersions(), settled, fake.timers);
++
++  settle.edited("left");
++  settle.destroy();
++
++  expect(fake.pending()).toBe(0);
++  expect(settle.settleNow()).toEqual([]);
++});
+diff --git a/frontend/src/editor/internal/compareSettle.ts b/frontend/src/editor/internal/compareSettle.ts
+new file mode 100644
+index 0000000..d7968b0
+--- /dev/null
++++ b/frontend/src/editor/internal/compareSettle.ts
+@@ -0,0 +1,81 @@
++import { nextColumnVersion, type Column, type ColumnVersions } from "../../ipc";
++
++export const SETTLE_PAUSE_MS = 300;
++
++const COLUMNS = ["left", "right"] as const satisfies readonly Column[];
++
++export type Timers = {
++  readonly set: (run: () => void, ms: number) => number;
++  readonly clear: (id: number) => void;
++};
++
++const SYSTEM_TIMERS: Timers = {
++  set: (run, ms) => globalThis.setTimeout(run, ms),
++  clear: (id) => globalThis.clearTimeout(id),
++};
++
++export class Settle {
++  #versions: ColumnVersions;
++  readonly #settled: (columns: readonly Column[]) => void;
++  readonly #timers: Timers;
++  readonly #edited = new Set<Column>();
++  #timer: number | null = null;
++
++  constructor(
++    versions: ColumnVersions,
++    settled: (columns: readonly Column[]) => void,
++    timers: Timers = SYSTEM_TIMERS,
++  ) {
++    this.#versions = versions;
++    this.#settled = settled;
++    this.#timers = timers;
++  }
++
++  edited(column: Column): void {
++    const { left, right } = this.#versions;
++    this.#versions =
++      column === "left"
++        ? { left: nextColumnVersion(left), right }
++        : { left, right: nextColumnVersion(right) };
++    this.#edited.add(column);
++    this.#cancel();
++    this.#timer = this.#timers.set(() => {
++      this.#timer = null;
++      const columns = this.#take();
++      if (columns.length > 0) {
++        this.#settled(columns);
++      }
++    }, SETTLE_PAUSE_MS);
++  }
++
++  versions(): ColumnVersions {
++    return this.#versions;
++  }
++
++  accepts(versions: ColumnVersions): boolean {
++    return versions.left === this.#versions.left && versions.right === this.#versions.right;
++  }
++
++  settleNow(): readonly Column[] {
++    this.#cancel();
++    return this.#take();
++  }
++
++  destroy(): void {
++    this.#cancel();
++    this.#edited.clear();
++  }
++
++  #take(): readonly Column[] {
++    const columns = COLUMNS.filter((column) => this.#edited.has(column));
++    this.#edited.clear();
++    return columns;
++  }
++
++  #cancel(): void {
++    if (this.#timer !== null) {
++      this.#timers.clear(this.#timer);
++      this.#timer = null;
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/decorations.ts b/frontend/src/editor/internal/decorations.ts
+index c2b0ee9..15290ac 100644
+--- a/frontend/src/editor/internal/decorations.ts
++++ b/frontend/src/editor/internal/decorations.ts
+@@ -18,13 +18,13 @@ import type { ChunkState } from "./status";
+ import { paneTone, type Tone } from "./tone";
+ import { sideWordDecorations } from "./words";
+ 
+-type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
++export type Band = { readonly from: number; readonly to: number; readonly tone: Tone };
+ 
+ function pointEdge(line: Line, from: number): "above" | "below" {
+   return line.from === from ? "above" : "below";
+ }
+ 
+-function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
++export function bandDecorations(doc: Text, bands: readonly Band[]): DecorationSet {
+   const builder = new RangeSetBuilder<Decoration>();
+   for (const { from, to, tone } of bands) {
+     let line = doc.lineAt(from);
+diff --git a/frontend/src/editor/internal/lineSpan.ts b/frontend/src/editor/internal/lineSpan.ts
+index cf0bd80..356f541 100644
+--- a/frontend/src/editor/internal/lineSpan.ts
++++ b/frontend/src/editor/internal/lineSpan.ts
+@@ -1,10 +1,8 @@
+ import type { Text } from "@codemirror/state";
+ 
+-import type { Chunk } from "../../ipc";
+-
+ export function lineSpan(
+   doc: Text,
+-  range: Chunk["middle"] | Chunk["local"] | Chunk["remote"],
++  range: { readonly start: number; readonly len: number },
+ ): { from: number; to: number } {
+   const end = range.start + range.len;
+   return {
+diff --git a/frontend/src/editor/internal/tone.test.ts b/frontend/src/editor/internal/tone.test.ts
+index 9257774..43bd7e0 100644
+--- a/frontend/src/editor/internal/tone.test.ts
++++ b/frontend/src/editor/internal/tone.test.ts
+@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import { loadFixture, type Chunk } from "../../ipc";
+ import { PENDING } from "./status";
+-import { chunkTone, paneTone } from "./tone";
++import { changeTone, chunkTone, paneTone } from "./tone";
+ 
+ async function chunkWith(
+   kind: Chunk["kind"],
+@@ -112,3 +112,9 @@ test("paneTone: the Result tints a change while any side still waits, in the Res
+   expect(paneTone(conflict, { local: "applied", remote: "pending" }, "center")).toBe("conflict");
+   expect(paneTone(conflict, { local: "applied", remote: "ignored" }, "center")).toBeNull();
+ });
++
++test("changeTone: lines only on the changed side are inserted, only on the base side deleted, on both modified", () => {
++  expect(changeTone(0, 2)).toBe("inserted");
++  expect(changeTone(3, 0)).toBe("deleted");
++  expect(changeTone(1, 4)).toBe("modified");
++});
+diff --git a/frontend/src/editor/internal/tone.ts b/frontend/src/editor/internal/tone.ts
+index 7712ab7..103bc73 100644
+--- a/frontend/src/editor/internal/tone.ts
++++ b/frontend/src/editor/internal/tone.ts
+@@ -3,6 +3,17 @@ import type { Side } from "./side";
+ import { isResolved, isSideOpen, type ChunkStatus } from "./status";
+ 
+ export type Tone = "inserted" | "modified" | "deleted" | "conflict";
++export type ChangeTone = Exclude<Tone, "conflict">;
++
++export function changeTone(baseLines: number, changedLines: number): ChangeTone {
++  if (baseLines === 0) {
++    return "inserted";
++  }
++  if (changedLines === 0) {
++    return "deleted";
++  }
++  return "modified";
++}
+ 
+ function sideOf(chunk: Chunk, pane: Side | "center"): Side {
+   if (pane !== "center") {
+@@ -15,13 +26,7 @@ export function chunkTone(chunk: Chunk, pane: Side | "center"): Tone {
+   if (chunk.kind === "Conflict") {
+     return "conflict";
+   }
+-  if (chunk.middle.len === 0) {
+-    return "inserted";
+-  }
+-  if (chunk[sideOf(chunk, pane)].len === 0) {
+-    return "deleted";
+-  }
+-  return "modified";
++  return changeTone(chunk.middle.len, chunk[sideOf(chunk, pane)].len);
+ }
+ 
+ export function paneTone(chunk: Chunk, status: ChunkStatus, pane: Side | "center"): Tone | null {
+diff --git a/frontend/src/editor/internal/words.ts b/frontend/src/editor/internal/words.ts
+index 51ce02a..a50c12f 100644
+--- a/frontend/src/editor/internal/words.ts
++++ b/frontend/src/editor/internal/words.ts
+@@ -1,7 +1,7 @@
+ import type { EditorState, Range, Text } from "@codemirror/state";
+ import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
+ 
+-import type { Chunk } from "../../ipc";
++import type { Chunk, SideWords } from "../../ipc";
+ import type { Side } from "./side";
+ import { chunkTone, type Tone } from "./tone";
+ 
+@@ -51,23 +51,31 @@ export function removalAt(state: EditorState, pos: number): string | null {
+   return null;
+ }
+ 
++export function wordDecorations(
++  doc: Text,
++  words: SideWords<number>,
++  tone: Tone,
++): Range<Decoration>[] {
++  const mark = Decoration.mark({ class: `chunk-word-${tone}` });
++  const marks = words.changed.map((range) => {
++    const from = doc.line(range.line + 1).from + range.start;
++    return mark.range(from, from + range.len);
++  });
++  const bars = words.removals.map((removal) =>
++    Decoration.widget({ widget: new RemovalPoint(tone, removal.text) }).range(
++      doc.line(removal.at.line + 1).from + removal.at.column,
++    ),
++  );
++  return [...marks, ...bars];
++}
++
+ export function sideWordDecorations(
+   doc: Text,
+   chunks: readonly Chunk[],
+   side: Side,
+ ): DecorationSet {
+-  const decorations: Range<Decoration>[] = [];
+-  for (const chunk of chunks) {
+-    const tone = chunkTone(chunk, side);
+-    const mark = Decoration.mark({ class: `chunk-word-${tone}` });
+-    for (const range of chunk.words[side].changed) {
+-      const from = doc.line(range.line + 1).from + range.start;
+-      decorations.push(mark.range(from, from + range.len));
+-    }
+-    for (const removal of chunk.words[side].removals) {
+-      const bar = Decoration.widget({ widget: new RemovalPoint(tone, removal.text) });
+-      decorations.push(bar.range(doc.line(removal.at.line + 1).from + removal.at.column));
+-    }
+-  }
++  const decorations = chunks.flatMap((chunk) =>
++    wordDecorations(doc, chunk.words[side], chunkTone(chunk, side)),
++  );
+   return Decoration.set(decorations, true);
+ }
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 70fbf08..c3f7442 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -84,6 +84,7 @@ export {
+ export { createTauriServerHost, createTauriSource } from "./tauri";
+ export { createTauriCompareSource } from "./tauriCompare";
+ export type { ServerHost } from "./ServerHost";
++export type { SideWords } from "./words";
+ 
+ const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
+ 

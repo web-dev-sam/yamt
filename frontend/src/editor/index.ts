@@ -31,6 +31,9 @@ import type { IconPress } from "./internal/stripIcons";
 import { Strips } from "./internal/strips";
 import { visibleLines } from "./internal/viewport";
 
+export { CompareController, FORMAT_LANGUAGES, languageNames } from "./compare";
+export type { ColumnFormat, ColumnText, CompareEvents, FormatReport } from "./compare";
+export type { CompareHosts, CompareOptions } from "./compare";
 export type { Direction } from "./internal/navigation";
 export type { FormatOutcome } from "./internal/format";
 export type { Preferences } from "./internal/pane";
@@ -97,7 +100,8 @@ export class MergeController {
     });
     this.#frame.request();
     if (description !== null && description.support === undefined) {
-      void loadLanguage(description, data.path, this.#views, () => this.#destroyed);
+      const { left, center, right } = this.#views;
+      void loadLanguage(description, data.path, [left, center, right], () => this.#destroyed);
     }
     const result = { path: data.path, readOnly: this.#readOnly };
     this.#server = openResult(options.servers, result, () => this.#views, this.#field);

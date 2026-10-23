@@ -7,6 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `yamt --raw` opens a compare window for any two texts, no repository needed: type or paste into the left and right
+  columns and the differences show with the merge window's colours, word marks and bands, updated as you type, with
+  both columns scrolling together. A second `yamt --raw` while one is open says so and exits.
+  - **Format** lays out JSON and XML in both columns, keeping keys, numbers and entities exactly as written; a column
+    that does not parse says which line, and Ctrl/Cmd+Z undoes a Format.
+  - A **language** drop-down: "Auto" recognises JSON, XML, HTML, PHP and scripts with a `#!` line; any language yamt
+    highlights can be picked.
+  - **Tabs** in the left panel: "+" adds one, a double-click renames it, × closes it (asking first when it holds text);
+    Ctrl/Cmd+B hides the panel.
+  - Tabs, their names, texts and languages and the shown tab are kept between runs, also after a crash.
+
+### Changed
+
+- The operation tag at the bottom of the file list (MERGE, REBASE, …) shows what git is doing, how far it got and the
+  commit message in yamt's own tooltip the moment the pointer is on it, instead of the system's late tooltip.
+
+### Fixed
+
+- On Linux, pasting no longer crashes yamt when the clipboard cannot be read — the program that copied has quit, nothing
+  was ever copied, or it does not answer. Such a paste now pastes nothing (a fault in the system's web engine,
+  WebKitGTK 2.54). A middle-click pastes the selected text everywhere, as in other Linux programs.
+
 ## [0.4.2] - 2026-10-22
 
 ### Added

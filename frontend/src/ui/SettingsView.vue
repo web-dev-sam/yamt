@@ -5,9 +5,8 @@ import ArrowLeft from "~icons/lucide/arrow-left";
 import type { Antialiasing, Theme } from "../ipc";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import KeymapList from "./KeymapList.vue";
-import LanguageServerSettings from "./LanguageServerSettings.vue";
 import { showsAntialiasing } from "./settings";
-import { useAppStore } from "./store";
+import { useSettingsStore } from "./settingsStore";
 
 const THEMES: readonly { readonly value: Theme; readonly label: string }[] = [
   { value: "dark", label: "Dark" },
@@ -20,7 +19,7 @@ const ANTIALIASINGS: readonly { readonly value: Antialiasing; readonly label: st
 ];
 const ON_LINUX = showsAntialiasing(navigator.platform);
 
-const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useAppStore();
+const { settings, closeSettings, setTheme, setAntialiasing, moveSettings } = useSettingsStore();
 const back = useTemplateRef<HTMLButtonElement>("back");
 const pathText = shallowRef("");
 const focusedBefore = document.activeElement;
@@ -91,10 +90,7 @@ async function moveToDefault(): Promise<void> {
         <h3 id="settings-keymap" class="mb-2 font-semibold">Keymap</h3>
         <KeymapList />
       </section>
-      <section aria-labelledby="settings-servers">
-        <h3 id="settings-servers" class="mb-2 font-semibold">Language servers</h3>
-        <LanguageServerSettings />
-      </section>
+      <slot />
       <section aria-labelledby="settings-file">
         <h3 id="settings-file" class="mb-2 font-semibold">Settings file</h3>
         <form class="flex gap-2" @submit.prevent="moveSettings(pathText)">

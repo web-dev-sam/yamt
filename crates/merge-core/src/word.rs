@@ -12,22 +12,24 @@ use crate::line::{
 use crate::line_pairs::{LinePosition, line_pairs};
 use crate::token::{Token, TokenKind, line_tokens};
 
-/// Base text one side removed, and the place in that side where it would sit.
+/// Text the compared-with text has that this side lacks, and the place in this side where it
+/// would sit.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct Removal<L> {
-    /// The zero-width place in the side where the removed text would sit.
+    /// The zero-width place in this side where the missing text would sit.
     pub at: InlinePoint<L>,
-    /// The removed base text, every line break written `\n`; never empty.
+    /// The missing text, every line break written `\n`; never empty.
     pub text: String,
 }
 
-/// One side of a chunk compared with base, line by line.
+/// One side compared with another text, line by line.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 pub struct SideWordChanges<L> {
-    /// Side text that is not in base: sorted by line then start, disjoint, never empty,
-    /// never across a line break.
+    /// Side text that is not in the compared-with text: sorted by line then start, disjoint,
+    /// never empty, never across a line break.
     pub changed: Vec<InlineRange<L>>,
-    /// Base text this side removed with nothing new in its place: sorted by place, at most one per place.
+    /// Compared-with text this side lacks with nothing new in its place: sorted by place, at
+    /// most one per place.
     pub removals: Vec<Removal<L>>,
 }
 
@@ -63,7 +65,7 @@ pub fn word_changes(base: &str, local: &str, remote: &str, chunks: &[Chunk]) -> 
         .collect()
 }
 
-fn side_word_changes<L: Copy + PartialEq>(
+pub(crate) fn side_word_changes<L: Copy + PartialEq>(
     base: &[&str],
     all_side_lines: &[&str],
     side_range: Range<u32>,

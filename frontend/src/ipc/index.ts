@@ -3,10 +3,23 @@ import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
 export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
+export type { CompareSource } from "./CompareSource";
+export type {
+  Column,
+  ColumnVersions,
+  Comparison,
+  Difference,
+  TabEntry,
+  TabLanguage,
+  TabList,
+  TabTexts,
+} from "./compareDomain";
 export type {
   AddedServer,
   Antialiasing,
   Chunk,
+  ClipboardSelection,
+  ColumnVersion,
   ContinueReply,
   DiskChange,
   DiskResult,
@@ -38,15 +51,19 @@ export type {
   SourceResult,
   StartReply,
   StoredSettings,
+  TabId,
   Theme,
   WriteReply,
 } from "./domain";
+export { nextColumnVersion } from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
+export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
 export { createFixtureServerHost } from "./fixtureServers";
 export {
   bindingsOf,
   DEFAULT_KEYS,
   isLetter,
+  isLinux,
   isMac,
   KEY_ACTIONS,
   keyLabel,
@@ -62,8 +79,10 @@ export {
   type KeyProblem,
   type KeysRead,
 } from "./keys";
-export { createTauriServerHost, createTauriSource } from "./tauri";
+export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
+export { createTauriCompareSource } from "./tauriCompare";
 export type { ServerHost } from "./ServerHost";
+export type { SideWords } from "./words";
 
 const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
 

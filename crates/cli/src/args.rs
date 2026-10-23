@@ -26,6 +26,9 @@ pub(crate) enum Command {
     Fixture {
         case_dir: PathBuf,
     },
+    Compare {
+        case_dir: PathBuf,
+    },
 }
 
 pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
@@ -40,6 +43,9 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
         }),
         "golden" => parse_golden(rest),
         "fixture" => Ok(Command::Fixture {
+            case_dir: required_path(rest, "<case-dir>")?,
+        }),
+        "compare" => Ok(Command::Compare {
             case_dir: required_path(rest, "<case-dir>")?,
         }),
         other => Err(usage(format!("unknown command `{other}`"))),

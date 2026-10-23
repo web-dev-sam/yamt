@@ -14,6 +14,7 @@ import {
   toSettingsRead,
   toSides,
   toStartReply,
+  type ClipboardSelection,
   type ProgramFolders,
   type SettingsRead,
   type SourceFailure,
@@ -29,7 +30,7 @@ type CommandResult<T> =
   | { status: "ok"; data: T }
   | { status: "error"; error: SourceFailure | string | number | boolean | null | undefined };
 
-function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+export function toResult<T>(result: CommandResult<T>): SourceResult<T> {
   if (result.status === "ok") {
     return { ok: true, value: result.data };
   }
@@ -44,7 +45,7 @@ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<
   return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
 }
 
-function createTauriSettings(): SettingsSource {
+export function createTauriSettings(): SettingsSource {
   return {
     async loadSettings(current) {
       return toSettingsResult(await commands.loadSettings(current));
@@ -138,6 +139,10 @@ export function createTauriServerHost(): ServerHost {
       commands.findProgram(program, project, foldersDto(folders)),
     projectFiles: (paths) => commands.projectFiles([...paths]),
   };
+}
+
+export function readClipboard(selection: ClipboardSelection): Promise<string | null> {
+  return commands.readClipboard(selection);
 }
 
 function foldersDto(folders: ProgramFolders): ProgramFoldersDto {

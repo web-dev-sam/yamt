@@ -6,13 +6,12 @@ import ListTree from "~icons/lucide/list-tree";
 import type { FileEntry, OperationView } from "../ipc";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
-import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
 import FileMark from "./FileMark.vue";
 import { revealed, treeRows } from "./fileTree";
 import FileTree from "./FileTree.vue";
 import OperationLabel from "./OperationLabel.vue";
-import ResizeDots from "./ResizeDots.vue";
-import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
+import PanelWidthHandle from "./PanelWidthHandle.vue";
+import { usePanelWidth } from "./usePanelWidth";
 
 const props = defineProps<{
   files: readonly FileEntry[];
@@ -23,17 +22,9 @@ const emit = defineEmits<{ select: [path: string] }>();
 
 const list = useTemplateRef<HTMLElement>("list");
 const { mode, toggle } = createFileListMode();
-const { width, setWidth, resetWidth } = createFileListWidth();
-const resize = useColumnDrag({
-  accepts: (event) => event.target === event.currentTarget,
-  press: startResize,
-  reset: resetWidth,
-});
+const { widthStyle, resize } = usePanelWidth(list);
 const closed = shallowRef<ReadonlySet<string>>(new Set());
 
-const widthStyle = computed(() =>
-  width.value === null ? FILE_LIST_BOUNDS : { ...FILE_LIST_BOUNDS, width: `${width.value}px` },
-);
 const rows = computed(() => treeRows(props.files, closed.value));
 const viewButton = computed(() =>
   mode.value === "list"
@@ -50,18 +41,6 @@ watch(
     }
   },
 );
-
-function startResize(): ColumnDrag | null {
-  if (list.value === null) {
-    return null;
-  }
-  const pressWidth = list.value.getBoundingClientRect().width;
-  return {
-    moveBy: (dx) => {
-      setWidth(pressWidth + dx, window.innerWidth);
-    },
-  };
-}
 
 function toggleFolder(path: string): void {
   const next = new Set(closed.value);
@@ -117,15 +96,6 @@ function toggleFolder(path: string): void {
       </li>
     </ul>
     <OperationLabel v-if="operation !== null" :operation="operation" />
-    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
-    <div
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="File list width"
-      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
-      v-on="resize.listeners"
-    >
-      <ResizeDots class="absolute inset-0 m-auto size-fit" :state="resize.dots.value" />
-    </div>
+    <PanelWidthHandle label="File list width" :handle="resize" />
   </aside>
 </template>

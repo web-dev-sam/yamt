@@ -1,20 +1,34 @@
 import { LanguageDescription, type LanguageSupport } from "@codemirror/language";
 import { languages } from "@codemirror/language-data";
+import type { TransactionSpec } from "@codemirror/state";
 
 import { log } from "../../ipc";
-import type { PaneViews } from "./geometry";
 import { languageCompartment } from "./pane";
+
+export type LanguageView = { dispatch(spec: TransactionSpec): void };
+
+const LANGUAGE_NAMES: readonly string[] = languages
+  .map((description) => description.name)
+  .sort((a, b) => a.localeCompare(b));
 
 export function languageOf(path: string): LanguageDescription | null {
   const basename = path.slice(path.lastIndexOf("/") + 1);
   return LanguageDescription.matchFilename(languages, basename);
 }
 
+export function languageNamed(name: string): LanguageDescription | null {
+  return LanguageDescription.matchLanguageName(languages, name, false);
+}
+
+export function languageNames(): readonly string[] {
+  return LANGUAGE_NAMES;
+}
+
 export async function loadLanguage(
   description: LanguageDescription,
   path: string,
-  views: PaneViews,
-  destroyed: () => boolean,
+  views: readonly LanguageView[],
+  stale: () => boolean,
 ): Promise<void> {
   let support: LanguageSupport;
   try {
@@ -24,11 +38,11 @@ export async function loadLanguage(
     log.warn("language.load_failed", { path, language: description.name, reason });
     return;
   }
-  if (destroyed()) {
+  if (stale()) {
     return;
   }
   const effects = languageCompartment.reconfigure(support.language);
-  for (const view of [views.left, views.center, views.right]) {
+  for (const view of views) {
     view.dispatch({ effects });
   }
 }

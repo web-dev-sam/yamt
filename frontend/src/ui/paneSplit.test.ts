@@ -1,7 +1,7 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { createPaneSplit, dragged, EQUAL_SPLIT, paneColumns } from "./paneSplit";
+import { compareColumns, createPaneSplit, dragged, EQUAL_SPLIT, paneColumns } from "./paneSplit";
 
 const KEY = "yamt.panes.split";
 
@@ -202,6 +202,10 @@ test("the choice grid has five tracks with 1px gaps in each pane's minimum", () 
   expect(paneColumns({ local: 0.25, remote: 0.5 }, "gap")).toBe(
     `minmax(${least}, 25fr) 1px minmax(${least}, 25fr) 1px minmax(${least}, 50fr)`,
   );
+});
+
+test("the compare grid has two equal columns around the merge window's 2.5rem strip", () => {
+  expect(compareColumns()).toBe("minmax(0, 1fr) 2.5rem minmax(0, 1fr)");
 });
 
 test("every fr factor is at least 1 at the edges of the valid range", () => {

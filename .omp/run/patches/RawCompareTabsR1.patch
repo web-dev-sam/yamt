@@ -1,0 +1,239 @@
+diff --git a/crates/compare/src/files.rs b/crates/compare/src/files.rs
+index dec24bb..0ef0bd1 100644
+--- a/crates/compare/src/files.rs
++++ b/crates/compare/src/files.rs
+@@ -13,11 +13,15 @@ const LEFT_SUFFIX: &str = "-left.txt";
+ const RIGHT_SUFFIX: &str = "-right.txt";
+ 
+ pub(crate) fn column_path(dir: &Path, tab: TabId, column: Column) -> PathBuf {
++    dir.join(column_file_name(tab, column))
++}
++
++fn column_file_name(tab: TabId, column: Column) -> String {
+     let suffix = match column {
+         Column::Left => LEFT_SUFFIX,
+         Column::Right => RIGHT_SUFFIX,
+     };
+-    dir.join(format!("{}{suffix}", tab.0))
++    format!("{}{suffix}", tab.0)
+ }
+ 
+ /// The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
+@@ -106,7 +110,11 @@ fn column_file_tab(name: &str) -> Option<TabId> {
+     let id = name
+         .strip_suffix(LEFT_SUFFIX)
+         .or_else(|| name.strip_suffix(RIGHT_SUFFIX))?;
+-    id.parse().ok().map(TabId)
++    let tab = TabId(id.parse().ok()?);
++    [Column::Left, Column::Right]
++        .into_iter()
++        .any(|column| column_file_name(tab, column) == name)
++        .then_some(tab)
+ }
+ 
+ pub(crate) fn read_failed(path: &Path, message: String) -> Error {
+@@ -141,5 +149,8 @@ mod tests {
+         assert_eq!(column_file_tab("notes-left.txt"), None);
+         assert_eq!(column_file_tab("3-middle.txt"), None);
+         assert_eq!(column_file_tab("lock"), None);
++        assert_eq!(column_file_tab("03-left.txt"), None);
++        assert_eq!(column_file_tab("+3-left.txt"), None);
++        assert_eq!(column_file_tab("+7-right.txt.tmp"), None);
+     }
+ }
+diff --git a/crates/compare/src/index.rs b/crates/compare/src/index.rs
+index ba71dfe..7076868 100644
+--- a/crates/compare/src/index.rs
++++ b/crates/compare/src/index.rs
+@@ -97,13 +97,23 @@ impl Index {
+             .ok_or(Error::UnknownTab { tab })
+     }
+ 
+-    /// What makes a parsed index unusable: an id repeated, at or above `nextId`, or a shown tab not listed.
++    /// What makes a parsed index unusable: no id or number left for a new tab, an id repeated, at or above
++    /// `nextId`, or a shown tab not listed.
+     fn problem(&self) -> Option<String> {
+         if self.tabs.is_empty() {
+             return Some("`tabs` is empty".to_owned());
+         }
++        if self.next_id.0 == u32::MAX {
++            return Some(format!("`nextId` {} leaves no id for a new tab", u32::MAX));
++        }
+         let mut seen = HashSet::new();
+         for tab in &self.tabs {
++            if tab.number == u32::MAX {
++                return Some(format!(
++                    "the tab number {} leaves no number for a new tab",
++                    u32::MAX
++                ));
++            }
+             if !seen.insert(tab.id) {
+                 return Some(format!("the tab id {} appears twice", tab.id.0));
+             }
+@@ -211,6 +221,25 @@ mod tests {
+         assert_eq!(message, "the tab id 2 is not below `nextId` 2");
+     }
+ 
++    #[test]
++    fn a_next_id_at_u32_max_is_broken_so_a_new_tab_never_overflows() {
++        let message = problem_of(
++            r#"{"format":1,"shown":1,"nextId":4294967295,"tabs":[{"id":1,"number":1,"name":"a","language":{"kind":"auto"}}]}"#,
++        );
++        assert_eq!(message, "`nextId` 4294967295 leaves no id for a new tab");
++    }
++
++    #[test]
++    fn a_tab_number_at_u32_max_is_broken_so_a_new_tab_never_overflows() {
++        let message = problem_of(
++            r#"{"format":1,"shown":1,"nextId":2,"tabs":[{"id":1,"number":4294967295,"name":"a","language":{"kind":"auto"}}]}"#,
++        );
++        assert_eq!(
++            message,
++            "the tab number 4294967295 leaves no number for a new tab"
++        );
++    }
++
+     #[test]
+     fn a_shown_tab_not_listed_is_broken() {
+         let message = problem_of(
+diff --git a/crates/compare/tests/columns.rs b/crates/compare/tests/columns.rs
+index 20f6562..94981d6 100644
+--- a/crates/compare/tests/columns.rs
++++ b/crates/compare/tests/columns.rs
+@@ -204,7 +204,7 @@ fn a_column_over_the_limit_is_too_large_and_nothing_is_written_or_stored() {
+     store
+         .set_column(tab, Column::Left, "kept".to_owned(), ColumnVersion(1))
+         .unwrap();
+-    let over = MAX_COLUMN_BYTES as usize + 1;
++    let over = 8 * 1024 * 1024 + 1;
+     let result = store.set_column(tab, Column::Left, "x".repeat(over), ColumnVersion(2));
+     assert!(matches!(result, Err(Error::TooLarge { bytes }) if bytes == over));
+     assert_eq!(
+@@ -223,16 +223,13 @@ fn a_column_over_the_limit_is_too_large_and_nothing_is_written_or_stored() {
+ fn a_column_exactly_at_the_limit_is_stored() {
+     let dir = tempfile::tempdir().unwrap();
+     let (mut store, tab) = first_tab(dir.path());
+-    let full = "x".repeat(MAX_COLUMN_BYTES as usize);
++    let full = "x".repeat(8 * 1024 * 1024);
+     store
+         .set_column(tab, Column::Right, full, ColumnVersion(1))
+         .unwrap();
+     drop(store);
+     let (mut store, tab) = first_tab(dir.path());
+-    assert_eq!(
+-        texts(&mut store, tab).right.len(),
+-        MAX_COLUMN_BYTES as usize
+-    );
++    assert_eq!(texts(&mut store, tab).right.len(), 8 * 1024 * 1024);
+ }
+ 
+ #[test]
+@@ -265,6 +262,28 @@ fn a_non_utf8_column_file_fails_at_load_and_no_other_call_rewrites_it() {
+     assert!(!column_file(dir.path(), tab, "right").exists());
+ }
+ 
++#[test]
++fn a_column_file_that_cannot_be_read_fails_at_load_and_no_set_column_overwrites_it() {
++    let dir = tempfile::tempdir().unwrap();
++    let (mut store, tab) = first_tab(dir.path());
++    let left = column_file(dir.path(), tab, "left");
++    fs::create_dir(&left).unwrap();
++    let loaded = store.load_tab(tab);
++    assert!(
++        matches!(&loaded, Err(Error::ReadFailed { path, .. }) if *path == left),
++        "{loaded:?}"
++    );
++    for column in [Column::Left, Column::Right] {
++        let result = store.set_column(tab, column, "text".to_owned(), ColumnVersion(1));
++        assert!(
++            matches!(result, Err(Error::ReadFailed { .. })),
++            "{result:?}"
++        );
++    }
++    assert!(left.is_dir());
++    assert!(!column_file(dir.path(), tab, "right").exists());
++}
++
+ #[test]
+ fn holds_text_comes_from_the_file_sizes_before_a_load_and_from_the_texts_after() {
+     let dir = tempfile::tempdir().unwrap();
+diff --git a/crates/compare/tests/opening.rs b/crates/compare/tests/opening.rs
+index e014215..68a8d60 100644
+--- a/crates/compare/tests/opening.rs
++++ b/crates/compare/tests/opening.rs
+@@ -5,7 +5,7 @@ use std::fs;
+ use std::path::Path;
+ 
+ use serde_json::{Value, json};
+-use yamt_compare::{Error, MAX_COLUMN_BYTES, TabId, TabLanguage, TabStore};
++use yamt_compare::{Error, TabId, TabLanguage, TabStore};
+ 
+ const ONE_TAB: &str = r#"{"format":1,"shown":3,"nextId":4,"tabs":[{"id":3,"number":1,"name":"Compare 1","language":{"kind":"auto"}}]}"#;
+ 
+@@ -35,7 +35,7 @@ fn the_first_open_creates_the_folder_compare_1_and_its_tabs_json() {
+     let dir = home.path().join("yamt").join("compare");
+     let store = TabStore::open(&dir).unwrap();
+     let start = store.start();
+-    assert_eq!(start.column_limit, MAX_COLUMN_BYTES);
++    assert_eq!(start.column_limit, 8 * 1024 * 1024);
+     assert_eq!(start.list.tabs.len(), 1);
+     let tab = &start.list.tabs[0];
+     assert_eq!((tab.id, tab.name.as_str()), (TabId(1), "Compare 1"));
+@@ -112,6 +112,22 @@ fn format_2_is_newer_format_and_nothing_in_the_folder_changes() {
+     assert_eq!(files_in(dir.path()), before);
+ }
+ 
++#[test]
++fn a_tabs_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes() {
++    let dir = tempfile::tempdir().unwrap();
++    let index = dir.path().join("tabs.json");
++    fs::create_dir(&index).unwrap();
++    let column = dir.path().join("7-left.txt");
++    fs::write(&column, "kept").unwrap();
++    let result = TabStore::open(dir.path());
++    assert!(
++        matches!(&result, Err(Error::ReadFailed { path, .. }) if *path == index),
++        "{result:?}"
++    );
++    assert_eq!(names_in(dir.path()), ["7-left.txt", "tabs.json"]);
++    assert_eq!(fs::read_to_string(&column).unwrap(), "kept");
++}
++
+ #[test]
+ fn a_second_open_while_the_first_lives_is_locked_and_opens_after_it_is_dropped() {
+     let dir = tempfile::tempdir().unwrap();
+diff --git a/crates/compare/tests/tabs.rs b/crates/compare/tests/tabs.rs
+index 1acf473..85912e5 100644
+--- a/crates/compare/tests/tabs.rs
++++ b/crates/compare/tests/tabs.rs
+@@ -148,6 +148,30 @@ fn closing_a_tab_deletes_both_its_column_files() {
+     assert!(!index.contains("Compare 2"));
+ }
+ 
++#[test]
++fn a_failed_index_write_at_close_keeps_the_tab_and_both_its_column_files() {
++    let dir = tempfile::tempdir().unwrap();
++    let mut store = TabStore::open(dir.path()).unwrap();
++    let closed = store.add_tab().unwrap().shown;
++    let columns =
++        ["left", "right"].map(|column| dir.path().join(format!("{}-{column}.txt", closed.0)));
++    for column in &columns {
++        fs::write(column, "text").unwrap();
++    }
++    let temp = dir.path().join("tabs.json.tmp");
++    fs::create_dir(&temp).unwrap();
++    fs::write(temp.join("in the way"), "").unwrap();
++    let result = store.close_tab(closed);
++    assert!(
++        matches!(&result, Err(Error::WriteFailed { path, .. }) if *path == dir.path().join("tabs.json")),
++        "{result:?}"
++    );
++    for column in &columns {
++        assert_eq!(fs::read_to_string(column).unwrap(), "text");
++    }
++    assert!(store.start().list.tabs.iter().any(|tab| tab.id == closed));
++}
++
+ #[test]
+ fn rename_trims_the_name() {
+     let dir = tempfile::tempdir().unwrap();

@@ -12,7 +12,7 @@ import {
   type KeymapCommand,
 } from "./keyText";
 import { ARROW_STEPS } from "./menuKeys";
-import { useAppStore } from "./store";
+import { useSettingsStore } from "./settingsStore";
 import { useDropdownMenu } from "./useDropdownMenu";
 
 type Recording = {
@@ -21,7 +21,7 @@ type Recording = {
   readonly initial: Key | null;
 };
 
-const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useAppStore();
+const { settings, addKey, changeKey, removeKey, removeAllKeys, resetKeys } = useSettingsStore();
 const list = useTemplateRef<HTMLDivElement>("list");
 const menu = useTemplateRef<HTMLUListElement[]>("menu");
 const {

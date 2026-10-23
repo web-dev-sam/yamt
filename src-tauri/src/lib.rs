@@ -1,9 +1,12 @@
-//! Desktop shell: one window over a `MergeSession`; the exit status says whether the merge is resolved.
+//! Desktop shell: one window over a `MergeSession`, whose exit status says whether the merge is resolved, or
+//! with `--raw` one compare window over the stored tabs.
 
 #[cfg(target_os = "linux")]
 mod appimage;
 mod args;
+mod clipboard;
 mod commands;
+mod compare;
 #[cfg(target_os = "linux")]
 mod font_rendering;
 mod frontend_log;
@@ -44,6 +47,7 @@ pub fn run() -> ExitCode {
             println!("yamt {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
+        Ok(Invocation::Compare) => window::run_compare().report(),
         Ok(Invocation::Merge { repo }) => {
             #[cfg(target_os = "linux")]
             let repo = appimage::repo_from_start_dir(repo);

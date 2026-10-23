@@ -31,8 +31,9 @@ type StartApp = Extract<Command, { kind: "start-app" }>;
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
-  readonly repoDir: string;
+  readonly repoDir: string | null;
   readonly binary: string;
+  readonly args: readonly string[];
 };
 
 const DISPLAY_READY_MS = 10_000;
@@ -73,13 +74,16 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     mkdirSync(join(configDir, "yamt"), { recursive: true });
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
-  const repoDir = command.repo.kind === "dir" ? fromRoot(command.repo.dir) : join(folder, "repo");
-  if (command.repo.kind === "fresh") {
+  if (command.opens.kind === "raw") {
+    return { home, configDir, repoDir: null, binary, args: ["--raw"] };
+  }
+  const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
+  if (command.opens.kind === "fresh") {
     execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {
       stdio: ["ignore", "ignore", "pipe"],
     });
   }
-  return { home, configDir, repoDir, binary };
+  return { home, configDir, repoDir, binary, args: ["--repo", repoDir] };
 }
 
 function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
@@ -181,7 +185,7 @@ async function appSteps(
     next = recorder.state;
     await waitForRecording(logDir);
   }
-  const options = { application: prepared.binary, args: ["--repo", prepared.repoDir] };
+  const options = { application: prepared.binary, args: prepared.args };
   next = save({
     ...next,
     session: await newSession(next.driverPort, { "tauri:options": options }),

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { useEventListener } from "@vueuse/core";
 import { computed, onUnmounted, useTemplateRef, watch } from "vue";
 
 import { pressesKey, type FileMergeData, type Side } from "../ipc";
@@ -9,6 +8,7 @@ import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSid
 import MergeToolbar from "./MergeToolbar.vue";
 import OperationButtons from "./OperationButtons.vue";
 import PaneDivider from "./PaneDivider.vue";
+import PaneFrame from "./PaneFrame.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
@@ -82,8 +82,6 @@ const work: FileWork = { unsaved: () => unsaved.value };
 if (props.data.deleted === null) {
   track(props.data.path, work);
 }
-useEventListener(window, "keydown", historyKeyInShownFile);
-useEventListener(window, "keydown", saveKeyInShownFile);
 const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
 
 const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
@@ -161,16 +159,9 @@ function markResolved(): void {
   }
 }
 
-function historyKeyInShownFile(event: KeyboardEvent): void {
-  if (props.shown && question.value === null) {
-    historyKey(event);
-  }
-}
-
-function saveKeyInShownFile(event: KeyboardEvent): void {
+function shownKeydown(event: KeyboardEvent): void {
+  historyKey(event);
   if (
-    !props.shown ||
-    question.value !== null ||
     !editable.value ||
     event.defaultPrevented ||
     !pressesKey(event, settings.value.keys.bindings.save, navigator.platform)
@@ -183,32 +174,32 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <div
-    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
-    :class="{ 'invisible [content-visibility:hidden]': !shown }"
+  <PaneFrame
+    :shown="shown"
+    :asking="question !== null"
+    :columns="gridTemplateColumns"
+    @shown-keydown="shownKeydown"
   >
-    <MergeToolbar
-      v-if="editable"
-      :summary="summary"
-      :path="data.path"
-      :problems="problems"
-      @move="moveToChange"
-      @apply-left="applyAllNonConflicting('local')"
-      @apply-right="applyAllNonConflicting('remote')"
-      @undo="undo"
-      @redo="redo"
-      @finish="markResolved"
-    />
-    <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
-      <OperationButtons :abort="true" />
-      <ServerStatus class="ml-auto" :path="null" :problems="null" />
-      <SettingsButton />
-    </header>
-    <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
-    <section
-      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
-      :style="{ gridTemplateColumns }"
-    >
+    <template #header>
+      <MergeToolbar
+        v-if="editable"
+        :summary="summary"
+        :path="data.path"
+        :problems="problems"
+        @move="moveToChange"
+        @apply-left="applyAllNonConflicting('local')"
+        @apply-right="applyAllNonConflicting('remote')"
+        @undo="undo"
+        @redo="redo"
+        @finish="markResolved"
+      />
+      <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
+        <OperationButtons :abort="true" />
+        <ServerStatus class="ml-auto" :path="null" :problems="null" />
+        <SettingsButton />
+      </header>
+    </template>
+    <template #default="{ stripLayer }">
       <div
         v-for="column in columns"
         :key="column.side"
@@ -261,9 +252,9 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
         class="col-start-1 row-start-2 min-h-0 min-w-0"
         :class="{ invisible: data.deleted === 'local' }"
       />
-      <!-- Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
       <div
-        class="col-start-2 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
+        class="col-start-2 row-start-2 cursor-col-resize"
+        :class="stripLayer"
         v-on="dividers.local.listeners"
       >
         <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
@@ -275,7 +266,8 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
       />
       <p v-if="centerLine !== null" class="col-start-3 row-start-2 p-3">{{ centerLine }}</p>
       <div
-        class="col-start-4 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
+        class="col-start-4 row-start-2 cursor-col-resize"
+        :class="stripLayer"
         v-on="dividers.remote.listeners"
       >
         <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
@@ -302,6 +294,6 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
           </button>
         </div>
       </template>
-    </section>
-  </div>
+    </template>
+  </PaneFrame>
 </template>

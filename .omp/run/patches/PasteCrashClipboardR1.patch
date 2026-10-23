@@ -1,0 +1,42 @@
+diff --git i/src-tauri/src/clipboard.rs w/src-tauri/src/clipboard.rs
+index e7f178b..5c25741 100644
+--- i/src-tauri/src/clipboard.rs
++++ w/src-tauri/src/clipboard.rs
+@@ -67,10 +67,36 @@ fn requested_text<R: Runtime>(
+     None
+ }
+ 
+-#[cfg(all(test, target_os = "linux"))]
++#[cfg(test)]
+ mod tests {
+     use super::*;
+ 
++    fn text_read_from(answer: TextAnswer) -> Option<String> {
++        tauri::async_runtime::block_on(text_from(answer))
++    }
++
++    #[test]
++    fn sent_text_comes_back_as_written() {
++        let (sender, answer) = std::sync::mpsc::channel();
++        sender.send(Some("one\ntwo\n".to_owned())).unwrap();
++        assert_eq!(text_read_from(answer), Some("one\ntwo\n".to_owned()));
++    }
++
++    #[test]
++    fn no_text_from_gtk_reads_as_none() {
++        let (sender, answer) = std::sync::mpsc::channel();
++        sender.send(None).unwrap();
++        assert_eq!(text_read_from(answer), None);
++    }
++
++    #[test]
++    fn a_request_dropped_before_gtk_answers_reads_as_none() {
++        let (sender, answer) = std::sync::mpsc::channel::<Option<String>>();
++        drop(sender);
++        assert_eq!(text_read_from(answer), None);
++    }
++
++    #[cfg(target_os = "linux")]
+     #[test]
+     fn each_selection_reads_its_own_gdk_selection() {
+         assert!(selection_atom(ClipboardSelection::Clipboard) == gtk::gdk::SELECTION_CLIPBOARD);

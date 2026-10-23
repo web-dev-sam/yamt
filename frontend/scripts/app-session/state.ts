@@ -26,7 +26,7 @@ export type AppState = Common & {
   readonly kind: "app";
   readonly display: number;
   readonly configDir: string;
-  readonly repoDir: string;
+  readonly repoDir: string | null;
 };
 
 export type FixtureState = Common & { readonly kind: "fixture"; readonly url: string };
@@ -81,7 +81,7 @@ export function parseState(text: string): SessionState {
       kind,
       display: numberField(record, "display"),
       configDir: stringField(record, "configDir"),
-      repoDir: stringField(record, "repoDir"),
+      repoDir: record["repoDir"] === null ? null : stringField(record, "repoDir"),
     };
   }
   if (kind === "fixture") {

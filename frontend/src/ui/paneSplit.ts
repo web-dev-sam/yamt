@@ -38,6 +38,10 @@ export function paneColumns(split: PaneSplit, gutter: Gutter): string {
   return [track(split.local), width, track(center), width, track(split.remote)].join(" ");
 }
 
+export function compareColumns(): string {
+  return `minmax(0, 1fr) ${GUTTER_WIDTH.strip} minmax(0, 1fr)`;
+}
+
 export function dragged(widths: PaneWidths, boundary: Side, dx: number): PaneSplit {
   const total = widths.local + widths.center + widths.remote;
   const least = Math.min(MIN_PANE_PX, total / PANES);

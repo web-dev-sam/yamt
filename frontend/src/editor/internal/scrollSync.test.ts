@@ -1,8 +1,8 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { Span } from "../../connectors";
-import type { Pane } from "./geometry";
-import { anchorsOf, ScrollSync, targets, type Anchor } from "./scrollSync";
+import { PANES, type Pane } from "./geometry";
+import { anchorsOf, ScrollSync, targets as paneTargets, type Anchor } from "./scrollSync";
 
 const LINE_PX = 20;
 
@@ -16,8 +16,13 @@ function row(left: Lines, center: Lines, right: Lines): Record<Pane, Span> {
   return { left: span(left), center: span(center), right: span(right) };
 }
 
-function ends(left: number, center: number, right: number): Anchor {
+function ends(left: number, center: number, right: number): Anchor<Pane> {
   return { left: left * LINE_PX, center: center * LINE_PX, right: right * LINE_PX };
+}
+
+function targets(anchors: readonly Anchor<Pane>[], source: Pane, y: number): Anchor<Pane> {
+  const at = paneTargets(anchors, source, y);
+  return { left: at("left"), center: at("center"), right: at("right") };
 }
 
 test("without chunks every pane follows line for line", () => {
@@ -153,7 +158,7 @@ test("follow('center') makes the next sync write both sides though the middle di
   vi.stubGlobal("cancelAnimationFrame", () => {});
   const views = { left: fakePane(0), center: fakePane(0), right: fakePane(0) };
   let requested = 0;
-  const sync = new ScrollSync(views, () => {
+  const sync = new ScrollSync(views, PANES, () => {
     requested += 1;
   });
   const anchors = anchorsOf([], ends(100, 100, 100));
@@ -178,4 +183,30 @@ test("follow('center') makes the next sync write both sides though the middle di
   scrolled(views.left, 500);
   sync.sync(anchors);
   expect(tops(views)).toEqual([500, 300, 300]);
+});
+
+test("two columns follow each other through their difference's anchors, the source left where it was", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  const sync = new ScrollSync(views, ["left", "right"], () => {});
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 5 * LINE_PX, right: 5 * LINE_PX },
+    { left: 10 * LINE_PX, right: 17 * LINE_PX },
+    { left: 20 * LINE_PX, right: 27 * LINE_PX },
+  ];
+
+  scrolled(views.left, 50);
+  sync.sync(anchors);
+  const leftLed = [views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop];
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+  scrolled(views.right, 300);
+  sync.sync(anchors);
+
+  expect(leftLed).toEqual([50, 120]);
+  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([160, 300]);
 });

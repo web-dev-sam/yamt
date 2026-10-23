@@ -262,3 +262,99 @@ test("lsp importing ipc's index and its own internal/ violates nothing", () => {
 
   expect(violationsOf(files)).toEqual([]);
 });
+
+test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {
+  const files = [
+    { path: "src/ui/compareStore.ts", text: `import { useAppStore } from "./store";` },
+    {
+      path: "src/ui/CompareApp.vue",
+      text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/CompareTabList.vue",
+      text: `<script setup lang="ts">\nimport "./store.ts";\n</script>`,
+    },
+    {
+      path: "src/ui/CompareLanguagePicker.vue",
+      text: `<script setup lang="ts">\nimport "../lsp";\n</script>`,
+    },
+    { path: "src/ui/useCompareController.ts", text: `import type { X } from "../lsp/index.ts";` },
+    { path: "src/ui/useCompareFormat.test.ts", text: `import "./store";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM7", file: "src/ui/compareStore.ts", specifier: "./store" },
+    { rule: "PM7", file: "src/ui/CompareApp.vue", specifier: "./App.vue" },
+    { rule: "PM7", file: "src/ui/CompareTabList.vue", specifier: "./store.ts" },
+    { rule: "PM7", file: "src/ui/CompareLanguagePicker.vue", specifier: "../lsp" },
+    { rule: "PM7", file: "src/ui/useCompareController.ts", specifier: "../lsp/index.ts" },
+    { rule: "PM7", file: "src/ui/useCompareFormat.test.ts", specifier: "./store" },
+  ]);
+});
+
+test("merge files importing the store and compare files importing their own neighbours violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/MergeView.vue",
+      text: `<script setup lang="ts">\nimport "./store";\n</script>`,
+    },
+    { path: "src/ui/compareStore.ts", text: `import "./settingsStore";\nimport "./storeless";` },
+    { path: "src/ui/TabList.vue", text: `<script setup lang="ts">\nimport "./store";\n</script>` },
+    {
+      path: "src/ui/CompareView.vue",
+      text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("reading clipboardData or navigator.clipboard outside ui/linuxPaste.ts violates PM8", () => {
+  const files = [
+    {
+      path: "src/editor/internal/paste.ts",
+      text: `view.dom.addEventListener("paste", (event) => event.clipboardData?.getData("text/plain"));`,
+    },
+    { path: "src/ui/copy.ts", text: `const text = await navigator.clipboard.readText();` },
+    {
+      path: "src/ipc/items.ts",
+      text: `const items = await window.navigator["clipboard"]["read"]();`,
+    },
+    {
+      path: "src/ui/Field.vue",
+      text: `<script setup lang="ts">\nfunction onPaste({ clipboardData }: ClipboardEvent) {}\n</script>`,
+    },
+    { path: "src/lsp/internal/take.ts", text: `const { readText } = navigator.clipboard;` },
+    { path: "src/ui/data.ts", text: `const data = event["clipboardData"];` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM8", file: "src/editor/internal/paste.ts", specifier: "event.clipboardData" },
+    { rule: "PM8", file: "src/ui/copy.ts", specifier: "navigator.clipboard.readText" },
+    { rule: "PM8", file: "src/ipc/items.ts", specifier: `window.navigator["clipboard"]["read"]` },
+    { rule: "PM8", file: "src/ui/Field.vue", specifier: "clipboardData" },
+    { rule: "PM8", file: "src/lsp/internal/take.ts", specifier: "readText" },
+    { rule: "PM8", file: "src/ui/data.ts", specifier: `event["clipboardData"]` },
+  ]);
+  expect(findFenceViolations(files.slice(0, 1)).map(({ reason }) => reason)).toEqual([
+    "only ui/linuxPaste.ts reads the clipboard through WebKit (plan §2 #99)",
+  ]);
+});
+
+test("ui/linuxPaste.ts reading, and writing the clipboard or a paste's data anywhere, violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/linuxPaste.ts",
+      text: `const text = event.clipboardData?.getData("text/plain");`,
+    },
+    { path: "src/ui/ServerMenu.ts", text: `await navigator.clipboard.writeText(command);` },
+    {
+      path: "src/ui/paste.ts",
+      text: `new ClipboardEvent("paste", { clipboardData, bubbles: true });\nconst read = file.read();`,
+    },
+    { path: "src/ui/reader.ts", text: "function f({ readText }: Clipboard) {}" },
+    { path: "src/ui/linuxPaste.test.ts", text: "const data = event.clipboardData;" },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});

@@ -45,7 +45,7 @@ async function fixtureSteps(
   const browser = { binary: MINIBROWSER, args: ["--automation"] };
   const capabilities = { browserName: "MiniBrowser", "webkitgtk:browserOptions": browser };
   const next = save({ ...driver.state, session: await newSession(driverPort, capabilities) });
-  await inSession(next, "POST", "/url", { url });
+  await inSession(next, "POST", "/url", { url: `${url}${command.search}` });
   await inSession(next, "POST", "/window/rect", command.size);
   return next;
 }

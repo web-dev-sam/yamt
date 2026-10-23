@@ -1,0 +1,39 @@
+import { readFile } from "node:fs/promises";
+
+export interface Task {
+  id: number;
+  title: string;
+  done: boolean;
+  due?: Date;
+}
+
+export function parseTasks(text: string): Task[] {
+  const tasks: Task[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") {
+      continue;
+    }
+    const [id, title, done] = trimmed.split(";");
+    tasks.push({
+      id: Number(id),
+      title: title ?? "",
+      done: done === "x",
+    });
+  }
+  return tasks;
+}
+
+export function openTasks(tasks: Task[]): Task[] {
+  return tasks.filter((task) => !task.done);
+}
+
+export function summary(tasks: Task[]): string {
+  const open = openTasks(tasks).length;
+  return `${open} of ${tasks.length} tasks open`;
+}
+
+export async function loadTasks(path: string): Promise<Task[]> {
+  const text = await readFile(path, "utf8");
+  return parseTasks(text);
+}

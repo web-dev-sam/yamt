@@ -1,4 +1,4 @@
-import { bandPath, waveCenterY, waveJoinPath } from "../../connectors";
+import { bandPath, waveCenterY, waveJoinPath, type Span } from "../../connectors";
 import type { Chunk } from "../../ipc";
 import type { ChunkAction } from "./apply";
 import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry";
@@ -68,6 +68,20 @@ export function keepsArrowRow(
   );
 }
 
+export function placedBand(
+  left: Span,
+  right: Span,
+  shifts: { readonly left: number; readonly right: number },
+  size: { readonly width: number; readonly height: number },
+): string | null {
+  const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
+  const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
+  const top = Math.min(onLeft.top, onRight.top);
+  return crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)
+    ? bandPath({ left: onLeft, right: onRight }, size.width)
+    : null;
+}
+
 export function bandPaints(
   { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
   shifts: { readonly left: number; readonly right: number },
@@ -78,13 +92,8 @@ export function bandPaints(
   for (const row of rows) {
     const tone = paneTone(row.chunk, row.status, side);
     if (tone !== null) {
-      const left = row[panes.left];
-      const right = row[panes.right];
-      const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
-      const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
-      const top = Math.min(onLeft.top, onRight.top);
-      if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
-        const d = bandPath({ left: onLeft, right: onRight }, size.width);
+      const d = placedBand(row[panes.left], row[panes.right], shifts, size);
+      if (d !== null) {
         paints.push({ chunk: row.chunk, tone, d });
       }
     }

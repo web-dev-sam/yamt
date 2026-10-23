@@ -1,12 +1,28 @@
 import { expect, test } from "vitest";
 
-import { parseKey, type Key, type SourceFailure } from "../ipc";
+import {
+  createFixtureCompareSource,
+  log,
+  parseKey,
+  type Key,
+  type SourceFailure,
+  type TabId,
+} from "../ipc";
 import type { Problem, ProblemCause } from "./problem";
 import { problemText } from "./problemText";
 
 const PATH = "src/a.ts";
 const SETTINGS = "/home/me/.config/yamt/settings.json";
 const LINUX = "Linux x86_64";
+const TAB = await openedTab();
+
+async function openedTab(): Promise<TabId> {
+  const reply = await createFixtureCompareSource(log, "", {}).openCompare();
+  if (!reply.ok) {
+    throw new Error("the fixture opened no tab");
+  }
+  return reply.value.list.shown;
+}
 
 function onFinish(cause: ProblemCause): Problem {
   return { action: "finish", path: PATH, cause };
@@ -156,6 +172,52 @@ test("an action after an abort says the merge was aborted", () => {
   expect(text({ action: "save", path: PATH, cause: { kind: "MergeAborted" } })).toBe(
     `Could not save ${PATH}: the merge was aborted.`,
   );
+});
+
+test("an unknown compare tab says the tab was closed", () => {
+  expect(text({ action: "list", cause: { kind: "UnknownTab", tab: 3 } })).toBe(
+    "Could not list the conflicted files: that tab was closed.",
+  );
+});
+
+test("a column over the limit names the limit from the reply in MiB", () => {
+  const limit = 8 * 1024 * 1024;
+
+  expect(text({ action: "list", cause: { kind: "ColumnTooLarge", limit } })).toBe(
+    "Could not list the conflicted files: a column holds up to 8 MiB.",
+  );
+  expect(text({ action: "list", cause: { kind: "ColumnTooLarge", limit: limit / 2 } })).toBe(
+    "Could not list the conflicted files: a column holds up to 4 MiB.",
+  );
+});
+
+test("a stopped worker says to try again", () => {
+  expect(text({ action: "list", cause: { kind: "WorkerStopped" } })).toBe(
+    "Could not list the conflicted files: yamt's worker stopped; try again.",
+  );
+});
+
+test.each([
+  [{ action: "tabs" }, "Could not update the tabs: boom"],
+  [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
+  [
+    { action: "saveTab", tab: TAB, column: "left", name: "Compare 2" },
+    "Could not save Compare 2: boom",
+  ],
+] as const)("a failed compare call %o says what failed, naming the tab", (failed, words) => {
+  expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
+});
+
+test("a save to a tab another call closed says the tab was closed", () => {
+  expect(
+    text({
+      action: "saveTab",
+      tab: TAB,
+      column: "right",
+      name: "Compare 2",
+      cause: { kind: "UnknownTab", tab: 2 },
+    }),
+  ).toBe("Could not save Compare 2: that tab was closed.");
 });
 
 test.each([

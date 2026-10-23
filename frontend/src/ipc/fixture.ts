@@ -55,7 +55,7 @@ function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.Gener
   );
 }
 
-const LINE_RANGE = v.object({
+export const LINE_RANGE = v.object({
   start: v.number(),
   len: v.number(),
 } satisfies SchemaOf<Generated.LineRange<number>>);
@@ -84,7 +84,7 @@ const REMOVAL = v.object({
   text: v.string(),
 } satisfies SchemaOf<Generated.Removal<number>>);
 
-const SIDE_WORD_CHANGES = v.object({
+export const SIDE_WORD_CHANGES = v.object({
   changed: v.array(INLINE_RANGE),
   removals: v.array(REMOVAL),
 } satisfies SchemaOf<Generated.SideWordChanges<number>>);
@@ -132,22 +132,29 @@ const FILE_MERGE_DATA = v.object({
   disk_version: v.number(),
 } satisfies SchemaOf<Generated.FileMergeData>);
 
-function parseFixture(file: string, json: unknown): FileMergeData {
-  const parsed = v.safeParse(FILE_MERGE_DATA, json);
+export function parsedFixture<O, T>(
+  schema: v.GenericSchema<unknown, O>,
+  name: string,
+  json: unknown,
+  convert: (parsed: O) => T,
+): T {
+  const parsed = v.safeParse(schema, json);
   if (!parsed.success) {
-    throw new Error(`fixture ${file}: ${v.summarize(parsed.issues)}`);
+    throw new Error(`${name}: ${v.summarize(parsed.issues)}`);
   }
   try {
-    return toDomain(parsed.output);
+    return convert(parsed.output);
   } catch (error) {
-    throw new Error(`fixture ${file}: ${error instanceof Error ? error.message : String(error)}`, {
+    throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`, {
       cause: error,
     });
   }
 }
 
 function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, FileMergeData> {
-  const parsed = Object.entries(files).map(([file, json]) => parseFixture(file, json));
+  const parsed = Object.entries(files).map(([file, json]) =>
+    parsedFixture(FILE_MERGE_DATA, `fixture ${file}`, json, toDomain),
+  );
   parsed.sort((a, b) => a.path.localeCompare(b.path));
   return new Map(parsed.map((data) => [data.path, data]));
 }

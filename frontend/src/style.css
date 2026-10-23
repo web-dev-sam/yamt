@@ -143,6 +143,18 @@
   background-color: var(--color-panel);
 }
 
+@utility hover-tooltip {
+  border: 1px solid var(--color-control-border);
+  border-radius: 4px;
+  background-color: var(--color-panel);
+}
+
+@utility tooltip-text {
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+}
+
 @layer base {
   :root {
     color-scheme: dark;

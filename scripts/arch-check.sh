@@ -34,10 +34,17 @@ if [ -n "$forbidden_in_lsp_host" ]; then
     failed=1
 fi
 
+compare_deps=$(normal_deps yamt-compare)
+forbidden_in_compare=$(grep -E '^(yamt-|tauri(-|$))' <<<"$compare_deps" | grep -vxE 'yamt-(compare|merge-core)' || true)
+if [ -n "$forbidden_in_compare" ]; then
+    echo "arch-check: yamt-compare depends on yamt-merge-core only among yamt crates, and never on tauri, not:" $forbidden_in_compare >&2
+    failed=1
+fi
+
 app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host)' || true)
+forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare)' || true)
 if [ -n "$forbidden_in_app" ]; then
-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings and yamt-lsp-host only, not:" $forbidden_in_app >&2
+    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host and yamt-compare only, not:" $forbidden_in_app >&2
     failed=1
 fi
 

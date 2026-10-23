@@ -50,7 +50,7 @@ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
   }
 }
 
-function dropMissing<K, T>(
+export function dropMissing<K, T>(
   nodes: Map<K, T>,
   keptKeys: ReadonlySet<K>,
   remove: (node: T) => void,
@@ -227,6 +227,6 @@ function stripViews(views: PaneViews, side: Side): GapPanes {
   return { left: views[panes.left], right: views[panes.right] };
 }
 
-function keepEditorFocus(event: MouseEvent): void {
+export function keepEditorFocus(event: MouseEvent): void {
   event.preventDefault();
 }

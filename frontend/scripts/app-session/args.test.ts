@@ -8,7 +8,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
     kind: "start-app",
     name: "smoke",
     binary: "target/debug/yamt",
-    repo: { kind: "fresh" },
+    opens: { kind: "fresh" },
     settings: null,
     size: { width: 1600, height: 1000 },
     record: null,
@@ -40,7 +40,7 @@ test("start-app reads every option of the acceptance run", () => {
     kind: "start-app",
     name: "smoke",
     binary: "target/release/yamt",
-    repo: { kind: "dir", dir: "/tmp/r" },
+    opens: { kind: "dir", dir: "/tmp/r" },
     settings: '{"theme":"light"}',
     size: { width: 800, height: 600 },
     record: { file: "/tmp/s.mkv", seconds: 5 },
@@ -48,11 +48,24 @@ test("start-app reads every option of the acceptance run", () => {
   });
 });
 
-test("start-app needs exactly one repository choice", () => {
-  expect(() => parseCommand(["start-app", "--name", "a"])).toThrow(/--repo <dir> or --fresh-repo/);
+test("start-app needs exactly one of --repo, --fresh-repo and --raw", () => {
+  const needsOne = /needs one of --repo <dir>, --fresh-repo and --raw/;
+  expect(() => parseCommand(["start-app", "--name", "a"])).toThrow(needsOne);
   expect(() => parseCommand(["start-app", "--name", "a", "--repo", "/r", "--fresh-repo"])).toThrow(
-    /exclude each other/,
+    needsOne,
   );
+  expect(() => parseCommand(["start-app", "--name", "a", "--repo", "/r", "--raw"])).toThrow(
+    needsOne,
+  );
+  expect(() => parseCommand(["start-app", "--name", "a", "--fresh-repo", "--raw"])).toThrow(
+    needsOne,
+  );
+});
+
+test("start-app --raw opens the compare window and no repository", () => {
+  expect(
+    parseCommand(["start-app", "--name", "c", "--raw", "--home", "/tmp/c-home"]),
+  ).toMatchObject({ kind: "start-app", opens: { kind: "raw" }, home: "/tmp/c-home" });
 });
 
 test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
@@ -92,12 +105,25 @@ test("a session name is a plain file name, never a path", () => {
   expect(parseCommand(["stop", "--name", "fx_2-b"])).toEqual({ kind: "stop", name: "fx_2-b" });
 });
 
-test("start-fixture takes a name and a size", () => {
+test("start-fixture takes a name and a size, and opens the merge page", () => {
   expect(parseCommand(["start-fixture", "--name", "fx", "--size", "1280x800"])).toEqual({
     kind: "start-fixture",
     name: "fx",
     size: { width: 1280, height: 800 },
+    search: "",
   });
+});
+
+test("start-fixture --raw opens the compare page, --raw-case one compare fixture in its first tab", () => {
+  expect(parseCommand(["start-fixture", "--name", "fx", "--raw"])).toMatchObject({
+    search: "?raw",
+  });
+  expect(
+    parseCommand(["start-fixture", "--name", "fx", "--raw-case", "json-payload"]),
+  ).toMatchObject({ search: "?raw=json-payload" });
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--raw-case"])).toThrow(
+    /--raw-case needs a value/,
+  );
 });
 
 test("click takes one accessible name, an optional role, a 0-based --nth, --x11 and --double", () => {

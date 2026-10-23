@@ -6,7 +6,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{servers, settings};
+use crate::{clipboard, compare, servers, settings};
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
@@ -34,6 +34,15 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         servers::stop_server,
         servers::find_program,
         servers::project_files,
+        compare::open_compare,
+        compare::load_tab::<tauri::Wry>,
+        compare::set_column::<tauri::Wry>,
+        compare::add_tab,
+        compare::close_tab,
+        compare::rename_tab,
+        compare::set_tab_language,
+        compare::show_tab,
+        clipboard::read_clipboard::<tauri::Wry>,
     ])
 }
 
@@ -49,6 +58,11 @@ pub(crate) fn with_session<R: Runtime>(
         .on_page_load(|webview, page| {
             servers::stop_runs_on_page_start(&webview.state(), page.event());
         })
+}
+
+/// The compare window's commands; its `CompareState` is managed once the data folder is known.
+pub(crate) fn with_compare<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder.invoke_handler(specta_builder().invoke_handler())
 }
 
 #[tauri::command]

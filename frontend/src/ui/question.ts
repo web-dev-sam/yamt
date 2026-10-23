@@ -21,7 +21,8 @@ export type Question =
       readonly kind: "servers";
       readonly found: readonly ServerSpec[];
       readonly added: readonly ServerSpec[];
-    };
+    }
+  | { readonly kind: "closeTab"; readonly name: string };
 
 type QuestionList =
   | { readonly kind: "none" }
@@ -73,6 +74,7 @@ export function endsWithStop(question: Question): boolean {
     case "exit":
     case "clash":
     case "servers":
+    case "closeTab":
       return false;
     default: {
       const _exhaustive: never = question;
@@ -131,6 +133,17 @@ const REWORDS_TEXT: QuestionText = {
   cancel: "Cancel",
 };
 
+function closeTabText(name: string): QuestionText {
+  return {
+    title: "Close Tab",
+    message: `Close ${name}? Its text is lost.`,
+    list: { kind: "none" },
+    note: null,
+    confirm: "Yes",
+    cancel: "No",
+  };
+}
+
 export function questionText(question: Question, platform: string): QuestionText {
   switch (question.kind) {
     case "unprocessed":
@@ -161,6 +174,8 @@ export function questionText(question: Question, platform: string): QuestionText
       return continueUnsavedText(question.operation, question.files);
     case "rewords":
       return REWORDS_TEXT;
+    case "closeTab":
+      return closeTabText(question.name);
     default: {
       const _exhaustive: never = question;
       return _exhaustive;

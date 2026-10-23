@@ -1,4 +1,5 @@
 import { keyLabel, type KeyProblem } from "../ipc";
+import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, operationName } from "./operationText";
 import type { Problem, ProblemCause } from "./problem";
@@ -16,6 +17,15 @@ const OPERATION_STATE_WORDS: Readonly<
   GitRunning: "Git is still running; try again when it is done.",
   MergeFinished: "The operation is finished.",
   NoOperation: "Git has no operation to continue or abort.",
+};
+
+const FIXED_REASONS: Readonly<
+  Record<"NoConfigFolder" | "MergeAborted" | "UnknownTab" | "WorkerStopped", string>
+> = {
+  NoConfigFolder: "this system has no config folder to keep it in.",
+  MergeAborted: "the merge was aborted.",
+  UnknownTab: "that tab was closed.",
+  WorkerStopped: "yamt's worker stopped; try again.",
 };
 
 function attempted(problem: CausedProblem): string {
@@ -40,6 +50,12 @@ function attempted(problem: CausedProblem): string {
       const { verb, object } = continueAction(problem.operation);
       return `Could not ${verb.toLowerCase()} ${object}`;
     }
+    case "tabs":
+      return "Could not update the tabs";
+    case "loadTab":
+      return `Could not load ${problem.name}`;
+    case "saveTab":
+      return `Could not save ${problem.name}`;
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;
@@ -99,6 +115,7 @@ function causedText(problem: CausedProblem, platform: string): string {
   const { cause } = problem;
   switch (cause.kind) {
     case "Git":
+    case "Unexpected":
       return `${attempted(problem)}: ${cause.message.trim()}`;
     case "UnknownPath":
       return `${attempted(problem)}: ${cause.path} is not one of the conflicted files.`;
@@ -115,9 +132,10 @@ function causedText(problem: CausedProblem, platform: string): string {
     case "NotAbsolute":
       return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
     case "NoConfigFolder":
-      return `${attempted(problem)}: this system has no config folder to keep it in.`;
     case "MergeAborted":
-      return `${attempted(problem)}: the merge was aborted.`;
+    case "UnknownTab":
+    case "WorkerStopped":
+      return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
     case "StopMovedOn":
     case "GitRunning":
     case "MergeFinished":
@@ -125,8 +143,8 @@ function causedText(problem: CausedProblem, platform: string): string {
       return OPERATION_STATE_WORDS[cause.kind];
     case "Keys":
       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
-    case "Unexpected":
-      return `${attempted(problem)}: ${cause.message.trim()}`;
+    case "ColumnTooLarge":
+      return `${attempted(problem)}: ${columnLimitText(cause.limit)}.`;
     default: {
       const _exhaustive: never = cause;
       return _exhaustive;

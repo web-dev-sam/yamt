@@ -8,6 +8,7 @@
     "pnpm-lock.yaml",
     "src/ipc/bindings.ts",
     "fixtures/golden/**",
-    "fixtures/showcase/**"
+    "fixtures/showcase/**",
+    "fixtures/compare/**"
   ]
 }

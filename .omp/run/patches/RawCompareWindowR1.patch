@@ -1,0 +1,1174 @@
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 329bdf7..02ffee2 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -31,7 +31,7 @@ type StartApp = Extract<Command, { kind: "start-app" }>;
+ type Prepared = {
+   readonly home: string;
+   readonly configDir: string;
+-  readonly repoDir: string;
++  readonly repoDir: string | null;
+   readonly binary: string;
+   readonly args: readonly string[];
+ };
+@@ -75,7 +75,7 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
+   }
+   if (command.opens.kind === "raw") {
+-    return { home, configDir, repoDir: "", binary, args: ["--raw"] };
++    return { home, configDir, repoDir: null, binary, args: ["--raw"] };
+   }
+   const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
+   if (command.opens.kind === "fresh") {
+diff --git a/frontend/scripts/app-session/state.test.ts b/frontend/scripts/app-session/state.test.ts
+index 7b1f9bc..2cb7cb1 100644
+--- a/frontend/scripts/app-session/state.test.ts
++++ b/frontend/scripts/app-session/state.test.ts
+@@ -69,6 +69,14 @@ test("every process survives a write and a read, in order", () => {
+   expect(readState(path)).toEqual(FIXTURE);
+ });
+ 
++test("a raw session opens no repository and reads back with none, not an empty path", () => {
++  const path = join(scratch(), "raw.json");
++  const raw: AppState = { ...APP, repoDir: null };
++  writeState(path, raw);
++  expect(readState(path)).toEqual(raw);
++  expect(() => parseState(JSON.stringify({ ...APP, repoDir: 7 }))).toThrow(/field "repoDir"/);
++});
++
+ test("a missing state file reads as no session; a broken one is an error naming the file", () => {
+   const folder = scratch();
+   expect(readState(join(folder, "none.json"))).toBeNull();
+diff --git a/frontend/scripts/app-session/state.ts b/frontend/scripts/app-session/state.ts
+index f7ee321..6ad69ec 100644
+--- a/frontend/scripts/app-session/state.ts
++++ b/frontend/scripts/app-session/state.ts
+@@ -26,7 +26,7 @@ export type AppState = Common & {
+   readonly kind: "app";
+   readonly display: number;
+   readonly configDir: string;
+-  readonly repoDir: string;
++  readonly repoDir: string | null;
+ };
+ 
+ export type FixtureState = Common & { readonly kind: "fixture"; readonly url: string };
+@@ -81,7 +81,7 @@ export function parseState(text: string): SessionState {
+       kind,
+       display: numberField(record, "display"),
+       configDir: stringField(record, "configDir"),
+-      repoDir: stringField(record, "repoDir"),
++      repoDir: record["repoDir"] === null ? null : stringField(record, "repoDir"),
+     };
+   }
+   if (kind === "fixture") {
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index f7ed69d..7c48380 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -271,22 +271,24 @@ test("a compare file importing the merge store, App.vue or lsp/ violates PM7", (
+       text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
+     },
+     {
+-      path: "src/ui/TabList.vue",
++      path: "src/ui/CompareTabList.vue",
+       text: `<script setup lang="ts">\nimport "./store.ts";\n</script>`,
+     },
+     {
+-      path: "src/ui/LanguagePicker.vue",
++      path: "src/ui/CompareLanguagePicker.vue",
+       text: `<script setup lang="ts">\nimport "../lsp";\n</script>`,
+     },
+     { path: "src/ui/useCompareController.ts", text: `import type { X } from "../lsp/index.ts";` },
++    { path: "src/ui/useCompareFormat.test.ts", text: `import "./store";` },
+   ];
+ 
+   expect(violationsOf(files)).toEqual([
+     { rule: "PM7", file: "src/ui/compareStore.ts", specifier: "./store" },
+     { rule: "PM7", file: "src/ui/CompareApp.vue", specifier: "./App.vue" },
+-    { rule: "PM7", file: "src/ui/TabList.vue", specifier: "./store.ts" },
+-    { rule: "PM7", file: "src/ui/LanguagePicker.vue", specifier: "../lsp" },
++    { rule: "PM7", file: "src/ui/CompareTabList.vue", specifier: "./store.ts" },
++    { rule: "PM7", file: "src/ui/CompareLanguagePicker.vue", specifier: "../lsp" },
+     { rule: "PM7", file: "src/ui/useCompareController.ts", specifier: "../lsp/index.ts" },
++    { rule: "PM7", file: "src/ui/useCompareFormat.test.ts", specifier: "./store" },
+   ]);
+ });
+ 
+@@ -297,6 +299,7 @@ test("merge files importing the store and compare files importing their own neig
+       text: `<script setup lang="ts">\nimport "./store";\n</script>`,
+     },
+     { path: "src/ui/compareStore.ts", text: `import "./settingsStore";\nimport "./storeless";` },
++    { path: "src/ui/TabList.vue", text: `<script setup lang="ts">\nimport "./store";\n</script>` },
+     {
+       path: "src/ui/CompareView.vue",
+       text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 9e74928..29f2510 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -31,8 +31,7 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
+ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
+ const ICON_PREFIX = "~icons/";
+ const RAW_QUERY = "?raw";
+-const COMPARE_FILE =
+-  /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|TabList\.vue|LanguagePicker\.vue|useCompareController(?:\.test)?\.ts)$/;
++const COMPARE_FILE = /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|useCompare[^/]*\.ts)$/;
+ const MERGE_ROOT_FILES: Record<string, true> = {
+   "src/ui/store": true,
+   "src/ui/store.ts": true,
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 02a4dcc..f3335fb 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -1,6 +1,6 @@
+ Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()` (merge window) or `useCompareStore()` (compare window); the editor seams are `useMergeController` and `useCompareController`. Section order enforced by `scripts/check-sfc-order.ts`.
+ 
+-Compare window (plan §2 #93–#97): a second root, `CompareApp.vue` over `compareStore.ts`, mounted by `main.ts` when `<html data-window="compare">` (app) or `?raw` (fixture mode). `ui/Compare*.vue`, `ui/compare*.ts`, `TabList.vue`, `LanguagePicker.vue` and `useCompareController.ts` never import `store.ts`, `App.vue` or `lsp/` (fence PM7, `scripts/fences.ts`). `TabList.vue` is the panel in the file list's place (the file list's width key, `useColumnDrag`, rename inline); one `CompareView.vue` per visited tab, mounted on first show and hidden as opened files are (#51); its controller lives in `useCompareController` (built once the hosts exist and `loadTab` answered; settled → `saveColumn` → `showComparison`; tracked for `flushAll` at close); `LanguagePicker.vue` is the language drop-down over `useDropdownMenu`. The gear's `SettingsView` has no slot here, so no language-server section.
++Compare window (plan §2 #93–#97): a second root, `CompareApp.vue` over `compareStore.ts`, mounted by `main.ts` when `<html data-window="compare">` (app) or `?raw` (fixture mode). Every compare-only file carries the prefix — `Compare*.vue`, `compare*.ts`, `useCompare*.ts` — and none imports `store.ts`, `App.vue` or `lsp/` (fence PM7, `scripts/fences.ts`). `CompareTabList.vue` is the panel in the file list's place (rename inline); the store's `visited` (written with `tabs`/`shown`) holds the tabs shown at least once, and `CompareApp` renders one `CompareView.vue` per entry; showing or adding a tab returns the screen to the tabs. Its controller lives in `useCompareController` (built once the hosts exist and `loadTab` answered; settled → `saveColumn` → `showComparison`; tracked for `flushAll` at close: one close flush at a time, which also waits for every write in flight); `CompareLanguagePicker.vue` is the language drop-down over `useDropdownMenu`, its label "Auto" until the tab's first detection. The gear's `SettingsView` has no slot here, so no language-server section. Both roots set `<html data-theme>` through `settingsStore.ts` `useThemeAttribute`.
+ 
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+@@ -8,7 +8,9 @@ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start an
+ 
+ Header group and pins (plan §2 #83): `ServerStatus.vue` shows the counts and the format note, then the pinned servers' buttons (`serverButtons.ts`: one `ServerButton` per view in view order, `pinned` by `ServerKey` from `pinnedServers`, `DOT_CLASSES`), then `ServerGroup.vue`: the "Servers" button (dot = `groupDot` over every view's `dotKind`), its teleported list (`useDropdownMenu`; per server a `menuitem` row and a `menuitemcheckbox` pin calling `togglePin(key)`), and a chosen row's `ServerMenu` in the list's place with the group button as opener; a click on the group button while that menu is open only closes it. The open menu's shape is `OpenMenu` (`serverMenuToggle.ts`, also `ServerMenu`'s props); the list and `ServerMenu` are placed by `useMenuPlacement` (measured size, window size, `menuPosition`), anchored `belowLeft` of their opener. Menus step over `MENU_ITEMS` (`menuKeys.ts`); every `useDropdownMenu` drop-down also closes on window blur and on a right-press (`contextmenu`) outside it, the opener included; `ServerMenu` closes on any press outside it and gives the keyboard back to its opener on Escape/Tab. Fixture mode builds a server host only with `?servers` (`ipc/fixtureServers.ts`, `main.ts`): four servers that never start.
+ 
+-Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize handle (`DotsState` from `useColumnDrag`). `PaneDivider.vue` is the one pane divider shared by `MergeView` and `ChoiceView`: the separator role, its label per side, `usePaneDividers`' listeners and the dots. MergeView's header cells above the strips are dividers and the strip wrappers take the same listeners; ChoiceView's 1 px gutters carry a divider with a 5 px hit box; `FileList`'s handle uses `useColumnDrag` and `FILE_LIST_BOUNDS`, its dots centred as an absolute box (flex-centred dots there cost WebKitGTK scroll frames).
++Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize handle (`DotsState` from `useColumnDrag`). `PaneDivider.vue` is the one pane divider shared by `MergeView` and `ChoiceView`: the separator role, its label per side, `usePaneDividers`' listeners and the dots. MergeView's header cells above the strips are dividers and the strip wrappers take the same listeners; ChoiceView's 1 px gutters carry a divider with a 5 px hit box. The side panels (`FileList`, `CompareTabList`) share one width: `usePanelWidth` (`createFileListWidth`, `FILE_LIST_BOUNDS`, the drag) and `PanelWidthHandle.vue` (the handle, its label a prop, its dots centred as an absolute box: flex-centred dots there cost WebKitGTK scroll frames).
++
++Shown views (plan §2 #51): `PaneFrame.vue` is the shell of `MergeView` and `CompareView` — hidden by `invisible [content-visibility:hidden]`, the rounded pane section, the strip layer class (`stripLayer` slot prop) — and emits `shownKeydown` for window keys only while its view is shown and no question waits.
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index 3246ffc..4c10abe 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -13,6 +13,7 @@ import { allResolvedText } from "./operationText";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import ServerLogView from "./ServerLogView.vue";
++import { useThemeAttribute } from "./settingsStore";
+ import SettingsView from "./SettingsView.vue";
+ import StopView from "./StopView.vue";
+ import { useAppStore } from "./store";
+@@ -31,7 +32,6 @@ const {
+   allResolved,
+   pick,
+   refocus,
+-  settings,
+   dismissProblem,
+   dismissNotice,
+   answer,
+@@ -42,6 +42,7 @@ const {
+ 
+ const focused = useWindowFocus();
+ const altHeld = useAltHold();
++useThemeAttribute();
+ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+ });
+@@ -54,13 +55,6 @@ watch(focused, (now) => {
+     void refocus();
+   }
+ });
+-watch(
+-  () => settings.value.theme,
+-  (theme) => {
+-    document.documentElement.dataset["theme"] = theme;
+-  },
+-  { immediate: true },
+-);
+ 
+ onMounted(() => {
+   void watchWindowClose();
+diff --git a/frontend/src/ui/CompareApp.vue b/frontend/src/ui/CompareApp.vue
+index a202753..2217c4a 100644
+--- a/frontend/src/ui/CompareApp.vue
++++ b/frontend/src/ui/CompareApp.vue
+@@ -1,25 +1,27 @@
+ <script setup lang="ts">
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+-import { computed, onMounted, shallowRef, watch } from "vue";
++import { onMounted, watch } from "vue";
+ 
+-import { onWindowClose, type TabId } from "../ipc";
++import { log, onWindowClose } from "../ipc";
+ import { useCompareStore } from "./compareStore";
++import CompareTabList from "./CompareTabList.vue";
+ import CompareView from "./CompareView.vue";
+ import NoticeBar from "./NoticeBar.vue";
++import { unexpected } from "./problem";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
++import { useThemeAttribute } from "./settingsStore";
+ import SettingsView from "./SettingsView.vue";
+-import TabList from "./TabList.vue";
+ 
+ const {
+   tabs,
+   shown,
++  visited,
+   detected,
+   notices,
+   problem,
+   question,
+   screen,
+-  settings,
+   fileListShown,
+   loadSettings,
+   addTab,
+@@ -35,46 +37,36 @@ const {
+ } = useCompareStore();
+ 
+ const focused = useWindowFocus();
++useThemeAttribute();
+ useEventListener(window, "keydown", (event) => {
+   fileListKey(event, navigator.platform);
+ });
+-const visited = shallowRef<ReadonlySet<TabId>>(new Set());
+ 
+-const mounted = computed(() => tabs.value.filter((tab) => visited.value.has(tab.id)));
+-
+-watch(
+-  [shown, tabs],
+-  ([tab, listed]) => {
+-    const open = new Set(listed.map((entry) => entry.id));
+-    const kept = [...visited.value, ...(tab === null ? [] : [tab])].filter((id) => open.has(id));
+-    visited.value = new Set(kept);
+-  },
+-  { immediate: true },
+-);
+ watch(focused, (now) => {
+   if (now) {
+     void loadSettings();
+   }
+ });
+-watch(
+-  () => settings.value.theme,
+-  (theme) => {
+-    document.documentElement.dataset["theme"] = theme;
+-  },
+-  { immediate: true },
+-);
+ 
+ onMounted(() => {
+-  void onWindowClose(async () => {
+-    await flushAll();
+-    return true;
+-  });
++  void watchWindowClose();
+ });
++
++async function watchWindowClose(): Promise<void> {
++  try {
++    await onWindowClose(async () => {
++      await flushAll();
++      return true;
++    });
++  } catch (error) {
++    log.error("compare.close_guard_failed", { ...unexpected(error) });
++  }
++}
+ </script>
+ 
+ <template>
+   <div class="flex h-full gap-island p-island">
+-    <TabList
++    <CompareTabList
+       v-show="fileListShown"
+       :tabs="tabs"
+       :shown="shown"
+@@ -89,7 +81,7 @@ onMounted(() => {
+       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+         <CompareView
+-          v-for="tab in mounted"
++          v-for="tab in visited"
+           :key="tab.id"
+           :tab="tab"
+           :shown="tab.id === shown && screen.kind === 'files'"
+diff --git a/frontend/src/ui/LanguagePicker.vue b/frontend/src/ui/CompareLanguagePicker.vue
+similarity index 95%
+rename from frontend/src/ui/LanguagePicker.vue
+rename to frontend/src/ui/CompareLanguagePicker.vue
+index 3faacbc..8f0feb1 100644
+--- a/frontend/src/ui/LanguagePicker.vue
++++ b/frontend/src/ui/CompareLanguagePicker.vue
+@@ -4,13 +4,13 @@ import Check from "~icons/lucide/check";
+ import ChevronDown from "~icons/lucide/chevron-down";
+ 
+ import type { TabLanguage } from "../ipc";
+-import { languageLabel } from "./compareTabs";
++import { languageLabel, type Detected } from "./compareTabs";
+ import { languageNames } from "./useCompareController";
+ import { useDropdownMenu } from "./useDropdownMenu";
+ 
+ type Item = { readonly label: string; readonly language: TabLanguage };
+ 
+-const props = defineProps<{ language: TabLanguage; detected: string | null }>();
++const props = defineProps<{ language: TabLanguage; detected: Detected }>();
+ const emit = defineEmits<{ pick: [language: TabLanguage] }>();
+ 
+ const ITEMS: readonly Item[] = [
+diff --git a/frontend/src/ui/TabList.vue b/frontend/src/ui/CompareTabList.vue
+similarity index 74%
+rename from frontend/src/ui/TabList.vue
+rename to frontend/src/ui/CompareTabList.vue
+index 07c3f69..80209de 100644
+--- a/frontend/src/ui/TabList.vue
++++ b/frontend/src/ui/CompareTabList.vue
+@@ -5,9 +5,8 @@ import X from "~icons/lucide/x";
+ 
+ import type { TabEntry, TabId } from "../ipc";
+ import { languageLabel } from "./compareTabs";
+-import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
+-import ResizeDots from "./ResizeDots.vue";
+-import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
++import PanelWidthHandle from "./PanelWidthHandle.vue";
++import { usePanelWidth } from "./usePanelWidth";
+ 
+ type Renaming = { readonly tab: TabId; readonly draft: string };
+ 
+@@ -24,36 +23,16 @@ const emit = defineEmits<{
+ }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+-const { width, setWidth, resetWidth } = createFileListWidth();
+-const resize = useColumnDrag({
+-  accepts: (event) => event.target === event.currentTarget,
+-  press: startResize,
+-  reset: resetWidth,
+-});
++const { widthStyle, resize } = usePanelWidth(list);
+ const renaming = shallowRef<Renaming | null>(null);
+ 
+-const widthStyle = computed(() =>
+-  width.value === null ? FILE_LIST_BOUNDS : { ...FILE_LIST_BOUNDS, width: `${width.value}px` },
+-);
+ const rows = computed(() =>
+   props.tabs.map((tab) => ({
+     tab,
+-    language: languageLabel(tab.language, props.detected.get(tab.id) ?? null),
++    language: languageLabel(tab.language, props.detected.get(tab.id)),
+   })),
+ );
+ 
+-function startResize(): ColumnDrag | null {
+-  if (list.value === null) {
+-    return null;
+-  }
+-  const pressWidth = list.value.getBoundingClientRect().width;
+-  return {
+-    moveBy: (dx) => {
+-      setWidth(pressWidth + dx, window.innerWidth);
+-    },
+-  };
+-}
+-
+ function startRename(tab: TabEntry): void {
+   renaming.value = { tab: tab.id, draft: tab.name };
+ }
+@@ -147,15 +126,6 @@ function cancelRename(): void {
+         </button>
+       </li>
+     </ul>
+-    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
+-    <div
+-      role="separator"
+-      aria-orientation="vertical"
+-      aria-label="Tab list width"
+-      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
+-      v-on="resize.listeners"
+-    >
+-      <ResizeDots class="absolute inset-0 m-auto size-fit" :state="resize.dots.value" />
+-    </div>
++    <PanelWidthHandle label="Tab list width" :handle="resize" />
+   </aside>
+ </template>
+diff --git a/frontend/src/ui/CompareView.vue b/frontend/src/ui/CompareView.vue
+index 80e418a..8b4fff7 100644
+--- a/frontend/src/ui/CompareView.vue
++++ b/frontend/src/ui/CompareView.vue
+@@ -1,12 +1,13 @@
+ <script setup lang="ts">
+-import { useEventListener } from "@vueuse/core";
+ import { computed, useTemplateRef } from "vue";
+ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
+ 
+ import type { TabEntry, TabLanguage } from "../ipc";
++import CompareLanguagePicker from "./CompareLanguagePicker.vue";
+ import { useCompareStore } from "./compareStore";
+-import LanguagePicker from "./LanguagePicker.vue";
++import { ACTION_NAMES } from "./keyText";
++import PaneFrame from "./PaneFrame.vue";
+ import { compareColumns } from "./paneSplit";
+ import SettingsButton from "./SettingsButton.vue";
+ import { FORMAT_LANGUAGES, useCompareController } from "./useCompareController";
+@@ -15,6 +16,8 @@ const props = defineProps<{ tab: TabEntry; shown: boolean }>();
+ 
+ const GRID_TEMPLATE_COLUMNS = compareColumns();
+ const NOT_FORMATTABLE = `Format covers ${FORMAT_LANGUAGES.join(" and ")} only`;
++const PREVIOUS = ACTION_NAMES["previous-change"];
++const NEXT = ACTION_NAMES["next-change"];
+ 
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const right = useTemplateRef<HTMLDivElement>("right");
+@@ -25,9 +28,8 @@ const { formatLanguage, format, moveToChange, historyKey } = useCompareControlle
+   { left, right, strip },
+   { preferences, language: () => props.tab.language },
+ );
+-useEventListener(window, "keydown", historyKeyInShownTab);
+ 
+-const detectedName = computed(() => detected.value.get(props.tab.id) ?? null);
++const detectedName = computed(() => detected.value.get(props.tab.id));
+ const formatTitle = computed(() =>
+   formatLanguage.value === null
+     ? NOT_FORMATTABLE
+@@ -37,63 +39,57 @@ const formatTitle = computed(() =>
+ function pickLanguage(language: TabLanguage): void {
+   void setLanguage(props.tab.id, language);
+ }
+-
+-function historyKeyInShownTab(event: KeyboardEvent): void {
+-  if (props.shown && question.value === null) {
+-    historyKey(event);
+-  }
+-}
+ </script>
+ 
+ <template>
+-  <div
+-    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+-    :class="{ 'invisible [content-visibility:hidden]': !shown }"
++  <PaneFrame
++    :shown="shown"
++    :asking="question !== null"
++    :columns="GRID_TEMPLATE_COLUMNS"
++    @shown-keydown="historyKey"
+   >
+-    <header class="flex h-10 shrink-0 items-center gap-1 px-2">
+-      <button
+-        type="button"
+-        :title="formatTitle"
+-        :disabled="formatLanguage === null"
+-        class="mr-2 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+-        @mousedown.prevent
+-        @click="format"
+-      >
+-        Format
+-      </button>
+-      <LanguagePicker
+-        class="mr-2"
+-        :language="tab.language"
+-        :detected="detectedName"
+-        @pick="pickLanguage"
+-      />
+-      <button
+-        type="button"
+-        title="Previous change"
+-        aria-label="Previous change"
+-        class="rounded p-1.5 hover:bg-hover"
+-        @mousedown.prevent
+-        @click="moveToChange('up')"
+-      >
+-        <ArrowUp class="size-4" aria-hidden="true" />
+-      </button>
+-      <button
+-        type="button"
+-        title="Next change"
+-        aria-label="Next change"
+-        class="rounded p-1.5 hover:bg-hover"
+-        @mousedown.prevent
+-        @click="moveToChange('down')"
+-      >
+-        <ArrowDown class="size-4" aria-hidden="true" />
+-      </button>
+-      <SettingsButton class="ml-auto" />
+-    </header>
+-    <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
+-    <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+-      :style="{ gridTemplateColumns: GRID_TEMPLATE_COLUMNS }"
+-    >
++    <template #header>
++      <header class="flex h-10 shrink-0 items-center gap-1 px-2">
++        <button
++          type="button"
++          :title="formatTitle"
++          :disabled="formatLanguage === null"
++          class="mr-2 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @mousedown.prevent
++          @click="format"
++        >
++          Format
++        </button>
++        <CompareLanguagePicker
++          class="mr-2"
++          :language="tab.language"
++          :detected="detectedName"
++          @pick="pickLanguage"
++        />
++        <button
++          type="button"
++          :title="PREVIOUS"
++          :aria-label="PREVIOUS"
++          class="rounded p-1.5 hover:bg-hover"
++          @mousedown.prevent
++          @click="moveToChange('up')"
++        >
++          <ArrowUp class="size-4" aria-hidden="true" />
++        </button>
++        <button
++          type="button"
++          :title="NEXT"
++          :aria-label="NEXT"
++          class="rounded p-1.5 hover:bg-hover"
++          @mousedown.prevent
++          @click="moveToChange('down')"
++        >
++          <ArrowDown class="size-4" aria-hidden="true" />
++        </button>
++        <SettingsButton class="ml-auto" />
++      </header>
++    </template>
++    <template #default="{ stripLayer }">
+       <h2 class="col-start-1 row-start-1 border-b border-separator px-3 py-1.5 text-fg-muted">
+         Left
+       </h2>
+@@ -102,11 +98,10 @@ function historyKeyInShownTab(event: KeyboardEvent): void {
+         Right
+       </h2>
+       <div ref="left" class="col-start-1 row-start-2 min-h-0 min-w-0" />
+-      <!-- The strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
+-      <div class="col-start-2 row-start-2 min-h-0 border-x border-separator will-change-transform">
++      <div class="col-start-2 row-start-2" :class="stripLayer">
+         <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
+       </div>
+       <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
+-    </section>
+-  </div>
++    </template>
++  </PaneFrame>
+ </template>
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index 99400c1..d692ce2 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -6,13 +6,12 @@ import ListTree from "~icons/lucide/list-tree";
+ import type { FileEntry, OperationView } from "../ipc";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
+-import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
+ import FileMark from "./FileMark.vue";
+ import { revealed, treeRows } from "./fileTree";
+ import FileTree from "./FileTree.vue";
+ import OperationLabel from "./OperationLabel.vue";
+-import ResizeDots from "./ResizeDots.vue";
+-import { useColumnDrag, type ColumnDrag } from "./useColumnDrag";
++import PanelWidthHandle from "./PanelWidthHandle.vue";
++import { usePanelWidth } from "./usePanelWidth";
+ 
+ const props = defineProps<{
+   files: readonly FileEntry[];
+@@ -23,17 +22,9 @@ const emit = defineEmits<{ select: [path: string] }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+ const { mode, toggle } = createFileListMode();
+-const { width, setWidth, resetWidth } = createFileListWidth();
+-const resize = useColumnDrag({
+-  accepts: (event) => event.target === event.currentTarget,
+-  press: startResize,
+-  reset: resetWidth,
+-});
++const { widthStyle, resize } = usePanelWidth(list);
+ const closed = shallowRef<ReadonlySet<string>>(new Set());
+ 
+-const widthStyle = computed(() =>
+-  width.value === null ? FILE_LIST_BOUNDS : { ...FILE_LIST_BOUNDS, width: `${width.value}px` },
+-);
+ const rows = computed(() => treeRows(props.files, closed.value));
+ const viewButton = computed(() =>
+   mode.value === "list"
+@@ -51,18 +42,6 @@ watch(
+   },
+ );
+ 
+-function startResize(): ColumnDrag | null {
+-  if (list.value === null) {
+-    return null;
+-  }
+-  const pressWidth = list.value.getBoundingClientRect().width;
+-  return {
+-    moveBy: (dx) => {
+-      setWidth(pressWidth + dx, window.innerWidth);
+-    },
+-  };
+-}
+-
+ function toggleFolder(path: string): void {
+   const next = new Set(closed.value);
+   if (!next.delete(path)) {
+@@ -117,15 +96,6 @@ function toggleFolder(path: string): void {
+       </li>
+     </ul>
+     <OperationLabel v-if="operation !== null" :operation="operation" />
+-    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
+-    <div
+-      role="separator"
+-      aria-orientation="vertical"
+-      aria-label="File list width"
+-      class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
+-      v-on="resize.listeners"
+-    >
+-      <ResizeDots class="absolute inset-0 m-auto size-fit" :state="resize.dots.value" />
+-    </div>
++    <PanelWidthHandle label="File list width" :handle="resize" />
+   </aside>
+ </template>
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index 683e6d3..caa5818 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -1,5 +1,4 @@
+ <script setup lang="ts">
+-import { useEventListener } from "@vueuse/core";
+ import { computed, onUnmounted, useTemplateRef, watch } from "vue";
+ 
+ import { pressesKey, type FileMergeData, type Side } from "../ipc";
+@@ -9,6 +8,7 @@ import { deletedSideView, keptToApply, type DeletedSideView } from "./deletedSid
+ import MergeToolbar from "./MergeToolbar.vue";
+ import OperationButtons from "./OperationButtons.vue";
+ import PaneDivider from "./PaneDivider.vue";
++import PaneFrame from "./PaneFrame.vue";
+ import { paneColumns, type PaneWidths } from "./paneSplit";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+@@ -82,8 +82,6 @@ const work: FileWork = { unsaved: () => unsaved.value };
+ if (props.data.deleted === null) {
+   track(props.data.path, work);
+ }
+-useEventListener(window, "keydown", historyKeyInShownFile);
+-useEventListener(window, "keydown", saveKeyInShownFile);
+ const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+ 
+ const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
+@@ -161,16 +159,9 @@ function markResolved(): void {
+   }
+ }
+ 
+-function historyKeyInShownFile(event: KeyboardEvent): void {
+-  if (props.shown && question.value === null) {
+-    historyKey(event);
+-  }
+-}
+-
+-function saveKeyInShownFile(event: KeyboardEvent): void {
++function shownKeydown(event: KeyboardEvent): void {
++  historyKey(event);
+   if (
+-    !props.shown ||
+-    question.value !== null ||
+     !editable.value ||
+     event.defaultPrevented ||
+     !pressesKey(event, settings.value.keys.bindings.save, navigator.platform)
+@@ -183,32 +174,32 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+ </script>
+ 
+ <template>
+-  <div
+-    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+-    :class="{ 'invisible [content-visibility:hidden]': !shown }"
++  <PaneFrame
++    :shown="shown"
++    :asking="question !== null"
++    :columns="gridTemplateColumns"
++    @shown-keydown="shownKeydown"
+   >
+-    <MergeToolbar
+-      v-if="editable"
+-      :summary="summary"
+-      :path="data.path"
+-      :problems="problems"
+-      @move="moveToChange"
+-      @apply-left="applyAllNonConflicting('local')"
+-      @apply-right="applyAllNonConflicting('remote')"
+-      @undo="undo"
+-      @redo="redo"
+-      @finish="markResolved"
+-    />
+-    <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
+-      <OperationButtons :abort="true" />
+-      <ServerStatus class="ml-auto" :path="null" :problems="null" />
+-      <SettingsButton />
+-    </header>
+-    <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
+-    <section
+-      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+-      :style="{ gridTemplateColumns }"
+-    >
++    <template #header>
++      <MergeToolbar
++        v-if="editable"
++        :summary="summary"
++        :path="data.path"
++        :problems="problems"
++        @move="moveToChange"
++        @apply-left="applyAllNonConflicting('local')"
++        @apply-right="applyAllNonConflicting('remote')"
++        @undo="undo"
++        @redo="redo"
++        @finish="markResolved"
++      />
++      <header v-else class="flex h-10 shrink-0 items-center justify-end px-2">
++        <OperationButtons :abort="true" />
++        <ServerStatus class="ml-auto" :path="null" :problems="null" />
++        <SettingsButton />
++      </header>
++    </template>
++    <template #default="{ stripLayer }">
+       <div
+         v-for="column in columns"
+         :key="column.side"
+@@ -261,9 +252,9 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+         class="col-start-1 row-start-2 min-h-0 min-w-0"
+         :class="{ invisible: data.deleted === 'local' }"
+       />
+-      <!-- Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51). -->
+       <div
+-        class="col-start-2 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
++        class="col-start-2 row-start-2 cursor-col-resize"
++        :class="stripLayer"
+         v-on="dividers.local.listeners"
+       >
+         <svg ref="leftStrip" aria-hidden="true" class="block h-full w-full" />
+@@ -275,7 +266,8 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+       />
+       <p v-if="centerLine !== null" class="col-start-3 row-start-2 p-3">{{ centerLine }}</p>
+       <div
+-        class="col-start-4 row-start-2 min-h-0 cursor-col-resize border-x border-separator will-change-transform"
++        class="col-start-4 row-start-2 cursor-col-resize"
++        :class="stripLayer"
+         v-on="dividers.remote.listeners"
+       >
+         <svg ref="rightStrip" aria-hidden="true" class="block h-full w-full" />
+@@ -302,6 +294,6 @@ function saveKeyInShownFile(event: KeyboardEvent): void {
+           </button>
+         </div>
+       </template>
+-    </section>
+-  </div>
++    </template>
++  </PaneFrame>
+ </template>
+diff --git a/frontend/src/ui/PaneFrame.vue b/frontend/src/ui/PaneFrame.vue
+new file mode 100644
+index 0000000..cdbbde1
+--- /dev/null
++++ b/frontend/src/ui/PaneFrame.vue
+@@ -0,0 +1,33 @@
++<script setup lang="ts">
++import { useEventListener } from "@vueuse/core";
++
++const props = defineProps<{ shown: boolean; asking: boolean; columns: string }>();
++const emit = defineEmits<{ shownKeydown: [event: KeyboardEvent] }>();
++
++// Each strip and its border sit on their own layer: repainting them inside the window's layer on every scroll frame was slow in WebKitGTK (plan §2 #51).
++const STRIP_LAYER = "min-h-0 border-x border-separator will-change-transform";
++
++useEventListener(window, "keydown", keydownWhileShown);
++
++function keydownWhileShown(event: KeyboardEvent): void {
++  if (props.shown && !props.asking) {
++    emit("shownKeydown", event);
++  }
++}
++</script>
++
++<template>
++  <div
++    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
++    :class="{ 'invisible [content-visibility:hidden]': !shown }"
++  >
++    <slot name="header" />
++    <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
++    <section
++      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
++      :style="{ gridTemplateColumns: columns }"
++    >
++      <slot :strip-layer="STRIP_LAYER" />
++    </section>
++  </div>
++</template>
+diff --git a/frontend/src/ui/PanelWidthHandle.vue b/frontend/src/ui/PanelWidthHandle.vue
+new file mode 100644
+index 0000000..37a7711
+--- /dev/null
++++ b/frontend/src/ui/PanelWidthHandle.vue
+@@ -0,0 +1,19 @@
++<script setup lang="ts">
++import ResizeDots from "./ResizeDots.vue";
++import type { ColumnDragBinding } from "./useColumnDrag";
++
++defineProps<{ label: string; handle: ColumnDragBinding }>();
++</script>
++
++<template>
++  <div
++    role="separator"
++    aria-orientation="vertical"
++    :aria-label="label"
++    class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
++    v-on="handle.listeners"
++  >
++    <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->
++    <ResizeDots class="absolute inset-0 m-auto size-fit" :state="handle.dots.value" />
++  </div>
++</template>
+diff --git a/frontend/src/ui/compareStore.test.ts b/frontend/src/ui/compareStore.test.ts
+index 5a86cbc..72839ee 100644
+--- a/frontend/src/ui/compareStore.test.ts
++++ b/frontend/src/ui/compareStore.test.ts
+@@ -34,6 +34,7 @@ const LINUX = "Linux x86_64";
+ const LIMIT = 8 * 1024 * 1024;
+ const GONE: SourceFailure = { kind: "ReadFailed", path: "/data/tabs.json", message: "denied" };
+ const UNKNOWN: SourceFailure = { kind: "UnknownTab", tab: 4 };
++const MICROTASKS = 10;
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -178,6 +179,53 @@ test("add, show, rename and language write the mirror from each reply (catches a
+   ]);
+ });
+ 
++test("a tab's view is kept once shown, in the list's order, with its latest entry, until it closes (catches views built for unopened tabs or kept after a close)", async () => {
++  const store = await started();
++  const first = tabAt(store, 0);
++  expect(store.visited.value.map((entry) => entry.id)).toEqual([first]);
++
++  await store.addTab();
++  await store.addTab();
++  const [second, third] = [tabAt(store, 1), tabAt(store, 2)];
++  await store.showTab(first);
++  expect(store.visited.value.map((entry) => entry.id)).toEqual([first, second, third]);
++
++  await store.closeTab(second);
++  await store.renameTab(third, "later");
++  expect(store.visited.value).toEqual(store.tabs.value);
++  expect(store.visited.value.map((entry) => entry.name)).toEqual(["Compare 1", "later"]);
++});
++
++test("after a restart only the shown tab gets a view (catches every stored tab mounted at start)", async () => {
++  const before = await started();
++  await before.addTab();
++  const list = { tabs: before.tabs.value, shown: tabAt(before, 0) };
++  const store = await started((fixture) => ({
++    openCompare: async () => {
++      const start = await fixture.openCompare();
++      return start.ok ? { ...start, value: { ...start.value, list } } : start;
++    },
++  }));
++
++  expect(store.tabs.value).toBe(list.tabs);
++  expect(store.visited.value).toEqual([list.tabs[0]]);
++});
++
++test.each([
++  ["showTab", (store, tab) => store.showTab(tab)],
++  ["addTab", (store) => store.addTab()],
++] satisfies [string, Act][])(
++  "%s from the settings view shows the tabs again (catches a tab switch hidden behind the settings)",
++  async (_call, act) => {
++    const store = await started();
++    store.openSettings();
++
++    await act(store, tabAt(store, 0));
++
++    expect(store.screen.value).toEqual({ kind: "files" });
++  },
++);
++
+ test("a rename shows only once its reply arrives (catches an optimistic edit of the mirror)", async () => {
+   const held = gate();
+   const store = await started((fixture) => ({
+@@ -397,6 +445,62 @@ test("flushAll sends each unsent column once and resolves only when every reply
+   expect(firstHandle.asked).toEqual(["unsent"]);
+ });
+ 
++test("a second close request while the first flush runs waits for that same flush, sending nothing twice (catches a window closed under a running write)", async () => {
++  spyConsole();
++  const held = gate();
++  const sent: string[] = [];
++  const store = await started((fixture) => ({
++    setColumn: async (write) => {
++      sent.push(write.text);
++      await held.opened;
++      return fixture.setColumn(write);
++    },
++  }));
++  const tab = tabAt(store, 0);
++  store.track(tab, handle(true, [await sendOf(store, tab, "once")]));
++  let flushed = false;
++
++  const first = store.flushAll();
++  const second = store.flushAll();
++  void second.then(() => {
++    flushed = true;
++  });
++  await Promise.resolve();
++  expect(second).toBe(first);
++  expect([flushed, sent]).toEqual([false, ["once"]]);
++  held.open();
++  await second;
++
++  await store.flushAll();
++  expect(sent).toEqual(["once", "once"]);
++});
++
++test("flushAll waits for a save already in flight though nothing is left unsent (catches a close before a settle's write landed)", async () => {
++  spyConsole();
++  const held = gate();
++  const store = await started((fixture) => ({
++    setColumn: async (write) => {
++      await held.opened;
++      return fixture.setColumn(write);
++    },
++  }));
++  const tab = tabAt(store, 0);
++  const saving = store.saveColumn(tab, await sendOf(store, tab, "settled"));
++  let flushed = false;
++
++  const flushing = store.flushAll().then(() => {
++    flushed = true;
++  });
++  for (let tick = 0; tick < MICROTASKS; tick += 1) {
++    await Promise.resolve();
++  }
++  expect(flushed).toBe(false);
++  held.open();
++  await flushing;
++
++  expect((await saving)?.versions.left).toBe(1);
++});
++
+ test("a failed flush is shown and logged, never thrown (catches a close stopped by one bad column)", async () => {
+   const lines = spyConsole();
+   const store = await started(() => ({ setColumn: () => Promise.reject(new Error("ipc gone")) }));
+diff --git a/frontend/src/ui/compareStore.ts b/frontend/src/ui/compareStore.ts
+index f5d4c56..fbc0088 100644
+--- a/frontend/src/ui/compareStore.ts
++++ b/frontend/src/ui/compareStore.ts
+@@ -43,6 +43,7 @@ export type CompareStore = SettingsStore &
+   CompareNotices & {
+     readonly tabs: Readonly<ShallowRef<readonly TabEntry[]>>;
+     readonly shown: Readonly<ShallowRef<TabId | null>>;
++    readonly visited: Readonly<ShallowRef<readonly TabEntry[]>>;
+     readonly columnLimit: Readonly<ShallowRef<number>>;
+     readonly detected: Readonly<ShallowRef<ReadonlyMap<TabId, string | null>>>;
+     readonly problem: Readonly<ShallowRef<Problem | null>>;
+@@ -72,6 +73,7 @@ export type CompareStore = SettingsStore &
+ type Refs = {
+   readonly tabs: ShallowRef<readonly TabEntry[]>;
+   readonly shown: ShallowRef<TabId | null>;
++  readonly visited: ShallowRef<readonly TabEntry[]>;
+   readonly columnLimit: ShallowRef<number>;
+   readonly detected: ShallowRef<ReadonlyMap<TabId, string | null>>;
+   readonly problem: ShallowRef<Problem | null>;
+@@ -85,6 +87,8 @@ type State = Refs & {
+   readonly source: CompareSource;
+   readonly asking: Asking;
+   readonly tracked: Map<TabId, TrackedTab>;
++  readonly saving: Set<Promise<unknown>>;
++  closing: Promise<void> | null;
+   latestSettings: number;
+ };
+ 
+@@ -94,6 +98,7 @@ function createRefs(startTheme: Theme): Refs {
+   return {
+     tabs: shallowRef<readonly TabEntry[]>([]),
+     shown: shallowRef<TabId | null>(null),
++    visited: shallowRef<readonly TabEntry[]>([]),
+     columnLimit: shallowRef(0),
+     detected: shallowRef<ReadonlyMap<TabId, string | null>>(new Map()),
+     problem: shallowRef<Problem | null>(null),
+@@ -111,6 +116,8 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
+     source,
+     asking: createAsking(),
+     tracked: new Map(),
++    saving: new Set(),
++    closing: null,
+     latestSettings: 0,
+   };
+   const settings = settingsActions(state);
+@@ -158,8 +165,10 @@ function chromeActions(
+ }
+ 
+ function adoptList(state: State, { tabs, shown }: TabList): void {
++  const seen = new Set(state.visited.value.map((tab) => tab.id));
+   state.tabs.value = tabs;
+   state.shown.value = shown;
++  state.visited.value = tabs.filter((tab) => tab.id === shown || seen.has(tab.id));
+   if (state.problem.value?.action === "tabs") {
+     state.problem.value = null;
+   }
+@@ -212,9 +221,11 @@ function tabActions(
+   const { source } = state;
+   return {
+     addTab: async () => {
++      state.screen.value = { kind: "files" };
+       await changeTabs(state, () => source.addTab());
+     },
+     showTab: async (tab) => {
++      state.screen.value = { kind: "files" };
+       await changeTabs(state, () => source.showTab(tab));
+     },
+     closeTab: (tab) => closeTab(state, tab),
+@@ -240,7 +251,10 @@ async function loadTab(state: State, tab: TabId): Promise<TabTexts | null> {
+ async function saveColumn(state: State, tab: TabId, send: ColumnSend): Promise<Comparison | null> {
+   const { column } = send;
+   const name = tabName(state.tabs.value, tab);
+-  const outcome = await attempt(() => state.source.setColumn({ tab, ...send }));
++  const writing = attempt(() => state.source.setColumn({ tab, ...send }));
++  state.saving.add(writing);
++  const outcome = await writing;
++  state.saving.delete(writing);
+   if (!outcome.ok) {
+     report(state, { action: "saveTab", tab, column, name, cause: outcome.cause });
+     return null;
+@@ -252,6 +266,14 @@ async function saveColumn(state: State, tab: TabId, send: ColumnSend): Promise<C
+   return outcome.value;
+ }
+ 
++async function flushAll(state: State): Promise<void> {
++  const sends = [...state.tracked].flatMap(([tab, handle]) =>
++    handle.unsent().map((send) => saveColumn(state, tab, send)),
++  );
++  await Promise.all([...sends, ...state.saving]);
++  state.closing = null;
++}
++
+ function columnActions(
+   state: State,
+ ): Pick<CompareStore, "loadTab" | "saveColumn" | "track" | "flushAll"> {
+@@ -266,12 +288,7 @@ function columnActions(
+         }
+       };
+     },
+-    flushAll: async () => {
+-      const sends = [...state.tracked].flatMap(([tab, handle]) =>
+-        handle.unsent().map((send) => saveColumn(state, tab, send)),
+-      );
+-      await Promise.all(sends);
+-    },
++    flushAll: () => (state.closing ??= flushAll(state)),
+   };
+ }
+ 
+diff --git a/frontend/src/ui/compareTabs.test.ts b/frontend/src/ui/compareTabs.test.ts
+index 48b380c..383a177 100644
+--- a/frontend/src/ui/compareTabs.test.ts
++++ b/frontend/src/ui/compareTabs.test.ts
+@@ -7,6 +7,11 @@ test("Auto shows what it found, or plain text when it found nothing (catches Aut
+   expect(languageLabel({ kind: "auto" }, null)).toBe("Auto · Plain text");
+ });
+ 
++test("Auto before anything was detected reads Auto alone (catches a tab not opened yet shown as plain text)", () => {
++  expect(languageLabel({ kind: "auto" }, undefined)).toBe("Auto");
++  expect(languageLabel({ kind: "picked", name: "JSON" }, undefined)).toBe("JSON");
++});
++
+ test("a picked language shows its name only, whatever Auto found (catches Auto's finding over the user's pick)", () => {
+   expect(languageLabel({ kind: "picked", name: "TypeScript" }, "JSON")).toBe("TypeScript");
+ });
+diff --git a/frontend/src/ui/compareTabs.ts b/frontend/src/ui/compareTabs.ts
+index 00a826f..ff60150 100644
+--- a/frontend/src/ui/compareTabs.ts
++++ b/frontend/src/ui/compareTabs.ts
+@@ -1,9 +1,12 @@
+ import type { TabLanguage } from "../ipc";
+ 
+-export function languageLabel(language: TabLanguage, detected: string | null): string {
++/** What Auto found: a language name, null when it found none, undefined before it looked. */
++export type Detected = string | null | undefined;
++
++export function languageLabel(language: TabLanguage, detected: Detected): string {
+   switch (language.kind) {
+     case "auto":
+-      return `Auto · ${detected ?? "Plain text"}`;
++      return detected === undefined ? "Auto" : `Auto · ${detected ?? "Plain text"}`;
+     case "picked":
+       return language.name;
+     default: {
+diff --git a/frontend/src/ui/settingsStore.ts b/frontend/src/ui/settingsStore.ts
+index 91ab6e1..2cdf647 100644
+--- a/frontend/src/ui/settingsStore.ts
++++ b/frontend/src/ui/settingsStore.ts
+@@ -1,4 +1,4 @@
+-import type { ShallowRef } from "vue";
++import { watch, type ShallowRef } from "vue";
+ 
+ import type { SettingsActions, SettingsInUse } from "./settings";
+ 
+@@ -30,3 +30,14 @@ export function useSettingsStore(): SettingsStore {
+   }
+   return registered;
+ }
++
++export function useThemeAttribute(): void {
++  const { settings } = useSettingsStore();
++  watch(
++    () => settings.value.theme,
++    (theme) => {
++      document.documentElement.dataset["theme"] = theme;
++    },
++    { immediate: true },
++  );
++}
+diff --git a/frontend/src/ui/usePanelWidth.ts b/frontend/src/ui/usePanelWidth.ts
+new file mode 100644
+index 0000000..50896ad
+--- /dev/null
++++ b/frontend/src/ui/usePanelWidth.ts
+@@ -0,0 +1,42 @@
++import { computed, toValue, type ComputedRef, type MaybeRefOrGetter } from "vue";
++
++import { createFileListWidth, FILE_LIST_BOUNDS } from "./fileListWidth";
++import { useColumnDrag, type ColumnDrag, type ColumnDragBinding } from "./useColumnDrag";
++
++type WidthStyle = typeof FILE_LIST_BOUNDS & { readonly width?: string };
++
++export function usePanelWidth(panel: MaybeRefOrGetter<HTMLElement | null>): {
++  readonly widthStyle: ComputedRef<WidthStyle>;
++  readonly resize: ColumnDragBinding;
++} {
++  const stored = createFileListWidth();
++  const resize = useColumnDrag({
++    accepts: (event) => event.target === event.currentTarget,
++    press: startResize,
++    reset: () => {
++      stored.resetWidth();
++    },
++  });
++
++  function startResize(): ColumnDrag | null {
++    const element = toValue(panel);
++    if (element === null) {
++      return null;
++    }
++    const pressWidth = element.getBoundingClientRect().width;
++    return {
++      moveBy: (dx) => {
++        stored.setWidth(pressWidth + dx, window.innerWidth);
++      },
++    };
++  }
++
++  return {
++    widthStyle: computed(() =>
++      stored.width.value === null
++        ? FILE_LIST_BOUNDS
++        : { ...FILE_LIST_BOUNDS, width: `${stored.width.value}px` },
++    ),
++    resize,
++  };
++}

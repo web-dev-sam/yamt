@@ -5,12 +5,15 @@ import { computed, onMounted, watch } from "vue";
 import { useAltHold } from "./altHold";
 import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
+import LanguageServerSettings from "./LanguageServerSettings.vue";
 import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
+import { noticeRow } from "./noticeText";
 import { allResolvedText } from "./operationText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import ServerLogView from "./ServerLogView.vue";
+import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
 import StopView from "./StopView.vue";
 import { useAppStore } from "./store";
@@ -29,7 +32,6 @@ const {
   allResolved,
   pick,
   refocus,
-  settings,
   dismissProblem,
   dismissNotice,
   answer,
@@ -40,24 +42,19 @@ const {
 
 const focused = useWindowFocus();
 const altHeld = useAltHold();
+useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
 });
 
 const resolvedLine = computed(() => allResolvedText(operation.value));
+const noticeRows = computed(() => notices.value.map((notice) => noticeRow(notice)));
 
 watch(focused, (now) => {
   if (now) {
     void refocus();
   }
 });
-watch(
-  () => settings.value.theme,
-  (theme) => {
-    document.documentElement.dataset["theme"] = theme;
-  },
-  { immediate: true },
-);
 
 onMounted(() => {
   void watchWindowClose();
@@ -74,7 +71,7 @@ onMounted(() => {
       @select="pick"
     />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
-      <NoticeBar v-if="notices.length > 0" :notices="notices" @close="dismissNotice" />
+      <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
       <ProblemBar
         v-if="emptyStop.barProblem !== null"
         :problem="emptyStop.barProblem"
@@ -102,7 +99,12 @@ onMounted(() => {
           :shown="sides.path === active && screen.kind === 'files'"
         />
         <StopView v-if="emptyStop.stopView !== null" :message="emptyStop.stopView.message" />
-        <SettingsView v-if="screen.kind === 'settings'" />
+        <SettingsView v-if="screen.kind === 'settings'">
+          <section aria-labelledby="settings-servers">
+            <h3 id="settings-servers" class="mb-2 font-semibold">Language servers</h3>
+            <LanguageServerSettings />
+          </section>
+        </SettingsView>
         <ServerLogView
           v-else-if="screen.kind === 'serverLog'"
           :key="screen.name"

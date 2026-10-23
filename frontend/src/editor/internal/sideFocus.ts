@@ -20,7 +20,7 @@ import { otherSide, SIDES, type Side } from "./side";
 import type { SideCommand } from "./sideKeys";
 import { setMark, sideMarks } from "./sideMark";
 import { isSideOpen, type ChunkState } from "./status";
-import { revealScrollTop, visibleArea } from "./viewport";
+import { revealSpan, visibleArea } from "./viewport";
 import { wheelStep, type WheelSum } from "./wheel";
 
 type FocusSources = {
@@ -233,14 +233,6 @@ export class SideFocus {
     if (row === undefined) {
       return;
     }
-    const view = this.#view(side);
-    const scrollTop = revealScrollTop(row[SIDE_PANE[side]], {
-      area: visibleArea(view),
-      lineHeight: view.defaultLineHeight,
-      paddingTop: view.documentPadding.top,
-    });
-    if (scrollTop !== null) {
-      view.scrollDOM.scrollTop = scrollTop;
-    }
+    revealSpan(this.#view(side), row[SIDE_PANE[side]]);
   }
 }

@@ -5,6 +5,8 @@ import {
   bindingsOf,
   DEFAULT_KEYS,
   KEY_ACTIONS,
+  isLinux,
+  isMac,
   keyLabel,
   keyOfEvent,
   keyText,
@@ -53,6 +55,17 @@ function pressed(platform: string, press: Press): string | null {
   const found = keyOfEvent(event(press), platform);
   return found === null ? null : keyText(found);
 }
+
+test("Linux and macOS are told apart by navigator.platform's start and CodeMirror's Mac test", () => {
+  expect(isLinux("Linux x86_64")).toBe(true);
+  expect(isLinux("Linux aarch64")).toBe(true);
+  expect(isLinux("MacIntel")).toBe(false);
+  expect(isLinux("Win32")).toBe(false);
+  expect(isLinux("")).toBe(false);
+  expect(isLinux("FreeBSD amd64 Linux")).toBe(false);
+  expect(isMac(MAC)).toBe(true);
+  expect(isMac(LINUX)).toBe(false);
+});
 
 test("the actions are listed in the settings order", () => {
   expect(KEY_ACTIONS).toEqual([

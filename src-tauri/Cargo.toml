@@ -27,6 +27,7 @@ tauri-build.workspace = true
 yamt-session.workspace = true
 yamt-settings.workspace = true
 yamt-lsp-host.workspace = true
+yamt-compare.workspace = true
 serde.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true

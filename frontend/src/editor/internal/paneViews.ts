@@ -37,7 +37,7 @@ export type PaneWiring = {
   readonly act: (action: ChunkAction) => void;
 };
 
-function everyPane(): Extension {
+export function everyPane(): Extension {
   return [
     // Under a transformed or contained ancestor CodeMirror lays fixed tooltips out inside the
     // pane (@codemirror/view tooltips readMeasure, makeAbsolute), squeezing their text.

@@ -30,6 +30,19 @@ export const commands = {
 	stopServer: (run: RunId) => __TAURI_INVOKE<void>("stop_server", { run }),
 	findProgram: (program: string, project: string, folders: ProgramFolders) => __TAURI_INVOKE<ProgramFound>("find_program", { program, project, folders }),
 	projectFiles: (paths: string[]) => __TAURI_INVOKE<ProjectFile[]>("project_files", { paths }),
+	openCompare: () => typedError<CompareStart, IpcError>(__TAURI_INVOKE("open_compare")),
+	loadTab: (tab: TabId) => typedError<TabTexts, IpcError>(__TAURI_INVOKE("load_tab", { tab })),
+	setColumn: (tab: TabId, column: Column, text: string, version: ColumnVersion) => typedError<Comparison, IpcError>(__TAURI_INVOKE("set_column", { tab, column, text, version })),
+	addTab: () => typedError<TabList, IpcError>(__TAURI_INVOKE("add_tab")),
+	closeTab: (tab: TabId) => typedError<TabList, IpcError>(__TAURI_INVOKE("close_tab", { tab })),
+	renameTab: (tab: TabId, name: string) => typedError<TabList, IpcError>(__TAURI_INVOKE("rename_tab", { tab, name })),
+	setTabLanguage: (tab: TabId, language: TabLanguage) => typedError<TabList, IpcError>(__TAURI_INVOKE("set_tab_language", { tab, language })),
+	showTab: (tab: TabId) => typedError<TabList, IpcError>(__TAURI_INVOKE("show_tab", { tab })),
+	/**
+	 *  The selection's text, or `None` when it cannot be read; on Linux through GTK's text request,
+	 *  which never asks for the format list that `WebKitGTK` 2.54 crashes on (plan §2 #99).
+	 */
+	readClipboard: (selection: ClipboardSelection) => __TAURI_INVOKE<string | null>("read_clipboard", { selection }),
 };
 
 /* Types */
@@ -76,8 +89,65 @@ export type ChunkKind =
 /**  Local and remote changed these base lines differently. */
 "Conflict";
 
+export type ClipboardSelection = "clipboard" | "primary";
+
+/**  One of a tab's two texts: the left is the base the right is compared against. */
+export type Column = 
+/**  The base. */
+"left" | 
+/**  The text compared against the left. */
+"right";
+
+/**  Counts one column's sends from the window; starts at 0 per tab when the store opens. */
+export type ColumnVersion = number;
+
+/**  The versions of a tab's two texts. */
+export type ColumnVersions = {
+	/**  The left text's version. */
+	left: ColumnVersion,
+	/**  The right text's version. */
+	right: ColumnVersion,
+};
+
+/**  What the window gets when it starts. */
+export type CompareStart = {
+	/**  The tabs. */
+	list: TabList,
+	/**  The most bytes a column holds (`MAX_COLUMN_BYTES`). */
+	column_limit: number,
+};
+
+/**  The differences between a tab's two texts, and the versions they were computed from. */
+export type Comparison = {
+	/**  The versions of the two texts compared. */
+	versions: ColumnVersions,
+	/**  The differences, sorted and disjoint. */
+	differences: Difference[],
+};
+
 /**  What a Continue git accepted led to: the operation ended, or git stopped at another stop. */
 export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
+
+/**  One place where the right text differs from the left, located in both texts. */
+export type Difference = {
+	/**  The lines in the left; empty where the right inserted lines. */
+	left: LineRange<LeftLine>,
+	/**  The lines in the right; empty where the right removed the left's lines. */
+	right: LineRange<RightLine>,
+	/**  Where the two sides of this difference differ inside their lines. */
+	words: DifferenceWords,
+};
+
+/**  Each side of a difference compared with the other side. */
+export type DifferenceWords = {
+	/**
+	 *  Left compared with right: left text the right lacks; removals are right text the left
+	 *  lacks, placed where it would sit in the left.
+	 */
+	left: SideWordChanges<LeftLine>,
+	/**  Right compared with left. */
+	right: SideWordChanges<RightLine>,
+};
 
 export type DiskChange = {
 	path: string,
@@ -152,7 +222,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "WorkerStopped" };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -173,6 +243,9 @@ export type LanguageServerSettings = {
 	off?: { [key in string]: string[] },
 	added: AddedServer[],
 };
+
+/**  0-based line index in the left text of a 2-way compare. */
+export type LeftLine = number;
 
 /**  The lines `start .. start + len` of one text; built from a length, so it cannot be inverted. */
 export type LineRange<L> = {
@@ -245,15 +318,21 @@ export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Te
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
 
-/**  Base text one side removed, and the place in that side where it would sit. */
+/**
+ *  Text the compared-with text has that this side lacks, and the place in this side where it
+ *  would sit.
+ */
 export type Removal<L> = {
-	/**  The zero-width place in the side where the removed text would sit. */
+	/**  The zero-width place in this side where the missing text would sit. */
 	at: InlinePoint<L>,
-	/**  The removed base text, every line break written `\n`; never empty. */
+	/**  The missing text, every line break written `\n`; never empty. */
 	text: string,
 };
 
 export type RepositoryAnswer = "start" | "dontStart";
+
+/**  0-based line index in the right text of a 2-way compare. */
+export type RightLine = number;
 
 export type RunId = number;
 
@@ -293,14 +372,17 @@ export type SideNames = {
 	remote: SideName | null,
 };
 
-/**  One side of a chunk compared with base, line by line. */
+/**  One side compared with another text, line by line. */
 export type SideWordChanges<L> = {
 	/**
-	 *  Side text that is not in base: sorted by line then start, disjoint, never empty,
-	 *  never across a line break.
+	 *  Side text that is not in the compared-with text: sorted by line then start, disjoint,
+	 *  never empty, never across a line break.
 	 */
 	changed: InlineRange<L>[],
-	/**  Base text this side removed with nothing new in its place: sorted by place, at most one per place. */
+	/**
+	 *  Compared-with text this side lacks with nothing new in its place: sorted by place, at
+	 *  most one per place.
+	 */
 	removals: Removal<L>[],
 };
 
@@ -315,6 +397,48 @@ export type StoredSettings = {
 	antialiasing: Antialiasing,
 	keys: { [key in string]: string[] },
 	languageServers: LanguageServerSettings,
+};
+
+/**  One tab as the window lists it. */
+export type TabEntry = {
+	/**  The tab's id. */
+	id: TabId,
+	/**  The tab's name. */
+	name: string,
+	/**  The tab's language. */
+	language: TabLanguage,
+	/**  Either column holds text. */
+	holds_text: boolean,
+};
+
+/**  A tab's identity; ids never repeat within a data folder. */
+export type TabId = number;
+
+/**  The language a tab shows both columns in. */
+export type TabLanguage = 
+/**  Detected by the window from the texts. */
+{ kind: "auto" } | 
+/**  Picked by the user. */
+{ kind: "picked"; 
+/**  A window language name, opaque here. */
+name: string };
+
+/**  Every tab in the stored order, and the one shown. */
+export type TabList = {
+	/**  The tabs in the stored order. */
+	tabs: TabEntry[],
+	/**  The shown tab, always one of `tabs`. */
+	shown: TabId,
+};
+
+/**  A tab's two texts and their comparison. */
+export type TabTexts = {
+	/**  The left text. */
+	left: string,
+	/**  The right text. */
+	right: string,
+	/**  The comparison of the two. */
+	comparison: Comparison,
 };
 
 export type Theme = "dark" | "light";

@@ -1,0 +1,620 @@
+diff --git a/frontend/src/editor/compare.browser.test.ts b/frontend/src/editor/compare.browser.test.ts
+index 26174d2..e9c1285 100644
+--- a/frontend/src/editor/compare.browser.test.ts
++++ b/frontend/src/editor/compare.browser.test.ts
+@@ -1,10 +1,12 @@
+ import "../style.css";
++import { EditorView } from "@codemirror/view";
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import { page, userEvent } from "vitest/browser";
+ 
+-import { DEFAULT_KEYS, loadCompareFixture } from "../ipc";
++import { DEFAULT_KEYS, loadCompareFixture, nextColumnVersion, type TabTexts } from "../ipc";
+ import { CompareController, type CompareEvents, type CompareHosts } from "./index";
+ import type { CompareOptions } from "./index";
++import { SETTLE_PAUSE_MS } from "./internal/compareSettle";
+ import { found } from "./paneHarness";
+ 
+ const WIDTH = 1200;
+@@ -21,6 +23,8 @@ const BELOW_DIFFERENCES = /^const line(5[7-9]|[67]\d) = \d+;$/;
+ const HALF = 0.5;
+ const SCREENSHOTS = "/tmp/yamt-compare";
+ const MOUNTED = "data-compare-probe";
++const CHANGED_LINE = 11;
++const OLD = "const value = old(a, b);";
+ const OPTIONS: CompareOptions = {
+   preferences: { theme: "dark", keys: DEFAULT_KEYS },
+   language: { kind: "auto" },
+@@ -144,12 +148,14 @@ function middleLineText(host: HTMLElement): string | null {
+ 
+ const controllers: CompareController[] = [];
+ 
+-async function opened(): Promise<{ hosts: CompareHosts; controller: CompareController }> {
++async function opened(
++  events: CompareEvents = EVENTS,
++): Promise<{ hosts: CompareHosts; controller: CompareController; texts: TabTexts }> {
+   const hosts = mount();
+   const texts = await loadCompareFixture("probe", { "probe.json": CASE });
+-  const controller = new CompareController(texts, hosts, OPTIONS, EVENTS);
++  const controller = new CompareController(texts, hosts, OPTIONS, events);
+   controllers.push(controller);
+-  return { hosts, controller };
++  return { hosts, controller, texts };
+ }
+ 
+ function cursorLine(): string | null {
+@@ -174,6 +180,7 @@ beforeEach(async () => {
+ });
+ 
+ afterEach(() => {
++  vi.useRealTimers();
+   controllers.splice(0).forEach((controller) => controller.destroy());
+   document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
+   delete document.documentElement.dataset["theme"];
+@@ -297,3 +304,63 @@ test("the columns and the strip follow the theme, dark then light", async () =>
+   expect(light[0]).not.toBe(dark[0]);
+   expect(light[1]).not.toBe(dark[1]);
+ });
++
++function tintedLines(hosts: CompareHosts): number[] {
++  return [hosts.left, hosts.right].map(
++    (host) => host.querySelectorAll(".cm-line.chunk-band.chunk-modified").length,
++  );
++}
++
++function typeAtLine(host: HTMLElement, line: number, text: string): void {
++  const editor = found(host.querySelector<HTMLElement>(".cm-editor"), "editor");
++  const view = EditorView.findFromDOM(editor);
++  if (view === null) {
++    throw new Error("no view");
++  }
++  const at = view.state.doc.line(line).from;
++  view.dispatch({ changes: { from: at, insert: text }, userEvent: "input.type" });
++}
++
++test("edits settle with the next version, only a reply for the current versions is shown, and destroy stops the timer", async () => {
++  const settled = vi.fn<CompareEvents["settled"]>();
++  const { hosts, controller, texts } = await opened({ ...EVENTS, settled });
++  const start = texts.comparison.versions;
++  const firstOnly = await loadCompareFixture("first", {
++    "first.json": { ...CASE, differences: CASE.differences.slice(0, 1) },
++  });
++  const edited = { left: nextColumnVersion(start.left), right: start.right };
++  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
++
++  typeAtLine(hosts.left, CHANGED_LINE, "x");
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS - 1);
++  const early = settled.mock.calls.length;
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS);
++
++  expect(early).toBe(0);
++  expect(settled.mock.calls).toEqual([
++    [[{ column: "left", text: CASE.left.replace(OLD, `x${OLD}`), version: edited.left }]],
++  ]);
++  const before = tintedLines(hosts);
++  expect(controller.showComparison({ ...firstOnly.comparison, versions: start })).toBe(false);
++  expect(tintedLines(hosts)).toEqual(before);
++  expect(controller.showComparison({ ...firstOnly.comparison, versions: edited })).toBe(true);
++  expect([before, tintedLines(hosts)]).toEqual([
++    [2, 2],
++    [1, 1],
++  ]);
++
++  typeAtLine(hosts.left, CHANGED_LINE, "y");
++  expect(controller.settleNow()).toEqual([
++    {
++      column: "left",
++      text: CASE.left.replace(OLD, `yx${OLD}`),
++      version: nextColumnVersion(edited.left),
++    },
++  ]);
++
++  typeAtLine(hosts.left, CHANGED_LINE, "z");
++  controllers.splice(controllers.indexOf(controller), 1);
++  controller.destroy();
++  vi.advanceTimersByTime(SETTLE_PAUSE_MS * 2);
++  expect(settled).toHaveBeenCalledTimes(1);
++});
+diff --git a/frontend/src/editor/compare.ts b/frontend/src/editor/compare.ts
+index 9ce9b8e..ffc8c6e 100644
+--- a/frontend/src/editor/compare.ts
++++ b/frontend/src/editor/compare.ts
+@@ -3,19 +3,14 @@ import type { ViewUpdate } from "@codemirror/view";
+ 
+ import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
+ import { showDifferences } from "./internal/compareFields";
++import { keyboardColumn, revealDifference } from "./internal/compareFocus";
+ import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
+ import { CompareFrame } from "./internal/compareFrame";
+ import { CompareLanguage } from "./internal/compareLanguage";
+ import { columnMarks } from "./internal/compareMarks";
+ import { Settle } from "./internal/compareSettle";
+ import { CompareStrip } from "./internal/compareStrip";
+-import {
+-  COLUMNS,
+-  createColumnViews,
+-  keyboardColumn,
+-  revealDifference,
+-} from "./internal/compareViews";
+-import type { ColumnViews } from "./internal/compareViews";
++import { COLUMNS, createColumnViews, type ColumnViews } from "./internal/compareViews";
+ import { historyCommand } from "./internal/historyKey";
+ import type { Direction } from "./internal/navigation";
+ import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
+diff --git a/frontend/src/editor/internal/compareFocus.ts b/frontend/src/editor/internal/compareFocus.ts
+new file mode 100644
+index 0000000..9d1c646
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFocus.ts
+@@ -0,0 +1,40 @@
++import type { EditorView } from "@codemirror/view";
++
++import type { Column } from "../../ipc";
++import { differenceField } from "./compareFields";
++import { nextDifference } from "./compareNavigation";
++import { COLUMNS, type ColumnViews } from "./compareViews";
++import { toDocPos } from "./docPos";
++import { rangeSpan } from "./geometry";
++import type { Direction } from "./navigation";
++import { revealSpan } from "./viewport";
++
++export function keyboardColumn(views: ColumnViews): Column | null {
++  return (
++    COLUMNS.find((column) => {
++      const view = views[column];
++      return view.dom.contains(view.root.activeElement);
++    }) ?? null
++  );
++}
++
++export function revealDifference(view: EditorView, direction: Direction): void {
++  const { state } = view;
++  const target = nextDifference(
++    state.doc,
++    state.field(differenceField).spans,
++    toDocPos(state.selection.main.head),
++    direction,
++  );
++  if (target === null) {
++    return;
++  }
++  view.dispatch({ selection: { anchor: target.from } });
++  revealSpan(
++    view,
++    rangeSpan(state.doc, target, (pos) => view.lineBlockAt(pos)),
++  );
++  if (!view.hasFocus) {
++    view.focus();
++  }
++}
+diff --git a/frontend/src/editor/internal/compareFormat.test.ts b/frontend/src/editor/internal/compareFormat.test.ts
+index c7f802e..5efbb25 100644
+--- a/frontend/src/editor/internal/compareFormat.test.ts
++++ b/frontend/src/editor/internal/compareFormat.test.ts
+@@ -1,14 +1,15 @@
+ import { history, undo, undoDepth } from "@codemirror/commands";
+-import { EditorState, type TransactionSpec } from "@codemirror/state";
+-import { expect, test } from "vitest";
++import { EditorState, type Extension, type TransactionSpec } from "@codemirror/state";
++import { expect, test, vi } from "vitest";
+ 
++import { columnLimit } from "./columnBytes";
+ import { formatColumns, type FormatTarget } from "./compareFormat";
+ 
+ type Held = FormatTarget & { state: EditorState };
+ 
+-function column(text: string): Held {
++function column(text: string, extensions: Extension = []): Held {
+   const held: Held = {
+-    state: EditorState.create({ doc: text, extensions: history() }),
++    state: EditorState.create({ doc: text, extensions: [history(), extensions] }),
+     dispatch(spec: TransactionSpec) {
+       held.state = held.state.update(spec).state;
+     },
+@@ -69,3 +70,15 @@ test("an already formatted column reports unchanged and adds no undo step", () =
+   expect(right.state.sliceDoc()).toBe("<a>\n  <b>x</b>\n</a>\n");
+   expect(xml.left).toEqual({ kind: "unchanged" });
+ });
++
++test("a formatted text past the column limit is refused and reported unchanged", () => {
++  const refused = vi.fn<() => void>();
++  const left = column(MINIFIED, columnLimit(MINIFIED.length, refused));
++
++  const report = formatColumns({ left, right: column(MINIFIED) }, "JSON");
++
++  expect(refused).toHaveBeenCalledTimes(1);
++  expect(report).toEqual({ left: { kind: "unchanged" }, right: { kind: "formatted" } });
++  expect(left.state.sliceDoc()).toBe(MINIFIED);
++  expect(undoDepth(left.state)).toBe(0);
++});
+diff --git a/frontend/src/editor/internal/compareFormat.ts b/frontend/src/editor/internal/compareFormat.ts
+index ca06d38..db1bd0f 100644
+--- a/frontend/src/editor/internal/compareFormat.ts
++++ b/frontend/src/editor/internal/compareFormat.ts
+@@ -29,17 +29,18 @@ export function isFormatLanguage(name: string): name is FormatLanguage {
+ }
+ 
+ function formatColumn(target: FormatTarget, language: FormatLanguage): ColumnFormat {
++  const { doc } = target.state;
+   const result = FORMATTERS[language](target.state.sliceDoc());
+-  if (result.kind === "formatted") {
+-    target.dispatch({
+-      changes: { from: 0, to: target.state.doc.length, insert: result.text },
+-      selection: EditorSelection.cursor(0),
+-      userEvent: "yamt.format",
+-      annotations: isolateHistory.of("full"),
+-    });
+-    return { kind: "formatted" };
++  if (result.kind !== "formatted") {
++    return result;
+   }
+-  return result;
++  target.dispatch({
++    changes: { from: 0, to: doc.length, insert: result.text },
++    selection: EditorSelection.cursor(0),
++    userEvent: "yamt.format",
++    annotations: isolateHistory.of("full"),
++  });
++  return { kind: target.state.doc === doc ? "unchanged" : "formatted" };
+ }
+ 
+ export function formatColumns(
+diff --git a/frontend/src/editor/internal/compareLanguage.test.ts b/frontend/src/editor/internal/compareLanguage.test.ts
+index 49eb152..b39ec97 100644
+--- a/frontend/src/editor/internal/compareLanguage.test.ts
++++ b/frontend/src/editor/internal/compareLanguage.test.ts
+@@ -1,9 +1,10 @@
+ import { language } from "@codemirror/language";
+ import { languages } from "@codemirror/language-data";
+-import { EditorState, type TransactionSpec } from "@codemirror/state";
++import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
+ import { expect, test, vi } from "vitest";
+ 
+-import { CompareLanguage } from "./compareLanguage";
++import { columnOpening, CompareLanguage } from "./compareLanguage";
++import { OPENING_CHARS } from "./detectLanguage";
+ import { languageNames } from "./language";
+ import { languageCompartment } from "./pane";
+ 
+@@ -99,3 +100,23 @@ test("languageNames lists every language-data name once, in alphabetical order",
+   }
+   expect(names).toEqual(expect.arrayContaining(["JSON", "XML", "TypeScript", "Python"]));
+ });
++
++test("Auto reads each column's opening only, past any leading blank lines", () => {
++  const blank = Array.from({ length: OPENING_CHARS }, () => "  ");
++  const body = Array.from({ length: OPENING_CHARS }, (_, line) => `  "k${line}": ${line},`);
++  const doc = Text.of([...blank, '{"a": 1,', ...body, "}", ""]);
++  const detected = vi.fn<(name: string | null) => void>();
++
++  const opening = columnOpening(doc);
++  const auto = new CompareLanguage(
++    { kind: "auto" },
++    { left: column("\n \n"), right: column(doc.toString()) },
++    detected,
++  );
++
++  expect(opening).toHaveLength(OPENING_CHARS);
++  expect(opening.startsWith('{"a": 1,\n  "k0": 0,')).toBe(true);
++  expect(columnOpening(Text.of(["  ", "\t", ""]))).toBe("");
++  expect(detected.mock.calls).toEqual([["JSON"]]);
++  auto.destroy();
++});
+diff --git a/frontend/src/editor/internal/compareLanguage.ts b/frontend/src/editor/internal/compareLanguage.ts
+index d1d5816..c196746 100644
+--- a/frontend/src/editor/internal/compareLanguage.ts
++++ b/frontend/src/editor/internal/compareLanguage.ts
+@@ -1,8 +1,8 @@
+-import type { EditorState } from "@codemirror/state";
++import type { EditorState, Text } from "@codemirror/state";
+ 
+ import type { Column, TabLanguage } from "../../ipc";
+ import { isFormatLanguage, type FormatLanguage } from "./compareFormat";
+-import { detectLanguage } from "./detectLanguage";
++import { detectLanguage, OPENING_CHARS } from "./detectLanguage";
+ import { languageNamed, loadLanguage, type LanguageView } from "./language";
+ import { languageCompartment } from "./pane";
+ 
+@@ -10,6 +10,20 @@ type LanguageColumn = LanguageView & { readonly state: EditorState };
+ type Finding = { readonly name: string | null };
+ 
+ const LOG_PATH = "compare";
++const NOT_SPACE = /\S/;
++
++export function columnOpening(doc: Text): string {
++  let offset = 0;
++  for (const iter = doc.iter(); !iter.next().done;) {
++    const found = iter.value.search(NOT_SPACE);
++    if (found !== -1) {
++      const start = offset + found;
++      return doc.sliceString(start, start + OPENING_CHARS);
++    }
++    offset += iter.value.length;
++  }
++  return "";
++}
+ 
+ export class CompareLanguage {
+   readonly #columns: Readonly<Record<Column, LanguageColumn>>;
+@@ -59,7 +73,7 @@ export class CompareLanguage {
+ 
+   #detect(): void {
+     const { left, right } = this.#columns;
+-    const name = detectLanguage(left.state.sliceDoc(), right.state.sliceDoc());
++    const name = detectLanguage(columnOpening(left.state.doc), columnOpening(right.state.doc));
+     if (this.#finding === null || this.#finding.name !== name) {
+       this.#finding = { name };
+       this.#detected(name);
+diff --git a/frontend/src/editor/internal/compareSettle.ts b/frontend/src/editor/internal/compareSettle.ts
+index 39bfb9a..20d658d 100644
+--- a/frontend/src/editor/internal/compareSettle.ts
++++ b/frontend/src/editor/internal/compareSettle.ts
+@@ -1,9 +1,8 @@
+ import { nextColumnVersion, type Column, type ColumnVersions } from "../../ipc";
++import { COLUMNS } from "./compareViews";
+ 
+ export const SETTLE_PAUSE_MS = 300;
+ 
+-const COLUMNS = ["left", "right"] as const satisfies readonly Column[];
+-
+ export class Settle {
+   #versions: ColumnVersions;
+   readonly #settled: (columns: readonly Column[]) => void;
+diff --git a/frontend/src/editor/internal/compareStrip.ts b/frontend/src/editor/internal/compareStrip.ts
+index 4f89e7a..be416c0 100644
+--- a/frontend/src/editor/internal/compareStrip.ts
++++ b/frontend/src/editor/internal/compareStrip.ts
+@@ -1,7 +1,8 @@
+ import "../theme.css";
+-import { bandPath, type Span } from "../../connectors";
++import type { Span } from "../../connectors";
+ import type { Column } from "../../ipc";
+-import { crossesStrip } from "./gap";
++import { placedBand } from "./gap";
++import { dropMissing, keepEditorFocus } from "./strips";
+ import type { ChangeTone } from "./tone";
+ 
+ export type CompareRow = Readonly<Record<Column, Span>> & { readonly tone: ChangeTone };
+@@ -9,14 +10,6 @@ export type StripPanes = Readonly<Record<Column, { readonly documentTop: number
+ 
+ const SVG_NS = "http://www.w3.org/2000/svg";
+ 
+-function shiftedSpan({ top, bottom }: Span, by: number): Span {
+-  return { top: top + by, bottom: bottom + by };
+-}
+-
+-function keepEditorFocus(event: MouseEvent): void {
+-  event.preventDefault();
+-}
+-
+ export class CompareStrip {
+   readonly #strip: SVGSVGElement;
+   readonly #layer = document.createElementNS(SVG_NS, "g");
+@@ -31,14 +24,15 @@ export class CompareStrip {
+   paint(panes: StripPanes, rows: readonly CompareRow[]): void {
+     const strip = this.#strip;
+     const stripTop = strip.getBoundingClientRect().top;
+-    const width = strip.clientWidth;
+-    const height = strip.clientHeight;
++    const shifts = {
++      left: panes.left.documentTop - stripTop,
++      right: panes.right.documentTop - stripTop,
++    };
++    const size = { width: strip.clientWidth, height: strip.clientHeight };
+     const kept = new Set<string>();
+     rows.forEach((row, index) => {
+-      const left = shiftedSpan(row.left, panes.left.documentTop - stripTop);
+-      const right = shiftedSpan(row.right, panes.right.documentTop - stripTop);
+-      const top = Math.min(left.top, right.top);
+-      if (!crossesStrip(top, Math.max(left.bottom, right.bottom), height)) {
++      const d = placedBand(row.left, row.right, shifts, size);
++      if (d === null) {
+         return;
+       }
+       const key = `${index} ${row.tone}`;
+@@ -50,14 +44,11 @@ export class CompareStrip {
+         this.#bands.set(key, path);
+         this.#layer.append(path);
+       }
+-      path.setAttribute("d", bandPath({ left, right }, width));
++      path.setAttribute("d", d);
++    });
++    dropMissing(this.#bands, kept, (path) => {
++      path.remove();
+     });
+-    for (const [key, path] of this.#bands) {
+-      if (!kept.has(key)) {
+-        path.remove();
+-        this.#bands.delete(key);
+-      }
+-    }
+   }
+ 
+   destroy(): void {
+diff --git a/frontend/src/editor/internal/compareViews.ts b/frontend/src/editor/internal/compareViews.ts
+index 89867e2..531e707 100644
+--- a/frontend/src/editor/internal/compareViews.ts
++++ b/frontend/src/editor/internal/compareViews.ts
+@@ -4,14 +4,9 @@ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ import type { Column } from "../../ipc";
+ import { columnLimit } from "./columnBytes";
+ import { differenceField } from "./compareFields";
+-import { nextDifference } from "./compareNavigation";
+-import { toDocPos } from "./docPos";
+-import { rangeSpan } from "./geometry";
+-import type { Direction } from "./navigation";
+ import { createPane, type PaneSettings } from "./pane";
+ import { everyPane } from "./paneViews";
+ import { removalTooltip } from "./removalTooltip";
+-import { revealScrollTop, visibleArea } from "./viewport";
+ 
+ export type ColumnViews = Readonly<Record<Column, EditorView>>;
+ 
+@@ -62,38 +57,3 @@ export function createColumnViews(
+     right: createColumn("right", { text: texts.right, parent: hosts.right }, wiring),
+   };
+ }
+-
+-export function keyboardColumn(views: ColumnViews): Column | null {
+-  return (
+-    COLUMNS.find((column) => {
+-      const view = views[column];
+-      return view.dom.contains(view.root.activeElement);
+-    }) ?? null
+-  );
+-}
+-
+-export function revealDifference(view: EditorView, direction: Direction): void {
+-  const { state } = view;
+-  const target = nextDifference(
+-    state.doc,
+-    state.field(differenceField).spans,
+-    toDocPos(state.selection.main.head),
+-    direction,
+-  );
+-  if (target === null) {
+-    return;
+-  }
+-  view.dispatch({ selection: { anchor: target.from } });
+-  const span = rangeSpan(state.doc, target, (pos) => view.lineBlockAt(pos));
+-  const top = revealScrollTop(span, {
+-    area: visibleArea(view),
+-    lineHeight: view.defaultLineHeight,
+-    paddingTop: view.documentPadding.top,
+-  });
+-  if (top !== null) {
+-    view.scrollDOM.scrollTop = top;
+-  }
+-  if (!view.hasFocus) {
+-    view.focus();
+-  }
+-}
+diff --git a/frontend/src/editor/internal/detectLanguage.ts b/frontend/src/editor/internal/detectLanguage.ts
+index 09eecd1..1cf5abe 100644
+--- a/frontend/src/editor/internal/detectLanguage.ts
++++ b/frontend/src/editor/internal/detectLanguage.ts
+@@ -1,7 +1,7 @@
+ import { LanguageDescription } from "@codemirror/language";
+ import { languages } from "@codemirror/language-data";
+ 
+-const OPENING_CHARS = 4096;
++export const OPENING_CHARS = 4096;
+ const HTML = /^<(?:!doctype\s+html|html)(?![\w:.-])/i;
+ const TAG = /^<(?:!--|[A-Za-z])/;
+ const JSON_OBJECT = /^\{\s*["}]/;
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 5b9626f..09f7614 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -1,4 +1,4 @@
+-import { bandPath, waveCenterY, waveJoinPath } from "../../connectors";
++import { bandPath, waveCenterY, waveJoinPath, type Span } from "../../connectors";
+ import type { Chunk } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry";
+@@ -68,6 +68,20 @@ export function keepsArrowRow(
+   );
+ }
+ 
++export function placedBand(
++  left: Span,
++  right: Span,
++  shifts: { readonly left: number; readonly right: number },
++  size: { readonly width: number; readonly height: number },
++): string | null {
++  const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
++  const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
++  const top = Math.min(onLeft.top, onRight.top);
++  return crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)
++    ? bandPath({ left: onLeft, right: onRight }, size.width)
++    : null;
++}
++
+ export function bandPaints(
+   { rows, side }: { readonly rows: readonly ChunkRow[]; readonly side: Side },
+   shifts: { readonly left: number; readonly right: number },
+@@ -78,13 +92,8 @@ export function bandPaints(
+   for (const row of rows) {
+     const tone = paneTone(row.chunk, row.status, side);
+     if (tone !== null) {
+-      const left = row[panes.left];
+-      const right = row[panes.right];
+-      const onLeft = { top: left.top + shifts.left, bottom: left.bottom + shifts.left };
+-      const onRight = { top: right.top + shifts.right, bottom: right.bottom + shifts.right };
+-      const top = Math.min(onLeft.top, onRight.top);
+-      if (crossesStrip(top, Math.max(onLeft.bottom, onRight.bottom), size.height)) {
+-        const d = bandPath({ left: onLeft, right: onRight }, size.width);
++      const d = placedBand(row[panes.left], row[panes.right], shifts, size);
++      if (d !== null) {
+         paints.push({ chunk: row.chunk, tone, d });
+       }
+     }
+diff --git a/frontend/src/editor/internal/sideFocus.ts b/frontend/src/editor/internal/sideFocus.ts
+index 9e1505f..7bf701e 100644
+--- a/frontend/src/editor/internal/sideFocus.ts
++++ b/frontend/src/editor/internal/sideFocus.ts
+@@ -20,7 +20,7 @@ import { otherSide, SIDES, type Side } from "./side";
+ import type { SideCommand } from "./sideKeys";
+ import { setMark, sideMarks } from "./sideMark";
+ import { isSideOpen, type ChunkState } from "./status";
+-import { revealScrollTop, visibleArea } from "./viewport";
++import { revealSpan, visibleArea } from "./viewport";
+ import { wheelStep, type WheelSum } from "./wheel";
+ 
+ type FocusSources = {
+@@ -233,14 +233,6 @@ export class SideFocus {
+     if (row === undefined) {
+       return;
+     }
+-    const view = this.#view(side);
+-    const scrollTop = revealScrollTop(row[SIDE_PANE[side]], {
+-      area: visibleArea(view),
+-      lineHeight: view.defaultLineHeight,
+-      paddingTop: view.documentPadding.top,
+-    });
+-    if (scrollTop !== null) {
+-      view.scrollDOM.scrollTop = scrollTop;
+-    }
++    revealSpan(this.#view(side), row[SIDE_PANE[side]]);
+   }
+ }
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index 63a44ea..8830304 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -50,7 +50,7 @@ function placeInOrder(parent: SVGGElement, nodes: readonly Element[]): void {
+   }
+ }
+ 
+-function dropMissing<K, T>(
++export function dropMissing<K, T>(
+   nodes: Map<K, T>,
+   keptKeys: ReadonlySet<K>,
+   remove: (node: T) => void,
+@@ -227,6 +227,6 @@ function stripViews(views: PaneViews, side: Side): GapPanes {
+   return { left: views[panes.left], right: views[panes.right] };
+ }
+ 
+-function keepEditorFocus(event: MouseEvent): void {
++export function keepEditorFocus(event: MouseEvent): void {
+   event.preventDefault();
+ }
+diff --git a/frontend/src/editor/internal/viewport.ts b/frontend/src/editor/internal/viewport.ts
+index d3a8635..d20606a 100644
+--- a/frontend/src/editor/internal/viewport.ts
++++ b/frontend/src/editor/internal/viewport.ts
+@@ -64,3 +64,14 @@ export function revealScrollTop(
+   const offset = fits ? Math.min(height / REVEAL_PARTS, height - gap - changeHeight) : gap;
+   return Math.max(0, span.top - offset + paddingTop);
+ }
++
++export function revealSpan(view: EditorView, span: Span): void {
++  const scrollTop = revealScrollTop(span, {
++    area: visibleArea(view),
++    lineHeight: view.defaultLineHeight,
++    paddingTop: view.documentPadding.top,
++  });
++  if (scrollTop !== null) {
++    view.scrollDOM.scrollTop = scrollTop;
++  }
++}

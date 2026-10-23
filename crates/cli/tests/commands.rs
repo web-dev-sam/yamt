@@ -3,37 +3,18 @@
 use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use yamt_conflict_repo::{ConflictFile, FileKind, conflict_repo};
 
+mod yamt_cli;
+
+use yamt_cli::{Output, path, yamt_cli};
+
 const BASE: &str = "a\nb\nc\nd\ne\nf\ng\nh\ni\n";
 const LOCAL: &str = "a\nB\nc\nd\ne\nf\ng\nL\ni\n";
 const REMOTE: &str = "a\nb\nc\nd\nE\nf\ng\nR\ni\n";
-
-struct Output {
-    code: i32,
-    stdout: String,
-    stderr: String,
-}
-
-fn yamt_cli<S: AsRef<OsStr>>(args: &[S]) -> Output {
-    let output = Command::new(env!("CARGO_BIN_EXE_yamt-cli"))
-        .args(args)
-        .output()
-        .unwrap();
-    Output {
-        code: output.status.code().unwrap(),
-        stdout: String::from_utf8(output.stdout).unwrap(),
-        stderr: String::from_utf8(output.stderr).unwrap(),
-    }
-}
-
-fn path(path: &Path) -> &str {
-    path.to_str().unwrap()
-}
 
 fn write_case(root: &Path, name: &str, extension: &str) -> std::path::PathBuf {
     let dir = root.join(name);
