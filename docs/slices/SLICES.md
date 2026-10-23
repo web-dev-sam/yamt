@@ -972,6 +972,26 @@ commit changes version and docs only. Nothing pushed.
 | 2   | final run before tagging (`briefs/release-0.5.0-verify.md`): `just check`, licences, `.deb` name, `--version`, the release binary on the conflict project, a rebase with the tag's tooltip, the compare window, paste with a dead clipboard | verifier     | done        | `Release050Verify2` at `8dd895d`: gate pass; licences no diff; `yamt_0.5.0_amd64.deb`, `yamt 0.5.0`, `--raw` unknown (2); Mark resolved; rebase tooltip at once, end exit 0; `--diff` Format, tabs across restart, second exits 2; dead-clipboard paste alive. First start stopped by #1586. Notes `Release050Verify2.md` |
 | 3   | release build and publishing (`docs/slices/handoff-release-0.5.0.md`)                                                                                                                                                                       | human        | handed over |                                                                                                                                                                                                                                                                                                                           |
 
+## Themes — WebStorm, VS Code, Zed and Atom in their exact colours (session 28, branch `feat/themes` off main `17849b0`)
+
+Owner request (2026-10-23): "create a new branch, I want to enable different themes and add a zed, vscode and webstorm
+and atom theme. I want the theme to be exactly those colors so that different editor users can a similar visual feel as
+their favorite editor". Rules, acceptance, non-goals: `docs/slices/request-themes.md` (rules 1–4, 6 decided as the
+boring choice, OR13: each editor's own default dark and light, yamt's two kept as the default; rule 5, the change
+colours, asked: the one real tradeoff, plan §2 #32 makes conflicts purple).
+
+Slice graph: 1a, 1b, 1c (colour research, read-only, now) → 2 (design, with the research) → 3 (builds, after the
+owner's answer on change colours) → 4 (final run).
+
+| row | slice                                                                                                         | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1a  | research: VS Code 1.143 Dark 2026 / Light 2026 colours (`briefs/3.TH-theme-colours.md`, `ThemeColoursVscode`) | scout    | running |          |
+| 1b  | research: Zed 1.25.3 One Dark / One Light, Atom 1.60.0 One Dark / One Light (`ThemeColoursZedAtom`)           | scout    | running |          |
+| 1c  | research: WebStorm 2026.2 Islands Dark / Islands Light (`ThemeColoursWebstorm`)                               | scout    | running |          |
+| 2   | design: the theme list's one source, palettes per theme, syntax kinds, shapes, the picker, builds             | designer | planned |          |
+| 3   | builds per the design                                                                                         | rust/web | planned |          |
+| 4   | final run: `just check`, `just mutants 17849b0`, WebKit and the real app in every theme                       | verifier | planned |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
