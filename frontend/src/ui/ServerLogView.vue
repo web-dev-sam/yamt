@@ -109,7 +109,7 @@ function escapePressed(event: KeyboardEvent): void {
 <template>
   <section
     :aria-label="logTitle(name)"
-    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col rounded-island bg-panel"
+    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col island bg-panel"
   >
     <header class="flex shrink-0 items-center gap-3 border-b border-separator px-3 py-2">
       <button

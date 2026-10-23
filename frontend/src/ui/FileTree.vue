@@ -52,7 +52,7 @@ function pressed(row: TreeRow): void {
   <ul
     role="tree"
     aria-label="Conflicted files"
-    class="group mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
+    class="group mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-sidebar-scroller"
   >
     <li
       v-for="row in rows"

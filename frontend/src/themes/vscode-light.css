@@ -1,0 +1,124 @@
+/*
+ * VS Code 1.143.0 Light 2026 (COLOR_THEME_LIGHT), T/ = /usr/share/code/resources/app/extensions/theme-defaults/themes/:
+ * L26 = T/2026-light.json, LM = T/light_modern.json, L+ = T/light_plus.json, Lvs = T/light_vs.json (include chain
+ * 2026-light → light_modern → light_plus → light_vs; colours: the later file wins; tokenColors: TextMate specificity),
+ * js:N@c = …/out/vs/workbench/workbench.desktop.main.js line N column c (registered defaults),
+ * css:4@c = …/workbench.desktop.main.css line 4 column c. workbench.experimental.modernUI is on (js:867@13723).
+ * "gap" names the closest element for what VS Code has no colour for.
+ */
+:root[data-theme="vscode-light"] {
+  --radius-island: 8px; /* css:4@202798 cornerRadius.large (modern-UI cards) */
+  --spacing-island: 4px; /* css:4@201702 spacing.size40 */
+  --island-line: 1px; /* css:4@202798 surface.border width */
+
+  --color-window: #fafafd; /* L26 titleBar.activeBackground (modernUI.shellBackground, js:632@41550) */
+  --color-panel: #ffffff; /* L26 editor.background */
+  --color-sidebar: #ffffff; /* L26 surface.background (css:4@202798) */
+  --color-panel-inline: #fafafd; /* L26 editorWidget.background */
+  --color-panel-border: #e4e5e6; /* L26 surface.border (js:632@38992) */
+  --color-separator: #e5e5e5; /* LM editorGroup.border */
+  --color-control-border: #d8d8d866; /* L26 input.border */
+  --color-fg: #202020; /* L26 foreground */
+  --color-fg-muted: #606060; /* L26 descriptionForeground */
+  --color-code: #202020; /* L26 editor.foreground */
+  --color-gutter: #606060; /* L26 editorLineNumber.foreground */
+  --color-gutter-active: #202020; /* L26 editorLineNumber.activeForeground */
+  --color-handle: #20202066; /* js:632@39318 modernSash.gripForeground = foreground × 0.4 */
+  --color-handle-active: #0069cc; /* js:108@3656 sash.hoverBorder → L26 focusBorder */
+  --color-active-line: #eaeaea40; /* L26 editor.lineHighlightBackground */
+  --color-selection: #0069cc40; /* L26 editor.selectionBackground */
+  --color-caret: #202020; /* L26 editorCursor.foreground */
+  --color-hover: #0000001f; /* L26 toolbar.hoverBackground */
+  --color-row-hover: #00000014; /* L26 list.hoverBackground */
+  --color-row-selected: #00000025; /* L26 list.activeSelectionBackground */
+  --color-primary: #0069cc; /* L26 button.background */
+  --color-on-primary: #ffffff; /* L26 button.foreground */
+  --color-problem: #fdeded; /* L26 inputValidation.errorBackground */
+  --color-problem-border: #ad0707; /* L26 inputValidation.errorBorder */
+  --color-on-problem: #202020; /* L26 foreground */
+  --color-problem-error: #e51400; /* js:108@6558 editorError.foreground */
+  --color-problem-warning: #bf8803; /* js:108@6858 editorWarning.foreground */
+  --color-problem-info: #0063d3; /* js:108@6858 editorInfo.foreground */
+  --color-success-signal: #73c991; /* js:4019@7464 testing.iconPassed */
+  --color-success: #9bb95533; /* gap: js:108@11030 diffEditor.insertedLineBackground */
+  --color-success-border: #587c0c; /* gap: L26 editorGutter.addedBackground */
+  --color-on-success: #202020; /* L26 foreground */
+  --color-info: #e6f2fa; /* L26 inputValidation.infoBackground */
+  --color-info-border: #0069cc; /* L26 inputValidation.infoBorder */
+  --color-on-info: #202020; /* L26 foreground */
+  --color-search-match: #0069cc1a; /* L26 editor.findMatchHighlightBackground */
+  --color-diff-wave: #22222233; /* gap: js:108@11618 diffEditor.diagonalFill */
+
+  --color-syntax-keyword: #0000ff; /* Lvs storage.modifier, keyword.operator.expression, keyword.operator.new */
+  --color-syntax-control-keyword: #af00db; /* L+ keyword.control */
+  --color-syntax-definition-keyword: #cf222e; /* L26 storage.type */
+  --color-syntax-bool: #0000ff; /* Lvs constant.language */
+  --color-syntax-null: #0000ff; /* Lvs constant.language */
+  --color-syntax-self: #0550ae; /* L26 variable.language */
+  --color-syntax-string: #0a3069; /* L26 string */
+  --color-syntax-character: #cf222e; /* L26 constant.character (constant.character.entity.html) */
+  --color-syntax-number: #098658; /* Lvs constant.numeric */
+  --color-syntax-unit: #098658; /* Lvs keyword.other.unit */
+  --color-syntax-colour-literal: #0451a5; /* Lvs constant.other.color.rgb-value */
+  --color-syntax-regexp: #0a3069; /* L26 string.regexp */
+  --color-syntax-escape: #ee0000; /* L+ constant.character.escape */
+  --color-syntax-comment: #6e7781; /* L26 comment */
+  --color-syntax-variable: #1f2328; /* L26 variable.other */
+  --color-syntax-variable-definition: #0550ae; /* L26 variable.other.constant */
+  --color-syntax-function: #8250df; /* L26 entity.name.function */
+  --color-syntax-method: #8250df; /* L26 entity.name.function */
+  --color-syntax-property: #1f2328; /* L26 variable.other (variable.other.property) */
+  --color-syntax-property-definition: #001080; /* L+ meta.object-literal.key */
+  --color-syntax-type: #267f99; /* L+ entity.name.type, support.type */
+  --color-syntax-operator: #000000; /* Lvs keyword.operator */
+  --color-syntax-arrow: #cf222e; /* L26 storage.type (storage.type.function.arrow) */
+  --color-syntax-punctuation: #1f2328; /* L26 meta.block */
+  --color-syntax-interpolation: #0000ff; /* Lvs punctuation.definition.template-expression */
+  --color-syntax-decorator: #202020; /* L26 editor.foreground (punctuation.decorator has no rule) */
+  --color-syntax-markup-mark: #0550ae; /* L26 markup.heading (punctuation.definition.heading) */
+  --color-syntax-tag: #116329; /* L26 entity.name.tag */
+  --color-syntax-angle-bracket: #800000; /* Lvs punctuation.definition.tag */
+  --color-syntax-attribute: #e50000; /* Lvs entity.other.attribute-name */
+  --color-syntax-heading: #0550ae; /* L26 markup.heading */
+  --color-syntax-emphasis: #1f2328; /* L26 markup.italic */
+  --color-syntax-strong: #1f2328; /* L26 markup.bold */
+  --color-syntax-strikethrough: #202020; /* L26 editor.foreground (markup.strikethrough sets style only) */
+  --color-syntax-quote: #116329; /* L26 markup.quote */
+  --color-syntax-content-separator: #0550ae; /* L26 meta.separator */
+  --color-syntax-monospace: #0550ae; /* L26 markup.inline.raw */
+  --color-syntax-link: #0a3069; /* L26 string.other.link */
+  --color-syntax-url: #202020; /* L26 editor.foreground (markup.underline.link sets style only) */
+
+  --syntax-comment-style: normal; /* L26 comment */
+  --syntax-heading-weight: bold; /* L26 markup.heading fontStyle bold */
+  --syntax-heading-style: normal; /* L26 markup.heading */
+  --syntax-emphasis-style: italic; /* L26 markup.italic fontStyle italic */
+  --syntax-strong-weight: bold; /* L26 markup.bold fontStyle bold */
+  --syntax-strikethrough-line: line-through; /* L26 markup.strikethrough fontStyle strikethrough */
+  --syntax-link-line: none; /* L26 string.other.link */
+  --syntax-link-style: normal; /* L26 string.other.link */
+  --syntax-url-line: underline; /* Lvs markup.underline fontStyle underline */
+  --syntax-url-style: normal; /* Lvs markup.underline */
+  --syntax-function-style: normal; /* L26 entity.name.function */
+  --syntax-quote-style: normal; /* L26 markup.quote */
+  --syntax-content-separator-weight: bold; /* L26 meta.separator fontStyle bold */
+  --syntax-content-separator-style: normal; /* L26 meta.separator */
+
+  --color-chunk-inserted: #9bb95533; /* js:108@11030 diffEditor.insertedLineBackground */
+  --color-chunk-modified: #9bb95533; /* gap: js:4149@7125 mergeEditor.change.background */
+  --color-chunk-deleted: #ff000033; /* js:108@11030 diffEditor.removedLineBackground */
+  --color-chunk-conflict: #40a6ff33; /* js:108@13481 merge.incomingContentBackground */
+  --color-chunk-modified-word: #9ccc2c66; /* js:4149@7125 mergeEditor.change.word.background */
+  --color-chunk-conflict-word: #40a6ff80; /* js:108@13336 merge.incomingHeaderBackground */
+  --color-chunk-modified-removal: #ad0707; /* L26 editorGutter.deletedBackground */
+  --color-chunk-conflict-removal: #40a6ff80; /* js:108@13994 editorOverviewRuler.incomingContentForeground */
+
+  --color-mark-inserted: #587c0c; /* js:709@23739 minimapGutter.addedBackground → L26 editorGutter.addedBackground */
+  --color-mark-modified: #005fb8; /* js:709@23739 minimapGutter.modifiedBackground → LM editorGutter.modifiedBackground */
+  --color-mark-deleted: #ad0707; /* js:709@23739 minimapGutter.deletedBackground → L26 editorGutter.deletedBackground */
+  --color-mark-conflict: #40a6ff80; /* js:108@13994 editorOverviewRuler.incomingContentForeground */
+
+  --color-minimap-slider: #646464c0; /* L26 minimapSlider.background */
+  --color-minimap-slider-hover: #646464d0; /* L26 minimapSlider.hoverBackground */
+  --color-minimap-slider-active: #646464e0; /* L26 minimapSlider.activeBackground */
+}

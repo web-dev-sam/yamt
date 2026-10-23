@@ -70,7 +70,7 @@ onMounted(() => {
       :operation="operation"
       @select="pick"
     />
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+    <div class="ml-(--island-overlap) flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
       <ProblemBar
         v-if="emptyStop.barProblem !== null"
@@ -80,7 +80,7 @@ onMounted(() => {
       <p
         v-else-if="allResolved"
         role="status"
-        class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-fg"
+        class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-on-success"
       >
         {{ resolvedLine }}
       </p>

@@ -76,7 +76,7 @@ async function watchWindowClose(): Promise<void> {
       @close="closeTab"
       @rename="renameTab"
     />
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+    <div class="ml-(--island-overlap) flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <NoticeBar v-if="notices.length > 0" :rows="notices" @close="dismissNotice" />
       <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">

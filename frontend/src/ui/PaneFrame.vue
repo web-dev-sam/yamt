@@ -24,7 +24,7 @@ function keydownWhileShown(event: KeyboardEvent): void {
     <slot name="header" />
     <!-- Rounded without clipping: overflow hidden around the scrolling panes was slower in WebKitGTK (plan §2 #51); the 4 px inset keeps the pane corners inside the arc. -->
     <section
-      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] rounded-island bg-panel px-1 pb-1"
+      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] island bg-panel px-1 pb-1"
       :style="{ gridTemplateColumns: columns }"
     >
       <slot :strip-layer="STRIP_LAYER" />

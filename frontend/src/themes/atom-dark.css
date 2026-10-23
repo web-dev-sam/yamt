@@ -1,0 +1,125 @@
+/*
+ * Atom 1.60.0 One Dark (one-dark-ui + one-dark-syntax, src/config-schema.js:103), LESS 2.7 values, at atom/atom@v1.60.0:
+ * colors = packages/one-dark-syntax/styles/colors.less, sv = …/syntax-variables.less, L = …/styles/syntax-legacy/_base.less,
+ * N = …/styles/syntax/base.less, ts = …/styles/syntax/typescript.less, uv/uvc = packages/one-dark-ui/styles/ui-variables.less
+ * and ui-variables-custom.less, ui/<f> = packages/one-dark-ui/styles/<f>, gd = packages/git-diff/styles/git-diff.less;
+ * nt = atom/notifications@v0.72.1 styles/notifications.less; gh/<f> = atom/github@v0.36.9 styles/<f>.
+ * Syntax: tree-sitter scopes (config-schema.js:395-397); "unscoped" takes @syntax-text-color.
+ * "gap" names the closest element for what Atom has no colour for.
+ */
+:root[data-theme="atom-dark"] {
+  --radius-island: 0px; /* ui/panes.less#L5-6 flat panes */
+  --spacing-island: 0px; /* ui/panes.less#L5-6 panes touch */
+  --island-line: 1px; /* ui/panes.less#L5-6 1 px @base-border-color */
+
+  --color-window: #21252b; /* ui/atom.less#L10 @app-background-color = uvc#L58 @level-3-color */
+  --color-panel: #282c34; /* sv:10 @syntax-background-color */
+  --color-sidebar: #21252b; /* ui/tree-view.less#L5 @tree-view-background-color = @level-3-color */
+  --color-panel-inline: #21252b; /* uv#L44 @tool-panel-background-color = @level-3-color */
+  --color-panel-border: #181a1f; /* uvc#L38 @base-border-color */
+  --color-separator: #181a1f; /* uvc#L38 @base-border-color */
+  --color-control-border: #181a1f; /* uv#L42,59 @input-border-color, @button-border-color */
+  --color-fg: #9da5b4; /* uvc#L36 @text-color */
+  --color-fg-muted: #9da5b499; /* uv#L13 @text-color-subtle */
+  --color-code: #abb2bf; /* sv:6 @syntax-text-color = colors @mono-1 */
+  --color-gutter: #636d83; /* sv:22 @syntax-gutter-text-color */
+  --color-gutter-active: #abb2bf; /* sv:23 @syntax-gutter-text-color-selected */
+  --color-handle: #4b5362; /* gap: uvc#L94 @scrollbar-color */
+  --color-handle-active: #568af2; /* gap: uvc#L67 @accent-color (ui/tabs.less#L170 drop marker) */
+  --color-active-line: #99bbff0a; /* sv:50 @syntax-cursor-line */
+  --color-selection: #3e4451; /* sv:8 @syntax-selection-color */
+  --color-caret: #528bff; /* sv:7 @syntax-cursor-color = colors @syntax-accent */
+  --color-hover: #31363f; /* ui/dropdowns.less#L13 @background-color-highlight */
+  --color-row-hover: #31363f; /* gap: ui/dropdowns.less#L13 @background-color-highlight */
+  --color-row-selected: #3a3f4b; /* ui/tree-view.less#L18-19 @background-color-selected */
+  --color-primary: #4d78cc; /* ui/buttons.less#L76-77 .btn-primary = uvc#L71 @accent-bg-color */
+  --color-on-primary: #ffffff; /* ui/buttons.less#L34,41 contrast(@accent-bg-color) */
+  --color-problem: #e89d96; /* nt#L258-259 lighten(@background-color-error, 25%) */
+  --color-problem-border: #d13b2e; /* nt#L272-273 @background-color-error */
+  --color-on-problem: #7a1200; /* nt#L258 darken(@text-color-error, 40%) */
+  --color-problem-error: #ff6347; /* uv#L20 @text-color-error */
+  --color-problem-warning: #e2c08d; /* uv#L19 @text-color-warning */
+  --color-problem-info: #6494ed; /* uv#L17 @text-color-info */
+  --color-success-signal: #73c990; /* uv#L18 @text-color-success */
+  --color-success: #72da87; /* nt#L249,259 lighten(@background-color-success, 25%) */
+  --color-success-border: #2ba143; /* nt#L273 @background-color-success */
+  --color-on-success: #1f5130; /* nt#L258 darken(@text-color-success, 40%) */
+  --color-info: #7ebef7; /* nt#L245,259 lighten(@background-color-info, 25%) */
+  --color-info-border: #0f82e6; /* nt#L273 @background-color-info */
+  --color-on-info: #0e3377; /* nt#L258 darken(@text-color-info, 40%) */
+  --color-search-match: #528bff3d; /* sv:18 @syntax-result-marker-color */
+  --color-diff-wave: #abb2bf; /* gap: editor.less .fold-marker:after = @syntax-gutter-text-color-selected */
+
+  --color-syntax-keyword: #c678dd; /* L:23 .syntax--keyword @hue-3 */
+  --color-syntax-control-keyword: #c678dd; /* L:23 .syntax--keyword @hue-3 */
+  --color-syntax-definition-keyword: #c678dd; /* L:43 .syntax--storage @hue-3 */
+  --color-syntax-bool: #d19a66; /* L:61 .syntax--constant @hue-6 */
+  --color-syntax-null: #d19a66; /* L:61 .syntax--constant @hue-6 */
+  --color-syntax-self: #abb2bf; /* unscoped this: @mono-1 */
+  --color-syntax-string: #98c379; /* L:97 .syntax--string @hue-4 */
+  --color-syntax-character: #abb2bf; /* unscoped entity: @mono-1 */
+  --color-syntax-number: #d19a66; /* L:72 .syntax--constant.syntax--numeric @hue-6 */
+  --color-syntax-unit: #d19a66; /* L:38 keyword.other.unit @hue-6 */
+  --color-syntax-colour-literal: #d19a66; /* L:38 constant.other.color @hue-6 */
+  --color-syntax-regexp: #98c379; /* N:127 .syntax--string.syntax--regexp @hue-4 */
+  --color-syntax-escape: #98c379; /* N:156 .syntax--constant.syntax--character.syntax--escape @hue-4 */
+  --color-syntax-comment: #5c6370; /* L:3-5 .syntax--comment @mono-3 */
+  --color-syntax-variable: #abb2bf; /* unscoped identifier: @mono-1 */
+  --color-syntax-variable-definition: #abb2bf; /* unscoped identifier: @mono-1 */
+  --color-syntax-function: #61afef; /* L:180 .syntax--entity.syntax--name.syntax--function @hue-2 */
+  --color-syntax-method: #61afef; /* L:180 .syntax--entity.syntax--name.syntax--function @hue-2 */
+  --color-syntax-property: #e06c75; /* L:85 .syntax--variable @hue-5 */
+  --color-syntax-property-definition: #e06c75; /* L:85 .syntax--variable @hue-5 */
+  --color-syntax-type: #56b6c2; /* L:166 .syntax--support.syntax--type @hue-1 */
+  --color-syntax-operator: #56b6c2; /* ts .syntax--source.syntax--ts .syntax--keyword.syntax--operator @hue-1 */
+  --color-syntax-arrow: #c678dd; /* L:43 .syntax--storage @hue-3 */
+  --color-syntax-punctuation: #abb2bf; /* N:88 .syntax--punctuation @mono-1 */
+  --color-syntax-interpolation: #be5046; /* L:148-150 punctuation.section.embedded @hue-5-2 */
+  --color-syntax-decorator: #abb2bf; /* unscoped decorator: @mono-1 */
+  --color-syntax-markup-mark: #e06c75; /* L:85 variable.unordered.list.gfm @hue-5 */
+  --color-syntax-tag: #e06c75; /* L:193 .syntax--entity.syntax--name.syntax--tag @hue-5 */
+  --color-syntax-angle-bracket: #56b6c2; /* ts keyword.operator (TSX "<") @hue-1 */
+  --color-syntax-attribute: #d19a66; /* L:197 .syntax--entity.syntax--other.syntax--attribute-name @hue-6 */
+  --color-syntax-heading: #e06c75; /* N:176 markup.heading @hue-5 */
+  --color-syntax-emphasis: #c678dd; /* N:198 markup.italic @hue-3 */
+  --color-syntax-strong: #d19a66; /* N:192 markup.bold @hue-6 */
+  --color-syntax-strikethrough: #e06c75; /* N:210 markup.strike @hue-5 */
+  --color-syntax-quote: #5c6370; /* L:3 comment.quote.gfm @mono-3 */
+  --color-syntax-content-separator: #5c6370; /* L:3 comment.hr.gfm @mono-3 */
+  --color-syntax-monospace: #98c379; /* N:215 markup.raw @hue-4 */
+  --color-syntax-link: #61afef; /* gfm.less .syntax--link .syntax--entity @hue-2 */
+  --color-syntax-url: #56b6c2; /* N:204 markup.underline.link @hue-1 */
+
+  --syntax-comment-style: italic; /* L:3-5 .syntax--comment font-style italic */
+  --syntax-heading-weight: normal; /* N:176 markup.heading */
+  --syntax-heading-style: normal; /* N:176 markup.heading */
+  --syntax-emphasis-style: italic; /* N:198 markup.italic font-style italic */
+  --syntax-strong-weight: bold; /* N:192 markup.bold font-weight bold */
+  --syntax-strikethrough-line: none; /* N:210 markup.strike sets colour only */
+  --syntax-link-line: none; /* gfm.less .syntax--link .syntax--entity */
+  --syntax-link-style: normal; /* gfm.less .syntax--link .syntax--entity */
+  --syntax-url-line: underline; /* N:220 markup.underline text-decoration underline */
+  --syntax-url-style: normal; /* N:204 markup.underline.link */
+  --syntax-function-style: normal; /* L:180 entity.name.function */
+  --syntax-quote-style: italic; /* L:3 .syntax--comment font-style italic */
+  --syntax-content-separator-weight: normal; /* L:3 .syntax--comment */
+  --syntax-content-separator-style: italic; /* L:3 .syntax--comment font-style italic */
+
+  --color-chunk-inserted: #1aff5b26; /* gh/variables.less#L15 @github-diff-added */
+  --color-chunk-modified: #e0c28526; /* gap: gh/conflicting-editor.less#L6 @conflict-color-modified at 15% */
+  --color-chunk-deleted: #ff526626; /* gh/variables.less#L14 @github-diff-deleted */
+  --color-chunk-conflict: #33a0ff26; /* gh/conflicting-editor.less#L4,81 @conflict-color-theirs at 15% */
+  --color-chunk-modified-word: #e0c28540; /* gap: gh/conflicting-editor.less#L57 fadein(@conflict-color-modified 15%, 10%) */
+  --color-chunk-conflict-word: #33a0ff40; /* gh/conflicting-editor.less#L57 fadein(theirs 15%, 10%) */
+  --color-chunk-modified-removal: #e05252; /* gd#L17-36 @syntax-color-removed */
+  --color-chunk-conflict-removal: #33a0ff; /* gh/conflicting-editor.less#L76 fade(@conflict-color-theirs, 100%) */
+
+  --color-mark-inserted: #43d08a; /* gd#L12-13 @syntax-color-added */
+  --color-mark-modified: #e0c285; /* gd#L7-8 @syntax-color-modified */
+  --color-mark-deleted: #e05252; /* gd#L17-36 @syntax-color-removed */
+  --color-mark-conflict: #33a0ff; /* gh/conflicting-editor.less#L4 @conflict-color-theirs */
+
+  --color-minimap-slider: #4b5362; /* gap: ui/atom.less#L55-57 @scrollbar-color-editor */
+  --color-minimap-slider-hover: #4b5362; /* gap: ui/atom.less @scrollbar-color-editor (no hover rule) */
+  --color-minimap-slider-active: #4b5362; /* gap: ui/atom.less#L36-46 @scrollbar-color-editor (:active changes shape only) */
+}

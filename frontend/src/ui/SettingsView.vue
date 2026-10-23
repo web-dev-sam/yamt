@@ -61,7 +61,7 @@ async function moveToDefault(): Promise<void> {
 <template>
   <section
     aria-label="Settings"
-    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto rounded-island opaque-scroller"
+    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto island opaque-scroller"
   >
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
       <button

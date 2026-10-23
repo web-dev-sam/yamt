@@ -8,7 +8,7 @@ const emit = defineEmits<{ close: [key: string] }>();
 </script>
 
 <template>
-  <ul role="status" class="shrink-0 rounded-md border border-info-border bg-info text-fg">
+  <ul role="status" class="shrink-0 rounded-md border border-info-border bg-info text-on-info">
     <li v-for="row in rows" :key="row.key" class="flex items-start gap-2 px-3 py-2">
       <p class="min-w-0 flex-1 wrap-break-word">{{ row.text }}</p>
       <button

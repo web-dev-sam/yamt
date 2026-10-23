@@ -10,7 +10,7 @@ defineProps<{ label: string; handle: ColumnDragBinding }>();
     role="separator"
     aria-orientation="vertical"
     :aria-label="label"
-    class="absolute inset-y-0 -right-island z-10 w-island cursor-col-resize"
+    class="absolute inset-y-0 panel-handle z-10 cursor-col-resize"
     v-on="handle.listeners"
   >
     <!-- Flex-centred dots in this handle make about half of the panes' scroll frames late in WebKitGTK; centred as an absolute box they do not. -->

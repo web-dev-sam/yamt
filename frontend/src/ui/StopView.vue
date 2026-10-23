@@ -13,7 +13,7 @@ defineProps<{ message: string | null }>();
       <ServerStatus class="ml-auto" :path="null" :problems="null" />
       <SettingsButton />
     </header>
-    <section class="flex min-h-0 flex-1 flex-col items-start gap-3 rounded-island bg-panel p-3">
+    <section class="flex min-h-0 flex-1 flex-col items-start gap-3 island bg-panel p-3">
       <p>Git stopped without conflicts.</p>
       <pre
         v-if="message !== null"
