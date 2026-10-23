@@ -945,10 +945,10 @@ look. Built on `feat/raw-compare`, the checked-out branch the owner runs.
 
 Slice graph (no question, OR13): 1 → 2. Architecture and project map: orchestrator, before row 2.
 
-| row | slice                                                                                                                                      | owner    | status  | evidence |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | -------- |
-| 1   | 3.I-tooltip (`briefs/3.I-operation-tooltip.md`): yamt's own tooltip on `OperationLabel.vue`, open at once, no `title` (`OperationTooltip`) | web-impl | running |          |
-| 2   | final run (`briefs/3.I-verify.md`): `just check`, `just mutants <base>`, WebKit fixture and the real app (no GTK tooltip)                  | verifier | todo    |          |
+| row | slice                                                                                                                                      | owner    | status | evidence                                                                                                                                                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | 3.I-tooltip (`briefs/3.I-operation-tooltip.md`): yamt's own tooltip on `OperationLabel.vue`, open at once, no `title` (`OperationTooltip`) | web-impl | review | `2dd377d`: fixed sibling of the tag (z 500), `tooltipBox` in `operationTooltip.ts` (5 tests), `aria-describedby` hidden span; WebKit dark/light: visible on the first check after one move, transition 0s, 4 px above, cut at the top in a short window, Ctrl+B closes. Notes `OperationTooltip.md` |
+| 2   | final run (`briefs/3.I-verify.md`): `just check`, `just mutants <base>`, WebKit fixture and the real app (no GTK tooltip)                  | verifier | todo   |                                                                                                                                                                                                                                                                                                     |
 
 ## Open product questions
 
