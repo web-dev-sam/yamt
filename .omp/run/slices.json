@@ -22,5 +22,21 @@
       "frontend/src/ui/AGENTS.md"
     ],
     "readonly": ["**"]
+  },
+  "ThemesPalettesR1": {
+    "owned": [
+      "frontend/src/style.css",
+      "frontend/src/themes/**",
+      "frontend/scripts/themes.ts",
+      "frontend/scripts/themes.test.ts",
+      "frontend/scripts/palette.ts",
+      "frontend/scripts/palette.test.ts",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/CompareApp.vue",
+      "frontend/src/ui/FileList.vue",
+      "frontend/src/ui/CompareTabList.vue",
+      "frontend/src/ui/PanelWidthHandle.vue"
+    ],
+    "readonly": ["**"]
   }
 }
