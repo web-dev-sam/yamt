@@ -113,7 +113,7 @@ pub const MAX_COLUMN_BYTES: u32 = 8 * 1024 * 1024;
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Another process holds the lock file.
-    #[error("another yamt --raw window is open ({})", path.display())]
+    #[error("another yamt --diff window is open ({})", path.display())]
     Locked {
         /// The data folder.
         path: PathBuf,

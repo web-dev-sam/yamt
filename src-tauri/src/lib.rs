@@ -1,5 +1,5 @@
 //! Desktop shell: one window over a `MergeSession`, whose exit status says whether the merge is resolved, or
-//! with `--raw` one compare window over the stored tabs.
+//! with `--diff` one compare window over the stored tabs.
 
 #[cfg(target_os = "linux")]
 mod appimage;

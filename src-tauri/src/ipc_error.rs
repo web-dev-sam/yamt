@@ -103,7 +103,7 @@ impl From<yamt_compare::Error> for IpcError {
             },
             yamt_compare::Error::Locked { path } => IpcError::ReadFailed {
                 path: path.display().to_string(),
-                message: "another yamt --raw window holds it".to_owned(),
+                message: "another yamt --diff window holds it".to_owned(),
             },
             yamt_compare::Error::NewerFormat { path, format } => IpcError::ReadFailed {
                 path: path.display().to_string(),
@@ -261,7 +261,7 @@ mod tests {
         };
         assert_eq!(
             compare_json(locked),
-            json!({ "kind": "ReadFailed", "path": "/d/yamt/compare", "message": "another yamt --raw window holds it" })
+            json!({ "kind": "ReadFailed", "path": "/d/yamt/compare", "message": "another yamt --diff window holds it" })
         );
         let newer = yamt_compare::Error::NewerFormat {
             path: "/d/tabs.json".into(),

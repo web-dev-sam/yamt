@@ -20,7 +20,7 @@ fn lock(state: &CompareState) -> MutexGuard<'_, TabStore> {
 }
 
 /// Opens the store in `<data_dir>/yamt/compare/` and hands it to the app as its `CompareState`,
-/// or answers the line `yamt --raw` ends with.
+/// or answers the line `yamt --diff` ends with.
 pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, data_dir: &Path) -> Result<(), String> {
     let store = TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))?;
     app.manage(Mutex::new(store));
@@ -307,7 +307,7 @@ mod tests {
         let folder = compare_folder(held.data.path());
         assert_eq!(
             store_opened_in(held.data.path()).unwrap_err(),
-            format!("another yamt --raw window is open ({})", folder.display())
+            format!("another yamt --diff window is open ({})", folder.display())
         );
     }
 

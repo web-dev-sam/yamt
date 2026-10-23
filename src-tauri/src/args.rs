@@ -3,18 +3,18 @@ use std::path::PathBuf;
 
 pub(crate) const USAGE: &str = "\
 usage: yamt [--repo <path>]
-       yamt --raw
+       yamt --diff
 
 Resolves the conflicted files of the merge in progress in <path> (default: the current directory).
-With --raw, compares any two pasted texts in two columns: no repository needed, its tabs kept between runs.
+With --diff, compares any two pasted texts in two columns: no repository needed, its tabs kept between runs.
 
   --repo <path>  any directory inside the work tree
-  --raw          compare pasted texts instead of merging
+  --diff         compare pasted texts instead of merging
   --help         print this help
   --version      print the version
 ";
 
-const RAW_WITH_REPO: &str = "--raw compares pasted text and takes no --repo";
+const DIFF_WITH_REPO: &str = "--diff compares pasted text and takes no --repo";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Invocation {
@@ -27,12 +27,12 @@ pub(crate) enum Invocation {
 pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
     let mut args = args.into_iter();
     let mut repo = None;
-    let mut raw = false;
+    let mut diff = false;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help") => return Ok(Invocation::Help),
             Some("--version") => return Ok(Invocation::Version),
-            Some("--raw") => raw = true,
+            Some("--diff") => diff = true,
             Some("--repo") => {
                 repo = Some(
                     args.next()
@@ -43,8 +43,8 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
-    match (raw, repo) {
-        (true, Some(_)) => Err(RAW_WITH_REPO.to_owned()),
+    match (diff, repo) {
+        (true, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
         (true, None) => Ok(Invocation::Compare),
         (false, repo) => Ok(Invocation::Merge {
             repo: repo.unwrap_or_else(|| PathBuf::from(".")),
@@ -100,29 +100,29 @@ mod tests {
     }
 
     #[test]
-    fn raw_opens_the_compare_window() {
-        assert_eq!(parsed(&["--raw"]), Ok(Invocation::Compare));
+    fn diff_opens_the_compare_window() {
+        assert_eq!(parsed(&["--diff"]), Ok(Invocation::Compare));
     }
 
     #[test]
-    fn raw_with_a_repo_in_either_order_is_a_usage_error() {
-        let refused = Err(RAW_WITH_REPO.to_owned());
-        assert_eq!(parsed(&["--raw", "--repo", "p"]), refused);
-        assert_eq!(parsed(&["--repo", "p", "--raw"]), refused);
+    fn diff_with_a_repo_in_either_order_is_a_usage_error() {
+        let refused = Err(DIFF_WITH_REPO.to_owned());
+        assert_eq!(parsed(&["--diff", "--repo", "p"]), refused);
+        assert_eq!(parsed(&["--repo", "p", "--diff"]), refused);
     }
 
     #[test]
-    fn help_wins_over_raw() {
-        assert_eq!(parsed(&["--raw", "--help"]), Ok(Invocation::Help));
+    fn help_wins_over_diff() {
+        assert_eq!(parsed(&["--diff", "--help"]), Ok(Invocation::Help));
         assert_eq!(
-            parsed(&["--raw", "--repo", "p", "--version"]),
+            parsed(&["--diff", "--repo", "p", "--version"]),
             Ok(Invocation::Version)
         );
     }
 
     #[test]
-    fn the_usage_names_raw() {
-        assert!(USAGE.contains("       yamt --raw\n"), "{USAGE}");
-        assert!(USAGE.contains("  --raw  "), "{USAGE}");
+    fn the_usage_names_diff() {
+        assert!(USAGE.contains("       yamt --diff\n"), "{USAGE}");
+        assert!(USAGE.contains("  --diff  "), "{USAGE}");
     }
 }
