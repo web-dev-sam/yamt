@@ -808,9 +808,11 @@ Internals (`editor/internal/`, not importable from `ui/`):
   per detached canvas, dropped by `staleTiles` — document, folds, theme, language, parse growth — and when
   outside the window), each row painted by `minimapPixels.ts` (VS Code's prebaked glyphs from `minimapGlyphs.ts`,
   copied with its MIT notice) in the colours `minimapRows.ts` reads from the syntax tree through `syntax.ts`
-  `syntaxColourClasses` (the one code-colour table the pane's highlight is built from: Lezer tags → 39
-  `--color-syntax-*` tokens and their font-style variables, containers before inner tokens, the minimap taking the
-  token latest in the table as the text's CSS does, plan §2 #102) and from the theme (`readLook`, only when shown or
+  `syntaxColourClasses` (the one code-colour table the pane's highlights are built from: Lezer tags → 39
+  `--color-syntax-*` tokens and their font-style variables; `paletteHighlight` sets colours with containers before
+  inner tokens, `fontHighlight` font styles with link and url before the containers, so nested Markdown takes the inner
+  colour and the container's style; the minimap takes the token latest in the table as the text's CSS does, plan §2
+  #102) and from the theme (`readLook`, only when shown or
   after the `themeName` facet changed, two dark themes included); a collapsed run is one row in the wave colour.
   `minimapMarks.ts` gives the edges: the Result's errors over warnings on the left, every change `paneTone(…,
   "center")` still tints on the right, 4 CSS px wide, never under 4 tall; dropped when the rows move or problems
