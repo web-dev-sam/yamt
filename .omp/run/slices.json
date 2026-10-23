@@ -1,29 +1,7 @@
 {
-  "DiffFlagRust": {
-    "agent": "rust-impl",
-    "brief": "docs/slices/briefs/3.R-diff-flag-rust.md",
-    "owned": [
-      "src-tauri/src/args.rs",
-      "src-tauri/src/compare.rs",
-      "src-tauri/src/ipc_error.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/AGENTS.md",
-      "crates/compare/src/lib.rs",
-      "crates/merge-core/AGENTS.md"
-    ]
-  },
-  "DiffFlagWeb": {
+  "DiffFlagWebR1": {
     "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.R-diff-flag-web.md",
-    "owned": [
-      "frontend/src/main.ts",
-      "frontend/src/ipc/fixtureCompare.ts",
-      "frontend/src/ipc/fixtureCompare.test.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/scripts/app-session/args.ts",
-      "frontend/scripts/app-session/args.test.ts",
-      "frontend/scripts/app-session/start.ts"
-    ]
+    "brief": "docs/slices/briefs/3.R-diff-flag-web-rework-1.md",
+    "owned": ["frontend/scripts/app-session/state.test.ts", "frontend/src/ipc/fixtureCompare.ts"]
   }
 }

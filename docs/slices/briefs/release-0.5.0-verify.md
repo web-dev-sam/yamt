@@ -5,10 +5,12 @@ into `main` (`e5c0502`, a merge commit; the tree equals the branch head `1415413
 changes no product code: the workspace version is `0.5.0` (`Cargo.toml`, `Cargo.lock`), `CHANGELOG.md` has
 `## [0.5.0] - 2026-10-23`, the README names the 0.5.0 files (`readmer check` passes). Since 0.4.2 the product gained
 the compare window `yamt --diff` (plan §2 #93–#98), the Linux paste-crash fix (#99) and the operation tag's own tooltip
-(#100). Product code is unchanged since `fb5c733`, whose final run passed at `4e4bb65`
+(#100). After the release commit the owner renamed the compare flag from `--raw` to `--diff` before tagging (#101,
+#1586): `c83202d` (fixture `?diff`, app-session `--diff`/`--diff-case`), `803c2d7` (the shell's flag and messages) and
+their review round (`.omp/run/notes/DiffFlag*.md`). The tooltip's final run passed at `4e4bb65`
 (`.omp/run/notes/OperationTooltipVerify.md`); the compare and paste final runs are `.omp/run/notes/RawCompareVerify.md`,
-`PasteCrashVerify.md`. No mutation run this time. Dependencies changed since 0.4.2 (the `yamt-compare` crate), so the
-licence check matters. Read-only recipes only (VF6); you fix nothing (VF1); alone.
+`PasteCrashVerify.md`. Mutation runs for the rename are in its notes; none here. Dependencies changed since 0.4.2 (the
+`yamt-compare` crate), so the licence check matters. Read-only recipes only (VF6); you fix nothing (VF1); alone.
 
 Environment: app-session names `r-…`; scratch and screenshots under `/tmp/yamt-rel-0.5.0/`; throwaway repositories
 `/tmp/yamt-rel-*`, git writes only as `git -C /tmp/…`; `--home /tmp/yamt-rel-0.5.0/home-<n>` on every `start-app`
@@ -24,7 +26,10 @@ as the earlier final runs did; close windows with `WM_DELETE_WINDOW`, not WebDri
    THIRD_PARTY_LICENSES.txt`. Pass: exit 0, no diff.
 3. **Bundle:** `cargo tauri build --bundles deb`. Pass: `target/release/bundle/deb/yamt_0.5.0_amd64.deb` exists; its
    contents list `usr/bin/yamt` as the only program in `usr/bin` and carry `THIRD_PARTY_LICENSES.txt` equal to the
-   repository's; `target/release/yamt --version` prints `yamt 0.5.0`.
+   repository's; `target/release/yamt --version` prints `yamt 0.5.0`; `--help` names `yamt --diff` and the `--diff`
+   option; `yamt --raw; echo $?` → "yamt: unknown argument --raw" and 2; `yamt --diff --repo x; echo $?` → "yamt:
+   --diff compares pasted text and takes no --repo" and 2. `just app-session start-fixture --diff-case json-payload`
+   opens the compare page with that case in tab 1.
 4. **The release binary** (`target/release/yamt`) on a private display through the app-session helper (`start-app
    --name <n> --binary target/release/yamt … --home <home>`):
    1. **Conflict project:** `scripts/conflict-repo.sh /tmp/yamt-rel-merge`: the 7 files listed; open a text conflict;
