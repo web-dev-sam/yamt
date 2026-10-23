@@ -10,8 +10,8 @@ const props = defineProps<{ operation: OperationView }>();
 
 const tag = useTemplateRef<HTMLParagraphElement>("tag");
 const word = useTemplateRef<HTMLSpanElement>("word");
-const tagBounds = useElementBounding(tag);
-const wordBounds = useElementBounding(word);
+const tagBounds = useElementBounding(tag, { windowScroll: false });
+const wordBounds = useElementBounding(word, { windowScroll: false });
 const viewport = useWindowSize();
 const open = shallowRef(false);
 
@@ -67,7 +67,7 @@ function hide(): void {
   <div
     v-if="open"
     aria-hidden="true"
-    class="pointer-events-none fixed z-500 w-max overflow-hidden rounded border border-control-border bg-panel px-2 py-1 font-sans text-[13px] wrap-break-word whitespace-pre-wrap text-fg select-none"
+    class="pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none"
     :style="placement"
     v-text="line.tooltip"
   />

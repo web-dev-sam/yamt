@@ -1,3 +1,5 @@
+@reference "../style.css";
+
 .chunk-inserted {
   --chunk-tone: var(--color-chunk-inserted);
 }
@@ -278,16 +280,12 @@ path.chunk-band {
 
 :root .cm-tooltip.cm-tooltip-hover:has(> .cm-tooltip-lint),
 :root .cm-tooltip.cm-tooltip-hover:has(> .removal-tooltip) {
-  border: 1px solid var(--color-control-border);
-  border-radius: 4px;
-  background-color: var(--color-panel);
+  @apply hover-tooltip;
 }
 
 :root .cm-tooltip.cm-tooltip-hover:has(> .cm-tooltip-lint) {
   max-width: 480px;
-  color: var(--color-fg);
-  font-family: var(--font-sans);
-  font-size: 13px;
+  @apply tooltip-text;
 }
 
 :root .cm-tooltip-lint .cm-diagnostic {
