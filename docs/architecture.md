@@ -50,7 +50,7 @@ yamt/
 │  ├─ conflict-repo/          test-only: scripted conflict repos for gitio + session tests (dev-dependency)
 │  ├─ settings/               the per-user settings file (theme, changed keys, its location). NO tauri, NO git
 │  ├─ lsp-host/               starts language servers and frames their messages (plan §2 #70). NO yamt-*, NO tauri
-│  └─ compare/                the `yamt --raw` window's stored tabs (plan §2 #97). Depends on merge-core only; NO tauri, NO git
+│  └─ compare/                the `yamt --diff` window's stored tabs (plan §2 #97). Depends on merge-core only; NO tauri, NO git
 ├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
@@ -61,7 +61,7 @@ yamt/
 │  │  ├─ editor/              CodeMirror integration; exports ONLY MergeController and CompareController (plan §2 #96)
 │  │  ├─ connectors/          pure geometry → SVG path strings
 │  │  ├─ ui/                  Vue components + one store. Never imports @codemirror/*
-│  │  └─ main.ts              wiring: the merge root (source, store, App) or, for `yamt --raw`, the compare root (plan §2 #94)
+│  │  └─ main.ts              wiring: the merge root (source, store, App) or, for `yamt --diff`, the compare root (plan §2 #94)
 │  └─ fixtures/               golden/<case>.json: the engine's output per golden (`just fixtures`); compare/<case>.json (the compare window's cases); sample/ for `just smoke-cli`
 ├─ tests/golden/<case>/       base.<ext> local.<ext> remote.<ext> expected.json README.md  (real conflicts from public projects, plan §2 #26)
 └─ tests/compare/<case>/      left.txt right.txt: the compare window's fixture pairs (`yamt-cli compare`, plan §2 #95)
@@ -221,7 +221,7 @@ in UTF-16 code units (the unit of JavaScript strings and CodeMirror positions). 
 text or base text is empty gets nothing (the block tint says it all). Pure.
 
 **2-way compare** (plan §2 #93, #95; `compare.rs`): `pub fn compare(left: &str, right: &str) -> Vec<Difference>` for the
-`yamt --raw` window. One `compute_chunks(left, left, right, &Options { gap: COMPARE_GAP })` (`COMPARE_GAP` = 0: one
+`yamt --diff` window. One `compute_chunks(left, left, right, &Options { gap: COMPARE_GAP })` (`COMPARE_GAP` = 0: one
 difference per hunk, as WebStorm's 2-way; with `local == base` every chunk is `RemoteOnly`, `chunk.base` the left
 range, `chunk.remote` the right), then the word step's `side_word_changes` once per direction: the right against the
 left lines, the left against the right lines. `Difference { left: LineRange<LeftLine>, right: LineRange<RightLine>,
@@ -435,11 +435,11 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   `NoConfigFolder`, `MergeAborted`, `StopMovedOn`, `GitRunning`, `MergeFinished`, `NoOperation`, and for the compare
   window `UnknownTab { tab }`, `ColumnTooLarge { limit }`, `WorkerStopped`) mirrored into TS; no stringly errors. A disk
   change is never an error.
-- **The compare window** (`yamt --raw`, plan §2 #93/#94; `args.rs` `Invocation::Compare`, `window.rs` `run_compare`,
+- **The compare window** (`yamt --diff`, plan §2 #93/#94; `args.rs` `Invocation::Compare`, `window.rs` `run_compare`,
   `compare.rs`): never opens a `MergeSession`, never runs git, never manages `Mutex<Merge>` or the language-server host.
   `compare::manage_store_in(app, data_dir)` opens `yamt_compare::TabStore` in `<data_dir>/yamt/compare/` and manages it
   as `CompareState = Mutex<TabStore>` (the third `Mutex`, never held with another, plan §2 #97); a failure ends before
-  any window with exit 2 and one line (`another yamt --raw window is open (<folder>)`, the crate's `Broken`/`NewerFormat`
+  any window with exit 2 and one line (`another yamt --diff window is open (<folder>)`, the crate's `Broken`/`NewerFormat`
   words, `no data folder: …`). Both windows go through one `open_and_wait`; the start script sets `<html data-window=
   "merge|compare">` beside `data-theme`; the compare window is titled `Compare — yamt` and ends with exit 0, no question.
   Commands: `open_compare() -> CompareStart`, `load_tab(tab) -> TabTexts` and `set_column(tab, column, text, version) ->
@@ -453,8 +453,8 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   owner never blocks the window; `None` = no owner, no text, unreadable, or the main thread gone; other systems always
   `None`. Never asks GTK for the clipboard's format list: WebKitGTK 2.54.0/2.54.1 crash reading a failed one
   (`Clipboard::formats`, upstream bug 324466), which is why the window takes every paste on Linux (§5.4 `linuxPaste.ts`).
-- `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]` / `yamt --raw`
-  (`--raw` with `--repo` is a usage error);
+- `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]` / `yamt --diff`
+  (`--diff` with `--repo` is a usage error);
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1; after Abort exit 1 with `<operation> aborted`, after a finished Continue exit 0 with
   `<operation> finished` (#88/#89). Window title `<repository folder> — yamt`.
@@ -649,7 +649,7 @@ export interface CompareSource extends SettingsSource {
 Domain shapes and conversions in `ipc/compareDomain.ts` (camelCase `holdsText`/`columnLimit`); the brands `TabId`,
 `ColumnVersion`, `LeftLine`, `RightLine` and `nextColumnVersion` in `ipc/domain.ts` (IPC3); `Column` and `TabLanguage`
 alias the generated unions. `createTauriCompareSource` (`ipc/tauriCompare.ts`) maps the eight commands;
-`createFixtureCompareSource(log, search)` (`ipc/fixtureCompare.ts`, in memory) starts with one "Compare 1", `?raw=<case>`
+`createFixtureCompareSource(log, search)` (`ipc/fixtureCompare.ts`, in memory) starts with one "Compare 1", `?diff=<case>`
 puts `frontend/fixtures/compare/<case>.json` (written by `just fixtures` from `tests/compare/<case>/`) into tab 1, mirrors
 `yamt-compare`'s tab rules, and answers a column with a case's differences only when both texts equal that case's, else
 none and an `info` log `compare.fixture_miss`; both fixture sources parse through one `parsedFixture` (`ipc/fixture.ts`).
@@ -699,7 +699,7 @@ none and an `info` log `compare.fixture_miss`; both fixture sources parse throug
 | whether the minimap shows (Alt held)                                                                    | `useAltHold()` (`ui/altHold.ts`), one instance in `App.vue`: a `shallowRef` set by Alt's own key press and cleared by its release, another key, window blur, the page hidden or a key/pointer event reporting Alt up (`heldAfter`, pure); pointer listeners exist only while held; never stored. `App.vue` passes it to every `MergeView` as `minimap`; MergeView hands `shown && minimap` and the Result shown as text (`showsMinimap`, the rule `centerLine` also uses) to `useMergeController`'s `minimap` option → `MergeOptions.minimap` / `showMinimap` (plan §2 #80 hold, #81)                             | one window-wide fact, one writer; hidden files never get it, so they compute nothing                                                                                      |
 | the Result's minimap (code tiles, slider, edge marks)                                                   | `Minimap` (`editor/internal/minimap.ts`), owned by `Frame`: one `.minimap` box in the right pane's `view.dom`, `display: none` while not shown; code rows in `MinimapTiles` (128 rows each) dropped by `staleTiles` and outside the window, all dropped while hidden; slider and canvas window from `minimapLayout` per frame while shown; edge marks from `Frame`'s rows and the Result's diagnostics, dropped when rows move or problems arrive; theme colours read when shown or after the dark flag changed; no history (plan §2 #81)                                                                         | derived from the one geometry cache, the one tint rule (`paneTone`) and the one syntax table (`SYNTAX_COLOURS`); nothing to keep                                          |
 
-The compare window (`yamt --raw`, plan §2 #93–#97) has its own rows:
+The compare window (`yamt --diff`, plan §2 #93–#97) has its own rows:
 
 | state                                                                           | owner                                                                                                                                                                                                     | why                                                  |
 | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -1092,8 +1092,8 @@ It creates/destroys the non-reactive `MergeController` in a `watch(toRef(data), 
 `onSummaryChange` into a `shallowRef`, and is the merge root's only place `editor/` is imported from `ui/` (the compare
 root's is `useCompareController.ts`).
 
-**The compare window's root** (`yamt --raw`, plan §2 #94; fence PM7: these files never import `store.ts`, `App.vue` or
-`lsp/`): `main.ts` mounts `CompareApp.vue` instead of `App.vue` when `<html data-window="compare">` (app) or `?raw`
+**The compare window's root** (`yamt --diff`, plan §2 #94; fence PM7: these files never import `store.ts`, `App.vue` or
+`lsp/`): `main.ts` mounts `CompareApp.vue` instead of `App.vue` when `<html data-window="compare">` (app) or `?diff`
 (fixture), with `ui/compareStore.ts` (`createCompareStore(source, startTheme)`, `useCompareStore()`; tabs and the shown
 tab mirrored from Rust's replies, column sends with `track`/`flushAll`, the close question, `fileListKey`, notices
 through `ui/compareNotices.ts`, words in `ui/compareText.ts`, the visited tabs in `visited`) and no `LanguageServers`.

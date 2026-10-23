@@ -63,7 +63,7 @@ send_to_server(run: RunId, message) -> ()   queues one JSON-RPC body; framing is
 stop_server(run: RunId)           -> ()   signals; killed after 2 s; Exited follows on the channel
 find_program(program, project, folders) -> ProgramFound   Found{path, place: Project | Path | Home} | NotFound{searched}: folders.project up to the root, then PATH, then folders.home
 project_files(paths: Vec<String>) -> Vec<ProjectFile>   Missing | Folder | Text{text} (≤ 64 KiB) | TooLarge | NotText; repo-relative, outside the repository = Missing
-# the compare window (`yamt --raw`, plan §2 #93–#97; state Mutex<TabStore>, crate yamt-compare)
+# the compare window (`yamt --diff`, plan §2 #93–#97; state Mutex<TabStore>, crate yamt-compare)
 open_compare()                    -> CompareStart { list: TabList { tabs, shown }, column_limit }
 load_tab(tab: TabId)              -> TabTexts { left, right, comparison }   async: the store locked only to read, the diff on a worker after
 set_column(tab, column, text, version) -> Comparison { versions, differences }   async: stores one column (a version not above the stored one stores nothing), then diffs it against the other
@@ -85,7 +85,7 @@ authority. `SideContent.bytes` is `u64` exported as `number` (`#[specta(type = u
   runtime parse, decision 19). `import.meta.env.VITE_CHUNK_SOURCE === "tauri"` (set by the app's
   dev/build commands) is read only in `main.ts` (source) and `ipc/index.ts` (log forward). The compare window has its
   own interface, `CompareSource` (`ipc/CompareSource.ts`, extends `SettingsSource`): `createTauriCompareSource`
-  (`ipc/tauriCompare.ts`) and `createFixtureCompareSource` (`ipc/fixtureCompare.ts`, `?raw=<case>`).
+  (`ipc/tauriCompare.ts`) and `createFixtureCompareSource` (`ipc/fixtureCompare.ts`, `?diff=<case>`).
 - [IPC8] `ipc/log.ts` exports `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)`;
   the logger's `debug/info/warn/error(event, fields)` print a structured console line always and
   call `forward` if given (`debug` only in DEV). The one app logger is created by its first consumer,

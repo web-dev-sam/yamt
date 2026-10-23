@@ -11,9 +11,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `yamt --raw` opens a compare window for any two texts, no repository needed: type or paste into the left and right
+- `yamt --diff` opens a compare window for any two texts, no repository needed: type or paste into the left and right
   columns and the differences show with the merge window's colours, word marks and bands, updated as you type, with
-  both columns scrolling together. A second `yamt --raw` while one is open says so and exits.
+  both columns scrolling together. A second `yamt --diff` while one is open says so and exits.
   - **Format** lays out JSON and XML in both columns, keeping keys, numbers and entities exactly as written; a column
     that does not parse says which line, and Ctrl/Cmd+Z undoes a Format.
   - A **language** drop-down: "Auto" recognises JSON, XML, HTML, PHP and scripts with a `#!` line; any language yamt

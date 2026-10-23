@@ -95,15 +95,15 @@
       }
     },
     {
-      "label": "raw: open in yamt",
-      "detail": "Build yamt (debug, pages built in) from the current code and open the compare window (yamt --raw): two editable columns, differences shown as you type; its tabs and texts are kept in ~/.local/share/yamt/compare between runs. Running it again closes the open compare window and rebuilds; a compare window started elsewhere makes this one say so and exit. The terminal shows yamt's exit status when you close it.",
+      "label": "diff: open in yamt",
+      "detail": "Build yamt (debug, pages built in) from the current code and open the compare window (yamt --diff): two editable columns, differences shown as you type; its tabs and texts are kept in ~/.local/share/yamt/compare between runs. Running it again closes the open compare window and rebuilds; a compare window started elsewhere makes this one say so and exit. The terminal shows yamt's exit status when you close it.",
       "type": "shell",
-      "command": "just app --raw; echo \"yamt exit status: $?\"",
+      "command": "just app --diff; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
       "presentation": { "panel": "dedicated", "reveal": "always" },
       "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
       "options": {
-        "statusbar": { "label": "$(diff) raw" }
+        "statusbar": { "label": "$(diff) diff" }
       }
     }
   ],

@@ -26,7 +26,7 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
    ```bash
    chmod +x ~/Downloads/yamt_0.5.0_amd64.AppImage
    ~/Downloads/yamt_0.5.0_amd64.AppImage --version   # yamt 0.5.0
-   ~/Downloads/yamt_0.5.0_amd64.AppImage --raw
+   ~/Downloads/yamt_0.5.0_amd64.AppImage --diff
    ```
 
    The compare window opens with your tabs. Paste two JSON texts, press Format: both columns are laid out and the

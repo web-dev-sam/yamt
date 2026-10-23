@@ -66,10 +66,10 @@
       "body": [
         "```sh",
         "yamt          # in the repository, when git stops with conflicts",
-        "yamt --raw    # anywhere: compare any two texts side by side",
+        "yamt --diff   # anywhere: compare any two texts side by side",
         "```",
         "",
-        "`yamt --raw` opens a two-column compare instead of a merge: paste or type into both columns and the differences show as in the merge window. Format lays out JSON and XML (keys and values kept as written), the language drop-down picks the highlighting (Auto by default), and each comparison is a tab in the left panel. Tabs and their texts are kept between runs."
+        "`yamt --diff` opens a two-column compare instead of a merge: paste or type into both columns and the differences show as in the merge window. Format lays out JSON and XML (keys and values kept as written), the language drop-down picks the highlighting (Auto by default), and each comparison is a tab in the left panel. Tabs and their texts are kept between runs."
       ]
     },
     {
