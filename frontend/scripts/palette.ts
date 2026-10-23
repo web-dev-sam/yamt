@@ -11,8 +11,8 @@ export type PaletteViolation = {
   readonly match: string;
 };
 
-const TOKEN_DEFINITION = /--color-([\w-]+)\s*:/g;
-const TOKEN_USE = /--color-([\w-]+)/g;
+const TOKEN_DEFINITION = /--((?:color|syntax)-[\w-]+)\s*:/g;
+const TOKEN_USE = /--((?:color|syntax)-[\w-]+)/g;
 const VAR_OPENER = /var\(\s*$/;
 const HEX_COLOUR =
   /(?<![A-Za-z0-9])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![A-Za-z0-9-])/g;

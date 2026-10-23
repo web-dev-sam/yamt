@@ -4,7 +4,7 @@ import { hoverTooltip, type EditorView, type Tooltip } from "@codemirror/view";
 import { highlightCode } from "@lezer/highlight";
 
 import { barPlace, shownRemoval, type ShownRemoval } from "./removalText";
-import { paletteHighlight } from "./syntax";
+import { fontHighlight, paletteHighlight } from "./syntax";
 import { REMOVAL_BAR_CLASS, removalAt } from "./words";
 
 function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
@@ -27,7 +27,7 @@ function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
   highlightCode(
     shown.text,
     grammar.parser.parse(shown.text),
-    paletteHighlight,
+    [paletteHighlight, fontHighlight],
     (text, classes) => {
       if (classes === "") {
         block.append(text);

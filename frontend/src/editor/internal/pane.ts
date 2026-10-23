@@ -44,7 +44,7 @@ import { indentUnitOf } from "./indent";
 import { cmKeys } from "./keys";
 import { lineSeparator } from "./paneDocs";
 import { sideKeys } from "./sideKeys";
-import { paletteHighlight } from "./syntax";
+import { fontHighlight, paletteHighlight } from "./syntax";
 
 type PaneKind = "side" | "center" | "readOnlyCenter";
 
@@ -235,6 +235,7 @@ export function paneState(pane: {
       paneTheme,
       themeCompartment.of(themeExtensions(preferences.theme)),
       syntaxHighlighting(paletteHighlight),
+      syntaxHighlighting(fontHighlight),
       languageCompartment.of(pane.language ?? []),
       find,
       findKeysCompartment.of(findKeys(preferences.keys, platform)),

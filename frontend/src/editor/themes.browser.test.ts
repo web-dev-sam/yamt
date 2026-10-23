@@ -2,6 +2,7 @@ import "../style.css";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page } from "vitest/browser";
 
+import CSS_PROBE from "../../fixtures/themes/colour.css.txt?raw";
 import { DEFAULT_KEYS, loadFixture, THEMES, type FileMergeData, type Theme } from "../ipc";
 import { MergeController, type MergeHosts, type MergeOptions } from "./index";
 import { found, mount, unmountAll } from "./paneHarness";
@@ -26,7 +27,10 @@ const HEIGHT = 800;
 const WAIT_MS = 5000;
 const MINIMAP_EDGE_PX = 6;
 const MINIMAP_CODE_PX = 120;
-const CSS_COLOUR_LITERAL = ["#", "abc"].join("");
+const CSS_COLOUR_LITERAL = present(
+  /color: ([^;]+);/.exec(CSS_PROBE)?.[1],
+  "colour in the CSS probe",
+);
 
 const CSS_TEXT: Readonly<Record<Theme, string>> = {
   dark: themeBlock(STYLE),
@@ -143,7 +147,7 @@ const FIXTURES: readonly Fixture[] = [
   TSX,
   {
     path: "src/probe.css",
-    text: `.box { width: 10px; color: ${CSS_COLOUR_LITERAL}; }\n`,
+    text: CSS_PROBE,
     probes: [
       { needle: "px", colour: "--color-syntax-unit" },
       { needle: CSS_COLOUR_LITERAL, colour: "--color-syntax-colour-literal" },
@@ -170,6 +174,16 @@ const FIXTURES: readonly Fixture[] = [
     ],
   },
 ];
+
+const IN_EMPHASIS: Fixture = {
+  path: "nested.md",
+  text: "*[inner](u)* and [*outer*](u) and *<http://x.y>*\n",
+  probes: [
+    { needle: "inner", colour: "--color-syntax-link" },
+    { needle: "outer", colour: "--color-syntax-link" },
+    { needle: "http://x.y", colour: "--color-syntax-url" },
+  ],
+};
 
 const OPTIONS: MergeOptions = {
   readOnly: false,
@@ -294,8 +308,11 @@ function spanLook(span: HTMLElement): readonly string[] {
   return [style.color, style.fontStyle, style.fontWeight, style.textDecorationLine];
 }
 
-function expectedLook(values: Readonly<Record<string, string>>, colour: string): readonly string[] {
-  const fonts = FONTS[colour] ?? {};
+function expectedLook(
+  values: Readonly<Record<string, string>>,
+  colour: string,
+  fonts: Fonts = FONTS[colour] ?? {},
+): readonly string[] {
   function own(variable: string | undefined, otherwise: string): string {
     return variable === undefined ? otherwise : valueOf(values, variable);
   }
@@ -305,6 +322,17 @@ function expectedLook(values: Readonly<Record<string, string>>, colour: string):
     computed("font-weight", own(fonts.weight, "normal")),
     computed("text-decoration-line", own(fonts.line, "none")),
   ];
+}
+
+function lookInEmphasis(
+  values: Readonly<Record<string, string>>,
+  colour: string,
+): readonly string[] {
+  return expectedLook(values, colour, { ...FONTS[colour], ...FONTS["--color-syntax-emphasis"] });
+}
+
+function shownLooks(fixture: Fixture, hosts: MergeHosts): readonly (readonly string[])[] {
+  return fixture.probes.map(({ needle }) => spanLook(found(spanOf(hosts.center, needle), needle)));
 }
 
 function lookBefore(values: Readonly<Record<string, string>>, colour: string): readonly string[] {
@@ -339,6 +367,7 @@ afterEach(() => {
 
 test("every theme's panel, gutter, code, syntax spans, band and word mark show the values in its CSS", async () => {
   const hosts = await Promise.all(FIXTURES.map((fixture) => opened(fixture, OPTIONS)));
+  const nested = await opened(IN_EMPHASIS, OPTIONS);
   const [tsx] = hosts;
   const merge = present(tsx, "tsx hosts");
 
@@ -375,11 +404,16 @@ test("every theme's panel, gutter, code, syntax spans, band and word mark show t
         fixture.probes.map(({ colour }) => [theme, colour, expectedLook(values, colour)]),
       ),
     );
+    expect([theme, shownLooks(IN_EMPHASIS, nested)]).toEqual([
+      theme,
+      IN_EMPHASIS.probes.map(({ colour }) => lookInEmphasis(values, colour)),
+    ]);
   }
 });
 
 test("yamt Dark and Light colour and style every probed word as before the 39-token table", async () => {
   const hosts = await Promise.all(FIXTURES.map((fixture) => opened(fixture, OPTIONS)));
+  const nested = await opened(IN_EMPHASIS, OPTIONS);
 
   const yamtThemes: readonly Theme[] = ["dark", "light"];
   const shown = yamtThemes.flatMap((theme) => {
@@ -404,6 +438,15 @@ test("yamt Dark and Light colour and style every probed word as before the 39-to
       ),
     ),
   );
+  expect(
+    yamtThemes.map((theme) => {
+      useTheme(theme);
+      return [theme, shownLooks(IN_EMPHASIS, nested).map(([, style]) => style)];
+    }),
+  ).toEqual([
+    ["dark", ["italic", "italic", "italic"]],
+    ["light", ["italic", "italic", "italic"]],
+  ]);
 });
 
 test("with the minimap shown, a switch between two dark themes repaints its code pixels", async () => {

@@ -35,7 +35,8 @@ function row(
 }
 
 // A span inside a Markdown container carries the container's class first (@lezer/highlight
-// highlightTree, Mode.Inherit); CSS lets the later rule win, so containers come before what they hold.
+// highlightTree, Mode.Inherit); CSS lets the later rule win, so a colour row of a container comes
+// before the rows of what it holds.
 const SYNTAX_ROWS: readonly SyntaxRow[] = [
   row("--color-syntax-quote", tags.quote, ["--syntax-quote-style"]),
   row("--color-syntax-heading", tags.heading, [
@@ -113,9 +114,25 @@ export const syntaxColourClasses: Highlighter = tagHighlighter(
 );
 
 export const paletteHighlight = HighlightStyle.define(
-  SYNTAX_ROWS.map(({ tag, colour, fonts }) => ({
-    tag,
-    color: `var(${colour})`,
-    ...Object.fromEntries(fonts.map((font) => [FONT_PROPERTY[font], `var(${font})`])),
-  })),
+  SYNTAX_ROWS.map(({ tag, colour }) => ({ tag, color: `var(${colour})` })),
+);
+
+const HELD_TOKENS: Readonly<Record<string, true>> = {
+  "--color-syntax-link": true,
+  "--color-syntax-url": true,
+};
+
+// The fonts are a second style because one HighlightStyle keeps a single class per tag
+// (@lezer/highlight tagHighlighter). Link and url come first here, so text inside *emphasis* keeps
+// the container's italic while taking the link's colour.
+export const fontHighlight = HighlightStyle.define(
+  [
+    ...SYNTAX_ROWS.filter(({ colour }) => HELD_TOKENS[colour] === true),
+    ...SYNTAX_ROWS.filter(({ colour }) => HELD_TOKENS[colour] !== true),
+  ]
+    .filter(({ fonts }) => fonts.length > 0)
+    .map(({ tag, fonts }) => ({
+      tag,
+      ...Object.fromEntries(fonts.map((font) => [FONT_PROPERTY[font], `var(${font})`])),
+    })),
 );

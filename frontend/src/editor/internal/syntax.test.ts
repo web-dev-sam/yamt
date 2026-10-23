@@ -1,27 +1,36 @@
-import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, syntaxTree, type HighlightStyle } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { highlightTree, tags, type Tag } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
 import { languageOf } from "./language";
 import { rowColours } from "./minimapRows";
-import { paletteHighlight, SYNTAX_COLOURS, syntaxColourClasses } from "./syntax";
+import { fontHighlight, paletteHighlight, SYNTAX_COLOURS, syntaxColourClasses } from "./syntax";
 
 const PARSE_BUDGET_MS = 5000;
 const COLOUR = /(?:^|[{ ])color: var\(([^)]+)\);/;
+const FONT_PROPERTIES: Readonly<Record<string, true>> = {
+  "font-style": true,
+  "font-weight": true,
+  "text-decoration": true,
+};
 
-function rules(): string[] {
-  return paletteHighlight.module?.getRules().split("\n") ?? [];
+function rules(style: HighlightStyle): string[] {
+  return style.module?.getRules().split("\n") ?? [];
 }
 
-function ruleOf(tag: Tag): string | null {
-  const classes = paletteHighlight.style([tag]) ?? "";
-  const rule = rules().find((line) => line.startsWith(`.${classes} {`));
+function ruleOf(tag: Tag, style: HighlightStyle): string | null {
+  const classes = style.style([tag]) ?? "";
+  const rule = rules(style).find((line) => line.startsWith(`.${classes} {`));
   return rule === undefined ? null : rule.slice(rule.indexOf("{") + 1, -1).trim();
 }
 
+function propertiesOf(rule: string): string[] {
+  return [...rule.slice(rule.indexOf("{")).matchAll(/([\w-]+):/g)].map(([, name]) => name ?? "");
+}
+
 function colourOfRule(tag: Tag): string | null {
-  return COLOUR.exec(ruleOf(tag) ?? "")?.[1] ?? null;
+  return COLOUR.exec(ruleOf(tag, paletteHighlight) ?? "")?.[1] ?? null;
 }
 
 async function loaded(path: string, text: string): Promise<EditorState> {
@@ -146,75 +155,39 @@ test("each tag gets its token in the minimap classes and in the text, the preced
 });
 
 test("a row carries only its own font styles, so a heading's bold survives an emphasis inside it", () => {
-  const styled: readonly (readonly [Tag, string])[] = [
+  const styled: readonly (readonly [Tag, string | null])[] = [
     [
       tags.heading,
-      "color: var(--color-syntax-heading); font-weight: var(--syntax-heading-weight); font-style: var(--syntax-heading-style);",
+      "font-weight: var(--syntax-heading-weight); font-style: var(--syntax-heading-style);",
     ],
-    [
-      tags.emphasis,
-      "color: var(--color-syntax-emphasis); font-style: var(--syntax-emphasis-style);",
-    ],
-    [tags.strong, "color: var(--color-syntax-strong); font-weight: var(--syntax-strong-weight);"],
-    [
-      tags.strikethrough,
-      "color: var(--color-syntax-strikethrough); text-decoration: var(--syntax-strikethrough-line);",
-    ],
-    [tags.quote, "color: var(--color-syntax-quote); font-style: var(--syntax-quote-style);"],
+    [tags.emphasis, "font-style: var(--syntax-emphasis-style);"],
+    [tags.strong, "font-weight: var(--syntax-strong-weight);"],
+    [tags.strikethrough, "text-decoration: var(--syntax-strikethrough-line);"],
+    [tags.quote, "font-style: var(--syntax-quote-style);"],
     [
       tags.contentSeparator,
-      "color: var(--color-syntax-content-separator); font-weight: var(--syntax-content-separator-weight); font-style: var(--syntax-content-separator-style);",
+      "font-weight: var(--syntax-content-separator-weight); font-style: var(--syntax-content-separator-style);",
     ],
-    [tags.comment, "color: var(--color-syntax-comment); font-style: var(--syntax-comment-style);"],
-    [
-      tags.function(tags.variableName),
-      "color: var(--color-syntax-function); font-style: var(--syntax-function-style);",
-    ],
-    [
-      tags.link,
-      "color: var(--color-syntax-link); text-decoration: var(--syntax-link-line); font-style: var(--syntax-link-style);",
-    ],
-    [
-      tags.url,
-      "color: var(--color-syntax-url); text-decoration: var(--syntax-url-line); font-style: var(--syntax-url-style);",
-    ],
-    [tags.keyword, "color: var(--color-syntax-keyword);"],
-    [tags.function(tags.propertyName), "color: var(--color-syntax-method);"],
-    [tags.monospace, "color: var(--color-syntax-monospace);"],
+    [tags.comment, "font-style: var(--syntax-comment-style);"],
+    [tags.function(tags.variableName), "font-style: var(--syntax-function-style);"],
+    [tags.link, "text-decoration: var(--syntax-link-line); font-style: var(--syntax-link-style);"],
+    [tags.url, "text-decoration: var(--syntax-url-line); font-style: var(--syntax-url-style);"],
+    [tags.keyword, null],
+    [tags.function(tags.propertyName), null],
+    [tags.monospace, null],
   ];
 
-  expect(styled.map(([tag]) => ruleOf(tag))).toEqual(styled.map(([, rule]) => rule));
+  expect(styled.map(([tag]) => ruleOf(tag, fontHighlight))).toEqual(styled.map(([, rule]) => rule));
 });
 
-test("the table colours 39 distinct tokens and uses exactly the 14 style variables", () => {
-  const used = new Set(
-    [
-      ...rules()
-        .join("\n")
-        .matchAll(/var\((--syntax-[\w-]+)\)/g),
-    ].map(([, name]) => name),
-  );
+test("the table colours 39 distinct tokens; the colour style sets only colour, the font style only fonts", () => {
+  const fontProperties = rules(fontHighlight).flatMap(propertiesOf);
 
   expect(new Set(SYNTAX_COLOURS).size).toBe(SYNTAX_COLOURS.length);
   expect(SYNTAX_COLOURS).toHaveLength(39);
-  expect(used).toEqual(
-    new Set([
-      "--syntax-comment-style",
-      "--syntax-heading-weight",
-      "--syntax-heading-style",
-      "--syntax-emphasis-style",
-      "--syntax-strong-weight",
-      "--syntax-strikethrough-line",
-      "--syntax-link-line",
-      "--syntax-link-style",
-      "--syntax-url-line",
-      "--syntax-url-style",
-      "--syntax-function-style",
-      "--syntax-quote-style",
-      "--syntax-content-separator-weight",
-      "--syntax-content-separator-style",
-    ]),
-  );
+  expect(new Set(rules(paletteHighlight).flatMap(propertiesOf))).toEqual(new Set(["color"]));
+  expect(fontProperties.length).toBeGreaterThan(0);
+  expect(fontProperties.filter((name) => FONT_PROPERTIES[name] !== true)).toEqual([]);
 });
 
 test("parsed code: a declared function, a member access and a JSX tag take their own rows", async () => {
@@ -254,18 +227,33 @@ test("parsed code: a declared function, a member access and a JSX tag take their
   expect(tokenAt(rust, "'q'")).toBe("--color-syntax-character");
 });
 
-function textColours(state: EditorState): (string | null)[] {
-  const order = rules();
-  const colours: (string | null)[] = Array.from({ length: state.doc.length }, () => null);
-  highlightTree(syntaxTree(state), paletteHighlight, (from, to, classes) => {
+function textValues(
+  state: EditorState,
+  style: HighlightStyle,
+  property: string,
+): (string | null)[] {
+  const order = rules(style);
+  const value = new RegExp(`(?:^|[{ ])${property}: var\\(([^)]+)\\);`);
+  const values: (string | null)[] = Array.from({ length: state.doc.length }, () => null);
+  highlightTree(syntaxTree(state), style, (from, to, classes) => {
     const matched = classes
       .split(" ")
-      .map((name) => order.findIndex((line) => line.startsWith(`.${name} {`)))
+      .map((name) => order.findIndex((line) => line.startsWith(`.${name} {`) && value.test(line)))
       .filter((index) => index >= 0);
     const last = order[Math.max(...matched)] ?? "";
-    colours.fill(COLOUR.exec(last)?.[1] ?? null, from, to);
+    values.fill(value.exec(last)?.[1] ?? null, from, to);
   });
-  return colours;
+  return values;
+}
+
+function valuesAt(
+  values: readonly (string | null)[],
+  text: string,
+  needle: string,
+): (string | null)[] {
+  const from = text.indexOf(needle);
+  expect(from, needle).toBeGreaterThanOrEqual(0);
+  return values.slice(from, from + needle.length);
 }
 
 test("in nested Markdown the minimap's colour is the text's: the rule defined last wins", async () => {
@@ -285,7 +273,7 @@ test("in nested Markdown the minimap's colour is the text's: the rule defined la
   const minimap = [...rowColours(state, 0, state.doc.length)].map((index) =>
     index === 0 ? null : (palette[index] ?? "missing"),
   );
-  const text = textColours(state);
+  const text = textValues(state, paletteHighlight, "color");
 
   expect(minimap).toEqual(text);
   expect(new Set(text)).toEqual(
@@ -302,4 +290,32 @@ test("in nested Markdown the minimap's colour is the text's: the rule defined la
       "--color-syntax-content-separator",
     ]),
   );
+});
+
+test("in nested Markdown a link or url keeps its colour and takes its container's font style", async () => {
+  const doc = "*[inner](u)* and [*outer*](u) and *<http://x.y>* and [plain](u)\n";
+  const state = await loaded("a.md", doc);
+  const colours = textValues(state, paletteHighlight, "color");
+  const styles = textValues(state, fontHighlight, "font-style");
+  const lines = textValues(state, fontHighlight, "text-decoration");
+  const probed = ["inner", "outer", "http://x.y", "plain"];
+
+  expect(probed.map((needle) => valuesAt(colours, doc, needle))).toEqual([
+    Array(5).fill("--color-syntax-link"),
+    Array(5).fill("--color-syntax-link"),
+    Array(10).fill("--color-syntax-url"),
+    Array(5).fill("--color-syntax-link"),
+  ]);
+  expect(probed.map((needle) => valuesAt(styles, doc, needle))).toEqual([
+    Array(5).fill("--syntax-emphasis-style"),
+    Array(5).fill("--syntax-emphasis-style"),
+    Array(10).fill("--syntax-emphasis-style"),
+    Array(5).fill("--syntax-link-style"),
+  ]);
+  expect(probed.map((needle) => valuesAt(lines, doc, needle))).toEqual([
+    Array(5).fill("--syntax-link-line"),
+    Array(5).fill("--syntax-link-line"),
+    Array(10).fill("--syntax-url-line"),
+    Array(5).fill("--syntax-link-line"),
+  ]);
 });

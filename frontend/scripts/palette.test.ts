@@ -120,6 +120,30 @@ test("var(--color-nope) in a ts file is an unknown token", () => {
   ]);
 });
 
+test("a --syntax- variable is known only when @theme defines it, not a theme block", () => {
+  const palette = {
+    path: "src/style.css",
+    text: `@theme static {\n  --color-editor: #1e1f22;\n  --syntax-comment-style: italic;\n}\n`,
+  };
+  const theme = {
+    path: "src/themes/zed-dark.css",
+    text: `:root[data-theme="zed-dark"] {\n  --syntax-comment-style: normal;\n  --syntax-comment-weight: bold;\n}\n`,
+  };
+  const file = {
+    path: "src/editor/internal/syntax.ts",
+    text: `const fonts = ["--syntax-comment-style", "--syntax-comment-weight"];\n`,
+  };
+
+  expect(findPaletteViolations([palette, theme, file])).toEqual([
+    {
+      rule: "unknown-token",
+      file: "src/editor/internal/syntax.ts",
+      line: 1,
+      match: "--syntax-comment-weight",
+    },
+  ]);
+});
+
 test("--color-nope in a vue style block is an unknown token", () => {
   const file = {
     path: "src/ui/FileList.vue",

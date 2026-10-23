@@ -1,7 +1,5 @@
 /* yamt Light (plan §2 #57): yamt's own light palette, after WebStorm 2026.2 Islands Light. */
 :root[data-theme="light"] {
-  color-scheme: light;
-
   --radius-island: 10px;
   --spacing-island: 5px;
   --island-line: 0px;
