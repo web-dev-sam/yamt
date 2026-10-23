@@ -69,11 +69,11 @@ test("every process survives a write and a read, in order", () => {
   expect(readState(path)).toEqual(FIXTURE);
 });
 
-test("a raw session opens no repository and reads back with none, not an empty path", () => {
-  const path = join(scratch(), "raw.json");
-  const raw: AppState = { ...APP, repoDir: null };
-  writeState(path, raw);
-  expect(readState(path)).toEqual(raw);
+test("a --diff session opens no repository and reads back with none, not an empty path", () => {
+  const path = join(scratch(), "diff.json");
+  const compareState: AppState = { ...APP, repoDir: null };
+  writeState(path, compareState);
+  expect(readState(path)).toEqual(compareState);
   expect(() => parseState(JSON.stringify({ ...APP, repoDir: 7 }))).toThrow(/field "repoDir"/);
 });
 

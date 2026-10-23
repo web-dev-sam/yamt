@@ -96,17 +96,17 @@ function addTab(tabs: Tabs): FixtureTab {
 }
 
 function firstTabs(
-  diff: string | null,
+  caseName: string | null,
   cases: ReadonlyMap<string, Case>,
 ): { readonly tabs: Tabs; readonly first: FixtureTab } {
   const tabs: Tabs = { list: [], shown: FIRST_TAB_ID, nextId: FIRST_TAB_ID };
   const first = addTab(tabs);
-  if (diff === null || diff === "") {
+  if (caseName === null || caseName === "") {
     return { tabs, first };
   }
-  const shown = cases.get(diff);
+  const shown = cases.get(caseName);
   if (shown === undefined) {
-    throw new Error(`no compare fixture ${diff}; known: ${[...cases.keys()].join(", ")}`);
+    throw new Error(`no compare fixture ${caseName}; known: ${[...cases.keys()].join(", ")}`);
   }
   first.texts.left = shown.left;
   first.texts.right = shown.right;
