@@ -18,7 +18,8 @@
       "frontend/src/ui/ProblemBar.vue",
       "frontend/src/ui/App.vue",
       "frontend/src/ui/CompareApp.vue",
-      "frontend/src/ui/SettingsView.vue"
+      "frontend/src/ui/SettingsView.vue",
+      "frontend/src/ui/PanelWidthHandle.vue"
     ],
     "readonly": ["**"]
   }
