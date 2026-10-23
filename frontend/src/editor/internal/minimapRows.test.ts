@@ -5,48 +5,71 @@ import { languageOf } from "./language";
 import { topOfRow } from "./minimapLayout";
 import type { PixelRows } from "./minimapPixels";
 import { readLook, rowColours, rowPainter, waveRowsOf, type Look } from "./minimapRows";
+import { SYNTAX_COLOURS } from "./syntax";
+
+const PALETTE: readonly string[] = ["--color-code", ...SYNTAX_COLOURS];
+
+function slot(colour: string): number {
+  const index = PALETTE.indexOf(colour);
+  if (index < 1) {
+    throw new Error(`no palette slot for ${colour}`);
+  }
+  return index;
+}
 
 const CODE = 0;
-const KEYWORD = 1;
-const STRING = 2;
-const NUMBER = 3;
+const DEFINITION_KEYWORD = slot("--color-syntax-definition-keyword");
+const DEFINITION = slot("--color-syntax-variable-definition");
+const OPERATOR = slot("--color-syntax-operator");
+const STRING = slot("--color-syntax-string");
+const NUMBER = slot("--color-syntax-number");
+const PUNCTUATION = slot("--color-syntax-punctuation");
+const LINK = slot("--color-syntax-link");
 
-async function typescript(text: string): Promise<EditorState> {
-  const description = languageOf("a.ts");
+async function loaded(path: string, text: string): Promise<EditorState> {
+  const description = languageOf(path);
   if (description === null) {
-    throw new Error("no language for a.ts");
+    throw new Error(`no language for ${path}`);
   }
   const { language } = await description.load();
   return EditorState.create({ doc: text, extensions: language });
 }
 
 test("a row's colours are the palette index of each character's syntax token, from the row's start", async () => {
-  const state = await typescript("const x = 1;\nlet y = 'a';\n");
+  const state = await loaded("a.ts", "const x = 1;\nlet y = 'a';\n");
   const second = state.doc.line(2);
   const first = state.doc.line(1);
 
   expect([...rowColours(state, second.from, second.to)]).toEqual([
-    KEYWORD,
-    KEYWORD,
-    KEYWORD,
+    DEFINITION_KEYWORD,
+    DEFINITION_KEYWORD,
+    DEFINITION_KEYWORD,
     CODE,
+    DEFINITION,
     CODE,
-    CODE,
-    CODE,
+    OPERATOR,
     CODE,
     STRING,
     STRING,
     STRING,
-    CODE,
+    PUNCTUATION,
   ]);
   expect([...rowColours(state, first.from + 6, first.to)]).toEqual([
+    DEFINITION,
     CODE,
-    CODE,
-    CODE,
+    OPERATOR,
     CODE,
     NUMBER,
-    CODE,
+    PUNCTUATION,
   ]);
+});
+
+test("inside a Markdown container the token defined last wins, whichever span holds the other", async () => {
+  const emphasisInLink = await loaded("a.md", "[*b*](u)\n");
+  const linkInEmphasis = await loaded("a.md", "*[b](u)*\n");
+
+  expect([...rowColours(emphasisInLink, 1, 4)]).toEqual([LINK, LINK, LINK]);
+  expect([...rowColours(linkInEmphasis, 1, 4)]).toEqual([LINK, LINK, LINK]);
 });
 
 test("text no grammar colours is drawn in the code colour", () => {
@@ -80,7 +103,10 @@ test("the look reads each token once: code first, a missing token in the code co
 
   expect(look.glyphs.scale).toBe(2);
   expect(look.glyphs.light).toBe(true);
-  expect(look.glyphs.palette.slice(0, 3)).toEqual([code, keyword, code]);
+  expect(look.glyphs.palette).toHaveLength(PALETTE.length);
+  expect(look.glyphs.palette.slice(0, 2)).toEqual([code, code]);
+  expect(look.glyphs.palette[slot("--color-syntax-keyword")]).toEqual(keyword);
+  expect(look.glyphs.palette[slot("--color-syntax-control-keyword")]).toEqual(code);
   expect(look.wave).toEqual(wave);
   expect(look.edges).toEqual({
     inserted: hexOf(code),

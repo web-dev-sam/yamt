@@ -9,6 +9,7 @@ import { changeMarks, markBoxes, problemMarks, type EdgeMark } from "./minimapMa
 import { MinimapPointer } from "./minimapPointer";
 import { readLook, rowPainter, type Look } from "./minimapRows";
 import { MinimapTiles, staleTiles, TILE_ROWS, type TileRenderer } from "./minimapTiles";
+import { themeName } from "./pane";
 import { linted } from "./problems";
 
 type MinimapParts = {
@@ -75,8 +76,7 @@ export class Minimap {
       return false;
     }
     const { startState, state } = update;
-    const themeChanged =
-      startState.facet(EditorView.darkTheme) !== state.facet(EditorView.darkTheme);
+    const themeChanged = startState.facet(themeName) !== state.facet(themeName);
     const stale = staleTiles({
       docChanged: update.docChanged,
       foldsChanged: startState.field(this.#folds.center) !== state.field(this.#folds.center),

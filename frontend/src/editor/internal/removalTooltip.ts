@@ -3,8 +3,8 @@ import type { Extension } from "@codemirror/state";
 import { hoverTooltip, type EditorView, type Tooltip } from "@codemirror/view";
 import { highlightCode } from "@lezer/highlight";
 
-import { paletteHighlight } from "./pane";
 import { barPlace, shownRemoval, type ShownRemoval } from "./removalText";
+import { paletteHighlight } from "./syntax";
 import { REMOVAL_BAR_CLASS, removalAt } from "./words";
 
 function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {

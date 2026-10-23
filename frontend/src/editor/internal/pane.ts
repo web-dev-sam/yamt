@@ -10,15 +10,11 @@ import {
   undo,
   undoSelection,
 } from "@codemirror/commands";
-import {
-  HighlightStyle,
-  indentUnit,
-  syntaxHighlighting,
-  type Language,
-} from "@codemirror/language";
+import { indentUnit, syntaxHighlighting, type Language } from "@codemirror/language";
 import {
   Compartment,
   EditorState,
+  Facet,
   Prec,
   type Extension,
   type StateCommand,
@@ -34,15 +30,21 @@ import {
   keymap,
   lineNumbers,
 } from "@codemirror/view";
-import { tagHighlighter, tags, type Highlighter, type Tag } from "@lezer/highlight";
 
-import type { FileMergeData, KeyAction, KeyBindings, Theme } from "../../ipc";
+import {
+  themeKind,
+  type FileMergeData,
+  type KeyAction,
+  type KeyBindings,
+  type Theme,
+} from "../../ipc";
 import { cutOnce } from "./cutOnce";
 import { find, findKeys, findKeysCompartment } from "./find";
 import { indentUnitOf } from "./indent";
 import { cmKeys } from "./keys";
 import { lineSeparator } from "./paneDocs";
 import { sideKeys } from "./sideKeys";
+import { paletteHighlight } from "./syntax";
 
 type PaneKind = "side" | "center" | "readOnlyCenter";
 
@@ -54,6 +56,10 @@ export const languageCompartment = new Compartment();
 const themeCompartment = new Compartment();
 const middleKeysCompartment = new Compartment();
 const sideKeysCompartment = new Compartment();
+
+export const themeName = Facet.define<Theme, Theme | null>({
+  combine: (themes) => themes[0] ?? null,
+});
 
 export const LINE_HEIGHT_PX = 20;
 
@@ -109,53 +115,6 @@ const paneTheme = EditorView.theme({
   },
 });
 
-type SyntaxToken =
-  | "--color-syntax-keyword"
-  | "--color-syntax-string"
-  | "--color-syntax-number"
-  | "--color-syntax-comment"
-  | "--color-syntax-function"
-  | "--color-syntax-property"
-  | "--color-syntax-decorator"
-  | "--color-syntax-tag"
-  | "--color-syntax-regexp"
-  | "--color-syntax-link";
-
-export const SYNTAX_COLOURS: readonly {
-  readonly tag: Tag | readonly Tag[];
-  readonly colour: SyntaxToken;
-}[] = [
-  {
-    tag: [tags.keyword, tags.bool, tags.null, tags.self, tags.atom],
-    colour: "--color-syntax-keyword",
-  },
-  { tag: [tags.string, tags.special(tags.string)], colour: "--color-syntax-string" },
-  { tag: tags.number, colour: "--color-syntax-number" },
-  { tag: tags.comment, colour: "--color-syntax-comment" },
-  {
-    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
-    colour: "--color-syntax-function",
-  },
-  { tag: [tags.propertyName, tags.constant(tags.variableName)], colour: "--color-syntax-property" },
-  { tag: tags.meta, colour: "--color-syntax-decorator" },
-  { tag: [tags.tagName, tags.angleBracket], colour: "--color-syntax-tag" },
-  { tag: tags.attributeValue, colour: "--color-syntax-string" },
-  { tag: tags.escape, colour: "--color-syntax-keyword" },
-  { tag: tags.regexp, colour: "--color-syntax-regexp" },
-  { tag: [tags.link, tags.url], colour: "--color-syntax-link" },
-];
-
-export const syntaxColourClasses: Highlighter = tagHighlighter(
-  SYNTAX_COLOURS.map(({ tag, colour }) => ({ tag, class: colour })),
-);
-
-export const paletteHighlight = HighlightStyle.define([
-  ...SYNTAX_COLOURS.map(({ tag, colour }) => ({ tag, color: `var(${colour})` })),
-  { tag: [tags.heading, tags.strong], fontWeight: "bold" },
-  { tag: tags.emphasis, fontStyle: "italic" },
-  { tag: tags.strikethrough, textDecoration: "line-through" },
-]);
-
 const selectedText = Decoration.mark({ class: "selected-text" });
 
 // drawSelection paints behind every line background (@codemirror/view LayerView.setZIndex: z-index -1);
@@ -174,8 +133,8 @@ const sideFocusOutline = EditorView.theme({
   "&.cm-focused": { outline: "1px solid var(--color-primary)", outlineOffset: "-1px" },
 });
 
-function darkFlag(theme: Theme): Extension {
-  return EditorView.darkTheme.of(theme === "dark");
+function themeExtensions(theme: Theme): Extension {
+  return [EditorView.darkTheme.of(themeKind(theme) === "dark"), themeName.of(theme)];
 }
 
 function middleKeys(keys: KeyBindings, platform: string): Extension {
@@ -198,7 +157,7 @@ export function preferenceEffects(
       ? sideKeysCompartment.reconfigure(sideKeys(keys, platform))
       : middleKeysCompartment.reconfigure(middleKeys(keys, platform));
   return [
-    themeCompartment.reconfigure(darkFlag(theme)),
+    themeCompartment.reconfigure(themeExtensions(theme)),
     findKeysCompartment.reconfigure(findKeys(keys, platform)),
     kindKeys,
   ];
@@ -274,7 +233,7 @@ export function paneState(pane: {
       cutOnce(),
       selectionOverTints,
       paneTheme,
-      themeCompartment.of(darkFlag(preferences.theme)),
+      themeCompartment.of(themeExtensions(preferences.theme)),
       syntaxHighlighting(paletteHighlight),
       languageCompartment.of(pane.language ?? []),
       find,

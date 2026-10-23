@@ -8,7 +8,7 @@ import { MAX_COLUMNS, rowOfTop, topOfRow } from "./minimapLayout";
 import type { EdgeKind } from "./minimapMarks";
 import { paintRow, paintWave, rgbOf, type GlyphLook, type Rgb } from "./minimapPixels";
 import type { TileRenderer } from "./minimapTiles";
-import { SYNTAX_COLOURS, syntaxColourClasses } from "./pane";
+import { SYNTAX_COLOURS, syntaxColourClasses } from "./syntax";
 
 export type Look = {
   readonly glyphs: GlyphLook;
@@ -26,21 +26,14 @@ type RowSource = {
 };
 
 const CODE_TOKEN = "--color-code";
-const PALETTE_TOKENS: readonly string[] = [
-  CODE_TOKEN,
-  ...new Set(SYNTAX_COLOURS.map(({ colour }) => colour)),
-];
+const PALETTE_TOKENS: readonly string[] = [CODE_TOKEN, ...SYNTAX_COLOURS];
 const NO_COLOUR: Rgb = { r: 0, g: 0, b: 0 };
 const ROW_MIDDLE = 0.5;
 
+// The text takes the colour of the matching rule defined last (paletteHighlight is one stylesheet in
+// SYNTAX_COLOURS order), whatever the order of a span's classes.
 function paletteIndex(classes: string): number {
-  for (const name of classes.split(" ")) {
-    const index = PALETTE_TOKENS.indexOf(name);
-    if (index > 0) {
-      return index;
-    }
-  }
-  return 0;
+  return Math.max(0, ...classes.split(" ").map((name) => PALETTE_TOKENS.indexOf(name)));
 }
 
 export function rowColours(state: EditorState, from: number, to: number): Uint8Array {

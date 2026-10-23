@@ -10,25 +10,31 @@ import {
 import { ensureSyntaxTree, syntaxTree, type Language } from "@codemirror/language";
 import { Text, type EditorState, type StateCommand } from "@codemirror/state";
 import { EditorView, keymap, type KeyBinding } from "@codemirror/view";
-import { highlightTree, tags, type Tag } from "@lezer/highlight";
+import { highlightTree } from "@lezer/highlight";
 import { expect, test } from "vitest";
 
-import { DEFAULT_KEYS, loadFixture, parseKey, type Key, type KeyBindings } from "../../ipc";
+import {
+  DEFAULT_KEYS,
+  loadFixture,
+  parseKey,
+  type Key,
+  type KeyBindings,
+  type Theme,
+} from "../../ipc";
 import { chunkField } from "./chunkField";
 import { sideDecorations } from "./decorations";
 import { languageOf } from "./language";
 import {
   languageCompartment,
-  paletteHighlight,
-  SYNTAX_COLOURS,
-  syntaxColourClasses,
   paneState,
   preferenceEffects,
   refuseNativeHistory,
+  themeName,
   type PaneSettings,
 } from "./pane";
 import { paneDocs } from "./paneDocs";
 import { sideStatusField } from "./sideStatus";
+import { paletteHighlight } from "./syntax";
 
 const PARSE_BUDGET_MS = 5000;
 const COLOUR = /(?:^|[{ ])color: ([^;]+);/;
@@ -234,8 +240,8 @@ test("a Vue file draws template tags in the tag colour and its script setup as T
   const state = center(VUE_SFC, await loaded("App.vue"));
 
   expect(colourAt(state, "div")).toBe("var(--color-syntax-tag)");
-  expect(colourAt(state, "interface")).toBe("var(--color-syntax-keyword)");
-  expect(colourAt(state, "const")).toBe("var(--color-syntax-keyword)");
+  expect(colourAt(state, "interface")).toBe("var(--color-syntax-definition-keyword)");
+  expect(colourAt(state, "const")).toBe("var(--color-syntax-definition-keyword)");
   expect(colourAt(state, '"hi"')).toBe("var(--color-syntax-string)");
 });
 
@@ -243,13 +249,13 @@ test("a TSX file draws JSX tags in the tag colour", async () => {
   const state = center(TSX, await loaded("Provider.tsx"));
 
   expect(colourAt(state, "div")).toBe("var(--color-syntax-tag)");
-  expect(colourAt(state, "return")).toBe("var(--color-syntax-keyword)");
+  expect(colourAt(state, "return")).toBe("var(--color-syntax-control-keyword)");
 });
 
-test("a character literal is drawn in the string colour", async () => {
+test("a character literal is drawn in the character colour", async () => {
   const state = center(RUST, await loaded("lib.rs"));
 
-  expect(colourAt(state, "'a'")).toBe("var(--color-syntax-string)");
+  expect(colourAt(state, "'a'")).toBe("var(--color-syntax-character)");
 });
 
 test("recolouring the center pane adds no undo step and keeps the chunks", async () => {
@@ -269,7 +275,7 @@ test("recolouring the center pane adds no undo step and keeps the chunks", async
     effects: languageCompartment.reconfigure(await loaded(data.path)),
   }).state;
 
-  expect(colourAt(coloured, "<template>")).toBe("var(--color-syntax-tag)");
+  expect(colourAt(coloured, "<template>")).toBe("var(--color-syntax-angle-bracket)");
   expect(undoDepth(coloured)).toBe(0);
   expect(coloured.field(field)).toBe(plain.field(field));
   expect(coloured.doc).toBe(plain.doc);
@@ -367,11 +373,38 @@ test("Indent without keys: Tab indents nothing in the middle", () => {
   expect(commandsOn(state, "Shift-Tab")).toEqual([indentLess]);
 });
 
-test("CodeMirror's dark flag follows the theme", () => {
-  const light: PaneSettings = { ...SETTINGS, preferences: { theme: "light", keys: DEFAULT_KEYS } };
+test("CodeMirror's dark flag and the theme facet follow each of the ten themes", () => {
+  const darkFlags: readonly (readonly [Theme, boolean])[] = [
+    ["dark", true],
+    ["light", false],
+    ["webstorm-dark", true],
+    ["webstorm-light", false],
+    ["vscode-dark", true],
+    ["vscode-light", false],
+    ["zed-dark", true],
+    ["zed-light", false],
+    ["atom-dark", true],
+    ["atom-light", false],
+  ];
+  const states = darkFlags.map(([theme]) =>
+    center(PHP, null, { ...SETTINGS, preferences: { theme, keys: DEFAULT_KEYS } }),
+  );
 
-  expect(center(PHP, null).facet(EditorView.darkTheme)).toBe(true);
-  expect(center(PHP, null, light).facet(EditorView.darkTheme)).toBe(false);
+  expect(states.map((state) => state.facet(EditorView.darkTheme))).toEqual(
+    darkFlags.map(([, dark]) => dark),
+  );
+  expect(states.map((state) => state.facet(themeName))).toEqual(darkFlags.map(([theme]) => theme));
+});
+
+test("a switch between two dark themes keeps the dark flag and changes the theme facet", () => {
+  const vscode: PaneSettings = {
+    ...SETTINGS,
+    preferences: { theme: "vscode-dark", keys: DEFAULT_KEYS },
+  };
+  const state = center(PHP, null).update({ effects: preferenceEffects("center", vscode) }).state;
+
+  expect(state.facet(EditorView.darkTheme)).toBe(true);
+  expect(state.facet(themeName)).toBe("vscode-dark");
 });
 
 test("the browser's own undo and redo are refused in the middle; other input passes through", () => {
@@ -450,60 +483,4 @@ test("new preferences turn a side light, rebind its Apply and its find keys", ()
   expect(commandsOn(state, "Enter")).toEqual([]);
   expect(commandsOn(state, "F10")).toHaveLength(1);
   expect(commandsOn(state, "Escape")).toEqual([]);
-});
-
-function ruleOf(tag: Tag): string | null {
-  const classes = paletteHighlight.style([tag]) ?? "";
-  const rules = paletteHighlight.module?.getRules().split("\n") ?? [];
-  const rule = rules.find((line) => line.startsWith(`.${classes} {`));
-  return rule === undefined ? null : rule.slice(rule.indexOf("{") + 1, -1);
-}
-
-test("the pane's highlight styles every tag as before the syntax table", () => {
-  const keyword = "color: var(--color-syntax-keyword);";
-  const string = "color: var(--color-syntax-string);";
-  const styled: readonly (readonly [Tag, string])[] = [
-    [tags.keyword, keyword],
-    [tags.bool, keyword],
-    [tags.null, keyword],
-    [tags.self, keyword],
-    [tags.atom, keyword],
-    [tags.string, string],
-    [tags.special(tags.string), string],
-    [tags.number, "color: var(--color-syntax-number);"],
-    [tags.comment, "color: var(--color-syntax-comment);"],
-    [tags.function(tags.variableName), "color: var(--color-syntax-function);"],
-    [tags.function(tags.propertyName), "color: var(--color-syntax-function);"],
-    [tags.propertyName, "color: var(--color-syntax-property);"],
-    [tags.constant(tags.variableName), "color: var(--color-syntax-property);"],
-    [tags.meta, "color: var(--color-syntax-decorator);"],
-    [tags.tagName, "color: var(--color-syntax-tag);"],
-    [tags.angleBracket, "color: var(--color-syntax-tag);"],
-    [tags.attributeValue, string],
-    [tags.escape, keyword],
-    [tags.regexp, "color: var(--color-syntax-regexp);"],
-    [tags.link, "color: var(--color-syntax-link);"],
-    [tags.url, "color: var(--color-syntax-link);"],
-    [tags.heading, "font-weight: bold;"],
-    [tags.strong, "font-weight: bold;"],
-    [tags.emphasis, "font-style: italic;"],
-    [tags.strikethrough, "text-decoration: line-through;"],
-  ];
-
-  expect(styled.map(([tag]) => ruleOf(tag))).toEqual(styled.map(([, rule]) => rule));
-});
-
-test("the minimap classes and the pane's highlight give each tag the same token", () => {
-  const probed: readonly Tag[] = [
-    ...SYNTAX_COLOURS.flatMap(({ tag }) => [tag].flat()),
-    tags.controlKeyword,
-    tags.docComment,
-    tags.definition(tags.propertyName),
-    tags.variableName,
-    tags.heading,
-  ];
-
-  expect(probed.map((tag) => syntaxColourClasses.style([tag]))).toEqual(
-    probed.map((tag) => /var\(([^)]+)\)/.exec(ruleOf(tag) ?? "")?.[1] ?? null),
-  );
 });
