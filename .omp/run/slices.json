@@ -1,1 +1,25 @@
-{}
+{
+  "ThemesPalettes": {
+    "owned": [
+      "frontend/src/style.css",
+      "frontend/src/themes/**",
+      "frontend/scripts/themes.ts",
+      "frontend/scripts/themes.test.ts",
+      "frontend/scripts/palette.ts",
+      "frontend/scripts/palette.test.ts",
+      "frontend/src/ui/FileList.vue",
+      "frontend/src/ui/FileTree.vue",
+      "frontend/src/ui/CompareTabList.vue",
+      "frontend/src/ui/PaneFrame.vue",
+      "frontend/src/ui/ChoiceView.vue",
+      "frontend/src/ui/StopView.vue",
+      "frontend/src/ui/ServerLogView.vue",
+      "frontend/src/ui/NoticeBar.vue",
+      "frontend/src/ui/ProblemBar.vue",
+      "frontend/src/ui/App.vue",
+      "frontend/src/ui/CompareApp.vue",
+      "frontend/src/ui/SettingsView.vue"
+    ],
+    "readonly": ["**"]
+  }
+}
