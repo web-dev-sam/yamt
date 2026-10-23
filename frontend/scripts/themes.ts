@@ -273,7 +273,7 @@ export function findThemeViolations(files: readonly SourceFile[]): ThemeViolatio
   const shell = files.find(({ path }) => path === WINDOW_FILE);
   const native =
     shell === undefined
-      ? []
+      ? backgroundFindings({ path: WINDOW_FILE, text: "" }, placed, names)
       : [...backgroundFindings(shell, placed, names), ...armFindings(shell, names)];
   return [...findings, ...blockFindings(placed), ...native];
 }

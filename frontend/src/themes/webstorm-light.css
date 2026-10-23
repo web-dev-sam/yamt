@@ -11,7 +11,7 @@
  */
 :root[data-theme="webstorm-light"] {
   --radius-island: 10px; /* IL:404-414 Island.arc 20 */
-  --spacing-island: 5px; /* IL:404-414 Island.borderWidth */
+  --spacing-island: 5px; /* IL:404-414 Island.borderWidth 6; visible gap 5 px (3.T measurement) */
   --island-line: 0px; /* IL:411 Island.borderColor = tool-window-bg: no line */
 
   --color-window: #e9eaee; /* IL:218 MainWindow.background → gray-150 */

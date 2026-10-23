@@ -54,7 +54,7 @@ function toggleFolder(path: string): void {
 <template>
   <aside
     ref="list"
-    class="relative flex w-60 shrink-0 flex-col island bg-sidebar pb-1"
+    class="relative mr-(--island-overlap) flex w-60 shrink-0 flex-col island bg-sidebar pb-1"
     :style="widthStyle"
   >
     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">

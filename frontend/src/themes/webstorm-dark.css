@@ -9,7 +9,7 @@
  */
 :root[data-theme="webstorm-dark"] {
   --radius-island: 10px; /* ID ui Island.arc 20 */
-  --spacing-island: 5px; /* ID ui Island.borderWidth */
+  --spacing-island: 5px; /* ID ui Island.borderWidth 6; visible gap 5 px (3.T measurement) */
   --island-line: 0px; /* ID ui Island.borderColor = tool-window-bg: no line */
 
   --color-window: #26282c; /* ID ui MainWindow.background → gray-30 */

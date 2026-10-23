@@ -177,6 +177,19 @@ test("an @theme block outside src/style.css does not exempt literals or define t
   ]);
 });
 
+test("a token defined in src/style.css outside @theme stays unknown", () => {
+  const palette = {
+    path: "src/style.css",
+    text: `@theme static {\n  --color-panel: #1e1f22;\n}\n\n@utility alias {\n  --color-alias: var(--color-panel);\n}\n`,
+  };
+  const file = { path: "src/ui/extra.css", text: `p {\n  color: var(--color-alias);\n}\n` };
+
+  expect(findPaletteViolations([palette, file])).toEqual([
+    { rule: "unknown-token", file: "src/style.css", line: 6, match: "--color-alias" },
+    { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-alias" },
+  ]);
+});
+
 test("hex digits of other lengths or followed by a word character are not colours", () => {
   const file = {
     path: "src/ui/ids.ts",

@@ -65,7 +65,7 @@ async function watchWindowClose(): Promise<void> {
 </script>
 
 <template>
-  <div class="flex h-full gap-island p-island">
+  <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
     <CompareTabList
       v-show="fileListShown"
       :tabs="tabs"
@@ -76,9 +76,11 @@ async function watchWindowClose(): Promise<void> {
       @close="closeTab"
       @rename="renameTab"
     />
-    <div class="ml-(--island-overlap) flex min-h-0 min-w-0 flex-1 flex-col gap-island">
-      <NoticeBar v-if="notices.length > 0" :rows="notices" @close="dismissNotice" />
-      <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+      <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+        <NoticeBar v-if="notices.length > 0" :rows="notices" @close="dismissNotice" />
+        <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+      </div>
       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         <CompareView
           v-for="tab in visited"

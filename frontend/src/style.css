@@ -88,7 +88,7 @@
   --color-syntax-markup-mark: #b1b062;
   --color-syntax-tag: #dcb875;
   --color-syntax-angle-bracket: #dcb875;
-  --color-syntax-attribute: #c4c2ce;
+  --color-syntax-attribute: #d291cc;
   --color-syntax-heading: #c4c2ce;
   --color-syntax-emphasis: #c4c2ce;
   --color-syntax-strong: #c4c2ce;
@@ -138,6 +138,14 @@
   border-radius: var(--radius-island);
 }
 
+@utility past-window-edges {
+  margin: var(--island-overlap);
+}
+
+@utility inside-window-edges {
+  margin: calc(-1 * var(--island-overlap)) calc(-1 * var(--island-overlap)) 0;
+}
+
 @utility panel-handle {
   right: calc(
     -1 *
@@ -184,6 +192,12 @@
   html {
     background-color: var(--color-window);
     color: var(--color-fg);
+  }
+
+  /* `clip`, unlike `hidden`, is no scroll container: focus and scrollIntoView cannot move the root pulled past the window edges (CSS Overflow 3 §3.1). */
+  #app {
+    display: flex;
+    overflow: clip;
   }
 
   body {

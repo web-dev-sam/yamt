@@ -4,7 +4,8 @@
  * N = …/styles/syntax/base.less, ts = …/styles/syntax/typescript.less, uv/uvc = packages/one-light-ui/styles/ui-variables.less
  * and ui-variables-custom.less, ui/<f> = packages/one-light-ui/styles/<f>, gd = packages/git-diff/styles/git-diff.less;
  * nt = atom/notifications@v0.72.1 styles/notifications.less; gh/<f> = atom/github@v0.36.9 styles/<f>.
- * Syntax: tree-sitter scopes (config-schema.js:395-397); "unscoped" takes @syntax-text-color.
+ * Syntax: tree-sitter scopes (config-schema.js:395-397); "unscoped" takes @syntax-text-color. L:/N: line numbers are
+ * one-dark-syntax's, whose _base.less and base.less hold the same rules.
  * "gap" names the closest element for what Atom has no colour for.
  */
 :root[data-theme="atom-light"] {

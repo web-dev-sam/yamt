@@ -271,6 +271,16 @@ test("a window file without background() reports every theme's arm", () => {
   ]);
 });
 
+test("a tree without the window file reports every theme's background", () => {
+  const files = tree().filter(({ path }) => path !== WINDOW_FILE);
+
+  expect(findThemeViolations(files)).toEqual([
+    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_DARK" },
+    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_LIGHT" },
+    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_ZED_DARK" },
+  ]);
+});
+
 function placeWindowFile(folder: string, text: string): void {
   mkdirSync(join(folder, "src-tauri/src"), { recursive: true });
   writeFileSync(join(folder, WINDOW_FILE), text);
