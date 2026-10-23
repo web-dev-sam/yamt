@@ -22,5 +22,9 @@
       "frontend/src/ui/PanelWidthHandle.vue"
     ],
     "readonly": ["**"]
+  },
+  "ThemesRustR1": {
+    "owned": ["src-tauri/src/window.rs", "crates/settings/AGENTS.md"],
+    "readonly": ["**"]
   }
 }

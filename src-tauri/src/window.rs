@@ -24,7 +24,7 @@ const WIDTH: f64 = 1600.0;
 const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 600.0;
-// `--color-window` of each theme's block: frontend/src/style.css for Dark and Light,
+// `--color-window` of each theme's block: frontend/src/style.css (`@theme static`) for Dark,
 // frontend/src/themes/<name>.css for the others.
 const BACKGROUND_DARK: Color = Color(0x27, 0x25, 0x2e, 0xff);
 const BACKGROUND_LIGHT: Color = Color(0xe9, 0xea, 0xee, 0xff);
