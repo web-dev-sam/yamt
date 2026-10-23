@@ -980,17 +980,18 @@ their favorite editor". Rules, acceptance, non-goals: `docs/slices/request-theme
 boring choice, OR13: each editor's own default dark and light, yamt's two kept as the default; rule 5, the change
 colours, asked: the one real tradeoff, plan §2 #32 makes conflicts purple).
 
-Slice graph: 1a, 1b, 1c (colour research, read-only, now) → 2 (design, with the research) → 3 (builds, after the
-owner's answer on change colours) → 4 (final run).
+Slice graph: 1a, 1b, 1b', 1c (colour research, read-only) → 2 (design) → 3 (builds) → 4 (final run). Owner answer
+(#1592): change colours follow the editor (rule 5).
 
-| row | slice                                                                                                         | owner    | status  | evidence |
-| --- | ------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
-| 1a  | research: VS Code 1.143 Dark 2026 / Light 2026 colours (`briefs/3.TH-theme-colours.md`, `ThemeColoursVscode`) | scout    | running |          |
-| 1b  | research: Zed 1.25.3 One Dark / One Light, Atom 1.60.0 One Dark / One Light (`ThemeColoursZedAtom`)           | scout    | running |          |
-| 1c  | research: WebStorm 2026.2 Islands Dark / Islands Light (`ThemeColoursWebstorm`)                               | scout    | running |          |
-| 2   | design: the theme list's one source, palettes per theme, syntax kinds, shapes, the picker, builds             | designer | planned |          |
-| 3   | builds per the design                                                                                         | rust/web | planned |          |
-| 4   | final run: `just check`, `just mutants 17849b0`, WebKit and the real app in every theme                       | verifier | planned |          |
+| row | slice                                                                                                         | owner    | status  | evidence                                                                                                                                                            |
+| --- | ------------------------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1a  | research: VS Code 1.143 Dark 2026 / Light 2026 colours (`briefs/3.TH-theme-colours.md`, `ThemeColoursVscode`) | scout    | done    | tables A–E, include chain 2026 → Modern → Plus → VS, semantic highlighting on; notes `ThemeColoursVscode.md`                                                        |
+| 1b  | research: Zed 1.25.3 One Dark / One Light, Atom 1.60.0 One Dark / One Light (`ThemeColoursZedAtom`)           | scout    | done    | Zed complete (fallbacks from `refine_theme`); Atom syntax only, budget out; Atom uses tree-sitter by default (plain variables uncoloured); `ThemeColoursZedAtom.md` |
+| 1b' | research: Atom's window, git-diff and conflict colours (`ThemeColoursAtomUi`)                                 | scout    | running |                                                                                                                                                                     |
+| 1c  | research: WebStorm 2026.2 Islands Dark / Islands Light (`ThemeColoursWebstorm`)                               | scout    | done    | A–E; JS/TS/CSS/Markdown/JSON key fallbacks read by the orchestrator from the class files (`ThemeColoursWebstormKeys.md`), B redone (`ThemeColoursWebstormB.md`)     |
+| 2   | design: the theme list's one source, palettes per theme, syntax kinds, shapes, the picker, builds             | designer | running | `ThemesDesign`                                                                                                                                                      |
+| 3   | builds per the design                                                                                         | rust/web | planned |                                                                                                                                                                     |
+| 4   | final run: `just check`, `just mutants 17849b0`, WebKit and the real app in every theme                       | verifier | planned |                                                                                                                                                                     |
 
 ## Open product questions
 

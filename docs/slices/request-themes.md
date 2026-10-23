@@ -36,14 +36,18 @@ favorite editor".
    variables and teal types and an Atom user Atom's red properties (Atom 1.60 parses with tree-sitter by default:
    plain variables stay uncoloured there, `ThemeColoursZedAtom` doubt 3). Which word is which kind comes from yamt's own
    parsers, as today; a word may now and then be classed unlike in the editor. yamt Dark and Light look as today.
-4. **Shapes.** WebStorm's themes and yamt's own keep today's rounded panels with gaps (plan §2 #24); VS Code, Zed and
-   Atom show flat panels divided by thin lines, as those editors do. Sizes, font families and icons are unchanged
-   everywhere; a code word's italic, bold, underline or strikethrough follows the theme where the editor's theme sets
-   one (WebStorm's Islands Light draws comments italic).
+4. **Shapes, as each editor draws them** (corrected after the research: VS Code 1.143's default layout is rounded
+   cards): yamt's and WebStorm's themes keep today's islands (10 px corners, 5 px gaps, plan §2 #24); VS Code shows its
+   cards (8 px corners, 4 px gaps, a 1 px border line); Zed and Atom show flat panels that touch, divided by one 1 px
+   line. The file list's width handle and the pane dividers work as today in every shape. Sizes, font families and
+   icons are unchanged everywhere; a code word's italic, bold, underline or strikethrough follows the theme where the
+   editor's theme sets one (WebStorm's Islands Light draws comments italic).
 5. **Change colours follow the editor** (owner 2026-10-23, "Follow the editor"): in an editor's theme, added, changed
    and removed lines and conflicts — tints, word marks, removal bars, strips, the minimap's marks — use that editor's
    own diff, merge and conflict colours; conflicts are purple only in yamt's own themes (plan §2 #32 keeps them).
-   A kind the editor has no colour for takes that editor's closest one, named in the record.
+   A kind the editor has no colour for takes that editor's closest one, named in the record. A conflict takes one
+   colour family per theme for all its marks: the editor's whole-conflict colour where it has one (Zed, WebStorm),
+   else the colours it gives the incoming/theirs side (VS Code, Atom).
 6. **Switching** works as Dark/Light today (plan §2 #57): a pick recolours the whole window at once — every opened
    file, the compare window, the native window background — is stored in the settings file, and the next start opens
    in it with no frame of another colour.
