@@ -1,30 +1,26 @@
 {
-  "ThemesPalettes": {
+  "ThemesCode": {
     "owned": [
-      "frontend/src/style.css",
-      "frontend/src/themes/**",
-      "frontend/scripts/themes.ts",
-      "frontend/scripts/themes.test.ts",
-      "frontend/scripts/palette.ts",
-      "frontend/scripts/palette.test.ts",
-      "frontend/src/ui/FileList.vue",
-      "frontend/src/ui/FileTree.vue",
-      "frontend/src/ui/CompareTabList.vue",
-      "frontend/src/ui/PaneFrame.vue",
-      "frontend/src/ui/ChoiceView.vue",
-      "frontend/src/ui/StopView.vue",
-      "frontend/src/ui/ServerLogView.vue",
-      "frontend/src/ui/NoticeBar.vue",
-      "frontend/src/ui/ProblemBar.vue",
-      "frontend/src/ui/App.vue",
-      "frontend/src/ui/CompareApp.vue",
+      "frontend/src/ipc/themes.ts",
+      "frontend/src/ipc/themes.test.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/ipc/AGENTS.md",
+      "frontend/src/editor/internal/syntax.ts",
+      "frontend/src/editor/internal/syntax.test.ts",
+      "frontend/src/editor/internal/pane.ts",
+      "frontend/src/editor/internal/pane.test.ts",
+      "frontend/src/editor/internal/minimap.ts",
+      "frontend/src/editor/internal/minimapRows.ts",
+      "frontend/src/editor/internal/minimapRows.test.ts",
+      "frontend/src/editor/internal/removalTooltip.ts",
+      "frontend/src/editor/themes.browser.test.ts",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/main.ts",
+      "frontend/src/ui/settingsStore.ts",
+      "frontend/src/ui/settingsStore.test.ts",
       "frontend/src/ui/SettingsView.vue",
-      "frontend/src/ui/PanelWidthHandle.vue"
+      "frontend/src/ui/AGENTS.md"
     ],
-    "readonly": ["**"]
-  },
-  "ThemesRustR1": {
-    "owned": ["src-tauri/src/window.rs", "crates/settings/AGENTS.md"],
     "readonly": ["**"]
   }
 }
