@@ -1,13 +1,7 @@
 {
-  "OperationTooltipR1": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.I-operation-tooltip-rework-1.md",
-    "owned": [
-      "frontend/src/ui/OperationLabel.vue",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/style.css",
-      "frontend/src/editor/theme.css",
-      "frontend/src/editor/AGENTS.md"
-    ]
+  "OperationTooltipVerify": {
+    "agent": "verifier",
+    "brief": "docs/slices/briefs/3.I-verify.md",
+    "owned": []
   }
 }
