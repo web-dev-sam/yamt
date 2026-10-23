@@ -20,6 +20,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Ctrl/Cmd+B hides the panel.
   - Tabs, their names, texts and languages and the shown tab are kept between runs, also after a crash.
 
+### Changed
+
+- The operation tag at the bottom of the file list (MERGE, REBASE, …) shows what git is doing, how far it got and the
+  commit message in yamt's own tooltip the moment the pointer is on it, instead of the system's late tooltip.
+
 ### Fixed
 
 - On Linux, pasting no longer crashes yamt when the clipboard cannot be read — the program that copied has quit, nothing

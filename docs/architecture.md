@@ -1015,7 +1015,7 @@ naming what is lost, #74/#88 —, previous/next change
 arrows that keep the side's keyboard on a pointer press, the "Collapse unchanged fragments" toggle —
 `aria-pressed` while on, keeps the keyboard too, #68 —, bulk apply left/right, undo/redo — hidden
 at first, shown from the right-click menu, #58 —, counts, finish, reset — `MergeView` calls the store's
-`finish`/`reset`), `OperationLabel.vue` (the gray tag at the bottom of `FileList.vue`: `MERGE`, `REBASE`, `CHERRY-PICK`, …; its hover what git applies onto what, how far, the commit message, plan §2 #92),
+`finish`/`reset`), `OperationLabel.vue` (the gray tag at the bottom of `FileList.vue`: `MERGE`, `REBASE`, `CHERRY-PICK`, …; its own tooltip, open the moment the pointer is on it, no `title`: what git applies onto what, how far, the commit message, plan §2 #92, #100),
 `OperationButtons.vue` (Continue and Abort where no toolbar is: choice, deleted-side and empty-stop header rows),
 `StopView.vue` (the merge area for a stop without conflicts, with git's message, #89), `SettingsButton.vue` (the gear at the
 right end of every file's header row: toolbar, read-only header, choice header), `SettingsView.vue`
