@@ -33,10 +33,13 @@ favorite editor".
    the editor's closest element, named in the record.
 3. **Code colours.** yamt tells apart as many kinds of words as these editors colour differently (variables, types,
    parameters, properties, operators, punctuation, control keywords, …), so a VS Code user sees VS Code's light-blue
-   variables and teal types and an Atom user Atom's red variables. Which word is which kind comes from yamt's own
+   variables and teal types and an Atom user Atom's red properties (Atom 1.60 parses with tree-sitter by default:
+   plain variables stay uncoloured there, `ThemeColoursZedAtom` doubt 3). Which word is which kind comes from yamt's own
    parsers, as today; a word may now and then be classed unlike in the editor. yamt Dark and Light look as today.
 4. **Shapes.** WebStorm's themes and yamt's own keep today's rounded panels with gaps (plan §2 #24); VS Code, Zed and
-   Atom show flat panels divided by thin lines, as those editors do. Sizes, fonts and icons are unchanged everywhere.
+   Atom show flat panels divided by thin lines, as those editors do. Sizes, font families and icons are unchanged
+   everywhere; a code word's italic, bold, underline or strikethrough follows the theme where the editor's theme sets
+   one (WebStorm's Islands Light draws comments italic).
 5. **Change colours follow the editor** (owner 2026-10-23, "Follow the editor"): in an editor's theme, added, changed
    and removed lines and conflicts — tints, word marks, removal bars, strips, the minimap's marks — use that editor's
    own diff, merge and conflict colours; conflicts are purple only in yamt's own themes (plan §2 #32 keeps them).
