@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-23
+
 ### Added
 
 - `yamt --raw` opens a compare window for any two texts, no repository needed: type or paste into the left and right
@@ -284,7 +286,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.4.2...HEAD
+[Unreleased]: ../../compare/v0.5.0...HEAD
+[0.5.0]: ../../compare/v0.4.2...v0.5.0
 [0.4.2]: ../../compare/v0.4.1...v0.4.2
 [0.4.1]: ../../compare/v0.4.0...v0.4.1
 [0.4.0]: ../../compare/v0.3.2...v0.4.0

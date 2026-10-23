@@ -883,7 +883,7 @@ the feature's final run and the tag's checks (gate at `e0e1721`); the release co
 | 4   | fix: CI `rust (macos-14)` red on `v0.4.2`/`main` — two `gitio::edit_stop` tests; BSD sed reads `-i -e A -e B` as suffix `-e` (#1458) (`briefs/release-0.4.2-macos-sed.md`); test code only, binaries unaffected                              | rust-impl    | done        | `90361db` `sed_sequence_editor` (`sed -i.orig`), every caller + `operations-repo.sh`; review pass (`MacSedFixReview.md`); R1 `6116026` clippy `must_use`/`format_push_string` (#1459). Notes `MacSedFix*.md`                                                   |
 | 5   | final run after row 4 (`just check`); macOS proof = CI after the owner's push                                                                                                                                                                | verifier     | done        | `MacSedFixVerifyR1` at `6116026`: gate pass (595 Rust, 1756 web tests); 6/6 `edit_stop`; `operations-repo.sh rebase-interactive` stops with the reword. R0 run failed at clippy (`MacSedFixVerify.md`). macOS: pending CI                                      |
 
-## Raw compare — `yamt --raw`: two columns, any two texts, tabs that survive a restart (session 26, branch `feat/raw-compare` off main `8db7609`)
+## Raw compare — `yamt --raw`: two columns, any two texts, tabs that survive a restart (session 26, branch `feat/raw-compare` off main `8db7609`; merged into main `e5c0502`, owner #1585, with the paste-crash fix, the tag tooltip and the VS Code task below)
 
 Owner request (2026-10-21, #1461): `yamt --raw` opens a two-column compare (left the base, right compared against it),
 both editable, differences shown with the merge window's visuals; a Format button for JSON and other standard formats;
@@ -955,6 +955,19 @@ Slice graph (no question, OR13): 1 → 2. Architecture and project map: orchestr
 | row | slice                                                                                                                           | owner        | status | evidence                                                                                                                                                                                          |
 | --- | ------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | `.vscode/tasks.json` "raw: open in yamt" (button "raw"): `just app --raw`, one instance, rerun rebuilds, prints the exit status | orchestrator | done   | `b5ee5b7`; the task's own command on a private X display with a scratch data folder: window "Compare — yamt", tab "Compare 1", `yamt/compare/tabs.json` + `lock` written; no product code changed |
+
+## Release 0.5.0 (session 27, owner request #1585: "merge into main and release 0.5.0")
+
+Contents: the `[Unreleased]` changelog section — the compare window `yamt --raw` (plan §2 #93–#98), the Linux paste
+crash fix (#99), the operation tag's own tooltip (#100). `feat/raw-compare` merged into `main` as `e5c0502` (merge
+commit, tree equal to `1415413`). Product code as checked by the tooltip's final run (gate at `4e4bb65`); the release
+commit changes version and docs only. Nothing pushed.
+
+| row | slice                                                                                                                                                                                                                                       | owner        | status  | evidence                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------- | --------------------------------------------------------------- |
+| 1   | version 0.5.0: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.5.0] - 2026-10-23`, README file names (`.readmer/readme.json` + `readmer`)                                                                                                     | orchestrator | done    | release commit; no product file changes; `readmer check` passes |
+| 2   | final run before tagging (`briefs/release-0.5.0-verify.md`): `just check`, licences, `.deb` name, `--version`, the release binary on the conflict project, a rebase with the tag's tooltip, the compare window, paste with a dead clipboard | verifier     | running |                                                                 |
+| 3   | release build and publishing (`docs/slices/handoff-release-0.5.0.md`)                                                                                                                                                                       | human        | todo    |                                                                 |
 
 ## Open product questions
 
