@@ -53,7 +53,9 @@ if (IN_APP && isLinux(navigator.platform)) {
 }
 const { dataset } = document.documentElement;
 const startTheme = dataset["theme"] === "light" ? "light" : "dark";
-const comparing = IN_APP ? dataset["window"] === "compare" : new URLSearchParams(SEARCH).has("raw");
+const comparing = IN_APP
+  ? dataset["window"] === "compare"
+  : new URLSearchParams(SEARCH).has("diff");
 if (comparing) {
   startCompare(startTheme);
 } else {

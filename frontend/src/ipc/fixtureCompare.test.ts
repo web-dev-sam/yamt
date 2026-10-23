@@ -84,9 +84,9 @@ test("the first start shows one empty Compare 1 and the limit (catches a start w
   });
 });
 
-test("?raw=json-payload puts the case into tab 1 and loadTab returns its differences (catches an ignored ?raw)", async () => {
+test("?diff=json-payload puts the case into tab 1 and loadTab returns its differences (catches an ignored ?diff)", async () => {
   const payload = committedCase("json-payload");
-  const source = createFixtureCompareSource(quietLog().log, "?raw=json-payload");
+  const source = createFixtureCompareSource(quietLog().log, "?diff=json-payload");
 
   const start = valueOf(await source.openCompare());
   const texts = valueOf(await source.loadTab(start.list.shown));
@@ -100,8 +100,8 @@ test("?raw=json-payload puts the case into tab 1 and loadTab returns its differe
   expect(texts.comparison.differences).toHaveLength(4);
 });
 
-test.each(["?raw", "?raw="])(
-  "%s without a case starts one empty Compare 1 (catches a bare ?raw read as a case name)",
+test.each(["?diff", "?diff="])(
+  "%s without a case starts one empty Compare 1 (catches a bare ?diff read as a case name)",
   async (search) => {
     const source = createFixtureCompareSource(quietLog().log, search);
 
@@ -118,8 +118,8 @@ test.each(["?raw", "?raw="])(
   },
 );
 
-test("an unknown ?raw case fails the start naming it and the known ones", () => {
-  expect(() => createFixtureCompareSource(quietLog().log, "?raw=nope")).toThrow(
+test("an unknown ?diff case fails the start naming it and the known ones", () => {
+  expect(() => createFixtureCompareSource(quietLog().log, "?diff=nope")).toThrow(
     "no compare fixture nope; known: json-payload, typescript, words",
   );
 });
@@ -301,10 +301,10 @@ test("texts matching no case log compare.fixture_miss once and answer no differe
   expect(entries).toHaveLength(1);
 });
 
-test("an edited left column after ?raw=words answers no differences (catches matching the right column only)", async () => {
+test("an edited left column after ?diff=words answers no differences (catches matching the right column only)", async () => {
   const { log, entries } = quietLog();
   const words = committedCase("words");
-  const source = createFixtureCompareSource(log, "?raw=words");
+  const source = createFixtureCompareSource(log, "?diff=words");
   const tab = await firstTab(source);
   const { versions } = valueOf(await source.loadTab(tab)).comparison;
   const edited = `${words.left}edited\n`;

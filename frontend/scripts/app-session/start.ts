@@ -74,8 +74,8 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     mkdirSync(join(configDir, "yamt"), { recursive: true });
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
-  if (command.opens.kind === "raw") {
-    return { home, configDir, repoDir: null, binary, args: ["--raw"] };
+  if (command.opens.kind === "diff") {
+    return { home, configDir, repoDir: null, binary, args: ["--diff"] };
   }
   const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
   if (command.opens.kind === "fresh") {

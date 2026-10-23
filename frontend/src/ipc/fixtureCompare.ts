@@ -96,17 +96,17 @@ function addTab(tabs: Tabs): FixtureTab {
 }
 
 function firstTabs(
-  raw: string | null,
+  diff: string | null,
   cases: ReadonlyMap<string, Case>,
 ): { readonly tabs: Tabs; readonly first: FixtureTab } {
   const tabs: Tabs = { list: [], shown: FIRST_TAB_ID, nextId: FIRST_TAB_ID };
   const first = addTab(tabs);
-  if (raw === null || raw === "") {
+  if (diff === null || diff === "") {
     return { tabs, first };
   }
-  const shown = cases.get(raw);
+  const shown = cases.get(diff);
   if (shown === undefined) {
-    throw new Error(`no compare fixture ${raw}; known: ${[...cases.keys()].join(", ")}`);
+    throw new Error(`no compare fixture ${diff}; known: ${[...cases.keys()].join(", ")}`);
   }
   first.texts.left = shown.left;
   first.texts.right = shown.right;
@@ -228,7 +228,7 @@ export function createFixtureCompareSource(
   files: Readonly<Record<string, unknown>> = CASE_FILES,
 ): CompareSource {
   const cases = parseCases(files);
-  const { tabs } = firstTabs(new URLSearchParams(search).get("raw"), cases);
+  const { tabs } = firstTabs(new URLSearchParams(search).get("diff"), cases);
   return {
     async openCompare() {
       const start = { list: tabListDto(tabs), column_limit: COLUMN_LIMIT_BYTES };

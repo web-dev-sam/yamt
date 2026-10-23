@@ -48,24 +48,24 @@ test("start-app reads every option of the acceptance run", () => {
   });
 });
 
-test("start-app needs exactly one of --repo, --fresh-repo and --raw", () => {
-  const needsOne = /needs one of --repo <dir>, --fresh-repo and --raw/;
+test("start-app needs exactly one of --repo, --fresh-repo and --diff", () => {
+  const needsOne = /needs one of --repo <dir>, --fresh-repo and --diff/;
   expect(() => parseCommand(["start-app", "--name", "a"])).toThrow(needsOne);
   expect(() => parseCommand(["start-app", "--name", "a", "--repo", "/r", "--fresh-repo"])).toThrow(
     needsOne,
   );
-  expect(() => parseCommand(["start-app", "--name", "a", "--repo", "/r", "--raw"])).toThrow(
+  expect(() => parseCommand(["start-app", "--name", "a", "--repo", "/r", "--diff"])).toThrow(
     needsOne,
   );
-  expect(() => parseCommand(["start-app", "--name", "a", "--fresh-repo", "--raw"])).toThrow(
+  expect(() => parseCommand(["start-app", "--name", "a", "--fresh-repo", "--diff"])).toThrow(
     needsOne,
   );
 });
 
-test("start-app --raw opens the compare window and no repository", () => {
+test("start-app --diff opens the compare window and no repository", () => {
   expect(
-    parseCommand(["start-app", "--name", "c", "--raw", "--home", "/tmp/c-home"]),
-  ).toMatchObject({ kind: "start-app", opens: { kind: "raw" }, home: "/tmp/c-home" });
+    parseCommand(["start-app", "--name", "c", "--diff", "--home", "/tmp/c-home"]),
+  ).toMatchObject({ kind: "start-app", opens: { kind: "diff" }, home: "/tmp/c-home" });
 });
 
 test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
@@ -114,15 +114,15 @@ test("start-fixture takes a name and a size, and opens the merge page", () => {
   });
 });
 
-test("start-fixture --raw opens the compare page, --raw-case one compare fixture in its first tab", () => {
-  expect(parseCommand(["start-fixture", "--name", "fx", "--raw"])).toMatchObject({
-    search: "?raw",
+test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {
+  expect(parseCommand(["start-fixture", "--name", "fx", "--diff"])).toMatchObject({
+    search: "?diff",
   });
   expect(
-    parseCommand(["start-fixture", "--name", "fx", "--raw-case", "json-payload"]),
-  ).toMatchObject({ search: "?raw=json-payload" });
-  expect(() => parseCommand(["start-fixture", "--name", "fx", "--raw-case"])).toThrow(
-    /--raw-case needs a value/,
+    parseCommand(["start-fixture", "--name", "fx", "--diff-case", "json-payload"]),
+  ).toMatchObject({ search: "?diff=json-payload" });
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--diff-case"])).toThrow(
+    /--diff-case needs a value/,
   );
 });
 
