@@ -935,6 +935,21 @@ Architecture, project map, ipc-contract and changelog: orchestrator, once before
 | 3   | 3.F-paste (`briefs/3.F-paste.md`, `-rework-1.md`, `-rework-2.md`): `ui/linuxPaste.ts`, `isLinux`, `readClipboard`, fence PM8, both windows (`PasteCrashWindow`; needs 2) | web-impl  | accepted | `496a474`: real app — owner killed / never owned: every key, menu Paste, middle button, fields → alive, unchanged; live, self-owned, PRIMARY, 300 lines, 8 MiB notice pass. Boundary fail #1565 (+ #1566–#1569), correctness fail #1571 (+ #1572, #1573) → `1c58eef` (R1: deliver only to the still-focused element; PM8 in `clipboardFence.ts`); boundary #1575 cycle → `b5ef0e5` (R2); re-checks pass. Notes `PasteCrashWindow*.md`                                                                                                                |
 | 4   | final run (`briefs/3.F-verify.md`): `just check`, `just mutants bea67f0`, the request's acceptance in the real app on a private display (`PasteCrashVerify`)             | verifier  | done     | `1ff77d1`: gate pass (1947 web, 681 Rust tests); survivors all judged before. X11: never-owned and killed owner × Ctrl+V/Shift+Insert/Ctrl+Shift+V × Result, side pane, compare columns, find, rename, settings path; menu Paste; middle button → alive, no core, unchanged. Live, self-owned, PRIMARY, 300 lines, 8 MiB notice, undo pass; hung owner keeps typing live, a late answer lands only with focus kept. Wayland (private kwin): pass. `bea67f0` still crashes, same frames. Menu has no Paste As Plain Text. Notes `PasteCrashVerify.md` |
 
+## Operation tag tooltip — the tag's details open at once on hover (session 27, branch `feat/raw-compare`)
+
+Owner request (2026-10-23, #1579): "I want an actual tooltip on the merge status on the bottom left that opens
+immediately on hover". The status is the operation tag at the bottom of the file list (plan §2 #92); its details sit
+in the browser's `title`, which WebKitGTK opens late in GTK's look. Rules, place and look: plan §2 #100 (details
+decided as the boring choice, no question, OR13). Non-goals: every other `title` hover; the tag's words, place and
+look. Built on `feat/raw-compare`, the checked-out branch the owner runs.
+
+Slice graph (no question, OR13): 1 → 2. Architecture and project map: orchestrator, before row 2.
+
+| row | slice                                                                                                                                      | owner    | status  | evidence |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------- | -------- |
+| 1   | 3.I-tooltip (`briefs/3.I-operation-tooltip.md`): yamt's own tooltip on `OperationLabel.vue`, open at once, no `title` (`OperationTooltip`) | web-impl | running |          |
+| 2   | final run (`briefs/3.I-verify.md`): `just check`, `just mutants <base>`, WebKit fixture and the real app (no GTK tooltip)                  | verifier | todo    |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
