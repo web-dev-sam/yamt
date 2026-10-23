@@ -5,15 +5,16 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
 
 ## Where things stand
 
-- `main` holds the merge of `feat/raw-compare` (`e5c0502`) and the release commit `ae7c707` (version 0.5.0, changelog,
-  README file names). Neither is pushed.
-- The final run before tagging is on the board ("Release 0.5.0" row 2, notes `.omp/run/notes/Release050Verify.md`).
+- `main` holds the merge of `feat/raw-compare` (`e5c0502`), the release commit `ae7c707` (version 0.5.0, changelog,
+  README file names) and, after it, your rename of the compare flag to `yamt --diff` (`803c2d7`, `c83202d`,
+  `2630efb` and their docs). Nothing is pushed. The tag goes on the head of `main`.
+- The final run before tagging is on the board ("Release 0.5.0" row 2, notes `.omp/run/notes/Release050Verify2.md`).
 - If the 0.4.1 or 0.4.2 drafts are still unpublished, publish them first (`handoff-release-0.4.2.md`), so the release
   list stays in order.
 
 ## Steps
 
-1. **Push `main` and wait for CI:** `git push origin main`. Wait until the "ci" run for `ae7c707` is green on all four
+1. **Push `main` and wait for CI:** `git push origin main`. Wait until the "ci" run for the new head is green on all four
    jobs (frontend, ubuntu-22.04, macos-14, windows-2025) at https://github.com/web-dev-sam/yamt/actions. If one is
    red, stop and tell the main session.
 2. **Tag and push** (one line): `git tag -a v0.5.0 -m "yamt 0.5.0" && git push origin v0.5.0`. The "release" run

@@ -1,7 +1,7 @@
 {
-  "DiffFlagWebR1": {
-    "agent": "web-impl",
-    "brief": "docs/slices/briefs/3.R-diff-flag-web-rework-1.md",
-    "owned": ["frontend/scripts/app-session/state.test.ts", "frontend/src/ipc/fixtureCompare.ts"]
+  "Release050Verify2": {
+    "agent": "verifier",
+    "brief": "docs/slices/briefs/release-0.5.0-verify.md",
+    "owned": []
   }
 }
