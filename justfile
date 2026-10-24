@@ -45,8 +45,8 @@ fixtures-into dir:
     for case in tests/showcase/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/showcase/$(basename "$case").json"; done
     for case in tests/compare/*/; do target/debug/yamt-cli compare "$case" > "{{ dir }}/compare/$(basename "$case").json"; done
     rm -rf target/range-repo && scripts/range-repo.sh target/range-repo > /dev/null
-    target/debug/yamt-cli range target/range-repo main...feature > "{{ dir }}/range/review.json"
-    target/debug/yamt-cli range target/range-repo feature..feature > "{{ dir }}/range/empty.json"
+    {{ hermetic_git }} target/debug/yamt-cli range target/range-repo main...feature > "{{ dir }}/range/review.json"
+    {{ hermetic_git }} target/debug/yamt-cli range target/range-repo feature..feature > "{{ dir }}/range/empty.json"
 
 web-lint: (frontend "lint")
 
