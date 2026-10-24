@@ -4667,7 +4667,7 @@ dependencies = [
  "serde",
  "specta",
  "tempfile",
- "tracing",
+ "yamt-pipe",
 ]
 
 [[package]]
@@ -4678,6 +4678,16 @@ dependencies = [
  "proptest",
  "serde",
  "specta",
+]
+
+[[package]]
+name = "yamt-pipe"
+version = "0.5.1"
+dependencies = [
+ "serde",
+ "specta",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]

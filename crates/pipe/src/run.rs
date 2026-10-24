@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::frame::{self, Frame, MAX_MESSAGE_BYTES};
+use crate::frame::{self, Frame, Framing, MAX_MESSAGE_BYTES};
 
 const STOP_GRACE: Duration = Duration::from_secs(2);
 const EXIT_POLL: Duration = Duration::from_millis(20);
@@ -17,6 +17,10 @@ const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// What a running server sends the window; `Exited` comes once, last.
+#[expect(
+    missing_docs,
+    reason = "specta copies doc comments into the generated bindings.ts, whose shape is fixed"
+)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(tag = "kind")]
 pub enum HostEvent {
@@ -41,17 +45,20 @@ enum ToServer {
 
 /// One started program and the threads around it: a supervisor owning the `Child`, a writer
 /// owning its stdin, a reader each for stdout and stderr.
-pub(crate) struct Running {
+pub struct Running {
     stop: Sender<StopReason>,
     writes: Sender<ToServer>,
     supervisor: JoinHandle<()>,
 }
 
 impl Running {
-    pub(crate) fn start(
+    /// Starts `program` in `folder`; `events` gets its messages and stderr lines, then one
+    /// `Exited`. Once `events` is dropped, the run stops itself at its next output.
+    pub fn start(
         program: &Path,
         args: &[String],
         folder: &Path,
+        framing: Framing,
         events: Sender<HostEvent>,
     ) -> io::Result<Running> {
         let mut child = command(program, args, folder).spawn()?;
@@ -63,9 +70,9 @@ impl Running {
         };
         let (stop, stop_requests) = mpsc::channel();
         let (writes, queued) = mpsc::channel();
-        thread::spawn(move || write_messages(stdin, &queued));
+        thread::spawn(move || write_messages(stdin, framing, &queued));
         let readers = vec![
-            spawn_message_reader(stdout, &events, &stop),
+            spawn_message_reader(stdout, framing, &events, &stop),
             spawn_log_reader(stderr, &events, &stop),
         ];
         let close = writes.clone();
@@ -78,27 +85,32 @@ impl Running {
         })
     }
 
-    pub(crate) fn send(&self, message: String) {
+    /// Queues one message for the program's stdin; after the run ended it is ignored.
+    pub fn send(&self, message: String) {
         let _ = self.writes.send(ToServer::Message(message));
     }
 
-    pub(crate) fn stop(&self) {
+    /// Closes the program's stdin, gives it 2 s to exit, then kills it; returns at once.
+    pub fn stop(&self) {
         let _ = self.stop.send(StopReason::Asked);
     }
 
-    pub(crate) fn is_finished(&self) -> bool {
+    /// Whether the run has ended: the program reaped and `Exited` sent.
+    #[must_use]
+    pub fn is_finished(&self) -> bool {
         self.supervisor.is_finished()
     }
 
-    pub(crate) fn wait(self) {
+    /// Returns once the run has ended: the program reaped and `Exited` sent.
+    pub fn wait(self) {
         if self.supervisor.join().is_err() {
-            tracing::error!("a language server's supervisor thread panicked");
+            tracing::error!("a program's supervisor thread panicked");
         }
     }
 }
 
 fn command(program: &Path, args: &[String], folder: &Path) -> Command {
-    tracing::debug!(?program, ?args, ?folder, "starting a language server");
+    tracing::debug!(?program, ?args, ?folder, "starting a program");
     let mut command = Command::new(program);
     command
         .args(args)
@@ -113,13 +125,14 @@ fn command(program: &Path, args: &[String], folder: &Path) -> Command {
 
 fn spawn_message_reader(
     stdout: ChildStdout,
+    framing: Framing,
     events: &Sender<HostEvent>,
     stop: &Sender<StopReason>,
 ) -> JoinHandle<()> {
     let events = events.clone();
     let stop = stop.clone();
     thread::spawn(move || {
-        let reason = read_messages(stdout, &events);
+        let reason = read_messages(stdout, framing, &events);
         let _ = stop.send(reason);
     })
 }
@@ -139,15 +152,14 @@ fn spawn_log_reader(
     })
 }
 
-fn read_messages(stdout: ChildStdout, events: &Sender<HostEvent>) -> StopReason {
+fn read_messages(stdout: ChildStdout, framing: Framing, events: &Sender<HostEvent>) -> StopReason {
     let mut reader = BufReader::new(stdout);
     loop {
-        match frame::read_frame(&mut reader) {
-            Frame::Message(text) => {
-                if events.send(HostEvent::Message { text }).is_err() {
-                    return StopReason::EventsGone;
-                }
-            }
+        let event = match frame::read_message(&mut reader, framing) {
+            Frame::Message(text) => HostEvent::Message { text },
+            Frame::Dropped { reason } => HostEvent::Log {
+                line: format!("yamt: dropped {reason}"),
+            },
             Frame::End => return StopReason::OutputClosed,
             Frame::TooLarge { bytes } => {
                 let line = format!(
@@ -159,6 +171,9 @@ fn read_messages(stdout: ChildStdout, events: &Sender<HostEvent>) -> StopReason 
                 let line = format!("yamt: cannot read the server's output: {reason}; stopping it");
                 return stop_with_log(events, line);
             }
+        };
+        if events.send(event).is_err() {
+            return StopReason::EventsGone;
         }
     }
 }
@@ -177,11 +192,11 @@ fn read_log(stderr: ChildStderr, events: &Sender<HostEvent>) -> Result<(), SendE
     Ok(())
 }
 
-fn write_messages(mut stdin: ChildStdin, queued: &Receiver<ToServer>) {
+fn write_messages(mut stdin: ChildStdin, framing: Framing, queued: &Receiver<ToServer>) {
     for write in queued {
         match write {
             ToServer::Message(text) => {
-                if frame::write_frame(&mut stdin, &text).is_err() {
+                if frame::write_message(&mut stdin, framing, &text).is_err() {
                     return;
                 }
             }
@@ -198,7 +213,7 @@ fn supervise(
     readers: &[JoinHandle<()>],
 ) {
     let reason = wait_for_stop(&mut child, stop_requests);
-    tracing::debug!(?reason, "stopping a language server");
+    tracing::debug!(?reason, "stopping a program");
     let _ = writes.send(ToServer::Close);
     let code = exit_code(&mut child);
     let drained = Instant::now() + OUTPUT_DRAIN;

@@ -27,10 +27,17 @@ if [ -n "$forbidden_in_settings" ]; then
     failed=1
 fi
 
+pipe_deps=$(normal_deps yamt-pipe)
+forbidden_in_pipe=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$pipe_deps" | grep -vx 'yamt-pipe' || true)
+if [ -n "$forbidden_in_pipe" ]; then
+    echo "arch-check: yamt-pipe depends on no yamt crate, never on tauri or serde_json, not:" $forbidden_in_pipe >&2
+    failed=1
+fi
+
 lsp_host_deps=$(normal_deps yamt-lsp-host)
-forbidden_in_lsp_host=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$lsp_host_deps" | grep -vx 'yamt-lsp-host' || true)
+forbidden_in_lsp_host=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$lsp_host_deps" | grep -vxE 'yamt-(lsp-host|pipe)' || true)
 if [ -n "$forbidden_in_lsp_host" ]; then
-    echo "arch-check: yamt-lsp-host must not depend on:" $forbidden_in_lsp_host >&2
+    echo "arch-check: yamt-lsp-host depends on yamt-pipe only among yamt crates, never on tauri or serde_json, not:" $forbidden_in_lsp_host >&2
     failed=1
 fi
 

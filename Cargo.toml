@@ -8,6 +8,7 @@ members = [
   "crates/conflict-repo",
   "crates/settings",
   "crates/lsp-host",
+  "crates/pipe",
   "crates/compare",
   "crates/range",
   "crates/review",
@@ -27,6 +28,7 @@ yamt-session = { path = "crates/session" }
 yamt-conflict-repo = { path = "crates/conflict-repo" }
 yamt-settings = { path = "crates/settings" }
 yamt-lsp-host = { path = "crates/lsp-host" }
+yamt-pipe = { path = "crates/pipe" }
 yamt-compare = { path = "crates/compare" }
 yamt-range = { path = "crates/range" }
 yamt-review = { path = "crates/review" }

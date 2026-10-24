@@ -1,13 +1,9 @@
 use std::env;
-#[cfg(windows)]
-use std::ffi::OsStr;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-
-use crate::files;
 
 #[cfg(unix)]
 const EXECUTE_BITS: u32 = 0o111;
@@ -26,6 +22,10 @@ pub struct ProgramFolders {
     pub home: Vec<String>,
 }
 
+#[expect(
+    missing_docs,
+    reason = "specta copies doc comments into the generated bindings.ts, whose shape is fixed"
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, specta::Type)]
 pub enum ProgramPlace {
     Project,
@@ -33,6 +33,10 @@ pub enum ProgramPlace {
     Home,
 }
 
+#[expect(
+    missing_docs,
+    reason = "specta copies doc comments into the generated bindings.ts, whose shape is fixed"
+)]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
 #[serde(tag = "kind")]
 pub enum ProgramFound {
@@ -40,15 +44,18 @@ pub enum ProgramFound {
     NotFound { searched: Vec<String> },
 }
 
+/// A program `find` found.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct Found {
-    pub(crate) path: PathBuf,
-    pub(crate) place: ProgramPlace,
+pub struct Found {
+    /// The program's path.
+    pub path: PathBuf,
+    /// Where it was found.
+    pub place: ProgramPlace,
 }
 
-/// The program a server command names, seen from `project` (a folder inside `root`); `Err` lists
+/// The program a command names, seen from `project` (a folder inside `root`); `Err` lists
 /// every folder searched, in order.
-pub(crate) fn find(
+pub fn find(
     root: &Path,
     project: &Path,
     program: &str,
@@ -59,6 +66,16 @@ pub(crate) fn find(
         home: env::home_dir(),
     };
     find_with(root, project, program, folders, &environment)
+}
+
+/// `segment` itself when it is one plain file name: not empty, `.`, `..`, a root or a drive.
+#[must_use]
+pub fn plain_name(segment: &str) -> Option<&OsStr> {
+    let mut components = Path::new(segment).components();
+    let (Some(Component::Normal(name)), None) = (components.next(), components.next()) else {
+        return None;
+    };
+    Some(name)
 }
 
 /// What the lookup reads from the user's environment; tests give their own.
@@ -136,7 +153,7 @@ fn relative_folders(entries: &[String]) -> Vec<PathBuf> {
 fn relative_folder(entry: &str) -> Option<PathBuf> {
     let mut folder = PathBuf::new();
     for segment in entry.split('/') {
-        folder.push(files::plain_name(segment)?);
+        folder.push(plain_name(segment)?);
     }
     Some(folder)
 }
