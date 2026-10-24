@@ -4713,6 +4713,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "yamt-conflict-repo",
+ "yamt-gitio",
  "yamt-merge-core",
  "yamt-range",
 ]

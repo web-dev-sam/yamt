@@ -18,7 +18,6 @@ pub struct ThreadStore {
 
 /// A message waiting for the next send: queued, or refused and sent again.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 reads it"))]
 pub(crate) struct QueuedMessage {
     pub(crate) thread: ThreadId,
     pub(crate) message: MessageId,
@@ -123,7 +122,6 @@ impl ThreadStore {
     }
 
     /// Every queued or refused message on a file of `range`, in thread order, then message order.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 calls it"))]
     pub(crate) fn queued(&self, range: &Range) -> Vec<QueuedMessage> {
         let mut queued = Vec::new();
         for thread in &self.file.threads {
@@ -148,7 +146,6 @@ impl ThreadStore {
     }
 
     /// Stores what a send made of the message.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 calls it"))]
     pub(crate) fn record(&mut self, message: MessageId, posting: Posting) -> Result<()> {
         let mut next = self.file.clone();
         let (_, stored) = next

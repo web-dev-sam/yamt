@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 yamt-range.workspace = true
+yamt-gitio.workspace = true
 yamt-merge-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
