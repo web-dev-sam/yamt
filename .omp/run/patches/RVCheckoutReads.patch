@@ -1,0 +1,601 @@
+From 006c48460f9e90cdbc0610eb91fccad9afa6f3d0 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:52:05 +0200
+Subject: [PATCH] feat(gitio): shared clone, detached checkout, status and head
+ reads for the AI's checkout; compare diffs two texts
+
+---
+ .omp/run/notes/RVCheckoutReads.md      |  51 +++++++
+ .omp/run/notes/RVThreadRowsBoundary.md |  58 ++++++++
+ crates/compare/src/lib.rs              |  33 +++++
+ crates/gitio/src/checkout.rs           | 193 +++++++++++++++++++++++++
+ crates/gitio/src/lib.rs                |   5 +-
+ crates/gitio/tests/checkout.rs         | 174 ++++++++++++++++++++++
+ 6 files changed, 513 insertions(+), 1 deletion(-)
+ create mode 100644 .omp/run/notes/RVCheckoutReads.md
+ create mode 100644 .omp/run/notes/RVThreadRowsBoundary.md
+ create mode 100644 crates/gitio/src/checkout.rs
+ create mode 100644 crates/gitio/tests/checkout.rs
+
+diff --git a/.omp/run/notes/RVCheckoutReads.md b/.omp/run/notes/RVCheckoutReads.md
+new file mode 100644
+index 0000000..ec0b60f
+--- /dev/null
++++ b/.omp/run/notes/RVCheckoutReads.md
+@@ -0,0 +1,51 @@
++The brief is done: `yamt-gitio` gains the five checkout methods and `StatusEntry`, and `yamt-compare` gains `text_differences`. Every acceptance test passes, as do the brief's `cargo fmt --check`, workspace clippy and the crate tests. One method does more than the brief's comment says: `clone_shared_into` also deletes the clone's branch (first deviation below).
++
++**summary**
++- `crates/gitio/src/checkout.rs` (new) adds `StatusEntry { xy, path }` and five `Repo` methods: `clone_shared_into`, `remove_remote`, `checkout_detached`, `status_entries` and `head_commit`.
++- The clone and the checkout use the no-deadline runner (`run_to_end`) with the usual `LC_ALL=C` command. The other git runs use the 30 s deadline runner.
++- Status output is read by a small parser over the `-z` records; paths stay bytes.
++- `yamt_compare::text_differences(left, right)` returns `Error::TooLarge { bytes }` when either side is over `MAX_COLUMN_BYTES` (it reuses `files::require_within_limit`); otherwise it returns `merge_core::compare`.
++
++**files_changed**
++- `crates/gitio/src/checkout.rs` (new)
++- `crates/gitio/src/lib.rs` (`mod checkout`, `pub use checkout::StatusEntry`, the `//!` line now mentions the clone; the existing re-exports, `glab`/`program` included, are kept)
++- `crates/gitio/tests/checkout.rs` (new)
++- `crates/compare/src/lib.rs` (`text_differences` and its two tests only)
++
++**tests_added**
++- `checkout::tests::status_records_parse_with_their_letters_and_paths_as_written`: `??`, ` D`, `M ` and `A ` records; a path with a space and one with a newline come back as written.
++- `checkout::tests::a_status_path_that_is_not_utf8_keeps_its_bytes` (unix): the bytes `\xff\xfe` survive.
++- `checkout::tests::a_clean_status_lists_nothing`: empty output gives an empty list.
++- `checkout::tests::a_status_record_without_a_path_or_its_space_is_unexpected_output`: `"?? "`, `"??x.txt"` and `"M"` each give `UnexpectedOutput { command: "status" }`.
++- `a_shared_clone_without_origin_checks_out_the_commit_detached`: the clone lands at `<folder>/checkout`. HEAD is detached (`symbolic-ref` exits 1), HEAD is the `remote` commit and the file holds that commit's text. Status is clean and `git remote` is empty.
++- `the_clone_borrows_objects_and_keeps_no_refs_of_the_source`: `objects/info/alternates` points at the source's objects. After `remove_remote`, `for-each-ref` in the clone prints nothing and `git remote` is empty. HEAD is the source's checked-out commit.
++- `status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones`: the result is exactly `A ` added.txt, ` M` edited.txt, `??` new folder/untracked.txt, ` D` removed.txt and `M ` staged.txt. `ignored.txt`, excluded through `.git/info/exclude`, is not listed.
++- `head_commit_moves_after_a_commit_in_the_clone`: after a commit, `head_commit` is no longer the checked-out commit, equals `rev-parse HEAD`, and its parent is that commit.
++- `a_commit_in_the_clone_leaves_the_source_refs_and_config_untouched`: a branch and a commit are made in the clone. The source's `for-each-ref`, `.git/config` bytes and `symbolic-ref HEAD` stay the same, and `cat-file -e <new commit>` fails in the source.
++- `text_differences_refuses_a_side_over_the_column_limit`: a side of `MAX_COLUMN_BYTES + 1` bytes is refused as `TooLarge` with that byte count, on either side. Both sides at exactly the limit are accepted.
++- `text_differences_equals_merge_core_compare`: the result is not empty and equals `compare(left, right)`.
++
++**smoke_evidence**
++- `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` → `Finished \`dev\` profile [unoptimized + debuginfo] target(s) in 27.56s`, with no warnings.
++- `cargo test -p yamt-gitio -p yamt-compare`:
++  - `Running tests/checkout.rs … test result: ok. 5 passed; 0 failed`
++  - `test tests::text_differences_equals_merge_core_compare ... ok`
++  - `test tests::text_differences_refuses_a_side_over_the_column_limit ... ok`
++  - yamt-compare unittests `ok. 14 passed`; yamt-gitio unittests `ok. 40 passed` (the 4 `checkout::tests::*` included)
++  - every other gitio and compare suite also reports `test result: ok`
++- No test writes or runs a hook or script.
++- `just mutants` was not run.
++
++**deviations_from_brief**
++- **`clone_shared_into` also deletes the clone's branch.** `git clone` always makes a local branch from the source's HEAD (here `refs/heads/local`), so the acceptance check "the clone's `refs/heads` holds no source branch after `remove_remote`" can't pass on clone alone. After cloning, the method points HEAD straight at its commit (`update-ref --no-deref HEAD <oid>`), then deletes each `refs/heads/*` that `for-each-ref` lists (`update-ref --stdin`). These are two runs because git refuses one transaction that updates HEAD and deletes the branch it points to ("multiple updates for 'HEAD'…"). If HEAD has no commit yet (an empty source), it does nothing.
++- **A relative `into` is joined to the repository root**, because the clone runs with the root as working folder.
++- **The clone's `Repo` comes from `Repo::discover(&into)`**, since `Repo`'s fields are private to `repo.rs`. This finds git on PATH a second time.
++- **`run_to_success` repeats about 10 lines of `Repo::abort`'s handling** (non-zero exit → `GitFailed` with stderr). `abort_continue.rs` is outside my files, so I couldn't share it.
++- **Docs and AGENTS.md not updated.** The design's build table also lists `docs/architecture.md` §3.2/§3.7 for this step, and the project map's gitio line and `crates/gitio/AGENTS.md` don't mention `checkout.rs`. None of these were mine to edit, so Main should update them.
++
++**open_risks**
++- `crates/gitio/src/checkout.rs:73-88`: two separate ref updates. If the run is killed in between, HEAD is detached but the branch is still there; running the clone again from scratch fixes it.
++- `crates/gitio/tests/checkout.rs`: `Repo` runs git with the user's own config, as the other gitio tests do. A global ignore rule matching `untracked.txt` or `added.txt`, or a global post-checkout hook, could change the results.
++- `crates/compare/src/lib.rs` (the column-limit test): it builds two 8 MiB strings and diffs two equal ones; this takes about 0.17 s here.
++
++Checks for Main: `just check`, `just mutants` on `crates/gitio/src/checkout.rs` and `text_differences`, and `just arch-check` (no new dependency edges).
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVThreadRowsBoundary.md b/.omp/run/notes/RVThreadRowsBoundary.md
+new file mode 100644
+index 0000000..b593879
+--- /dev/null
++++ b/.omp/run/notes/RVThreadRowsBoundary.md
+@@ -0,0 +1,58 @@
++```json
++{
++  "verdict": "fail",
++  "findings": [
++    {
++      "severity": "block",
++      "rule_id": null,
++      "file": "frontend/src/editor/internal/threadHosts.ts",
++      "line": 141,
++      "problem": "The patch only forgets the remembered field on a `focusin` (`#focusIn`), and the implementer lists this as an open risk. Suppose a user leaves a thread's text box by clicking somewhere that cannot take focus, so focus goes to `<body>` in WebKit. If they then scroll the row out and back, or a `showThreads` rebuilds the row, `addCell` and `restoreFocus` (111) put focus back in that text box. The keys the user types next then go into the comment, not to the window.",
++      "fix": "Clear `#focused` in a capturing document `pointerdown` listener whenever the press is outside every host. Remove that listener in `destroy()` next to the `focusin` one. A detach caused by scrolling then still restores focus, but a field the user left does not."
++    },
++    {
++      "severity": "block",
++      "rule_id": "principles §3 / review-protocol growth check (copied decision)",
++      "file": "frontend/src/editor/internal/threadNumbers.ts",
++      "line": 21,
++      "problem": "The rule for which column a `ThreadLine` shows in (removed or unchangedOnLeft → left, added or unchangedOnRight → right) is now written twice: as `shownColumn` in ipc/threadLine.ts:11 and again as `lineInShownColumn`, and `lineCounts` (40–42) calls both. Rows 20–21 need the same line-in-its-column answer for the list counts and the box header, and they can only copy it a third time, because `editor/internal` is fenced off from ui.",
++      "fix": "Add `shownLine(line): { column: Column; line: number }` to ipc/threadLine.ts as the one exhaustive switch, define `shownColumn` as `shownLine(line).column`, export it from ipc/index.ts, and delete `lineInShownColumn` so `lineCounts` reads both values from one call."
++    },
++    {
++      "severity": "should",
++      "rule_id": "principles §2",
++      "file": "frontend/src/editor/range.ts",
++      "line": 66,
++      "problem": "`ThreadHosts` is built before the views, so it holds a `() => ThreadViews` getter (threadHosts.ts:21) and needs a second setup step, `watchColumns()` (range.ts:80). It does not need to be built first: the views reach their cells only through the `showThreadRows` payload, and `updated` never runs during construction. Every later reader has to trace a thunk and a two-phase setup that do nothing.",
++      "fix": "Build `ThreadHosts` after `createReadOnlyColumnViews`, pass it `views: this.#views` directly, and observe the scrollers and gutters in its constructor. This removes the getter and `watchColumns`."
++    },
++    {
++      "severity": "should",
++      "rule_id": "slice contract (\"fixed; you may add, never change\")",
++      "file": "frontend/src/editor/range.ts",
++      "line": 41,
++      "problem": "`events: RangeEvents = NO_EVENTS` turns the contract's required fourth argument into a fallback that silently does nothing. A caller that forgets `events` still compiles, and line-number presses then do nothing. If row 20 does not remove the default, it stays as a second constructor shape.",
++      "fix": "Delete `NO_EVENTS` and the default, and make `events` required. The orchestrator should put that removal, plus `ui/useRangeController.ts:129` and `editor/range.browser.test.ts:119`, in row 20's Owned and Change."
++    }
++  ],
++  "checked": [
++    "Ownership: every file the patch touches is in the brief's Owned list (thread*.ts and their tests, rangeThreads.browser.test.ts, range/index/compare.ts, compareFrame(.test).ts, theme.css, editor/AGENTS.md, ipc/threadLine.ts, ipc/index.ts) or is the implementer's report under .omp/run/notes.",
++    "PM2/PM3/PM5: the new editor files import only @codemirror/*, ../../ipc (index), siblings in editor/internal and `~icons/lucide/message-square-plus?raw`. They import no vue, @tauri-apps or ui. ipc/threadLine.ts imports only compareDomain, domain and validate inside ipc.",
++    "Brands: threadLine.ts makes LeftLine and RightLine only through domain.ts's `isLeftLine`/`isRightLine` guards, as compareDomain.ts does. I accept the deviation of adding changedThreadLine/unchangedThreadLine, because the editor cannot create brands.",
++    "Contract: ThreadLine has the four variants with readonly fields; `shownColumn` is exhaustive through a `never` default. ShownThread and RangeEvents are re-exported from editor/index.ts. RangeController has setPreferences, moveToChange, showThreads and destroy. CompareFrame takes { views, strip, fields, anchors }; compare.ts passes [differenceField] and () => [], and range.ts passes [differenceField, threadField] and threadAnchors.",
++    "Deviation accepted: `threadRows(differences, shown)` shares `linePlace` with `anchorAt` (threadAnchor.ts:13), so the anchor rule and the gap rule are one rule.",
++    "Deviation accepted: there is one module-level threadField whose payload carries the column and cells. compareViews.ts's `extensions` is shared by both columns and is not owned. threadAnchors reads the rows from the left column's field only, and showThreads hands both columns the same `rows` (range.ts showThreads).",
++    "Deviation accepted: place-0 rows use side `index − rows.length` (threadField.ts:31–34), which keeps order above line 1. Pinned by threadField.test.ts 'each row is a block widget…'.",
++    "Deviation accepted: the `LineBlock` export from compareFrame.ts is a type-only edge threadField → compareFrame and adds no cycle. EditorView.lineBlockAt's BlockInfo satisfies it, so compare.ts compiles unchanged.",
++    "Deviation accepted: destroy() reports `events.hosts(new Map())` only when hosts existed (range.ts destroy). ThreadHosts.destroy disconnects the observer, removes the focusin listener and clears both CSS variables.",
++    "Deviation accepted: the xmlns comment in threadNumbers.ts:98–99 is an external fact with a source (CP1). The new files have no other comments.",
++    "Open risk accepted: threadAnchors add nothing under exact geometry, because an unchanged row adds equal height in both columns, so the slope stays 1. The brief requires them, so this is not a finding.",
++    "Open risks accepted: a three-digit badge overflowing the 20 px padding, and focus sitting on <body> while the focused row is virtualised out. Both are inherent to the design's host model.",
++    "State: row heights have one writer, ThreadHosts.#heights; the widget's toDOM only reads height(). Hosts are created and dropped only in ThreadHosts.show/#drop. Vue receives HTMLElements only, never an EditorView or a position.",
++    "CM: ThreadRowWidget keeps the default ignoreEvent (true). Its eq compares row key, column and keys, never height. Block decorations come from a StateField's provide, not a plugin. rowsChanged counts threadField, so a showThreads drops the cached layout.",
++    "theme.css: the thread rules use only variables (--color-fg, --color-fg-muted, --color-primary, --color-on-primary, --font-sans), with no colour literal (VU17). The rules are scoped under .cm-thread-lines, so the compare window's gutter is untouched.",
++    "TS10: the new files have no top-level arrow functions; TS17: the Maps and Sets are keyed by runtime keys only.",
++    "Decision record: the patch contradicts no plan §2 row (#116, #96, #51 as cited by the brief). Map and ipc/AGENTS.md lines are left to the orchestrator's docs pass, as stated."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/crates/compare/src/lib.rs b/crates/compare/src/lib.rs
+index 1fe800c..6709b6e 100644
+--- a/crates/compare/src/lib.rs
++++ b/crates/compare/src/lib.rs
+@@ -238,6 +238,14 @@ pub fn tab_texts(loaded: &LoadedTab) -> TabTexts {
+     }
+ }
+ 
++/// The differences between two texts (`yamt_merge_core::compare`); `Error::TooLarge` when either is over
++/// `MAX_COLUMN_BYTES`.
++pub fn text_differences(left: &str, right: &str) -> Result<Vec<Difference>> {
++    files::require_within_limit(left.len())?;
++    files::require_within_limit(right.len())?;
++    Ok(compare(left, right))
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+@@ -249,4 +257,29 @@ mod tests {
+             Ok(yamt_merge_core::MAX_TEXT_BYTES)
+         );
+     }
++
++    #[test]
++    fn text_differences_refuses_a_side_over_the_column_limit() {
++        let at_limit = "a".repeat(MAX_COLUMN_BYTES as usize);
++        let over = "a".repeat(MAX_COLUMN_BYTES as usize + 1);
++        let over_bytes = over.len();
++        assert!(matches!(
++            text_differences(&over, "b"),
++            Err(Error::TooLarge { bytes }) if bytes == over_bytes
++        ));
++        assert!(matches!(
++            text_differences("b", &over),
++            Err(Error::TooLarge { bytes }) if bytes == over_bytes
++        ));
++        assert!(text_differences(&at_limit, &at_limit).is_ok());
++    }
++
++    #[test]
++    fn text_differences_equals_merge_core_compare() {
++        let left = "one\ntwo words here\nthree\n";
++        let right = "one\ntwo other words here\nfour\n";
++        let differences = text_differences(left, right).unwrap();
++        assert_ne!(differences, Vec::new());
++        assert_eq!(differences, compare(left, right));
++    }
+ }
+diff --git a/crates/gitio/src/checkout.rs b/crates/gitio/src/checkout.rs
+new file mode 100644
+index 0000000..ee9133e
+--- /dev/null
++++ b/crates/gitio/src/checkout.rs
+@@ -0,0 +1,193 @@
++use std::path::{Path, PathBuf};
++use std::process::Command;
++
++use crate::entry::{Oid, path_from_git};
++use crate::repo::{REV_PARSE, Repo, without_final_newline};
++use crate::run::{Access, GIT_TIMEOUT, argv, run, run_to_end};
++use crate::{Error, Result};
++
++const STATUS: &str = "status";
++const FOR_EACH_REF: &str = "for-each-ref";
++
++/// One file `git status --porcelain=v1` lists: its two status letters (`??` untracked) and its path.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct StatusEntry {
++    pub xy: [u8; 2],
++    pub path: PathBuf,
++}
++
++impl Repo {
++    /// `git clone --shared --no-checkout --quiet <this repository> <into>`, then HEAD detached at the cloned
++    /// branch's commit and that branch deleted, so the clone holds no branch of this repository. No deadline:
++    /// a large repository takes long. A relative `into` is relative to this repository's root.
++    pub fn clone_shared_into(&self, into: &Path) -> Result<Repo> {
++        let into = self.root().join(into);
++        let mut command = self.command(
++            Access::Write,
++            &["clone", "--shared", "--no-checkout", "--quiet", "--"],
++        );
++        command.arg(self.root()).arg(&into);
++        run_to_success(command)?;
++        let clone = Repo::discover(&into)?;
++        clone.delete_branches_detaching_head()?;
++        Ok(clone)
++    }
++
++    /// `git remote remove <name>`: the remote, its remote-tracking branches and its config.
++    pub fn remove_remote(&self, name: &str) -> Result<()> {
++        let command = self.command(Access::Write, &["remote", "remove", name]);
++        run(command, None, GIT_TIMEOUT)?;
++        Ok(())
++    }
++
++    /// `git checkout --detach --quiet <commit>`. No deadline: writing a large tree takes long.
++    pub fn checkout_detached(&self, commit: &Oid) -> Result<()> {
++        let args = ["checkout", "--detach", "--quiet", commit.as_str()];
++        run_to_success(self.command(Access::Write, &args))
++    }
++
++    /// Every modified, added, deleted and untracked file, never an ignored one:
++    /// `git status --porcelain=v1 -z --untracked-files=all --no-renames`.
++    pub fn status_entries(&self) -> Result<Vec<StatusEntry>> {
++        let args = [
++            STATUS,
++            "--porcelain=v1",
++            "-z",
++            "--untracked-files=all",
++            "--no-renames",
++        ];
++        parse_status(&run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?)
++    }
++
++    /// The commit HEAD names: `git rev-parse --verify HEAD^{commit}`.
++    pub fn head_commit(&self) -> Result<Oid> {
++        let command = self.command(Access::Read, &[REV_PARSE, "--verify", "HEAD^{commit}"]);
++        let line = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
++        Oid::parse(&String::from_utf8_lossy(&line))
++    }
++
++    fn delete_branches_detaching_head(&self) -> Result<()> {
++        let Some(head) = self.commit_named("HEAD")? else {
++            return Ok(());
++        };
++        let detach = ["update-ref", "--no-deref", "HEAD", head.as_str()];
++        run(self.command(Access::Write, &detach), None, GIT_TIMEOUT)?;
++        let listing = self.command(
++            Access::Read,
++            &[FOR_EACH_REF, "--format=%(refname)", "refs/heads"],
++        );
++        let mut deletes = Vec::new();
++        for branch in run(listing, None, GIT_TIMEOUT)?.split(|&byte| byte == b'\n') {
++            if !branch.is_empty() {
++                deletes.extend_from_slice(b"delete ");
++                deletes.extend_from_slice(branch);
++                deletes.push(b'\n');
++            }
++        }
++        let command = self.command(Access::Write, &["update-ref", "--stdin"]);
++        run(command, Some(deletes), GIT_TIMEOUT)?;
++        Ok(())
++    }
++}
++
++fn run_to_success(command: Command) -> Result<()> {
++    let args = argv(&command);
++    let finished = run_to_end(command)?;
++    if finished.status.success() {
++        return Ok(());
++    }
++    Err(Error::GitFailed {
++        args,
++        status: finished.status.code(),
++        stderr: String::from_utf8_lossy(&finished.stderr)
++            .trim_end()
++            .to_owned(),
++    })
++}
++
++// git-status(1) "Porcelain Format Version 1" with `-z`: records `XY SP <path> NUL`, path unquoted; without
++// renames no record carries a second path.
++fn parse_status(output: &[u8]) -> Result<Vec<StatusEntry>> {
++    let mut entries = Vec::new();
++    for record in output.split(|&byte| byte == b'\0') {
++        if record.is_empty() {
++            continue;
++        }
++        let entry = status_entry(record).ok_or_else(|| Error::UnexpectedOutput {
++            command: STATUS,
++            output: String::from_utf8_lossy(record).into_owned(),
++        })?;
++        entries.push(entry);
++    }
++    Ok(entries)
++}
++
++fn status_entry(record: &[u8]) -> Option<StatusEntry> {
++    match record {
++        [x, y, b' ', path @ ..] if !path.is_empty() => Some(StatusEntry {
++            xy: [*x, *y],
++            path: path_from_git(path),
++        }),
++        _ => None,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn entry(xy: [u8; 2], path: &str) -> StatusEntry {
++        StatusEntry {
++            xy,
++            path: PathBuf::from(path),
++        }
++    }
++
++    #[test]
++    fn status_records_parse_with_their_letters_and_paths_as_written() {
++        let output = b"?? new file.txt\0 D gone\nline.txt\0M  staged.txt\0A  added.txt\0";
++
++        let entries = parse_status(output).unwrap();
++
++        let expected = vec![
++            entry(*b"??", "new file.txt"),
++            entry(*b" D", "gone\nline.txt"),
++            entry(*b"M ", "staged.txt"),
++            entry(*b"A ", "added.txt"),
++        ];
++        assert_eq!(entries, expected);
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn a_status_path_that_is_not_utf8_keeps_its_bytes() {
++        use std::os::unix::ffi::OsStrExt;
++
++        let entries = parse_status(b" M bytes \xff\xfe.txt\0").unwrap();
++
++        let path = PathBuf::from(std::ffi::OsStr::from_bytes(b"bytes \xff\xfe.txt"));
++        assert_eq!(entries, vec![StatusEntry { xy: *b" M", path }]);
++    }
++
++    #[test]
++    fn a_clean_status_lists_nothing() {
++        assert_eq!(parse_status(b"").unwrap(), Vec::new());
++    }
++
++    #[test]
++    fn a_status_record_without_a_path_or_its_space_is_unexpected_output() {
++        for record in [&b"?? \0"[..], b"??x.txt\0", b"M\0"] {
++            let error = parse_status(record).unwrap_err();
++            assert!(
++                matches!(
++                    error,
++                    Error::UnexpectedOutput {
++                        command: STATUS,
++                        ..
++                    }
++                ),
++                "{record:?}: {error:?}"
++            );
++        }
++    }
++}
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index ddfc7eb..14e6740 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,12 +1,14 @@
+ //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads what git is doing
+ //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
+ //! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
+-//! and lists the files that changed between two commits; runs glab, GitLab's command line, the same way.
++//! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
++//! runs glab, GitLab's command line, the same way.
+ #![forbid(unsafe_code)]
+ 
+ mod abort_continue;
+ mod attributes;
+ mod blob;
++mod checkout;
+ mod diff;
+ mod entry;
+ mod glab;
+@@ -25,6 +27,7 @@ mod version;
+ pub use abort_continue::GitRun;
+ pub use attributes::{AttributeValue, MergeAttributes};
+ pub use blob::BlobReader;
++pub use checkout::StatusEntry;
+ pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
+ pub use entry::{Oid, Stage, StageEntry};
+ pub use glab::{GLAB_TIMEOUT, Glab, GlabRun};
+diff --git a/crates/gitio/tests/checkout.rs b/crates/gitio/tests/checkout.rs
+new file mode 100644
+index 0000000..6cf3803
+--- /dev/null
++++ b/crates/gitio/tests/checkout.rs
+@@ -0,0 +1,174 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
++use yamt_gitio::{Oid, Repo, StatusEntry};
++
++const CHECKOUT: &str = "checkout";
++const ORIGIN: &str = "origin";
++
++fn oid_of(root: &Path, revision: &str) -> Oid {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
++}
++
++fn text_of(root: &Path, args: &[&str]) -> String {
++    String::from_utf8(git_ok(root, args).unwrap()).unwrap()
++}
++
++/// `base` on `main`, `local` on the checked-out branch `local`, `remote` on branch `remote`.
++fn file<'a>(path: &'a str, local: &'a [u8], remote: &'a [u8]) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base: Some(b"base\n"),
++        local: Some(local),
++        remote: Some(remote),
++    }
++}
++
++/// A source repository, and a folder the clone goes into as `CHECKOUT`.
++fn source_and_folder(files: &[ConflictFile]) -> (TempDir, TempDir) {
++    (diverged_repo(files).unwrap(), tempfile::tempdir().unwrap())
++}
++
++/// The clone without `origin`, checked out detached at the source's `remote` commit.
++fn checkout_at_remote(source: &Path, folder: &Path) -> (Repo, Oid) {
++    let clone = Repo::discover(source)
++        .unwrap()
++        .clone_shared_into(&folder.join(CHECKOUT))
++        .unwrap();
++    clone.remove_remote(ORIGIN).unwrap();
++    let remote = oid_of(source, "remote");
++    clone.checkout_detached(&remote).unwrap();
++    (clone, remote)
++}
++
++fn commit_everything(root: &Path, message: &str) {
++    git_ok(root, &["add", "--all"]).unwrap();
++    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message]).unwrap();
++}
++
++#[test]
++fn a_shared_clone_without_origin_checks_out_the_commit_detached() {
++    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++
++    let (clone, remote) = checkout_at_remote(source.path(), folder.path());
++
++    let root = clone.root();
++    assert_eq!(
++        fs::canonicalize(root).unwrap(),
++        fs::canonicalize(folder.path().join(CHECKOUT)).unwrap()
++    );
++    assert_eq!(clone.head_commit().unwrap(), remote);
++    let symbolic = git(root, &["symbolic-ref", "--quiet", "HEAD"]).unwrap();
++    assert_eq!(symbolic.status.code(), Some(1), "HEAD is not detached");
++    assert_eq!(fs::read(root.join("a.txt")).unwrap(), b"remote\n");
++    assert_eq!(clone.status_entries().unwrap(), Vec::new());
++    assert_eq!(text_of(root, &["remote"]), "");
++}
++
++#[test]
++fn the_clone_borrows_objects_and_keeps_no_refs_of_the_source() {
++    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++    let into = folder.path().join(CHECKOUT);
++
++    let clone = Repo::discover(source.path())
++        .unwrap()
++        .clone_shared_into(&into)
++        .unwrap();
++    clone.remove_remote(ORIGIN).unwrap();
++
++    let alternates = fs::read_to_string(into.join(".git/objects/info/alternates")).unwrap();
++    let source_objects = fs::canonicalize(source.path().join(".git/objects")).unwrap();
++    let borrowed = fs::canonicalize(PathBuf::from(alternates.trim_end())).unwrap();
++    assert_eq!(borrowed, source_objects);
++    assert_eq!(
++        text_of(&into, &["for-each-ref"]),
++        "",
++        "refs left in the clone"
++    );
++    assert_eq!(text_of(&into, &["remote"]), "");
++    assert_eq!(clone.head_commit().unwrap(), oid_of(source.path(), "local"));
++}
++
++#[test]
++fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones() {
++    let (source, folder) = source_and_folder(&[
++        file("edited.txt", b"local\n", b"remote\n"),
++        file("staged.txt", b"local\n", b"remote\n"),
++        file("removed.txt", b"local\n", b"remote\n"),
++    ]);
++    let (clone, _) = checkout_at_remote(source.path(), folder.path());
++    let root = clone.root();
++    fs::write(root.join(".git/info/exclude"), "ignored.txt\n").unwrap();
++    fs::write(root.join("ignored.txt"), "ignored\n").unwrap();
++    fs::write(root.join("edited.txt"), "edited\n").unwrap();
++    fs::write(root.join("staged.txt"), "staged\n").unwrap();
++    fs::write(root.join("added.txt"), "added\n").unwrap();
++    git_ok(root, &["add", "--", "staged.txt", "added.txt"]).unwrap();
++    fs::remove_file(root.join("removed.txt")).unwrap();
++    fs::create_dir(root.join("new folder")).unwrap();
++    fs::write(root.join("new folder/untracked.txt"), "new\n").unwrap();
++
++    let mut entries = clone.status_entries().unwrap();
++
++    entries.sort_by(|a, b| a.path.cmp(&b.path));
++    let entry = |xy: &[u8; 2], path: &str| StatusEntry {
++        xy: *xy,
++        path: PathBuf::from(path),
++    };
++    let expected = vec![
++        entry(b"A ", "added.txt"),
++        entry(b" M", "edited.txt"),
++        entry(b"??", "new folder/untracked.txt"),
++        entry(b" D", "removed.txt"),
++        entry(b"M ", "staged.txt"),
++    ];
++    assert_eq!(entries, expected);
++}
++
++#[test]
++fn head_commit_moves_after_a_commit_in_the_clone() {
++    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++    let (clone, remote) = checkout_at_remote(source.path(), folder.path());
++    let root = clone.root();
++    fs::write(root.join("a.txt"), "the AI's edit\n").unwrap();
++
++    commit_everything(root, "the AI's commit");
++
++    let head = clone.head_commit().unwrap();
++    assert_ne!(head, remote);
++    assert_eq!(head, oid_of(root, "HEAD"));
++    assert_eq!(oid_of(root, "HEAD^"), remote);
++}
++
++#[test]
++fn a_commit_in_the_clone_leaves_the_source_refs_and_config_untouched() {
++    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++    let source_root = source.path();
++    let refs_before = text_of(source_root, &["for-each-ref"]);
++    let config_before = fs::read(source_root.join(".git/config")).unwrap();
++    let head_before = text_of(source_root, &["symbolic-ref", "HEAD"]);
++    let (clone, _) = checkout_at_remote(source_root, folder.path());
++    let root = clone.root();
++    fs::write(root.join("a.txt"), "the AI's edit\n").unwrap();
++    git_ok(root, &["branch", "ai-branch"]).unwrap();
++
++    commit_everything(root, "the AI's commit");
++
++    let commit = clone.head_commit().unwrap();
++    assert_eq!(text_of(source_root, &["for-each-ref"]), refs_before);
++    assert_eq!(
++        fs::read(source_root.join(".git/config")).unwrap(),
++        config_before
++    );
++    assert_eq!(text_of(source_root, &["symbolic-ref", "HEAD"]), head_before);
++    let in_source = git(source_root, &["cat-file", "-e", commit.as_str()]).unwrap();
++    assert!(
++        !in_source.status.success(),
++        "the commit went into the source's objects"
++    );
++}
+-- 
+2.56.0
+
