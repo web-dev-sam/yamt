@@ -13,8 +13,8 @@ export class MarkdownView {
 
   constructor(host: HTMLElement) {
     this.#host = host;
-    this.#paint = (element, info, code) => {
-      void paintCode(element, info, code, () => !this.#destroyed && host.contains(element));
+    this.#paint = (element, block) => {
+      void paintCode(element, block, () => !this.#destroyed && host.contains(element));
     };
   }
 

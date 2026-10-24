@@ -1,5 +1,5 @@
-import { HighlightStyle } from "@codemirror/language";
-import { tagHighlighter, tags, type Highlighter, type Tag } from "@lezer/highlight";
+import { HighlightStyle, type Language } from "@codemirror/language";
+import { highlightCode, tagHighlighter, tags, type Highlighter, type Tag } from "@lezer/highlight";
 
 const FONT_PROPERTY = {
   "--syntax-comment-style": "fontStyle",
@@ -136,3 +136,30 @@ export const fontHighlight = HighlightStyle.define(
       ...Object.fromEntries(fonts.map((font) => [FONT_PROPERTY[font], `var(${font})`])),
     })),
 );
+
+export const CODE_HIGHLIGHTERS: readonly HighlightStyle[] = [paletteHighlight, fontHighlight];
+
+export function highlightedNodes(
+  document: Document,
+  code: string,
+  parser: Language["parser"],
+): Node[] {
+  const nodes: Node[] = [];
+  highlightCode(
+    code,
+    parser.parse(code),
+    CODE_HIGHLIGHTERS,
+    (text, classes) => {
+      if (classes === "") {
+        nodes.push(document.createTextNode(text));
+        return;
+      }
+      const span = document.createElement("span");
+      span.className = classes;
+      span.textContent = text;
+      nodes.push(span);
+    },
+    () => nodes.push(document.createTextNode("\n")),
+  );
+  return nodes;
+}

@@ -1,6 +1,24 @@
 import { expect, test } from "vitest";
 
 import { parseInline } from "./markdownInline";
+import { MAX_NESTING, type Inline } from "./markdownTree";
+
+const LINEAR_MS = 500;
+
+function depthOf(inlines: readonly Inline[]): number {
+  return Math.max(
+    0,
+    ...inlines.map((inline) => ("children" in inline ? 1 + depthOf(inline.children) : 0)),
+  );
+}
+
+function textOf(inlines: readonly Inline[]): string {
+  return inlines
+    .map((inline) =>
+      "children" in inline ? textOf(inline.children) : "text" in inline ? inline.text : "",
+    )
+    .join("");
+}
 
 test("backticks win over emphasis", () => {
   expect(parseInline("*a `b*` c*")).toEqual([
@@ -78,4 +96,51 @@ test("escapes, hard breaks and soft breaks", () => {
     { kind: "break" },
     { kind: "text", text: "c\nd" },
   ]);
+});
+
+test("emphasis never crosses a link's text, and a link inside a link stays text", () => {
+  expect(parseInline("*a [b*](c) d* [x [y](z)](w)")).toEqual([
+    {
+      kind: "emphasis",
+      children: [
+        { kind: "text", text: "a " },
+        { kind: "link", children: [{ kind: "text", text: "b*" }], address: "c" },
+        { kind: "text", text: " d" },
+      ],
+    },
+    { kind: "text", text: " [x " },
+    { kind: "link", children: [{ kind: "text", text: "y" }], address: "z" },
+    { kind: "text", text: "](w)" },
+  ]);
+});
+
+test("a strong closer shared by two openers and the rule of three", () => {
+  expect(parseInline("***a***")).toEqual([
+    {
+      kind: "emphasis",
+      children: [{ kind: "strong", children: [{ kind: "text", text: "a" }] }],
+    },
+  ]);
+  expect(parseInline("*a**b*")).toEqual([
+    { kind: "emphasis", children: [{ kind: "text", text: "a**b" }] },
+  ]);
+});
+
+test("a 10,000-deep emphasis stops at MAX_NESTING, the rest literal", () => {
+  const levels = 10_000;
+  const inner = levels - MAX_NESTING;
+  const parsed = parseInline(`${"*a ".repeat(levels)}${"a* ".repeat(levels)}`);
+  expect(depthOf(parsed)).toBe(MAX_NESTING);
+  expect(textOf(parsed)).toBe(
+    `${"a ".repeat(MAX_NESTING)}${"*a ".repeat(inner)}${"a* ".repeat(inner)}${"a ".repeat(MAX_NESTING)}`,
+  );
+});
+
+test("unmatched openers, brackets and parentheses parse in linear time", () => {
+  const unmatched = "*a ".repeat(20_000);
+  const brackets = "[](".repeat(20_000);
+  const started = performance.now();
+  expect(parseInline(unmatched)).toEqual([{ kind: "text", text: unmatched }]);
+  expect(parseInline(brackets)).toEqual([{ kind: "text", text: brackets }]);
+  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
 });

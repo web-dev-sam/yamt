@@ -1,9 +1,28 @@
 import { expect, test } from "vitest";
 
 import { parseBlocks, type Block } from "./markdownBlocks";
+import { MAX_NESTING } from "./markdownTree";
+
+const LINEAR_MS = 500;
 
 function blocks(text: string): Block[] {
   return parseBlocks(text).map(({ block }) => block);
+}
+
+function innermost(
+  outer: readonly Block[],
+  kind: "quote" | "list",
+): { readonly depth: number; readonly blocks: readonly Block[] } {
+  let depth = 0;
+  let inside = outer;
+  for (;;) {
+    const [only] = inside;
+    if (inside.length !== 1 || only?.kind !== kind) {
+      return { depth, blocks: inside };
+    }
+    depth += 1;
+    inside = only.kind === "quote" ? only.blocks : (only.items[0]?.blocks ?? []);
+  }
 }
 
 test("a fenced block keeps a line that looks like a heading", () => {
@@ -68,15 +87,51 @@ test("a table needs its delimiter row", () => {
   expect(blocks("| a | b |\n| c | d |")).toEqual([
     { kind: "paragraph", text: "| a | b |\n| c | d |" },
   ]);
-  expect(blocks("| a | b |\n|:--|--:|\n| c \\| d | e |\nend")).toEqual([
+  expect(blocks("| a | b |\n|:--|--:|\n| c \\| d | e |\nend\n\nafter")).toEqual([
     {
       kind: "table",
       align: ["left", "right"],
       header: ["a", "b"],
-      rows: [["c \\| d", "e"]],
+      rows: [
+        ["c \\| d", "e"],
+        ["end", ""],
+      ],
     },
-    { kind: "paragraph", text: "end" },
+    { kind: "paragraph", text: "after" },
   ]);
+});
+
+test("a quote with a pipe right after a table starts a quote", () => {
+  expect(blocks("| a |\n|---|\n> q | x")).toEqual([
+    { kind: "table", align: ["none"], header: ["a"], rows: [] },
+    { kind: "quote", blocks: [{ kind: "paragraph", text: "q | x" }] },
+  ]);
+});
+
+test("a heading drops its closing run only after a space, in linear time", () => {
+  expect(blocks("# a#\n## b ##  \n### ###")).toEqual([
+    { kind: "heading", tag: "h1", text: "a#" },
+    { kind: "heading", tag: "h2", text: "b" },
+    { kind: "heading", tag: "h3", text: "" },
+  ]);
+  const inner = " ".repeat(100_000);
+  const started = performance.now();
+  expect(blocks(`# a${inner}b`)).toEqual([{ kind: "heading", tag: "h1", text: `a${inner}b` }]);
+  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
+});
+
+test("a 10,000-deep quote and list stop nesting at MAX_NESTING, the rest a paragraph", () => {
+  const levels = 10_000;
+  const quote = blocks(`${">".repeat(levels)} deep`);
+  expect(innermost(quote, "quote")).toEqual({
+    depth: MAX_NESTING,
+    blocks: [{ kind: "paragraph", text: `${">".repeat(levels - MAX_NESTING)} deep` }],
+  });
+  const list = blocks(`${"- ".repeat(levels)}x`);
+  expect(innermost(list, "list")).toEqual({
+    depth: MAX_NESTING,
+    blocks: [{ kind: "paragraph", text: `${"- ".repeat(levels - MAX_NESTING)}x` }],
+  });
 });
 
 test("raw HTML stays text", () => {

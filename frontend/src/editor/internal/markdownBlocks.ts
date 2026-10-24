@@ -1,6 +1,7 @@
-type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+import { startsTable, tableOf, type Table } from "./markdownTable";
+import { MAX_NESTING } from "./markdownTree";
 
-export type Align = "none" | "left" | "center" | "right";
+type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
 
 export type Numbering =
   | { readonly kind: "bullet" }
@@ -14,33 +15,26 @@ export type Block =
   | { readonly kind: "code"; readonly info: string; readonly code: string }
   | { readonly kind: "list"; readonly numbering: Numbering; readonly items: readonly ListItem[] }
   | { readonly kind: "quote"; readonly blocks: readonly Block[] }
-  | {
-      readonly kind: "table";
-      readonly align: readonly Align[];
-      readonly header: readonly string[];
-      readonly rows: readonly (readonly string[])[];
-    }
+  | Table
   | { readonly kind: "rule" };
 
 export type SourcedBlock = { readonly source: string; readonly block: Block };
 
+export type CodeBlock = Extract<Block, { kind: "code" }>;
+
 type Parsed = { readonly block: Block; readonly end: number };
+
+type Starter = (lines: readonly string[], at: number, depth: number) => Parsed | null;
 
 type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
 
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
 const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
-const HEADING_CLOSE = /(?:^|[ \t]+)#+$/;
+const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/s;
 const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
 const QUOTE = /^ {0,3}> ?(.*)$/;
 const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/;
-const DELIMITER_CELL = /^:?-+:?$/;
-const ALIGN: Readonly<Record<string, Align>> = { "::": "center", ":-": "left", "-:": "right" };
-const LEADING_PIPE = /^\|/;
-const TRAILING_PIPE = /(?<!\\)\|$/;
-const CELL_PIPE = /(?<!\\)\|/;
 const WHITESPACE = /^[ \t]$/;
 const LINE_BREAK = /\r\n|\n|\r/;
 const TAB_STOP = 4;
@@ -90,14 +84,23 @@ function fence(lines: readonly string[], at: number): Parsed | null {
   }
   const info = rest.trim().split(/\s+/)[0] ?? "";
   const code: string[] = [];
-  for (let end = at + 1; end < lines.length; end += 1) {
-    const line = lineAt(lines, end);
-    if (closesFence(line, marks)) {
-      return { block: { kind: "code", info, code: code.join("\n") }, end: end + 1 };
-    }
-    code.push(stripColumns(line, indent.length));
+  let end = at + 1;
+  while (end < lines.length && !closesFence(lineAt(lines, end), marks)) {
+    code.push(stripColumns(lineAt(lines, end), indent.length));
+    end += 1;
   }
-  return { block: { kind: "code", info, code: code.join("\n") }, end: lines.length };
+  const closed = Math.min(end + 1, lines.length);
+  return { block: { kind: "code", info, code: code.join("\n") }, end: closed };
+}
+
+function headingText(content: string): string {
+  const text = content.trimEnd();
+  let close = text.length;
+  while (text[close - 1] === "#") {
+    close -= 1;
+  }
+  const before = text[close - 1];
+  return close === 0 || before === " " || before === "\t" ? text.slice(0, close).trimEnd() : text;
 }
 
 function heading(lines: readonly string[], at: number): Parsed | null {
@@ -106,50 +109,22 @@ function heading(lines: readonly string[], at: number): Parsed | null {
   if (tag === undefined) {
     return null;
   }
-  return { block: { kind: "heading", tag, text: content.replace(HEADING_CLOSE, "") }, end: at + 1 };
+  return { block: { kind: "heading", tag, text: headingText(content) }, end: at + 1 };
 }
 
 function rule(lines: readonly string[], at: number): Parsed | null {
   return RULE.test(lineAt(lines, at)) ? { block: { kind: "rule" }, end: at + 1 } : null;
 }
 
-function cells(line: string): string[] {
-  const inner = line.trim().replace(LEADING_PIPE, "").replace(TRAILING_PIPE, "");
-  return inner.split(CELL_PIPE).map((cell) => cell.trim());
-}
-
-function delimiterRow(line: string, columns: number): Align[] | null {
-  const row = cells(line);
-  if (
-    !line.includes("|") ||
-    row.length !== columns ||
-    !row.every((cell) => DELIMITER_CELL.test(cell))
-  ) {
-    return null;
-  }
-  return row.map((cell) => ALIGN[`${cell.at(0)}${cell.at(-1)}`] ?? "none");
-}
-
-function startsTable(lines: readonly string[], at: number): boolean {
-  const header = lineAt(lines, at);
-  const next = lineAt(lines, at + 1);
-  return header.includes("|") && delimiterRow(next, cells(header).length) !== null;
-}
-
 function table(lines: readonly string[], at: number): Parsed | null {
-  if (!startsTable(lines, at)) {
+  if (!startsTable(lineAt(lines, at), lineAt(lines, at + 1))) {
     return null;
   }
-  const header = cells(lineAt(lines, at));
-  const align = delimiterRow(lineAt(lines, at + 1), header.length) ?? [];
-  const rows: string[][] = [];
   let end = at + TABLE_HEAD_LINES;
-  while (end < lines.length && lineAt(lines, end).includes("|")) {
-    const row = cells(lineAt(lines, end));
-    rows.push(header.map((_, column) => row[column] ?? ""));
+  while (end < lines.length && !isBlank(lineAt(lines, end)) && !interrupts(lines, end)) {
     end += 1;
   }
-  return { block: { kind: "table", align, header, rows }, end };
+  return { block: tableOf(lines.slice(at, end)), end };
 }
 
 function itemStart(line: string): ItemStart | null {
@@ -177,11 +152,11 @@ function interrupts(lines: readonly string[], at: number): boolean {
     listStarts ||
     QUOTE.test(line) ||
     [fence, heading, rule].some((starts) => starts(lines, at) !== null) ||
-    startsTable(lines, at)
+    startsTable(line, lineAt(lines, at + 1))
   );
 }
 
-function quote(lines: readonly string[], at: number): Parsed | null {
+function quote(lines: readonly string[], at: number, depth: number): Parsed | null {
   const inner: string[] = [];
   let end = at;
   while (end < lines.length) {
@@ -197,7 +172,7 @@ function quote(lines: readonly string[], at: number): Parsed | null {
     }
     end += 1;
   }
-  return end === at ? null : { block: { kind: "quote", blocks: blocksOf(inner) }, end };
+  return end === at ? null : { block: { kind: "quote", blocks: blocksOf(inner, depth + 1) }, end };
 }
 
 function itemEnd(
@@ -226,7 +201,7 @@ function itemEnd(
   return end;
 }
 
-function list(lines: readonly string[], at: number): Parsed | null {
+function list(lines: readonly string[], at: number, depth: number): Parsed | null {
   const first = itemStart(lineAt(lines, at));
   if (first === null) {
     return null;
@@ -237,7 +212,7 @@ function list(lines: readonly string[], at: number): Parsed | null {
   for (;;) {
     const content = [start.first];
     end = itemEnd(lines, end, start, content);
-    items.push({ blocks: blocksOf(content) });
+    items.push({ blocks: blocksOf(content, depth + 1) });
     let next = end;
     while (next < lines.length && isBlank(lineAt(lines, next))) {
       next += 1;
@@ -261,10 +236,11 @@ function paragraph(lines: readonly string[], at: number): Parsed {
   return { block: { kind: "paragraph", text: text.join("\n") }, end };
 }
 
-function parsedAt(lines: readonly string[], at: number): Parsed {
-  const starters = [fence, heading, rule, quote, list, table];
+function parsedAt(lines: readonly string[], at: number, depth: number): Parsed {
+  const nested = depth < MAX_NESTING ? [quote, list] : [];
+  const starters: readonly Starter[] = [fence, heading, rule, ...nested, table];
   for (const starts of starters) {
-    const parsed = starts(lines, at);
+    const parsed = starts(lines, at, depth);
     if (parsed !== null) {
       return parsed;
     }
@@ -272,7 +248,7 @@ function parsedAt(lines: readonly string[], at: number): Parsed {
   return paragraph(lines, at);
 }
 
-function sourced(lines: readonly string[]): SourcedBlock[] {
+function sourced(lines: readonly string[], depth: number): SourcedBlock[] {
   const blocks: SourcedBlock[] = [];
   let at = 0;
   while (at < lines.length) {
@@ -280,17 +256,17 @@ function sourced(lines: readonly string[]): SourcedBlock[] {
       at += 1;
       continue;
     }
-    const { block, end } = parsedAt(lines, at);
+    const { block, end } = parsedAt(lines, at, depth);
     blocks.push({ source: lines.slice(at, end).join("\n"), block });
     at = end;
   }
   return blocks;
 }
 
-function blocksOf(lines: readonly string[]): Block[] {
-  return sourced(lines).map(({ block }) => block);
+function blocksOf(lines: readonly string[], depth: number): Block[] {
+  return sourced(lines, depth).map(({ block }) => block);
 }
 
 export function parseBlocks(text: string): SourcedBlock[] {
-  return sourced(text.split(LINE_BREAK));
+  return sourced(text.split(LINE_BREAK), 0);
 }

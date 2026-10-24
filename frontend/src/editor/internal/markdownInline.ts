@@ -1,24 +1,24 @@
-type Styled = "emphasis" | "strong" | "strike";
-
-export type Inline =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "code"; readonly text: string }
-  | { readonly kind: "break" }
-  | { readonly kind: Styled; readonly children: readonly Inline[] }
-  | { readonly kind: "link"; readonly children: readonly Inline[]; readonly address: string };
+import {
+  IMAGE_OPEN,
+  inlineTree,
+  STRIKE_RUN,
+  type Bracket,
+  type Delimiter,
+  type Inline,
+  type Piece,
+  type Run,
+} from "./markdownTree";
 
 type Step = { readonly inlines: readonly Inline[]; readonly end: number };
 
 type Target = { readonly address: string; readonly end: number };
 
-type Delimiter = "*" | "_" | "~";
+type OpenBracket = { readonly bracket: Bracket; readonly piece: number; readonly at: number };
 
 const PUNCTUATION = /^[!-/:-@[-`{-~]$/;
 const SPACE = /^\s$/;
 const WORD = /^[\p{L}\p{N}]$/u;
 const AUTOLINK = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>/;
-const STRIKE_RUN = 2;
-const STRONG_RUN = 2;
 const ESCAPE_WIDTH = "\\*".length;
 
 function runLength(text: string, at: number, char: string): number {
@@ -33,31 +33,44 @@ function text(value: string, end: number): Step {
   return { inlines: [{ kind: "text", text: value }], end };
 }
 
-function codeSpanEnd(source: string, at: number): number | null {
-  const run = runLength(source, at, "`");
-  let from = at + run;
-  for (;;) {
-    const next = source.indexOf("`", from);
-    if (next < 0) {
-      return null;
+class CodeSpans {
+  readonly #starts = new Map<number, number[]>();
+  readonly #next = new Map<number, number>();
+
+  constructor(source: string) {
+    let at = source.indexOf("`");
+    while (at >= 0) {
+      const run = runLength(source, at, "`");
+      const starts = this.#starts.get(run) ?? [];
+      starts.push(at);
+      this.#starts.set(run, starts);
+      at = source.indexOf("`", at + run);
     }
-    const closing = runLength(source, next, "`");
-    if (closing === run) {
-      return next + closing;
+  }
+
+  closing(from: number, run: number): number | null {
+    const starts = this.#starts.get(run) ?? [];
+    let index = this.#next.get(run) ?? 0;
+    while (index < starts.length && (starts[index] ?? from) < from) {
+      index += 1;
     }
-    from = next + closing;
+    this.#next.set(run, index);
+    return starts[index] ?? null;
   }
 }
 
-function codeSpan(source: string, at: number): Step {
+function codeSpan(source: string, at: number, spans: CodeSpans): Step {
   const run = runLength(source, at, "`");
-  const end = codeSpanEnd(source, at);
-  if (end === null) {
+  const close = spans.closing(at + run, run);
+  if (close === null) {
     return text("`".repeat(run), at + run);
   }
-  const inner = source.slice(at + run, end - run).replaceAll("\n", " ");
+  const inner = source.slice(at + run, close).replaceAll("\n", " ");
   const padded = inner.startsWith(" ") && inner.endsWith(" ") && inner.trim() !== "";
-  return { inlines: [{ kind: "code", text: padded ? inner.slice(1, -1) : inner }], end };
+  return {
+    inlines: [{ kind: "code", text: padded ? inner.slice(1, -1) : inner }],
+    end: close + run,
+  };
 }
 
 function escape(source: string, at: number): Step {
@@ -76,191 +89,145 @@ function spaces(source: string, at: number): Step {
   return run > 1 ? { inlines: [{ kind: "break" }], end: at + run + 1 } : text("\n", at + run + 1);
 }
 
-function canOpen(source: string, at: number, run: number, char: Delimiter): boolean {
-  const next = source.charAt(at + run);
-  const before = source.charAt(at - 1);
-  return next !== "" && !SPACE.test(next) && (char !== "_" || !WORD.test(before));
-}
-
-function canClose(source: string, at: number, run: number, char: Delimiter): boolean {
-  const before = source.charAt(at - 1);
-  const after = source.charAt(at + run);
-  return before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after));
-}
-
-function widthOf(run: number, char: Delimiter): number {
-  return char === "~" ? STRIKE_RUN : Math.min(run, STRONG_RUN);
-}
-
-function skipped(source: string, at: number): number | null {
-  const char = source[at];
-  if (char === "\\") {
-    return at + ESCAPE_WIDTH;
-  }
-  if (char === "`") {
-    return codeSpanEnd(source, at) ?? at + runLength(source, at, "`");
-  }
-  return null;
-}
-
-function closer(source: string, from: number, char: Delimiter, width: number): number | null {
-  let at = from;
-  while (at < source.length) {
-    const past = skipped(source, at);
-    if (past !== null) {
-      at = past;
-      continue;
-    }
-    if (source[at] !== char) {
-      at += 1;
-      continue;
-    }
-    const run = runLength(source, at, char);
-    if (canClose(source, at, run, char) && run >= width) {
-      return at;
-    }
-    if (!canOpen(source, at, run, char)) {
-      at += run;
-      continue;
-    }
-    const inner = widthOf(run, char);
-    const nested = closer(source, at + inner, char, inner);
-    if (nested === null) {
-      return null;
-    }
-    at = nested + inner;
-  }
-  return null;
-}
-
-function styledKind(char: Delimiter, width: number): Styled {
-  if (char === "~") {
-    return "strike";
-  }
-  return width === STRONG_RUN ? "strong" : "emphasis";
-}
-
-function delimited(source: string, at: number, char: Delimiter): Step {
-  const run = runLength(source, at, char);
-  if ((char === "~" && run !== STRIKE_RUN) || !canOpen(source, at, run, char)) {
-    return text(char.repeat(run), at + run);
-  }
-  const width = widthOf(run, char);
-  const end = closer(source, at + width, char, width);
-  if (end === null) {
-    return text(char, at + 1);
-  }
-  const children = parseInline(source.slice(at + width, end));
-  return { inlines: [{ kind: styledKind(char, width), children }], end: end + width };
-}
-
-function bracketEnd(source: string, at: number): number | null {
-  let depth = 0;
-  let index = at;
-  while (index < source.length) {
-    const past = skipped(source, index);
-    if (past !== null) {
-      index = past;
-      continue;
-    }
-    const char = source[index];
-    depth += char === "[" ? 1 : char === "]" ? -1 : 0;
-    if (depth === 0) {
-      return index;
-    }
-    index += 1;
-  }
-  return null;
-}
-
-function destination(source: string, open: number): Target | null {
-  if (source[open] !== "(") {
-    return null;
-  }
-  let depth = 0;
-  for (let index = open; index < source.length; index += 1) {
-    const char = source[index];
-    depth += char === "(" ? 1 : char === ")" ? -1 : 0;
-    if (depth === 0) {
-      const inner = source.slice(open + 1, index).trim();
-      const address = inner.startsWith("<") ? inner.slice(1, inner.indexOf(">")) : inner;
-      return { address: address.split(/\s+/)[0] ?? "", end: index + 1 };
-    }
-  }
-  return null;
-}
-
-function link(source: string, at: number): Step | null {
-  const close = bracketEnd(source, at);
-  const target = close === null ? null : destination(source, close + 1);
-  if (close === null || target === null) {
-    return null;
-  }
-  const children = parseInline(source.slice(at + 1, close));
-  return { inlines: [{ kind: "link", children, address: target.address }], end: target.end };
-}
-
-function image(source: string, at: number): Step | null {
-  const close = source[at + 1] === "[" ? bracketEnd(source, at + 1) : null;
-  const target = close === null ? null : destination(source, close + 1);
-  if (close === null || target === null) {
-    return null;
-  }
-  return text(`${source.slice(at + "![".length, close)} (${target.address})`, target.end);
-}
-
-function autolink(source: string, at: number): Step | null {
+function autolink(source: string, at: number): Step {
   const match = AUTOLINK.exec(source.slice(at));
-  return match === null ? null : text(match[1] ?? "", at + match[0].length);
+  return match === null ? text("<", at + 1) : text(match[1] ?? "", at + match[0].length);
 }
 
-function stepAt(source: string, at: number): Step | null {
-  const char = source.charAt(at);
-  switch (char) {
-    case "\\":
-      return escape(source, at);
-    case "`":
-      return codeSpan(source, at);
-    case " ":
-      return spaces(source, at);
-    case "!":
-      return image(source, at);
-    case "[":
-      return link(source, at);
-    case "<":
-      return autolink(source, at);
-    case "*":
-    case "_":
-    case "~":
-      return delimited(source, at, char);
-    default:
-      return null;
+function parenMatches(source: string): Map<number, number> {
+  const matches = new Map<number, number>();
+  const open: number[] = [];
+  for (let at = 0; at < source.length; at += 1) {
+    if (source[at] === "(") {
+      open.push(at);
+    } else if (source[at] === ")") {
+      const start = open.pop();
+      if (start !== undefined) {
+        matches.set(start, at);
+      }
+    }
   }
+  return matches;
 }
 
-function append(inlines: Inline[], next: Inline): void {
-  const last = inlines.at(-1);
-  if (last?.kind === "text" && next.kind === "text") {
-    inlines[inlines.length - 1] = { kind: "text", text: last.text + next.text };
-  } else {
-    inlines.push(next);
+function destination(
+  source: string,
+  open: number,
+  parens: ReadonlyMap<number, number>,
+): Target | null {
+  const close = source[open] === "(" ? parens.get(open) : undefined;
+  if (close === undefined) {
+    return null;
+  }
+  const inner = source.slice(open + 1, close).trim();
+  const address = inner.startsWith("<") ? inner.slice(1, inner.indexOf(">")) : inner;
+  return { address: address.split(/\s+/)[0] ?? "", end: close + 1 };
+}
+
+function delimiterRun(source: string, at: number, char: Delimiter): Run {
+  const length = runLength(source, at, char);
+  const before = source.charAt(at - 1);
+  const after = source.charAt(at + length);
+  return {
+    kind: "run",
+    char,
+    length,
+    canOpen: after !== "" && !SPACE.test(after) && (char !== "_" || !WORD.test(before)),
+    canClose: before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after)),
+    closes: [],
+    opens: [],
+  };
+}
+
+class InlineScan {
+  readonly pieces: Piece[] = [];
+  readonly #source: string;
+  readonly #spans: CodeSpans;
+  readonly #parens: ReadonlyMap<number, number>;
+  readonly #brackets: OpenBracket[] = [];
+  #inactiveBelow = 0;
+
+  constructor(source: string) {
+    this.#source = source;
+    this.#spans = new CodeSpans(source);
+    this.#parens = parenMatches(source);
+  }
+
+  step(at: number): number {
+    const source = this.#source;
+    const char = source.charAt(at);
+    switch (char) {
+      case "\\":
+        return this.#push(escape(source, at));
+      case "`":
+        return this.#push(codeSpan(source, at, this.#spans));
+      case " ":
+        return this.#push(spaces(source, at));
+      case "<":
+        return this.#push(autolink(source, at));
+      case "!":
+        return source[at + 1] === "[" ? this.#open(at, true) : this.#push(text(char, at + 1));
+      case "[":
+        return this.#open(at, false);
+      case "]":
+        return this.#close(at);
+      case "*":
+      case "_":
+      case "~":
+        return this.#run(at, char);
+      default:
+        return this.#push(text(char, at + 1));
+    }
+  }
+
+  #push({ inlines, end }: Step): number {
+    this.pieces.push(...inlines.map((inline): Piece => ({ kind: "inline", inline })));
+    return end;
+  }
+
+  #run(at: number, char: Delimiter): number {
+    const run = delimiterRun(this.#source, at, char);
+    if (char === "~" && run.length !== STRIKE_RUN) {
+      return this.#push(text(char.repeat(run.length), at + run.length));
+    }
+    this.pieces.push(run);
+    return at + run.length;
+  }
+
+  #open(at: number, image: boolean): number {
+    const bracket: Bracket = { kind: "bracket", image, linked: false };
+    this.#brackets.push({ bracket, piece: this.pieces.length, at });
+    this.pieces.push(bracket);
+    return at + (image ? IMAGE_OPEN.length : 1);
+  }
+
+  #close(at: number): number {
+    const open = this.#brackets.pop();
+    const depth = this.#brackets.length;
+    const active = open !== undefined && (open.bracket.image || depth >= this.#inactiveBelow);
+    this.#inactiveBelow = Math.min(this.#inactiveBelow, depth);
+    const target = active ? destination(this.#source, at + 1, this.#parens) : null;
+    if (open === undefined || target === null) {
+      return this.#push(text("]", at + 1));
+    }
+    if (open.bracket.image) {
+      const alt = this.#source.slice(open.at + IMAGE_OPEN.length, at);
+      this.pieces.length = open.piece;
+      return this.#push(text(`${alt} (${target.address})`, target.end));
+    }
+    open.bracket.linked = true;
+    const raw = this.#source.slice(at, target.end);
+    this.pieces.push({ kind: "linkEnd", open: open.bracket, address: target.address, raw });
+    this.#inactiveBelow = depth;
+    return target.end;
   }
 }
 
 export function parseInline(source: string): Inline[] {
-  const inlines: Inline[] = [];
+  const scan = new InlineScan(source);
   let at = 0;
   while (at < source.length) {
-    const step = stepAt(source, at);
-    if (step === null) {
-      append(inlines, { kind: "text", text: source.charAt(at) });
-      at += 1;
-      continue;
-    }
-    for (const inline of step.inlines) {
-      append(inlines, inline);
-    }
-    at = step.end;
+    at = scan.step(at);
   }
-  return inlines;
+  return inlineTree(scan.pieces);
 }

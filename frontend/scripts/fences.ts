@@ -5,6 +5,7 @@ import { parse } from "@vue/compiler-sfc";
 import ts from "typescript";
 
 import { clipboardViolations } from "./clipboardFence";
+import { markdownViolations } from "./markdownFence";
 
 export type SourceFile = { readonly path: string; readonly text: string };
 
@@ -44,9 +45,6 @@ const ROOT_FILES: Readonly<Record<string, string>> = {
 };
 const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
 const WINDOW_RULES: Readonly<Record<string, "PM7" | "PM9">> = { compare: "PM7", range: "PM9" };
-const MARKDOWN_SEAM = "src/ui/useMarkdown.ts";
-const MARKDOWN_VIEW = "MarkdownView";
-const MARKDOWN_MODULE = "src/editor/markdown";
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -131,52 +129,6 @@ function rootFinding(file: string, target: string): Finding | undefined {
     return { rule, reason: `the ${root} window never imports lsp/` };
   }
   return undefined;
-}
-
-function namesOf(statement: ts.ImportDeclaration | ts.ExportDeclaration): string[] | "all" {
-  const bindings = ts.isImportDeclaration(statement)
-    ? statement.importClause?.namedBindings
-    : statement.exportClause;
-  if (bindings === undefined) {
-    return ts.isExportDeclaration(statement) ? "all" : [];
-  }
-  if (ts.isNamespaceImport(bindings) || ts.isNamespaceExport(bindings)) {
-    return "all";
-  }
-  const elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[] = bindings.elements;
-  return elements.map((element) => (element.propertyName ?? element.name).text);
-}
-
-function exposesMarkdownView(path: string, statement: ts.Statement): string | undefined {
-  if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) {
-    return undefined;
-  }
-  const literal = statement.moduleSpecifier;
-  const specifier = literal !== undefined && ts.isStringLiteral(literal) ? literal.text : "";
-  const target = relativeTarget(path, specifier.replace(QUERY_SUFFIX, "")) ?? "";
-  if (!isInside(target, "src/editor")) {
-    return undefined;
-  }
-  const names = namesOf(statement);
-  const direct = target === MARKDOWN_MODULE || target === `${MARKDOWN_MODULE}.ts`;
-  return direct || names === "all" || names.includes(MARKDOWN_VIEW) ? specifier : undefined;
-}
-
-function markdownViolations(path: string, texts: readonly string[]): FenceViolation[] {
-  if (MODULE_OF.exec(path)?.[1] !== "ui" || path === MARKDOWN_SEAM) {
-    return [];
-  }
-  return texts.flatMap((text) =>
-    ts
-      .createSourceFile(path, text, ts.ScriptTarget.Latest)
-      .statements.flatMap((statement) => exposesMarkdownView(path, statement) ?? [])
-      .map((specifier): FenceViolation => ({
-        rule: "PM2",
-        file: path,
-        specifier,
-        reason: "ui/ reaches MarkdownView only through ui/useMarkdown.ts (plan §2 #112)",
-      })),
-  );
 }
 
 function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {

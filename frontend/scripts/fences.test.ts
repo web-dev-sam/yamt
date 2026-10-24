@@ -427,6 +427,8 @@ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.
     { path: "src/ui/answer.ts", text: `export { MarkdownView } from "../editor";` },
     { path: "src/ui/whole.ts", text: `import * as editor from "../editor";` },
     { path: "src/ui/direct.ts", text: `import type { X } from "../editor/markdown";` },
+    { path: "src/ui/star.ts", text: `export * from "../editor";` },
+    { path: "src/ui/direct2.ts", text: `import { X } from "../editor/markdown.ts";` },
   ];
 
   expect(violationsOf(files)).toEqual([
@@ -434,6 +436,8 @@ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.
     { rule: "PM2", file: "src/ui/answer.ts", specifier: "../editor" },
     { rule: "PM2", file: "src/ui/whole.ts", specifier: "../editor" },
     { rule: "PM2", file: "src/ui/direct.ts", specifier: "../editor/markdown" },
+    { rule: "PM2", file: "src/ui/star.ts", specifier: "../editor" },
+    { rule: "PM2", file: "src/ui/direct2.ts", specifier: "../editor/markdown.ts" },
   ]);
 });
 
@@ -446,6 +450,8 @@ test("useMarkdown.ts importing MarkdownView and other ui files importing the edi
       text: `<script setup lang="ts">\nimport { useMarkdown } from "./useMarkdown";\n</script>`,
     },
     { path: "src/editor/index.ts", text: `export { MarkdownView } from "./markdown";` },
+    { path: "src/ui/ns.ts", text: `import * as sides from "./sides";` },
+    { path: "src/ui/re.ts", text: `export { MergeController } from "../editor";` },
   ];
 
   expect(violationsOf(files)).toEqual([]);

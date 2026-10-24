@@ -1,10 +1,9 @@
 import { language } from "@codemirror/language";
 import type { Extension } from "@codemirror/state";
 import { hoverTooltip, type EditorView, type Tooltip } from "@codemirror/view";
-import { highlightCode } from "@lezer/highlight";
 
 import { barPlace, shownRemoval, type ShownRemoval } from "./removalText";
-import { fontHighlight, paletteHighlight } from "./syntax";
+import { highlightedNodes } from "./syntax";
 import { REMOVAL_BAR_CLASS, removalAt } from "./words";
 
 function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
@@ -24,22 +23,7 @@ function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
     block.textContent = shown.text;
     return block;
   }
-  highlightCode(
-    shown.text,
-    grammar.parser.parse(shown.text),
-    [paletteHighlight, fontHighlight],
-    (text, classes) => {
-      if (classes === "") {
-        block.append(text);
-        return;
-      }
-      const span = document.createElement("span");
-      span.className = classes;
-      span.textContent = text;
-      block.append(span);
-    },
-    () => block.append("\n"),
-  );
+  block.append(...highlightedNodes(document, shown.text, grammar.parser));
   return block;
 }
 
