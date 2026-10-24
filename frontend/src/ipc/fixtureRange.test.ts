@@ -113,7 +113,7 @@ test("?range=review lists the case's sides and files and loads each file by its 
   expect(entries).toEqual([]);
 });
 
-test.each(["?range", "?range="])("%s without a case loads review", async (search) => {
+test.each(["", "?range", "?range="])("'%s' without a case loads review", async (search) => {
   const source = createFixtureRangeSource(quietLog().log, search, FILES);
 
   expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
@@ -160,8 +160,65 @@ test("loadRangeFile of an id past the list answers UnknownRangeFile with that id
   });
 });
 
+test("the committed cases parse: review lists 13 files of every kind, empty none", async () => {
+  const { log, entries } = quietLog();
+  const review = createFixtureRangeSource(log, "?range");
+
+  const start = valueOf(await review.openRange());
+  const loaded = await Promise.all(
+    start.files.map(async ({ id }) => valueOf(await review.loadRangeFile(id))),
+  );
+
+  expect(start.files).toHaveLength(13);
+  expect(start.files[3]).toMatchObject({
+    path: "docs/keys.md",
+    change: { kind: "renamed", oldPath: "docs/shortcuts.md" },
+  });
+  expect(start.files[6]).toMatchObject({
+    path: "src/api/mockBoards.ts",
+    change: { kind: "deleted" },
+  });
+  expect(loaded.map((file) => file.kind)).toEqual([
+    "kindChanged",
+    "tooLarge",
+    "texts",
+    "texts",
+    "notUtf8",
+    "binary",
+    "texts",
+    "texts",
+    "texts",
+    "modeOnly",
+    "texts",
+    "texts",
+    "submodule",
+  ]);
+  expect(loaded[10]).toMatchObject({
+    mode: { kind: "changed", old: "file", new: "executable" },
+  });
+  expect(valueOf(await createFixtureRangeSource(log, "?range=empty").openRange()).files).toEqual(
+    [],
+  );
+  expect(entries).toEqual([]);
+});
+
 test.each([
   ["a missing start", { files: [] }, 'Invalid key: Expected "start"'],
+  [
+    "an unknown entry kind",
+    { start: EMPTY.start, files: [{ kind: "modeOnly", old: "file", new: "nope" }] },
+    "expected one of file, executable, link, submodule",
+  ],
+  [
+    "an entry kind that is no string",
+    { start: EMPTY.start, files: [{ kind: "modeOnly", old: ["file"], new: "link" }] },
+    "expected one of file, executable, link, submodule",
+  ],
+  [
+    "unknown sides",
+    { start: EMPTY.start, files: [{ kind: "notUtf8", sides: "middle" }] },
+    "expected one of left, right, both",
+  ],
   ["an unknown file kind", { start: EMPTY.start, files: [{ kind: "nope" }] }, "kind"],
   [
     "a negative file id",

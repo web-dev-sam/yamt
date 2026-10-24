@@ -1,7 +1,7 @@
 import * as v from "valibot";
 
 import type * as Generated from "./bindings";
-import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
+import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 import {
@@ -26,7 +26,20 @@ const DEFAULT_CASE = "review";
 
 const NULL_SHORT_ID = "0000000";
 
-const ENTRY_KIND = v.picklist(["file", "executable", "link", "submodule"]);
+const ENTRY_KINDS: Readonly<Record<Generated.RangeEntryKind, true>> = {
+  file: true,
+  executable: true,
+  link: true,
+  submodule: true,
+};
+
+const RANGE_SIDES: Readonly<Record<Generated.RangeSides, true>> = {
+  left: true,
+  right: true,
+  both: true,
+};
+
+const ENTRY_KIND = memberOf(ENTRY_KINDS);
 
 const RANGE_SIDE: v.GenericSchema<Generated.RangeSide> = v.object({
   label: v.variant("kind", [
@@ -52,12 +65,6 @@ const RANGE_ENTRY: v.GenericSchema<Generated.RangeEntry> = v.object({
   ]),
 });
 
-const DIFFERENCE: v.GenericSchema<Generated.Difference> = v.object({
-  left: LINE_RANGE,
-  right: LINE_RANGE,
-  words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
-});
-
 const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
   v.object({
     kind: v.literal("texts"),
@@ -71,7 +78,7 @@ const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
   }),
   v.object({ kind: v.literal("binary") }),
   v.object({ kind: v.literal("tooLarge"), limit: v.number() }),
-  v.object({ kind: v.literal("notUtf8"), sides: v.picklist(["left", "right", "both"]) }),
+  v.object({ kind: v.literal("notUtf8"), sides: memberOf(RANGE_SIDES) }),
   v.object({ kind: v.literal("modeOnly"), old: ENTRY_KIND, new: ENTRY_KIND }),
   v.object({ kind: v.literal("kindChanged"), old: ENTRY_KIND, new: ENTRY_KIND }),
   v.object({
@@ -90,18 +97,6 @@ const CASE = v.object({
   }),
   files: v.array(RANGE_FILE),
 });
-
-function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
-  return new Map(
-    Object.entries(files).map(([file, json]) => [
-      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
-      parsedFixture(CASE, `range fixture ${file}`, json, ({ start, files: loaded }) => ({
-        start: toRangeStart(start),
-        files: loaded.map(toRangeFile),
-      })),
-    ]),
-  );
-}
 
 function missingCase(name: string): Case {
   const side: RangeSide = {
@@ -128,7 +123,11 @@ export function createFixtureRangeSource(
   search: string,
   files: Readonly<Record<string, unknown>> = CASE_FILES,
 ): RangeSource {
-  const shown = shownCase(log, search, parseCases(files));
+  const cases = parsedCases(CASE, "range fixture", files, ({ start, files: loaded }) => ({
+    start: toRangeStart(start),
+    files: loaded.map(toRangeFile),
+  }));
+  const shown = shownCase(log, search, cases);
   return {
     async openRange() {
       return { ok: true, value: shown.start };

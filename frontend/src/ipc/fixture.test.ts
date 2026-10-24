@@ -2,7 +2,7 @@ import * as v from "valibot";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { ChunkSource } from "./ChunkSource";
-import { createFixtureSource, loadFixture } from "./fixture";
+import { createFixtureSource, loadFixture, parsedCases } from "./fixture";
 import type { DiskChange, DiskVersion, FileEntry, Side, SourceResult } from "./index";
 import { createLog, type Log, type LogEntry } from "./log";
 
@@ -758,5 +758,17 @@ test("loadFixture reads a committed or an in-memory record and rejects an unknow
   expect(await loadFixture("a.ts", { "a.json": record("a.ts") })).toEqual(loaded("a.ts"));
   await expect(loadFixture("nope.ts", { "a.json": record("a.ts") })).rejects.toThrow(
     "no fixture for nope.ts",
+  );
+});
+
+test("parsedCases names each case by its file name without the last .json", () => {
+  const cases = parsedCases(v.string(), "case", { "../a.json/v1.jsonc.json": "x" }, (text) => text);
+
+  expect([...cases]).toEqual([["v1.jsonc", "x"]]);
+});
+
+test("parsedCases names the file in a parse failure", () => {
+  expect(() => parsedCases(v.string(), "range fixture", { "bad.json": 1 }, (text) => text)).toThrow(
+    /^range fixture bad\.json: /,
   );
 });

@@ -48,14 +48,14 @@ const NOT_TEXT: Readonly<Record<Generated.NotText, true>> = {
   Directory: true,
 };
 
-function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
+export function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
   return v.custom<T>(
     (input) => typeof input === "string" && Object.hasOwn(members, input),
     `expected one of ${Object.keys(members).join(", ")}`,
   );
 }
 
-export const LINE_RANGE = v.object({
+const LINE_RANGE = v.object({
   start: v.number(),
   len: v.number(),
 } satisfies SchemaOf<Generated.LineRange<number>>);
@@ -84,10 +84,16 @@ const REMOVAL = v.object({
   text: v.string(),
 } satisfies SchemaOf<Generated.Removal<number>>);
 
-export const SIDE_WORD_CHANGES = v.object({
+const SIDE_WORD_CHANGES = v.object({
   changed: v.array(INLINE_RANGE),
   removals: v.array(REMOVAL),
 } satisfies SchemaOf<Generated.SideWordChanges<number>>);
+
+export const DIFFERENCE = v.object({
+  left: LINE_RANGE,
+  right: LINE_RANGE,
+  words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
+} satisfies SchemaOf<Generated.Difference>);
 
 const WORD_CHANGES = v.object({
   chunk: v.number(),
@@ -132,7 +138,7 @@ const FILE_MERGE_DATA = v.object({
   disk_version: v.number(),
 } satisfies SchemaOf<Generated.FileMergeData>);
 
-export function parsedFixture<O, T>(
+function parsedFixture<O, T>(
   schema: v.GenericSchema<unknown, O>,
   name: string,
   json: unknown,
@@ -149,6 +155,20 @@ export function parsedFixture<O, T>(
       cause: error,
     });
   }
+}
+
+export function parsedCases<O, T>(
+  schema: v.GenericSchema<unknown, O>,
+  label: string,
+  files: Readonly<Record<string, unknown>>,
+  convert: (parsed: O) => T,
+): Map<string, T> {
+  return new Map(
+    Object.entries(files).map(([file, json]) => [
+      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
+      parsedFixture(schema, `${label} ${file}`, json, convert),
+    ]),
+  );
 }
 
 function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, FileMergeData> {
