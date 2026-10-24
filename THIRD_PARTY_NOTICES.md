@@ -25,6 +25,12 @@ release jobs regenerate it and fail when the committed copy is out of date.
   Studio Code (MIT, Microsoft Corporation; `minimapPreBaked.ts`, `minimapCharSheet.ts`) into
   `frontend/src/editor/internal/minimapGlyphs.ts`; `minimapLayout.ts` and `minimapPixels.ts` follow its minimap
   layout and glyph drawing (`minimap.ts`, `minimapCharRenderer.ts`).
+- **Theme colours**: hand-checked. The eight editor themes in `frontend/src/themes/` hold colour values (no
+  code) read from each editor's theme files, and every value names its file: Visual Studio Code 1.143's
+  `theme-defaults` (MIT, Microsoft Corporation); Atom 1.60's One themes and its `github` package (MIT, GitHub
+  Inc.); Zed 1.25's One themes (`assets/themes/one`, MIT, GitHub Inc.), with Zed's own defaults for the keys
+  they leave out; WebStorm 2026.2's Islands themes and colour schemes from the IntelliJ Platform
+  (`intellij-community`, Apache-2.0, JetBrains s.r.o.).
 - **System libraries in the AppImage**: the Linux AppImage carries the GTK and WebKitGTK libraries of the
   Ubuntu 22.04 build machine (LGPL-2.1-or-later and other licenses). The full-text file names their Ubuntu
   source packages; the release job appends the installed versions and the GNU LGPL and GPL texts before
@@ -45,3 +51,4 @@ If a package has neither a license file nor a license the script knows, the scri
 | [vscode-icons](https://github.com/vscode-icons/vscode-icons)                                        | file-type icons                        | MIT, Roberto Huertas        |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) via `@fontsource/jetbrains-mono` 5.3.0 | the editor font                        | OFL-1.1, notice in the file |
 | [Visual Studio Code](https://github.com/microsoft/vscode) minimap                                   | the Result's minimap                   | MIT, Microsoft Corporation  |
+| Theme colours of Visual Studio Code, Atom, Zed and WebStorm                                         | the eight editor themes                | MIT; Apache-2.0 (WebStorm)  |

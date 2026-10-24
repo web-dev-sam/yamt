@@ -229,7 +229,7 @@ icon_entries() {
     standard_text MIT "2013-present Cole Bemis"
 }
 
-# Code copied into yamt's own sources (no package carries it): holder and licence hand-checked.
+# Code and theme colours copied into yamt's own sources (no package carries them): holder and licence hand-checked.
 copied_entries() {
     printf '\n---- Visual Studio Code minimap (MIT) ----\n\n'
     printf 'frontend/src/editor/internal/minimapGlyphs.ts holds the prebaked minimap glyph intensities and the\n'
@@ -237,6 +237,26 @@ copied_entries() {
     printf 'glyph drawing (microsoft/vscode 789f2c470d13c4760f2b5cc6a9e1919c05d04f7d, src/vs/editor/browser/viewParts/\n'
     printf 'minimap/minimapPreBaked.ts, minimapCharSheet.ts, minimapCharRenderer.ts and minimap.ts):\n\n'
     standard_text MIT "2015 - present Microsoft Corporation"
+    printf '\n---- Visual Studio Code theme colours (MIT) ----\n\n'
+    printf 'frontend/src/themes/vscode-dark.css and vscode-light.css hold colour values of Visual Studio Code 1.143.0'"'"'s\n'
+    printf 'Dark 2026 and Light 2026 (microsoft/vscode extensions/theme-defaults/themes/ and the registered defaults); the\n'
+    printf 'licence is the one quoted for the minimap above (2015 - present Microsoft Corporation).\n'
+    printf '\n---- Atom One Dark and One Light theme colours (MIT) ----\n\n'
+    printf 'frontend/src/themes/atom-dark.css and atom-light.css hold colour values of atom/atom v1.60.0 (packages\n'
+    printf 'one-dark-syntax, one-light-syntax, one-dark-ui, one-light-ui, git-diff), atom/notifications v0.72.1 and\n'
+    printf 'atom/github v0.36.9 (copyright 2014 GitHub Inc.: one-dark-ui, one-light-ui, git-diff, notifications;\n'
+    printf '2016 GitHub Inc.: one-dark-syntax, one-light-syntax, github):\n\n'
+    standard_text MIT "2014, 2016 GitHub Inc."
+    printf '\n---- Zed One Dark and One Light theme colours (MIT) ----\n\n'
+    printf 'frontend/src/themes/zed-dark.css and zed-light.css hold colour values of zed-industries/zed v1.25.3\n'
+    printf 'assets/themes/one/one.json (licence: assets/themes/one/LICENSE) and Zed'"'"'s defaults for the keys it leaves out:\n\n'
+    standard_text MIT "2014 GitHub Inc."
+    printf '\n---- WebStorm Islands Dark and Islands Light theme colours (Apache-2.0) ----\n\n'
+    printf 'frontend/src/themes/webstorm-dark.css and webstorm-light.css hold colour values of WebStorm 2026.2'"'"'s Islands\n'
+    printf 'themes and colour schemes, which are part of the IntelliJ Platform (JetBrains/intellij-community\n'
+    printf 'idea/262.10968.63, platform/platform-resources/src/themes/), licensed under the Apache License 2.0 (its text\n'
+    printf 'is quoted above, for example under tao). Its NOTICE.txt:\n\n'
+    printf 'This software includes code from IntelliJ IDEA\nCopyright (C) JetBrains s.r.o.\nhttps://www.jetbrains.com/idea/\n'
 }
 
 ubuntu_section() {
