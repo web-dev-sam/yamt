@@ -1,4 +1,5 @@
 use yamt_compare::{MAX_COLUMN_BYTES, TabId};
+use yamt_range::RangeFileId;
 use yamt_session::UnsupportedReason;
 
 #[derive(Debug, serde::Serialize, specta::Type)]
@@ -43,6 +44,9 @@ pub enum IpcError {
     },
     ColumnTooLarge {
         limit: u32,
+    },
+    UnknownRangeFile {
+        file: RangeFileId,
     },
     WorkerStopped,
 }
@@ -116,6 +120,24 @@ impl From<yamt_compare::Error> for IpcError {
             yamt_compare::Error::UnknownTab { tab } => IpcError::UnknownTab { tab },
             yamt_compare::Error::TooLarge { .. } => IpcError::ColumnTooLarge {
                 limit: MAX_COLUMN_BYTES,
+            },
+        }
+    }
+}
+
+impl From<yamt_range::Error> for IpcError {
+    fn from(error: yamt_range::Error) -> IpcError {
+        match error {
+            yamt_range::Error::UnknownFile { file } => IpcError::UnknownRangeFile { file },
+            yamt_range::Error::Git(source) => IpcError::Git {
+                message: source.to_string(),
+            },
+            yamt_range::Error::NotARepository { .. }
+            | yamt_range::Error::UnknownName { .. }
+            | yamt_range::Error::NoMergeBase { .. }
+            | yamt_range::Error::Locked { .. }
+            | yamt_range::Error::LockFailed { .. } => IpcError::Git {
+                message: error.to_string(),
             },
         }
     }
@@ -299,6 +321,29 @@ mod tests {
         assert_eq!(
             compare_json(yamt_compare::Error::UnknownTab { tab: TabId(7) }),
             json!({ "kind": "UnknownTab", "tab": 7 })
+        );
+    }
+
+    fn range_json(error: yamt_range::Error) -> Value {
+        serde_json::to_value(IpcError::from(error)).unwrap()
+    }
+
+    #[test]
+    fn an_unknown_range_file_has_its_kind_and_a_start_refusal_is_its_line() {
+        let unknown = yamt_range::Error::UnknownFile {
+            file: RangeFileId(9),
+        };
+        assert_eq!(
+            range_json(unknown),
+            json!({ "kind": "UnknownRangeFile", "file": 9 })
+        );
+        let no_base = yamt_range::Error::NoMergeBase {
+            left: "main".to_owned(),
+            right: "other".to_owned(),
+        };
+        assert_eq!(
+            range_json(no_base),
+            json!({ "kind": "Git", "message": "main and other have no merge base" })
         );
     }
 }

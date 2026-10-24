@@ -1,5 +1,5 @@
 //! Desktop shell: one window over a `MergeSession`, whose exit status says whether the merge is resolved, or
-//! with `--diff` one compare window over the stored tabs.
+//! with `--diff` one compare window over the stored tabs, or with `--diff=<range>` one read-only commit range.
 
 #[cfg(target_os = "linux")]
 mod appimage;
@@ -17,6 +17,7 @@ mod merge;
 #[cfg(test)]
 mod mock_window;
 mod outcome;
+mod range;
 mod servers;
 mod settings;
 mod window;
@@ -52,6 +53,11 @@ pub fn run() -> ExitCode {
             #[cfg(target_os = "linux")]
             let repo = appimage::repo_from_start_dir(repo);
             merge(&repo).report()
+        }
+        Ok(Invocation::Range { spec, repo }) => {
+            #[cfg(target_os = "linux")]
+            let repo = appimage::repo_from_start_dir(repo);
+            range::run_range(&repo, &spec).report()
         }
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }

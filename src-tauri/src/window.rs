@@ -43,9 +43,10 @@ const PAGE_ANSWER: &str = "true";
 
 /// Which page the window shows: `<html data-window>` before the first frame (plan §2 #94).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowKind {
+pub(crate) enum WindowKind {
     Merge,
     Compare,
+    Range,
 }
 
 impl WindowKind {
@@ -53,6 +54,7 @@ impl WindowKind {
         match self {
             WindowKind::Merge => "merge",
             WindowKind::Compare => "compare",
+            WindowKind::Range => "range",
         }
     }
 }
@@ -72,7 +74,7 @@ pub(crate) fn run_compare() -> Ending {
     }
 }
 
-fn context() -> tauri::Context<tauri::Wry> {
+pub(crate) fn context() -> tauri::Context<tauri::Wry> {
     tauri::generate_context!()
 }
 
@@ -100,7 +102,7 @@ fn open_compare() -> tauri::Result<Ending> {
     })
 }
 
-fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
+pub(crate) fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
     let stored = start_settings(app.path());
     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
     #[cfg(target_os = "linux")]
@@ -163,7 +165,7 @@ fn start_script(theme: Theme, kind: WindowKind) -> String {
     )
 }
 
-fn window_title(root: &Path) -> String {
+pub(crate) fn window_title(root: &Path) -> String {
     let folder = root.file_name().unwrap_or(root.as_os_str());
     format!("{} — yamt", folder.to_string_lossy())
 }
@@ -280,6 +282,10 @@ mod tests {
         assert_eq!(
             start_script(Theme::ZedLight, WindowKind::Merge),
             r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
+        );
+        assert_eq!(
+            start_script(Theme::Dark, WindowKind::Range),
+            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range";"#
         );
     }
 

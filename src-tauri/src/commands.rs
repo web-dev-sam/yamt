@@ -6,7 +6,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{clipboard, compare, servers, settings};
+use crate::{clipboard, compare, range, servers, settings};
 
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
@@ -42,6 +42,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         compare::rename_tab,
         compare::set_tab_language,
         compare::show_tab,
+        range::open_range,
+        range::load_range_file::<tauri::Wry>,
         clipboard::read_clipboard::<tauri::Wry>,
     ])
 }
@@ -62,6 +64,11 @@ pub(crate) fn with_session<R: Runtime>(
 
 /// The compare window's commands; its `CompareState` is managed once the data folder is known.
 pub(crate) fn with_compare<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder.invoke_handler(specta_builder().invoke_handler())
+}
+
+/// The range window's commands; its `RangeState` is managed once the data folder is known.
+pub(crate) fn with_range<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.invoke_handler(specta_builder().invoke_handler())
 }
 
