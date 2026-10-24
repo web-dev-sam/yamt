@@ -23,25 +23,7 @@
       "frontend/src/ipc/index.ts"
     ]
   },
-  "RVWindowR1": {
-    "owned": [
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/useRangeController.ts",
-      "frontend/src/ui/useRangeController.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/RangeView.vue",
-      "frontend/src/ui/RangeApp.vue",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts",
-      "frontend/scripts/app-session/args.ts",
-      "frontend/scripts/app-session/args.test.ts",
-      "frontend/scripts/app-session/startArgs.ts",
-      "frontend/scripts/app-session/start.ts",
-      "frontend/scripts/app-session/video.ts"
-    ]
+  "RVThreadsR1": {
+    "owned": ["crates/review/**"]
   }
 }
