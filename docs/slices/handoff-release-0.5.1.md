@@ -6,9 +6,12 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
 ## Where things stand
 
 - `main` holds the merge of `feat/themes` (`732b709`), the licence notices for the copied theme colours (`e45c6cd`),
-  the release commit `d652757` (version 0.5.1, changelog, README file names) and the board update after the final
-  run. Nothing is pushed: `origin/main` is still at `v0.5.0` (`17849b0`). The tag goes on the head of `main`.
-- The final run before tagging is on the board ("Release 0.5.1" row 2, notes `.omp/run/notes/Release051Verify.md`).
+  the release commit `d652757` (version 0.5.1, changelog, README file names), the Windows test fix `3b45909` (the
+  0.5.0 `windows-2025` ci failure, #1623; tests only) and the board updates. Nothing is pushed: `origin/main` is
+  still at `v0.5.0` (`17849b0`). The tag goes on the head of `main`.
+- The final runs before tagging are on the board ("Release 0.5.1" row 2, "Windows CI" row 2; notes
+  `.omp/run/notes/Release051Verify.md`, `WindowsTestsVerify.md`). No Windows machine here: the `windows-2025` job in
+  step 1 is the first real Windows run of the fix.
 - Not in 0.5.1: a settings file broken at start shows no problem (finding #1619, older than 0.5.0; board "Themes"
   row 4').
 
@@ -16,7 +19,7 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
 
 1. **Push `main` and wait for CI:** `git push origin main`. Wait until the "ci" run for the new head is green on all four
    jobs (frontend, ubuntu-22.04, macos-14, windows-2025) at https://github.com/web-dev-sam/yamt/actions. If one is
-   red, stop and tell the main session.
+   red, stop and tell the main session: do not tag (the 0.5.0 tag went out with `windows-2025` red).
 2. **Tag and push** (one line): `git tag -a v0.5.1 -m "yamt 0.5.1" && git push origin v0.5.1`. The "release" run
    builds 0.5.1 (`draft-release` and three `build` jobs: Linux, macOS universal, Windows).
 3. **Check the draft** at https://github.com/web-dev-sam/yamt/releases: `yamt_0.5.1_amd64.AppImage`,
