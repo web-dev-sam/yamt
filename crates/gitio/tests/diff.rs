@@ -389,6 +389,22 @@ fn merge_base_is_the_fork_point_and_none_for_unrelated_histories() {
 }
 
 #[test]
+fn a_name_that_is_not_a_commit_is_git_s_failure_with_its_message() {
+    let dir = diverged_repo(&[regular("a.txt", Some(b"base\n"), Some(b"local\n"))]).unwrap();
+    let root = dir.path();
+    let repo = Repo::discover(root).unwrap();
+    git_ok(root, &["tag", "treetag", "HEAD^{tree}"]).unwrap();
+
+    let named = repo.commit_named("treetag");
+
+    assert!(
+        matches!(&named, Err(Error::GitFailed { status: Some(1), stderr, .. })
+            if stderr.contains("expected commit type")),
+        "{named:?}"
+    );
+}
+
+#[test]
 fn blob_sizes_answer_in_order_and_missing_as_none() {
     let dir = diverged_repo(&[regular("a.txt", Some(b"abc"), Some(b""))]).unwrap();
     let root = dir.path();

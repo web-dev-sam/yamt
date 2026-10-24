@@ -5,6 +5,7 @@ use crate::{Error, Result};
 
 const BRANCH: &str = "branch";
 const LOG: &str = "log";
+const REV_PARSE: &str = "rev-parse";
 const MERGE_MSG: &str = "MERGE_MSG";
 const NON_SYMBOLIC_SHORT_NAME: &str =
     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
@@ -40,11 +41,23 @@ impl Repo {
             "refs/remotes",
         ];
         let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
-        let names = output.split(|&byte| byte == b'\n');
-        Ok(names
-            .filter(|name| !name.is_empty())
-            .map(<[u8]>::to_vec)
-            .collect())
+        Ok(non_empty_lines(&output))
+    }
+
+    /// The ref `name` stands for (`refs/heads/x`, `refs/remotes/origin/x`, `HEAD` when detached…); `None` for a
+    /// commit id or an expression such as `HEAD~2`. `--verify` refuses a range or an option: `GitFailed`.
+    pub fn symbolic_full_name(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        let args = [REV_PARSE, "--verify", "--symbolic-full-name", name];
+        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+        if output.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(without_final_newline(REV_PARSE, output)?))
+    }
+
+    pub fn remote_names(&self) -> Result<Vec<Vec<u8>>> {
+        let output = run(self.command(Access::Read, &["remote"]), None, GIT_TIMEOUT)?;
+        Ok(non_empty_lines(&output))
     }
 
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
@@ -76,4 +89,12 @@ impl Repo {
             message: message.to_vec(),
         })
     }
+}
+
+fn non_empty_lines(output: &[u8]) -> Vec<Vec<u8>> {
+    let lines = output.split(|&byte| byte == b'\n');
+    lines
+        .filter(|line| !line.is_empty())
+        .map(<[u8]>::to_vec)
+        .collect()
 }
