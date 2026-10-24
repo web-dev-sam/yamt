@@ -29,6 +29,7 @@ yamt-settings.workspace = true
 yamt-lsp-host.workspace = true
 yamt-compare.workspace = true
 yamt-range.workspace = true
+yamt-review.workspace = true
 serde.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true

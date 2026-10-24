@@ -4611,6 +4611,7 @@ dependencies = [
  "yamt-conflict-repo",
  "yamt-lsp-host",
  "yamt-range",
+ "yamt-review",
  "yamt-session",
  "yamt-settings",
 ]
@@ -4690,6 +4691,21 @@ dependencies = [
  "yamt-conflict-repo",
  "yamt-gitio",
  "yamt-merge-core",
+]
+
+[[package]]
+name = "yamt-review"
+version = "0.5.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "yamt-conflict-repo",
+ "yamt-merge-core",
+ "yamt-range",
 ]
 
 [[package]]

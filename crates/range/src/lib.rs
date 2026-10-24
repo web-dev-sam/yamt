@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use yamt_gitio::Oid;
 use yamt_merge_core::Difference;
 
 pub use crate::lock::PairLock;
@@ -61,6 +62,14 @@ pub struct RangeEntry {
     pub path: String,
     pub change: RangeChange,
     pub lines: RangeLineCounts,
+}
+
+/// The two commits the range compares, and how the right one was named.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Compared {
+    pub left: Oid,
+    pub right: Oid,
+    pub right_label: RangeSideLabel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]

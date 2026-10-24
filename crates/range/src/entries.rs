@@ -8,10 +8,9 @@ const EXECUTABLE_MODE: u32 = 0o100_755;
 const LINK_MODE: u32 = 0o120_000;
 const GITLINK_MODE: u32 = 0o160_000;
 
-/// A changed file as the range holds it: its row, and both sides' blobs as listed.
+/// A changed file's two sides as the range holds them: both blobs as listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FileAt {
-    pub(crate) entry: RangeEntry,
     pub(crate) old: Option<BlobAt>,
     pub(crate) new: Option<BlobAt>,
     pub(crate) binary: bool,
@@ -58,21 +57,28 @@ pub(crate) fn blob_ids(changed: &[ChangedFile]) -> Vec<Oid> {
     ids
 }
 
-/// One `FileAt` per changed file, ids in list order; `sizes` answer `blob_ids(&changed)` in its order.
-pub(crate) fn files_at(changed: Vec<ChangedFile>, sizes: Vec<Option<u64>>) -> Vec<FileAt> {
+/// One row per changed file, ids in list order.
+pub(crate) fn entries_at(changed: &[ChangedFile]) -> Vec<RangeEntry> {
+    (0..)
+        .zip(changed)
+        .map(|(id, file)| RangeEntry {
+            id: RangeFileId(id),
+            path: display_path(&file.change),
+            change: range_change(&file.change),
+            lines: line_counts(file.numstat),
+        })
+        .collect()
+}
+
+/// One `FileAt` per changed file, in list order; `sizes` answer `blob_ids(&changed)` in its order.
+pub(crate) fn files_at(changed: &[ChangedFile], sizes: Vec<Option<u64>>) -> Vec<FileAt> {
     let mut sizes = sizes.into_iter();
     let mut files = Vec::with_capacity(changed.len());
-    for (id, file) in (0..).zip(changed) {
+    for file in changed {
         let (old, new) = sides(&file.change);
         let old = old.map(|side| blob_at(side, &mut sizes));
         let new = new.map(|side| blob_at(side, &mut sizes));
         files.push(FileAt {
-            entry: RangeEntry {
-                id: RangeFileId(id),
-                path: display_path(&file.change),
-                change: range_change(&file.change),
-                lines: line_counts(file.numstat),
-            },
             old,
             new,
             binary: file.numstat == Numstat::Binary,
@@ -213,10 +219,7 @@ mod tests {
     fn rows_are_sorted_by_path_and_a_deleted_row_is_named_by_its_old_path() {
         let mut changed = listing();
         sort_by_display_path(&mut changed);
-        let entries: Vec<RangeEntry> = files_at(changed, vec![Some(1); 4])
-            .into_iter()
-            .map(|file| file.entry)
-            .collect();
+        let entries = entries_at(&changed);
 
         let entry = |id, path: &str, change, lines| RangeEntry {
             id: RangeFileId(id),
@@ -249,7 +252,7 @@ mod tests {
         let ids = blob_ids(&changed);
         assert_eq!(ids, [FIRST, SECOND, THIRD, FIRST, SECOND].map(oid));
 
-        let files = files_at(changed, vec![Some(10), Some(20), Some(30), None, Some(50)]);
+        let files = files_at(&changed, vec![Some(10), Some(20), Some(30), None, Some(50)]);
 
         let blobs: Vec<(Option<BlobAt>, Option<BlobAt>, bool)> = files
             .into_iter()
