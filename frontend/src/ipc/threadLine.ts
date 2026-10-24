@@ -8,19 +8,23 @@ export type ThreadLine =
   | { readonly kind: "unchangedOnLeft"; readonly left: LeftLine; readonly right: RightLine }
   | { readonly kind: "unchangedOnRight"; readonly left: LeftLine; readonly right: RightLine };
 
-export function shownColumn(line: ThreadLine): Column {
+export function shownLine(line: ThreadLine): { readonly column: Column; readonly line: number } {
   switch (line.kind) {
     case "removed":
     case "unchangedOnLeft":
-      return "left";
+      return { column: "left", line: line.left };
     case "added":
     case "unchangedOnRight":
-      return "right";
+      return { column: "right", line: line.right };
     default: {
       const _exhaustive: never = line;
       return _exhaustive;
     }
   }
+}
+
+export function shownColumn(line: ThreadLine): Column {
+  return shownLine(line).column;
 }
 
 function leftLine(n: number): LeftLine {

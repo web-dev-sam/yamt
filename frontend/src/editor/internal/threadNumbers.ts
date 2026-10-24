@@ -3,11 +3,12 @@ import {
   type EditorState,
   type Extension,
   type RangeSet,
+  type Text,
 } from "@codemirror/state";
 import { EditorView, GutterMarker, lineNumberMarkers, lineNumbers } from "@codemirror/view";
 import messageSquarePlusIcon from "~icons/lucide/message-square-plus?raw";
 
-import { shownColumn, type Column, type Difference, type ThreadLine } from "../../ipc";
+import { shownLine, type Column, type Difference, type ThreadLine } from "../../ipc";
 import { anchorAt } from "./threadAnchor";
 import { threadField, type LineCount } from "./threadField";
 import type { ShownThread } from "./threadRows";
@@ -18,31 +19,23 @@ export type NumberPress =
 
 const COUNT_CLASS = "cm-thread-count";
 
-function lineInShownColumn(line: ThreadLine): number {
-  switch (line.kind) {
-    case "removed":
-    case "unchangedOnLeft":
-      return line.left;
-    case "added":
-    case "unchangedOnRight":
-      return line.right;
-    default: {
-      const _exhaustive: never = line;
-      return _exhaustive;
-    }
-  }
-}
-
 export function lineCounts(threads: readonly ShownThread[], column: Column): LineCount[] {
   const counts = new Map<number, string[]>();
   for (const thread of threads) {
-    if (thread.shown === "draft" || shownColumn(thread.line) !== column) {
+    const shown = shownLine(thread.line);
+    if (thread.shown === "draft" || shown.column !== column) {
       continue;
     }
-    const line = lineInShownColumn(thread.line);
-    counts.set(line, [...(counts.get(line) ?? []), thread.key]);
+    counts.set(shown.line, [...(counts.get(shown.line) ?? []), thread.key]);
   }
   return [...counts].map(([line, keys]) => ({ line, keys })).sort((a, b) => a.line - b.line);
+}
+
+export function pressedLine(doc: Text, from: number): number | null {
+  const lastIsEmpty = doc.line(doc.lines).length === 0;
+  const gitLines = lastIsEmpty ? doc.lines - 1 : doc.lines;
+  const line = doc.lineAt(from).number - 1;
+  return line < gitLines ? line : null;
 }
 
 export function numberPress(press: {
@@ -124,7 +117,10 @@ export function threadNumbers(
           if (target.closest(".cm-gutterElement") === null) {
             return false;
           }
-          const line = view.state.doc.lineAt(block.from).number - 1;
+          const line = pressedLine(view.state.doc, block.from);
+          if (line === null) {
+            return false;
+          }
           pressed(view, line, target.closest(`.${COUNT_CLASS}`) !== null);
           return true;
         },

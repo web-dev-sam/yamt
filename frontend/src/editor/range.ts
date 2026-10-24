@@ -63,7 +63,6 @@ export class RangeController {
     this.#differences = texts.differences;
     this.#events = events;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };
-    this.#threadHosts = new ThreadHosts({ views: () => this.#views, columns: hosts });
     this.#views = createReadOnlyColumnViews(texts, hosts, {
       settings: this.#settings,
       updated: (_column, update) => {
@@ -77,7 +76,7 @@ export class RangeController {
         }),
       ],
     });
-    this.#threadHosts.watchColumns();
+    this.#threadHosts = new ThreadHosts({ views: this.#views, columns: hosts });
     this.#strip = new CompareStrip(hosts.strip);
     this.#frame = new CompareFrame({
       views: this.#views,

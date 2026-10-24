@@ -18,7 +18,7 @@ function px(value: number): string {
 }
 
 export class ThreadHosts implements RowCells {
-  readonly #views: () => ThreadViews;
+  readonly #views: ThreadViews;
   readonly #columns: ColumnHosts;
   readonly #hosts = new Map<string, HTMLElement>();
   readonly #measured = new Map<string, number>();
@@ -34,27 +34,19 @@ export class ThreadHosts implements RowCells {
   #focused: HTMLElement | null = null;
   #focusLost = false;
 
-  constructor({
-    views,
-    columns,
-  }: {
-    readonly views: () => ThreadViews;
-    readonly columns: ColumnHosts;
-  }) {
+  constructor({ views, columns }: { readonly views: ThreadViews; readonly columns: ColumnHosts }) {
     this.#views = views;
     this.#columns = columns;
-    document.addEventListener("focusin", this.#focusIn, true);
-  }
-
-  watchColumns(): void {
     for (const column of COLUMNS) {
-      const { scrollDOM } = this.#views()[column];
+      const { scrollDOM } = views[column];
       this.#observer.observe(scrollDOM);
       const gutters = scrollDOM.querySelector(":scope > .cm-gutters");
       if (gutters !== null) {
         this.#observer.observe(gutters);
       }
     }
+    document.addEventListener("focusin", this.#focusIn, true);
+    document.addEventListener("pointerdown", this.#pointerDown, true);
   }
 
   height(row: string): number {
@@ -127,6 +119,7 @@ export class ThreadHosts implements RowCells {
   destroy(): void {
     this.#observer.disconnect();
     document.removeEventListener("focusin", this.#focusIn, true);
+    document.removeEventListener("pointerdown", this.#pointerDown, true);
     for (const host of this.#hosts.values()) {
       host.remove();
     }
@@ -140,11 +133,22 @@ export class ThreadHosts implements RowCells {
 
   readonly #focusIn = (event: FocusEvent): void => {
     const { target } = event;
-    const host = target instanceof HTMLElement ? target.closest(`.${HOST_CLASS}`) : null;
-    const ours = host !== null && this.#hosts.get(host.getAttribute(KEY_ATTRIBUTE) ?? "") === host;
-    this.#focused = ours && target instanceof HTMLElement ? target : null;
+    this.#focused = target instanceof HTMLElement && this.#inHost(target) ? target : null;
     this.#focusLost = false;
   };
+
+  readonly #pointerDown = (event: PointerEvent): void => {
+    const { target } = event;
+    if (!(target instanceof Element && this.#inHost(target))) {
+      this.#focused = null;
+      this.#focusLost = false;
+    }
+  };
+
+  #inHost(target: Element): boolean {
+    const host = target.closest(`.${HOST_CLASS}`);
+    return host !== null && this.#hosts.get(host.getAttribute(KEY_ATTRIBUTE) ?? "") === host;
+  }
 
   #create(key: string): void {
     const host = document.createElement("div");
@@ -183,7 +187,7 @@ export class ThreadHosts implements RowCells {
 
   #placeColumns(): void {
     for (const column of COLUMNS) {
-      const { contentDOM, scrollDOM } = this.#views()[column];
+      const { contentDOM, scrollDOM } = this.#views[column];
       const left =
         contentDOM.getBoundingClientRect().left -
         scrollDOM.getBoundingClientRect().left +
@@ -211,7 +215,7 @@ export class ThreadHosts implements RowCells {
     }
     if (changed) {
       for (const column of COLUMNS) {
-        this.#views()[column].requestMeasure();
+        this.#views[column].requestMeasure();
       }
     }
   }

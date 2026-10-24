@@ -54,3 +54,12 @@ test("a line just past a pure insertion is unchanged, the last inserted line add
   });
   expect(anchorAt(differences, "left", 3)).toEqual({ kind: "unchangedOnLeft", left: 3, right: 5 });
 });
+
+test("every line of an added file's right column is added", async () => {
+  const differences = await differencesOf([
+    { left: { start: 0, len: 0 }, right: { start: 0, len: 2 } },
+  ]);
+
+  expect(anchorAt(differences, "right", 0)).toEqual({ kind: "added", right: 0 });
+  expect(anchorAt(differences, "right", 1)).toEqual({ kind: "added", right: 1 });
+});

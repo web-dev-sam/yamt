@@ -1,11 +1,10 @@
 import { StateEffect, StateField, type EditorState, type Text } from "@codemirror/state";
-import { BlockType, Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
 
-import type { Span } from "../../connectors";
 import type { Column } from "../../ipc";
-import type { LineBlock } from "./compareFrame";
+import { textBlock, type LineBlock } from "./compareFrame";
 import { contentEnd, type Anchor } from "./scrollSync";
-import type { ThreadRow } from "./threadRows";
+import { sitsBeforePlace, type ThreadRow } from "./threadRows";
 import { ThreadRowWidget, type RowCells } from "./threadWidget";
 
 export type LineCount = { readonly line: number; readonly keys: readonly string[] };
@@ -29,8 +28,10 @@ export function rowDecorations(doc: Text, threads: ColumnThreads | null): Decora
   const widgets = rows.map((row, index) => {
     const widget = new ThreadRowWidget(row, column, cells);
     const place = Math.min(row.place[column], doc.lines);
-    return place === 0
-      ? Decoration.widget({ widget, block: true, side: index - rows.length }).range(0)
+    return sitsBeforePlace(row, column) && place < doc.lines
+      ? Decoration.widget({ widget, block: true, side: index - rows.length }).range(
+          doc.line(place + 1).from,
+        )
       : Decoration.widget({ widget, block: true, side: 1 + index }).range(doc.line(place).to);
   });
   return Decoration.set(widgets, true);
@@ -53,13 +54,6 @@ export const threadField = StateField.define<ColumnThreads | null>({
     ),
 });
 
-function textBlock(block: LineBlock): Span {
-  if (typeof block.type === "number") {
-    return block;
-  }
-  return block.type.find((part) => part.type === BlockType.Text) ?? block;
-}
-
 function bottomAbove(view: AnchorView, place: number): number {
   const { doc } = view.state;
   return textBlock(view.lineBlockAt(doc.line(Math.min(place, doc.lines)).from)).bottom;
@@ -75,7 +69,7 @@ function topBelow(view: AnchorView, place: number): number {
 export function threadAnchors(views: Readonly<Record<Column, AnchorView>>): Anchor<Column>[] {
   const rows = views.left.state.field(threadField, false)?.rows ?? [];
   return rows
-    .filter((row) => row.unchanged)
+    .filter((row) => row.kind === "unchanged")
     .flatMap(({ place }) => [
       { left: bottomAbove(views.left, place.left), right: bottomAbove(views.right, place.right) },
       { left: topBelow(views.left, place.left), right: topBelow(views.right, place.right) },

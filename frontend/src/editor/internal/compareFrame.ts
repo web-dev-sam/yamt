@@ -1,6 +1,6 @@
 import { searchPanelOpen } from "@codemirror/search";
 import type { StateField } from "@codemirror/state";
-import type { BlockType, ViewUpdate } from "@codemirror/view";
+import { BlockType, type ViewUpdate } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
 import type { Column } from "../../ipc";
@@ -25,8 +25,23 @@ type CompareLayout = {
   readonly anchors: readonly Anchor<Column>[];
 };
 
+export function textBlock(block: LineBlock): Span {
+  if (typeof block.type === "number") {
+    return block;
+  }
+  return block.type.find((part) => part.type === BlockType.Text) ?? block;
+}
+
 function columnSpan(view: FrameView, range: { readonly from: number; readonly to: number }): Span {
-  return rangeSpan(view.state.doc, range, (pos) => view.lineBlockAt(pos));
+  const { doc } = view.state;
+  if (range.from !== range.to) {
+    return rangeSpan(doc, range, (pos) => view.lineBlockAt(pos));
+  }
+  const block = view.lineBlockAt(range.from);
+  const text = textBlock(block);
+  return doc.lineAt(range.from).from === range.from
+    ? { top: block.top, bottom: text.top }
+    : { top: text.bottom, bottom: block.bottom };
 }
 
 function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {

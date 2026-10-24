@@ -9,33 +9,55 @@ export type ShownThread = {
 
 type ThreadPlace = Readonly<Record<Column, number>>;
 
+export type RowKind = "unchanged" | "changed" | "leftEmpty" | "rightEmpty";
+
 export type ThreadRow = {
   readonly key: string;
   readonly place: ThreadPlace;
   readonly keys: Readonly<Record<Column, readonly string[]>>;
-  readonly unchanged: boolean;
+  readonly kind: RowKind;
 };
 
 type GrowingRow = Omit<ThreadRow, "keys"> & { readonly keys: Record<Column, string[]> };
 
-function gapAfter(differences: readonly Difference[], column: Column, line: number): number {
-  const place = linePlace(differences, column, line);
-  if (place.kind === "between") {
-    return place.partner + 1;
-  }
-  const other = column === "left" ? place.difference.right : place.difference.left;
-  return other.start + other.len;
+type Placed = { readonly place: ThreadPlace; readonly kind: RowKind };
+
+const EMPTY_KIND: Readonly<Record<Column, RowKind>> = { left: "leftEmpty", right: "rightEmpty" };
+
+export function sitsBeforePlace(row: ThreadRow, column: Column): boolean {
+  return row.kind === EMPTY_KIND[column];
 }
 
-function placeOf(differences: readonly Difference[], line: ThreadLine): ThreadPlace {
+function gapAfter(
+  differences: readonly Difference[],
+  column: Column,
+  line: number,
+): { readonly place: number; readonly kind: RowKind } {
+  const place = linePlace(differences, column, line);
+  if (place.kind === "between") {
+    return { place: place.partner + 1, kind: "changed" };
+  }
+  const otherColumn = column === "left" ? "right" : "left";
+  const other = place.difference[otherColumn];
+  return {
+    place: other.start + other.len,
+    kind: other.len === 0 ? EMPTY_KIND[otherColumn] : "changed",
+  };
+}
+
+function placeOf(differences: readonly Difference[], line: ThreadLine): Placed {
   switch (line.kind) {
-    case "removed":
-      return { left: line.left + 1, right: gapAfter(differences, "left", line.left) };
-    case "added":
-      return { left: gapAfter(differences, "right", line.right), right: line.right + 1 };
+    case "removed": {
+      const gap = gapAfter(differences, "left", line.left);
+      return { place: { left: line.left + 1, right: gap.place }, kind: gap.kind };
+    }
+    case "added": {
+      const gap = gapAfter(differences, "right", line.right);
+      return { place: { left: gap.place, right: line.right + 1 }, kind: gap.kind };
+    }
     case "unchangedOnLeft":
     case "unchangedOnRight":
-      return { left: line.left + 1, right: line.right + 1 };
+      return { place: { left: line.left + 1, right: line.right + 1 }, kind: "unchanged" };
     default: {
       const _exhaustive: never = line;
       return _exhaustive;
@@ -52,11 +74,9 @@ export function threadRows(
     if (thread.shown === "collapsed") {
       continue;
     }
-    const place = placeOf(differences, thread.line);
+    const { place, kind } = placeOf(differences, thread.line);
     const key = `${place.left}:${place.right}`;
-    const unchanged =
-      thread.line.kind === "unchangedOnLeft" || thread.line.kind === "unchangedOnRight";
-    const row = rows.get(key) ?? { key, place, keys: { left: [], right: [] }, unchanged };
+    const row = rows.get(key) ?? { key, place, keys: { left: [], right: [] }, kind };
     row.keys[shownColumn(thread.line)].push(thread.key);
     rows.set(key, row);
   }

@@ -24,7 +24,7 @@ async function differencesOf(
 }
 
 function places(rows: readonly ThreadRow[]): unknown[] {
-  return rows.map(({ place, keys }) => ({ place, keys }));
+  return rows.map(({ place, keys, kind }) => ({ place, keys, kind }));
 }
 
 test("a removed line's gap sits after the difference's right lines", async () => {
@@ -37,8 +37,8 @@ test("a removed line's gap sits after the difference's right lines", async () =>
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
-    { place: { left: 2, right: 5 }, keys: { left: ["removed"], right: [] } },
-    { place: { left: 3, right: 3 }, keys: { left: [], right: ["added"] } },
+    { place: { left: 2, right: 5 }, keys: { left: ["removed"], right: [] }, kind: "changed" },
+    { place: { left: 3, right: 3 }, keys: { left: [], right: ["added"] }, kind: "changed" },
   ]);
 });
 
@@ -56,9 +56,12 @@ test("an unchanged line's threads from both columns share one row", async () => 
   const rows = threadRows(differences, threads);
 
   expect(places(rows)).toEqual([
-    { place: { left: 8, right: 10 }, keys: { left: ["on-left", "second"], right: ["on-right"] } },
+    {
+      place: { left: 8, right: 10 },
+      keys: { left: ["on-left", "second"], right: ["on-right"] },
+      kind: "unchanged",
+    },
   ]);
-  expect(rows[0]?.unchanged).toBe(true);
 });
 
 test("rows at one place keep their order by the other column's place", async () => {
@@ -71,8 +74,8 @@ test("rows at one place keep their order by the other column's place", async () 
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
-    { place: { left: 3, right: 4 }, keys: { left: [], right: ["earlier"] } },
-    { place: { left: 3, right: 6 }, keys: { left: [], right: ["later"] } },
+    { place: { left: 3, right: 4 }, keys: { left: [], right: ["earlier"] }, kind: "leftEmpty" },
+    { place: { left: 3, right: 6 }, keys: { left: [], right: ["later"] }, kind: "leftEmpty" },
   ]);
 });
 
@@ -88,17 +91,32 @@ test("collapsed threads place no row, drafts do", async () => {
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
-    { place: { left: 5, right: 5 }, keys: { left: [], right: ["draft"] } },
+    { place: { left: 5, right: 5 }, keys: { left: [], right: ["draft"] }, kind: "unchanged" },
+  ]);
+});
+
+test("a removed line in a pure deletion places its row on the right's empty side", async () => {
+  const differences = await differencesOf([
+    { left: { start: 3, len: 2 }, right: { start: 3, len: 0 } },
+  ]);
+  const threads: ShownThread[] = [
+    { key: "removed", line: changedThreadLine("left", 4), shown: "open" },
+    { key: "before", line: unchangedThreadLine("left", { left: 2, right: 2 }), shown: "open" },
+  ];
+
+  expect(places(threadRows(differences, threads))).toEqual([
+    { place: { left: 3, right: 3 }, keys: { left: ["before"], right: [] }, kind: "unchanged" },
+    { place: { left: 5, right: 3 }, keys: { left: ["removed"], right: [] }, kind: "rightEmpty" },
   ]);
 });
 
 test("a row's height is the larger column's sum", () => {
   const heights: Readonly<Record<string, number>> = { a: 30, b: 40, c: 50 };
-  const row = {
+  const row: ThreadRow = {
     key: "1:1",
     place: { left: 1, right: 1 },
     keys: { left: ["a", "b"], right: ["c"] },
-    unchanged: true,
+    kind: "unchanged",
   };
 
   expect(rowHeight(row, (key) => heights[key] ?? 0)).toBe(70);

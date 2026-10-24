@@ -1,7 +1,8 @@
+import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
 import { changedThreadLine, unchangedThreadLine } from "../../ipc";
-import { lineCounts, numberPress } from "./threadNumbers";
+import { lineCounts, numberPress, pressedLine } from "./threadNumbers";
 import type { ShownThread } from "./threadRows";
 
 test("the count mark counts open and collapsed threads shown in this column, not drafts", () => {
@@ -38,4 +39,21 @@ test("a press on the badge reports the line's keys; a press on the number starts
     kind: "start",
     line: { kind: "unchangedOnLeft", left: 2, right: 2 },
   });
+});
+
+test("a press on the empty line after a text's last newline is no line of the file", () => {
+  const doc = Text.of(["a", "b", ""]);
+
+  expect(pressedLine(doc, doc.line(2).from)).toBe(1);
+  expect(pressedLine(doc, doc.line(3).from)).toBeNull();
+});
+
+test("a text without a last newline keeps its last line pressable", () => {
+  const doc = Text.of(["a", "b"]);
+
+  expect(pressedLine(doc, doc.line(2).from)).toBe(1);
+});
+
+test("an added file's empty left column has no line to press", () => {
+  expect(pressedLine(Text.of([""]), 0)).toBeNull();
 });
