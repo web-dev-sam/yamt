@@ -25,13 +25,16 @@
       "frontend/src/ipc/index.ts"
     ]
   },
-  "RVAgentSettingsRust": {
+  "RVAiShell": {
     "owned": [
-      "crates/settings/src/lib.rs",
-      "crates/settings/src/file.rs",
-      "crates/settings/tests/**",
-      "src-tauri/src/settings.rs",
-      "src-tauri/src/commands.rs"
+      "src-tauri/src/ai.rs",
+      "src-tauri/src/args.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/range.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/ipc_error.rs",
+      "src-tauri/AGENTS.md"
     ]
   }
 }
