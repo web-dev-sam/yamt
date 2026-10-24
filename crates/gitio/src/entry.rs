@@ -88,7 +88,7 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
     let tab = record.iter().position(|&byte| byte == b'\t')?;
     let (meta, path) = (record.get(..tab)?, record.get(tab + 1..)?);
     let mut fields = std::str::from_utf8(meta).ok()?.split(' ');
-    let mode = u32::from_str_radix(fields.next()?, OCTAL).ok()?;
+    let mode = mode_from_git(fields.next()?)?;
     let oid = Oid::parse(fields.next()?).ok()?;
     let stage = Stage::from_index_number(fields.next()?)?;
     if fields.next().is_some() || path.is_empty() {
@@ -101,6 +101,10 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
         stage,
         path,
     })
+}
+
+pub(crate) fn mode_from_git(text: &str) -> Option<u32> {
+    u32::from_str_radix(text, OCTAL).ok()
 }
 
 pub(crate) fn index_info(entries: &[StageEntry]) -> Vec<u8> {

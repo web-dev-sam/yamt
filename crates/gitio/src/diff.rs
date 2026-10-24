@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::entry::{Oid, path_from_git};
+use crate::entry::{Oid, mode_from_git, path_from_git};
 use crate::repo::Repo;
 use crate::run::{Access, GIT_TIMEOUT, run};
 use crate::{Error, Result};
 
 const DIFF_TREE: &str = "diff-tree";
-const OCTAL: u32 = 8;
 const NUMSTAT_FIELDS: usize = 3;
 const BINARY_COUNT: &str = "-";
 
@@ -190,7 +189,7 @@ fn counts_of(added: &[u8], removed: &[u8]) -> Option<Numstat> {
 }
 
 fn mode_of(octal: &str, header: &[u8]) -> Result<u32> {
-    u32::from_str_radix(octal, OCTAL).map_err(|_| unexpected(header))
+    mode_from_git(octal).ok_or_else(|| unexpected(header))
 }
 
 fn next_path<'a>(fields: &mut impl Iterator<Item = &'a [u8]>, record: &[u8]) -> Result<PathBuf> {
@@ -387,5 +386,15 @@ mod tests {
 
             assert!(matches!(error, Error::UnexpectedOutput { .. }), "{error:?}");
         }
+    }
+
+    #[test]
+    fn a_record_with_an_empty_path_is_unexpected_output() {
+        let mut output = raw("100644", "100644", '1', '2', "M");
+        output.extend_from_slice(b"\0");
+
+        let error = parse_changed_files(&output).unwrap_err();
+
+        assert!(matches!(error, Error::UnexpectedOutput { .. }), "{error:?}");
     }
 }

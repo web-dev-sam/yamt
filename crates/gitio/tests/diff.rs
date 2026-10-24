@@ -248,9 +248,10 @@ fn the_users_diff_config_does_not_change_the_list() {
 fn listing_under_the_users_diff_config() {
     let moved: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
     let moved_and_edited: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\nten\n";
-    let (counted_before, counted_after): (&[u8], &[u8]) =
-        (b"a\nb\nc\nx\nd\ne\n", b"x\na\nb\nc\nd\ne\n");
+    let (counted_before, counted_after): (&[u8], &[u8]) = (b"x\nx\nx\nx\nU\n", b"U\nx\nx\nx\nx\n");
+    let gitmodules: &[u8] = b"[submodule \"lib\"]\n\tpath = vendor/lib\n\tignore = all\n";
     let dir = diverged_repo(&[
+        regular(".gitmodules", None, Some(gitmodules)),
         regular("a/moved.txt", Some(moved), None),
         regular("z/moved.txt", None, Some(moved_and_edited)),
         regular("z/counted.txt", Some(counted_before), Some(counted_after)),
@@ -273,6 +274,7 @@ fn listing_under_the_users_diff_config() {
         ("diff.external", "false"),
         ("diff.ignoreSubmodules", "all"),
         ("diff.noprefix", "true"),
+        ("submodule.lib.ignore", "all"),
     ] {
         git_ok(root, &["config", key, value]).unwrap();
     }
@@ -280,6 +282,13 @@ fn listing_under_the_users_diff_config() {
     let files = listed(root);
 
     let expected = vec![
+        counted(
+            Changed::Added {
+                new: side(".gitmodules", REGULAR, blob(root, gitmodules)),
+            },
+            3,
+            0,
+        ),
         ChangedFile {
             change: Changed::Modified {
                 old: side("vendor/lib", GITLINK, Oid::parse(FIRST_COMMIT).unwrap()),
@@ -292,7 +301,7 @@ fn listing_under_the_users_diff_config() {
                 old: side("z/counted.txt", REGULAR, blob(root, counted_before)),
                 new: side("z/counted.txt", REGULAR, blob(root, counted_after)),
             },
-            numstat: lines(1, 1),
+            numstat: lines(4, 4),
         },
         ChangedFile {
             change: Changed::Renamed {

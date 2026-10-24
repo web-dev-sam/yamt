@@ -41,26 +41,13 @@ impl Repo {
     pub fn commit_named(&self, name: &str) -> Result<Option<Oid>> {
         let revision = format!("{name}^{{commit}}");
         let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
-        let output = match run(command, None, GIT_TIMEOUT) {
-            Ok(output) => output,
-            Err(error) if is_silent_failure(&error) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let line = without_final_newline(REV_PARSE, output)?;
-        let hex = String::from_utf8_lossy(&line);
-        Ok(Some(Oid::parse(&hex)?))
+        oid_unless_silent(command, REV_PARSE)
     }
 
     /// `git merge-base <a> <b>`: the first base when there are several (as `git diff a...b`); exit 1 → None
     pub fn merge_base(&self, a: &Oid, b: &Oid) -> Result<Option<Oid>> {
         let command = self.command(Access::Read, &[MERGE_BASE, a.as_str(), b.as_str()]);
-        let output = match run(command, None, GIT_TIMEOUT) {
-            Ok(output) => output,
-            Err(error) if is_silent_failure(&error) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let line = without_final_newline(MERGE_BASE, output)?;
-        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
+        oid_unless_silent(command, MERGE_BASE)
     }
 
     /// `git rev-parse --path-format=absolute --git-common-dir`: one identity for every worktree of a repository
@@ -183,13 +170,7 @@ impl Repo {
         }
         let args = [REV_PARSE, "--verify", "--quiet", "HEAD"];
         let command = git_command(&self.git, &submodule, Access::Read, &args);
-        let output = match run(command, None, GIT_TIMEOUT) {
-            Ok(output) => output,
-            Err(error) if is_silent_failure(&error) => return Ok(None),
-            Err(error) => return Err(error),
-        };
-        let line = without_final_newline(REV_PARSE, output)?;
-        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
+        oid_unless_silent(command, REV_PARSE)
     }
 
     pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
@@ -211,11 +192,18 @@ impl Repo {
 
 // git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits 1 without a message; git-merge-base(1)
 // exits 1 without a message when the commits share no ancestor (builtin/merge-base.c `show_merge_base`).
-fn is_silent_failure(error: &Error) -> bool {
-    matches!(
-        error,
-        Error::GitFailed { status: Some(SILENT_FAILURE_STATUS), stderr, .. } if stderr.is_empty()
-    )
+fn oid_unless_silent(command: Command, name: &'static str) -> Result<Option<Oid>> {
+    let output = match run(command, None, GIT_TIMEOUT) {
+        Ok(output) => output,
+        Err(Error::GitFailed {
+            status: Some(SILENT_FAILURE_STATUS),
+            stderr,
+            ..
+        }) if stderr.is_empty() => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let line = without_final_newline(name, output)?;
+    Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
 }
 
 pub(crate) fn exists(path: &Path) -> Result<bool> {

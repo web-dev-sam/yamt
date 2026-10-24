@@ -1,0 +1,9 @@
+just mutants 8e68d49 (covers 525fa24 RVCrate)
+MISSED   crates/merge-core/src/lib.rs:26:44: replace * with + in 3s build + 1s test
+MISSED   crates/merge-core/src/lib.rs:26:44: replace * with / in 1s build + 1s test
+MISSED   crates/merge-core/src/lib.rs:26:37: replace * with + in 1s build + 1s test
+MISSED   crates/merge-core/src/lib.rs:26:37: replace * with / in 1s build + 1s test
+MISSED   crates/range/src/load.rs:75:10: replace == with != in is_link in 0s build + 3s test
+83 mutants tested in 2m: 5 missed, 53 caught, 25 unviable
+
+merge-core lib.rs:26 (MAX_TEXT_BYTES arithmetic): pinned by yamt-compare's the_column_limit_is_merge_core_s_text_limit and yamt-range's exactly_8_mib_loads_and_one_byte_more_is_too_large; cargo-mutants runs only the mutated crate's tests — dropped (OR12).

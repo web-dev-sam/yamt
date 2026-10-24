@@ -76,7 +76,7 @@ impl BlobReader {
             [_, kind, size] => {
                 let size = size.parse().map_err(|_| unexpected(&header))?;
                 let content = self.read_content_and_newline(size)?;
-                if *kind == "blob" {
+                if *kind == BLOB {
                     Ok(content)
                 } else {
                     Err(unexpected(&header))
@@ -122,5 +122,29 @@ fn unexpected(output: &str) -> Error {
     Error::UnexpectedOutput {
         command: CAT_FILE,
         output: output.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex(digit: char) -> String {
+        digit.to_string().repeat(40)
+    }
+
+    #[test]
+    fn an_answer_naming_another_id_is_unexpected_output() {
+        let asked = Oid::parse(&hex('a')).unwrap();
+        let other = hex('b');
+
+        for answer in [format!("{other} blob 3"), format!("{other} missing")] {
+            let error = blob_size(&asked, &answer).unwrap_err();
+
+            assert!(
+                matches!(error, Error::UnexpectedOutput { .. }),
+                "{answer}: {error:?}"
+            );
+        }
     }
 }
