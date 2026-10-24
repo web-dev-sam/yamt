@@ -4,7 +4,7 @@ import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
 import type { Preferences, RangeTexts } from "../editor";
 import type { RangeFile } from "../ipc";
 import { preferencesOf, startSettings } from "./settings";
-import { followRange, type RangeHandle, type ShownRange } from "./useRangeController";
+import { followRange, shownHosts, type RangeHandle, type ShownRange } from "./useRangeController";
 
 type Built = { readonly texts: RangeTexts; readonly hosts: string; readonly theme: string };
 
@@ -79,11 +79,11 @@ function run(firstHosts: string | null): Run {
 
 test("a texts reply builds one controller on the hosts with the path, both texts and the preferences", async () => {
   const live = run("hosts");
-  expect(live.handle.shown.value).toEqual({ kind: "loading" });
+  expect(live.handle.content.value).toEqual({ kind: "loading" });
 
   await live.answer(TEXTS);
 
-  expect(live.handle.shown.value).toEqual({
+  expect(live.handle.content.value).toEqual({
     kind: "columns",
     note: "Mode changed: file → executable file",
   });
@@ -132,7 +132,7 @@ test.each<RangeFile>([
   await live.answer(file);
 
   expect(live.built).toEqual([]);
-  expect(live.handle.shown.value.kind).toBe("sentence");
+  expect(live.handle.content.value.kind).toBe("sentence");
 });
 
 test("the binary sentence is the one rangeText words", async () => {
@@ -140,7 +140,7 @@ test("the binary sentence is the one rangeText words", async () => {
 
   await live.answer({ kind: "binary" });
 
-  expect(live.handle.shown.value).toEqual({ kind: "sentence", text: "Binary file: not shown." });
+  expect(live.handle.content.value).toEqual({ kind: "sentence", text: "Binary file: not shown." });
 });
 
 test("a reply arriving after unmount is dropped: nothing built, nothing shown", async () => {
@@ -150,7 +150,7 @@ test("a reply arriving after unmount is dropped: nothing built, nothing shown", 
   await live.answer(TEXTS);
 
   expect(live.built).toEqual([]);
-  expect(live.handle.shown.value).toEqual({ kind: "loading" });
+  expect(live.handle.content.value).toEqual({ kind: "loading" });
   expect(live.calls).toEqual([]);
 });
 
@@ -160,7 +160,7 @@ test("a failed load builds nothing and stays loading", async () => {
   await live.answer(null);
 
   expect(live.built).toEqual([]);
-  expect(live.handle.shown.value).toEqual({ kind: "loading" });
+  expect(live.handle.content.value).toEqual({ kind: "loading" });
 });
 
 test("preferences changed before the controller exists reach it at build, not through a missing controller", async () => {
@@ -175,3 +175,19 @@ test("preferences changed before the controller exists reach it at build, not th
   expect(live.built.map(({ theme }) => theme)).toEqual(["light"]);
   expect(live.calls).toEqual([]);
 });
+
+test.each(["left", "right", "strip"] as const)(
+  "no hosts while the %s ref is still null (catches a column built on a half-mounted view)",
+  (missing) => {
+    const refs = {
+      left: shallowRef<string | null>("left host"),
+      right: shallowRef<string | null>("right host"),
+      strip: shallowRef<number | null>(0),
+    };
+    expect(shownHosts(refs)).toEqual({ left: "left host", right: "right host", strip: 0 });
+
+    refs[missing].value = null;
+
+    expect(shownHosts(refs)).toBeNull();
+  },
+);

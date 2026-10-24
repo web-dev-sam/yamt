@@ -102,6 +102,19 @@ function settingsText(parsed: Parsed): string | null {
   return text;
 }
 
+export function appArgs(opens: Opening, repoDir: string | null): readonly string[] {
+  const repo = repoDir === null ? [] : ["--repo", repoDir];
+  switch (opens.kind) {
+    case "diff":
+      return ["--diff", ...repo];
+    case "range":
+      return [`--diff=${opens.range}`, ...repo];
+    case "dir":
+    case "fresh":
+      return repo;
+  }
+}
+
 export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartCommand {
   noPositionals(parsed);
   const name = sessionName(parsed);

@@ -28,7 +28,7 @@ const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
 const { preferences, question } = useRangeStore();
-const { shown: view, moveToChange } = useRangeController(
+const { content, moveToChange } = useRangeController(
   props.file,
   { left, right, strip },
   { preferences },
@@ -38,9 +38,9 @@ const icon = computed(() => fileIcon(props.file.path));
 const heading = computed(() => fileHeading(props.file));
 const leftHeading = computed(() => sideHeading(props.leftSide));
 const rightHeading = computed(() => sideHeading(props.rightSide));
-const columns = computed(() => view.value.kind === "columns");
-const note = computed(() => (view.value.kind === "columns" ? view.value.note : null));
-const sentence = computed(() => (view.value.kind === "sentence" ? view.value.text : null));
+const columns = computed(() => content.value.kind === "columns");
+const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
+const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
 </script>
 
 <template>

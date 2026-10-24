@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { readFileSync } from "node:fs";
 
-import type { Recording } from "./args";
 import {
   collapseRows,
   countColours,
@@ -13,6 +12,7 @@ import {
 } from "./colours";
 import { logFile, run, waitUntil, type Launch } from "./processes";
 import { displayEnv, fromRoot } from "./session";
+import type { Recording } from "./startArgs";
 import type { AppState } from "./state";
 
 const FRAMES_PER_SECOND = 60;

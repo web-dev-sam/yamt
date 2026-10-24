@@ -3,7 +3,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 import type { RangeEntry, RangeFile, RangeFileId, RangeSource, RangeStart, Theme } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { fileListKey, type KeyPress } from "./fileListKey";
-import { attempt, report, type Problem } from "./problem";
+import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
 import type { Screen } from "./screen";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
@@ -24,7 +24,7 @@ export type RangeStore = SettingsStore & {
   startUp(): Promise<void>;
   loadSettings(): Promise<void>;
   showFile(path: string): void;
-  loadFile(file: RangeFileId): Promise<RangeFile | null>;
+  loadFile(entry: RangeEntry): Promise<RangeFile | null>;
   fileListKey(event: KeyPress, platform: string): void;
   dismissProblem(): void;
   answer(yes: boolean): void;
@@ -49,8 +49,6 @@ type State = Refs & {
 };
 
 export const MOUNTED_FILES = 16;
-
-const RANGE_WORD = "the range";
 
 let store: RangeStore | null = null;
 
@@ -83,7 +81,7 @@ export function createRangeStore(source: RangeSource, startTheme: Theme): RangeS
         show(state, entry);
       }
     },
-    loadFile: (file) => loadFile(state, file),
+    loadFile: (entry) => loadFile(state, entry),
     ...chromeActions(state),
   };
   store = created;
@@ -148,7 +146,7 @@ async function startUp(state: State, settings: SettingsActions): Promise<void> {
     settings.loadSettings(),
   ]);
   if (!outcome.ok) {
-    report(state, { action: "open", path: RANGE_WORD, cause: outcome.cause });
+    report(state, { action: "openRange", cause: outcome.cause });
     return;
   }
   state.start.value = outcome.value;
@@ -158,18 +156,15 @@ async function startUp(state: State, settings: SettingsActions): Promise<void> {
   }
 }
 
-async function loadFile(state: State, file: RangeFileId): Promise<RangeFile | null> {
-  const path = entryOf(state, file)?.path ?? `file ${file}`;
-  const outcome = await attempt(() => state.source.loadRangeFile(file));
+async function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {
+  const { id, path } = entry;
+  const outcome = await attempt(() => state.source.loadRangeFile(id));
   if (!outcome.ok) {
-    forget(state, file);
+    forget(state, id);
     report(state, { action: "open", path, cause: outcome.cause });
     return null;
   }
-  const problem = state.problem.value;
-  if (problem?.action === "open" && problem.path === path) {
-    state.problem.value = null;
-  }
+  clearProblemAbout(state, path);
   return outcome.value;
 }
 

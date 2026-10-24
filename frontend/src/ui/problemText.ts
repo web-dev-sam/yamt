@@ -56,6 +56,8 @@ function attempted(problem: CausedProblem): string {
     }
     case "tabs":
       return "Could not update the tabs";
+    case "openRange":
+      return "Could not open the range";
     case "loadTab":
       return `Could not load ${problem.name}`;
     case "saveTab":

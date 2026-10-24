@@ -64,3 +64,9 @@ test("a settings failure logs its cause, and only the file's path for key proble
     }),
   ).toEqual(['[error] store.settings_failed {kind: "Keys", path: "/home/me/settings.json"}']);
 });
+
+test("a failed openRange logs its cause under its own event (catches a log line without the cause)", () => {
+  expect(logged({ action: "openRange", cause: { kind: "Git", message: "bad revision" } })).toEqual([
+    '[error] store.openRange_failed {kind: "Git", message: "bad revision"}',
+  ]);
+});

@@ -20,6 +20,10 @@ type Finding = Pick<FenceViolation, "rule" | "reason">;
 
 type Edge = { readonly specifier: string; readonly file: string };
 
+type Root = "merge" | "compare" | "range";
+
+type WindowRoot = Exclude<Root, "merge">;
+
 const SKIPPED_FILE = "src/ipc/bindings.ts";
 const QUERY_SUFFIX = /\?.*$/;
 const MODULE_OF = /^src\/([^/]+)\//;
@@ -35,7 +39,7 @@ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"]
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
 const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
-const ROOT_FILES: Readonly<Record<string, string>> = {
+const ROOT_FILES: Readonly<Record<string, Root>> = {
   "src/ui/store": "merge",
   "src/ui/App": "merge",
   "src/ui/compareStore": "compare",
@@ -44,7 +48,10 @@ const ROOT_FILES: Readonly<Record<string, string>> = {
   "src/ui/RangeApp": "range",
 };
 const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
-const WINDOW_RULES: Readonly<Record<string, "PM7" | "PM9">> = { compare: "PM7", range: "PM9" };
+const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
+  compare: "PM7",
+  range: "PM9",
+};
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -115,12 +122,16 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   return undefined;
 }
 
+function isWindowRoot(name: string): name is WindowRoot {
+  return Object.hasOwn(WINDOW_RULES, name);
+}
+
 function rootFinding(file: string, target: string): Finding | undefined {
-  const root = WINDOW_FILE.exec(file)?.[1]?.toLowerCase();
-  const rule = root === undefined ? undefined : WINDOW_RULES[root];
-  if (rule === undefined) {
+  const root = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
+  if (!isWindowRoot(root)) {
     return undefined;
   }
+  const rule = WINDOW_RULES[root];
   const other = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
   if (other !== undefined && other !== root) {
     return { rule, reason: `the ${root} window never imports the ${other} window's root` };

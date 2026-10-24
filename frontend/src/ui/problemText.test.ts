@@ -214,6 +214,12 @@ test.each([
   expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
 });
 
+test("a failed openRange says the range could not be opened, with git's words", () => {
+  expect(text({ action: "openRange", cause: { kind: "Git", message: "bad revision\n" } })).toBe(
+    "Could not open the range: bad revision",
+  );
+});
+
 test("a save to a tab another call closed says the tab was closed", () => {
   expect(
     text({

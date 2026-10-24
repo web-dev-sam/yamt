@@ -8,26 +8,20 @@ import {
   type ShallowRef,
 } from "vue";
 
-import {
-  RangeController,
-  type CompareHosts,
-  type Direction,
-  type Preferences,
-  type RangeTexts,
-} from "../editor";
+import { RangeController, type Direction, type Preferences, type RangeTexts } from "../editor";
 import type { RangeEntry, RangeFile } from "../ipc";
 import { useRangeStore } from "./rangeStore";
 import { fileSentence, modeNote } from "./rangeText";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
-type RangeHostRefs = {
-  readonly left: Host<HTMLDivElement>;
-  readonly right: Host<HTMLDivElement>;
-  readonly strip: Host<SVGSVGElement>;
+type HostRefs<D, S> = {
+  readonly left: Host<D>;
+  readonly right: Host<D>;
+  readonly strip: Host<S>;
 };
 
-type RangeShown =
+type RangeContent =
   | { readonly kind: "loading" }
   | { readonly kind: "columns"; readonly note: string | null }
   | { readonly kind: "sentence"; readonly text: string };
@@ -35,7 +29,7 @@ type RangeShown =
 export type ShownRange = Pick<RangeController, "setPreferences" | "moveToChange" | "destroy">;
 
 export type RangeHandle = {
-  readonly shown: Readonly<ShallowRef<RangeShown>>;
+  readonly content: Readonly<ShallowRef<RangeContent>>;
   moveToChange(direction: Direction): void;
 };
 
@@ -48,7 +42,7 @@ export type RangeParts<H> = {
 };
 
 type Live = {
-  readonly shown: ShallowRef<RangeShown>;
+  readonly content: ShallowRef<RangeContent>;
   waiting: RangeTexts | null;
   controller: ShownRange | null;
   disposed: boolean;
@@ -59,24 +53,24 @@ function land(live: Live, path: string, file: RangeFile | null): void {
     return;
   }
   if (file.kind !== "texts") {
-    live.shown.value = { kind: "sentence", text: fileSentence(file) };
+    live.content.value = { kind: "sentence", text: fileSentence(file) };
     return;
   }
   const { left, right, differences, mode } = file;
   live.waiting = { path, left, right, differences };
-  live.shown.value = { kind: "columns", note: modeNote(mode) };
+  live.content.value = { kind: "columns", note: modeNote(mode) };
 }
 
 export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   const live: Live = {
-    shown: shallowRef<RangeShown>({ kind: "loading" }),
+    content: shallowRef<RangeContent>({ kind: "loading" }),
     waiting: null,
     controller: null,
     disposed: false,
   };
 
   watch(
-    [live.shown, parts.hosts],
+    [live.content, parts.hosts],
     () => {
       const hosts = parts.hosts();
       if (live.waiting === null || hosts === null) {
@@ -102,14 +96,18 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   });
 
   return {
-    shown: live.shown,
+    content: live.content,
     moveToChange: (direction) => {
       live.controller?.moveToChange(direction);
     },
   };
 }
 
-function shownHosts({ left, right, strip }: RangeHostRefs): CompareHosts | null {
+export function shownHosts<D, S>({
+  left,
+  right,
+  strip,
+}: HostRefs<D, S>): { readonly left: D; readonly right: D; readonly strip: S } | null {
   return left.value === null || right.value === null || strip.value === null
     ? null
     : { left: left.value, right: right.value, strip: strip.value };
@@ -117,13 +115,13 @@ function shownHosts({ left, right, strip }: RangeHostRefs): CompareHosts | null 
 
 export function useRangeController(
   file: RangeEntry,
-  hosts: RangeHostRefs,
+  hosts: HostRefs<HTMLDivElement, SVGSVGElement>,
   options: { readonly preferences: MaybeRefOrGetter<Preferences> },
 ): RangeHandle {
   const store = useRangeStore();
   return followRange({
     path: file.path,
-    load: () => store.loadFile(file.id),
+    load: () => store.loadFile(file),
     hosts: () => shownHosts(hosts),
     preferences: options.preferences,
     build: (texts, shown, preferences) => new RangeController(texts, shown, { preferences }),

@@ -15,6 +15,7 @@ import type { Command } from "./args";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
 import { freePort, launchTracked, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
+import { appArgs } from "./startArgs";
 import {
   readState,
   saveState,
@@ -74,21 +75,25 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     mkdirSync(join(configDir, "yamt"), { recursive: true });
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
-  if (command.opens.kind === "diff") {
-    return { home, configDir, repoDir: null, binary, args: ["--diff"] };
+  const repoDir = repoFolder(command.opens, folder);
+  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir) };
+}
+
+function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+  switch (opens.kind) {
+    case "diff":
+      return null;
+    case "dir":
+    case "range":
+      return fromRoot(opens.dir);
+    case "fresh": {
+      const repoDir = join(folder, "repo");
+      execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      return repoDir;
+    }
   }
-  if (command.opens.kind === "range") {
-    const repoDir = fromRoot(command.opens.dir);
-    const args = [`--diff=${command.opens.range}`, "--repo", repoDir];
-    return { home, configDir, repoDir, binary, args };
-  }
-  const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
-  if (command.opens.kind === "fresh") {
-    execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-  }
-  return { home, configDir, repoDir, binary, args: ["--repo", repoDir] };
 }
 
 function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {

@@ -39,7 +39,7 @@ export type Problem =
       readonly cause: ProblemCause;
     }
   | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
-  | { readonly action: "tabs"; readonly cause: ProblemCause }
+  | { readonly action: "tabs" | "openRange"; readonly cause: ProblemCause }
   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
   | {
       readonly action: "saveTab";
@@ -79,6 +79,7 @@ export function logProblem(problem: Problem): void {
   switch (problem.action) {
     case "list":
     case "tabs":
+    case "openRange":
       log.error(event, { ...problem.cause });
       return;
     case "abort":
@@ -108,10 +109,6 @@ export function logProblem(problem: Problem): void {
     case "saveTab":
       log.error(event, { name: problem.name, ...problem.cause });
       return;
-    default: {
-      const _exhaustive: never = problem;
-      return _exhaustive;
-    }
   }
 }
 

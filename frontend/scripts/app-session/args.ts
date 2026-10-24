@@ -34,8 +34,6 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
   colours       <file.mkv> <hex> [<hex> …]
   stop          --name <n>`;
 
-export type { Recording } from "./startArgs";
-
 export type Command =
   | StartCommand
   | {

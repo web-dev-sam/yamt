@@ -120,7 +120,7 @@ test("an empty range shows no file and mounts none", async () => {
   expect(store.visited.value).toEqual([]);
 });
 
-test("before openRange answers: the files screen, the start theme's preferences, no file to show or load", async () => {
+test("before openRange answers: the files screen, the start theme's preferences, no file to show", async () => {
   quiet();
   const other = await started(4);
   const store = createRangeStore(source(4), "light");
@@ -130,10 +130,7 @@ test("before openRange answers: the files screen, the start theme's preferences,
   store.showFile("src/f00.ts");
   expect([store.shown.value, store.visited.value]).toEqual([null, []]);
 
-  expect(await store.loadFile(fileAt(other, 3).id)).toMatchObject({ kind: "texts" });
-  const refusing = createRangeStore({ ...source(4), loadRangeFile: () => failed(UNKNOWN) }, "dark");
-  await refusing.loadFile(fileAt(other, 3).id);
-  expect(refusing.problem.value).toEqual({ action: "open", path: "file 3", cause: UNKNOWN });
+  expect(await store.loadFile(fileAt(other, 3))).toMatchObject({ kind: "texts" });
 });
 
 test("a failed openRange reports the range and shows nothing", async () => {
@@ -144,10 +141,16 @@ test("a failed openRange reports the range and shows nothing", async () => {
 
   expect(store.start.value).toBeNull();
   expect(store.shown.value).toBeNull();
+  expect(store.problem.value).toEqual({
+    action: "openRange",
+    cause: { kind: "Unexpected", message: "the app is gone" },
+  });
   expect(store.problem.value === null ? null : problemText(store.problem.value, LINUX)).toBe(
     "Could not open the range: the app is gone",
   );
-  expect(errors).toHaveLength(1);
+  expect(errors).toEqual([
+    '[error] store.openRange_failed {kind: "Unexpected", message: "the app is gone"}',
+  ]);
 });
 
 test("showFile from the settings screen shows the file and returns the screen to files", async () => {
@@ -217,7 +220,7 @@ test("a failed load reports open with its path and leaves visited; a later succe
   store.showFile(second.path);
   expect(visitedIndexes(store)).toEqual([0, 1]);
 
-  expect(await store.loadFile(second.id)).toBeNull();
+  expect(await store.loadFile(second)).toBeNull();
 
   expect(store.problem.value).toEqual({ action: "open", path: "src/f01.ts", cause: UNKNOWN });
   expect(visitedIndexes(store)).toEqual([0]);
@@ -225,12 +228,12 @@ test("a failed load reports open with its path and leaves visited; a later succe
   expect(errors).toHaveLength(1);
 
   refusing = false;
-  expect(await store.loadFile(fileAt(store, 0).id)).toMatchObject({ kind: "texts" });
+  expect(await store.loadFile(fileAt(store, 0))).toMatchObject({ kind: "texts" });
   expect(store.problem.value).toEqual({ action: "open", path: "src/f01.ts", cause: UNKNOWN });
 
   store.showFile(second.path);
   expect(visitedIndexes(store)).toEqual([0, 1]);
-  expect(await store.loadFile(second.id)).toEqual({
+  expect(await store.loadFile(second)).toEqual({
     kind: "texts",
     left: "src/f01.ts\n",
     right: "src/f01.ts!\n",
@@ -249,7 +252,7 @@ test("a failed file leaves the eviction order too: the next eviction drops the l
   for (let index = 1; index < MOUNTED_FILES; index += 1) {
     store.showFile(fileAt(store, index).path);
   }
-  await store.loadFile(fileAt(store, 0).id);
+  await store.loadFile(fileAt(store, 0));
   expect(store.visited.value).toHaveLength(MOUNTED_FILES - 1);
 
   store.showFile(fileAt(store, MOUNTED_FILES).path);
@@ -262,7 +265,7 @@ test("a failed file leaves the eviction order too: the next eviction drops the l
 test("dismissProblem clears the shown problem", async () => {
   quiet();
   const store = await started(2, () => ({ loadRangeFile: () => failed(UNKNOWN) }));
-  await store.loadFile(fileAt(store, 0).id);
+  await store.loadFile(fileAt(store, 0));
   expect(store.problem.value).not.toBeNull();
 
   store.dismissProblem();

@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import { parseCommand, type Command } from "./args";
 import { parseChord } from "./keys";
+import { appArgs } from "./startArgs";
 
 test("start-app takes the brief's defaults: debug binary, 1600x1000, no recording, no settings", () => {
   expect(parseCommand(["start-app", "--name", "smoke", "--fresh-repo"])).toEqual({
@@ -84,6 +85,17 @@ test("start-app --range needs --repo and takes neither --fresh-repo nor --diff",
   expect(() => parseCommand([...range, "--fresh-repo"])).toThrow(needsRepo);
   expect(() => parseCommand([...range, "--repo", "/r", "--diff"])).toThrow(needsRepo);
   expect(() => parseCommand([...range, "--repo", "/r", "--fresh-repo"])).toThrow(needsRepo);
+});
+
+test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
+  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr")).toEqual([
+    "--diff=main...feature",
+    "--repo",
+    "/tmp/rr",
+  ]);
+  expect(appArgs({ kind: "diff" }, null)).toEqual(["--diff"]);
+  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r")).toEqual(["--repo", "/tmp/r"]);
+  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo")).toEqual(["--repo", "/tmp/s/repo"]);
 });
 
 test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
