@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use tauri::{App, Manager, Runtime, State, WebviewWindow};
+use tauri::{App, AppHandle, Manager, Runtime, State, WebviewWindow};
 use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
 use yamt_review::ThreadStore;
 
+use crate::ai;
+use crate::args::Ai;
 use crate::ipc_error::{IpcError, blocking_reply};
 use crate::outcome::Ending;
 use crate::window::{WindowKind, open_with_data_folder, window_title};
@@ -20,26 +22,29 @@ pub(crate) struct RangeState {
     _lock: PairLock,
 }
 
-/// `yamt --diff=<range>`: every refusal before the window is one line and exit 2; a closed window is exit 0.
-pub(crate) fn run_range(repo: &Path, spec: &RangeSpec) -> Ending {
+/// `yamt --diff=<range>`: every refusal before the window is one line and exit 2; a closed window is
+/// exit 0, after the AI's workspace ended (plan §2 #111).
+pub(crate) fn run_range(repo: &Path, spec: &RangeSpec, ai: Ai) -> Ending {
     let resolved = match Resolved::resolve(repo, spec) {
         Ok(resolved) => resolved,
         Err(error) => return Ending::failure(error.to_string()),
     };
     let title = range_title(spec, resolved.root());
-    let manage = |app: &App, app_folder: &Path| manage_range_in(app, app_folder, resolved);
-    match open_with_data_folder(&title, WindowKind::Range, manage) {
+    let manage = |app: &App, app_folder: &Path| manage_range_in(app, app_folder, resolved, ai);
+    let at_exit = |app: &AppHandle| ai::end_at_exit(&app.state());
+    match open_with_data_folder(&title, WindowKind::Range, ai, manage, at_exit) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }
 }
 
 /// Takes the pair's lock in `<app_folder>/range/` before listing and reading the pair's threads, then
-/// hands the range to the app.
+/// hands the range and the AI's state to the app.
 fn manage_range_in<R: Runtime>(
     app: &App<R>,
     app_folder: &Path,
     resolved: Resolved,
+    ai: Ai,
 ) -> Result<(), String> {
     let lock =
         PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
@@ -49,6 +54,7 @@ fn manage_range_in<R: Runtime>(
     if !unlisted.is_empty() {
         tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");
     }
+    ai::manage(app, ai, range_folder(app_folder), lock.folder(), &range);
     app.manage(RangeState {
         range,
         threads: Mutex::new(threads),
@@ -132,12 +138,16 @@ pub(crate) mod tests {
 
     /// A window on `main...remote` of a repository whose one file `a.txt` changes from "one" to "two".
     pub(crate) fn open_range_window() -> RangeWindow {
-        open_range_window_in(repo(), TempDir::new().unwrap())
+        open_range_window_with(Ai::Off)
     }
 
-    fn open_range_window_in(repo: TempDir, data: TempDir) -> RangeWindow {
+    pub(crate) fn open_range_window_with(ai: Ai) -> RangeWindow {
+        open_range_window_in(repo(), TempDir::new().unwrap(), ai)
+    }
+
+    fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
         let app = range_app();
-        manage_range_in(&app, &app_folder(data.path()), resolved(repo.path())).unwrap();
+        manage_range_in(&app, &app_folder(data.path()), resolved(repo.path()), ai).unwrap();
         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
             .build()
             .unwrap();
@@ -164,7 +174,12 @@ pub(crate) mod tests {
         std::fs::write(&threads, broken).unwrap();
         let app = range_app();
 
-        let refused = manage_range_in(&app, &app_folder(data.path()), resolved(repo.path()));
+        let refused = manage_range_in(
+            &app,
+            &app_folder(data.path()),
+            resolved(repo.path()),
+            Ai::Off,
+        );
 
         let line = refused.unwrap_err();
         let named = format!("the review threads {} cannot be read: ", threads.display());
@@ -181,7 +196,7 @@ pub(crate) mod tests {
         let threads = threads_path(repo.path(), data.path());
         std::fs::write(&threads, GONE_THREAD).unwrap();
 
-        let (window, log) = logged(|| open_range_window_in(repo, data));
+        let (window, log) = logged(|| open_range_window_in(repo, data, Ai::Off));
 
         let warnings: Vec<&str> = log.lines().filter(|line| line.contains("WARN")).collect();
         assert_eq!(warnings.len(), 1, "{log}");
@@ -244,6 +259,7 @@ pub(crate) mod tests {
             &range_app(),
             &app_folder(window.data.path()),
             resolved(window.repo.path()),
+            Ai::Off,
         );
         let start = resolved(window.repo.path()).list().unwrap().start();
         assert_eq!(

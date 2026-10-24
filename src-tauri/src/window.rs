@@ -11,6 +11,8 @@ use tauri::{
 use yamt_session::MergeSession;
 use yamt_settings::{StoredSettings, Theme};
 
+use crate::args::Ai;
+
 use crate::commands::{with_commands, with_session};
 use crate::compare;
 use crate::merge::MergeState;
@@ -81,21 +83,24 @@ fn context() -> tauri::Context<tauri::Wry> {
 
 fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
     let app = with_session(tauri::Builder::default(), session).build(context())?;
-    let handle = open_and_wait(app, title, WindowKind::Merge)?;
+    let handle = open_and_wait(app, title, WindowKind::Merge, Ai::Off)?;
     servers::lock(&handle.state::<HostState>()).stop_all();
     Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
 }
 
 fn open_compare() -> tauri::Result<Ending> {
-    open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, compare::manage_store_in)
+    let manage = compare::manage_store_in;
+    open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, Ai::Off, manage, |_| {})
 }
 
 /// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens;
-/// its refusal is the one line the run ends with, a closed window is exit 0.
+/// its refusal is the one line the run ends with, a closed window is exit 0 after `at_exit`.
 pub(crate) fn open_with_data_folder(
     title: &str,
     kind: WindowKind,
+    ai: Ai,
     manage: impl FnOnce(&App, &Path) -> Result<(), String>,
+    at_exit: impl FnOnce(&AppHandle),
 ) -> tauri::Result<Ending> {
     let app = with_commands(tauri::Builder::default()).build(context())?;
     let managed = app
@@ -106,7 +111,8 @@ pub(crate) fn open_with_data_folder(
     if let Err(problem) = managed {
         return Ok(Ending::failure(problem));
     }
-    open_and_wait(app, title, kind)?;
+    let handle = open_and_wait(app, title, kind, ai)?;
+    at_exit(&handle);
     Ok(Ending {
         exit: Exit::Success,
         message: None,
@@ -118,7 +124,7 @@ pub(crate) fn app_folder(data_dir: &Path) -> PathBuf {
     data_dir.join(APP_FOLDER)
 }
 
-fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
+fn open_and_wait(app: App, title: &str, kind: WindowKind, ai: Ai) -> tauri::Result<AppHandle> {
     let stored = start_settings(app.path());
     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
     #[cfg(target_os = "linux")]
@@ -129,7 +135,7 @@ fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHa
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .background_color(background(theme))
-        .initialization_script(start_script(theme, kind))
+        .initialization_script(start_script(theme, kind, ai))
         .build()?;
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();
@@ -173,9 +179,14 @@ fn background(theme: Theme) -> Color {
 
 // wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
 // document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
-fn start_script(theme: Theme, kind: WindowKind) -> String {
+fn start_script(theme: Theme, kind: WindowKind, ai: Ai) -> String {
+    let ai_line = match (kind, ai) {
+        (WindowKind::Range, Ai::On) => " document.documentElement.dataset.ai = \"on\";",
+        (WindowKind::Range, Ai::Off)
+        | (WindowKind::Merge | WindowKind::Compare, Ai::On | Ai::Off) => "",
+    };
     format!(
-        "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";",
+        "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";{ai_line}",
         theme.name(),
         kind.name()
     )
@@ -288,21 +299,34 @@ mod tests {
     #[test]
     fn the_start_script_names_the_theme_and_the_window() {
         assert_eq!(
-            start_script(Theme::Light, WindowKind::Merge),
+            start_script(Theme::Light, WindowKind::Merge, Ai::Off),
             r#"document.documentElement.dataset.theme = "light"; document.documentElement.dataset.window = "merge";"#
         );
         assert_eq!(
-            start_script(Theme::Dark, WindowKind::Compare),
+            start_script(Theme::Dark, WindowKind::Compare, Ai::Off),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
         );
         assert_eq!(
-            start_script(Theme::ZedLight, WindowKind::Merge),
+            start_script(Theme::ZedLight, WindowKind::Merge, Ai::Off),
             r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
         );
         assert_eq!(
-            start_script(Theme::Dark, WindowKind::Range),
+            start_script(Theme::Dark, WindowKind::Range, Ai::Off),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range";"#
         );
+    }
+
+    // The page builds its agent client only under `data-ai`; a merge or compare page must never get it.
+    #[test]
+    fn the_start_script_marks_ai_only_when_on() {
+        assert_eq!(
+            start_script(Theme::Dark, WindowKind::Range, Ai::On),
+            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range"; document.documentElement.dataset.ai = "on";"#
+        );
+        for kind in [WindowKind::Merge, WindowKind::Compare] {
+            assert!(!start_script(Theme::Dark, kind, Ai::On).contains("dataset.ai"));
+        }
+        assert!(!start_script(Theme::Dark, WindowKind::Range, Ai::Off).contains("dataset.ai"));
     }
 
     fn second_request_after(delay: Duration) -> CloseRequest {

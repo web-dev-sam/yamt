@@ -6,7 +6,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{clipboard, compare, range, review, servers, settings};
+use crate::{ai, clipboard, compare, range, review, servers, settings};
 
 #[expect(
     clippy::too_many_lines,
@@ -56,6 +56,13 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         review::unqueue_message,
         review::check_gitlab::<tauri::Wry>,
         review::send_queue::<tauri::Wry>,
+        ai::prepare_checkout::<tauri::Wry>,
+        ai::start_agent,
+        ai::send_to_agent,
+        ai::stop_agent,
+        ai::checkout_changes::<tauri::Wry>,
+        ai::discard_checkout::<tauri::Wry>,
+        ai::diff_texts,
         clipboard::read_clipboard::<tauri::Wry>,
     ])
 }
@@ -74,9 +81,16 @@ pub(crate) fn with_session<R: Runtime>(
         })
 }
 
-/// A window whose state is managed once the data folder is known: the compare and range windows.
+/// A window whose state is managed once the data folder is known: the compare and range windows. A
+/// range window's page that starts loading stops the agent of the page before.
 pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.invoke_handler(specta_builder().invoke_handler())
+    builder
+        .invoke_handler(specta_builder().invoke_handler())
+        .on_page_load(|webview, page| {
+            if let Some(state) = webview.try_state() {
+                ai::stop_agent_on_page_start(&state, page.event());
+            }
+        })
 }
 
 #[tauri::command]

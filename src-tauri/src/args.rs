@@ -18,6 +18,7 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
   --repo <path>     any directory inside the work tree
   --diff            compare pasted texts instead of merging
   --diff=<range>    review a commit range
+  --ai              with --diff=<range>: an AI agent answers review comments in its own checkout
   --help            print this help
   --version         print the version
 ";
@@ -29,11 +30,24 @@ const CURRENT_DIR: &str = ".";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Invocation {
-    Merge { repo: PathBuf },
+    Merge {
+        repo: PathBuf,
+    },
     Compare,
-    Range { spec: RangeSpec, repo: PathBuf },
+    Range {
+        spec: RangeSpec,
+        repo: PathBuf,
+        ai: Ai,
+    },
     Help,
     Version,
+}
+
+/// `--ai`: accepted with every mode, kept only by a range window (plan §2 #108).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Ai {
+    Off,
+    On,
 }
 
 /// What the `--diff` flags seen so far ask for.
@@ -64,12 +78,14 @@ impl Window {
 pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
     let mut args = args.into_iter();
     let mut repo = None;
+    let mut ai = Ai::Off;
     let mut window = Ok(Window::Merge);
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help") => return Ok(Invocation::Help),
             Some("--version") => return Ok(Invocation::Version),
             Some("--diff") => window = window.and_then(Window::with_compare),
+            Some("--ai") => ai = Ai::On,
             Some("--repo") => {
                 repo = Some(
                     args.next()
@@ -89,6 +105,7 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
         (Window::Range(spec), repo) => Ok(Invocation::Range {
             spec,
             repo: repo.unwrap_or_else(|| PathBuf::from(CURRENT_DIR)),
+            ai,
         }),
         (Window::Merge, repo) => Ok(Invocation::Merge {
             repo: repo.unwrap_or_else(|| PathBuf::from(CURRENT_DIR)),
@@ -186,7 +203,28 @@ mod tests {
         Invocation::Range {
             spec: RangeSpec::parse(text).unwrap(),
             repo: PathBuf::from(repo),
+            ai: Ai::Off,
         }
+    }
+
+    // A merge or compare window that kept the flag would start an agent nobody can see.
+    #[test]
+    fn ai_is_accepted_with_every_mode_and_reaches_only_the_range_window() {
+        let merge = Invocation::Merge {
+            repo: PathBuf::from("p"),
+        };
+        assert_eq!(parsed(&["--ai", "--repo", "p"]), Ok(merge));
+        assert_eq!(parsed(&["--diff", "--ai"]), Ok(Invocation::Compare));
+        assert_eq!(parsed(&["--ai", "--help"]), Ok(Invocation::Help));
+        assert_eq!(parsed(&["--ai", "--version"]), Ok(Invocation::Version));
+        let with_ai = Invocation::Range {
+            spec: RangeSpec::parse("a...b").unwrap(),
+            repo: PathBuf::from("."),
+            ai: Ai::On,
+        };
+        assert_eq!(parsed(&["--diff=a...b", "--ai"]), Ok(with_ai));
+        assert_eq!(parsed(&["--diff=a...b"]), Ok(range("a...b", ".")));
+        assert!(USAGE.contains("  --ai              "), "{USAGE}");
     }
 
     #[test]

@@ -11,9 +11,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use yamt_merge_core::{Difference, compare};
+use yamt_merge_core::compare;
 
 pub use crate::store::TabStore;
+pub use yamt_merge_core::Difference;
 
 /// A tab's identity; ids never repeat within a data folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]

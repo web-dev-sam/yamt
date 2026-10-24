@@ -61,6 +61,11 @@ pub enum IpcError {
         message: MessageId,
     },
     SendRunning,
+    AiOff,
+    RemoveFailed {
+        folder: String,
+        message: String,
+    },
 }
 
 /// Runs `work` on a blocking worker; a worker that panicked is logged and answers `WorkerStopped`.
@@ -183,6 +188,25 @@ impl From<yamt_review::Error> for IpcError {
             | yamt_review::Error::Broken { .. }
             | yamt_review::Error::NewerFormat { .. } => IpcError::Git {
                 message: error.to_string(),
+            },
+        }
+    }
+}
+
+impl From<yamt_agent::Error> for IpcError {
+    fn from(error: yamt_agent::Error) -> IpcError {
+        match error {
+            yamt_agent::Error::Remove { folder, source }
+            | yamt_agent::Error::Rename {
+                from: folder,
+                source,
+                ..
+            } => IpcError::RemoveFailed {
+                folder: folder.display().to_string(),
+                message: source.to_string(),
+            },
+            yamt_agent::Error::Git(source) => IpcError::Git {
+                message: source.to_string(),
             },
         }
     }
@@ -389,6 +413,33 @@ mod tests {
         assert_eq!(
             range_json(no_base),
             json!({ "kind": "Git", "message": "main and other have no merge base" })
+        );
+    }
+
+    // The window's close shows the folder it could not remove, so the user can remove it by hand.
+    #[test]
+    fn ai_off_and_a_failed_removal_serialise_with_their_kinds() {
+        assert_eq!(
+            serde_json::to_value(IpcError::AiOff).unwrap(),
+            json!({ "kind": "AiOff" })
+        );
+        let agent_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
+        let remove = yamt_agent::Error::Remove {
+            folder: "/d/pair/checkout.removing".into(),
+            source: std::io::Error::other("busy"),
+        };
+        assert_eq!(
+            agent_json(remove),
+            json!({ "kind": "RemoveFailed", "folder": "/d/pair/checkout.removing", "message": "busy" })
+        );
+        let rename = yamt_agent::Error::Rename {
+            from: "/d/pair/checkout".into(),
+            to: "/d/pair/checkout.removing".into(),
+            source: std::io::Error::other("permission denied"),
+        };
+        assert_eq!(
+            agent_json(rename),
+            json!({ "kind": "RemoveFailed", "folder": "/d/pair/checkout", "message": "permission denied" })
         );
     }
 
