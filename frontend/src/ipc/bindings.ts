@@ -24,6 +24,7 @@ export const commands = {
 	/**  Keyed by the repository root as `servers_context` gives it. */
 	setServerSwitch: (current: StoredSettings, server: string, on: boolean) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_server_switch", { current, server, on })),
 	setAddedServers: (current: StoredSettings, added: AddedServer[]) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_added_servers", { current, added })),
+	setAgent: (current: StoredSettings, agent: AgentSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_agent", { current, agent })),
 	serversContext: () => __TAURI_INVOKE<ServerContext>("servers_context"),
 	startServer: (command: ServerCommand, events: Channel<HostEvent>) => __TAURI_INVOKE<StartReply>("start_server", { command, events }),
 	sendToServer: (run: RunId, message: string) => __TAURI_INVOKE<void>("send_to_server", { run, message }),
@@ -62,6 +63,12 @@ export const commands = {
 export type AddedServer = {
 	command: string[],
 	fileTypes: string[],
+};
+
+/**  The AI agent the window starts and its first message; `None` = the window's default. */
+export type AgentSettings = {
+	command: string[] | null,
+	firstMessage: string | null,
 };
 
 /**  How code text is smoothed: with coloured subpixels or grey only (applied on Linux, at start). */
@@ -609,6 +616,7 @@ export type StoredSettings = {
 	antialiasing: Antialiasing,
 	keys: { [key in string]: string[] },
 	languageServers: LanguageServerSettings,
+	agent: AgentSettings,
 };
 
 /**  One tab as the window lists it. */
