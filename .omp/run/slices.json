@@ -1,29 +1,19 @@
 {
-  "RVThreadRows": {
-    "owned": [
-      "frontend/src/editor/internal/threadAnchor.ts",
-      "frontend/src/editor/internal/threadRows.ts",
-      "frontend/src/editor/internal/threadField.ts",
-      "frontend/src/editor/internal/threadWidget.ts",
-      "frontend/src/editor/internal/threadHosts.ts",
-      "frontend/src/editor/internal/threadNumbers.ts",
-      "frontend/src/editor/internal/threadAnchor.test.ts",
-      "frontend/src/editor/internal/threadRows.test.ts",
-      "frontend/src/editor/internal/threadField.test.ts",
-      "frontend/src/editor/internal/threadNumbers.test.ts",
-      "frontend/src/editor/internal/compareFrame.ts",
-      "frontend/src/editor/internal/compareFrame.test.ts",
-      "frontend/src/editor/rangeThreads.browser.test.ts",
-      "frontend/src/editor/range.ts",
-      "frontend/src/editor/index.ts",
-      "frontend/src/editor/compare.ts",
-      "frontend/src/editor/theme.css",
-      "frontend/src/editor/AGENTS.md",
-      "frontend/src/ipc/threadLine.ts",
-      "frontend/src/ipc/index.ts"
-    ]
-  },
   "RVPipe": {
     "owned": ["crates/pipe/**", "crates/lsp-host/**", "scripts/arch-check.sh"]
+  },
+  "RVGlabR1": {
+    "owned": [
+      "crates/gitio/src/glab.rs",
+      "crates/gitio/src/lib.rs",
+      "crates/gitio/src/run.rs",
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/src/names.rs",
+      "crates/gitio/src/program.rs",
+      "crates/gitio/tests/glab.rs",
+      "scripts/fake-glab/glab",
+      "tests/glab/runner/**",
+      "tests/glab/README.md"
+    ]
   }
 }
