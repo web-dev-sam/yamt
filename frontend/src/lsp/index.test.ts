@@ -10,6 +10,7 @@ import type {
   ServerHost,
   StartReply,
 } from "../ipc";
+import type { Timers } from "../jsonrpc";
 import {
   LanguageServers,
   addedSpecs,
@@ -31,7 +32,6 @@ import {
   type ServerProblem,
   type ServerSpec,
   type ServerState,
-  type Timers,
 } from "./index";
 
 type Json = Record<string, unknown>;

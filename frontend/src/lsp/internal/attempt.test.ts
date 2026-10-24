@@ -10,8 +10,8 @@ import type {
   ServerHost,
   StartReply,
 } from "../../ipc";
+import { SYSTEM_TIMERS } from "../../jsonrpc";
 import { Attempt, type AttemptEvents } from "./attempt";
-import { SYSTEM_TIMERS } from "./timers";
 
 function isRunId(n: number): n is RunId {
   return Number.isSafeInteger(n);

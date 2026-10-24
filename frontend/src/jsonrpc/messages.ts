@@ -20,6 +20,7 @@ export type Incoming =
       readonly id: number | string | null;
       readonly code: number;
       readonly message: string;
+      readonly data: unknown;
     };
 
 const INCOMING: v.GenericSchema<unknown, Incoming> = v.union([
@@ -32,8 +33,20 @@ const INCOMING: v.GenericSchema<unknown, Incoming> = v.union([
     v.transform(({ method, params }) => ({ kind: "notification", method, params }) as const),
   ),
   v.pipe(
-    v.object({ id: v.nullable(ID), error: v.object({ code: v.number(), message: v.string() }) }),
-    v.transform(({ id, error }) => ({ kind: "error", id, ...error }) as const),
+    v.object({
+      id: v.nullable(ID),
+      error: v.object({ code: v.number(), message: v.string(), data: v.optional(v.unknown()) }),
+    }),
+    v.transform(
+      ({ id, error }) =>
+        ({
+          kind: "error",
+          id,
+          code: error.code,
+          message: error.message,
+          data: error.data,
+        }) as const,
+    ),
   ),
   v.pipe(
     v.looseObject({ id: ID, result: v.unknown() }),

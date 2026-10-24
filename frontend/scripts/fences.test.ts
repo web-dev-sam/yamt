@@ -263,6 +263,58 @@ test("lsp importing ipc's index and its own internal/ violates nothing", () => {
   expect(violationsOf(files)).toEqual([]);
 });
 
+test("jsonrpc importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/jsonrpc/index.ts", text: `import { ref } from "vue";` },
+    { path: "src/jsonrpc/connection.ts", text: `import { useTimeoutFn } from "@vueuse/core";` },
+    { path: "src/jsonrpc/timers.ts", text: `import { Channel } from "@tauri-apps/api/core";` },
+    { path: "src/jsonrpc/messages.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/jsonrpc/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/jsonrpc/connection.ts", specifier: "@vueuse/core" },
+    { rule: "PM3", file: "src/jsonrpc/timers.ts", specifier: "@tauri-apps/api/core" },
+    { rule: "PM3", file: "src/jsonrpc/messages.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("jsonrpc importing any other src/ module violates PM2", () => {
+  const files = [
+    { path: "src/jsonrpc/index.ts", text: `import type { ServerHost } from "../ipc";` },
+    { path: "src/jsonrpc/connection.ts", text: `import "../lsp/index.ts";` },
+    { path: "src/jsonrpc/messages.ts", text: `import { log } from "../ipc/log";` },
+    { path: "src/jsonrpc/timers.ts", text: `import "../main";` },
+    { path: "src/jsonrpc/a.ts", text: `import "../jsonrpcx/b";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "jsonrpc/ imports no other src/ module",
+    })),
+  );
+});
+
+test("jsonrpc importing itself and valibot, and lsp importing jsonrpc, violate nothing", () => {
+  const files = [
+    { path: "src/jsonrpc/index.ts", text: `export { Connection } from "./connection";` },
+    {
+      path: "src/jsonrpc/connection.ts",
+      text: `import { parseIncoming } from "./messages";\nimport type { Timers } from "./timers.ts";`,
+    },
+    { path: "src/jsonrpc/messages.ts", text: `import * as v from "valibot";` },
+    { path: "src/jsonrpc/sample.ts", text: `import "../../fixtures/sample/base.ts.txt?raw";` },
+    { path: "src/lsp/internal/attempt.ts", text: `import { Connection } from "../../jsonrpc";` },
+    { path: "src/lsp/index.ts", text: `import type { Timers } from "../jsonrpc/index.ts";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {
   const files = [
     { path: "src/ui/compareStore.ts", text: `import { useAppStore } from "./store";` },

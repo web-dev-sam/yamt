@@ -129,7 +129,13 @@
       }
     },
     {
-      "files": ["src/editor/**", "src/model/**", "src/connectors/**", "src/lsp/**"],
+      "files": [
+        "src/editor/**",
+        "src/model/**",
+        "src/connectors/**",
+        "src/lsp/**",
+        "src/jsonrpc/**"
+      ],
       "rules": {
         "no-restricted-imports": [
           "error",
@@ -137,13 +143,13 @@
             "paths": [
               {
                 "name": "vue",
-                "message": "editor/, model/, connectors/, lsp/ are framework-free (PM3)."
+                "message": "editor/, model/, connectors/, lsp/, jsonrpc/ are framework-free (PM3)."
               }
             ],
             "patterns": [
               {
                 "group": ["vue/**", "@vue/**", "@vueuse/**", "@tauri-apps/**"],
-                "message": "editor/, model/, connectors/, lsp/ are framework-free (PM3)."
+                "message": "editor/, model/, connectors/, lsp/, jsonrpc/ are framework-free (PM3)."
               },
               {
                 "group": ["../**/internal", "../**/internal/**"],

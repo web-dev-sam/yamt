@@ -1,12 +1,10 @@
 import type { HostEvent, RunId, ServerCommand, ServerHost, StartReply } from "../../ipc";
-import { answer, type Answer, type AnswerContext } from "./answers";
-import { Connection } from "./connection";
+import { Connection, parseWith, type Answer, type Timers } from "../../jsonrpc";
+import { answer, type AnswerContext } from "./answers";
 import type { LogLine } from "./log";
-import { parseWith } from "./messages";
 import { pushProblems } from "./problems";
 import { MESSAGE_PARAMS } from "./protocol";
 import type { ServerDocs } from "./serverDocs";
-import type { Timers } from "./timers";
 
 const SHUTDOWN_TIMEOUT_MS = 2000;
 
@@ -58,6 +56,7 @@ export class Attempt {
         log: (text) => this.#events.log("yamt", text),
       },
       setup.timers,
+      { cancelNotification: "$/cancelRequest" },
     );
   }
 

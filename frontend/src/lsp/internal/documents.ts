@@ -1,5 +1,5 @@
+import type { Timers } from "../../jsonrpc";
 import type { ServerProblem } from "./problems";
-import type { Timers } from "./timers";
 import { nextVersion, type DocVersion } from "./version";
 
 export interface ResultDocument {

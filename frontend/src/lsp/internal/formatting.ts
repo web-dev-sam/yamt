@@ -1,11 +1,9 @@
-import type { Connection } from "./connection";
+import { parseWith, type Connection, type Timers } from "../../jsonrpc";
 import type { DocEntry } from "./documents";
 import { applyEdits } from "./edits";
-import { parseWith } from "./messages";
 import { TEXT_EDITS } from "./protocol";
 import type { Server } from "./server";
 import type { ServerState } from "./state";
-import type { Timers } from "./timers";
 
 export type FormattingOptions = { readonly tabSize: number; readonly insertSpaces: boolean };
 

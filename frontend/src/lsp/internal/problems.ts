@@ -1,5 +1,4 @@
-import type { Connection, Reply } from "./connection";
-import { parseWith } from "./messages";
+import { parseWith, type Connection, type Reply } from "../../jsonrpc";
 import { DIAGNOSTIC_REPORT, PUBLISH_DIAGNOSTICS, type Diagnostic } from "./protocol";
 import { sameFile } from "./uri";
 import { isDocVersion, type DocVersion } from "./version";

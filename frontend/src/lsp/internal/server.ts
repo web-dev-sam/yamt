@@ -1,4 +1,5 @@
 import type { ServerHost } from "../../ipc";
+import type { Timers } from "../../jsonrpc";
 import { Attempt } from "./attempt";
 import type { DocEntry } from "./documents";
 import {
@@ -15,7 +16,6 @@ import { stateOf, STOPPED, type Halting, type Run, type Running } from "./run";
 import { ServerDocs } from "./serverDocs";
 import { serves, type ServerSpec } from "./spec";
 import { failText, stateAtRest, startFailure, type ServerState, type StartFailure } from "./state";
-import type { Timers } from "./timers";
 import { fileUri } from "./uri";
 
 export type ServerEnv = {

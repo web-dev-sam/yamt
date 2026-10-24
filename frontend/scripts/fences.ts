@@ -33,6 +33,7 @@ const FRAMEWORK_FREE_MODULES: Record<string, true> = {
   model: true,
   connectors: true,
   lsp: true,
+  jsonrpc: true,
 };
 const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connectors"] as const;
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
@@ -110,6 +111,9 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   const forbidden = LSP_FORBIDDEN_MODULES.find((directory) => isInside(target, directory));
   if (module === "lsp" && forbidden !== undefined) {
     return { rule: "PM2", reason: `lsp/ never imports ${forbidden.slice("src/".length)}/` };
+  }
+  if (module === "jsonrpc" && target.startsWith("src/") && !isInside(target, "src/jsonrpc")) {
+    return { rule: "PM2", reason: "jsonrpc/ imports no other src/ module" };
   }
   const targetModule = MODULE_OF.exec(target)?.[1];
   if (

@@ -1,6 +1,6 @@
 import type { ServerHost } from "../../ipc";
+import { parseWith, type Parsed } from "../../jsonrpc";
 import type { WorkspaceFolder } from "./answers";
-import { parseWith, type Parsed } from "./messages";
 import { INITIALIZE_RESULT } from "./protocol";
 import type { ServerSpec } from "./spec";
 import { fileUri } from "./uri";
