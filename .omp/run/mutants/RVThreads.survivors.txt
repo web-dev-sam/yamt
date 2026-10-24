@@ -1,0 +1,4 @@
+just mutants e54b9b9 (covers 532e9f3 RVThreads)
+MISSED   crates/review/src/thread_file.rs:157:23: replace match guard error.kind() == ErrorKind::NotFound with true in read_threads in 0s build + 0s test
+MISSED   crates/review/src/thread_store.rs:55:12: delete ! in ThreadStore::list in 0s build + 0s test
+74 mutants tested in 62s: 2 missed, 44 caught, 28 unviable

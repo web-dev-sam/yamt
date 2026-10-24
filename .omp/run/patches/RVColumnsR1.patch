@@ -1,0 +1,629 @@
+From 2e9555f1f745dae3451fd74b590980f875a913bb Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:00:40 +0200
+Subject: [PATCH] fix(editor): compare and range columns share marks,
+ preferences and arrow helpers; defineSlots ordered
+
+---
+ .omp/run/findings.jsonl                       |  6 ++
+ .omp/run/mutants/RVIpcR1.survivors.txt        |  6 ++
+ .omp/run/notes/RVColumnsR1.md                 | 68 +++++++++++++++++
+ .omp/run/notes/RVMarkdownCorrect.md           | 74 +++++++++++++++++++
+ docs/slices/briefs/3.RV-markdown-rework-1.md  | 63 ++++++++++++++++
+ frontend/scripts/check-sfc-order.test.ts      | 12 +++
+ frontend/scripts/check-sfc-order.ts           |  1 +
+ frontend/src/editor/compare.ts                | 27 +++----
+ .../src/editor/internal/compareFocus.test.ts  | 19 +++++
+ frontend/src/editor/internal/compareFocus.ts  | 17 ++++-
+ frontend/src/editor/internal/compareViews.ts  | 25 ++++++-
+ frontend/src/editor/range.browser.test.ts     | 37 +++++++---
+ frontend/src/editor/range.ts                  | 27 +++----
+ 13 files changed, 338 insertions(+), 44 deletions(-)
+ create mode 100644 .omp/run/mutants/RVIpcR1.survivors.txt
+ create mode 100644 .omp/run/notes/RVColumnsR1.md
+ create mode 100644 .omp/run/notes/RVMarkdownCorrect.md
+ create mode 100644 docs/slices/briefs/3.RV-markdown-rework-1.md
+ create mode 100644 frontend/src/editor/internal/compareFocus.test.ts
+
+diff --git a/.omp/run/findings.jsonl b/.omp/run/findings.jsonl
+index 6d9831a..7d175ca 100644
+--- a/.omp/run/findings.jsonl
++++ b/.omp/run/findings.jsonl
+@@ -1557,3 +1557,9 @@
+ {"ts": "2026-10-24T14:40:00+00:00", "slice": "RVMarkdown", "source": "boundary", "severity": "should", "rule_id": "growth: one rule per fence file", "file": "frontend/scripts/fences.ts", "line": 129, "problem": "the MarkdownView seam rule (~50 lines) inline in fences.ts at 287/300; the next seam fence will not fit", "fix": "scripts/markdownFence.ts as clipboardFence.ts", "triage": "promoted: a file at its cap blocks the next rule"}
+ {"ts": "2026-10-24T14:40:00+00:00", "slice": "RVMarkdown", "source": "boundary", "severity": "should", "rule_id": "TS7", "file": "frontend/src/editor/internal/markdownDom.ts", "line": 4, "problem": "swappable positional strings (info/code, className/text) in CodePainter, codeNode, paintCode, textElement, withInlines", "fix": "pass the code block; an options object for textElement/withInlines", "triage": "promoted: each new caller can swap them silently (vision 4)"}
+ {"ts": "2026-10-24T14:40:00+00:00", "slice": "RVMarkdown", "source": "boundary", "severity": "nit", "rule_id": null, "file": "frontend/src/editor/internal/markdownDom.ts", "line": 121, "problem": "numbering.kind === 'ordered' tested twice", "fix": "inline once", "triage": "dropped: local, no growth harm"}
++{"ts": "2026-10-24T15:20:00+00:00", "slice": "RVMarkdown", "source": "correctness", "severity": "block", "rule_id": "hostile input", "file": "frontend/src/editor/internal/markdownBlocks.ts", "line": 200, "problem": "unbounded nesting: >×5000, - ×5000, *a ×20000 throw a stack overflow; every later chunk throws too", "fix": "MAX_NESTING through blocks and inlines; past it literal text; tests at 10,000 deep", "triage": "n/a"}
++{"ts": "2026-10-24T15:20:00+00:00", "slice": "RVMarkdown", "source": "correctness", "severity": "block", "rule_id": "hostile input", "file": "frontend/src/editor/internal/markdownBlocks.ts", "line": 34, "problem": "HEADING / HEADING_CLOSE regexes quadratic on long space runs (200,000 spaces: 55 s), re-run on every chunk", "fix": "/^ {0,3}(#{1,6})(?:[ \\t]+(.*))?$/ then string trimming of the closing run; test with 100,000 spaces", "triage": "n/a"}
++{"ts": "2026-10-24T15:20:00+00:00", "slice": "RVMarkdown", "source": "correctness", "severity": "block", "rule_id": "hostile input", "file": "frontend/src/editor/internal/markdownInline.ts", "line": 106, "problem": "unmatched openers rescan to the end: *a ×5000 1.0 s, [ ×20000 0.86 s, [](×20000 2.5 s, per chunk", "fix": "one linear delimiter stack (process_emphasis with openers_bottom); remember where no ]/) closes", "triage": "n/a"}
++{"ts": "2026-10-24T15:20:00+00:00", "slice": "RVMarkdown", "source": "correctness", "severity": "block", "rule_id": "GFM tables", "file": "frontend/src/editor/internal/markdownBlocks.ts", "line": 147, "problem": "any line with | continues a table, swallowing a following quote, list, heading or fence", "fix": "continue rows while !isBlank && !interrupts", "triage": "n/a"}
++{"ts": "2026-10-24T15:20:00+00:00", "slice": "RVMarkdown", "source": "correctness", "severity": "should", "rule_id": "VF7", "file": "frontend/scripts/fences.ts", "line": 133, "problem": "the export * refusal, the editor-path guard and the ../editor/markdown.ts form are untested (survivors)", "fix": "violation and no-violation cases named by the review", "triage": "promoted: an untested fence rule a refactor could lose"}
++{"ts": "2026-10-24T15:20:00+00:00", "slice": "RVMarkdown", "source": "correctness", "severity": "should", "rule_id": "VF7", "file": "frontend/src/ui/useMarkdown.ts", "line": 13, "problem": "all 14 mutants NoCoverage: null host, host swap, dispose and the text watch never ran; C's AiTurn builds on them", "fix": "ui/useMarkdown.test.ts with a fake MarkdownView", "triage": "promoted: an untested rule the next build relies on"}
+diff --git a/.omp/run/mutants/RVIpcR1.survivors.txt b/.omp/run/mutants/RVIpcR1.survivors.txt
+new file mode 100644
+index 0000000..ea1ee55
+--- /dev/null
++++ b/.omp/run/mutants/RVIpcR1.survivors.txt
+@@ -0,0 +1,6 @@
++just mutants 3131449 (covers 3d9d0ce RVIpcR1) — Stryker
++All files          |  74.50 |   74.50 |      333 |         0 |        114 |        0 |        0 |
++ fixture.ts        |  69.54 |   69.54 |      121 |         0 |         53 |        0 |        0 |
++ fixtureCompare.ts |  98.81 |   98.81 |      166 |         0 |          2 |        0 |        0 |
++ fixtureRange.ts   |  43.81 |   43.81 |       46 |         0 |         59 |        0 |        0 |
++Survivors: module-level valibot schema constants in fixtureRange.ts/fixture.ts (the #732/#1609 class: vitest never re-evaluates module scope; killed by the committed-case and parse-failure tests once evaluated) — dropped, as the RVIpc correctness review dropped the same class.
+diff --git a/.omp/run/notes/RVColumnsR1.md b/.omp/run/notes/RVColumnsR1.md
+new file mode 100644
+index 0000000..a8a0aa6
+--- /dev/null
++++ b/.omp/run/notes/RVColumnsR1.md
+@@ -0,0 +1,68 @@
++All three items are fixed. The probe's assertions all passed when run in MiniBrowser, and the compare window (`?diff`) still behaves as before: word marks, bands, arrows and preferences.
++
++```
++summary                 Both controllers now call the same three column helpers: `showColumnDifferences` and
++                        `setColumnPreferences` in compareViews.ts, and `moveToDifference` in compareFocus.ts.
++                        The arrows' "left column when no column has the keyboard" rule is now `arrowColumn`, with a node test.
++                        The SFC order check sorts `defineSlots` as a macro.
++                        In the range probe the right column has an extra leading line, so the two columns' marks fall on different line numbers.
++files_changed           frontend/src/editor/range.ts
++                        frontend/src/editor/compare.ts
++                        frontend/src/editor/internal/compareViews.ts
++                        frontend/src/editor/internal/compareFocus.ts
++                        frontend/src/editor/internal/compareFocus.test.ts (new)
++                        frontend/src/editor/range.browser.test.ts
++                        frontend/scripts/check-sfc-order.ts
++                        frontend/scripts/check-sfc-order.test.ts
++tests_added             compareFocus.test.ts "the arrows move in the left column when no column has the keyboard":
++                          `keyboardColumn` is null and `arrowColumn` is "left".
++                        compareFocus.test.ts "the arrows move in the column that has the keyboard": right → right, left → left.
++                        check-sfc-order.test.ts "a defineSlots after state reports the macro line":
++                          the result matches `Slots.vue:4: macro after state`.
++                        range.browser.test.ts, first test reworked: "each column is marked with its own lines from one reply…":
++                          3 strip bands; 2 modified band lines in each column; left has 1 `.chunk-marker-inserted` and right
++                          has 1 inserted band line; left's first word mark is {old, line 2}, right's is {new, line 3};
++                          left's `.chunk-removal` is on line 4, right's on line 3.
++smoke_evidence          pnpm -C frontend typecheck → exit 0
++                        pnpm -C frontend lint → exit 0
++                        pnpm -C frontend test → "Test Files 160 passed (160) / Tests 2072 passed (2072)"
++                        pnpm -C frontend sfc-order → exit 0
++                        pnpm -C frontend fmt:check → "All matched files use the correct format."
++                        The new SFC test fails without the entry: with the `defineSlots` line removed,
++                          `vitest run scripts/check-sfc-order.test.ts` → "× a defineSlots after state reports the macro line …
++                          Tests 1 failed | 3 passed (4)". With the line back → "Tests 6 passed (6)" (this file plus compareFocus.test.ts).
++                        Probe in MiniBrowser (`just webdriver` + `just app-session start-fixture --name rvcol --range-case review`,
++                          then `read` of a script that imports /src/editor/index.ts and builds a RangeController with the probe's CASE in the page):
++                          {"stripBands":[true,true,true],
++                           "left":{"modifiedBandLines":2,"insertedBandLines":0,"insertedMarkers":1,"removals":1,"firstWord":{"text":"old","line":2},"removal":{"line":4}},
++                           "right":{"modifiedBandLines":2,"insertedBandLines":1,"insertedMarkers":0,"removals":1,"firstWord":{"text":"new","line":3},"removal":{"line":3}},
++                           "moveDown":["const value = old(a, b);","call(x);","call(x);"],"leftFocused":true}
++                          Screenshot: /tmp/rvcol-probe.png (left: old/removal on line 4; right: green "// added", "new" on line 3).
++                        Compare window, `start-fixture --name rvcmp --diff-case words`:
++                          - Marks: bandLines [4,5]; words [["nine","printed ","Visitors sign the book at reception."],["ten","Guests wait…","All rooms…"]];
++                            removals [0,1]; 5 strip bands. Screenshot: /tmp/rvcmp-1.png.
++                          - Arrows: "Next change" ×2 with no column focused → {"line":"Questions go to the front desk.","column":"left","focused":true}.
++                            After clicking into the right column, "Next change" → {"line":"Badges are handed out at the door.","column":"right"}.
++                          - Preferences: Settings → Light → Back. Both editors went from "cm-editor ͼ1 ͼ3 ͼ4 ͼ22 ͼo" to "cm-editor ͼ1 ͼ2 ͼ4 ͼ22 ͼo",
++                            theme "light"; still 6 word marks and 5 strip bands. Screenshot: /tmp/rvcmp-light.png.
++deviations_from_brief   - `showColumnDifferences` lives in compareViews.ts, not compareMarks.ts. compareFields.ts already imports the
++                          `ColumnMarks` type from compareMarks.ts, so compareMarks importing `showDifferences` back would be an
++                          `import/no-cycle` error. compareViews.ts already imports compareFields.ts and owns `COLUMNS`.
++                        - `revealDifference` is now private to compareFocus.ts; `moveToDifference` was its only caller.
++                        - `keyboardColumn` now takes a narrow `Focusable` record (`dom.contains`, `root.activeElement`) instead of
++                          `ColumnViews`, and `arrowColumn` is exported. That lets the node test use plain objects without `as`:
++                          node tests have no DOM, so no EditorView. `ColumnViews` still fits both, and `historyKey` is unchanged.
++                        - `showColumnDifferences` and `setColumnPreferences` have no node test: they only loop over the columns and
++                          need real EditorViews. The per-column rule is checked by the MiniBrowser probe and the existing `columnMarks` tests.
++                        - The probe fixture now lists the real insertion difference (left {0,0}, right {0,1}), so the strip shows 3 bands
++                          and the assertions check the inserted marker on the left and the inserted band on the right.
++                        - The Playwright browser test itself was not run (WebKit cannot launch here, as the brief says). Its assertions
++                          were run as the in-page script shown under smoke_evidence. That script finds a mark's line by its `.cm-line`
++                          index instead of `EditorView.posAtDOM`.
++open_risks              - The range window's own view (`--range-case review`) showed 0 `.cm-editor` elements: RangeController is not
++                          mounted there yet, so in the real window it was only seen through the in-page probe.
++                        - `pnpm -C frontend unused` fails on `RangeSideLabel` (src/ipc/index.ts:92, src/ipc/rangeDomain.ts:6),
++                          which this slice does not own. Nothing in my files is reported.
++```
++
++Checks for Main to run: `pnpm -C frontend test:browser` where Playwright WebKit can launch, and `just check` on the merged tree.
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVMarkdownCorrect.md b/.omp/run/notes/RVMarkdownCorrect.md
+new file mode 100644
+index 0000000..132aeec
+--- /dev/null
++++ b/.omp/run/notes/RVMarkdownCorrect.md
+@@ -0,0 +1,74 @@
++The verdict is fail, with four blocking findings and two `should` findings. One is a rendering bug on everyday input; three are about hostile input.
++
++- **Security holds.** No HTML string is built, `class` is the only attribute, links and images are text only, and code blocks load only bundled language-data grammars.
++- **Hostile input breaks the parsers.** Deep nesting throws a stack overflow. Some lines take seconds to parse. `show()` re-parses the whole answer on every streamed chunk, so a slow line freezes the window again on each chunk. I measured this with read-only `node -e` probes on the two pure parser modules (Node 24, V8). No files were written. WebKit's stack limit was not measured.
++- **The node tests:** I traced the seven named tests against their mutations, plus `>=`→`>` on the indent check, and each fails under them.
++- **The browser test file has never run in Playwright.** I accepted the MiniBrowser probe in its place; the details are in `checked`.
++
++```json
++{
++  "verdict": "fail",
++  "findings": [
++    {
++      "severity": "block",
++      "rule_id": "hostile input: unbounded recursion",
++      "file": "frontend/src/editor/internal/markdownBlocks.ts",
++      "line": 200,
++      "problem": "Nesting has no limit. `quote` → `blocksOf` (:200), `list` → `blocksOf` (:240) and `markdownInline.ts:127` `closer` → `closer` recurse once per level. In the probe, one 5 KB line of `>`×5000 or `- `×5000, or a 60 KB paragraph of `*a `×20000, throws `RangeError: Maximum call stack size exceeded` from `parseBlocks`/`parseInline`. `show()` re-parses the whole text on every chunk, so every later chunk throws too and the answer silently stops at its last good render.",
++      "fix": "Add one `MAX_NESTING` constant (for example 16) and pass the depth through `blocksOf`/`quote`/`list` and through `delimited`/`closer`/`link`'s `parseInline`; past it, the rest is literal paragraph text. Add node tests showing that a 10,000-deep quote, list and emphasis each parse to text without throwing."
++    },
++    {
++      "severity": "block",
++      "rule_id": "hostile input: quadratic regex (R-AI7 precedent: nothing in the window may freeze on large input)",
++      "file": "frontend/src/editor/internal/markdownBlocks.ts",
++      "line": 34,
++      "problem": "Both heading regexes are quadratic on a heading line that holds a long run of spaces. `HEADING`'s lazy `(.*?)` followed by `[ \\t]*$`, and `HEADING_CLOSE` (:35) applied through `replace`, backtrack over the run once per position. For `\"# a\" + 50,000 spaces + \"b\"` they took 1.66 s + 1.58 s; with 200,000 spaces, `parseBlocks` took 55 s. `heading()` also runs from `interrupts()` for every paragraph, quote and list line, and `MarkdownView.show` (markdown.ts:25) re-parses the whole text on every streamed chunk, kept blocks included. So one such line freezes the window again on each chunk.",
++      "fix": "Match `/^ {0,3}(#{1,6})(?:[ \\t]+(.*))?$/`. Then `trimEnd()` the content and drop a trailing `#` run only when a space or tab precedes it, using string operations instead of `HEADING_CLOSE`. Add a node test parsing a heading with 100,000 inner spaces into its text."
++    },
++    {
++      "severity": "block",
++      "rule_id": "hostile input: quadratic rescans",
++      "file": "frontend/src/editor/internal/markdownInline.ts",
++      "line": 106,
++      "problem": "Each unmatched opener rescans to the end of the block. `closer` rescans for every `*`/`_` opener that has no closer; after a failure, `delimited` moves on one character and the next opener scans again. `bracketEnd` and `destination` (:176) do the same for every `[` and `(`. In the probe, `*a `×5000 (15 KB) took 1.0 s, `[`×20000 took 0.86 s and `[](`×20000 took 2.5 s. The last block of a streamed answer is inline-parsed again on every chunk, so the window hangs about once per chunk.",
++      "fix": "Replace the rescanning `closer` with one left-to-right delimiter stack per inline run (CommonMark's process_emphasis with `openers_bottom`, linear). Remember the first position past which no `]`/`)` closes, so a later `[`/`(` answers literal without scanning. Add a node test that parses `*a `×20000 and `[](`×20000."
++    },
++    {
++      "severity": "block",
++      "rule_id": "GFM tables (brief Change 1)",
++      "file": "frontend/src/editor/internal/markdownBlocks.ts",
++      "line": 147,
++      "problem": "Any line containing `|` continues the table, even when it starts another block. In the probe, `| a |\\n|---|\\n> q | x` renders the quote as the cell `> q` and silently drops `x`; a list item, heading or fence line with a pipe directly after a table is absorbed the same way. GFM ends a table at a blank line or at the start of another block (spec example 201).",
++      "fix": "Continue rows while `!isBlank(line) && !interrupts(lines, end)` instead of `includes(\"|\")`. Add a node test showing that a quote with a pipe right after a table starts a quote."
++    },
++    {
++      "severity": "should",
++      "rule_id": "VF7",
++      "file": "frontend/scripts/fences.ts",
++      "line": 133,
++      "problem": "These mutants on the new lines survive. 131 (the ternary/`?.`) and 133/134 (×4): `export * from \"../editor\"`, a default or side-effect import of editor/, and a ui file re-exporting another editor name are untested, though the report says `export *` is refused. 150 (×2): removing the `src/editor` guard would flag `import * as x from \"./sides\"`, and no test shows it must not. 154 (×2): the `../editor/markdown.ts` form is untested. A future refactor can lose the `export *` refusal or start flagging unrelated namespace imports, and nothing would fail.",
++      "fix": "In the PM2 violation test, add `src/ui/star.ts` with `export * from \"../editor\";` and `src/ui/direct2.ts` with `import { X } from \"../editor/markdown.ts\";`. In the no-violation test, add `src/ui/ns.ts` with `import * as sides from \"./sides\";` and `src/ui/re.ts` with `export { MergeController } from \"../editor\";`."
++    },
++    {
++      "severity": "should",
++      "rule_id": "VF7",
++      "file": "frontend/src/ui/useMarkdown.ts",
++      "line": 13,
++      "problem": "All 14 mutants are NoCoverage. The null-host guard, destroying the old view on a host swap, destroying on scope dispose, and the text watch never ran anywhere: the MiniBrowser probe imported `editor/index.ts` directly. C7's AiTurn builds on exactly these rules, so a broken swap or dispose would first show up there.",
++      "fix": "Add `ui/useMarkdown.test.ts`. Run `useMarkdown` inside an `effectScope` with `vi.mock(\"../editor\")` returning a fake `MarkdownView` that records construct/show/destroy. Check that a null host builds nothing, a set host calls show(text()), a text change calls show, a host swap destroys the old view, and `scope.stop()` destroys."
++    }
++  ],
++  "checked": [
++    "Security: every element comes from `element()` typed to the brief's tag set; text goes through `textContent`/`createTextNode` only; `className` gets only constants or `highlightCode`'s highlighter classes. No `innerHTML`, `setAttribute`, `href` or `src` (markdownDom.ts, codeBlock.ts, markdown.ts). The `<style>` text comes from `HighlightStyle.module.getRules()`, never from the answer. `languageNamed` is `matchLanguageName(languages, name, false)`, an exact name/alias match whose `load()` imports only bundled language-data packages, so no URL comes from the answer. `ALIGN` keys are two-character `:`/`-` strings (no prototype keys). theme.css `.markdown-*` has no `url()` or `attr()`.",
++    "Links and images (the brief's hostile cases): `[t](javascript:…)` becomes a link node shown as text plus a muted address span; images become `alt (url)` text; autolinks become text; `<script>`, `<img onerror>` and `<div onclick>` stay literal at block level (paragraph) and inline (AUTOLINK needs a scheme with `:` or an `@`). Pinned by markdownInline.test.ts and markdownBlocks.test.ts 'raw HTML stays text'.",
++    "Streaming (markdown.ts show): a block's parse depends only on its own source lines, and each block's extent is part of its source, so keeping by index while the sources match is sound. A shrinking text removes the extra nodes. A replaced or destroyed block's pending paint is skipped by `live()`; dropping that guard would paint a detached element, which is invisible. `description.load()` caches its promise, so a re-created code block repaints within a microtask, before the next paint (no flicker after the first load).",
++    "Node tests traced by hand against their mutations. Fence: closing on `HEADING` fails, and the tilde test kills `>=`→`===` and the mark-character check. List continuation: `true` for the indent check fails, `>=`→`>` fails ('  more' at column 2), and `blanks === 0`→`true` fails ('after' joins). Table: accepting any pipe line fails. Backticks: no code-span skip in `closer` fails. Unmatched `*`: traced through `closer`, giving `2 * 3 and *open and *` + em(half), the CommonMark result. Image and HTML mutations fail as reported.",
++    "The browser test file has never run in Playwright: Playwright WebKit cannot launch here, the known libicudata issue #423/#1074. Accepted: the same three scenarios ran in WebKit (MiniBrowser through `just webdriver`), and the innerHTML, no-highlighter and re-render-from-zero mutations each failed there. The file's helpers read correctly: the link text plus ' ' plus the address span gives 'click javascript:…'; syntax.ts:66 styles `tags.comment` with a font property, so `classOf(fontHighlight, tags.comment)` resolves.",
++    "Mutation survivors dropped. fences.ts:144 (a): any other statement has an empty target, which the `isInside` guard rejects. 148 (a): `moduleSpecifier` is always a StringLiteral when present, and the `\"\"` replacement gives no relative target. 149 `?? \"\"` (a): same reason. 170 (a): the reason text is not observable, since `violationsOf` strips it. Lines 48–124 and 178–269 lie outside this patch's hunks (43–45, 129–174, 273–276).",
++    "Implementer open risks accepted: approximate emphasis for nested unmatched openers (a CommonMark divergence chosen to avoid exponential search; still literal and safe); a lazy line joining an item or quote whose last content is an open fence (needs an unclosed fence followed by an unprefixed line); a tab split by a strip being dropped; the `(?<!\\\\)\\|` lookbehind (WebKitGTK 2.54 supports it).",
++    "No line-space conversions or EditorState are touched (no base/local/remote/doc mapping; CM1–CM9 do not apply). No risk-register owner is touched (RK1–RK27).",
++    "Probes: read-only `node -e` imports of markdownBlocks.ts and markdownInline.ts (Node 24.22 type stripping). No repository or scratch files were written. These are the only commands run; no test file or toolchain was run.",
++    "Not repeated from the boundary review: the shared highlighter with removalTooltip, `loadedSupport`, markdownFence.ts, positional strings."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/docs/slices/briefs/3.RV-markdown-rework-1.md b/docs/slices/briefs/3.RV-markdown-rework-1.md
+new file mode 100644
+index 0000000..dccf5f4
+--- /dev/null
++++ b/docs/slices/briefs/3.RV-markdown-rework-1.md
+@@ -0,0 +1,63 @@
++# Slice 3.RV-markdown — fix round 1
++
++Board "Review a commit range" row 11. Original brief: `briefs/3.RV-markdown.md` (its Contract stands). Your round-1
++patch is committed (`ae46983`); the reviews are `.omp/run/notes/RVMarkdownBoundary.md` and
++`.omp/run/notes/RVMarkdownCorrect.md` — read both in full, their probes and numbers are given. Owned is widened to the
++shared homes they name. The range window's fence rules (PM9) are in `fences.ts` since `50444c3`: keep them.
++
++## Target
++
++Owned: `frontend/src/editor/markdown.ts`, `frontend/src/editor/internal/{markdownBlocks,markdownInline,markdownDom,
++codeBlock,removalTooltip,language,syntax}.ts` and their `.test.ts` files (new or changed),
++`frontend/src/editor/internal/markdownDom.browser.test.ts`, `frontend/src/ui/useMarkdown.ts`,
++`frontend/src/ui/useMarkdown.test.ts` (new), `frontend/scripts/{fences,fences.test,markdownFence,markdownFence.test}.ts`
++(`markdownFence*` new).
++
++Read-only: everything else.
++
++## Blocks to fix (verbatim from the reviews; 1–5 are blocks, the rest promoted)
++
++1. **One highlighter for code outside a pane** (`codeBlock.ts:25`, plan #102): `highlighted()` and `HIGHLIGHTERS` copy
++   `removalTooltip.ts:27–42`. Export one `highlightedNodes(document, code, parser): Node[]` holding the highlighter
++   pair (in `codeBlock.ts` or beside the table in `syntax.ts`); `paintCode` and `removalTooltip.ts` both call it.
++2. **Bounded nesting** (`markdownBlocks.ts:200`, `:240`, `markdownInline.ts:127`): one `MAX_NESTING` (e.g. 16) passed
++   through `blocksOf`/`quote`/`list` and through the inline recursion; past it the rest is literal paragraph text.
++   Node tests: a 10,000-deep quote, list and emphasis each parse to text without throwing.
++3. **Linear heading match** (`markdownBlocks.ts:34–35`): match `/^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/`, then `trimEnd()`
++   the content and drop a trailing `#` run only when a space or tab precedes it, with string operations instead of
++   `HEADING_CLOSE`. Node test: a heading with 100,000 inner spaces parses to its text (time it; report).
++4. **Linear inline scanning** (`markdownInline.ts:106`, `:176`): replace the rescanning `closer` with one left-to-right
++   delimiter stack per inline run (CommonMark's process_emphasis with `openers_bottom`, linear); remember the first
++   position past which no `]`/`)` closes, so a later `[`/`(` answers literal without scanning. Node tests: `*a `×20000
++   and `[](`×20000 parse (time them; report).
++5. **Tables end at another block** (`markdownBlocks.ts:147`, GFM example 201): continue rows while `!isBlank(line) &&
++   !interrupts(lines, end)` instead of `includes("|")`. Node test: a quote with a pipe right after a table starts a
++   quote.
++6. **One language load-and-log** (`codeBlock.ts:56`): pull the load-and-log out of `language.ts` as
++   `loadedSupport(description, fields): Promise<LanguageSupport | null>` with the one event name; `loadLanguage` and
++   `paintCode` both use it.
++7. **The MarkdownView fence in its own file** (`fences.ts:129`, at 287/300 lines): move `namesOf`,
++   `exposesMarkdownView`, `markdownViolations` and their constants into `scripts/markdownFence.ts`, exporting
++   `markdownViolations` as `clipboardFence.ts` does; `fences.ts` calls it.
++8. **No swappable positional strings** (`markdownDom.ts:4`, TS7): pass the code block itself (`paint(element, block:
++   Extract<Block, { kind: "code" }>)`, `codeNode(document, block, paint)`), and give `textElement`/`withInlines` an
++   options object `{ tag, className, text }`.
++9. **Test the fence's forms** (`fences.ts:133`, survivors): in the PM2 violation test add `src/ui/star.ts` with `export *
++   from "../editor";` and `src/ui/direct2.ts` with `import { X } from "../editor/markdown.ts";`; in the no-violation
++   test add `src/ui/ns.ts` with `import * as sides from "./sides";` and `src/ui/re.ts` with `export { MergeController }
++   from "../editor";`.
++10. **Test `useMarkdown`** (`ui/useMarkdown.ts:13`, all NoCoverage): `ui/useMarkdown.test.ts`, run inside an
++    `effectScope` with `vi.mock("../editor")` returning a fake `MarkdownView` that records construct/show/destroy: a
++    null host builds nothing, a set host calls `show(text())`, a text change calls `show`, a host swap destroys the old
++    view, `scope.stop()` destroys.
++
++## Acceptance
++
++All of the above; the earlier node tests pass; the removal tooltip in the merge window (fixture mode) still colours its
++code (observed value); the browser checks re-run in MiniBrowser (Playwright WebKit cannot launch here) — paste the
++values. Commands: `pnpm -C frontend typecheck`, `pnpm -C frontend lint`, `pnpm -C frontend test`, `pnpm -C frontend
++fmt:check`, `pnpm -C frontend unused`.
++
++## Skills
++
++`skill://ts-conventions`, `skill://cm6-rules`, `skill://vue-conventions` (plus your autoloaded ones).
+diff --git a/frontend/scripts/check-sfc-order.test.ts b/frontend/scripts/check-sfc-order.test.ts
+index 0133565..8706af9 100644
+--- a/frontend/scripts/check-sfc-order.test.ts
++++ b/frontend/scripts/check-sfc-order.test.ts
+@@ -46,3 +46,15 @@ function stop(): void {}
+ 
+   expect(firstViolation("Late.vue", text)).toMatch(/^Late\.vue:4: state after lifecycle /);
+ });
++
++test("a defineSlots after state reports the macro line", () => {
++  const text = `<script setup lang="ts">
++import { ref } from "vue";
++const open = ref(false);
++const slots = defineSlots<{ default(): unknown }>();
++</script>
++<template><p>{{ open }} {{ slots }}</p></template>
++`;
++
++  expect(firstViolation("Slots.vue", text)).toMatch(/^Slots\.vue:4: macro after state /);
++});
+diff --git a/frontend/scripts/check-sfc-order.ts b/frontend/scripts/check-sfc-order.ts
+index c9781f7..a13ad48 100644
+--- a/frontend/scripts/check-sfc-order.ts
++++ b/frontend/scripts/check-sfc-order.ts
+@@ -20,6 +20,7 @@ const CALLEE_SECTIONS: Record<string, Section> = {
+   defineProps: "macro",
+   defineEmits: "macro",
+   defineModel: "macro",
++  defineSlots: "macro",
+   withDefaults: "macro",
+   ref: "state",
+   reactive: "state",
+diff --git a/frontend/src/editor/compare.ts b/frontend/src/editor/compare.ts
+index ffc8c6e..39b0381 100644
+--- a/frontend/src/editor/compare.ts
++++ b/frontend/src/editor/compare.ts
+@@ -2,18 +2,22 @@ import { redo, undo } from "@codemirror/commands";
+ import type { ViewUpdate } from "@codemirror/view";
+ 
+ import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
+-import { showDifferences } from "./internal/compareFields";
+-import { keyboardColumn, revealDifference } from "./internal/compareFocus";
++import { keyboardColumn, moveToDifference } from "./internal/compareFocus";
+ import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
+ import { CompareFrame } from "./internal/compareFrame";
+ import { CompareLanguage } from "./internal/compareLanguage";
+-import { columnMarks } from "./internal/compareMarks";
+ import { Settle } from "./internal/compareSettle";
+ import { CompareStrip } from "./internal/compareStrip";
+-import { COLUMNS, createColumnViews, type ColumnViews } from "./internal/compareViews";
++import {
++  COLUMNS,
++  createColumnViews,
++  setColumnPreferences,
++  showColumnDifferences,
++  type ColumnViews,
++} from "./internal/compareViews";
+ import { historyCommand } from "./internal/historyKey";
+ import type { Direction } from "./internal/navigation";
+-import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
++import type { PaneSettings, Preferences } from "./internal/pane";
+ 
+ export type { ColumnFormat, FormatReport } from "./internal/compareFormat";
+ export { FORMAT_LANGUAGES } from "./internal/compareFormat";
+@@ -104,11 +108,7 @@ export class CompareController {
+     if (!this.#settle.accepts(comparison.versions)) {
+       return false;
+     }
+-    for (const column of COLUMNS) {
+-      const view = this.#views[column];
+-      const marks = columnMarks(view.state.doc, comparison.differences, column);
+-      view.dispatch({ effects: showDifferences.of(marks) });
+-    }
++    showColumnDifferences(this.#views, comparison.differences);
+     return true;
+   }
+ 
+@@ -118,10 +118,7 @@ export class CompareController {
+ 
+   setPreferences(preferences: Preferences): void {
+     this.#settings = { ...this.#settings, preferences };
+-    const effects = preferenceEffects("center", this.#settings);
+-    for (const column of COLUMNS) {
+-      this.#views[column].dispatch({ effects });
+-    }
++    setColumnPreferences(this.#views, this.#settings);
+   }
+ 
+   formatLanguage(): FormatLanguage | null {
+@@ -134,7 +131,7 @@ export class CompareController {
+   }
+ 
+   moveToChange(direction: Direction): void {
+-    revealDifference(this.#views[keyboardColumn(this.#views) ?? "left"], direction);
++    moveToDifference(this.#views, direction);
+   }
+ 
+   historyKey(event: KeyboardEvent): boolean {
+diff --git a/frontend/src/editor/internal/compareFocus.test.ts b/frontend/src/editor/internal/compareFocus.test.ts
+new file mode 100644
+index 0000000..dd1f9ca
+--- /dev/null
++++ b/frontend/src/editor/internal/compareFocus.test.ts
+@@ -0,0 +1,19 @@
++import { expect, test } from "vitest";
++
++import { arrowColumn, keyboardColumn } from "./compareFocus";
++
++function column(focused: boolean): Parameters<typeof keyboardColumn>[0]["left"] {
++  return { dom: { contains: () => focused }, root: { activeElement: null } };
++}
++
++test("the arrows move in the left column when no column has the keyboard", () => {
++  const views = { left: column(false), right: column(false) };
++
++  expect(keyboardColumn(views)).toBeNull();
++  expect(arrowColumn(views)).toBe("left");
++});
++
++test("the arrows move in the column that has the keyboard", () => {
++  expect(arrowColumn({ left: column(false), right: column(true) })).toBe("right");
++  expect(arrowColumn({ left: column(true), right: column(false) })).toBe("left");
++});
+diff --git a/frontend/src/editor/internal/compareFocus.ts b/frontend/src/editor/internal/compareFocus.ts
+index 9d1c646..25067e7 100644
+--- a/frontend/src/editor/internal/compareFocus.ts
++++ b/frontend/src/editor/internal/compareFocus.ts
+@@ -9,7 +9,12 @@ import { rangeSpan } from "./geometry";
+ import type { Direction } from "./navigation";
+ import { revealSpan } from "./viewport";
+ 
+-export function keyboardColumn(views: ColumnViews): Column | null {
++type Focusable = {
++  readonly dom: Pick<Node, "contains">;
++  readonly root: Pick<DocumentOrShadowRoot, "activeElement">;
++};
++
++export function keyboardColumn(views: Readonly<Record<Column, Focusable>>): Column | null {
+   return (
+     COLUMNS.find((column) => {
+       const view = views[column];
+@@ -18,7 +23,15 @@ export function keyboardColumn(views: ColumnViews): Column | null {
+   );
+ }
+ 
+-export function revealDifference(view: EditorView, direction: Direction): void {
++export function arrowColumn(views: Readonly<Record<Column, Focusable>>): Column {
++  return keyboardColumn(views) ?? "left";
++}
++
++export function moveToDifference(views: ColumnViews, direction: Direction): void {
++  revealDifference(views[arrowColumn(views)], direction);
++}
++
++function revealDifference(view: EditorView, direction: Direction): void {
+   const { state } = view;
+   const target = nextDifference(
+     state.doc,
+diff --git a/frontend/src/editor/internal/compareViews.ts b/frontend/src/editor/internal/compareViews.ts
+index e2db522..5b02f43 100644
+--- a/frontend/src/editor/internal/compareViews.ts
++++ b/frontend/src/editor/internal/compareViews.ts
+@@ -1,10 +1,11 @@
+ import { Text, type EditorState, type Extension } from "@codemirror/state";
+ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+-import type { Column } from "../../ipc";
++import type { Column, Difference } from "../../ipc";
+ import { columnLimit } from "./columnBytes";
+-import { differenceField } from "./compareFields";
+-import { paneState, type PaneSettings } from "./pane";
++import { differenceField, showDifferences } from "./compareFields";
++import { columnMarks } from "./compareMarks";
++import { paneState, preferenceEffects, type PaneSettings } from "./pane";
+ import { everyPane } from "./paneViews";
+ import { removalTooltip } from "./removalTooltip";
+ 
+@@ -126,3 +127,21 @@ export function createReadOnlyColumnViews(
+     readOnlyColumnState({ column, text: texts[column] }, wiring),
+   );
+ }
++
++export function showColumnDifferences(
++  views: ColumnViews,
++  differences: readonly Difference[],
++): void {
++  for (const column of COLUMNS) {
++    const view = views[column];
++    const marks = columnMarks(view.state.doc, differences, column);
++    view.dispatch({ effects: showDifferences.of(marks) });
++  }
++}
++
++export function setColumnPreferences(views: ColumnViews, settings: PaneSettings): void {
++  const effects = preferenceEffects("center", settings);
++  for (const column of COLUMNS) {
++    views[column].dispatch({ effects });
++  }
++}
+diff --git a/frontend/src/editor/range.browser.test.ts b/frontend/src/editor/range.browser.test.ts
+index 46fedf0..343ed58 100644
+--- a/frontend/src/editor/range.browser.test.ts
++++ b/frontend/src/editor/range.browser.test.ts
+@@ -25,6 +25,7 @@ const LEFT = [
+   "",
+ ].join("\n");
+ const RIGHT = [
++  "// added",
+   "const first = 1;",
+   "const value = new(a);",
+   "const same = 2;",
+@@ -36,9 +37,17 @@ const CASE = {
+   left: LEFT,
+   right: RIGHT,
+   differences: [
++    {
++      left: { start: 0, len: 0 },
++      right: { start: 0, len: 1 },
++      words: {
++        left: { changed: [], removals: [] },
++        right: { changed: [], removals: [] },
++      },
++    },
+     {
+       left: { start: 1, len: 1 },
+-      right: { start: 1, len: 1 },
++      right: { start: 2, len: 1 },
+       words: {
+         left: {
+           changed: [
+@@ -48,17 +57,17 @@ const CASE = {
+           removals: [],
+         },
+         right: {
+-          changed: [{ line: 1, start: 14, len: 3 }],
+-          removals: [{ at: { line: 1, column: 19 }, text: ", b" }],
++          changed: [{ line: 2, start: 14, len: 3 }],
++          removals: [{ at: { line: 2, column: 19 }, text: ", b" }],
+         },
+       },
+     },
+     {
+       left: { start: 3, len: 1 },
+-      right: { start: 3, len: 1 },
++      right: { start: 4, len: 1 },
+       words: {
+         left: { changed: [], removals: [{ at: { line: 3, column: 6 }, text: ", y" }] },
+-        right: { changed: [{ line: 3, start: 6, len: 3 }], removals: [] },
++        right: { changed: [{ line: 4, start: 6, len: 3 }], removals: [] },
+       },
+     },
+   ],
+@@ -121,12 +130,18 @@ afterEach(() => {
+   document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
+ });
+ 
+-test("both columns are marked from one reply: bands, word marks, removal bars and the strip", async () => {
++function markLine(host: HTMLElement, selector: string): { text: string; line: number } {
++  const mark = found(host.querySelector<HTMLElement>(selector), selector);
++  const view = viewIn(host);
++  return { text: mark.textContent, line: view.state.doc.lineAt(view.posAtDOM(mark)).number };
++}
++
++test("each column is marked with its own lines from one reply: bands, word marks, removal bars and the strip", async () => {
+   const { hosts } = await opened();
+   const bands = await vi.waitFor(
+     () => {
+       const shown = [...hosts.strip.querySelectorAll("path.chunk-band")];
+-      expect(shown).toHaveLength(2);
++      expect(shown).toHaveLength(3);
+       return shown;
+     },
+     { timeout: WAIT_MS },
+@@ -135,10 +150,14 @@ test("both columns are marked from one reply: bands, word marks, removal bars an
+ 
+   for (const host of [hosts.left, hosts.right]) {
+     expect(host.querySelectorAll(".cm-line.chunk-band.chunk-modified")).toHaveLength(2);
+-    expect(host.querySelectorAll(".chunk-word-modified").length).toBeGreaterThan(0);
+     expect(host.querySelectorAll(".chunk-removal")).toHaveLength(1);
+   }
+-  expect(hosts.left.querySelector(".chunk-word-modified")?.textContent).toBe("old");
++  expect(hosts.left.querySelectorAll(".cm-line.chunk-marker-inserted")).toHaveLength(1);
++  expect(hosts.right.querySelectorAll(".cm-line.chunk-band.chunk-inserted")).toHaveLength(1);
++  expect(markLine(hosts.left, ".chunk-word-modified")).toEqual({ text: "old", line: 2 });
++  expect(markLine(hosts.right, ".chunk-word-modified")).toEqual({ text: "new", line: 3 });
++  expect(markLine(hosts.left, ".chunk-removal").line).toBe(4);
++  expect(markLine(hosts.right, ".chunk-removal").line).toBe(3);
+   expect(bands.every((band) => (band.getAttribute("d") ?? "") !== "")).toBe(true);
+ });
+ 
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+index fdc4aca..308eb12 100644
+--- a/frontend/src/editor/range.ts
++++ b/frontend/src/editor/range.ts
+@@ -1,14 +1,18 @@
+ import type { Difference } from "../ipc";
+ import type { CompareHosts } from "./compare";
+-import { showDifferences } from "./internal/compareFields";
+-import { keyboardColumn, revealDifference } from "./internal/compareFocus";
++import { moveToDifference } from "./internal/compareFocus";
+ import { CompareFrame } from "./internal/compareFrame";
+-import { columnMarks } from "./internal/compareMarks";
+ import { CompareStrip } from "./internal/compareStrip";
+-import { COLUMNS, createReadOnlyColumnViews, type ColumnViews } from "./internal/compareViews";
++import {
++  COLUMNS,
++  createReadOnlyColumnViews,
++  setColumnPreferences,
++  showColumnDifferences,
++  type ColumnViews,
++} from "./internal/compareViews";
+ import { languageOf, loadLanguage } from "./internal/language";
+ import type { Direction } from "./internal/navigation";
+-import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
++import type { PaneSettings, Preferences } from "./internal/pane";
+ 
+ export type RangeTexts = {
+   readonly path: string; // the file's path in the range, the old path when deleted: picks the language
+@@ -37,11 +41,7 @@ export class RangeController {
+     });
+     this.#strip = new CompareStrip(hosts.strip);
+     this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
+-    for (const column of COLUMNS) {
+-      const view = this.#views[column];
+-      const marks = columnMarks(view.state.doc, texts.differences, column);
+-      view.dispatch({ effects: showDifferences.of(marks) });
+-    }
++    showColumnDifferences(this.#views, texts.differences);
+     const description = languageOf(texts.path);
+     if (description !== null) {
+       const { left, right } = this.#views;
+@@ -52,14 +52,11 @@ export class RangeController {
+ 
+   setPreferences(preferences: Preferences): void {
+     this.#settings = { ...this.#settings, preferences };
+-    const effects = preferenceEffects("center", this.#settings);
+-    for (const column of COLUMNS) {
+-      this.#views[column].dispatch({ effects });
+-    }
++    setColumnPreferences(this.#views, this.#settings);
+   }
+ 
+   moveToChange(direction: Direction): void {
+-    revealDifference(this.#views[keyboardColumn(this.#views) ?? "left"], direction);
++    moveToDifference(this.#views, direction);
+   }
+ 
+   destroy(): void {
+-- 
+2.56.0
+
