@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use crate::repo::program_in;
+use crate::program::program_in;
 use crate::run::{Waited, argv, run_with_deadline};
 use crate::{Error, Result};
 

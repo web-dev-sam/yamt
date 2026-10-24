@@ -14,6 +14,7 @@ mod merge_config;
 mod merge_file;
 mod names;
 mod operation;
+mod program;
 mod repo;
 mod rerere;
 mod run;

@@ -13,7 +13,6 @@ use yamt_gitio::{Error, Glab, GlabRun, Oid, Repo};
 
 const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
 const HANG_SECONDS: u64 = 5;
-const EXECUTABLE: u32 = 0o755;
 const PLAIN: u32 = 0o644;
 const BODY_PAST_ANY_PIPE_BUFFER: usize = 1 << 20;
 const POST: [&str; 6] = [
@@ -26,6 +25,7 @@ const POST: [&str; 6] = [
 ];
 const NOT_FOUND_TEST: &str = "glab_is_none_on_a_path_without_a_runnable_glab";
 const FOUND_TEST: &str = "glab_found_on_path_is_the_one_run";
+const OVERRIDES_TEST: &str = "glab_runs_in_the_repository_with_no_color_and_stdin_closed";
 const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     path: "a.txt",
     kind: FileKind::Regular,
@@ -52,8 +52,10 @@ fn runner_file(name: &str) -> Vec<u8> {
     fs::read(runner_scenario().join(name)).unwrap()
 }
 
-/// The fake glab on the `runner` scenario behind a wrapper script that sets the fake's variables (a test cannot
-/// change its own environment, which glab inherits); the wrapper, post count and log live in `dir`.
+/// The fake glab on the `runner` scenario through a symlink in `dir`, beside the `glab.env` naming its variables (a
+/// test cannot change its own environment, which glab inherits); the post count and log live in `dir` too. A link,
+/// not a written script: a parallel test's fork could still hold a written file open for writing at its exec
+/// (ETXTBSY).
 struct Fake {
     dir: TempDir,
     glab: Glab,
@@ -64,18 +66,17 @@ impl Fake {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         fs::write(&state, format!("{posts_before}\n")).unwrap();
-        let wrapper = dir.path().join("glab");
-        let script = format!(
-            "#!/bin/sh\nexport YAMT_FAKE_GLAB='{}' YAMT_FAKE_GLAB_STATE='{}' YAMT_FAKE_GLAB_LOG='{}'\nexec '{}' \"$@\"\n",
+        let settings = format!(
+            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_STATE={}\nYAMT_FAKE_GLAB_LOG={}\n",
             runner_scenario().display(),
             state.display(),
             dir.path().join("log").display(),
-            fake_glab_folder().join("glab").display(),
         );
-        fs::write(&wrapper, script).unwrap();
-        fs::set_permissions(&wrapper, fs::Permissions::from_mode(EXECUTABLE)).unwrap();
+        fs::write(dir.path().join("glab.env"), settings).unwrap();
+        let link = dir.path().join("glab");
+        std::os::unix::fs::symlink(fake_glab_folder().join("glab"), &link).unwrap();
         Fake {
-            glab: Glab::at(wrapper),
+            glab: Glab::at(link),
             dir,
         }
     }
@@ -140,6 +141,20 @@ fn a_failing_glab_keeps_its_exit_stdout_and_stderr() {
 }
 
 #[test]
+fn the_fake_invents_no_stderr_for_an_error_body_without_a_message() {
+    let fake = Fake::new(4);
+
+    let ran = fake.run(&POST, Some(b"{}".to_vec()));
+
+    let expected = GlabRun::Failed {
+        status: Some(2),
+        stdout: without_final_newline(runner_file("post-5.json")),
+        stderr: b"fake glab: no recorded stderr for this body\n".to_vec(),
+    };
+    assert_eq!(ran, expected);
+}
+
+#[test]
 fn a_hanging_glab_times_out() {
     let fake = Fake::new(3);
     let glab = fake.glab.with_timeout(SHORT_TIMEOUT);
@@ -158,6 +173,24 @@ fn a_hanging_glab_times_out() {
 }
 
 #[test]
+fn glab_overrides_no_color_and_the_terminal_prompt_and_closes_stdin() {
+    let dir = tempfile::tempdir().unwrap();
+    let leaked = dir.path().join("stdin");
+    fs::write(&leaked, "leaked").unwrap();
+    let stdin = fs::File::open(&leaked).unwrap();
+
+    let ran = run_ignored_in_child(&[OVERRIDES_TEST], |child| {
+        child
+            .env("NO_COLOR", "0")
+            .env("GIT_TERMINAL_PROMPT", "1")
+            .stdin(stdin);
+    });
+
+    ran.unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+#[ignore = "run by glab_overrides_no_color_and_the_terminal_prompt_and_closes_stdin"]
 fn glab_runs_in_the_repository_with_no_color_and_stdin_closed() {
     let fake = Fake::new(0);
     let repo = diverged_repo(&FILES).unwrap();

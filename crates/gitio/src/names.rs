@@ -1,11 +1,10 @@
 use crate::entry::Oid;
-use crate::repo::{Repo, read_if_present, without_final_newline};
+use crate::repo::{REV_PARSE, Repo, read_if_present, without_final_newline};
 use crate::run::{Access, GIT_TIMEOUT, run};
 use crate::{Error, Result};
 
 const BRANCH: &str = "branch";
 const LOG: &str = "log";
-const REV_PARSE: &str = "rev-parse";
 const MERGE_MSG: &str = "MERGE_MSG";
 const NON_SYMBOLIC_SHORT_NAME: &str =
     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";

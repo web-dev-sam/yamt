@@ -11,6 +11,11 @@ here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
 | `YAMT_FAKE_GLAB_STATE` | a file holding how many posts were answered so far (missing = 0); each post adds one. Required for posts |
 | `YAMT_FAKE_GLAB_LOG` | a file every call is appended to (optional) |
 
+Each variable left unset is read from a `glab.env` file in the folder of `$0` (for a fake run through a symlink,
+the link's folder), one `NAME=value` line per variable, the value taken as written (no quotes); any other line
+exits 2. The Rust tests run the fake this way: a symlink `glab` beside its `glab.env` in a temporary folder, so no
+test ever runs a file it has just written (ETXTBSY).
+
 ## Scenario folder
 
 | file | answers |
@@ -22,7 +27,7 @@ here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
 | `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
 | `post-<n>.json` | the body of the n-th POST `…/draft_notes` (n from 1, counted in the state file) |
 | `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
-| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)` |
+| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
 | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
 | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
 
@@ -40,7 +45,7 @@ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), aga
 - An HTTP error (`glab api projects/gitlab-org%2Fno-such-project-yamt`): stdout holds the error body
   (`{"message":"404 Project Not Found"}`, headers first with `--include`), stderr
   `glab: 404 Project Not Found (HTTP 404)` and a newline, exit 1. The fake takes the message from the body's
-  `"message"` string, or else the status line's words.
+  `"message"` string; it never invents one.
 - `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
   "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
   dropped).
@@ -61,4 +66,5 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
 ## Scenarios
 
 - `runner/` — `yamt-gitio`'s own tests (`crates/gitio/tests/glab.rs`): post 1 is accepted, post 2 refused with
-  400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s.
+  400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s,
+  post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).

@@ -1,7 +1,8 @@
 #!/bin/sh
 # A stand-in for glab 1.124.0 in yamt's tests and app sessions: answers `glab auth status` and `glab api` from
 # the scenario folder $YAMT_FAKE_GLAB, counts posts in $YAMT_FAKE_GLAB_STATE and logs every call to
-# $YAMT_FAKE_GLAB_LOG; the folder layout and the log format are in tests/glab/README.md.
+# $YAMT_FAKE_GLAB_LOG; each variable left unset is read from a glab.env beside $0 when there is one. The folder
+# layout, glab.env and the log format are in tests/glab/README.md.
 # What it imitates, as glab 1.124.0 printed it: `auth status` writes everything on stderr; `api` prints the body
 # as GitLab sent it (no final newline), after the status line, the headers and an empty line, each ending in
 # CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1.
@@ -26,6 +27,20 @@ text_or() {
 		printf '%s' "$2"
 	fi
 }
+
+# Run through a symlink, the folder of $0 is the link's: tests place one beside their glab.env.
+settings="$(dirname "$0")/glab.env"
+if [ -f "$settings" ]; then
+	while IFS= read -r line; do
+		value=${line#*=}
+		case $line in
+		YAMT_FAKE_GLAB=*) : "${YAMT_FAKE_GLAB=$value}" ;;
+		YAMT_FAKE_GLAB_STATE=*) : "${YAMT_FAKE_GLAB_STATE=$value}" ;;
+		YAMT_FAKE_GLAB_LOG=*) : "${YAMT_FAKE_GLAB_LOG=$value}" ;;
+		*) fail "unknown line in $settings: $line" ;;
+		esac
+	done <"$settings"
+fi
 
 scenario=${YAMT_FAKE_GLAB:-}
 [ -n "$scenario" ] || fail 'YAMT_FAKE_GLAB names no scenario folder'
@@ -63,7 +78,8 @@ answer() {
 		exit 1
 	fi
 	message=$(printf '%s' "$2" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
-	printf 'glab: %s (HTTP %s)\n' "${message:-${1#* }}" "$code" >&2
+	[ -n "$message" ] || fail 'no recorded stderr for this body'
+	printf 'glab: %s (HTTP %s)\n' "$message" "$code" >&2
 	exit 1
 }
 
