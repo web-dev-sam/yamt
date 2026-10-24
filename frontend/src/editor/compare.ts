@@ -2,6 +2,7 @@ import { redo, undo } from "@codemirror/commands";
 import type { ViewUpdate } from "@codemirror/view";
 
 import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
+import { differenceField } from "./internal/compareFields";
 import { keyboardColumn, moveToDifference } from "./internal/compareFocus";
 import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
 import { CompareFrame } from "./internal/compareFrame";
@@ -81,7 +82,12 @@ export class CompareController {
       },
     });
     this.#strip = new CompareStrip(hosts.strip);
-    this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
+    this.#frame = new CompareFrame({
+      views: this.#views,
+      strip: this.#strip,
+      fields: [differenceField],
+      anchors: () => [],
+    });
     this.showComparison(texts.comparison);
     this.#language = new CompareLanguage(options.language, this.#views, events.detected);
     this.#frame.request();

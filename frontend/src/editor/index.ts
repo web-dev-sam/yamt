@@ -43,7 +43,7 @@ export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 export { MarkdownView } from "./markdown";
 export { RangeController } from "./range";
-export type { RangeOptions, RangeTexts } from "./range";
+export type { RangeEvents, RangeOptions, RangeTexts, ShownThread } from "./range";
 
 export type MergeHosts = {
   readonly left: HTMLElement;

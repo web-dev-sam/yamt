@@ -97,6 +97,7 @@ export type { RangeSource } from "./RangeSource";
 export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
 export { THEMES, themeKind, themeOf, themeRows } from "./themes";
 export { createTauriCompareSource } from "./tauriCompare";
+export { changedThreadLine, shownColumn, unchangedThreadLine, type ThreadLine } from "./threadLine";
 export { createTauriRangeSource } from "./tauriRange";
 export type { ServerHost } from "./ServerHost";
 export type { SideWords } from "./words";

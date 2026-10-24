@@ -484,3 +484,56 @@ ul.markdown-list {
   user-select: text;
   -webkit-user-select: text;
 }
+
+.cm-editor .cm-thread-row {
+  position: sticky;
+  left: var(--thread-left, 0px);
+  box-sizing: border-box;
+  width: var(--thread-width, 100%);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  white-space: normal;
+  cursor: auto;
+}
+
+.cm-editor .cm-thread-host {
+  display: flow-root;
+}
+
+.cm-editor.cm-thread-lines .cm-lineNumbers .cm-gutterElement {
+  position: relative;
+  padding-left: 20px;
+  cursor: pointer;
+}
+
+.cm-editor.cm-thread-lines
+  .cm-lineNumbers
+  .cm-gutterElement:hover:not(:has(.cm-thread-count))::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 14px;
+  background-color: var(--color-fg-muted);
+  content: "";
+  -webkit-mask: var(--thread-icon) center / 14px 14px no-repeat;
+  mask: var(--thread-icon) center / 14px 14px no-repeat;
+}
+
+.cm-editor .cm-thread-count {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  box-sizing: border-box;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background-color: var(--color-primary);
+  color: var(--color-on-primary);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  transform: translateY(-50%);
+}
