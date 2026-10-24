@@ -238,6 +238,14 @@ pub fn tab_texts(loaded: &LoadedTab) -> TabTexts {
     }
 }
 
+/// The differences between two texts (`yamt_merge_core::compare`); `Error::TooLarge` when either is over
+/// `MAX_COLUMN_BYTES`.
+pub fn text_differences(left: &str, right: &str) -> Result<Vec<Difference>> {
+    files::require_within_limit(left.len())?;
+    files::require_within_limit(right.len())?;
+    Ok(compare(left, right))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +256,30 @@ mod tests {
             usize::try_from(MAX_COLUMN_BYTES),
             Ok(yamt_merge_core::MAX_TEXT_BYTES)
         );
+    }
+
+    #[test]
+    fn text_differences_refuses_a_side_over_the_column_limit() {
+        let at_limit = "a".repeat(MAX_COLUMN_BYTES as usize);
+        let over = "a".repeat(MAX_COLUMN_BYTES as usize + 1);
+        let over_bytes = over.len();
+        assert!(matches!(
+            text_differences(&over, "b"),
+            Err(Error::TooLarge { bytes }) if bytes == over_bytes
+        ));
+        assert!(matches!(
+            text_differences("b", &over),
+            Err(Error::TooLarge { bytes }) if bytes == over_bytes
+        ));
+        assert!(text_differences(&at_limit, &at_limit).is_ok());
+    }
+
+    #[test]
+    fn text_differences_equals_merge_core_compare() {
+        let left = "one\ntwo words here\nthree\n";
+        let right = "one\ntwo other words here\nfour\n";
+        let differences = text_differences(left, right).unwrap();
+        assert_ne!(differences, Vec::new());
+        assert_eq!(differences, compare(left, right));
     }
 }

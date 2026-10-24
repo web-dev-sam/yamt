@@ -1,12 +1,14 @@
 //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads what git is doing
 //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
 //! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
-//! and lists the files that changed between two commits; runs glab, GitLab's command line, the same way.
+//! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
+//! runs glab, GitLab's command line, the same way.
 #![forbid(unsafe_code)]
 
 mod abort_continue;
 mod attributes;
 mod blob;
+mod checkout;
 mod diff;
 mod entry;
 mod glab;
@@ -25,6 +27,7 @@ mod version;
 pub use abort_continue::GitRun;
 pub use attributes::{AttributeValue, MergeAttributes};
 pub use blob::BlobReader;
+pub use checkout::StatusEntry;
 pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
 pub use entry::{Oid, Stage, StageEntry};
 pub use glab::{GLAB_TIMEOUT, Glab, GlabRun};
