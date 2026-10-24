@@ -4594,6 +4594,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "yamt-agent"
+version = "0.5.1"
+dependencies = [
+ "serde",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "yamt-conflict-repo",
+ "yamt-gitio",
+ "yamt-pipe",
+ "yamt-range",
+]
+
+[[package]]
 name = "yamt-app"
 version = "0.5.1"
 dependencies = [
@@ -4607,6 +4622,7 @@ dependencies = [
  "tauri-specta",
  "tracing",
  "tracing-subscriber",
+ "yamt-agent",
  "yamt-compare",
  "yamt-conflict-repo",
  "yamt-lsp-host",

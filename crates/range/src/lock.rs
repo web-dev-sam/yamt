@@ -29,31 +29,67 @@ impl PairLock {
         let folder = range_dir.join(repo_key(&common_dir)).join(pair);
         fs::create_dir_all(&folder).map_err(|error| lock_failed(&folder, &error))?;
         let path = folder.join(LOCK_FILE);
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(&path)
-            .map_err(|error| lock_failed(&path, &error))?;
-        // The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
-        // (`File::try_lock`, flock(2) / `LockFileEx`).
-        match file.try_lock() {
-            Ok(()) => Ok(PairLock {
+        match hold(&path).map_err(|error| lock_failed(&path, &error))? {
+            Some(file) => Ok(PairLock {
                 _lock: file,
                 folder,
             }),
-            Err(TryLockError::WouldBlock) => Err(Error::Locked {
+            None => Err(Error::Locked {
                 root: resolved.root().to_owned(),
                 left: resolved.left.side.short_id.clone(),
                 right: resolved.right.side.short_id.clone(),
             }),
-            Err(TryLockError::Error(error)) => Err(lock_failed(&path, &error)),
         }
+    }
+
+    /// Takes an existing pair folder's lock; `None` while another `PairLock` holds it (an open window).
+    pub fn try_hold(folder: &Path) -> io::Result<Option<PairLock>> {
+        let held = hold(&folder.join(LOCK_FILE))?;
+        Ok(held.map(|file| PairLock {
+            _lock: file,
+            folder: folder.to_owned(),
+        }))
     }
 
     #[must_use]
     pub fn folder(&self) -> &Path {
         &self.folder
+    }
+}
+
+/// Every `<range_dir>/<repo key>/<left id>-<right id>/` folder; a folder that cannot be listed adds none.
+#[must_use]
+pub fn pair_folders(range_dir: &Path) -> Vec<PathBuf> {
+    let mut pairs = Vec::new();
+    for repo in folders_in(range_dir) {
+        pairs.extend(folders_in(&repo));
+    }
+    pairs
+}
+
+fn folders_in(folder: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// The lock file opened (created when missing) and locked; `None` when another open file holds the lock.
+fn hold(path: &Path) -> io::Result<Option<File>> {
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)?;
+    // The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
+    // (`File::try_lock`, flock(2) / `LockFileEx`).
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(TryLockError::WouldBlock) => Ok(None),
+        Err(TryLockError::Error(error)) => Err(error),
     }
 }
 
@@ -114,5 +150,38 @@ mod tests {
             format!("proj.git-{}", hash("/x/proj.git"))
         );
         assert_ne!(key("/x/proj/.git"), key("/y/proj/.git"));
+    }
+
+    #[test]
+    fn try_hold_answers_none_while_another_lock_holds_the_pair_and_takes_it_once_released() {
+        let folder = tempfile::tempdir().unwrap();
+        let first = PairLock::try_hold(folder.path()).unwrap().unwrap();
+        assert_eq!(first.folder(), folder.path());
+
+        assert!(PairLock::try_hold(folder.path()).unwrap().is_none());
+
+        drop(first);
+        assert!(PairLock::try_hold(folder.path()).unwrap().is_some());
+    }
+
+    #[test]
+    fn pair_folders_lists_every_pair_folder_under_every_repository_and_no_file() {
+        let range_dir = tempfile::tempdir().unwrap();
+        let one = range_dir.path().join("proj-1");
+        let two = range_dir.path().join("other-2");
+        for pair in [one.join("a-b"), one.join("c-d"), two.join("e-f")] {
+            fs::create_dir_all(pair).unwrap();
+        }
+        fs::write(one.join(LOCK_FILE), b"").unwrap();
+        fs::write(range_dir.path().join("stray"), b"").unwrap();
+
+        let mut pairs = pair_folders(range_dir.path());
+        pairs.sort();
+
+        assert_eq!(pairs, [two.join("e-f"), one.join("a-b"), one.join("c-d")]);
+        assert_eq!(
+            pair_folders(&range_dir.path().join("missing")),
+            Vec::<PathBuf>::new()
+        );
     }
 }
