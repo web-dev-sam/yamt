@@ -6,12 +6,15 @@ use std::process;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
-use crate::{Error, LanguageServerSettings, StoredSettings};
+use crate::{AgentSettings, Error, LanguageServerSettings, StoredSettings};
 
 const THEME: &str = "theme";
 const ANTIALIASING: &str = "antialiasing";
 const KEYS: &str = "keys";
 const LANGUAGE_SERVERS: &str = "languageServers";
+const AGENT: &str = "agent";
+const AGENT_COMMAND: &str = "command";
+const AGENT_FIRST_MESSAGE: &str = "firstMessage";
 
 /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
 const MAX_LINK_HOPS: usize = 40;
@@ -53,8 +56,22 @@ impl Loaded {
             })?;
             entries.insert(LANGUAGE_SERVERS.to_owned(), servers);
         }
+        if let Some(agent) = agent_entry(self.stored.agent) {
+            entries.insert(AGENT.to_owned(), agent);
+        }
         Ok(entries)
     }
+}
+
+fn agent_entry(agent: AgentSettings) -> Option<Value> {
+    let mut fields = Map::new();
+    if let Some(command) = agent.command {
+        fields.insert(AGENT_COMMAND.to_owned(), Value::from(command));
+    }
+    if let Some(first_message) = agent.first_message {
+        fields.insert(AGENT_FIRST_MESSAGE.to_owned(), Value::from(first_message));
+    }
+    (!fields.is_empty()).then_some(Value::Object(fields))
 }
 
 /// `None` when there is no file at `path`.
@@ -88,6 +105,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
         antialiasing: entry(path, ANTIALIASING, others.remove(ANTIALIASING))?,
         keys: entry(path, KEYS, others.remove(KEYS))?,
         language_servers: entry(path, LANGUAGE_SERVERS, others.remove(LANGUAGE_SERVERS))?,
+        agent: entry::<AgentSettings>(path, AGENT, others.remove(AGENT))?.without_empty_command(),
     };
     Ok(Loaded { others, stored })
 }
