@@ -6,8 +6,12 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{clipboard, compare, range, servers, settings};
+use crate::{clipboard, compare, range, review, servers, settings};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one line per command of every window"
+)]
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
         load_file,
@@ -44,6 +48,13 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         compare::show_tab,
         range::open_range,
         range::load_range_file::<tauri::Wry>,
+        review::list_threads,
+        review::add_thread,
+        review::add_note,
+        review::queue_message,
+        review::unqueue_message,
+        review::check_gitlab::<tauri::Wry>,
+        review::send_queue::<tauri::Wry>,
         clipboard::read_clipboard::<tauri::Wry>,
     ])
 }

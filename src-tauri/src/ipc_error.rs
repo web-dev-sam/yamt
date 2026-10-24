@@ -1,5 +1,6 @@
 use yamt_compare::{MAX_COLUMN_BYTES, TabId};
 use yamt_range::RangeFileId;
+use yamt_review::{MessageId, ThreadId};
 use yamt_session::UnsupportedReason;
 
 #[derive(Debug, serde::Serialize, specta::Type)]
@@ -49,6 +50,17 @@ pub enum IpcError {
         file: RangeFileId,
     },
     WorkerStopped,
+    UnknownThread {
+        thread: ThreadId,
+    },
+    UnknownMessage {
+        message: MessageId,
+    },
+    EmptyMessage,
+    MessagePending {
+        message: MessageId,
+    },
+    SendRunning,
 }
 
 /// Runs `work` on a blocking worker; a worker that panicked is logged and answers `WorkerStopped`.
@@ -149,6 +161,27 @@ impl From<yamt_range::Error> for IpcError {
             | yamt_range::Error::NoMergeBase { .. }
             | yamt_range::Error::Locked { .. }
             | yamt_range::Error::LockFailed { .. } => IpcError::Git {
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
+impl From<yamt_review::Error> for IpcError {
+    fn from(error: yamt_review::Error) -> IpcError {
+        match error {
+            yamt_review::Error::WriteFailed { path, message } => IpcError::WriteFailed {
+                path: path.display().to_string(),
+                message,
+            },
+            yamt_review::Error::UnknownFile { file } => IpcError::UnknownRangeFile { file },
+            yamt_review::Error::UnknownThread { thread } => IpcError::UnknownThread { thread },
+            yamt_review::Error::UnknownMessage { message } => IpcError::UnknownMessage { message },
+            yamt_review::Error::EmptyMessage => IpcError::EmptyMessage,
+            yamt_review::Error::MessagePending { message } => IpcError::MessagePending { message },
+            yamt_review::Error::ReadFailed { .. }
+            | yamt_review::Error::Broken { .. }
+            | yamt_review::Error::NewerFormat { .. } => IpcError::Git {
                 message: error.to_string(),
             },
         }

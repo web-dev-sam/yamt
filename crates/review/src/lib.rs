@@ -22,6 +22,7 @@ pub use crate::thread_store::ThreadStore;
 pub use crate::thread_types::{
     Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine, ThreadList,
 };
+pub use yamt_gitio::Glab;
 
 /// A merge request as the window names it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]

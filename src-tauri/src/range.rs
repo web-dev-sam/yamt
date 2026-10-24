@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
+use yamt_review::ThreadStore;
 
 use crate::ipc_error::{IpcError, blocking_reply};
 use crate::outcome::Ending;
@@ -9,9 +11,12 @@ use crate::window::{WindowKind, open_with_data_folder, window_title};
 
 const RANGE_FOLDER: &str = "range";
 
-/// The range the window shows and the lock on its commit pair, both held for the run (plan §2 #104, #107).
+/// The range the window shows, its review threads and the lock on its commit pair, held for the run
+/// (plan §2 #104, #107, #117): a send holds `sending` throughout and locks `threads` only between glab calls.
 pub(crate) struct RangeState {
-    range: Range,
+    pub(crate) range: Range,
+    pub(crate) threads: Mutex<ThreadStore>,
+    pub(crate) sending: Mutex<()>,
     _lock: PairLock,
 }
 
@@ -29,7 +34,8 @@ pub(crate) fn run_range(repo: &Path, spec: &RangeSpec) -> Ending {
     }
 }
 
-/// Takes the pair's lock in `<app_folder>/range/` before listing, then hands the range to the app.
+/// Takes the pair's lock in `<app_folder>/range/` before listing and reading the pair's threads, then
+/// hands the range to the app.
 fn manage_range_in<R: Runtime>(
     app: &App<R>,
     app_folder: &Path,
@@ -38,7 +44,17 @@ fn manage_range_in<R: Runtime>(
     let lock =
         PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
     let range = resolved.list().map_err(|error| error.to_string())?;
-    app.manage(RangeState { range, _lock: lock });
+    let threads = ThreadStore::open(lock.folder()).map_err(|error| error.to_string())?;
+    let unlisted = threads.unlisted_paths(&range);
+    if !unlisted.is_empty() {
+        tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");
+    }
+    app.manage(RangeState {
+        range,
+        threads: Mutex::new(threads),
+        sending: Mutex::new(()),
+        _lock: lock,
+    });
     Ok(())
 }
 
@@ -69,7 +85,7 @@ pub(crate) async fn load_range_file<R: Runtime>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use serde_json::json;
     use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
     use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -77,15 +93,19 @@ mod tests {
 
     use super::*;
     use crate::commands::with_commands;
+    use crate::frontend_log::tests::logged;
     use crate::mock_window::invoke_on;
+    use crate::outcome::Exit;
     use crate::window::app_folder;
 
     const RANGE: &str = "main...remote";
+    const THREADS_FILE: &str = "threads.json";
+    const GONE_THREAD: &str = r#"{"format":1,"nextThread":2,"nextMessage":2,"threads":[{"id":1,"path":"gone.txt","line":{"kind":"added","right":0},"session":null,"messages":[{"id":1,"body":{"kind":"note","text":"Why?"},"written":0,"posting":{"kind":"notQueued"}}]}]}"#;
 
-    struct RangeWindow {
-        repo: TempDir,
-        data: TempDir,
-        webview: WebviewWindow<MockRuntime>,
+    pub(crate) struct RangeWindow {
+        pub(crate) repo: TempDir,
+        pub(crate) data: TempDir,
+        pub(crate) webview: WebviewWindow<MockRuntime>,
         _app: App<MockRuntime>,
     }
 
@@ -110,9 +130,12 @@ mod tests {
             .unwrap()
     }
 
-    fn open_range_window() -> RangeWindow {
-        let repo = repo();
-        let data = TempDir::new().unwrap();
+    /// A window on `main...remote` of a repository whose one file `a.txt` changes from "one" to "two".
+    pub(crate) fn open_range_window() -> RangeWindow {
+        open_range_window_in(repo(), TempDir::new().unwrap())
+    }
+
+    fn open_range_window_in(repo: TempDir, data: TempDir) -> RangeWindow {
         let app = range_app();
         manage_range_in(&app, &app_folder(data.path()), resolved(repo.path())).unwrap();
         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
@@ -124,6 +147,54 @@ mod tests {
             webview,
             _app: app,
         }
+    }
+
+    /// The threads file the window will read; the pair's lock is let go again.
+    fn threads_path(repo: &Path, data: &Path) -> PathBuf {
+        let lock = PairLock::take(&range_folder(&app_folder(data)), &resolved(repo)).unwrap();
+        lock.folder().join(THREADS_FILE)
+    }
+
+    // Opening on a file it cannot read would show no threads, and the next add would write over them.
+    #[test]
+    fn a_broken_threads_file_ends_before_any_window_with_exit_2() {
+        let (repo, data) = (repo(), TempDir::new().unwrap());
+        let threads = threads_path(repo.path(), data.path());
+        let broken = b"{\"format\":1,";
+        std::fs::write(&threads, broken).unwrap();
+        let app = range_app();
+
+        let refused = manage_range_in(&app, &app_folder(data.path()), resolved(repo.path()));
+
+        let line = refused.unwrap_err();
+        let named = format!("the review threads {} cannot be read: ", threads.display());
+        assert!(line.starts_with(&named), "{line}");
+        assert_eq!(Ending::failure(line).exit, Exit::Failure);
+        assert!(app.try_state::<RangeState>().is_none());
+        assert_eq!(std::fs::read(&threads).unwrap(), broken);
+    }
+
+    // A thread on a file this range does not list must survive, and its absence must be traceable.
+    #[test]
+    fn threads_on_a_path_the_range_does_not_list_are_kept_and_logged_once() {
+        let (repo, data) = (repo(), TempDir::new().unwrap());
+        let threads = threads_path(repo.path(), data.path());
+        std::fs::write(&threads, GONE_THREAD).unwrap();
+
+        let (window, log) = logged(|| open_range_window_in(repo, data));
+
+        let warnings: Vec<&str> = log.lines().filter(|line| line.contains("WARN")).collect();
+        assert_eq!(warnings.len(), 1, "{log}");
+        assert!(warnings[0].contains(r#"paths=["gone.txt"]"#), "{log}");
+        let listed = invoke_on(&window.webview, "list_threads", json!({}));
+        assert_eq!(listed, Ok(json!({ "threads": [] })));
+        assert_eq!(std::fs::read_to_string(&threads).unwrap(), GONE_THREAD);
+    }
+
+    #[test]
+    fn a_range_whose_threads_are_all_listed_logs_no_warning() {
+        let (_window, log) = logged(open_range_window);
+        assert!(!log.contains("WARN"), "{log}");
     }
 
     #[test]
