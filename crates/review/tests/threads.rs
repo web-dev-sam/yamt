@@ -218,6 +218,18 @@ fn a_newer_format_is_refused_and_left_unchanged() {
     assert_eq!(folder_names(&folder), [THREADS]);
 }
 
+#[test]
+fn a_threads_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes() {
+    let folder = tempfile::tempdir().unwrap();
+    fs::create_dir(threads_path(&folder)).unwrap();
+    let error = refusal(&folder);
+    assert!(
+        matches!(&error, Error::ReadFailed { path, .. } if *path == threads_path(&folder)),
+        "{error:?}"
+    );
+    assert_eq!(folder_names(&folder), [THREADS]);
+}
+
 fn message_json(id: u32) -> String {
     format!(
         r#"{{"id":{id},"body":{{"kind":"note","text":"a"}},"written":0,"posting":{{"kind":"notQueued"}}}}"#
@@ -482,33 +494,31 @@ fn threads_on_paths_no_longer_listed_are_kept_on_every_write() {
     let remote = range(repo.path(), "main..remote");
     let folder = tempfile::tempdir().unwrap();
     let mut store = ThreadStore::open(folder.path()).unwrap();
-    store
-        .add_thread(&local, RangeFileId(1), added_line(), "on b")
-        .unwrap();
-    store
-        .add_thread(&local, RangeFileId(2), added_line(), "on c")
-        .unwrap();
+    for (file, text) in [(0, "on a"), (1, "on b"), (2, "on c")] {
+        store
+            .add_thread(&local, RangeFileId(file), added_line(), text)
+            .unwrap();
+    }
 
     let mut reopened = ThreadStore::open(folder.path()).unwrap();
+    assert_eq!(reopened.unlisted_paths(&remote), ["a.txt", "b.txt"]);
+    assert_eq!(reopened.unlisted_paths(&local), Vec::<String>::new());
     let shown = reopened.list(&remote);
     let thread = only_thread(&shown);
-    assert_eq!((thread.id, thread.file), (ThreadId(2), RangeFileId(0)));
+    assert_eq!((thread.id, thread.file), (ThreadId(3), RangeFileId(0)));
 
-    let after_note = reopened.add_note(&remote, ThreadId(2), "more").unwrap();
+    let after_note = reopened.add_note(&remote, ThreadId(3), "more").unwrap();
     assert_eq!(only_thread(&after_note).messages.len(), 2);
     let hidden = reopened.add_note(&remote, ThreadId(1), "more");
     assert_eq!(refused(hidden), "no review thread has the id 1");
     let hidden_message = reopened.queue(&remote, MessageId(1), "more");
     assert_eq!(refused(hidden_message), "no review message has the id 1");
-    reopened.queue(&remote, MessageId(2), "queued").unwrap();
+    reopened.queue(&remote, MessageId(3), "queued").unwrap();
 
-    let both = ThreadStore::open(folder.path()).unwrap().list(&local);
-    let ids: Vec<(ThreadId, RangeFileId)> = both.threads.iter().map(|t| (t.id, t.file)).collect();
-    assert_eq!(
-        ids,
-        [(ThreadId(1), RangeFileId(1)), (ThreadId(2), RangeFileId(2))]
-    );
-    assert_eq!(both.threads[0].messages[0].body, note("on b"));
+    let all = ThreadStore::open(folder.path()).unwrap().list(&local);
+    let ids: Vec<(u32, u32)> = all.threads.iter().map(|t| (t.id.0, t.file.0)).collect();
+    assert_eq!(ids, [(1, 0), (2, 1), (3, 2)]);
+    assert_eq!(all.threads[1].messages[0].body, note("on b"));
 }
 
 #[test]

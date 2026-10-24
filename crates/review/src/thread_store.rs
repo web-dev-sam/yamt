@@ -22,7 +22,7 @@ pub struct ThreadStore {
 pub(crate) struct QueuedMessage {
     pub(crate) thread: ThreadId,
     pub(crate) message: MessageId,
-    pub(crate) path: String,
+    pub(crate) file: RangeFileId,
     pub(crate) line: ThreadLine,
     pub(crate) text: String,
 }
@@ -39,23 +39,32 @@ impl ThreadStore {
     #[must_use]
     pub fn list(&self, range: &Range) -> ThreadList {
         let mut threads = Vec::new();
-        let mut unlisted = Vec::new();
         for stored in &self.file.threads {
-            match file_at(range, &stored.path) {
-                Some(file) => threads.push(Thread {
+            if let Some(file) = file_at(range, &stored.path) {
+                threads.push(Thread {
                     id: stored.id,
                     file,
                     line: stored.line,
                     messages: stored.messages.clone(),
                     session: stored.session.clone(),
-                }),
-                None => unlisted.push(stored.path.as_str()),
+                });
             }
         }
-        if !unlisted.is_empty() {
-            tracing::warn!(paths = ?unlisted, "review threads kept on files this range does not list");
-        }
         ThreadList { threads }
+    }
+
+    /// The stored paths `range` does not list, sorted, each once: their threads are kept but not shown.
+    #[must_use]
+    pub fn unlisted_paths(&self, range: &Range) -> Vec<String> {
+        let mut paths = Vec::new();
+        for stored in &self.file.threads {
+            if file_at(range, &stored.path).is_none() {
+                paths.push(stored.path.clone());
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        paths
     }
 
     /// A new thread on `line` of `file`, with `text` as its first message.
@@ -113,11 +122,14 @@ impl ThreadStore {
         self.change_posting(range, message, Posting::NotQueued)
     }
 
-    /// Every queued or refused message, in thread order, then message order.
+    /// Every queued or refused message on a file of `range`, in thread order, then message order.
     #[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 calls it"))]
-    pub(crate) fn queued(&self) -> Vec<QueuedMessage> {
+    pub(crate) fn queued(&self, range: &Range) -> Vec<QueuedMessage> {
         let mut queued = Vec::new();
         for thread in &self.file.threads {
+            let Some(file) = file_at(range, &thread.path) else {
+                continue;
+            };
             for message in &thread.messages {
                 let text = match &message.posting {
                     Posting::Queued { text } | Posting::Refused { text, .. } => text,
@@ -126,7 +138,7 @@ impl ThreadStore {
                 queued.push(QueuedMessage {
                     thread: thread.id,
                     message: message.id,
-                    path: thread.path.clone(),
+                    file,
                     line: thread.line,
                     text: text.clone(),
                 });
@@ -213,7 +225,9 @@ fn seconds_since_1970() -> u64 {
 mod tests {
     use std::fs;
 
+    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
     use yamt_merge_core::RightLine;
+    use yamt_range::{RangeSpec, Resolved};
 
     use super::*;
 
@@ -231,24 +245,61 @@ mod tests {
         ThreadStore::open(dir).unwrap()
     }
 
+    /// `main..local` lists a.txt (0) and b.txt (1); `main..remote` lists a.txt (0) only.
+    fn repo() -> TempDir {
+        let file = |path, local: &'static [u8], remote: Option<&'static [u8]>| ConflictFile {
+            path,
+            kind: FileKind::Regular,
+            base: remote.map(|_| b"1\n".as_slice()),
+            local: Some(local),
+            remote,
+        };
+        diverged_repo(&[
+            file("a.txt", b"2\n", Some(b"3\n")),
+            file("b.txt", b"new\n", None),
+        ])
+        .unwrap()
+    }
+
+    fn range(repo: &TempDir, text: &str) -> Range {
+        Resolved::resolve(repo.path(), &RangeSpec::parse(text).unwrap())
+            .unwrap()
+            .list()
+            .unwrap()
+    }
+
     #[test]
     fn queued_lists_queued_and_refused_messages_in_thread_then_message_order() {
+        let repo = repo();
         let dir = tempfile::tempdir().unwrap();
         let store = stored_in(dir.path());
         let queued: Vec<_> = store
-            .queued()
+            .queued(&range(&repo, "main..local"))
             .into_iter()
-            .map(|q| (q.thread.0, q.message.0, q.path, q.line, q.text))
+            .map(|q| (q.thread.0, q.message.0, q.file, q.line, q.text))
             .collect();
         let line = ThreadLine::Added {
             right: RightLine(4),
         };
         let expected = vec![
-            (2, 5, "b.txt".to_owned(), line, "first".to_owned()),
-            (2, 1, "b.txt".to_owned(), line, "second".to_owned()),
-            (1, 4, "a.txt".to_owned(), line, "third".to_owned()),
+            (2, 5, RangeFileId(1), line, "first".to_owned()),
+            (2, 1, RangeFileId(1), line, "second".to_owned()),
+            (1, 4, RangeFileId(0), line, "third".to_owned()),
         ];
         assert_eq!(queued, expected);
+    }
+
+    #[test]
+    fn queued_leaves_out_messages_on_paths_the_range_does_not_list() {
+        let repo = repo();
+        let dir = tempfile::tempdir().unwrap();
+        let store = stored_in(dir.path());
+        let queued: Vec<_> = store
+            .queued(&range(&repo, "main..remote"))
+            .into_iter()
+            .map(|q| (q.message.0, q.file))
+            .collect();
+        assert_eq!(queued, [(4, RangeFileId(0))]);
     }
 
     #[test]
@@ -264,7 +315,8 @@ mod tests {
         store.record(MessageId(5), pending).unwrap();
         let reopened = ThreadStore::open(dir.path()).unwrap();
         assert_eq!(reopened.file, store.file);
-        let ids: Vec<u32> = store.queued().iter().map(|q| q.message.0).collect();
+        let local = range(&repo(), "main..local");
+        let ids: Vec<u32> = store.queued(&local).iter().map(|q| q.message.0).collect();
         assert_eq!(ids, [1, 4]);
     }
 
