@@ -309,6 +309,39 @@ test("merge files importing the store and compare files importing their own neig
   expect(violationsOf(files)).toEqual([]);
 });
 
+test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
+  const files = [
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport { MarkdownView as View } from "../editor/index.ts";\n</script>`,
+    },
+    { path: "src/ui/answer.ts", text: `export { MarkdownView } from "../editor";` },
+    { path: "src/ui/whole.ts", text: `import * as editor from "../editor";` },
+    { path: "src/ui/direct.ts", text: `import type { X } from "../editor/markdown";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM2", file: "src/ui/AiTurn.vue", specifier: "../editor/index.ts" },
+    { rule: "PM2", file: "src/ui/answer.ts", specifier: "../editor" },
+    { rule: "PM2", file: "src/ui/whole.ts", specifier: "../editor" },
+    { rule: "PM2", file: "src/ui/direct.ts", specifier: "../editor/markdown" },
+  ]);
+});
+
+test("useMarkdown.ts importing MarkdownView and other ui files importing the editor's other names violate nothing", () => {
+  const files = [
+    { path: "src/ui/useMarkdown.ts", text: `import { MarkdownView } from "../editor";` },
+    { path: "src/ui/useMergeController.ts", text: `import { MergeController } from "../editor";` },
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport { useMarkdown } from "./useMarkdown";\n</script>`,
+    },
+    { path: "src/editor/index.ts", text: `export { MarkdownView } from "./markdown";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("reading clipboardData or navigator.clipboard outside ui/linuxPaste.ts violates PM8", () => {
   const files = [
     {
