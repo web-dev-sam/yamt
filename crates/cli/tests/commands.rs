@@ -1,6 +1,5 @@
 #![cfg(test)]
 
-use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
@@ -95,6 +94,7 @@ fn unknown_command_is_a_usage_error_with_exit_code_two() {
 #[cfg(unix)]
 #[test]
 fn non_utf8_argument_is_a_usage_error_with_exit_code_two() {
+    use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     let output = yamt_cli(&[OsStr::new("classify"), OsStr::from_bytes(b"\xff")]);
     assert_eq!(output.code, 2);

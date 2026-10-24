@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 use yamt_compare::{Error, TabId, TabLanguage, TabStore};
 
 const ONE_TAB: &str = r#"{"format":1,"shown":3,"nextId":4,"tabs":[{"id":3,"number":1,"name":"Compare 1","language":{"kind":"auto"}}]}"#;
+const LOCK_FILE: &str = "lock";
 
 fn files_in(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     fs::read_dir(dir)
@@ -15,6 +16,11 @@ fn files_in(dir: &Path) -> BTreeMap<String, Vec<u8>> {
         .map(|entry| {
             let entry = entry.unwrap();
             let name = entry.file_name().into_string().unwrap();
+            if name == LOCK_FILE {
+                // Windows' LockFileEx refuses every read of a held lock's bytes (error 33); the listing's length opens no file.
+                assert_eq!(entry.metadata().unwrap().len(), 0);
+                return (name, Vec::new());
+            }
             (name, fs::read(entry.path()).unwrap())
         })
         .collect()

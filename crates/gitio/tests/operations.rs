@@ -3,10 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use yamt_conflict_repo::{
-    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, conflict_repo, diverged_repo, git, git_ok,
+    ConflictFile, FileKind, Run, STEP_TWO_FILE, TempDir, diverged_repo, git, git_ok,
     operation_repo, sed_sequence_editor,
 };
-use yamt_gitio::{Error, Oid, Operation, Progress, Rebase, Repo, Stop};
+use yamt_gitio::{Oid, Operation, Progress, Rebase, Repo, Stop};
 
 const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     path: "cart.ts",
@@ -114,6 +114,8 @@ fn rebase_merges_redoing_a_merge_is_a_rebase_with_redoing_merge_not_a_merge() {
 #[cfg(unix)]
 #[test]
 fn a_rebase_state_that_cannot_be_looked_at_fails_the_stop() {
+    use yamt_conflict_repo::conflict_repo;
+    use yamt_gitio::Error;
     let dir = conflict_repo(&FILES).unwrap();
     let repo = Repo::discover(dir.path()).unwrap();
     let rebase_merge = git_path(dir.path(), "rebase-merge");

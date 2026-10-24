@@ -16,8 +16,6 @@ const STOP_GRACE: Duration = Duration::from_secs(2);
 const LOG_LINE_BYTES: usize = 8 * 1024;
 const IDLE: Duration = Duration::from_millis(300);
 const BURST_LINES: usize = 1000;
-const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
-const DRAIN_SLACK: Duration = Duration::from_secs(1);
 const BURST_PADDING: usize = 40;
 
 struct Echo {
@@ -230,6 +228,8 @@ fn stderr_lines_written_after_the_server_exited_all_come_before_its_exited() {
 #[cfg(unix)]
 #[test]
 fn a_server_whose_child_holds_its_output_exits_after_at_most_the_drain() {
+    const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
+    const DRAIN_SLACK: Duration = Duration::from_secs(1);
     let echo = start_echo(&[]);
     let asked = Instant::now();
     echo.host.send(echo.run, "orphan".to_owned());
