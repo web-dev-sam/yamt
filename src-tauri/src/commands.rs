@@ -62,13 +62,8 @@ pub(crate) fn with_session<R: Runtime>(
         })
 }
 
-/// The compare window's commands; its `CompareState` is managed once the data folder is known.
-pub(crate) fn with_compare<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.invoke_handler(specta_builder().invoke_handler())
-}
-
-/// The range window's commands; its `RangeState` is managed once the data folder is known.
-pub(crate) fn with_range<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+/// A window whose state is managed once the data folder is known: the compare and range windows.
+pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.invoke_handler(specta_builder().invoke_handler())
 }
 

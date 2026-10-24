@@ -7,9 +7,8 @@ use yamt_compare::{
     TabStore, TabTexts, comparison, tab_texts,
 };
 
-use crate::ipc_error::IpcError;
+use crate::ipc_error::{IpcError, blocking_reply};
 
-const APP_FOLDER: &str = "yamt";
 const COMPARE_FOLDER: &str = "compare";
 
 /// The stored compare tabs (plan §2 #97); never locked together with another `Mutex`.
@@ -19,16 +18,17 @@ fn lock(state: &CompareState) -> MutexGuard<'_, TabStore> {
     state.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Opens the store in `<data_dir>/yamt/compare/` and hands it to the app as its `CompareState`,
+/// Opens the store in `<app_folder>/compare/` and hands it to the app as its `CompareState`,
 /// or answers the line `yamt --diff` ends with.
-pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, data_dir: &Path) -> Result<(), String> {
-    let store = TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))?;
+pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, app_folder: &Path) -> Result<(), String> {
+    let store =
+        TabStore::open(&compare_folder(app_folder)).map_err(|error| start_failure(&error))?;
     app.manage(Mutex::new(store));
     Ok(())
 }
 
-fn compare_folder(data_dir: &Path) -> PathBuf {
-    data_dir.join(APP_FOLDER).join(COMPARE_FOLDER)
+fn compare_folder(app_folder: &Path) -> PathBuf {
+    app_folder.join(COMPARE_FOLDER)
 }
 
 fn start_failure(error: &yamt_compare::Error) -> String {
@@ -57,14 +57,11 @@ where
     R: Runtime,
     T: Send + 'static,
 {
-    let worker = tauri::async_runtime::spawn_blocking(move || {
+    blocking_reply(move || {
         let loaded = with_store(&window, work)?;
         Ok(reply(&loaded))
-    });
-    worker.await.unwrap_or_else(|error| {
-        tracing::error!(%error, "yamt's compare worker stopped");
-        Err(IpcError::WorkerStopped)
     })
+    .await
 }
 
 fn with_store<R: Runtime>(
@@ -165,6 +162,7 @@ mod tests {
 
     use super::*;
     use crate::mock_window::{compare_app, open_compare_window};
+    use crate::window::app_folder;
 
     fn tab(id: u32, name: &str, language: &Value, holds_text: bool) -> Value {
         json!({ "id": id, "name": name, "language": language, "holds_text": holds_text })
@@ -273,28 +271,24 @@ mod tests {
     }
 
     #[test]
-    fn a_worker_that_panics_answers_worker_stopped_and_the_store_still_answers() {
+    fn a_worker_that_panics_under_the_lock_leaves_the_store_answering() {
         let window = open_compare_window();
         let panicking =
             |_: &mut TabStore| -> yamt_compare::Result<LoadedTab> { panic!("worker panic") };
 
         let answered =
-            tauri::async_runtime::block_on(on_worker(window.webview.clone(), panicking, tab_texts))
-                .err();
+            tauri::async_runtime::block_on(on_worker(window.webview.clone(), panicking, tab_texts));
 
-        assert!(
-            matches!(answered, Some(IpcError::WorkerStopped)),
-            "{answered:?}"
-        );
+        assert!(answered.is_err());
         assert!(window.invoke("load_tab", json!({ "tab": 1 })).is_ok());
     }
 
     fn store_opened_in(data_dir: &Path) -> Result<(), String> {
-        manage_store_in(&compare_app(), data_dir)
+        manage_store_in(&compare_app(), &app_folder(data_dir))
     }
 
     fn tabs_file(data: &TempDir, text: &str) -> PathBuf {
-        let folder = compare_folder(data.path());
+        let folder = compare_folder(&app_folder(data.path()));
         fs::create_dir_all(&folder).unwrap();
         let path = folder.join("tabs.json");
         fs::write(&path, text).unwrap();
@@ -304,7 +298,7 @@ mod tests {
     #[test]
     fn a_second_open_of_the_same_data_folder_says_another_window_is_open() {
         let held = open_compare_window();
-        let folder = compare_folder(held.data.path());
+        let folder = compare_folder(&app_folder(held.data.path()));
         assert_eq!(
             store_opened_in(held.data.path()).unwrap_err(),
             format!("another yamt --diff window is open ({})", folder.display())

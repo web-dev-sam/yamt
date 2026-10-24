@@ -3,12 +3,10 @@ use std::path::{Path, PathBuf};
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
 
-use crate::commands::with_range;
-use crate::ipc_error::IpcError;
-use crate::outcome::{Ending, Exit};
-use crate::window::{WindowKind, context, open_and_wait, window_title};
+use crate::ipc_error::{IpcError, blocking_reply};
+use crate::outcome::Ending;
+use crate::window::{WindowKind, open_with_data_folder, window_title};
 
-const APP_FOLDER: &str = "yamt";
 const RANGE_FOLDER: &str = "range";
 
 /// The range the window shows and the lock on its commit pair, both held for the run (plan §2 #104, #107).
@@ -24,44 +22,28 @@ pub(crate) fn run_range(repo: &Path, spec: &RangeSpec) -> Ending {
         Err(error) => return Ending::failure(error.to_string()),
     };
     let title = range_title(spec, resolved.root());
-    match open_window(resolved, &title) {
+    let manage = |app: &App, app_folder: &Path| manage_range_in(app, app_folder, resolved);
+    match open_with_data_folder(&title, WindowKind::Range, manage) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }
 }
 
-fn open_window(resolved: Resolved, title: &str) -> tauri::Result<Ending> {
-    let app = with_range(tauri::Builder::default()).build(context())?;
-    let managed = app
-        .path()
-        .data_dir()
-        .map_err(|error| format!("no data folder: {error}"))
-        .and_then(|data_dir| manage_range_in(&app, &data_dir, resolved));
-    if let Err(problem) = managed {
-        return Ok(Ending::failure(problem));
-    }
-    open_and_wait(app, title, WindowKind::Range)?;
-    Ok(Ending {
-        exit: Exit::Success,
-        message: None,
-    })
-}
-
-/// Takes the pair's lock in `<data_dir>/yamt/range/` before listing, then hands the range to the app.
+/// Takes the pair's lock in `<app_folder>/range/` before listing, then hands the range to the app.
 fn manage_range_in<R: Runtime>(
     app: &App<R>,
-    data_dir: &Path,
+    app_folder: &Path,
     resolved: Resolved,
 ) -> Result<(), String> {
     let lock =
-        PairLock::take(&range_folder(data_dir), &resolved).map_err(|error| error.to_string())?;
+        PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
     let range = resolved.list().map_err(|error| error.to_string())?;
     app.manage(RangeState { range, _lock: lock });
     Ok(())
 }
 
-fn range_folder(data_dir: &Path) -> PathBuf {
-    data_dir.join(APP_FOLDER).join(RANGE_FOLDER)
+fn range_folder(app_folder: &Path) -> PathBuf {
+    app_folder.join(RANGE_FOLDER)
 }
 
 fn range_title(spec: &RangeSpec, root: &Path) -> String {
@@ -83,13 +65,7 @@ pub(crate) async fn load_range_file<R: Runtime>(
     window: WebviewWindow<R>,
     file: RangeFileId,
 ) -> Result<RangeFile, IpcError> {
-    let worker = tauri::async_runtime::spawn_blocking(move || {
-        Ok(window.state::<RangeState>().range.load(file)?)
-    });
-    worker.await.unwrap_or_else(|error| {
-        tracing::error!(%error, "yamt's range worker stopped");
-        Err(IpcError::WorkerStopped)
-    })
+    blocking_reply(move || Ok(window.state::<RangeState>().range.load(file)?)).await
 }
 
 #[cfg(test)]
@@ -100,7 +76,9 @@ mod tests {
     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
 
     use super::*;
+    use crate::commands::with_commands;
     use crate::mock_window::invoke_on;
+    use crate::window::app_folder;
 
     const RANGE: &str = "main...remote";
 
@@ -127,7 +105,7 @@ mod tests {
     }
 
     fn range_app() -> App<MockRuntime> {
-        with_range(mock_builder())
+        with_commands(mock_builder())
             .build(mock_context(noop_assets()))
             .unwrap()
     }
@@ -136,7 +114,7 @@ mod tests {
         let repo = repo();
         let data = TempDir::new().unwrap();
         let app = range_app();
-        manage_range_in(&app, data.path(), resolved(repo.path())).unwrap();
+        manage_range_in(&app, &app_folder(data.path()), resolved(repo.path())).unwrap();
         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
             .build()
             .unwrap();
@@ -159,6 +137,24 @@ mod tests {
     }
 
     #[test]
+    fn the_pair_lock_lives_under_the_data_folder_s_yamt_range() {
+        let window = open_range_window();
+        let range_dir = window.data.path().join("yamt").join("range");
+        let repo_dir = only_entry(&range_dir);
+        let pair_dir = only_entry(&repo_dir);
+        assert!(pair_dir.join("lock").is_file(), "{}", pair_dir.display());
+    }
+
+    fn only_entry(dir: &Path) -> PathBuf {
+        let entries: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        entries[0].clone()
+    }
+
+    #[test]
     fn a_listed_file_loads_and_an_unknown_id_answers_unknown_range_file() {
         let window = open_range_window();
         let loaded = invoke_on(&window.webview, "load_range_file", json!({ "file": 0 })).unwrap();
@@ -175,7 +171,7 @@ mod tests {
         let window = open_range_window();
         let refused = manage_range_in(
             &range_app(),
-            window.data.path(),
+            &app_folder(window.data.path()),
             resolved(window.repo.path()),
         );
         let start = resolved(window.repo.path()).list().unwrap().start();

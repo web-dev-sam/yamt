@@ -8,10 +8,11 @@ use tauri::{App, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
 use yamt_session::MergeSession;
 
-use crate::commands::{with_compare, with_session};
+use crate::commands::{with_commands, with_session};
 use crate::compare::manage_store_in;
 use crate::merge::MergeState;
 use crate::outcome::{Ending, ending_when_git_is_done};
+use crate::window::app_folder;
 
 pub(crate) const CRLF_PATH: &str = "crlf.ts";
 
@@ -82,7 +83,7 @@ pub(crate) struct CompareWindow {
 }
 
 pub(crate) fn compare_app() -> App<MockRuntime> {
-    with_compare(mock_builder())
+    with_commands(mock_builder())
         .build(mock_context(noop_assets()))
         .unwrap()
 }
@@ -90,7 +91,7 @@ pub(crate) fn compare_app() -> App<MockRuntime> {
 pub(crate) fn open_compare_window() -> CompareWindow {
     let data = TempDir::new().unwrap();
     let app = compare_app();
-    manage_store_in(&app, data.path()).unwrap();
+    manage_store_in(&app, &app_folder(data.path())).unwrap();
     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
         .build()
         .unwrap();

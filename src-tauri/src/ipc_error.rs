@@ -51,6 +51,18 @@ pub enum IpcError {
     WorkerStopped,
 }
 
+/// Runs `work` on a blocking worker; a worker that panicked is logged and answers `WorkerStopped`.
+pub(crate) async fn blocking_reply<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, IpcError> + Send + 'static,
+) -> Result<T, IpcError> {
+    tauri::async_runtime::spawn_blocking(work)
+        .await
+        .unwrap_or_else(|error| {
+            tracing::error!(%error, "yamt's worker stopped");
+            Err(IpcError::WorkerStopped)
+        })
+}
+
 impl From<yamt_session::Error> for IpcError {
     fn from(error: yamt_session::Error) -> IpcError {
         match error {
@@ -345,5 +357,28 @@ mod tests {
             range_json(no_base),
             json!({ "kind": "Git", "message": "main and other have no merge base" })
         );
+    }
+
+    #[test]
+    fn a_worker_that_panics_answers_worker_stopped() {
+        let answered =
+            tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
+                panic!("worker panic")
+            }))
+            .err();
+        assert!(
+            matches!(answered, Some(IpcError::WorkerStopped)),
+            "{answered:?}"
+        );
+    }
+
+    #[test]
+    fn a_worker_s_own_answer_is_the_reply() {
+        let answered = tauri::async_runtime::block_on(blocking_reply(|| Ok(7)));
+        assert!(matches!(answered, Ok(7)), "{answered:?}");
+        let refused = tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
+            Err(IpcError::NoOperation)
+        }));
+        assert!(matches!(refused, Err(IpcError::NoOperation)), "{refused:?}");
     }
 }

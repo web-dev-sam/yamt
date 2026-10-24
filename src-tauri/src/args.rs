@@ -64,12 +64,12 @@ impl Window {
 pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
     let mut args = args.into_iter();
     let mut repo = None;
-    let mut window = Window::Merge;
+    let mut window = Ok(Window::Merge);
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help") => return Ok(Invocation::Help),
             Some("--version") => return Ok(Invocation::Version),
-            Some("--diff") => window = window.with_compare()?,
+            Some("--diff") => window = window.and_then(Window::with_compare),
             Some("--repo") => {
                 repo = Some(
                     args.next()
@@ -78,12 +78,12 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
                 );
             }
             Some(text) if let Some(range) = text.strip_prefix(RANGE_FLAG) => {
-                window = window.with_range(range)?;
+                window = window.and_then(|window| window.with_range(range));
             }
             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
         }
     }
-    match (window, repo) {
+    match (window?, repo) {
         (Window::Compare, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
         (Window::Compare, None) => Ok(Invocation::Compare),
         (Window::Range(spec), repo) => Ok(Invocation::Range {
@@ -160,6 +160,18 @@ mod tests {
         assert_eq!(parsed(&["--diff", "--help"]), Ok(Invocation::Help));
         assert_eq!(
             parsed(&["--diff", "--repo", "p", "--version"]),
+            Ok(Invocation::Version)
+        );
+    }
+
+    #[test]
+    fn help_wins_over_a_range_error() {
+        assert_eq!(
+            parsed(&["--diff", "--diff=a..b", "--help"]),
+            Ok(Invocation::Help)
+        );
+        assert_eq!(
+            parsed(&["--diff=main", "--version"]),
             Ok(Invocation::Version)
         );
     }
