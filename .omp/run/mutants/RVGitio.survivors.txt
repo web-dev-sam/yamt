@@ -1,0 +1,11 @@
+just mutants 0a66109 (covers db154c9 RVGitio and 8e68d49 RVColumns)
+Found 61 mutants to test
+ok       Unmutated baseline in 4s build + 4s test
+ INFO Auto-set test timeout to 22s
+MISSED   crates/gitio/src/blob.rs:40:31: replace match guard *named == oid.as_str() with true in blob_size in 0s build + 3s test
+MISSED   crates/gitio/src/blob.rs:41:32: replace match guard *named == oid.as_str() with true in blob_size in 0s build + 3s test
+MISSED   crates/gitio/src/diff.rs:198:23: replace match guard !path.is_empty() with true in next_path in 0s build + 3s test
+MISSED   crates/gitio/src/repo.rs:188:27: replace match guard is_silent_failure(&error) with true in Repo::submodule_head in 0s build + 3s test
+61 mutants tested in 3m: 4 missed, 47 caught, 10 unviable
+
+Stryker (frontend): survivors only in ui/fileTree.ts lines 30, 33, 44, 66 — unchanged logic (the patch changed types only there): pre-existing, dropped (OR12).
