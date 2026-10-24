@@ -40,6 +40,13 @@ export const commands = {
 	showTab: (tab: TabId) => typedError<TabList, IpcError>(__TAURI_INVOKE("show_tab", { tab })),
 	openRange: () => __TAURI_INVOKE<RangeStart>("open_range"),
 	loadRangeFile: (file: RangeFileId) => typedError<RangeFile, IpcError>(__TAURI_INVOKE("load_range_file", { file })),
+	listThreads: () => typedError<ThreadList, IpcError>(__TAURI_INVOKE("list_threads")),
+	addThread: (file: RangeFileId, line: ThreadLine, text: string) => typedError<ThreadAdded, IpcError>(__TAURI_INVOKE("add_thread", { file, line, text })),
+	addNote: (thread: ThreadId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_note", { thread, text })),
+	queueMessage: (message: MessageId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("queue_message", { message, text })),
+	unqueueMessage: (message: MessageId) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("unqueue_message", { message })),
+	checkGitlab: () => typedError<GitLabCheck, IpcError>(__TAURI_INVOKE("check_gitlab")),
+	sendQueue: (progress: Channel<SendProgress>) => typedError<SendReply, IpcError>(__TAURI_INVOKE("send_queue", { progress })),
 	/**
 	 *  The selection's text, or `None` when it cannot be read; on Linux through GTK's text request,
 	 *  which never asks for the format list that `WebKitGTK` 2.54 crashes on (plan §2 #99).
@@ -197,6 +204,17 @@ export type FileStatus = "Unresolved" |
 /**  Unmerged for git, with the resolution git rerere replayed on disk, not yet reviewed (plan §2 #90). */
 "Remembered" | "Resolved";
 
+/**  Whether GitLab's diff is exactly the window's. */
+export type GitLabCheck = 
+/**  It is: posting goes to this merge request. */
+{ kind: "linedUp"; 
+/**  The merge request. */
+merge_request: MergeRequestRef } | 
+/**  It is not. */
+{ kind: "notLinedUp"; 
+/**  Why. */
+why: NotLinedUp };
+
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
 
@@ -224,7 +242,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "SendRunning" };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -273,6 +291,17 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 
 export type LogValue = string | number | null | boolean;
 
+/**  What the merge requests were looked up by. */
+export type LookedAt = 
+/**  The right side's branch: its open merge requests. */
+{ kind: "branch"; 
+/**  The branch, without `refs/heads/` or a remote. */
+name: string } | 
+/**  The right commit, as the range names no branch: the open merge requests ending at it. */
+{ kind: "commit"; 
+/**  The commit's short id. */
+short_id: string };
+
 export type MergeChunk = {
 	chunk: Chunk,
 	middle: LineRange<MiddleLine>,
@@ -280,17 +309,121 @@ export type MergeChunk = {
 	waiting: Waiting,
 };
 
+/**  A merge request as the window names it. */
+export type MergeRequestRef = {
+	/**  Its short reference, "!12". */
+	reference: string,
+	/**  Its title. */
+	title: string,
+	/**  Its page on GitLab. */
+	web_url: string,
+};
+
+/**  One message of a thread. */
+export type Message = {
+	/**  The message's id. */
+	id: MessageId,
+	/**  What it says. */
+	body: MessageBody,
+	/**  When it was added, in seconds since 1970. */
+	written: number,
+	/**  Where it stands on its way to GitLab. */
+	posting: Posting,
+};
+
+/**  What a message says. */
+export type MessageBody = 
+/**  Text the user wrote. */
+{ kind: "note"; 
+/**  The text as written. */
+text: string } | 
+/**  An AI answer, kept in the AI's own session. */
+{ kind: "aiAnswer"; 
+/**  The answer's turn in the thread's session. */
+turn: number };
+
+/**  A message's identity; ids never repeat within a pair folder. */
+export type MessageId = number;
+
 /**  Where the middle pane starts: yamt's merge of the stages (base), or the file as found on disk. */
 export type Middle = { kind: "Stages"; text: string } | { kind: "Disk"; text: string } | { kind: "DiskNotText"; found: NotText };
 
 /**  0-based line of the middle pane's starting text. */
 export type MiddleLine = number;
 
+/**  Why posting is disabled: GitLab's diff is not the window's, or GitLab could not be asked. */
+export type NotLinedUp = 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first output line, which names the instance. */
+detail: string } | 
+/**  No open merge request was found. */
+{ kind: "noMergeRequest"; 
+/**  What was looked up. */
+looked_at: LookedAt } | 
+/**  Several open merge requests, none of them lining up. */
+{ kind: "several"; 
+/**  What was looked up. */
+looked_at: LookedAt; 
+/**  Their references, "!12". */
+references: string[] } | 
+/**  The merge request's diff ends at another commit. */
+{ kind: "moved"; 
+/**  The merge request. */
+merge_request: MergeRequestRef; 
+/**  The short id GitLab's diff ends at. */
+gitlab_head: string; 
+/**  The short id the window's right side is. */
+shown_head: string } | 
+/**  The merge request's diff starts from another commit. */
+{ kind: "otherBase"; 
+/**  The merge request. */
+merge_request: MergeRequestRef; 
+/**  The short id GitLab's diff starts from. */
+gitlab_base: string; 
+/**  The short id the window's left side is. */
+shown_base: string } | 
+/**  GitLab still prepares the merge request's diff. */
+{ kind: "preparing"; 
+/**  The merge request. */
+merge_request: MergeRequestRef } | 
+/**  glab failed, timed out or answered something unexpected. */
+{ kind: "failed"; 
+/**  What went wrong, in glab's or yamt's words. */
+message: string };
+
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
 /**  What git is doing, with the names of what it applies (plan §2 #87). */
 export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
+
+/**  Where a message stands on its way to GitLab. */
+export type Posting = 
+/**  Not meant for GitLab. */
+{ kind: "notQueued" } | 
+/**  Waiting for the next send. */
+{ kind: "queued"; 
+/**  The text to post, as edited. */
+text: string } | 
+/**  GitLab refused it; it is sent again with the next send. */
+{ kind: "refused"; 
+/**  The text to post, as edited. */
+text: string; 
+/**  GitLab's words. */
+reason: string } | 
+/**  Posted as a draft note of the user's pending review. */
+{ kind: "pending"; 
+/**  The text posted. */
+text: string; 
+/**  GitLab's id of the draft note. */
+draft_note: number; 
+/**  The merge request's reference, "!12". */
+merge_request: string; 
+/**  The merge request's Changes page. */
+link: string };
 
 /**
  *  Folders a server's program is looked for in besides PATH (plan §2 #72). Each entry is a relative path of plain
@@ -381,6 +514,39 @@ export type RepositoryAnswer = "start" | "dontStart";
 export type RightLine = number;
 
 export type RunId = number;
+
+/**  How far a send is: `done` of `of` messages. */
+export type SendProgress = {
+	/**  The messages handled so far. */
+	done: number,
+	/**  The messages the send handles. */
+	of: number,
+};
+
+/**  How a send ended. */
+export type SendReply = 
+/**  GitLab's diff is not the window's; nothing was sent. */
+{ kind: "notLinedUp"; 
+/**  Why. */
+why: NotLinedUp } | 
+/**  Every queued message was handled. */
+{ kind: "sent"; 
+/**  The threads after the send. */
+list: ThreadList; 
+/**  Messages now pending on GitLab. */
+sent: number; 
+/**  Messages GitLab refused, still queued. */
+refused: number } | 
+/**  The send stopped; the message it stopped at and the rest stay queued. */
+{ kind: "stopped"; 
+/**  The threads after the send. */
+list: ThreadList; 
+/**  Messages now pending on GitLab. */
+sent: number; 
+/**  Messages GitLab refused, still queued. */
+refused: number; 
+/**  Why it stopped. */
+reason: string };
 
 /**  `project`: the repository-relative folder the program runs in (`""` = the root, `/` separators). */
 export type ServerCommand = {
@@ -488,6 +654,60 @@ export type TabTexts = {
 };
 
 export type Theme = "dark" | "light" | "webstorm-dark" | "webstorm-light" | "vscode-dark" | "vscode-light" | "zed-dark" | "zed-light" | "atom-dark" | "atom-light";
+
+/**  A thread on one line of one file of the range. */
+export type Thread = {
+	/**  The thread's id. */
+	id: ThreadId,
+	/**  The file it is on. */
+	file: RangeFileId,
+	/**  The line it is on. */
+	line: ThreadLine,
+	/**  Its messages in the order they were added; never empty. */
+	messages: Message[],
+	/**  The AI session the thread's answers live in. */
+	session: string | null,
+};
+
+/**  A new thread's id, and the threads with it. */
+export type ThreadAdded = {
+	/**  The new thread. */
+	thread: ThreadId,
+	/**  Every thread, the new one last. */
+	list: ThreadList,
+};
+
+/**  A thread's identity; ids never repeat within a pair folder. */
+export type ThreadId = number;
+
+/**  The line a thread is on; the variant decides the column that shows it. */
+export type ThreadLine = 
+/**  A left line inside a difference. */
+{ kind: "removed"; 
+/**  The line. */
+left: LeftLine } | 
+/**  A right line inside a difference. */
+{ kind: "added"; 
+/**  The line. */
+right: RightLine } | 
+/**  An unchanged line, shown in the left column. */
+{ kind: "unchangedOnLeft"; 
+/**  The line in the left text. */
+left: LeftLine; 
+/**  The same line in the right text. */
+right: RightLine } | 
+/**  An unchanged line, shown in the right column. */
+{ kind: "unchangedOnRight"; 
+/**  The line in the left text. */
+left: LeftLine; 
+/**  The same line in the right text. */
+right: RightLine };
+
+/**  Every thread on a file of the range, in the order they were made. */
+export type ThreadList = {
+	/**  The threads. */
+	threads: Thread[],
+};
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 
