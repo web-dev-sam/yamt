@@ -1,34 +1,4 @@
 {
-  "RVMarkdownR1": {
-    "owned": [
-      "frontend/src/editor/markdown.ts",
-      "frontend/src/editor/internal/markdownBlocks.ts",
-      "frontend/src/editor/internal/markdownBlocks.test.ts",
-      "frontend/src/editor/internal/markdownInline.ts",
-      "frontend/src/editor/internal/markdownInline.test.ts",
-      "frontend/src/editor/internal/markdownTree.ts",
-      "frontend/src/editor/internal/markdownTree.test.ts",
-      "frontend/src/editor/internal/markdownDom.ts",
-      "frontend/src/editor/internal/markdownDom.test.ts",
-      "frontend/src/editor/internal/markdownDom.browser.test.ts",
-      "frontend/src/editor/internal/markdownTable.ts",
-      "frontend/src/editor/internal/markdownTable.test.ts",
-      "frontend/src/editor/internal/codeBlock.ts",
-      "frontend/src/editor/internal/codeBlock.test.ts",
-      "frontend/src/editor/internal/removalTooltip.ts",
-      "frontend/src/editor/internal/removalTooltip.test.ts",
-      "frontend/src/editor/internal/language.ts",
-      "frontend/src/editor/internal/language.test.ts",
-      "frontend/src/editor/internal/syntax.ts",
-      "frontend/src/editor/internal/syntax.test.ts",
-      "frontend/src/ui/useMarkdown.ts",
-      "frontend/src/ui/useMarkdown.test.ts",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts",
-      "frontend/scripts/markdownFence.ts",
-      "frontend/scripts/markdownFence.test.ts"
-    ]
-  },
   "RVGlab": {
     "owned": [
       "crates/gitio/src/glab.rs",
@@ -40,6 +10,30 @@
       "crates/gitio/tests/diff.rs",
       "scripts/fake-glab/glab",
       "tests/glab/**"
+    ]
+  },
+  "RVThreadRows": {
+    "owned": [
+      "frontend/src/editor/internal/threadAnchor.ts",
+      "frontend/src/editor/internal/threadRows.ts",
+      "frontend/src/editor/internal/threadField.ts",
+      "frontend/src/editor/internal/threadWidget.ts",
+      "frontend/src/editor/internal/threadHosts.ts",
+      "frontend/src/editor/internal/threadNumbers.ts",
+      "frontend/src/editor/internal/threadAnchor.test.ts",
+      "frontend/src/editor/internal/threadRows.test.ts",
+      "frontend/src/editor/internal/threadField.test.ts",
+      "frontend/src/editor/internal/threadNumbers.test.ts",
+      "frontend/src/editor/internal/compareFrame.ts",
+      "frontend/src/editor/internal/compareFrame.test.ts",
+      "frontend/src/editor/rangeThreads.browser.test.ts",
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/index.ts",
+      "frontend/src/editor/compare.ts",
+      "frontend/src/editor/theme.css",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/ipc/threadLine.ts",
+      "frontend/src/ipc/index.ts"
     ]
   }
 }
