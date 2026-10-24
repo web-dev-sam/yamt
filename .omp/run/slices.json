@@ -1,1 +1,11 @@
-{}
+{
+  "WindowsTests": {
+    "owned": [
+      "crates/compare/tests/opening.rs",
+      "crates/cli/tests/commands.rs",
+      "crates/lsp-host/tests/run.rs",
+      "crates/gitio/tests/operations.rs"
+    ],
+    "readonly": ["**"]
+  }
+}
