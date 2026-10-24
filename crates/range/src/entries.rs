@@ -50,7 +50,7 @@ pub(crate) fn blob_ids(changed: &[ChangedFile]) -> Vec<Oid> {
     for file in changed {
         let (old, new) = sides(&file.change);
         for side in [old, new].into_iter().flatten() {
-            if side.mode != GITLINK_MODE {
+            if has_blob(side) {
                 ids.push(side.oid.clone());
             }
         }
@@ -81,11 +81,15 @@ pub(crate) fn files_at(changed: Vec<ChangedFile>, sizes: Vec<Option<u64>>) -> Ve
     files
 }
 
+fn has_blob(side: &TreeSide) -> bool {
+    side.mode != GITLINK_MODE
+}
+
 fn blob_at(tree_side: &TreeSide, sizes: &mut impl Iterator<Item = Option<u64>>) -> BlobAt {
-    let size = if tree_side.mode == GITLINK_MODE {
-        None
-    } else {
+    let size = if has_blob(tree_side) {
         sizes.next().flatten()
+    } else {
+        None
     };
     BlobAt {
         oid: tree_side.oid.clone(),

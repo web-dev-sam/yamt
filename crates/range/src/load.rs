@@ -31,6 +31,15 @@ pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the compile-time assert before the cast proves MAX_TEXT_BYTES fits in u32"
+)]
+const TOO_LARGE_LIMIT: u32 = {
+    assert!(MAX_TEXT_BYTES <= u32::MAX as usize);
+    MAX_TEXT_BYTES as u32
+};
+
 /// The answer the listing alone gives (plan §2 #105's order up to the size), or `None`: read the blobs.
 fn decide(file: &FileAt) -> Option<RangeFile> {
     let (old, new) = (file.old.as_ref(), file.new.as_ref());
@@ -42,7 +51,7 @@ fn decide(file: &FileAt) -> Option<RangeFile> {
     }
     if let (Some(old), Some(new)) = (old, new) {
         let (old_kind, new_kind) = (old.kind(), new.kind());
-        if is_link(old_kind) != is_link(new_kind) {
+        if (old_kind == RangeEntryKind::Link) != (new_kind == RangeEntryKind::Link) {
             return Some(RangeFile::KindChanged {
                 old: old_kind,
                 new: new_kind,
@@ -60,7 +69,7 @@ fn decide(file: &FileAt) -> Option<RangeFile> {
     }
     if old.is_some_and(is_too_large) || new.is_some_and(is_too_large) {
         return Some(RangeFile::TooLarge {
-            limit: u32::try_from(MAX_TEXT_BYTES).unwrap_or(u32::MAX),
+            limit: TOO_LARGE_LIMIT,
         });
     }
     None
@@ -69,10 +78,6 @@ fn decide(file: &FileAt) -> Option<RangeFile> {
 fn commit_id(side: Option<&BlobAt>) -> Option<String> {
     side.filter(|side| side.is_gitlink())
         .map(|side| side.oid.as_str().to_owned())
-}
-
-fn is_link(kind: RangeEntryKind) -> bool {
-    kind == RangeEntryKind::Link
 }
 
 fn is_too_large(blob: &BlobAt) -> bool {
