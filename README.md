@@ -76,6 +76,8 @@ yamt --diff   # anywhere: compare any two texts side by side
 
 `yamt --diff` opens a two-column compare instead of a merge: paste or type into both columns and the differences show as in the merge window. Format lays out JSON and XML (keys and values kept as written), the language drop-down picks the highlighting (Auto by default), and each comparison is a tab in the left panel. Tabs and their texts are kept between runs.
 
+The gear opens the settings. Theme offers yamt's own Dark and Light and the default dark and light themes of WebStorm (Islands), VS Code (Dark/Light 2026), Zed (One) and Atom (One), in those editors' own colours: window, code and change colours, and their panel shapes.
+
 ## Language servers
 
 yamt runs the language servers your project already has (it ships none): the result pane shows their problems as you type, and Ctrl+S formats with the project's formatter. It asks once per repository before starting them. It finds these by itself; settings add others:

@@ -48,7 +48,7 @@ yamt/
 │  ├─ session/                MergeSession state machine; depends on merge-core + gitio
 │  ├─ cli/                    headless binary (M0): classify / scan / golden / fixture / compare tooling
 │  ├─ conflict-repo/          test-only: scripted conflict repos for gitio + session tests (dev-dependency)
-│  ├─ settings/               the per-user settings file (theme, changed keys, its location). NO tauri, NO git
+│  ├─ settings/               the per-user settings file (theme — ten names, plan §2 #102 —, changed keys, its location). NO tauri, NO git
 │  ├─ lsp-host/               starts language servers and frames their messages (plan §2 #70). NO yamt-*, NO tauri
 │  └─ compare/                the `yamt --diff` window's stored tabs (plan §2 #97). Depends on merge-core only; NO tauri, NO git
 ├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare
@@ -685,7 +685,7 @@ none and an `info` log `compare.fixture_miss`; both fixture sources parse throug
 | summary counts of the open file                                                                         | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | per controller                                                                                                                                                            |
 | what the files' grid cell shows                                                                         | `screen` shallowRef in `ui/store.ts` (`Screen` = files \| settings \| serverLog{name}): the gear (`openSettings`), "Back" (`closeSettings`, `closeServerLog`), Show log (`showServerLog`), a file picked in the list (`pick`); never by the app's own `open`                                                                                                                                                                                                                                                                                                                                                      | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56, #70)                                                                      |
 | the settings in use (theme, key bindings, the file's path)                                              | `settings` shallowRef in `ui/store.ts`, changed only by the replies of the four settings calls (`ui/settings.ts`), re-read on window focus with the file list; `preferences` is computed from it and handed to every opened file's controller                                                                                                                                                                                                                                                                                                                                                                     | the file is the truth (Rust `yamt-settings`); a failed call keeps the settings in use (plan §2 #57)                                                                       |
-| the page's theme attribute (`<html data-theme>`)                                                        | set before the first frame by the shell's start script; `main.ts` reads it as the start theme; afterwards written only by `useThemeAttribute()` (`ui/settingsStore.ts`, called by both roots) from the registered store's `settings.theme`                                                                                                                                                                                                                                                                                                                                                                        | one palette per theme in `style.css` (plan §2 #57)                                                                                                                        |
+| the page's theme attribute (`<html data-theme>`) and `color-scheme`                                     | set before the first frame by the shell's start script; `main.ts` reads it as the start theme through `themeOf` (an unknown value → `dark`); afterwards written only by `useThemeAttribute()` (`ui/settingsStore.ts`, called by both roots) from the registered store's `settings.theme`, with `documentElement.style.colorScheme` from `themeKind` (plan §2 #102)                                                                                                                                                                                                                                                | one palette per theme: `style.css` `@theme` (yamt Dark) and `themes/<name>.css` (plan §2 #57, #102)                                                                       |
 | each pane's dark flag and key bindings                                                                  | CodeMirror compartments in each pane, reconfigured by `MergeController.setPreferences`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | no history; the same preferences reach every opened file, shown or hidden (plan §2 #57)                                                                                   |
 | toolbar buttons the user hid                                                                            | `HiddenButtons` (`ui/toolbarButtons.ts`, `storedValue` from `ui/windowStorage.ts`) held by the store: read as `hiddenButtons`, changed only by `toggleButton` from the toolbar's right-click menu; Abort merge, Undo and Redo hidden at first (`HIDDEN_AT_FIRST`, one start state per id); stored in localStorage `yamt.toolbar.hidden` as an object of the buttons the user decided (id → hidden); an array stored before #74 (hidden ids) reads as decisions for the seven ids it can name                                                                                                                      | one choice for every file, remembered across restarts; a button added later keeps its own start state until decided (plan §2 #58, #74, #1091)                             |
 | whether unchanged lines collapse                                                                        | `Collapsing` (`ui/collapsing.ts`, `storedValue`) held by the store: read as `collapsing`, flipped only by `toggleCollapsing` from the toolbar's "Collapse unchanged fragments" button; stored in localStorage `yamt.collapse.unchanged`, anything but `"false"` is on; each `MergeView` passes it to `useMergeController`'s `collapsed` option, whose watch calls `setCollapsed` on every live controller                                                                                                                                                                                                         | one choice for every file, remembered across restarts; never part of `Preferences`, so re-applying preferences cannot reset shown runs (plan §2 #68)                      |
@@ -722,7 +722,7 @@ snapshot then marks its own saved point (`markSaved`).
 ```ts
 export class MergeController {
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), minimap (the Result's minimap shown at build, plan §2 #81), servers: LanguageServers | null (plan §2 #70) }
-  setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the dark flag and the side, find and middle keymaps in all three panes (plan §2 #57)
+  setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the theme compartment (dark flag from `themeKind`, the `themeName` facet the minimap redraws on) and the side, find and middle keymaps in all three panes (plan §2 #57, #102)
   setCollapsed(on: boolean): void; // the collapse toggle: off shows every hidden line, on hides every run back to its start; keeps the middle's top line, re-aligns the sides at once; not in history (plan §2 #68)
   showMinimap(shown: boolean): void; // the Result's minimap while Alt is held: shown paints in the next frame, hidden takes it out of layout and drops its tiles (plan §2 #81)
   applyAllNonConflicting(side: Side): void; // one undo step
@@ -769,8 +769,9 @@ Ctrl/Cmd+right-click on a side change (#46, #55) and the side-pane keys (#54).
 
 Internals (`editor/internal/`, not importable from `ui/`):
 
-- `pane.ts` — shared extensions (bundled font theme, line numbers, Lezer highlight with the
-  language compartment, `EditorState.lineSeparator` for CRLF, a highest-precedence selection mark
+- `pane.ts` — shared extensions (bundled font theme, line numbers, Lezer highlight from `syntax.ts` with the
+  language compartment, the theme compartment — CodeMirror's dark flag from `themeKind` and the `themeName` facet,
+  plan §2 #102 —, `EditorState.lineSeparator` for CRLF, a highest-precedence selection mark
   so selected text shows over block tints and word marks), `readOnly` + `editable(false)` for
   sides (focusable through `tabindex` so find works), `history()` and Tab / Shift+Tab
   (`indentWithTab`) for center only, with the indent unit guessed from the starting text by
@@ -806,9 +807,13 @@ Internals (`editor/internal/`, not importable from `ui/`):
   its window, padding rows, size, tiles or edges changed. Code rows come from `MinimapTiles` (128 Result rows
   per detached canvas, dropped by `staleTiles` — document, folds, theme, language, parse growth — and when
   outside the window), each row painted by `minimapPixels.ts` (VS Code's prebaked glyphs from `minimapGlyphs.ts`,
-  copied with its MIT notice) in the colours `minimapRows.ts` reads from the syntax tree through `pane.ts`
-  `syntaxColourClasses` (the one `SYNTAX_COLOURS` table the pane's highlight is built from) and from the theme
-  (`readLook`, only when shown or after the dark flag changed); a collapsed run is one row in the wave colour.
+  copied with its MIT notice) in the colours `minimapRows.ts` reads from the syntax tree through `syntax.ts`
+  `syntaxColourClasses` (the one code-colour table the pane's highlights are built from: Lezer tags → 39
+  `--color-syntax-*` tokens and their font-style variables; `paletteHighlight` sets colours with containers before
+  inner tokens, `fontHighlight` font styles with link and url before the containers, so nested Markdown takes the inner
+  colour and the container's style; the minimap takes the token latest in the table as the text's CSS does, plan §2
+  #102) and from the theme (`readLook`, only when shown or
+  after the `themeName` facet changed, two dark themes included); a collapsed run is one row in the wave colour.
   `minimapMarks.ts` gives the edges: the Result's errors over warnings on the left, every change `paneTone(…,
   "center")` still tints on the right, 4 CSS px wide, never under 4 tall; dropped when the rows move or problems
   arrive. `MinimapPointer` takes the presses: `mousedown` prevented and stopped (focus and selection stay), a
@@ -1019,7 +1024,8 @@ at first, shown from the right-click menu, #58 —, counts, finish, reset — `M
 `OperationButtons.vue` (Continue and Abort where no toolbar is: choice, deleted-side and empty-stop header rows),
 `StopView.vue` (the merge area for a stop without conflicts, with git's message, #89), `SettingsButton.vue` (the gear at the
 right end of every file's header row: toolbar, read-only header, choice header), `SettingsView.vue`
-(the settings screen in the files' grid cell: a centred column with "Back", then Theme (Dark/Light),
+(the settings screen in the files' grid cell: a centred column with "Back", then Theme (five labelled groups from
+`themeRows()` — yamt, WebStorm, VS Code, Zed, Atom — each its Dark and Light, one pressed across all, plan §2 #102),
 Antialiasing (Subpixel/Greyscale, Linux only by `showsAntialiasing`, applied at the next start, #60),
 Keymap and the settings file field with Use/Default; keyboard to "Back" on open and back to its
 opener on "Back", plan §2 #56, #57), `ChoiceButtons.vue` (one pressed-choice button group: Theme and
@@ -1145,8 +1151,10 @@ imports → types → macros (defineProps / defineEmits<…>() / defineModel) �
 - Split components by responsibility, not by section count: `FileList`, `MergeToolbar`, `MergeView`,
   `WarningBanner`, `App` is the expected set for v0; a sixth needs a one-line justification in the PR.
 - CodeMirror decorations use semantic classes (`.chunk-local`, `.chunk-conflict`, …) whose
-  colours are `var(--color-…)` from the one palette, the `@theme` block in `frontend/src/style.css`
-  (plan §2 #24); the editor theme in `editor/internal/pane.ts` reads the same variables.
+  colours are `var(--color-…)` from the palettes: yamt Dark in the `@theme` block of `frontend/src/style.css`
+  (plan §2 #24), every other theme in one `:root[data-theme="<name>"]` block in `frontend/src/themes/<name>.css`
+  defining the same variables (#57, #102; checked by `frontend/scripts/themes.ts`); the editor's highlight in
+  `editor/internal/syntax.ts` reads the same variables.
 
 ---
 

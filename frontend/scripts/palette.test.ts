@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import { expect, test } from "vitest";
 
-import { findPaletteViolations, readPaletteSources, WINDOW_FILE } from "./palette";
+import { findPaletteViolations, readPaletteSources } from "./palette";
 
 const FRONTEND_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -14,101 +14,39 @@ const PALETTE = {
   text: `@theme static {\n  --color-*: initial;\n  --color-editor: #1e1f22;\n}\n`,
 };
 
-test("the real source tree has no palette violations, the native window colours included", () => {
-  const sources = readPaletteSources(FRONTEND_ROOT);
-
-  expect(sources.map(({ path }) => path)).toContain(WINDOW_FILE);
-  expect(findPaletteViolations(sources)).toEqual([]);
+test("the real source tree has no palette violations", () => {
+  expect(findPaletteViolations(readPaletteSources(FRONTEND_ROOT))).toEqual([]);
 });
 
-const TWO_PALETTES = {
-  path: "src/style.css",
+const THEME_FILE = {
+  path: "src/themes/zed-dark.css",
   text: [
-    "@theme static {",
-    "  --color-*: initial;",
-    "  --color-window: #26282c;",
-    "  --color-editor: #1e1f22;",
+    "/* Zed 1.25.3 One Dark: #282c33 in a comment outside the block */",
+    ':root[data-theme="zed-dark"] {',
+    "  --color-editor: #282C33; /* one:58 */",
+    "  --color-fg: var(--color-nope);",
     "}",
-    "",
-    ':root[data-theme="light"] {',
-    "  color-scheme: light;",
-    "  --color-window: #E9EAEE;",
-    "  --color-editor: #ffffff;",
-    "}",
+    "p { color: #fff; }",
     "",
   ].join("\n"),
 };
 
-function shell(dark: string, light: string): { path: string; text: string } {
-  return {
-    path: WINDOW_FILE,
-    text: [
-      "// `--color-window` in frontend/src/style.css, dark and light palettes.",
-      `const BACKGROUND_DARK: Color = Color(${dark}, 0xff);`,
-      `const BACKGROUND_LIGHT: Color = Color(${light}, 0xff);`,
-      "",
-    ].join("\n"),
-  };
-}
-
-test("colour literals inside the light block are allowed", () => {
-  expect(findPaletteViolations([TWO_PALETTES])).toEqual([]);
-});
-
-test("the light block must define exactly the dark block's colour tokens", () => {
-  const palette = {
-    path: "src/style.css",
-    text: [
-      "@theme static {",
-      "  --color-window: #26282c;",
-      "  --color-editor: #1e1f22;",
-      "}",
-      ':root[data-theme="light"] {',
-      "  --color-window: #e9eaee;",
-      "  --color-extra: #123456;",
-      "}",
-      "",
-    ].join("\n"),
-  };
-
-  expect(findPaletteViolations([palette])).toEqual([
-    { rule: "light-missing", file: "src/style.css", line: 5, match: "--color-editor" },
-    { rule: "light-extra", file: "src/style.css", line: 7, match: "--color-extra" },
+test("a literal inside a theme block is allowed, outside one it is refused", () => {
+  expect(findPaletteViolations([PALETTE, THEME_FILE])).toEqual([
+    { rule: "literal", file: "src/themes/zed-dark.css", line: 1, match: "#282c33" },
+    { rule: "unknown-token", file: "src/themes/zed-dark.css", line: 4, match: "--color-nope" },
+    { rule: "literal", file: "src/themes/zed-dark.css", line: 6, match: "#fff" },
   ]);
 });
 
-test("a light block outside src/style.css exempts nothing", () => {
+test("a theme block outside src/themes/ exempts nothing", () => {
   const file = {
     path: "src/ui/extra.css",
     text: `:root[data-theme="light"] {\n  color: #fff;\n}\n`,
   };
 
-  expect(findPaletteViolations([TWO_PALETTES, file])).toEqual([
+  expect(findPaletteViolations([PALETTE, file])).toEqual([
     { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#fff" },
-  ]);
-});
-
-test("the native window backgrounds equal each palette's --color-window", () => {
-  expect(
-    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2c", "0xe9, 0xea, 0xee")]),
-  ).toEqual([]);
-  expect(
-    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2d", "0xe9, 0xea, 0xee")]),
-  ).toEqual([{ rule: "window-background", file: WINDOW_FILE, line: 2, match: "BACKGROUND_DARK" }]);
-  expect(
-    findPaletteViolations([TWO_PALETTES, shell("0x26, 0x28, 0x2c", "0xff, 0xff, 0xff")]),
-  ).toEqual([{ rule: "window-background", file: WINDOW_FILE, line: 3, match: "BACKGROUND_LIGHT" }]);
-});
-
-test("a window file without one of the backgrounds is reported", () => {
-  const missing = {
-    path: WINDOW_FILE,
-    text: "const BACKGROUND: Color = Color(0x26, 0x28, 0x2c, 0xff);\n",
-  };
-
-  expect(findPaletteViolations([TWO_PALETTES, missing])).toEqual([
-    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_DARK" },
-    { rule: "window-background", file: WINDOW_FILE, line: 1, match: "BACKGROUND_LIGHT" },
   ]);
 });
 
@@ -131,31 +69,6 @@ test("readPaletteSources reports ts, vue and css literals on disk and skips src/
       { rule: "literal", file: "src/ui/Probe.vue", line: 2, match: "#123456" },
       { rule: "literal", file: "src/style.css", line: 7, match: "#ffffff" },
     ]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-function windowTextAbove(frontendRoot: string): string | undefined {
-  return readPaletteSources(frontendRoot).find(({ path }) => path === WINDOW_FILE)?.text;
-}
-
-function placeWindowFile(folder: string, text: string): void {
-  mkdirSync(join(folder, "src-tauri/src"), { recursive: true });
-  writeFileSync(join(folder, WINDOW_FILE), text);
-}
-
-test("readPaletteSources reads the window file of the nearest ancestor, as from a mutation sandbox", () => {
-  const root = mkdtempSync(join(tmpdir(), "yamt-palette-"));
-  const frontend = join(root, "target/stryker-tmp/sandbox-1");
-  try {
-    mkdirSync(join(frontend, "src"), { recursive: true });
-
-    expect(windowTextAbove(frontend)).toBeUndefined();
-    placeWindowFile(root, "// repository\n");
-    expect(windowTextAbove(frontend)).toBe("// repository\n");
-    placeWindowFile(join(root, "target"), "// nearer\n");
-    expect(windowTextAbove(frontend)).toBe("// nearer\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -204,6 +117,30 @@ test("var(--color-nope) in a ts file is an unknown token", () => {
 
   expect(findPaletteViolations([PALETTE, file])).toEqual([
     { rule: "unknown-token", file: "src/editor/pane.ts", line: 2, match: "--color-nope" },
+  ]);
+});
+
+test("a --syntax- variable is known only when @theme defines it, not a theme block", () => {
+  const palette = {
+    path: "src/style.css",
+    text: `@theme static {\n  --color-editor: #1e1f22;\n  --syntax-comment-style: italic;\n}\n`,
+  };
+  const theme = {
+    path: "src/themes/zed-dark.css",
+    text: `:root[data-theme="zed-dark"] {\n  --syntax-comment-style: normal;\n  --syntax-comment-weight: bold;\n}\n`,
+  };
+  const file = {
+    path: "src/editor/internal/syntax.ts",
+    text: `const fonts = ["--syntax-comment-style", "--syntax-comment-weight"];\n`,
+  };
+
+  expect(findPaletteViolations([palette, theme, file])).toEqual([
+    {
+      rule: "unknown-token",
+      file: "src/editor/internal/syntax.ts",
+      line: 1,
+      match: "--syntax-comment-weight",
+    },
   ]);
 });
 
@@ -261,6 +198,19 @@ test("an @theme block outside src/style.css does not exempt literals or define t
   expect(findPaletteViolations([PALETTE, file])).toEqual([
     { rule: "literal", file: "src/ui/extra.css", line: 2, match: "#abcd" },
     { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-extra" },
+  ]);
+});
+
+test("a token defined in src/style.css outside @theme stays unknown", () => {
+  const palette = {
+    path: "src/style.css",
+    text: `@theme static {\n  --color-panel: #1e1f22;\n}\n\n@utility alias {\n  --color-alias: var(--color-panel);\n}\n`,
+  };
+  const file = { path: "src/ui/extra.css", text: `p {\n  color: var(--color-alias);\n}\n` };
+
+  expect(findPaletteViolations([palette, file])).toEqual([
+    { rule: "unknown-token", file: "src/style.css", line: 6, match: "--color-alias" },
+    { rule: "unknown-token", file: "src/ui/extra.css", line: 2, match: "--color-alias" },
   ]);
 });
 

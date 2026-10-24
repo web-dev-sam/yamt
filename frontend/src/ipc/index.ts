@@ -80,6 +80,7 @@ export {
   type KeysRead,
 } from "./keys";
 export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
+export { THEMES, themeKind, themeOf, themeRows } from "./themes";
 export { createTauriCompareSource } from "./tauriCompare";
 export type { ServerHost } from "./ServerHost";
 export type { SideWords } from "./words";

@@ -1,0 +1,33 @@
+**Verdict: pass.** All five findings are fixed and I found nothing at the `block` level. I ran no tests; everything below comes from reading the code and the implementer's pasted measurements.
+
+```json
+{
+  "verdict": "pass",
+  "findings": [],
+  "checked": [
+    "#1597/#1603 fixed: FileList.vue:57 and CompareTabList.vue:73 now carry `mr-(--island-overlap)` on the <aside>, and the right columns lost `ml-(--island-overlap)` (App.vue:73, CompareApp.vue:79). The margin is part of the v-show'd element, so it goes away when Ctrl+B hides the list. The right column then starts at the root's content edge (x = -1 in flat themes): the pane's line sits just outside the window and its content starts at x = 0. The report's rects show this: section [-1,39,1201,765], .cm-content at 35.4.",
+    "Deviation accepted: the line sits at x = -1 rather than x = 0. A line at x = 0 is exactly the window-edge line #1598 removes, and the brief's real requirement, 'content unclipped', holds.",
+    "#1598/#1604 fixed: `--island-overlap` = min(0px, spacing - line) is computed on :root, where the theme blocks also set `--spacing-island` and `--island-line` (style.css:21). It is -1px in zed/atom, min(0, 4-1) = 0 in VS Code and min(0, 5-0) = 0 in yamt/WebStorm. So `past-window-edges` (margin = overlap) pushes the flat themes' outer lines just outside the window and leaves island and card themes alone. VS Code's four-sided `island` border is untouched.",
+    "Choice named as the brief asked: the root is pulled past every edge and `#app` gets `display: flex; overflow: clip`. The root became `flex-1 min-w-0`, and the stretched cross size makes it H+2 tall. In island themes the result equals the old `h-full`.",
+    "Handle still centred on the line: the `panel-handle` maths is unchanged and is computed from the aside's own padding box. In flat themes right = -((0 - 1 + 5)/2 + 1) = -3px, giving [236,241] around the line at 238..239, which matches the report's rects. The 240 → 360 → 240 drag is in the evidence.",
+    "Banner wrapper (deviation accepted): it is needed, because otherwise the root pull-out would clip the banners' borders. `inside-window-edges` is 0 in island and card themes, so nothing changes there. NoticeBar and ProblemBar were already `shrink-0`, so the `shrink-0` wrapper changes no sizing, and the gap between two banners is still gap-island.",
+    "`empty:hidden` is correct: Vue renders only `<!--v-if-->` comments when no banner shows, and comments do not defeat :empty. If the wrapper stayed visible, its 1px top margin would push the header to y = 0. The report's header top at -1 (section at y = 39) shows the wrapper is hidden.",
+    "Disclosed behaviour change, not a block: in flat themes with the list shown, a banner's left border now sits next to the panel line instead of on top of it. Flat themes have 0 spacing, so banners touch panels anyway.",
+    "Operation tag tooltip (OperationLabel.vue:70) is safe: it is `position: fixed`, so its containing block stays the viewport. `overflow: clip` creates no containing block and clips no fixed-position descendant. #app is the viewport's size in any case, and `tooltipBox` keeps the box inside `viewport`. The ui/AGENTS.md:17 list of forbidden ancestor properties does not include overflow.",
+    "Toolbar right-click menu and server menus are unaffected: ToolbarMenu, ServerMenu and ServerGroup render through `<Teleport to=\"body\">` with `fixed`, outside #app.",
+    "The in-place drop-downs (CompareLanguagePicker, KeymapList, PresetPicker, KeyRecorder) are `absolute` inside their own views. #app clips at the viewport's bounds, which is where the viewport already clipped them. Flip-above is measured against the window.",
+    "QuestionDialog uses showModal() and renders in the top layer, so #app's clip does not affect it.",
+    "Focus rings at the edges: the side panes' `.cm-focused` outline is inset (pane.ts:174, offset -1px). With the list hidden, the Local pane's content starts at x = 0 as before, so the outline stays visible. File rows sit inside the list's `overflow-y-auto`, so that scroller clipped their rings before and still does. Header buttons are vertically centred in h-10, so their 3px ring stays inside the window at the new y = -1 header top.",
+    "Minimap and scrollbars are not clipped: the right section is [..,1201] with its border at 1200, so view.dom content ends at the window edge x = W. Before, it ended at W-1. The bottom behaves the same way (content ends at H).",
+    "`overflow: clip` does what the comment claims: content past the clip edge cannot be scrolled and adds no scrollable overflow to the viewport. body's `overflow: hidden` viewport therefore has nothing that focus or scrollIntoView could scroll to.",
+    "#1602 fixed: `--color-syntax-attribute` is now #d291cc (style.css:91), equal to `--color-syntax-property` (style.css:80), and #871094 in light.css:76, equal to its property colour (light.css:65). The AE evidence is 0 or below one pixel, and the Vue shot shows the attributes in #d291cc on both sides.",
+    "#1599 fixed: both WebStorm comments now name Island.borderWidth 6 and the visible 5 px gap.",
+    "#1600 fixed: atom-light.css:7-8 now says the L:/N: line numbers are one-dark-syntax's.",
+    "#1605 fixed: with `shell === undefined`, themes.ts:276 runs `backgroundFindings` over an empty text. No constant is found, so every theme reports `window-background` at line 1 (themes.ts:235-236). The test themes.test.ts:274 would fail if the fix were deleted, because the old `[]` gives no findings. Arm findings are rightly left out: the brief asks only for backgrounds.",
+    "#1607 pinned: `definedTokens` reads only `tailwindThemeSpans` (palette.ts:21-30). The test palette.test.ts:180 expects `unknown-token` both where the token is defined (style.css line 6) and where it is used (extra.css line 2). If definitions anywhere in the file counted, that test would fail.",
+    "Mutation survivor themes.ts:276:55 (`\"\"` → `\"Stryker was here!\"`) is equivalent (VF7 (a)): neither text matches `BACKGROUND_CONSTANT`, so `found` is empty and every finding is still line 1 either way. Agrees with #1608. The other ten survivors are the ones round 1 already triaged.",
+    "No growth harm: both roots share one rule, the two utilities in style.css, rather than copies of it, and no new state or import edge was added.",
+    "Not raised as a block: the project map's style.css entry does not yet name `past-window-edges`, `inside-window-edges` or the #app clip. The implementer flagged this (the map is outside the slice's Owned files), and PM6 checks file names, not utilities. It is a doc update for the orchestrator."
+  ]
+}
+```

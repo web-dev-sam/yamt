@@ -62,7 +62,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full gap-island p-island">
+  <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
     <FileList
       v-show="fileListShown"
       :files="files"
@@ -71,19 +71,21 @@ onMounted(() => {
       @select="pick"
     />
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
-      <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
-      <ProblemBar
-        v-if="emptyStop.barProblem !== null"
-        :problem="emptyStop.barProblem"
-        @close="dismissProblem"
-      />
-      <p
-        v-else-if="allResolved"
-        role="status"
-        class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-fg"
-      >
-        {{ resolvedLine }}
-      </p>
+      <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+        <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
+        <ProblemBar
+          v-if="emptyStop.barProblem !== null"
+          :problem="emptyStop.barProblem"
+          @close="dismissProblem"
+        />
+        <p
+          v-else-if="allResolved"
+          role="status"
+          class="shrink-0 rounded-md border border-success-border bg-success px-3 py-2 text-on-success"
+        >
+          {{ resolvedLine }}
+        </p>
+      </div>
       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         <MergeView
           v-for="file in opened"

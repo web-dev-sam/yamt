@@ -10,6 +10,7 @@ import {
   isLinux,
   log,
   readClipboard,
+  themeOf,
   type ServerHost,
   type Theme,
 } from "./ipc";
@@ -52,7 +53,7 @@ if (IN_APP && isLinux(navigator.platform)) {
   takeLinuxPastes(window, readClipboard);
 }
 const { dataset } = document.documentElement;
-const startTheme = dataset["theme"] === "light" ? "light" : "dark";
+const startTheme = themeOf(dataset["theme"]);
 const comparing = IN_APP
   ? dataset["window"] === "compare"
   : new URLSearchParams(SEARCH).has("diff");

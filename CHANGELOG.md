@@ -7,6 +7,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Eight new themes in Settings → Theme, each an editor's default dark and light theme in that editor's own colours:
+  WebStorm 2026.2 Islands Dark/Light, VS Code 1.143 Dark 2026/Light 2026, Zed 1.25 One Dark/One Light and Atom 1.60
+  One Dark/One Light. yamt's own Dark (still the default) and Light look as before.
+  - Every colour is the editor's own value, with its source recorded next to it: window, panels, text, selection,
+    line numbers, find matches, problems, notices, the minimap's slider and the code's syntax colours, including
+    italic or bold words where the editor's theme sets them.
+  - Code is coloured in more kinds than before (variables, parameters, types, operators, punctuation, control
+    keywords, …), so each editor's distinctions show.
+  - Added, changed and removed lines and conflicts use the editor's own diff, merge and conflict colours; conflicts
+    stay purple only in yamt's themes.
+  - Panels take the editor's shape: WebStorm's rounded islands, VS Code's rounded cards with a thin border, Zed's and
+    Atom's flat panels divided by one thin line.
+  - A switch recolours every open file, the compare window and the window's background at once; the next start opens
+    in the chosen theme with no flash of another.
+
 ## [0.5.0] - 2026-10-23
 
 ### Added

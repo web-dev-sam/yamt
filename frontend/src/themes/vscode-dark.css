@@ -1,0 +1,124 @@
+/*
+ * VS Code 1.143.0 Dark 2026 (COLOR_THEME_DARK), T/ = /usr/share/code/resources/app/extensions/theme-defaults/themes/:
+ * D26 = T/2026-dark.json, DM = T/dark_modern.json, D+ = T/dark_plus.json, Dvs = T/dark_vs.json (include chain
+ * 2026-dark → dark_modern → dark_plus → dark_vs; colours: the later file wins; tokenColors: TextMate specificity),
+ * js:N@c = …/out/vs/workbench/workbench.desktop.main.js line N column c (registered defaults),
+ * css:4@c = …/workbench.desktop.main.css line 4 column c. workbench.experimental.modernUI is on (js:867@13723).
+ * "gap" names the closest element for what VS Code has no colour for.
+ */
+:root[data-theme="vscode-dark"] {
+  --radius-island: 8px; /* css:4@202798 cornerRadius.large (modern-UI cards) */
+  --spacing-island: 4px; /* css:4@201702 spacing.size40 */
+  --island-line: 1px; /* css:4@202798 surface.border width */
+
+  --color-window: #191a1b; /* D26 titleBar.activeBackground (modernUI.shellBackground, js:632@41550) */
+  --color-panel: #121314; /* D26 editor.background */
+  --color-sidebar: #191a1b; /* D26 surface.background (css:4@202798) */
+  --color-panel-inline: #202122; /* D26 editorWidget.background */
+  --color-panel-border: #2a2b2c; /* D26 surface.border (js:632@38992) */
+  --color-separator: #ffffff17; /* DM editorGroup.border */
+  --color-control-border: #333536; /* D26 input.border */
+  --color-fg: #bfbfbf; /* D26 foreground */
+  --color-fg-muted: #8c8c8c; /* D26 descriptionForeground */
+  --color-code: #bbbebf; /* D26 editor.foreground */
+  --color-gutter: #858889; /* D26 editorLineNumber.foreground */
+  --color-gutter-active: #bbbebf; /* D26 editorLineNumber.activeForeground */
+  --color-handle: #bfbfbf66; /* js:632@39318 modernSash.gripForeground = foreground × 0.4 */
+  --color-handle-active: #3994bcb3; /* js:108@3656 sash.hoverBorder → D26 focusBorder */
+  --color-active-line: #242526; /* D26 editor.lineHighlightBackground */
+  --color-selection: #276782dd; /* D26 editor.selectionBackground */
+  --color-caret: #bbbebf; /* D26 editorCursor.foreground */
+  --color-hover: #5a5d5e50; /* js:108@12166 toolbar.hoverBackground */
+  --color-row-hover: #ffffff14; /* D26 list.hoverBackground */
+  --color-row-selected: #ffffff22; /* D26 list.activeSelectionBackground */
+  --color-primary: #297aa0; /* D26 button.background */
+  --color-on-primary: #ffffff; /* D26 button.foreground */
+  --color-problem: #3a1d1d; /* D26 inputValidation.errorBackground */
+  --color-problem-border: #be1100; /* D26 inputValidation.errorBorder */
+  --color-on-problem: #bfbfbf; /* D26 foreground */
+  --color-problem-error: #f14c4c; /* js:108@6558 editorError.foreground */
+  --color-problem-warning: #cca700; /* js:108@6858 editorWarning.foreground */
+  --color-problem-info: #59a4f9; /* js:108@6858 editorInfo.foreground */
+  --color-success-signal: #73c991; /* js:4019@7464 testing.iconPassed */
+  --color-success: #347d3926; /* gap: D26 diffEditor.insertedLineBackground */
+  --color-success-border: #72c892; /* gap: D26 editorGutter.addedBackground */
+  --color-on-success: #bfbfbf; /* D26 foreground */
+  --color-info: #1e3a47; /* D26 inputValidation.infoBackground */
+  --color-info-border: #3994bc; /* D26 inputValidation.infoBorder */
+  --color-on-info: #bfbfbf; /* D26 foreground */
+  --color-search-match: #27678280; /* D26 editor.findMatchHighlightBackground */
+  --color-diff-wave: #cccccc33; /* gap: js:108@11618 diffEditor.diagonalFill */
+
+  --color-syntax-keyword: #569cd6; /* Dvs storage.modifier, keyword.operator.expression, keyword.operator.new */
+  --color-syntax-control-keyword: #c586c0; /* D+ keyword.control */
+  --color-syntax-definition-keyword: #ff7b72; /* D26 storage.type */
+  --color-syntax-bool: #569cd6; /* Dvs constant.language */
+  --color-syntax-null: #569cd6; /* Dvs constant.language */
+  --color-syntax-self: #79c0ff; /* D26 variable.language */
+  --color-syntax-string: #a5d6ff; /* D26 string */
+  --color-syntax-character: #ff7b72; /* D26 constant.character (constant.character.entity.html) */
+  --color-syntax-number: #b5cea8; /* Dvs constant.numeric */
+  --color-syntax-unit: #b5cea8; /* Dvs keyword.other.unit */
+  --color-syntax-colour-literal: #ce9178; /* D+ constant.other.color.rgb-value */
+  --color-syntax-regexp: #a5d6ff; /* D26 string.regexp */
+  --color-syntax-escape: #d7ba7d; /* D+ constant.character.escape */
+  --color-syntax-comment: #8b949e; /* D26 comment */
+  --color-syntax-variable: #c9d1d9; /* D26 variable.other */
+  --color-syntax-variable-definition: #79c0ff; /* D26 variable.other.constant */
+  --color-syntax-function: #d2a8ff; /* D26 entity.name.function */
+  --color-syntax-method: #d2a8ff; /* D26 entity.name.function */
+  --color-syntax-property: #c9d1d9; /* D26 variable.other (variable.other.property) */
+  --color-syntax-property-definition: #9cdcfe; /* D+ meta.object-literal.key */
+  --color-syntax-type: #4ec9b0; /* D+ entity.name.type, support.type */
+  --color-syntax-operator: #d4d4d4; /* Dvs keyword.operator */
+  --color-syntax-arrow: #ff7b72; /* D26 storage.type (storage.type.function.arrow) */
+  --color-syntax-punctuation: #c9d1d9; /* D26 meta.block */
+  --color-syntax-interpolation: #569cd6; /* Dvs punctuation.definition.template-expression */
+  --color-syntax-decorator: #bbbebf; /* D26 editor.foreground (punctuation.decorator has no rule) */
+  --color-syntax-markup-mark: #79c0ff; /* D26 markup.heading (punctuation.definition.heading) */
+  --color-syntax-tag: #7ee787; /* D26 entity.name.tag */
+  --color-syntax-angle-bracket: #808080; /* Dvs punctuation.definition.tag */
+  --color-syntax-attribute: #9cdcfe; /* Dvs entity.other.attribute-name */
+  --color-syntax-heading: #79c0ff; /* D26 markup.heading */
+  --color-syntax-emphasis: #c9d1d9; /* D26 markup.italic */
+  --color-syntax-strong: #c9d1d9; /* D26 markup.bold */
+  --color-syntax-strikethrough: #bbbebf; /* D26 editor.foreground (markup.strikethrough sets style only) */
+  --color-syntax-quote: #7ee787; /* D26 markup.quote */
+  --color-syntax-content-separator: #79c0ff; /* D26 meta.separator */
+  --color-syntax-monospace: #79c0ff; /* D26 markup.inline.raw */
+  --color-syntax-link: #a5d6ff; /* D26 string.other.link */
+  --color-syntax-url: #bbbebf; /* D26 editor.foreground (markup.underline.link sets style only) */
+
+  --syntax-comment-style: normal; /* D26 comment */
+  --syntax-heading-weight: bold; /* D26 markup.heading fontStyle bold */
+  --syntax-heading-style: normal; /* D26 markup.heading */
+  --syntax-emphasis-style: italic; /* D26 markup.italic fontStyle italic */
+  --syntax-strong-weight: bold; /* D26 markup.bold fontStyle bold */
+  --syntax-strikethrough-line: line-through; /* D26 markup.strikethrough fontStyle strikethrough */
+  --syntax-link-line: none; /* D26 string.other.link */
+  --syntax-link-style: normal; /* D26 string.other.link */
+  --syntax-url-line: underline; /* Dvs markup.underline fontStyle underline */
+  --syntax-url-style: normal; /* Dvs markup.underline */
+  --syntax-function-style: normal; /* D26 entity.name.function */
+  --syntax-quote-style: normal; /* D26 markup.quote */
+  --syntax-content-separator-weight: bold; /* D26 meta.separator fontStyle bold */
+  --syntax-content-separator-style: normal; /* D26 meta.separator */
+
+  --color-chunk-inserted: #347d3926; /* D26 diffEditor.insertedLineBackground */
+  --color-chunk-modified: #9bb95533; /* gap: js:4149@7125 mergeEditor.change.background */
+  --color-chunk-deleted: #c93c3726; /* D26 diffEditor.removedLineBackground */
+  --color-chunk-conflict: #40a6ff33; /* js:108@13481 merge.incomingContentBackground */
+  --color-chunk-modified-word: #9ccc2c33; /* js:4149@7125 mergeEditor.change.word.background */
+  --color-chunk-conflict-word: #40a6ff80; /* js:108@13336 merge.incomingHeaderBackground */
+  --color-chunk-modified-removal: #f28772; /* D26 editorGutter.deletedBackground */
+  --color-chunk-conflict-removal: #40a6ff80; /* js:108@13994 editorOverviewRuler.incomingContentForeground */
+
+  --color-mark-inserted: #72c892; /* js:709@23739 minimapGutter.addedBackground → D26 editorGutter.addedBackground */
+  --color-mark-modified: #0078d4; /* js:709@23739 minimapGutter.modifiedBackground → DM editorGutter.modifiedBackground */
+  --color-mark-deleted: #f28772; /* js:709@23739 minimapGutter.deletedBackground → D26 editorGutter.deletedBackground */
+  --color-mark-conflict: #40a6ff80; /* js:108@13994 editorOverviewRuler.incomingContentForeground */
+
+  --color-minimap-slider: #a8a9aa85; /* D26 minimapSlider.background */
+  --color-minimap-slider-hover: #a8a9aa90; /* D26 minimapSlider.hoverBackground */
+  --color-minimap-slider-active: #a8a9aa9c; /* D26 minimapSlider.activeBackground */
+}

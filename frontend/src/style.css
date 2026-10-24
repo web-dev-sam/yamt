@@ -1,4 +1,13 @@
 @import "tailwindcss";
+@import "./themes/light.css";
+@import "./themes/webstorm-dark.css";
+@import "./themes/webstorm-light.css";
+@import "./themes/vscode-dark.css";
+@import "./themes/vscode-light.css";
+@import "./themes/zed-dark.css";
+@import "./themes/zed-light.css";
+@import "./themes/atom-dark.css";
+@import "./themes/atom-light.css";
 
 @theme static {
   --color-*: initial;
@@ -8,10 +17,15 @@
 
   --radius-island: 10px;
   --spacing-island: 5px;
+  --island-line: 0px;
+  --island-overlap: min(0px, calc(var(--spacing-island) - var(--island-line)));
+  --spacing-handle: 5px;
 
   --color-window: #27252e;
   --color-panel: #17161c;
+  --color-sidebar: #17161c;
   --color-panel-inline: #211f27;
+  --color-panel-border: #17161c;
   --color-separator: #27252e;
   --color-control-border: #43404d;
   --color-fg: #d6d4dd;
@@ -31,27 +45,74 @@
   --color-on-primary: #ffffff;
   --color-problem: #f66b712e;
   --color-problem-border: #f66b7266;
+  --color-on-problem: #d6d4dd;
   --color-problem-error: #f66b71;
   --color-problem-warning: #f0c45e;
   --color-problem-info: #aba9b6;
   --color-success-signal: #78bf7b;
   --color-success: #78bf7b26;
   --color-success-border: #78bf7b59;
+  --color-on-success: #d6d4dd;
   --color-info: #377ee333;
   --color-info-border: #377ee380;
+  --color-on-info: #d6d4dd;
   --color-search-match: #78bf7b40;
   --color-diff-wave: #565362;
 
   --color-syntax-keyword: #e0986b;
+  --color-syntax-control-keyword: #e0986b;
+  --color-syntax-definition-keyword: #e0986b;
+  --color-syntax-bool: #e0986b;
+  --color-syntax-null: #e0986b;
+  --color-syntax-self: #e0986b;
   --color-syntax-string: #78bf7b;
+  --color-syntax-character: #78bf7b;
   --color-syntax-number: #52bccf;
-  --color-syntax-comment: #817e8d;
-  --color-syntax-function: #67b0f9;
-  --color-syntax-property: #d291cc;
-  --color-syntax-decorator: #b1b062;
-  --color-syntax-tag: #dcb875;
+  --color-syntax-unit: #e0986b;
+  --color-syntax-colour-literal: #c4c2ce;
   --color-syntax-regexp: #7ad7d1;
+  --color-syntax-escape: #e0986b;
+  --color-syntax-comment: #817e8d;
+  --color-syntax-variable: #c4c2ce;
+  --color-syntax-variable-definition: #c4c2ce;
+  --color-syntax-function: #67b0f9;
+  --color-syntax-method: #67b0f9;
+  --color-syntax-property: #d291cc;
+  --color-syntax-property-definition: #d291cc;
+  --color-syntax-type: #c4c2ce;
+  --color-syntax-operator: #c4c2ce;
+  --color-syntax-arrow: #c4c2ce;
+  --color-syntax-punctuation: #c4c2ce;
+  --color-syntax-interpolation: #c4c2ce;
+  --color-syntax-decorator: #b1b062;
+  --color-syntax-markup-mark: #b1b062;
+  --color-syntax-tag: #dcb875;
+  --color-syntax-angle-bracket: #dcb875;
+  --color-syntax-attribute: #d291cc;
+  --color-syntax-heading: #c4c2ce;
+  --color-syntax-emphasis: #c4c2ce;
+  --color-syntax-strong: #c4c2ce;
+  --color-syntax-strikethrough: #c4c2ce;
+  --color-syntax-quote: #c4c2ce;
+  --color-syntax-content-separator: #c4c2ce;
+  --color-syntax-monospace: #c4c2ce;
   --color-syntax-link: #a689f1;
+  --color-syntax-url: #a689f1;
+
+  --syntax-comment-style: normal;
+  --syntax-heading-weight: bold;
+  --syntax-heading-style: normal;
+  --syntax-emphasis-style: italic;
+  --syntax-strong-weight: bold;
+  --syntax-strikethrough-line: line-through;
+  --syntax-link-line: none;
+  --syntax-link-style: normal;
+  --syntax-url-line: none;
+  --syntax-url-style: normal;
+  --syntax-function-style: normal;
+  --syntax-quote-style: normal;
+  --syntax-content-separator-weight: normal;
+  --syntax-content-separator-style: normal;
 
   --color-chunk-inserted: #2b9f4a24;
   --color-chunk-modified: #377ee324;
@@ -72,75 +133,37 @@
   --color-minimap-slider-active: #bfbfbf33;
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
+@utility island {
+  border: var(--island-line) solid var(--color-panel-border);
+  border-radius: var(--radius-island);
+}
 
-  --color-window: #e9eaee;
-  --color-panel: #ffffff;
-  --color-panel-inline: #f7f8f9;
-  --color-separator: #e9eaee;
-  --color-control-border: #d1d3d9;
-  --color-fg: #000000;
-  --color-fg-muted: #73767c;
-  --color-code: #080808;
-  --color-gutter: #aeb3c2;
-  --color-gutter-active: #767a8a;
-  --color-handle: #aeb3c2;
-  --color-handle-active: #767a8a;
-  --color-active-line: #f5f8fe;
-  --color-selection: #a6d2ff;
-  --color-caret: #000000;
-  --color-hover: #00000012;
-  --color-row-hover: #00000008;
-  --color-row-selected: #d0dffe;
-  --color-primary: #3871e1;
-  --color-on-primary: #ffffff;
-  --color-problem: #fff6f5;
-  --color-problem-border: #ffc4c5;
-  --color-problem-error: #e55230;
-  --color-problem-warning: #e8a33e;
-  --color-problem-info: #8c8c8c;
-  --color-success-signal: #208a3c;
-  --color-success: #f5faf3;
-  --color-success-border: #bbdbc2;
-  --color-info: #f7f8ff;
-  --color-info-border: #bdd3ff;
-  --color-search-match: #ccccff;
-  --color-diff-wave: #d0d0d0;
+@utility past-window-edges {
+  margin: var(--island-overlap);
+}
 
-  --color-syntax-keyword: #0033b3;
-  --color-syntax-string: #067d17;
-  --color-syntax-number: #1750eb;
-  --color-syntax-comment: #8c8c8c;
-  --color-syntax-function: #00627a;
-  --color-syntax-property: #871094;
-  --color-syntax-decorator: #9e880d;
-  --color-syntax-tag: #0033b3;
-  --color-syntax-regexp: #264eff;
-  --color-syntax-link: #006dcc;
+@utility inside-window-edges {
+  margin: calc(-1 * var(--island-overlap)) calc(-1 * var(--island-overlap)) 0;
+}
 
-  --color-chunk-inserted: #4e9d6c5c;
-  --color-chunk-modified: #538af95c;
-  --color-chunk-deleted: #8b8e945c;
-  --color-chunk-conflict: #967bef6b;
-  --color-chunk-modified-word: #538af9a6;
-  --color-chunk-conflict-word: #967befa6;
-  --color-chunk-modified-removal: #3871e1;
-  --color-chunk-conflict-removal: #8060db;
-
-  --color-mark-inserted: #aadeaa;
-  --color-mark-modified: #b6d2f2;
-  --color-mark-deleted: #c8c8c8;
-  --color-mark-conflict: #c6bbf5;
-
-  --color-minimap-slider: #64646433;
-  --color-minimap-slider-hover: #64646459;
-  --color-minimap-slider-active: #0000004d;
+@utility panel-handle {
+  right: calc(
+    -1 *
+      (
+        (var(--spacing-island) + var(--island-overlap) + var(--spacing-handle)) / 2 +
+          var(--island-line)
+      )
+  );
+  width: var(--spacing-handle);
 }
 
 /* Chromium keeps subpixel text in a composited scroller only over an opaque background (plan §2 #60). */
 @utility opaque-scroller {
   background-color: var(--color-panel);
+}
+
+@utility opaque-sidebar-scroller {
+  background-color: var(--color-sidebar);
 }
 
 @utility hover-tooltip {
@@ -169,6 +192,12 @@
   html {
     background-color: var(--color-window);
     color: var(--color-fg);
+  }
+
+  /* `clip`, unlike `hidden`, is no scroll container: focus and scrollIntoView cannot move the root pulled past the window edges (CSS Overflow 3 §3.1). */
+  #app {
+    display: flex;
+    overflow: clip;
   }
 
   body {

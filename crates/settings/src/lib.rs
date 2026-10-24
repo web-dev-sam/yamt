@@ -13,11 +13,19 @@ use crate::file::Loaded;
 pub use crate::places::Places;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum Theme {
     #[default]
     Dark,
     Light,
+    WebstormDark,
+    WebstormLight,
+    VscodeDark,
+    VscodeLight,
+    ZedDark,
+    ZedLight,
+    AtomDark,
+    AtomLight,
 }
 
 impl Theme {
@@ -27,6 +35,14 @@ impl Theme {
         match self {
             Theme::Dark => "dark",
             Theme::Light => "light",
+            Theme::WebstormDark => "webstorm-dark",
+            Theme::WebstormLight => "webstorm-light",
+            Theme::VscodeDark => "vscode-dark",
+            Theme::VscodeLight => "vscode-light",
+            Theme::ZedDark => "zed-dark",
+            Theme::ZedLight => "zed-light",
+            Theme::AtomDark => "atom-dark",
+            Theme::AtomLight => "atom-light",
         }
     }
 }
@@ -266,11 +282,26 @@ mod tests {
 
     #[test]
     fn a_theme_name_is_its_serde_spelling() {
-        for theme in [Theme::Dark, Theme::Light] {
+        let themes = [
+            (Theme::Dark, "dark"),
+            (Theme::Light, "light"),
+            (Theme::WebstormDark, "webstorm-dark"),
+            (Theme::WebstormLight, "webstorm-light"),
+            (Theme::VscodeDark, "vscode-dark"),
+            (Theme::VscodeLight, "vscode-light"),
+            (Theme::ZedDark, "zed-dark"),
+            (Theme::ZedLight, "zed-light"),
+            (Theme::AtomDark, "atom-dark"),
+            (Theme::AtomLight, "atom-light"),
+        ];
+        for (theme, spelling) in themes {
+            assert_eq!(theme.name(), spelling);
             assert_eq!(
                 serde_json::to_value(theme).unwrap(),
-                serde_json::Value::from(theme.name())
+                serde_json::Value::from(spelling)
             );
+            let read: Theme = serde_json::from_value(serde_json::Value::from(spelling)).unwrap();
+            assert_eq!(read, theme);
         }
     }
 

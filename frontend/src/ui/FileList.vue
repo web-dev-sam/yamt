@@ -54,7 +54,7 @@ function toggleFolder(path: string): void {
 <template>
   <aside
     ref="list"
-    class="relative flex w-60 shrink-0 flex-col rounded-island bg-panel pb-1"
+    class="relative mr-(--island-overlap) flex w-60 shrink-0 flex-col island bg-sidebar pb-1"
     :style="widthStyle"
   >
     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
@@ -81,7 +81,7 @@ function toggleFolder(path: string): void {
       v-else
       role="listbox"
       aria-label="Conflicted files"
-      class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
+      class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-sidebar-scroller"
     >
       <li
         v-for="file in files"

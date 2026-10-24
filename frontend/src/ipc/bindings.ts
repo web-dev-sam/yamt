@@ -441,7 +441,7 @@ export type TabTexts = {
 	comparison: Comparison,
 };
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "webstorm-dark" | "webstorm-light" | "vscode-dark" | "vscode-light" | "zed-dark" | "zed-light" | "atom-dark" | "atom-light";
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";
 

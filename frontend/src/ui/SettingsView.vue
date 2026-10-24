@@ -2,16 +2,13 @@
 import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
 
-import type { Antialiasing, Theme } from "../ipc";
+import { themeRows, type Antialiasing } from "../ipc";
 import ChoiceButtons from "./ChoiceButtons.vue";
 import KeymapList from "./KeymapList.vue";
 import { showsAntialiasing } from "./settings";
 import { useSettingsStore } from "./settingsStore";
 
-const THEMES: readonly { readonly value: Theme; readonly label: string }[] = [
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-];
+const THEME_ROWS = themeRows().map((row, index) => ({ ...row, id: `settings-theme-${index}` }));
 
 const ANTIALIASINGS: readonly { readonly value: Antialiasing; readonly label: string }[] = [
   { value: "subpixel", label: "Subpixel" },
@@ -61,7 +58,7 @@ async function moveToDefault(): Promise<void> {
 <template>
   <section
     aria-label="Settings"
-    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto rounded-island opaque-scroller"
+    class="col-start-1 row-start-1 min-h-0 min-w-0 overflow-y-auto island opaque-scroller"
   >
     <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 p-6">
       <button
@@ -75,7 +72,18 @@ async function moveToDefault(): Promise<void> {
       </button>
       <section aria-labelledby="settings-theme">
         <h3 id="settings-theme" class="mb-2 font-semibold">Theme</h3>
-        <ChoiceButtons :options="THEMES" :pressed="settings.theme" @pick="setTheme" />
+        <div class="grid grid-cols-[max-content_auto] items-center gap-x-4 gap-y-2">
+          <div
+            v-for="{ group, themes, id } in THEME_ROWS"
+            :key="group"
+            role="group"
+            :aria-labelledby="id"
+            class="col-span-2 grid grid-cols-subgrid items-center"
+          >
+            <span :id="id" class="text-fg-muted">{{ group }}</span>
+            <ChoiceButtons :options="themes" :pressed="settings.theme" @pick="setTheme" />
+          </div>
+        </div>
       </section>
       <section v-if="ON_LINUX" aria-labelledby="settings-antialiasing">
         <h3 id="settings-antialiasing" class="mb-2 font-semibold">Antialiasing</h3>

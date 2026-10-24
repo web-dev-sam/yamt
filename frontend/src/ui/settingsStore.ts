@@ -1,6 +1,12 @@
 import { watch, type ShallowRef } from "vue";
 
+import { themeKind } from "../ipc";
 import type { SettingsActions, SettingsInUse } from "./settings";
+
+type ThemedRoot = {
+  readonly dataset: DOMStringMap;
+  readonly style: Pick<CSSStyleDeclaration, "colorScheme">;
+};
 
 export type SettingsStore = Pick<
   SettingsActions,
@@ -31,12 +37,13 @@ export function useSettingsStore(): SettingsStore {
   return registered;
 }
 
-export function useThemeAttribute(): void {
+export function useThemeAttribute(root: ThemedRoot = document.documentElement): void {
   const { settings } = useSettingsStore();
   watch(
     () => settings.value.theme,
     (theme) => {
-      document.documentElement.dataset["theme"] = theme;
+      root.dataset["theme"] = theme;
+      root.style.colorScheme = themeKind(theme);
     },
     { immediate: true },
   );

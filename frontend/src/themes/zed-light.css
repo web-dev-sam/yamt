@@ -1,0 +1,123 @@
+/*
+ * Zed 1.25.3 One Light (default.json:9-12), sources at zed-industries/zed@v1.25.3 (8dd255c3):
+ * one = assets/themes/one/one.json (One Light from :427), schema = crates/theme_settings/src/schema.rs (fallbacks of
+ * omitted keys), dc = crates/theme/src/default_colors.rs (code defaults), cv = crates/git_ui/src/conflict_view.rs,
+ * dock = crates/workspace/src/dock.rs. Syntax: the tree-sitter capture's key (longest dot prefix); "no key" takes
+ * editor.foreground. "gap" names the closest element for what Zed has no colour for.
+ */
+:root[data-theme="zed-light"] {
+  --radius-island: 0px; /* dock:1341 flat panels */
+  --spacing-island: 0px; /* dock:1341 panels touch */
+  --island-line: 1px; /* dock:1341 1 px border between panels */
+
+  --color-window: #dcdcdd; /* one:437 background */
+  --color-panel: #fafafa; /* one:477 editor.background */
+  --color-sidebar: #ebebec; /* one:468 panel.background (dock:1340) */
+  --color-panel-inline: #ebebec; /* one:435 elevated_surface.background */
+  --color-panel-border: #c9c9ca; /* one:429 border */
+  --color-separator: #c9c9ca; /* one:429 border */
+  --color-control-border: #dfdfe0; /* one:430 border.variant */
+  --color-fg: #242529; /* one:449 text */
+  --color-fg-muted: #58585a; /* one:450 text.muted */
+  --color-code: #242529; /* one:476 editor.foreground */
+  --color-gutter: #b4b4bb; /* one:482 editor.line_number */
+  --color-gutter-active: #44454b; /* one:483 editor.active_line_number */
+  --color-handle: #c9c9ca; /* gap: one:429 border (the divider line) */
+  --color-handle-active: #7d82e8; /* gap: one:431 border.focused */
+  --color-active-line: #ebebecbf; /* one:480 editor.active_line.background */
+  --color-selection: #5c78e23d; /* one:570 players[0].selection */
+  --color-caret: #5c78e2; /* one:568 players[0].cursor */
+  --color-hover: #dfdfe0; /* one:445 ghost_element.hover */
+  --color-row-hover: #dfdfe0; /* one:439 element.hover */
+  --color-row-selected: #cacaca; /* one:441 element.selected */
+  --color-primary: #5c78e2; /* one:453 text.accent */
+  --color-on-primary: #242529; /* gap: one:449 text */
+  --color-problem: #fbdfd9; /* one:534 error.background */
+  --color-problem-border: #f6c6bd; /* one:535 error.border */
+  --color-on-problem: #242529; /* one:449 text */
+  --color-problem-error: #d36151; /* one:533 error */
+  --color-problem-warning: #a48819; /* one:563 warning */
+  --color-problem-info: #5c78e2; /* one:545 info */
+  --color-success-signal: #669f59; /* one:557 success */
+  --color-success: #dfeadb; /* one:558 success.background */
+  --color-success-border: #c8dcc1; /* one:559 success.border */
+  --color-on-success: #242529; /* one:449 text */
+  --color-info: #e2e2fa; /* one:546 info.background */
+  --color-info-border: #cbcdf6; /* one:547 info.border */
+  --color-on-info: #242529; /* one:449 text */
+  --color-search-match: #5c79e266; /* one:466 search.match_background */
+  --color-diff-wave: #7e8086; /* gap: one:451 text.placeholder (fold placeholder) */
+
+  --color-syntax-keyword: #a449ab; /* one:670 keyword */
+  --color-syntax-control-keyword: #a449ab; /* one:670 keyword (@keyword.control) */
+  --color-syntax-definition-keyword: #a449ab; /* one:670 keyword (@keyword.declaration) */
+  --color-syntax-bool: #ad6e25; /* one:615 boolean */
+  --color-syntax-null: #c18401; /* one:630 constant (@constant.builtin) */
+  --color-syntax-self: #ad6e25; /* one:820 variable.special */
+  --color-syntax-string: #649f57; /* one:765 string */
+  --color-syntax-character: #ad6e26; /* one:780 string.special */
+  --color-syntax-number: #ad6e25; /* one:695 number */
+  --color-syntax-unit: #3882b7; /* one:805 type (@type.unit) */
+  --color-syntax-colour-literal: #ad6e26; /* one:780 string.special */
+  --color-syntax-regexp: #ad6e26; /* one:775 string.regex */
+  --color-syntax-escape: #7c7e86; /* one:770 string.escape */
+  --color-syntax-comment: #a2a3a7; /* one:620 comment */
+  --color-syntax-variable: #242529; /* one:810 variable */
+  --color-syntax-variable-definition: #242529; /* one:810 variable */
+  --color-syntax-function: #5b79e3; /* one:660 function */
+  --color-syntax-method: #5b79e3; /* one:660 function (@function.method) */
+  --color-syntax-property: #d3604f; /* one:720 property */
+  --color-syntax-property-definition: #d3604f; /* one:720 property */
+  --color-syntax-type: #3882b7; /* one:805 type */
+  --color-syntax-operator: #3882b7; /* one:700 operator */
+  --color-syntax-arrow: #3882b7; /* one:700 operator */
+  --color-syntax-punctuation: #4d4f52; /* one:735 punctuation.delimiter, one:730 punctuation.bracket */
+  --color-syntax-interpolation: #b92b46; /* one:750 punctuation.special */
+  --color-syntax-decorator: #b92b46; /* one:750 punctuation.special */
+  --color-syntax-markup-mark: #d3604f; /* one:800 title (@title.markup heading marks) */
+  --color-syntax-tag: #5c78e2; /* one:790 tag */
+  --color-syntax-angle-bracket: #4d4f52; /* one:730 punctuation.bracket */
+  --color-syntax-attribute: #5c78e2; /* one:610 attribute */
+  --color-syntax-heading: #d3604f; /* one:800 title */
+  --color-syntax-emphasis: #5c78e2; /* one:645 emphasis */
+  --color-syntax-strong: #ad6e25; /* one:650 emphasis.strong */
+  --color-syntax-strikethrough: #242529; /* one:476 editor.foreground (@strikethrough.markup has no key) */
+  --color-syntax-quote: #242529; /* one:476 editor.foreground (@text has no key) */
+  --color-syntax-content-separator: #d3604f; /* one:800 title */
+  --color-syntax-monospace: #649f57; /* one:795 text.literal */
+  --color-syntax-link: #5b79e3; /* one:680 link_text */
+  --color-syntax-url: #3882b7; /* one:685 link_uri */
+
+  --syntax-comment-style: normal; /* one:620 comment font_style null */
+  --syntax-heading-weight: normal; /* one:800 title font_weight 400 */
+  --syntax-heading-style: normal; /* one:800 title font_style null */
+  --syntax-emphasis-style: normal; /* one:645 emphasis font_style null */
+  --syntax-strong-weight: bold; /* one:650 emphasis.strong font_weight 700 */
+  --syntax-strikethrough-line: none; /* gap: @strikethrough.markup has no key */
+  --syntax-link-line: none; /* one:680 link_text */
+  --syntax-link-style: italic; /* one:680 link_text font_style italic */
+  --syntax-url-line: none; /* one:685 link_uri */
+  --syntax-url-style: normal; /* one:685 link_uri */
+  --syntax-function-style: normal; /* one:660 function */
+  --syntax-quote-style: normal; /* one:476 editor.foreground */
+  --syntax-content-separator-weight: normal; /* one:800 title font_weight 400 */
+  --syntax-content-separator-style: normal; /* one:800 title */
+
+  --color-chunk-inserted: #27a65729; /* schema:614-618 editor_diff_hunk_added_background = one:519 version_control.added × 0.16 */
+  --color-chunk-modified: #faf2e6; /* gap: one:549 modified.background */
+  --color-chunk-deleted: #e06c7629; /* schema:629-633 editor_diff_hunk_deleted_background = one:523 version_control.deleted × 0.16 */
+  --color-chunk-conflict: #0588f080; /* dc:180 version_control.conflict_marker.theirs = blue().light().step_10() × 0.5 (cv:318) */
+  --color-chunk-modified-word: #2ea04859; /* one:521 version_control.word_added */
+  --color-chunk-conflict-word: #5c78e233; /* cv:646 text_accent.opacity(0.2) */
+  --color-chunk-modified-removal: #e06c76; /* one:523 version_control.deleted */
+  --color-chunk-conflict-removal: #0588f0; /* dc:180 blue().light().step_10() (theirs' base) */
+
+  --color-mark-inserted: #27a657; /* one:519 version_control.added */
+  --color-mark-modified: #d3b020; /* one:520 version_control.modified */
+  --color-mark-deleted: #e06c76; /* one:523 version_control.deleted */
+  --color-mark-conflict: #0588f0; /* dc:180 blue().light().step_10() (theirs' base) */
+
+  --color-minimap-slider: #383a414c; /* schema:524 minimap_thumb_background → one:471 scrollbar.thumb.background */
+  --color-minimap-slider-hover: #dfdfe0b3; /* schema:529 minimap_thumb_hover_background → one:472, alpha capped at 0.7 */
+  --color-minimap-slider-active: #383a414c; /* schema:534 minimap_thumb_active_background → one:471 */
+}

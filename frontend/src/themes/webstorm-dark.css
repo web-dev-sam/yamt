@@ -1,0 +1,125 @@
+/*
+ * WebStorm 2026.2 (262.10968.77) Islands Dark, jars under ~/.local/share/JetBrains/WebStorm-262.10968.77/:
+ * ID = lib/intellij.platform.ide.impl.jar:themes/islands/ManyIslandsDark.theme.json (ui keys, named colours),
+ * SD = …:themes/islands/IslandSchemeDark.xml (scheme "Islands Dark", parent Darcula),
+ * DC = …:DefaultColorSchemesManager.xml (Darcula :1562–3035),
+ * JD = plugins/javascript-plugin/lib/modules/intellij.javascript.backend.jar:colorSchemes/Darcula.xml,
+ * TDF = intellij-community idea/262.10968.63 TextDiffTypeFactory.java (getIgnoredColor: c + 0.6·(TEXT bg − c)).
+ * "→ X" names the fallback the key resolves to; "gap" names the closest element for what WebStorm has no colour for.
+ */
+:root[data-theme="webstorm-dark"] {
+  --radius-island: 10px; /* ID ui Island.arc 20 */
+  --spacing-island: 5px; /* ID ui Island.borderWidth 6; visible gap 5 px (3.T measurement) */
+  --island-line: 0px; /* ID ui Island.borderColor = tool-window-bg: no line */
+
+  --color-window: #26282c; /* ID ui MainWindow.background → gray-30 */
+  --color-panel: #191a1c; /* SD TEXT background; ID ui ToolWindow.background */
+  --color-sidebar: #191a1c; /* ID ui ToolWindow.background */
+  --color-panel-inline: #212326; /* ID ui Editor.SearchField.background → gray-20 */
+  --color-panel-border: #191a1c; /* ID ui Island.borderColor → tool-window-bg */
+  --color-separator: #26282c; /* ID ui EditorTabs.underTabsBorderColor → gray-30 */
+  --color-control-border: #40434a; /* ID ui Component.borderColor → gray-50 */
+  --color-fg: #d1d3d9; /* ID ui *.foreground → gray-130 */
+  --color-fg-muted: #73767c; /* ID ui *.infoForeground → gray-80 */
+  --color-code: #bcbec4; /* SD TEXT foreground */
+  --color-gutter: #4b5059; /* SD LINE_NUMBERS_COLOR */
+  --color-gutter-active: #a1a3ab; /* SD LINE_NUMBER_ON_CARET_ROW_COLOR */
+  --color-handle: #4b5059; /* gap: SD LINE_NUMBERS_COLOR */
+  --color-handle-active: #a1a3ab; /* gap: SD LINE_NUMBER_ON_CARET_ROW_COLOR */
+  --color-active-line: #1f2024; /* SD CARET_ROW_COLOR */
+  --color-selection: #214283; /* DC:1611 SELECTION_BACKGROUND */
+  --color-caret: #ced0d6; /* SD CARET_COLOR */
+  --color-hover: #ffffff17; /* ID ui ActionButton.hoverBackground → transparent-white-20 */
+  --color-row-hover: #ffffff10; /* ID ui List.hoverBackground → transparent-white-10 */
+  --color-row-selected: #2a4371; /* ID ui *.selectionBackground → blue-50 */
+  --color-primary: #3871e1; /* ID ui Button.default.startBackground → blue-80 */
+  --color-on-primary: #ffffff; /* ID ui Button.default.foreground */
+  --color-problem: #56272b; /* ID ui Banner.errorBackground → red-40 */
+  --color-problem-border: #80383e; /* ID ui Banner.errorBorderColor → red-60 */
+  --color-on-problem: #d1d3d9; /* ID ui *.foreground */
+  --color-problem-error: #fa6675; /* SD ERRORS_ATTRIBUTES effect */
+  --color-problem-warning: #f2c55c; /* SD WARNING_ATTRIBUTES effect */
+  --color-problem-info: #857042; /* SD INFO_ATTRIBUTES effect */
+  --color-success-signal: #6db083; /* ID ui Label.successForeground → green-100 */
+  --color-success: #203b2a; /* ID ui Banner.successBackground → green-40 */
+  --color-success-border: #29583c; /* ID ui Banner.successBorderColor → green-60 */
+  --color-on-success: #d1d3d9; /* ID ui *.foreground */
+  --color-info: #233558; /* ID ui Banner.infoBackground → blue-40 */
+  --color-info-border: #2e4d89; /* ID ui Banner.infoBorderColor → blue-60 */
+  --color-on-info: #d1d3d9; /* ID ui *.foreground */
+  --color-search-match: #114957; /* SD TEXT_SEARCH_RESULT_ATTRIBUTES background */
+  --color-diff-wave: #555555; /* DC:1616 DIFF_SEPARATOR_WAVE */
+
+  --color-syntax-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD (TS.KEYWORD → JS.KEYWORD) */
+  --color-syntax-control-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD */
+  --color-syntax-definition-keyword: #cf8e6d; /* SD DEFAULT_KEYWORD */
+  --color-syntax-bool: #cf8e6d; /* SD DEFAULT_KEYWORD */
+  --color-syntax-null: #cf8e6d; /* SD DEFAULT_KEYWORD */
+  --color-syntax-self: #cf8e6d; /* SD DEFAULT_KEYWORD */
+  --color-syntax-string: #6aab73; /* SD DEFAULT_STRING (JS.STRING) */
+  --color-syntax-character: #56a8f5; /* SD HTML_ENTITY_REFERENCE */
+  --color-syntax-number: #2aacb8; /* SD DEFAULT_NUMBER (JS.NUMBER) */
+  --color-syntax-unit: #6aab73; /* SD DEFAULT_STRING (CSS.UNIT → CSS.PROPERTY_VALUE) */
+  --color-syntax-colour-literal: #56a8f5; /* SD CSS.COLOR */
+  --color-syntax-regexp: #42c3d4; /* SD JS.REGEXP */
+  --color-syntax-escape: #cf8e6d; /* SD DEFAULT_VALID_STRING_ESCAPE */
+  --color-syntax-comment: #7a7e85; /* SD DEFAULT_LINE_COMMENT, DEFAULT_BLOCK_COMMENT */
+  --color-syntax-variable: #a9b7c6; /* JD:3-7 JS.LOCAL_VARIABLE */
+  --color-syntax-variable-definition: #a9b7c6; /* JD:3-7 JS.LOCAL_VARIABLE */
+  --color-syntax-function: #56a8f5; /* SD DEFAULT_FUNCTION_DECLARATION (JS.GLOBAL_FUNCTION inherits) */
+  --color-syntax-method: #56a8f5; /* SD JS.INSTANCE_MEMBER_FUNCTION */
+  --color-syntax-property: #c77dbb; /* SD DEFAULT_INSTANCE_FIELD (JS.INSTANCE_MEMBER_VARIABLE) */
+  --color-syntax-property-definition: #c77dbb; /* SD DEFAULT_INSTANCE_FIELD */
+  --color-syntax-type: #bcbec4; /* SD DEFAULT_IDENTIFIER (TS.CLASS, TS.INTERFACE) */
+  --color-syntax-operator: #bcbec4; /* SD DEFAULT_OPERATION_SIGN */
+  --color-syntax-arrow: #bcbec4; /* SD DEFAULT_OPERATION_SIGN (TS.FUNCTION_ARROW) */
+  --color-syntax-punctuation: #bcbec4; /* SD DEFAULT_COMMA, DEFAULT_BRACES, DEFAULT_DOT */
+  --color-syntax-interpolation: #bcbec4; /* SD DEFAULT_BRACES (JS.TEMPLATE_LITERAL_PLACEHOLDER_DELIMITERS) */
+  --color-syntax-decorator: #b3ae60; /* SD DEFAULT_METADATA (JS.DECORATOR) */
+  --color-syntax-markup-mark: #cf8e6d; /* SD DEFAULT_KEYWORD (MARKDOWN_*_MARKER) */
+  --color-syntax-tag: #d5b778; /* SD HTML_TAG_NAME */
+  --color-syntax-angle-bracket: #d5b778; /* SD HTML_TAG */
+  --color-syntax-attribute: #bababa; /* DC:2399 HTML_ATTRIBUTE_NAME */
+  --color-syntax-heading: #c77dbb; /* SD DEFAULT_CONSTANT (MARKDOWN_HEADER_LEVEL_n) */
+  --color-syntax-emphasis: #bcbec4; /* SD TEXT (MARKDOWN_ITALIC has no colour) */
+  --color-syntax-strong: #bcbec4; /* SD TEXT (MARKDOWN_BOLD has no colour) */
+  --color-syntax-strikethrough: #bcbec4; /* SD DEPRECATED_ATTRIBUTES effect (MARKDOWN_STRIKE_THROUGH) */
+  --color-syntax-quote: #6aab73; /* SD DEFAULT_STRING (MARKDOWN_BLOCK_QUOTE) */
+  --color-syntax-content-separator: #cf8e6d; /* SD DEFAULT_KEYWORD (MARKDOWN_HRULE) */
+  --color-syntax-monospace: #6aab73; /* SD DEFAULT_STRING (MARKDOWN_CODE_SPAN) */
+  --color-syntax-link: #56a8f5; /* SD MARKDOWN_LINK_TEXT */
+  --color-syntax-url: #57aaf7; /* SD DEFAULT_STATIC_METHOD (MARKDOWN_LINK_DESTINATION) */
+
+  --syntax-comment-style: normal; /* SD DEFAULT_LINE_COMMENT */
+  --syntax-heading-weight: normal; /* SD DEFAULT_CONSTANT */
+  --syntax-heading-style: italic; /* SD DEFAULT_CONSTANT FONT_TYPE 2 */
+  --syntax-emphasis-style: normal; /* gap: MARKDOWN_ITALIC's code default unread */
+  --syntax-strong-weight: normal; /* gap: MARKDOWN_BOLD's code default unread */
+  --syntax-strikethrough-line: line-through; /* SD DEPRECATED_ATTRIBUTES strikeout */
+  --syntax-link-line: underline; /* SD MARKDOWN_LINK_TEXT effect */
+  --syntax-link-style: normal; /* SD MARKDOWN_LINK_TEXT */
+  --syntax-url-line: none; /* SD DEFAULT_STATIC_METHOD */
+  --syntax-url-style: italic; /* SD DEFAULT_STATIC_METHOD FONT_TYPE 2 */
+  --syntax-function-style: normal; /* SD DEFAULT_FUNCTION_DECLARATION */
+  --syntax-quote-style: normal; /* SD DEFAULT_STRING */
+  --syntax-content-separator-weight: normal; /* SD DEFAULT_KEYWORD */
+  --syntax-content-separator-style: normal; /* SD DEFAULT_KEYWORD */
+
+  --color-chunk-inserted: #294436; /* DC:2269 DIFF_INSERTED background */
+  --color-chunk-modified: #25323e; /* TDF getIgnoredColor(DC:2275 DIFF_MODIFIED) */
+  --color-chunk-deleted: #484a4a; /* DC:2263 DIFF_DELETED background */
+  --color-chunk-conflict: #2b2322; /* TDF getIgnoredColor(DC:2257 DIFF_CONFLICT) */
+  --color-chunk-modified-word: #385570; /* DC:2275 DIFF_MODIFIED background */
+  --color-chunk-conflict-word: #45302b; /* DC:2257 DIFF_CONFLICT background */
+  --color-chunk-modified-removal: #385570; /* DC:2275 DIFF_MODIFIED background */
+  --color-chunk-conflict-removal: #45302b; /* DC:2257 DIFF_CONFLICT background */
+
+  --color-mark-inserted: #447152; /* DC:2270 DIFF_INSERTED stripe */
+  --color-mark-modified: #43698d; /* DC:2276 DIFF_MODIFIED stripe */
+  --color-mark-deleted: #656e76; /* DC:2264 DIFF_DELETED stripe */
+  --color-mark-conflict: #8f5247; /* DC:2258 DIFF_CONFLICT stripe */
+
+  --color-minimap-slider: #80808059; /* gap: ID ui ScrollBar.thumbColor */
+  --color-minimap-slider-hover: #8080808c; /* gap: ID ui ScrollBar.hoverThumbColor */
+  --color-minimap-slider-active: #8080808c; /* gap: ID ui ScrollBar.hoverThumbColor */
+}

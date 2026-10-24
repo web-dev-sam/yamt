@@ -24,9 +24,18 @@ const WIDTH: f64 = 1600.0;
 const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 600.0;
-// `--color-window` in frontend/src/style.css, dark and light palettes.
+// `--color-window` of each theme's block: frontend/src/style.css (`@theme static`) for Dark,
+// frontend/src/themes/<name>.css for the others.
 const BACKGROUND_DARK: Color = Color(0x27, 0x25, 0x2e, 0xff);
 const BACKGROUND_LIGHT: Color = Color(0xe9, 0xea, 0xee, 0xff);
+const BACKGROUND_WEBSTORM_DARK: Color = Color(0x26, 0x28, 0x2c, 0xff);
+const BACKGROUND_WEBSTORM_LIGHT: Color = Color(0xe9, 0xea, 0xee, 0xff);
+const BACKGROUND_VSCODE_DARK: Color = Color(0x19, 0x1a, 0x1b, 0xff);
+const BACKGROUND_VSCODE_LIGHT: Color = Color(0xfa, 0xfa, 0xfd, 0xff);
+const BACKGROUND_ZED_DARK: Color = Color(0x3b, 0x41, 0x4d, 0xff);
+const BACKGROUND_ZED_LIGHT: Color = Color(0xdc, 0xdc, 0xdd, 0xff);
+const BACKGROUND_ATOM_DARK: Color = Color(0x21, 0x25, 0x2b, 0xff);
+const BACKGROUND_ATOM_LIGHT: Color = Color(0xea, 0xea, 0xeb, 0xff);
 const UNANSWERED_CLOSE_GRACE: Duration = Duration::from_secs(1);
 const UNANSWERED_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PAGE_PING: &str = "true";
@@ -133,6 +142,14 @@ fn background(theme: Theme) -> Color {
     match theme {
         Theme::Dark => BACKGROUND_DARK,
         Theme::Light => BACKGROUND_LIGHT,
+        Theme::WebstormDark => BACKGROUND_WEBSTORM_DARK,
+        Theme::WebstormLight => BACKGROUND_WEBSTORM_LIGHT,
+        Theme::VscodeDark => BACKGROUND_VSCODE_DARK,
+        Theme::VscodeLight => BACKGROUND_VSCODE_LIGHT,
+        Theme::ZedDark => BACKGROUND_ZED_DARK,
+        Theme::ZedLight => BACKGROUND_ZED_LIGHT,
+        Theme::AtomDark => BACKGROUND_ATOM_DARK,
+        Theme::AtomLight => BACKGROUND_ATOM_LIGHT,
     }
 }
 
@@ -259,6 +276,10 @@ mod tests {
         assert_eq!(
             start_script(Theme::Dark, WindowKind::Compare),
             r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
+        );
+        assert_eq!(
+            start_script(Theme::ZedLight, WindowKind::Merge),
+            r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
         );
     }
 

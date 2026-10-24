@@ -79,7 +79,7 @@ function paneWidths(): PaneWidths | null {
     </header>
     <section
       ref="section"
-      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-island bg-separator"
+      class="grid min-h-0 min-w-0 flex-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden island bg-separator"
       :style="{ gridTemplateColumns }"
     >
       <template v-for="column in columns" :key="column.side">

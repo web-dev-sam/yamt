@@ -1,0 +1,24 @@
+```json
+{
+  "verdict": "pass",
+  "findings": [],
+  "checked": [
+    "#1597/#1603 fixed: App.vue:73 and CompareApp.vue:79 (the right columns) no longer carry `ml-(--island-overlap)`. FileList.vue:57 and CompareTabList.vue:73 now carry `mr-(--island-overlap)` on the root `<aside>`, so the 1 px overlap disappears along with the panel's `v-show`.",
+    "#1597 handle stays centred on the line: the `panel-handle` formula in style.css:149-157 is unchanged and positions the handle from the aside's own padding edge. For flat themes, right = -((0 - 1 + 5)/2 + 1) = -3 px, giving [236, 241] with its centre at 238.5, the middle of the line pixel [238, 239). That matches the report's rects. For yamt islands (5/0/0) and VS Code cards (4/1/0) the centre stays the gap's centre.",
+    "Drag after the move: usePanelWidth.ts:26 works from `getBoundingClientRect().width`, not from position, so the aside's 1 px shift to x = -1 does not affect 240 → 360 → 240. The report's rects agree.",
+    "#1598 fixed, choice named: `past-window-edges` (style.css:141, margin = --island-overlap) pulls the root out by 1 px on every side in Zed and Atom (min(0, 0 - 1)). It is 0 in yamt, WebStorm and VS Code (spacing ≥ line), so VS Code's cards keep their four-sided border inside `p-island`. This matches plan §2 #102 'one 1 px border-colour line between touching panels'.",
+    "Deviation accepted, `#app { display: flex; overflow: clip }` (style.css:197): a flex row lets the root's negative margins grow it to +2 px on both axes (`flex-1` plus stretch). `clip` is not a scroll container, so the 1 px overhang cannot be scrolled into view. The comment cites CSS Overflow 3 (CP1). Fixed-position descendants (the OperationLabel tooltip) are not clipped, because their containing block is the viewport. `clip` creates no stacking context or containing block, which keeps ui/AGENTS.md:17's rule. QuestionDialog is a native `<dialog>` in the top layer, so the clip does not affect it.",
+    "Deviation accepted, the banners' wrapper (App.vue:74, CompareApp.vue:80): `inside-window-edges` reverses the root's overhang on the top, left and right edges, so banner borders are never clipped. Its margins are 0 in island and card themes. Gaps are unchanged: before, the column had banner gap banner gap grid; now it has wrapper(banner gap banner) gap grid. `empty:hidden` holds because Vue's `v-if` placeholders are comments, which `:empty` ignores. NoticeBar and ProblemBar already have `shrink-0` roots.",
+    "Deviation accepted, the pane's line at x = −1 with the list hidden: #1598 removes every line at the window's edges, so a line at x = 0 would bring the defect back. The brief's real point (#1597: content unclipped) holds, since the section's padding box starts at x = 0 (report: section [-1,39,…], first .cm-content at x 35.4).",
+    "Two new utilities: each has two users (App and CompareApp) and lives beside `island`/`panel-handle` in style.css. Their names say what they do, so no comment is needed (comment policy). They add no second source for the overlap: both read `--island-overlap`.",
+    "Docs: the only text that mentions `ml-(--island-overlap)` is the brief (grep over docs/, frontend/, .omp/skills). The project map's style.css entry does not name the two new utilities or the #app clip. The implementer flagged this for the orchestrator. The map is not in Owned, and map-check only checks file names, so this is not a finding.",
+    "#1602 fixed: style.css:91 `--color-syntax-attribute: #d291cc` (= --color-syntax-property) and themes/light.css:76 `#871094` (= light.css:65 property).",
+    "#1599 fixed: webstorm-dark.css:12 and webstorm-light.css:14 now say 'Island.borderWidth 6; visible gap 5 px (3.T measurement)'.",
+    "#1600 fixed using the brief's first option: the atom-light.css header (lines 7-8) says the L:/N: line numbers are one-dark-syntax's. That the two files hold the same rules is still taken on the reviewer's word, as the brief allowed.",
+    "#1605 fixed: when `shell === undefined`, themes.ts:273-277 runs `backgroundFindings` over an empty window file, so every theme reports `window-background` at line 1 and no arm findings are made up. Test: themes.test.ts:274 (three themes, exact list).",
+    "#1607 pinned: palette.test.ts:180 has `--color-alias` defined in an `@utility` outside `@theme`. It is reported as unknown-token both where it is defined (style.css line 6) and where it is used (src/ui/extra.css line 2). palette.ts is unchanged.",
+    "Ownership: every file in the report's files_changed is inside the brief's Owned globs. I could not run git, so this was checked against the report plus the current file contents, not the raw diff. PanelWidthHandle.vue needed no change.",
+    "No new import edges: the template changes use no new components, and the script blocks of App.vue and CompareApp.vue are unchanged in their imports. The two roots share no new state."
+  ]
+}
+```
