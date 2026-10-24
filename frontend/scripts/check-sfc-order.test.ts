@@ -46,3 +46,15 @@ function stop(): void {}
 
   expect(firstViolation("Late.vue", text)).toMatch(/^Late\.vue:4: state after lifecycle /);
 });
+
+test("a defineSlots after state reports the macro line", () => {
+  const text = `<script setup lang="ts">
+import { ref } from "vue";
+const open = ref(false);
+const slots = defineSlots<{ default(): unknown }>();
+</script>
+<template><p>{{ open }} {{ slots }}</p></template>
+`;
+
+  expect(firstViolation("Slots.vue", text)).toMatch(/^Slots\.vue:4: macro after state /);
+});

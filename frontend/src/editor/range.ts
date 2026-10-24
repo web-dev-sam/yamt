@@ -1,14 +1,18 @@
 import type { Difference } from "../ipc";
 import type { CompareHosts } from "./compare";
-import { showDifferences } from "./internal/compareFields";
-import { keyboardColumn, revealDifference } from "./internal/compareFocus";
+import { moveToDifference } from "./internal/compareFocus";
 import { CompareFrame } from "./internal/compareFrame";
-import { columnMarks } from "./internal/compareMarks";
 import { CompareStrip } from "./internal/compareStrip";
-import { COLUMNS, createReadOnlyColumnViews, type ColumnViews } from "./internal/compareViews";
+import {
+  COLUMNS,
+  createReadOnlyColumnViews,
+  setColumnPreferences,
+  showColumnDifferences,
+  type ColumnViews,
+} from "./internal/compareViews";
 import { languageOf, loadLanguage } from "./internal/language";
 import type { Direction } from "./internal/navigation";
-import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
+import type { PaneSettings, Preferences } from "./internal/pane";
 
 export type RangeTexts = {
   readonly path: string; // the file's path in the range, the old path when deleted: picks the language
@@ -37,11 +41,7 @@ export class RangeController {
     });
     this.#strip = new CompareStrip(hosts.strip);
     this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
-    for (const column of COLUMNS) {
-      const view = this.#views[column];
-      const marks = columnMarks(view.state.doc, texts.differences, column);
-      view.dispatch({ effects: showDifferences.of(marks) });
-    }
+    showColumnDifferences(this.#views, texts.differences);
     const description = languageOf(texts.path);
     if (description !== null) {
       const { left, right } = this.#views;
@@ -52,14 +52,11 @@ export class RangeController {
 
   setPreferences(preferences: Preferences): void {
     this.#settings = { ...this.#settings, preferences };
-    const effects = preferenceEffects("center", this.#settings);
-    for (const column of COLUMNS) {
-      this.#views[column].dispatch({ effects });
-    }
+    setColumnPreferences(this.#views, this.#settings);
   }
 
   moveToChange(direction: Direction): void {
-    revealDifference(this.#views[keyboardColumn(this.#views) ?? "left"], direction);
+    moveToDifference(this.#views, direction);
   }
 
   destroy(): void {

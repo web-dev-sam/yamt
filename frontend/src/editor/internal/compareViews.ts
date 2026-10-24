@@ -1,10 +1,11 @@
 import { Text, type EditorState, type Extension } from "@codemirror/state";
 import { EditorView, type ViewUpdate } from "@codemirror/view";
 
-import type { Column } from "../../ipc";
+import type { Column, Difference } from "../../ipc";
 import { columnLimit } from "./columnBytes";
-import { differenceField } from "./compareFields";
-import { paneState, type PaneSettings } from "./pane";
+import { differenceField, showDifferences } from "./compareFields";
+import { columnMarks } from "./compareMarks";
+import { paneState, preferenceEffects, type PaneSettings } from "./pane";
 import { everyPane } from "./paneViews";
 import { removalTooltip } from "./removalTooltip";
 
@@ -125,4 +126,22 @@ export function createReadOnlyColumnViews(
   return columnViews(hosts, (column) =>
     readOnlyColumnState({ column, text: texts[column] }, wiring),
   );
+}
+
+export function showColumnDifferences(
+  views: ColumnViews,
+  differences: readonly Difference[],
+): void {
+  for (const column of COLUMNS) {
+    const view = views[column];
+    const marks = columnMarks(view.state.doc, differences, column);
+    view.dispatch({ effects: showDifferences.of(marks) });
+  }
+}
+
+export function setColumnPreferences(views: ColumnViews, settings: PaneSettings): void {
+  const effects = preferenceEffects("center", settings);
+  for (const column of COLUMNS) {
+    views[column].dispatch({ effects });
+  }
 }

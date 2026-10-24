@@ -25,6 +25,7 @@ const LEFT = [
   "",
 ].join("\n");
 const RIGHT = [
+  "// added",
   "const first = 1;",
   "const value = new(a);",
   "const same = 2;",
@@ -37,8 +38,16 @@ const CASE = {
   right: RIGHT,
   differences: [
     {
+      left: { start: 0, len: 0 },
+      right: { start: 0, len: 1 },
+      words: {
+        left: { changed: [], removals: [] },
+        right: { changed: [], removals: [] },
+      },
+    },
+    {
       left: { start: 1, len: 1 },
-      right: { start: 1, len: 1 },
+      right: { start: 2, len: 1 },
       words: {
         left: {
           changed: [
@@ -48,17 +57,17 @@ const CASE = {
           removals: [],
         },
         right: {
-          changed: [{ line: 1, start: 14, len: 3 }],
-          removals: [{ at: { line: 1, column: 19 }, text: ", b" }],
+          changed: [{ line: 2, start: 14, len: 3 }],
+          removals: [{ at: { line: 2, column: 19 }, text: ", b" }],
         },
       },
     },
     {
       left: { start: 3, len: 1 },
-      right: { start: 3, len: 1 },
+      right: { start: 4, len: 1 },
       words: {
         left: { changed: [], removals: [{ at: { line: 3, column: 6 }, text: ", y" }] },
-        right: { changed: [{ line: 3, start: 6, len: 3 }], removals: [] },
+        right: { changed: [{ line: 4, start: 6, len: 3 }], removals: [] },
       },
     },
   ],
@@ -121,12 +130,18 @@ afterEach(() => {
   document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
 });
 
-test("both columns are marked from one reply: bands, word marks, removal bars and the strip", async () => {
+function markLine(host: HTMLElement, selector: string): { text: string; line: number } {
+  const mark = found(host.querySelector<HTMLElement>(selector), selector);
+  const view = viewIn(host);
+  return { text: mark.textContent, line: view.state.doc.lineAt(view.posAtDOM(mark)).number };
+}
+
+test("each column is marked with its own lines from one reply: bands, word marks, removal bars and the strip", async () => {
   const { hosts } = await opened();
   const bands = await vi.waitFor(
     () => {
       const shown = [...hosts.strip.querySelectorAll("path.chunk-band")];
-      expect(shown).toHaveLength(2);
+      expect(shown).toHaveLength(3);
       return shown;
     },
     { timeout: WAIT_MS },
@@ -135,10 +150,14 @@ test("both columns are marked from one reply: bands, word marks, removal bars an
 
   for (const host of [hosts.left, hosts.right]) {
     expect(host.querySelectorAll(".cm-line.chunk-band.chunk-modified")).toHaveLength(2);
-    expect(host.querySelectorAll(".chunk-word-modified").length).toBeGreaterThan(0);
     expect(host.querySelectorAll(".chunk-removal")).toHaveLength(1);
   }
-  expect(hosts.left.querySelector(".chunk-word-modified")?.textContent).toBe("old");
+  expect(hosts.left.querySelectorAll(".cm-line.chunk-marker-inserted")).toHaveLength(1);
+  expect(hosts.right.querySelectorAll(".cm-line.chunk-band.chunk-inserted")).toHaveLength(1);
+  expect(markLine(hosts.left, ".chunk-word-modified")).toEqual({ text: "old", line: 2 });
+  expect(markLine(hosts.right, ".chunk-word-modified")).toEqual({ text: "new", line: 3 });
+  expect(markLine(hosts.left, ".chunk-removal").line).toBe(4);
+  expect(markLine(hosts.right, ".chunk-removal").line).toBe(3);
   expect(bands.every((band) => (band.getAttribute("d") ?? "") !== "")).toBe(true);
 });
 
