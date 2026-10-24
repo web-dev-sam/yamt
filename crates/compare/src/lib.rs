@@ -106,7 +106,7 @@ pub struct TabTexts {
     pub comparison: Comparison,
 }
 
-/// The most bytes a column holds: the merge window's per-file limit (`session`'s `MAX_TEXT_BYTES`).
+/// The most bytes a column holds: the merge window's per-file limit (`yamt_merge_core::MAX_TEXT_BYTES`).
 pub const MAX_COLUMN_BYTES: u32 = 8 * 1024 * 1024;
 
 /// Why a store operation failed.
@@ -235,5 +235,18 @@ pub fn tab_texts(loaded: &LoadedTab) -> TabTexts {
         left: loaded.left.to_string(),
         right: loaded.right.to_string(),
         comparison: comparison(loaded),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_column_limit_is_merge_core_s_text_limit() {
+        assert_eq!(
+            usize::try_from(MAX_COLUMN_BYTES),
+            Ok(yamt_merge_core::MAX_TEXT_BYTES)
+        );
     }
 }

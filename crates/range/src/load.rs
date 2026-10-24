@@ -1,0 +1,97 @@
+use yamt_gitio::{BlobReader, Repo};
+use yamt_merge_core::{MAX_TEXT_BYTES, compare};
+
+use crate::entries::{BlobAt, FileAt};
+use crate::{RangeEntryKind, RangeFile, RangeModeChange, RangeSides, Result};
+
+/// What `file` shows, read from the repository only when the listing cannot answer.
+pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
+    if let Some(answer) = decide(file) {
+        return Ok(answer);
+    }
+    let mut reader = repo.blob_reader()?;
+    let left = read_side(&mut reader, file.old.as_ref())?;
+    let right = read_side(&mut reader, file.new.as_ref())?;
+    match (String::from_utf8(left), String::from_utf8(right)) {
+        (Ok(left), Ok(right)) => Ok(RangeFile::Texts {
+            differences: compare(&left, &right),
+            left,
+            right,
+            mode: mode_change(file),
+        }),
+        (Err(_), Ok(_)) => Ok(RangeFile::NotUtf8 {
+            sides: RangeSides::Left,
+        }),
+        (Ok(_), Err(_)) => Ok(RangeFile::NotUtf8 {
+            sides: RangeSides::Right,
+        }),
+        (Err(_), Err(_)) => Ok(RangeFile::NotUtf8 {
+            sides: RangeSides::Both,
+        }),
+    }
+}
+
+/// The answer the listing alone gives (plan §2 #105's order up to the size), or `None`: read the blobs.
+fn decide(file: &FileAt) -> Option<RangeFile> {
+    let (old, new) = (file.old.as_ref(), file.new.as_ref());
+    if old.is_some_and(BlobAt::is_gitlink) || new.is_some_and(BlobAt::is_gitlink) {
+        return Some(RangeFile::Submodule {
+            old: commit_id(old),
+            new: commit_id(new),
+        });
+    }
+    if let (Some(old), Some(new)) = (old, new) {
+        let (old_kind, new_kind) = (old.kind(), new.kind());
+        if is_link(old_kind) != is_link(new_kind) {
+            return Some(RangeFile::KindChanged {
+                old: old_kind,
+                new: new_kind,
+            });
+        }
+        if old.oid == new.oid && old_kind != new_kind {
+            return Some(RangeFile::ModeOnly {
+                old: old_kind,
+                new: new_kind,
+            });
+        }
+    }
+    if file.binary {
+        return Some(RangeFile::Binary);
+    }
+    if old.is_some_and(is_too_large) || new.is_some_and(is_too_large) {
+        return Some(RangeFile::TooLarge {
+            limit: u32::try_from(MAX_TEXT_BYTES).unwrap_or(u32::MAX),
+        });
+    }
+    None
+}
+
+fn commit_id(side: Option<&BlobAt>) -> Option<String> {
+    side.filter(|side| side.is_gitlink())
+        .map(|side| side.oid.as_str().to_owned())
+}
+
+fn is_link(kind: RangeEntryKind) -> bool {
+    kind == RangeEntryKind::Link
+}
+
+fn is_too_large(blob: &BlobAt) -> bool {
+    blob.size.is_some_and(|size| size > MAX_TEXT_BYTES as u64)
+}
+
+fn read_side(reader: &mut BlobReader, side: Option<&BlobAt>) -> Result<Vec<u8>> {
+    match side {
+        Some(blob) => Ok(reader.read(&blob.oid)?),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn mode_change(file: &FileAt) -> RangeModeChange {
+    match (&file.old, &file.new) {
+        (Some(old), Some(new)) if old.kind() != new.kind() => RangeModeChange::Changed {
+            old: old.kind(),
+            new: new.kind(),
+        },
+        _ => RangeModeChange::Same,
+    }
+}
