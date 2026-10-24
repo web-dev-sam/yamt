@@ -1,0 +1,13 @@
+just mutants 7b820f8~1 (covers 7b820f8 RVPipe)
+MISSED   crates/pipe/src/bin/line-echo.rs:90:67: replace / with % in answer in 0s build + 3s test
+MISSED   crates/pipe/src/bin/line-echo.rs:138:5: replace replace_with -> io::Result<()> with Ok(()) in 0s build + 2s test
+MISSED   crates/pipe/src/frame.rs:5:37: replace * with + in 0s build + 3s test
+MISSED   crates/pipe/src/program.rs:94:30: replace || with && in find_with in 0s build + 3s test
+MISSED   crates/pipe/src/program.rs:172:5: replace runnable -> Option<PathBuf> with None in 0s build + 3s test
+MISSED   crates/pipe/src/program.rs:172:5: replace runnable -> Option<PathBuf> with Some(Default::default()) in 0s build + 3s test
+MISSED   crates/pipe/src/program.rs:182:5: replace windows_candidates -> Vec<PathBuf> with vec![] in 0s build + 3s test
+MISSED   crates/pipe/src/program.rs:182:5: replace windows_candidates -> Vec<PathBuf> with vec![Default::default()] in 0s build + 3s test
+MISSED   crates/pipe/src/program.rs:183:65: delete ! in windows_candidates in 0s build + 3s test
+MISSED   crates/pipe/src/run.rs:220:74: replace < with <= in supervise in 0s build + 2s test
+MISSED   crates/pipe/src/run.rs:243:26: replace < with <= in exit_code in 0s build + 3s test
+143 mutants tested in 9m: 11 missed, 100 caught, 29 unviable, 3 timeouts
