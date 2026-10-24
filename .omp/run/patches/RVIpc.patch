@@ -1,0 +1,933 @@
+From 516810c11d1142080068834cfebcf85d3b995202 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:29:27 +0200
+Subject: [PATCH] feat(ipc): RangeSource with Tauri and fixture sources for the
+ range window
+
+---
+ .omp/run/findings.jsonl                |   3 +
+ .omp/run/mutants/RVShell.survivors.txt |   3 +
+ .omp/run/notes/RVColumnsBoundary.md    |  53 ++++++++
+ .omp/run/notes/RVIpc.md                |  65 +++++++++
+ frontend/src/ipc/AGENTS.md             |   2 +
+ frontend/src/ipc/RangeSource.ts        |   8 ++
+ frontend/src/ipc/domain.ts             |   5 +
+ frontend/src/ipc/fixtureRange.test.ts  | 178 +++++++++++++++++++++++++
+ frontend/src/ipc/fixtureRange.ts       | 144 ++++++++++++++++++++
+ frontend/src/ipc/index.ts              |  16 +++
+ frontend/src/ipc/rangeDomain.test.ts   | 136 +++++++++++++++++++
+ frontend/src/ipc/rangeDomain.ts        |  74 ++++++++++
+ frontend/src/ipc/tauriRange.ts         |  17 +++
+ frontend/src/ui/problemText.test.ts    |   6 +
+ frontend/src/ui/problemText.ts         |  11 +-
+ scripts/map-check.sh                   |   4 +-
+ 16 files changed, 718 insertions(+), 7 deletions(-)
+ create mode 100644 .omp/run/mutants/RVShell.survivors.txt
+ create mode 100644 .omp/run/notes/RVColumnsBoundary.md
+ create mode 100644 .omp/run/notes/RVIpc.md
+ create mode 100644 frontend/src/ipc/RangeSource.ts
+ create mode 100644 frontend/src/ipc/fixtureRange.test.ts
+ create mode 100644 frontend/src/ipc/fixtureRange.ts
+ create mode 100644 frontend/src/ipc/rangeDomain.test.ts
+ create mode 100644 frontend/src/ipc/rangeDomain.ts
+ create mode 100644 frontend/src/ipc/tauriRange.ts
+
+diff --git a/.omp/run/findings.jsonl b/.omp/run/findings.jsonl
+index 183fcb8..ac72974 100644
+--- a/.omp/run/findings.jsonl
++++ b/.omp/run/findings.jsonl
+@@ -1537,3 +1537,6 @@
+ {"ts": "2026-10-24T12:50:00+00:00", "slice": "RVCrate", "source": "boundary", "severity": "should", "rule_id": "DR5", "file": "docs/plan.md", "line": 139, "problem": "#107 still says the work tree folder's name; the code names the key after the common git dir's folder", "fix": "orchestrator amends #107", "triage": "promoted: orchestrator applied the amendment"}
+ {"ts": "2026-10-24T13:05:00+00:00", "slice": "RVCrate", "source": "correctness", "severity": "should", "rule_id": "VF7", "file": "crates/range/src/load.rs", "line": 61, "problem": "the old-side halves of the size guard and the gitlink guard are untested: a deleted or modified file whose old blob is over 8 MiB would be read and sent whole", "fix": "a deleted over-limit file in exactly_8_mib…; a removed submodule in mode_only_kind_changed_and_submodule…", "triage": "promoted: an untested guard the IPC's size relies on"}
+ {"ts": "2026-10-24T13:05:00+00:00", "slice": "RVCrate", "source": "correctness", "severity": "nit", "rule_id": null, "file": "crates/range/src/load.rs", "line": 74, "problem": "one-caller is_link makes an equivalent mutant every mutation run reports again", "fix": "inline as (old == Link) != (new == Link)", "triage": "promoted: a standing survivor in every run hides real ones; one line in the same round"}
++{"ts": "2026-10-24T13:15:00+00:00", "slice": "RVColumns", "source": "boundary", "severity": "should", "rule_id": "growth: copied decision", "file": "frontend/src/editor/range.ts", "line": 40, "problem": "range.ts copies three bodies from CompareController: columnMarks→showDifferences loop, preferenceEffects loop, keyboardColumn(views) ?? 'left' arrow rule", "fix": "one helper each in compareMarks.ts, compareFocus.ts and beside COLUMNS, used by both controllers", "triage": "promoted: a copied rule; the two windows would drift"}
++{"ts": "2026-10-24T13:15:00+00:00", "slice": "RVColumns", "source": "boundary", "severity": "should", "rule_id": "VU2", "file": "frontend/src/ui/FileList.vue", "line": 15, "problem": "first defineSlots calls; check-sfc-order.ts CALLEE_SECTIONS does not list defineSlots, so a misplaced one passes unnoticed", "fix": "defineSlots: 'macro' in CALLEE_SECTIONS with a failing case in check-sfc-order.test.ts", "triage": "promoted: a detector gap under an existing rule (VU2), one entry"}
++{"ts": "2026-10-24T13:15:00+00:00", "slice": "RVColumns", "source": "boundary", "severity": "nit", "rule_id": "TS16", "file": "frontend/src/editor/internal/compareViews.ts", "line": 23, "problem": "ReadOnlyWiring exported but unused; repeats ColumnWiring's fields", "fix": "unexported Pick<ColumnWiring,…> & { extensions }", "triage": "dropped: one extra symbol, no growth harm"}
+diff --git a/.omp/run/mutants/RVShell.survivors.txt b/.omp/run/mutants/RVShell.survivors.txt
+new file mode 100644
+index 0000000..e0f8a93
+--- /dev/null
++++ b/.omp/run/mutants/RVShell.survivors.txt
+@@ -0,0 +1,3 @@
++just mutants d6c6d3f (covers 8787d4d RVShell)
++MISSED   src-tauri/src/range.rs:64:5: replace range_folder -> PathBuf with Default::default() in 4s build + 1s test
++27 mutants tested in 2m: 1 missed, 8 caught, 18 unviable
+diff --git a/.omp/run/notes/RVColumnsBoundary.md b/.omp/run/notes/RVColumnsBoundary.md
+new file mode 100644
+index 0000000..f7e5c55
+--- /dev/null
++++ b/.omp/run/notes/RVColumnsBoundary.md
+@@ -0,0 +1,53 @@
++```json
++{
++  "verdict": "pass",
++  "findings": [
++    {
++      "severity": "should",
++      "file": "frontend/src/editor/range.ts",
++      "line": 40,
++      "rule_id": "growth: copied decision",
++      "problem": "`range.ts` copies three method bodies from `CompareController` instead of sharing them: the per-column `columnMarks` → `showDifferences` loop (40–44, the same as compare.ts `showComparison`), the `preferenceEffects(\"center\", …)` loop in `setPreferences`, and the arrows' rule `keyboardColumn(views) ?? \"left\"` in `moveToChange`. As the app grows, a change to any of these rules, such as which column the arrows move when no column has focus, must be made in both controllers, or the compare and range windows quietly start to differ.",
++      "fix": "Move each body into the internal file that owns the rule, used by both controllers: for example `showColumnDifferences(views, differences)` in `compareMarks.ts`, `moveToDifference(views, direction)` in `compareFocus.ts`, and a column-preferences helper beside `COLUMNS`. Those files are outside this brief's `Owned` list, so the orchestrator has to widen it or schedule this as a follow-up slice."
++    },
++    {
++      "severity": "should",
++      "file": "frontend/src/ui/FileList.vue",
++      "line": 15,
++      "rule_id": "VU2",
++      "problem": "This patch adds the first `defineSlots` calls (also `FileTree.vue:12`), but `scripts/check-sfc-order.ts` `CALLEE_SECTIONS` does not list `defineSlots`, so `classify` returns `undefined` and the statement is skipped. The order is correct today, but a later `defineSlots` placed after state or functions would pass `sfc-order` unnoticed.",
++      "fix": "Add `defineSlots: \"macro\"` to `CALLEE_SECTIONS`, with a failing case in `check-sfc-order.test.ts`. The script is outside `Owned`, so this belongs to the orchestrator or curator."
++    },
++    {
++      "severity": "nit",
++      "file": "frontend/src/editor/internal/compareViews.ts",
++      "line": 23,
++      "rule_id": "TS16",
++      "problem": "`ReadOnlyWiring` is exported but nothing imports it: the test does not, despite the report's 'for node tests', and `range.ts` does not either. It also repeats `ColumnWiring`'s `settings` and `updated` fields by hand. Nothing gets harder as the app grows; the export is just one more symbol for a reader to look up.",
++      "fix": "Declare it without `export`, as `Pick<ColumnWiring, \"settings\" | \"updated\"> & { readonly extensions: Extension }`."
++    }
++  ],
++  "checked": [
++    "Ownership: every changed file is in the brief's Owned list (range.ts, range.browser.test.ts, editor/index.ts, compareViews.ts, compareViews.test.ts, fileTree.ts, fileTree.test.ts, FileTree.vue, FileList.vue, App.vue) plus the report under .omp/run/notes. compareFrame.ts is untouched, and no thread code was added.",
++    "The contract matches word for word: `RangeTexts` (including the `path` comment taken from the contract), `RangeOptions`, and `RangeController` with a constructor, setPreferences, moveToChange and destroy only, with none of format, settleNow, historyKey, setLanguage or holdsText (plan §2 #106, vision 4). `editor/index.ts` adds exactly the two export lines, and the file is now 292/300 lines.",
++    "`fileTree.ts` exports `ListedFile = { readonly path: string }`, `TreeRow<F extends ListedFile>` and `treeRows<F>`. `FileEntry` is no longer imported, and the file reads only `file.path`.",
++    "`FileList.vue` and `FileTree.vue` are `generic=\"F extends ListedFile\"` with the contract's props, emits and slots. Neither imports `FileEntry`, `FileMark` or `OperationLabel`. Both aria-labels come from `label`, and the list keeps the view button, `usePanelWidth` with `PanelWidthHandle`, closed folders and reveal.",
++    "`App.vue` passes `label=\"Conflicted files\"`, puts `FileMark` with the slot's label into `#file` (the list still gives `file.path` and the tree `row.label`, as before), and puts `OperationLabel v-if` into `#footer`. App stays a composition surface (VU16).",
++    "Accepted deviation: `columnState` without the `column` argument. It never used the column; the per-column listener and the refusal live in `editableColumnState` and `readOnlyColumnState`, which keeps the pure part pure.",
++    "Accepted deviation: the test-only exports `editableColumnState` and `readOnlyColumnState`. knip counts `**/*.test.ts` as entries, so TS16 is met.",
++    "Accepted deviation: `compareViews.test.ts` stubs `document`. It is needed because `everyPane()` reads `document.body` (`paneViews.ts:44`), and the same stub is already used in `minimapTiles.test.ts:21` and `usePaneDividers.test.ts:119`.",
++    "Accepted deviation: `defineSlots` in FileTree and FileList, which types `F` in the slot props. It sits in the macro position (the detector gap is reported above).",
++    "The read-only factory gets `\"readOnlyCenter\"` (`pane.ts:209`: centre extensions plus `EditorState.readOnly`), `differenceField`, `removalTooltip()`, `everyPane()`, no `columnLimit`, and the `extensions` seam named in design §6, so B's threads have a place to attach. The editable path's extension list is unchanged apart from the listener moving into `updatedListener`.",
++    "`createPane` still has its users in `paneViews.ts:77,88,96`, so nothing became dead.",
++    "`CompareFrame` reads `differenceField` from both columns (`compareFrame.ts:30-31`). The read-only factory installs it, so the frame cannot throw for range columns.",
++    "Language: `languageOf(texts.path)` plus `loadLanguage(..., () => this.#destroyed)` follows the merge window's rule in the same shape as `editor/index.ts:79,106`.",
++    "Boundaries: `range.ts` imports only `../ipc` types, its own `./compare` type and its own `internal/` files (PM5). editor/ does not import vue or tauri (PM3), and ui/ does not import editor/ (PM2). The browser test imports `./paneHarness`, which is allowed for *.browser.test.ts.",
++    "No new comments in the patch (CP rules).",
++    "TS10/TS11: top-level functions are declarations; compareViews.ts is 128 lines and range.ts 73, with no function over 40 lines.",
++    "State: no new Vue state. Column text stays in each column's `EditorState`, and the list's mode, width and closed folders keep their existing owners (fileListMode, usePanelWidth, FileList's `closed`).",
++    "Not graded here: the stale lines in ui/AGENTS.md:17,19, the project-map entries and editor/AGENTS.md. They belong to the orchestrator's docs pass, as the task states.",
++    "Acceptance route: `range.browser.test.ts` never ran itself, because Playwright WebKit cannot launch on this host (`libicudata.so.74`, the known #423/#1074). The vite browser project uses the Playwright provider, not `just webdriver`, so the implementer reproduced each probe check in MiniBrowser through `just webdriver` and reported the output, with before/after pixel diffs of the merge list. The probe file's own selectors stay unproven; whether that evidence is enough is for the correctness reviewer to judge.",
++    "I ran no checks of my own; this review comes from reading the patch and the files."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVIpc.md b/.omp/run/notes/RVIpc.md
+new file mode 100644
+index 0000000..96987d7
+--- /dev/null
++++ b/.omp/run/notes/RVIpc.md
+@@ -0,0 +1,65 @@
++The range window's IPC surface is in place and the brief is done: the `RangeFileId` brand, `rangeDomain.ts`, `RangeSource`, the Tauri and fixture sources, the problem words and the `map-check.sh` loop. Typecheck, lint, format and the full node suite pass. Two checks still fail and need follow-up from you: `pnpm -C frontend unused` and `just map-check`, both explained below.
++
++```
++summary
++  New: the `RangeFileId` brand and `isRangeFileId` guard in ipc/domain.ts; ipc/rangeDomain.ts (camelCase range shapes, `toRangeStart`, `toRangeFile`, reusing `toDifferences`); ipc/RangeSource.ts; ipc/tauriRange.ts (`createTauriRangeSource`); ipc/fixtureRange.ts (`createFixtureRangeSource(log, search, files = fixtures/range glob)`: a bare `?range` loads `review`, `?range=<case>` loads that case, an unknown case logs `range.fixture_miss` and lists nothing). ipc/index.ts exports the surface.
++  ui/problemText.ts: `UnknownRangeFile` → "that file is not part of this range."
++  scripts/map-check.sh now loops over `ChunkSource CompareSource RangeSource`.
++
++files_changed
++  frontend/src/ipc/domain.ts
++  frontend/src/ipc/rangeDomain.ts (new)
++  frontend/src/ipc/rangeDomain.test.ts (new)
++  frontend/src/ipc/RangeSource.ts (new)
++  frontend/src/ipc/tauriRange.ts (new)
++  frontend/src/ipc/fixtureRange.ts (new)
++  frontend/src/ipc/fixtureRange.test.ts (new)
++  frontend/src/ipc/index.ts
++  frontend/src/ipc/AGENTS.md
++  frontend/src/ui/problemText.ts
++  frontend/src/ui/problemText.test.ts
++  scripts/map-check.sh
++
++tests_added
++  rangeDomain.test.ts:
++    - "a start converts both sides and every change, camelCased, keeping the merge-base label": all four RangeChange arms (renamed → oldPath), short_id → shortId, the mergeBase and named labels.
++    - "a file id of %s is refused by the brand, naming the field" (-1, 0.5): isRangeFileId refuses it and accepts 0; toRangeStart throws `files[1].id must be a non-negative safe integer, got …`.
++    - "a texts reply converts its differences with both columns' words and keeps the mode": both mode arms (changed and same).
++    - "a bad line in a texts reply's differences is refused, naming the field".
++    - "a $kind reply carries its fields unchanged": binary, tooLarge, notUtf8, modeOnly, kindChanged, submodule.
++  fixtureRange.test.ts (inline JSON passed as `files`; row 7's fixtures do not exist yet):
++    - "?range=review lists the case's sides and files and loads each file by its id" (no log entry).
++    - "%s without a case loads review" for `?range` and `?range=`.
++    - "?range=empty loads that case, not review".
++    - "an unknown case logs range.fixture_miss naming the known ones and lists nothing": exact empty start, the log entry, and loadRangeFile → UnknownRangeFile.
++    - "loadRangeFile of an id past the list answers UnknownRangeFile with that id".
++    - "a case file with %s fails the parse, naming the file": a missing start, an unknown file kind, a negative id.
++  problemText.test.ts:
++    - "a range file Rust does not list says it is not part of this range" → "Could not open src/a.ts: that file is not part of this range."
++
++smoke_evidence
++  pnpm -C frontend exec vitest run --project node src/ipc/rangeDomain.test.ts src/ipc/fixtureRange.test.ts src/ui/problemText.test.ts
++    → Test Files  3 passed (3) / Tests  65 passed (65)
++  pnpm -C frontend typecheck → `$ vue-tsc -b`, no errors
++  pnpm -C frontend lint → `$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"`, no findings
++  pnpm -C frontend fmt:check → All matched files use the correct format. (449 files)
++  pnpm -C frontend test → Test Files  154 passed (154) / Tests  1999 passed (1999)
++  bash scripts/map-check.sh (not my recipe; run only to see what the loop change does)
++    → missing: command open_range / load_range_file (not in docs/architecture.md, not in .omp/skills/ipc-contract/SKILL.md); RangeSource.openRange and RangeSource.loadRangeFile (not in docs/architecture.md). These are for you to add to the docs.
++  Not observed: Stryker. I did not run `just mutants`.
++
++deviations_from_brief
++  - problemText.ts: adding the case pushed `causedText` to 41 lines (max-lines-per-function 40). I removed its `default: never` arm. TS3 allows that form: tsgolint switch-exhaustiveness-check covers it, and TS2366 fails the build if a kind is missing because the function returns `string`.
++  - index.ts exports the source interface, the domain types, `RangeFileId` and both factories. It does not export `isRangeFileId`, `toRangeStart` or `toRangeFile`, so nothing outside ipc/ sees DTO conversions (IPC2). I read "exports all of the above" that way; if row 9 needs the guard, it is a one-word re-export.
++  - The bindings make `commands.openRange()` infallible (`Promise<RangeStart>`, no typedError). So `createTauriRangeSource.openRange` always answers `ok: true`; an IPC rejection throws, as any invoke rejection does.
++  - An unknown fixture case answers openRange with `{ range: <case>, both sides { label: named "HEAD", shortId: "0000000", subject: "" }, files: [] }` and logs `range.fixture_miss` with `{ case, known }`. The brief left that shape open.
++  - fixtureRange.ts has its own valibot schemas for range types and Difference. fixtureCompare.ts keeps its Difference schema inline and fixture.ts's `memberOf` is not exported, and neither file is mine, so the Difference schema now exists twice and the entry kinds use `v.picklist`.
++  - The worktree had no frontend/node_modules; I ran `pnpm -C frontend install --offline --frozen-lockfile` before the recipes.
++  - .omp/run/slices.json shows as modified in the worktree. I did not edit it.
++
++open_risks
++  - frontend/src/ipc/tauriRange.ts:6: no test. tauriRange.test.ts is not in my Owned list, so mutants on these lines survive until someone adds one in the pattern of tauriCompare.test.ts.
++  - `pnpm -C frontend unused` (knip) fails: index.ts exports for the range surface and several rangeDomain.ts types have no importer until row 9 consumes them.
++  - Project map / architecture.md / ipc-contract SKILL.md need: rangeDomain.ts, RangeSource.ts, tauriRange.ts, fixtureRange.ts, the RangeSource methods openRange and loadRangeFile, and the commands open_range and load_range_file.
++  - frontend/src/ipc/fixtureRange.ts:29: the entry-kind picklist is not checked against `Generated.RangeEntryKind` for completeness. A new Rust kind would fail only when a fixture uses it.
++```
+\ No newline at end of file
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 3593046..23b7d6d 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -1,5 +1,7 @@
+ Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is generated — never edit. `domain.ts` is the only place brands are created (the compare window's guards and `nextColumnVersion` included); `fixture.ts` is the only file allowed `as` (after valibot); `log.ts` is the only file allowed `console.*`. Fixture mode's git operation lives in `fixtureOperations.ts` (`?operation=`, `?rewords`, `?empty`); `createFixtureSource` takes the page's search as a required parameter. The compare window (`yamt --diff`, plan §2 #93–#97, #101) has its own `CompareSource` (`CompareSource.ts`): domain shapes and their conversions in `compareDomain.ts`, the app's in `tauriCompare.ts`, fixture mode's in memory in `fixtureCompare.ts` (`?diff` starts one empty "Compare 1", `?diff=<case>` loads `fixtures/compare/<case>.json` into tab 1; the tab rules mirror `crates/compare`).
+ 
++The range window (`yamt --diff=<range>`, plan §2 #103–#107) has its own `RangeSource` (`RangeSource.ts`, read-only: `openRange`, `loadRangeFile`): the `RangeFileId` brand in `domain.ts`, camelCase shapes and their conversions in `rangeDomain.ts` (a texts reply's differences through `compareDomain.ts` `toDifferences`), the app's in `tauriRange.ts`, fixture mode's in `fixtureRange.ts` (`fixtures/range/<case>.json` = `{ start, files }`, a file's id its index; `?range` loads `review`, `?range=<case>` that case, an unknown case logs `range.fixture_miss` and lists nothing).
++
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+ 
+ `themes.ts` (plan §2 #102) is the one table of the ten themes' group, button words and kind (`THEMES`, exhaustive over the generated `Theme`): `themeOf` reads `<html data-theme>` (anything not a name is yamt Dark), `themeKind` gives dark or light to the editor's dark flag and `color-scheme`, `themeRows` the Settings picker's five editors, each its dark then its light. Colours live only in the CSS blocks.
+diff --git a/frontend/src/ipc/RangeSource.ts b/frontend/src/ipc/RangeSource.ts
+new file mode 100644
+index 0000000..b43d6a7
+--- /dev/null
++++ b/frontend/src/ipc/RangeSource.ts
+@@ -0,0 +1,8 @@
++import type { SettingsSource } from "./ChunkSource";
++import type { RangeFileId, SourceResult } from "./domain";
++import type { RangeFile, RangeStart } from "./rangeDomain";
++
++export interface RangeSource extends SettingsSource {
++  openRange(): Promise<SourceResult<RangeStart>>;
++  loadRangeFile(file: RangeFileId): Promise<SourceResult<RangeFile>>;
++}
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 7145eca..d6a2fb2 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -6,6 +6,7 @@ export type TabId = number & { readonly __brand: "TabId" };
+ export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
+ export type LeftLine = number & { readonly __brand: "LeftLine" };
+ export type RightLine = number & { readonly __brand: "RightLine" };
++export type RangeFileId = number & { readonly __brand: "RangeFileId" };
+ 
+ type MiddleLine = number & { readonly __brand: "MiddleLine" };
+ export type DiskVersion = number & { readonly __brand: "DiskVersion" };
+@@ -166,6 +167,10 @@ export function isRightLine(n: number): n is RightLine {
+   return isNonNegativeInteger(n);
+ }
+ 
++export function isRangeFileId(value: number): value is RangeFileId {
++  return isNonNegativeInteger(value);
++}
++
+ export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
+   const next = version + 1;
+   if (!isColumnVersion(next)) {
+diff --git a/frontend/src/ipc/fixtureRange.test.ts b/frontend/src/ipc/fixtureRange.test.ts
+new file mode 100644
+index 0000000..fda4446
+--- /dev/null
++++ b/frontend/src/ipc/fixtureRange.test.ts
+@@ -0,0 +1,178 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import { isRangeFileId, type RangeFileId, type SourceResult } from "./domain";
++import { createFixtureRangeSource } from "./fixtureRange";
++import { createLog, type Log, type LogEntry } from "./log";
++
++const REVIEW: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
++  start: {
++    range: "main...feature",
++    left: {
++      label: { kind: "mergeBase", left: "main", right: "feature" },
++      short_id: "1b2cfed",
++      subject: "Start",
++    },
++    right: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
++    files: [
++      {
++        id: 0,
++        path: "board.ts",
++        change: { kind: "modified" },
++        lines: { kind: "counted", added: 1, removed: 1 },
++      },
++      { id: 1, path: "logo.png", change: { kind: "added" }, lines: { kind: "notCounted" } },
++    ],
++  },
++  files: [
++    {
++      kind: "texts",
++      left: "a\n",
++      right: "b\n",
++      differences: [
++        {
++          left: { start: 0, len: 1 },
++          right: { start: 0, len: 1 },
++          words: { left: { changed: [], removals: [] }, right: { changed: [], removals: [] } },
++        },
++      ],
++      mode: { kind: "same" },
++    },
++    { kind: "binary" },
++  ],
++};
++
++const EMPTY: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
++  start: {
++    range: "feature..feature",
++    left: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
++    right: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
++    files: [],
++  },
++  files: [],
++};
++
++const FILES: Readonly<Record<string, unknown>> = {
++  "../../fixtures/range/empty.json": EMPTY,
++  "../../fixtures/range/review.json": REVIEW,
++};
++
++const REVIEW_START = {
++  range: "main...feature",
++  left: {
++    label: { kind: "mergeBase", left: "main", right: "feature" },
++    shortId: "1b2cfed",
++    subject: "Start",
++  },
++  right: { label: { kind: "named", name: "feature" }, shortId: "2b3b4b5", subject: "Remind" },
++  files: [
++    {
++      id: 0,
++      path: "board.ts",
++      change: { kind: "modified" },
++      lines: { kind: "counted", added: 1, removed: 1 },
++    },
++    { id: 1, path: "logo.png", change: { kind: "added" }, lines: { kind: "notCounted" } },
++  ],
++};
++
++function quietLog(): { log: Log; entries: LogEntry[] } {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const entries: LogEntry[] = [];
++  const log = createLog((entry) => {
++    entries.push(entry);
++  });
++  return { log, entries };
++}
++
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
++function fileId(n: number): RangeFileId {
++  if (!isRangeFileId(n)) {
++    throw new Error(`${n} is no file id`);
++  }
++  return n;
++}
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++test("?range=review lists the case's sides and files and loads each file by its id", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, "?range=review", FILES);
++
++  expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
++  expect(valueOf(await source.loadRangeFile(fileId(0)))).toEqual(REVIEW.files[0]);
++  expect(valueOf(await source.loadRangeFile(fileId(1)))).toEqual({ kind: "binary" });
++  expect(entries).toEqual([]);
++});
++
++test.each(["?range", "?range="])("%s without a case loads review", async (search) => {
++  const source = createFixtureRangeSource(quietLog().log, search, FILES);
++
++  expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
++});
++
++test("?range=empty loads that case, not review (catches a case name ignored)", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=empty", FILES);
++
++  const start = valueOf(await source.openRange());
++
++  expect(start.range).toBe("feature..feature");
++  expect(start.files).toEqual([]);
++});
++
++test("an unknown case logs range.fixture_miss naming the known ones and lists nothing", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureRangeSource(log, "?range=nope", FILES);
++
++  expect(valueOf(await source.openRange())).toEqual({
++    range: "nope",
++    left: { label: { kind: "named", name: "HEAD" }, shortId: "0000000", subject: "" },
++    right: { label: { kind: "named", name: "HEAD" }, shortId: "0000000", subject: "" },
++    files: [],
++  });
++  expect(entries).toEqual([
++    {
++      level: "info",
++      event: "range.fixture_miss",
++      fields: { case: "nope", known: "empty, review" },
++    },
++  ]);
++  expect(await source.loadRangeFile(fileId(0))).toEqual({
++    ok: false,
++    failure: { kind: "UnknownRangeFile", file: 0 },
++  });
++});
++
++test("loadRangeFile of an id past the list answers UnknownRangeFile with that id", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review", FILES);
++
++  expect(await source.loadRangeFile(fileId(2))).toEqual({
++    ok: false,
++    failure: { kind: "UnknownRangeFile", file: 2 },
++  });
++});
++
++test.each([
++  ["a missing start", { files: [] }, 'Invalid key: Expected "start"'],
++  ["an unknown file kind", { start: EMPTY.start, files: [{ kind: "nope" }] }, "kind"],
++  [
++    "a negative file id",
++    { start: { ...EMPTY.start, files: [{ ...REVIEW.start.files[0], id: -1 }] }, files: [] },
++    "files[0].id must be a non-negative safe integer, got -1",
++  ],
++])("a case file with %s fails the parse, naming the file", (_case, json, detail) => {
++  const files = { "bad.json": json };
++
++  expect(() => createFixtureRangeSource(quietLog().log, "?range=bad", files)).toThrow(
++    /^range fixture bad\.json: /,
++  );
++  expect(() => createFixtureRangeSource(quietLog().log, "?range=bad", files)).toThrow(detail);
++});
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+new file mode 100644
+index 0000000..61fcc08
+--- /dev/null
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -0,0 +1,144 @@
++import * as v from "valibot";
++
++import type * as Generated from "./bindings";
++import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
++import { createFixtureSettings } from "./fixtureSettings";
++import type { Log } from "./log";
++import {
++  toRangeFile,
++  toRangeStart,
++  type RangeFile,
++  type RangeSide,
++  type RangeStart,
++} from "./rangeDomain";
++import type { RangeSource } from "./RangeSource";
++
++type Case = { readonly start: RangeStart; readonly files: readonly RangeFile[] };
++
++// Stryker disable all: Vite needs import.meta.glob arguments as literals
++const CASE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
++  "../../fixtures/range/*.json",
++  { eager: true, import: "default" },
++);
++// Stryker restore all
++
++const DEFAULT_CASE = "review";
++
++const NULL_SHORT_ID = "0000000";
++
++const ENTRY_KIND = v.picklist(["file", "executable", "link", "submodule"]);
++
++const RANGE_SIDE: v.GenericSchema<Generated.RangeSide> = v.object({
++  label: v.variant("kind", [
++    v.object({ kind: v.literal("named"), name: v.string() }),
++    v.object({ kind: v.literal("mergeBase"), left: v.string(), right: v.string() }),
++  ]),
++  short_id: v.string(),
++  subject: v.string(),
++});
++
++const RANGE_ENTRY: v.GenericSchema<Generated.RangeEntry> = v.object({
++  id: v.number(),
++  path: v.string(),
++  change: v.variant("kind", [
++    v.object({ kind: v.literal("added") }),
++    v.object({ kind: v.literal("modified") }),
++    v.object({ kind: v.literal("deleted") }),
++    v.object({ kind: v.literal("renamed"), old_path: v.string() }),
++  ]),
++  lines: v.variant("kind", [
++    v.object({ kind: v.literal("counted"), added: v.number(), removed: v.number() }),
++    v.object({ kind: v.literal("notCounted") }),
++  ]),
++});
++
++const DIFFERENCE: v.GenericSchema<Generated.Difference> = v.object({
++  left: LINE_RANGE,
++  right: LINE_RANGE,
++  words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
++});
++
++const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
++  v.object({
++    kind: v.literal("texts"),
++    left: v.string(),
++    right: v.string(),
++    differences: v.array(DIFFERENCE),
++    mode: v.variant("kind", [
++      v.object({ kind: v.literal("same") }),
++      v.object({ kind: v.literal("changed"), old: ENTRY_KIND, new: ENTRY_KIND }),
++    ]),
++  }),
++  v.object({ kind: v.literal("binary") }),
++  v.object({ kind: v.literal("tooLarge"), limit: v.number() }),
++  v.object({ kind: v.literal("notUtf8"), sides: v.picklist(["left", "right", "both"]) }),
++  v.object({ kind: v.literal("modeOnly"), old: ENTRY_KIND, new: ENTRY_KIND }),
++  v.object({ kind: v.literal("kindChanged"), old: ENTRY_KIND, new: ENTRY_KIND }),
++  v.object({
++    kind: v.literal("submodule"),
++    old: v.nullable(v.string()),
++    new: v.nullable(v.string()),
++  }),
++]);
++
++const CASE = v.object({
++  start: v.object({
++    range: v.string(),
++    left: RANGE_SIDE,
++    right: RANGE_SIDE,
++    files: v.array(RANGE_ENTRY),
++  }),
++  files: v.array(RANGE_FILE),
++});
++
++function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
++  return new Map(
++    Object.entries(files).map(([file, json]) => [
++      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
++      parsedFixture(CASE, `range fixture ${file}`, json, ({ start, files: loaded }) => ({
++        start: toRangeStart(start),
++        files: loaded.map(toRangeFile),
++      })),
++    ]),
++  );
++}
++
++function missingCase(name: string): Case {
++  const side: RangeSide = {
++    label: { kind: "named", name: "HEAD" },
++    shortId: NULL_SHORT_ID,
++    subject: "",
++  };
++  return { start: { range: name, left: side, right: side, files: [] }, files: [] };
++}
++
++function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>): Case {
++  const asked = new URLSearchParams(search).get("range");
++  const name = asked === null || asked === "" ? DEFAULT_CASE : asked;
++  const found = cases.get(name);
++  if (found !== undefined) {
++    return found;
++  }
++  log.info("range.fixture_miss", { case: name, known: [...cases.keys()].join(", ") });
++  return missingCase(name);
++}
++
++export function createFixtureRangeSource(
++  log: Log,
++  search: string,
++  files: Readonly<Record<string, unknown>> = CASE_FILES,
++): RangeSource {
++  const shown = shownCase(log, search, parseCases(files));
++  return {
++    async openRange() {
++      return { ok: true, value: shown.start };
++    },
++    async loadRangeFile(file) {
++      const found = shown.files[file];
++      return found === undefined
++        ? { ok: false, failure: { kind: "UnknownRangeFile", file } }
++        : { ok: true, value: found };
++    },
++    ...createFixtureSettings(),
++  };
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 804ed8a..d8afeb0 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -38,6 +38,7 @@ export type {
+   ProgramFound,
+   ProgressView,
+   ProjectFile,
++  RangeFileId,
+   RepositoryAnswer,
+   RunId,
+   ServerCommand,
+@@ -58,6 +59,7 @@ export type {
+ export { nextColumnVersion } from "./domain";
+ export { createFixtureSource, loadFixture } from "./fixture";
+ export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
++export { createFixtureRangeSource } from "./fixtureRange";
+ export { createFixtureServerHost } from "./fixtureServers";
+ export {
+   bindingsOf,
+@@ -79,9 +81,23 @@ export {
+   type KeyProblem,
+   type KeysRead,
+ } from "./keys";
++export type {
++  RangeChange,
++  RangeEntry,
++  RangeEntryKind,
++  RangeFile,
++  RangeLineCounts,
++  RangeModeChange,
++  RangeSide,
++  RangeSideLabel,
++  RangeSides,
++  RangeStart,
++} from "./rangeDomain";
++export type { RangeSource } from "./RangeSource";
+ export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
+ export { THEMES, themeKind, themeOf, themeRows } from "./themes";
+ export { createTauriCompareSource } from "./tauriCompare";
++export { createTauriRangeSource } from "./tauriRange";
+ export type { ServerHost } from "./ServerHost";
+ export type { SideWords } from "./words";
+ 
+diff --git a/frontend/src/ipc/rangeDomain.test.ts b/frontend/src/ipc/rangeDomain.test.ts
+new file mode 100644
+index 0000000..fb661f5
+--- /dev/null
++++ b/frontend/src/ipc/rangeDomain.test.ts
+@@ -0,0 +1,136 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { isRangeFileId } from "./domain";
++import { toRangeFile, toRangeStart } from "./rangeDomain";
++
++const DIFFERENCE: Generated.Difference = {
++  left: { start: 0, len: 1 },
++  right: { start: 0, len: 2 },
++  words: {
++    left: { changed: [{ line: 0, start: 4, len: 3 }], removals: [] },
++    right: { changed: [], removals: [{ at: { line: 1, column: 2 }, text: "x" }] },
++  },
++};
++
++const START: Generated.RangeStart = {
++  range: "main...feature",
++  left: {
++    label: { kind: "mergeBase", left: "main", right: "feature" },
++    short_id: "1b2cfed",
++    subject: "Start the board",
++  },
++  right: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Reminders" },
++  files: [
++    {
++      id: 0,
++      path: "a.ts",
++      change: { kind: "added" },
++      lines: { kind: "counted", added: 3, removed: 0 },
++    },
++    {
++      id: 1,
++      path: "b.ts",
++      change: { kind: "modified" },
++      lines: { kind: "counted", added: 1, removed: 2 },
++    },
++    { id: 2, path: "c.png", change: { kind: "deleted" }, lines: { kind: "notCounted" } },
++    {
++      id: 3,
++      path: "new/d.ts",
++      change: { kind: "renamed", old_path: "old/d.ts" },
++      lines: { kind: "counted", added: 0, removed: 0 },
++    },
++  ],
++};
++
++test("a start converts both sides and every change, camelCased, keeping the merge-base label", () => {
++  expect(toRangeStart(START)).toEqual({
++    range: "main...feature",
++    left: {
++      label: { kind: "mergeBase", left: "main", right: "feature" },
++      shortId: "1b2cfed",
++      subject: "Start the board",
++    },
++    right: { label: { kind: "named", name: "feature" }, shortId: "2b3b4b5", subject: "Reminders" },
++    files: [
++      {
++        id: 0,
++        path: "a.ts",
++        change: { kind: "added" },
++        lines: { kind: "counted", added: 3, removed: 0 },
++      },
++      {
++        id: 1,
++        path: "b.ts",
++        change: { kind: "modified" },
++        lines: { kind: "counted", added: 1, removed: 2 },
++      },
++      { id: 2, path: "c.png", change: { kind: "deleted" }, lines: { kind: "notCounted" } },
++      {
++        id: 3,
++        path: "new/d.ts",
++        change: { kind: "renamed", oldPath: "old/d.ts" },
++        lines: { kind: "counted", added: 0, removed: 0 },
++      },
++    ],
++  });
++});
++
++test.each([-1, 0.5])("a file id of %s is refused by the brand, naming the field", (bad) => {
++  const [first] = START.files;
++  if (first === undefined) {
++    throw new Error("the start lost its files");
++  }
++
++  expect(isRangeFileId(bad)).toBe(false);
++  expect(isRangeFileId(0)).toBe(true);
++  expect(() => toRangeStart({ ...START, files: [first, { ...first, id: bad }] })).toThrow(
++    `files[1].id must be a non-negative safe integer, got ${bad}`,
++  );
++});
++
++test("a texts reply converts its differences with both columns' words and keeps the mode", () => {
++  const mode = { kind: "changed", old: "file", new: "executable" } as const;
++
++  expect(
++    toRangeFile({ kind: "texts", left: "a\n", right: "b\nc\n", differences: [DIFFERENCE], mode }),
++  ).toEqual({
++    kind: "texts",
++    left: "a\n",
++    right: "b\nc\n",
++    differences: [
++      {
++        left: { start: 0, len: 1 },
++        right: { start: 0, len: 2 },
++        words: {
++          left: { changed: [{ line: 0, start: 4, len: 3 }], removals: [] },
++          right: { changed: [], removals: [{ at: { line: 1, column: 2 }, text: "x" }] },
++        },
++      },
++    ],
++    mode,
++  });
++  expect(
++    toRangeFile({ kind: "texts", left: "", right: "x\n", differences: [], mode: { kind: "same" } }),
++  ).toEqual({ kind: "texts", left: "", right: "x\n", differences: [], mode: { kind: "same" } });
++});
++
++test("a bad line in a texts reply's differences is refused, naming the field", () => {
++  const bad = { ...DIFFERENCE, right: { start: -1, len: 1 } };
++
++  expect(() =>
++    toRangeFile({ kind: "texts", left: "", right: "", differences: [bad], mode: { kind: "same" } }),
++  ).toThrow("differences[0].right.start must be a non-negative safe integer, got -1");
++});
++
++test.each<Generated.RangeFile>([
++  { kind: "binary" },
++  { kind: "tooLarge", limit: 8_388_608 },
++  { kind: "notUtf8", sides: "both" },
++  { kind: "modeOnly", old: "file", new: "executable" },
++  { kind: "kindChanged", old: "file", new: "link" },
++  { kind: "submodule", old: null, new: "3c4d5e6f" },
++])("a $kind reply carries its fields unchanged", (reply) => {
++  expect(toRangeFile(reply)).toEqual(reply);
++});
+diff --git a/frontend/src/ipc/rangeDomain.ts b/frontend/src/ipc/rangeDomain.ts
+new file mode 100644
+index 0000000..3ac86f8
+--- /dev/null
++++ b/frontend/src/ipc/rangeDomain.ts
+@@ -0,0 +1,74 @@
++import type * as Generated from "./bindings";
++import { toDifferences, type Difference } from "./compareDomain";
++import { isRangeFileId, type RangeFileId } from "./domain";
++import { invalid } from "./validate";
++
++export type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
++export type RangeSide = {
++  readonly label: RangeSideLabel;
++  readonly shortId: string;
++  readonly subject: string;
++};
++export type RangeChange =
++  | Readonly<Exclude<Generated.RangeChange, { kind: "renamed" }>>
++  | { readonly kind: "renamed"; readonly oldPath: string };
++export type RangeLineCounts = Readonly<Generated.RangeLineCounts>;
++export type RangeEntry = {
++  readonly id: RangeFileId;
++  readonly path: string;
++  readonly change: RangeChange;
++  readonly lines: RangeLineCounts;
++};
++export type RangeStart = {
++  readonly range: string;
++  readonly left: RangeSide;
++  readonly right: RangeSide;
++  readonly files: readonly RangeEntry[];
++};
++export type RangeEntryKind = Generated.RangeEntryKind;
++export type RangeModeChange = Readonly<Generated.RangeModeChange>;
++export type RangeSides = Generated.RangeSides;
++export type RangeFile =
++  | {
++      readonly kind: "texts";
++      readonly left: string;
++      readonly right: string;
++      readonly differences: readonly Difference[];
++      readonly mode: RangeModeChange;
++    }
++  | Readonly<Exclude<Generated.RangeFile, { kind: "texts" }>>;
++
++function toRangeSide({ label, short_id: shortId, subject }: Generated.RangeSide): RangeSide {
++  return { label, shortId, subject };
++}
++
++function toRangeChange(change: Generated.RangeChange): RangeChange {
++  return change.kind === "renamed" ? { kind: "renamed", oldPath: change.old_path } : change;
++}
++
++function toRangeEntry(
++  { id, path, change, lines }: Generated.RangeEntry,
++  index: number,
++): RangeEntry {
++  if (!isRangeFileId(id)) {
++    throw invalid(`files[${index}].id`, id);
++  }
++  return { id, path, change: toRangeChange(change), lines };
++}
++
++export function toRangeStart(raw: Generated.RangeStart): RangeStart {
++  return {
++    range: raw.range,
++    left: toRangeSide(raw.left),
++    right: toRangeSide(raw.right),
++    files: raw.files.map(toRangeEntry),
++  };
++}
++
++export function toRangeFile(raw: Generated.RangeFile): RangeFile {
++  if (raw.kind !== "texts") {
++    return raw;
++  }
++  const { left, right, differences, mode } = raw;
++  return { kind: "texts", left, right, differences: toDifferences(differences), mode };
++}
+diff --git a/frontend/src/ipc/tauriRange.ts b/frontend/src/ipc/tauriRange.ts
+new file mode 100644
+index 0000000..4325918
+--- /dev/null
++++ b/frontend/src/ipc/tauriRange.ts
+@@ -0,0 +1,17 @@
++import { commands } from "./bindings";
++import { toRangeFile, toRangeStart } from "./rangeDomain";
++import type { RangeSource } from "./RangeSource";
++import { createTauriSettings, toResult } from "./tauri";
++
++export function createTauriRangeSource(): RangeSource {
++  return {
++    async openRange() {
++      return { ok: true, value: toRangeStart(await commands.openRange()) };
++    },
++    async loadRangeFile(file) {
++      const result = toResult(await commands.loadRangeFile(file));
++      return result.ok ? { ok: true, value: toRangeFile(result.value) } : result;
++    },
++    ...createTauriSettings(),
++  };
++}
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index ba266eb..356347d 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -180,6 +180,12 @@ test("an unknown compare tab says the tab was closed", () => {
+   );
+ });
+ 
++test("a range file Rust does not list says it is not part of this range", () => {
++  expect(text({ action: "open", path: PATH, cause: { kind: "UnknownRangeFile", file: 3 } })).toBe(
++    `Could not open ${PATH}: that file is not part of this range.`,
++  );
++});
++
+ test("a column over the limit names the limit from the reply in MiB", () => {
+   const limit = 8 * 1024 * 1024;
+ 
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 8f5b4c4..ec964b3 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -20,11 +20,15 @@ const OPERATION_STATE_WORDS: Readonly<
+ };
+ 
+ const FIXED_REASONS: Readonly<
+-  Record<"NoConfigFolder" | "MergeAborted" | "UnknownTab" | "WorkerStopped", string>
++  Record<
++    "NoConfigFolder" | "MergeAborted" | "UnknownTab" | "UnknownRangeFile" | "WorkerStopped",
++    string
++  >
+ > = {
+   NoConfigFolder: "this system has no config folder to keep it in.",
+   MergeAborted: "the merge was aborted.",
+   UnknownTab: "that tab was closed.",
++  UnknownRangeFile: "that file is not part of this range.",
+   WorkerStopped: "yamt's worker stopped; try again.",
+ };
+ 
+@@ -134,6 +138,7 @@ function causedText(problem: CausedProblem, platform: string): string {
+     case "NoConfigFolder":
+     case "MergeAborted":
+     case "UnknownTab":
++    case "UnknownRangeFile":
+     case "WorkerStopped":
+       return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
+     case "StopMovedOn":
+@@ -145,10 +150,6 @@ function causedText(problem: CausedProblem, platform: string): string {
+       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
+     case "ColumnTooLarge":
+       return `${attempted(problem)}: ${columnLimitText(cause.limit)}.`;
+-    default: {
+-      const _exhaustive: never = cause;
+-      return _exhaustive;
+-    }
+   }
+ }
+ 
+diff --git a/scripts/map-check.sh b/scripts/map-check.sh
+index d53a232..c6ec52f 100755
+--- a/scripts/map-check.sh
++++ b/scripts/map-check.sh
+@@ -27,8 +27,8 @@ while IFS= read -r command; do
+     done
+ done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
+ 
+-# Every window data-source method must be named in architecture (the merge window's and the compare window's).
+-for source in ChunkSource CompareSource; do
++# Every window data-source method must be named in architecture (the merge, compare and range windows').
++for source in ChunkSource CompareSource RangeSource; do
+     while IFS= read -r method; do
+         grep -qw -- "$method" "$ARCH" || missing+=("$source.$method (not in $ARCH)")
+     done < <(sed -n 's/^  \([a-zA-Z]*\)(.*/\1/p' "frontend/src/ipc/$source.ts")
+-- 
+2.56.0
+

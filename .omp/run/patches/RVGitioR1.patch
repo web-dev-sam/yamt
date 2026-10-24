@@ -1,0 +1,323 @@
+From de7923c9861da301e391bd7d7690b3c336003ceb Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:14:38 +0200
+Subject: [PATCH] fix(gitio): pin the diff-tree flags and answer pairing; one
+ silent-exit helper, one mode parser
+
+---
+ .omp/run/mutants/RVCrate.survivors.txt |  9 +++++
+ .omp/run/notes/RVGitioR1.md            | 52 ++++++++++++++++++++++++++
+ crates/gitio/src/blob.rs               | 26 ++++++++++++-
+ crates/gitio/src/diff.rs               | 15 ++++++--
+ crates/gitio/src/entry.rs              |  6 ++-
+ crates/gitio/src/repo.rs               | 42 ++++++++-------------
+ crates/gitio/tests/diff.rs             | 15 ++++++--
+ 7 files changed, 130 insertions(+), 35 deletions(-)
+ create mode 100644 .omp/run/mutants/RVCrate.survivors.txt
+ create mode 100644 .omp/run/notes/RVGitioR1.md
+
+diff --git a/.omp/run/mutants/RVCrate.survivors.txt b/.omp/run/mutants/RVCrate.survivors.txt
+new file mode 100644
+index 0000000..a24d650
+--- /dev/null
++++ b/.omp/run/mutants/RVCrate.survivors.txt
+@@ -0,0 +1,9 @@
++just mutants 8e68d49 (covers 525fa24 RVCrate)
++MISSED   crates/merge-core/src/lib.rs:26:44: replace * with + in 3s build + 1s test
++MISSED   crates/merge-core/src/lib.rs:26:44: replace * with / in 1s build + 1s test
++MISSED   crates/merge-core/src/lib.rs:26:37: replace * with + in 1s build + 1s test
++MISSED   crates/merge-core/src/lib.rs:26:37: replace * with / in 1s build + 1s test
++MISSED   crates/range/src/load.rs:75:10: replace == with != in is_link in 0s build + 3s test
++83 mutants tested in 2m: 5 missed, 53 caught, 25 unviable
++
++merge-core lib.rs:26 (MAX_TEXT_BYTES arithmetic): pinned by yamt-compare's the_column_limit_is_merge_core_s_text_limit and yamt-range's exactly_8_mib_loads_and_one_byte_more_is_too_large; cargo-mutants runs only the mutated crate's tests — dropped (OR12).
+diff --git a/.omp/run/notes/RVGitioR1.md b/.omp/run/notes/RVGitioR1.md
+new file mode 100644
+index 0000000..a872276
+--- /dev/null
++++ b/.omp/run/notes/RVGitioR1.md
+@@ -0,0 +1,52 @@
++All six items from the fix brief are done, and each git flag's removal by hand made the listing test fail. `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` came back clean, and `cargo test -p yamt-gitio -p yamt-range` passes. No public signature changed.
++
++```
++summary
++  1. listing_under_the_users_diff_config now catches the removal of either diff-tree flag (histogram, ignore-submodules=none).
++  2. repo.rs: one private oid_unless_silent(command, name) holds "exit 1 with no message means None"; commit_named, merge_base and submodule_head all call it.
++  3. entry.rs: pub(crate) mode_from_git is the one octal mode parser; parse_record and diff.rs use it, and diff.rs no longer has its own OCTAL.
++  4. blob.rs: BlobReader::read compares against the BLOB constant.
++  5. Two new unit tests: one checks that a cat-file answer is matched to the id that was asked; one checks that an empty raw path is refused.
++
++files_changed
++  crates/gitio/src/entry.rs
++  crates/gitio/src/diff.rs
++  crates/gitio/src/repo.rs
++  crates/gitio/src/blob.rs
++  crates/gitio/tests/diff.rs
++
++tests_added
++  - blob::tests::an_answer_naming_another_id_is_unexpected_output: blob_size(oid 'a'×40, "<b> blob 3") and (…, "<b> missing") both return Error::UnexpectedOutput, which pins the `*named == oid.as_str()` guards.
++  - diff::tests::a_record_with_an_empty_path_is_unexpected_output: raw("100644","100644",'1','2',"M") followed by b"\0" gives UnexpectedOutput, which pins next_path's empty-path refusal.
++  - listing_under_the_users_diff_config (changed):
++      - z/counted.txt is now x×4,U → U,x×4 and expects lines(4, 4).
++      - It commits .gitmodules ([submodule "lib"] path = vendor/lib, ignore = all) on `local` and sets submodule.lib.ignore=all in the repository config.
++      - The expected list adds `.gitmodules` as Added with lines(3, 0) and keeps the gitlink entry.
++
++smoke_evidence
++  - Hand removal of "--diff-algorithm=histogram" (diff.rs:78), then `cargo test -p yamt-gitio --test diff`:
++      test the_users_diff_config_does_not_change_the_list ... FAILED
++      test listing_under_the_users_diff_config ... FAILED
++      left (z/counted.txt): numstat: Lines { added: 1, removed: … }   right: Lines { added: 4, removed: … }
++      test result: FAILED. 10 passed; 1 failed; 1 ignored
++    Flag restored.
++  - Hand removal of "--ignore-submodules=none" (diff.rs:79), same command:
++      test the_users_diff_config_does_not_change_the_list ... FAILED
++      left: [.gitmodules Added, z/counted.txt Modified 4/4, Renamed …]   (no vendor/lib gitlink entry)
++      test result: FAILED. 10 passed; 1 failed; 1 ignored
++    Flag restored.
++  - `cargo fmt --check`: no output.
++  - `cargo clippy --workspace --all-targets -- -D warnings`: no warnings or errors; "Finished `dev` profile".
++  - `cargo test -p yamt-gitio -p yamt-range`: every suite ok.
++      gitio lib 35 passed; abort_continue 5 (7 ignored); diff 11 (1 ignored); edit_stop 6; merge_heads 12; operations 26; repo 19; rerere 4 (1 ignored); what_git_wrote 10; yamt-range lib 8; range 17.
++  - `cargo test -p yamt-gitio --lib -- an_answer_naming_another_id a_record_with_an_empty_path`:
++      test blob::tests::an_answer_naming_another_id_is_unexpected_output ... ok
++      test diff::tests::a_record_with_an_empty_path_is_unexpected_output ... ok
++
++deviations_from_brief
++  - Item 2: there is no separate is_silent_failure function any more. The "exit 1 with empty stderr" check is a match-arm pattern inside oid_unless_silent, which satisfies "lives only inside it". The git-source comment moved onto oid_unless_silent.
++  - Item 5: the test is named an_answer_naming_another_id_is_unexpected_output because the brief left the name open.
++
++open_risks
++  - crates/gitio/tests/diff.rs:254: `.gitmodules` is added on `local` only, so it appears as an Added entry. It sorts first in diff-tree's tree order, and this run confirmed that order.
++```
+\ No newline at end of file
+diff --git a/crates/gitio/src/blob.rs b/crates/gitio/src/blob.rs
+index 4129b33..09afe89 100644
+--- a/crates/gitio/src/blob.rs
++++ b/crates/gitio/src/blob.rs
+@@ -76,7 +76,7 @@ impl BlobReader {
+             [_, kind, size] => {
+                 let size = size.parse().map_err(|_| unexpected(&header))?;
+                 let content = self.read_content_and_newline(size)?;
+-                if *kind == "blob" {
++                if *kind == BLOB {
+                     Ok(content)
+                 } else {
+                     Err(unexpected(&header))
+@@ -124,3 +124,27 @@ fn unexpected(output: &str) -> Error {
+         output: output.to_owned(),
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn hex(digit: char) -> String {
++        digit.to_string().repeat(40)
++    }
++
++    #[test]
++    fn an_answer_naming_another_id_is_unexpected_output() {
++        let asked = Oid::parse(&hex('a')).unwrap();
++        let other = hex('b');
++
++        for answer in [format!("{other} blob 3"), format!("{other} missing")] {
++            let error = blob_size(&asked, &answer).unwrap_err();
++
++            assert!(
++                matches!(error, Error::UnexpectedOutput { .. }),
++                "{answer}: {error:?}"
++            );
++        }
++    }
++}
+diff --git a/crates/gitio/src/diff.rs b/crates/gitio/src/diff.rs
+index 0e5c47d..e63400c 100644
+--- a/crates/gitio/src/diff.rs
++++ b/crates/gitio/src/diff.rs
+@@ -1,13 +1,12 @@
+ use std::collections::HashMap;
+ use std::path::{Path, PathBuf};
+ 
+-use crate::entry::{Oid, path_from_git};
++use crate::entry::{Oid, mode_from_git, path_from_git};
+ use crate::repo::Repo;
+ use crate::run::{Access, GIT_TIMEOUT, run};
+ use crate::{Error, Result};
+ 
+ const DIFF_TREE: &str = "diff-tree";
+-const OCTAL: u32 = 8;
+ const NUMSTAT_FIELDS: usize = 3;
+ const BINARY_COUNT: &str = "-";
+ 
+@@ -190,7 +189,7 @@ fn counts_of(added: &[u8], removed: &[u8]) -> Option<Numstat> {
+ }
+ 
+ fn mode_of(octal: &str, header: &[u8]) -> Result<u32> {
+-    u32::from_str_radix(octal, OCTAL).map_err(|_| unexpected(header))
++    mode_from_git(octal).ok_or_else(|| unexpected(header))
+ }
+ 
+ fn next_path<'a>(fields: &mut impl Iterator<Item = &'a [u8]>, record: &[u8]) -> Result<PathBuf> {
+@@ -388,4 +387,14 @@ mod tests {
+             assert!(matches!(error, Error::UnexpectedOutput { .. }), "{error:?}");
+         }
+     }
++
++    #[test]
++    fn a_record_with_an_empty_path_is_unexpected_output() {
++        let mut output = raw("100644", "100644", '1', '2', "M");
++        output.extend_from_slice(b"\0");
++
++        let error = parse_changed_files(&output).unwrap_err();
++
++        assert!(matches!(error, Error::UnexpectedOutput { .. }), "{error:?}");
++    }
+ }
+diff --git a/crates/gitio/src/entry.rs b/crates/gitio/src/entry.rs
+index 823e99e..da34d92 100644
+--- a/crates/gitio/src/entry.rs
++++ b/crates/gitio/src/entry.rs
+@@ -88,7 +88,7 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
+     let tab = record.iter().position(|&byte| byte == b'\t')?;
+     let (meta, path) = (record.get(..tab)?, record.get(tab + 1..)?);
+     let mut fields = std::str::from_utf8(meta).ok()?.split(' ');
+-    let mode = u32::from_str_radix(fields.next()?, OCTAL).ok()?;
++    let mode = mode_from_git(fields.next()?)?;
+     let oid = Oid::parse(fields.next()?).ok()?;
+     let stage = Stage::from_index_number(fields.next()?)?;
+     if fields.next().is_some() || path.is_empty() {
+@@ -103,6 +103,10 @@ fn parse_record(record: &[u8]) -> Option<StageEntry> {
+     })
+ }
+ 
++pub(crate) fn mode_from_git(text: &str) -> Option<u32> {
++    u32::from_str_radix(text, OCTAL).ok()
++}
++
+ pub(crate) fn index_info(entries: &[StageEntry]) -> Vec<u8> {
+     let mut first_entry_of_each_path: Vec<&StageEntry> = Vec::new();
+     for entry in entries {
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index bfd403b..dc49f92 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -41,26 +41,13 @@ impl Repo {
+     pub fn commit_named(&self, name: &str) -> Result<Option<Oid>> {
+         let revision = format!("{name}^{{commit}}");
+         let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
+-        let output = match run(command, None, GIT_TIMEOUT) {
+-            Ok(output) => output,
+-            Err(error) if is_silent_failure(&error) => return Ok(None),
+-            Err(error) => return Err(error),
+-        };
+-        let line = without_final_newline(REV_PARSE, output)?;
+-        let hex = String::from_utf8_lossy(&line);
+-        Ok(Some(Oid::parse(&hex)?))
++        oid_unless_silent(command, REV_PARSE)
+     }
+ 
+     /// `git merge-base <a> <b>`: the first base when there are several (as `git diff a...b`); exit 1 → None
+     pub fn merge_base(&self, a: &Oid, b: &Oid) -> Result<Option<Oid>> {
+         let command = self.command(Access::Read, &[MERGE_BASE, a.as_str(), b.as_str()]);
+-        let output = match run(command, None, GIT_TIMEOUT) {
+-            Ok(output) => output,
+-            Err(error) if is_silent_failure(&error) => return Ok(None),
+-            Err(error) => return Err(error),
+-        };
+-        let line = without_final_newline(MERGE_BASE, output)?;
+-        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
++        oid_unless_silent(command, MERGE_BASE)
+     }
+ 
+     /// `git rev-parse --path-format=absolute --git-common-dir`: one identity for every worktree of a repository
+@@ -183,13 +170,7 @@ impl Repo {
+         }
+         let args = [REV_PARSE, "--verify", "--quiet", "HEAD"];
+         let command = git_command(&self.git, &submodule, Access::Read, &args);
+-        let output = match run(command, None, GIT_TIMEOUT) {
+-            Ok(output) => output,
+-            Err(error) if is_silent_failure(&error) => return Ok(None),
+-            Err(error) => return Err(error),
+-        };
+-        let line = without_final_newline(REV_PARSE, output)?;
+-        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
++        oid_unless_silent(command, REV_PARSE)
+     }
+ 
+     pub fn checkout_from_index(&self, path: &Path) -> Result<()> {
+@@ -211,11 +192,18 @@ impl Repo {
+ 
+ // git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits 1 without a message; git-merge-base(1)
+ // exits 1 without a message when the commits share no ancestor (builtin/merge-base.c `show_merge_base`).
+-fn is_silent_failure(error: &Error) -> bool {
+-    matches!(
+-        error,
+-        Error::GitFailed { status: Some(SILENT_FAILURE_STATUS), stderr, .. } if stderr.is_empty()
+-    )
++fn oid_unless_silent(command: Command, name: &'static str) -> Result<Option<Oid>> {
++    let output = match run(command, None, GIT_TIMEOUT) {
++        Ok(output) => output,
++        Err(Error::GitFailed {
++            status: Some(SILENT_FAILURE_STATUS),
++            stderr,
++            ..
++        }) if stderr.is_empty() => return Ok(None),
++        Err(error) => return Err(error),
++    };
++    let line = without_final_newline(name, output)?;
++    Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
+ }
+ 
+ pub(crate) fn exists(path: &Path) -> Result<bool> {
+diff --git a/crates/gitio/tests/diff.rs b/crates/gitio/tests/diff.rs
+index 28a1472..c2795ab 100644
+--- a/crates/gitio/tests/diff.rs
++++ b/crates/gitio/tests/diff.rs
+@@ -248,9 +248,10 @@ fn the_users_diff_config_does_not_change_the_list() {
+ fn listing_under_the_users_diff_config() {
+     let moved: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
+     let moved_and_edited: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\nten\n";
+-    let (counted_before, counted_after): (&[u8], &[u8]) =
+-        (b"a\nb\nc\nx\nd\ne\n", b"x\na\nb\nc\nd\ne\n");
++    let (counted_before, counted_after): (&[u8], &[u8]) = (b"x\nx\nx\nx\nU\n", b"U\nx\nx\nx\nx\n");
++    let gitmodules: &[u8] = b"[submodule \"lib\"]\n\tpath = vendor/lib\n\tignore = all\n";
+     let dir = diverged_repo(&[
++        regular(".gitmodules", None, Some(gitmodules)),
+         regular("a/moved.txt", Some(moved), None),
+         regular("z/moved.txt", None, Some(moved_and_edited)),
+         regular("z/counted.txt", Some(counted_before), Some(counted_after)),
+@@ -273,6 +274,7 @@ fn listing_under_the_users_diff_config() {
+         ("diff.external", "false"),
+         ("diff.ignoreSubmodules", "all"),
+         ("diff.noprefix", "true"),
++        ("submodule.lib.ignore", "all"),
+     ] {
+         git_ok(root, &["config", key, value]).unwrap();
+     }
+@@ -280,6 +282,13 @@ fn listing_under_the_users_diff_config() {
+     let files = listed(root);
+ 
+     let expected = vec![
++        counted(
++            Changed::Added {
++                new: side(".gitmodules", REGULAR, blob(root, gitmodules)),
++            },
++            3,
++            0,
++        ),
+         ChangedFile {
+             change: Changed::Modified {
+                 old: side("vendor/lib", GITLINK, Oid::parse(FIRST_COMMIT).unwrap()),
+@@ -292,7 +301,7 @@ fn listing_under_the_users_diff_config() {
+                 old: side("z/counted.txt", REGULAR, blob(root, counted_before)),
+                 new: side("z/counted.txt", REGULAR, blob(root, counted_after)),
+             },
+-            numstat: lines(1, 1),
++            numstat: lines(4, 4),
+         },
+         ChangedFile {
+             change: Changed::Renamed {
+-- 
+2.56.0
+

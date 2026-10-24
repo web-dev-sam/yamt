@@ -1,0 +1,694 @@
+From 57ad1738f85b6fca78772069601f58680016b419 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:40:58 +0200
+Subject: [PATCH] fix(range): split range tests, compile-time size limit, one
+ gitlink predicate, old-side guards tested
+
+---
+ .omp/run/notes/RVCrateR1.md           |  65 ++++++++++
+ crates/range/src/entries.rs           |  12 +-
+ crates/range/src/load.rs              |  17 ++-
+ crates/range/tests/listing_answers.rs | 169 +++++++++++++++++++++++++
+ crates/range/tests/lock.rs            | 122 ++++++++++++++++++
+ crates/range/tests/range.rs           | 175 +-------------------------
+ 6 files changed, 379 insertions(+), 181 deletions(-)
+ create mode 100644 .omp/run/notes/RVCrateR1.md
+ create mode 100644 crates/range/tests/listing_answers.rs
+ create mode 100644 crates/range/tests/lock.rs
+
+diff --git a/.omp/run/notes/RVCrateR1.md b/.omp/run/notes/RVCrateR1.md
+new file mode 100644
+index 0000000..4f151b7
+--- /dev/null
++++ b/.omp/run/notes/RVCrateR1.md
+@@ -0,0 +1,65 @@
++All five fixes are in, and the earlier tests still pass. To get `range.rs` under the 400-line limit I also had to move three tests into a third file, which the brief didn't ask for.
++
++```
++summary
++  The lock tests now live in crates/range/tests/lock.rs (122 lines) and the tests of answers the listing gives
++  without reading in tests/listing_answers.rs (169 lines). That brings tests/range.rs to 374 lines, under RS6's 400.
++  load.rs: the limit is a compile-time `TOO_LARGE_LIMIT`, and `is_link` is inlined as two `==` comparisons.
++  entries.rs: one gitlink predicate, `has_blob`, used by both `blob_ids` and `blob_at`.
++  Both old-side guards (size, gitlink) are now tested, and removing either one by hand made a test fail.
++
++files_changed
++  crates/range/src/load.rs
++  crates/range/src/entries.rs
++  crates/range/tests/range.rs
++  crates/range/tests/lock.rs (new)
++  crates/range/tests/listing_answers.rs (new)
++
++tests_added
++  exactly_8_mib_loads_and_one_byte_more_is_too_large (now in listing_answers.rs): adds a deleted over-limit
++    "gone.txt" and drops its blob; expects TooLarge, so the old-side size guard answers before any read.
++  mode_only_kind_changed_and_submodule_are_sentences (now in listing_answers.rs): adds a removed submodule
++    "vendor/gone" and expects Submodule { old: Some(FIRST_COMMIT), new: None }, so the old-side gitlink guard
++    answers before any read.
++  The three lock tests moved into lock.rs unchanged.
++
++smoke_evidence
++  wc -l crates/range/tests/*.rs → 169 listing_answers.rs, 122 lock.rs, 374 range.rs
++  cargo fmt --check → no output, exit 0
++  cargo clippy --workspace --all-targets -- -D warnings → "Finished `dev` profile", no warnings or errors
++  cargo test -p yamt-range -p yamt-app →
++    yamt_app lib: ok. 101 passed; main: 0; tests/cli.rs: ok. 5 passed
++    yamt_range lib: ok. 8 passed; tests/listing_answers.rs: ok. 3 passed; tests/lock.rs: ok. 3 passed;
++    tests/range.rs: ok. 11 passed (17 integration tests in total, the same 14 + 3 as before)
++  Hand-removal 1, the old-side size guard (`if new.is_some_and(is_too_large)` only):
++    test exactly_8_mib_loads_and_one_byte_more_is_too_large ... FAILED
++    panicked at crates/range/tests/range.rs:79:26: called `Result::unwrap()` on an `Err` value:
++    Git(BlobMissing { oid: Oid("6d060ac4468a652e4e28295012a684868caae8cc") })
++    test result: FAILED. 13 passed; 1 failed
++  Hand-removal 2, the old-side gitlink guard (`if new.is_some_and(BlobAt::is_gitlink)` only):
++    test mode_only_kind_changed_and_submodule_are_sentences ... FAILED
++    panicked at crates/range/tests/range.rs:79:26: called `Result::unwrap()` on an `Err` value:
++    Git(BlobMissing { oid: Oid("1111111111111111111111111111111111111111") })
++    test result: FAILED. 13 passed; 1 failed
++  Both guards restored afterwards; load.rs is back to its pre-experiment state and all tests pass.
++
++deviations_from_brief
++  - Block 1: the prescribed move alone left range.rs at 477 lines, still over 400. I also moved
++    binary_is_answered_…, exactly_8_mib_… and mode_only_kind_changed_… into tests/listing_answers.rs (the
++    answers `decide` gives from the listing, each proven by dropping the object). With them went their
++    helpers (submodule, drop_object, FIRST/SECOND_COMMIT); the small shared helpers are copied, as the brief
++    says for lock.rs.
++  - lock.rs also copies `file` and `changed`, which the lock tests use.
++  - Block 2: the brief's verbatim const trips clippy::cast_possible_truncation (pedantic, -D warnings). It
++    now carries `#[expect(clippy::cast_possible_truncation, reason = "the compile-time assert before the cast
++    proves MAX_TEXT_BYTES fits in u32")]`.
++  - Block 4: the deleted file holds "b\n"×4 Mi + "b", not `over`. With `over`, or any text like it, git sees
++    gone.txt → exact.txt as a rename. exact.txt's old side is then over the limit, so it loaded as TooLarge
++    and failed the test, which I saw happen.
++  - The test helper `submodule` takes a third parameter, `local`, and a new helper `submodule_file` builds
++    the expected RangeFile::Submodule, so the longer test stays within 40 lines.
++
++open_risks
++  - crates/range/tests/listing_answers.rs:93: if a later edit makes gone.txt's text similar to exact.txt's,
++    rename detection will silently turn the deleted-file case into a rename again.
++```
+\ No newline at end of file
+diff --git a/crates/range/src/entries.rs b/crates/range/src/entries.rs
+index 148d007..bf0875d 100644
+--- a/crates/range/src/entries.rs
++++ b/crates/range/src/entries.rs
+@@ -50,7 +50,7 @@ pub(crate) fn blob_ids(changed: &[ChangedFile]) -> Vec<Oid> {
+     for file in changed {
+         let (old, new) = sides(&file.change);
+         for side in [old, new].into_iter().flatten() {
+-            if side.mode != GITLINK_MODE {
++            if has_blob(side) {
+                 ids.push(side.oid.clone());
+             }
+         }
+@@ -81,11 +81,15 @@ pub(crate) fn files_at(changed: Vec<ChangedFile>, sizes: Vec<Option<u64>>) -> Ve
+     files
+ }
+ 
++fn has_blob(side: &TreeSide) -> bool {
++    side.mode != GITLINK_MODE
++}
++
+ fn blob_at(tree_side: &TreeSide, sizes: &mut impl Iterator<Item = Option<u64>>) -> BlobAt {
+-    let size = if tree_side.mode == GITLINK_MODE {
+-        None
+-    } else {
++    let size = if has_blob(tree_side) {
+         sizes.next().flatten()
++    } else {
++        None
+     };
+     BlobAt {
+         oid: tree_side.oid.clone(),
+diff --git a/crates/range/src/load.rs b/crates/range/src/load.rs
+index 6fc3e3b..96fea74 100644
+--- a/crates/range/src/load.rs
++++ b/crates/range/src/load.rs
+@@ -31,6 +31,15 @@ pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
+     }
+ }
+ 
++#[expect(
++    clippy::cast_possible_truncation,
++    reason = "the compile-time assert before the cast proves MAX_TEXT_BYTES fits in u32"
++)]
++const TOO_LARGE_LIMIT: u32 = {
++    assert!(MAX_TEXT_BYTES <= u32::MAX as usize);
++    MAX_TEXT_BYTES as u32
++};
++
+ /// The answer the listing alone gives (plan §2 #105's order up to the size), or `None`: read the blobs.
+ fn decide(file: &FileAt) -> Option<RangeFile> {
+     let (old, new) = (file.old.as_ref(), file.new.as_ref());
+@@ -42,7 +51,7 @@ fn decide(file: &FileAt) -> Option<RangeFile> {
+     }
+     if let (Some(old), Some(new)) = (old, new) {
+         let (old_kind, new_kind) = (old.kind(), new.kind());
+-        if is_link(old_kind) != is_link(new_kind) {
++        if (old_kind == RangeEntryKind::Link) != (new_kind == RangeEntryKind::Link) {
+             return Some(RangeFile::KindChanged {
+                 old: old_kind,
+                 new: new_kind,
+@@ -60,7 +69,7 @@ fn decide(file: &FileAt) -> Option<RangeFile> {
+     }
+     if old.is_some_and(is_too_large) || new.is_some_and(is_too_large) {
+         return Some(RangeFile::TooLarge {
+-            limit: u32::try_from(MAX_TEXT_BYTES).unwrap_or(u32::MAX),
++            limit: TOO_LARGE_LIMIT,
+         });
+     }
+     None
+@@ -71,10 +80,6 @@ fn commit_id(side: Option<&BlobAt>) -> Option<String> {
+         .map(|side| side.oid.as_str().to_owned())
+ }
+ 
+-fn is_link(kind: RangeEntryKind) -> bool {
+-    kind == RangeEntryKind::Link
+-}
+-
+ fn is_too_large(blob: &BlobAt) -> bool {
+     blob.size.is_some_and(|size| size > MAX_TEXT_BYTES as u64)
+ }
+diff --git a/crates/range/tests/listing_answers.rs b/crates/range/tests/listing_answers.rs
+new file mode 100644
+index 0000000..0d3c0f5
+--- /dev/null
++++ b/crates/range/tests/listing_answers.rs
+@@ -0,0 +1,169 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::Path;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_merge_core::MAX_TEXT_BYTES;
++use yamt_range::{Range, RangeEntryKind, RangeFile, RangeSpec, Resolved};
++
++const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
++const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
++const LINK_MODE: &str = "120000";
++
++/// A file of the scripted repository: `base` on `main`, `local` on the checked-out branch `local`, `remote` on `remote`.
++fn file<'a>(
++    path: &'a str,
++    base: Option<&'a [u8]>,
++    local: Option<&'a [u8]>,
++    remote: Option<&'a [u8]>,
++) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote,
++    }
++}
++
++/// A file only `local` changes.
++fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    file(path, base, local, base)
++}
++
++fn repo_with(files: &[ConflictFile]) -> TempDir {
++    diverged_repo(files).unwrap()
++}
++
++fn rev_parse(root: &Path, revision: &str) -> String {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn range(root: &Path, text: &str) -> Range {
++    let resolved = Resolved::resolve(root, &RangeSpec::parse(text).unwrap()).unwrap();
++    resolved.list().unwrap()
++}
++
++fn load(range: &Range, path: &str) -> RangeFile {
++    let start = range.start();
++    let entry = start.files.iter().find(|entry| entry.path == path).unwrap();
++    range.load(entry.id).unwrap()
++}
++
++fn commit(root: &Path, message: &str) {
++    git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
++}
++
++/// Stages `path` as a symbolic link to `target` without making one on disk (Windows needs a right for that).
++fn stage_link(root: &Path, path: &str, target: &str) {
++    let scratch = root.join(".git").join("link-target");
++    fs::write(&scratch, target).unwrap();
++    let scratch_arg = scratch.to_str().unwrap();
++    let output = git_ok(root, &["hash-object", "-w", "--", scratch_arg]).unwrap();
++    let oid = String::from_utf8(output).unwrap().trim_end().to_owned();
++    let cacheinfo = format!("{LINK_MODE},{oid},{path}");
++    git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo]).unwrap();
++}
++
++/// Removes a loose object, so any read of it fails: what the listing answers is never read.
++fn drop_object(root: &Path, revision: &str) {
++    let oid = rev_parse(root, revision);
++    let (folder, name) = oid.split_at(2);
++    fs::remove_file(root.join(".git").join("objects").join(folder).join(name)).unwrap();
++}
++
++#[test]
++fn binary_is_answered_before_size_and_without_reading() {
++    let large_binary = vec![0_u8; MAX_TEXT_BYTES + 1];
++    let dir = repo_with(&[changed("big.bin", None, Some(&large_binary))]);
++    let root = dir.path();
++    let range = range(root, "main..local");
++    drop_object(root, "local:big.bin");
++
++    assert_eq!(load(&range, "big.bin"), RangeFile::Binary);
++}
++
++#[test]
++fn exactly_8_mib_loads_and_one_byte_more_is_too_large() {
++    let exact = "a\n".repeat(MAX_TEXT_BYTES / 2);
++    let over = format!("{exact}a");
++    let gone = format!("{}b", "b\n".repeat(MAX_TEXT_BYTES / 2));
++    let dir = repo_with(&[
++        changed("exact.txt", None, Some(exact.as_bytes())),
++        changed("over.txt", None, Some(over.as_bytes())),
++        changed("gone.txt", Some(gone.as_bytes()), None),
++    ]);
++    let root = dir.path();
++    let range = range(root, "main..local");
++    drop_object(root, "local:over.txt");
++    drop_object(root, "main:gone.txt");
++
++    let loaded = load(&range, "exact.txt");
++    let RangeFile::Texts { left, right, .. } = &loaded else {
++        panic!("{loaded:?}");
++    };
++    assert_eq!((left.len(), right.len()), (0, MAX_TEXT_BYTES));
++    let limit = u32::try_from(MAX_TEXT_BYTES).unwrap();
++    assert_eq!(load(&range, "over.txt"), RangeFile::TooLarge { limit });
++    assert_eq!(load(&range, "gone.txt"), RangeFile::TooLarge { limit });
++}
++
++/// A submodule at `local` on `local`, at `base` on `main` and `remote`.
++fn submodule(
++    path: &'static str,
++    base: Option<&'static str>,
++    local: Option<&'static str>,
++) -> ConflictFile<'static> {
++    ConflictFile {
++        path,
++        kind: FileKind::Submodule,
++        base: base.map(str::as_bytes),
++        local: local.map(str::as_bytes),
++        remote: base.map(str::as_bytes),
++    }
++}
++
++fn submodule_file(old: Option<&str>, new: Option<&str>) -> RangeFile {
++    RangeFile::Submodule {
++        old: old.map(str::to_owned),
++        new: new.map(str::to_owned),
++    }
++}
++
++#[test]
++fn mode_only_kind_changed_and_submodule_are_sentences() {
++    let dir = repo_with(&[
++        changed("entry", Some(b"text\n"), Some(b"text\n")),
++        changed("run.sh", Some(b"echo hi\n"), Some(b"echo hi\n")),
++        submodule("vendor/lib", Some(FIRST_COMMIT), Some(SECOND_COMMIT)),
++        submodule("vendor/new", None, Some(SECOND_COMMIT)),
++        submodule("vendor/gone", Some(FIRST_COMMIT), None),
++    ]);
++    let root = dir.path();
++    git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
++    stage_link(root, "entry", "target.txt");
++    commit(root, "modes");
++    let range = range(root, "main..local");
++    drop_object(root, "local:run.sh");
++    drop_object(root, "local:entry");
++    drop_object(root, "main:entry");
++
++    let mode_only = RangeFile::ModeOnly {
++        old: RangeEntryKind::File,
++        new: RangeEntryKind::Executable,
++    };
++    let kind_changed = RangeFile::KindChanged {
++        old: RangeEntryKind::File,
++        new: RangeEntryKind::Link,
++    };
++    assert_eq!(load(&range, "run.sh"), mode_only);
++    assert_eq!(load(&range, "entry"), kind_changed);
++    let changed_submodule = submodule_file(Some(FIRST_COMMIT), Some(SECOND_COMMIT));
++    assert_eq!(load(&range, "vendor/lib"), changed_submodule);
++    let added_submodule = submodule_file(None, Some(SECOND_COMMIT));
++    assert_eq!(load(&range, "vendor/new"), added_submodule);
++    let removed_submodule = submodule_file(Some(FIRST_COMMIT), None);
++    assert_eq!(load(&range, "vendor/gone"), removed_submodule);
++}
+diff --git a/crates/range/tests/lock.rs b/crates/range/tests/lock.rs
+new file mode 100644
+index 0000000..6d1e08c
+--- /dev/null
++++ b/crates/range/tests/lock.rs
+@@ -0,0 +1,122 @@
++#![cfg(test)]
++
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_range::{Error, PairLock, RangeSpec, Resolved};
++
++const LOCK_FILE: &str = "lock";
++
++/// A file of the scripted repository: `base` on `main`, `local` on the checked-out branch `local`, `remote` on `remote`.
++fn file<'a>(
++    path: &'a str,
++    base: Option<&'a [u8]>,
++    local: Option<&'a [u8]>,
++    remote: Option<&'a [u8]>,
++) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote,
++    }
++}
++
++/// A file only `local` changes.
++fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    file(path, base, local, base)
++}
++
++fn repo_with(files: &[ConflictFile]) -> TempDir {
++    diverged_repo(files).unwrap()
++}
++
++fn rev_parse(root: &Path, revision: &str) -> String {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn short_id(root: &Path, revision: &str) -> String {
++    let output = git_ok(root, &["log", "-1", "--format=%h", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn resolved(root: &Path, text: &str) -> Resolved {
++    Resolved::resolve(root, &RangeSpec::parse(text).unwrap()).unwrap()
++}
++
++fn pair_folder(range_dir: &Path, root: &Path, left: &str, right: &str) -> PathBuf {
++    let lock = PairLock::take(range_dir, &resolved(root, &format!("{left}..{right}"))).unwrap();
++    lock.folder().to_owned()
++}
++
++#[test]
++fn the_same_pair_twice_is_locked_naming_both_short_ids() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let root = dir.path();
++    let range_dir = tempfile::tempdir().unwrap();
++    let first = resolved(root, "main..local");
++    let held = PairLock::take(range_dir.path(), &first).unwrap();
++    let main_id = rev_parse(root, "main");
++    let typed_otherwise = resolved(root, &format!("{main_id}..HEAD"));
++
++    let error = PairLock::take(range_dir.path(), &typed_otherwise).unwrap_err();
++
++    let (left, right) = (short_id(root, "main"), short_id(root, "local"));
++    let line = format!(
++        "another yamt window shows {left}..{right} of {}",
++        typed_otherwise.root().display()
++    );
++    assert_eq!(error.to_string(), line);
++    assert!(matches!(&error, Error::Locked { root: shown, .. } if shown == typed_otherwise.root()));
++    let pair = format!("{main_id}-{}", rev_parse(root, "local"));
++    assert_eq!(held.folder().file_name().unwrap(), pair.as_str());
++    let repo_folder = held.folder().parent().unwrap();
++    assert_eq!(repo_folder.parent().unwrap(), range_dir.path());
++    assert!(held.folder().join(LOCK_FILE).is_file());
++    drop(held);
++    assert!(PairLock::take(range_dir.path(), &typed_otherwise).is_ok());
++}
++
++#[test]
++fn another_worktree_of_the_same_repository_shares_the_lock() {
++    let dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
++    let root = dir.path();
++    let linked_dir = tempfile::tempdir().unwrap();
++    let linked = linked_dir.path().join("elsewhere");
++    let linked_arg = linked.to_str().unwrap();
++    git_ok(
++        root,
++        &[
++            "worktree", "add", "--quiet", "--detach", linked_arg, "remote",
++        ],
++    )
++    .unwrap();
++    let range_dir = tempfile::tempdir().unwrap();
++    let _held = PairLock::take(range_dir.path(), &resolved(root, "main..remote")).unwrap();
++    let from_linked = resolved(&linked, "main..remote");
++
++    let error = PairLock::take(range_dir.path(), &from_linked).unwrap_err();
++
++    assert!(matches!(&error, Error::Locked { root: shown, .. } if shown == from_linked.root()));
++    assert_ne!(from_linked.root(), resolved(root, "main..remote").root());
++}
++
++#[test]
++fn a_different_pair_is_not_locked() {
++    let dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
++    let root = dir.path();
++    let range_dir = tempfile::tempdir().unwrap();
++    let to_local = PairLock::take(range_dir.path(), &resolved(root, "main..local")).unwrap();
++
++    let to_remote = PairLock::take(range_dir.path(), &resolved(root, "main..remote")).unwrap();
++    let reversed = PairLock::take(range_dir.path(), &resolved(root, "local..main")).unwrap();
++
++    assert_ne!(to_local.folder(), to_remote.folder());
++    assert_ne!(to_local.folder(), reversed.folder());
++    assert_eq!(to_local.folder().parent(), to_remote.folder().parent());
++    let other_dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
++    let other = pair_folder(range_dir.path(), other_dir.path(), "main", "local");
++    assert_ne!(other.parent(), to_local.folder().parent());
++}
+diff --git a/crates/range/tests/range.rs b/crates/range/tests/range.rs
+index 90ae14c..cc4d065 100644
+--- a/crates/range/tests/range.rs
++++ b/crates/range/tests/range.rs
+@@ -1,19 +1,16 @@
+ #![cfg(test)]
+ 
+ use std::fs;
+-use std::path::{Path, PathBuf};
++use std::path::Path;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+-use yamt_merge_core::{MAX_TEXT_BYTES, compare};
++use yamt_merge_core::compare;
+ use yamt_range::{
+-    Error, PairLock, Range, RangeChange, RangeEntryKind, RangeFile, RangeFileId, RangeModeChange,
+-    RangeSide, RangeSideLabel, RangeSides, RangeSpec, Resolved,
++    Error, Range, RangeChange, RangeEntryKind, RangeFile, RangeFileId, RangeModeChange, RangeSide,
++    RangeSideLabel, RangeSides, RangeSpec, Resolved,
+ };
+ 
+-const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
+-const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
+ const LINK_MODE: &str = "120000";
+-const LOCK_FILE: &str = "lock";
+ 
+ /// A file of the scripted repository: `base` on `main`, `local` on the checked-out branch `local`, `remote` on `remote`.
+ fn file<'a>(
+@@ -123,13 +120,6 @@ fn stage_link(root: &Path, path: &str, target: &str) {
+     git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo]).unwrap();
+ }
+ 
+-/// Removes a loose object, so any read of it fails: what the listing answers is never read.
+-fn drop_object(root: &Path, revision: &str) {
+-    let oid = rev_parse(root, revision);
+-    let (folder, name) = oid.split_at(2);
+-    fs::remove_file(root.join(".git").join("objects").join(folder).join(name)).unwrap();
+-}
+-
+ #[test]
+ fn three_dots_compares_the_merge_base_and_two_dots_the_tips() {
+     let dir = repo_with(&[
+@@ -300,38 +290,6 @@ fn renamed_shows_the_old_text_left() {
+     );
+ }
+ 
+-#[test]
+-fn binary_is_answered_before_size_and_without_reading() {
+-    let large_binary = vec![0_u8; MAX_TEXT_BYTES + 1];
+-    let dir = repo_with(&[changed("big.bin", None, Some(&large_binary))]);
+-    let root = dir.path();
+-    let range = range(root, "main..local");
+-    drop_object(root, "local:big.bin");
+-
+-    assert_eq!(load(&range, "big.bin"), RangeFile::Binary);
+-}
+-
+-#[test]
+-fn exactly_8_mib_loads_and_one_byte_more_is_too_large() {
+-    let exact = "a\n".repeat(MAX_TEXT_BYTES / 2);
+-    let over = format!("{exact}a");
+-    let dir = repo_with(&[
+-        changed("exact.txt", None, Some(exact.as_bytes())),
+-        changed("over.txt", None, Some(over.as_bytes())),
+-    ]);
+-    let root = dir.path();
+-    let range = range(root, "main..local");
+-    drop_object(root, "local:over.txt");
+-
+-    let loaded = load(&range, "exact.txt");
+-    let RangeFile::Texts { left, right, .. } = &loaded else {
+-        panic!("{loaded:?}");
+-    };
+-    assert_eq!((left.len(), right.len()), (0, MAX_TEXT_BYTES));
+-    let limit = u32::try_from(MAX_TEXT_BYTES).unwrap();
+-    assert_eq!(load(&range, "over.txt"), RangeFile::TooLarge { limit });
+-}
+-
+ #[test]
+ fn non_utf8_names_the_sides() {
+     let dir = repo_with(&[
+@@ -347,56 +305,6 @@ fn non_utf8_names_the_sides() {
+     assert_eq!(load(&range, "both.txt"), not_utf8(RangeSides::Both));
+ }
+ 
+-/// A submodule at `SECOND_COMMIT` on `local`, at `base` on `main` and `remote`.
+-fn submodule(path: &'static str, base: Option<&'static str>) -> ConflictFile<'static> {
+-    ConflictFile {
+-        path,
+-        kind: FileKind::Submodule,
+-        base: base.map(str::as_bytes),
+-        local: Some(SECOND_COMMIT.as_bytes()),
+-        remote: base.map(str::as_bytes),
+-    }
+-}
+-
+-#[test]
+-fn mode_only_kind_changed_and_submodule_are_sentences() {
+-    let dir = repo_with(&[
+-        changed("entry", Some(b"text\n"), Some(b"text\n")),
+-        changed("run.sh", Some(b"echo hi\n"), Some(b"echo hi\n")),
+-        submodule("vendor/lib", Some(FIRST_COMMIT)),
+-        submodule("vendor/new", None),
+-    ]);
+-    let root = dir.path();
+-    git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
+-    stage_link(root, "entry", "target.txt");
+-    commit(root, "modes");
+-    let range = range(root, "main..local");
+-    drop_object(root, "local:run.sh");
+-    drop_object(root, "local:entry");
+-    drop_object(root, "main:entry");
+-
+-    let mode_only = RangeFile::ModeOnly {
+-        old: RangeEntryKind::File,
+-        new: RangeEntryKind::Executable,
+-    };
+-    let kind_changed = RangeFile::KindChanged {
+-        old: RangeEntryKind::File,
+-        new: RangeEntryKind::Link,
+-    };
+-    let changed_submodule = RangeFile::Submodule {
+-        old: Some(FIRST_COMMIT.to_owned()),
+-        new: Some(SECOND_COMMIT.to_owned()),
+-    };
+-    let added_submodule = RangeFile::Submodule {
+-        old: None,
+-        new: Some(SECOND_COMMIT.to_owned()),
+-    };
+-    assert_eq!(load(&range, "run.sh"), mode_only);
+-    assert_eq!(load(&range, "entry"), kind_changed);
+-    assert_eq!(load(&range, "vendor/lib"), changed_submodule);
+-    assert_eq!(load(&range, "vendor/new"), added_submodule);
+-}
+-
+ #[test]
+ fn a_link_is_shown_as_its_target_text() {
+     let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"a\n"))]);
+@@ -464,78 +372,3 @@ fn a_range_is_shared_between_threads() {
+     fn require_send_and_sync<T: Send + Sync>() {}
+     require_send_and_sync::<Range>();
+ }
+-
+-fn pair_folder(range_dir: &Path, root: &Path, left: &str, right: &str) -> PathBuf {
+-    let lock = PairLock::take(range_dir, &resolved(root, &format!("{left}..{right}"))).unwrap();
+-    lock.folder().to_owned()
+-}
+-
+-#[test]
+-fn the_same_pair_twice_is_locked_naming_both_short_ids() {
+-    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
+-    let root = dir.path();
+-    let range_dir = tempfile::tempdir().unwrap();
+-    let first = resolved(root, "main..local");
+-    let held = PairLock::take(range_dir.path(), &first).unwrap();
+-    let main_id = rev_parse(root, "main");
+-    let typed_otherwise = resolved(root, &format!("{main_id}..HEAD"));
+-
+-    let error = PairLock::take(range_dir.path(), &typed_otherwise).unwrap_err();
+-
+-    let (left, right) = (short_id(root, "main"), short_id(root, "local"));
+-    let line = format!(
+-        "another yamt window shows {left}..{right} of {}",
+-        typed_otherwise.root().display()
+-    );
+-    assert_eq!(error.to_string(), line);
+-    assert!(matches!(&error, Error::Locked { root: shown, .. } if shown == typed_otherwise.root()));
+-    let pair = format!("{main_id}-{}", rev_parse(root, "local"));
+-    assert_eq!(held.folder().file_name().unwrap(), pair.as_str());
+-    let repo_folder = held.folder().parent().unwrap();
+-    assert_eq!(repo_folder.parent().unwrap(), range_dir.path());
+-    assert!(held.folder().join(LOCK_FILE).is_file());
+-    drop(held);
+-    assert!(PairLock::take(range_dir.path(), &typed_otherwise).is_ok());
+-}
+-
+-#[test]
+-fn another_worktree_of_the_same_repository_shares_the_lock() {
+-    let dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
+-    let root = dir.path();
+-    let linked_dir = tempfile::tempdir().unwrap();
+-    let linked = linked_dir.path().join("elsewhere");
+-    let linked_arg = linked.to_str().unwrap();
+-    git_ok(
+-        root,
+-        &[
+-            "worktree", "add", "--quiet", "--detach", linked_arg, "remote",
+-        ],
+-    )
+-    .unwrap();
+-    let range_dir = tempfile::tempdir().unwrap();
+-    let _held = PairLock::take(range_dir.path(), &resolved(root, "main..remote")).unwrap();
+-    let from_linked = resolved(&linked, "main..remote");
+-
+-    let error = PairLock::take(range_dir.path(), &from_linked).unwrap_err();
+-
+-    assert!(matches!(&error, Error::Locked { root: shown, .. } if shown == from_linked.root()));
+-    assert_ne!(from_linked.root(), resolved(root, "main..remote").root());
+-}
+-
+-#[test]
+-fn a_different_pair_is_not_locked() {
+-    let dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
+-    let root = dir.path();
+-    let range_dir = tempfile::tempdir().unwrap();
+-    let to_local = PairLock::take(range_dir.path(), &resolved(root, "main..local")).unwrap();
+-
+-    let to_remote = PairLock::take(range_dir.path(), &resolved(root, "main..remote")).unwrap();
+-    let reversed = PairLock::take(range_dir.path(), &resolved(root, "local..main")).unwrap();
+-
+-    assert_ne!(to_local.folder(), to_remote.folder());
+-    assert_ne!(to_local.folder(), reversed.folder());
+-    assert_eq!(to_local.folder().parent(), to_remote.folder().parent());
+-    let other_dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
+-    let other = pair_folder(range_dir.path(), other_dir.path(), "main", "local");
+-    assert_ne!(other.parent(), to_local.folder().parent());
+-}
+-- 
+2.56.0
+

@@ -1,1 +1,34 @@
-{}
+{
+  "RVWindow": {
+    "owned": [
+      "frontend/src/main.ts",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/RangeFileRow.vue",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/rangeText.ts",
+      "frontend/src/ui/rangeText.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/scripts/fences.ts",
+      "frontend/scripts/fences.test.ts",
+      "frontend/scripts/app-session/args.ts",
+      "frontend/scripts/app-session/args.test.ts",
+      "frontend/scripts/app-session/start.ts",
+      "frontend/scripts/app-session/fixture.ts"
+    ]
+  },
+  "RVShellR1": {
+    "owned": [
+      "src-tauri/src/args.rs",
+      "src-tauri/src/range.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/compare.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/ipc_error.rs",
+      "src-tauri/src/mock_window.rs"
+    ]
+  }
+}

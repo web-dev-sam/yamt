@@ -1,0 +1,943 @@
+From 8e68d491afcdc5f4e87e223856f1ffee683a2d68 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:02:25 +0200
+Subject: [PATCH] feat(editor): RangeController with read-only columns; one
+ generic file list for both roots
+
+---
+ .omp/run/notes/RVColumns.md                   |  64 ++++++
+ frontend/src/editor/index.ts                  |   2 +
+ .../src/editor/internal/compareViews.test.ts  |  91 ++++++++
+ frontend/src/editor/internal/compareViews.ts  | 109 ++++++++--
+ frontend/src/editor/range.browser.test.ts     | 202 ++++++++++++++++++
+ frontend/src/editor/range.ts                  |  73 +++++++
+ frontend/src/ui/App.vue                       |  13 +-
+ frontend/src/ui/FileList.vue                  |  27 ++-
+ frontend/src/ui/FileTree.vue                  |  16 +-
+ frontend/src/ui/fileTree.test.ts              |  19 +-
+ frontend/src/ui/fileTree.ts                   |  38 ++--
+ 11 files changed, 589 insertions(+), 65 deletions(-)
+ create mode 100644 .omp/run/notes/RVColumns.md
+ create mode 100644 frontend/src/editor/internal/compareViews.test.ts
+ create mode 100644 frontend/src/editor/range.browser.test.ts
+ create mode 100644 frontend/src/editor/range.ts
+
+diff --git a/.omp/run/notes/RVColumns.md b/.omp/run/notes/RVColumns.md
+new file mode 100644
+index 0000000..d066d32
+--- /dev/null
++++ b/.omp/run/notes/RVColumns.md
+@@ -0,0 +1,64 @@
++All three parts of the brief are in place: `RangeController`, the split column factory, and the list made generic with slots. Node tests, typecheck, lint, format, knip, sfc-order and map-check all pass. One acceptance line is reached by another route: Playwright WebKit cannot launch on this host, so `range.browser.test.ts` never ran itself. I ran the same checks in MiniBrowser through `just webdriver` instead (details under `smoke_evidence`).
++
++## summary
++- `editor/range.ts`: `RangeController` shows two read-only columns. It reuses `CompareStrip`/`CompareFrame` (bands, locked scroll, find space), marks both columns once from the reply, takes its language from the path, and moves with `revealDifference`/`keyboardColumn`. It has no format, settle, history, language picker or `holdsText`.
++- `editor/internal/compareViews.ts`: one shared `columnState` builds both kinds of column. `editableColumnState` and `createColumnViews` keep the compare window as it was (`"center"` with the byte limit). The new `readOnlyColumnState` and `createReadOnlyColumnViews` (`"readOnlyCenter"`, no byte limit) take an `extensions` input, the seam left for delivery B's threads.
++- `ui/fileTree.ts`, `FileTree.vue` and `FileList.vue` are generic over `F extends ListedFile`. They have `#file` and `#footer` slots and a `label` prop, and no longer import `FileEntry`, `FileMark` or `OperationLabel`. `App.vue` fills the slots, and the merge window looks and behaves as before.
++
++## files_changed
++- `frontend/src/editor/range.ts` (new)
++- `frontend/src/editor/range.browser.test.ts` (new)
++- `frontend/src/editor/index.ts` (+2 lines, now 292)
++- `frontend/src/editor/internal/compareViews.ts`
++- `frontend/src/editor/internal/compareViews.test.ts` (new)
++- `frontend/src/ui/fileTree.ts`
++- `frontend/src/ui/fileTree.test.ts`
++- `frontend/src/ui/FileTree.vue`
++- `frontend/src/ui/FileList.vue`
++- `frontend/src/ui/App.vue`
++
++## tests_added
++Each node test was checked with its one-line hand mutation from the design §10 table; each mutation failed only its own test, and the code was restored afterwards:
++
++| test (`compareViews.test.ts`) | hand mutation | failure seen |
++|---|---|---|
++| "a read-only column's state refuses a user insert and keeps its text" | `"readOnlyCenter"` → `"center"` in `readOnlyColumnState` | `expected false to be true` at `at.readOnly` |
++| "a read-only column holds differenceField, so showDifferences lands" | `differenceField` dropped from the read-only extensions | `expected undefined to deeply equal [ { from: 2, to: 11, … } ]` |
++| "an editable column still refuses an insert over its byte limit" | the `columnLimit(...)` lines deleted in the editable path | `expected 'a\nnew \nword\nb\n' to be 'a\nnew word\nb\n'` |
++
++- `ui/fileTree.test.ts` "treeRows: keeps a file row's own type for any listed file": rows built from another `{ path, added }` type keep that type in each file row. The existing merge-row tests are unchanged (`shown` now takes `TreeRow<ListedFile>`).
++- `editor/range.browser.test.ts`: five tests — both columns marked from one reply, a `.ts` path loads TypeScript, `moveToChange("down")` with no wrap, typing changes nothing, `destroy()` empties the hosts.
++
++## smoke_evidence
++- `pnpm -C frontend typecheck` → `$ vue-tsc -b`, exit 0.
++- `pnpm -C frontend lint` → `$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"`, exit 0, nothing reported.
++- `pnpm -C frontend test` → `Test Files 152 passed (152)`, `Tests 1978 passed (1978)`.
++- `pnpm -C frontend unused` and `sfc-order` → exit 0. `fmt:check` → `All matched files use the correct format.` `just map-check` → `map-check: ok`.
++- **WebKit probe:**
++  - `pnpm -C frontend exec vitest run --project browser src/editor/range.browser.test.ts` failed to start: `MiniBrowser: error while loading shared libraries: libicudata.so.74` (this host has ICU 78). This is the known failure (#423/#1074). The probe file did not run.
++  - Instead: `just app-session start-fixture --name rvafter`, which starts `just webdriver` and MiniBrowser. A throwaway WebDriver script, `/tmp/range-probe/probe.mjs`, imports `/src/editor/index.ts` in the page, builds the real `RangeController` and runs the probe's scenario:
++    - Marks: `{"stripBands":["chunk-modified chunk-band d=true","chunk-modified chunk-band d=true"],"columns":[{"bandLines":2,"wordMarks":["old",", b"],"removalBars":1},{"bandLines":2,"wordMarks":["new",", y"],"removalBars":1}]}`
++    - Language: `{"keyword":"const","highlightedSpans":[30,30],"lineColour":"rgb(196, 194, 206)","keywordColour":"rgb(224, 152, 107)"}`
++    - Moves: `moveToChange {"lines":["const value = old(a, b);","call(x);","call(x);"],"focusInLeft":true}`
++    - Typing: `focused left true`, `focused right true`, then after `abc`, Enter, Backspace, Delete: `after typing {…,"same":true,…}`
++    - Destroy: `destroy [0,0,0]`
++    - Screenshot: `/tmp/range-probe/range-dark.png`
++- **Merge window before and after** (fixture mode, MiniBrowser through `just webdriver`; "before" from the main checkout at `b74ca67`, whose `frontend/` matches this tree's base `f1dfcb4`):
++  - Both sessions: tree `aria-label` `"Conflicted files"`, 12 tree items, width 240. Dragging "File list width" by +80 gives 320. Ctrl+B hides the panel (`"none"`); a second Ctrl+B shows it again (`["flex",320]`).
++  - Screenshots `/tmp/range-probe/{before,after}-{list,tree,hidden,wide}.png`. Pixel difference (`compare -metric AE`): tree 0, hidden 0, wide 0. The list has 304 px, all outside the sidebar (`-trim`: 1129x759 starting at x=260; the sidebar is 0–245 px); the diff image shows they are the editor panes' scrollbars. The "remembered" mark and the MERGE tag are identical.
++
++## deviations_from_brief
++- `columnState` takes `{ text, kind, settings, extensions }` without the `column` argument the Change step lists, because it never uses it. The column goes into `editableColumnState`/`readOnlyColumnState({ column, text }, wiring)`, which build the per-column listener and the refusal callback.
++- New exports `editableColumnState`, `readOnlyColumnState` and `ReadOnlyWiring`: the node tests need the exact states the two factories build, without a DOM.
++- `compareViews.test.ts` stubs `document` as `{ body: {} }`, because `everyPane()` reads `document.body` when the column state is built; node has no `document`.
++- Both `FileTree.vue` and `FileList.vue` declare their slots with `defineSlots` so `F` is typed in the slot props.
++- **Shared edits needed (not mine to make):**
++  - `frontend/src/ui/AGENTS.md` lines 17 and 19 still say `FileList.vue` renders `OperationLabel` and `FileMark`; they now come from `App.vue` through the `#footer` and `#file` slots.
++  - The project map's `frontend/src/ui` entry for FileList/FileTree/fileTree.ts and the `frontend/src/editor` entry (compare section) should name the generic list, `range.ts` and the second factory.
++  - `frontend/src/editor/AGENTS.md` (Compare paragraph) should name `RangeController` and `createReadOnlyColumnViews`.
++- The probe and the before/after shots were run in MiniBrowser through `just app-session` and `just webdriver`, as the brief and earlier notes require when Playwright WebKit cannot launch. `range.browser.test.ts` exists as asked but has never run.
++
++## open_risks
++- `frontend/src/editor/range.browser.test.ts` has never run in Playwright WebKit. Its checks were reproduced by the throwaway script, not by the file itself, so its selector and wait details are unproven (for example the `language` facet name `"typescript"` and the first `span` on line 1 being `const`).
++- `frontend/src/editor/range.ts:31-35`: the `updated` callback calls `this.#frame` before `#frame` is assigned in the constructor. This is safe because CodeMirror does not call the update listener while building a view, and `CompareController` uses the same pattern.
++- In the probe screenshot, the strip's bands are hard to see in the 40 px gap, though `d` is non-empty for both. That probe page has no `PaneFrame` styling, so judge band visibility in the real range view (row 8).
+\ No newline at end of file
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 460bba7..1239422 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -41,6 +41,8 @@ export type { ProblemCounts } from "./internal/problems";
+ export type { ResultSnapshot } from "./internal/savedPoint";
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
++export { RangeController } from "./range";
++export type { RangeOptions, RangeTexts } from "./range";
+ 
+ export type MergeHosts = {
+   readonly left: HTMLElement;
+diff --git a/frontend/src/editor/internal/compareViews.test.ts b/frontend/src/editor/internal/compareViews.test.ts
+new file mode 100644
+index 0000000..ec45025
+--- /dev/null
++++ b/frontend/src/editor/internal/compareViews.test.ts
+@@ -0,0 +1,91 @@
++import { insertNewlineAndIndent } from "@codemirror/commands";
++import type { EditorState } from "@codemirror/state";
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import { DEFAULT_KEYS, loadCompareFixture, type Column } from "../../ipc";
++import { differenceField, showDifferences } from "./compareFields";
++import { columnMarks } from "./compareMarks";
++import { editableColumnState, readOnlyColumnState } from "./compareViews";
++import type { PaneSettings } from "./pane";
++
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: "Linux x86_64",
++};
++const LEFT = "a\nold word\nb\n";
++const RIGHT = "a\nnew word\nb\n";
++const CASE = {
++  left: LEFT,
++  right: RIGHT,
++  differences: [
++    {
++      left: { start: 1, len: 1 },
++      right: { start: 1, len: 1 },
++      words: {
++        left: { changed: [{ line: 1, start: 0, len: 3 }], removals: [] },
++        right: { changed: [{ line: 1, start: 0, len: 3 }], removals: [] },
++      },
++    },
++  ],
++};
++
++beforeEach(() => {
++  vi.stubGlobal("document", { body: {} });
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++function readOnly(text: string): EditorState {
++  return readOnlyColumnState(
++    { column: "left", text },
++    { settings: SETTINGS, updated: () => {}, extensions: [] },
++  );
++}
++
++function pressedEnter(state: EditorState): EditorState {
++  let after = state;
++  insertNewlineAndIndent({
++    state,
++    dispatch: (tr) => {
++      after = tr.state;
++    },
++  });
++  return after;
++}
++
++test("a read-only column's state refuses a user insert and keeps its text", () => {
++  const state = readOnly(LEFT);
++  const at = state.update({ selection: { anchor: LEFT.indexOf("word") } }).state;
++
++  expect(at.readOnly).toBe(true);
++  expect(insertNewlineAndIndent({ state: at, dispatch: () => {} })).toBe(false);
++  expect(pressedEnter(at).sliceDoc()).toBe(LEFT);
++});
++
++test("a read-only column holds differenceField, so showDifferences lands", async () => {
++  const state = readOnly(LEFT);
++  const { comparison } = await loadCompareFixture("case", { "case.json": CASE });
++  const marks = columnMarks(state.doc, comparison.differences, "left");
++
++  const shown = state.update({ effects: showDifferences.of(marks) }).state;
++
++  expect(shown.field(differenceField, false)?.spans).toEqual([
++    { from: LEFT.indexOf("old"), to: LEFT.indexOf("b\n"), tone: "modified" },
++  ]);
++});
++
++test("an editable column still refuses an insert over its byte limit", () => {
++  const refused = vi.fn<(column: Column) => void>();
++  const state = editableColumnState(
++    { column: "right", text: RIGHT },
++    { settings: SETTINGS, columnLimit: RIGHT.length, refused, updated: () => {} },
++  );
++  const at = state.update({ selection: { anchor: RIGHT.indexOf("word") } }).state;
++
++  const after = pressedEnter(at);
++
++  expect(after.sliceDoc()).toBe(RIGHT);
++  expect(refused.mock.calls).toEqual([["right"]]);
++});
+diff --git a/frontend/src/editor/internal/compareViews.ts b/frontend/src/editor/internal/compareViews.ts
+index 531e707..e2db522 100644
+--- a/frontend/src/editor/internal/compareViews.ts
++++ b/frontend/src/editor/internal/compareViews.ts
+@@ -1,15 +1,18 @@
+-import { Text } from "@codemirror/state";
++import { Text, type EditorState, type Extension } from "@codemirror/state";
+ import { EditorView, type ViewUpdate } from "@codemirror/view";
+ 
+ import type { Column } from "../../ipc";
+ import { columnLimit } from "./columnBytes";
+ import { differenceField } from "./compareFields";
+-import { createPane, type PaneSettings } from "./pane";
++import { paneState, type PaneSettings } from "./pane";
+ import { everyPane } from "./paneViews";
+ import { removalTooltip } from "./removalTooltip";
+ 
+ export type ColumnViews = Readonly<Record<Column, EditorView>>;
+ 
++type ColumnTexts = Readonly<Record<Column, string>>;
++type ColumnHosts = Readonly<Record<Column, HTMLElement>>;
++
+ export type ColumnWiring = {
+   readonly settings: PaneSettings;
+   readonly columnLimit: number;
+@@ -17,22 +20,56 @@ export type ColumnWiring = {
+   readonly updated: (column: Column, update: ViewUpdate) => void;
+ };
+ 
++export type ReadOnlyWiring = {
++  readonly settings: PaneSettings;
++  readonly updated: (column: Column, update: ViewUpdate) => void;
++  readonly extensions: Extension;
++};
++
++type ColumnSource = { readonly column: Column; readonly text: string };
++
+ export const COLUMNS = ["left", "right"] as const satisfies readonly Column[];
+ 
+ const LINE_BREAK = /\r\n?|\n/;
+ 
+-function createColumn(
+-  column: Column,
+-  { text, parent }: { readonly text: string; readonly parent: HTMLElement },
+-  wiring: ColumnWiring,
+-): EditorView {
+-  return createPane({
+-    kind: "center",
++function columnState({
++  text,
++  kind,
++  settings,
++  extensions,
++}: {
++  readonly text: string;
++  readonly kind: "center" | "readOnlyCenter";
++  readonly settings: PaneSettings;
++  readonly extensions: Extension;
++}): EditorState {
++  return paneState({
++    kind,
+     doc: Text.of(text.split(LINE_BREAK)),
+     eol: "Lf",
+     language: null,
++    settings,
++    extensions,
++  });
++}
++
++function updatedListener(
++  column: Column,
++  updated: (column: Column, update: ViewUpdate) => void,
++): Extension {
++  return EditorView.updateListener.of((update) => {
++    updated(column, update);
++  });
++}
++
++export function editableColumnState(
++  { column, text }: ColumnSource,
++  wiring: ColumnWiring,
++): EditorState {
++  return columnState({
++    text,
++    kind: "center",
+     settings: wiring.settings,
+-    parent,
+     extensions: [
+       differenceField,
+       columnLimit(wiring.columnLimit, () => {
+@@ -40,20 +77,52 @@ function createColumn(
+       }),
+       removalTooltip(),
+       everyPane(),
+-      EditorView.updateListener.of((update) => {
+-        wiring.updated(column, update);
+-      }),
++      updatedListener(column, wiring.updated),
+     ],
+   });
+ }
+ 
+-export function createColumnViews(
+-  texts: Readonly<Record<Column, string>>,
+-  hosts: Readonly<Record<Column, HTMLElement>>,
+-  wiring: ColumnWiring,
+-): ColumnViews {
++export function readOnlyColumnState(
++  { column, text }: ColumnSource,
++  wiring: ReadOnlyWiring,
++): EditorState {
++  return columnState({
++    text,
++    kind: "readOnlyCenter",
++    settings: wiring.settings,
++    extensions: [
++      differenceField,
++      removalTooltip(),
++      everyPane(),
++      updatedListener(column, wiring.updated),
++      wiring.extensions,
++    ],
++  });
++}
++
++function columnViews(hosts: ColumnHosts, state: (column: Column) => EditorState): ColumnViews {
+   return {
+-    left: createColumn("left", { text: texts.left, parent: hosts.left }, wiring),
+-    right: createColumn("right", { text: texts.right, parent: hosts.right }, wiring),
++    left: new EditorView({ state: state("left"), parent: hosts.left }),
++    right: new EditorView({ state: state("right"), parent: hosts.right }),
+   };
+ }
++
++export function createColumnViews(
++  texts: ColumnTexts,
++  hosts: ColumnHosts,
++  wiring: ColumnWiring,
++): ColumnViews {
++  return columnViews(hosts, (column) =>
++    editableColumnState({ column, text: texts[column] }, wiring),
++  );
++}
++
++export function createReadOnlyColumnViews(
++  texts: ColumnTexts,
++  hosts: ColumnHosts,
++  wiring: ReadOnlyWiring,
++): ColumnViews {
++  return columnViews(hosts, (column) =>
++    readOnlyColumnState({ column, text: texts[column] }, wiring),
++  );
++}
+diff --git a/frontend/src/editor/range.browser.test.ts b/frontend/src/editor/range.browser.test.ts
+new file mode 100644
+index 0000000..46fedf0
+--- /dev/null
++++ b/frontend/src/editor/range.browser.test.ts
+@@ -0,0 +1,202 @@
++import "../style.css";
++import { language } from "@codemirror/language";
++import { EditorView } from "@codemirror/view";
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { page, userEvent } from "vitest/browser";
++
++import { DEFAULT_KEYS, loadCompareFixture } from "../ipc";
++import { RangeController, type CompareHosts, type RangeOptions, type RangeTexts } from "./index";
++import { found } from "./paneHarness";
++
++const WIDTH = 1200;
++const HEIGHT = 700;
++const PANE_PX = 500;
++const WAIT_MS = 3000;
++const SCREENSHOTS = "/tmp/yamt-range";
++const MOUNTED = "data-range-probe";
++const PATH = "src/probe.ts";
++const OPTIONS: RangeOptions = { preferences: { theme: "dark", keys: DEFAULT_KEYS } };
++const LEFT = [
++  "const first = 1;",
++  "const value = old(a, b);",
++  "const same = 2;",
++  "call(x);",
++  "const last = 3;",
++  "",
++].join("\n");
++const RIGHT = [
++  "const first = 1;",
++  "const value = new(a);",
++  "const same = 2;",
++  "call(x, y);",
++  "const last = 3;",
++  "",
++].join("\n");
++const CASE = {
++  left: LEFT,
++  right: RIGHT,
++  differences: [
++    {
++      left: { start: 1, len: 1 },
++      right: { start: 1, len: 1 },
++      words: {
++        left: {
++          changed: [
++            { line: 1, start: 14, len: 3 },
++            { line: 1, start: 19, len: 3 },
++          ],
++          removals: [],
++        },
++        right: {
++          changed: [{ line: 1, start: 14, len: 3 }],
++          removals: [{ at: { line: 1, column: 19 }, text: ", b" }],
++        },
++      },
++    },
++    {
++      left: { start: 3, len: 1 },
++      right: { start: 3, len: 1 },
++      words: {
++        left: { changed: [], removals: [{ at: { line: 3, column: 6 }, text: ", y" }] },
++        right: { changed: [{ line: 3, start: 6, len: 3 }], removals: [] },
++      },
++    },
++  ],
++};
++
++function box(style: string): HTMLDivElement {
++  const node = document.createElement("div");
++  node.setAttribute("style", style);
++  return node;
++}
++
++function mount(): CompareHosts {
++  const wrapper = box(
++    `position: fixed; inset: 40px 0 auto 0; height: ${PANE_PX}px; display: grid; grid-template-columns: 1fr 40px 1fr; will-change: transform`,
++  );
++  wrapper.setAttribute(MOUNTED, "");
++  const pane = `min-width: 0; min-height: 0; height: ${PANE_PX}px`;
++  const strip = document.createElementNS("http://www.w3.org/2000/svg", "svg");
++  strip.setAttribute("style", "display: block; width: 100%; height: 100%");
++  const layer = box("min-height: 0; will-change: transform");
++  layer.append(strip);
++  const hosts = { left: box(pane), right: box(pane), strip };
++  wrapper.append(hosts.left, layer, hosts.right);
++  document.body.append(wrapper);
++  return hosts;
++}
++
++function viewIn(host: HTMLElement): EditorView {
++  const view = EditorView.findFromDOM(
++    found(host.querySelector<HTMLElement>(".cm-editor"), "editor"),
++  );
++  if (view === null) {
++    throw new Error("no view");
++  }
++  return view;
++}
++
++const controllers: RangeController[] = [];
++
++async function opened(): Promise<{ hosts: CompareHosts; controller: RangeController }> {
++  const hosts = mount();
++  const { comparison } = await loadCompareFixture("probe", { "probe.json": CASE });
++  const texts: RangeTexts = {
++    path: PATH,
++    left: LEFT,
++    right: RIGHT,
++    differences: comparison.differences,
++  };
++  const controller = new RangeController(texts, hosts, OPTIONS);
++  controllers.push(controller);
++  return { hosts, controller };
++}
++
++beforeEach(async () => {
++  await page.viewport(WIDTH, HEIGHT);
++});
++
++afterEach(() => {
++  controllers.splice(0).forEach((controller) => controller.destroy());
++  document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
++});
++
++test("both columns are marked from one reply: bands, word marks, removal bars and the strip", async () => {
++  const { hosts } = await opened();
++  const bands = await vi.waitFor(
++    () => {
++      const shown = [...hosts.strip.querySelectorAll("path.chunk-band")];
++      expect(shown).toHaveLength(2);
++      return shown;
++    },
++    { timeout: WAIT_MS },
++  );
++  await page.screenshot({ path: `${SCREENSHOTS}/range-dark.png` });
++
++  for (const host of [hosts.left, hosts.right]) {
++    expect(host.querySelectorAll(".cm-line.chunk-band.chunk-modified")).toHaveLength(2);
++    expect(host.querySelectorAll(".chunk-word-modified").length).toBeGreaterThan(0);
++    expect(host.querySelectorAll(".chunk-removal")).toHaveLength(1);
++  }
++  expect(hosts.left.querySelector(".chunk-word-modified")?.textContent).toBe("old");
++  expect(bands.every((band) => (band.getAttribute("d") ?? "") !== "")).toBe(true);
++});
++
++test("a .ts path loads TypeScript into both columns and colours its keywords", async () => {
++  const { hosts } = await opened();
++
++  await vi.waitFor(
++    () => {
++      for (const host of [hosts.left, hosts.right]) {
++        expect(viewIn(host).state.facet(language)?.name).toBe("typescript");
++      }
++    },
++    { timeout: WAIT_MS },
++  );
++  const line = found(hosts.left.querySelector<HTMLElement>(".cm-line"), "line");
++  const keyword = await vi.waitFor(
++    () => found(line.querySelector<HTMLElement>("span"), "keyword span"),
++    { timeout: WAIT_MS },
++  );
++
++  expect(keyword.textContent).toBe("const");
++  expect(getComputedStyle(keyword).color).not.toBe(getComputedStyle(line).color);
++});
++
++test("moveToChange(down) puts the selection on the next difference, no wrap", async () => {
++  const { hosts, controller } = await opened();
++  const left = viewIn(hosts.left);
++
++  controller.moveToChange("down");
++  const first = left.state.doc.lineAt(left.state.selection.main.head).text;
++  controller.moveToChange("down");
++  const second = left.state.doc.lineAt(left.state.selection.main.head).text;
++  controller.moveToChange("down");
++  const past = left.state.doc.lineAt(left.state.selection.main.head).text;
++
++  expect(hosts.left.contains(document.activeElement)).toBe(true);
++  expect([first, second, past]).toEqual(["const value = old(a, b);", "call(x);", "call(x);"]);
++});
++
++test("typing, Enter, Backspace and Delete change neither column", async () => {
++  const { hosts } = await opened();
++
++  for (const host of [hosts.left, hosts.right]) {
++    await userEvent.click(found(host.querySelector<HTMLElement>(".cm-content"), "content"));
++    await userEvent.keyboard("abc{Enter}{Backspace}{Delete}");
++  }
++
++  expect(viewIn(hosts.left).state.sliceDoc()).toBe(LEFT);
++  expect(viewIn(hosts.right).state.sliceDoc()).toBe(RIGHT);
++});
++
++test("destroy empties both hosts and the strip", async () => {
++  const { hosts, controller } = await opened();
++  controllers.splice(controllers.indexOf(controller), 1);
++
++  controller.destroy();
++
++  expect([hosts.left, hosts.right, hosts.strip].map((host) => host.childElementCount)).toEqual([
++    0, 0, 0,
++  ]);
++});
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+new file mode 100644
+index 0000000..fdc4aca
+--- /dev/null
++++ b/frontend/src/editor/range.ts
+@@ -0,0 +1,73 @@
++import type { Difference } from "../ipc";
++import type { CompareHosts } from "./compare";
++import { showDifferences } from "./internal/compareFields";
++import { keyboardColumn, revealDifference } from "./internal/compareFocus";
++import { CompareFrame } from "./internal/compareFrame";
++import { columnMarks } from "./internal/compareMarks";
++import { CompareStrip } from "./internal/compareStrip";
++import { COLUMNS, createReadOnlyColumnViews, type ColumnViews } from "./internal/compareViews";
++import { languageOf, loadLanguage } from "./internal/language";
++import type { Direction } from "./internal/navigation";
++import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
++
++export type RangeTexts = {
++  readonly path: string; // the file's path in the range, the old path when deleted: picks the language
++  readonly left: string;
++  readonly right: string;
++  readonly differences: readonly Difference[];
++};
++
++export type RangeOptions = { readonly preferences: Preferences };
++
++export class RangeController {
++  readonly #views: ColumnViews;
++  readonly #strip: CompareStrip;
++  readonly #frame: CompareFrame;
++  #settings: PaneSettings;
++  #destroyed = false;
++
++  constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions) {
++    this.#settings = { preferences: options.preferences, platform: navigator.platform };
++    this.#views = createReadOnlyColumnViews(texts, hosts, {
++      settings: this.#settings,
++      updated: (_column, update) => {
++        this.#frame.changed(update);
++      },
++      extensions: [],
++    });
++    this.#strip = new CompareStrip(hosts.strip);
++    this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
++    for (const column of COLUMNS) {
++      const view = this.#views[column];
++      const marks = columnMarks(view.state.doc, texts.differences, column);
++      view.dispatch({ effects: showDifferences.of(marks) });
++    }
++    const description = languageOf(texts.path);
++    if (description !== null) {
++      const { left, right } = this.#views;
++      void loadLanguage(description, texts.path, [left, right], () => this.#destroyed);
++    }
++    this.#frame.request();
++  }
++
++  setPreferences(preferences: Preferences): void {
++    this.#settings = { ...this.#settings, preferences };
++    const effects = preferenceEffects("center", this.#settings);
++    for (const column of COLUMNS) {
++      this.#views[column].dispatch({ effects });
++    }
++  }
++
++  moveToChange(direction: Direction): void {
++    revealDifference(this.#views[keyboardColumn(this.#views) ?? "left"], direction);
++  }
++
++  destroy(): void {
++    this.#destroyed = true;
++    this.#frame.destroy();
++    for (const column of COLUMNS) {
++      this.#views[column].destroy();
++    }
++    this.#strip.destroy();
++  }
++}
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index e145be0..dd5ed0c 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -5,10 +5,12 @@ import { computed, onMounted, watch } from "vue";
+ import { useAltHold } from "./altHold";
+ import ChoiceView from "./ChoiceView.vue";
+ import FileList from "./FileList.vue";
++import FileMark from "./FileMark.vue";
+ import LanguageServerSettings from "./LanguageServerSettings.vue";
+ import MergeView from "./MergeView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import { noticeRow } from "./noticeText";
++import OperationLabel from "./OperationLabel.vue";
+ import { allResolvedText } from "./operationText";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+@@ -67,9 +69,16 @@ onMounted(() => {
+       v-show="fileListShown"
+       :files="files"
+       :active="active"
+-      :operation="operation"
++      label="Conflicted files"
+       @select="pick"
+-    />
++    >
++      <template #file="{ file, label }">
++        <FileMark :status="file.status" :label="label" />
++      </template>
++      <template #footer>
++        <OperationLabel v-if="operation !== null" :operation="operation" />
++      </template>
++    </FileList>
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+         <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index bbcd2d2..974854a 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -1,24 +1,18 @@
+-<script setup lang="ts">
++<script setup lang="ts" generic="F extends ListedFile">
+ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ import ListIcon from "~icons/lucide/list";
+ import ListTree from "~icons/lucide/list-tree";
+ 
+-import type { FileEntry, OperationView } from "../ipc";
+ import { fileIcon } from "./fileIcon";
+ import { createFileListMode } from "./fileListMode";
+-import FileMark from "./FileMark.vue";
+-import { revealed, treeRows } from "./fileTree";
++import { revealed, treeRows, type ListedFile } from "./fileTree";
+ import FileTree from "./FileTree.vue";
+-import OperationLabel from "./OperationLabel.vue";
+ import PanelWidthHandle from "./PanelWidthHandle.vue";
+ import { usePanelWidth } from "./usePanelWidth";
+ 
+-const props = defineProps<{
+-  files: readonly FileEntry[];
+-  active: string | null;
+-  operation: OperationView | null;
+-}>();
++const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
+ const emit = defineEmits<{ select: [path: string] }>();
++defineSlots<{ file(props: { file: F; label: string }): unknown; footer(): unknown }>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+ const { mode, toggle } = createFileListMode();
+@@ -74,13 +68,18 @@ function toggleFolder(path: string): void {
+       v-if="mode === 'tree'"
+       :rows="rows"
+       :active="active"
++      :label="label"
+       @select="emit('select', $event)"
+       @toggle="toggleFolder"
+-    />
++    >
++      <template #file="row">
++        <slot name="file" :file="row.file" :label="row.label" />
++      </template>
++    </FileTree>
+     <ul
+       v-else
+       role="listbox"
+-      aria-label="Conflicted files"
++      :aria-label="label"
+       class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-sidebar-scroller"
+     >
+       <li
+@@ -92,10 +91,10 @@ function toggleFolder(path: string): void {
+         @click="emit('select', file.path)"
+       >
+         <component :is="fileIcon(file.path)" class="size-4 shrink-0" aria-hidden="true" />
+-        <FileMark :status="file.status" :label="file.path" />
++        <slot name="file" :file="file" :label="file.path" />
+       </li>
+     </ul>
+-    <OperationLabel v-if="operation !== null" :operation="operation" />
++    <slot name="footer" />
+     <PanelWidthHandle label="File list width" :handle="resize" />
+   </aside>
+ </template>
+diff --git a/frontend/src/ui/FileTree.vue b/frontend/src/ui/FileTree.vue
+index e0abf1c..8416218 100644
+--- a/frontend/src/ui/FileTree.vue
++++ b/frontend/src/ui/FileTree.vue
+@@ -1,21 +1,21 @@
+-<script setup lang="ts">
++<script setup lang="ts" generic="F extends ListedFile">
+ import type { Component } from "vue";
+ import ChevronDown from "~icons/lucide/chevron-down";
+ import ChevronRight from "~icons/lucide/chevron-right";
+ 
+ import { fileIcon } from "./fileIcon";
+-import FileMark from "./FileMark.vue";
+-import type { TreeRow } from "./fileTree";
++import type { ListedFile, TreeRow } from "./fileTree";
+ import { folderIcon } from "./folderIcon";
+ 
+-defineProps<{ rows: readonly TreeRow[]; active: string | null }>();
++defineProps<{ rows: readonly TreeRow<F>[]; active: string | null; label: string }>();
+ const emit = defineEmits<{ select: [path: string]; toggle: [path: string] }>();
++defineSlots<{ file(props: { file: F; label: string }): unknown }>();
+ 
+ const ROW_PADDING_PX = 8;
+ const INDENT_PX = 8;
+ const TWISTIE_CENTRE_PX = 8;
+ 
+-function rowIcon(row: TreeRow): Component {
++function rowIcon(row: TreeRow<F>): Component {
+   switch (row.kind) {
+     case "folder":
+       return folderIcon(row.path, row.open);
+@@ -36,7 +36,7 @@ function guideLeft(level: number): string {
+   return `${rowStart(level - 1) + TWISTIE_CENTRE_PX}px`;
+ }
+ 
+-function pressed(row: TreeRow): void {
++function pressed(row: TreeRow<F>): void {
+   switch (row.kind) {
+     case "folder":
+       emit("toggle", row.path);
+@@ -51,7 +51,7 @@ function pressed(row: TreeRow): void {
+ <template>
+   <ul
+     role="tree"
+-    aria-label="Conflicted files"
++    :aria-label="label"
+     class="group mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-sidebar-scroller"
+   >
+     <li
+@@ -79,7 +79,7 @@ function pressed(row: TreeRow): void {
+         </template>
+       </span>
+       <component :is="rowIcon(row)" class="size-4 shrink-0" aria-hidden="true" />
+-      <FileMark v-if="row.kind === 'file'" :status="row.file.status" :label="row.label" />
++      <slot v-if="row.kind === 'file'" name="file" :file="row.file" :label="row.label" />
+       <span v-else class="truncate">{{ row.label }}</span>
+     </li>
+   </ul>
+diff --git a/frontend/src/ui/fileTree.test.ts b/frontend/src/ui/fileTree.test.ts
+index 7da8ebd..bbecb8f 100644
+--- a/frontend/src/ui/fileTree.test.ts
++++ b/frontend/src/ui/fileTree.test.ts
+@@ -1,13 +1,13 @@
+ import { expect, test } from "vitest";
+ 
+ import type { FileEntry } from "../ipc";
+-import { folderPaths, revealed, treeRows, type TreeRow } from "./fileTree";
++import { folderPaths, revealed, treeRows, type ListedFile, type TreeRow } from "./fileTree";
+ 
+ function entry(path: string): FileEntry {
+   return { path, status: "Unresolved", unsupported: null };
+ }
+ 
+-function shown(rows: readonly TreeRow[]): string[] {
++function shown(rows: readonly TreeRow<ListedFile>[]): string[] {
+   return rows.map((row) => {
+     switch (row.kind) {
+       case "folder":
+@@ -138,6 +138,21 @@ test("treeRows: gives the whole entry to a file row", () => {
+   ]);
+ });
+ 
++test("treeRows: keeps a file row's own type for any listed file", () => {
++  type Reviewed = { readonly path: string; readonly added: number };
++  const changed: Reviewed = { path: "src/b.ts", added: 3 };
++  const top: Reviewed = { path: "a.ts", added: 1 };
++  const rows: readonly TreeRow<Reviewed>[] = treeRows([changed, top], new Set());
++  const added = rows.flatMap((row) => (row.kind === "file" ? [row.file.added] : []));
++
++  expect(rows).toEqual([
++    { kind: "folder", path: "src", label: "src", depth: 0, open: true },
++    { kind: "file", file: changed, label: "b.ts", depth: 1 },
++    { kind: "file", file: top, label: "a.ts", depth: 0 },
++  ]);
++  expect(added).toEqual([3, 1]);
++});
++
+ test("treeRows: shows nothing for no files", () => {
+   expect(treeRows([], new Set())).toEqual([]);
+ });
+diff --git a/frontend/src/ui/fileTree.ts b/frontend/src/ui/fileTree.ts
+index 2da9032..c7623e7 100644
+--- a/frontend/src/ui/fileTree.ts
++++ b/frontend/src/ui/fileTree.ts
+@@ -1,6 +1,6 @@
+-import type { FileEntry } from "../ipc";
++export type ListedFile = { readonly path: string };
+ 
+-export type TreeRow =
++export type TreeRow<F extends ListedFile> =
+   | {
+       readonly kind: "folder";
+       readonly path: string;
+@@ -10,14 +10,14 @@ export type TreeRow =
+     }
+   | {
+       readonly kind: "file";
+-      readonly file: FileEntry;
++      readonly file: F;
+       readonly label: string;
+       readonly depth: number;
+     };
+ 
+-type Folder = {
+-  readonly folders: Map<string, Folder>;
+-  readonly files: { readonly name: string; readonly file: FileEntry }[];
++type Folder<F extends ListedFile> = {
++  readonly folders: Map<string, Folder<F>>;
++  readonly files: { readonly name: string; readonly file: F }[];
+ };
+ 
+ const NAME_ORDER = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+@@ -33,14 +33,14 @@ function compareNames(a: string, b: string): number {
+   return a < b ? -1 : 1;
+ }
+ 
+-function folderTree(files: readonly FileEntry[]): Folder {
+-  const root: Folder = { folders: new Map(), files: [] };
++function folderTree<F extends ListedFile>(files: readonly F[]): Folder<F> {
++  const root: Folder<F> = { folders: new Map(), files: [] };
+   for (const file of files) {
+     const names = file.path.split("/");
+     let folder = root;
+     for (const name of names.slice(0, -1)) {
+       const known = folder.folders.get(name);
+-      const child: Folder = known ?? { folders: new Map(), files: [] };
++      const child: Folder<F> = known ?? { folders: new Map(), files: [] };
+       if (known === undefined) {
+         folder.folders.set(name, child);
+       }
+@@ -53,9 +53,9 @@ function folderTree(files: readonly FileEntry[]): Folder {
+ 
+ type Place = { readonly parent: string; readonly depth: number };
+ 
+-function pushFolderRows(
+-  rows: TreeRow[],
+-  [name, folder]: readonly [string, Folder],
++function pushFolderRows<F extends ListedFile>(
++  rows: TreeRow<F>[],
++  [name, folder]: readonly [string, Folder<F>],
+   place: Place,
+   closed: ReadonlySet<string>,
+ ): void {
+@@ -78,9 +78,9 @@ function pushFolderRows(
+   }
+ }
+ 
+-function pushRows(
+-  rows: TreeRow[],
+-  folder: Folder,
++function pushRows<F extends ListedFile>(
++  rows: TreeRow<F>[],
++  folder: Folder<F>,
+   place: Place,
+   closed: ReadonlySet<string>,
+ ): void {
+@@ -94,11 +94,11 @@ function pushRows(
+   }
+ }
+ 
+-export function treeRows(
+-  files: readonly FileEntry[],
++export function treeRows<F extends ListedFile>(
++  files: readonly F[],
+   closed: ReadonlySet<string>,
+-): readonly TreeRow[] {
+-  const rows: TreeRow[] = [];
++): readonly TreeRow<F>[] {
++  const rows: TreeRow<F>[] = [];
+   pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
+   return rows;
+ }
+-- 
+2.56.0
+

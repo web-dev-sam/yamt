@@ -1,0 +1,729 @@
+From 8787d4d76c527671aeae11b994cfb18b87489b57 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:23:17 +0200
+Subject: [PATCH] feat(app): yamt --diff=<range> opens the range window;
+ open_range and load_range_file
+
+---
+ .omp/run/notes/RVShell.md  |  98 ++++++++++++++++++
+ src-tauri/AGENTS.md        |   2 +-
+ src-tauri/src/args.rs      | 136 +++++++++++++++++++++++--
+ src-tauri/src/commands.rs  |   9 +-
+ src-tauri/src/ipc_error.rs |  45 +++++++++
+ src-tauri/src/lib.rs       |   8 +-
+ src-tauri/src/range.rs     | 201 +++++++++++++++++++++++++++++++++++++
+ src-tauri/src/window.rs    |  14 ++-
+ 8 files changed, 495 insertions(+), 18 deletions(-)
+ create mode 100644 .omp/run/notes/RVShell.md
+ create mode 100644 src-tauri/src/range.rs
+
+diff --git a/.omp/run/notes/RVShell.md b/.omp/run/notes/RVShell.md
+new file mode 100644
+index 0000000..7773319
+--- /dev/null
++++ b/.omp/run/notes/RVShell.md
+@@ -0,0 +1,98 @@
++`yamt --diff=<range>` now opens a read-only window over the range: the argument is parsed, the window has its own state, and its two commands exist. Every acceptance item ran on a real build. Until row 9 lands, the window still shows the merge page.
++
++```
++summary
++  - args.rs: `--diff=<text>` goes through RangeSpec::parse, and its SpecError is the usage line. `--repo <p>` works
++    in either order. `--diff` alone stays Compare, and `--diff --repo` stays DIFF_WITH_REPO. `--diff` together with
++    `--diff=`, or two `--diff=`, gives "give --diff or one --diff=<range>, not both". The help text is design §1's,
++    word for word.
++  - New range.rs: run_range checks the range before any app is built. It then takes PairLock under
++    <data_dir>/yamt/range, lists the range, manages RangeState (no Mutex), opens WindowKind::Range titled
++    "<range> — <folder> — yamt", and exits 0. It has two commands: open_range and load_range_file (spawn_blocking;
++    a panic → WorkerStopped).
++  - window.rs: WindowKind::Range → data-window="range"; context, open_and_wait and window_title are now pub(crate).
++    lib.rs gains the Range arm (appimage on Linux). commands.rs registers both commands and adds with_range.
++    ipc_error.rs gains UnknownRangeFile and an exhaustive From<yamt_range::Error>.
++
++files_changed
++  src-tauri/src/args.rs
++  src-tauri/src/lib.rs
++  src-tauri/src/window.rs
++  src-tauri/src/range.rs (new)
++  src-tauri/src/commands.rs
++  src-tauri/src/ipc_error.rs
++  src-tauri/AGENTS.md
++
++tests_added
++  args.rs:
++    - a_range_takes_the_current_directory_or_a_repo_in_either_order: catches a dropped --repo, or a range
++      treated as Merge or Compare.
++    - each_malformed_range_is_its_usage_line: the five lines of the §1 table, written out as literals.
++    - diff_and_a_range_or_two_ranges_are_a_usage_error: --diff then --diff=, --diff= then --diff, and two --diff=.
++    - the_usage_names_the_range_forms: both usage lines and the `--diff=<range>` option row.
++    - Unchanged: diff_opens_the_compare_window (--diff alone stays Compare).
++  window.rs:
++    - the_start_script_names_the_theme_and_the_window gains the Range case, data-window="range".
++  range.rs:
++    - open_range_answers_the_range_s_start: the IPC reply equals serde(Range::start()).
++    - a_listed_file_loads_and_an_unknown_id_answers_unknown_range_file: id 0 loads as texts; id 7 gives
++      Err {"kind":"UnknownRangeFile","file":7}.
++    - a_second_window_on_the_same_pair_is_refused_naming_both_short_ids: manage_range_in on the same data folder
++      gives the Locked line with both short ids and the root.
++    - the_title_is_the_range_as_typed_then_the_repository_folder: "main...feature — proj — yamt".
++  ipc_error.rs:
++    - an_unknown_range_file_has_its_kind_and_a_start_refusal_is_its_line: UnknownFile → UnknownRangeFile;
++      NoMergeBase → Git with its line.
++
++smoke_evidence
++  cargo fmt --check → FMT_OK
++  cargo clippy --workspace --all-targets -- -D warnings → "Finished `dev` profile", no warnings
++    (also run with --features yamt-app/bindings → Finished, no warnings)
++  cargo test -p yamt-app → "test result: ok. 101 passed; 0 failed" (lib), "ok. 5 passed" (the other binary)
++  just arch-check → "arch-check: ok"
++  export-bindings into target/range-bindings.ts (bindings.ts itself not touched): openRange, loadRangeFile,
++    `{ kind: "UnknownRangeFile"; file: RangeFileId }` and every Range* type are present.
++  Real app: `cargo tauri build --debug --no-bundle`, then target/debug/yamt against a temp repository
++    (main, feature branched off main, and `other` with unrelated history). Private Xvfb; XDG_DATA_HOME and
++    XDG_CONFIG_HOME pointed at temp folders.
++    $ yamt --diff=main --repo proj
++      → "yamt: --diff=main: a range needs two dots (a..b) or three (a...b); yamt does not compare the working tree"
++        + usage, exit 2
++    $ yamt --diff=nope..main --repo proj → `yamt: git names no commit "nope"`, exit 2
++    $ yamt --diff=main...feature --repo /tmp
++      → "yamt: /tmp is not inside a git repository: fatal: not a git repository (or any parent up to mount point /)",
++        exit 2
++    $ yamt --diff=main...other --repo proj → "yamt: main and other have no merge base", exit 2
++    $ yamt --diff --diff=main..feature → "yamt: give --diff or one --diff=<range>, not both" + usage, exit 2
++    (These four ran with DISPLAY unset, so no window could have been built.)
++    $ yamt --diff=main...feature --repo proj & → window "main...feature — proj — yamt"
++      (screenshot /tmp/rvshell/first.png)
++    Same pair again → "yamt: another yamt window shows bb9ed6b..f2f29a4 of /tmp/rvshell/proj", exit 2
++    Same pair typed as feature~1..feature → the same line, exit 2
++    $ yamt --diff=main..feature --repo proj & → a second window "main..feature — proj — yamt" beside the first
++    WM_DELETE_WINDOW to both → "first window closed: exit 0", "second window closed: exit 0"
++    Lock folders: data/yamt/range/proj-1f0b7712b903b6bf/<base>-<feature>/lock and <main>-<feature>/lock
++    What the window showed: the merge page (empty Files panel) with the problem bar "Could not list the conflicted
++    files: state not managed for field `state` on command `list_stop`…". That is expected until row 9's main.ts
++    switch lands.
++
++deviations_from_brief
++  - range.rs has its own APP_FOLDER "yamt", the same value as compare.rs's private constant, because compare.rs is
++    not in Owned. One shared constant (vision 2) would need compare.rs to make APP_FOLDER pub(crate); range.rs could
++    then import it.
++  - window_title in window.rs is now pub(crate) too, so the range title reuses "<folder> — yamt".
++  - The range tests build their own mock window inside range.rs (with_range(mock_builder()) + invoke_on), because
++    mock_window.rs is not in Owned. A range-window helper there would follow open_compare_window if wanted.
++  - A test beyond the acceptance list: the same pair twice in the shell (manage_range_in) gives the Locked line.
++  - The real-app close used WM_DELETE_WINDOW sent directly (a throwaway ctypes script, since deleted). Xvfb has no
++    window manager, and `xdotool windowquit` closed neither the range nor the --diff window there.
++  - app-session cannot start --diff=<range> yet (W4 adds that), so the smoke used a plain run instead.
++  - Docs outside Owned, for the docs slice: the project-map src-tauri entry (range.rs, WindowKind range,
++    with_range, UnknownRangeFile) and architecture §3.5.
++
++open_risks
++  - src-tauri/src/range.rs load_range_file: the WorkerStopped path has no test. Compare's test injects a panicking
++    closure through on_worker; the range command has no such seam, and I did not add one for a single caller.
++  - src-tauri/src/ipc_error.rs From<yamt_range::Error>: the Git(source) arm has no test. src-tauri may not depend
++    on yamt-gitio (PM1), so the test cannot construct a gitio Error.
++```
+\ No newline at end of file
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index ea54a5b..381e02b 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`; `--diff` with `--repo` is a usage error, `--help`/`--version` win), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; never called for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for both windows, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge or compare, built by one `open_and_wait`: reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script sets `<html data-theme>` and `<html data-window="merge|compare">` before the first frame; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of both windows; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one; `with_compare` sets only the invoke handler), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error` and from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`). Three `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host` and `compare` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` (plan §2 #103–#107): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_range`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), manages `RangeState { range, _lock }` without a `Mutex` (nothing changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and ends with exit 0 and no message at close; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`)), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one; `with_compare` and `with_range` set only the invoke handler), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`) and from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Three `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare` and `range` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/args.rs b/src-tauri/src/args.rs
+index 4c728b9..ad686d1 100644
+--- a/src-tauri/src/args.rs
++++ b/src-tauri/src/args.rs
+@@ -1,38 +1,75 @@
+ use std::ffi::OsString;
+ use std::path::PathBuf;
+ 
++use yamt_range::RangeSpec;
++
+ pub(crate) const USAGE: &str = "\
+ usage: yamt [--repo <path>]
+        yamt --diff
++       yamt --diff=<a>..<b> [--repo <path>]
++       yamt --diff=<a>...<b> [--repo <path>]
+ 
+ Resolves the conflicted files of the merge in progress in <path> (default: the current directory).
+ With --diff, compares any two pasted texts in two columns: no repository needed, its tabs kept between runs.
++With --diff=<range>, shows read-only what changed between two commits of the repository: a..b compares the
++two commits, a...b compares where b branched off a with b (a merge request's changes). Either side is any
++name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
+ 
+-  --repo <path>  any directory inside the work tree
+-  --diff         compare pasted texts instead of merging
+-  --help         print this help
+-  --version      print the version
++  --repo <path>     any directory inside the work tree
++  --diff            compare pasted texts instead of merging
++  --diff=<range>    review a commit range
++  --help            print this help
++  --version         print the version
+ ";
+ 
+ const DIFF_WITH_REPO: &str = "--diff compares pasted text and takes no --repo";
++const DIFF_TWICE: &str = "give --diff or one --diff=<range>, not both";
++const RANGE_FLAG: &str = "--diff=";
++const CURRENT_DIR: &str = ".";
+ 
+ #[derive(Debug, PartialEq, Eq)]
+ pub(crate) enum Invocation {
+     Merge { repo: PathBuf },
+     Compare,
++    Range { spec: RangeSpec, repo: PathBuf },
+     Help,
+     Version,
+ }
+ 
++/// What the `--diff` flags seen so far ask for.
++enum Window {
++    Merge,
++    Compare,
++    Range(RangeSpec),
++}
++
++impl Window {
++    fn with_compare(self) -> Result<Window, String> {
++        match self {
++            Window::Merge | Window::Compare => Ok(Window::Compare),
++            Window::Range(_) => Err(DIFF_TWICE.to_owned()),
++        }
++    }
++
++    fn with_range(self, text: &str) -> Result<Window, String> {
++        match self {
++            Window::Merge => RangeSpec::parse(text)
++                .map(Window::Range)
++                .map_err(|error| error.to_string()),
++            Window::Compare | Window::Range(_) => Err(DIFF_TWICE.to_owned()),
++        }
++    }
++}
++
+ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
+     let mut args = args.into_iter();
+     let mut repo = None;
+-    let mut diff = false;
++    let mut window = Window::Merge;
+     while let Some(arg) = args.next() {
+         match arg.to_str() {
+             Some("--help") => return Ok(Invocation::Help),
+             Some("--version") => return Ok(Invocation::Version),
+-            Some("--diff") => diff = true,
++            Some("--diff") => window = window.with_compare()?,
+             Some("--repo") => {
+                 repo = Some(
+                     args.next()
+@@ -40,14 +77,21 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
+                         .ok_or("--repo needs a path")?,
+                 );
+             }
++            Some(text) if let Some(range) = text.strip_prefix(RANGE_FLAG) => {
++                window = window.with_range(range)?;
++            }
+             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
+         }
+     }
+-    match (diff, repo) {
+-        (true, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
+-        (true, None) => Ok(Invocation::Compare),
+-        (false, repo) => Ok(Invocation::Merge {
+-            repo: repo.unwrap_or_else(|| PathBuf::from(".")),
++    match (window, repo) {
++        (Window::Compare, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
++        (Window::Compare, None) => Ok(Invocation::Compare),
++        (Window::Range(spec), repo) => Ok(Invocation::Range {
++            spec,
++            repo: repo.unwrap_or_else(|| PathBuf::from(CURRENT_DIR)),
++        }),
++        (Window::Merge, repo) => Ok(Invocation::Merge {
++            repo: repo.unwrap_or_else(|| PathBuf::from(CURRENT_DIR)),
+         }),
+     }
+ }
+@@ -125,4 +169,74 @@ mod tests {
+         assert!(USAGE.contains("       yamt --diff\n"), "{USAGE}");
+         assert!(USAGE.contains("  --diff  "), "{USAGE}");
+     }
++
++    fn range(text: &str, repo: &str) -> Invocation {
++        Invocation::Range {
++            spec: RangeSpec::parse(text).unwrap(),
++            repo: PathBuf::from(repo),
++        }
++    }
++
++    #[test]
++    fn a_range_takes_the_current_directory_or_a_repo_in_either_order() {
++        assert_eq!(
++            parsed(&["--diff=main...feature"]),
++            Ok(range("main...feature", "."))
++        );
++        assert_eq!(
++            parsed(&["--diff=a..b", "--repo", "p"]),
++            Ok(range("a..b", "p"))
++        );
++        assert_eq!(
++            parsed(&["--repo", "p", "--diff=a..b"]),
++            Ok(range("a..b", "p"))
++        );
++    }
++
++    #[test]
++    fn each_malformed_range_is_its_usage_line() {
++        let refusals = [
++            ("--diff=", "--diff= needs a range, such as main...dev"),
++            (
++                "--diff=main",
++                "--diff=main: a range needs two dots (a..b) or three (a...b); yamt does not compare the working tree",
++            ),
++            (
++                "--diff=a....b",
++                r#"--diff=a....b: a range holds one ".." or "...""#,
++            ),
++            (
++                "--diff=a..b..c",
++                r#"--diff=a..b..c: a range holds one ".." or "...""#,
++            ),
++            (
++                "--diff=-x..b",
++                r#"--diff=-x..b: a side may not start with "-""#,
++            ),
++        ];
++        for (arg, line) in refusals {
++            assert_eq!(parsed(&[arg]), Err(line.to_owned()), "{arg}");
++        }
++    }
++
++    #[test]
++    fn diff_and_a_range_or_two_ranges_are_a_usage_error() {
++        let refused = Err("give --diff or one --diff=<range>, not both".to_owned());
++        assert_eq!(parsed(&["--diff", "--diff=a..b"]), refused);
++        assert_eq!(parsed(&["--diff=a..b", "--diff"]), refused);
++        assert_eq!(parsed(&["--diff=a..b", "--diff=a..b"]), refused);
++    }
++
++    #[test]
++    fn the_usage_names_the_range_forms() {
++        assert!(
++            USAGE.contains("       yamt --diff=<a>..<b> [--repo <path>]\n"),
++            "{USAGE}"
++        );
++        assert!(
++            USAGE.contains("       yamt --diff=<a>...<b> [--repo <path>]\n"),
++            "{USAGE}"
++        );
++        assert!(USAGE.contains("  --diff=<range>    "), "{USAGE}");
++    }
+ }
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 17d441a..e2fa583 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -6,7 +6,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
+ use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
+-use crate::{clipboard, compare, servers, settings};
++use crate::{clipboard, compare, range, servers, settings};
+ 
+ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+@@ -42,6 +42,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         compare::rename_tab,
+         compare::set_tab_language,
+         compare::show_tab,
++        range::open_range,
++        range::load_range_file::<tauri::Wry>,
+         clipboard::read_clipboard::<tauri::Wry>,
+     ])
+ }
+@@ -65,6 +67,11 @@ pub(crate) fn with_compare<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Bui
+     builder.invoke_handler(specta_builder().invoke_handler())
+ }
+ 
++/// The range window's commands; its `RangeState` is managed once the data folder is known.
++pub(crate) fn with_range<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
++    builder.invoke_handler(specta_builder().invoke_handler())
++}
++
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index e28c557..b5ac2c4 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -1,4 +1,5 @@
+ use yamt_compare::{MAX_COLUMN_BYTES, TabId};
++use yamt_range::RangeFileId;
+ use yamt_session::UnsupportedReason;
+ 
+ #[derive(Debug, serde::Serialize, specta::Type)]
+@@ -44,6 +45,9 @@ pub enum IpcError {
+     ColumnTooLarge {
+         limit: u32,
+     },
++    UnknownRangeFile {
++        file: RangeFileId,
++    },
+     WorkerStopped,
+ }
+ 
+@@ -121,6 +125,24 @@ impl From<yamt_compare::Error> for IpcError {
+     }
+ }
+ 
++impl From<yamt_range::Error> for IpcError {
++    fn from(error: yamt_range::Error) -> IpcError {
++        match error {
++            yamt_range::Error::UnknownFile { file } => IpcError::UnknownRangeFile { file },
++            yamt_range::Error::Git(source) => IpcError::Git {
++                message: source.to_string(),
++            },
++            yamt_range::Error::NotARepository { .. }
++            | yamt_range::Error::UnknownName { .. }
++            | yamt_range::Error::NoMergeBase { .. }
++            | yamt_range::Error::Locked { .. }
++            | yamt_range::Error::LockFailed { .. } => IpcError::Git {
++                message: error.to_string(),
++            },
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use serde_json::{Value, json};
+@@ -301,4 +323,27 @@ mod tests {
+             json!({ "kind": "UnknownTab", "tab": 7 })
+         );
+     }
++
++    fn range_json(error: yamt_range::Error) -> Value {
++        serde_json::to_value(IpcError::from(error)).unwrap()
++    }
++
++    #[test]
++    fn an_unknown_range_file_has_its_kind_and_a_start_refusal_is_its_line() {
++        let unknown = yamt_range::Error::UnknownFile {
++            file: RangeFileId(9),
++        };
++        assert_eq!(
++            range_json(unknown),
++            json!({ "kind": "UnknownRangeFile", "file": 9 })
++        );
++        let no_base = yamt_range::Error::NoMergeBase {
++            left: "main".to_owned(),
++            right: "other".to_owned(),
++        };
++        assert_eq!(
++            range_json(no_base),
++            json!({ "kind": "Git", "message": "main and other have no merge base" })
++        );
++    }
+ }
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index e123bdd..dbd53a1 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,5 +1,5 @@
+ //! Desktop shell: one window over a `MergeSession`, whose exit status says whether the merge is resolved, or
+-//! with `--diff` one compare window over the stored tabs.
++//! with `--diff` one compare window over the stored tabs, or with `--diff=<range>` one read-only commit range.
+ 
+ #[cfg(target_os = "linux")]
+ mod appimage;
+@@ -17,6 +17,7 @@ mod merge;
+ #[cfg(test)]
+ mod mock_window;
+ mod outcome;
++mod range;
+ mod servers;
+ mod settings;
+ mod window;
+@@ -53,6 +54,11 @@ pub fn run() -> ExitCode {
+             let repo = appimage::repo_from_start_dir(repo);
+             merge(&repo).report()
+         }
++        Ok(Invocation::Range { spec, repo }) => {
++            #[cfg(target_os = "linux")]
++            let repo = appimage::repo_from_start_dir(repo);
++            range::run_range(&repo, &spec).report()
++        }
+         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
+     }
+ }
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+new file mode 100644
+index 0000000..2865cfc
+--- /dev/null
++++ b/src-tauri/src/range.rs
+@@ -0,0 +1,201 @@
++use std::path::{Path, PathBuf};
++
++use tauri::{App, Manager, Runtime, State, WebviewWindow};
++use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
++
++use crate::commands::with_range;
++use crate::ipc_error::IpcError;
++use crate::outcome::{Ending, Exit};
++use crate::window::{WindowKind, context, open_and_wait, window_title};
++
++const APP_FOLDER: &str = "yamt";
++const RANGE_FOLDER: &str = "range";
++
++/// The range the window shows and the lock on its commit pair, both held for the run (plan §2 #104, #107).
++pub(crate) struct RangeState {
++    range: Range,
++    _lock: PairLock,
++}
++
++/// `yamt --diff=<range>`: every refusal before the window is one line and exit 2; a closed window is exit 0.
++pub(crate) fn run_range(repo: &Path, spec: &RangeSpec) -> Ending {
++    let resolved = match Resolved::resolve(repo, spec) {
++        Ok(resolved) => resolved,
++        Err(error) => return Ending::failure(error.to_string()),
++    };
++    let title = range_title(spec, resolved.root());
++    match open_window(resolved, &title) {
++        Ok(ending) => ending,
++        Err(error) => Ending::failure(error.to_string()),
++    }
++}
++
++fn open_window(resolved: Resolved, title: &str) -> tauri::Result<Ending> {
++    let app = with_range(tauri::Builder::default()).build(context())?;
++    let managed = app
++        .path()
++        .data_dir()
++        .map_err(|error| format!("no data folder: {error}"))
++        .and_then(|data_dir| manage_range_in(&app, &data_dir, resolved));
++    if let Err(problem) = managed {
++        return Ok(Ending::failure(problem));
++    }
++    open_and_wait(app, title, WindowKind::Range)?;
++    Ok(Ending {
++        exit: Exit::Success,
++        message: None,
++    })
++}
++
++/// Takes the pair's lock in `<data_dir>/yamt/range/` before listing, then hands the range to the app.
++fn manage_range_in<R: Runtime>(
++    app: &App<R>,
++    data_dir: &Path,
++    resolved: Resolved,
++) -> Result<(), String> {
++    let lock =
++        PairLock::take(&range_folder(data_dir), &resolved).map_err(|error| error.to_string())?;
++    let range = resolved.list().map_err(|error| error.to_string())?;
++    app.manage(RangeState { range, _lock: lock });
++    Ok(())
++}
++
++fn range_folder(data_dir: &Path) -> PathBuf {
++    data_dir.join(APP_FOLDER).join(RANGE_FOLDER)
++}
++
++fn range_title(spec: &RangeSpec, root: &Path) -> String {
++    format!("{} — {}", spec.text(), window_title(root))
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn open_range(state: State<'_, RangeState>) -> RangeStart {
++    state.range.start()
++}
++
++// The range comes from the window: tauri-macros 2.7 checks an async command with a borrowed
++// argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn load_range_file<R: Runtime>(
++    window: WebviewWindow<R>,
++    file: RangeFileId,
++) -> Result<RangeFile, IpcError> {
++    let worker = tauri::async_runtime::spawn_blocking(move || {
++        Ok(window.state::<RangeState>().range.load(file)?)
++    });
++    worker.await.unwrap_or_else(|error| {
++        tracing::error!(%error, "yamt's range worker stopped");
++        Err(IpcError::WorkerStopped)
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use serde_json::json;
++    use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
++    use tauri::{WebviewUrl, WebviewWindowBuilder};
++    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
++
++    use super::*;
++    use crate::mock_window::invoke_on;
++
++    const RANGE: &str = "main...remote";
++
++    struct RangeWindow {
++        repo: TempDir,
++        data: TempDir,
++        webview: WebviewWindow<MockRuntime>,
++        _app: App<MockRuntime>,
++    }
++
++    fn repo() -> TempDir {
++        let file = ConflictFile {
++            path: "a.txt",
++            kind: FileKind::Regular,
++            base: Some(b"one\n"),
++            local: Some(b"one\n"),
++            remote: Some(b"two\n"),
++        };
++        diverged_repo(&[file]).unwrap()
++    }
++
++    fn resolved(root: &Path) -> Resolved {
++        Resolved::resolve(root, &RangeSpec::parse(RANGE).unwrap()).unwrap()
++    }
++
++    fn range_app() -> App<MockRuntime> {
++        with_range(mock_builder())
++            .build(mock_context(noop_assets()))
++            .unwrap()
++    }
++
++    fn open_range_window() -> RangeWindow {
++        let repo = repo();
++        let data = TempDir::new().unwrap();
++        let app = range_app();
++        manage_range_in(&app, data.path(), resolved(repo.path())).unwrap();
++        let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
++            .build()
++            .unwrap();
++        RangeWindow {
++            repo,
++            data,
++            webview,
++            _app: app,
++        }
++    }
++
++    #[test]
++    fn open_range_answers_the_range_s_start() {
++        let window = open_range_window();
++        let start = resolved(window.repo.path()).list().unwrap().start();
++        assert_eq!(
++            invoke_on(&window.webview, "open_range", json!({})),
++            Ok(serde_json::to_value(start).unwrap())
++        );
++    }
++
++    #[test]
++    fn a_listed_file_loads_and_an_unknown_id_answers_unknown_range_file() {
++        let window = open_range_window();
++        let loaded = invoke_on(&window.webview, "load_range_file", json!({ "file": 0 })).unwrap();
++        assert_eq!(loaded["kind"], "texts");
++        assert_eq!(loaded["right"], "two\n");
++        assert_eq!(
++            invoke_on(&window.webview, "load_range_file", json!({ "file": 7 })),
++            Err(json!({ "kind": "UnknownRangeFile", "file": 7 }))
++        );
++    }
++
++    #[test]
++    fn a_second_window_on_the_same_pair_is_refused_naming_both_short_ids() {
++        let window = open_range_window();
++        let refused = manage_range_in(
++            &range_app(),
++            window.data.path(),
++            resolved(window.repo.path()),
++        );
++        let start = resolved(window.repo.path()).list().unwrap().start();
++        assert_eq!(
++            refused,
++            Err(format!(
++                "another yamt window shows {}..{} of {}",
++                start.left.short_id,
++                start.right.short_id,
++                resolved(window.repo.path()).root().display()
++            ))
++        );
++    }
++
++    #[test]
++    fn the_title_is_the_range_as_typed_then_the_repository_folder() {
++        let spec = RangeSpec::parse("main...feature").unwrap();
++        assert_eq!(
++            range_title(&spec, Path::new("/home/me/proj")),
++            "main...feature — proj — yamt"
++        );
++    }
++}
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index dbe88ff..7fae206 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -43,9 +43,10 @@ const PAGE_ANSWER: &str = "true";
+ 
+ /// Which page the window shows: `<html data-window>` before the first frame (plan §2 #94).
+ #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-enum WindowKind {
++pub(crate) enum WindowKind {
+     Merge,
+     Compare,
++    Range,
+ }
+ 
+ impl WindowKind {
+@@ -53,6 +54,7 @@ impl WindowKind {
+         match self {
+             WindowKind::Merge => "merge",
+             WindowKind::Compare => "compare",
++            WindowKind::Range => "range",
+         }
+     }
+ }
+@@ -72,7 +74,7 @@ pub(crate) fn run_compare() -> Ending {
+     }
+ }
+ 
+-fn context() -> tauri::Context<tauri::Wry> {
++pub(crate) fn context() -> tauri::Context<tauri::Wry> {
+     tauri::generate_context!()
+ }
+ 
+@@ -100,7 +102,7 @@ fn open_compare() -> tauri::Result<Ending> {
+     })
+ }
+ 
+-fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
++pub(crate) fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
+     let stored = start_settings(app.path());
+     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
+     #[cfg(target_os = "linux")]
+@@ -163,7 +165,7 @@ fn start_script(theme: Theme, kind: WindowKind) -> String {
+     )
+ }
+ 
+-fn window_title(root: &Path) -> String {
++pub(crate) fn window_title(root: &Path) -> String {
+     let folder = root.file_name().unwrap_or(root.as_os_str());
+     format!("{} — yamt", folder.to_string_lossy())
+ }
+@@ -281,6 +283,10 @@ mod tests {
+             start_script(Theme::ZedLight, WindowKind::Merge),
+             r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
+         );
++        assert_eq!(
++            start_script(Theme::Dark, WindowKind::Range),
++            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range";"#
++        );
+     }
+ 
+     fn second_request_after(delay: Duration) -> CloseRequest {
+-- 
+2.56.0
+

@@ -1,0 +1,1868 @@
+From 525fa24d89273aee71415d72d78bf040b29ca2b5 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:11:20 +0200
+Subject: [PATCH] feat(range): yamt-range crate: parse, resolve, list and load
+ a commit range; one lock per pair
+
+MAX_TEXT_BYTES moves to merge-core as the one 8 MiB.
+---
+ .omp/run/notes/RVCrate.md    | 122 ++++++++
+ Cargo.lock                   |  14 +
+ Cargo.toml                   |   2 +
+ crates/compare/src/lib.rs    |  15 +-
+ crates/merge-core/src/lib.rs |   3 +
+ crates/range/AGENTS.md       |   1 +
+ crates/range/Cargo.toml      |  20 ++
+ crates/range/src/entries.rs  | 279 ++++++++++++++++++
+ crates/range/src/lib.rs      | 154 ++++++++++
+ crates/range/src/load.rs     |  97 +++++++
+ crates/range/src/lock.rs     | 118 ++++++++
+ crates/range/src/open.rs     | 132 +++++++++
+ crates/range/src/spec.rs     | 159 ++++++++++
+ crates/range/tests/range.rs  | 541 +++++++++++++++++++++++++++++++++++
+ crates/session/src/decode.rs |   2 +-
+ scripts/arch-check.sh        |  11 +-
+ src-tauri/Cargo.toml         |   1 +
+ 17 files changed, 1667 insertions(+), 4 deletions(-)
+ create mode 100644 .omp/run/notes/RVCrate.md
+ create mode 100644 crates/range/AGENTS.md
+ create mode 100644 crates/range/Cargo.toml
+ create mode 100644 crates/range/src/entries.rs
+ create mode 100644 crates/range/src/lib.rs
+ create mode 100644 crates/range/src/load.rs
+ create mode 100644 crates/range/src/lock.rs
+ create mode 100644 crates/range/src/open.rs
+ create mode 100644 crates/range/src/spec.rs
+ create mode 100644 crates/range/tests/range.rs
+
+diff --git a/.omp/run/notes/RVCrate.md b/.omp/run/notes/RVCrate.md
+new file mode 100644
+index 0000000..2f87bc6
+--- /dev/null
++++ b/.omp/run/notes/RVCrate.md
+@@ -0,0 +1,122 @@
++I've built the new `yamt-range` crate as the brief describes. All the acceptance tests pass, and so do all four required commands: `cargo fmt --check`, `cargo clippy`, `cargo test` on the four packages, and `just arch-check`.
++
++```
++summary
++  - New crate crates/range (yamt-range). It holds every Contract type with its serde shape, and the messages for
++    Error and SpecError. It provides RangeSpec::parse/text, Resolved::resolve/root/list, Range::start/load
++    (Range is Send + Sync) and PairLock::take/folder.
++  - Listing: one changed_files run and one blob_sizes run (gitlinks are never sent to it). Entries are sorted by
++    display path and ids follow that order. load decides the answer from listing data in #105's order, so a blob it
++    answers from the listing is never read. Otherwise it reads at most two blobs with one BlobReader and answers
++    Texts with merge_core::compare, or NotUtf8.
++  - The 8 MiB limit now lives in merge-core only: yamt_merge_core::MAX_TEXT_BYTES. session/decode.rs uses it, and
++    a test in compare pins MAX_COLUMN_BYTES to it.
++  - arch-check: yamt-range may depend on yamt-gitio and yamt-merge-core only among the yamt crates, never on tauri;
++    yamt-app may also depend on yamt-range.
++
++files_changed
++  crates/range/Cargo.toml (new)
++  crates/range/AGENTS.md (new)
++  crates/range/src/lib.rs (new)
++  crates/range/src/spec.rs (new)
++  crates/range/src/open.rs (new)
++  crates/range/src/entries.rs (new)
++  crates/range/src/load.rs (new)
++  crates/range/src/lock.rs (new)
++  crates/range/tests/range.rs (new)
++  crates/merge-core/src/lib.rs   (MAX_TEXT_BYTES)
++  crates/session/src/decode.rs   (pub(crate) use yamt_merge_core::MAX_TEXT_BYTES)
++  crates/compare/src/lib.rs      (the pin test; one doc line, see deviations)
++  scripts/arch-check.sh
++  src-tauri/Cargo.toml           (only the path dependency line)
++  Cargo.lock                     (cargo regenerated it; not in Owned)
++
++tests_added
++  spec.rs:
++    - two_dots_three_dots_and_empty_sides_read_as_typed_or_head: the brief's valid examples, plus "...dev" and
++      "a.b..c-d"; an empty side becomes HEAD.
++    - every_malformed_range_is_its_error: "", "main", "a.b", "a....b", "a..b..c", "a...b...c", "-x..b", "a...-x".
++    - each_error_is_its_usage_line: the usage lines of design §1's table, word for word.
++  entries.rs:
++    - rows_are_sorted_by_path_and_a_deleted_row_is_named_by_its_old_path: also covers the rename's old_path and the
++      counts (Counted / NotCounted).
++    - sizes_go_to_the_sides_in_blob_id_order_and_never_to_a_gitlink: the order of blob_ids matches how files_at
++      hands out the sizes; a gitlink gets no size; numstat Binary sets the binary flag.
++    - a_mode_names_its_kind: 100644, 100755, 120000 and 160000 map to File, Executable, Link and Submodule.
++  lock.rs:
++    - fnv1a_64_gives_the_published_vectors: "a" → af63dc4c8601ec8c, plus "" and "foobar".
++    - the_key_names_the_work_tree_folder_or_a_bare_repository_and_hashes_the_common_dir
++  compare/src/lib.rs:
++    - the_column_limit_is_merge_core_s_text_limit: usize::try_from(MAX_COLUMN_BYTES) == Ok(MAX_TEXT_BYTES).
++  tests/range.rs (real temp repositories; all 16 design §10 names, plus one more):
++    - three_dots_compares_the_merge_base_and_two_dots_the_tips: the file sets differ; the labels are MergeBase and
++      Named; short ids and subjects are checked; start().range is the text as typed.
++    - a_criss_cross_range_lists_what_git_diff_three_dots_lists: the test first checks that merge-base --all gives
++      2 bases, then compares the list with `git diff --name-only x...y`.
++    - an_empty_side_is_head: "main.." lists the same files as "main..local", with the right labelled HEAD; ".."
++      lists nothing.
++    - unknown_name_not_a_repository_and_no_merge_base_are_their_errors: the variant and its Display line for each;
++      git's message is cut to its first line.
++    - added_has_an_empty_left_and_deleted_an_empty_right
++    - renamed_shows_the_old_text_left
++    - binary_is_answered_before_size_and_without_reading: a NUL blob of 8 MiB + 1; its loose object is deleted after
++      listing.
++    - exactly_8_mib_loads_and_one_byte_more_is_too_large: the larger blob's object is deleted too.
++    - non_utf8_names_the_sides: Left, Right, Both.
++    - mode_only_kind_changed_and_submodule_are_sentences: the objects behind the mode-only and kind-change files
++      are deleted; a changed submodule and an added one (old None).
++    - a_link_is_shown_as_its_target_text: links staged through --cacheinfo 120000, so it runs on Windows too.
++    - texts_carry_merge_core_compare_s_differences: also checks that a mode change together with a content change
++      gives mode Changed{File, Executable}.
++    - an_unknown_id_is_unknown_file
++    - a_range_is_shared_between_threads: a compile-time Send + Sync check; this is the extra test.
++    - the_same_pair_twice_is_locked_naming_both_short_ids: the same pair typed differently ("<main id>..HEAD");
++      the folder is <range_dir>/<key>/<left oid>-<right oid> with its lock file; taking it again after the drop
++      succeeds.
++    - another_worktree_of_the_same_repository_shares_the_lock: the Locked error names the linked worktree's root.
++    - a_different_pair_is_not_locked: other tips and the reversed pair each get their own folder under the same
++      repo key; another repository gets a different key.
++
++smoke_evidence
++  cargo fmt --check → FMT_OK
++  cargo clippy --workspace --all-targets -- -D warnings → "Finished `dev` profile …", no warnings
++  cargo test -p yamt-range -p yamt-merge-core -p yamt-session -p yamt-compare →
++    yamt_range unittests   test result: ok. 8 passed; 0 failed
++    tests/range.rs         test result: ok. 17 passed; 0 failed (2.91s)
++    yamt_compare unittests test result: ok. 12 passed; 0 failed   (includes the pin test)
++    every merge-core, session and compare test binary: ok, 0 failed (1 ignored in session operations.rs, as before)
++  just arch-check → "arch-check: ok"
++
++deviations_from_brief
++  - Root Cargo.toml (shared; orchestrator): add `"crates/range",` to members and
++    `yamt-range = { path = "crates/range" }` to [workspace.dependencies]. Afterwards, src-tauri can use
++    `yamt-range.workspace = true`.
++  - Cargo.lock: cargo regenerated it (+14 lines for yamt-range).
++  - The repo key's name part: the brief says "the work tree folder's name", but each worktree has its own folder
++    name, so another_worktree_of_the_same_repository_shares_the_lock could not pass. I took the name from the
++    common git dir instead: its parent's name when the common dir is `.git`, otherwise its own name (a bare
++    repository or `--separate-git-dir`). The key now depends only on the common dir, as #107 intends. I kept the
++    name as an OsString, so nothing goes through lossy UTF-8.
++  - FileAt does not keep the path bytes (Change step 3). Blobs are read by object id, so nothing reads a path, and
++    an unread field would fail clippy's dead_code check. B and C can add them when they need them.
++  - RangeSpec keeps each side as a String with HEAD already filled in, instead of the design's Option<String>
++    (one concept fewer).
++  - ModeOnly compares the two sides' kinds rather than their raw modes. git's trees hold only canonical modes, so
++    the two are equivalent.
++  - compare/src/lib.rs: besides the pin test, I fixed the doc line on MAX_COLUMN_BYTES, which named "`session`'s
++    `MAX_TEXT_BYTES`" and now names `yamt_merge_core::MAX_TEXT_BYTES`.
++  - session/decode.rs re-exports the constant (`pub(crate) use yamt_merge_core::MAX_TEXT_BYTES`), because
++    merge_data.rs and sides.rs import it from crate::decode and are not in Owned.
++  - Docs not in Owned (for the docs slice): the project map's tree, PM1's text and the dependency diagram should
++    name yamt-range; docs/architecture.md needs its §7 crate list updated.
++
++open_risks
++  - crates/range/src/load.rs:62 `u32::try_from(MAX_TEXT_BYTES).unwrap_or(u32::MAX)`: a mutant of the fallback
++    survives, because the conversion cannot fail with 8 MiB.
++  - scripts/arch-check.sh:44-49: the new yamt-range rule has no committed test of its failing path. The existing
++    per-crate rules have none either; I only saw it pass ("arch-check: ok").
++  - crates/range/tests/range.rs a_criss_cross_range_…: this relies on `git diff a...b` and `git merge-base` picking
++    the same first base among several, which is git's behaviour today (both call repo_get_merge_bases).
++  - crates/range/src/open.rs not_a_repository: every GitFailed from `discover` is treated as "not a repository";
++    other errors (an Io error for a cwd that does not exist) come back as Error::Git.
++```
+\ No newline at end of file
+diff --git a/Cargo.lock b/Cargo.lock
+index ed7a1e5..bab7ad5 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4610,6 +4610,7 @@ dependencies = [
+  "yamt-compare",
+  "yamt-conflict-repo",
+  "yamt-lsp-host",
++ "yamt-range",
+  "yamt-session",
+  "yamt-settings",
+ ]
+@@ -4677,6 +4678,19 @@ dependencies = [
+  "specta",
+ ]
+ 
++[[package]]
++name = "yamt-range"
++version = "0.5.1"
++dependencies = [
++ "serde",
++ "specta",
++ "tempfile",
++ "thiserror 2.0.21",
++ "yamt-conflict-repo",
++ "yamt-gitio",
++ "yamt-merge-core",
++]
++
+ [[package]]
+ name = "yamt-session"
+ version = "0.5.1"
+diff --git a/Cargo.toml b/Cargo.toml
+index f5cc815..493c7dd 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -9,6 +9,7 @@ members = [
+   "crates/settings",
+   "crates/lsp-host",
+   "crates/compare",
++  "crates/range",
+   "src-tauri",
+ ]
+ 
+@@ -26,6 +27,7 @@ yamt-conflict-repo = { path = "crates/conflict-repo" }
+ yamt-settings = { path = "crates/settings" }
+ yamt-lsp-host = { path = "crates/lsp-host" }
+ yamt-compare = { path = "crates/compare" }
++yamt-range = { path = "crates/range" }
+ thiserror = "2.0.21"
+ serde = { version = "1.0.229", features = ["derive"] }
+ serde_json = "1.0.151"
+diff --git a/crates/compare/src/lib.rs b/crates/compare/src/lib.rs
+index 5739683..1fe800c 100644
+--- a/crates/compare/src/lib.rs
++++ b/crates/compare/src/lib.rs
+@@ -106,7 +106,7 @@ pub struct TabTexts {
+     pub comparison: Comparison,
+ }
+ 
+-/// The most bytes a column holds: the merge window's per-file limit (`session`'s `MAX_TEXT_BYTES`).
++/// The most bytes a column holds: the merge window's per-file limit (`yamt_merge_core::MAX_TEXT_BYTES`).
+ pub const MAX_COLUMN_BYTES: u32 = 8 * 1024 * 1024;
+ 
+ /// Why a store operation failed.
+@@ -237,3 +237,16 @@ pub fn tab_texts(loaded: &LoadedTab) -> TabTexts {
+         comparison: comparison(loaded),
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_column_limit_is_merge_core_s_text_limit() {
++        assert_eq!(
++            usize::try_from(MAX_COLUMN_BYTES),
++            Ok(yamt_merge_core::MAX_TEXT_BYTES)
++        );
++    }
++}
+diff --git a/crates/merge-core/src/lib.rs b/crates/merge-core/src/lib.rs
+index 57d63d3..36044ec 100644
+--- a/crates/merge-core/src/lib.rs
++++ b/crates/merge-core/src/lib.rs
+@@ -21,3 +21,6 @@ pub use line::{
+ };
+ pub use line_map::{LineMap, line_map};
+ pub use word::{Removal, SideWordChanges, WordChanges, word_changes};
++
++/// The most bytes a text may hold to be shown: larger files are answered "too large", never diffed.
++pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
+diff --git a/crates/range/AGENTS.md b/crates/range/AGENTS.md
+new file mode 100644
+index 0000000..ea8af3c
+--- /dev/null
++++ b/crates/range/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then one `BlobReader` for at most two blobs, UTF-8 per side, `Texts` with `yamt_merge_core::compare`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read.
+diff --git a/crates/range/Cargo.toml b/crates/range/Cargo.toml
+new file mode 100644
+index 0000000..a9063b5
+--- /dev/null
++++ b/crates/range/Cargo.toml
+@@ -0,0 +1,20 @@
++[package]
++name = "yamt-range"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++yamt-gitio.workspace = true
++yamt-merge-core.workspace = true
++serde.workspace = true
++specta.workspace = true
++thiserror.workspace = true
++
++[dev-dependencies]
++yamt-conflict-repo.workspace = true
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/range/src/entries.rs b/crates/range/src/entries.rs
+new file mode 100644
+index 0000000..148d007
+--- /dev/null
++++ b/crates/range/src/entries.rs
+@@ -0,0 +1,279 @@
++use std::path::Path;
++
++use yamt_gitio::{Changed, ChangedFile, Numstat, Oid, TreeSide};
++
++use crate::{RangeChange, RangeEntry, RangeEntryKind, RangeFileId, RangeLineCounts};
++
++const EXECUTABLE_MODE: u32 = 0o100_755;
++const LINK_MODE: u32 = 0o120_000;
++const GITLINK_MODE: u32 = 0o160_000;
++
++/// A changed file as the range holds it: its row, and both sides' blobs as listed.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct FileAt {
++    pub(crate) entry: RangeEntry,
++    pub(crate) old: Option<BlobAt>,
++    pub(crate) new: Option<BlobAt>,
++    pub(crate) binary: bool,
++}
++
++/// One side's object: `size` is `None` for a gitlink, whose id names a commit, not a blob.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct BlobAt {
++    pub(crate) oid: Oid,
++    pub(crate) mode: u32,
++    pub(crate) size: Option<u64>,
++}
++
++impl BlobAt {
++    pub(crate) fn kind(&self) -> RangeEntryKind {
++        match self.mode {
++            LINK_MODE => RangeEntryKind::Link,
++            GITLINK_MODE => RangeEntryKind::Submodule,
++            EXECUTABLE_MODE => RangeEntryKind::Executable,
++            _ => RangeEntryKind::File,
++        }
++    }
++
++    pub(crate) fn is_gitlink(&self) -> bool {
++        self.mode == GITLINK_MODE
++    }
++}
++
++pub(crate) fn sort_by_display_path(changed: &mut [ChangedFile]) {
++    changed.sort_by_cached_key(|file| display_path(&file.change));
++}
++
++/// Every side's object id but a gitlink's, in list order: the ids `files_at` takes the sizes of.
++pub(crate) fn blob_ids(changed: &[ChangedFile]) -> Vec<Oid> {
++    let mut ids = Vec::new();
++    for file in changed {
++        let (old, new) = sides(&file.change);
++        for side in [old, new].into_iter().flatten() {
++            if side.mode != GITLINK_MODE {
++                ids.push(side.oid.clone());
++            }
++        }
++    }
++    ids
++}
++
++/// One `FileAt` per changed file, ids in list order; `sizes` answer `blob_ids(&changed)` in its order.
++pub(crate) fn files_at(changed: Vec<ChangedFile>, sizes: Vec<Option<u64>>) -> Vec<FileAt> {
++    let mut sizes = sizes.into_iter();
++    let mut files = Vec::with_capacity(changed.len());
++    for (id, file) in (0..).zip(changed) {
++        let (old, new) = sides(&file.change);
++        let old = old.map(|side| blob_at(side, &mut sizes));
++        let new = new.map(|side| blob_at(side, &mut sizes));
++        files.push(FileAt {
++            entry: RangeEntry {
++                id: RangeFileId(id),
++                path: display_path(&file.change),
++                change: range_change(&file.change),
++                lines: line_counts(file.numstat),
++            },
++            old,
++            new,
++            binary: file.numstat == Numstat::Binary,
++        });
++    }
++    files
++}
++
++fn blob_at(tree_side: &TreeSide, sizes: &mut impl Iterator<Item = Option<u64>>) -> BlobAt {
++    let size = if tree_side.mode == GITLINK_MODE {
++        None
++    } else {
++        sizes.next().flatten()
++    };
++    BlobAt {
++        oid: tree_side.oid.clone(),
++        mode: tree_side.mode,
++        size,
++    }
++}
++
++fn sides(change: &Changed) -> (Option<&TreeSide>, Option<&TreeSide>) {
++    match change {
++        Changed::Added { new } => (None, Some(new)),
++        Changed::Deleted { old } => (Some(old), None),
++        Changed::Modified { old, new } | Changed::Renamed { old, new } => (Some(old), Some(new)),
++    }
++}
++
++fn display_path(change: &Changed) -> String {
++    match change {
++        Changed::Added { new } | Changed::Modified { new, .. } | Changed::Renamed { new, .. } => {
++            display(&new.path)
++        }
++        Changed::Deleted { old } => display(&old.path),
++    }
++}
++
++fn range_change(change: &Changed) -> RangeChange {
++    match change {
++        Changed::Added { .. } => RangeChange::Added,
++        Changed::Modified { .. } => RangeChange::Modified,
++        Changed::Deleted { .. } => RangeChange::Deleted,
++        Changed::Renamed { old, .. } => RangeChange::Renamed {
++            old_path: display(&old.path),
++        },
++    }
++}
++
++fn line_counts(numstat: Numstat) -> RangeLineCounts {
++    match numstat {
++        Numstat::Lines { added, removed } => RangeLineCounts::Counted { added, removed },
++        Numstat::Binary | Numstat::Missing => RangeLineCounts::NotCounted,
++    }
++}
++
++fn display(path: &Path) -> String {
++    path.to_string_lossy().into_owned()
++}
++
++#[cfg(test)]
++mod tests {
++    use std::path::PathBuf;
++
++    use super::*;
++
++    const REGULAR_MODE: u32 = 0o100_644;
++    const FIRST: &str = "1111111111111111111111111111111111111111";
++    const SECOND: &str = "2222222222222222222222222222222222222222";
++    const THIRD: &str = "3333333333333333333333333333333333333333";
++
++    fn side(path: &str, mode: u32, hex: &str) -> TreeSide {
++        TreeSide {
++            path: PathBuf::from(path),
++            mode,
++            oid: oid(hex),
++        }
++    }
++
++    fn oid(hex: &str) -> Oid {
++        Oid::parse(hex).unwrap()
++    }
++
++    fn blob(hex: &str, mode: u32, size: Option<u64>) -> BlobAt {
++        BlobAt {
++            oid: oid(hex),
++            mode,
++            size,
++        }
++    }
++
++    fn listed(change: Changed, numstat: Numstat) -> ChangedFile {
++        ChangedFile { change, numstat }
++    }
++
++    fn listing() -> Vec<ChangedFile> {
++        vec![
++            listed(
++                Changed::Modified {
++                    old: side("z.txt", REGULAR_MODE, FIRST),
++                    new: side("z.txt", EXECUTABLE_MODE, SECOND),
++                },
++                Numstat::Lines {
++                    added: 2,
++                    removed: 1,
++                },
++            ),
++            listed(
++                Changed::Deleted {
++                    old: side("m/gone.txt", REGULAR_MODE, THIRD),
++                },
++                Numstat::Binary,
++            ),
++            listed(
++                Changed::Renamed {
++                    old: side("y/old.txt", REGULAR_MODE, FIRST),
++                    new: side("b/new.txt", REGULAR_MODE, SECOND),
++                },
++                Numstat::Missing,
++            ),
++            listed(
++                Changed::Added {
++                    new: side("a/lib", GITLINK_MODE, THIRD),
++                },
++                Numstat::Lines {
++                    added: 1,
++                    removed: 0,
++                },
++            ),
++        ]
++    }
++
++    #[test]
++    fn rows_are_sorted_by_path_and_a_deleted_row_is_named_by_its_old_path() {
++        let mut changed = listing();
++        sort_by_display_path(&mut changed);
++        let entries: Vec<RangeEntry> = files_at(changed, vec![Some(1); 4])
++            .into_iter()
++            .map(|file| file.entry)
++            .collect();
++
++        let entry = |id, path: &str, change, lines| RangeEntry {
++            id: RangeFileId(id),
++            path: path.to_owned(),
++            change,
++            lines,
++        };
++        let renamed = RangeChange::Renamed {
++            old_path: "y/old.txt".to_owned(),
++        };
++        let counted = |added, removed| RangeLineCounts::Counted { added, removed };
++        let expected = vec![
++            entry(0, "a/lib", RangeChange::Added, counted(1, 0)),
++            entry(1, "b/new.txt", renamed, RangeLineCounts::NotCounted),
++            entry(
++                2,
++                "m/gone.txt",
++                RangeChange::Deleted,
++                RangeLineCounts::NotCounted,
++            ),
++            entry(3, "z.txt", RangeChange::Modified, counted(2, 1)),
++        ];
++        assert_eq!(entries, expected);
++    }
++
++    #[test]
++    fn sizes_go_to_the_sides_in_blob_id_order_and_never_to_a_gitlink() {
++        let mut changed = listing();
++        sort_by_display_path(&mut changed);
++        let ids = blob_ids(&changed);
++        assert_eq!(ids, [FIRST, SECOND, THIRD, FIRST, SECOND].map(oid));
++
++        let files = files_at(changed, vec![Some(10), Some(20), Some(30), None, Some(50)]);
++
++        let blobs: Vec<(Option<BlobAt>, Option<BlobAt>, bool)> = files
++            .into_iter()
++            .map(|file| (file.old, file.new, file.binary))
++            .collect();
++        let expected = vec![
++            (None, Some(blob(THIRD, GITLINK_MODE, None)), false),
++            (
++                Some(blob(FIRST, REGULAR_MODE, Some(10))),
++                Some(blob(SECOND, REGULAR_MODE, Some(20))),
++                false,
++            ),
++            (Some(blob(THIRD, REGULAR_MODE, Some(30))), None, true),
++            (
++                Some(blob(FIRST, REGULAR_MODE, None)),
++                Some(blob(SECOND, EXECUTABLE_MODE, Some(50))),
++                false,
++            ),
++        ];
++        assert_eq!(blobs, expected);
++    }
++
++    #[test]
++    fn a_mode_names_its_kind() {
++        let kind = |mode| blob(FIRST, mode, None).kind();
++        assert_eq!(kind(REGULAR_MODE), RangeEntryKind::File);
++        assert_eq!(kind(EXECUTABLE_MODE), RangeEntryKind::Executable);
++        assert_eq!(kind(LINK_MODE), RangeEntryKind::Link);
++        assert_eq!(kind(GITLINK_MODE), RangeEntryKind::Submodule);
++    }
++}
+diff --git a/crates/range/src/lib.rs b/crates/range/src/lib.rs
+new file mode 100644
+index 0000000..5932ace
+--- /dev/null
++++ b/crates/range/src/lib.rs
+@@ -0,0 +1,154 @@
++//! A commit range of a git repository: its spec, both sides, the changed files and what each one shows.
++#![forbid(unsafe_code)]
++
++mod entries;
++mod load;
++mod lock;
++mod open;
++mod spec;
++
++use std::path::PathBuf;
++
++use serde::{Deserialize, Serialize};
++use specta::Type;
++use yamt_merge_core::Difference;
++
++pub use crate::lock::PairLock;
++pub use crate::open::{Range, Resolved};
++pub use crate::spec::{RangeSpec, SpecError};
++
++/// A changed file's place in the range's list: 0.. in list order, fixed for the window's life.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
++pub struct RangeFileId(pub u32);
++
++/// How a column header names its side.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum RangeSideLabel {
++    /// A side as typed; an empty side is `HEAD`.
++    Named { name: String },
++    /// The left of `a...b`: where `right` branched off `left`.
++    MergeBase { left: String, right: String },
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct RangeSide {
++    pub label: RangeSideLabel,
++    pub short_id: String,
++    pub subject: String,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum RangeChange {
++    Added,
++    Modified,
++    Deleted,
++    Renamed { old_path: String },
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum RangeLineCounts {
++    Counted { added: u32, removed: u32 },
++    NotCounted,
++}
++
++/// One row of the list; `path` is the new path, the old one for a deleted file (UTF-8, lossy for display).
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct RangeEntry {
++    pub id: RangeFileId,
++    pub path: String,
++    pub change: RangeChange,
++    pub lines: RangeLineCounts,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct RangeStart {
++    pub range: String,
++    pub left: RangeSide,
++    pub right: RangeSide,
++    pub files: Vec<RangeEntry>,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub enum RangeEntryKind {
++    File,
++    Executable,
++    Link,
++    Submodule,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum RangeModeChange {
++    Same,
++    Changed {
++        old: RangeEntryKind,
++        new: RangeEntryKind,
++    },
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub enum RangeSides {
++    Left,
++    Right,
++    Both,
++}
++
++/// What one file shows: decided once, here.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum RangeFile {
++    Texts {
++        left: String,
++        right: String,
++        differences: Vec<Difference>,
++        mode: RangeModeChange,
++    },
++    Binary,
++    TooLarge {
++        limit: u32,
++    },
++    NotUtf8 {
++        sides: RangeSides,
++    },
++    ModeOnly {
++        old: RangeEntryKind,
++        new: RangeEntryKind,
++    },
++    KindChanged {
++        old: RangeEntryKind,
++        new: RangeEntryKind,
++    },
++    Submodule {
++        old: Option<String>,
++        new: Option<String>,
++    },
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error("{} is not inside a git repository: {message}", path.display())]
++    NotARepository { path: PathBuf, message: String },
++    #[error("git names no commit \"{name}\"")]
++    UnknownName { name: String },
++    #[error("{left} and {right} have no merge base")]
++    NoMergeBase { left: String, right: String },
++    #[error("another yamt window shows {left}..{right} of {}", root.display())]
++    Locked {
++        root: PathBuf,
++        left: String,
++        right: String,
++    },
++    #[error("cannot write {}: {message}", path.display())]
++    LockFailed { path: PathBuf, message: String },
++    #[error("no file {} in this range", file.0)]
++    UnknownFile { file: RangeFileId },
++    #[error(transparent)]
++    Git(#[from] yamt_gitio::Error),
++}
++
++pub type Result<T, E = Error> = std::result::Result<T, E>;
+diff --git a/crates/range/src/load.rs b/crates/range/src/load.rs
+new file mode 100644
+index 0000000..6fc3e3b
+--- /dev/null
++++ b/crates/range/src/load.rs
+@@ -0,0 +1,97 @@
++use yamt_gitio::{BlobReader, Repo};
++use yamt_merge_core::{MAX_TEXT_BYTES, compare};
++
++use crate::entries::{BlobAt, FileAt};
++use crate::{RangeEntryKind, RangeFile, RangeModeChange, RangeSides, Result};
++
++/// What `file` shows, read from the repository only when the listing cannot answer.
++pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
++    if let Some(answer) = decide(file) {
++        return Ok(answer);
++    }
++    let mut reader = repo.blob_reader()?;
++    let left = read_side(&mut reader, file.old.as_ref())?;
++    let right = read_side(&mut reader, file.new.as_ref())?;
++    match (String::from_utf8(left), String::from_utf8(right)) {
++        (Ok(left), Ok(right)) => Ok(RangeFile::Texts {
++            differences: compare(&left, &right),
++            left,
++            right,
++            mode: mode_change(file),
++        }),
++        (Err(_), Ok(_)) => Ok(RangeFile::NotUtf8 {
++            sides: RangeSides::Left,
++        }),
++        (Ok(_), Err(_)) => Ok(RangeFile::NotUtf8 {
++            sides: RangeSides::Right,
++        }),
++        (Err(_), Err(_)) => Ok(RangeFile::NotUtf8 {
++            sides: RangeSides::Both,
++        }),
++    }
++}
++
++/// The answer the listing alone gives (plan §2 #105's order up to the size), or `None`: read the blobs.
++fn decide(file: &FileAt) -> Option<RangeFile> {
++    let (old, new) = (file.old.as_ref(), file.new.as_ref());
++    if old.is_some_and(BlobAt::is_gitlink) || new.is_some_and(BlobAt::is_gitlink) {
++        return Some(RangeFile::Submodule {
++            old: commit_id(old),
++            new: commit_id(new),
++        });
++    }
++    if let (Some(old), Some(new)) = (old, new) {
++        let (old_kind, new_kind) = (old.kind(), new.kind());
++        if is_link(old_kind) != is_link(new_kind) {
++            return Some(RangeFile::KindChanged {
++                old: old_kind,
++                new: new_kind,
++            });
++        }
++        if old.oid == new.oid && old_kind != new_kind {
++            return Some(RangeFile::ModeOnly {
++                old: old_kind,
++                new: new_kind,
++            });
++        }
++    }
++    if file.binary {
++        return Some(RangeFile::Binary);
++    }
++    if old.is_some_and(is_too_large) || new.is_some_and(is_too_large) {
++        return Some(RangeFile::TooLarge {
++            limit: u32::try_from(MAX_TEXT_BYTES).unwrap_or(u32::MAX),
++        });
++    }
++    None
++}
++
++fn commit_id(side: Option<&BlobAt>) -> Option<String> {
++    side.filter(|side| side.is_gitlink())
++        .map(|side| side.oid.as_str().to_owned())
++}
++
++fn is_link(kind: RangeEntryKind) -> bool {
++    kind == RangeEntryKind::Link
++}
++
++fn is_too_large(blob: &BlobAt) -> bool {
++    blob.size.is_some_and(|size| size > MAX_TEXT_BYTES as u64)
++}
++
++fn read_side(reader: &mut BlobReader, side: Option<&BlobAt>) -> Result<Vec<u8>> {
++    match side {
++        Some(blob) => Ok(reader.read(&blob.oid)?),
++        None => Ok(Vec::new()),
++    }
++}
++
++fn mode_change(file: &FileAt) -> RangeModeChange {
++    match (&file.old, &file.new) {
++        (Some(old), Some(new)) if old.kind() != new.kind() => RangeModeChange::Changed {
++            old: old.kind(),
++            new: new.kind(),
++        },
++        _ => RangeModeChange::Same,
++    }
++}
+diff --git a/crates/range/src/lock.rs b/crates/range/src/lock.rs
+new file mode 100644
+index 0000000..84cbe27
+--- /dev/null
++++ b/crates/range/src/lock.rs
+@@ -0,0 +1,118 @@
++use std::ffi::OsString;
++use std::fs::{self, File, OpenOptions, TryLockError};
++use std::io;
++use std::path::{Path, PathBuf};
++
++use crate::{Error, Resolved, Result};
++
++const LOCK_FILE: &str = "lock";
++const GIT_DIR_NAME: &str = ".git";
++const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
++const FNV_PRIME: u64 = 0x0100_0000_01b3;
++
++/// The range window's claim on one repository and commit pair, held for the process's life.
++#[derive(Debug)]
++pub struct PairLock {
++    _lock: File,
++    folder: PathBuf,
++}
++
++impl PairLock {
++    /// Takes `<range_dir>/<repo key>/<left id>-<right id>/lock`; another process holding it is `Locked`.
++    pub fn take(range_dir: &Path, resolved: &Resolved) -> Result<PairLock> {
++        let common_dir = resolved.repo.common_dir()?;
++        let pair = format!(
++            "{}-{}",
++            resolved.left.oid.as_str(),
++            resolved.right.oid.as_str()
++        );
++        let folder = range_dir.join(repo_key(&common_dir)).join(pair);
++        fs::create_dir_all(&folder).map_err(|error| lock_failed(&folder, &error))?;
++        let path = folder.join(LOCK_FILE);
++        let file = OpenOptions::new()
++            .create(true)
++            .truncate(false)
++            .write(true)
++            .open(&path)
++            .map_err(|error| lock_failed(&path, &error))?;
++        // The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
++        // (`File::try_lock`, flock(2) / `LockFileEx`).
++        match file.try_lock() {
++            Ok(()) => Ok(PairLock {
++                _lock: file,
++                folder,
++            }),
++            Err(TryLockError::WouldBlock) => Err(Error::Locked {
++                root: resolved.root().to_owned(),
++                left: resolved.left.side.short_id.clone(),
++                right: resolved.right.side.short_id.clone(),
++            }),
++            Err(TryLockError::Error(error)) => Err(lock_failed(&path, &error)),
++        }
++    }
++
++    #[must_use]
++    pub fn folder(&self) -> &Path {
++        &self.folder
++    }
++}
++
++/// The repository's folder name, `-`, and the FNV-1a hash of its common git dir: the same from every worktree.
++fn repo_key(common_dir: &Path) -> OsString {
++    let in_work_tree = common_dir
++        .file_name()
++        .is_some_and(|name| name == GIT_DIR_NAME);
++    let named = if in_work_tree {
++        common_dir.parent().unwrap_or(common_dir)
++    } else {
++        common_dir
++    };
++    let mut key = named.file_name().unwrap_or_default().to_os_string();
++    let hash = fnv1a_64(common_dir.as_os_str().as_encoded_bytes());
++    key.push(format!("-{hash:016x}"));
++    key
++}
++
++/// FNV-1a, 64 bits (<http://www.isthe.com/chongo/tech/comp/fnv/>): stable across Rust releases, unlike `DefaultHasher`.
++fn fnv1a_64(bytes: &[u8]) -> u64 {
++    let mut hash = FNV_OFFSET_BASIS;
++    for &byte in bytes {
++        hash ^= u64::from(byte);
++        hash = hash.wrapping_mul(FNV_PRIME);
++    }
++    hash
++}
++
++fn lock_failed(path: &Path, error: &io::Error) -> Error {
++    Error::LockFailed {
++        path: path.to_owned(),
++        message: error.to_string(),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn fnv1a_64_gives_the_published_vectors() {
++        assert_eq!(format!("{:016x}", fnv1a_64(b"a")), "af63dc4c8601ec8c");
++        assert_eq!(format!("{:016x}", fnv1a_64(b"")), "cbf29ce484222325");
++        assert_eq!(format!("{:016x}", fnv1a_64(b"foobar")), "85944171f73967e8");
++    }
++
++    #[test]
++    fn the_key_names_the_work_tree_folder_or_a_bare_repository_and_hashes_the_common_dir() {
++        let key = |dir: &str| repo_key(Path::new(dir)).into_string().unwrap();
++        let hash = |dir: &str| format!("{:016x}", fnv1a_64(dir.as_bytes()));
++        assert_eq!(
++            key("/x/proj/.git"),
++            format!("proj-{}", hash("/x/proj/.git"))
++        );
++        assert_eq!(
++            key("/x/proj.git"),
++            format!("proj.git-{}", hash("/x/proj.git"))
++        );
++        assert_ne!(key("/x/proj/.git"), key("/y/proj/.git"));
++    }
++}
+diff --git a/crates/range/src/open.rs b/crates/range/src/open.rs
+new file mode 100644
+index 0000000..2d7ca69
+--- /dev/null
++++ b/crates/range/src/open.rs
+@@ -0,0 +1,132 @@
++use std::path::Path;
++
++use yamt_gitio::{Oid, Repo};
++
++use crate::entries::{FileAt, blob_ids, files_at, sort_by_display_path};
++use crate::load::load_file;
++use crate::spec::Dots;
++use crate::{
++    Error, RangeFile, RangeFileId, RangeSide, RangeSideLabel, RangeSpec, RangeStart, Result,
++};
++
++/// A range whose two commits git has named: built before any window opens.
++pub struct Resolved {
++    pub(crate) repo: Repo,
++    spec: RangeSpec,
++    pub(crate) left: SideAt,
++    pub(crate) right: SideAt,
++}
++
++/// One side's commit, and how the window names it.
++pub(crate) struct SideAt {
++    pub(crate) oid: Oid,
++    pub(crate) side: RangeSide,
++}
++
++/// A resolved range and its changed files: immutable for the window's life.
++pub struct Range {
++    resolved: Resolved,
++    files: Vec<FileAt>,
++}
++
++impl Resolved {
++    pub fn resolve(cwd: &Path, spec: &RangeSpec) -> Result<Resolved> {
++        let repo = Repo::discover(cwd).map_err(|error| not_a_repository(cwd, error))?;
++        let left_tip = commit_named(&repo, &spec.left)?;
++        let right_tip = commit_named(&repo, &spec.right)?;
++        let (left_oid, left_label) = match spec.dots {
++            Dots::Two => (left_tip, named(&spec.left)),
++            Dots::Three => {
++                let base = repo.merge_base(&left_tip, &right_tip)?;
++                let Some(base) = base else {
++                    return Err(Error::NoMergeBase {
++                        left: spec.left.clone(),
++                        right: spec.right.clone(),
++                    });
++                };
++                let label = RangeSideLabel::MergeBase {
++                    left: spec.left.clone(),
++                    right: spec.right.clone(),
++                };
++                (base, label)
++            }
++        };
++        let left = side_at(&repo, left_oid, left_label)?;
++        let right = side_at(&repo, right_tip, named(&spec.right))?;
++        Ok(Resolved {
++            repo,
++            spec: spec.clone(),
++            left,
++            right,
++        })
++    }
++
++    #[must_use]
++    pub fn root(&self) -> &Path {
++        self.repo.root()
++    }
++
++    pub fn list(self) -> Result<Range> {
++        let mut changed = self.repo.changed_files(&self.left.oid, &self.right.oid)?;
++        sort_by_display_path(&mut changed);
++        let sizes = self.repo.blob_sizes(&blob_ids(&changed))?;
++        let files = files_at(changed, sizes);
++        Ok(Range {
++            resolved: self,
++            files,
++        })
++    }
++}
++
++impl Range {
++    #[must_use]
++    pub fn start(&self) -> RangeStart {
++        RangeStart {
++            range: self.resolved.spec.text().to_owned(),
++            left: self.resolved.left.side.clone(),
++            right: self.resolved.right.side.clone(),
++            files: self.files.iter().map(|file| file.entry.clone()).collect(),
++        }
++    }
++
++    pub fn load(&self, file: RangeFileId) -> Result<RangeFile> {
++        let Some(found) = self.files.iter().find(|at| at.entry.id == file) else {
++            return Err(Error::UnknownFile { file });
++        };
++        load_file(&self.resolved.repo, found)
++    }
++}
++
++/// `Repo::discover` fails with git's own refusal outside a work tree; its first line names why.
++fn not_a_repository(cwd: &Path, error: yamt_gitio::Error) -> Error {
++    if let yamt_gitio::Error::GitFailed { stderr, .. } = &error {
++        let message = stderr.lines().next().unwrap_or_default().to_owned();
++        return Error::NotARepository {
++            path: cwd.to_owned(),
++            message,
++        };
++    }
++    Error::Git(error)
++}
++
++fn commit_named(repo: &Repo, name: &str) -> Result<Oid> {
++    repo.commit_named(name)?.ok_or_else(|| Error::UnknownName {
++        name: name.to_owned(),
++    })
++}
++
++fn named(name: &str) -> RangeSideLabel {
++    RangeSideLabel::Named {
++        name: name.to_owned(),
++    }
++}
++
++fn side_at(repo: &Repo, oid: Oid, label: RangeSideLabel) -> Result<SideAt> {
++    let summary = repo.commit_summary(&oid)?;
++    let side = RangeSide {
++        label,
++        short_id: String::from_utf8_lossy(&summary.short_id).into_owned(),
++        subject: String::from_utf8_lossy(&summary.subject).into_owned(),
++    };
++    Ok(SideAt { oid, side })
++}
+diff --git a/crates/range/src/spec.rs b/crates/range/src/spec.rs
+new file mode 100644
+index 0000000..ae8584c
+--- /dev/null
++++ b/crates/range/src/spec.rs
+@@ -0,0 +1,159 @@
++const DOTS: &str = "..";
++const EMPTY_SIDE: &str = "HEAD";
++
++/// A range as the user typed it: `a..b` compares the two commits, `a...b` where `b` branched off `a` with `b`.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct RangeSpec {
++    text: String,
++    pub(crate) left: String,
++    pub(crate) dots: Dots,
++    pub(crate) right: String,
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum Dots {
++    Two,
++    Three,
++}
++
++#[derive(Debug, PartialEq, Eq, thiserror::Error)]
++pub enum SpecError {
++    #[error("--diff= needs a range, such as main...dev")]
++    Empty,
++    #[error(
++        "--diff={text}: a range needs two dots (a..b) or three (a...b); yamt does not compare the working tree"
++    )]
++    NoDots { text: String },
++    #[error("--diff={text}: a range holds one \"..\" or \"...\"")]
++    ExtraDots { text: String },
++    #[error("--diff={text}: a side may not start with \"-\"")]
++    Dash { text: String },
++}
++
++impl RangeSpec {
++    pub fn parse(text: &str) -> Result<RangeSpec, SpecError> {
++        if text.is_empty() {
++            return Err(SpecError::Empty);
++        }
++        let Some((left, rest)) = text.split_once(DOTS) else {
++            return Err(SpecError::NoDots {
++                text: text.to_owned(),
++            });
++        };
++        let (dots, right) = match rest.strip_prefix('.') {
++            Some(right) => (Dots::Three, right),
++            None => (Dots::Two, rest),
++        };
++        if right.starts_with('.') || right.contains(DOTS) {
++            return Err(SpecError::ExtraDots {
++                text: text.to_owned(),
++            });
++        }
++        if left.starts_with('-') || right.starts_with('-') {
++            return Err(SpecError::Dash {
++                text: text.to_owned(),
++            });
++        }
++        Ok(RangeSpec {
++            text: text.to_owned(),
++            left: side_name(left),
++            dots,
++            right: side_name(right),
++        })
++    }
++
++    #[must_use]
++    pub fn text(&self) -> &str {
++        &self.text
++    }
++}
++
++fn side_name(typed: &str) -> String {
++    if typed.is_empty() {
++        EMPTY_SIDE.to_owned()
++    } else {
++        typed.to_owned()
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn sides(text: &str) -> (String, Dots, String) {
++        let spec = RangeSpec::parse(text).unwrap();
++        assert_eq!(spec.text(), text);
++        (spec.left, spec.dots, spec.right)
++    }
++
++    fn owned(left: &str, dots: Dots, right: &str) -> (String, Dots, String) {
++        (left.to_owned(), dots, right.to_owned())
++    }
++
++    #[test]
++    fn two_dots_three_dots_and_empty_sides_read_as_typed_or_head() {
++        assert_eq!(sides("v1.2..v1.3"), owned("v1.2", Dots::Two, "v1.3"));
++        assert_eq!(sides("HEAD~3...main"), owned("HEAD~3", Dots::Three, "main"));
++        assert_eq!(sides("@{u}.."), owned("@{u}", Dots::Two, "HEAD"));
++        assert_eq!(sides(".."), owned("HEAD", Dots::Two, "HEAD"));
++        assert_eq!(sides("...dev"), owned("HEAD", Dots::Three, "dev"));
++        assert_eq!(sides("a.b..c-d"), owned("a.b", Dots::Two, "c-d"));
++    }
++
++    #[test]
++    fn every_malformed_range_is_its_error() {
++        let refused = |text: &str| RangeSpec::parse(text).unwrap_err();
++        let text = |text: &str| text.to_owned();
++        assert_eq!(refused(""), SpecError::Empty);
++        assert_eq!(refused("main"), SpecError::NoDots { text: text("main") });
++        assert_eq!(refused("a.b"), SpecError::NoDots { text: text("a.b") });
++        assert_eq!(
++            refused("a....b"),
++            SpecError::ExtraDots {
++                text: text("a....b")
++            }
++        );
++        assert_eq!(
++            refused("a..b..c"),
++            SpecError::ExtraDots {
++                text: text("a..b..c")
++            }
++        );
++        assert_eq!(
++            refused("a...b...c"),
++            SpecError::ExtraDots {
++                text: text("a...b...c")
++            }
++        );
++        assert_eq!(
++            refused("-x..b"),
++            SpecError::Dash {
++                text: text("-x..b")
++            }
++        );
++        assert_eq!(
++            refused("a...-x"),
++            SpecError::Dash {
++                text: text("a...-x")
++            }
++        );
++    }
++
++    #[test]
++    fn each_error_is_its_usage_line() {
++        let line = |text: &str| RangeSpec::parse(text).unwrap_err().to_string();
++        assert_eq!(line(""), "--diff= needs a range, such as main...dev");
++        assert_eq!(
++            line("main"),
++            "--diff=main: a range needs two dots (a..b) or three (a...b); yamt does not compare the working tree"
++        );
++        assert_eq!(
++            line("a....b"),
++            "--diff=a....b: a range holds one \"..\" or \"...\""
++        );
++        assert_eq!(
++            line("-x..b"),
++            "--diff=-x..b: a side may not start with \"-\""
++        );
++    }
++}
+diff --git a/crates/range/tests/range.rs b/crates/range/tests/range.rs
+new file mode 100644
+index 0000000..90ae14c
+--- /dev/null
++++ b/crates/range/tests/range.rs
+@@ -0,0 +1,541 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_merge_core::{MAX_TEXT_BYTES, compare};
++use yamt_range::{
++    Error, PairLock, Range, RangeChange, RangeEntryKind, RangeFile, RangeFileId, RangeModeChange,
++    RangeSide, RangeSideLabel, RangeSides, RangeSpec, Resolved,
++};
++
++const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
++const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
++const LINK_MODE: &str = "120000";
++const LOCK_FILE: &str = "lock";
++
++/// A file of the scripted repository: `base` on `main`, `local` on the checked-out branch `local`, `remote` on `remote`.
++fn file<'a>(
++    path: &'a str,
++    base: Option<&'a [u8]>,
++    local: Option<&'a [u8]>,
++    remote: Option<&'a [u8]>,
++) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote,
++    }
++}
++
++/// A file only `local` changes.
++fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    file(path, base, local, base)
++}
++
++fn repo_with(files: &[ConflictFile]) -> TempDir {
++    diverged_repo(files).unwrap()
++}
++
++fn rev_parse(root: &Path, revision: &str) -> String {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn short_id(root: &Path, revision: &str) -> String {
++    let output = git_ok(root, &["log", "-1", "--format=%h", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn resolved(root: &Path, text: &str) -> Resolved {
++    Resolved::resolve(root, &RangeSpec::parse(text).unwrap()).unwrap()
++}
++
++fn range(root: &Path, text: &str) -> Range {
++    resolved(root, text).list().unwrap()
++}
++
++fn refusal(root: &Path, text: &str) -> Error {
++    match Resolved::resolve(root, &RangeSpec::parse(text).unwrap()) {
++        Ok(_) => panic!("{text} resolved"),
++        Err(error) => error,
++    }
++}
++
++fn paths(range: &Range) -> Vec<String> {
++    range
++        .start()
++        .files
++        .into_iter()
++        .map(|entry| entry.path)
++        .collect()
++}
++
++fn load(range: &Range, path: &str) -> RangeFile {
++    let start = range.start();
++    let entry = start.files.iter().find(|entry| entry.path == path).unwrap();
++    range.load(entry.id).unwrap()
++}
++
++fn texts(left: &str, right: &str, mode: RangeModeChange) -> RangeFile {
++    RangeFile::Texts {
++        left: left.to_owned(),
++        right: right.to_owned(),
++        differences: compare(left, right),
++        mode,
++    }
++}
++
++fn named(name: &str) -> RangeSideLabel {
++    RangeSideLabel::Named {
++        name: name.to_owned(),
++    }
++}
++
++fn side(root: &Path, label: RangeSideLabel, revision: &str, subject: &str) -> RangeSide {
++    RangeSide {
++        label,
++        short_id: short_id(root, revision),
++        subject: subject.to_owned(),
++    }
++}
++
++fn commit(root: &Path, message: &str) {
++    git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
++}
++
++fn write_and_add(root: &Path, path: &str, text: &str) {
++    fs::write(root.join(path), text).unwrap();
++    git_ok(root, &["add", "--", path]).unwrap();
++}
++
++/// Stages `path` as a symbolic link to `target` without making one on disk (Windows needs a right for that).
++fn stage_link(root: &Path, path: &str, target: &str) {
++    let scratch = root.join(".git").join("link-target");
++    fs::write(&scratch, target).unwrap();
++    let scratch_arg = scratch.to_str().unwrap();
++    let output = git_ok(root, &["hash-object", "-w", "--", scratch_arg]).unwrap();
++    let oid = String::from_utf8(output).unwrap().trim_end().to_owned();
++    let cacheinfo = format!("{LINK_MODE},{oid},{path}");
++    git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo]).unwrap();
++}
++
++/// Removes a loose object, so any read of it fails: what the listing answers is never read.
++fn drop_object(root: &Path, revision: &str) {
++    let oid = rev_parse(root, revision);
++    let (folder, name) = oid.split_at(2);
++    fs::remove_file(root.join(".git").join("objects").join(folder).join(name)).unwrap();
++}
++
++#[test]
++fn three_dots_compares_the_merge_base_and_two_dots_the_tips() {
++    let dir = repo_with(&[
++        file("a.txt", Some(b"a\n"), Some(b"a local\n"), Some(b"a\n")),
++        file("b.txt", Some(b"b\n"), Some(b"b\n"), Some(b"b remote\n")),
++    ]);
++    let root = dir.path();
++
++    let three = range(root, "remote...local");
++    let two = range(root, "remote..local");
++
++    assert_eq!(paths(&three), ["a.txt"]);
++    let base_label = RangeSideLabel::MergeBase {
++        left: "remote".to_owned(),
++        right: "local".to_owned(),
++    };
++    let start = three.start();
++    assert_eq!(start.range, "remote...local");
++    assert_eq!(start.left, side(root, base_label, "main", "base"));
++    assert_eq!(start.right, side(root, named("local"), "local", "local"));
++
++    assert_eq!(paths(&two), ["a.txt", "b.txt"]);
++    let start = two.start();
++    assert_eq!(start.range, "remote..local");
++    assert_eq!(start.left, side(root, named("remote"), "remote", "remote"));
++    assert_eq!(start.right, side(root, named("local"), "local", "local"));
++}
++
++#[test]
++fn a_criss_cross_range_lists_what_git_diff_three_dots_lists() {
++    let dir = repo_with(&[changed("f.txt", Some(b"f\n"), Some(b"f\n"))]);
++    let root = dir.path();
++    git_ok(root, &["checkout", "--quiet", "-b", "x", "main"]).unwrap();
++    write_and_add(root, "x.txt", "x1\n");
++    commit(root, "x1");
++    let x1 = rev_parse(root, "HEAD");
++    git_ok(root, &["checkout", "--quiet", "-b", "y", "main"]).unwrap();
++    write_and_add(root, "y.txt", "y1\n");
++    commit(root, "y1");
++    let y1 = rev_parse(root, "HEAD");
++    git_ok(root, &["merge", "--quiet", "--no-edit", &x1]).unwrap();
++    write_and_add(root, "y.txt", "y2\n");
++    write_and_add(root, "w.txt", "from y\n");
++    commit(root, "y2");
++    git_ok(root, &["checkout", "--quiet", "x"]).unwrap();
++    git_ok(root, &["merge", "--quiet", "--no-edit", &y1]).unwrap();
++    write_and_add(root, "x.txt", "x2\n");
++    write_and_add(root, "f.txt", "f from x\n");
++    commit(root, "x2");
++    let bases = git_ok(root, &["merge-base", "--all", "x", "y"]).unwrap();
++    assert_eq!(String::from_utf8(bases).unwrap().lines().count(), 2);
++
++    let listed = paths(&range(root, "x...y"));
++
++    let output = git_ok(root, &["diff", "--name-only", "x...y"]).unwrap();
++    let mut by_git: Vec<String> = String::from_utf8(output)
++        .unwrap()
++        .lines()
++        .map(str::to_owned)
++        .collect();
++    by_git.sort();
++    assert_eq!(listed, by_git);
++    assert_ne!(listed.len(), 0);
++}
++
++#[test]
++fn an_empty_side_is_head() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let root = dir.path();
++
++    let to_head = range(root, "main..");
++    let nothing = range(root, "..");
++
++    assert_eq!(paths(&to_head), paths(&range(root, "main..local")));
++    assert_eq!(paths(&to_head), ["a.txt"]);
++    assert_eq!(
++        to_head.start().right,
++        side(root, named("HEAD"), "local", "local")
++    );
++    assert_eq!(paths(&nothing), Vec::<String>::new());
++    assert_eq!(
++        nothing.start().left,
++        side(root, named("HEAD"), "local", "local")
++    );
++}
++
++#[test]
++fn unknown_name_not_a_repository_and_no_merge_base_are_their_errors() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let root = dir.path();
++    git_ok(root, &["checkout", "--quiet", "--orphan", "unrelated"]).unwrap();
++    commit(root, "unrelated");
++    let outside = tempfile::tempdir().unwrap();
++
++    let unknown_left = refusal(root, "nope..main");
++    let unknown_right = refusal(root, "main...nope");
++    let no_base = refusal(root, "main...unrelated");
++    let not_a_repository = refusal(outside.path(), "main..dev");
++
++    assert!(matches!(&unknown_left, Error::UnknownName { name } if name == "nope"));
++    assert_eq!(unknown_left.to_string(), "git names no commit \"nope\"");
++    assert!(matches!(&unknown_right, Error::UnknownName { name } if name == "nope"));
++    assert!(
++        matches!(&no_base, Error::NoMergeBase { left, right } if left == "main" && right == "unrelated")
++    );
++    assert_eq!(no_base.to_string(), "main and unrelated have no merge base");
++    let Error::NotARepository { path, message } = &not_a_repository else {
++        panic!("{not_a_repository:?}");
++    };
++    assert_eq!(path, outside.path());
++    assert!(
++        message.starts_with("fatal: not a git repository"),
++        "{message}"
++    );
++    assert!(!message.contains('\n'), "{message}");
++    let line = format!(
++        "{} is not inside a git repository: {message}",
++        outside.path().display()
++    );
++    assert_eq!(not_a_repository.to_string(), line);
++    assert_eq!(paths(&range(root, "main..unrelated")), ["a.txt"]);
++}
++
++#[test]
++fn added_has_an_empty_left_and_deleted_an_empty_right() {
++    let dir = repo_with(&[
++        changed("new.txt", None, Some(b"new\n")),
++        changed("old.txt", Some(b"old\n"), None),
++    ]);
++    let range = range(dir.path(), "main..local");
++
++    let changes: Vec<RangeChange> = range
++        .start()
++        .files
++        .into_iter()
++        .map(|entry| entry.change)
++        .collect();
++    assert_eq!(changes, [RangeChange::Added, RangeChange::Deleted]);
++    assert_eq!(
++        load(&range, "new.txt"),
++        texts("", "new\n", RangeModeChange::Same)
++    );
++    assert_eq!(
++        load(&range, "old.txt"),
++        texts("old\n", "", RangeModeChange::Same)
++    );
++}
++
++#[test]
++fn renamed_shows_the_old_text_left() {
++    let old = "one\ntwo\nthree\nfour\nfive\nsix\n";
++    let new = "one\ntwo\nthree\nfour\nfive\nsix and more\n";
++    let dir = repo_with(&[
++        changed("old/name.txt", Some(old.as_bytes()), None),
++        changed("new/name.txt", None, Some(new.as_bytes())),
++    ]);
++    let range = range(dir.path(), "main..local");
++
++    let start = range.start();
++    assert_eq!(paths(&range), ["new/name.txt"]);
++    let renamed = RangeChange::Renamed {
++        old_path: "old/name.txt".to_owned(),
++    };
++    assert_eq!(start.files[0].change, renamed);
++    assert_eq!(
++        load(&range, "new/name.txt"),
++        texts(old, new, RangeModeChange::Same)
++    );
++}
++
++#[test]
++fn binary_is_answered_before_size_and_without_reading() {
++    let large_binary = vec![0_u8; MAX_TEXT_BYTES + 1];
++    let dir = repo_with(&[changed("big.bin", None, Some(&large_binary))]);
++    let root = dir.path();
++    let range = range(root, "main..local");
++    drop_object(root, "local:big.bin");
++
++    assert_eq!(load(&range, "big.bin"), RangeFile::Binary);
++}
++
++#[test]
++fn exactly_8_mib_loads_and_one_byte_more_is_too_large() {
++    let exact = "a\n".repeat(MAX_TEXT_BYTES / 2);
++    let over = format!("{exact}a");
++    let dir = repo_with(&[
++        changed("exact.txt", None, Some(exact.as_bytes())),
++        changed("over.txt", None, Some(over.as_bytes())),
++    ]);
++    let root = dir.path();
++    let range = range(root, "main..local");
++    drop_object(root, "local:over.txt");
++
++    let loaded = load(&range, "exact.txt");
++    let RangeFile::Texts { left, right, .. } = &loaded else {
++        panic!("{loaded:?}");
++    };
++    assert_eq!((left.len(), right.len()), (0, MAX_TEXT_BYTES));
++    let limit = u32::try_from(MAX_TEXT_BYTES).unwrap();
++    assert_eq!(load(&range, "over.txt"), RangeFile::TooLarge { limit });
++}
++
++#[test]
++fn non_utf8_names_the_sides() {
++    let dir = repo_with(&[
++        changed("both.txt", Some(b"caf\xe9\n"), Some(b"th\xe9\n")),
++        changed("left.txt", Some(b"caf\xe9\n"), Some(b"cafe\n")),
++        changed("right.txt", Some(b"cafe\n"), Some(b"caf\xe9\n")),
++    ]);
++    let range = range(dir.path(), "main..local");
++
++    let not_utf8 = |sides| RangeFile::NotUtf8 { sides };
++    assert_eq!(load(&range, "left.txt"), not_utf8(RangeSides::Left));
++    assert_eq!(load(&range, "right.txt"), not_utf8(RangeSides::Right));
++    assert_eq!(load(&range, "both.txt"), not_utf8(RangeSides::Both));
++}
++
++/// A submodule at `SECOND_COMMIT` on `local`, at `base` on `main` and `remote`.
++fn submodule(path: &'static str, base: Option<&'static str>) -> ConflictFile<'static> {
++    ConflictFile {
++        path,
++        kind: FileKind::Submodule,
++        base: base.map(str::as_bytes),
++        local: Some(SECOND_COMMIT.as_bytes()),
++        remote: base.map(str::as_bytes),
++    }
++}
++
++#[test]
++fn mode_only_kind_changed_and_submodule_are_sentences() {
++    let dir = repo_with(&[
++        changed("entry", Some(b"text\n"), Some(b"text\n")),
++        changed("run.sh", Some(b"echo hi\n"), Some(b"echo hi\n")),
++        submodule("vendor/lib", Some(FIRST_COMMIT)),
++        submodule("vendor/new", None),
++    ]);
++    let root = dir.path();
++    git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
++    stage_link(root, "entry", "target.txt");
++    commit(root, "modes");
++    let range = range(root, "main..local");
++    drop_object(root, "local:run.sh");
++    drop_object(root, "local:entry");
++    drop_object(root, "main:entry");
++
++    let mode_only = RangeFile::ModeOnly {
++        old: RangeEntryKind::File,
++        new: RangeEntryKind::Executable,
++    };
++    let kind_changed = RangeFile::KindChanged {
++        old: RangeEntryKind::File,
++        new: RangeEntryKind::Link,
++    };
++    let changed_submodule = RangeFile::Submodule {
++        old: Some(FIRST_COMMIT.to_owned()),
++        new: Some(SECOND_COMMIT.to_owned()),
++    };
++    let added_submodule = RangeFile::Submodule {
++        old: None,
++        new: Some(SECOND_COMMIT.to_owned()),
++    };
++    assert_eq!(load(&range, "run.sh"), mode_only);
++    assert_eq!(load(&range, "entry"), kind_changed);
++    assert_eq!(load(&range, "vendor/lib"), changed_submodule);
++    assert_eq!(load(&range, "vendor/new"), added_submodule);
++}
++
++#[test]
++fn a_link_is_shown_as_its_target_text() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"a\n"))]);
++    let root = dir.path();
++    stage_link(root, "link", "old/target");
++    commit(root, "link");
++    stage_link(root, "link", "new/target");
++    commit(root, "retarget");
++
++    let range = range(root, "HEAD~1..HEAD");
++
++    let expected = texts("old/target", "new/target", RangeModeChange::Same);
++    assert_eq!(load(&range, "link"), expected);
++}
++
++#[test]
++fn texts_carry_merge_core_compare_s_differences() {
++    let (old, new) = ("one\ntwo\nthree\n", "one\n2\nthree\nfour\n");
++    let dir = repo_with(&[
++        changed("lines.txt", Some(old.as_bytes()), Some(new.as_bytes())),
++        changed("tool.sh", Some(b"echo 1\n"), Some(b"echo 1\n")),
++    ]);
++    let root = dir.path();
++    write_and_add(root, "tool.sh", "echo 2\n");
++    git_ok(root, &["update-index", "--chmod=+x", "tool.sh"]).unwrap();
++    commit(root, "tool");
++
++    let range = range(root, "main..local");
++
++    let loaded = load(&range, "lines.txt");
++    assert_eq!(loaded, texts(old, new, RangeModeChange::Same));
++    let RangeFile::Texts { differences, .. } = loaded else {
++        panic!("{loaded:?}");
++    };
++    assert_eq!(differences.len(), 2);
++    let executable = RangeModeChange::Changed {
++        old: RangeEntryKind::File,
++        new: RangeEntryKind::Executable,
++    };
++    assert_eq!(
++        load(&range, "tool.sh"),
++        texts("echo 1\n", "echo 2\n", executable)
++    );
++}
++
++#[test]
++fn an_unknown_id_is_unknown_file() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let range = range(dir.path(), "main..local");
++
++    let error = range.load(RangeFileId(1)).unwrap_err();
++
++    assert!(matches!(
++        error,
++        Error::UnknownFile {
++            file: RangeFileId(1)
++        }
++    ));
++    assert_eq!(error.to_string(), "no file 1 in this range");
++    assert!(range.load(RangeFileId(0)).is_ok());
++}
++
++#[test]
++fn a_range_is_shared_between_threads() {
++    fn require_send_and_sync<T: Send + Sync>() {}
++    require_send_and_sync::<Range>();
++}
++
++fn pair_folder(range_dir: &Path, root: &Path, left: &str, right: &str) -> PathBuf {
++    let lock = PairLock::take(range_dir, &resolved(root, &format!("{left}..{right}"))).unwrap();
++    lock.folder().to_owned()
++}
++
++#[test]
++fn the_same_pair_twice_is_locked_naming_both_short_ids() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let root = dir.path();
++    let range_dir = tempfile::tempdir().unwrap();
++    let first = resolved(root, "main..local");
++    let held = PairLock::take(range_dir.path(), &first).unwrap();
++    let main_id = rev_parse(root, "main");
++    let typed_otherwise = resolved(root, &format!("{main_id}..HEAD"));
++
++    let error = PairLock::take(range_dir.path(), &typed_otherwise).unwrap_err();
++
++    let (left, right) = (short_id(root, "main"), short_id(root, "local"));
++    let line = format!(
++        "another yamt window shows {left}..{right} of {}",
++        typed_otherwise.root().display()
++    );
++    assert_eq!(error.to_string(), line);
++    assert!(matches!(&error, Error::Locked { root: shown, .. } if shown == typed_otherwise.root()));
++    let pair = format!("{main_id}-{}", rev_parse(root, "local"));
++    assert_eq!(held.folder().file_name().unwrap(), pair.as_str());
++    let repo_folder = held.folder().parent().unwrap();
++    assert_eq!(repo_folder.parent().unwrap(), range_dir.path());
++    assert!(held.folder().join(LOCK_FILE).is_file());
++    drop(held);
++    assert!(PairLock::take(range_dir.path(), &typed_otherwise).is_ok());
++}
++
++#[test]
++fn another_worktree_of_the_same_repository_shares_the_lock() {
++    let dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
++    let root = dir.path();
++    let linked_dir = tempfile::tempdir().unwrap();
++    let linked = linked_dir.path().join("elsewhere");
++    let linked_arg = linked.to_str().unwrap();
++    git_ok(
++        root,
++        &[
++            "worktree", "add", "--quiet", "--detach", linked_arg, "remote",
++        ],
++    )
++    .unwrap();
++    let range_dir = tempfile::tempdir().unwrap();
++    let _held = PairLock::take(range_dir.path(), &resolved(root, "main..remote")).unwrap();
++    let from_linked = resolved(&linked, "main..remote");
++
++    let error = PairLock::take(range_dir.path(), &from_linked).unwrap_err();
++
++    assert!(matches!(&error, Error::Locked { root: shown, .. } if shown == from_linked.root()));
++    assert_ne!(from_linked.root(), resolved(root, "main..remote").root());
++}
++
++#[test]
++fn a_different_pair_is_not_locked() {
++    let dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
++    let root = dir.path();
++    let range_dir = tempfile::tempdir().unwrap();
++    let to_local = PairLock::take(range_dir.path(), &resolved(root, "main..local")).unwrap();
++
++    let to_remote = PairLock::take(range_dir.path(), &resolved(root, "main..remote")).unwrap();
++    let reversed = PairLock::take(range_dir.path(), &resolved(root, "local..main")).unwrap();
++
++    assert_ne!(to_local.folder(), to_remote.folder());
++    assert_ne!(to_local.folder(), reversed.folder());
++    assert_eq!(to_local.folder().parent(), to_remote.folder().parent());
++    let other_dir = repo_with(&[file("a.txt", Some(b"a\n"), Some(b"b\n"), Some(b"c\n"))]);
++    let other = pair_folder(range_dir.path(), other_dir.path(), "main", "local");
++    assert_ne!(other.parent(), to_local.folder().parent());
++}
+diff --git a/crates/session/src/decode.rs b/crates/session/src/decode.rs
+index ae5db69..60ec031 100644
+--- a/crates/session/src/decode.rs
++++ b/crates/session/src/decode.rs
+@@ -1,9 +1,9 @@
+ use serde::Serialize;
+ use specta::Type;
++pub(crate) use yamt_merge_core::MAX_TEXT_BYTES;
+ 
+ // git's binary heuristic: a NUL within the first 8000 bytes (xdiff-interface.c FIRST_FEW_BYTES).
+ const BINARY_PROBE_LEN: usize = 8000;
+-pub(crate) const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+ pub enum Eol {
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index 62ab17a..7e7a1c3 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -41,10 +41,17 @@ if [ -n "$forbidden_in_compare" ]; then
+     failed=1
+ fi
+ 
++range_deps=$(normal_deps yamt-range)
++forbidden_in_range=$(grep -E '^(yamt-|tauri(-|$))' <<<"$range_deps" | grep -vxE 'yamt-(range|gitio|merge-core)' || true)
++if [ -n "$forbidden_in_range" ]; then
++    echo "arch-check: yamt-range depends on yamt-gitio and yamt-merge-core only among yamt crates, and never on tauri, not:" $forbidden_in_range >&2
++    failed=1
++fi
++
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare)' || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host and yamt-compare only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare and yamt-range only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index bc88102..8cc3ade 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -28,6 +28,7 @@ yamt-session.workspace = true
+ yamt-settings.workspace = true
+ yamt-lsp-host.workspace = true
+ yamt-compare.workspace = true
++yamt-range.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+ specta-typescript.workspace = true
+-- 
+2.56.0
+
