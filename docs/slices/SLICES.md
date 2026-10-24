@@ -1025,6 +1025,16 @@ changelog line. Proof of the Windows run is CI after the owner pushes (no Window
 | 1   | 3.WT-windows-tests (`briefs/3.WT-windows-tests.md`): the locked test skips the lock's bytes; unix-only items moved into their tests | rust-impl | accepted | `3b45909`: `files_in` keeps the lock by name, its listed length asserted 0 (`DirEntry::metadata` on Windows is the listing, std 1.99 `windows.rs:188`); `OsStr`, `OUTPUT_DRAIN`/`DRAIN_SLACK`, `conflict_repo`/`Error` inside their `cfg(unix)` tests. Windows-target clippy `-D warnings` clean (whole workspace); nextest 228 passed; throwaway writes fail the test. Correctness review pass. Mutants: tests only, none. Notes `WindowsTests*.md` |
 | 2   | gate on `main` with the fix, Windows-target clippy (`briefs/3.WT-verify.md`)                                                        | verifier  | done     | `WindowsTestsVerify` at `9ae77ab`: gate pass (684 Rust, 1974 web); Windows-target clippy `--workspace -D warnings` exit 0, no lint (a cross-host build-script note, #1624 dropped); `NEXTEST_PROFILE=ci just test` 684 passed, `opening` 10/10; tree clean; mutants: tests only. Windows itself: CI after the push. Notes `WindowsTestsVerify.md`                                                                                                    |
 
+## Review a commit range — `yamt --diff=<range>`, threads posted to GitLab, an AI behind `--ai` (session 29, planning)
+
+Owner request (2026-10-24): `--diff=<a>..<b>` compares two git states with a GitLab-style changed-files list on the left;
+GitLab-style line threads of the owner's notes, any message queued and sent with the others as pending GitLab line
+discussions through glab; `--ai` adds an "Ask AI" turn per thread answered by omp (command in Settings) in a temporary
+checkout of the reviewed commit, edits allowed there, interruptible, thinking openable, a Keep/Discard question at close
+when it changed. "lets just plan" — no build started. Intent, rules, defaults, sourced facts, non-goals, risks:
+`docs/slices/request-review-range.md`. Every question answered (#1625–#1627). Three deliveries in order: A (the range
+window) → B (threads and posting, no AI) → C (the AI). Next: designer for A, on the owner's go.
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
