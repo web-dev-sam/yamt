@@ -1,0 +1,21 @@
+```json
+{
+  "verdict": "pass",
+  "findings": [],
+  "checked": [
+    "Q1, the locked test still catches a write: in crates/compare/tests/opening.rs:13-27, the files_in map still has the key \"lock\". Every other file is compared byte for byte (:24). If a locked open creates or removes any file, the lock included, the map's keys change and assert_eq!(files_in(..), before) at :160 fails.",
+    "Q1, a changed lock: an empty file cannot change its bytes without changing its length. The assert_eq!(len, 0) at :21 runs in the snapshot taken after the open, so any written byte fails the test. On Linux, DirEntry::metadata is an lstat and reports the exact length, so this check is as strong as the old fs::read of the empty bytes. Replacing the lock with a new empty file was not caught before either, so nothing was lost.",
+    "Q1, the other files_in users: broken_json_is_broken… (:83/:92) and format_2_is_newer_format… (:113/:118) have no lock before the open. store.rs:30-34 reads tabs.json before take_lock, so a broken store gets no lock file. A lock created by those opens would still show as a new key and fail the test, as before. The assert at :21 is never reached there. The other tests use names_in or direct reads, and none of them changed.",
+    "Q1, a fault in the product would be seen: if open skipped the lock it would not return Err(Locked), and :156-159 fails. If it removed orphans or wrote tabs.json before the lock, the orphan file or the tabs.json bytes differ, and :160 fails. The implementer's notes record two throwaway edits (orphan removed, lock written) that made the test fail. I accept the deviation of making those edits in the test, because store.rs was blocked by the ownership hook.",
+    "Q2, std 1.99.0 (rust-toolchain.toml), library/std/src/sys/fs/windows.rs:188-190: DirEntry::metadata() is `Ok(self.data.into())`, built from the WIN32_FIND_DATAW that FindFirstFileExW/FindNextFileW (:137, :1257) already filled. File size comes from nFileSizeHigh/Low at :1140. It opens no file and does no ReadFile, so a byte-range lock cannot refuse it. fs::read_dir on the folder takes no lock on the lock file either.",
+    "Q2, a length of 0 is certain: take_lock (crates/compare/src/files.rs:29-44) opens with create(true), truncate(false), write(true) and never writes. TabStore keeps it only as `_lock: File` (store.rs:22, :47) and never writes it. The lock covers 0..u64::MAX (windows.rs:458-470, LockFileEx), so another handle cannot write the lock file while it is held. The cached directory size can only go stale after a write, and no write can happen, so it is 0.",
+    "Q3, commands.rs: OsStr is now imported only inside the #[cfg(unix)] non_utf8_argument_is_a_usage_error_with_exit_code_two (:97). A grep finds no other OsStr use in the file. The test body is unchanged.",
+    "Q3, gitio operations.rs: conflict_repo and Error are now imported only inside the #[cfg(unix)] a_rebase_state_that_cannot_be_looked_at_fails_the_stop (:117-118). A grep shows those lines are their only users. The top-level imports keep the other items, and the test body is unchanged.",
+    "Q3, lsp-host run.rs: OUTPUT_DRAIN and DRAIN_SLACK are now consts with the same 1 s values inside the #[cfg(unix)] a_server_whose_child_holds_its_output_exits_after_at_most_the_drain (:231-232), their only user (:243). The bound is the same, so Linux and macOS behave as before.",
+    "Q4: a grep for try_lock, lock_shared and LockFileEx across crates/ and src-tauri/ finds one OS file lock, compare's take_lock. Grepping fs::read, read_to_string and read_dir in crates/compare/{src,tests} and src-tauri/src/compare.rs, no test reads the lock file. Every other read targets tabs.json or column files, which are not locked. The brief says 636 of 637 Windows tests passed, the one failure being this test.",
+    "Risk register: the patch only changes test files of compare, cli, lsp-host and gitio. No RK row's owner is touched, so no proving test is required.",
+    "Mutants: this patch changes tests only and I was given no survivor list, so I had no survivors to triage.",
+    "Not run by me: any test or clippy. I took the Windows-target clippy result and the nextest tail from the implementer's notes, not from my own run. As the brief's open_risks says, the windows-2025 CI run is the only real proof."
+  ]
+}
+```
