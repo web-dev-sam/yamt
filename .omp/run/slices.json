@@ -5,6 +5,7 @@
       "src-tauri/src/range.rs",
       "src-tauri/src/commands.rs",
       "src-tauri/src/ipc_error.rs",
+      "src-tauri/src/lib.rs",
       "src-tauri/AGENTS.md",
       "crates/review/src/lib.rs"
     ]
