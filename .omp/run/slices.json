@@ -23,7 +23,7 @@
       "frontend/src/ipc/index.ts"
     ]
   },
-  "RVThreadsR1": {
-    "owned": ["crates/review/**"]
+  "RVPipe": {
+    "owned": ["crates/pipe/**", "crates/lsp-host/**", "scripts/arch-check.sh"]
   }
 }

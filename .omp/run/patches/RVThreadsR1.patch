@@ -1,0 +1,334 @@
+From e31e24ee5805d4f3b99f1ebdda81476fd2cdd17c Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:34:38 +0200
+Subject: [PATCH] fix(review): unreadable threads file tested; queued and
+ unlisted_paths take the range
+
+---
+ .omp/run/notes/RVThreadsR1.md     | 35 ++++++++++++
+ Cargo.lock                        |  1 -
+ crates/review/AGENTS.md           |  2 +-
+ crates/review/Cargo.toml          |  1 -
+ crates/review/src/thread_store.rs | 88 ++++++++++++++++++++++++-------
+ crates/review/tests/threads.rs    | 42 +++++++++------
+ 6 files changed, 132 insertions(+), 37 deletions(-)
+ create mode 100644 .omp/run/notes/RVThreadsR1.md
+
+diff --git a/.omp/run/notes/RVThreadsR1.md b/.omp/run/notes/RVThreadsR1.md
+new file mode 100644
+index 0000000..f2d1bcb
+--- /dev/null
++++ b/.omp/run/notes/RVThreadsR1.md
+@@ -0,0 +1,35 @@
++All three items in the brief are fixed. `cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean, and `cargo test -p yamt-review` passes. When I removed the `NotFound` guard by hand, the new test failed. Nothing is committed.
++
++**summary**
++- **Item 1:** a new integration test makes `threads.json` a folder so it cannot be read. `ThreadStore::open` must then answer `Error::ReadFailed` with that path, and the pair folder must still hold only `threads.json`.
++- **Item 2:** `queued(&self, range: &Range)` now drops messages on paths the range does not list, using `file_at` as `list`, `add_note` and `change_posting` do. `QueuedMessage` carries `file: RangeFileId` instead of `path`.
++- **Item 3:** `list` is pure and logs nothing. The new `pub fn unlisted_paths(&self, range: &Range) -> Vec<String>` gives the stored paths the range does not list, sorted, each once.
++
++**files_changed**
++- `crates/review/src/thread_store.rs`
++- `crates/review/tests/threads.rs`
++- `crates/review/Cargo.toml`
++- `crates/review/AGENTS.md`
++- `Cargo.lock` (cargo regenerated it; see deviations)
++
++**tests_added**
++- `a_threads_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes` (tests/threads.rs): an unreadable `threads.json` is refused as `ReadFailed` with `path == threads_path(&folder)`, and the folder still holds only `["threads.json"]`. This kills the `NotFound` guard → `true` mutant.
++- `threads_on_paths_no_longer_listed_are_kept_on_every_write` (extended): it now also adds a thread on a.txt. `unlisted_paths` is `["a.txt", "b.txt"]` through `main..remote` and `[]` through `main..local`. Because of the new first thread, the ids in its later assertions shift by one.
++- `queued_leaves_out_messages_on_paths_the_range_does_not_list` (thread_store.rs unit test): through `main..remote`, only message 4 on a.txt comes back, as `RangeFileId(0)`.
++- `queued_lists_queued_and_refused_messages_in_thread_then_message_order` (updated): it now asserts the `RangeFileId` (b.txt → 1, a.txt → 0) instead of the path.
++- `record_writes_the_posting_and_keeps_it` (updated): it calls `queued` with a range.
++- The unit tests build their `Range` over a small `diverged_repo`: `main..local` lists a.txt and b.txt, `main..remote` lists only a.txt.
++
++**smoke_evidence**
++- `cargo test -p yamt-review` → `test result: ok. 11 passed` (unit), `test result: ok. 15 passed` (threads), `test result: ok. 0 passed` (doc). Both `a_threads_json_that_cannot_be_read_… ... ok` and `threads_on_paths_no_longer_listed_are_kept_on_every_write ... ok` appear.
++- `NotFound` guard replaced by hand with `Err(_) => Ok(None)`, then `cargo test -p yamt-review --test threads` → `test a_threads_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes ... FAILED`, `panicked at crates/review/tests/threads.rs:78:18`, `test result: FAILED. 14 passed; 1 failed`. The guard is restored.
++- `cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings` → no output from fmt, then clippy `Finished dev profile` with no warnings or errors.
++
++**deviations_from_brief**
++- I removed `tracing.workspace = true` from `crates/review/Cargo.toml`, because `list` was its only user. Cargo then dropped the `"tracing",` line from yamt-review's entry in `Cargo.lock`, which is outside Owned. It is a one-line, cargo-generated change. Restore the dependency instead if the orchestrator wants it kept.
++- `unlisted_paths` returns its paths sorted with duplicates removed; the brief did not set the order. Two threads on one path then appear once in the warning, and the result does not depend on the order threads were made.
++- `QueuedMessage` carries the `RangeFileId` rather than the entry. It is a plain copied value, and `range.entry(file)` gives row 16 the entry when it needs it.
++- I shortened `threads_on_paths_no_longer_listed_are_kept_on_every_write` to stay under clippy's 40-line limit: a loop adds the threads, and the ids are compared as `(u32, u32)` pairs. It checks the same things as before.
++
++**open_risks**
++- Row 17's shell still has to call `unlisted_paths` once at start and log the result. Until it does, no warning about hidden threads appears anywhere (`crates/review/src/thread_store.rs:56`).
+\ No newline at end of file
+diff --git a/Cargo.lock b/Cargo.lock
+index d46b81f..03369b0 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4702,7 +4702,6 @@ dependencies = [
+  "specta",
+  "tempfile",
+  "thiserror 2.0.21",
+- "tracing",
+  "yamt-conflict-repo",
+  "yamt-merge-core",
+  "yamt-range",
+diff --git a/crates/review/AGENTS.md b/crates/review/AGENTS.md
+index 16d5f0a..1192ef9 100644
+--- a/crates/review/AGENTS.md
++++ b/crates/review/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer`, `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write, left out with one `warn` line), add_thread, add_note, queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`); blank text is `EmptyMessage`, a pending message is `MessagePending`; ids from the counters, never reused; the file written before memory changes, so a failed write changes nothing; `pub(crate)` `queued` (queued and refused messages in thread, then message order) and `record` for the sender). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store.rs`; `tests/threads.rs` on real temp folders with a `Range` over a `yamt-conflict-repo` repository.
++Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer`, `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread, add_note, queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`); blank text is `EmptyMessage`, a pending message is `MessagePending`; ids from the counters, never reused; the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule; `pub(crate)` `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order) and `record` for the sender). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store.rs`; `tests/threads.rs` on real temp folders with a `Range` over a `yamt-conflict-repo` repository.
+diff --git a/crates/review/Cargo.toml b/crates/review/Cargo.toml
+index 26421c0..3027c7b 100644
+--- a/crates/review/Cargo.toml
++++ b/crates/review/Cargo.toml
+@@ -12,7 +12,6 @@ serde.workspace = true
+ serde_json.workspace = true
+ specta.workspace = true
+ thiserror.workspace = true
+-tracing.workspace = true
+ 
+ [dev-dependencies]
+ yamt-conflict-repo.workspace = true
+diff --git a/crates/review/src/thread_store.rs b/crates/review/src/thread_store.rs
+index 347c2e3..ad60fe6 100644
+--- a/crates/review/src/thread_store.rs
++++ b/crates/review/src/thread_store.rs
+@@ -22,7 +22,7 @@ pub struct ThreadStore {
+ pub(crate) struct QueuedMessage {
+     pub(crate) thread: ThreadId,
+     pub(crate) message: MessageId,
+-    pub(crate) path: String,
++    pub(crate) file: RangeFileId,
+     pub(crate) line: ThreadLine,
+     pub(crate) text: String,
+ }
+@@ -39,25 +39,34 @@ impl ThreadStore {
+     #[must_use]
+     pub fn list(&self, range: &Range) -> ThreadList {
+         let mut threads = Vec::new();
+-        let mut unlisted = Vec::new();
+         for stored in &self.file.threads {
+-            match file_at(range, &stored.path) {
+-                Some(file) => threads.push(Thread {
++            if let Some(file) = file_at(range, &stored.path) {
++                threads.push(Thread {
+                     id: stored.id,
+                     file,
+                     line: stored.line,
+                     messages: stored.messages.clone(),
+                     session: stored.session.clone(),
+-                }),
+-                None => unlisted.push(stored.path.as_str()),
++                });
+             }
+         }
+-        if !unlisted.is_empty() {
+-            tracing::warn!(paths = ?unlisted, "review threads kept on files this range does not list");
+-        }
+         ThreadList { threads }
+     }
+ 
++    /// The stored paths `range` does not list, sorted, each once: their threads are kept but not shown.
++    #[must_use]
++    pub fn unlisted_paths(&self, range: &Range) -> Vec<String> {
++        let mut paths = Vec::new();
++        for stored in &self.file.threads {
++            if file_at(range, &stored.path).is_none() {
++                paths.push(stored.path.clone());
++            }
++        }
++        paths.sort();
++        paths.dedup();
++        paths
++    }
++
+     /// A new thread on `line` of `file`, with `text` as its first message.
+     pub fn add_thread(
+         &mut self,
+@@ -113,11 +122,14 @@ impl ThreadStore {
+         self.change_posting(range, message, Posting::NotQueued)
+     }
+ 
+-    /// Every queued or refused message, in thread order, then message order.
++    /// Every queued or refused message on a file of `range`, in thread order, then message order.
+     #[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 calls it"))]
+-    pub(crate) fn queued(&self) -> Vec<QueuedMessage> {
++    pub(crate) fn queued(&self, range: &Range) -> Vec<QueuedMessage> {
+         let mut queued = Vec::new();
+         for thread in &self.file.threads {
++            let Some(file) = file_at(range, &thread.path) else {
++                continue;
++            };
+             for message in &thread.messages {
+                 let text = match &message.posting {
+                     Posting::Queued { text } | Posting::Refused { text, .. } => text,
+@@ -126,7 +138,7 @@ impl ThreadStore {
+                 queued.push(QueuedMessage {
+                     thread: thread.id,
+                     message: message.id,
+-                    path: thread.path.clone(),
++                    file,
+                     line: thread.line,
+                     text: text.clone(),
+                 });
+@@ -213,7 +225,9 @@ fn seconds_since_1970() -> u64 {
+ mod tests {
+     use std::fs;
+ 
++    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
+     use yamt_merge_core::RightLine;
++    use yamt_range::{RangeSpec, Resolved};
+ 
+     use super::*;
+ 
+@@ -231,26 +245,63 @@ mod tests {
+         ThreadStore::open(dir).unwrap()
+     }
+ 
++    /// `main..local` lists a.txt (0) and b.txt (1); `main..remote` lists a.txt (0) only.
++    fn repo() -> TempDir {
++        let file = |path, local: &'static [u8], remote: Option<&'static [u8]>| ConflictFile {
++            path,
++            kind: FileKind::Regular,
++            base: remote.map(|_| b"1\n".as_slice()),
++            local: Some(local),
++            remote,
++        };
++        diverged_repo(&[
++            file("a.txt", b"2\n", Some(b"3\n")),
++            file("b.txt", b"new\n", None),
++        ])
++        .unwrap()
++    }
++
++    fn range(repo: &TempDir, text: &str) -> Range {
++        Resolved::resolve(repo.path(), &RangeSpec::parse(text).unwrap())
++            .unwrap()
++            .list()
++            .unwrap()
++    }
++
+     #[test]
+     fn queued_lists_queued_and_refused_messages_in_thread_then_message_order() {
++        let repo = repo();
+         let dir = tempfile::tempdir().unwrap();
+         let store = stored_in(dir.path());
+         let queued: Vec<_> = store
+-            .queued()
++            .queued(&range(&repo, "main..local"))
+             .into_iter()
+-            .map(|q| (q.thread.0, q.message.0, q.path, q.line, q.text))
++            .map(|q| (q.thread.0, q.message.0, q.file, q.line, q.text))
+             .collect();
+         let line = ThreadLine::Added {
+             right: RightLine(4),
+         };
+         let expected = vec![
+-            (2, 5, "b.txt".to_owned(), line, "first".to_owned()),
+-            (2, 1, "b.txt".to_owned(), line, "second".to_owned()),
+-            (1, 4, "a.txt".to_owned(), line, "third".to_owned()),
++            (2, 5, RangeFileId(1), line, "first".to_owned()),
++            (2, 1, RangeFileId(1), line, "second".to_owned()),
++            (1, 4, RangeFileId(0), line, "third".to_owned()),
+         ];
+         assert_eq!(queued, expected);
+     }
+ 
++    #[test]
++    fn queued_leaves_out_messages_on_paths_the_range_does_not_list() {
++        let repo = repo();
++        let dir = tempfile::tempdir().unwrap();
++        let store = stored_in(dir.path());
++        let queued: Vec<_> = store
++            .queued(&range(&repo, "main..remote"))
++            .into_iter()
++            .map(|q| (q.message.0, q.file))
++            .collect();
++        assert_eq!(queued, [(4, RangeFileId(0))]);
++    }
++
+     #[test]
+     fn record_writes_the_posting_and_keeps_it() {
+         let dir = tempfile::tempdir().unwrap();
+@@ -264,7 +315,8 @@ mod tests {
+         store.record(MessageId(5), pending).unwrap();
+         let reopened = ThreadStore::open(dir.path()).unwrap();
+         assert_eq!(reopened.file, store.file);
+-        let ids: Vec<u32> = store.queued().iter().map(|q| q.message.0).collect();
++        let local = range(&repo(), "main..local");
++        let ids: Vec<u32> = store.queued(&local).iter().map(|q| q.message.0).collect();
+         assert_eq!(ids, [1, 4]);
+     }
+ 
+diff --git a/crates/review/tests/threads.rs b/crates/review/tests/threads.rs
+index b46f2bf..319643b 100644
+--- a/crates/review/tests/threads.rs
++++ b/crates/review/tests/threads.rs
+@@ -218,6 +218,18 @@ fn a_newer_format_is_refused_and_left_unchanged() {
+     assert_eq!(folder_names(&folder), [THREADS]);
+ }
+ 
++#[test]
++fn a_threads_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes() {
++    let folder = tempfile::tempdir().unwrap();
++    fs::create_dir(threads_path(&folder)).unwrap();
++    let error = refusal(&folder);
++    assert!(
++        matches!(&error, Error::ReadFailed { path, .. } if *path == threads_path(&folder)),
++        "{error:?}"
++    );
++    assert_eq!(folder_names(&folder), [THREADS]);
++}
++
+ fn message_json(id: u32) -> String {
+     format!(
+         r#"{{"id":{id},"body":{{"kind":"note","text":"a"}},"written":0,"posting":{{"kind":"notQueued"}}}}"#
+@@ -482,33 +494,31 @@ fn threads_on_paths_no_longer_listed_are_kept_on_every_write() {
+     let remote = range(repo.path(), "main..remote");
+     let folder = tempfile::tempdir().unwrap();
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+-    store
+-        .add_thread(&local, RangeFileId(1), added_line(), "on b")
+-        .unwrap();
+-    store
+-        .add_thread(&local, RangeFileId(2), added_line(), "on c")
+-        .unwrap();
++    for (file, text) in [(0, "on a"), (1, "on b"), (2, "on c")] {
++        store
++            .add_thread(&local, RangeFileId(file), added_line(), text)
++            .unwrap();
++    }
+ 
+     let mut reopened = ThreadStore::open(folder.path()).unwrap();
++    assert_eq!(reopened.unlisted_paths(&remote), ["a.txt", "b.txt"]);
++    assert_eq!(reopened.unlisted_paths(&local), Vec::<String>::new());
+     let shown = reopened.list(&remote);
+     let thread = only_thread(&shown);
+-    assert_eq!((thread.id, thread.file), (ThreadId(2), RangeFileId(0)));
++    assert_eq!((thread.id, thread.file), (ThreadId(3), RangeFileId(0)));
+ 
+-    let after_note = reopened.add_note(&remote, ThreadId(2), "more").unwrap();
++    let after_note = reopened.add_note(&remote, ThreadId(3), "more").unwrap();
+     assert_eq!(only_thread(&after_note).messages.len(), 2);
+     let hidden = reopened.add_note(&remote, ThreadId(1), "more");
+     assert_eq!(refused(hidden), "no review thread has the id 1");
+     let hidden_message = reopened.queue(&remote, MessageId(1), "more");
+     assert_eq!(refused(hidden_message), "no review message has the id 1");
+-    reopened.queue(&remote, MessageId(2), "queued").unwrap();
++    reopened.queue(&remote, MessageId(3), "queued").unwrap();
+ 
+-    let both = ThreadStore::open(folder.path()).unwrap().list(&local);
+-    let ids: Vec<(ThreadId, RangeFileId)> = both.threads.iter().map(|t| (t.id, t.file)).collect();
+-    assert_eq!(
+-        ids,
+-        [(ThreadId(1), RangeFileId(1)), (ThreadId(2), RangeFileId(2))]
+-    );
+-    assert_eq!(both.threads[0].messages[0].body, note("on b"));
++    let all = ThreadStore::open(folder.path()).unwrap().list(&local);
++    let ids: Vec<(u32, u32)> = all.threads.iter().map(|t| (t.id.0, t.file.0)).collect();
++    assert_eq!(ids, [(1, 0), (2, 1), (3, 2)]);
++    assert_eq!(all.threads[1].messages[0].body, note("on b"));
+ }
+ 
+ #[test]
+-- 
+2.56.0
+
