@@ -38,6 +38,8 @@ export const commands = {
 	renameTab: (tab: TabId, name: string) => typedError<TabList, IpcError>(__TAURI_INVOKE("rename_tab", { tab, name })),
 	setTabLanguage: (tab: TabId, language: TabLanguage) => typedError<TabList, IpcError>(__TAURI_INVOKE("set_tab_language", { tab, language })),
 	showTab: (tab: TabId) => typedError<TabList, IpcError>(__TAURI_INVOKE("show_tab", { tab })),
+	openRange: () => __TAURI_INVOKE<RangeStart>("open_range"),
+	loadRangeFile: (file: RangeFileId) => typedError<RangeFile, IpcError>(__TAURI_INVOKE("load_range_file", { file })),
 	/**
 	 *  The selection's text, or `None` when it cannot be read; on Linux through GTK's text request,
 	 *  which never asks for the format list that `WebKitGTK` 2.54 crashes on (plan §2 #99).
@@ -222,7 +224,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "WorkerStopped" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -314,6 +316,50 @@ export type ProgressView = {
 
 /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
 export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };
+
+export type RangeChange = { kind: "added" } | { kind: "modified" } | { kind: "deleted" } | { kind: "renamed"; old_path: string };
+
+/**  One row of the list; `path` is the new path, the old one for a deleted file (UTF-8, lossy for display). */
+export type RangeEntry = {
+	id: RangeFileId,
+	path: string,
+	change: RangeChange,
+	lines: RangeLineCounts,
+};
+
+export type RangeEntryKind = "file" | "executable" | "link" | "submodule";
+
+/**  What one file shows: decided once, here. */
+export type RangeFile = { kind: "texts"; left: string; right: string; differences: Difference[]; mode: RangeModeChange } | { kind: "binary" } | { kind: "tooLarge"; limit: number } | { kind: "notUtf8"; sides: RangeSides } | { kind: "modeOnly"; old: RangeEntryKind; new: RangeEntryKind } | { kind: "kindChanged"; old: RangeEntryKind; new: RangeEntryKind } | { kind: "submodule"; old: string | null; new: string | null };
+
+/**  A changed file's place in the range's list: 0.. in list order, fixed for the window's life. */
+export type RangeFileId = number;
+
+export type RangeLineCounts = { kind: "counted"; added: number; removed: number } | { kind: "notCounted" };
+
+export type RangeModeChange = { kind: "same" } | { kind: "changed"; old: RangeEntryKind; new: RangeEntryKind };
+
+export type RangeSide = {
+	label: RangeSideLabel,
+	short_id: string,
+	subject: string,
+};
+
+/**  How a column header names its side. */
+export type RangeSideLabel = 
+/**  A side as typed; an empty side is `HEAD`. */
+{ kind: "named"; name: string } | 
+/**  The left of `a...b`: where `right` branched off `left`. */
+{ kind: "mergeBase"; left: string; right: string };
+
+export type RangeSides = "left" | "right" | "both";
+
+export type RangeStart = {
+	range: string,
+	left: RangeSide,
+	right: RangeSide,
+	files: RangeEntry[],
+};
 
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
