@@ -1,17 +1,4 @@
 {
-  "RVGlab": {
-    "owned": [
-      "crates/gitio/src/glab.rs",
-      "crates/gitio/src/lib.rs",
-      "crates/gitio/src/run.rs",
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/src/names.rs",
-      "crates/gitio/tests/glab.rs",
-      "crates/gitio/tests/diff.rs",
-      "scripts/fake-glab/glab",
-      "tests/glab/**"
-    ]
-  },
   "RVThreadRows": {
     "owned": [
       "frontend/src/editor/internal/threadAnchor.ts",
@@ -34,6 +21,27 @@
       "frontend/src/editor/AGENTS.md",
       "frontend/src/ipc/threadLine.ts",
       "frontend/src/ipc/index.ts"
+    ]
+  },
+  "RVWindowR1": {
+    "owned": [
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/scripts/fences.ts",
+      "frontend/scripts/fences.test.ts",
+      "frontend/scripts/app-session/args.ts",
+      "frontend/scripts/app-session/args.test.ts",
+      "frontend/scripts/app-session/startArgs.ts",
+      "frontend/scripts/app-session/start.ts",
+      "frontend/scripts/app-session/video.ts"
     ]
   }
 }
