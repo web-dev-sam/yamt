@@ -6,6 +6,7 @@ export type TabId = number & { readonly __brand: "TabId" };
 export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
 export type LeftLine = number & { readonly __brand: "LeftLine" };
 export type RightLine = number & { readonly __brand: "RightLine" };
+export type RangeFileId = number & { readonly __brand: "RangeFileId" };
 
 type MiddleLine = number & { readonly __brand: "MiddleLine" };
 export type DiskVersion = number & { readonly __brand: "DiskVersion" };
@@ -164,6 +165,10 @@ export function isLeftLine(n: number): n is LeftLine {
 
 export function isRightLine(n: number): n is RightLine {
   return isNonNegativeInteger(n);
+}
+
+export function isRangeFileId(value: number): value is RangeFileId {
+  return isNonNegativeInteger(value);
 }
 
 export function nextColumnVersion(version: ColumnVersion): ColumnVersion {

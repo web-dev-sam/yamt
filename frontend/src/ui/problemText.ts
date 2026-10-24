@@ -20,11 +20,15 @@ const OPERATION_STATE_WORDS: Readonly<
 };
 
 const FIXED_REASONS: Readonly<
-  Record<"NoConfigFolder" | "MergeAborted" | "UnknownTab" | "WorkerStopped", string>
+  Record<
+    "NoConfigFolder" | "MergeAborted" | "UnknownTab" | "UnknownRangeFile" | "WorkerStopped",
+    string
+  >
 > = {
   NoConfigFolder: "this system has no config folder to keep it in.",
   MergeAborted: "the merge was aborted.",
   UnknownTab: "that tab was closed.",
+  UnknownRangeFile: "that file is not part of this range.",
   WorkerStopped: "yamt's worker stopped; try again.",
 };
 
@@ -134,6 +138,7 @@ function causedText(problem: CausedProblem, platform: string): string {
     case "NoConfigFolder":
     case "MergeAborted":
     case "UnknownTab":
+    case "UnknownRangeFile":
     case "WorkerStopped":
       return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
     case "StopMovedOn":
@@ -145,10 +150,6 @@ function causedText(problem: CausedProblem, platform: string): string {
       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
     case "ColumnTooLarge":
       return `${attempted(problem)}: ${columnLimitText(cause.limit)}.`;
-    default: {
-      const _exhaustive: never = cause;
-      return _exhaustive;
-    }
   }
 }
 

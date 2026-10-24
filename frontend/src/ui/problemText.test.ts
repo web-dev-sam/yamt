@@ -180,6 +180,12 @@ test("an unknown compare tab says the tab was closed", () => {
   );
 });
 
+test("a range file Rust does not list says it is not part of this range", () => {
+  expect(text({ action: "open", path: PATH, cause: { kind: "UnknownRangeFile", file: 3 } })).toBe(
+    `Could not open ${PATH}: that file is not part of this range.`,
+  );
+});
+
 test("a column over the limit names the limit from the reply in MiB", () => {
   const limit = 8 * 1024 * 1024;
 

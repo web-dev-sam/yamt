@@ -1,0 +1,3 @@
+just mutants d6c6d3f (covers 8787d4d RVShell)
+MISSED   src-tauri/src/range.rs:64:5: replace range_folder -> PathBuf with Default::default() in 4s build + 1s test
+27 mutants tested in 2m: 1 missed, 8 caught, 18 unviable

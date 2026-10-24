@@ -38,6 +38,7 @@ export type {
   ProgramFound,
   ProgressView,
   ProjectFile,
+  RangeFileId,
   RepositoryAnswer,
   RunId,
   ServerCommand,
@@ -58,6 +59,7 @@ export type {
 export { nextColumnVersion } from "./domain";
 export { createFixtureSource, loadFixture } from "./fixture";
 export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
+export { createFixtureRangeSource } from "./fixtureRange";
 export { createFixtureServerHost } from "./fixtureServers";
 export {
   bindingsOf,
@@ -79,9 +81,23 @@ export {
   type KeyProblem,
   type KeysRead,
 } from "./keys";
+export type {
+  RangeChange,
+  RangeEntry,
+  RangeEntryKind,
+  RangeFile,
+  RangeLineCounts,
+  RangeModeChange,
+  RangeSide,
+  RangeSideLabel,
+  RangeSides,
+  RangeStart,
+} from "./rangeDomain";
+export type { RangeSource } from "./RangeSource";
 export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
 export { THEMES, themeKind, themeOf, themeRows } from "./themes";
 export { createTauriCompareSource } from "./tauriCompare";
+export { createTauriRangeSource } from "./tauriRange";
 export type { ServerHost } from "./ServerHost";
 export type { SideWords } from "./words";
 

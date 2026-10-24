@@ -1,0 +1,74 @@
+import type * as Generated from "./bindings";
+import { toDifferences, type Difference } from "./compareDomain";
+import { isRangeFileId, type RangeFileId } from "./domain";
+import { invalid } from "./validate";
+
+export type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+export type RangeSide = {
+  readonly label: RangeSideLabel;
+  readonly shortId: string;
+  readonly subject: string;
+};
+export type RangeChange =
+  | Readonly<Exclude<Generated.RangeChange, { kind: "renamed" }>>
+  | { readonly kind: "renamed"; readonly oldPath: string };
+export type RangeLineCounts = Readonly<Generated.RangeLineCounts>;
+export type RangeEntry = {
+  readonly id: RangeFileId;
+  readonly path: string;
+  readonly change: RangeChange;
+  readonly lines: RangeLineCounts;
+};
+export type RangeStart = {
+  readonly range: string;
+  readonly left: RangeSide;
+  readonly right: RangeSide;
+  readonly files: readonly RangeEntry[];
+};
+export type RangeEntryKind = Generated.RangeEntryKind;
+export type RangeModeChange = Readonly<Generated.RangeModeChange>;
+export type RangeSides = Generated.RangeSides;
+export type RangeFile =
+  | {
+      readonly kind: "texts";
+      readonly left: string;
+      readonly right: string;
+      readonly differences: readonly Difference[];
+      readonly mode: RangeModeChange;
+    }
+  | Readonly<Exclude<Generated.RangeFile, { kind: "texts" }>>;
+
+function toRangeSide({ label, short_id: shortId, subject }: Generated.RangeSide): RangeSide {
+  return { label, shortId, subject };
+}
+
+function toRangeChange(change: Generated.RangeChange): RangeChange {
+  return change.kind === "renamed" ? { kind: "renamed", oldPath: change.old_path } : change;
+}
+
+function toRangeEntry(
+  { id, path, change, lines }: Generated.RangeEntry,
+  index: number,
+): RangeEntry {
+  if (!isRangeFileId(id)) {
+    throw invalid(`files[${index}].id`, id);
+  }
+  return { id, path, change: toRangeChange(change), lines };
+}
+
+export function toRangeStart(raw: Generated.RangeStart): RangeStart {
+  return {
+    range: raw.range,
+    left: toRangeSide(raw.left),
+    right: toRangeSide(raw.right),
+    files: raw.files.map(toRangeEntry),
+  };
+}
+
+export function toRangeFile(raw: Generated.RangeFile): RangeFile {
+  if (raw.kind !== "texts") {
+    return raw;
+  }
+  const { left, right, differences, mode } = raw;
+  return { kind: "texts", left, right, differences: toDifferences(differences), mode };
+}
