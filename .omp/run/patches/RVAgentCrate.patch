@@ -1,0 +1,1674 @@
+From 040cc4784e0249e7ca4dcebff941927548776afd Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 14:03:55 +0200
+Subject: [PATCH] feat(agent): yamt-agent owns the AI's shared-clone checkout
+ and its agent process as one Workspace
+
+---
+ .omp/run/notes/RVAgentCrate.md     |  66 ++++++
+ Cargo.lock                         |  16 ++
+ Cargo.toml                         |   2 +
+ crates/agent/AGENTS.md             |   1 +
+ crates/agent/Cargo.toml            |  22 ++
+ crates/agent/src/bin/agent-echo.rs |  81 +++++++
+ crates/agent/src/checkout.rs       |  93 ++++++++
+ crates/agent/src/lib.rs            |  85 ++++++++
+ crates/agent/src/look.rs           |  77 +++++++
+ crates/agent/src/process.rs        |  34 +++
+ crates/agent/src/sweep.rs          |  42 ++++
+ crates/agent/src/workspace.rs      | 124 +++++++++++
+ crates/agent/tests/checkout.rs     | 330 +++++++++++++++++++++++++++++
+ crates/agent/tests/process.rs      | 244 +++++++++++++++++++++
+ crates/agent/tests/sweep.rs        | 124 +++++++++++
+ crates/range/src/lib.rs            |   2 +-
+ crates/range/src/lock.rs           |  93 ++++++--
+ scripts/arch-check.sh              |  11 +-
+ src-tauri/Cargo.toml               |   1 +
+ 19 files changed, 1433 insertions(+), 15 deletions(-)
+ create mode 100644 .omp/run/notes/RVAgentCrate.md
+ create mode 100644 crates/agent/AGENTS.md
+ create mode 100644 crates/agent/Cargo.toml
+ create mode 100644 crates/agent/src/bin/agent-echo.rs
+ create mode 100644 crates/agent/src/checkout.rs
+ create mode 100644 crates/agent/src/lib.rs
+ create mode 100644 crates/agent/src/look.rs
+ create mode 100644 crates/agent/src/process.rs
+ create mode 100644 crates/agent/src/sweep.rs
+ create mode 100644 crates/agent/src/workspace.rs
+ create mode 100644 crates/agent/tests/checkout.rs
+ create mode 100644 crates/agent/tests/process.rs
+ create mode 100644 crates/agent/tests/sweep.rs
+
+diff --git a/.omp/run/notes/RVAgentCrate.md b/.omp/run/notes/RVAgentCrate.md
+new file mode 100644
+index 0000000..0addee1
+--- /dev/null
++++ b/.omp/run/notes/RVAgentCrate.md
+@@ -0,0 +1,66 @@
++**summary**
++- The new crate `yamt-agent` (`crates/agent`) is one `Workspace` per `--ai` range window. It owns the AI's checkout, which is made as `checkout.partial` from a shared clone with `origin` removed and the right commit checked out detached, then renamed to `checkout`. A complete checkout is reused, and removal goes through `checkout.removing`.
++- It also owns the agent process: the program is found through `yamt_pipe::find` (PATH, then the command's home folders) and started with `Running::start(…, Framing::Lines, …)`. The agent is always stopped and reaped before any removal (`discard`, `end(self)`). It also provides `LookJob::look` → `CheckoutLook`, `sweep_leftovers`, and the `agent-echo` test agent.
++- `yamt-range` gains `PairLock::try_hold` and `pair_folders`.
++- `src-tauri` depends on `yamt-agent` by path, which makes the crate a workspace member. `arch-check` now checks the crate's dependencies and allows it under yamt-app.
++
++**files_changed**
++- `crates/agent/Cargo.toml`, `crates/agent/AGENTS.md`
++- `crates/agent/src/{lib,workspace,checkout,look,process,sweep}.rs`, `crates/agent/src/bin/agent-echo.rs`
++- `crates/agent/tests/{checkout,process,sweep}.rs`
++- `crates/range/src/lock.rs`, `crates/range/src/lib.rs`
++- `src-tauri/Cargo.toml` (one line: `yamt-agent = { path = "../crates/agent" }`)
++- `scripts/arch-check.sh`
++- `Cargo.lock` (written by cargo, +16 lines; not in Owned)
++
++**tests_added**
++
++All 19 names from the brief's Acceptance list are present (12 in `checkout.rs`, 8 in `process.rs`, 4 in `sweep.rs`, including the extras below):
++- `tests/checkout.rs`:
++  - `prepare_makes_the_checkout_in_the_pair_folder_and_reuses_it_the_second_time`: checks the remote content, HEAD at the right commit and detached, no remotes, no partial folder left, and a marker in `.git` that survives the second prepare.
++  - `prepare_reuses_a_kept_checkout_with_its_changes_and_commits`: after `end`, the commit and the untracked file are still there, and the look is `Changed` with `head_moved`.
++  - `a_partial_checkout_left_by_a_crash_is_removed_before_prepare`
++  - `look_is_missing_before_prepare_and_clean_after`
++  - `an_edited_file_an_untracked_file_and_a_moved_head_each_count_as_changed`
++  - `an_ignored_file_alone_counts_as_clean` (also checks that `end` removes it, per #115)
++  - `a_checkout_git_cannot_read_is_unreadable_and_never_removed_by_end_or_sweep`: the `alternates` file is deleted.
++  - `end_removes_a_clean_checkout_and_keeps_a_changed_one`
++  - `a_checkout_left_after_a_kill_is_reused_by_the_next_window`: the `Workspace` is dropped without `end`.
++  - Extra: `a_failed_prepare_leaves_no_partial_checkout`, `discard_removes_a_changed_checkout`, and `a_checkout_without_its_own_git_folder_is_unreadable_inside_another_repository` (git must not mistake an outer repository for the checkout).
++- `tests/process.rs`:
++  - `the_agent_runs_in_the_checkout` (`pwd` plus `edit`)
++  - `start_without_a_checkout_answers_no_checkout`
++  - `a_crashed_agent_reports_exited_once_with_its_code`
++  - `start_while_an_agent_runs_stops_the_old_one_first`: the old run's `Exited` is already queued when `start` returns, and `send`/`stop` with the old run are ignored.
++  - `a_missing_program_lists_path_and_the_home_entries`
++  - `discard_stops_the_agent_before_removing_the_checkout`: uses `hold`. `Exited` is already queued when `discard` returns, the agent's late write does not bring the folder back, and a later `start` answers `NoCheckout`.
++  - Extra: `stop_ends_the_agent_of_its_run_and_keeps_the_checkout`, `stop_agent_ends_the_running_agent_and_keeps_the_checkout`.
++- `tests/sweep.rs`: `a_clean_leftover_of_an_unheld_pair_is_removed`, `a_changed_leftover_is_kept`, `a_leftover_of_a_held_pair_is_untouched`, `the_own_pair_keeps_its_checkout_and_loses_partial_and_removing_folders` (own lock held, as a real window holds it).
++- `crates/range/src/lock.rs`: `try_hold_answers_none_while_another_lock_holds_the_pair_and_takes_it_once_released`, `pair_folders_lists_every_pair_folder_under_every_repository_and_no_file`.
++
++**smoke_evidence**
++- `cargo fmt --check` → no output; `FMT-OK` printed.
++- `cargo clippy --workspace --all-targets -- -D warnings` → `Finished 'dev' profile`, no warnings. This ran before the last small test edit; `cargo clippy -p yamt-agent --all-targets -- -D warnings` after that edit → `Finished`, clean.
++- `cargo test -p yamt-agent -p yamt-range` → `checkout: ok. 12 passed`, `process: ok. 8 passed`, `sweep: ok. 4 passed`, `yamt_range lib: ok. 11 passed`, plus range's integration files `3 passed`, `3 passed`, `11 passed`; 0 failed.
++- `just arch-check` → `arch-check: ok`.
++- The new arch rule's failing path was shown by hand with the same pipeline (`printf 'yamt-agent\nyamt-gitio\nyamt-session\ntauri\nserde_json\n' | grep -E … | grep -vxE 'yamt-(agent|gitio|pipe|range|merge-core)'` → `yamt-session`, `tauri`, `serde_json`). No committed test exists for it; the script has no test harness for any of its rules.
++- `just mutants` was not run.
++
++**deviations_from_brief**
++- **Root `Cargo.toml` (read-only):** not edited. The crate builds today because `src-tauri`'s path dependency makes it a member automatically. For the usual pattern, add `"crates/agent",` to `[workspace] members` and `yamt-agent = { path = "crates/agent" }` to `[workspace.dependencies]`, then change the `src-tauri` line to `yamt-agent.workspace = true`.
++- **`Cargo.lock`:** cargo added the `yamt-agent` package entry (+16 lines). It is outside Owned.
++- **`Error::Rename { from, to, source }` added:** used when renaming `checkout.partial` to `checkout` fails. Adding a variant is allowed by the Contract.
++- **`PairLock::take` changed:** it now shares the private `hold` (open plus `try_lock`) with `try_hold` instead of repeating it. Its behaviour and errors are the same, but this goes beyond "only the two additions".
++- **Extra `Unreadable` case:** a checkout counts as `Unreadable` also when `git rev-parse --show-toplevel` finds a different repository, compared by canonical path. Without this, a broken `checkout/.git` inside a dotfiles home repository would be judged against the wrong repository, and could be removed if that repository looked clean.
++- **The sweep reads the right commit from the pair folder name** (`<left>-<right>`, as `PairLock::take` builds it). A folder name without a `-` keeps its checkout.
++- **`look_job` uses `<pair>/checkout` even before `prepare`.** A checkout kept from an earlier window is therefore asked about at close and judged by `end`, as AgentDesign §4 describes for the own pair.
++- **`prepare` also removes a leftover `checkout.removing`** before making a new checkout, not only `checkout.partial`.
++- **`hold <file>` in `agent-echo`:** after stdin closes, it waits 300 ms and writes `released` into the file, recreating its folder if needed. The discard test uses this to see the order of stop and removal on Linux, where an open file does not block removal.
++- **No `SpawnFailed` test:** it would need to exec a file the test just wrote, which you ruled out.
++- **Needed outside Owned (not done):** a `docs/architecture.md` §3 and §7 entry and a project-map line for `crates/agent`, and a mention of `try_hold`/`pair_folders` in `crates/range/AGENTS.md`.
++
++**open_risks**
++- `crates/agent/src/sweep.rs`, `right_commit` (the last function): it repeats `PairLock::take`'s folder-name format (`lock.rs:24-28`). If that format changes, the sweep sees every checkout as `head_moved` and keeps it, so it fails safe.
++- `crates/agent/src/checkout.rs`, the private `remove_if_present` (bottom of the file, used by `remove`): on Windows, `remove_dir_all` over read-only git object files has not been checked.
++- `crates/agent/src/workspace.rs`, `stop_and_reap` (the last method): `start`, `discard` and `end` can block for up to about 3 s while an agent ignores stdin closing (2 s grace, then kill, then up to 1 s drain).
++- `crates/agent/src/look.rs`, the private `changes` (just below `LookJob`): file paths come from `to_string_lossy`, so they use the OS separator on Windows.
+\ No newline at end of file
+diff --git a/Cargo.lock b/Cargo.lock
+index ed43ad5..ff6086d 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4593,6 +4593,21 @@ dependencies = [
+  "pkg-config",
+ ]
+ 
++[[package]]
++name = "yamt-agent"
++version = "0.5.1"
++dependencies = [
++ "serde",
++ "specta",
++ "tempfile",
++ "thiserror 2.0.21",
++ "tracing",
++ "yamt-conflict-repo",
++ "yamt-gitio",
++ "yamt-pipe",
++ "yamt-range",
++]
++
+ [[package]]
+ name = "yamt-app"
+ version = "0.5.1"
+@@ -4607,6 +4622,7 @@ dependencies = [
+  "tauri-specta",
+  "tracing",
+  "tracing-subscriber",
++ "yamt-agent",
+  "yamt-compare",
+  "yamt-conflict-repo",
+  "yamt-lsp-host",
+diff --git a/Cargo.toml b/Cargo.toml
+index dd13d1c..92ad548 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -12,6 +12,7 @@ members = [
+   "crates/compare",
+   "crates/range",
+   "crates/review",
++  "crates/agent",
+   "src-tauri",
+ ]
+ 
+@@ -32,6 +33,7 @@ yamt-pipe = { path = "crates/pipe" }
+ yamt-compare = { path = "crates/compare" }
+ yamt-range = { path = "crates/range" }
+ yamt-review = { path = "crates/review" }
++yamt-agent = { path = "crates/agent" }
+ thiserror = "2.0.21"
+ serde = { version = "1.0.229", features = ["derive"] }
+ serde_json = "1.0.151"
+diff --git a/crates/agent/AGENTS.md b/crates/agent/AGENTS.md
+new file mode 100644
+index 0000000..15dadb6
+--- /dev/null
++++ b/crates/agent/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. The AI's workspace for one range window started with `--ai` (plan §2 #108–#111, #115): its temporary checkout of the right commit and the agent process running in it; Rust never reads the agent's messages (ACP is the window's). `lib.rs` (the IPC types `AgentRun`, `AgentCommand`, `AgentStartReply`, `CheckoutReply`, `CheckoutLook` — serde tag `kind`, variants as named; `Error`), `workspace.rs` (`Pair` from `yamt-range`'s pair lock; `Workspace`: `prepare` makes or reuses `<pair folder>/checkout`, `start` only after `prepare` with cwd = the checkout and a running agent stopped and reaped first, `send`/`stop` for the current run only, `stop_agent`, `look_job`, `discard` and `end(self)` stop and reap the agent before any removal), `checkout.rs` (made as `checkout.partial` — `clone --shared --no-checkout`, `remote remove origin`, `checkout --detach` the right commit — then renamed to `checkout`, so a `checkout/` is always complete; removed through `checkout.removing`; `remove_when_clean`), `look.rs` (`LookJob::look`: `Missing`, `Clean`, `Changed` = any `git status` entry, ignored files never, or `HEAD` ≠ the right commit; `Unreadable` when git fails or finds another repository than the checkout's own), `process.rs` (the program through `yamt_pipe::find` without project entries — PATH, then the command's home folders — and `Running::start` with `Framing::Lines`), `sweep.rs` (`sweep_leftovers(range_dir, own)`: in every other pair whose lock `PairLock::try_hold` takes, the partial and removing folders and a clean checkout deleted, a changed or unreadable one kept; the right commit read from the folder name `<left>-<right>`; in `own` only the partial and removing folders). `bin/agent-echo.rs`: the tests' line agent (echo, `pwd`, `edit <file>`, `stderr <text>`, `exit <code>`, `huge`, `hold <file>`). Tests in `tests/{checkout,process,sweep}.rs` run real git in temp folders and start the built `agent-echo` where cargo put it. Depends on `yamt-gitio`, `yamt-pipe` and `yamt-range` only among yamt crates; never tauri, never serde_json (arch-check).
+diff --git a/crates/agent/Cargo.toml b/crates/agent/Cargo.toml
+new file mode 100644
+index 0000000..6bbb735
+--- /dev/null
++++ b/crates/agent/Cargo.toml
+@@ -0,0 +1,22 @@
++[package]
++name = "yamt-agent"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++yamt-gitio.workspace = true
++yamt-pipe.workspace = true
++yamt-range.workspace = true
++serde.workspace = true
++specta.workspace = true
++thiserror.workspace = true
++tracing.workspace = true
++
++[dev-dependencies]
++yamt-conflict-repo.workspace = true
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/agent/src/bin/agent-echo.rs b/crates/agent/src/bin/agent-echo.rs
+new file mode 100644
+index 0000000..a54ba1b
+--- /dev/null
++++ b/crates/agent/src/bin/agent-echo.rs
+@@ -0,0 +1,81 @@
++//! A line-framed test agent for this crate's tests: answers each line with the same line. `pwd` answers its
++//! working folder; `edit <file>` appends a line to that file and answers `edited <file>`; `stderr <text>` writes
++//! `text` on stderr; `exit <code>` exits with that code; `huge` writes one line over 64 MiB, then `after`;
++//! `hold <file>` keeps that file open, answers `holding <file>`, and once stdin closes waits a moment, writes
++//! `released` into it (making its folder again if it is gone) and exits.
++use std::fs::{self, File, OpenOptions};
++use std::io::{self, BufRead, Write};
++use std::path::PathBuf;
++use std::time::Duration;
++use std::{env, process, thread};
++
++const HUGE_LINE_BYTES: usize = 64 * 1024 * 1024 + 1;
++const HOLD_RELEASE: Duration = Duration::from_millis(300);
++const EDITED_LINE: &[u8] = b"edited by agent-echo\n";
++const RELEASED: &[u8] = b"released\n";
++
++struct Held {
++    path: PathBuf,
++    _file: File,
++}
++
++fn main() -> io::Result<()> {
++    let mut held = None;
++    for line in io::stdin().lock().lines() {
++        let line = line?;
++        if let Some(file) = line.strip_prefix("hold ") {
++            held = Some(hold(file)?);
++        } else {
++            answer(&line)?;
++        }
++    }
++    if let Some(held) = held {
++        thread::sleep(HOLD_RELEASE);
++        if let Some(folder) = held.path.parent() {
++            fs::create_dir_all(folder)?;
++        }
++        fs::write(&held.path, RELEASED)?;
++    }
++    Ok(())
++}
++
++fn hold(file: &str) -> io::Result<Held> {
++    let path = env::current_dir()?.join(file);
++    let opened = OpenOptions::new().create(true).append(true).open(&path)?;
++    write_out(format!("holding {file}\n").as_bytes())?;
++    Ok(Held {
++        path,
++        _file: opened,
++    })
++}
++
++fn answer(line: &str) -> io::Result<()> {
++    if line == "pwd" {
++        let folder = env::current_dir()?;
++        write_out(format!("{}\n", folder.display()).as_bytes())
++    } else if let Some(file) = line.strip_prefix("edit ") {
++        OpenOptions::new()
++            .create(true)
++            .append(true)
++            .open(file)?
++            .write_all(EDITED_LINE)?;
++        write_out(format!("edited {file}\n").as_bytes())
++    } else if let Some(text) = line.strip_prefix("stderr ") {
++        eprintln!("{text}");
++        Ok(())
++    } else if let Some(code) = line.strip_prefix("exit ") {
++        process::exit(code.trim().parse().unwrap_or(1));
++    } else if line == "huge" {
++        let mut huge = vec![b'x'; HUGE_LINE_BYTES];
++        huge.extend_from_slice(b"\nafter\n");
++        write_out(&huge)
++    } else {
++        write_out(format!("{line}\n").as_bytes())
++    }
++}
++
++fn write_out(bytes: &[u8]) -> io::Result<()> {
++    let mut out = io::stdout().lock();
++    out.write_all(bytes)?;
++    out.flush()
++}
+diff --git a/crates/agent/src/checkout.rs b/crates/agent/src/checkout.rs
+new file mode 100644
+index 0000000..9e254ef
+--- /dev/null
++++ b/crates/agent/src/checkout.rs
+@@ -0,0 +1,93 @@
++use std::fs;
++use std::io;
++use std::path::{Path, PathBuf};
++
++use yamt_gitio::{Oid, Repo};
++
++use crate::look::LookJob;
++use crate::{CheckoutLook, Error};
++
++/// A `checkout` folder is always complete: it is made as `checkout.partial` and removed as
++/// `checkout.removing`, so a crash leaves only folders that are safe to delete (plan §2 #110).
++pub(crate) const CHECKOUT: &str = "checkout";
++const PARTIAL: &str = "checkout.partial";
++const REMOVING: &str = "checkout.removing";
++const ORIGIN: &str = "origin";
++
++/// `<pair folder>/checkout`, reused when it exists, otherwise made from `repo` at `commit`.
++pub(crate) fn made_or_reused(
++    pair_folder: &Path,
++    repo: &Path,
++    commit: &str,
++) -> Result<PathBuf, Error> {
++    let checkout = pair_folder.join(CHECKOUT);
++    if checkout.is_dir() {
++        return Ok(checkout);
++    }
++    remove_leftovers(pair_folder)?;
++    let partial = pair_folder.join(PARTIAL);
++    if let Err(error) = make(&partial, repo, commit) {
++        if let Err(leftover) = remove_if_present(&partial) {
++            tracing::warn!(%leftover, "a failed checkout's partial folder stays");
++        }
++        return Err(error);
++    }
++    fs::rename(&partial, &checkout).map_err(|source| Error::Rename {
++        from: partial,
++        to: checkout.clone(),
++        source,
++    })?;
++    Ok(checkout)
++}
++
++fn make(partial: &Path, repo: &Path, commit: &str) -> Result<(), Error> {
++    let commit = Oid::parse(commit)?;
++    let clone = Repo::discover(repo)?.clone_shared_into(partial)?;
++    clone.remove_remote(ORIGIN)?;
++    clone.checkout_detached(&commit)?;
++    Ok(())
++}
++
++/// Removes `<pair folder>/checkout` through `checkout.removing`; a missing one is already removed.
++pub(crate) fn remove(pair_folder: &Path) -> Result<(), Error> {
++    let removing = pair_folder.join(REMOVING);
++    remove_if_present(&removing)?;
++    let checkout = pair_folder.join(CHECKOUT);
++    match fs::rename(&checkout, &removing) {
++        Ok(()) => remove_if_present(&removing),
++        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
++        Err(source) => Err(Error::Remove {
++            folder: checkout,
++            source,
++        }),
++    }
++}
++
++/// Removes `<pair folder>/checkout` only when a look now finds it clean; a failed removal is logged.
++pub(crate) fn remove_when_clean(pair_folder: &Path, new_commit: String) {
++    match LookJob::in_pair(pair_folder, new_commit).look() {
++        CheckoutLook::Clean => {
++            if let Err(error) = remove(pair_folder) {
++                tracing::warn!(%error, "the AI's clean checkout stays");
++            }
++        }
++        CheckoutLook::Missing | CheckoutLook::Changed { .. } | CheckoutLook::Unreadable { .. } => {}
++    }
++}
++
++/// Deletes the `checkout.partial` and `checkout.removing` folders a crash or kill left.
++pub(crate) fn remove_leftovers(pair_folder: &Path) -> Result<(), Error> {
++    remove_if_present(&pair_folder.join(PARTIAL))?;
++    remove_if_present(&pair_folder.join(REMOVING))
++}
++
++fn remove_if_present(folder: &Path) -> Result<(), Error> {
++    match fs::remove_dir_all(folder) {
++        Ok(()) => Ok(()),
++        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
++        Err(source) => Err(Error::Remove {
++            folder: folder.to_owned(),
++            source,
++        }),
++    }
++}
+diff --git a/crates/agent/src/lib.rs b/crates/agent/src/lib.rs
+new file mode 100644
+index 0000000..c2ca7dd
+--- /dev/null
++++ b/crates/agent/src/lib.rs
+@@ -0,0 +1,85 @@
++//! The AI's workspace for one range window: its temporary checkout of the right commit and the agent process running in it.
++#![forbid(unsafe_code)]
++
++mod checkout;
++mod look;
++mod process;
++mod sweep;
++mod workspace;
++
++use std::io;
++use std::path::PathBuf;
++
++use serde::{Deserialize, Serialize};
++use specta::Type;
++
++pub use crate::look::LookJob;
++pub use crate::sweep::sweep_leftovers;
++pub use crate::workspace::{Pair, Workspace};
++
++/// One agent process start; a later start gets a new number.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++pub struct AgentRun(pub u32);
++
++/// The agent's program and arguments as the settings name them, and the home folders looked in after PATH.
++#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Type)]
++pub struct AgentCommand {
++    pub program: String,
++    pub args: Vec<String>,
++    pub home_folders: Vec<String>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum AgentStartReply {
++    Started {
++        run: AgentRun,
++    },
++    NotFound {
++        program: String,
++        searched: Vec<String>,
++    },
++    SpawnFailed {
++        program: String,
++        message: String,
++    },
++    NoCheckout,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum CheckoutReply {
++    Ready { folder: String },
++    Failed { message: String },
++}
++
++/// What the checkout holds now; `Changed` lists at least one file or has `head_moved`.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind")]
++pub enum CheckoutLook {
++    Missing,
++    Clean,
++    Changed {
++        folder: String,
++        files: Vec<String>,
++        head_moved: bool,
++    },
++    Unreadable {
++        folder: String,
++        message: String,
++    },
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error(transparent)]
++    Git(#[from] yamt_gitio::Error),
++    #[error("cannot remove {}: {source}", folder.display())]
++    Remove { folder: PathBuf, source: io::Error },
++    #[error("cannot rename {} to {}: {source}", from.display(), to.display())]
++    Rename {
++        from: PathBuf,
++        to: PathBuf,
++        source: io::Error,
++    },
++}
+diff --git a/crates/agent/src/look.rs b/crates/agent/src/look.rs
+new file mode 100644
+index 0000000..990bbff
+--- /dev/null
++++ b/crates/agent/src/look.rs
+@@ -0,0 +1,77 @@
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_gitio::Repo;
++
++use crate::CheckoutLook;
++use crate::checkout::CHECKOUT;
++
++/// The checkout's folder and the commit it was made at, taken under the shell's lock; `look` runs git outside it.
++#[derive(Clone, Debug)]
++pub struct LookJob {
++    folder: PathBuf,
++    new_commit: String,
++}
++
++impl LookJob {
++    pub(crate) fn in_pair(pair_folder: &Path, new_commit: String) -> LookJob {
++        LookJob {
++            folder: pair_folder.join(CHECKOUT),
++            new_commit,
++        }
++    }
++
++    /// "Changed" is any file `git status` lists (an ignored one is not) or `HEAD` away from the commit.
++    #[must_use]
++    pub fn look(self) -> CheckoutLook {
++        if !self.folder.exists() {
++            return CheckoutLook::Missing;
++        }
++        let folder = self.folder.to_string_lossy().into_owned();
++        match changes(&self.folder, &self.new_commit) {
++            Ok(Changes { files, head_moved }) if files.is_empty() && !head_moved => {
++                CheckoutLook::Clean
++            }
++            Ok(Changes { files, head_moved }) => CheckoutLook::Changed {
++                folder,
++                files,
++                head_moved,
++            },
++            Err(message) => CheckoutLook::Unreadable { folder, message },
++        }
++    }
++}
++
++struct Changes {
++    files: Vec<String>,
++    head_moved: bool,
++}
++
++fn changes(folder: &Path, new_commit: &str) -> Result<Changes, String> {
++    let repo = own_repo(folder)?;
++    let entries = repo.status_entries().map_err(|error| error.to_string())?;
++    let head = repo.head_commit().map_err(|error| error.to_string())?;
++    Ok(Changes {
++        files: entries
++            .iter()
++            .map(|entry| entry.path.to_string_lossy().into_owned())
++            .collect(),
++        head_moved: head.as_str() != new_commit,
++    })
++}
++
++/// The repository whose work tree is `folder` itself: git looks in parent folders when the checkout's
++/// own `.git` is broken, and a repository found there is not the checkout.
++fn own_repo(folder: &Path) -> Result<Repo, String> {
++    let repo = Repo::discover(folder).map_err(|error| error.to_string())?;
++    let own = fs::canonicalize(folder).map_err(|error| error.to_string())?;
++    let found = fs::canonicalize(repo.root()).map_err(|error| error.to_string())?;
++    if found == own {
++        Ok(repo)
++    } else {
++        Err(format!(
++            "git finds the repository {} instead",
++            found.display()
++        ))
++    }
++}
+diff --git a/crates/agent/src/process.rs b/crates/agent/src/process.rs
+new file mode 100644
+index 0000000..b62bd6a
+--- /dev/null
++++ b/crates/agent/src/process.rs
+@@ -0,0 +1,34 @@
++use std::path::Path;
++use std::sync::mpsc::Sender;
++
++use yamt_pipe::{Framing, HostEvent, ProgramFolders, Running, find};
++
++use crate::{AgentCommand, AgentStartReply};
++
++/// Starts the command's program in `checkout`, looked up in PATH, then in the command's home folders;
++/// `Err` is the reply that says why it did not start.
++pub(crate) fn start_in(
++    checkout: &Path,
++    command: &AgentCommand,
++    events: Sender<HostEvent>,
++) -> Result<Running, AgentStartReply> {
++    let folders = ProgramFolders {
++        project: Vec::new(),
++        home: command.home_folders.clone(),
++    };
++    let found = find(checkout, checkout, &command.program, &folders).map_err(|searched| {
++        AgentStartReply::NotFound {
++            program: command.program.clone(),
++            searched: searched
++                .iter()
++                .map(|folder| folder.to_string_lossy().into_owned())
++                .collect(),
++        }
++    })?;
++    Running::start(&found.path, &command.args, checkout, Framing::Lines, events).map_err(|error| {
++        AgentStartReply::SpawnFailed {
++            program: command.program.clone(),
++            message: error.to_string(),
++        }
++    })
++}
+diff --git a/crates/agent/src/sweep.rs b/crates/agent/src/sweep.rs
+new file mode 100644
+index 0000000..2c10ddf
+--- /dev/null
++++ b/crates/agent/src/sweep.rs
+@@ -0,0 +1,42 @@
++use std::path::Path;
++
++use yamt_range::{PairLock, pair_folders};
++
++use crate::checkout;
++
++/// What crashes and kills left in `range_dir`'s pair folders: in every pair whose lock it takes, the partial and
++/// removing folders and a clean checkout are deleted; a changed or unreadable one is kept. In `own`, the
++/// window's own pair folder, only the partial and removing folders go: its checkout is reused.
++pub fn sweep_leftovers(range_dir: &Path, own: &Path) {
++    for folder in pair_folders(range_dir) {
++        if folder == own {
++            remove_leftovers(&folder);
++            continue;
++        }
++        match PairLock::try_hold(&folder) {
++            Ok(Some(_held)) => {
++                remove_leftovers(&folder);
++                if let Some(new_commit) = right_commit(&folder) {
++                    checkout::remove_when_clean(&folder, new_commit);
++                }
++            }
++            Ok(None) => {}
++            Err(error) => {
++                tracing::warn!(%error, folder = %folder.display(), "a pair's lock cannot be taken");
++            }
++        }
++    }
++}
++
++fn remove_leftovers(folder: &Path) {
++    if let Err(error) = checkout::remove_leftovers(folder) {
++        tracing::warn!(%error, "a leftover of the AI's checkout stays");
++    }
++}
++
++/// The right commit from the pair folder's name `<left id>-<right id>` (`yamt_range::PairLock::take`).
++fn right_commit(folder: &Path) -> Option<String> {
++    let name = folder.file_name()?.to_str()?;
++    let (_left, right) = name.split_once('-')?;
++    Some(right.to_owned())
++}
+diff --git a/crates/agent/src/workspace.rs b/crates/agent/src/workspace.rs
+new file mode 100644
+index 0000000..66ce826
+--- /dev/null
++++ b/crates/agent/src/workspace.rs
+@@ -0,0 +1,124 @@
++use std::path::PathBuf;
++use std::sync::mpsc::Sender;
++
++use yamt_pipe::{HostEvent, Running};
++
++use crate::checkout;
++use crate::look::LookJob;
++use crate::process;
++use crate::{AgentCommand, AgentRun, AgentStartReply, CheckoutReply, Error};
++
++/// The range window's repository, its pair folder (held by its `PairLock`) and the right commit's full id.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct Pair {
++    pub repo: PathBuf,
++    pub folder: PathBuf,
++    pub new_commit: String,
++}
++
++/// The AI's checkout and the agent running in it. Every removal stops and reaps the agent first.
++pub struct Workspace {
++    pair: Pair,
++    /// `Some` once `prepare` made or reused a complete checkout.
++    checkout: Option<PathBuf>,
++    agent: Option<(AgentRun, Running)>,
++    next_run: u32,
++}
++
++impl Workspace {
++    #[must_use]
++    pub fn new(pair: Pair) -> Workspace {
++        Workspace {
++            pair,
++            checkout: None,
++            agent: None,
++            next_run: 0,
++        }
++    }
++
++    /// Makes `<pair folder>/checkout` or reuses the one there, with whatever it holds. Blocks for as
++    /// long as git writes the work tree.
++    pub fn prepare(&mut self) -> CheckoutReply {
++        match checkout::made_or_reused(&self.pair.folder, &self.pair.repo, &self.pair.new_commit) {
++            Ok(folder) => {
++                let reply = CheckoutReply::Ready {
++                    folder: folder.to_string_lossy().into_owned(),
++                };
++                self.checkout = Some(folder);
++                reply
++            }
++            Err(error) => CheckoutReply::Failed {
++                message: error.to_string(),
++            },
++        }
++    }
++
++    /// Starts the agent in the checkout, after stopping and reaping one that runs.
++    pub fn start(&mut self, command: &AgentCommand, events: Sender<HostEvent>) -> AgentStartReply {
++        let Some(folder) = self.checkout.clone() else {
++            return AgentStartReply::NoCheckout;
++        };
++        self.stop_and_reap();
++        match process::start_in(&folder, command, events) {
++            Ok(running) => {
++                let run = AgentRun(self.next_run);
++                self.next_run += 1;
++                self.agent = Some((run, running));
++                AgentStartReply::Started { run }
++            }
++            Err(reply) => reply,
++        }
++    }
++
++    /// Sends one line to the agent of `run`; for an earlier run it is dropped.
++    pub fn send(&self, run: AgentRun, message: String) {
++        if let Some(running) = self.running(run) {
++            running.send(message);
++        }
++    }
++
++    /// Asks the agent of `run` to stop; `Exited` follows on its events.
++    pub fn stop(&self, run: AgentRun) {
++        if let Some(running) = self.running(run) {
++            running.stop();
++        }
++    }
++
++    pub fn stop_agent(&self) {
++        if let Some((_, running)) = &self.agent {
++            running.stop();
++        }
++    }
++
++    #[must_use]
++    pub fn look_job(&self) -> LookJob {
++        LookJob::in_pair(&self.pair.folder, self.pair.new_commit.clone())
++    }
++
++    /// Stops and reaps the agent, then removes the checkout, kept changes included.
++    pub fn discard(&mut self) -> Result<(), Error> {
++        self.stop_and_reap();
++        self.checkout = None;
++        checkout::remove(&self.pair.folder)
++    }
++
++    /// At exit: stops and reaps the agent, looks again, and removes the checkout only when it is clean.
++    pub fn end(mut self) {
++        self.stop_and_reap();
++        checkout::remove_when_clean(&self.pair.folder, self.pair.new_commit);
++    }
++
++    fn running(&self, run: AgentRun) -> Option<&Running> {
++        match &self.agent {
++            Some((current, running)) if *current == run => Some(running),
++            Some(_) | None => None,
++        }
++    }
++
++    fn stop_and_reap(&mut self) {
++        if let Some((_, running)) = self.agent.take() {
++            running.stop();
++            running.wait();
++        }
++    }
++}
+diff --git a/crates/agent/tests/checkout.rs b/crates/agent/tests/checkout.rs
+new file mode 100644
+index 0000000..4806fee
+--- /dev/null
++++ b/crates/agent/tests/checkout.rs
+@@ -0,0 +1,330 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_agent::{CheckoutLook, CheckoutReply, Pair, Workspace, sweep_leftovers};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
++
++const IGNORE_RULES: &[u8] = b"ignored/\n";
++
++/// The source repository, the data folder standing for `<data_dir>/yamt/range`, and the pair inside it
++/// whose right commit is the source's `remote`.
++struct Fixture {
++    _source: TempDir,
++    range_dir: TempDir,
++    pair: Pair,
++}
++
++impl Fixture {
++    fn new() -> Fixture {
++        let files = [
++            same_on_every_side(".gitignore", IGNORE_RULES),
++            ConflictFile {
++                path: "a.txt",
++                kind: FileKind::Regular,
++                base: Some(b"base\n"),
++                local: Some(b"local\n"),
++                remote: Some(b"remote\n"),
++            },
++        ];
++        let source = diverged_repo(&files).unwrap();
++        let range_dir = tempfile::tempdir().unwrap();
++        let left = commit_of(source.path(), "main");
++        let right = commit_of(source.path(), "remote");
++        let folder = range_dir
++            .path()
++            .join("source-0123456789abcdef")
++            .join(format!("{left}-{right}"));
++        fs::create_dir_all(&folder).unwrap();
++        let pair = Pair {
++            repo: source.path().to_owned(),
++            folder,
++            new_commit: right,
++        };
++        Fixture {
++            _source: source,
++            range_dir,
++            pair,
++        }
++    }
++
++    fn workspace(&self) -> Workspace {
++        Workspace::new(self.pair.clone())
++    }
++
++    fn checkout(&self) -> PathBuf {
++        self.pair.folder.join("checkout")
++    }
++
++    fn ready(&self) -> CheckoutReply {
++        CheckoutReply::Ready {
++            folder: self.checkout().to_string_lossy().into_owned(),
++        }
++    }
++
++    fn changed(&self, files: &[&str], head_moved: bool) -> CheckoutLook {
++        CheckoutLook::Changed {
++            folder: self.checkout().to_string_lossy().into_owned(),
++            files: files.iter().map(|file| (*file).to_owned()).collect(),
++            head_moved,
++        }
++    }
++}
++
++fn same_on_every_side<'a>(path: &'a str, text: &'a [u8]) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base: Some(text),
++        local: Some(text),
++        remote: Some(text),
++    }
++}
++
++fn commit_of(root: &Path, revision: &str) -> String {
++    text_of(root, &["rev-parse", revision])
++        .trim_end()
++        .to_owned()
++}
++
++fn text_of(root: &Path, args: &[&str]) -> String {
++    String::from_utf8(git_ok(root, args).unwrap()).unwrap()
++}
++
++fn commit_everything(root: &Path, message: &str) {
++    git_ok(root, &["add", "--all"]).unwrap();
++    git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message]).unwrap();
++}
++
++#[test]
++fn prepare_makes_the_checkout_in_the_pair_folder_and_reuses_it_the_second_time() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++
++    assert_eq!(workspace.prepare(), fixture.ready());
++
++    let checkout = fixture.checkout();
++    assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"remote\n");
++    assert_eq!(commit_of(&checkout, "HEAD"), fixture.pair.new_commit);
++    assert!(
++        !git(&checkout, &["symbolic-ref", "-q", "HEAD"])
++            .unwrap()
++            .status
++            .success()
++    );
++    assert_eq!(text_of(&checkout, &["remote"]), "");
++    assert!(!fixture.pair.folder.join("checkout.partial").exists());
++    let marker = checkout.join(".git").join("yamt-test-marker");
++    fs::write(&marker, b"").unwrap();
++
++    assert_eq!(workspace.prepare(), fixture.ready());
++    assert!(marker.exists());
++}
++
++#[test]
++fn prepare_reuses_a_kept_checkout_with_its_changes_and_commits() {
++    let fixture = Fixture::new();
++    let mut first = fixture.workspace();
++    first.prepare();
++    let checkout = fixture.checkout();
++    fs::write(checkout.join("a.txt"), b"the AI's line\n").unwrap();
++    commit_everything(&checkout, "the AI's commit");
++    let commit = commit_of(&checkout, "HEAD");
++    fs::write(checkout.join("new.txt"), b"not committed\n").unwrap();
++    first.end();
++
++    let mut next = fixture.workspace();
++    assert_eq!(next.prepare(), fixture.ready());
++
++    assert_eq!(commit_of(&checkout, "HEAD"), commit);
++    assert_eq!(
++        fs::read(checkout.join("new.txt")).unwrap(),
++        b"not committed\n"
++    );
++    assert_eq!(next.look_job().look(), fixture.changed(&["new.txt"], true));
++}
++
++#[test]
++fn a_partial_checkout_left_by_a_crash_is_removed_before_prepare() {
++    let fixture = Fixture::new();
++    let partial = fixture.pair.folder.join("checkout.partial");
++    let removing = fixture.pair.folder.join("checkout.removing");
++    fs::create_dir_all(&partial).unwrap();
++    fs::write(partial.join("stale.txt"), b"half a clone\n").unwrap();
++    fs::create_dir_all(&removing).unwrap();
++
++    assert_eq!(fixture.workspace().prepare(), fixture.ready());
++
++    assert!(!partial.exists());
++    assert!(!removing.exists());
++    assert!(!fixture.checkout().join("stale.txt").exists());
++    assert_eq!(
++        fs::read(fixture.checkout().join("a.txt")).unwrap(),
++        b"remote\n"
++    );
++}
++
++#[test]
++fn a_failed_prepare_leaves_no_partial_checkout() {
++    let mut fixture = Fixture::new();
++    fixture.pair.new_commit = "0".repeat(40);
++    let mut workspace = fixture.workspace();
++
++    let reply = workspace.prepare();
++
++    assert!(matches!(reply, CheckoutReply::Failed { message } if !message.is_empty()));
++    assert!(!fixture.pair.folder.join("checkout.partial").exists());
++    assert!(!fixture.checkout().exists());
++}
++
++#[test]
++fn look_is_missing_before_prepare_and_clean_after() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    assert_eq!(workspace.look_job().look(), CheckoutLook::Missing);
++
++    workspace.prepare();
++
++    assert_eq!(workspace.look_job().look(), CheckoutLook::Clean);
++}
++
++#[test]
++fn an_edited_file_an_untracked_file_and_a_moved_head_each_count_as_changed() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    let checkout = fixture.checkout();
++
++    fs::write(checkout.join("a.txt"), b"edited\n").unwrap();
++    assert_eq!(
++        workspace.look_job().look(),
++        fixture.changed(&["a.txt"], false)
++    );
++    git_ok(&checkout, &["checkout", "--", "a.txt"]).unwrap();
++
++    fs::write(checkout.join("untracked.txt"), b"new\n").unwrap();
++    assert_eq!(
++        workspace.look_job().look(),
++        fixture.changed(&["untracked.txt"], false)
++    );
++    fs::remove_file(checkout.join("untracked.txt")).unwrap();
++
++    commit_everything(&checkout, "an empty commit");
++    assert_eq!(workspace.look_job().look(), fixture.changed(&[], true));
++}
++
++#[test]
++fn an_ignored_file_alone_counts_as_clean() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    let ignored = fixture.checkout().join("ignored");
++    fs::create_dir_all(&ignored).unwrap();
++    fs::write(ignored.join("build.out"), b"output\n").unwrap();
++
++    assert_eq!(workspace.look_job().look(), CheckoutLook::Clean);
++
++    workspace.end();
++    assert!(!fixture.checkout().exists());
++}
++
++#[test]
++fn a_checkout_git_cannot_read_is_unreadable_and_never_removed_by_end_or_sweep() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    let checkout = fixture.checkout();
++    let borrowed = checkout
++        .join(".git")
++        .join("objects")
++        .join("info")
++        .join("alternates");
++    fs::remove_file(borrowed).unwrap();
++
++    let look = workspace.look_job().look();
++    let CheckoutLook::Unreadable { folder, message } = look else {
++        panic!("{look:?} instead of Unreadable");
++    };
++    assert_eq!(folder, checkout.to_string_lossy());
++    assert_ne!(message, "");
++
++    sweep_leftovers(
++        fixture.range_dir.path(),
++        &fixture.range_dir.path().join("other"),
++    );
++    assert!(checkout.join("a.txt").exists());
++    workspace.end();
++    assert!(checkout.join("a.txt").exists());
++}
++
++#[test]
++fn a_checkout_without_its_own_git_folder_is_unreadable_inside_another_repository() {
++    let fixture = Fixture::new();
++    let outer = fixture.range_dir.path();
++    git_ok(outer, &["init", "--quiet"]).unwrap();
++    commit_everything(outer, "a repository around the data folder");
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    fs::remove_dir_all(fixture.checkout().join(".git")).unwrap();
++
++    let look = workspace.look_job().look();
++
++    assert!(matches!(look, CheckoutLook::Unreadable { .. }), "{look:?}");
++    workspace.end();
++    assert!(fixture.checkout().join("a.txt").exists());
++}
++
++#[test]
++fn end_removes_a_clean_checkout_and_keeps_a_changed_one() {
++    let fixture = Fixture::new();
++    let mut clean = fixture.workspace();
++    clean.prepare();
++    clean.end();
++    assert!(!fixture.checkout().exists());
++    assert!(!fixture.pair.folder.join("checkout.removing").exists());
++
++    let mut changed = fixture.workspace();
++    changed.prepare();
++    fs::write(fixture.checkout().join("a.txt"), b"edited\n").unwrap();
++    changed.end();
++    assert_eq!(
++        fs::read(fixture.checkout().join("a.txt")).unwrap(),
++        b"edited\n"
++    );
++}
++
++#[test]
++fn discard_removes_a_changed_checkout() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    fs::write(fixture.checkout().join("a.txt"), b"edited\n").unwrap();
++
++    workspace.discard().unwrap();
++
++    assert!(!fixture.checkout().exists());
++    assert!(!fixture.pair.folder.join("checkout.removing").exists());
++    assert_eq!(workspace.look_job().look(), CheckoutLook::Missing);
++}
++
++#[test]
++fn a_checkout_left_after_a_kill_is_reused_by_the_next_window() {
++    let fixture = Fixture::new();
++    let mut killed = fixture.workspace();
++    killed.prepare();
++    fs::write(fixture.checkout().join("untracked.txt"), b"kept\n").unwrap();
++    drop(killed);
++
++    let mut next = fixture.workspace();
++    assert_eq!(next.prepare(), fixture.ready());
++
++    assert_eq!(
++        fs::read(fixture.checkout().join("untracked.txt")).unwrap(),
++        b"kept\n"
++    );
++    assert_eq!(
++        next.look_job().look(),
++        fixture.changed(&["untracked.txt"], false)
++    );
++}
+diff --git a/crates/agent/tests/process.rs b/crates/agent/tests/process.rs
+new file mode 100644
+index 0000000..ed26825
+--- /dev/null
++++ b/crates/agent/tests/process.rs
+@@ -0,0 +1,244 @@
++#![cfg(test)]
++
++use std::env;
++use std::fs;
++use std::path::{Path, PathBuf};
++use std::sync::mpsc::{self, Receiver, TryRecvError};
++use std::thread;
++use std::time::Duration;
++
++use yamt_agent::{AgentCommand, AgentRun, AgentStartReply, Pair, Workspace};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_pipe::HostEvent;
++
++const ECHO: &str = env!("CARGO_BIN_EXE_agent-echo");
++const WAIT: Duration = Duration::from_secs(10);
++const HOLD_RELEASE_AND_MORE: Duration = Duration::from_millis(800);
++const MISSING_PROGRAM: &str = "yamt-agent-test-no-such-program";
++const CRASH_CODE: i32 = 3;
++
++/// A workspace whose checkout is prepared, and the folders it lives in.
++struct Prepared {
++    _source: TempDir,
++    _range_dir: TempDir,
++    checkout: PathBuf,
++    workspace: Workspace,
++}
++
++fn prepared() -> Prepared {
++    let mut unprepared = unprepared();
++    unprepared.workspace.prepare();
++    unprepared
++}
++
++fn unprepared() -> Prepared {
++    let file = ConflictFile {
++        path: "a.txt",
++        kind: FileKind::Regular,
++        base: Some(b"base\n"),
++        local: Some(b"local\n"),
++        remote: Some(b"remote\n"),
++    };
++    let source = diverged_repo(&[file]).unwrap();
++    let range_dir = tempfile::tempdir().unwrap();
++    let new_commit = String::from_utf8(git_ok(source.path(), &["rev-parse", "remote"]).unwrap())
++        .unwrap()
++        .trim_end()
++        .to_owned();
++    let folder = range_dir
++        .path()
++        .join("source-0123456789abcdef")
++        .join("pair");
++    fs::create_dir_all(&folder).unwrap();
++    let pair = Pair {
++        repo: source.path().to_owned(),
++        folder: folder.clone(),
++        new_commit,
++    };
++    Prepared {
++        _source: source,
++        _range_dir: range_dir,
++        checkout: folder.join("checkout"),
++        workspace: Workspace::new(pair),
++    }
++}
++
++fn echo_command() -> AgentCommand {
++    AgentCommand {
++        program: ECHO.to_owned(),
++        args: Vec::new(),
++        home_folders: Vec::new(),
++    }
++}
++
++fn start_echo(workspace: &mut Workspace) -> (AgentRun, Receiver<HostEvent>) {
++    let (sender, events) = mpsc::channel();
++    match workspace.start(&echo_command(), sender) {
++        AgentStartReply::Started { run } => (run, events),
++        other @ (AgentStartReply::NotFound { .. }
++        | AgentStartReply::SpawnFailed { .. }
++        | AgentStartReply::NoCheckout) => panic!("{other:?} instead of Started"),
++    }
++}
++
++fn next_message(events: &Receiver<HostEvent>) -> String {
++    match events.recv_timeout(WAIT).unwrap() {
++        HostEvent::Message { text } => text,
++        other @ (HostEvent::Log { .. } | HostEvent::Exited { .. }) => {
++            panic!("{other:?} instead of a message")
++        }
++    }
++}
++
++/// The run's last event, already sent: `Exited`, with nothing after it.
++fn exited_code(events: &Receiver<HostEvent>) -> Option<i32> {
++    let code = match events.try_recv() {
++        Ok(HostEvent::Exited { code }) => code,
++        other => panic!("{other:?} instead of Exited"),
++    };
++    assert_eq!(events.try_recv(), Err(TryRecvError::Disconnected));
++    code
++}
++
++fn same_folder(left: &Path, right: &Path) -> bool {
++    fs::canonicalize(left).unwrap() == fs::canonicalize(right).unwrap()
++}
++
++#[test]
++fn the_agent_runs_in_the_checkout() {
++    let mut prepared = prepared();
++    let (run, events) = start_echo(&mut prepared.workspace);
++
++    prepared.workspace.send(run, "pwd".to_owned());
++    let folder = next_message(&events);
++    prepared.workspace.send(run, "edit a.txt".to_owned());
++    assert_eq!(next_message(&events), "edited a.txt");
++
++    assert!(same_folder(Path::new(&folder), &prepared.checkout));
++    assert_eq!(
++        fs::read(prepared.checkout.join("a.txt")).unwrap(),
++        b"remote\nedited by agent-echo\n"
++    );
++}
++
++#[test]
++fn start_without_a_checkout_answers_no_checkout() {
++    let mut unprepared = unprepared();
++    let (sender, _events) = mpsc::channel();
++
++    let reply = unprepared.workspace.start(&echo_command(), sender);
++
++    assert_eq!(reply, AgentStartReply::NoCheckout);
++}
++
++#[test]
++fn a_crashed_agent_reports_exited_once_with_its_code() {
++    let mut prepared = prepared();
++    let (run, events) = start_echo(&mut prepared.workspace);
++
++    prepared.workspace.send(run, format!("exit {CRASH_CODE}"));
++
++    assert_eq!(
++        events.recv_timeout(WAIT).unwrap(),
++        HostEvent::Exited {
++            code: Some(CRASH_CODE)
++        }
++    );
++    prepared.workspace.discard().unwrap();
++    assert_eq!(events.try_recv(), Err(TryRecvError::Disconnected));
++}
++
++#[test]
++fn start_while_an_agent_runs_stops_the_old_one_first() {
++    let mut prepared = prepared();
++    let (old_run, old_events) = start_echo(&mut prepared.workspace);
++
++    let (new_run, new_events) = start_echo(&mut prepared.workspace);
++
++    assert_ne!(old_run, new_run);
++    assert_eq!(exited_code(&old_events), Some(0));
++    prepared
++        .workspace
++        .send(old_run, "to the old run".to_owned());
++    prepared.workspace.stop(old_run);
++    prepared
++        .workspace
++        .send(new_run, "to the new run".to_owned());
++    assert_eq!(next_message(&new_events), "to the new run");
++}
++
++#[test]
++fn stop_ends_the_agent_of_its_run_and_keeps_the_checkout() {
++    let mut prepared = prepared();
++    let (run, events) = start_echo(&mut prepared.workspace);
++
++    prepared.workspace.stop(run);
++
++    assert_eq!(
++        events.recv_timeout(WAIT).unwrap(),
++        HostEvent::Exited { code: Some(0) }
++    );
++    assert!(prepared.checkout.join("a.txt").exists());
++}
++
++#[test]
++fn stop_agent_ends_the_running_agent_and_keeps_the_checkout() {
++    let mut prepared = prepared();
++    let (_run, events) = start_echo(&mut prepared.workspace);
++
++    prepared.workspace.stop_agent();
++
++    assert_eq!(
++        events.recv_timeout(WAIT).unwrap(),
++        HostEvent::Exited { code: Some(0) }
++    );
++    assert!(prepared.checkout.join("a.txt").exists());
++}
++
++#[test]
++fn a_missing_program_lists_path_and_the_home_entries() {
++    let mut prepared = prepared();
++    let command = AgentCommand {
++        program: MISSING_PROGRAM.to_owned(),
++        args: Vec::new(),
++        home_folders: vec!["agents/bin".to_owned(), ".local/bin".to_owned()],
++    };
++    let (sender, _events) = mpsc::channel();
++
++    let reply = prepared.workspace.start(&command, sender);
++
++    let path_variable = env::var_os("PATH").unwrap_or_default();
++    let home = env::home_dir().unwrap();
++    let mut searched: Vec<PathBuf> = env::split_paths(&path_variable).collect();
++    searched.push(home.join("agents/bin"));
++    searched.push(home.join(".local/bin"));
++    assert_eq!(
++        reply,
++        AgentStartReply::NotFound {
++            program: MISSING_PROGRAM.to_owned(),
++            searched: searched
++                .iter()
++                .map(|folder| folder.to_string_lossy().into_owned())
++                .collect(),
++        }
++    );
++}
++
++#[test]
++fn discard_stops_the_agent_before_removing_the_checkout() {
++    let mut prepared = prepared();
++    let (run, events) = start_echo(&mut prepared.workspace);
++    prepared.workspace.send(run, "hold a.txt".to_owned());
++    assert_eq!(next_message(&events), "holding a.txt");
++
++    prepared.workspace.discard().unwrap();
++
++    assert_eq!(exited_code(&events), Some(0));
++    thread::sleep(HOLD_RELEASE_AND_MORE);
++    assert!(!prepared.checkout.exists());
++    let (sender, _later) = mpsc::channel();
++    assert_eq!(
++        prepared.workspace.start(&echo_command(), sender),
++        AgentStartReply::NoCheckout
++    );
++}
+diff --git a/crates/agent/tests/sweep.rs b/crates/agent/tests/sweep.rs
+new file mode 100644
+index 0000000..03f93ff
+--- /dev/null
++++ b/crates/agent/tests/sweep.rs
+@@ -0,0 +1,124 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_agent::{Pair, Workspace, sweep_leftovers};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_range::PairLock;
++
++/// A pair folder `<left>-<right>` in a range folder whose checkout a window made and then lost
++/// (dropped without `end`), with a `checkout.partial` and a `checkout.removing` beside it.
++struct Leftover {
++    _source: TempDir,
++    range_dir: TempDir,
++    folder: PathBuf,
++}
++
++impl Leftover {
++    fn new() -> Leftover {
++        let file = ConflictFile {
++            path: "a.txt",
++            kind: FileKind::Regular,
++            base: Some(b"base\n"),
++            local: Some(b"local\n"),
++            remote: Some(b"remote\n"),
++        };
++        let source = diverged_repo(&[file]).unwrap();
++        let range_dir = tempfile::tempdir().unwrap();
++        let left = commit_of(source.path(), "main");
++        let right = commit_of(source.path(), "remote");
++        let folder = range_dir
++            .path()
++            .join("source-0123456789abcdef")
++            .join(format!("{left}-{right}"));
++        fs::create_dir_all(&folder).unwrap();
++        let mut workspace = Workspace::new(Pair {
++            repo: source.path().to_owned(),
++            folder: folder.clone(),
++            new_commit: right,
++        });
++        workspace.prepare();
++        drop(workspace);
++        for leftover in ["checkout.partial", "checkout.removing"] {
++            fs::create_dir_all(folder.join(leftover).join("inside")).unwrap();
++        }
++        Leftover {
++            _source: source,
++            range_dir,
++            folder,
++        }
++    }
++
++    fn sweep_from(&self, own: &Path) {
++        sweep_leftovers(self.range_dir.path(), own);
++    }
++
++    fn other_pair(&self) -> PathBuf {
++        self.range_dir
++            .path()
++            .join("other-0123456789abcdef")
++            .join("a-b")
++    }
++
++    fn has(&self, name: &str) -> bool {
++        self.folder.join(name).exists()
++    }
++}
++
++fn commit_of(root: &Path, revision: &str) -> String {
++    String::from_utf8(git_ok(root, &["rev-parse", revision]).unwrap())
++        .unwrap()
++        .trim_end()
++        .to_owned()
++}
++
++#[test]
++fn a_clean_leftover_of_an_unheld_pair_is_removed() {
++    let leftover = Leftover::new();
++
++    leftover.sweep_from(&leftover.other_pair());
++
++    assert!(!leftover.has("checkout"));
++    assert!(!leftover.has("checkout.partial"));
++    assert!(!leftover.has("checkout.removing"));
++}
++
++#[test]
++fn a_changed_leftover_is_kept() {
++    let leftover = Leftover::new();
++    fs::write(leftover.folder.join("checkout").join("a.txt"), b"edited\n").unwrap();
++
++    leftover.sweep_from(&leftover.other_pair());
++
++    assert_eq!(
++        fs::read(leftover.folder.join("checkout").join("a.txt")).unwrap(),
++        b"edited\n"
++    );
++    assert!(!leftover.has("checkout.partial"));
++    assert!(!leftover.has("checkout.removing"));
++}
++
++#[test]
++fn a_leftover_of_a_held_pair_is_untouched() {
++    let leftover = Leftover::new();
++    let _window = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
++
++    leftover.sweep_from(&leftover.other_pair());
++
++    assert!(leftover.has("checkout"));
++    assert!(leftover.has("checkout.partial"));
++    assert!(leftover.has("checkout.removing"));
++}
++
++#[test]
++fn the_own_pair_keeps_its_checkout_and_loses_partial_and_removing_folders() {
++    let leftover = Leftover::new();
++    let _own = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
++
++    leftover.sweep_from(&leftover.folder);
++
++    assert!(leftover.has("checkout"));
++    assert!(!leftover.has("checkout.partial"));
++    assert!(!leftover.has("checkout.removing"));
++}
+diff --git a/crates/range/src/lib.rs b/crates/range/src/lib.rs
+index db60aa6..b900900 100644
+--- a/crates/range/src/lib.rs
++++ b/crates/range/src/lib.rs
+@@ -14,7 +14,7 @@ use specta::Type;
+ use yamt_gitio::Oid;
+ use yamt_merge_core::Difference;
+ 
+-pub use crate::lock::PairLock;
++pub use crate::lock::{PairLock, pair_folders};
+ pub use crate::open::{Range, Resolved};
+ pub use crate::spec::{RangeSpec, SpecError};
+ 
+diff --git a/crates/range/src/lock.rs b/crates/range/src/lock.rs
+index 84cbe27..928b36b 100644
+--- a/crates/range/src/lock.rs
++++ b/crates/range/src/lock.rs
+@@ -29,34 +29,70 @@ impl PairLock {
+         let folder = range_dir.join(repo_key(&common_dir)).join(pair);
+         fs::create_dir_all(&folder).map_err(|error| lock_failed(&folder, &error))?;
+         let path = folder.join(LOCK_FILE);
+-        let file = OpenOptions::new()
+-            .create(true)
+-            .truncate(false)
+-            .write(true)
+-            .open(&path)
+-            .map_err(|error| lock_failed(&path, &error))?;
+-        // The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
+-        // (`File::try_lock`, flock(2) / `LockFileEx`).
+-        match file.try_lock() {
+-            Ok(()) => Ok(PairLock {
++        match hold(&path).map_err(|error| lock_failed(&path, &error))? {
++            Some(file) => Ok(PairLock {
+                 _lock: file,
+                 folder,
+             }),
+-            Err(TryLockError::WouldBlock) => Err(Error::Locked {
++            None => Err(Error::Locked {
+                 root: resolved.root().to_owned(),
+                 left: resolved.left.side.short_id.clone(),
+                 right: resolved.right.side.short_id.clone(),
+             }),
+-            Err(TryLockError::Error(error)) => Err(lock_failed(&path, &error)),
+         }
+     }
+ 
++    /// Takes an existing pair folder's lock; `None` while another `PairLock` holds it (an open window).
++    pub fn try_hold(folder: &Path) -> io::Result<Option<PairLock>> {
++        let held = hold(&folder.join(LOCK_FILE))?;
++        Ok(held.map(|file| PairLock {
++            _lock: file,
++            folder: folder.to_owned(),
++        }))
++    }
++
+     #[must_use]
+     pub fn folder(&self) -> &Path {
+         &self.folder
+     }
+ }
+ 
++/// Every `<range_dir>/<repo key>/<left id>-<right id>/` folder; a folder that cannot be listed adds none.
++#[must_use]
++pub fn pair_folders(range_dir: &Path) -> Vec<PathBuf> {
++    let mut pairs = Vec::new();
++    for repo in folders_in(range_dir) {
++        pairs.extend(folders_in(&repo));
++    }
++    pairs
++}
++
++fn folders_in(folder: &Path) -> Vec<PathBuf> {
++    let Ok(entries) = fs::read_dir(folder) else {
++        return Vec::new();
++    };
++    entries
++        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
++        .filter(|path| path.is_dir())
++        .collect()
++}
++
++/// The lock file opened (created when missing) and locked; `None` when another open file holds the lock.
++fn hold(path: &Path) -> io::Result<Option<File>> {
++    let file = OpenOptions::new()
++        .create(true)
++        .truncate(false)
++        .write(true)
++        .open(path)?;
++    // The lock is the file's own: the OS releases it when the process ends, also on `kill -9`
++    // (`File::try_lock`, flock(2) / `LockFileEx`).
++    match file.try_lock() {
++        Ok(()) => Ok(Some(file)),
++        Err(TryLockError::WouldBlock) => Ok(None),
++        Err(TryLockError::Error(error)) => Err(error),
++    }
++}
++
+ /// The repository's folder name, `-`, and the FNV-1a hash of its common git dir: the same from every worktree.
+ fn repo_key(common_dir: &Path) -> OsString {
+     let in_work_tree = common_dir
+@@ -115,4 +151,37 @@ mod tests {
+         );
+         assert_ne!(key("/x/proj/.git"), key("/y/proj/.git"));
+     }
++
++    #[test]
++    fn try_hold_answers_none_while_another_lock_holds_the_pair_and_takes_it_once_released() {
++        let folder = tempfile::tempdir().unwrap();
++        let first = PairLock::try_hold(folder.path()).unwrap().unwrap();
++        assert_eq!(first.folder(), folder.path());
++
++        assert!(PairLock::try_hold(folder.path()).unwrap().is_none());
++
++        drop(first);
++        assert!(PairLock::try_hold(folder.path()).unwrap().is_some());
++    }
++
++    #[test]
++    fn pair_folders_lists_every_pair_folder_under_every_repository_and_no_file() {
++        let range_dir = tempfile::tempdir().unwrap();
++        let one = range_dir.path().join("proj-1");
++        let two = range_dir.path().join("other-2");
++        for pair in [one.join("a-b"), one.join("c-d"), two.join("e-f")] {
++            fs::create_dir_all(pair).unwrap();
++        }
++        fs::write(one.join(LOCK_FILE), b"").unwrap();
++        fs::write(range_dir.path().join("stray"), b"").unwrap();
++
++        let mut pairs = pair_folders(range_dir.path());
++        pairs.sort();
++
++        assert_eq!(pairs, [two.join("e-f"), one.join("a-b"), one.join("c-d")]);
++        assert_eq!(
++            pair_folders(&range_dir.path().join("missing")),
++            Vec::<PathBuf>::new()
++        );
++    }
+ }
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index 3847803..5a50d78 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -62,10 +62,17 @@ if [ -n "$forbidden_in_review" ]; then
+     failed=1
+ fi
+ 
++agent_deps=$(normal_deps yamt-agent)
++forbidden_in_agent=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$agent_deps" | grep -vxE 'yamt-(agent|gitio|pipe|range|merge-core)' || true)
++if [ -n "$forbidden_in_agent" ]; then
++    echo "arch-check: yamt-agent depends on yamt-gitio, yamt-pipe and yamt-range (with its yamt-merge-core) only among yamt crates, never on tauri or serde_json, not:" $forbidden_in_agent >&2
++    failed=1
++fi
++
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review)' || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range and yamt-review only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review and yamt-agent only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 4cdada1..4630e2e 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -30,6 +30,7 @@ yamt-lsp-host.workspace = true
+ yamt-compare.workspace = true
+ yamt-range.workspace = true
+ yamt-review.workspace = true
++yamt-agent.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+ specta-typescript.workspace = true
+-- 
+2.56.0
+

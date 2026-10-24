@@ -1,36 +1,20 @@
 {
-  "RVGitlab": {
+  "RVReviewShell": {
     "owned": [
-      "crates/review/src/lib.rs",
-      "crates/review/src/right_branch.rs",
-      "crates/review/src/gitlab.rs",
-      "crates/review/src/lines_up.rs",
-      "crates/review/src/position.rs",
-      "crates/review/src/send.rs",
-      "crates/review/src/thread_store.rs",
-      "crates/review/Cargo.toml",
-      "crates/review/tests/review.rs",
-      "tests/glab/lined-up/**",
-      "tests/glab/two-dots/**",
-      "tests/glab/moved/**",
-      "tests/glab/other-base/**",
-      "tests/glab/several/**",
-      "tests/glab/preparing/**",
-      "tests/glab/no-merge-request/**",
-      "tests/glab/commit-route/**",
-      "tests/glab/logged-out/**",
-      "tests/glab/refusal/**",
-      "tests/glab/timeout/**",
-      "tests/glab/drafted/**"
+      "src-tauri/src/review.rs",
+      "src-tauri/src/range.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/ipc_error.rs",
+      "src-tauri/AGENTS.md",
+      "crates/review/src/lib.rs"
     ]
   },
-  "RVAgentCrate": {
+  "RVJsonrpc": {
     "owned": [
-      "crates/agent/**",
-      "crates/range/src/lock.rs",
-      "crates/range/src/lib.rs",
-      "src-tauri/Cargo.toml",
-      "scripts/arch-check.sh"
+      "frontend/src/jsonrpc/**",
+      "frontend/src/lsp/**",
+      "frontend/scripts/fences.ts",
+      "frontend/scripts/fences.test.ts"
     ]
   }
 }
