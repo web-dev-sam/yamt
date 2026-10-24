@@ -34,7 +34,8 @@
       "src-tauri/src/range.rs",
       "src-tauri/src/commands.rs",
       "src-tauri/src/ipc_error.rs",
-      "src-tauri/AGENTS.md"
+      "src-tauri/AGENTS.md",
+      "crates/compare/src/lib.rs"
     ]
   }
 }
