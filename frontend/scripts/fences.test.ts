@@ -309,6 +309,115 @@ test("merge files importing the store and compare files importing their own neig
   expect(violationsOf(files)).toEqual([]);
 });
 
+test("a range file importing the merge root, the compare root or lsp/ violates PM9", () => {
+  const files = [
+    { path: "src/ui/rangeStore.ts", text: `import { useAppStore } from "./store";` },
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeView.vue",
+      text: `<script setup lang="ts">\nimport { useCompareStore } from "./compareStore";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeFileRow.vue",
+      text: `<script setup lang="ts">\nimport "./CompareApp.vue";\n</script>`,
+    },
+    { path: "src/ui/rangeText.ts", text: `import "./compareStore.ts";` },
+    { path: "src/ui/useRangeController.ts", text: `import type { X } from "../lsp";` },
+    { path: "src/ui/useRangeLoad.test.ts", text: `import "./store.ts";` },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM9",
+      file: "src/ui/rangeStore.ts",
+      specifier: "./store",
+      reason: "the range window never imports the merge window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeApp.vue",
+      specifier: "./App.vue",
+      reason: "the range window never imports the merge window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeView.vue",
+      specifier: "./compareStore",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeFileRow.vue",
+      specifier: "./CompareApp.vue",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/rangeText.ts",
+      specifier: "./compareStore.ts",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/useRangeController.ts",
+      specifier: "../lsp",
+      reason: "the range window never imports lsp/",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/useRangeLoad.test.ts",
+      specifier: "./store.ts",
+      reason: "the range window never imports the merge window's root",
+    },
+  ]);
+});
+
+test("a compare file importing the range root violates PM7", () => {
+  const files = [
+    { path: "src/ui/compareStore.ts", text: `import { useRangeStore } from "./rangeStore";` },
+    {
+      path: "src/ui/CompareApp.vue",
+      text: `<script setup lang="ts">\nimport RangeApp from "./RangeApp.vue";\n</script>`,
+    },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM7",
+      file: "src/ui/compareStore.ts",
+      specifier: "./rangeStore",
+      reason: "the compare window never imports the range window's root",
+    },
+    {
+      rule: "PM7",
+      file: "src/ui/CompareApp.vue",
+      specifier: "./RangeApp.vue",
+      reason: "the compare window never imports the range window's root",
+    },
+  ]);
+});
+
+test("range files importing shared ui files and their own neighbours violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport FileList from "./FileList.vue";\nimport "./rangeStore";\n</script>`,
+    },
+    { path: "src/ui/rangeStore.ts", text: `import "./settingsStore";\nimport "./fileListKey";` },
+    {
+      path: "src/ui/RangeView.vue",
+      text: `<script setup lang="ts">\nimport "./paneSplit";\n</script>`,
+    },
+    { path: "src/ui/useRangeController.ts", text: `import "../editor";` },
+    { path: "src/ui/storeRange.ts", text: `import "./compareStore";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
   const files = [
     {

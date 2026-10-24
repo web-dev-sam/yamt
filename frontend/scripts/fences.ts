@@ -9,7 +9,7 @@ import { clipboardViolations } from "./clipboardFence";
 export type SourceFile = { readonly path: string; readonly text: string };
 
 export type FenceViolation = {
-  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8";
+  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8" | "PM9";
   readonly file: string;
   readonly specifier: string;
   readonly reason: string;
@@ -33,13 +33,17 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
-const COMPARE_FILE = /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|useCompare[^/]*\.ts)$/;
-const MERGE_ROOT_FILES: Record<string, true> = {
-  "src/ui/store": true,
-  "src/ui/store.ts": true,
-  "src/ui/App": true,
-  "src/ui/App.vue": true,
+const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
+const ROOT_FILES: Readonly<Record<string, string>> = {
+  "src/ui/store": "merge",
+  "src/ui/App": "merge",
+  "src/ui/compareStore": "compare",
+  "src/ui/CompareApp": "compare",
+  "src/ui/rangeStore": "range",
+  "src/ui/RangeApp": "range",
 };
+const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
+const WINDOW_RULES: Readonly<Record<string, "PM7" | "PM9">> = { compare: "PM7", range: "PM9" };
 const MARKDOWN_SEAM = "src/ui/useMarkdown.ts";
 const MARKDOWN_VIEW = "MarkdownView";
 const MARKDOWN_MODULE = "src/editor/markdown";
@@ -113,15 +117,18 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   return undefined;
 }
 
-function compareFinding(file: string, target: string): Finding | undefined {
-  if (!COMPARE_FILE.test(file)) {
+function rootFinding(file: string, target: string): Finding | undefined {
+  const root = WINDOW_FILE.exec(file)?.[1]?.toLowerCase();
+  const rule = root === undefined ? undefined : WINDOW_RULES[root];
+  if (rule === undefined) {
     return undefined;
   }
-  if (Object.hasOwn(MERGE_ROOT_FILES, target)) {
-    return { rule: "PM7", reason: "the compare window never imports the merge window's root" };
+  const other = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
+  if (other !== undefined && other !== root) {
+    return { rule, reason: `the ${root} window never imports the ${other} window's root` };
   }
   if (isInside(target, "src/lsp")) {
-    return { rule: "PM7", reason: "the compare window never imports lsp/" };
+    return { rule, reason: `the ${root} window never imports lsp/` };
   }
   return undefined;
 }
@@ -258,7 +265,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
       const finding =
         target === undefined
           ? packageFinding(module, specifier)
-          : (pathFinding(module, target) ?? compareFinding(file.path, target));
+          : (pathFinding(module, target) ?? rootFinding(file.path, target));
       if (finding !== undefined) {
         violations.push({ ...finding, file: file.path, specifier });
       }

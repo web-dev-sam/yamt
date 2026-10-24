@@ -68,6 +68,24 @@ test("start-app --diff opens the compare window and no repository", () => {
   ).toMatchObject({ kind: "start-app", opens: { kind: "diff" }, home: "/tmp/c-home" });
 });
 
+test("start-app --range opens the range window on the --repo folder", () => {
+  expect(
+    parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
+  ).toMatchObject({
+    kind: "start-app",
+    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr" },
+  });
+});
+
+test("start-app --range needs --repo and takes neither --fresh-repo nor --diff", () => {
+  const needsRepo = /--range needs --repo <dir>, and neither --fresh-repo nor --diff/;
+  const range = ["start-app", "--name", "r", "--range", "a..b"];
+  expect(() => parseCommand(range)).toThrow(needsRepo);
+  expect(() => parseCommand([...range, "--fresh-repo"])).toThrow(needsRepo);
+  expect(() => parseCommand([...range, "--repo", "/r", "--diff"])).toThrow(needsRepo);
+  expect(() => parseCommand([...range, "--repo", "/r", "--fresh-repo"])).toThrow(needsRepo);
+});
+
 test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
   const base = ["start-app", "--name", "a", "--fresh-repo"];
   expect(() => parseCommand([...base, "--record", "/tmp/s.mkv"])).toThrow(/go together/);
@@ -112,6 +130,22 @@ test("start-fixture takes a name and a size, and opens the merge page", () => {
     size: { width: 1280, height: 800 },
     search: "",
   });
+});
+
+test("start-fixture --range-case opens one range fixture, never with a compare option", () => {
+  expect(parseCommand(["start-fixture", "--name", "fx", "--range-case", "review"])).toMatchObject({
+    search: "?range=review",
+  });
+  expect(parseCommand(["start-fixture", "--name", "fx", "--range-case", "a b"])).toMatchObject({
+    search: "?range=a%20b",
+  });
+  const alone = /--range-case without --diff or --diff-case/;
+  const ranged = ["start-fixture", "--name", "fx", "--range-case", "empty"];
+  expect(() => parseCommand([...ranged, "--diff"])).toThrow(alone);
+  expect(() => parseCommand([...ranged, "--diff-case", "words"])).toThrow(alone);
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--range-case"])).toThrow(
+    /--range-case needs a value/,
+  );
 });
 
 test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {

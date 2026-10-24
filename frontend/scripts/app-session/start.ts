@@ -77,6 +77,11 @@ function prepareApp(command: StartApp, folder: string): Prepared {
   if (command.opens.kind === "diff") {
     return { home, configDir, repoDir: null, binary, args: ["--diff"] };
   }
+  if (command.opens.kind === "range") {
+    const repoDir = fromRoot(command.opens.dir);
+    const args = [`--diff=${command.opens.range}`, "--repo", repoDir];
+    return { home, configDir, repoDir, binary, args };
+  }
   const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
   if (command.opens.kind === "fresh") {
     execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {

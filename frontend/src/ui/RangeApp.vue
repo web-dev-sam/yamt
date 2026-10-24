@@ -1,0 +1,98 @@
+<script setup lang="ts">
+import { useEventListener, useWindowFocus } from "@vueuse/core";
+import { computed, watch } from "vue";
+
+import FileList from "./FileList.vue";
+import ProblemBar from "./ProblemBar.vue";
+import QuestionDialog from "./QuestionDialog.vue";
+import RangeFileRow from "./RangeFileRow.vue";
+import { useRangeStore } from "./rangeStore";
+import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
+import RangeView from "./RangeView.vue";
+import SettingsButton from "./SettingsButton.vue";
+import { useThemeAttribute } from "./settingsStore";
+import SettingsView from "./SettingsView.vue";
+
+const {
+  start,
+  shown,
+  shownPath,
+  visited,
+  problem,
+  question,
+  screen,
+  fileListShown,
+  loadSettings,
+  showFile,
+  fileListKey,
+  dismissProblem,
+  answer,
+  dismissQuestion,
+} = useRangeStore();
+
+const focused = useWindowFocus();
+useThemeAttribute();
+useEventListener(window, "keydown", (event) => {
+  fileListKey(event, navigator.platform);
+});
+
+const files = computed(() => start.value?.files ?? []);
+const emptyText = computed(() =>
+  start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
+);
+
+watch(focused, (now) => {
+  if (now) {
+    void loadSettings();
+  }
+});
+</script>
+
+<template>
+  <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
+    <FileList
+      v-show="fileListShown"
+      :files="files"
+      :active="shownPath"
+      :label="RANGE_LIST_LABEL"
+      @select="showFile"
+    >
+      <template #file="{ file, label }">
+        <RangeFileRow :file="file" :label="label" />
+      </template>
+    </FileList>
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+      <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+        <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+      </div>
+      <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+        <template v-if="start !== null">
+          <RangeView
+            v-for="file in visited"
+            :key="file.id"
+            :file="file"
+            :left-side="start.left"
+            :right-side="start.right"
+            :shown="file.id === shown && screen.kind === 'files'"
+          />
+        </template>
+        <div
+          v-if="emptyText !== null && screen.kind === 'files'"
+          class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+        >
+          <header class="flex h-10 shrink-0 items-center px-2">
+            <SettingsButton class="ml-auto" />
+          </header>
+          <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
+        </div>
+        <SettingsView v-if="screen.kind === 'settings'" />
+      </div>
+    </div>
+    <QuestionDialog
+      v-if="question !== null"
+      :question="question"
+      @answer="answer"
+      @dismiss="dismissQuestion"
+    />
+  </div>
+</template>
