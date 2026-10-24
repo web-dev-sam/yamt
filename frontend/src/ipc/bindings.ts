@@ -48,6 +48,15 @@ export const commands = {
 	unqueueMessage: (message: MessageId) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("unqueue_message", { message })),
 	checkGitlab: () => typedError<GitLabCheck, IpcError>(__TAURI_INVOKE("check_gitlab")),
 	sendQueue: (progress: Channel<SendProgress>) => typedError<SendReply, IpcError>(__TAURI_INVOKE("send_queue", { progress })),
+	prepareCheckout: () => typedError<CheckoutReply, IpcError>(__TAURI_INVOKE("prepare_checkout")),
+	startAgent: (command: AgentCommand, events: Channel<HostEvent>) => typedError<AgentStartReply, IpcError>(__TAURI_INVOKE("start_agent", { command, events })),
+	sendToAgent: (run: AgentRun, message: string) => typedError<null, IpcError>(__TAURI_INVOKE("send_to_agent", { run, message })),
+	stopAgent: (run: AgentRun) => typedError<null, IpcError>(__TAURI_INVOKE("stop_agent", { run })),
+	/**  The checkout's folder is taken under the lock; git looks at it after the lock is released. */
+	checkoutChanges: () => typedError<CheckoutLook, IpcError>(__TAURI_INVOKE("checkout_changes")),
+	discardCheckout: () => typedError<null, IpcError>(__TAURI_INVOKE("discard_checkout")),
+	/**  An edit's two texts as the compare window's differences (plan §2 #114); needs no AI state. */
+	diffTexts: (old: string, next: string) => typedError<Difference[], IpcError>(__TAURI_INVOKE("diff_texts", { old, next })),
 	/**
 	 *  The selection's text, or `None` when it cannot be read; on Linux through GTK's text request,
 	 *  which never asks for the format list that `WebKitGTK` 2.54 crashes on (plan §2 #99).
@@ -65,17 +74,34 @@ export type AddedServer = {
 	fileTypes: string[],
 };
 
+/**  The agent's program and arguments as the settings name them, and the home folders looked in after PATH. */
+export type AgentCommand = {
+	program: string,
+	args: string[],
+	home_folders: string[],
+};
+
+/**  One agent process start; a later start gets a new number. */
+export type AgentRun = number;
+
 /**  The AI agent the window starts and its first message; `None` = the window's default. */
 export type AgentSettings = {
 	command: string[] | null,
 	firstMessage: string | null,
 };
 
+export type AgentStartReply = { kind: "Started"; run: AgentRun } | { kind: "NotFound"; program: string; searched: string[] } | { kind: "SpawnFailed"; program: string; message: string } | { kind: "NoCheckout" };
+
 /**  How code text is smoothed: with coloured subpixels or grey only (applied on Linux, at start). */
 export type Antialiasing = "subpixel" | "greyscale";
 
 /**  0-based line index in the base text. */
 export type BaseLine = number;
+
+/**  What the checkout holds now; `Changed` lists at least one file or has `head_moved`. */
+export type CheckoutLook = { kind: "Missing" } | { kind: "Clean" } | { kind: "Changed"; folder: string; files: string[]; head_moved: boolean } | { kind: "Unreadable"; folder: string; message: string };
+
+export type CheckoutReply = { kind: "Ready"; folder: string } | { kind: "Failed"; message: string };
 
 /**  One region where local or remote differs from base, located in all three texts. */
 export type Chunk = {
@@ -249,7 +275,7 @@ export type InlineRange<L> = {
 	len: number,
 };
 
-export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "SendRunning" };
+export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "SendRunning" } | { kind: "AiOff" } | { kind: "RemoveFailed"; folder: string; message: string };
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
