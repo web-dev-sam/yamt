@@ -11,7 +11,8 @@ use crate::{Error, Result, StageEntry};
 
 const REV_PARSE: &str = "rev-parse";
 const HASH_OBJECT: &str = "hash-object";
-const UNRESOLVED_NAME_STATUS: i32 = 1;
+const MERGE_BASE: &str = "merge-base";
+const SILENT_FAILURE_STATUS: i32 = 1;
 
 pub struct Repo {
     root: PathBuf,
@@ -42,12 +43,31 @@ impl Repo {
         let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
         let output = match run(command, None, GIT_TIMEOUT) {
             Ok(output) => output,
-            Err(error) if is_unresolved_name(&error) => return Ok(None),
+            Err(error) if is_silent_failure(&error) => return Ok(None),
             Err(error) => return Err(error),
         };
         let line = without_final_newline(REV_PARSE, output)?;
         let hex = String::from_utf8_lossy(&line);
         Ok(Some(Oid::parse(&hex)?))
+    }
+
+    /// `git merge-base <a> <b>`: the first base when there are several (as `git diff a...b`); exit 1 → None
+    pub fn merge_base(&self, a: &Oid, b: &Oid) -> Result<Option<Oid>> {
+        let command = self.command(Access::Read, &[MERGE_BASE, a.as_str(), b.as_str()]);
+        let output = match run(command, None, GIT_TIMEOUT) {
+            Ok(output) => output,
+            Err(error) if is_silent_failure(&error) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let line = without_final_newline(MERGE_BASE, output)?;
+        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
+    }
+
+    /// `git rev-parse --path-format=absolute --git-common-dir`: one identity for every worktree of a repository
+    pub fn common_dir(&self) -> Result<PathBuf> {
+        let args = [REV_PARSE, "--path-format=absolute", "--git-common-dir"];
+        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+        Ok(path_from_git(&without_final_newline(REV_PARSE, output)?))
     }
 
     pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
@@ -165,7 +185,7 @@ impl Repo {
         let command = git_command(&self.git, &submodule, Access::Read, &args);
         let output = match run(command, None, GIT_TIMEOUT) {
             Ok(output) => output,
-            Err(error) if is_unresolved_name(&error) => return Ok(None),
+            Err(error) if is_silent_failure(&error) => return Ok(None),
             Err(error) => return Err(error),
         };
         let line = without_final_newline(REV_PARSE, output)?;
@@ -189,11 +209,12 @@ impl Repo {
     }
 }
 
-// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
-fn is_unresolved_name(error: &Error) -> bool {
+// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits 1 without a message; git-merge-base(1)
+// exits 1 without a message when the commits share no ancestor (builtin/merge-base.c `show_merge_base`).
+fn is_silent_failure(error: &Error) -> bool {
     matches!(
         error,
-        Error::GitFailed { status: Some(UNRESOLVED_NAME_STATUS), stderr, .. } if stderr.is_empty()
+        Error::GitFailed { status: Some(SILENT_FAILURE_STATUS), stderr, .. } if stderr.is_empty()
     )
 }
 

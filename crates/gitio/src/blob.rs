@@ -1,10 +1,49 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdout, Command, Stdio};
 
-use crate::run::argv;
+use crate::repo::Repo;
+use crate::run::{Access, GIT_TIMEOUT, argv, run};
 use crate::{Error, Oid, Result};
 
 pub(crate) const CAT_FILE: &str = "cat-file";
+const BLOB: &str = "blob";
+
+impl Repo {
+    /// one `git cat-file --batch-check` run over all ids; answers in input order; None = missing; a gitlink id is never asked
+    pub fn blob_sizes(&self, oids: &[Oid]) -> Result<Vec<Option<u64>>> {
+        if oids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut input = String::new();
+        for oid in oids {
+            input.push_str(oid.as_str());
+            input.push('\n');
+        }
+        let command = self.command(Access::Read, &[CAT_FILE, "--batch-check", "--buffer"]);
+        let output = run(command, Some(input.into_bytes()), GIT_TIMEOUT)?;
+        let text = String::from_utf8_lossy(&output);
+        let answers: Vec<&str> = text.lines().collect();
+        if answers.len() != oids.len() {
+            return Err(unexpected(&text));
+        }
+        oids.iter()
+            .zip(answers)
+            .map(|(oid, answer)| blob_size(oid, answer))
+            .collect()
+    }
+}
+
+// git-cat-file(1) BATCH OUTPUT: `<oid> SP <type> SP <size> LF`, or `<object> SP missing LF`.
+fn blob_size(oid: &Oid, answer: &str) -> Result<Option<u64>> {
+    let fields: Vec<&str> = answer.split(' ').collect();
+    match fields.as_slice() {
+        [named, "missing"] if *named == oid.as_str() => Ok(None),
+        [named, BLOB, size] if *named == oid.as_str() => {
+            size.parse().map(Some).map_err(|_| unexpected(answer))
+        }
+        _ => Err(unexpected(answer)),
+    }
+}
 
 pub struct BlobReader {
     child: Child,

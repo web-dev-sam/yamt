@@ -1,11 +1,13 @@
 //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads what git is doing
 //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
-//! tracks and the merge driver config, re-runs git's merge of one file, and aborts or continues the operation.
+//! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
+//! and lists the files that changed between two commits.
 #![forbid(unsafe_code)]
 
 mod abort_continue;
 mod attributes;
 mod blob;
+mod diff;
 mod entry;
 mod merge_config;
 mod merge_file;
@@ -21,6 +23,7 @@ mod version;
 pub use abort_continue::GitRun;
 pub use attributes::{AttributeValue, MergeAttributes};
 pub use blob::BlobReader;
+pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
 pub use entry::{Oid, Stage, StageEntry};
 pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
