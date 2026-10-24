@@ -41,6 +41,8 @@ export type { ProblemCounts } from "./internal/problems";
 export type { ResultSnapshot } from "./internal/savedPoint";
 export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
+export { RangeController } from "./range";
+export type { RangeOptions, RangeTexts } from "./range";
 
 export type MergeHosts = {
   readonly left: HTMLElement;

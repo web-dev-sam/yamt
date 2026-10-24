@@ -1,13 +1,13 @@
 import { expect, test } from "vitest";
 
 import type { FileEntry } from "../ipc";
-import { folderPaths, revealed, treeRows, type TreeRow } from "./fileTree";
+import { folderPaths, revealed, treeRows, type ListedFile, type TreeRow } from "./fileTree";
 
 function entry(path: string): FileEntry {
   return { path, status: "Unresolved", unsupported: null };
 }
 
-function shown(rows: readonly TreeRow[]): string[] {
+function shown(rows: readonly TreeRow<ListedFile>[]): string[] {
   return rows.map((row) => {
     switch (row.kind) {
       case "folder":
@@ -136,6 +136,21 @@ test("treeRows: gives the whole entry to a file row", () => {
     { kind: "folder", path: "a", label: "a", depth: 0, open: true },
     { kind: "file", file: resolved, label: "x.ts", depth: 1 },
   ]);
+});
+
+test("treeRows: keeps a file row's own type for any listed file", () => {
+  type Reviewed = { readonly path: string; readonly added: number };
+  const changed: Reviewed = { path: "src/b.ts", added: 3 };
+  const top: Reviewed = { path: "a.ts", added: 1 };
+  const rows: readonly TreeRow<Reviewed>[] = treeRows([changed, top], new Set());
+  const added = rows.flatMap((row) => (row.kind === "file" ? [row.file.added] : []));
+
+  expect(rows).toEqual([
+    { kind: "folder", path: "src", label: "src", depth: 0, open: true },
+    { kind: "file", file: changed, label: "b.ts", depth: 1 },
+    { kind: "file", file: top, label: "a.ts", depth: 0 },
+  ]);
+  expect(added).toEqual([3, 1]);
 });
 
 test("treeRows: shows nothing for no files", () => {

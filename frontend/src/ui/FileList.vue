@@ -1,24 +1,18 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="F extends ListedFile">
 import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import ListIcon from "~icons/lucide/list";
 import ListTree from "~icons/lucide/list-tree";
 
-import type { FileEntry, OperationView } from "../ipc";
 import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
-import FileMark from "./FileMark.vue";
-import { revealed, treeRows } from "./fileTree";
+import { revealed, treeRows, type ListedFile } from "./fileTree";
 import FileTree from "./FileTree.vue";
-import OperationLabel from "./OperationLabel.vue";
 import PanelWidthHandle from "./PanelWidthHandle.vue";
 import { usePanelWidth } from "./usePanelWidth";
 
-const props = defineProps<{
-  files: readonly FileEntry[];
-  active: string | null;
-  operation: OperationView | null;
-}>();
+const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
 const emit = defineEmits<{ select: [path: string] }>();
+defineSlots<{ file(props: { file: F; label: string }): unknown; footer(): unknown }>();
 
 const list = useTemplateRef<HTMLElement>("list");
 const { mode, toggle } = createFileListMode();
@@ -74,13 +68,18 @@ function toggleFolder(path: string): void {
       v-if="mode === 'tree'"
       :rows="rows"
       :active="active"
+      :label="label"
       @select="emit('select', $event)"
       @toggle="toggleFolder"
-    />
+    >
+      <template #file="row">
+        <slot name="file" :file="row.file" :label="row.label" />
+      </template>
+    </FileTree>
     <ul
       v-else
       role="listbox"
-      aria-label="Conflicted files"
+      :aria-label="label"
       class="mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-sidebar-scroller"
     >
       <li
@@ -92,10 +91,10 @@ function toggleFolder(path: string): void {
         @click="emit('select', file.path)"
       >
         <component :is="fileIcon(file.path)" class="size-4 shrink-0" aria-hidden="true" />
-        <FileMark :status="file.status" :label="file.path" />
+        <slot name="file" :file="file" :label="file.path" />
       </li>
     </ul>
-    <OperationLabel v-if="operation !== null" :operation="operation" />
+    <slot name="footer" />
     <PanelWidthHandle label="File list width" :handle="resize" />
   </aside>
 </template>

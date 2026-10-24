@@ -1,6 +1,6 @@
-import type { FileEntry } from "../ipc";
+export type ListedFile = { readonly path: string };
 
-export type TreeRow =
+export type TreeRow<F extends ListedFile> =
   | {
       readonly kind: "folder";
       readonly path: string;
@@ -10,14 +10,14 @@ export type TreeRow =
     }
   | {
       readonly kind: "file";
-      readonly file: FileEntry;
+      readonly file: F;
       readonly label: string;
       readonly depth: number;
     };
 
-type Folder = {
-  readonly folders: Map<string, Folder>;
-  readonly files: { readonly name: string; readonly file: FileEntry }[];
+type Folder<F extends ListedFile> = {
+  readonly folders: Map<string, Folder<F>>;
+  readonly files: { readonly name: string; readonly file: F }[];
 };
 
 const NAME_ORDER = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -33,14 +33,14 @@ function compareNames(a: string, b: string): number {
   return a < b ? -1 : 1;
 }
 
-function folderTree(files: readonly FileEntry[]): Folder {
-  const root: Folder = { folders: new Map(), files: [] };
+function folderTree<F extends ListedFile>(files: readonly F[]): Folder<F> {
+  const root: Folder<F> = { folders: new Map(), files: [] };
   for (const file of files) {
     const names = file.path.split("/");
     let folder = root;
     for (const name of names.slice(0, -1)) {
       const known = folder.folders.get(name);
-      const child: Folder = known ?? { folders: new Map(), files: [] };
+      const child: Folder<F> = known ?? { folders: new Map(), files: [] };
       if (known === undefined) {
         folder.folders.set(name, child);
       }
@@ -53,9 +53,9 @@ function folderTree(files: readonly FileEntry[]): Folder {
 
 type Place = { readonly parent: string; readonly depth: number };
 
-function pushFolderRows(
-  rows: TreeRow[],
-  [name, folder]: readonly [string, Folder],
+function pushFolderRows<F extends ListedFile>(
+  rows: TreeRow<F>[],
+  [name, folder]: readonly [string, Folder<F>],
   place: Place,
   closed: ReadonlySet<string>,
 ): void {
@@ -78,9 +78,9 @@ function pushFolderRows(
   }
 }
 
-function pushRows(
-  rows: TreeRow[],
-  folder: Folder,
+function pushRows<F extends ListedFile>(
+  rows: TreeRow<F>[],
+  folder: Folder<F>,
   place: Place,
   closed: ReadonlySet<string>,
 ): void {
@@ -94,11 +94,11 @@ function pushRows(
   }
 }
 
-export function treeRows(
-  files: readonly FileEntry[],
+export function treeRows<F extends ListedFile>(
+  files: readonly F[],
   closed: ReadonlySet<string>,
-): readonly TreeRow[] {
-  const rows: TreeRow[] = [];
+): readonly TreeRow<F>[] {
+  const rows: TreeRow<F>[] = [];
   pushRows(rows, folderTree(files), { parent: "", depth: 0 }, closed);
   return rows;
 }

@@ -5,10 +5,12 @@ import { computed, onMounted, watch } from "vue";
 import { useAltHold } from "./altHold";
 import ChoiceView from "./ChoiceView.vue";
 import FileList from "./FileList.vue";
+import FileMark from "./FileMark.vue";
 import LanguageServerSettings from "./LanguageServerSettings.vue";
 import MergeView from "./MergeView.vue";
 import NoticeBar from "./NoticeBar.vue";
 import { noticeRow } from "./noticeText";
+import OperationLabel from "./OperationLabel.vue";
 import { allResolvedText } from "./operationText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
@@ -67,9 +69,16 @@ onMounted(() => {
       v-show="fileListShown"
       :files="files"
       :active="active"
-      :operation="operation"
+      label="Conflicted files"
       @select="pick"
-    />
+    >
+      <template #file="{ file, label }">
+        <FileMark :status="file.status" :label="label" />
+      </template>
+      <template #footer>
+        <OperationLabel v-if="operation !== null" :operation="operation" />
+      </template>
+    </FileList>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
         <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />
