@@ -135,7 +135,7 @@ mutants base:
     else
         echo "mutants: no Rust changes since {{ base }}"
     fi
-    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
+    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/agent/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     if [ -n "$web_files" ]; then
         # --ignoreStatic: module-level mutants are not re-evaluated under the vitest runner, so they survive
         # whatever the tests assert (#732: 134 false survivors).

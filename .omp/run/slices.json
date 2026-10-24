@@ -1,21 +1,37 @@
 {
-  "RVReviewShell": {
+  "RVThreadRowsR1": {
     "owned": [
-      "src-tauri/src/review.rs",
-      "src-tauri/src/range.rs",
-      "src-tauri/src/commands.rs",
-      "src-tauri/src/ipc_error.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/AGENTS.md",
-      "crates/review/src/lib.rs"
+      "frontend/src/editor/internal/threadAnchor.ts",
+      "frontend/src/editor/internal/threadRows.ts",
+      "frontend/src/editor/internal/threadField.ts",
+      "frontend/src/editor/internal/threadWidget.ts",
+      "frontend/src/editor/internal/threadHosts.ts",
+      "frontend/src/editor/internal/threadNumbers.ts",
+      "frontend/src/editor/internal/compareFrame.ts",
+      "frontend/src/editor/internal/geometry.ts",
+      "frontend/src/editor/internal/threadAnchor.test.ts",
+      "frontend/src/editor/internal/threadRows.test.ts",
+      "frontend/src/editor/internal/threadField.test.ts",
+      "frontend/src/editor/internal/threadWidget.test.ts",
+      "frontend/src/editor/internal/threadHosts.test.ts",
+      "frontend/src/editor/internal/threadNumbers.test.ts",
+      "frontend/src/editor/internal/compareFrame.test.ts",
+      "frontend/src/editor/internal/geometry.test.ts",
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/compare.ts",
+      "frontend/src/editor/rangeThreads.browser.test.ts",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/ipc/threadLine.ts",
+      "frontend/src/ipc/index.ts"
     ]
   },
-  "RVJsonrpc": {
+  "RVAgentSettingsRust": {
     "owned": [
-      "frontend/src/jsonrpc/**",
-      "frontend/src/lsp/**",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts"
+      "crates/settings/src/lib.rs",
+      "crates/settings/src/file.rs",
+      "crates/settings/tests/**",
+      "src-tauri/src/settings.rs",
+      "src-tauri/src/commands.rs"
     ]
   }
 }

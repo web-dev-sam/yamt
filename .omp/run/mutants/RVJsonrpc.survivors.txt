@@ -1,0 +1,13 @@
+just mutants 028d5f3~1 (covers 028d5f3 RVJsonrpc) — Stryker; jsonrpc/ was outside the recipe's scope at this run (added to the justfile after it); the implementer's own Stryker on jsonrpc/connection.ts: 95 killed, 0 survived, 2 no coverage (never default); messages.ts/timers.ts survivors are module-level (#732).
+All files         |  93.45 |   94.25 |     1096 |         3 |         67 |       10 |        1 |
+  fences.ts       |  85.02 |   86.14 |      258 |         3 |         42 |        4 |        0 |
+    answers.ts    |  91.25 |   91.25 |       73 |         0 |          7 |        0 |        0 |
+    attempt.ts    |  95.10 |   97.00 |       97 |         0 |          3 |        2 |        1 |
+    documents.ts  | 100.00 |  100.00 |       14 |         0 |          0 |        0 |        0 |
+    formatting.ts |  97.92 |  100.00 |       94 |         0 |          0 |        2 |        0 |
+    handshake.ts  |  97.47 |   97.47 |       77 |         0 |          2 |        0 |        0 |
+    problems.ts   |  94.50 |   94.50 |      103 |         0 |          6 |        0 |        0 |
+    server.ts     |  97.65 |   98.58 |      208 |         0 |          3 |        2 |        0 |
+    serverDocs.ts | 100.00 |  100.00 |       43 |         0 |          0 |        0 |        0 |
+   index.ts       |  96.99 |   96.99 |      129 |         0 |          4 |        0 |        0 |
+lsp/ files: lines changed are import paths only; their survivors are pre-existing.
