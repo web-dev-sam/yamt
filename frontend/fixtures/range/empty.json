@@ -1,0 +1,23 @@
+{
+  "files": [],
+  "start": {
+    "files": [],
+    "left": {
+      "label": {
+        "kind": "named",
+        "name": "feature"
+      },
+      "short_id": "9c1ba3f",
+      "subject": "New logo, staging config and release tools"
+    },
+    "range": "feature..feature",
+    "right": {
+      "label": {
+        "kind": "named",
+        "name": "feature"
+      },
+      "short_id": "9c1ba3f",
+      "subject": "New logo, staging config and release tools"
+    }
+  }
+}

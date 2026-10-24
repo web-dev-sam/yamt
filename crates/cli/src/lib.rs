@@ -1,4 +1,4 @@
-//! Headless command line front end: classify, scan, golden, fixture and compare tooling.
+//! Headless command line front end: classify, scan, golden, fixture, compare and range tooling.
 #![forbid(unsafe_code)]
 
 mod args;
@@ -7,6 +7,7 @@ mod classify;
 mod compare;
 mod fixture;
 mod golden;
+mod range;
 mod scan;
 
 use std::ffi::OsString;
@@ -22,7 +23,8 @@ const USAGE: &str = "usage:
   yamt-cli scan [<repo>]
   yamt-cli golden run|update [<dir>]
   yamt-cli fixture <case-dir>
-  yamt-cli compare <case-dir>";
+  yamt-cli compare <case-dir>
+  yamt-cli range <repo-dir> <range>";
 const USAGE_EXIT_CODE: u8 = 2;
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +51,8 @@ pub enum Error {
     GoldenFailed { failed: usize, total: usize },
     #[error(transparent)]
     Session(#[from] yamt_session::Error),
+    #[error(transparent)]
+    Range(#[from] yamt_range::Error),
     #[error("cannot serialise json: {0}")]
     Json(#[from] serde_json::Error),
     #[error("cannot write to stdout: {0}")]
@@ -61,7 +65,7 @@ impl Error {
     #[must_use]
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            Error::Usage { .. } => ExitCode::from(USAGE_EXIT_CODE),
+            Error::Usage { .. } | Error::Range(_) => ExitCode::from(USAGE_EXIT_CODE),
             Error::Read { .. }
             | Error::Write { .. }
             | Error::MalformedCase { .. }
@@ -86,6 +90,7 @@ pub fn run(args: &[OsString]) -> Result<()> {
         Command::GoldenUpdate { dir } => golden::update(&dir),
         Command::Fixture { case_dir } => fixture::fixture(&case_dir),
         Command::Compare { case_dir } => compare::compare(&case_dir),
+        Command::Range { repo, spec } => range::range(&repo, &spec),
     }
 }
 

@@ -34,15 +34,19 @@ fixtures-check: (fixtures-into "target/fixtures-check")
     diff -ru frontend/fixtures/golden target/fixtures-check/golden
     diff -ru frontend/fixtures/showcase target/fixtures-check/showcase
     diff -ru frontend/fixtures/compare target/fixtures-check/compare
+    diff -ru frontend/fixtures/range target/fixtures-check/range
 
-# Window fixtures: goldens, tests/showcase/ demo cases, tests/compare/ pairs (plan §2 #95).
+# Window fixtures: goldens, tests/showcase/ demo cases, tests/compare/ pairs (plan §2 #95), range cases over scripts/range-repo.sh (#103).
 [private]
 fixtures-into dir:
-    rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare
+    rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare {{ dir }}/range && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare {{ dir }}/range
     cargo build --quiet -p yamt-cli
     for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/golden/$(basename "$case").json"; done
     for case in tests/showcase/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/showcase/$(basename "$case").json"; done
     for case in tests/compare/*/; do target/debug/yamt-cli compare "$case" > "{{ dir }}/compare/$(basename "$case").json"; done
+    rm -rf target/range-repo && scripts/range-repo.sh target/range-repo > /dev/null
+    target/debug/yamt-cli range target/range-repo main...feature > "{{ dir }}/range/review.json"
+    target/debug/yamt-cli range target/range-repo feature..feature > "{{ dir }}/range/empty.json"
 
 web-lint: (frontend "lint")
 
