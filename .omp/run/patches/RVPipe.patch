@@ -1,0 +1,1459 @@
+From 7b820f8c835bbb7322ebb9e6a87f0b46be347d56 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:46:19 +0200
+Subject: [PATCH] refactor(pipe): yamt-pipe holds the process core with
+ Content-Length and line framings; lsp-host uses it
+
+---
+ .omp/run/notes/RVPipe.md                 |  80 ++++++
+ .omp/run/notes/RVWindowR1Check.md        |  26 ++
+ Cargo.lock                               |  12 +-
+ Cargo.toml                               |   2 +
+ crates/lsp-host/AGENTS.md                |   2 +-
+ crates/lsp-host/Cargo.toml               |   2 +-
+ crates/lsp-host/src/files.rs             |  13 +-
+ crates/lsp-host/src/lib.rs               |  33 ++-
+ crates/pipe/AGENTS.md                    |   1 +
+ crates/{lsp-host => pipe}/Cargo.toml     |   2 +-
+ crates/pipe/src/bin/line-echo.rs         | 139 ++++++++++
+ crates/{lsp-host => pipe}/src/frame.rs   | 200 +++++++++++---
+ crates/pipe/src/lib.rs                   |  11 +
+ crates/{lsp-host => pipe}/src/program.rs |  41 ++-
+ crates/{lsp-host => pipe}/src/run.rs     |  59 ++--
+ crates/pipe/tests/lines.rs               | 329 +++++++++++++++++++++++
+ scripts/arch-check.sh                    |  11 +-
+ 17 files changed, 850 insertions(+), 113 deletions(-)
+ create mode 100644 .omp/run/notes/RVPipe.md
+ create mode 100644 .omp/run/notes/RVWindowR1Check.md
+ create mode 100644 crates/pipe/AGENTS.md
+ copy crates/{lsp-host => pipe}/Cargo.toml (92%)
+ create mode 100644 crates/pipe/src/bin/line-echo.rs
+ rename crates/{lsp-host => pipe}/src/frame.rs (52%)
+ create mode 100644 crates/pipe/src/lib.rs
+ rename crates/{lsp-host => pipe}/src/program.rs (93%)
+ rename crates/{lsp-host => pipe}/src/run.rs (77%)
+ create mode 100644 crates/pipe/tests/lines.rs
+
+diff --git a/.omp/run/notes/RVPipe.md b/.omp/run/notes/RVPipe.md
+new file mode 100644
+index 0000000..d5c196f
+--- /dev/null
++++ b/.omp/run/notes/RVPipe.md
+@@ -0,0 +1,80 @@
++**summary**
++- There is a new crate `crates/pipe` (`yamt-pipe`). It holds the process core that used to live in `yamt-lsp-host`: `Running` with its four threads, the framing code, and the program lookup `find` with its `plain_name` rule. `Running` and `find` are now public.
++- A second framing, `Framing::Lines`, is added beside `Framing::ContentLength`. Outgoing messages are written as `message + "\n"`. Incoming text is read one line per message: a trailing `\r` is removed and empty lines are skipped. A line over 64 MiB or one that is not UTF-8 is dropped with a `Log` line, and reading carries on with the next line.
++- `yamt-lsp-host` now uses `yamt-pipe` and always starts with `Framing::ContentLength`. It re-exports `HostEvent`, `ProgramFolders`, `ProgramFound` and `ProgramPlace`. Its own public API is unchanged, and so are `src-tauri` and `bindings.ts`.
++- New test program `src/bin/line-echo.rs`, and `scripts/arch-check.sh` gains a rule for each crate's allowed dependencies.
++
++**files_changed**
++- `crates/pipe/Cargo.toml`, `crates/pipe/AGENTS.md`, `crates/pipe/src/lib.rs`, `crates/pipe/src/run.rs`, `crates/pipe/src/frame.rs`, `crates/pipe/src/program.rs`, `crates/pipe/src/bin/line-echo.rs`, `crates/pipe/tests/lines.rs` — all new
++- `crates/lsp-host/Cargo.toml`, `crates/lsp-host/AGENTS.md`, `crates/lsp-host/src/lib.rs`, `crates/lsp-host/src/files.rs` — changed
++- `crates/lsp-host/src/run.rs`, `crates/lsp-host/src/frame.rs`, `crates/lsp-host/src/program.rs` — deleted (moved into `crates/pipe`)
++- `scripts/arch-check.sh` — changed
++- `Cargo.lock` — cargo regenerated it (outside `Owned`)
++
++**tests_added**
++
++`crates/pipe/tests/lines.rs`, every test going through `line-echo` with `Framing::Lines`:
++- **`a_line_message_comes_back_whole_with_a_multi_byte_body`**: no bytes beyond ASCII are lost or re-encoded.
++- **`a_line_split_across_two_writes_arrives_as_one_message`**: the split point can land inside a multi-byte character; it still arrives as one message.
++- **`two_lines_in_one_write_arrive_as_two_messages`**: one read is not taken as one message.
++- **`a_crlf_line_end_is_not_part_of_the_message`**: the `\r` is removed.
++- **`a_line_over_the_cap_is_dropped_with_a_log_line_and_the_next_one_arrives`**: there is a cap, the program is not stopped, and the next line is not lost.
++- **`a_line_that_is_not_utf8_is_dropped_with_a_log_line`**: no replacement characters are passed on.
++- **`a_stderr_line_is_a_log_event`**
++- **`exited_comes_once_and_last_with_the_code`**
++
++Added so that mutants on the moved `run.rs` lines are caught by `yamt-pipe`'s own tests (the mutants recipe uses `--test-workspace=false`, so `lsp-host`'s tests don't count for them):
++- `stop_closes_stdin_and_a_cooperative_program_exits_once_within_the_grace`
++- `stop_kills_a_program_that_ignores_it_after_the_grace`
++- `an_idle_program_keeps_running_and_answers_later`
++- `is_finished_turns_true_once_the_run_has_ended`
++- `wait_returns_after_exited_was_sent`
++- `a_dropped_event_receiver_stops_the_run_at_its_next_output`
++- `stderr_lines_written_after_the_program_exited_all_come_before_its_exited`
++- `a_program_whose_child_holds_its_output_exits_after_at_most_the_drain` (unix only)
++- `a_program_that_closes_its_stderr_keeps_serving` (unix only)
++- `a_program_that_closes_its_stdout_is_stopped_through_its_stdin` (unix only): catches a lost `OutputClosed` stop
++- `a_missing_folder_is_a_start_error`
++
++New unit tests in `frame.rs`:
++- `a_written_line_is_the_message_and_one_line_feed`
++- `lines_read_back_one_byte_at_a_time_without_their_line_ends`
++- `a_carriage_return_inside_a_line_stays`
++- `a_line_that_is_not_utf8_is_dropped_and_the_next_one_is_read`
++- `a_line_of_64_mib_is_read_also_with_a_carriage_return_and_a_longer_one_is_dropped`: checks the exact limit, with and without `\r`, and the cut path.
++- `a_log_line_cut_right_after_a_carriage_return_keeps_it`
++
++All the `Content-Length` and lookup unit tests moved unchanged into `frame.rs` and `program.rs`.
++
++**smoke_evidence**
++- `cargo test -p yamt-pipe -p yamt-lsp-host`:
++  - `yamt_pipe` unit tests: `test result: ok. 25 passed` (all 7 old `Content-Length`/log-line tests and all 13 lookup tests among them)
++  - `tests/lines.rs`: `test result: ok. 19 passed` (all 8 acceptance names listed as `ok`)
++  - `crates/lsp-host/tests/files.rs`: `ok. 3 passed`
++  - `crates/lsp-host/tests/run.rs`: `ok. 18 passed` (neither file was edited)
++- `cargo fmt --all --check` → `FMT_OK`
++- `cargo clippy --workspace --all-targets -- -D warnings` → `Finished `dev` profile`, no warnings
++- `cargo build -p yamt-app` → `Finished `dev` profile`. `git status --short src-tauri frontend Cargo.toml` printed nothing, so `src-tauri` is unchanged.
++- Bindings: `cargo run --quiet -p yamt-app --features bindings --bin export-bindings -- target/bindings-check.ts && diff -u frontend/src/ipc/bindings.ts target/bindings-check.ts && echo IDENTICAL` → `IDENTICAL`. An earlier run with doc comments on the IPC types did produce a diff, which is why those types use `#[expect(missing_docs)]` (see below).
++- `just arch-check` → `arch-check: ok`. Failing path checked by hand: fed fake dependency lists through both new filters, and they flagged `yamt-merge-core`, `tauri-utils` (pipe) and `yamt-gitio`, `serde_json` (lsp-host).
++
++**deviations_from_brief**
++- **Root `Cargo.toml` lines to add:** `"crates/pipe",` to `[workspace] members` (after `"crates/lsp-host",`) and `yamt-pipe = { path = "crates/pipe" }` to `[workspace.dependencies]`. Until then, `crates/lsp-host/Cargo.toml` uses `yamt-pipe = { path = "../pipe" }`, which makes the crate a workspace member on its own. Once the root lines land, this can become `yamt-pipe.workspace = true`.
++- `Cargo.lock` gained a `yamt-pipe` entry; cargo writes it on build.
++- `HostEvent`, `ProgramPlace` and `ProgramFound` have `#[expect(missing_docs, reason = …)]` instead of doc comments. specta copies doc comments into `bindings.ts`, which would break the "bindings unchanged" rule. All other public items are documented.
++- Added (allowed by the contract):
++  - `pub fn plain_name` in `yamt-pipe`, so `lsp-host/src/files.rs` uses the same rule instead of a copy.
++  - `MAX_MESSAGE_BYTES` is now `usize` (was a crate-private `u64`); one constant serves both framings.
++  - A private `Frame::Dropped { reason }` variant, logged as `yamt: dropped <reason>`. Not-UTF-8 text: `yamt: dropped a message that is not UTF-8`.
++- `line-echo` has more commands than step 3 lists: `split`, `twice`, `crlf` (needed by the acceptance tests) and `--ignore-stop`, `burst`, `orphan`, `close-stderr`, `close-stdout` (needed by the extra tests). It also prints `line-echo pid <pid>` on start.
++- `arch-check` also bans `serde_json` for `yamt-pipe`, the same as the existing `lsp-host` rule.
++- `tracing` was dropped from `lsp-host`'s dependencies (no longer used), and the moved tracing text now says "program" instead of "language server". The window-visible log texts are unchanged.
++- Not edited because they are read-only, but now out of date: the `lsp-host` entry in the project map (`.omp/skills/project-map/SKILL.md`), `docs/architecture.md` §3, and probably the `yamt-app` dependency list in `scripts/map-check.sh`. They need the new crate and its files.
++- No test copies or execs a file it just wrote; the tests start the built `line-echo` where cargo put it, so the `place_echo` pattern wasn't needed.
++
++**open_risks**
++- I did not run `just mutants`. The tests are aimed at the moved `run.rs`, `frame.rs` and `program.rs` lines, but that is not proven.
++- `crates/pipe/src/frame.rs` (test `a_line_of_64_mib_is_read_also_with_a_carriage_return_and_a_longer_one_is_dropped`): builds about 192 MiB in memory, plus copies, so peak use during a test run is roughly 400 MiB.
++- `crates/pipe/tests/lines.rs` (`a_line_over_the_cap…`): sends a 64 MiB line through a real pipe. It takes under a second here, but could be slow on CI machines.
++- `crates/pipe/src/frame.rs` `write_message`: `Lines` does not check for a `\n` inside a message. The brief puts this on the caller (JSON lines contain no raw newline).
++- `scripts/arch-check.sh`: there is no committed test of the new rules' failing path; the script has no test harness and the existing rules have none either. I only checked the filters by hand, as above.
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVWindowR1Check.md b/.omp/run/notes/RVWindowR1Check.md
+new file mode 100644
+index 0000000..62b740b
+--- /dev/null
++++ b/.omp/run/notes/RVWindowR1Check.md
+@@ -0,0 +1,26 @@
++```json
++{
++  "verdict": "pass",
++  "findings": [],
++  "checked": [
++    "Item 1 is fixed. rangeStore.ts:167 is now `clearProblemAbout(state, path)`, imported from ./problem, and the private copy is gone. The shared rule (problem.ts:126, any problem whose `path` equals this path) behaves the same here, because `open` is the only problem with a path that the range store reports. The test 'a failed load … a later success' still pins three things: another file's success keeps the problem, the same file's success clears it, and the eviction order after a failure.",
++    "Item 2 is fixed. problem.ts has `{ action: \"tabs\" | \"openRange\"; cause }`, logProblem:82 logs `store.openRange_failed` with the cause, and problemText.ts:59 says 'Could not open the range'. startUp at rangeStore.ts:149 reports `{ action: \"openRange\", cause }`. A grep finds no `RANGE_WORD` and no 'the range' path anywhere in src. compareStore.ts:172 (`action === \"tabs\"`) still narrows correctly against the merged union. No other dispatch on `action` needs the new kind: emptyStop, listing, settings and problemText.problemText all fall through to causedText.",
++    "Item 2 acceptance is met by the node tests the brief allows. rangeStore.test 'a failed openRange…' asserts the stored Problem, the shown words 'Could not open the range: the app is gone' and the exact log line. problemText.test asserts that git's message is trimmed. problem.test pins the log event and its fields.",
++    "Item 3 is fixed. `loadFile(entry: RangeEntry)` uses `entry.id`/`entry.path`, and the `file ${id}` fallback and the 'names file 3' case are gone (grep finds neither). `entryOf` survives only for `shownPath` (rangeStore.ts:73), so it is not dead. `RangeFileId` is still used by `shown`, `recent` and `forget`.",
++    "Item 4 is fixed. `RangeHandle.content`/`RangeContent` (useRangeController.ts:24,32,45). RangeView.vue:31 destructures `content`, and lines 41–43 read it. A grep finds no `RangeShown`, `handle.shown` or leftover `view` in RangeView.vue.",
++    "Item 5 is fixed (TS17). fences.ts declares `type Root`, `WindowRoot = Exclude<Root, \"merge\">`, `ROOT_FILES: Readonly<Record<string, Root>>` and `WINDOW_RULES: Readonly<Record<WindowRoot, \"PM7\" | \"PM9\">>`. The `isWindowRoot` type guard (`Object.hasOwn`) narrows before indexing, with no `as`. The finding messages are unchanged, and adding a fourth `Root` member without a rule entry is now a type error.",
++    "Item 6 is fixed. args.ts no longer re-exports `Recording`, and video.ts:15 imports it from ./startArgs. A grep shows no other importer of `Recording` from ./args (KeymapList.vue has its own local `Recording` type).",
++    "Item 7 is fixed. `shownHosts<D, S>` is exported. useRangeController.test's test.each over left/right/strip asserts that all three set refs give the hosts and that any one null ref gives null. Dropping the `CompareHosts` import leaves no unused export: editor's browser tests and range.ts still use it, and the inline return type matches `CompareHosts` structurally (typecheck passes, per the implementer).",
++    "Item 8 is fixed. The pure `appArgs(opens, repoDir)` in startArgs.ts:105 is called from prepareApp, and the new `repoFolder` gives the same argv as before for each kind: diff→`--diff`, range→`--diff=<range> --repo <dir>`, dir→`--repo fromRoot(dir)`, fresh→conflict-repo.sh then `--repo <folder>/repo`. args.test asserts the range, diff, dir and fresh argv.",
++    "Deviation accepted: `appArgs` adds `--repo` for any kind when given one. Its only caller is prepareApp, and repoFolder gives null only for `diff`, so the app never gets `--diff --repo`. The pairing is dev-tooling looseness with no effect on the app or any caller, which is below the RV8 block bar.",
++    "Deviation accepted: logProblem dropped its `never` default. TS3 allows a switch with no default when tsgolint covers it, and `.oxlintrc.json:20` sets `typescript/switch-exhaustiveness-check: error`. The function returns void, so a missed case cannot compile into a missing return.",
++    "Deviation accepted: the RangeApp.vue VU16 empty-text nit is not done. It was a nit and is not among the brief's eight items.",
++    "Survivors per VF7. `startArgs.ts` 38/39/84/97/99/119 are the pre-existing size/recording/settingsText/noPositionals lines (the earlier review listed them pre-shift); appArgs (105–117) has none.",
++    "Survivors per VF7 (continued). `useRangeController.ts:82` (×2) is `{ flush: \"post\" }`, already dropped as (a) equivalent last round. Lines 120/122/124/125/127 (×2) are the composable's wiring into `followRange`: (b) every mutant except 127:77 is a vue-tsc type error, and (c) 127:77 (the `{ preferences }` options) runs in the implementer's real-app smoke, where docs/current.md loaded `shortcuts.md || keys.md`.",
++    "Survivors per VF7 (continued). `rangeStore.ts:117:10` (the `?.` in `entryOf`) is (b): `state.start.value` is `RangeStart | null`, so dropping `?.` fails `vue-tsc -b`. It survives at runtime only because the brief removed the pre-start loadFile case. No fences.ts or problem.ts survivor falls on this round's hunks.",
++    "Growth check: no new module, state or import edge. clearProblemAbout's new caller removes a copied rule; failure words stay only in problemText.ts (architecture §5.1); the Problem union gains one kind, logged and worded in the existing homes. ui/AGENTS.md:5's line 'A failed `loadFile` reports `open` with the path…' still holds.",
++    "Ownership: every source file the patch touches is in the brief's Owned list. The added .omp/run/notes/RVWindowR1.md is the implementer's report. ROOT_FILES' string keys follow the brief's wording.",
++    "Read-only review: no targeted test was run, because no block depended on one."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/Cargo.lock b/Cargo.lock
+index 03369b0..f97ac7d 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4667,7 +4667,7 @@ dependencies = [
+  "serde",
+  "specta",
+  "tempfile",
+- "tracing",
++ "yamt-pipe",
+ ]
+ 
+ [[package]]
+@@ -4680,6 +4680,16 @@ dependencies = [
+  "specta",
+ ]
+ 
++[[package]]
++name = "yamt-pipe"
++version = "0.5.1"
++dependencies = [
++ "serde",
++ "specta",
++ "tempfile",
++ "tracing",
++]
++
+ [[package]]
+ name = "yamt-range"
+ version = "0.5.1"
+diff --git a/Cargo.toml b/Cargo.toml
+index 3393851..dd13d1c 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -8,6 +8,7 @@ members = [
+   "crates/conflict-repo",
+   "crates/settings",
+   "crates/lsp-host",
++  "crates/pipe",
+   "crates/compare",
+   "crates/range",
+   "crates/review",
+@@ -27,6 +28,7 @@ yamt-session = { path = "crates/session" }
+ yamt-conflict-repo = { path = "crates/conflict-repo" }
+ yamt-settings = { path = "crates/settings" }
+ yamt-lsp-host = { path = "crates/lsp-host" }
++yamt-pipe = { path = "crates/pipe" }
+ yamt-compare = { path = "crates/compare" }
+ yamt-range = { path = "crates/range" }
+ yamt-review = { path = "crates/review" }
+diff --git a/crates/lsp-host/AGENTS.md b/crates/lsp-host/AGENTS.md
+index e05f9d1..a07b6a3 100644
+--- a/crates/lsp-host/AGENTS.md
++++ b/crates/lsp-host/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Starts language servers and passes their messages through (plan §2 #67, #70); Rust never parses a server message and never learns a server's name. `lib.rs` (`Host`: start, send, stop, `stop_every` (signals every run, returns at once), `stop_all` (signals and joins every run), `find_program`, `project_files`, `context`; the IPC types `RunId`, `ServerCommand`, `StartReply`, `ServerContext`), `run.rs` (`Running`: per run a supervisor thread owning the `Child` — stop asked, stdout closed or broken, events dropped, or the program gone, then `STOP_GRACE` 2 s, kill, reap, up to `OUTPUT_DRAIN` 1 s for the readers, one `Exited` last; a writer thread owning stdin; a stdout reader sending `Message`s; a stderr reader sending `Log` lines, whose end stops nothing; `HostEvent`), `frame.rs` (`Content-Length` frames, headers case-insensitive, header lines up to 8 KiB, messages up to 64 MiB; stderr lines cut at 8 KiB), `program.rs` (lookup shared by start and `find_program`: a name with a separator relative to the project, else the window's `ProgramFolders` (plan §2 #72): each `project` entry in list order in the project folder and each parent up to the root, then `PATH`, then each `home` entry in the user's home folder (`ProgramPlace::Home`; none without a home folder); an entry that is not plain `/`-separated names is skipped; Windows `PATHEXT`, `CREATE_NO_WINDOW`), `files.rs` (`in_repository`: plain `/` segments only (`plain_name`, shared with `program.rs`) and no link out of the root; `ProjectFile`, text up to 64 KiB). std threads and channels only: no `Arc`, no async, no `yamt-*` crate, no tauri, no `serde_json` (arch-check). `src/bin/lsp-echo.rs` is the framed test server the tests in `tests/run.rs` start as a real child (its commands, incl. `burst`, `orphan`, unix `close-stderr`, are listed in its header); `tests/files.rs` covers `project_files`; lookup and framing have unit tests in their files.
++Owner skill: `skill://rust-conventions`. Starts language servers and passes their messages through (plan §2 #67, #70); Rust never parses a server message and never learns a server's name. `lib.rs` (`Host`: start, send, stop, `stop_every` (signals every run, returns at once), `stop_all` (signals and joins every run), `find_program`, `project_files`, `context`; the IPC types `RunId`, `ServerCommand`, `StartReply`, `ServerContext`; re-exports `HostEvent`, `ProgramFolders`, `ProgramFound`, `ProgramPlace` from `yamt-pipe`), `files.rs` (`in_repository`: plain `/` segments only (`yamt_pipe::plain_name`, the lookup's rule) and no link out of the root; `ProjectFile`, text up to 64 KiB). The process core — `Running` with its threads, `Content-Length` frames, the program lookup — lives in `yamt-pipe` (plan §2 #109); every run here is `Framing::ContentLength`. std threads and channels only: no `Arc`, no async, `yamt-pipe` the only `yamt-*` crate, no tauri, no `serde_json` (arch-check). `src/bin/lsp-echo.rs` is the framed test server the tests in `tests/run.rs` start as a real child through `Host` (its commands, incl. `burst`, `orphan`, unix `close-stderr`, are listed in its header); `tests/files.rs` covers `project_files`.
+diff --git a/crates/lsp-host/Cargo.toml b/crates/lsp-host/Cargo.toml
+index 469613e..ad6a142 100644
+--- a/crates/lsp-host/Cargo.toml
++++ b/crates/lsp-host/Cargo.toml
+@@ -6,9 +6,9 @@ publish.workspace = true
+ license.workspace = true
+ 
+ [dependencies]
++yamt-pipe.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+-tracing.workspace = true
+ 
+ [dev-dependencies]
+ tempfile.workspace = true
+diff --git a/crates/lsp-host/src/files.rs b/crates/lsp-host/src/files.rs
+index 0720a28..05eede2 100644
+--- a/crates/lsp-host/src/files.rs
++++ b/crates/lsp-host/src/files.rs
+@@ -1,8 +1,8 @@
+-use std::ffi::OsStr;
+ use std::fs;
+-use std::path::{Component, Path, PathBuf};
++use std::path::{Path, PathBuf};
+ 
+ use serde::Serialize;
++use yamt_pipe::plain_name;
+ 
+ const MAX_TEXT_BYTES: u64 = 64 * 1024;
+ 
+@@ -32,15 +32,6 @@ pub(crate) fn in_repository(root: &Path, relative: &str) -> Option<PathBuf> {
+     Some(path)
+ }
+ 
+-/// `segment` itself when it is one plain file name: not empty, `.`, `..`, a root or a drive.
+-pub(crate) fn plain_name(segment: &str) -> Option<&OsStr> {
+-    let mut components = Path::new(segment).components();
+-    let (Some(Component::Normal(name)), None) = (components.next(), components.next()) else {
+-        return None;
+-    };
+-    Some(name)
+-}
+-
+ pub(crate) fn project_file(root: &Path, relative: &str) -> ProjectFile {
+     let Some(path) = in_repository(root, relative) else {
+         return ProjectFile::Missing;
+diff --git a/crates/lsp-host/src/lib.rs b/crates/lsp-host/src/lib.rs
+index af077e9..4649f58 100644
+--- a/crates/lsp-host/src/lib.rs
++++ b/crates/lsp-host/src/lib.rs
+@@ -2,9 +2,6 @@
+ #![forbid(unsafe_code)]
+ 
+ mod files;
+-mod frame;
+-mod program;
+-mod run;
+ 
+ use std::collections::BTreeMap;
+ use std::mem;
+@@ -12,11 +9,10 @@ use std::path::{Path, PathBuf};
+ use std::sync::mpsc::Sender;
+ 
+ use serde::{Deserialize, Serialize};
++use yamt_pipe::{Framing, Running};
+ 
+ pub use crate::files::ProjectFile;
+-pub use crate::program::{ProgramFolders, ProgramFound, ProgramPlace};
+-pub use crate::run::HostEvent;
+-use crate::run::Running;
++pub use yamt_pipe::{HostEvent, ProgramFolders, ProgramFound, ProgramPlace};
+ 
+ #[derive(
+     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, specta::Type,
+@@ -92,17 +88,18 @@ impl Host {
+                 project: command.project.clone(),
+             };
+         };
+-        let program = match program::find(&self.root, &project, &command.program, &command.folders)
+-        {
+-            Ok(found) => found.path,
+-            Err(searched) => {
+-                return StartReply::NotFound {
+-                    program: command.program.clone(),
+-                    searched: texts(&searched),
+-                };
+-            }
+-        };
+-        match Running::start(&program, &command.args, &project, events) {
++        let program =
++            match yamt_pipe::find(&self.root, &project, &command.program, &command.folders) {
++                Ok(found) => found.path,
++                Err(searched) => {
++                    return StartReply::NotFound {
++                        program: command.program.clone(),
++                        searched: texts(&searched),
++                    };
++                }
++            };
++        let framing = Framing::ContentLength;
++        match Running::start(&program, &command.args, &project, framing, events) {
+             Ok(running) => {
+                 let run = RunId(self.next_run);
+                 self.next_run = self.next_run.wrapping_add(1);
+@@ -158,7 +155,7 @@ impl Host {
+                 searched: Vec::new(),
+             };
+         };
+-        match program::find(&self.root, &project, program, folders) {
++        match yamt_pipe::find(&self.root, &project, program, folders) {
+             Ok(found) => ProgramFound::Found {
+                 path: found.path.display().to_string(),
+                 place: found.place,
+diff --git a/crates/pipe/AGENTS.md b/crates/pipe/AGENTS.md
+new file mode 100644
+index 0000000..c0de49a
+--- /dev/null
++++ b/crates/pipe/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. Starts one program and pipes its messages both ways in one of two framings (plan §2 #70, #109); never parses a message. `lib.rs` (the public surface; `#![warn(missing_docs)]`), `run.rs` (`Running`: start(program, args, folder, framing, events), send, stop, is_finished, wait; per run a supervisor thread owning the `Child` — stop asked, stdout closed or broken, events dropped, or the program gone, then `STOP_GRACE` 2 s, kill, reap, up to `OUTPUT_DRAIN` 1 s for the readers, one `Exited` last; a writer thread owning stdin; a stdout reader sending `Message`s; a stderr reader sending `Log` lines, whose end stops nothing; `HostEvent`, whose serde/specta shape is the generated `HostEvent` in `bindings.ts`; `CREATE_NO_WINDOW` on Windows), `frame.rs` (`Framing`: `ContentLength` — headers case-insensitive, header lines up to 8 KiB, a bad or too large frame stops the program — or `Lines` — `message + "\n"` out, one line per message in, a trailing `\r` dropped, empty lines skipped, a line over the cap or not UTF-8 dropped with a `Log` line while reading goes on; `MAX_MESSAGE_BYTES` 64 MiB for both; stderr lines cut at 8 KiB), `program.rs` (`find`: a name with a separator relative to the project, else `ProgramFolders` (plan §2 #72): each `project` entry in list order in the project folder and each parent up to the root, then `PATH`, then each `home` entry in the user's home folder (`ProgramPlace::Home`; none without a home folder); an entry that is not plain `/`-separated names (`plain_name`) is skipped; Windows `PATHEXT`; `ProgramFound` is the window's answer shape). std threads and channels only: no `Arc`, no async, no `yamt-*` crate, no tauri, no `serde_json` (arch-check). `src/bin/line-echo.rs` is the line-framed test program `tests/lines.rs` starts as a real child (its commands, incl. `huge`, `bytes`, `burst`, `orphan`, unix `close-stderr`/`close-stdout`, are listed in its header); framing and lookup have unit tests in their files. Tests start the built binaries in place; never exec a file a test just wrote (ETXTBSY, see `lsp-host`'s `place_echo`).
+diff --git a/crates/lsp-host/Cargo.toml b/crates/pipe/Cargo.toml
+similarity index 92%
+copy from crates/lsp-host/Cargo.toml
+copy to crates/pipe/Cargo.toml
+index 469613e..d343ee1 100644
+--- a/crates/lsp-host/Cargo.toml
++++ b/crates/pipe/Cargo.toml
+@@ -1,5 +1,5 @@
+ [package]
+-name = "yamt-lsp-host"
++name = "yamt-pipe"
+ version.workspace = true
+ edition.workspace = true
+ publish.workspace = true
+diff --git a/crates/pipe/src/bin/line-echo.rs b/crates/pipe/src/bin/line-echo.rs
+new file mode 100644
+index 0000000..2bf599b
+--- /dev/null
++++ b/crates/pipe/src/bin/line-echo.rs
+@@ -0,0 +1,139 @@
++//! A line-framed test program for this crate's tests: writes `line-echo pid <pid>` on stderr, then
++//! answers each line with the same line. `stderr <text>` writes `text` on stderr instead;
++//! `exit <code>` exits with that code; `huge` writes one line over 64 MiB, then `after`; `bytes`
++//! writes a line that is not UTF-8, then `after`; `split <text>` answers in two writes; `twice
++//! <text>` answers two lines in one write; `crlf <text>` answers with a `\r\n` line end. With
++//! `--ignore-stop` it keeps running after its stdin closes.
++//!
++//! Commands that outlive or change the process: `burst <n>` exits 0 while a copy of it writes `n`
++//! stderr lines a moment later; `orphan` exits 3 while a sleeping copy holds its stdout and stderr;
++//! `close-stderr` / `close-stdout` (unix) replace it with a copy whose stderr / stdout is closed,
++//! which keeps reading lines (the first answers `stderr closed`).
++use std::io::{self, BufRead, Write};
++use std::process::{Command, Stdio};
++use std::time::Duration;
++use std::{env, process, thread};
++
++const IGNORE_STOP: &str = "--ignore-stop";
++const LATE_BURST: &str = "--late-burst";
++const HOLD: &str = "--hold";
++const STDERR_CLOSED: &str = "--stderr-closed";
++const STDOUT_CLOSED: &str = "--stdout-closed";
++const HUGE_LINE_BYTES: usize = 64 * 1024 * 1024 + 1;
++const NOT_UTF8: &[u8] = b"\xff\xfe";
++const SPLIT_PAUSE: Duration = Duration::from_millis(50);
++const BURST_PAUSE: Duration = Duration::from_millis(200);
++const HOLD_PIPES: Duration = Duration::from_secs(5);
++const IDLE: Duration = Duration::from_secs(60);
++const ORPHAN_EXIT_CODE: i32 = 3;
++const BURST_PADDING: usize = 40;
++
++fn main() -> io::Result<()> {
++    let args: Vec<String> = env::args().skip(1).collect();
++    match args.first().map(String::as_str) {
++        Some(LATE_BURST) => {
++            thread::sleep(BURST_PAUSE);
++            write_burst(
++                args.get(1)
++                    .and_then(|count| count.parse().ok())
++                    .unwrap_or(0),
++            );
++            Ok(())
++        }
++        Some(HOLD) => {
++            thread::sleep(HOLD_PIPES);
++            Ok(())
++        }
++        Some(STDERR_CLOSED) => {
++            write_out(b"stderr closed\n")?;
++            serve(false)
++        }
++        Some(IGNORE_STOP) => serve(true),
++        Some(_) | None => serve(false),
++    }
++}
++
++fn serve(ignores_stop: bool) -> io::Result<()> {
++    eprintln!("line-echo pid {}", process::id());
++    let input = io::stdin().lock();
++    for line in input.lines() {
++        answer(&line?)?;
++    }
++    if ignores_stop {
++        loop {
++            thread::sleep(IDLE);
++        }
++    }
++    Ok(())
++}
++
++fn write_burst(lines: usize) {
++    let padding = "-".repeat(BURST_PADDING);
++    for line in 0..lines {
++        eprintln!("line-echo burst {line} {padding}");
++    }
++}
++
++fn answer(line: &str) -> io::Result<()> {
++    if let Some(text) = line.strip_prefix("stderr ") {
++        eprintln!("{text}");
++        Ok(())
++    } else if let Some(code) = line.strip_prefix("exit ") {
++        process::exit(code.trim().parse().unwrap_or(1));
++    } else if line == "huge" {
++        let mut huge = vec![b'x'; HUGE_LINE_BYTES];
++        huge.extend_from_slice(b"\nafter\n");
++        write_out(&huge)
++    } else if line == "bytes" {
++        write_out(&[NOT_UTF8, b"\nafter\n"].concat())
++    } else if let Some(text) = line.strip_prefix("split ") {
++        let (first, second) = text.as_bytes().split_at(text.len() / 2);
++        write_out(first)?;
++        thread::sleep(SPLIT_PAUSE);
++        write_out(&[second, b"\n"].concat())
++    } else if let Some(text) = line.strip_prefix("twice ") {
++        write_out(format!("{text}\n{text}\n").as_bytes())
++    } else if let Some(text) = line.strip_prefix("crlf ") {
++        write_out(format!("{text}\r\n").as_bytes())
++    } else if let Some(lines) = line.strip_prefix("burst ") {
++        spawn_copy(&[LATE_BURST, lines.trim()], Stdio::null())?;
++        process::exit(0);
++    } else if line == "orphan" {
++        spawn_copy(&[HOLD], Stdio::inherit())?;
++        process::exit(ORPHAN_EXIT_CODE);
++    } else if line == "close-stderr" {
++        replace_with(STDERR_CLOSED, |command| command.stderr(Stdio::null()))
++    } else if line == "close-stdout" {
++        replace_with(STDOUT_CLOSED, |command| command.stdout(Stdio::null()))
++    } else {
++        write_out(format!("{line}\n").as_bytes())
++    }
++}
++
++fn write_out(bytes: &[u8]) -> io::Result<()> {
++    let mut out = io::stdout().lock();
++    out.write_all(bytes)?;
++    out.flush()
++}
++
++/// A copy with no stdin and this process's stderr.
++fn spawn_copy(args: &[&str], stdout: Stdio) -> io::Result<()> {
++    Command::new(env::current_exe()?)
++        .args(args)
++        .stdin(Stdio::null())
++        .stdout(stdout)
++        .spawn()?;
++    Ok(())
++}
++
++#[cfg(unix)]
++fn replace_with(arg: &str, close: impl FnOnce(&mut Command) -> &mut Command) -> io::Result<()> {
++    use std::os::unix::process::CommandExt;
++    let mut command = Command::new(env::current_exe()?);
++    Err(close(command.arg(arg)).exec())
++}
++
++#[cfg(not(unix))]
++fn replace_with(_arg: &str, _close: impl FnOnce(&mut Command) -> &mut Command) -> io::Result<()> {
++    Err(io::Error::other("closing a pipe needs unix"))
++}
+diff --git a/crates/lsp-host/src/frame.rs b/crates/pipe/src/frame.rs
+similarity index 52%
+rename from crates/lsp-host/src/frame.rs
+rename to crates/pipe/src/frame.rs
+index 16c3373..529a417 100644
+--- a/crates/lsp-host/src/frame.rs
++++ b/crates/pipe/src/frame.rs
+@@ -1,32 +1,56 @@
+ use std::io::{self, BufRead, Read, Write};
+ 
+-pub(crate) const MAX_MESSAGE_BYTES: u64 = 64 * 1024 * 1024;
++/// The largest message either framing passes on: 64 MiB.
++pub const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+ const MAX_LOG_LINE_BYTES: usize = 8 * 1024;
+ const MAX_HEADER_LINE_BYTES: usize = 8 * 1024;
+ const CONTENT_LENGTH: &str = "content-length";
+ 
++/// How messages are cut on the program's stdin and stdout.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Framing {
++    /// A `Content-Length` header, a blank line, then the body (the Language Server Protocol's base protocol).
++    ContentLength,
++    /// One message per line, ended by `\n`.
++    Lines,
++}
++
+ #[derive(Debug, PartialEq, Eq)]
+ pub(crate) enum Frame {
+     Message(String),
+     End,
+     TooLarge { bytes: u64 },
+     Broken { reason: String },
++    Dropped { reason: String },
+ }
+ 
+-pub(crate) fn write_frame(out: &mut impl Write, message: &str) -> io::Result<()> {
+-    let mut frame = format!("Content-Length: {}\r\n\r\n", message.len()).into_bytes();
+-    frame.extend_from_slice(message.as_bytes());
+-    out.write_all(&frame)?;
++pub(crate) fn write_message(
++    out: &mut impl Write,
++    framing: Framing,
++    message: &str,
++) -> io::Result<()> {
++    let framed = match framing {
++        Framing::ContentLength => format!("Content-Length: {}\r\n\r\n{message}", message.len()),
++        Framing::Lines => format!("{message}\n"),
++    };
++    out.write_all(framed.as_bytes())?;
+     out.flush()
+ }
+ 
+-pub(crate) fn read_frame(reader: &mut impl BufRead) -> Frame {
++pub(crate) fn read_message(reader: &mut impl BufRead, framing: Framing) -> Frame {
++    match framing {
++        Framing::ContentLength => read_frame(reader),
++        Framing::Lines => read_line_message(reader),
++    }
++}
++
++fn read_frame(reader: &mut impl BufRead) -> Frame {
+     let length = match content_length(reader) {
+         Ok(Some(length)) => length,
+         Ok(None) => return Frame::End,
+         Err(reason) => return Frame::Broken { reason },
+     };
+-    if length > MAX_MESSAGE_BYTES {
++    if !usize::try_from(length).is_ok_and(|length| length <= MAX_MESSAGE_BYTES) {
+         return Frame::TooLarge { bytes: length };
+     }
+     let mut body = Vec::new();
+@@ -48,7 +72,7 @@ fn content_length(reader: &mut impl BufRead) -> Result<Option<u64>, String> {
+     loop {
+         let line = match bounded_line(reader, MAX_HEADER_LINE_BYTES) {
+             Ok(Some(line)) if line.cut => return Err("a header line is too long".to_owned()),
+-            Ok(Some(line)) => line.text,
++            Ok(Some(line)) => line.text(),
+             Ok(None) if started => return Err("the output ended inside a header".to_owned()),
+             Ok(None) => return Ok(None),
+             Err(error) => return Err(error.to_string()),
+@@ -68,22 +92,66 @@ fn content_length(reader: &mut impl BufRead) -> Result<Option<u64>, String> {
+     }
+ }
+ 
++/// The next non-empty line; a line over `MAX_MESSAGE_BYTES` or not UTF-8 is `Dropped`, and the
++/// following read starts at the next line.
++fn read_line_message(reader: &mut impl BufRead) -> Frame {
++    loop {
++        let line = match bounded_line(reader, MAX_MESSAGE_BYTES + 1) {
++            Ok(Some(line)) => line,
++            Ok(None) => return Frame::End,
++            Err(error) => return broken(&error.to_string()),
++        };
++        let bytes = line.without_carriage_return();
++        if line.cut || bytes.len() > MAX_MESSAGE_BYTES {
++            return dropped("a message of more than 64 MiB");
++        }
++        if bytes.is_empty() {
++            continue;
++        }
++        return match String::from_utf8(bytes.to_vec()) {
++            Ok(text) => Frame::Message(text),
++            Err(_) => dropped("a message that is not UTF-8"),
++        };
++    }
++}
++
+ fn broken(reason: &str) -> Frame {
+     Frame::Broken {
+         reason: reason.to_owned(),
+     }
+ }
+ 
+-/// One stderr line without its line break, cut at `MAX_LOG_LINE_BYTES`; `None` at the end.
+-pub(crate) fn log_line(reader: &mut impl BufRead) -> io::Result<Option<String>> {
+-    Ok(bounded_line(reader, MAX_LOG_LINE_BYTES)?.map(|line| line.text))
++fn dropped(reason: &str) -> Frame {
++    Frame::Dropped {
++        reason: reason.to_owned(),
++    }
+ }
+ 
++/// One stderr line without its line break, cut at `MAX_LOG_LINE_BYTES`; `None` at the end.
++pub(crate) fn log_line(reader: &mut impl BufRead) -> io::Result<Option<String>> {
++    Ok(bounded_line(reader, MAX_LOG_LINE_BYTES)?.map(|line| line.text()))
++}
++
++/// The bytes before a `\n`, at most the reader's `max`; `cut` when more were dropped.
+ struct Line {
+-    text: String,
++    bytes: Vec<u8>,
+     cut: bool,
+ }
+ 
++impl Line {
++    /// A cut line keeps its last byte: the `\r` was not its end.
++    fn without_carriage_return(&self) -> &[u8] {
++        match self.bytes.split_last() {
++            Some((b'\r', rest)) if !self.cut => rest,
++            Some(_) | None => &self.bytes,
++        }
++    }
++
++    fn text(&self) -> String {
++        String::from_utf8_lossy(self.without_carriage_return()).into_owned()
++    }
++}
++
+ /// Reads up to the next `\n` and drops what lies past `max` bytes, so a line without an end
+ /// never grows memory.
+ fn bounded_line(reader: &mut impl BufRead, max: usize) -> io::Result<Option<Line>> {
+@@ -93,7 +161,7 @@ fn bounded_line(reader: &mut impl BufRead, max: usize) -> io::Result<Option<Line
+     loop {
+         let available = reader.fill_buf()?;
+         if available.is_empty() {
+-            return Ok(read_any.then(|| line_of(bytes, cut)));
++            return Ok(read_any.then_some(Line { bytes, cut }));
+         }
+         read_any = true;
+         let newline = available.iter().position(|byte| *byte == b'\n');
+@@ -104,21 +172,11 @@ fn bounded_line(reader: &mut impl BufRead, max: usize) -> io::Result<Option<Line
+         let consumed = newline.map_or(available.len(), |at| at + 1);
+         reader.consume(consumed);
+         if newline.is_some() {
+-            return Ok(Some(line_of(bytes, cut)));
++            return Ok(Some(Line { bytes, cut }));
+         }
+     }
+ }
+ 
+-fn line_of(mut bytes: Vec<u8>, cut: bool) -> Line {
+-    if !cut && bytes.last() == Some(&b'\r') {
+-        bytes.pop();
+-    }
+-    Line {
+-        text: String::from_utf8_lossy(&bytes).into_owned(),
+-        cut,
+-    }
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use std::io::{BufReader, Read};
+@@ -138,35 +196,50 @@ mod tests {
+         }
+     }
+ 
+-    fn framed(message: &str) -> Vec<u8> {
++    fn framed(framing: Framing, message: &str) -> Vec<u8> {
+         let mut bytes = Vec::new();
+-        write_frame(&mut bytes, message).unwrap();
++        write_message(&mut bytes, framing, message).unwrap();
+         bytes
+     }
+ 
++    fn message(text: &str) -> Frame {
++        Frame::Message(text.to_owned())
++    }
++
+     #[test]
+     fn a_written_frame_counts_bytes_not_characters() {
+-        assert_eq!(framed("é"), "Content-Length: 2\r\n\r\né".as_bytes());
++        let bytes = framed(Framing::ContentLength, "é");
++        assert_eq!(bytes, "Content-Length: 2\r\n\r\né".as_bytes());
++    }
++
++    #[test]
++    fn a_written_line_is_the_message_and_one_line_feed() {
++        assert_eq!(
++            framed(Framing::Lines, "{\"a\":\"é\"}"),
++            "{\"a\":\"é\"}\n".as_bytes()
++        );
+     }
+ 
+     #[test]
+     fn frames_read_back_whole_also_one_byte_at_a_time() {
+-        let bytes = [framed("{\"a\":\"世界\"}"), framed("")].concat();
++        let bytes = [
++            framed(Framing::ContentLength, "{\"a\":\"世界\"}"),
++            framed(Framing::ContentLength, ""),
++        ]
++        .concat();
+         let mut reader = BufReader::new(OneByteAtATime(&bytes));
+-        assert_eq!(
+-            read_frame(&mut reader),
+-            Frame::Message("{\"a\":\"世界\"}".to_owned())
+-        );
+-        assert_eq!(read_frame(&mut reader), Frame::Message(String::new()));
+-        assert_eq!(read_frame(&mut reader), Frame::End);
++        let mut next = || read_message(&mut reader, Framing::ContentLength);
++        assert_eq!(next(), message("{\"a\":\"世界\"}"));
++        assert_eq!(next(), message(""));
++        assert_eq!(next(), Frame::End);
+     }
+ 
+     #[test]
+     fn header_names_are_case_insensitive_and_other_headers_are_ignored() {
+         let bytes = b"Content-Type: x\r\ncontent-LENGTH:  3 \r\n\r\nabcContent-Length: 1\n\nd";
+         let mut reader = &bytes[..];
+-        assert_eq!(read_frame(&mut reader), Frame::Message("abc".to_owned()));
+-        assert_eq!(read_frame(&mut reader), Frame::Message("d".to_owned()));
++        assert_eq!(read_frame(&mut reader), message("abc"));
++        assert_eq!(read_frame(&mut reader), message("d"));
+     }
+ 
+     #[test]
+@@ -196,10 +269,7 @@ mod tests {
+             (b"Content-Length: 1\r\n\r\n\xff", "a message is not UTF-8"),
+         ];
+         for (bytes, reason) in cases {
+-            let expected = Frame::Broken {
+-                reason: reason.to_owned(),
+-            };
+-            assert_eq!(read_frame(&mut &bytes[..]), expected, "{bytes:?}");
++            assert_eq!(read_frame(&mut &bytes[..]), broken(reason), "{bytes:?}");
+         }
+     }
+ 
+@@ -207,10 +277,7 @@ mod tests {
+     fn a_header_line_of_8_kib_is_read_and_a_longer_one_is_broken() {
+         let header_line = |bytes: usize| format!("X: {}\r\n", "x".repeat(bytes - "X: \r".len()));
+         let accepted = format!("{}Content-Length: 1\r\n\r\na", header_line(8192));
+-        assert_eq!(
+-            read_frame(&mut accepted.as_bytes()),
+-            Frame::Message("a".to_owned())
+-        );
++        assert_eq!(read_frame(&mut accepted.as_bytes()), message("a"));
+         let refused = format!("{}Content-Length: 1\r\n\r\na", header_line(8193));
+         let expected = broken("a header line is too long");
+         assert_eq!(read_frame(&mut refused.as_bytes()), expected);
+@@ -227,4 +294,49 @@ mod tests {
+         assert_eq!(log_line(&mut reader).unwrap(), Some("last".to_owned()));
+         assert_eq!(log_line(&mut reader).unwrap(), None);
+     }
++
++    #[test]
++    fn a_log_line_cut_right_after_a_carriage_return_keeps_it() {
++        let bytes = format!("{}\r{}\n", "y".repeat(MAX_LOG_LINE_BYTES - 1), "z");
++        let line = log_line(&mut bytes.as_bytes()).unwrap().unwrap();
++        assert_eq!(line, format!("{}\r", "y".repeat(MAX_LOG_LINE_BYTES - 1)));
++    }
++
++    #[test]
++    fn lines_read_back_one_byte_at_a_time_without_their_line_ends() {
++        let bytes = "{\"a\":\"世界\"}\r\n\n\r\nsecond\nlast without an end";
++        let mut reader = BufReader::new(OneByteAtATime(bytes.as_bytes()));
++        let mut next = || read_message(&mut reader, Framing::Lines);
++        assert_eq!(next(), message("{\"a\":\"世界\"}"));
++        assert_eq!(next(), message("second"));
++        assert_eq!(next(), message("last without an end"));
++        assert_eq!(next(), Frame::End);
++    }
++
++    #[test]
++    fn a_carriage_return_inside_a_line_stays() {
++        let mut reader = &b"a\rb\r\r\n"[..];
++        assert_eq!(read_line_message(&mut reader), message("a\rb\r"));
++    }
++
++    #[test]
++    fn a_line_that_is_not_utf8_is_dropped_and_the_next_one_is_read() {
++        let mut reader = &b"\xff\xfe\nafter\n"[..];
++        let expected = dropped("a message that is not UTF-8");
++        assert_eq!(read_line_message(&mut reader), expected);
++        assert_eq!(read_line_message(&mut reader), message("after"));
++    }
++
++    #[test]
++    fn a_line_of_64_mib_is_read_also_with_a_carriage_return_and_a_longer_one_is_dropped() {
++        let at_limit = "a".repeat(MAX_MESSAGE_BYTES);
++        let over = "b".repeat(MAX_MESSAGE_BYTES + 1);
++        let bytes = format!("{at_limit}\r\n{over}\r\n{over}\nafter\n");
++        let mut reader = bytes.as_bytes();
++        let too_long = dropped("a message of more than 64 MiB");
++        assert_eq!(read_line_message(&mut reader), Frame::Message(at_limit));
++        assert_eq!(read_line_message(&mut reader), too_long);
++        assert_eq!(read_line_message(&mut reader), too_long);
++        assert_eq!(read_line_message(&mut reader), message("after"));
++    }
+ }
+diff --git a/crates/pipe/src/lib.rs b/crates/pipe/src/lib.rs
+new file mode 100644
+index 0000000..b3077d6
+--- /dev/null
++++ b/crates/pipe/src/lib.rs
+@@ -0,0 +1,11 @@
++//! Starts a program and pipes its framed messages both ways, one framing per run; never reads a message.
++#![forbid(unsafe_code)]
++#![warn(missing_docs)]
++
++mod frame;
++mod program;
++mod run;
++
++pub use crate::frame::{Framing, MAX_MESSAGE_BYTES};
++pub use crate::program::{Found, ProgramFolders, ProgramFound, ProgramPlace, find, plain_name};
++pub use crate::run::{HostEvent, Running};
+diff --git a/crates/lsp-host/src/program.rs b/crates/pipe/src/program.rs
+similarity index 93%
+rename from crates/lsp-host/src/program.rs
+rename to crates/pipe/src/program.rs
+index bf219ea..8cfb705 100644
+--- a/crates/lsp-host/src/program.rs
++++ b/crates/pipe/src/program.rs
+@@ -1,14 +1,10 @@
+ use std::env;
+-#[cfg(windows)]
+-use std::ffi::OsStr;
+-use std::ffi::OsString;
++use std::ffi::{OsStr, OsString};
+ use std::fs;
+-use std::path::{Path, PathBuf};
++use std::path::{Component, Path, PathBuf};
+ 
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::files;
+-
+ #[cfg(unix)]
+ const EXECUTE_BITS: u32 = 0o111;
+ /// Windows' own value when `PATHEXT` is not set (`cmd.exe` documentation, "PATHEXT").
+@@ -26,6 +22,10 @@ pub struct ProgramFolders {
+     pub home: Vec<String>,
+ }
+ 
++#[expect(
++    missing_docs,
++    reason = "specta copies doc comments into the generated bindings.ts, whose shape is fixed"
++)]
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, specta::Type)]
+ pub enum ProgramPlace {
+     Project,
+@@ -33,6 +33,10 @@ pub enum ProgramPlace {
+     Home,
+ }
+ 
++#[expect(
++    missing_docs,
++    reason = "specta copies doc comments into the generated bindings.ts, whose shape is fixed"
++)]
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
+ #[serde(tag = "kind")]
+ pub enum ProgramFound {
+@@ -40,15 +44,18 @@ pub enum ProgramFound {
+     NotFound { searched: Vec<String> },
+ }
+ 
++/// A program `find` found.
+ #[derive(Debug, PartialEq, Eq)]
+-pub(crate) struct Found {
+-    pub(crate) path: PathBuf,
+-    pub(crate) place: ProgramPlace,
++pub struct Found {
++    /// The program's path.
++    pub path: PathBuf,
++    /// Where it was found.
++    pub place: ProgramPlace,
+ }
+ 
+-/// The program a server command names, seen from `project` (a folder inside `root`); `Err` lists
++/// The program a command names, seen from `project` (a folder inside `root`); `Err` lists
+ /// every folder searched, in order.
+-pub(crate) fn find(
++pub fn find(
+     root: &Path,
+     project: &Path,
+     program: &str,
+@@ -61,6 +68,16 @@ pub(crate) fn find(
+     find_with(root, project, program, folders, &environment)
+ }
+ 
++/// `segment` itself when it is one plain file name: not empty, `.`, `..`, a root or a drive.
++#[must_use]
++pub fn plain_name(segment: &str) -> Option<&OsStr> {
++    let mut components = Path::new(segment).components();
++    let (Some(Component::Normal(name)), None) = (components.next(), components.next()) else {
++        return None;
++    };
++    Some(name)
++}
++
+ /// What the lookup reads from the user's environment; tests give their own.
+ struct Environment {
+     path_variable: Option<OsString>,
+@@ -136,7 +153,7 @@ fn relative_folders(entries: &[String]) -> Vec<PathBuf> {
+ fn relative_folder(entry: &str) -> Option<PathBuf> {
+     let mut folder = PathBuf::new();
+     for segment in entry.split('/') {
+-        folder.push(files::plain_name(segment)?);
++        folder.push(plain_name(segment)?);
+     }
+     Some(folder)
+ }
+diff --git a/crates/lsp-host/src/run.rs b/crates/pipe/src/run.rs
+similarity index 77%
+rename from crates/lsp-host/src/run.rs
+rename to crates/pipe/src/run.rs
+index 1ff0026..f543caa 100644
+--- a/crates/lsp-host/src/run.rs
++++ b/crates/pipe/src/run.rs
+@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
+ 
+ use serde::Serialize;
+ 
+-use crate::frame::{self, Frame, MAX_MESSAGE_BYTES};
++use crate::frame::{self, Frame, Framing, MAX_MESSAGE_BYTES};
+ 
+ const STOP_GRACE: Duration = Duration::from_secs(2);
+ const EXIT_POLL: Duration = Duration::from_millis(20);
+@@ -17,6 +17,10 @@ const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
+ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+ 
+ /// What a running server sends the window; `Exited` comes once, last.
++#[expect(
++    missing_docs,
++    reason = "specta copies doc comments into the generated bindings.ts, whose shape is fixed"
++)]
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, specta::Type)]
+ #[serde(tag = "kind")]
+ pub enum HostEvent {
+@@ -41,17 +45,20 @@ enum ToServer {
+ 
+ /// One started program and the threads around it: a supervisor owning the `Child`, a writer
+ /// owning its stdin, a reader each for stdout and stderr.
+-pub(crate) struct Running {
++pub struct Running {
+     stop: Sender<StopReason>,
+     writes: Sender<ToServer>,
+     supervisor: JoinHandle<()>,
+ }
+ 
+ impl Running {
+-    pub(crate) fn start(
++    /// Starts `program` in `folder`; `events` gets its messages and stderr lines, then one
++    /// `Exited`. Once `events` is dropped, the run stops itself at its next output.
++    pub fn start(
+         program: &Path,
+         args: &[String],
+         folder: &Path,
++        framing: Framing,
+         events: Sender<HostEvent>,
+     ) -> io::Result<Running> {
+         let mut child = command(program, args, folder).spawn()?;
+@@ -63,9 +70,9 @@ impl Running {
+         };
+         let (stop, stop_requests) = mpsc::channel();
+         let (writes, queued) = mpsc::channel();
+-        thread::spawn(move || write_messages(stdin, &queued));
++        thread::spawn(move || write_messages(stdin, framing, &queued));
+         let readers = vec![
+-            spawn_message_reader(stdout, &events, &stop),
++            spawn_message_reader(stdout, framing, &events, &stop),
+             spawn_log_reader(stderr, &events, &stop),
+         ];
+         let close = writes.clone();
+@@ -78,27 +85,32 @@ impl Running {
+         })
+     }
+ 
+-    pub(crate) fn send(&self, message: String) {
++    /// Queues one message for the program's stdin; after the run ended it is ignored.
++    pub fn send(&self, message: String) {
+         let _ = self.writes.send(ToServer::Message(message));
+     }
+ 
+-    pub(crate) fn stop(&self) {
++    /// Closes the program's stdin, gives it 2 s to exit, then kills it; returns at once.
++    pub fn stop(&self) {
+         let _ = self.stop.send(StopReason::Asked);
+     }
+ 
+-    pub(crate) fn is_finished(&self) -> bool {
++    /// Whether the run has ended: the program reaped and `Exited` sent.
++    #[must_use]
++    pub fn is_finished(&self) -> bool {
+         self.supervisor.is_finished()
+     }
+ 
+-    pub(crate) fn wait(self) {
++    /// Returns once the run has ended: the program reaped and `Exited` sent.
++    pub fn wait(self) {
+         if self.supervisor.join().is_err() {
+-            tracing::error!("a language server's supervisor thread panicked");
++            tracing::error!("a program's supervisor thread panicked");
+         }
+     }
+ }
+ 
+ fn command(program: &Path, args: &[String], folder: &Path) -> Command {
+-    tracing::debug!(?program, ?args, ?folder, "starting a language server");
++    tracing::debug!(?program, ?args, ?folder, "starting a program");
+     let mut command = Command::new(program);
+     command
+         .args(args)
+@@ -113,13 +125,14 @@ fn command(program: &Path, args: &[String], folder: &Path) -> Command {
+ 
+ fn spawn_message_reader(
+     stdout: ChildStdout,
++    framing: Framing,
+     events: &Sender<HostEvent>,
+     stop: &Sender<StopReason>,
+ ) -> JoinHandle<()> {
+     let events = events.clone();
+     let stop = stop.clone();
+     thread::spawn(move || {
+-        let reason = read_messages(stdout, &events);
++        let reason = read_messages(stdout, framing, &events);
+         let _ = stop.send(reason);
+     })
+ }
+@@ -139,15 +152,14 @@ fn spawn_log_reader(
+     })
+ }
+ 
+-fn read_messages(stdout: ChildStdout, events: &Sender<HostEvent>) -> StopReason {
++fn read_messages(stdout: ChildStdout, framing: Framing, events: &Sender<HostEvent>) -> StopReason {
+     let mut reader = BufReader::new(stdout);
+     loop {
+-        match frame::read_frame(&mut reader) {
+-            Frame::Message(text) => {
+-                if events.send(HostEvent::Message { text }).is_err() {
+-                    return StopReason::EventsGone;
+-                }
+-            }
++        let event = match frame::read_message(&mut reader, framing) {
++            Frame::Message(text) => HostEvent::Message { text },
++            Frame::Dropped { reason } => HostEvent::Log {
++                line: format!("yamt: dropped {reason}"),
++            },
+             Frame::End => return StopReason::OutputClosed,
+             Frame::TooLarge { bytes } => {
+                 let line = format!(
+@@ -159,6 +171,9 @@ fn read_messages(stdout: ChildStdout, events: &Sender<HostEvent>) -> StopReason
+                 let line = format!("yamt: cannot read the server's output: {reason}; stopping it");
+                 return stop_with_log(events, line);
+             }
++        };
++        if events.send(event).is_err() {
++            return StopReason::EventsGone;
+         }
+     }
+ }
+@@ -177,11 +192,11 @@ fn read_log(stderr: ChildStderr, events: &Sender<HostEvent>) -> Result<(), SendE
+     Ok(())
+ }
+ 
+-fn write_messages(mut stdin: ChildStdin, queued: &Receiver<ToServer>) {
++fn write_messages(mut stdin: ChildStdin, framing: Framing, queued: &Receiver<ToServer>) {
+     for write in queued {
+         match write {
+             ToServer::Message(text) => {
+-                if frame::write_frame(&mut stdin, &text).is_err() {
++                if frame::write_message(&mut stdin, framing, &text).is_err() {
+                     return;
+                 }
+             }
+@@ -198,7 +213,7 @@ fn supervise(
+     readers: &[JoinHandle<()>],
+ ) {
+     let reason = wait_for_stop(&mut child, stop_requests);
+-    tracing::debug!(?reason, "stopping a language server");
++    tracing::debug!(?reason, "stopping a program");
+     let _ = writes.send(ToServer::Close);
+     let code = exit_code(&mut child);
+     let drained = Instant::now() + OUTPUT_DRAIN;
+diff --git a/crates/pipe/tests/lines.rs b/crates/pipe/tests/lines.rs
+new file mode 100644
+index 0000000..79a20d0
+--- /dev/null
++++ b/crates/pipe/tests/lines.rs
+@@ -0,0 +1,329 @@
++#![cfg(test)]
++
++use std::path::Path;
++use std::process::Command;
++use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
++use std::thread;
++use std::time::{Duration, Instant};
++
++use yamt_pipe::{Framing, HostEvent, Running};
++
++const ECHO: &str = env!("CARGO_BIN_EXE_line-echo");
++const WAIT: Duration = Duration::from_secs(10);
++const STOP_GRACE: Duration = Duration::from_secs(2);
++const IDLE: Duration = Duration::from_millis(300);
++const POLL: Duration = Duration::from_millis(20);
++const BURST_LINES: usize = 1000;
++const BURST_PADDING: usize = 40;
++const TOO_LONG: &str = "yamt: dropped a message of more than 64 MiB";
++const NOT_UTF8: &str = "yamt: dropped a message that is not UTF-8";
++
++struct Echo {
++    running: Running,
++    events: Receiver<HostEvent>,
++    pid: u32,
++}
++
++fn start_echo(args: &[&str]) -> Echo {
++    let (sender, events) = mpsc::channel();
++    let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
++    let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
++    let running = Running::start(Path::new(ECHO), &args, folder, Framing::Lines, sender).unwrap();
++    let pid = pid_of(&next_log(&events));
++    Echo {
++        running,
++        events,
++        pid,
++    }
++}
++
++fn pid_of(first_line: &str) -> u32 {
++    first_line
++        .strip_prefix("line-echo pid ")
++        .unwrap()
++        .parse()
++        .unwrap()
++}
++
++impl Echo {
++    fn send(&self, message: &str) {
++        self.running.send(message.to_owned());
++    }
++}
++
++fn next_event(events: &Receiver<HostEvent>) -> HostEvent {
++    events.recv_timeout(WAIT).unwrap()
++}
++
++fn next_message(events: &Receiver<HostEvent>) -> String {
++    match next_event(events) {
++        HostEvent::Message { text } => text,
++        other @ (HostEvent::Log { .. } | HostEvent::Exited { .. }) => {
++            panic!("{other:?} instead of a message")
++        }
++    }
++}
++
++fn next_log(events: &Receiver<HostEvent>) -> String {
++    match next_event(events) {
++        HostEvent::Log { line } => line,
++        other @ (HostEvent::Message { .. } | HostEvent::Exited { .. }) => {
++            panic!("{other:?} instead of a log line")
++        }
++    }
++}
++
++/// Every event before the one `Exited`, and its code, after checking nothing follows it.
++fn events_until_exited(events: &Receiver<HostEvent>) -> (Vec<HostEvent>, Option<i32>) {
++    let mut before = Vec::new();
++    loop {
++        match next_event(events) {
++            HostEvent::Exited { code } => {
++                assert_eq!(
++                    events.recv_timeout(WAIT),
++                    Err(RecvTimeoutError::Disconnected)
++                );
++                return (before, code);
++            }
++            event @ (HostEvent::Message { .. } | HostEvent::Log { .. }) => before.push(event),
++        }
++    }
++}
++
++fn exited_once(events: &Receiver<HostEvent>) -> Option<i32> {
++    events_until_exited(events).1
++}
++
++#[cfg(unix)]
++fn is_alive(pid: u32) -> bool {
++    let status = Command::new("kill")
++        .args(["-0", &pid.to_string()])
++        .status()
++        .unwrap();
++    status.success()
++}
++
++#[cfg(windows)]
++fn is_alive(pid: u32) -> bool {
++    let filter = format!("PID eq {pid}");
++    let output = Command::new("tasklist")
++        .args(["/FI", &filter, "/NH"])
++        .output()
++        .unwrap();
++    String::from_utf8_lossy(&output.stdout).contains(&pid.to_string())
++}
++
++/// Catches a framing that loses or re-encodes bytes past ASCII.
++#[test]
++fn a_line_message_comes_back_whole_with_a_multi_byte_body() {
++    let echo = start_echo(&[]);
++    let text = "{\"text\":\"héllo → 世界 🦀\"}";
++    echo.send(text);
++    assert_eq!(next_message(&echo.events), text);
++}
++
++/// Catches a reader that takes whatever one read returned as a message.
++#[test]
++fn a_line_split_across_two_writes_arrives_as_one_message() {
++    let echo = start_echo(&[]);
++    echo.send("split ü→世界 split");
++    assert_eq!(next_message(&echo.events), "ü→世界 split");
++}
++
++/// Catches a reader that takes one read as one message, or loses what follows the first line.
++#[test]
++fn two_lines_in_one_write_arrive_as_two_messages() {
++    let echo = start_echo(&[]);
++    echo.send("twice abc");
++    echo.send("after");
++    assert_eq!(next_message(&echo.events), "abc");
++    assert_eq!(next_message(&echo.events), "abc");
++    assert_eq!(next_message(&echo.events), "after");
++}
++
++/// Catches a reader that passes on the `\r` of a Windows line end.
++#[test]
++fn a_crlf_line_end_is_not_part_of_the_message() {
++    let echo = start_echo(&[]);
++    echo.send("crlf {\"a\":1}");
++    assert_eq!(next_message(&echo.events), "{\"a\":1}");
++}
++
++/// Catches a reader without a cap, one that stops the program, or one that loses the next line.
++#[test]
++fn a_line_over_the_cap_is_dropped_with_a_log_line_and_the_next_one_arrives() {
++    let echo = start_echo(&[]);
++    echo.send("huge");
++    assert_eq!(next_log(&echo.events), TOO_LONG);
++    assert_eq!(next_message(&echo.events), "after");
++    echo.send("still here");
++    assert_eq!(next_message(&echo.events), "still here");
++}
++
++/// Catches a reader that passes on replacement characters or stops at a bad line.
++#[test]
++fn a_line_that_is_not_utf8_is_dropped_with_a_log_line() {
++    let echo = start_echo(&[]);
++    echo.send("bytes");
++    assert_eq!(next_log(&echo.events), NOT_UTF8);
++    assert_eq!(next_message(&echo.events), "after");
++}
++
++/// Catches stderr read with the message framing or lost.
++#[test]
++fn a_stderr_line_is_a_log_event() {
++    let echo = start_echo(&[]);
++    echo.send("stderr warming up é");
++    assert_eq!(next_log(&echo.events), "warming up é");
++    echo.send("next");
++    assert_eq!(next_message(&echo.events), "next");
++}
++
++/// Catches a lost or doubled `Exited`, one before the program's last output, or a lost code.
++#[test]
++fn exited_comes_once_and_last_with_the_code() {
++    let echo = start_echo(&[]);
++    echo.send("before");
++    echo.send("exit 7");
++    let (before, code) = events_until_exited(&echo.events);
++    let message = HostEvent::Message {
++        text: "before".to_owned(),
++    };
++    assert_eq!((before, code), (vec![message], Some(7)));
++}
++
++#[test]
++fn stop_closes_stdin_and_a_cooperative_program_exits_once_within_the_grace() {
++    let echo = start_echo(&[]);
++    let asked = Instant::now();
++    echo.running.stop();
++    assert_eq!(exited_once(&echo.events), Some(0));
++    assert!(asked.elapsed() < STOP_GRACE, "{:?}", asked.elapsed());
++    echo.running.stop();
++    echo.send("ignored");
++    assert!(!is_alive(echo.pid));
++}
++
++#[test]
++fn stop_kills_a_program_that_ignores_it_after_the_grace() {
++    let echo = start_echo(&["--ignore-stop"]);
++    let asked = Instant::now();
++    echo.running.stop();
++    let code = exited_once(&echo.events);
++    assert!(asked.elapsed() >= STOP_GRACE, "{:?}", asked.elapsed());
++    if cfg!(unix) {
++        assert_eq!(code, None);
++    }
++    assert!(!is_alive(echo.pid));
++}
++
++#[test]
++fn an_idle_program_keeps_running_and_answers_later() {
++    let echo = start_echo(&[]);
++    thread::sleep(IDLE);
++    assert!(is_alive(echo.pid));
++    assert!(!echo.running.is_finished());
++    echo.send("still here");
++    assert_eq!(next_message(&echo.events), "still here");
++}
++
++#[test]
++fn is_finished_turns_true_once_the_run_has_ended() {
++    let echo = start_echo(&[]);
++    echo.send("exit 0");
++    exited_once(&echo.events);
++    let deadline = Instant::now() + WAIT;
++    while !echo.running.is_finished() && Instant::now() < deadline {
++        thread::sleep(POLL);
++    }
++    assert!(echo.running.is_finished());
++}
++
++#[test]
++fn wait_returns_after_exited_was_sent() {
++    let echo = start_echo(&[]);
++    echo.running.stop();
++    echo.running.wait();
++    let last = echo.events.try_iter().last();
++    assert_eq!(last, Some(HostEvent::Exited { code: Some(0) }));
++}
++
++#[test]
++fn a_dropped_event_receiver_stops_the_run_at_its_next_output() {
++    let Echo {
++        running,
++        events,
++        pid,
++    } = start_echo(&[]);
++    drop(events);
++    running.send("anyone there".to_owned());
++    let deadline = Instant::now() + WAIT;
++    while is_alive(pid) && Instant::now() < deadline {
++        thread::sleep(POLL);
++    }
++    assert!(!is_alive(pid));
++}
++
++#[test]
++fn stderr_lines_written_after_the_program_exited_all_come_before_its_exited() {
++    let echo = start_echo(&[]);
++    echo.send(&format!("burst {BURST_LINES}"));
++    let (before, code) = events_until_exited(&echo.events);
++    assert_eq!(code, Some(0));
++    let padding = "-".repeat(BURST_PADDING);
++    let expected: Vec<HostEvent> = (0..BURST_LINES)
++        .map(|line| HostEvent::Log {
++            line: format!("line-echo burst {line} {padding}"),
++        })
++        .collect();
++    assert_eq!(before, expected);
++}
++
++#[cfg(unix)]
++#[test]
++fn a_program_whose_child_holds_its_output_exits_after_at_most_the_drain() {
++    const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
++    const DRAIN_SLACK: Duration = Duration::from_secs(1);
++    let echo = start_echo(&[]);
++    let asked = Instant::now();
++    echo.send("orphan");
++    let code = loop {
++        if let HostEvent::Exited { code } = next_event(&echo.events) {
++            break code;
++        }
++    };
++    let took = asked.elapsed();
++    assert_eq!(code, Some(3));
++    assert!(took < OUTPUT_DRAIN + DRAIN_SLACK, "{took:?}");
++}
++
++#[cfg(unix)]
++#[test]
++fn a_program_that_closes_its_stderr_keeps_serving() {
++    let echo = start_echo(&[]);
++    echo.send("close-stderr");
++    assert_eq!(next_message(&echo.events), "stderr closed");
++    echo.send("still here");
++    assert_eq!(next_message(&echo.events), "still here");
++}
++
++#[cfg(unix)]
++#[test]
++fn a_program_that_closes_its_stdout_is_stopped_through_its_stdin() {
++    let echo = start_echo(&[]);
++    let asked = Instant::now();
++    echo.send("close-stdout");
++    let (before, code) = events_until_exited(&echo.events);
++    let pid_line = |event: &HostEvent| matches!(event, HostEvent::Log { line } if line.starts_with("line-echo pid "));
++    assert!(before.iter().all(pid_line), "{before:?}");
++    assert_eq!(code, Some(0));
++    assert!(asked.elapsed() < STOP_GRACE, "{:?}", asked.elapsed());
++}
++
++#[test]
++fn a_missing_folder_is_a_start_error() {
++    let (sender, _events) = mpsc::channel();
++    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("missing");
++    let started = Running::start(Path::new(ECHO), &[], &folder, Framing::Lines, sender);
++    assert!(started.is_err());
++}
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index 2159acf..3847803 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -27,10 +27,17 @@ if [ -n "$forbidden_in_settings" ]; then
+     failed=1
+ fi
+ 
++pipe_deps=$(normal_deps yamt-pipe)
++forbidden_in_pipe=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$pipe_deps" | grep -vx 'yamt-pipe' || true)
++if [ -n "$forbidden_in_pipe" ]; then
++    echo "arch-check: yamt-pipe depends on no yamt crate, never on tauri or serde_json, not:" $forbidden_in_pipe >&2
++    failed=1
++fi
++
+ lsp_host_deps=$(normal_deps yamt-lsp-host)
+-forbidden_in_lsp_host=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$lsp_host_deps" | grep -vx 'yamt-lsp-host' || true)
++forbidden_in_lsp_host=$(grep -E '^(yamt-|tauri(-|$)|serde_json$)' <<<"$lsp_host_deps" | grep -vxE 'yamt-(lsp-host|pipe)' || true)
+ if [ -n "$forbidden_in_lsp_host" ]; then
+-    echo "arch-check: yamt-lsp-host must not depend on:" $forbidden_in_lsp_host >&2
++    echo "arch-check: yamt-lsp-host depends on yamt-pipe only among yamt crates, never on tauri or serde_json, not:" $forbidden_in_lsp_host >&2
+     failed=1
+ fi
+ 
+-- 
+2.56.0
+

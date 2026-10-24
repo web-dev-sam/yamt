@@ -1,19 +1,34 @@
 {
-  "RVPipe": {
-    "owned": ["crates/pipe/**", "crates/lsp-host/**", "scripts/arch-check.sh"]
-  },
-  "RVGlabR1": {
+  "RVGitlab": {
     "owned": [
-      "crates/gitio/src/glab.rs",
+      "crates/review/src/lib.rs",
+      "crates/review/src/right_branch.rs",
+      "crates/review/src/gitlab.rs",
+      "crates/review/src/lines_up.rs",
+      "crates/review/src/position.rs",
+      "crates/review/src/send.rs",
+      "crates/review/Cargo.toml",
+      "crates/review/tests/review.rs",
+      "tests/glab/lined-up/**",
+      "tests/glab/two-dots/**",
+      "tests/glab/moved/**",
+      "tests/glab/other-base/**",
+      "tests/glab/several/**",
+      "tests/glab/preparing/**",
+      "tests/glab/no-merge-request/**",
+      "tests/glab/commit-route/**",
+      "tests/glab/logged-out/**",
+      "tests/glab/refusal/**",
+      "tests/glab/timeout/**",
+      "tests/glab/drafted/**"
+    ]
+  },
+  "RVCheckoutReads": {
+    "owned": [
+      "crates/gitio/src/checkout.rs",
       "crates/gitio/src/lib.rs",
-      "crates/gitio/src/run.rs",
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/src/names.rs",
-      "crates/gitio/src/program.rs",
-      "crates/gitio/tests/glab.rs",
-      "scripts/fake-glab/glab",
-      "tests/glab/runner/**",
-      "tests/glab/README.md"
+      "crates/gitio/tests/checkout.rs",
+      "crates/compare/src/lib.rs"
     ]
   }
 }

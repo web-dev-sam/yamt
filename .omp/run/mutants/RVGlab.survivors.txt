@@ -1,8 +1,5 @@
-just mutants e0cbf94~1 (RVGlab): baseline FAILED, no mutants tested — flaky test in the unmutated tree:
-
-thread 'stdin_reaches_glab_and_stdout_comes_back' (1295100) panicked at crates/gitio/tests/glab.rs:88:53:
-called `Result::unwrap()` on an `Err` value: GlabIo { program: "/var/tmp/yamt-mutants/.tmpDtviUA/glab", source: Os { code: 26, kind: ExecutableFileBusy, message: "Text file busy" } }
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-
-
-(cargo-mutants runs cargo test with threads; the test copies the fake glab to a temp folder and execs it: ETXTBSY when another test thread forks while the copy's write fd is open.)
+just mutants e0cbf94~1 (covers e0cbf94 RVGlab + 41dc675 RVGlabR1): clean baseline
+MISSED   crates/gitio/src/program.rs:25:5: replace is_runnable -> bool with true in 1s build + 4s test
+MISSED   crates/gitio/src/program.rs:25:5: replace is_runnable -> bool with false in 0s build + 4s test
+51 mutants tested in 2m: 2 missed, 38 caught, 11 unviable
+program.rs:25 is the #[cfg(not(unix))] is_runnable: not compiled on Linux, so its mutants cannot be caught here — dropped (platform-equivalent); the Windows CI build covers its compile only.

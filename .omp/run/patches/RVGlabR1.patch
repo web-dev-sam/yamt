@@ -1,0 +1,595 @@
+From 41dc675be5a4b4a73ea2e5cc77fd58d10c206f8f Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:43:56 +0200
+Subject: [PATCH] fix(gitio): ETXTBSY-safe fake glab, environment pinned in a
+ child, PATH lookup in program.rs
+
+---
+ .omp/run/notes/RVColumnsR1Check.md |  21 ++++++
+ .omp/run/notes/RVGlabR1.md         |  40 +++++++++++
+ crates/gitio/src/glab.rs           |   2 +-
+ crates/gitio/src/lib.rs            |   1 +
+ crates/gitio/src/names.rs          |   3 +-
+ crates/gitio/src/program.rs        | 109 +++++++++++++++++++++++++++++
+ crates/gitio/src/repo.rs           | 108 +---------------------------
+ crates/gitio/tests/glab.rs         |  53 +++++++++++---
+ scripts/fake-glab/glab             |  20 +++++-
+ tests/glab/README.md               |  12 +++-
+ tests/glab/runner/post-5.json      |   1 +
+ tests/glab/runner/post-5.status    |   1 +
+ 12 files changed, 247 insertions(+), 124 deletions(-)
+ create mode 100644 .omp/run/notes/RVColumnsR1Check.md
+ create mode 100644 .omp/run/notes/RVGlabR1.md
+ create mode 100644 crates/gitio/src/program.rs
+ create mode 100644 tests/glab/runner/post-5.json
+ create mode 100644 tests/glab/runner/post-5.status
+
+diff --git a/.omp/run/notes/RVColumnsR1Check.md b/.omp/run/notes/RVColumnsR1Check.md
+new file mode 100644
+index 0000000..2b0b0d1
+--- /dev/null
++++ b/.omp/run/notes/RVColumnsR1Check.md
+@@ -0,0 +1,21 @@
++```json
++{
++  "verdict": "pass",
++  "findings": [],
++  "checked": [
++    "Item 1 (copied bodies) is fixed. `compare.ts` and `range.ts` now call the same three helpers. `showColumnDifferences(views, differences)` (compareViews.ts:131-140) is the old `columnMarks` → `showDifferences.of` loop, unchanged, and is called from compare.ts:117 (`showComparison`) and range.ts:88 (the constructor). `setColumnPreferences(views, settings)` (compareViews.ts:142-147) is the old `preferenceEffects(\"center\", …)` loop and is called from compare.ts:127 and range.ts:110. `moveToDifference(views, direction)` → `arrowColumn` = `keyboardColumn(views) ?? \"left\"` (compareFocus.ts:26-32) is called from compare.ts:140 and range.ts:114. A grep of frontend/src finds no other `columnMarks(`/`showDifferences.of`/`preferenceEffects(\"center\"` loop outside tests, apart from the merge window's own `index.ts:218`, which this round does not cover.",
++    "The compare window behaves the same by reading. The three bodies were moved word for word: the same COLUMNS order, the same effects and the same left fallback. `historyKey` still uses `keyboardColumn(this.#views)` (compare.ts:144), and `ColumnViews` (EditorView: `dom` HTMLElement, `root` DocumentOrShadowRoot) still fits the narrower `Focusable` type. The report gives observed `?diff` values for marks, arrows (no focus → left, right focused → right) and Light preferences.",
++    "Deviation accepted: `showColumnDifferences` lives in compareViews.ts, not compareMarks.ts. compareFields.ts imports a type from compareMarks.ts (compareFields.ts:4), so compareMarks → compareFields would form a cycle. The new edge compareViews → compareMarks has no cycle, since compareMarks imports only decorations/docPos/lineSpan/tone/words. compareViews already owns `COLUMNS` and the column states, and both helpers are per-column dispatches to those panes, so no new job lands there (growth check).",
++    "Deviation accepted: `revealDifference` is now private (compareFocus.ts:34); its only caller is `moveToDifference`. `keyboardColumn` takes a `Focusable` record (`Pick<Node,\"contains\">`, `Pick<DocumentOrShadowRoot,\"activeElement\">`) so the node test needs no `as` (TS rules). `arrowColumn` is the named rule with its own test, not a one-caller wrapper left over.",
++    "The `arrowColumn` test (compareFocus.test.ts) carries the rule. Changing `?? \"left\"` to `?? \"right\"` fails test 1. Making `keyboardColumn` ignore focus fails test 2 (right → right).",
++    "Item 2 (defineSlots) is fixed. `defineSlots: \"macro\"` is at check-sfc-order.ts:23, and check-sfc-order.test.ts:50-60 expects `Slots.vue:4: macro after state`. The report shows this test failing with the entry removed (`Tests 1 failed | 3 passed`). The survivors at check-sfc-order.ts 51-110 are on unchanged lines, so they are dropped as pre-existing (OR12).",
++    "Item 3 (the probe tells the columns apart) is fixed. RIGHT starts with the extra line `// added`, and the fixture adds the matching insertion difference (left {0,0}, right {0,1}). I checked the right column's ranges against the texts: 0-based line 2, column 14 is `new` (1-based line 3); the removal at line 2, column 19 is 1-based line 3; the word at line 4, columns 6+3 is `, y`. Each column's own lines are asserted: left {old, line 2} with its removal on line 4, right {new, line 3} with its removal on line 3. Left has one `.chunk-marker-inserted`, right one `.chunk-band.chunk-inserted` (class names at decorations.ts:33,36), and the strip has 3 bands. A left/right mix-up in the `columnMarks(…, column)` loop now fails.",
++    "Probe evidence accepted: the MiniBrowser output in RVColumnsR1.md matches each assertion. Playwright WebKit cannot launch on this host (libicudata.so.74), as the brief says. The in-page script used `.cm-line` indices instead of `posAtDOM`, and the file's `markLine` reads correctly by inspection.",
++    "Commit 049bf0f (thread rows) did not undo any item. The current range.ts still calls `showColumnDifferences` (:88), `setColumnPreferences` (:110) and `moveToDifference` (:114). compare.ts still calls all three (:117, :127, :140). check-sfc-order.ts:23 and its test are present. range.browser.test.ts still has the extra right line and the per-column assertions (:27-73, :139-160). The new `showThreads` loop (range.ts:117-125) dispatches `showThreadRows`, which is a new range-only effect, not a copy of a compare body.",
++    "Boundaries: editor/ imports only `@codemirror/*`, `../ipc` and its own `internal/` (PM3/PM5), and no ui file is touched (PM2). All 8 code files changed are in the brief's Owned list. The other paths in the commit (.omp/run/findings.jsonl, .omp/run/mutants/RVIpcR1.survivors.txt, .omp/run/notes/RVMarkdownCorrect.md, docs/slices/briefs/3.RV-markdown-rework-1.md) are orchestrator run files, not the implementer's code, so I accepted them.",
++    "No comments added (CP rules). The `RangeController` public surface is unchanged in this round (constructor, setPreferences, moveToChange, destroy), as the brief asks.",
++    "Docs left for the orchestrator's docs pass, not graded: the project map's line 100 still names `revealDifference` as compareFocus's export and does not list `arrowColumn`/`moveToDifference` or compareViews' `showColumnDifferences`/`setColumnPreferences`. The map, AGENTS.md and the architecture doc are outside Owned.",
++    "I ran no tests or gates; this is a reading-only re-check (RV6/RV8)."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVGlabR1.md b/.omp/run/notes/RVGlabR1.md
+new file mode 100644
+index 0000000..477540b
+--- /dev/null
++++ b/.omp/run/notes/RVGlabR1.md
+@@ -0,0 +1,40 @@
++All five fixes are in, and every acceptance command passes. Two things need your attention: `cargo mutants` reports 2 missed mutants that cannot be killed on Linux, and I could not delete the `mutants.out/` folder it left behind.
++
++**summary**
++- The fake glab is now run through a symlink `dir/glab` → `scripts/fake-glab/glab`. When one of its three variables is unset, the fake reads it from a `glab.env` file beside `$0`. No test runs a file it has just written any more, so the ETXTBSY failure cannot happen.
++- The `NO_COLOR` / `GIT_TERMINAL_PROMPT` overrides and the closed stdin are now checked in a child process. The child starts with `NO_COLOR=0`, `GIT_TERMINAL_PROMPT=1` and stdin coming from a file that holds `leaked`, and the test asserts the exact log.
++- The fake no longer makes up stderr. For an error body without a string `"message"` and no `post-<n>.err`, it exits 2 with `fake glab: no recorded stderr for this body`.
++- There is one `REV_PARSE`: it is `pub(crate)` in `repo.rs` and imported in `names.rs`.
++- The PATH lookup has its own module, `crates/gitio/src/program.rs` (`program_in`, `is_runnable` and their four unit tests). `repo.rs` and `glab.rs` import it.
++
++**files_changed**
++- `crates/gitio/src/program.rs` (new)
++- `crates/gitio/src/repo.rs`, `crates/gitio/src/names.rs`, `crates/gitio/src/glab.rs`, `crates/gitio/src/lib.rs`
++- `crates/gitio/tests/glab.rs`
++- `scripts/fake-glab/glab`
++- `tests/glab/README.md`
++- `tests/glab/runner/post-5.json`, `tests/glab/runner/post-5.status` (new)
++
++**tests_added**
++- `glab_overrides_no_color_and_the_terminal_prompt_and_closes_stdin`: runs the existing test `glab_runs_in_the_repository_with_no_color_and_stdin_closed` (now `#[ignore]`) in a child with `NO_COLOR=0`, `GIT_TERMINAL_PROMPT=1` and stdin from a file holding `leaked`. The child asserts the whole log, including `env: NO_COLOR=1 GIT_TERMINAL_PROMPT=0` and an empty `stdin: ` line.
++- `the_fake_invents_no_stderr_for_an_error_body_without_a_message`: post 5 answers `400 Bad Request` with `{"error":"note is invalid"}` and has no `.err`. The run comes back as `Failed { status: Some(2), stdout: <body>, stderr: "fake glab: no recorded stderr for this body\n" }`.
++- The four lookup tests were moved from `repo.rs` into `program.rs` without changes.
++
++**smoke_evidence**
++- `cargo fmt --check` → no output. I ran `cargo fmt -p yamt-gitio` first.
++- `sh -n scripts/fake-glab/glab` → ok.
++- `cargo clippy --workspace --all-targets -- -D warnings` → `Finished `dev` profile [unoptimized + debuginfo] target(s) in 40.38s`, no warnings.
++- `cargo test -p yamt-gitio` → every binary `test result: ok`. Two examples: `36 passed` (unit), and `11 passed; 0 failed; 3 ignored` for the glab test file.
++- `cargo test -q -p yamt-gitio --test glab`, 20 times in a row → `run 1` … `run 20`: each `test result: ok. 11 passed; 0 failed; 3 ignored`.
++- `cargo mutants -p yamt-gitio --file crates/gitio/src/glab.rs --file crates/gitio/src/program.rs` → `ok Unmutated baseline in 4s build + 4s test`, then `16 mutants tested in 48s: 2 missed, 10 caught, 4 unviable`. Both misses are `program.rs:25:5 replace is_runnable -> bool with true/false`. That is the Windows-only `#[cfg(not(unix))]` `is_runnable`, which is not compiled on Linux, so no Linux test can catch it.
++- The measured real-glab outputs in `tests/glab/README.md` are unchanged. I edited only the "Environment" text (`glab.env`), the `post-<n>.err` row, the sentence about where the message comes from, and the `runner/` scenario line.
++
++**deviations_from_brief**
++- I added a `runner/` post 5 and a test for item 3, so the new refusal has a test that exercises its failing case (SP4).
++- `glab.env` is not sourced as shell. The fake reads `NAME=value` lines and uses `${VAR=value}`, so a variable already set in the environment wins. Any other line exits 2. This is written down in the README.
++- `mutants.out/` is still in the working tree. `bash-guard` blocked `rm -rf mutants.out`, so it needs deleting before the commit.
++
++**open_risks**
++- `crates/gitio/src/program.rs:25`: the two Windows-only `is_runnable` mutants will always show as missed in a Linux mutants run, unless `.cargo/mutants.toml` (not mine to edit) excludes them.
++- `scripts/fake-glab/glab:32`: `$(dirname "$0")` relies on sh being given the symlink's path as `$0`. Linux and macOS both do this, and the tests pass on Linux.
++- From the review, still for you: the project map, `crates/gitio/AGENTS.md` and `docs/architecture.md` don't name `program.rs`, `glab.rs`, the fake or `tests/glab/` yet. Those files are outside this brief.
+\ No newline at end of file
+diff --git a/crates/gitio/src/glab.rs b/crates/gitio/src/glab.rs
+index 1dfd4fd..91e099a 100644
+--- a/crates/gitio/src/glab.rs
++++ b/crates/gitio/src/glab.rs
+@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ use std::time::Duration;
+ 
+-use crate::repo::program_in;
++use crate::program::program_in;
+ use crate::run::{Waited, argv, run_with_deadline};
+ use crate::{Error, Result};
+ 
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index e9b854d..ddfc7eb 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -14,6 +14,7 @@ mod merge_config;
+ mod merge_file;
+ mod names;
+ mod operation;
++mod program;
+ mod repo;
+ mod rerere;
+ mod run;
+diff --git a/crates/gitio/src/names.rs b/crates/gitio/src/names.rs
+index 28691d9..854e8ef 100644
+--- a/crates/gitio/src/names.rs
++++ b/crates/gitio/src/names.rs
+@@ -1,11 +1,10 @@
+ use crate::entry::Oid;
+-use crate::repo::{Repo, read_if_present, without_final_newline};
++use crate::repo::{REV_PARSE, Repo, read_if_present, without_final_newline};
+ use crate::run::{Access, GIT_TIMEOUT, run};
+ use crate::{Error, Result};
+ 
+ const BRANCH: &str = "branch";
+ const LOG: &str = "log";
+-const REV_PARSE: &str = "rev-parse";
+ const MERGE_MSG: &str = "MERGE_MSG";
+ const NON_SYMBOLIC_SHORT_NAME: &str =
+     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
+diff --git a/crates/gitio/src/program.rs b/crates/gitio/src/program.rs
+new file mode 100644
+index 0000000..1adfd3c
+--- /dev/null
++++ b/crates/gitio/src/program.rs
+@@ -0,0 +1,109 @@
++use std::ffi::OsStr;
++use std::path::{Path, PathBuf};
++
++/// The first absolute folder of `search_path` holding a runnable `name` (`name.exe` on Windows).
++pub(crate) fn program_in(search_path: &OsStr, name: &str) -> Option<PathBuf> {
++    let file_name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
++    std::env::split_paths(search_path)
++        .filter(|dir| dir.is_absolute())
++        .map(|dir| dir.join(&file_name))
++        .find(|candidate| is_runnable(candidate))
++}
++
++#[cfg(unix)]
++fn is_runnable(path: &Path) -> bool {
++    use std::os::unix::fs::PermissionsExt;
++    const ANY_EXECUTE_BIT: u32 = 0o111;
++    path.metadata().is_ok_and(|metadata| {
++        metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
++    })
++}
++
++// Windows has no execute bit: the `.exe` name is what makes a file runnable.
++#[cfg(not(unix))]
++fn is_runnable(path: &Path) -> bool {
++    path.is_file()
++}
++
++#[cfg(test)]
++mod tests {
++    use std::ffi::OsString;
++    use std::fs;
++
++    use super::*;
++
++    const GIT: &str = "git";
++
++    fn search_path(dirs: &[&Path]) -> OsString {
++        std::env::join_paths(dirs).unwrap()
++    }
++
++    fn program_file(dir: &Path, name: &str) -> PathBuf {
++        dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
++    }
++
++    #[cfg(unix)]
++    fn runnable_program_in(dir: &Path, name: &str) -> PathBuf {
++        use std::os::unix::fs::PermissionsExt;
++        let program = program_file(dir, name);
++        fs::write(&program, "").unwrap();
++        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
++        program
++    }
++
++    #[cfg(not(unix))]
++    fn runnable_program_in(dir: &Path, name: &str) -> PathBuf {
++        let program = program_file(dir, name);
++        fs::write(&program, "").unwrap();
++        program
++    }
++
++    #[test]
++    fn a_relative_path_entry_is_skipped_and_the_same_folder_found_by_its_absolute_path() {
++        let dir = tempfile::tempdir_in(".").unwrap();
++        runnable_program_in(dir.path(), GIT);
++        let name = dir.path().file_name().unwrap();
++        let (relative, absolute) = (Path::new(name), std::env::current_dir().unwrap().join(name));
++        assert_eq!(program_in(&search_path(&[relative]), GIT), None);
++        let found = program_in(&search_path(&[relative, &absolute]), GIT);
++        assert_eq!(found, Some(program_file(&absolute, GIT)));
++    }
++
++    #[test]
++    fn only_the_program_named_is_found() {
++        let (with_git, with_glab) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++        runnable_program_in(with_git.path(), GIT);
++        let glab = runnable_program_in(with_glab.path(), "glab");
++        let both = search_path(&[with_git.path(), with_glab.path()]);
++
++        assert_eq!(program_in(&both, "glab"), Some(glab));
++        assert_eq!(program_in(&search_path(&[with_git.path()]), "glab"), None);
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn a_git_without_an_execute_bit_is_skipped_and_the_next_executable_one_found() {
++        use std::os::unix::fs::PermissionsExt;
++        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++        let not_executable = plain.path().join("git");
++        fs::write(&not_executable, "").unwrap();
++        fs::set_permissions(&not_executable, fs::Permissions::from_mode(0o644)).unwrap();
++        let git = runnable_program_in(runnable.path(), GIT);
++        assert_eq!(
++            program_in(&search_path(&[plain.path(), runnable.path()]), GIT),
++            Some(git)
++        );
++    }
++
++    #[cfg(not(unix))]
++    #[test]
++    fn a_git_without_the_exe_name_is_skipped_and_the_next_git_exe_found() {
++        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++        fs::write(plain.path().join("git"), "").unwrap();
++        let git = runnable_program_in(runnable.path(), GIT);
++        assert_eq!(
++            program_in(&search_path(&[plain.path(), runnable.path()]), GIT),
++            Some(git)
++        );
++    }
++}
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 147df44..12ed5ab 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -1,4 +1,3 @@
+-use std::ffi::OsStr;
+ use std::fs;
+ use std::io;
+ use std::path::{Path, PathBuf};
+@@ -6,10 +5,11 @@ use std::process::Command;
+ 
+ use crate::blob::{BlobReader, CAT_FILE};
+ use crate::entry::{LS_FILES, Oid, index_info, parse_unmerged, path_from_git};
++use crate::program::program_in;
+ use crate::run::{Access, GIT_TIMEOUT, git_command, git_command_as_user, run};
+ use crate::{Error, Result, StageEntry};
+ 
+-const REV_PARSE: &str = "rev-parse";
++pub(crate) const REV_PARSE: &str = "rev-parse";
+ const HASH_OBJECT: &str = "hash-object";
+ const MERGE_BASE: &str = "merge-base";
+ const SILENT_FAILURE_STATUS: i32 = 1;
+@@ -239,107 +239,3 @@ fn find_git_on_path() -> Result<PathBuf> {
+     let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
+     program_in(&search_path, GIT).ok_or(Error::GitNotFound)
+ }
+-
+-/// The first absolute folder of `search_path` holding a runnable `name` (`name.exe` on Windows).
+-pub(crate) fn program_in(search_path: &OsStr, name: &str) -> Option<PathBuf> {
+-    let file_name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+-    std::env::split_paths(search_path)
+-        .filter(|dir| dir.is_absolute())
+-        .map(|dir| dir.join(&file_name))
+-        .find(|candidate| is_runnable(candidate))
+-}
+-
+-#[cfg(unix)]
+-fn is_runnable(path: &Path) -> bool {
+-    use std::os::unix::fs::PermissionsExt;
+-    const ANY_EXECUTE_BIT: u32 = 0o111;
+-    path.metadata().is_ok_and(|metadata| {
+-        metadata.is_file() && metadata.permissions().mode() & ANY_EXECUTE_BIT != 0
+-    })
+-}
+-
+-// Windows has no execute bit: the `.exe` name is what makes a file runnable.
+-#[cfg(not(unix))]
+-fn is_runnable(path: &Path) -> bool {
+-    path.is_file()
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use std::ffi::OsString;
+-
+-    use super::*;
+-
+-    fn search_path(dirs: &[&Path]) -> OsString {
+-        std::env::join_paths(dirs).unwrap()
+-    }
+-
+-    fn program_file(dir: &Path, name: &str) -> PathBuf {
+-        dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+-    }
+-
+-    #[cfg(unix)]
+-    fn runnable_program_in(dir: &Path, name: &str) -> PathBuf {
+-        use std::os::unix::fs::PermissionsExt;
+-        let program = program_file(dir, name);
+-        fs::write(&program, "").unwrap();
+-        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+-        program
+-    }
+-
+-    #[cfg(not(unix))]
+-    fn runnable_program_in(dir: &Path, name: &str) -> PathBuf {
+-        let program = program_file(dir, name);
+-        fs::write(&program, "").unwrap();
+-        program
+-    }
+-
+-    #[test]
+-    fn a_relative_path_entry_is_skipped_and_the_same_folder_found_by_its_absolute_path() {
+-        let dir = tempfile::tempdir_in(".").unwrap();
+-        runnable_program_in(dir.path(), GIT);
+-        let name = dir.path().file_name().unwrap();
+-        let (relative, absolute) = (Path::new(name), std::env::current_dir().unwrap().join(name));
+-        assert_eq!(program_in(&search_path(&[relative]), GIT), None);
+-        let found = program_in(&search_path(&[relative, &absolute]), GIT);
+-        assert_eq!(found, Some(program_file(&absolute, GIT)));
+-    }
+-
+-    #[test]
+-    fn only_the_program_named_is_found() {
+-        let (with_git, with_glab) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+-        runnable_program_in(with_git.path(), GIT);
+-        let glab = runnable_program_in(with_glab.path(), "glab");
+-        let both = search_path(&[with_git.path(), with_glab.path()]);
+-
+-        assert_eq!(program_in(&both, "glab"), Some(glab));
+-        assert_eq!(program_in(&search_path(&[with_git.path()]), "glab"), None);
+-    }
+-
+-    #[cfg(unix)]
+-    #[test]
+-    fn a_git_without_an_execute_bit_is_skipped_and_the_next_executable_one_found() {
+-        use std::os::unix::fs::PermissionsExt;
+-        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+-        let not_executable = plain.path().join("git");
+-        fs::write(&not_executable, "").unwrap();
+-        fs::set_permissions(&not_executable, fs::Permissions::from_mode(0o644)).unwrap();
+-        let git = runnable_program_in(runnable.path(), GIT);
+-        assert_eq!(
+-            program_in(&search_path(&[plain.path(), runnable.path()]), GIT),
+-            Some(git)
+-        );
+-    }
+-
+-    #[cfg(not(unix))]
+-    #[test]
+-    fn a_git_without_the_exe_name_is_skipped_and_the_next_git_exe_found() {
+-        let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+-        fs::write(plain.path().join("git"), "").unwrap();
+-        let git = runnable_program_in(runnable.path(), GIT);
+-        assert_eq!(
+-            program_in(&search_path(&[plain.path(), runnable.path()]), GIT),
+-            Some(git)
+-        );
+-    }
+-}
+diff --git a/crates/gitio/tests/glab.rs b/crates/gitio/tests/glab.rs
+index 781cea9..c3a94d0 100644
+--- a/crates/gitio/tests/glab.rs
++++ b/crates/gitio/tests/glab.rs
+@@ -13,7 +13,6 @@ use yamt_gitio::{Error, Glab, GlabRun, Oid, Repo};
+ 
+ const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
+ const HANG_SECONDS: u64 = 5;
+-const EXECUTABLE: u32 = 0o755;
+ const PLAIN: u32 = 0o644;
+ const BODY_PAST_ANY_PIPE_BUFFER: usize = 1 << 20;
+ const POST: [&str; 6] = [
+@@ -26,6 +25,7 @@ const POST: [&str; 6] = [
+ ];
+ const NOT_FOUND_TEST: &str = "glab_is_none_on_a_path_without_a_runnable_glab";
+ const FOUND_TEST: &str = "glab_found_on_path_is_the_one_run";
++const OVERRIDES_TEST: &str = "glab_runs_in_the_repository_with_no_color_and_stdin_closed";
+ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
+     path: "a.txt",
+     kind: FileKind::Regular,
+@@ -52,8 +52,10 @@ fn runner_file(name: &str) -> Vec<u8> {
+     fs::read(runner_scenario().join(name)).unwrap()
+ }
+ 
+-/// The fake glab on the `runner` scenario behind a wrapper script that sets the fake's variables (a test cannot
+-/// change its own environment, which glab inherits); the wrapper, post count and log live in `dir`.
++/// The fake glab on the `runner` scenario through a symlink in `dir`, beside the `glab.env` naming its variables (a
++/// test cannot change its own environment, which glab inherits); the post count and log live in `dir` too. A link,
++/// not a written script: a parallel test's fork could still hold a written file open for writing at its exec
++/// (ETXTBSY).
+ struct Fake {
+     dir: TempDir,
+     glab: Glab,
+@@ -64,18 +66,17 @@ impl Fake {
+         let dir = tempfile::tempdir().unwrap();
+         let state = dir.path().join("state");
+         fs::write(&state, format!("{posts_before}\n")).unwrap();
+-        let wrapper = dir.path().join("glab");
+-        let script = format!(
+-            "#!/bin/sh\nexport YAMT_FAKE_GLAB='{}' YAMT_FAKE_GLAB_STATE='{}' YAMT_FAKE_GLAB_LOG='{}'\nexec '{}' \"$@\"\n",
++        let settings = format!(
++            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_STATE={}\nYAMT_FAKE_GLAB_LOG={}\n",
+             runner_scenario().display(),
+             state.display(),
+             dir.path().join("log").display(),
+-            fake_glab_folder().join("glab").display(),
+         );
+-        fs::write(&wrapper, script).unwrap();
+-        fs::set_permissions(&wrapper, fs::Permissions::from_mode(EXECUTABLE)).unwrap();
++        fs::write(dir.path().join("glab.env"), settings).unwrap();
++        let link = dir.path().join("glab");
++        std::os::unix::fs::symlink(fake_glab_folder().join("glab"), &link).unwrap();
+         Fake {
+-            glab: Glab::at(wrapper),
++            glab: Glab::at(link),
+             dir,
+         }
+     }
+@@ -139,6 +140,20 @@ fn a_failing_glab_keeps_its_exit_stdout_and_stderr() {
+     assert_eq!([refused, failed, not_found], failures);
+ }
+ 
++#[test]
++fn the_fake_invents_no_stderr_for_an_error_body_without_a_message() {
++    let fake = Fake::new(4);
++
++    let ran = fake.run(&POST, Some(b"{}".to_vec()));
++
++    let expected = GlabRun::Failed {
++        status: Some(2),
++        stdout: without_final_newline(runner_file("post-5.json")),
++        stderr: b"fake glab: no recorded stderr for this body\n".to_vec(),
++    };
++    assert_eq!(ran, expected);
++}
++
+ #[test]
+ fn a_hanging_glab_times_out() {
+     let fake = Fake::new(3);
+@@ -158,6 +173,24 @@ fn a_hanging_glab_times_out() {
+ }
+ 
+ #[test]
++fn glab_overrides_no_color_and_the_terminal_prompt_and_closes_stdin() {
++    let dir = tempfile::tempdir().unwrap();
++    let leaked = dir.path().join("stdin");
++    fs::write(&leaked, "leaked").unwrap();
++    let stdin = fs::File::open(&leaked).unwrap();
++
++    let ran = run_ignored_in_child(&[OVERRIDES_TEST], |child| {
++        child
++            .env("NO_COLOR", "0")
++            .env("GIT_TERMINAL_PROMPT", "1")
++            .stdin(stdin);
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++#[test]
++#[ignore = "run by glab_overrides_no_color_and_the_terminal_prompt_and_closes_stdin"]
+ fn glab_runs_in_the_repository_with_no_color_and_stdin_closed() {
+     let fake = Fake::new(0);
+     let repo = diverged_repo(&FILES).unwrap();
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index cedc087..a57f254 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -1,7 +1,8 @@
+ #!/bin/sh
+ # A stand-in for glab 1.124.0 in yamt's tests and app sessions: answers `glab auth status` and `glab api` from
+ # the scenario folder $YAMT_FAKE_GLAB, counts posts in $YAMT_FAKE_GLAB_STATE and logs every call to
+-# $YAMT_FAKE_GLAB_LOG; the folder layout and the log format are in tests/glab/README.md.
++# $YAMT_FAKE_GLAB_LOG; each variable left unset is read from a glab.env beside $0 when there is one. The folder
++# layout, glab.env and the log format are in tests/glab/README.md.
+ # What it imitates, as glab 1.124.0 printed it: `auth status` writes everything on stderr; `api` prints the body
+ # as GitLab sent it (no final newline), after the status line, the headers and an empty line, each ending in
+ # CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1.
+@@ -27,6 +28,20 @@ text_or() {
+ 	fi
+ }
+ 
++# Run through a symlink, the folder of $0 is the link's: tests place one beside their glab.env.
++settings="$(dirname "$0")/glab.env"
++if [ -f "$settings" ]; then
++	while IFS= read -r line; do
++		value=${line#*=}
++		case $line in
++		YAMT_FAKE_GLAB=*) : "${YAMT_FAKE_GLAB=$value}" ;;
++		YAMT_FAKE_GLAB_STATE=*) : "${YAMT_FAKE_GLAB_STATE=$value}" ;;
++		YAMT_FAKE_GLAB_LOG=*) : "${YAMT_FAKE_GLAB_LOG=$value}" ;;
++		*) fail "unknown line in $settings: $line" ;;
++		esac
++	done <"$settings"
++fi
++
+ scenario=${YAMT_FAKE_GLAB:-}
+ [ -n "$scenario" ] || fail 'YAMT_FAKE_GLAB names no scenario folder'
+ [ -d "$scenario" ] || fail "no scenario folder $scenario"
+@@ -63,7 +78,8 @@ answer() {
+ 		exit 1
+ 	fi
+ 	message=$(printf '%s' "$2" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
+-	printf 'glab: %s (HTTP %s)\n' "${message:-${1#* }}" "$code" >&2
++	[ -n "$message" ] || fail 'no recorded stderr for this body'
++	printf 'glab: %s (HTTP %s)\n' "$message" "$code" >&2
+ 	exit 1
+ }
+ 
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 79d4c92..d437568 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -11,6 +11,11 @@ here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
+ | `YAMT_FAKE_GLAB_STATE` | a file holding how many posts were answered so far (missing = 0); each post adds one. Required for posts |
+ | `YAMT_FAKE_GLAB_LOG` | a file every call is appended to (optional) |
+ 
++Each variable left unset is read from a `glab.env` file in the folder of `$0` (for a fake run through a symlink,
++the link's folder), one `NAME=value` line per variable, the value taken as written (no quotes); any other line
++exits 2. The Rust tests run the fake this way: a symlink `glab` beside its `glab.env` in a temporary folder, so no
++test ever runs a file it has just written (ETXTBSY).
++
+ ## Scenario folder
+ 
+ | file | answers |
+@@ -22,7 +27,7 @@ here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
+ | `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
+ | `post-<n>.json` | the body of the n-th POST `…/draft_notes` (n from 1, counted in the state file) |
+ | `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
+-| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)` |
++| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
+ | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
+ | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
+ 
+@@ -40,7 +45,7 @@ Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), aga
+ - An HTTP error (`glab api projects/gitlab-org%2Fno-such-project-yamt`): stdout holds the error body
+   (`{"message":"404 Project Not Found"}`, headers first with `--include`), stderr
+   `glab: 404 Project Not Found (HTTP 404)` and a newline, exit 1. The fake takes the message from the body's
+-  `"message"` string, or else the status line's words.
++  `"message"` string; it never invents one.
+ - `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
+   "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
+   dropped).
+@@ -61,4 +66,5 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+ ## Scenarios
+ 
+ - `runner/` — `yamt-gitio`'s own tests (`crates/gitio/tests/glab.rs`): post 1 is accepted, post 2 refused with
+-  400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s.
++  400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s,
++  post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
+diff --git a/tests/glab/runner/post-5.json b/tests/glab/runner/post-5.json
+new file mode 100644
+index 0000000..f75029f
+--- /dev/null
++++ b/tests/glab/runner/post-5.json
+@@ -0,0 +1 @@
++{"error":"note is invalid"}
+diff --git a/tests/glab/runner/post-5.status b/tests/glab/runner/post-5.status
+new file mode 100644
+index 0000000..59db10c
+--- /dev/null
++++ b/tests/glab/runner/post-5.status
+@@ -0,0 +1 @@
++400 Bad Request
+-- 
+2.56.0
+
