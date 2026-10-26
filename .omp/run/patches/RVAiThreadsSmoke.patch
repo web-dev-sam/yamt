@@ -1,0 +1,330 @@
+From 393f9d52de25723c50a142ba3fe52b775ba38d88 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Tue, 27 Oct 2026 00:11:58 +0100
+Subject: [PATCH] fix(range): turns omp holds without an answer become answers
+ at load; app-session --ai
+
+---
+ frontend/scripts/app-session/args.test.ts | 42 +++++++++++++--
+ frontend/scripts/app-session/args.ts      | 11 ++--
+ frontend/scripts/app-session/start.ts     |  3 +-
+ frontend/scripts/app-session/startArgs.ts | 30 ++++++++---
+ frontend/src/ui/rangeAi.test.ts           | 63 +++++++++++++++++++++++
+ frontend/src/ui/rangeAi.ts                | 12 ++++-
+ 6 files changed, 142 insertions(+), 19 deletions(-)
+
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 1b244c0..52eb711 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -15,6 +15,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
+     record: null,
+     home: null,
+     glab: null,
++    ai: false,
+   });
+ });
+ 
+@@ -48,6 +49,7 @@ test("start-app reads every option of the acceptance run", () => {
+     record: { file: "/tmp/s.mkv", seconds: 5 },
+     home: "/tmp/h-home",
+     glab: null,
++    ai: false,
+   });
+ });
+ 
+@@ -90,14 +92,28 @@ test("start-app --range needs --repo and takes neither --fresh-repo nor --diff",
+ });
+ 
+ test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
+-  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr")).toEqual([
++  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", false)).toEqual([
+     "--diff=main...feature",
+     "--repo",
+     "/tmp/rr",
+   ]);
+-  expect(appArgs({ kind: "diff" }, null)).toEqual(["--diff"]);
+-  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r")).toEqual(["--repo", "/tmp/r"]);
+-  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo")).toEqual(["--repo", "/tmp/s/repo"]);
++  expect(appArgs({ kind: "diff" }, null, false)).toEqual(["--diff"]);
++  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", false)).toEqual(["--repo", "/tmp/r"]);
++  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", false)).toEqual(["--repo", "/tmp/s/repo"]);
++});
++
++test("start-app --ai reaches the app as its own --ai after the repository", () => {
++  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
++  expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
++  expect(parseCommand(range)).toMatchObject({ ai: false });
++  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", true)).toEqual([
++    "--diff=a...b",
++    "--repo",
++    "/tmp/rr",
++    "--ai",
++  ]);
++  expect(appArgs({ kind: "diff" }, null, true)).toEqual(["--diff", "--ai"]);
++  expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+ });
+ 
+ test("start-app --glab names a tests/glab scenario by its form, only with --range", () => {
+@@ -193,7 +209,7 @@ test("start-fixture --threads and --gitlab pick the review scripts of a range fi
+   expect(parseCommand([...ranged, "--threads", "seeded"])).toMatchObject({
+     search: "?range=review&threads=seeded",
+   });
+-  const onlyRange = /--threads and --gitlab only with --range-case/;
++  const onlyRange = /--threads, --gitlab and --ai only with --range-case/;
+   expect(() => parseCommand(["start-fixture", "--name", "fx", "--gitlab", "moved"])).toThrow(
+     onlyRange,
+   );
+@@ -202,6 +218,22 @@ test("start-fixture --threads and --gitlab pick the review scripts of a range fi
+   ).toThrow(onlyRange);
+ });
+ 
++test("start-fixture --ai turns the range fixture's AI on, --ai-case picks its agent fixture, --ai-changes a changed checkout", () => {
++  const ranged = ["start-fixture", "--name", "fx", "--range-case", "review", "--threads", "seeded"];
++  expect(parseCommand([...ranged, "--ai"])).toMatchObject({
++    search: "?range=review&threads=seeded&ai=",
++  });
++  expect(parseCommand([...ranged, "--ai", "--ai-case", "crash", "--ai-changes"])).toMatchObject({
++    search: "?range=review&threads=seeded&ai=crash&ai-changes=",
++  });
++  const needsAi = /--ai-case and --ai-changes only with --ai/;
++  expect(() => parseCommand([...ranged, "--ai-case", "crash"])).toThrow(needsAi);
++  expect(() => parseCommand([...ranged, "--ai-changes"])).toThrow(needsAi);
++  expect(() => parseCommand(["start-fixture", "--name", "fx", "--ai"])).toThrow(
++    /--threads, --gitlab and --ai only with --range-case/,
++  );
++});
++
+ test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {
+   expect(parseCommand(["start-fixture", "--name", "fx", "--diff"])).toMatchObject({
+     search: "?diff",
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index b28eba2..d4fee38 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -16,12 +16,13 @@ import { startCommand, type StartCommand } from "./startArgs";
+ 
+ const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
+   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
+-                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]]
++                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
+                 --glab: scripts/fake-glab first on PATH; its scenario is the link <folder>/glab/scenario
+   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+-                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]]
++                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
++                  [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
+   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
+   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
+@@ -91,11 +92,11 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "home",
+       "glab",
+     ],
+-    flags: ["fresh-repo", "diff"],
++    flags: ["fresh-repo", "diff", "ai"],
+   },
+   "start-fixture": {
+-    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab"],
+-    flags: ["diff"],
++    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case"],
++    flags: ["diff", "ai", "ai-changes"],
+   },
+   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 7f8fa62..1c79273 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -81,7 +81,8 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+   }
+   const repoDir = repoFolder(command.opens, folder);
+   const glab = fakeGlab(scenarioFolder, folder);
+-  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir), glab };
++  const args = appArgs(command.opens, repoDir, command.ai);
++  return { home, configDir, repoDir, binary, args, glab };
+ }
+ 
+ function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index b746799..ceb39ba 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -22,6 +22,7 @@ export type StartCommand =
+       readonly record: Recording | null;
+       readonly home: string | null;
+       readonly glab: string | null;
++      readonly ai: boolean;
+     }
+   | {
+       readonly kind: "start-fixture";
+@@ -63,6 +64,21 @@ function opening(parsed: Parsed): Opening {
+   return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
+ }
+ 
++function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
++  const named = parsed.values.get("ai-case");
++  const changes = parsed.flags.has("ai-changes");
++  if (!parsed.flags.has("ai")) {
++    if (named !== undefined || changes) {
++      throw new Error("start-fixture takes --ai-case and --ai-changes only with --ai");
++    }
++    return;
++  }
++  review.set("ai", named ?? "");
++  if (changes) {
++    review.set("ai-changes", "");
++  }
++}
++
+ function reviewSearch(parsed: Parsed): string {
+   const review = new URLSearchParams();
+   for (const name of ["threads", "gitlab"]) {
+@@ -71,6 +87,7 @@ function reviewSearch(parsed: Parsed): string {
+       review.set(name, value);
+     }
+   }
++  addAiSearch(parsed, review);
+   const text = review.toString();
+   return text === "" ? "" : `&${text}`;
+ }
+@@ -87,7 +104,7 @@ function fixtureSearch(parsed: Parsed): string {
+     return `?range=${encodeURIComponent(range)}${review}`;
+   }
+   if (review !== "") {
+-    throw new Error("start-fixture takes --threads and --gitlab only with --range-case");
++    throw new Error("start-fixture takes --threads, --gitlab and --ai only with --range-case");
+   }
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+ }
+@@ -144,16 +161,16 @@ function settingsText(parsed: Parsed): string | null {
+   return text;
+ }
+ 
+-export function appArgs(opens: Opening, repoDir: string | null): readonly string[] {
+-  const repo = repoDir === null ? [] : ["--repo", repoDir];
++export function appArgs(opens: Opening, repoDir: string | null, ai: boolean): readonly string[] {
++  const options = [...(repoDir === null ? [] : ["--repo", repoDir]), ...(ai ? ["--ai"] : [])];
+   switch (opens.kind) {
+     case "diff":
+-      return ["--diff", ...repo];
++      return ["--diff", ...options];
+     case "range":
+-      return [`--diff=${opens.range}`, ...repo];
++      return [`--diff=${opens.range}`, ...options];
+     case "dir":
+     case "fresh":
+-      return repo;
++      return options;
+   }
+ }
+ 
+@@ -174,5 +191,6 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
+     record: recording(parsed),
+     home: parsed.values.get("home") ?? null,
+     glab: glabScenario(parsed, opens),
++    ai: parsed.flags.has("ai"),
+   };
+ }
+diff --git a/frontend/src/ui/rangeAi.test.ts b/frontend/src/ui/rangeAi.test.ts
+index c6fe1e1..28a2f9d 100644
+--- a/frontend/src/ui/rangeAi.test.ts
++++ b/frontend/src/ui/rangeAi.test.ts
+@@ -364,6 +364,69 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
+   expect(askedAt(live, 0).request).toEqual({ session: SEEDED_SESSION, text: "Who calls it?" });
+ });
+ 
++test("turns omp holds without an answer in the thread (a reload mid-turn) become answers before Ask is offered", async () => {
++  const live = await rig();
++  await live.threads.addNote(live.seeded, "Who calls it?");
++  live.ai.load(live.seeded);
++  const turns = [view("Yes"), view("Half"), view("Rest")];
++  loadAt(live, 0).answer({ kind: "loaded", turns });
++  expect(live.ai.canAsk(live.seeded)).toBe(false);
++  await settle();
++
++  expect(bodies(live, live.seeded).slice(1)).toEqual([
++    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 0 },
++    { kind: "note", text: "Who calls it?" },
++    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 1 },
++    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 2 },
++  ]);
++  expect(live.ai.canAsk(live.seeded)).toBe(false);
++  await live.threads.addNote(live.seeded, "And now?");
++  live.ai.ask(live.seeded);
++  expect(askedAt(live, 0).request.text).toBe("And now?");
++  askedAt(live, 0).end({ kind: "finished", turn: view("Now") });
++  await settle();
++  expect(bodies(live, live.seeded).at(-1)).toEqual({
++    kind: "aiAnswer",
++    session: SEEDED_SESSION,
++    turn: 3,
++  });
++  expect(aiOf(live, live.seeded).loaded).toEqual({
++    kind: "loaded",
++    turns: [...turns, view("Now")],
++  });
++});
++
++test("a failed write of an unseen turn's answer stops there and still shows the conversation", async () => {
++  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
++  const failure = { kind: "WriteFailed", path: "/t/threads.json", message: "full" } as const;
++  let writes = 0;
++  const threads = createRangeThreads(
++    {
++      ...fixture,
++      addAiAnswer: async () => {
++        writes += 1;
++        return { ok: false, failure };
++      },
++    },
++    () => undefined,
++  );
++  await threads.load();
++  const client = new FakeClient();
++  const ai = createRangeAi(client, threads, () => CONTEXT);
++  const seeded = threads.list.value.threads[3];
++  if (seeded === undefined) {
++    throw new Error("no seeded thread");
++  }
++
++  ai.load(seeded.id);
++  const turns = [view("Yes"), view("Half"), view("Rest")];
++  client.loads[0]?.answer({ kind: "loaded", turns });
++  await settle();
++
++  expect(writes).toBe(1);
++  expect(ai.byThread.value.get(seeded.id)).toMatchObject({ loaded: { kind: "loaded", turns } });
++});
++
+ test("a load that failed for another reason than a lost session is tried again", async () => {
+   const live = await rig();
+   live.ai.load(live.seeded);
+diff --git a/frontend/src/ui/rangeAi.ts b/frontend/src/ui/rangeAi.ts
+index 6c4e1dd..c4547d9 100644
+--- a/frontend/src/ui/rangeAi.ts
++++ b/frontend/src/ui/rangeAi.ts
+@@ -249,9 +249,17 @@ async function load(state: State, id: ThreadId): Promise<void> {
+   }
+   put(state, id, { session, loaded: null });
+   const loaded = await state.client.loadConversation(session);
+-  if (aiOf(state, id).session === session) {
+-    put(state, id, { loaded });
++  if (aiOf(state, id).session !== session) {
++    return;
+   }
++  const held = loaded.kind === "loaded" ? loaded.turns.length : 0;
++  // Turns omp holds that no answer records (a reload mid-turn) become answers, plan row 121.
++  for (let known = answersIn(thread, session); known < held; known += 1) {
++    if (!(await state.threads.addAiAnswer(id, session))) {
++      break;
++    }
++  }
++  put(state, id, { loaded });
+ }
+ 
+ export function createRangeAi(
+-- 
+2.56.0
+

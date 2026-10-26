@@ -1,7 +1,6 @@
 {
-  "RVAiThreadsSmoke": {
+  "RVAiThreadsR1": {
     "owned": [
-      "frontend/src/main.ts",
       "frontend/src/ui/rangeAi.ts",
       "frontend/src/ui/rangeAi.test.ts",
       "frontend/src/ui/rangeAiView.ts",
@@ -11,25 +10,21 @@
       "frontend/src/ui/rangeThreads.ts",
       "frontend/src/ui/rangeThreads.test.ts",
       "frontend/src/ui/rangeGitLab.ts",
-      "frontend/src/ui/rangeGitLab.test.ts",
-      "frontend/src/ui/rangeThreadText.ts",
-      "frontend/src/ui/rangeThreadText.test.ts",
-      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/agentSettingsFields.ts",
+      "frontend/src/ui/agentSettingsFields.test.ts",
       "frontend/src/ui/RangeThreadBox.vue",
       "frontend/src/ui/RangeMessage.vue",
+      "frontend/src/main.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/domain.test.ts",
       "frontend/src/ipc/ReviewSource.ts",
       "frontend/src/ipc/reviewDomain.ts",
       "frontend/src/ipc/reviewDomain.test.ts",
       "frontend/src/ipc/tauriReview.ts",
-      "frontend/src/ipc/tauriReview.test.ts",
       "frontend/src/ipc/fixtureReview.ts",
-      "frontend/src/ipc/fixtureReview.test.ts",
-      "frontend/src/ipc/fixtureThreads.ts",
-      "frontend/scripts/app-session/args.ts",
-      "frontend/scripts/app-session/args.test.ts",
-      "frontend/scripts/app-session/startArgs.ts",
-      "frontend/scripts/app-session/startArgs.test.ts",
-      "frontend/scripts/app-session/start.ts"
+      "frontend/src/ipc/index.ts",
+      "frontend/src/agent/index.ts",
+      "frontend/src/agent/internal/session.ts"
     ]
   }
 }
