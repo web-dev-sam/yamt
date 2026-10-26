@@ -87,6 +87,11 @@ class, `MergeController` (`editor/index.ts`). Everything below is internal.
   no synchronous layout reads in scroll handlers.
 - [CM14] `destroy()` destroys all three views, removes listeners, and leaves the host elements
   empty; `MergeView.vue` calls it on file switch.
+- [CM15] Block rows between lines (the range window's thread boxes, plan §2 #116) come from a `StateField` of block
+  widget decorations, never from a view plugin; each widget's DOM host is kept by `ThreadHosts` for the thread's life
+  (focus, typed text and Vue's teleported box survive redraws); widgets `ignoreEvent()` so CodeMirror's keymaps, find,
+  copy, paste and selection never act on a box; scroll-sync anchors measure a joined block's top, not its text top
+  (`threadField.ts` `threadAnchors`). Detector: `threadField`/`compareFrame` tests and the thread-rows MiniBrowser probes.
 
 ## Dependencies (closed list, decision 4)
 

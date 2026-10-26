@@ -157,6 +157,20 @@ Names in older rows (orchestrator 2026-10-22, the git-operations cutover, #1431)
 
 `StopMovedOn` means the stop the window shows is gone (orchestrator 2026-10-22, refines #89 after reviews #1435/#1440): whenever Rust answers it, the next `list_stop` lists git's current stop — a write from an older stop is refused by the new stop's own session (its versions start above the old ones, #1383); an Abort or Continue that finds another stop, and a worker panic, leave the state `MovedOn`, so the list opens git's stop. The window sends every `StopMovedOn` through `reportFailure` to one `nextStop({ kind: "outside" })`, never to a list that would answer `MovedOn` again. Rejected: a stop identity in every `Listing` (an IPC change where one state rule suffices).
 
+Amendments after the range window's reviews (orchestrator 2026-10-26; the rules stand, these make them exact):
+#108's names are as built: `args::Ai { Off, On }` is the flag, `enum AiState { Off, On(Workspace) }` is managed as
+`Mutex<AiState>`, and `AiState::workspace()` is the one `AiOff` mapping. #110's clone keeps no branch or tag of the
+source (`--no-tags`, `--origin origin` whatever `clone.defaultRemoteName` says, branches deleted, HEAD detached),
+writes `core.longpaths=true` into its own config, never sees the user's `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/
+`GIT_COMMON_DIR`/`GIT_OBJECT_DIRECTORY`/`GIT_ALTERNATE_OBJECT_DIRECTORIES` (nor does the agent), refuses a partial-clone
+source by name, and sweeps other pairs' leftovers outside the window's AI lock. #117's lock order: the send guard is
+`try_lock`ed for the whole send, and `Mutex<ThreadStore>` is taken only between glab calls, never across one. #121's
+command is `add_ai_answer(thread, session)`; "omp holds the prompt" is decided as measured on omp 18.12.6 (a turn
+killed at 300 ms or mid-answer keeps its prompt in `session/load`'s replay, one killed at 30 ms does not; a
+`session/cancel` 5 ms after the prompt answers `cancelled` with no prompt in the replay, one 4 s after keeps it): a
+finished or `ended` turn is recorded at once; a stopped, crashed or refused one only when the replay holds one more
+turn than the thread has answers of that session.
+
 ### Prior art surveyed — nobody has built this
 
 | project             | what it is                                                 | state                                                     |
