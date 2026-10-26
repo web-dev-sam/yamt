@@ -1,9 +1,9 @@
 //! A line-framed test program for this crate's tests: writes `line-echo pid <pid>` on stderr, then
 //! answers each line with the same line. `stderr <text>` writes `text` on stderr instead;
-//! `exit <code>` exits with that code; `huge` writes one line over 64 MiB, then `after`; `bytes`
-//! writes a line that is not UTF-8, then `after`; `split <text>` answers in two writes; `twice
-//! <text>` answers two lines in one write; `crlf <text>` answers with a `\r\n` line end. With
-//! `--ignore-stop` it keeps running after its stdin closes.
+//! `exit <code>` exits with that code; `huge` writes one line over `MAX_MESSAGE_BYTES`, then
+//! `after`; `bytes` writes a line that is not UTF-8, then `after`; `split <text>` answers in two
+//! writes; `twice <text>` answers two lines in one write; `crlf <text>` answers with a `\r\n` line
+//! end. With `--ignore-stop` it keeps running after its stdin closes.
 //!
 //! Commands that outlive or change the process: `burst <n>` exits 0 while a copy of it writes `n`
 //! stderr lines a moment later; `orphan` exits 3 while a sleeping copy holds its stdout and stderr;
@@ -19,7 +19,7 @@ const LATE_BURST: &str = "--late-burst";
 const HOLD: &str = "--hold";
 const STDERR_CLOSED: &str = "--stderr-closed";
 const STDOUT_CLOSED: &str = "--stdout-closed";
-const HUGE_LINE_BYTES: usize = 64 * 1024 * 1024 + 1;
+const HUGE_LINE_BYTES: usize = yamt_pipe::MAX_MESSAGE_BYTES + 1;
 const NOT_UTF8: &[u8] = b"\xff\xfe";
 const SPLIT_PAUSE: Duration = Duration::from_millis(50);
 const BURST_PAUSE: Duration = Duration::from_millis(200);

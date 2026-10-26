@@ -7,11 +7,12 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::frame::{self, Frame, Framing, MAX_MESSAGE_BYTES};
+use crate::frame::{self, DropReason, Frame, Framing, MAX_MESSAGE_BYTES};
 
 const STOP_GRACE: Duration = Duration::from_secs(2);
 const EXIT_POLL: Duration = Duration::from_millis(20);
 const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
+const BYTES_PER_MIB: usize = 1024 * 1024;
 /// `CREATE_NO_WINDOW` (Win32 process creation flags): a console program gets no console window.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -157,8 +158,8 @@ fn read_messages(stdout: ChildStdout, framing: Framing, events: &Sender<HostEven
     loop {
         let event = match frame::read_message(&mut reader, framing) {
             Frame::Message(text) => HostEvent::Message { text },
-            Frame::Dropped { reason } => HostEvent::Log {
-                line: format!("yamt: dropped {reason}"),
+            Frame::Dropped(reason) => HostEvent::Log {
+                line: dropped_line(reason),
             },
             Frame::End => return StopReason::OutputClosed,
             Frame::TooLarge { bytes } => {
@@ -181,6 +182,16 @@ fn read_messages(stdout: ChildStdout, framing: Framing, events: &Sender<HostEven
 fn stop_with_log(events: &Sender<HostEvent>, line: String) -> StopReason {
     let _ = events.send(HostEvent::Log { line });
     StopReason::OutputBroken
+}
+
+fn dropped_line(reason: DropReason) -> String {
+    match reason {
+        DropReason::TooLong => format!(
+            "yamt: dropped a message of more than {} MiB",
+            MAX_MESSAGE_BYTES / BYTES_PER_MIB
+        ),
+        DropReason::NotUtf8 => "yamt: dropped a message that is not UTF-8".to_owned(),
+    }
 }
 
 /// `Err` once nobody takes the events; `Ok` when stderr ends or cannot be read.

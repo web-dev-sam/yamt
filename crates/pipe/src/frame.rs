@@ -21,7 +21,14 @@ pub(crate) enum Frame {
     End,
     TooLarge { bytes: u64 },
     Broken { reason: String },
-    Dropped { reason: String },
+    Dropped(DropReason),
+}
+
+/// Why a `Lines` message was dropped while reading went on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DropReason {
+    TooLong,
+    NotUtf8,
 }
 
 pub(crate) fn write_message(
@@ -72,7 +79,7 @@ fn content_length(reader: &mut impl BufRead) -> Result<Option<u64>, String> {
     loop {
         let line = match bounded_line(reader, MAX_HEADER_LINE_BYTES) {
             Ok(Some(line)) if line.cut => return Err("a header line is too long".to_owned()),
-            Ok(Some(line)) => line.text(),
+            Ok(Some(line)) => line.into_text(),
             Ok(None) if started => return Err("the output ended inside a header".to_owned()),
             Ok(None) => return Ok(None),
             Err(error) => return Err(error.to_string()),
@@ -101,16 +108,17 @@ fn read_line_message(reader: &mut impl BufRead) -> Frame {
             Ok(None) => return Frame::End,
             Err(error) => return broken(&error.to_string()),
         };
-        let bytes = line.without_carriage_return();
-        if line.cut || bytes.len() > MAX_MESSAGE_BYTES {
-            return dropped("a message of more than 64 MiB");
+        let cut = line.cut;
+        let bytes = line.into_message();
+        if cut || bytes.len() > MAX_MESSAGE_BYTES {
+            return Frame::Dropped(DropReason::TooLong);
         }
         if bytes.is_empty() {
             continue;
         }
-        return match String::from_utf8(bytes.to_vec()) {
+        return match String::from_utf8(bytes) {
             Ok(text) => Frame::Message(text),
-            Err(_) => dropped("a message that is not UTF-8"),
+            Err(_) => Frame::Dropped(DropReason::NotUtf8),
         };
     }
 }
@@ -121,15 +129,9 @@ fn broken(reason: &str) -> Frame {
     }
 }
 
-fn dropped(reason: &str) -> Frame {
-    Frame::Dropped {
-        reason: reason.to_owned(),
-    }
-}
-
 /// One stderr line without its line break, cut at `MAX_LOG_LINE_BYTES`; `None` at the end.
 pub(crate) fn log_line(reader: &mut impl BufRead) -> io::Result<Option<String>> {
-    Ok(bounded_line(reader, MAX_LOG_LINE_BYTES)?.map(|line| line.text()))
+    Ok(bounded_line(reader, MAX_LOG_LINE_BYTES)?.map(Line::into_text))
 }
 
 /// The bytes before a `\n`, at most the reader's `max`; `cut` when more were dropped.
@@ -140,15 +142,15 @@ struct Line {
 
 impl Line {
     /// A cut line keeps its last byte: the `\r` was not its end.
-    fn without_carriage_return(&self) -> &[u8] {
-        match self.bytes.split_last() {
-            Some((b'\r', rest)) if !self.cut => rest,
-            Some(_) | None => &self.bytes,
+    fn into_message(mut self) -> Vec<u8> {
+        if !self.cut && self.bytes.last() == Some(&b'\r') {
+            self.bytes.pop();
         }
+        self.bytes
     }
 
-    fn text(&self) -> String {
-        String::from_utf8_lossy(self.without_carriage_return()).into_owned()
+    fn into_text(self) -> String {
+        String::from_utf8_lossy(&self.into_message()).into_owned()
     }
 }
 
@@ -285,12 +287,12 @@ mod tests {
 
     #[test]
     fn log_lines_lose_their_line_break_and_a_long_one_is_cut_at_8_kib() {
-        let long = "y".repeat(MAX_LOG_LINE_BYTES + 5);
+        let long = "y".repeat(8 * 1024 + 5);
         let bytes = format!("first\r\n{long}\nlast");
         let mut reader = BufReader::new(OneByteAtATime(bytes.as_bytes()));
         assert_eq!(log_line(&mut reader).unwrap(), Some("first".to_owned()));
         let cut = log_line(&mut reader).unwrap().unwrap();
-        assert_eq!(cut, "y".repeat(MAX_LOG_LINE_BYTES));
+        assert_eq!(cut, "y".repeat(8192));
         assert_eq!(log_line(&mut reader).unwrap(), Some("last".to_owned()));
         assert_eq!(log_line(&mut reader).unwrap(), None);
     }
@@ -322,7 +324,7 @@ mod tests {
     #[test]
     fn a_line_that_is_not_utf8_is_dropped_and_the_next_one_is_read() {
         let mut reader = &b"\xff\xfe\nafter\n"[..];
-        let expected = dropped("a message that is not UTF-8");
+        let expected = Frame::Dropped(DropReason::NotUtf8);
         assert_eq!(read_line_message(&mut reader), expected);
         assert_eq!(read_line_message(&mut reader), message("after"));
     }
@@ -333,7 +335,7 @@ mod tests {
         let over = "b".repeat(MAX_MESSAGE_BYTES + 1);
         let bytes = format!("{at_limit}\r\n{over}\r\n{over}\nafter\n");
         let mut reader = bytes.as_bytes();
-        let too_long = dropped("a message of more than 64 MiB");
+        let too_long = Frame::Dropped(DropReason::TooLong);
         assert_eq!(read_line_message(&mut reader), Frame::Message(at_limit));
         assert_eq!(read_line_message(&mut reader), too_long);
         assert_eq!(read_line_message(&mut reader), too_long);
