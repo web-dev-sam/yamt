@@ -1,0 +1,5 @@
+just mutants 965196a (covers 393f9d5 RVAiThreadsSmoke)
+On lines 393f9d5 changed: 3 of 228:
+NoCoverage ObjectLiteral frontend/scripts/app-session/start.ts:85 | -     return { home, configDir, repoDir, binary, args, glab }; => +     return {};
+NoCoverage BlockStatement frontend/src/ui/rangeAi.ts:252 | -     if (aiOf(state, id).session !== session) { => -       return;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:252 | -     if (aiOf(state, id).session !== session) { => +     if (false) {
