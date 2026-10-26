@@ -20,6 +20,8 @@ type KeysUnread = {
 
 export type ProblemCause = SourceFailure | Unexpected;
 
+export type ThreadStep = "list" | "add" | "note" | "queue" | "unqueue" | "check" | "send";
+
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
   | {
@@ -41,6 +43,7 @@ export type Problem =
   | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
   | { readonly action: "tabs" | "openRange"; readonly cause: ProblemCause }
   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
+  | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
   | {
       readonly action: "saveTab";
       readonly tab: TabId;
@@ -108,6 +111,9 @@ export function logProblem(problem: Problem): void {
     case "loadTab":
     case "saveTab":
       log.error(event, { name: problem.name, ...problem.cause });
+      return;
+    case "threads":
+      log.error(event, { step: problem.step, ...problem.cause });
       return;
   }
 }

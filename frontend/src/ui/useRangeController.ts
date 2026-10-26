@@ -8,7 +8,14 @@ import {
   type ShallowRef,
 } from "vue";
 
-import { RangeController, type Direction, type Preferences, type RangeTexts } from "../editor";
+import {
+  RangeController,
+  type Direction,
+  type Preferences,
+  type RangeEvents,
+  type RangeTexts,
+  type ShownThread,
+} from "../editor";
 import type { RangeEntry, RangeFile } from "../ipc";
 import { useRangeStore } from "./rangeStore";
 import { fileSentence, modeNote } from "./rangeText";
@@ -26,10 +33,16 @@ type RangeContent =
   | { readonly kind: "columns"; readonly note: string | null }
   | { readonly kind: "sentence"; readonly text: string };
 
-export type ShownRange = Pick<RangeController, "setPreferences" | "moveToChange" | "destroy">;
+export type ShownRange = Pick<
+  RangeController,
+  "setPreferences" | "moveToChange" | "showThreads" | "destroy"
+>;
+
+type ThreadHosts = ReadonlyMap<string, HTMLElement>;
 
 export type RangeHandle = {
   readonly content: Readonly<ShallowRef<RangeContent>>;
+  readonly threadHosts: Readonly<ShallowRef<ThreadHosts>>;
   moveToChange(direction: Direction): void;
 };
 
@@ -38,11 +51,19 @@ export type RangeParts<H> = {
   readonly load: () => Promise<RangeFile | null>;
   readonly hosts: () => H | null;
   readonly preferences: MaybeRefOrGetter<Preferences>;
-  readonly build: (texts: RangeTexts, hosts: H, preferences: Preferences) => ShownRange;
+  readonly threads: () => readonly ShownThread[];
+  readonly events: Pick<RangeEvents, "startThread" | "toggleThreads">;
+  readonly build: (
+    texts: RangeTexts,
+    hosts: H,
+    preferences: Preferences,
+    events: RangeEvents,
+  ) => ShownRange;
 };
 
 type Live = {
   readonly content: ShallowRef<RangeContent>;
+  readonly threadHosts: ShallowRef<ThreadHosts>;
   waiting: RangeTexts | null;
   controller: ShownRange | null;
   disposed: boolean;
@@ -61,9 +82,27 @@ function land(live: Live, path: string, file: RangeFile | null): void {
   live.content.value = { kind: "columns", note: modeNote(mode) };
 }
 
+function build<H>(live: Live, parts: RangeParts<H>): void {
+  const hosts = parts.hosts();
+  if (live.waiting === null || hosts === null) {
+    return;
+  }
+  const events: RangeEvents = {
+    ...parts.events,
+    hosts: (next) => {
+      live.threadHosts.value = next;
+    },
+  };
+  const controller = parts.build(live.waiting, hosts, toValue(parts.preferences), events);
+  live.waiting = null;
+  live.controller = controller;
+  controller.showThreads(parts.threads());
+}
+
 export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   const live: Live = {
     content: shallowRef<RangeContent>({ kind: "loading" }),
+    threadHosts: shallowRef<ThreadHosts>(new Map()),
     waiting: null,
     controller: null,
     disposed: false,
@@ -72,17 +111,15 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   watch(
     [live.content, parts.hosts],
     () => {
-      const hosts = parts.hosts();
-      if (live.waiting === null || hosts === null) {
-        return;
-      }
-      live.controller = parts.build(live.waiting, hosts, toValue(parts.preferences));
-      live.waiting = null;
+      build(live, parts);
     },
     { flush: "post" },
   );
   watch(toRef(parts.preferences), (next) => {
     live.controller?.setPreferences(next);
+  });
+  watch(parts.threads, (next) => {
+    live.controller?.showThreads(next);
   });
   void parts.load().then((file) => {
     land(live, parts.path, file);
@@ -97,6 +134,7 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
 
   return {
     content: live.content,
+    threadHosts: live.threadHosts,
     moveToChange: (direction) => {
       live.controller?.moveToChange(direction);
     },
@@ -119,11 +157,22 @@ export function useRangeController(
   options: { readonly preferences: MaybeRefOrGetter<Preferences> },
 ): RangeHandle {
   const store = useRangeStore();
+  const { threads } = store;
   return followRange({
     path: file.path,
     load: () => store.loadFile(file),
     hosts: () => shownHosts(hosts),
     preferences: options.preferences,
-    build: (texts, shown, preferences) => new RangeController(texts, shown, { preferences }),
+    threads: () => threads.shownFor(file.id),
+    events: {
+      startThread: (line) => {
+        threads.startThread(file.id, line);
+      },
+      toggleThreads: (keys) => {
+        threads.toggle(keys);
+      },
+    },
+    build: (texts, shown, preferences, events) =>
+      new RangeController(texts, shown, { preferences }, events),
   });
 }

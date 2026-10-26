@@ -28,6 +28,7 @@ const {
   dismissProblem,
   answer,
   dismissQuestion,
+  gitlab,
 } = useRangeStore();
 
 const focused = useWindowFocus();
@@ -44,6 +45,7 @@ const emptyText = computed(() =>
 watch(focused, (now) => {
   if (now) {
     void loadSettings();
+    gitlab.checkOnFocus();
   }
 });
 </script>

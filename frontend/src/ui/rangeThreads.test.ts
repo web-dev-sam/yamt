@@ -1,0 +1,307 @@
+import { expect, test } from "vitest";
+
+import {
+  changedThreadLine,
+  createFixtureRangeSource,
+  log,
+  unchangedThreadLine,
+  type RangeFileId,
+  type RangeSource,
+  type SourceFailure,
+  type Thread,
+} from "../ipc";
+import type { Problem } from "./problem";
+import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+
+type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+
+type Opened = {
+  readonly threads: RangeThreads;
+  readonly problems: Problem[];
+  readonly board: RangeFileId;
+  readonly other: RangeFileId;
+};
+
+const SEEDED = "?range=review&threads=seeded";
+const UNKNOWN: SourceFailure = { kind: "UnknownRangeFile", file: 99 };
+
+async function opened(search = "?range=review", edit: Edit = () => ({})): Promise<Opened> {
+  const fixture = createFixtureRangeSource(log, search);
+  const start = await fixture.openRange();
+  if (!start.ok) {
+    throw new Error("the fixture did not open");
+  }
+  const { files } = start.value;
+  function idOf(path: string): RangeFileId {
+    const entry = files.find((each) => each.path === path);
+    if (entry === undefined) {
+      throw new Error(`no ${path}`);
+    }
+    return entry.id;
+  }
+  const problems: Problem[] = [];
+  const threads = createRangeThreads({ ...fixture, ...edit(fixture) }, (problem) => {
+    problems.push(problem);
+  });
+  await threads.load();
+  return { threads, problems, board: idOf("src/board/board.ts"), other: idOf("config") };
+}
+
+function threadAt(threads: RangeThreads, index: number): Thread {
+  const thread = threads.list.value.threads[index];
+  if (thread === undefined) {
+    throw new Error(`no thread at ${index}`);
+  }
+  return thread;
+}
+
+function texts(thread: Thread): string[] {
+  return thread.messages.map(({ body }) => (body.kind === "note" ? body.text : "ai"));
+}
+
+test("a draft's Comment adds the thread and its key becomes the stored id with the text kept", async () => {
+  const { threads, board } = await opened();
+  const line = changedThreadLine("right", 3);
+  threads.startThread(board, line);
+  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "draft" }]);
+  expect(threads.boxOf("draft-0")).toEqual({
+    kind: "draft",
+    draft: { kind: "thread", file: board, line, text: "", focus: 0 },
+  });
+
+  threads.writeDraft("draft-0", "Why 300?");
+  await threads.addThread("draft-0", "Why 300?");
+
+  const thread = threadAt(threads, 0);
+  expect(texts(thread)).toEqual(["Why 300?"]);
+  expect(thread.line).toEqual(line);
+  expect(threads.drafts.value.size).toBe(0);
+  expect(threads.open.value).toEqual(new Set([thread.id]));
+  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "open" }]);
+  expect(threads.boxOf("draft-0")).toEqual({ kind: "thread", thread, open: true });
+});
+
+test("a refused Comment keeps the draft with its text and reports the add", async () => {
+  const { threads, problems, board } = await opened("?range=review", () => ({
+    addThread: async () => ({ ok: false, failure: UNKNOWN }),
+  }));
+  threads.startThread(board, changedThreadLine("left", 1));
+
+  await threads.addThread("draft-0", "Why 300?");
+
+  expect(threads.list.value.threads).toEqual([]);
+  expect(threads.drafts.value.get("draft-0")).toMatchObject({ kind: "thread", text: "Why 300?" });
+  expect(problems).toEqual([{ action: "threads", step: "add", cause: UNKNOWN }]);
+});
+
+test("a second Comment while the first is in flight sends nothing more", async () => {
+  let calls = 0;
+  const { threads, board } = await opened("?range=review", (fixture) => ({
+    addThread: async (file, line, text) => {
+      calls += 1;
+      return fixture.addThread(file, line, text);
+    },
+  }));
+  threads.startThread(board, changedThreadLine("left", 1));
+
+  await Promise.all([threads.addThread("draft-0", "a"), threads.addThread("draft-0", "a")]);
+
+  expect(calls).toBe(1);
+  expect(threads.list.value.threads).toHaveLength(1);
+});
+
+test("a second press on a line with an open draft focuses it, with no second draft", async () => {
+  const { threads, board, other } = await opened();
+  const line = unchangedThreadLine("left", { left: 4, right: 6 });
+  threads.startThread(board, line);
+  threads.writeDraft("draft-0", "half");
+
+  threads.startThread(board, unchangedThreadLine("left", { left: 4, right: 6 }));
+
+  expect([...threads.drafts.value]).toEqual([
+    ["draft-0", { kind: "thread", file: board, line, text: "half", focus: 1 }],
+  ]);
+
+  threads.startThread(board, unchangedThreadLine("right", { left: 4, right: 6 }));
+  threads.startThread(board, changedThreadLine("left", 5));
+  threads.startThread(other, line);
+  expect([...threads.drafts.value.keys()]).toEqual(["draft-0", "draft-1", "draft-2", "draft-3"]);
+});
+
+test("a dropped draft leaves the line; writing a missing draft creates nothing", async () => {
+  const { threads, board } = await opened();
+  threads.startThread(board, changedThreadLine("left", 1));
+
+  threads.dropDraft("draft-0");
+  threads.writeDraft("draft-0", "late");
+
+  expect(threads.drafts.value.size).toBe(0);
+  expect(threads.shownFor(board)).toEqual([]);
+});
+
+test("stored threads come back collapsed; open and collapse per thread and per line", async () => {
+  const { threads, board } = await opened(SEEDED);
+  const keys = ["thread-0", "thread-1", "thread-2", "thread-3"];
+  expect(threads.shownFor(board).map(({ key, shown }) => [key, shown])).toEqual(
+    keys.map((key) => [key, "collapsed"]),
+  );
+
+  threads.toggle(["thread-0"]);
+  expect([...threads.open.value]).toEqual([threadAt(threads, 0).id]);
+  expect(threads.boxOf("thread-0")).toMatchObject({ kind: "thread", open: true });
+
+  threads.toggle(["thread-0", "thread-1"]);
+  expect(threads.open.value.size).toBe(2);
+
+  threads.toggle(["thread-0", "thread-1"]);
+  expect(threads.open.value.size).toBe(0);
+
+  threads.toggle(["draft-7", "nothing"]);
+  expect(threads.open.value.size).toBe(0);
+  expect(threads.boxOf("nothing")).toBeNull();
+});
+
+test("counts per file ignore drafts", async () => {
+  const { threads, board, other } = await opened(SEEDED);
+  threads.startThread(other, changedThreadLine("left", 0));
+  threads.startThread(board, changedThreadLine("left", 0));
+
+  expect([...threads.counts.value]).toEqual([[board, 4]]);
+
+  await threads.addThread("draft-0", "here");
+
+  expect(threads.counts.value.get(other)).toBe(1);
+  expect(threads.counts.value.get(board)).toBe(4);
+});
+
+test("blank text is never sent", async () => {
+  const sent: string[] = [];
+  const { threads, board } = await opened(SEEDED, (fixture) => ({
+    addThread: async (file, line, text) => {
+      sent.push("thread");
+      return fixture.addThread(file, line, text);
+    },
+    addNote: async (thread, text) => {
+      sent.push("note");
+      return fixture.addNote(thread, text);
+    },
+    queueMessage: async (message, text) => {
+      sent.push("queue");
+      return fixture.queueMessage(message, text);
+    },
+  }));
+  const thread = threadAt(threads, 3);
+  const [message] = thread.messages;
+  if (message === undefined) {
+    throw new Error("no message");
+  }
+  threads.startThread(board, changedThreadLine("left", 0));
+
+  await threads.addThread("draft-0", "  \n");
+  await threads.addNote(thread.id, "\t");
+  await threads.queue(message.id, "");
+
+  expect(sent).toEqual([]);
+  expect(threads.drafts.value.has("draft-0")).toBe(true);
+});
+
+test("a note is added to its thread and its draft text cleared; a refused note keeps it", async () => {
+  const { threads } = await opened(SEEDED);
+  const { id } = threadAt(threads, 0);
+  threads.writeNote(id, "More?");
+  expect(threads.noteText(id)).toBe("More?");
+
+  await threads.addNote(id, "More?");
+
+  expect(texts(threadAt(threads, 0))).toEqual(["Why does the overdue check go?", "More?"]);
+  expect(threads.noteText(id)).toBe("");
+
+  const refused = await opened(SEEDED, () => ({
+    addNote: async (thread) => ({ ok: false, failure: { kind: "UnknownThread", thread } }),
+  }));
+  await refused.threads.addNote(id, "Lost?");
+  expect(refused.threads.noteText(id)).toBe("Lost?");
+  expect(refused.problems).toEqual([
+    { action: "threads", step: "note", cause: { kind: "UnknownThread", thread: id } },
+  ]);
+});
+
+test("writing a blank note drops its draft", async () => {
+  const { threads } = await opened(SEEDED);
+  const { id } = threadAt(threads, 0);
+  threads.writeNote(id, "x");
+
+  threads.writeNote(id, " ");
+
+  expect(threads.drafts.value.size).toBe(0);
+});
+
+test("queue and unqueue change the posting and the queued count; a pending one reports", async () => {
+  const { threads, problems } = await opened(SEEDED);
+  expect(threads.queued.value).toBe(2);
+  const [open] = threadAt(threads, 3).messages;
+  const [pending] = threadAt(threads, 2).messages;
+  if (open === undefined || pending === undefined) {
+    throw new Error("no message");
+  }
+
+  await threads.queue(open.id, "Is it still used?");
+  expect(threadAt(threads, 3).messages[0]?.posting).toEqual({
+    kind: "queued",
+    text: "Is it still used?",
+  });
+  expect(threads.queued.value).toBe(3);
+
+  await threads.unqueue(open.id);
+  expect(threads.queued.value).toBe(2);
+
+  await threads.queue(pending.id, "again");
+  await threads.unqueue(pending.id);
+  expect(problems).toEqual([
+    { action: "threads", step: "queue", cause: { kind: "MessagePending", message: pending.id } },
+    { action: "threads", step: "unqueue", cause: { kind: "MessagePending", message: pending.id } },
+  ]);
+});
+
+test("a failed list reports it and keeps the empty list", async () => {
+  const { threads, problems } = await opened(SEEDED, () => ({
+    listThreads: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
+  }));
+
+  expect(threads.list.value.threads).toEqual([]);
+  expect(problems).toEqual([{ action: "threads", step: "list", cause: { kind: "WorkerStopped" } }]);
+});
+
+test("a reply arriving after the view unmounted is applied to the store only", async () => {
+  const openers: (() => void)[] = [];
+  const gate = new Promise<void>((resolve) => {
+    openers.push(resolve);
+  });
+  const { threads, board } = await opened("?range=review", (fixture) => ({
+    addThread: async (file, line, text) => {
+      await gate;
+      return fixture.addThread(file, line, text);
+    },
+  }));
+  const line = changedThreadLine("left", 2);
+  threads.startThread(board, line);
+  const adding = threads.addThread("draft-0", "late");
+  threads.dropDraft("draft-0");
+
+  for (const open of openers) {
+    open();
+  }
+  await adding;
+
+  expect(texts(threadAt(threads, 0))).toEqual(["late"]);
+  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "open" }]);
+});
+
+test("replace mirrors a send's list", async () => {
+  const { threads } = await opened(SEEDED);
+  const list = { threads: [threadAt(threads, 0)] };
+
+  threads.replace(list);
+
+  expect(threads.list.value).toBe(list);
+});

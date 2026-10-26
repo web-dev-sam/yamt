@@ -2,7 +2,7 @@ import { keyLabel, type KeyProblem } from "../ipc";
 import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, operationName } from "./operationText";
-import type { Problem, ProblemCause } from "./problem";
+import type { Problem, ProblemCause, ThreadStep } from "./problem";
 
 type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 
@@ -48,6 +48,16 @@ const FIXED_REASONS: Readonly<Record<FixedKind, string>> = {
   AiOff: "the AI is off; start yamt with --ai to use it.",
 };
 
+const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
+  list: "Could not load the threads",
+  add: "Could not add the thread",
+  note: "Could not add the note",
+  queue: "Could not queue the message",
+  unqueue: "Could not unqueue the message",
+  check: "Could not check GitLab",
+  send: "Could not send to GitLab",
+};
+
 function attempted(problem: CausedProblem): string {
   switch (problem.action) {
     case "list":
@@ -78,6 +88,8 @@ function attempted(problem: CausedProblem): string {
       return `Could not load ${problem.name}`;
     case "saveTab":
       return `Could not save ${problem.name}`;
+    case "threads":
+      return THREAD_STEP_WORDS[problem.step];
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;

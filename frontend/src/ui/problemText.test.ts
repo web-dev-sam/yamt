@@ -240,6 +240,20 @@ test("a failed openRange says the range could not be opened, with git's words", 
   );
 });
 
+test.each([
+  ["list", "Could not load the threads: boom"],
+  ["add", "Could not add the thread: boom"],
+  ["note", "Could not add the note: boom"],
+  ["queue", "Could not queue the message: boom"],
+  ["unqueue", "Could not unqueue the message: boom"],
+  ["check", "Could not check GitLab: boom"],
+  ["send", "Could not send to GitLab: boom"],
+] as const)("a failed thread call at %s says what failed", (step, words) => {
+  expect(text({ action: "threads", step, cause: { kind: "Unexpected", message: "boom" } })).toBe(
+    words,
+  );
+});
+
 test("a save to a tab another call closed says the tab was closed", () => {
   expect(
     text({

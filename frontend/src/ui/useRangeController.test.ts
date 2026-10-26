@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
 
-import type { Preferences, RangeTexts } from "../editor";
-import type { RangeFile } from "../ipc";
+import type { Preferences, RangeEvents, RangeTexts, ShownThread } from "../editor";
+import { changedThreadLine, type RangeFile } from "../ipc";
 import { preferencesOf, startSettings } from "./settings";
 import { followRange, shownHosts, type RangeHandle, type ShownRange } from "./useRangeController";
 
@@ -14,6 +14,8 @@ type Run = {
   readonly calls: string[];
   readonly hosts: ShallowRef<string | null>;
   readonly preferences: ShallowRef<Preferences>;
+  readonly threads: ShallowRef<readonly ShownThread[]>;
+  readonly events: () => RangeEvents;
   readonly answer: (file: RangeFile | null) => Promise<void>;
   readonly stop: () => void;
 };
@@ -27,12 +29,15 @@ const TEXTS: RangeFile = {
   differences: [],
   mode: { kind: "changed", old: "file", new: "executable" },
 };
+const THREAD: ShownThread = { key: "thread-1", line: changedThreadLine("left", 2), shown: "open" };
 
 function run(firstHosts: string | null): Run {
   const built: Built[] = [];
   const calls: string[] = [];
   const hosts = shallowRef<string | null>(firstHosts);
   const preferences = shallowRef(DARK);
+  const threads = shallowRef<readonly ShownThread[]>([]);
+  const given: RangeEvents[] = [];
   const answers: ((file: RangeFile | null) => void)[] = [];
   const loaded = new Promise<RangeFile | null>((resolve) => {
     answers.push(resolve);
@@ -41,6 +46,7 @@ function run(firstHosts: string | null): Run {
   const shown: ShownRange = {
     setPreferences: (next) => calls.push(`preferences ${next.theme}`),
     moveToChange: (direction) => calls.push(`move ${direction}`),
+    showThreads: (next) => calls.push(`threads ${next.map(({ key }) => key).join(",")}`),
     destroy: () => calls.push("destroy"),
   };
   const handle = scope.run(() =>
@@ -49,8 +55,14 @@ function run(firstHosts: string | null): Run {
       load: () => loaded,
       hosts: () => hosts.value,
       preferences,
-      build: (texts, at, chosen) => {
+      threads: () => threads.value,
+      events: {
+        startThread: (line) => calls.push(`start ${line.kind}`),
+        toggleThreads: (keys) => calls.push(`toggle ${keys.join(",")}`),
+      },
+      build: (texts, at, chosen, events) => {
         built.push({ texts, hosts: at, theme: chosen.theme });
+        given.push(events);
         return shown;
       },
     }),
@@ -64,6 +76,14 @@ function run(firstHosts: string | null): Run {
     calls,
     hosts,
     preferences,
+    threads,
+    events: () => {
+      const [events] = given;
+      if (events === undefined) {
+        throw new Error("nothing built");
+      }
+      return events;
+    },
     answer: async (file) => {
       for (const answer of answers) {
         answer(file);
@@ -116,7 +136,48 @@ test("the controller waits for its hosts, then follows preferences and arrows, a
   live.stop();
   live.handle.moveToChange("down");
 
-  expect(live.calls).toEqual(["preferences light", "move up", "destroy"]);
+  expect(live.calls).toEqual(["threads ", "preferences light", "move up", "destroy"]);
+});
+
+test("the built controller shows the file's threads at once and each later change of them", async () => {
+  const live = run(null);
+  live.threads.value = [THREAD];
+  await nextTick();
+  expect(live.calls).toEqual([]);
+
+  await live.answer(TEXTS);
+  live.hosts.value = "mounted";
+  await nextTick();
+  expect(live.calls).toEqual(["threads thread-1"]);
+
+  live.threads.value = [THREAD, { ...THREAD, key: "draft-0", shown: "draft" }];
+  await nextTick();
+  expect(live.calls).toEqual(["threads thread-1", "threads thread-1,draft-0"]);
+});
+
+test("a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again)", async () => {
+  const live = run("hosts");
+  await live.answer(TEXTS);
+  live.stop();
+
+  live.threads.value = [THREAD];
+  await nextTick();
+
+  expect(live.calls).toEqual(["threads ", "destroy"]);
+});
+
+test("the controller gets the line events and its hosts reach threadHosts", async () => {
+  const live = run("hosts");
+  await live.answer(TEXTS);
+  const events = live.events();
+  const hosts = new Map<string, HTMLElement>();
+
+  events.startThread(changedThreadLine("right", 4));
+  events.toggleThreads(["thread-1", "thread-2"]);
+  events.hosts(hosts);
+
+  expect(live.calls).toEqual(["threads ", "start added", "toggle thread-1,thread-2"]);
+  expect(live.handle.threadHosts.value).toBe(hosts);
 });
 
 test.each<RangeFile>([
@@ -173,7 +234,7 @@ test("preferences changed before the controller exists reach it at build, not th
   await nextTick();
 
   expect(live.built.map(({ theme }) => theme)).toEqual(["light"]);
-  expect(live.calls).toEqual([]);
+  expect(live.calls).toEqual(["threads "]);
 });
 
 test.each(["left", "right", "strip"] as const)(

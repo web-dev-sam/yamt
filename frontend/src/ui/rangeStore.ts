@@ -5,6 +5,8 @@ import { createAsking, type Asking } from "./asking";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
+import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
+import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import type { Screen } from "./screen";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
@@ -21,6 +23,8 @@ export type RangeStore = SettingsStore & {
   readonly screen: Readonly<ShallowRef<Screen>>;
   readonly fileListShown: ShallowRef<boolean>;
   readonly preferences: ComputedRef<Preferences>;
+  readonly threads: RangeThreads;
+  readonly gitlab: GitLabState;
   startUp(): Promise<void>;
   loadSettings(): Promise<void>;
   showFile(path: string): void;
@@ -44,6 +48,8 @@ type Refs = {
 type State = Refs & {
   readonly source: RangeSource;
   readonly asking: Asking;
+  readonly threads: RangeThreads;
+  readonly gitlab: GitLabState;
   recent: readonly RangeFileId[];
   latestSettings: number;
 };
@@ -66,13 +72,28 @@ function createRefs(startTheme: Theme): Refs {
 
 export function createRangeStore(source: RangeSource, startTheme: Theme): RangeStore {
   const refs = createRefs(startTheme);
-  const state: State = { ...refs, source, asking: createAsking(), recent: [], latestSettings: 0 };
+  function problems(problem: Problem): void {
+    report(refs, problem);
+  }
+  const threads = createRangeThreads(source, problems);
+  const gitlab = createGitLabCheck(source, threads, problems, refs.start);
+  const state: State = {
+    ...refs,
+    source,
+    asking: createAsking(),
+    threads,
+    gitlab,
+    recent: [],
+    latestSettings: 0,
+  };
   const settings = settingsActions(state);
   const created: RangeStore = {
     ...refs,
     shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),
+    threads,
+    gitlab,
     ...settings,
     startUp: () => startUp(state, settings),
     showFile: (path) => {
@@ -154,6 +175,7 @@ async function startUp(state: State, settings: SettingsActions): Promise<void> {
   if (first !== undefined) {
     show(state, first);
   }
+  await Promise.all([state.threads.load(), state.gitlab.checkNow()]);
 }
 
 async function loadFile(state: State, entry: RangeEntry): Promise<RangeFile | null> {

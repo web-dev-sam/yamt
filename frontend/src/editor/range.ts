@@ -38,12 +38,6 @@ export type RangeEvents = {
   readonly hosts: (hosts: ReadonlyMap<string, HTMLElement>) => void;
 };
 
-const NO_EVENTS: RangeEvents = {
-  startThread: () => {},
-  toggleThreads: () => {},
-  hosts: () => {},
-};
-
 export class RangeController {
   readonly #differences: readonly Difference[];
   readonly #events: RangeEvents;
@@ -54,12 +48,7 @@ export class RangeController {
   #settings: PaneSettings;
   #destroyed = false;
 
-  constructor(
-    texts: RangeTexts,
-    hosts: CompareHosts,
-    options: RangeOptions,
-    events: RangeEvents = NO_EVENTS,
-  ) {
+  constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions, events: RangeEvents) {
     this.#differences = texts.differences;
     this.#events = events;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };

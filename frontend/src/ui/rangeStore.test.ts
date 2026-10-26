@@ -153,6 +153,62 @@ test("a failed openRange reports the range and shows nothing", async () => {
   ]);
 });
 
+test("at start the list shows first, then the threads load and GitLab is checked once", async () => {
+  const calls: string[] = [];
+  const store = await started(2, (fixture) => ({
+    openRange: async () => {
+      calls.push("openRange");
+      return fixture.openRange();
+    },
+    listThreads: async () => {
+      calls.push("listThreads");
+      return fixture.listThreads();
+    },
+    checkGitLab: async () => {
+      calls.push(`checkGitLab shown ${String(useRangeStore().shown.value)}`);
+      return fixture.checkGitLab();
+    },
+  }));
+
+  expect(calls).toEqual(["openRange", "listThreads", `checkGitLab shown ${fileAt(store, 0).id}`]);
+  expect(store.gitlab.check.value?.kind).toBe("linedUp");
+  expect(store.gitlab.checking.value).toBe(false);
+  expect(store.threads.list.value).toEqual({ threads: [] });
+});
+
+test("a failed openRange loads no threads and checks nothing", async () => {
+  quiet();
+  const calls: string[] = [];
+  const store = await started(2, () => ({
+    openRange: async () => ({ ok: false, failure: UNKNOWN }),
+    listThreads: async () => {
+      calls.push("listThreads");
+      return { ok: true, value: { threads: [] } };
+    },
+    checkGitLab: async () => {
+      calls.push("checkGitLab");
+      return { ok: false, failure: UNKNOWN };
+    },
+  }));
+
+  expect(calls).toEqual([]);
+  expect(store.gitlab.check.value).toBeNull();
+});
+
+test("a failed thread list is the window's problem", async () => {
+  const errors = quiet();
+  const store = await started(2, () => ({
+    listThreads: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
+  }));
+
+  expect(store.problem.value).toEqual({
+    action: "threads",
+    step: "list",
+    cause: { kind: "WorkerStopped" },
+  });
+  expect(errors).toEqual(['[error] store.threads_failed {step: "list", kind: "WorkerStopped"}']);
+});
+
 test("showFile from the settings screen shows the file and returns the screen to files", async () => {
   const store = await started(3);
   store.openSettings();

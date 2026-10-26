@@ -70,3 +70,9 @@ test("a failed openRange logs its cause under its own event (catches a log line 
     '[error] store.openRange_failed {kind: "Git", message: "bad revision"}',
   ]);
 });
+
+test("a failed thread call logs its step and cause (catches a log line without the step)", () => {
+  expect(logged({ action: "threads", step: "queue", cause: { kind: "EmptyMessage" } })).toEqual([
+    '[error] store.threads_failed {step: "queue", kind: "EmptyMessage"}',
+  ]);
+});

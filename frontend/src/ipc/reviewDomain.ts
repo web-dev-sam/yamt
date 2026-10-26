@@ -11,7 +11,7 @@ import { toThreadLine, type ThreadLine } from "./threadLine";
 import { invalid } from "./validate";
 
 type MessageBody = Readonly<Generated.MessageBody>;
-type Posting =
+export type Posting =
   | Readonly<Exclude<Generated.Posting, { kind: "pending" }>>
   | {
       readonly kind: "pending";
@@ -20,7 +20,7 @@ type Posting =
       readonly mergeRequest: string;
       readonly link: string;
     };
-type Message = {
+export type Message = {
   readonly id: MessageId;
   readonly body: MessageBody;
   readonly written: number;
@@ -35,7 +35,7 @@ export type Thread = {
 };
 export type ThreadList = { readonly threads: readonly Thread[] };
 export type ThreadAdded = { readonly thread: ThreadId; readonly list: ThreadList };
-type MergeRequestRef = {
+export type MergeRequestRef = {
   readonly reference: string;
   readonly title: string;
   readonly webUrl: string;
@@ -43,7 +43,7 @@ type MergeRequestRef = {
 type LookedAt =
   | { readonly kind: "branch"; readonly name: string }
   | { readonly kind: "commit"; readonly shortId: string };
-type NotLinedUp =
+export type NotLinedUp =
   | { readonly kind: "glabMissing" }
   | { readonly kind: "notLoggedIn"; readonly detail: string }
   | { readonly kind: "noMergeRequest"; readonly lookedAt: LookedAt }

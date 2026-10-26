@@ -5,7 +5,13 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 
 import { DEFAULT_KEYS, loadCompareFixture } from "../ipc";
-import { RangeController, type CompareHosts, type RangeOptions, type RangeTexts } from "./index";
+import {
+  RangeController,
+  type CompareHosts,
+  type RangeEvents,
+  type RangeOptions,
+  type RangeTexts,
+} from "./index";
 import { found } from "./paneHarness";
 
 const WIDTH = 1200;
@@ -16,6 +22,7 @@ const SCREENSHOTS = "/tmp/yamt-range";
 const MOUNTED = "data-range-probe";
 const PATH = "src/probe.ts";
 const OPTIONS: RangeOptions = { preferences: { theme: "dark", keys: DEFAULT_KEYS } };
+const EVENTS: RangeEvents = { startThread: () => {}, toggleThreads: () => {}, hosts: () => {} };
 const LEFT = [
   "const first = 1;",
   "const value = old(a, b);",
@@ -116,7 +123,7 @@ async function opened(): Promise<{ hosts: CompareHosts; controller: RangeControl
     right: RIGHT,
     differences: comparison.differences,
   };
-  const controller = new RangeController(texts, hosts, OPTIONS);
+  const controller = new RangeController(texts, hosts, OPTIONS, EVENTS);
   controllers.push(controller);
   return { hosts, controller };
 }
