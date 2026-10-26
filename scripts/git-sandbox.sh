@@ -1,5 +1,6 @@
-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh and operations-repo.sh:
-# the shared prelude for building a scripted repository in "$dir" without any user or system git config (risk RK19).
+# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh, operations-repo.sh and
+# range-repo.sh: the shared prelude for building a scripted repository in "$dir" without any user or system git config
+# (risk RK19).
 # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
 
 sandbox_name=$(basename "$0" .sh)
@@ -46,6 +47,18 @@ write() {
     mkdir -p "$(dirname "$dir/$1")"
     printf "$2" >"$dir/$1"
     repo_git add -- "$1"
+}
+
+# $1: the layer under "$files" (base, main or feature under scripts/demo), then the paths to copy from it into the
+# repo. Stages each path.
+put() {
+    local layer=$1 path
+    shift
+    for path in "$@"; do
+        mkdir -p "$(dirname "$dir/$path")"
+        cp "$files/$layer/$path" "$dir/$path"
+        repo_git add -- "$path"
+    done
 }
 
 # $1: how many files the merge in "$dir" must leave conflicted. Prints their paths; dies on any other count.

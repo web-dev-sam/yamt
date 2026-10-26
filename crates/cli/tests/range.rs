@@ -1,60 +1,42 @@
 #![cfg(test)]
 
-use std::fs;
-use std::path::Path;
-use std::process::Command;
-
 use serde_json::{Value, json};
 use tempfile::TempDir;
+use yamt_conflict_repo::{ConflictFile, FileKind, diverged_repo};
 
 mod yamt_cli;
 
 use yamt_cli::{path, yamt_cli};
 
-fn git(repo: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args([
-            "-c",
-            "user.name=yamt",
-            "-c",
-            "user.email=yamt@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .status()
-        .unwrap();
-    assert!(status.success(), "git {args:?}");
+fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
+    ConflictFile {
+        path,
+        kind: FileKind::Regular,
+        base,
+        local,
+        remote: base,
+    }
 }
 
-fn two_commit_repo(root: &Path) {
-    git(root, &["init", "-q"]);
-    fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
-    fs::write(root.join("b.txt"), "gone\n").unwrap();
-    git(root, &["add", "."]);
-    git(root, &["commit", "-q", "-m", "first"]);
-    fs::write(root.join("a.txt"), "one\n2\n").unwrap();
-    fs::remove_file(root.join("b.txt")).unwrap();
-    fs::write(root.join("c.bin"), b"\0bytes").unwrap();
-    git(root, &["add", "-A"]);
-    git(root, &["commit", "-q", "-m", "second"]);
+fn three_file_repo() -> TempDir {
+    diverged_repo(&[
+        changed("a.txt", Some(b"one\ntwo\n"), Some(b"one\n2\n")),
+        changed("b.txt", Some(b"gone\n"), None),
+        changed("c.bin", None, Some(b"\0bytes")),
+    ])
+    .unwrap()
 }
 
 // Catches a file answer printed out of list order, so the window's id (the index) would show another file.
 #[test]
 fn range_prints_the_start_and_every_file_at_its_id() {
-    let root = TempDir::new().unwrap();
-    two_commit_repo(root.path());
+    let root = three_file_repo();
 
-    let output = yamt_cli(&["range", path(root.path()), "HEAD~1..HEAD"]);
+    let output = yamt_cli(&["range", path(root.path()), "main..local"]);
 
     assert_eq!(output.code, 0, "{}", output.stderr);
     let data: Value = serde_json::from_str(&output.stdout).unwrap();
-    assert_eq!(data["start"]["range"], "HEAD~1..HEAD");
+    assert_eq!(data["start"]["range"], "main..local");
     let listed: Vec<(&Value, &Value)> = data["start"]["files"]
         .as_array()
         .unwrap()
@@ -102,13 +84,12 @@ fn a_malformed_range_exits_2_with_its_usage_line() {
     );
 }
 
-// Catches a range git cannot resolve exiting 1 like a read failure, or printing a half document.
+// Catches a range git cannot resolve exiting 1 like a read failure.
 #[test]
 fn an_unknown_name_exits_2_with_the_range_error() {
-    let root = TempDir::new().unwrap();
-    two_commit_repo(root.path());
+    let root = three_file_repo();
 
-    let output = yamt_cli(&["range", path(root.path()), "nope..HEAD"]);
+    let output = yamt_cli(&["range", path(root.path()), "nope..local"]);
 
     assert_eq!(output.code, 2);
     assert_eq!(output.stdout, "");

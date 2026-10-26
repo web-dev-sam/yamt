@@ -24,17 +24,6 @@ ui_on_feature=2222222222222222222222222222222222222222
 require_empty_dir "$dir"
 isolate_git_config
 
-# $1: the layer under scripts/demo (base, main or feature), then the paths to copy from it into the repo.
-put() {
-    local layer=$1 path
-    shift
-    for path in "$@"; do
-        mkdir -p "$(dirname "$dir/$path")"
-        cp "$files/$layer/$path" "$dir/$path"
-        repo_git add -- "$path"
-    done
-}
-
 # $1: the path in the repo, $2: the link's target. Stages the link.
 link() {
     rm -f "$dir/$1"
