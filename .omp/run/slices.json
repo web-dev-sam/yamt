@@ -33,16 +33,15 @@
       "frontend/src/ui/problemText.ts",
       "frontend/src/ui/problemText.test.ts",
       "frontend/src/ui/rangeAiView.ts",
-      "frontend/src/ui/rangeAiView.test.ts"
+      "frontend/src/ui/rangeAiView.test.ts",
+      "frontend/src/ipc/fixtureThreads.ts"
     ]
   },
-  "RVThreadBoxesR2": {
+  "RVAgentClientR2": {
     "owned": [
-      "frontend/scripts/app-session/args.ts",
-      "frontend/scripts/app-session/args.test.ts",
-      "frontend/scripts/app-session/startArgs.ts",
-      "frontend/scripts/app-session/startArgs.test.ts",
-      "frontend/scripts/app-session/start.ts"
+      "frontend/src/agent/index.test.ts",
+      "frontend/src/agent/internal/*.test.ts",
+      "frontend/src/ui/settings.test.ts"
     ]
   }
 }
