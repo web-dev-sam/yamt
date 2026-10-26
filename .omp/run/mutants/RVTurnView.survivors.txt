@@ -1,0 +1,30 @@
+just mutants d6490c5 (covers 24af296 RVTurnView)
+On lines 24af296 changed: 28 of 102 survivors/no-coverage:
+Survived StringLiteral frontend/scripts/fences.ts:175 | -     return { rule: "PM9", reason: "the AI's views are shown only in the range window" }; => +     return { rule: "PM9", reason: "" };
+Survived OptionalChaining frontend/scripts/fences.ts:171 | -     const inRange = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() === "range"; => +     const inRange = WINDOW_FILE.exec(file)?.[1].toLowerCas
+NoCoverage ConditionalExpression frontend/src/ui/aiClose.ts:29 | -       default: { => -         const _exhaustive: never = changes;
+NoCoverage BlockStatement frontend/src/ui/aiClose.ts:29 | -       default: { => -         const _exhaustive: never = changes;
+NoCoverage ConditionalExpression frontend/src/ui/aiClose.ts:58 | -       default: { => -         const _exhaustive: never = reply;
+NoCoverage BlockStatement frontend/src/ui/aiClose.ts:58 | -       default: { => -         const _exhaustive: never = reply;
+Survived ObjectLiteral frontend/src/ui/aiClose.ts:15 | -       log.warn("ai.close_look_failed", { ...look.cause }); => +       log.warn("ai.close_look_failed", {});
+Survived StringLiteral frontend/src/ui/aiClose.ts:15 | -       log.warn("ai.close_look_failed", { ...look.cause }); => +       log.warn("", { ...look.cause });
+NoCoverage ConditionalExpression frontend/src/ui/aiText.ts:52 | -       default: { => -         const _exhaustive: never = failure;
+NoCoverage BlockStatement frontend/src/ui/aiText.ts:52 | -       default: { => -         const _exhaustive: never = failure;
+Survived MethodExpression frontend/src/ui/aiText.ts:43 | -         return `The AI refused ${failure.method}: ${failure.message.trim()}`; => +         return `The AI refused ${failure.method}: ${failur
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:43 | -       add(rows, { kind: "context", old: line + 1, new: line + shift + 1, text: old[line] => +       add(rows, { kind: "context", old: line + 1, new: lin
+NoCoverage ConditionalExpression frontend/src/ui/editDiffLines.ts:58 | -       default: { => -         const _exhaustive: never = place;
+NoCoverage BlockStatement frontend/src/ui/editDiffLines.ts:58 | -       default: { => -         const _exhaustive: never = place;
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:82 | -       add(rows, { kind: "removed", old: line + 1, text: texts.old[line] ?? "" }); => +       add(rows, { kind: "removed", old: line + 1, text: te
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:85 | -       add(rows, { kind: "added", new: line + 1, text: texts.new[line] ?? "" }); => +       add(rows, { kind: "added", new: line + 1, text: text
+Survived ConditionalExpression frontend/src/ui/editDiffLines.ts:36 | -     } else if (row.kind !== "skipped") { => +     } else if (true) {
+Survived StringLiteral frontend/src/ui/editDiffLines.ts:36 | -     } else if (row.kind !== "skipped") { => +     } else if (row.kind !== "") {
+Survived EqualityOperator frontend/src/ui/editDiffLines.ts:55 | -         return length <= LONGEST_SHOWN_RUN => +         return length < LONGEST_SHOWN_RUN
+NoCoverage StringLiteral frontend/src/ui/problem.ts:84 | -     return { operation: problem.operation ?? "none", message: problem.message }; => +     return { operation: problem.operation ?? "", message: 
+Survived LogicalOperator frontend/src/ui/problem.ts:84 | -     return { operation: problem.operation ?? "none", message: problem.message }; => +     return { operation: problem.operation && "none", messa
+Survived ObjectLiteral frontend/src/ui/problem.ts:84 | -     return { operation: problem.operation ?? "none", message: problem.message }; => +     return {};
+Survived BlockStatement frontend/src/ui/problem.ts:83 | -   function stoppedFields(problem: Extract<Problem, { action: "stopped" }>): Record<strin => -     return { operation: problem.operation ?? "none", messa
+Survived StringLiteral frontend/src/ui/problem.ts:103 | -         log.info("store.stopped", stoppedFields(problem)); => +         log.info("", stoppedFields(problem));
+Survived StringLiteral frontend/src/ui/question.ts:157 | -   const KEEP_TITLE = "Keep the AI's changes?"; => +   const KEEP_TITLE = "";
+Survived StringLiteral frontend/src/ui/question.ts:160 | -   const STASH = "stash"; => +   const STASH = "";
+Survived StringLiteral frontend/src/ui/question.ts:158 | -   const KEEP = "Keep Changes"; => +   const KEEP = "";
+Survived StringLiteral frontend/src/ui/question.ts:159 | -   const DISCARD = "Discard Changes"; => +   const DISCARD = "";
