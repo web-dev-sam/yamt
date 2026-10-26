@@ -25,7 +25,11 @@
       "frontend/src/ui/question.test.ts",
       "frontend/src/ui/AGENTS.md",
       "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts"
+      "frontend/scripts/fences.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts"
     ]
   }
 }

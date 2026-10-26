@@ -1,0 +1,31 @@
+just mutants 3ed112e (covers 3adf0b3 RVAgentClientR1): Stryker 19 files, 2111 mutants; 1616 killed, 168 survived, 250 no coverage, 1 timeout.
+On lines 3adf0b3 changed: 72 (record-agent.ts 43 — a dev script with no node test; process.ts 5, protocol.ts 1, starter.ts 3, agent/index.ts 13, agentDomain.ts 4, fixtureAgent.ts 1, fixtureReview.ts 2):
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:150 | -         if (this.#loads.get(session) === loading) { => +         if (true) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:150 | -         if (this.#loads.get(session) === loading) { => +         if (false) {
+Survived EqualityOperator frontend/src/agent/internal/process.ts:150 | -         if (this.#loads.get(session) === loading) { => +         if (this.#loads.get(session) !== loading) {
+Survived BlockStatement frontend/src/agent/internal/process.ts:150 | -         if (this.#loads.get(session) === loading) { => -           this.#loads.delete(session);
+Survived CallExpression frontend/src/agent/internal/process.ts:151 | -           this.#loads.delete(session); => +           ;
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:49 | -     (input) => typeof input === "string" && isAgentSessionId(input), => +     (input) => true && isAgentSessionId(input),
+Survived ConditionalExpression frontend/src/agent/internal/starter.ts:56 | -       if (this.#agent === starting) { => +       if (true) {
+Survived ConditionalExpression frontend/src/agent/internal/starter.ts:75 | -       if (!prepared.ok && this.#checkout === preparing) { => +       if (!prepared.ok && true) {
+Survived ConditionalExpression frontend/src/agent/internal/starter.ts:107 | -           if (this.#agent === starting) { => +           if (true) {
+NoCoverage ConditionalExpression frontend/src/agent/index.ts:168 | -         default: { => -           const _exhaustive: never = now;
+NoCoverage BlockStatement frontend/src/agent/index.ts:168 | -         default: { => -           const _exhaustive: never = now;
+NoCoverage BlockStatement frontend/src/agent/index.ts:186 | -       if (isStopped(asking)) { => -         return;
+Survived BlockStatement frontend/src/agent/index.ts:100 | -       if (this.#starter.isDestroyed()) { => -         run.end(STOPPED);
+Survived ConditionalExpression frontend/src/agent/index.ts:100 | -       if (this.#starter.isDestroyed()) { => +       if (false) {
+Survived StringLiteral frontend/src/agent/index.ts:165 | -         case "stopped": => +         case "":
+Survived StringLiteral frontend/src/agent/index.ts:166 | -         case "answered": => +         case "":
+Survived ConditionalExpression frontend/src/agent/index.ts:166 | -         case "answered": => -           return;
+Survived ConditionalExpression frontend/src/agent/index.ts:181 | -         this.#end(run, started.kind === "failed" ? this.#failed(started.failure) : STOPP => +         this.#end(run, true ? this.#failed(started.failure
+Survived ConditionalExpression frontend/src/agent/index.ts:186 | -       if (isStopped(asking)) { => +       if (false) {
+Survived ConditionalExpression frontend/src/agent/index.ts:193 | -       if (request.session === null) { => +       if (true) {
+Survived ObjectLiteral frontend/src/agent/index.ts:201 | -       asking.now = { kind: "answered" }; => +       asking.now = {};
+Survived StringLiteral frontend/src/agent/index.ts:201 | -       asking.now = { kind: "answered" }; => +       asking.now = { kind: "" };
+NoCoverage ConditionalExpression frontend/src/ipc/agentDomain.ts:73 | -       default: { => -         const _exhaustive: never = dto;
+NoCoverage BlockStatement frontend/src/ipc/agentDomain.ts:73 | -       default: { => -         const _exhaustive: never = dto;
+Survived StringLiteral frontend/src/ipc/agentDomain.ts:65 | -       case "Clean": => +       case "":
+Survived StringLiteral frontend/src/ipc/agentDomain.ts:64 | -       case "Missing": => +       case "":
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:71 | -   const LOAD_CASE = "load"; => +   const LOAD_CASE = "";
+Survived ObjectLiteral frontend/src/ipc/fixtureReview.ts:50 | -   const SEEDED_AI_ANSWER: Generated.MessageBody = { => -     kind: "aiAnswer",
+Survived StringLiteral frontend/src/ipc/fixtureReview.ts:51 | -     kind: "aiAnswer", => +     kind: "",
