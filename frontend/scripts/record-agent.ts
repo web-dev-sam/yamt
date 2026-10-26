@@ -7,7 +7,6 @@
 // {{CHECKOUT}} and the session id as {{SESSION}}.
 import { spawn } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type { Writable } from "node:stream";
 
@@ -49,14 +48,34 @@ const COMMAND_STEP = v.object({
 });
 const CREATED = v.looseObject({ sessionId: v.string() });
 
+const SEPARATOR = /[\\/]/u;
+const ROOTED = /^(?:[\\/]|[A-Za-z]:)/u;
+const DRIVE = /^[A-Za-z]:$/u;
+
 function fail(message: string): never {
   process.stderr.write(`record-agent: ${message}\n`);
   process.exit(1);
 }
 
+function lexical(path: string): string[] {
+  const kept: string[] = [];
+  for (const segment of path.split(SEPARATOR)) {
+    if (segment === "..") {
+      kept.pop();
+    } else if (segment !== "" && segment !== ".") {
+      kept.push(segment);
+    }
+  }
+  return kept;
+}
+
+/** inside.ts's rule: `.`/`..` resolved without the disk, case folded under a drive letter. */
 function inside(path: string, folder: string): boolean {
-  const rest = relative(folder, resolve(folder, path));
-  return rest !== "" && !rest.startsWith("..") && !isAbsolute(rest);
+  const foldsCase = DRIVE.test(lexical(folder)[0] ?? "");
+  const base = lexical(foldsCase ? folder.toLowerCase() : folder);
+  const rooted = ROOTED.test(path) ? path : `${folder}/${path}`;
+  const target = lexical(foldsCase ? rooted.toLowerCase() : rooted);
+  return target.length > base.length && base.every((segment, at) => segment === target[at]);
 }
 
 function permissionAnswer(params: unknown, folder: string): unknown {

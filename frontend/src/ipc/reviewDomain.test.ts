@@ -72,7 +72,7 @@ test.each<[Generated.Posting, unknown]>([
 
 test.each<Generated.MessageBody>([
   { kind: "note", text: "Why?" },
-  { kind: "aiAnswer", turn: 2 },
+  { kind: "aiAnswer", session: "s1", turn: 2 },
 ])("message body %j is kept as it came", (body) => {
   const [converted] = toThreadList({ threads: [thread({ kind: "notQueued" }, body)] }).threads;
 

@@ -1,23 +1,23 @@
-import type { AgentSource, CheckoutFolder, Difference } from "../ipc";
+import type { AgentSource, Difference, SourceFailure } from "../ipc";
 import { parseWith, SYSTEM_TIMERS, type Reply, type Timers } from "../jsonrpc";
-import { agentCommand } from "./internal/command";
 import { replayTurns } from "./internal/conversation";
-import { requestFailure, sourceText, type AgentFailure } from "./internal/failure";
-import { AgentProcess, type Outcome } from "./internal/process";
+import { requestFailure, type AgentFailure } from "./internal/failure";
+import type { AgentProcess, Outcome } from "./internal/process";
 import { NEW_SESSION_RESULT, PROMPT_RESULT } from "./internal/protocol";
+import type { AgentSessionId } from "./internal/session";
+import { Starter } from "./internal/starter";
+import type { FileEdit, TurnView } from "./internal/turn";
 import {
-  agentSessionId,
   stopEnding,
   TurnRun,
-  type AgentSessionId,
   type Ending,
   type TurnEnd,
   type TurnEvents,
-} from "./internal/session";
-import type { FileEdit, TurnView } from "./internal/turn";
+} from "./internal/turnRun";
 
 export type { AgentFailure } from "./internal/failure";
-export type { AgentSessionId, TurnEnd, TurnEvents } from "./internal/session";
+export type { AgentSessionId } from "./internal/session";
+export type { TurnEnd, TurnEvents } from "./internal/turnRun";
 export type {
   FileEdit,
   Step,
@@ -41,17 +41,19 @@ export type AskRequest = { readonly session: AgentSessionId | null; readonly tex
 
 export interface RunningTurn {
   readonly ended: Promise<TurnEnd>;
-  /** Sends `session/cancel` once the prompt is out; before that, the turn ends without prompting. */
+  /** Sends `session/cancel` once the prompt is out; before that, the turn ends stopped at once. */
   stop(): void;
 }
 
 export type ConversationLoad =
   | { readonly kind: "loaded"; readonly turns: readonly TurnView[] }
-  | { readonly kind: "failed"; readonly failure: AgentFailure };
+  | { readonly kind: "failed"; readonly failure: AgentFailure }
+  | { readonly kind: "stopped" };
 
 export type EditDiff =
   | { readonly kind: "differences"; readonly differences: readonly Difference[] }
   | { readonly kind: "tooLarge"; readonly limit: number }
+  | { readonly kind: "appFailed"; readonly failure: SourceFailure }
   | { readonly kind: "failed"; readonly message: string };
 
 export type AgentSetup = {
@@ -60,26 +62,32 @@ export type AgentSetup = {
   readonly timers?: Timers;
 };
 
-type Asking = {
-  stopped: boolean;
-  prompted: { readonly agent: AgentProcess; readonly session: AgentSessionId } | null;
-};
+type Asking =
+  | { readonly kind: "preparing" }
+  | { readonly kind: "stopped" }
+  | { readonly kind: "prompted"; readonly agent: AgentProcess; readonly session: AgentSessionId }
+  | { readonly kind: "answered" };
+
+type AskingNow = { now: Asking };
+
+const STOPPED: Ending = { kind: "stopped" };
+
+function isStopped(asking: AskingNow): boolean {
+  return asking.now.kind === "stopped";
+}
 
 /** The window's one agent: the checkout made and the process started at the first ask. */
 export class AgentClient {
   readonly #source: AgentSource;
-  readonly #command: () => readonly string[];
   readonly #timers: Timers;
+  readonly #starter: Starter;
   readonly #running = new Set<TurnRun>();
   readonly #bySession = new Map<AgentSessionId, TurnRun>();
-  #checkout: Promise<Outcome<CheckoutFolder>> | null = null;
-  #agent: Promise<Outcome<AgentProcess>> | null = null;
-  #destroyed = false;
 
   constructor(setup: AgentSetup) {
     this.#source = setup.source;
-    this.#command = setup.command;
     this.#timers = setup.timers ?? SYSTEM_TIMERS;
+    this.#starter = new Starter({ ...setup, timers: this.#timers });
   }
 
   ask(request: AskRequest, events: TurnEvents): RunningTurn {
@@ -89,36 +97,33 @@ export class AgentClient {
       run.end({ kind: "failed", failure: { kind: "busy" } });
       return { ended: run.ended, stop: () => undefined };
     }
-    if (this.#destroyed) {
-      run.end({ kind: "stopped" });
+    if (this.#starter.isDestroyed()) {
+      run.end(STOPPED);
       return { ended: run.ended, stop: () => undefined };
     }
-    const asking: Asking = { stopped: false, prompted: null };
+    const asking: AskingNow = { now: { kind: "preparing" } };
     this.#running.add(run);
     if (session !== null) {
       this.#bySession.set(session, run);
     }
-    void this.#turn(run, request, asking).finally(() => this.#forget(run));
-    return {
-      ended: run.ended,
-      stop: () => {
-        asking.stopped = true;
-        asking.prompted?.agent.cancel(asking.prompted.session);
-      },
-    };
+    void this.#turn(run, request, asking);
+    return { ended: run.ended, stop: () => this.#stop(run, asking) };
   }
 
   async loadConversation(session: AgentSessionId): Promise<ConversationLoad> {
     if (this.#bySession.has(session)) {
       return { kind: "failed", failure: { kind: "busy" } };
     }
-    const agent = await this.#ready();
-    if (!agent.ok) {
-      return { kind: "failed", failure: agent.failure };
+    const started = await this.#starter.ready(() => true);
+    if (started.kind !== "started") {
+      return started.kind === "failed" ? started : { kind: "stopped" };
     }
-    const replay = await agent.value.replay(session);
-    return replay.ok
-      ? { kind: "loaded", turns: replayTurns(replay.value) }
+    const replay = await started.agent.replay(session);
+    if (replay.ok) {
+      return { kind: "loaded", turns: replayTurns(replay.value) };
+    }
+    return this.#starter.isDestroyed()
+      ? { kind: "stopped" }
       : { kind: "failed", failure: replay.failure };
   }
 
@@ -131,51 +136,76 @@ export class AgentClient {
       const { failure } = result;
       return failure.kind === "ColumnTooLarge"
         ? { kind: "tooLarge", limit: failure.limit }
-        : { kind: "failed", message: sourceText(failure) };
+        : { kind: "appFailed", failure };
     } catch (error) {
       return { kind: "failed", message: String(error) };
     }
   }
 
-  /** Whether any turn is running. */
+  /** Whether any turn is running; false already inside an `ended` handler. */
   isRunning(): boolean {
     return this.#running.size > 0;
   }
 
-  /** Stops the process; running turns end stopped. */
+  /** Stops the process; running turns end stopped, and nothing starts afterwards. */
   destroy(): void {
-    this.#destroyed = true;
-    void this.#agent?.then((agent) => (agent.ok ? agent.value.stop() : undefined));
+    this.#starter.destroy();
   }
 
-  async #turn(run: TurnRun, request: AskRequest, asking: Asking): Promise<void> {
-    const agent = await this.#ready();
-    if (!agent.ok) {
-      run.end(this.#failed(agent.failure));
+  #stop(run: TurnRun, asking: AskingNow): void {
+    const { now } = asking;
+    switch (now.kind) {
+      case "preparing":
+        asking.now = { kind: "stopped" };
+        this.#end(run, STOPPED);
+        return;
+      case "prompted":
+        now.agent.cancel(now.session);
+        return;
+      case "stopped":
+      case "answered":
+        return;
+      default: {
+        const _exhaustive: never = now;
+        return _exhaustive;
+      }
+    }
+  }
+
+  async #turn(run: TurnRun, request: AskRequest, asking: AskingNow): Promise<void> {
+    const started = await this.#starter.ready(() => !isStopped(asking));
+    if (isStopped(asking)) {
       return;
     }
-    const session = await this.#session(agent.value, request.session, run);
+    if (started.kind !== "started") {
+      this.#end(run, started.kind === "failed" ? this.#failed(started.failure) : STOPPED);
+      return;
+    }
+    const { agent } = started;
+    const session = await this.#session(agent, request.session);
+    if (isStopped(asking)) {
+      return;
+    }
     if (!session.ok) {
-      run.end(this.#failed(session.failure));
+      this.#end(run, this.#failed(session.failure));
       return;
     }
-    const unlisten = agent.value.listen(session.value, run);
-    if (asking.stopped || this.#destroyed) {
-      unlisten();
-      run.end({ kind: "stopped" });
-      return;
+    if (request.session === null) {
+      this.#bySession.set(session.value, run);
+      run.session(session.value);
     }
-    asking.prompted = { agent: agent.value, session: session.value };
+    const unlisten = agent.listen(session.value, run);
+    asking.now = { kind: "prompted", agent, session: session.value };
     const prompt = [{ type: "text", text: request.text }];
-    const reply = await agent.value.request("session/prompt", { sessionId: session.value, prompt });
+    const reply = await agent.request("session/prompt", { sessionId: session.value, prompt });
+    asking.now = { kind: "answered" };
     unlisten();
-    run.end(this.#promptEnding(agent.value, reply));
+    this.#end(run, this.#promptEnding(agent, reply));
   }
 
   async #session(
     agent: AgentProcess,
     session: AgentSessionId | null,
-    run: TurnRun,
   ): Promise<Outcome<AgentSessionId>> {
     if (session !== null) {
       const failure = await agent.load(session);
@@ -186,104 +216,37 @@ export class AgentClient {
       return { ok: false, failure: requestFailure("session/new", reply, agent.exit) };
     }
     const parsed = parseWith(NEW_SESSION_RESULT, reply.value);
-    const created = parsed.ok ? agentSessionId(parsed.value.sessionId) : null;
-    if (created === null) {
-      const message = parsed.ok ? "an empty session id" : parsed.reason;
+    if (!parsed.ok) {
+      const message = parsed.reason;
       return { ok: false, failure: { kind: "refused", method: "session/new", message } };
     }
+    const created = parsed.value.sessionId;
     agent.created(created);
-    this.#bySession.set(created, run);
-    run.session(created);
     return { ok: true, value: created };
   }
 
   #promptEnding(agent: AgentProcess, reply: Reply): Ending {
-    if (reply.kind === "result") {
-      const parsed = parseWith(PROMPT_RESULT, reply.value);
-      return parsed.ok
-        ? stopEnding(parsed.value.stopReason)
-        : this.#failed({ kind: "refused", method: "session/prompt", message: parsed.reason });
+    if (reply.kind !== "result") {
+      return this.#failed(requestFailure("session/prompt", reply, agent.exit));
     }
-    if (reply.kind === "closed" && agent.isStopping) {
-      return { kind: "stopped" };
-    }
-    return this.#failed(requestFailure("session/prompt", reply, agent.exit));
+    const parsed = parseWith(PROMPT_RESULT, reply.value);
+    return parsed.ok
+      ? stopEnding(parsed.value.stopReason)
+      : this.#failed({ kind: "refused", method: "session/prompt", message: parsed.reason });
   }
 
   #failed(failure: AgentFailure): Ending {
-    return this.#destroyed ? { kind: "stopped" } : { kind: "failed", failure };
+    return this.#starter.isDestroyed() ? STOPPED : { kind: "failed", failure };
   }
 
-  #forget(run: TurnRun): void {
+  /** Forgets the run before it settles, so code awaiting `ended` sees it gone. */
+  #end(run: TurnRun, ending: Ending): void {
     this.#running.delete(run);
     for (const [session, each] of this.#bySession) {
       if (each === run) {
         this.#bySession.delete(session);
       }
     }
-  }
-
-  async #ready(): Promise<Outcome<AgentProcess>> {
-    const folder = await this.#folder();
-    if (!folder.ok) {
-      return folder;
-    }
-    const starting = this.#agent ?? this.#start(folder.value);
-    this.#agent = starting;
-    const started = await starting;
-    if (!started.ok && this.#agent === starting) {
-      this.#agent = null;
-      if (started.failure.kind === "checkoutFailed") {
-        this.#checkout = null;
-      }
-    }
-    return started;
-  }
-
-  async #folder(): Promise<Outcome<CheckoutFolder>> {
-    const preparing = this.#checkout ?? this.#prepare();
-    this.#checkout = preparing;
-    const prepared = await preparing;
-    if (!prepared.ok && this.#checkout === preparing) {
-      this.#checkout = null;
-    }
-    return prepared;
-  }
-
-  async #prepare(): Promise<Outcome<CheckoutFolder>> {
-    try {
-      const result = await this.#source.prepareCheckout();
-      if (!result.ok) {
-        return {
-          ok: false,
-          failure: { kind: "checkoutFailed", message: sourceText(result.failure) },
-        };
-      }
-      const ready = result.value;
-      return ready.kind === "Ready"
-        ? { ok: true, value: ready.folder }
-        : { ok: false, failure: { kind: "checkoutFailed", message: ready.message } };
-    } catch (error) {
-      return { ok: false, failure: { kind: "checkoutFailed", message: String(error) } };
-    }
-  }
-
-  #start(folder: CheckoutFolder): Promise<Outcome<AgentProcess>> {
-    const command = agentCommand(this.#command());
-    if (command === null) {
-      return Promise.resolve({ ok: false, failure: { kind: "noCommand" } });
-    }
-    const starting = AgentProcess.start({
-      source: this.#source,
-      command,
-      folder,
-      timers: this.#timers,
-      exited: () => {
-        if (this.#agent === starting) {
-          this.#agent = null;
-        }
-      },
-    });
-    return starting;
+    run.end(ending);
   }
 }

@@ -40,9 +40,12 @@ export function toResult<T>(result: CommandResult<T>): SourceResult<T> {
   return { ok: false, failure: result.error };
 }
 
+export function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
+  return result.ok ? { ok: true, value: to(result.value) } : result;
+}
+
 function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<SettingsRead> {
-  const settings = toResult(result);
-  return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
+  return converted(toResult(result), toSettingsRead);
 }
 
 export function createTauriSettings(): SettingsSource {

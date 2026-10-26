@@ -12,7 +12,8 @@ export type AgentFailure =
   | { readonly kind: "refused"; readonly method: string; readonly message: string }
   | { readonly kind: "sessionGone" }
   | { readonly kind: "ended"; readonly reason: string }
-  | { readonly kind: "busy" };
+  | { readonly kind: "busy" }
+  | { readonly kind: "app"; readonly failure: SourceFailure };
 
 export type Exit = { readonly code: number | null; readonly lastLog: string | null };
 
@@ -24,12 +25,6 @@ const DETAILS = v.object({ details: v.string() });
 function errorWords(reply: Extract<Reply, { kind: "error" }>): string {
   const details = parseWith(DETAILS, reply.data);
   return details.ok ? details.value.details : reply.message;
-}
-
-export function sourceText(failure: SourceFailure): string {
-  return "message" in failure && typeof failure.message === "string"
-    ? failure.message
-    : failure.kind;
 }
 
 export function startFailure(reply: Exclude<AgentStartReply, { kind: "Started" }>): AgentFailure {

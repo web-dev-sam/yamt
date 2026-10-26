@@ -2,11 +2,12 @@ import type { CheckoutFolder } from "../../ipc";
 import { INVALID_PARAMS, METHOD_NOT_FOUND, parseWith, type Answer } from "../../jsonrpc";
 import { relativeInside } from "./inside";
 import { PERMISSION_REQUEST, type PermissionRequest } from "./protocol";
+import type { AgentSessionId } from "./session";
 import type { Refusal } from "./turn";
 
 export type Answered = {
   readonly answer: Answer;
-  readonly refused: { readonly session: string; readonly refusal: Refusal } | null;
+  readonly refused: { readonly session: AgentSessionId; readonly refusal: Refusal } | null;
 };
 
 type Choice = "allow_once" | "reject_once";

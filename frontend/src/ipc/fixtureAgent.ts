@@ -1,15 +1,11 @@
 import * as v from "valibot";
 
-import {
-  toAgentStartReply,
-  toCheckoutChanges,
-  toCheckoutReady,
-  type AgentSource,
-} from "./AgentSource";
+import { toAgentStartReply, toCheckoutChanges, toCheckoutReady } from "./agentDomain";
+import type { AgentSource } from "./AgentSource";
 import type * as Generated from "./bindings";
 import { toDifferences, type Difference } from "./compareDomain";
 import type { HostEvent, SourceResult } from "./domain";
-import { DIFFERENCE, parsedCases } from "./fixture";
+import { COLUMN_LIMIT_BYTES, DIFFERENCE, parsedCases } from "./fixture";
 import type { Log } from "./log";
 
 type Id = number | string;
@@ -71,8 +67,8 @@ export const FIXTURE_CHECKOUT = "/fixture/data/yamt/range/repository/main...feat
 const PLAY_MS = 30;
 const CRASH_CODE = 1;
 const CRASH_PARTS = 2;
-const COLUMN_LIMIT_BYTES = 8_388_608;
 const SCRIPTED: Readonly<Record<string, true>> = { "": true, crash: true, "checkout-fails": true };
+const LOAD_CASE = "load";
 
 const LINE = v.object({ from: v.picklist(["agent", "yamt"]), line: v.string() });
 const MESSAGE = v.looseObject({
@@ -226,7 +222,13 @@ function checkoutActions(
     },
     async checkoutChanges() {
       const look: Generated.CheckoutLook = fixture.changes
-        ? { kind: "Changed", folder: FIXTURE_CHECKOUT, files: ["README.md"], head_moved: false }
+        ? {
+            kind: "Changed",
+            folder: FIXTURE_CHECKOUT,
+            files: ["README.md"],
+            refs: [],
+            head_moved: false,
+          }
         : { kind: state.prepared ? "Clean" : "Missing" };
       return { ok: true, value: toCheckoutChanges(look) };
     },
@@ -248,8 +250,9 @@ function fixtureOf(log: Log, search: string, files: AgentFixtureFiles): Fixture 
       return [each, recorded(each, typeof text === "string" ? text : "")];
     }),
   );
+  const load = cases.get(LOAD_CASE);
+  cases.delete(LOAD_CASE);
   const prompts = cases.get(name);
-  const load = cases.get("load");
   if (prompts === undefined || load === undefined) {
     throw new Error(`no agent fixture ${name}; known: ${[...cases.keys()].join(", ")}`);
   }

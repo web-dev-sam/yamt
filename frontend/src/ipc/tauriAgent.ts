@@ -1,20 +1,17 @@
 import { Channel } from "@tauri-apps/api/core";
 
 import {
+  fromAgentCommand,
   toAgentStartReply,
   toCheckoutChanges,
   toCheckoutReady,
-  type AgentSource,
-} from "./AgentSource";
+} from "./agentDomain";
+import type { AgentSource } from "./AgentSource";
 import { commands, type HostEvent } from "./bindings";
 import { toDifferences } from "./compareDomain";
-import type { AgentRun, SourceResult } from "./domain";
+import type { AgentRun } from "./domain";
 import type { Log } from "./log";
-import { toResult } from "./tauri";
-
-function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
-  return result.ok ? { ok: true, value: to(result.value) } : result;
-}
+import { converted, toResult } from "./tauri";
 
 type Replied = { readonly status: "ok" } | { readonly status: "error"; readonly error: unknown };
 
@@ -39,10 +36,10 @@ export function createTauriAgentSource(log: Log): AgentSource {
     async prepareCheckout() {
       return converted(toResult(await commands.prepareCheckout()), toCheckoutReady);
     },
-    async startAgent({ program, args, homeFolders }, onEvent) {
+    async startAgent(command, onEvent) {
       const events = new Channel<HostEvent>(onEvent);
-      const command = { program, args: [...args], home_folders: [...homeFolders] };
-      return converted(toResult(await commands.startAgent(command, events)), toAgentStartReply);
+      const reply = await commands.startAgent(fromAgentCommand(command), events);
+      return converted(toResult(reply), toAgentStartReply);
     },
     sendToAgent(run, message) {
       void logged(log, "agent.send_failed", run, commands.sendToAgent(run, message));

@@ -146,3 +146,45 @@ test("a malformed permission request is an invalid-params error", () => {
     answer.kind === "error" && answer.message.startsWith("Malformed session/request_permission: "),
   ).toBe(true);
 });
+
+type Recorded = {
+  readonly from: "agent" | "yamt";
+  readonly id?: number;
+  readonly method?: string;
+  readonly params?: unknown;
+  readonly result?: unknown;
+};
+
+const PERMISSION = "session/request_permission";
+
+const RECORDINGS: Readonly<Record<string, string>> = import.meta.glob(
+  "../../../fixtures/agent/*.jsonl",
+  { eager: true, query: "?raw", import: "default" },
+);
+
+function recordedLine(json: string): Recorded {
+  const { from, line } = JSON.parse(json);
+  const message: Omit<Recorded, "from"> = JSON.parse(line.replaceAll("{{CHECKOUT}}", CHECKOUT));
+  return { ...message, from };
+}
+
+function recordedPermissions(text: string): [Recorded, Recorded | undefined][] {
+  const messages = text.trim().split("\n").map(recordedLine);
+  return messages
+    .filter((each) => each.from === "agent" && each.method === PERMISSION)
+    .map((request) => [
+      request,
+      messages.find(
+        (each) => each.from === "yamt" && each.method === undefined && each.id === request.id,
+      ),
+    ]);
+}
+
+test("every recorded permission is answered as the table answers it", () => {
+  const recorded = Object.values(RECORDINGS).flatMap(recordedPermissions);
+  expect(recorded).toHaveLength(3);
+  for (const [request, reply] of recorded) {
+    const { answer } = answerRequest(PERMISSION, request.params, CHECKOUT);
+    expect(answer.kind === "result" ? answer.value : answer).toEqual(reply?.result);
+  }
+});

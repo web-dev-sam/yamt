@@ -446,11 +446,11 @@ test("a failed prepare is not kept, a ready checkout is", async () => {
   expect(agent.prepareCalls).toBe(2);
 });
 
-test("an app failure or a throw from prepare is checkoutFailed too, and not kept", async () => {
+test("an app failure from prepare carries the app's failure, a throw is checkoutFailed; neither is kept", async () => {
   agent.prepares = [{ ok: false, failure: { kind: "AiOff" } }];
   const off = ask(null);
   await flush();
-  expect(off.end).toMatchObject({ failure: { kind: "checkoutFailed", message: "AiOff" } });
+  expect(off.end).toMatchObject({ failure: { kind: "app", failure: { kind: "AiOff" } } });
   agent.prepareCheckout = async () => {
     throw new Error("ipc down");
   };
@@ -503,7 +503,7 @@ test.each<[string, SourceResult<AgentStartReply>, object]>([
   [
     "an app failure",
     { ok: false, failure: { kind: "AiOff" } },
-    { kind: "spawnFailed", program: "omp", message: "AiOff" },
+    { kind: "app", failure: { kind: "AiOff" } },
   ],
 ])(
   "a start answered %s fails the turn and is retried at the next ask",
@@ -669,7 +669,7 @@ test.each<[string, () => Promise<never> | Promise<SourceResult<readonly Differen
   [
     "stopped",
     async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
-    { kind: "failed", message: "WorkerStopped" },
+    { kind: "appFailed", failure: { kind: "WorkerStopped" } },
   ],
   [
     "thrown",
@@ -769,4 +769,283 @@ test("over the fixture agent loadConversation gives back the recorded conversati
   await vi.runAllTimersAsync();
   const load = await loading;
   expect(load.kind === "loaded" && load.turns.map((turn) => stepsOf(turn).length)).toEqual([3]);
+});
+
+function heldPrepare(): (ready: SourceResult<CheckoutReady>) => void {
+  let release: ((ready: SourceResult<CheckoutReady>) => void) | null = null;
+  agent.prepareCheckout = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+  return (prepared) => release?.(prepared);
+}
+
+test("Stop while the checkout is made ends the turn at once; the late checkout starts nothing", async () => {
+  const release = heldPrepare();
+  const turn = ask(null);
+  await flush();
+  turn.stop();
+  await flush();
+  expect(turn.end).toEqual({ kind: "stopped", turn: { entries: [], answer: "" } });
+  expect(client.isRunning()).toBe(false);
+  release(ready());
+  await flush();
+  expect(agent.commands).toEqual([]);
+  expect(agent.sent).toEqual([]);
+  expect(turn.sessions).toEqual([]);
+  expect(turn.changes).toHaveLength(1);
+});
+
+test("Stop while omp starts ends the turn at once and sends no session/new", async () => {
+  agent.sendToAgent = (_run, message) => {
+    agent.sent.push(JSON.parse(message));
+  };
+  const turn = ask(null);
+  await flush();
+  turn.stop();
+  await flush();
+  expect(turn.end?.kind).toBe("stopped");
+  const [initialize] = agent.sent;
+  agent.reply(initialize?.id ?? -1, { protocolVersion: 1 });
+  await flush();
+  expect(agent.methods()).toEqual(["initialize"]);
+  expect(turn.sessions).toEqual([]);
+});
+
+test("a load and an ask on one thread send one session/load; the replay turns once, the answer is new", async () => {
+  agent.loadAnswer = (id, sessionId) => {
+    agent.update(sessionId, {
+      sessionUpdate: "user_message_chunk",
+      content: { type: "text", text: "Why?" },
+    });
+    agent.said(sessionId, "old answer");
+    agent.reply(id, {});
+  };
+  const loading = client.loadConversation(session("s5"));
+  const turn = ask(session("s5"), "And now?");
+  await flush();
+  expect(agent.methods()).toEqual(["initialize", "session/load", "session/prompt"]);
+  const load = await loading;
+  expect(load.kind === "loaded" && load.turns.map((each) => each.answer)).toEqual(["old answer"]);
+  agent.said("s5", "new");
+  finish("s5");
+  await flush();
+  expect(turn.end).toMatchObject({ kind: "finished", turn: { answer: "new" } });
+});
+
+test("inside an ended handler the turn is no longer running and its thread takes a new ask", async () => {
+  const first = ask(session("s6"));
+  await flush();
+  const seen = first.ended.then(() => ({ running: client.isRunning(), again: ask(session("s6")) }));
+  finish("s6");
+  const { running, again } = await seen;
+  expect(running).toBe(false);
+  await flush();
+  expect(again.end).toBeNull();
+  expect(agent.prompts()).toHaveLength(2);
+});
+
+test("destroy while the checkout is made starts nothing and ends the turn stopped", async () => {
+  const release = heldPrepare();
+  const turn = ask(null);
+  await flush();
+  client.destroy();
+  release(ready());
+  await flush();
+  expect(turn.end?.kind).toBe("stopped");
+  expect(agent.commands).toEqual([]);
+});
+
+test("loadConversation after destroy starts nothing and answers stopped", async () => {
+  client.destroy();
+  expect(await client.loadConversation(session("s8"))).toEqual({ kind: "stopped" });
+  expect(agent.prepareCalls).toBe(0);
+});
+
+test("a load cut off by destroy answers stopped", async () => {
+  agent.loadAnswer = () => undefined;
+  const loading = client.loadConversation(session("s8"));
+  await flush();
+  client.destroy();
+  await flush();
+  expect(await loading).toEqual({ kind: "stopped" });
+});
+
+test("a start that resolves after destroy is stopped", async () => {
+  const start = agent.startAgent.bind(agent);
+  const held = { release: (): void => undefined };
+  agent.startAgent = (command, onEvent) =>
+    new Promise((resolve) => {
+      held.release = () => resolve(start(command, onEvent));
+    });
+  const turn = ask(null);
+  await flush();
+  client.destroy();
+  held.release();
+  await flush();
+  expect(agent.stopped).toEqual([1]);
+  expect(turn.end?.kind).toBe("stopped");
+  expect(agent.methods()).toEqual(["initialize"]);
+});
+
+test("a stale stop after its turn ended cancels nothing", async () => {
+  const first = ask(null);
+  await flush();
+  finish("s1");
+  await flush();
+  ask(session("s1"));
+  await flush();
+  first.stop();
+  expect(agent.methods()).not.toContain("session/cancel");
+});
+
+test("a new thread's session counts as loaded: its next ask prompts without a load", async () => {
+  ask(null);
+  await flush();
+  finish("s1");
+  await flush();
+  ask(session("s1"));
+  await flush();
+  expect(agent.methods()).toEqual([
+    "initialize",
+    "session/new",
+    "session/prompt",
+    "session/prompt",
+  ]);
+});
+
+test("an ask on a new thread's session while its first turn runs is busy", async () => {
+  const first = ask(null);
+  await flush();
+  const second = ask(session("s1"));
+  await flush();
+  expect(second.end).toMatchObject({ kind: "failed", failure: { kind: "busy" } });
+  expect(first.end).toBeNull();
+});
+
+test("ending one thread's turn leaves another thread busy", async () => {
+  ask(session("a"));
+  ask(session("b"));
+  await flush();
+  finish("a");
+  await flush();
+  const again = ask(session("b"));
+  await flush();
+  expect(again.end).toMatchObject({ kind: "failed", failure: { kind: "busy" } });
+});
+
+test("a session/prompt error is refused with omp's details", async () => {
+  const turn = ask(null);
+  await flush();
+  agent.emit({
+    id: promptId("s1"),
+    error: { code: -32603, message: "Internal error", data: { details: "model overloaded" } },
+  });
+  await flush();
+  expect(turn.end).toMatchObject({
+    kind: "failed",
+    failure: { kind: "refused", method: "session/prompt", message: "model overloaded" },
+  });
+});
+
+test("loadConversation when the checkout fails answers checkoutFailed", async () => {
+  agent.prepares = [{ ok: true, value: { kind: "Failed", message: "no git" } }];
+  expect(await client.loadConversation(session("s2"))).toEqual({
+    kind: "failed",
+    failure: { kind: "checkoutFailed", message: "no git" },
+  });
+});
+
+test("a session/new answering an empty id is refused and reports no session", async () => {
+  agent.sendToAgent = (_run, message) => {
+    const sent: Sent = JSON.parse(message);
+    agent.sent.push(sent);
+    queueMicrotask(() => {
+      const result = sent.method === "initialize" ? { protocolVersion: 1 } : { sessionId: "" };
+      agent.reply(sent.id ?? -1, result);
+    });
+  };
+  const turn = ask(null);
+  await flush();
+  expect(turn.end).toMatchObject({
+    kind: "failed",
+    failure: { kind: "refused", method: "session/new" },
+  });
+  expect(turn.sessions).toEqual([]);
+});
+
+test("destroy on a client that never asked stops nothing", () => {
+  expect(() => client.destroy()).not.toThrow();
+  expect(agent.stopped).toEqual([]);
+});
+
+test("a start that throws is spawnFailed and retried at the next ask", async () => {
+  const start = agent.startAgent.bind(agent);
+  agent.startAgent = async () => {
+    throw new Error("ipc down");
+  };
+  const turn = ask(null);
+  await flush();
+  expect(turn.end).toMatchObject({
+    kind: "failed",
+    failure: { kind: "spawnFailed", program: "omp", message: "Error: ipc down" },
+  });
+  agent.startAgent = start;
+  const again = ask(null);
+  await flush();
+  expect(again.sessions).toEqual(["s1"]);
+});
+
+test("a malformed update is logged and dropped, another notification ignored; the stream goes on", async () => {
+  const warn = vi.spyOn(log, "warn");
+  const turn = ask(null);
+  await flush();
+  agent.emit({
+    method: "session/other",
+    params: { sessionId: "s1", update: { sessionUpdate: "tool_call" } },
+  });
+  agent.update("s1", { sessionUpdate: "plan", entries: [] });
+  expect(warn).not.toHaveBeenCalled();
+  agent.update("s1", { sessionUpdate: "tool_call", title: "no id" });
+  expect(warn).toHaveBeenCalledWith("agent.update_dropped", { reason: expect.any(String) });
+  agent.said("s1", "still here");
+  finish("s1");
+  await flush();
+  expect(turn.end).toMatchObject({ kind: "finished", turn: { entries: [], answer: "still here" } });
+  warn.mockRestore();
+});
+
+test("a refusal for a session no turn listens to is answered and changes no turn", async () => {
+  const turn = ask(null);
+  await flush();
+  agent.emit({
+    id: 0,
+    method: "session/request_permission",
+    params: {
+      sessionId: "elsewhere",
+      toolCall: { toolCallId: "t1", title: "Delete /tmp/x", locations: [{ path: "/tmp/x" }] },
+      options: [{ optionId: "no", kind: "reject_once" }],
+    },
+  });
+  await flush();
+  expect(agent.sent.at(-1)).toMatchObject({ id: 0, result: { outcome: { optionId: "no" } } });
+  finish("s1");
+  await flush();
+  expect(turn.end?.turn.entries).toEqual([]);
+});
+
+test("omp exiting before it answers initialize is crashed with its last line", async () => {
+  agent.sendToAgent = (_run, message) => {
+    agent.sent.push(JSON.parse(message));
+    queueMicrotask(() => {
+      agent.log("unknown flag --acp");
+      agent.exit(2);
+    });
+  };
+  const turn = ask(null);
+  await flush();
+  expect(turn.end).toMatchObject({
+    kind: "failed",
+    failure: { kind: "crashed", code: 2, lastLog: "unknown flag --acp" },
+  });
 });

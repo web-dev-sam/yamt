@@ -47,6 +47,11 @@ const SEEDED_PATH = "src/board/board.ts";
 const SEEDED_WRITTEN = 1_767_225_600;
 const SEEDED_DRAFT_NOTE = 101;
 const SEEDED_SESSION = "fixture-session";
+const SEEDED_AI_ANSWER: Generated.MessageBody = {
+  kind: "aiAnswer",
+  session: SEEDED_SESSION,
+  turn: 0,
+};
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -82,7 +87,7 @@ function seededThreads(file: number): Generated.Thread[] {
       line: { kind: "unchangedOnRight", left: 100, right: 101 },
       messages: [
         note("Is this still used?", { kind: "notQueued" }),
-        { body: { kind: "aiAnswer", turn: 0 }, posting: { kind: "notQueued" } },
+        { body: SEEDED_AI_ANSWER, posting: { kind: "notQueued" } },
       ],
       session: SEEDED_SESSION,
     },

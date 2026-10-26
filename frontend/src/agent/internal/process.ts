@@ -8,14 +8,7 @@ import {
 } from "../../ipc";
 import { Connection, parseWith, type Answer, type Reply, type Timers } from "../../jsonrpc";
 import { answerRequest } from "./answers";
-import {
-  loadFailure,
-  requestFailure,
-  sourceText,
-  startFailure,
-  type AgentFailure,
-  type Exit,
-} from "./failure";
+import { loadFailure, requestFailure, startFailure, type AgentFailure, type Exit } from "./failure";
 import { INITIALIZE_RESULT, parseUpdate, PROTOCOL_VERSION } from "./protocol";
 import type { AgentSessionId } from "./session";
 import type { Refusal, TurnUpdate } from "./turn";
@@ -49,7 +42,7 @@ export class AgentProcess {
   readonly #source: AgentSource;
   readonly #connection: Connection;
   readonly #exited: () => void;
-  readonly #listeners = new Map<string, Listener>();
+  readonly #listeners = new Map<AgentSessionId, Listener>();
   readonly #loads = new Map<AgentSessionId, Promise<AgentFailure | null>>();
   #run: AgentRun | null = null;
   #lastLog: string | null = null;
@@ -83,10 +76,6 @@ export class AgentProcess {
     return failure === null ? { ok: true, value: agent } : { ok: false, failure };
   }
 
-  get isStopping(): boolean {
-    return this.#stopping;
-  }
-
   get exit(): Exit | null {
     return this.#exit;
   }
@@ -112,39 +101,21 @@ export class AgentProcess {
     this.#loads.set(session, Promise.resolve(null));
   }
 
-  /** Loads the session once per process before a prompt; its replay goes to no one. */
+  /** Loads the session once per process before a prompt (joining a load in flight); no one hears its replay. */
   load(session: AgentSessionId): Promise<AgentFailure | null> {
-    const known = this.#loads.get(session);
-    if (known !== undefined) {
-      return known;
-    }
-    const loading = this.#loadReply(session).then((reply) => {
-      if (reply.kind === "result") {
-        return null;
-      }
-      if (this.#loads.get(session) === loading) {
-        this.#loads.delete(session);
-      }
-      return loadFailure(reply, this.#exit);
-    });
-    this.#loads.set(session, loading);
-    return loading;
+    return this.#loads.get(session) ?? this.#sendLoad(session);
   }
 
-  /** Loads the session and hands back its replay. */
+  /** Loads the session and hands back its replay; a `load` meanwhile joins this one. */
   async replay(session: AgentSessionId): Promise<Outcome<TurnUpdate[]>> {
     const updates: TurnUpdate[] = [];
     const unlisten = this.listen(session, {
       update: (update) => updates.push(update),
       refuse: () => undefined,
     });
-    const reply = await this.#loadReply(session);
+    const failure = await this.#sendLoad(session);
     unlisten();
-    if (reply.kind !== "result") {
-      return { ok: false, failure: loadFailure(reply, this.#exit) };
-    }
-    this.created(session);
-    return { ok: true, value: updates };
+    return failure === null ? { ok: true, value: updates } : { ok: false, failure };
   }
 
   async stop(): Promise<void> {
@@ -159,8 +130,7 @@ export class AgentProcess {
     try {
       const reply = await this.#source.startAgent(command, (event) => this.#onEvent(event));
       if (!reply.ok) {
-        const message = sourceText(reply.failure);
-        return { ok: false, failure: { kind: "spawnFailed", program, message } };
+        return { ok: false, failure: { kind: "app", failure: reply.failure } };
       }
       const started = reply.value;
       return started.kind === "Started"
@@ -171,8 +141,19 @@ export class AgentProcess {
     }
   }
 
-  #loadReply(session: AgentSessionId): Promise<Reply> {
-    return this.request("session/load", { sessionId: session, cwd: this.folder, mcpServers: [] });
+  #sendLoad(session: AgentSessionId): Promise<AgentFailure | null> {
+    const params = { sessionId: session, cwd: this.folder, mcpServers: [] };
+    const loading = this.request("session/load", params).then((reply) => {
+      if (reply.kind === "result") {
+        return null;
+      }
+      if (this.#loads.get(session) === loading) {
+        this.#loads.delete(session);
+      }
+      return loadFailure(reply, this.#exit);
+    });
+    this.#loads.set(session, loading);
+    return loading;
   }
 
   async #initialize(): Promise<AgentFailure | null> {

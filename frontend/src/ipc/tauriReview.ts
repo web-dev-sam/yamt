@@ -1,15 +1,10 @@
 import { Channel } from "@tauri-apps/api/core";
 
 import { commands, type SendProgress } from "./bindings";
-import type { SourceResult } from "./domain";
 import { toGitLabCheck, toSendReply, toThreadAdded, toThreadList } from "./reviewDomain";
 import type { ReviewSource } from "./ReviewSource";
-import { toResult } from "./tauri";
+import { converted, toResult } from "./tauri";
 import { fromThreadLine } from "./threadLine";
-
-function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
-  return result.ok ? { ok: true, value: to(result.value) } : result;
-}
 
 export function createTauriReview(): ReviewSource {
   return {

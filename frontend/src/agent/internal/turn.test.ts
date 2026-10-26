@@ -6,7 +6,6 @@ import permissionOutside from "../../../fixtures/agent/permission-outside.jsonl?
 import type { CheckoutFolder } from "../../ipc";
 import { answerRequest } from "./answers";
 import { parseUpdate } from "./protocol";
-import { stopEnding } from "./session";
 import {
   EMPTY_TURN,
   endTurn,
@@ -108,10 +107,9 @@ test("the recorded command moves pending → running → done and shows its outp
   });
 });
 
-test("the recorded cancel ends stopped and its unfinished command as noResult", () => {
+test("the recorded cancel leaves its unfinished command as noResult", () => {
   const turn = endTurn(folded(updatesOf(cancelled)));
   expect(steps(turn).map((step) => [step.kind, step.status])).toEqual([["execute", "noResult"]]);
-  expect(stopEnding("cancelled")).toEqual({ kind: "stopped" });
 });
 
 test("the recorded refusal of a delete outside shows on its step, which fails", () => {
@@ -141,20 +139,6 @@ test("the recorded refusal of a delete outside shows on its step, which fails", 
     { kind: "text", text: "Tool call rejected by user (edit)" },
   ]);
   expect(turn.answer).toMatch(/^I couldn't delete/u);
-});
-
-test.each([
-  ["end_turn", { kind: "finished" }],
-  ["cancelled", { kind: "stopped" }],
-  ["max_tokens", { kind: "failed", failure: { kind: "ended", reason: "max_tokens" } }],
-  [
-    "max_turn_requests",
-    { kind: "failed", failure: { kind: "ended", reason: "max_turn_requests" } },
-  ],
-  ["refusal", { kind: "failed", failure: { kind: "ended", reason: "refusal" } }],
-  ["something new", { kind: "failed", failure: { kind: "ended", reason: "something new" } }],
-])("stopReason %s ends the turn as %j", (stopReason, ending) => {
-  expect(stopEnding(stopReason)).toEqual(ending);
 });
 
 const READ: TurnUpdate = {
@@ -259,4 +243,45 @@ test("ending a turn turns only pending and running steps into noResult", () => {
 
 test("a user chunk leaves a live turn unchanged", () => {
   expect(foldUpdate(EMPTY_TURN, { kind: "asked", text: "hi" })).toBe(EMPTY_TURN);
+});
+
+test("a refusal of a known step keeps the step's own title", () => {
+  const refused = refuseStep(folded([READ]), { step: "a", title: "Delete /x", paths: ["/x"] });
+  expect(steps(refused)[0]).toEqual({
+    id: "a",
+    kind: "read",
+    title: "Read a",
+    status: "pending",
+    outputs: [{ kind: "refused", title: "Delete /x", paths: ["/x"] }],
+  });
+});
+
+test("a refusal of an unknown step in a turn with steps is titled by the refusal", () => {
+  const refused = refuseStep(folded([READ]), { step: "b", title: "Delete /x", paths: ["/x"] });
+  expect(steps(refused)).toEqual([
+    expect.objectContaining({ id: "a", title: "Read a" }),
+    {
+      id: "b",
+      kind: "other",
+      title: "Delete /x",
+      status: "pending",
+      outputs: [{ kind: "refused", title: "Delete /x", paths: ["/x"] }],
+    },
+  ]);
+});
+
+test("a first tool_call with content carries exactly that content", () => {
+  const turn = folded([
+    {
+      kind: "step",
+      step: {
+        id: "a",
+        title: "Read a",
+        kind: "read",
+        status: "pending",
+        outputs: [{ kind: "text", text: "line 1" }],
+      },
+    },
+  ]);
+  expect(steps(turn)[0]?.outputs).toEqual([{ kind: "text", text: "line 1" }]);
 });

@@ -147,7 +147,7 @@ test("?threads=seeded puts one thread of each line kind on board.ts with every p
   ]);
   expect(threads[3]?.messages.map((message) => message.body)).toEqual([
     { kind: "note", text: "Is this still used?" },
-    { kind: "aiAnswer", turn: 0 },
+    { kind: "aiAnswer", session: "fixture-session", turn: 0 },
   ]);
   expect(threads[0]?.messages[0]?.written).toBe(1_767_225_600);
 });

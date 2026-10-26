@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
 import { isAgentRun, type AgentRun, type HostEvent } from "./domain";
-import { createTauriAgentSource, type CheckoutChanges } from "./index";
+import { createTauriAgentSource } from "./index";
 import type { Log } from "./log";
 
 const commands = vi.hoisted(() => ({
@@ -108,18 +108,35 @@ test("prepareCheckout brands an absolute folder and refuses a relative one", asy
   );
 });
 
-test.each<Generated.CheckoutLook>([
-  { kind: "Missing" },
-  { kind: "Clean" },
-  { kind: "Changed", folder: "/data/checkout", files: ["a.ts"], head_moved: true },
-  { kind: "Unreadable", folder: "/data/checkout", message: "bad object" },
-])("checkoutChanges passes %j through with its folder branded", async (look) => {
+test.each<[Generated.CheckoutLook, object]>([
+  [{ kind: "Missing" }, { kind: "Missing" }],
+  [{ kind: "Clean" }, { kind: "Clean" }],
+  [
+    {
+      kind: "Changed",
+      folder: "/data/checkout",
+      files: ["a.ts"],
+      refs: ["refs/heads/ai"],
+      head_moved: true,
+    },
+    {
+      kind: "Changed",
+      folder: "/data/checkout",
+      files: ["a.ts"],
+      refs: ["refs/heads/ai"],
+      headMoved: true,
+    },
+  ],
+  [
+    { kind: "Unreadable", folder: "/data/checkout", message: "bad object" },
+    { kind: "Unreadable", folder: "/data/checkout", message: "bad object" },
+  ],
+])("checkoutChanges converts %j", async (look, expected) => {
   commands.checkoutChanges.mockResolvedValue(ok(look));
-  const reply = await createTauriAgentSource(LOG).checkoutChanges();
-  const expected: { ok: true; value: CheckoutChanges } | null = reply.ok
-    ? { ok: true, value: reply.value }
-    : null;
-  expect(expected).toEqual({ ok: true, value: look });
+  expect(await createTauriAgentSource(LOG).checkoutChanges()).toEqual({
+    ok: true,
+    value: expected,
+  });
 });
 
 test("checkoutChanges refuses a relative folder", async () => {

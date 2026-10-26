@@ -214,7 +214,13 @@ test("?ai-changes reports README.md changed in the checkout", async () => {
   const source = createFixtureAgentSource(LOG, "?ai&ai-changes");
   expect(await source.checkoutChanges()).toEqual({
     ok: true,
-    value: { kind: "Changed", folder: FIXTURE_CHECKOUT, files: ["README.md"], head_moved: false },
+    value: {
+      kind: "Changed",
+      folder: FIXTURE_CHECKOUT,
+      files: ["README.md"],
+      refs: [],
+      headMoved: false,
+    },
   });
 });
 
@@ -240,6 +246,14 @@ test("diffTexts answers the recorded edit's differences and nothing for other te
     ],
   ]);
   expect(await source.diffTexts("a", "b")).toEqual({ ok: true, value: [] });
+  expect(await source.diffTexts(diff.oldText, `${diff.newText}more\n`)).toEqual({
+    ok: true,
+    value: [],
+  });
+  expect(await source.diffTexts(`${diff.oldText}more\n`, diff.newText)).toEqual({
+    ok: true,
+    value: [],
+  });
   expect(LOG.info).toHaveBeenCalledWith("agent.fixture_miss", { old: 1, next: 1 });
 });
 
@@ -252,10 +266,43 @@ test("diffTexts refuses a side over 8 MiB as the app does", async () => {
   expect((await source.diffTexts("x".repeat(8_388_608), "")).ok).toBe(true);
 });
 
-test("an unknown case names the known ones", () => {
+test("an unknown case names the known ones; the load recording is not one to play", () => {
   expect(() => createFixtureAgentSource(LOG, "?ai=nope")).toThrow(
-    /^no agent fixture nope; known: .*cancelled.*edit-and-command.*load.*permission-outside/u,
+    "no agent fixture nope; known: cancelled, edit-and-command, permission-outside",
   );
+  expect(() => createFixtureAgentSource(LOG, "?ai=load")).toThrow(/^no agent fixture load;/u);
+});
+
+test("stopAgent of an old run leaves the new run playing", async () => {
+  const source = createFixtureAgentSource(LOG, "?ai");
+  const first = await started(source);
+  const second = await started(source);
+  await vi.runAllTimersAsync();
+  events = [];
+  await source.stopAgent(first);
+  send(source, second, { id: 1, method: "initialize", params: {} });
+  await vi.runAllTimersAsync();
+  expect(events).toEqual([expect.objectContaining({ kind: "Message" })]);
+  expect(messages()[0]).toMatchObject({ id: 1, result: { protocolVersion: 1 } });
+});
+
+test("a discard during playback ends the run with Exited and no code", async () => {
+  const source = createFixtureAgentSource(LOG, "?ai");
+  const run = await started(source);
+  const session = await newSession(source, run);
+  events = [];
+  send(source, run, {
+    id: 3,
+    method: "session/prompt",
+    params: { sessionId: session, prompt: [] },
+  });
+  await vi.advanceTimersByTimeAsync(31);
+  await source.discardCheckout();
+  await vi.runAllTimersAsync();
+  expect(events.filter((event) => event.kind !== "Message")).toEqual([
+    { kind: "Exited", code: null },
+  ]);
+  expect(events.at(-1)).toEqual({ kind: "Exited", code: null });
 });
 
 test("a recording line that is not a message is refused", () => {

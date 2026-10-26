@@ -16,7 +16,7 @@ import {
 } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
 import type { SourceResult } from "./domain";
-import { DIFFERENCE, parsedCases } from "./fixture";
+import { COLUMN_LIMIT_BYTES, DIFFERENCE, parsedCases } from "./fixture";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
@@ -49,8 +49,6 @@ const CASE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
   { eager: true, import: "default" },
 );
 // Stryker restore all
-
-const COLUMN_LIMIT_BYTES = 8_388_608;
 
 const FIRST_TAB_ID = 1;
 

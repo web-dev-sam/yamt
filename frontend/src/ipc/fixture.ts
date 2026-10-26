@@ -95,6 +95,9 @@ export const DIFFERENCE = v.object({
   words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
 } satisfies SchemaOf<Generated.Difference>);
 
+/** yamt-compare's `MAX_COLUMN_BYTES`: the UTF-8 bytes a column or a diffed text may hold. */
+export const COLUMN_LIMIT_BYTES = 8_388_608;
+
 const WORD_CHANGES = v.object({
   chunk: v.number(),
   local: SIDE_WORD_CHANGES,

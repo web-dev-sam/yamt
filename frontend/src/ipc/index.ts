@@ -2,13 +2,8 @@ import { createLog } from "./log";
 import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
-export type {
-  AgentCommand,
-  AgentSource,
-  AgentStartReply,
-  CheckoutChanges,
-  CheckoutReady,
-} from "./AgentSource";
+export type { AgentCommand, AgentStartReply, CheckoutReady } from "./agentDomain";
+export type { AgentSource } from "./AgentSource";
 export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
 export { createFixtureAgentSource } from "./fixtureAgent";
 export { createTauriAgentSource } from "./tauriAgent";

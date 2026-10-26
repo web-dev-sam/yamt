@@ -3,11 +3,15 @@ import * as v from "valibot";
 import type { CheckoutFolder } from "../../ipc";
 import { parseWith, type Parsed } from "../../jsonrpc";
 import { relativeInside } from "./inside";
+import { isAgentSessionId, type AgentSessionId } from "./session";
 import type { StepKind, StepOutput, StepStatus, StepUpdate, TurnUpdate } from "./turn";
 
 export const PROTOCOL_VERSION = 1;
 
-export type SessionUpdate = { readonly session: string; readonly update: TurnUpdate | null };
+export type SessionUpdate = {
+  readonly session: AgentSessionId;
+  readonly update: TurnUpdate | null;
+};
 
 const STEP_KINDS: Readonly<Record<string, StepKind>> = {
   read: "read",
@@ -27,23 +31,28 @@ const STEP_STATUSES: Readonly<Record<string, StepStatus>> = {
   failed: "failed",
 };
 
-const CHUNK_KINDS = {
+const CHUNK_UPDATES = ["agent_thought_chunk", "agent_message_chunk", "user_message_chunk"] as const;
+
+const STEP_UPDATES = ["tool_call", "tool_call_update"] as const;
+
+const READ_UPDATES: readonly string[] = [...CHUNK_UPDATES, ...STEP_UPDATES];
+
+const CHUNK_KINDS: Readonly<
+  Record<(typeof CHUNK_UPDATES)[number], Exclude<TurnUpdate["kind"], "step">>
+> = {
   agent_thought_chunk: "thought",
   agent_message_chunk: "said",
   user_message_chunk: "asked",
-} as const;
-
-const READ_KINDS: Readonly<Record<string, true>> = {
-  agent_thought_chunk: true,
-  agent_message_chunk: true,
-  user_message_chunk: true,
-  tool_call: true,
-  tool_call_update: true,
 };
+
+const SESSION_ID = v.custom<AgentSessionId>(
+  (input) => typeof input === "string" && isAgentSessionId(input),
+  "sessionId must be a non-empty string",
+);
 
 export const INITIALIZE_RESULT = v.object({ protocolVersion: v.number() });
 
-export const NEW_SESSION_RESULT = v.object({ sessionId: v.string() });
+export const NEW_SESSION_RESULT = v.object({ sessionId: SESSION_ID });
 
 export const PROMPT_RESULT = v.object({ stopReason: v.string() });
 
@@ -63,11 +72,11 @@ const MAYBE_TEXT = v.nullish(v.string());
 
 const UPDATE = v.variant("sessionUpdate", [
   v.object({
-    sessionUpdate: v.picklist(["agent_thought_chunk", "agent_message_chunk", "user_message_chunk"]),
+    sessionUpdate: v.picklist(CHUNK_UPDATES),
     content: v.unknown(),
   }),
   v.object({
-    sessionUpdate: v.picklist(["tool_call", "tool_call_update"]),
+    sessionUpdate: v.picklist(STEP_UPDATES),
     toolCallId: v.string(),
     title: MAYBE_TEXT,
     kind: MAYBE_TEXT,
@@ -76,12 +85,12 @@ const UPDATE = v.variant("sessionUpdate", [
   }),
 ]);
 
-const UPDATE_PARAMS = v.object({ sessionId: v.string(), update: v.unknown() });
+const UPDATE_PARAMS = v.object({ sessionId: SESSION_ID, update: v.unknown() });
 
 const UPDATE_KIND = v.object({ sessionUpdate: v.string() });
 
 export const PERMISSION_REQUEST = v.object({
-  sessionId: v.string(),
+  sessionId: SESSION_ID,
   toolCall: v.object({
     toolCallId: v.string(),
     title: MAYBE_TEXT,
@@ -143,6 +152,6 @@ export function parseUpdate(params: unknown, folder: CheckoutFolder): Parsed<Ses
     return { ok: true, value: { session, update: toUpdate(parsed.value, folder) } };
   }
   const read = parseWith(UPDATE_KIND, update);
-  const isRead = read.ok && Object.hasOwn(READ_KINDS, read.value.sessionUpdate);
+  const isRead = read.ok && READ_UPDATES.includes(read.value.sessionUpdate);
   return isRead ? parsed : { ok: true, value: { session, update: null } };
 }
