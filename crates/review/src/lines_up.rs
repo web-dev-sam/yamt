@@ -5,8 +5,6 @@ use crate::gitlab::{DiffRefs, Listed, MergeRequest};
 use crate::{LookedAt, MergeRequestRef, NotLinedUp};
 
 const MAX_MERGE_REQUESTS_CHECKED: usize = 5;
-/// git's default abbreviation.
-const SHORT_ID_CHARS: usize = 7;
 
 /// The merge requests whose details were fetched, and what they were looked up by.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -74,19 +72,20 @@ fn why_it_does_not(compared: &Compared, request: &MergeRequest) -> NotLinedUp {
     if diff_refs.head_sha != compared.right.as_str() {
         return NotLinedUp::Moved {
             merge_request,
-            gitlab_head: short_id(&diff_refs.head_sha),
-            shown_head: short_id(compared.right.as_str()),
+            gitlab_head: as_long_as(&diff_refs.head_sha, &compared.right_short_id),
+            shown_head: compared.right_short_id.clone(),
         };
     }
     NotLinedUp::OtherBase {
         merge_request,
-        gitlab_base: short_id(&diff_refs.base_sha),
-        shown_base: short_id(compared.left.as_str()),
+        gitlab_base: as_long_as(&diff_refs.base_sha, &compared.left_short_id),
+        shown_base: compared.left_short_id.clone(),
     }
 }
 
-pub(crate) fn short_id(sha: &str) -> String {
-    sha.get(..SHORT_ID_CHARS).unwrap_or(sha).to_owned()
+/// GitLab's full id cut to the length of the id the window shows.
+fn as_long_as(sha: &str, shown: &str) -> String {
+    sha.get(..shown.len()).unwrap_or(sha).to_owned()
 }
 
 #[cfg(test)]
@@ -100,10 +99,18 @@ mod tests {
     const MAIN: &str = "437805506eab02eaba409bdeffd00e0383476e35";
     const FEATURE: &str = "9c1ba3fc606a3776061d23006b83e2af2a357112";
 
+    const GIT_SHORT_ID_CHARS: usize = 7;
+
     fn compared(left: &str, right: &str) -> Compared {
+        compared_shown(left, right, GIT_SHORT_ID_CHARS)
+    }
+
+    fn compared_shown(left: &str, right: &str, shown_chars: usize) -> Compared {
         Compared {
             left: Oid::parse(left).unwrap(),
             right: Oid::parse(right).unwrap(),
+            left_short_id: left[..shown_chars].to_owned(),
+            right_short_id: right[..shown_chars].to_owned(),
             right_label: RangeSideLabel::Named {
                 name: "feature".to_owned(),
             },
@@ -211,6 +218,28 @@ mod tests {
                 merge_request: named("other-base", "merge-request.json"),
                 gitlab_base: "5f9d381".to_owned(),
                 shown_base: "531ea52".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn gitlab_s_ids_are_cut_to_the_length_of_the_shown_ones() {
+        const LONGER_SHORT_ID_CHARS: usize = 10;
+        let longer = compared_shown(MERGE_BASE, FEATURE, LONGER_SHORT_ID_CHARS);
+        assert_eq!(
+            checked(&longer, "other-base").map(|_| ()),
+            Err(NotLinedUp::OtherBase {
+                merge_request: named("other-base", "merge-request.json"),
+                gitlab_base: "5f9d381d23".to_owned(),
+                shown_base: "531ea52dfb".to_owned(),
+            })
+        );
+        assert_eq!(
+            checked(&longer, "moved").map(|_| ()),
+            Err(NotLinedUp::Moved {
+                merge_request: named("moved", "merge-request.json"),
+                gitlab_head: "d1e2f3a4b5".to_owned(),
+                shown_head: "9c1ba3fc60".to_owned(),
             })
         );
     }

@@ -7,7 +7,8 @@
 # executable only, the gitlink vendor/ui moved to another commit, data/big.txt added at 8 MiB + 1, the Latin-1
 # docs/legacy.txt edited, the CRLF tools/setup.cmd edited, the link docs/current.md retargeted, config turned from a
 # file into a link, tools/deploy.sh made executable and edited. `main` then moves on (README.md), so main..feature
-# lists README.md and main...feature does not. Names and dates are fixed, so the commit ids never change.
+# lists README.md and main...feature does not. Names and dates are fixed, so the commit ids never change:
+# tests/glab and crates/review/tests pin them, so any change to this script or to scripts/demo updates both.
 # Prints the command that opens the review. Uses no user or system git config (risk RK19).
 set -euo pipefail
 # shellcheck source=scripts/git-sandbox.sh

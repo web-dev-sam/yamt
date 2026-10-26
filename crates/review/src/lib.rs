@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 mod gitlab;
+mod glab_answer;
 mod lines_up;
 mod position;
 mod right_branch;

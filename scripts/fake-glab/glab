@@ -143,7 +143,12 @@ api() {
 	"POST "*/draft_notes) post ;;
 	"GET "*/draft_notes) answer_file draft-notes.json ;;
 	"GET "*/merge_requests) answer_file merge-requests.json ;;
-	"GET "*/merge_requests/*) answer_file merge-request.json ;;
+	"GET "*/merge_requests/*)
+		if [ -f "$scenario/merge-request-${endpoint##*/}.json" ]; then
+			answer_file "merge-request-${endpoint##*/}.json"
+		fi
+		answer_file merge-request.json
+		;;
 	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
 	esac
 }

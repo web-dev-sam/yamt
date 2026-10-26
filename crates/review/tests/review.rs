@@ -1,11 +1,10 @@
 #![cfg(test)]
 #![cfg(unix)]
 
-use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -14,8 +13,8 @@ use yamt_gitio::Glab;
 use yamt_merge_core::{LeftLine, RightLine};
 use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
 use yamt_review::{
-    GitLabCheck, LookedAt, MergeRequestRef, NotLinedUp, Posting, SendProgress, SendReply,
-    ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
+    GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
+    SendReply, ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
 };
 
 /// `scripts/range-repo.sh`'s commits, fixed by its names and dates.
@@ -120,8 +119,12 @@ struct Review {
 
 impl Review {
     fn new() -> Review {
+        Review::on("main...feature")
+    }
+
+    fn on(range_text: &str) -> Review {
         let repo = range_repo();
-        let range = range_of(&repo, "main...feature");
+        let range = range_of(&repo, range_text);
         let pair = tempfile::tempdir().unwrap();
         let mut store = ThreadStore::open(pair.path()).unwrap();
         let threads = [
@@ -145,10 +148,37 @@ impl Review {
     }
 
     fn send(&self, glab: &Glab) -> (SendReply, Vec<SendProgress>) {
-        let progress = RefCell::new(Vec::new());
-        let report = |step: SendProgress| progress.borrow_mut().push(step);
+        self.send_reacting(glab, &|_| {})
+    }
+
+    /// A send whose progress callback also runs `react`, as the user acting while the send runs.
+    fn send_reacting(
+        &self,
+        glab: &Glab,
+        react: &dyn Fn(SendProgress),
+    ) -> (SendReply, Vec<SendProgress>) {
+        let (sender, receiver) = mpsc::channel();
+        let report = |step: SendProgress| {
+            sender.send(step).unwrap();
+            react(step);
+        };
         let reply = send_queue(&self.range, Some(glab), &self.threads, &report).unwrap();
-        (reply, progress.into_inner())
+        (reply, receiver.try_iter().collect())
+    }
+
+    /// The first message of the thread at `index` in creation order.
+    fn first_message(&self, index: usize) -> MessageId {
+        let list = self.threads.lock().unwrap().list(&self.range);
+        list.threads[index].messages[0].id
+    }
+
+    /// Adds `text` as a note to the thread at `index` and queues it with that text.
+    fn add_queued_note(&self, index: usize, text: &str) {
+        let mut store = self.threads.lock().unwrap();
+        let thread = store.list(&self.range).threads[index].id;
+        let list = store.add_note(&self.range, thread, text).unwrap();
+        let note = list.threads[index].messages.last().unwrap().id;
+        store.queue(&self.range, note, text).unwrap();
     }
 
     fn postings(&self) -> Vec<Posting> {
@@ -223,6 +253,25 @@ fn merge_request_12() -> MergeRequestRef {
         title: "Reminders before a card is due".to_owned(),
         web_url: "https://gitlab.example/taskboard/taskboard/-/merge_requests/12".to_owned(),
     }
+}
+
+#[test]
+fn range_repo_has_the_scenarios_commit_ids() {
+    let repo = range_repo();
+    let commit = |args: &[&str]| {
+        let output = git_ok(&repo_root(&repo), args).unwrap();
+        String::from_utf8(output).unwrap().trim_end().to_owned()
+    };
+    let found = [
+        commit(&["merge-base", "main", "feature"]),
+        commit(&["rev-parse", "main"]),
+        commit(&["rev-parse", "feature"]),
+    ];
+    assert_eq!(
+        found,
+        [MERGE_BASE, MAIN, FEATURE],
+        "scripts/range-repo.sh made other commits: tests/glab/* and these constants pin its ids"
+    );
 }
 
 #[test]
@@ -390,6 +439,126 @@ fn a_message_already_among_the_drafts_is_recorded_without_posting_again() {
 }
 
 #[test]
+fn a_draft_a_pending_message_owns_never_stands_in_for_another_message() {
+    let review = Review::new();
+    let fake = Fake::new("drafted");
+    review.send(&fake.glab);
+    review.add_queued_note(0, ADDED_TEXT);
+
+    let (reply, steps) = review.send(&fake.glab);
+
+    let SendReply::Sent { sent: 1, .. } = reply else {
+        panic!("not sent once: {reply:?}");
+    };
+    let expected = vec![
+        pending(ADDED_TEXT, 301),
+        pending(ADDED_TEXT, 305),
+        pending(RENAMED_TEXT, 303),
+        pending(REMOVED_TEXT, 304),
+    ];
+    assert_eq!(review.postings_on_disk(), expected);
+    assert_eq!(steps, progress(&[1], 1));
+    let notes: Vec<String> = fake
+        .bodies()
+        .iter()
+        .map(|body| note_of(body).to_owned())
+        .collect();
+    assert_eq!(notes, [RENAMED_TEXT, REMOVED_TEXT, ADDED_TEXT]);
+}
+
+#[test]
+fn a_message_unqueued_while_the_send_runs_is_neither_posted_nor_pending() {
+    let review = Review::new();
+    let fake = Fake::new("lined-up");
+    let second = review.first_message(1);
+    let unqueue_second = |step: SendProgress| {
+        if step.done == 1 {
+            let mut store = review.threads.lock().unwrap();
+            store.unqueue(&review.range, second).unwrap();
+        }
+    };
+
+    let (reply, steps) = review.send_reacting(&fake.glab, &unqueue_second);
+
+    let expected = vec![
+        pending(ADDED_TEXT, 101),
+        Posting::NotQueued,
+        pending(REMOVED_TEXT, 102),
+    ];
+    let SendReply::Sent { sent: 2, .. } = reply else {
+        panic!("not sent twice: {reply:?}");
+    };
+    assert_eq!(review.postings_on_disk(), expected);
+    assert_eq!(steps, progress(&[1, 2, 3], 3));
+    let notes: Vec<String> = fake
+        .bodies()
+        .iter()
+        .map(|body| note_of(body).to_owned())
+        .collect();
+    assert_eq!(notes, [ADDED_TEXT, REMOVED_TEXT]);
+}
+
+#[test]
+fn a_message_edited_while_the_send_runs_is_posted_with_its_new_text() {
+    const EDITED: &str = "Keep the old title, or name both?";
+    let review = Review::new();
+    let fake = Fake::new("lined-up");
+    let second = review.first_message(1);
+    let edit_second = |step: SendProgress| {
+        if step.done == 1 {
+            let mut store = review.threads.lock().unwrap();
+            store.queue(&review.range, second, EDITED).unwrap();
+        }
+    };
+
+    review.send_reacting(&fake.glab, &edit_second);
+
+    let expected = vec![
+        pending(ADDED_TEXT, 101),
+        pending(EDITED, 102),
+        pending(REMOVED_TEXT, 103),
+    ];
+    assert_eq!(review.postings_on_disk(), expected);
+    let notes: Vec<String> = fake
+        .bodies()
+        .iter()
+        .map(|body| note_of(body).to_owned())
+        .collect();
+    assert_eq!(notes, [ADDED_TEXT, EDITED, REMOVED_TEXT]);
+}
+
+#[test]
+fn a_send_that_cannot_list_the_drafts_posts_nothing() {
+    let review = Review::on(&format!("main...{FEATURE}"));
+    let fake = Fake::new("commit-route");
+
+    let (reply, steps) = review.send(&fake.glab);
+
+    let SendReply::Stopped {
+        sent,
+        refused,
+        reason,
+        ..
+    } = reply
+    else {
+        panic!("not stopped: {reply:?}");
+    };
+    assert_eq!(
+        (sent, refused, reason.as_str()),
+        (0, 0, "glab: 404 Not Found (HTTP 404)")
+    );
+    assert_eq!(steps, []);
+    assert!(!fake.log().contains("stdin:"), "{}", fake.log());
+    let unchanged = vec![
+        queued(ADDED_TEXT),
+        queued(RENAMED_TEXT),
+        queued(REMOVED_TEXT),
+    ];
+    assert_eq!(review.postings(), unchanged);
+    assert_eq!(review.postings_on_disk(), unchanged);
+}
+
+#[test]
 fn send_rechecks_and_posts_nothing_when_the_merge_request_moved() {
     let review = Review::new();
     let fake = Fake::new("moved");
@@ -506,22 +675,34 @@ fn a_commit_id_side_asks_for_the_commit_s_merge_requests() {
 }
 
 #[test]
-fn several_and_none_name_what_was_looked_at() {
+fn several_line_up_as_the_one_that_matches_and_none_name_what_was_looked_at() {
     let repo = range_repo();
     let range = range_of(&repo, "main...feature");
     let several = Fake::new("several");
+    let several_none = Fake::new("several-none");
     let none = Fake::new("no-merge-request");
 
+    let fourteen = MergeRequestRef {
+        reference: "!14".to_owned(),
+        title: "Reminders before a card is due".to_owned(),
+        web_url: "https://gitlab.example/taskboard/taskboard/-/merge_requests/14".to_owned(),
+    };
+    assert_eq!(
+        check_gitlab(&range, Some(&several.glab)),
+        GitLabCheck::LinedUp {
+            merge_request: fourteen
+        }
+    );
     let feature = LookedAt::Branch {
         name: "feature".to_owned(),
     };
-    let references = vec!["!12".to_owned(), "!12".to_owned()];
+    let references = vec!["!12".to_owned(), "!14".to_owned()];
     let why = NotLinedUp::Several {
         looked_at: feature.clone(),
         references,
     };
     assert_eq!(
-        check_gitlab(&range, Some(&several.glab)),
+        check_gitlab(&range, Some(&several_none.glab)),
         GitLabCheck::NotLinedUp { why }
     );
     let why = NotLinedUp::NoMergeRequest { looked_at: feature };

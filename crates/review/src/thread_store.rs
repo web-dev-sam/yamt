@@ -16,14 +16,12 @@ pub struct ThreadStore {
     file: ThreadFile,
 }
 
-/// A message waiting for the next send: queued, or refused and sent again.
+/// A message waiting for the next send: queued, or refused and sent again. Its text is read again before the post.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct QueuedMessage {
-    pub(crate) thread: ThreadId,
     pub(crate) message: MessageId,
     pub(crate) file: RangeFileId,
     pub(crate) line: ThreadLine,
-    pub(crate) text: String,
 }
 
 impl ThreadStore {
@@ -129,30 +127,59 @@ impl ThreadStore {
                 continue;
             };
             for message in &thread.messages {
-                let text = match &message.posting {
-                    Posting::Queued { text } | Posting::Refused { text, .. } => text,
-                    Posting::NotQueued | Posting::Pending { .. } => continue,
-                };
-                queued.push(QueuedMessage {
-                    thread: thread.id,
-                    message: message.id,
-                    file,
-                    line: thread.line,
-                    text: text.clone(),
-                });
+                if waiting_text_of(&message.posting).is_some() {
+                    queued.push(QueuedMessage {
+                        message: message.id,
+                        file,
+                        line: thread.line,
+                    });
+                }
             }
         }
         queued
     }
 
-    /// Stores what a send made of the message.
-    pub(crate) fn record(&mut self, message: MessageId, posting: Posting) -> Result<()> {
+    /// The text to post when the message still waits for a send; `None` once it is unqueued, pending or gone.
+    pub(crate) fn waiting_text(&self, message: MessageId) -> Option<String> {
+        let stored = self
+            .file
+            .threads
+            .iter()
+            .flat_map(|thread| &thread.messages)
+            .find(|stored| stored.id == message)?;
+        waiting_text_of(&stored.posting).map(str::to_owned)
+    }
+
+    /// The draft notes the store's pending messages own.
+    pub(crate) fn pending_draft_notes(&self) -> Vec<u64> {
+        let mut owned = Vec::new();
+        for thread in &self.file.threads {
+            for message in &thread.messages {
+                if let Posting::Pending { draft_note, .. } = message.posting {
+                    owned.push(draft_note);
+                }
+            }
+        }
+        owned
+    }
+
+    /// Stores what a send made of the message, only while it still waits with `posted_text`; whether it did.
+    pub(crate) fn record_if_waiting(
+        &mut self,
+        message: MessageId,
+        posted_text: &str,
+        posting: Posting,
+    ) -> Result<bool> {
         let mut next = self.file.clone();
         let (_, stored) = next
             .message_mut(message)
             .ok_or(Error::UnknownMessage { message })?;
+        if waiting_text_of(&stored.posting) != Some(posted_text) {
+            return Ok(false);
+        }
         stored.posting = posting;
-        self.commit(next)
+        self.commit(next)?;
+        Ok(true)
     }
 
     fn change_posting(
@@ -191,6 +218,14 @@ fn file_at(range: &Range, path: &str) -> Option<RangeFileId> {
         .iter()
         .find(|entry| entry.path == path)
         .map(|entry| entry.id)
+}
+
+/// The text a send posts: a queued message's, or a refused one's sent again.
+fn waiting_text_of(posting: &Posting) -> Option<&str> {
+    match posting {
+        Posting::Queued { text } | Posting::Refused { text, .. } => Some(text),
+        Posting::NotQueued | Posting::Pending { .. } => None,
+    }
 }
 
 fn require_text(text: &str) -> Result<()> {
@@ -273,17 +308,36 @@ mod tests {
         let queued: Vec<_> = store
             .queued(&range(&repo, "main..local"))
             .into_iter()
-            .map(|q| (q.thread.0, q.message.0, q.file, q.line, q.text))
+            .map(|q| (q.message.0, q.file, q.line))
             .collect();
         let line = ThreadLine::Added {
             right: RightLine(4),
         };
         let expected = vec![
-            (2, 5, RangeFileId(1), line, "first".to_owned()),
-            (2, 1, RangeFileId(1), line, "second".to_owned()),
-            (1, 4, RangeFileId(0), line, "third".to_owned()),
+            (5, RangeFileId(1), line),
+            (1, RangeFileId(1), line),
+            (4, RangeFileId(0), line),
         ];
         assert_eq!(queued, expected);
+    }
+
+    #[test]
+    fn waiting_text_is_a_queued_or_refused_message_s_text_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = stored_in(dir.path());
+        let texts: Vec<Option<String>> = [5, 1, 2, 3, 42]
+            .into_iter()
+            .map(|id| store.waiting_text(MessageId(id)))
+            .collect();
+        let first = Some("first".to_owned());
+        let second = Some("second".to_owned());
+        assert_eq!(texts, [first, second, None, None, None]);
+    }
+
+    #[test]
+    fn pending_draft_notes_are_the_drafts_pending_messages_own() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(stored_in(dir.path()).pending_draft_notes(), [7]);
     }
 
     #[test]
@@ -300,33 +354,43 @@ mod tests {
     }
 
     #[test]
-    fn record_writes_the_posting_and_keeps_it() {
+    fn record_if_waiting_writes_the_posting_and_keeps_it() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = stored_in(dir.path());
-        let pending = Posting::Pending {
-            text: "first".to_owned(),
-            draft_note: 9,
-            merge_request: "!1".to_owned(),
-            link: "l".to_owned(),
-        };
-        store.record(MessageId(5), pending).unwrap();
+        let applied = store.record_if_waiting(MessageId(5), "first", pending("first"));
+        assert!(applied.unwrap());
         let reopened = ThreadStore::open(dir.path()).unwrap();
         assert_eq!(reopened.file, store.file);
         let local = range(&repo(), "main..local");
         let ids: Vec<u32> = store.queued(&local).iter().map(|q| q.message.0).collect();
         assert_eq!(ids, [1, 4]);
+        assert_eq!(store.pending_draft_notes(), [9, 7]);
     }
 
     #[test]
-    fn record_on_an_unknown_message_is_unknown_message() {
+    fn record_if_waiting_leaves_a_changed_message_alone_and_refuses_an_unknown_one() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = stored_in(dir.path());
-        let result = store.record(MessageId(42), Posting::NotQueued);
-        assert!(matches!(
-            result,
-            Err(Error::UnknownMessage {
-                message: MessageId(42)
-            })
-        ));
+        let before = store.file.clone();
+        let edited = store.record_if_waiting(MessageId(5), "older text", pending("older text"));
+        assert!(!edited.unwrap());
+        let unqueued = store.record_if_waiting(MessageId(2), "d", pending("d"));
+        assert!(!unqueued.unwrap());
+        let already_pending = store.record_if_waiting(MessageId(3), "e", pending("e"));
+        assert!(!already_pending.unwrap());
+        assert_eq!(store.file, before);
+        assert_eq!(ThreadStore::open(dir.path()).unwrap().file, before);
+        let unknown = store.record_if_waiting(MessageId(42), "x", Posting::NotQueued);
+        let message = MessageId(42);
+        assert!(matches!(unknown, Err(Error::UnknownMessage { message: m }) if m == message));
+    }
+
+    fn pending(text: &str) -> Posting {
+        Posting::Pending {
+            text: text.to_owned(),
+            draft_note: 9,
+            merge_request: "!1".to_owned(),
+            link: "l".to_owned(),
+        }
     }
 }

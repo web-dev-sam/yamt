@@ -151,7 +151,7 @@ pub(crate) fn merge_request_from(json: &[u8]) -> Result<MergeRequest, String> {
     })
 }
 
-/// The drafts of `glab api --paginate`, which prints one array per page.
+/// The drafts `glab api --paginate` printed: one JSON array, or one per page.
 pub(crate) fn draft_notes_from(json: &[u8]) -> Result<Vec<DraftNote>, String> {
     let mut drafts = Vec::new();
     for page in serde_json::Deserializer::from_slice(json).into_iter::<Value>() {

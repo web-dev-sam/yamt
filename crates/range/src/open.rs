@@ -114,6 +114,8 @@ impl Range {
         Compared {
             left: self.resolved.left.oid.clone(),
             right: self.resolved.right.oid.clone(),
+            left_short_id: self.resolved.left.side.short_id.clone(),
+            right_short_id: self.resolved.right.side.short_id.clone(),
             right_label: self.resolved.right.side.label.clone(),
         }
     }
@@ -186,6 +188,11 @@ mod tests {
         Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
     }
 
+    fn short_commit(root: &Path, revision: &str) -> String {
+        let output = git_ok(root, &["rev-parse", "--short", revision]).unwrap();
+        String::from_utf8(output).unwrap().trim_end().to_owned()
+    }
+
     #[test]
     fn the_accessors_answer_the_listed_rows_both_commits_and_the_work_tree() {
         let repo =
@@ -209,6 +216,8 @@ mod tests {
             Compared {
                 left: commit(root, "main"),
                 right: commit(root, "local"),
+                left_short_id: short_commit(root, "main"),
+                right_short_id: short_commit(root, "local"),
                 right_label: named("local"),
             }
         );

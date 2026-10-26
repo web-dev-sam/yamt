@@ -23,7 +23,8 @@ test ever runs a file it has just written (ETXTBSY).
 | `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
 | `auth-status.exit` | its exit status (missing = 0) |
 | `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
-| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` |
+| `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
+| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
 | `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
 | `post-<n>.json` | the body of the n-th POST `…/draft_notes` (n from 1, counted in the state file) |
 | `post-<n>.status` | its HTTP status line (missing = `201 Created`) |

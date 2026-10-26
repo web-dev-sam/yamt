@@ -64,11 +64,14 @@ pub struct RangeEntry {
     pub lines: RangeLineCounts,
 }
 
-/// The two commits the range compares, and how the right one was named.
+/// The two commits the range compares, their short ids as the column headers show them, and how the right one
+/// was named.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Compared {
     pub left: Oid,
     pub right: Oid,
+    pub left_short_id: String,
+    pub right_short_id: String,
     pub right_label: RangeSideLabel,
 }
 
