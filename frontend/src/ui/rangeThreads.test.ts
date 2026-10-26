@@ -8,9 +8,11 @@ import {
   type RangeFileId,
   type RangeSource,
   type SourceFailure,
+  type Message,
   type Thread,
 } from "../ipc";
 import type { Problem } from "./problem";
+import { createRangeStore, MOUNTED_FILES } from "./rangeStore";
 import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
@@ -57,6 +59,39 @@ function threadAt(threads: RangeThreads, index: number): Thread {
 
 function texts(thread: Thread): string[] {
   return thread.messages.map(({ body }) => (body.kind === "note" ? body.text : "ai"));
+}
+
+function messageOf(thread: Thread): Message {
+  const [first] = thread.messages;
+  if (first === undefined) {
+    throw new Error("no message");
+  }
+  return first;
+}
+
+function manyFiles(count: number): unknown {
+  const paths = Array.from({ length: count }, (_, index) => `src/f${index}.ts`);
+  const side = { label: { kind: "named", name: "main" }, short_id: "1b2cfed", subject: "Start" };
+  return {
+    start: {
+      range: "main...feature",
+      left: side,
+      right: { ...side, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
+      files: paths.map((path, id) => ({
+        id,
+        path,
+        change: { kind: "modified" },
+        lines: { kind: "counted", added: 1, removed: 1 },
+      })),
+    },
+    files: paths.map((path) => ({
+      kind: "texts",
+      left: `${path}\n`,
+      right: `${path}!\n`,
+      differences: [],
+      mode: { kind: "same" },
+    })),
+  };
 }
 
 test("a draft's Comment adds the thread and its key becomes the stored id with the text kept", async () => {
@@ -353,6 +388,76 @@ test("queue and unqueue change the posting and the queued count; a pending one r
     { action: "threads", step: "queue", cause: { kind: "MessagePending", message: pending.id } },
     { action: "threads", step: "unqueue", cause: { kind: "MessagePending", message: pending.id } },
   ]);
+});
+
+test("a half-edited Post text outlives a collapse and a reopen of its thread", async () => {
+  const { threads } = await opened(SEEDED);
+  const thread = threadAt(threads, 3);
+  const { id } = messageOf(thread);
+  const key = `thread-${thread.id}`;
+  threads.toggle([key]);
+  expect(threads.postDraft(id)).toBeNull();
+
+  threads.writePost(id, "Is it");
+  threads.writePost(id, "Is it still");
+  threads.toggle([key]);
+  expect(threads.boxOf(key)).toMatchObject({ kind: "thread", open: false });
+  threads.toggle([key]);
+
+  expect(threads.boxOf(key)).toMatchObject({ kind: "thread", open: true });
+  expect(threads.postDraft(id)).toBe("Is it still");
+});
+
+test("an emptied Post text keeps its editor open; Cancel drops it", async () => {
+  const { threads } = await opened(SEEDED);
+  const { id } = messageOf(threadAt(threads, 3));
+  threads.writePost(id, "x");
+
+  threads.writePost(id, "");
+  expect(threads.postDraft(id)).toBe("");
+
+  threads.dropPost(id);
+  expect(threads.postDraft(id)).toBeNull();
+});
+
+test("a queued Post closes its editor; a refused or blank Queue keeps the text", async () => {
+  const { threads } = await opened(SEEDED);
+  const open = messageOf(threadAt(threads, 3));
+  const pending = messageOf(threadAt(threads, 2));
+  threads.writePost(open.id, "Is it still used?");
+  threads.writePost(pending.id, "again");
+
+  await threads.queue(open.id, "  ");
+  expect(threads.postDraft(open.id)).toBe("Is it still used?");
+  await threads.queue(pending.id, "again");
+  expect(threads.postDraft(pending.id)).toBe("again");
+
+  await threads.queue(open.id, "Is it still used?");
+  expect(threads.postDraft(open.id)).toBeNull();
+  expect(threads.postDraft(pending.id)).toBe("again");
+});
+
+test("a Post text outlives its file's view: 16 other files evict file 0 and the text is still there", async () => {
+  const fixture = createFixtureRangeSource(log, "?range=review", {
+    "../../fixtures/range/review.json": manyFiles(MOUNTED_FILES + 1),
+  });
+  const store = createRangeStore(fixture, "dark");
+  await store.startUp();
+  const [first, ...others] = store.start.value?.files ?? [];
+  if (first === undefined) {
+    throw new Error("no file");
+  }
+  store.threads.startThread(first.id, changedThreadLine("right", 0));
+  await store.threads.addThread("draft-0", "Why?");
+  const { id } = messageOf(threadAt(store.threads, 0));
+  store.threads.writePost(id, "Why is");
+
+  for (const entry of others) {
+    store.showFile(entry.path);
+  }
+
+  expect(store.visited.value).not.toContain(first);
+  expect(store.threads.postDraft(id)).toBe("Why is");
 });
 
 test("a failed list reports it and keeps the empty list", async () => {

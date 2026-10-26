@@ -115,6 +115,10 @@ test("start-app --glab names a tests/glab scenario, only with --range", () => {
   expect(() => parseCommand([...range, "--glab", "../moved"])).toThrow(folderName);
   expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);
   expect(() => parseCommand([...range, "--glab", "Moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "lined-up/../moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "nosuch"])).toThrow(
+    /--glab nosuch: no scenario folder .*tests\/glab\/nosuch$/,
+  );
   expect(() => parseCommand([...range, "--glab"])).toThrow(/--glab needs a value/);
 });
 

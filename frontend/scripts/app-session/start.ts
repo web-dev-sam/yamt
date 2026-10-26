@@ -16,7 +16,7 @@ import type { Command } from "./args";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
 import { freePort, launchTracked, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
-import { appArgs } from "./startArgs";
+import { appArgs, glabFolder } from "./startArgs";
 import {
   readState,
   saveState,
@@ -87,14 +87,10 @@ function fakeGlab(scenario: string | null, folder: string): FakeGlab | null {
   if (scenario === null) {
     return null;
   }
-  const recorded = fromRoot(join("tests/glab", scenario));
-  if (!existsSync(recorded)) {
-    throw new Error(`--glab ${scenario}: no scenario folder ${recorded}`);
-  }
   const dir = join(folder, "glab");
   mkdirSync(dir);
   const link = join(dir, "scenario");
-  symlinkSync(recorded, link);
+  symlinkSync(glabFolder(scenario), link);
   return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
 }
 

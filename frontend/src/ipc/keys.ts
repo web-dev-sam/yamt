@@ -178,33 +178,33 @@ export function sameKey(a: Key, b: Key): boolean {
   return a.name === b.name && MODIFIERS.every(({ modifier }) => a[modifier] === b[modifier]);
 }
 
-function defaultKeys(...texts: string[]): readonly Key[] {
+export function keyList(...texts: string[]): readonly Key[] {
   return texts.map((text) => {
     const key = parseKey(text);
     if (key === null) {
-      throw new Error(`default key ${text} does not parse`);
+      throw new Error(`key ${text} does not parse`);
     }
     return key;
   });
 }
 
 export const DEFAULT_KEYS: KeyBindings = {
-  apply: defaultKeys("Enter", "Space"),
-  ignore: defaultKeys("Backspace", "Delete", "x"),
-  "next-change": defaultKeys("ArrowDown"),
-  "previous-change": defaultKeys("ArrowUp"),
-  "left-side": defaultKeys("ArrowLeft"),
-  "right-side": defaultKeys("ArrowRight"),
-  undo: defaultKeys("Mod-z"),
-  redo: defaultKeys("Mod-Shift-z", "Mod-y"),
-  save: defaultKeys("Mod-s"),
-  find: defaultKeys("Mod-f"),
-  "find-next": defaultKeys("F3"),
-  "find-previous": defaultKeys("Shift-F3"),
-  "close-find": defaultKeys("Escape"),
-  indent: defaultKeys("Tab"),
-  outdent: defaultKeys("Shift-Tab"),
-  "toggle-file-list": defaultKeys("Mod-b"),
+  apply: keyList("Enter", "Space"),
+  ignore: keyList("Backspace", "Delete", "x"),
+  "next-change": keyList("ArrowDown"),
+  "previous-change": keyList("ArrowUp"),
+  "left-side": keyList("ArrowLeft"),
+  "right-side": keyList("ArrowRight"),
+  undo: keyList("Mod-z"),
+  redo: keyList("Mod-Shift-z", "Mod-y"),
+  save: keyList("Mod-s"),
+  find: keyList("Mod-f"),
+  "find-next": keyList("F3"),
+  "find-previous": keyList("Shift-F3"),
+  "close-find": keyList("Escape"),
+  indent: keyList("Tab"),
+  outdent: keyList("Shift-Tab"),
+  "toggle-file-list": keyList("Mod-b"),
 };
 
 type Pressed = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;

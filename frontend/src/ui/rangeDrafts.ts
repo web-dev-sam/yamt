@@ -1,6 +1,12 @@
 import { shallowRef, type ShallowRef } from "vue";
 
-import { shownLine, type RangeFileId, type ThreadId, type ThreadLine } from "../ipc";
+import {
+  shownLine,
+  type MessageId,
+  type RangeFileId,
+  type ThreadId,
+  type ThreadLine,
+} from "../ipc";
 
 export type Draft =
   | {
@@ -10,7 +16,8 @@ export type Draft =
       readonly text: string;
       readonly focus: number;
     }
-  | { readonly kind: "note"; readonly thread: ThreadId; readonly text: string };
+  | { readonly kind: "note"; readonly thread: ThreadId; readonly text: string }
+  | { readonly kind: "post"; readonly message: MessageId; readonly text: string };
 
 export type ThreadDraft = Extract<Draft, { readonly kind: "thread" }>;
 
@@ -22,6 +29,9 @@ export type RangeDrafts = {
   dropDraft(key: string): void;
   noteText(thread: ThreadId): string;
   writeNote(thread: ThreadId, text: string): void;
+  postDraft(message: MessageId): string | null;
+  writePost(message: MessageId, text: string): void;
+  dropPost(message: MessageId): void;
 };
 
 type State = {
@@ -35,6 +45,10 @@ export function isBlank(text: string): boolean {
 
 function noteKey(thread: ThreadId): string {
   return `note-${thread}`;
+}
+
+function postKey(message: MessageId): string {
+  return `post-${message}`;
 }
 
 function setDraft(state: State, key: string, draft: Draft | null): void {
@@ -92,6 +106,16 @@ export function createRangeDrafts(): RangeDrafts {
     },
     writeNote: (thread, text) => {
       setDraft(state, noteKey(thread), isBlank(text) ? null : { kind: "note", thread, text });
+    },
+    postDraft: (message) => {
+      const draft = state.drafts.value.get(postKey(message));
+      return draft?.kind === "post" ? draft.text : null;
+    },
+    writePost: (message, text) => {
+      setDraft(state, postKey(message), { kind: "post", message, text });
+    },
+    dropPost: (message) => {
+      setDraft(state, postKey(message), null);
     },
   };
 }

@@ -1,14 +1,17 @@
-import { isMac } from "../ipc";
+import { keyList, pressesKey, type Key } from "../ipc";
 
 type BoxKey = "submit" | "cancel";
 
 type BoxKeyPress = Pick<
   KeyboardEvent,
-  "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing"
+  "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing"
 > &
   Pick<KeyboardEvent, "preventDefault" | "stopPropagation">;
 
-type WindowKeyPress = Pick<KeyboardEvent, "target" | "ctrlKey" | "metaKey">;
+const BOX_KEYS: Readonly<Record<BoxKey, readonly Key[]>> = {
+  submit: keyList("Mod-Enter"),
+  cancel: keyList("Escape"),
+};
 
 const TEXT_INPUT_TYPES: Readonly<Record<string, true>> = {
   email: true,
@@ -38,20 +41,14 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   }
 }
 
-export function typesIntoField(event: WindowKeyPress): boolean {
-  return isTypingTarget(event.target) && !event.ctrlKey && !event.metaKey;
-}
-
 function boxKey(event: BoxKeyPress, platform: string): BoxKey | null {
-  const { key, ctrlKey, metaKey, altKey, shiftKey } = event;
-  if (event.isComposing || altKey || shiftKey) {
+  if (event.isComposing) {
     return null;
   }
-  if (key === "Escape") {
-    return ctrlKey || metaKey ? null : "cancel";
+  if (pressesKey(event, BOX_KEYS.submit, platform)) {
+    return "submit";
   }
-  const command = isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
-  return key === "Enter" && command ? "submit" : null;
+  return pressesKey(event, BOX_KEYS.cancel, platform) ? "cancel" : null;
 }
 
 export function boxKeydown(

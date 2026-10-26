@@ -33,13 +33,21 @@ type ButtonView = {
   readonly disabled: boolean;
 };
 
+type PostAction = "edit" | "unqueue";
+
+type PostView = {
+  readonly label: string;
+  readonly title: string;
+  readonly action: PostAction | null;
+};
+
 export type GitLabState = {
   readonly check: Readonly<ShallowRef<GitLabCheck | null>>;
   readonly checking: Readonly<ShallowRef<boolean>>;
   readonly sending: Readonly<ShallowRef<SendProgress | null>>;
   readonly result: Readonly<ShallowRef<SentReply | null>>;
   readonly sendButton: ComputedRef<ButtonView>;
-  postButton(message: Message): ButtonView;
+  postButton(message: Message): PostView;
   checkNow(): Promise<void>;
   checkOnFocus(): void;
   send(): Promise<void>;
@@ -89,20 +97,20 @@ function sendButton(state: State): ButtonView {
   return { label, title, disabled: state.sending.value !== null };
 }
 
-function postButton(state: State, { body, posting }: Message): ButtonView {
+function postButton(state: State, { body, posting }: Message): PostView {
   if (body.kind === "aiAnswer") {
-    return { label: POST_LABEL, title: AI_ANSWER_TEXT, disabled: true };
+    return { label: POST_LABEL, title: AI_ANSWER_TEXT, action: null };
   }
   if (posting.kind === "pending") {
-    return { label: POST_LABEL, title: PENDING_TEXT, disabled: true };
+    return { label: POST_LABEL, title: PENDING_TEXT, action: null };
   }
   if (isQueued(posting)) {
-    return { label: UNQUEUE_LABEL, title: UNQUEUE_TITLE, disabled: false };
+    return { label: UNQUEUE_LABEL, title: UNQUEUE_TITLE, action: "unqueue" };
   }
   const shown = gate(state);
   return shown.kind === "blocked"
-    ? { label: POST_LABEL, title: shown.title, disabled: true }
-    : { label: POST_LABEL, title: postTitle(shown.mergeRequest), disabled: false };
+    ? { label: POST_LABEL, title: shown.title, action: null }
+    : { label: POST_LABEL, title: postTitle(shown.mergeRequest), action: "edit" };
 }
 
 async function checkNow(state: State): Promise<void> {

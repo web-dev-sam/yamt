@@ -167,7 +167,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
   expect(live.gitlab.postButton(note)).toEqual({
     label: "Post",
     title: "Checking GitLab…",
-    disabled: true,
+    action: null,
   });
 
   await checked(live);
@@ -180,7 +180,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
   expect(live.gitlab.postButton(note)).toEqual({
     label: "Post",
     title: "Queue this message as its own comment on !12",
-    disabled: false,
+    action: "edit",
   });
 });
 
@@ -209,14 +209,17 @@ test("a not lined-up answer disables both with its sentence; Unqueue stays enabl
   expect(live.gitlab.postButton(messageAt(live, 3))).toEqual({
     label: "Post",
     title: sentence,
-    disabled: true,
+    action: null,
   });
   expect(live.gitlab.postButton(messageAt(live, 0))).toEqual({
     label: "Unqueue",
     title: "Take this message out of the queue",
-    disabled: false,
+    action: "unqueue",
   });
-  expect(live.gitlab.postButton(messageAt(live, 1)).label).toBe("Unqueue");
+  expect(live.gitlab.postButton(messageAt(live, 1))).toMatchObject({
+    label: "Unqueue",
+    action: "unqueue",
+  });
 });
 
 test("a pending message and an AI answer cannot be posted", async () => {
@@ -226,12 +229,12 @@ test("a pending message and an AI answer cannot be posted", async () => {
   expect(live.gitlab.postButton(messageAt(live, 2))).toEqual({
     label: "Post",
     title: "Pending on GitLab",
-    disabled: true,
+    action: null,
   });
   expect(live.gitlab.postButton(messageAt(live, 3, 1))).toEqual({
     label: "Post",
     title: "An AI answer — start yamt with --ai to see it",
-    disabled: true,
+    action: null,
   });
 });
 

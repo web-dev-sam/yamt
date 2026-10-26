@@ -8,6 +8,7 @@ import type {
   SendReply,
   ThreadLine,
 } from "../ipc";
+import type { NoticeRow } from "./noticeText";
 import { sideLabel } from "./rangeText";
 
 export const CHECKING_TEXT = "Checking GitLab…";
@@ -17,6 +18,16 @@ export const AI_ANSWER_TEXT = "An AI answer — start yamt with --ai to see it";
 export const POST_LABEL = "Post";
 export const UNQUEUE_LABEL = "Unqueue";
 export const UNQUEUE_TITLE = "Take this message out of the queue";
+export const COMMENT_LABEL = "Comment";
+export const CANCEL_LABEL = "Cancel";
+export const COLLAPSE_THREAD = "Collapse the thread";
+export const DRAFT_PROMPT = "Write a comment…";
+export const REPLY_PROMPT = "Reply…";
+export const QUEUE_LABEL = "Queue";
+export const POST_FIELD_LABEL = "Text to post";
+export const COPY_LINK_TITLE = "Copy the link to the merge request's changes";
+
+const SEND_RESULT_CLOSE = "Close the notice about the send to GitLab";
 
 function twoDotsHint({ left, right }: RangeStart): string {
   if (left.label.kind !== "named") {
@@ -103,6 +114,16 @@ export function sendResultText(reply: Exclude<SendReply, { readonly kind: "notLi
       return _exhaustive;
     }
   }
+}
+
+export function sendNoticeRow(
+  reply: Exclude<SendReply, { readonly kind: "notLinedUp" }>,
+): NoticeRow {
+  return { key: "send", text: sendResultText(reply), closeLabel: SEND_RESULT_CLOSE };
+}
+
+export function threadCountText(threads: number): string {
+  return threads === 1 ? "1 thread" : `${threads} threads`;
 }
 
 export function threadPlaceText(

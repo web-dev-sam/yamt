@@ -12,8 +12,10 @@ import {
   postingLabel,
   postTitle,
   sendLabel,
+  sendNoticeRow,
   sendResultText,
   sendTitle,
+  threadCountText,
   threadPlaceText,
 } from "./rangeThreadText";
 
@@ -133,6 +135,21 @@ test("the result notice counts sent and refused, and a stop says why", () => {
   expect(
     sendResultText({ kind: "stopped", list, sent: 1, refused: 0, reason: "glab timed out" }),
   ).toBe("1 sent, 0 refused; stopped: glab timed out. The rest stay queued.");
+});
+
+test("the result notice is one closable row with its words", () => {
+  const list = { threads: [] };
+  expect(sendNoticeRow({ kind: "sent", list, sent: 2, refused: 0 })).toEqual({
+    key: "send",
+    text: "2 sent, 0 refused",
+    closeLabel: "Close the notice about the send to GitLab",
+  });
+});
+
+test("a file row's thread count says thread for one and threads otherwise", () => {
+  expect(threadCountText(1)).toBe("1 thread");
+  expect(threadCountText(2)).toBe("2 threads");
+  expect(threadCountText(0)).toBe("0 threads");
 });
 
 test.each([

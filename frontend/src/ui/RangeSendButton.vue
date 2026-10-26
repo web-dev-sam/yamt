@@ -16,8 +16,7 @@ function send(): void {
     <button
       type="button"
       :disabled="sendButton.disabled"
-      :title="sendButton.title"
-      class="flex items-center gap-1.5 rounded border border-control-border px-2.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+      class="flex items-center gap-1.5 rounded border border-control-border px-2.5 py-1 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
       @mousedown.prevent
       @click="send"
     >

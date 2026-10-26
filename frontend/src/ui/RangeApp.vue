@@ -8,16 +8,13 @@ import type { NoticeRow } from "./noticeText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import RangeFileRow from "./RangeFileRow.vue";
-import { typesIntoField } from "./rangeKeys";
 import { useRangeStore } from "./rangeStore";
 import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
-import { sendResultText } from "./rangeThreadText";
+import { sendNoticeRow } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
-
-const SEND_RESULT_CLOSE = "Close the notice about the send to GitLab";
 
 const {
   start,
@@ -42,9 +39,7 @@ const { counts } = threads;
 const focused = useWindowFocus();
 useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
-  if (!typesIntoField(event)) {
-    fileListKey(event, navigator.platform);
-  }
+  fileListKey(event, navigator.platform);
 });
 
 const files = computed(() => start.value?.files ?? []);
@@ -53,9 +48,7 @@ const emptyText = computed(() =>
 );
 const sendNotice = computed((): readonly NoticeRow[] => {
   const result = gitlab.result.value;
-  return result === null
-    ? []
-    : [{ key: "send", text: sendResultText(result), closeLabel: SEND_RESULT_CLOSE }];
+  return result === null ? [] : [sendNoticeRow(result)];
 });
 
 watch(focused, (now) => {

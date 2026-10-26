@@ -4,6 +4,7 @@ import MessageSquare from "~icons/lucide/message-square";
 
 import type { RangeChange, RangeEntry } from "../ipc";
 import { changeMark, lineCounts } from "./rangeText";
+import { threadCountText } from "./rangeThreadText";
 
 const props = defineProps<{ file: RangeEntry; label: string; threads: number }>();
 
@@ -20,9 +21,7 @@ const oldPath = computed(() =>
   props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
 );
 const counts = computed(() => lineCounts(props.file.lines));
-const threadsTitle = computed(() =>
-  props.threads === 1 ? "1 thread" : `${props.threads} threads`,
-);
+const threadsTitle = computed(() => threadCountText(props.threads));
 </script>
 
 <template>

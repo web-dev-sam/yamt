@@ -1,20 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef, useTemplateRef } from "vue";
+import { computed, onMounted, useTemplateRef } from "vue";
 
+import type { MessageId } from "../ipc";
 import { isBlank } from "./rangeDrafts";
 import { boxKeydown } from "./rangeKeys";
+import { useRangeStore } from "./rangeStore";
+import { CANCEL_LABEL, POST_FIELD_LABEL, QUEUE_LABEL } from "./rangeThreadText";
 
-const props = defineProps<{ text: string }>();
+const props = defineProps<{ message: MessageId }>();
 const emit = defineEmits<{ queue: [text: string]; cancel: [] }>();
 
-const QUEUE = "Queue";
-const CANCEL = "Cancel";
-const FIELD_LABEL = "Text to post";
-
 const field = useTemplateRef<HTMLTextAreaElement>("field");
-const edited = shallowRef(props.text);
+const { threads } = useRangeStore();
 
-const blank = computed(() => isBlank(edited.value));
+const text = computed(() => threads.postDraft(props.message) ?? "");
+const blank = computed(() => isBlank(text.value));
 
 onMounted(() => {
   field.value?.focus({ preventScroll: true });
@@ -22,13 +22,13 @@ onMounted(() => {
 
 function typed(event: Event): void {
   if (event.target instanceof HTMLTextAreaElement) {
-    edited.value = event.target.value;
+    threads.writePost(props.message, event.target.value);
   }
 }
 
 function queue(): void {
   if (!blank.value) {
-    emit("queue", edited.value);
+    emit("queue", text.value);
   }
 }
 
@@ -41,8 +41,8 @@ function keydown(event: KeyboardEvent): void {
   <div class="flex flex-col gap-2">
     <textarea
       ref="field"
-      :value="edited"
-      :aria-label="FIELD_LABEL"
+      :value="text"
+      :aria-label="POST_FIELD_LABEL"
       rows="4"
       class="w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
       @input="typed"
@@ -55,14 +55,14 @@ function keydown(event: KeyboardEvent): void {
         class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted disabled:hover:brightness-100"
         @click="queue"
       >
-        {{ QUEUE }}
+        {{ QUEUE_LABEL }}
       </button>
       <button
         type="button"
         class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
         @click="emit('cancel')"
       >
-        {{ CANCEL }}
+        {{ CANCEL_LABEL }}
       </button>
     </div>
   </div>

@@ -39,6 +39,9 @@ export type RangeThreads = {
   dropDraft(key: string): void;
   noteText(thread: ThreadId): string;
   writeNote(thread: ThreadId, text: string): void;
+  postDraft(message: MessageId): string | null;
+  writePost(message: MessageId, text: string): void;
+  dropPost(message: MessageId): void;
   toggle(keys: readonly string[]): void;
   addThread(draftKey: string, text: string): Promise<void>;
   addNote(thread: ThreadId, text: string): Promise<void>;
@@ -185,8 +188,11 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
       await changed(state, "list", () => source.listThreads());
     },
     queue: async (message, text) => {
-      if (!isBlank(text)) {
-        await changed(state, "queue", () => source.queueMessage(message, text));
+      if (
+        !isBlank(text) &&
+        (await changed(state, "queue", () => source.queueMessage(message, text)))
+      ) {
+        state.drafts.dropPost(message);
       }
     },
     unqueue: async (message) => {

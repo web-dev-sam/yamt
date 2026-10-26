@@ -89,6 +89,7 @@ export {
   isMac,
   KEY_ACTIONS,
   keyLabel,
+  keyList,
   keyOfEvent,
   keyText,
   parseKey,

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { boxKeydown, isTypingTarget, typesIntoField } from "./rangeKeys";
+import { boxKeydown, isTypingTarget } from "./rangeKeys";
 
 const LINUX = "Linux x86_64";
 const MAC = "MacIntel";
@@ -16,6 +16,7 @@ function boxPress(key: string, platform: string, held: Held = {}): string {
   boxKeydown(
     {
       key,
+      code: "",
       ctrlKey: held.ctrl === true,
       metaKey: held.meta === true,
       altKey: held.alt === true,
@@ -62,15 +63,6 @@ test("buttons, checkboxes, other elements, the window and nothing are not typing
 test("an input whose type is not a string is not a typing target, even one that reads as text", () => {
   const typed = Object.assign(new EventTarget(), { tagName: "INPUT", type: ["text"] });
   expect(isTypingTarget(typed)).toBe(false);
-});
-
-test("a press types into a field only without Ctrl or Cmd, so Ctrl/Cmd+B still reaches the window", () => {
-  const field = element({ tagName: "TEXTAREA" });
-  const code = element({ tagName: "DIV" });
-  expect(typesIntoField({ target: field, ctrlKey: false, metaKey: false })).toBe(true);
-  expect(typesIntoField({ target: field, ctrlKey: true, metaKey: false })).toBe(false);
-  expect(typesIntoField({ target: field, ctrlKey: false, metaKey: true })).toBe(false);
-  expect(typesIntoField({ target: code, ctrlKey: false, metaKey: false })).toBe(false);
 });
 
 test("Ctrl+Enter submits on Linux, Cmd+Enter on macOS, each kept from the column and the window", () => {

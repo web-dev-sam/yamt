@@ -7,16 +7,20 @@ import { isBlank } from "./rangeDrafts";
 import { boxKeydown } from "./rangeKeys";
 import RangeMessage from "./RangeMessage.vue";
 import { useRangeStore } from "./rangeStore";
-import { threadPlaceText } from "./rangeThreadText";
+import {
+  CANCEL_LABEL,
+  COLLAPSE_THREAD,
+  COMMENT_LABEL,
+  DRAFT_PROMPT,
+  REPLY_PROMPT,
+  threadPlaceText,
+} from "./rangeThreadText";
 
 const props = defineProps<{ threadKey: string; file: RangeEntry }>();
 
-const COMMENT = "Comment";
-const CANCEL = "Cancel";
-const COLLAPSE = "Collapse the thread";
 const PROMPTS = {
-  draft: { text: "Write a comment…", rows: 3 },
-  reply: { text: "Reply…", rows: 1 },
+  draft: { text: DRAFT_PROMPT, rows: 3 },
+  reply: { text: REPLY_PROMPT, rows: 1 },
 };
 
 const field = useTemplateRef<HTMLTextAreaElement>("field");
@@ -110,8 +114,8 @@ function collapse(): void {
       <button
         v-if="thread !== null"
         type="button"
-        :title="COLLAPSE"
-        :aria-label="COLLAPSE"
+        :title="COLLAPSE_THREAD"
+        :aria-label="COLLAPSE_THREAD"
         class="shrink-0 rounded p-0.5 hover:bg-hover"
         @click="collapse"
       >
@@ -136,16 +140,17 @@ function collapse(): void {
         type="button"
         :disabled="blank"
         class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted disabled:hover:brightness-100"
+        @mousedown.prevent
         @click="submit"
       >
-        {{ COMMENT }}
+        {{ COMMENT_LABEL }}
       </button>
       <button
         type="button"
         class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
         @click="cancel"
       >
-        {{ CANCEL }}
+        {{ CANCEL_LABEL }}
       </button>
     </div>
   </section>
