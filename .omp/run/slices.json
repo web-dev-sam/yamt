@@ -1,17 +1,4 @@
 {
-  "RVRustTidy": {
-    "owned": [
-      "crates/settings/src/file.rs",
-      "crates/settings/src/lib.rs",
-      "crates/settings/tests/**",
-      "crates/settings/AGENTS.md",
-      "src-tauri/src/review.rs",
-      "src-tauri/src/review/tests.rs",
-      "src-tauri/src/ai.rs",
-      "src-tauri/AGENTS.md",
-      "src-tauri/src/ai/tests.rs"
-    ]
-  },
   "RVAiThreadsSmoke": {
     "owned": [
       "frontend/src/main.ts",
