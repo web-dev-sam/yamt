@@ -80,8 +80,12 @@ function add(rows: Rows, row: DiffRow): void {
   }
 }
 
+function lacksBreak(side: Side, line: number): boolean {
+  return side.open && line === side.lines.length - 1;
+}
+
 function addLastLine(rows: Rows, side: Side, line: number): void {
-  if (side.open && line === side.lines.length - 1) {
+  if (lacksBreak(side, line)) {
     add(rows, { kind: "noNewline" });
   }
 }
@@ -132,7 +136,7 @@ function addChange(rows: Rows, texts: Texts, { left, right }: Placed): void {
       kind: "removed",
       old: line + 1,
       text: withoutCr(text),
-      ending: pairEnding(text, pair),
+      ending: lacksBreak(texts.old, line) ? null : pairEnding(text, pair),
     });
     addLastLine(rows, texts.old, line);
   }
@@ -144,7 +148,7 @@ function addChange(rows: Rows, texts: Texts, { left, right }: Placed): void {
       kind: "added",
       new: line + 1,
       text: withoutCr(text),
-      ending: pairEnding(text, pair),
+      ending: lacksBreak(texts.new, line) ? null : pairEnding(text, pair),
     });
     addLastLine(rows, texts.new, line);
   }

@@ -152,11 +152,11 @@ test("a side without a final newline gets git's marker after its last line, wher
 });
 
 test("a pair differing only by a carriage return is marked with each side's line ending, the \\r never shown", () => {
-  expect(shape(editDiffLines("a\r\nb\r\n", "a\nb\n", [placed([0, 2, 0, 2])]))).toEqual([
-    "-1 a [crlf]",
-    "-2 b [crlf]",
-    "+1 a [lf]",
-    "+2 b [lf]",
+  expect(shape(editDiffLines("ab\r\ncd\r\n", "ab\ncd\n", [placed([0, 2, 0, 2])]))).toEqual([
+    "-1 ab [crlf]",
+    "-2 cd [crlf]",
+    "+1 ab [lf]",
+    "+2 cd [lf]",
   ]);
   expect(shape(editDiffLines("x\r\ny\r\nz\r\n", "x\r\nY\nz\r\n", [placed([1, 1, 1, 1])]))).toEqual([
     " 1:1 x",
@@ -168,6 +168,34 @@ test("a pair differing only by a carriage return is marked with each side's line
     "-1 a [lf]",
     "-2 b",
     "+1 a [crlf]",
+  ]);
+});
+
+test("a last line without a line break claims no ending; its pair keeps its own", () => {
+  expect(shape(editDiffLines("a\r\n", "a", [placed([0, 1, 0, 1])]))).toEqual([
+    "-1 a [crlf]",
+    "+1 a",
+    "\\",
+  ]);
+  expect(shape(editDiffLines("a", "a\r\n", [placed([0, 1, 0, 1])]))).toEqual([
+    "-1 a",
+    "\\",
+    "+1 a [crlf]",
+  ]);
+});
+
+test("an unpaired changed line is never paired with the unchanged line after the change", () => {
+  expect(shape(editDiffLines("a\r\nc\r\nc\n", "a\nc\n", [placed([0, 2, 0, 1])]))).toEqual([
+    "-1 a [crlf]",
+    "-2 c",
+    "+1 a [lf]",
+    " 3:2 c",
+  ]);
+  expect(shape(editDiffLines("a\nc\n", "a\r\nc\r\nc\n", [placed([0, 1, 0, 2])]))).toEqual([
+    "-1 a [lf]",
+    "+1 a [crlf]",
+    "+2 c",
+    " 2:3 c",
   ]);
 });
 
@@ -233,4 +261,5 @@ test("each row kind fills its own cells; words come from the AI text", () => {
   expect(diffRowCells({ kind: "removed", old: 1, text: "a", ending: "crlf" }).note).toBe(
     "CRLF line ending",
   );
+  expect(diffRowCells({ kind: "added", new: 1, text: "a", ending: null }).note).toBe("");
 });
