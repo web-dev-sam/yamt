@@ -1,0 +1,918 @@
+From 9fc1dcadc261c418b45066bfba4fb7624987dc24 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 22:41:24 +0100
+Subject: [PATCH] feat(review): the thread store records the AI's session and
+ numbered answers
+
+---
+ crates/review/AGENTS.md                       |   2 +-
+ crates/review/src/send.rs                     |   2 +-
+ crates/review/src/thread_store.rs             | 308 +++++-------------
+ .../waiting.rs}                               | 175 +---------
+ crates/review/src/thread_types.rs             |   4 +-
+ crates/review/tests/threads.rs                | 150 ++++++++-
+ src-tauri/AGENTS.md                           |   2 +-
+ src-tauri/src/commands.rs                     |   2 +
+ src-tauri/src/review.rs                       |  51 +++
+ 9 files changed, 287 insertions(+), 409 deletions(-)
+ copy crates/review/src/{thread_store.rs => thread_store/waiting.rs} (59%)
+
+diff --git a/crates/review/AGENTS.md b/crates/review/AGENTS.md
+index 90566d1..706ebac 100644
+--- a/crates/review/AGENTS.md
++++ b/crates/review/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer`, `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread, add_note, queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`); blank text is `EmptyMessage`, a pending message is `MessagePending`; ids from the counters, never reused; the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule; for the sender, `pub(crate)` `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did)). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store.rs`; `tests/threads.rs` on real temp folders with a `Range` over a `yamt-conflict-repo` repository.
++Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120, #121): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer` (`session`, `turn`: the answer is turn `turn` among that session's answers, its text only in omp's session), `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`; `session` the conversation the next "Ask AI" continues), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread, add_note, set_session (replaces the thread's session), add_ai_answer (sets the session, then appends `AiAnswer { session, turn }`, turn = that session's answers already in the thread: the one numbering rule, #121), queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`); blank text is `EmptyMessage`, a pending message is `MessagePending`, a thread on a path the range does not list is `UnknownThread`; ids from the counters, never reused; the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule), `thread_store/waiting.rs` (the sender's side of the store, `pub(crate)`: `QueuedMessage`, `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did)). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store/waiting.rs`; `tests/threads.rs` on real temp folders with a `Range` over a `yamt-conflict-repo` repository.
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+index 24553b1..a527632 100644
+--- a/crates/review/src/send.rs
++++ b/crates/review/src/send.rs
+@@ -12,7 +12,7 @@ use crate::glab_answer::{Outcome, TIMED_OUT, answer, first_line, posted, run};
+ use crate::lines_up::{Found, LinedUp, candidates, lines_up};
+ use crate::position::{PostBody, line_place, same_draft};
+ use crate::right_branch::right_branch;
+-use crate::thread_store::QueuedMessage;
++use crate::thread_store::waiting::QueuedMessage;
+ use crate::{
+     Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
+     ThreadStore,
+diff --git a/crates/review/src/thread_store.rs b/crates/review/src/thread_store.rs
+index d959f1d..4848e33 100644
+--- a/crates/review/src/thread_store.rs
++++ b/crates/review/src/thread_store.rs
+@@ -9,6 +9,8 @@ use crate::{
+     ThreadLine, ThreadList,
+ };
+ 
++pub(crate) mod waiting;
++
+ /// The threads of one pair folder; the pair lock makes its process the only writer.
+ #[derive(Debug)]
+ pub struct ThreadStore {
+@@ -16,14 +18,6 @@ pub struct ThreadStore {
+     file: ThreadFile,
+ }
+ 
+-/// A message waiting for the next send: queued, or refused and sent again. Its text is read again before the post.
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub(crate) struct QueuedMessage {
+-    pub(crate) message: MessageId,
+-    pub(crate) file: RangeFileId,
+-    pub(crate) line: ThreadLine,
+-}
+-
+ impl ThreadStore {
+     /// Reads `<folder>/threads.json`; a missing file is an empty store, and nothing is written.
+     pub fn open(folder: &Path) -> Result<ThreadStore> {
+@@ -76,7 +70,7 @@ impl ThreadStore {
+         let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
+         let mut next = self.file.clone();
+         let id = next.take_thread_id(&self.path)?;
+-        let message = new_message(&mut next, &self.path, text)?;
++        let message = new_message(next.take_message_id(&self.path)?, note(text));
+         next.threads.push(StoredThread {
+             id,
+             path: entry.path.clone(),
+@@ -95,12 +89,44 @@ impl ThreadStore {
+     pub fn add_note(&mut self, range: &Range, thread: ThreadId, text: &str) -> Result<ThreadList> {
+         require_text(text)?;
+         let mut next = self.file.clone();
+-        let message = new_message(&mut next, &self.path, text)?;
+-        let stored = next
+-            .thread_mut(thread)
+-            .filter(|stored| file_at(range, &stored.path).is_some())
+-            .ok_or(Error::UnknownThread { thread })?;
+-        stored.messages.push(message);
++        let message = new_message(next.take_message_id(&self.path)?, note(text));
++        shown_thread_mut(&mut next, range, thread)?
++            .messages
++            .push(message);
++        self.commit(next)?;
++        Ok(self.list(range))
++    }
++
++    /// Stores the conversation the thread's next "Ask AI" continues; replaces an earlier one (#115: omp lost it).
++    pub fn set_session(
++        &mut self,
++        range: &Range,
++        thread: ThreadId,
++        session: &str,
++    ) -> Result<ThreadList> {
++        let mut next = self.file.clone();
++        shown_thread_mut(&mut next, range, thread)?.session = Some(session.to_owned());
++        self.commit(next)?;
++        Ok(self.list(range))
++    }
++
++    /// Sets the session as above when it differs, then appends `AiAnswer { session, turn }` with
++    /// turn = the number of `AiAnswer`s of that session already in the thread (the one numbering rule).
++    pub fn add_ai_answer(
++        &mut self,
++        range: &Range,
++        thread: ThreadId,
++        session: &str,
++    ) -> Result<ThreadList> {
++        let mut next = self.file.clone();
++        let id = next.take_message_id(&self.path)?;
++        let stored = shown_thread_mut(&mut next, range, thread)?;
++        stored.session = Some(session.to_owned());
++        let answer = MessageBody::AiAnswer {
++            session: session.to_owned(),
++            turn: answers_in(&stored.messages, session),
++        };
++        stored.messages.push(new_message(id, answer));
+         self.commit(next)?;
+         Ok(self.list(range))
+     }
+@@ -119,69 +145,6 @@ impl ThreadStore {
+         self.change_posting(range, message, Posting::NotQueued)
+     }
+ 
+-    /// Every queued or refused message on a file of `range`, in thread order, then message order.
+-    pub(crate) fn queued(&self, range: &Range) -> Vec<QueuedMessage> {
+-        let mut queued = Vec::new();
+-        for thread in &self.file.threads {
+-            let Some(file) = file_at(range, &thread.path) else {
+-                continue;
+-            };
+-            for message in &thread.messages {
+-                if waiting_text_of(&message.posting).is_some() {
+-                    queued.push(QueuedMessage {
+-                        message: message.id,
+-                        file,
+-                        line: thread.line,
+-                    });
+-                }
+-            }
+-        }
+-        queued
+-    }
+-
+-    /// The text to post when the message still waits for a send; `None` once it is unqueued, pending or gone.
+-    pub(crate) fn waiting_text(&self, message: MessageId) -> Option<String> {
+-        let stored = self
+-            .file
+-            .threads
+-            .iter()
+-            .flat_map(|thread| &thread.messages)
+-            .find(|stored| stored.id == message)?;
+-        waiting_text_of(&stored.posting).map(str::to_owned)
+-    }
+-
+-    /// The draft notes the store's pending messages own.
+-    pub(crate) fn pending_draft_notes(&self) -> Vec<u64> {
+-        let mut owned = Vec::new();
+-        for thread in &self.file.threads {
+-            for message in &thread.messages {
+-                if let Posting::Pending { draft_note, .. } = message.posting {
+-                    owned.push(draft_note);
+-                }
+-            }
+-        }
+-        owned
+-    }
+-
+-    /// Stores what a send made of the message, only while it still waits with `posted_text`; whether it did.
+-    pub(crate) fn record_if_waiting(
+-        &mut self,
+-        message: MessageId,
+-        posted_text: &str,
+-        posting: Posting,
+-    ) -> Result<bool> {
+-        let mut next = self.file.clone();
+-        let (_, stored) = next
+-            .message_mut(message)
+-            .ok_or(Error::UnknownMessage { message })?;
+-        if waiting_text_of(&stored.posting) != Some(posted_text) {
+-            return Ok(false);
+-        }
+-        stored.posting = posting;
+-        self.commit(next)?;
+-        Ok(true)
+-    }
+-
+     fn change_posting(
+         &mut self,
+         range: &Range,
+@@ -220,12 +183,31 @@ fn file_at(range: &Range, path: &str) -> Option<RangeFileId> {
+         .map(|entry| entry.id)
+ }
+ 
+-/// The text a send posts: a queued message's, or a refused one's sent again.
+-fn waiting_text_of(posting: &Posting) -> Option<&str> {
+-    match posting {
+-        Posting::Queued { text } | Posting::Refused { text, .. } => Some(text),
+-        Posting::NotQueued | Posting::Pending { .. } => None,
++/// The thread when it is on a file of `range`.
++fn shown_thread_mut<'a>(
++    next: &'a mut ThreadFile,
++    range: &Range,
++    thread: ThreadId,
++) -> Result<&'a mut StoredThread> {
++    next.thread_mut(thread)
++        .filter(|stored| file_at(range, &stored.path).is_some())
++        .ok_or(Error::UnknownThread { thread })
++}
++
++/// How many of `messages` are answers in `session`: the turn its next answer gets.
++fn answers_in(messages: &[Message], session: &str) -> u32 {
++    let mut answers = 0;
++    for message in messages {
++        if let MessageBody::AiAnswer {
++            session: answered_in,
++            ..
++        } = &message.body
++            && answered_in == session
++        {
++            answers += 1;
++        }
+     }
++    answers
+ }
+ 
+ fn require_text(text: &str) -> Result<()> {
+@@ -235,15 +217,19 @@ fn require_text(text: &str) -> Result<()> {
+     Ok(())
+ }
+ 
+-fn new_message(next: &mut ThreadFile, path: &Path, text: &str) -> Result<Message> {
+-    Ok(Message {
+-        id: next.take_message_id(path)?,
+-        body: MessageBody::Note {
+-            text: text.to_owned(),
+-        },
++fn note(text: &str) -> MessageBody {
++    MessageBody::Note {
++        text: text.to_owned(),
++    }
++}
++
++fn new_message(id: MessageId, body: MessageBody) -> Message {
++    Message {
++        id,
++        body,
+         written: seconds_since_1970(),
+         posting: Posting::NotQueued,
+-    })
++    }
+ }
+ 
+ /// A clock set before 1970 stamps 0.
+@@ -252,145 +238,3 @@ fn seconds_since_1970() -> u64 {
+         .duration_since(UNIX_EPOCH)
+         .map_or(0, |since| since.as_secs())
+ }
+-
+-#[cfg(test)]
+-mod tests {
+-    use std::fs;
+-
+-    use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
+-    use yamt_merge_core::RightLine;
+-    use yamt_range::{RangeSpec, Resolved};
+-
+-    use super::*;
+-
+-    const STORED: &str = r#"{"format":1,"nextThread":3,"nextMessage":6,"threads":[
+-        {"id":2,"path":"b.txt","line":{"kind":"added","right":4},"session":null,"messages":[
+-            {"id":5,"body":{"kind":"note","text":"b"},"written":0,"posting":{"kind":"queued","text":"first"}},
+-            {"id":1,"body":{"kind":"note","text":"c"},"written":0,"posting":{"kind":"refused","text":"second","reason":"400"}}]},
+-        {"id":1,"path":"a.txt","line":{"kind":"added","right":4},"session":null,"messages":[
+-            {"id":2,"body":{"kind":"note","text":"d"},"written":0,"posting":{"kind":"notQueued"}},
+-            {"id":3,"body":{"kind":"note","text":"e"},"written":0,"posting":{"kind":"pending","text":"e","draft_note":7,"merge_request":"!1","link":"l"}},
+-            {"id":4,"body":{"kind":"note","text":"f"},"written":0,"posting":{"kind":"queued","text":"third"}}]}]}"#;
+-
+-    fn stored_in(dir: &Path) -> ThreadStore {
+-        fs::write(dir.join(THREADS_FILE), STORED).unwrap();
+-        ThreadStore::open(dir).unwrap()
+-    }
+-
+-    /// `main..local` lists a.txt (0) and b.txt (1); `main..remote` lists a.txt (0) only.
+-    fn repo() -> TempDir {
+-        let file = |path, local: &'static [u8], remote: Option<&'static [u8]>| ConflictFile {
+-            path,
+-            kind: FileKind::Regular,
+-            base: remote.map(|_| b"1\n".as_slice()),
+-            local: Some(local),
+-            remote,
+-        };
+-        diverged_repo(&[
+-            file("a.txt", b"2\n", Some(b"3\n")),
+-            file("b.txt", b"new\n", None),
+-        ])
+-        .unwrap()
+-    }
+-
+-    fn range(repo: &TempDir, text: &str) -> Range {
+-        Resolved::resolve(repo.path(), &RangeSpec::parse(text).unwrap())
+-            .unwrap()
+-            .list()
+-            .unwrap()
+-    }
+-
+-    #[test]
+-    fn queued_lists_queued_and_refused_messages_in_thread_then_message_order() {
+-        let repo = repo();
+-        let dir = tempfile::tempdir().unwrap();
+-        let store = stored_in(dir.path());
+-        let queued: Vec<_> = store
+-            .queued(&range(&repo, "main..local"))
+-            .into_iter()
+-            .map(|q| (q.message.0, q.file, q.line))
+-            .collect();
+-        let line = ThreadLine::Added {
+-            right: RightLine(4),
+-        };
+-        let expected = vec![
+-            (5, RangeFileId(1), line),
+-            (1, RangeFileId(1), line),
+-            (4, RangeFileId(0), line),
+-        ];
+-        assert_eq!(queued, expected);
+-    }
+-
+-    #[test]
+-    fn waiting_text_is_a_queued_or_refused_message_s_text_now() {
+-        let dir = tempfile::tempdir().unwrap();
+-        let store = stored_in(dir.path());
+-        let texts: Vec<Option<String>> = [5, 1, 2, 3, 42]
+-            .into_iter()
+-            .map(|id| store.waiting_text(MessageId(id)))
+-            .collect();
+-        let first = Some("first".to_owned());
+-        let second = Some("second".to_owned());
+-        assert_eq!(texts, [first, second, None, None, None]);
+-    }
+-
+-    #[test]
+-    fn pending_draft_notes_are_the_drafts_pending_messages_own() {
+-        let dir = tempfile::tempdir().unwrap();
+-        assert_eq!(stored_in(dir.path()).pending_draft_notes(), [7]);
+-    }
+-
+-    #[test]
+-    fn queued_leaves_out_messages_on_paths_the_range_does_not_list() {
+-        let repo = repo();
+-        let dir = tempfile::tempdir().unwrap();
+-        let store = stored_in(dir.path());
+-        let queued: Vec<_> = store
+-            .queued(&range(&repo, "main..remote"))
+-            .into_iter()
+-            .map(|q| (q.message.0, q.file))
+-            .collect();
+-        assert_eq!(queued, [(4, RangeFileId(0))]);
+-    }
+-
+-    #[test]
+-    fn record_if_waiting_writes_the_posting_and_keeps_it() {
+-        let dir = tempfile::tempdir().unwrap();
+-        let mut store = stored_in(dir.path());
+-        let applied = store.record_if_waiting(MessageId(5), "first", pending("first"));
+-        assert!(applied.unwrap());
+-        let reopened = ThreadStore::open(dir.path()).unwrap();
+-        assert_eq!(reopened.file, store.file);
+-        let local = range(&repo(), "main..local");
+-        let ids: Vec<u32> = store.queued(&local).iter().map(|q| q.message.0).collect();
+-        assert_eq!(ids, [1, 4]);
+-        assert_eq!(store.pending_draft_notes(), [9, 7]);
+-    }
+-
+-    #[test]
+-    fn record_if_waiting_leaves_a_changed_message_alone_and_refuses_an_unknown_one() {
+-        let dir = tempfile::tempdir().unwrap();
+-        let mut store = stored_in(dir.path());
+-        let before = store.file.clone();
+-        let edited = store.record_if_waiting(MessageId(5), "older text", pending("older text"));
+-        assert!(!edited.unwrap());
+-        let unqueued = store.record_if_waiting(MessageId(2), "d", pending("d"));
+-        assert!(!unqueued.unwrap());
+-        let already_pending = store.record_if_waiting(MessageId(3), "e", pending("e"));
+-        assert!(!already_pending.unwrap());
+-        assert_eq!(store.file, before);
+-        assert_eq!(ThreadStore::open(dir.path()).unwrap().file, before);
+-        let unknown = store.record_if_waiting(MessageId(42), "x", Posting::NotQueued);
+-        let message = MessageId(42);
+-        assert!(matches!(unknown, Err(Error::UnknownMessage { message: m }) if m == message));
+-    }
+-
+-    fn pending(text: &str) -> Posting {
+-        Posting::Pending {
+-            text: text.to_owned(),
+-            draft_note: 9,
+-            merge_request: "!1".to_owned(),
+-            link: "l".to_owned(),
+-        }
+-    }
+-}
+diff --git a/crates/review/src/thread_store.rs b/crates/review/src/thread_store/waiting.rs
+similarity index 59%
+copy from crates/review/src/thread_store.rs
+copy to crates/review/src/thread_store/waiting.rs
+index d959f1d..1201248 100644
+--- a/crates/review/src/thread_store.rs
++++ b/crates/review/src/thread_store/waiting.rs
+@@ -1,20 +1,7 @@
+-use std::path::{Path, PathBuf};
+-use std::time::{SystemTime, UNIX_EPOCH};
+-
+ use yamt_range::{Range, RangeFileId};
+ 
+-use crate::thread_file::{StoredThread, THREADS_FILE, ThreadFile, read_threads, write_threads};
+-use crate::{
+-    Error, Message, MessageBody, MessageId, Posting, Result, Thread, ThreadAdded, ThreadId,
+-    ThreadLine, ThreadList,
+-};
+-
+-/// The threads of one pair folder; the pair lock makes its process the only writer.
+-#[derive(Debug)]
+-pub struct ThreadStore {
+-    path: PathBuf,
+-    file: ThreadFile,
+-}
++use super::{ThreadStore, file_at};
++use crate::{Error, MessageId, Posting, Result, ThreadLine};
+ 
+ /// A message waiting for the next send: queued, or refused and sent again. Its text is read again before the post.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -25,100 +12,6 @@ pub(crate) struct QueuedMessage {
+ }
+ 
+ impl ThreadStore {
+-    /// Reads `<folder>/threads.json`; a missing file is an empty store, and nothing is written.
+-    pub fn open(folder: &Path) -> Result<ThreadStore> {
+-        let path = folder.join(THREADS_FILE);
+-        let file = read_threads(&path)?.unwrap_or_else(ThreadFile::empty);
+-        Ok(ThreadStore { path, file })
+-    }
+-
+-    /// The threads on files of `range`, in creation order; threads on other paths are kept but left out.
+-    #[must_use]
+-    pub fn list(&self, range: &Range) -> ThreadList {
+-        let mut threads = Vec::new();
+-        for stored in &self.file.threads {
+-            if let Some(file) = file_at(range, &stored.path) {
+-                threads.push(Thread {
+-                    id: stored.id,
+-                    file,
+-                    line: stored.line,
+-                    messages: stored.messages.clone(),
+-                    session: stored.session.clone(),
+-                });
+-            }
+-        }
+-        ThreadList { threads }
+-    }
+-
+-    /// The stored paths `range` does not list, sorted, each once: their threads are kept but not shown.
+-    #[must_use]
+-    pub fn unlisted_paths(&self, range: &Range) -> Vec<String> {
+-        let mut paths = Vec::new();
+-        for stored in &self.file.threads {
+-            if file_at(range, &stored.path).is_none() {
+-                paths.push(stored.path.clone());
+-            }
+-        }
+-        paths.sort();
+-        paths.dedup();
+-        paths
+-    }
+-
+-    /// A new thread on `line` of `file`, with `text` as its first message.
+-    pub fn add_thread(
+-        &mut self,
+-        range: &Range,
+-        file: RangeFileId,
+-        line: ThreadLine,
+-        text: &str,
+-    ) -> Result<ThreadAdded> {
+-        require_text(text)?;
+-        let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
+-        let mut next = self.file.clone();
+-        let id = next.take_thread_id(&self.path)?;
+-        let message = new_message(&mut next, &self.path, text)?;
+-        next.threads.push(StoredThread {
+-            id,
+-            path: entry.path.clone(),
+-            line,
+-            session: None,
+-            messages: vec![message],
+-        });
+-        self.commit(next)?;
+-        Ok(ThreadAdded {
+-            thread: id,
+-            list: self.list(range),
+-        })
+-    }
+-
+-    /// Appends `text` to the thread as a note.
+-    pub fn add_note(&mut self, range: &Range, thread: ThreadId, text: &str) -> Result<ThreadList> {
+-        require_text(text)?;
+-        let mut next = self.file.clone();
+-        let message = new_message(&mut next, &self.path, text)?;
+-        let stored = next
+-            .thread_mut(thread)
+-            .filter(|stored| file_at(range, &stored.path).is_some())
+-            .ok_or(Error::UnknownThread { thread })?;
+-        stored.messages.push(message);
+-        self.commit(next)?;
+-        Ok(self.list(range))
+-    }
+-
+-    /// Queues the message for the next send with `text`, the message as edited for GitLab.
+-    pub fn queue(&mut self, range: &Range, message: MessageId, text: &str) -> Result<ThreadList> {
+-        require_text(text)?;
+-        let queued = Posting::Queued {
+-            text: text.to_owned(),
+-        };
+-        self.change_posting(range, message, queued)
+-    }
+-
+-    /// Takes the message out of the queue.
+-    pub fn unqueue(&mut self, range: &Range, message: MessageId) -> Result<ThreadList> {
+-        self.change_posting(range, message, Posting::NotQueued)
+-    }
+-
+     /// Every queued or refused message on a file of `range`, in thread order, then message order.
+     pub(crate) fn queued(&self, range: &Range) -> Vec<QueuedMessage> {
+         let mut queued = Vec::new();
+@@ -181,43 +74,6 @@ impl ThreadStore {
+         self.commit(next)?;
+         Ok(true)
+     }
+-
+-    fn change_posting(
+-        &mut self,
+-        range: &Range,
+-        message: MessageId,
+-        posting: Posting,
+-    ) -> Result<ThreadList> {
+-        let mut next = self.file.clone();
+-        let (_, stored) = next
+-            .message_mut(message)
+-            .filter(|(path, _)| file_at(range, path).is_some())
+-            .ok_or(Error::UnknownMessage { message })?;
+-        match stored.posting {
+-            Posting::Pending { .. } => return Err(Error::MessagePending { message }),
+-            Posting::NotQueued | Posting::Queued { .. } | Posting::Refused { .. } => {}
+-        }
+-        stored.posting = posting;
+-        self.commit(next)?;
+-        Ok(self.list(range))
+-    }
+-
+-    /// Writes `next` when it differs from the file in memory, then keeps it; a failed write keeps the old one.
+-    fn commit(&mut self, next: ThreadFile) -> Result<()> {
+-        if next != self.file {
+-            write_threads(&self.path, &next)?;
+-            self.file = next;
+-        }
+-        Ok(())
+-    }
+-}
+-
+-fn file_at(range: &Range, path: &str) -> Option<RangeFileId> {
+-    range
+-        .entries()
+-        .iter()
+-        .find(|entry| entry.path == path)
+-        .map(|entry| entry.id)
+ }
+ 
+ /// The text a send posts: a queued message's, or a refused one's sent again.
+@@ -228,40 +84,17 @@ fn waiting_text_of(posting: &Posting) -> Option<&str> {
+     }
+ }
+ 
+-fn require_text(text: &str) -> Result<()> {
+-    if text.trim().is_empty() {
+-        return Err(Error::EmptyMessage);
+-    }
+-    Ok(())
+-}
+-
+-fn new_message(next: &mut ThreadFile, path: &Path, text: &str) -> Result<Message> {
+-    Ok(Message {
+-        id: next.take_message_id(path)?,
+-        body: MessageBody::Note {
+-            text: text.to_owned(),
+-        },
+-        written: seconds_since_1970(),
+-        posting: Posting::NotQueued,
+-    })
+-}
+-
+-/// A clock set before 1970 stamps 0.
+-fn seconds_since_1970() -> u64 {
+-    SystemTime::now()
+-        .duration_since(UNIX_EPOCH)
+-        .map_or(0, |since| since.as_secs())
+-}
+-
+ #[cfg(test)]
+ mod tests {
+     use std::fs;
++    use std::path::Path;
+ 
+     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
+     use yamt_merge_core::RightLine;
+     use yamt_range::{RangeSpec, Resolved};
+ 
+     use super::*;
++    use crate::thread_file::THREADS_FILE;
+ 
+     const STORED: &str = r#"{"format":1,"nextThread":3,"nextMessage":6,"threads":[
+         {"id":2,"path":"b.txt","line":{"kind":"added","right":4},"session":null,"messages":[
+diff --git a/crates/review/src/thread_types.rs b/crates/review/src/thread_types.rs
+index c60876a..06f7615 100644
+--- a/crates/review/src/thread_types.rs
++++ b/crates/review/src/thread_types.rs
+@@ -52,7 +52,9 @@ pub enum MessageBody {
+     },
+     /// An AI answer, kept in the AI's own session.
+     AiAnswer {
+-        /// The answer's turn in the thread's session.
++        /// The session the answer lives in.
++        session: String,
++        /// The answer's turn among that session's answers in the thread, from 0.
+         turn: u32,
+     },
+ }
+diff --git a/crates/review/tests/threads.rs b/crates/review/tests/threads.rs
+index 319643b..a76c14f 100644
+--- a/crates/review/tests/threads.rs
++++ b/crates/review/tests/threads.rs
+@@ -73,6 +73,30 @@ fn note(text: &str) -> MessageBody {
+     }
+ }
+ 
++fn ai_answer(session: &str, turn: u32) -> MessageBody {
++    MessageBody::AiAnswer {
++        session: session.to_owned(),
++        turn,
++    }
++}
++
++/// The first message of a new thread on a.txt, through the store.
++fn store_with_one_thread(folder: &TempDir, range: &Range) -> ThreadStore {
++    let mut store = ThreadStore::open(folder.path()).unwrap();
++    store
++        .add_thread(range, RangeFileId(0), added_line(), "Why 300?")
++        .unwrap();
++    store
++}
++
++fn bodies(list: &ThreadList) -> Vec<MessageBody> {
++    let messages = &only_thread(list).messages;
++    messages
++        .iter()
++        .map(|message| message.body.clone())
++        .collect()
++}
++
+ fn refusal(folder: &TempDir) -> Error {
+     match ThreadStore::open(folder.path()) {
+         Ok(_) => panic!("the store opened"),
+@@ -126,7 +150,7 @@ const EVERY_KIND: &str = r#"{
+     { "id": 1, "path": "a.txt", "line": { "kind": "removed", "left": 3 }, "session": "omp-session-1",
+       "messages": [
+         { "id": 1, "body": { "kind": "note", "text": "Why 300?" }, "written": 1761300000, "posting": { "kind": "notQueued" } },
+-        { "id": 2, "body": { "kind": "aiAnswer", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
++        { "id": 2, "body": { "kind": "aiAnswer", "session": "omp-session-0", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
+     { "id": 2, "path": "b.txt", "line": { "kind": "added", "right": 4 }, "session": null,
+       "messages": [
+         { "id": 3, "body": { "kind": "note", "text": "t" }, "written": 1761300002, "posting": { "kind": "refused", "text": "t", "reason": "400 Bad request" } } ] },
+@@ -171,7 +195,7 @@ fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
+     let first = &list.threads[0];
+     assert_eq!(first.session.as_deref(), Some("omp-session-1"));
+     assert_eq!(first.line, ThreadLine::Removed { left: LeftLine(3) });
+-    assert_eq!(first.messages[1].body, MessageBody::AiAnswer { turn: 3 });
++    assert_eq!(first.messages[1].body, ai_answer("omp-session-0", 3));
+     assert_eq!(first.messages[1].written, 1_761_300_001);
+     assert_eq!(
+         list.threads[2].messages[0].posting,
+@@ -469,6 +493,8 @@ fn a_failed_write_changes_nothing_in_memory() {
+             .map(|added| added.list),
+         store.add_note(&range, ThreadId(1), "b"),
+         store.queue(&range, MessageId(1), "b"),
++        store.set_session(&range, ThreadId(1), "omp-1"),
++        store.add_ai_answer(&range, ThreadId(1), "omp-1"),
+     ];
+     for failure in failures {
+         assert!(
+@@ -559,3 +585,123 @@ fn an_unknown_file_thread_or_message_is_its_error() {
+     assert_eq!(on_disk(&folder), EVERY_KIND.as_bytes());
+     assert_eq!(store.list(&range), list);
+ }
++
++#[test]
++fn a_session_is_stored_survives_a_reopen_and_a_second_one_replaces_it() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    let mut store = store_with_one_thread(&folder, &range);
++
++    let list = store.set_session(&range, ThreadId(1), "omp-1").unwrap();
++    assert_eq!(only_thread(&list).session.as_deref(), Some("omp-1"));
++    assert_eq!(only_thread(&list).messages.len(), 1);
++    let mut reopened = ThreadStore::open(folder.path()).unwrap();
++    assert_eq!(reopened.list(&range), list);
++
++    let replaced = reopened.set_session(&range, ThreadId(1), "omp-2").unwrap();
++    assert_eq!(only_thread(&replaced).session.as_deref(), Some("omp-2"));
++    assert_eq!(json_on_disk(&folder)["threads"][0]["session"], "omp-2");
++    assert_eq!(
++        ThreadStore::open(folder.path()).unwrap().list(&range),
++        replaced
++    );
++}
++
++#[test]
++fn answers_number_0_1_2_within_a_session_and_a_new_session_starts_again_at_0() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    let mut store = store_with_one_thread(&folder, &range);
++
++    for _ in 0..3 {
++        store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
++    }
++    let first_answers = store.list(&range);
++    assert_eq!(
++        only_thread(&first_answers).session.as_deref(),
++        Some("omp-1")
++    );
++    store.add_note(&range, ThreadId(1), "And 400?").unwrap();
++    let list = store.add_ai_answer(&range, ThreadId(1), "omp-2").unwrap();
++
++    let expected = [
++        note("Why 300?"),
++        ai_answer("omp-1", 0),
++        ai_answer("omp-1", 1),
++        ai_answer("omp-1", 2),
++        note("And 400?"),
++        ai_answer("omp-2", 0),
++    ];
++    assert_eq!(bodies(&list), expected);
++    let thread = only_thread(&list);
++    assert_eq!(thread.session.as_deref(), Some("omp-2"));
++    let ids: Vec<u32> = thread.messages.iter().map(|message| message.id.0).collect();
++    assert_eq!(ids, [1, 2, 3, 4, 5, 6]);
++    let newest = &thread.messages[5];
++    assert_eq!(newest.posting, Posting::NotQueued);
++    assert!(newest.written > 0, "{}", newest.written);
++    assert_eq!(ThreadStore::open(folder.path()).unwrap().list(&range), list);
++}
++
++#[test]
++fn an_answer_counts_only_its_own_session_s_answers_and_keeps_the_older_ones() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    let mut store = store_with_one_thread(&folder, &range);
++    store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
++    store.add_ai_answer(&range, ThreadId(1), "omp-2").unwrap();
++    store.set_session(&range, ThreadId(1), "omp-1").unwrap();
++
++    let list = store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
++
++    let expected = [
++        note("Why 300?"),
++        ai_answer("omp-1", 0),
++        ai_answer("omp-2", 0),
++        ai_answer("omp-1", 1),
++    ];
++    assert_eq!(bodies(&list), expected);
++    assert_eq!(only_thread(&list).session.as_deref(), Some("omp-1"));
++}
++
++#[test]
++fn format_1_writes_an_ai_answer_with_its_session_and_turn() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    let mut store = store_with_one_thread(&folder, &range);
++
++    let list = store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
++
++    let written = json_on_disk(&folder);
++    let answer = serde_json::json!({ "kind": "aiAnswer", "session": "omp-1", "turn": 0 });
++    assert_eq!(written["threads"][0]["messages"][1]["body"], answer);
++    assert_eq!(written["threads"][0]["session"], "omp-1");
++    assert_eq!(written["nextMessage"], 3);
++    assert_eq!(ThreadStore::open(folder.path()).unwrap().list(&range), list);
++}
++
++#[test]
++fn an_unknown_or_unlisted_thread_gets_no_session_or_answer_and_nothing_is_written() {
++    let repo = repo();
++    let local = local_range(&repo);
++    let remote = range(repo.path(), "main..remote");
++    let folder = tempfile::tempdir().unwrap();
++    stored(&folder, EVERY_KIND);
++    let mut store = ThreadStore::open(folder.path()).unwrap();
++    let list = store.list(&local);
++
++    let session = store.set_session(&local, ThreadId(5), "omp-1");
++    assert_eq!(refused(session), "no review thread has the id 5");
++    let answer = store.add_ai_answer(&local, ThreadId(5), "omp-1");
++    assert_eq!(refused(answer), "no review thread has the id 5");
++    let hidden_session = store.set_session(&remote, ThreadId(1), "omp-1");
++    assert_eq!(refused(hidden_session), "no review thread has the id 1");
++    let hidden_answer = store.add_ai_answer(&remote, ThreadId(1), "omp-1");
++    assert_eq!(refused(hidden_answer), "no review thread has the id 1");
++    assert_eq!(on_disk(&folder), EVERY_KIND.as_bytes());
++    assert_eq!(store.list(&local), list);
++}
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index faba716..16a54a8 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts `sweep_leftovers` on a background thread that holds the state until the sweep ends, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; `stop_agent_on_page_start`: a page that starts loading stops the agent with `try_lock`, a prepare holding the state skipped, the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a small thread forwards the agent's events into its `Channel`, as `servers.rs` does), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script (`start_script(theme, kind, ai)`) sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`; `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` when the window manages a `Mutex<AiState>` (every range window, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (held by a prepare while git makes the checkout, and by the start's sweep). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts `sweep_leftovers` on a background thread that holds the state until the sweep ends, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; `stop_agent_on_page_start`: a page that starts loading stops the agent with `try_lock`, a prepare holding the state skipped, the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a small thread forwards the agent's events into its `Channel`, as `servers.rs` does), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script (`start_script(theme, kind, ai)`) sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`; `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` when the window manages a `Mutex<AiState>` (every range window, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (held by a prepare while git makes the checkout, and by the start's sweep). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index ceb79fa..7906b2e 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -54,6 +54,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         review::add_note,
+         review::queue_message,
+         review::unqueue_message,
++        review::set_thread_session,
++        review::add_ai_answer,
+         review::check_gitlab::<tauri::Wry>,
+         review::send_queue::<tauri::Wry>,
+         ai::prepare_checkout::<tauri::Wry>,
+diff --git a/src-tauri/src/review.rs b/src-tauri/src/review.rs
+index 8e3cffb..30965dd 100644
+--- a/src-tauri/src/review.rs
++++ b/src-tauri/src/review.rs
+@@ -85,6 +85,28 @@ pub(crate) fn unqueue_message(
+     Ok(locked(&state.threads).unqueue(&state.range, message)?)
+ }
+ 
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn set_thread_session(
++    state: State<'_, RangeState>,
++    thread: ThreadId,
++    session: String,
++) -> Result<ThreadList, IpcError> {
++    Ok(locked(&state.threads).set_session(&state.range, thread, &session)?)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn add_ai_answer(
++    state: State<'_, RangeState>,
++    thread: ThreadId,
++    session: String,
++) -> Result<ThreadList, IpcError> {
++    Ok(locked(&state.threads).add_ai_answer(&state.range, thread, &session)?)
++}
++
+ // The range comes from the window: tauri-macros 2.7 checks an async command with a borrowed
+ // argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
+ #[tauri::command]
+@@ -214,6 +236,35 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn set_thread_session_and_add_ai_answer_reach_the_thread_store() {
++        let window = open_range_window();
++        let thread = add_first_thread(&window)["thread"].clone();
++
++        let set = invoke(
++            &window,
++            "set_thread_session",
++            json!({ "thread": thread, "session": "omp-1" }),
++        );
++        assert_eq!(set.unwrap()["threads"][0]["session"], "omp-1");
++        let answered = invoke(
++            &window,
++            "add_ai_answer",
++            json!({ "thread": thread, "session": "omp-2" }),
++        )
++        .unwrap();
++
++        let answer = json!({ "kind": "aiAnswer", "session": "omp-2", "turn": 0 });
++        assert_eq!(answered["threads"][0]["messages"][1]["body"], answer);
++        assert_eq!(answered["threads"][0]["session"], "omp-2");
++        assert_eq!(invoke(&window, "list_threads", json!({})), Ok(answered));
++        let unknown = json!({ "thread": UNKNOWN_ID, "session": "omp-1" });
++        let refusal = json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID });
++        for cmd in ["set_thread_session", "add_ai_answer"] {
++            assert_eq!(invoke(&window, cmd, unknown.clone()), Err(refusal.clone()));
++        }
++    }
++
+     // Two sends at once would post the same queued messages twice.
+     #[test]
+     fn a_second_send_while_one_runs_answers_send_running() {
+-- 
+2.56.0
+
