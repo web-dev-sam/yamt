@@ -16,27 +16,19 @@
       "frontend/scripts/fences.test.ts"
     ]
   },
-  "RVThreadState": {
+  "RVAgentCrateR1": {
     "owned": [
-      "frontend/src/ui/rangeThreads.ts",
-      "frontend/src/ui/rangeThreads.test.ts",
-      "frontend/src/ui/rangeGitLab.ts",
-      "frontend/src/ui/rangeGitLab.test.ts",
-      "frontend/src/ui/rangeThreadText.ts",
-      "frontend/src/ui/rangeThreadText.test.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/useRangeController.ts",
-      "frontend/src/ui/useRangeController.test.ts",
-      "frontend/src/ui/RangeApp.vue",
-      "frontend/src/editor/range.ts",
-      "frontend/src/editor/range.browser.test.ts",
-      "frontend/src/editor/AGENTS.md",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ipc/reviewDomain.ts"
+      "crates/agent/**",
+      "crates/gitio/src/checkout.rs",
+      "crates/gitio/src/run.rs",
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/src/abort_continue.rs",
+      "crates/gitio/tests/checkout.rs",
+      "crates/gitio/AGENTS.md",
+      "crates/range/src/lock.rs",
+      "crates/range/src/lib.rs",
+      "crates/range/AGENTS.md",
+      "src-tauri/src/ai.rs"
     ]
   }
 }
