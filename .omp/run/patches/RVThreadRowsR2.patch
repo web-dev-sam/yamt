@@ -1,0 +1,174 @@
+From da05430898b8411591281adb875de3f72b306dfc Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:50:23 +0100
+Subject: [PATCH] fix(editor): an unchanged thread beside a pure deletion keeps
+ scroll sync continuous
+
+---
+ .../src/editor/internal/compareFrame.test.ts  | 130 ++++++++++++++++++
+ frontend/src/editor/internal/threadField.ts   |   4 +-
+ 2 files changed, 131 insertions(+), 3 deletions(-)
+
+diff --git a/frontend/src/editor/internal/compareFrame.test.ts b/frontend/src/editor/internal/compareFrame.test.ts
+index 9545e05..fa23a82 100644
+--- a/frontend/src/editor/internal/compareFrame.test.ts
++++ b/frontend/src/editor/internal/compareFrame.test.ts
+@@ -11,6 +11,7 @@ import { toDocPos } from "./docPos";
+ import { find } from "./find";
+ import { showThreadRows, threadAnchors, threadField } from "./threadField";
+ import type { ThreadRow } from "./threadRows";
++import type { ChangeTone } from "./tone";
+ 
+ const LINE_PX = 20;
+ const ROW_PX = 100;
+@@ -266,3 +267,132 @@ test("a removed line's row in a pure deletion grows both band edges by the row",
+   ]);
+   expect(views.right.scrollDOM.scrollTop).toBe(150);
+ });
++
++const UNCHANGED_ROW: ThreadRow = {
++  key: "20:20",
++  place: { left: 20, right: 20 },
++  keys: { left: ["unchanged"], right: [] },
++  kind: "unchanged",
++};
++
++const ADDITION_ROW: ThreadRow = {
++  key: "20:22",
++  place: { left: 20, right: 22 },
++  keys: { left: [], right: ["added"] },
++  kind: "leftEmpty",
++};
++
++type PlacedRows = {
++  readonly lines: number;
++  readonly span: { readonly from: number; readonly to: number; readonly tone: ChangeTone };
++  readonly rowsAfter: readonly number[];
++  readonly rowBefore: number | null;
++};
++
++function placedBlock(column: FakeColumn, pos: number, placed: PlacedRows): LineBlock {
++  const number = column.state.doc.lineAt(pos).number;
++  const rowsAbove = [...placed.rowsAfter, placed.rowBefore ?? Infinity].filter(
++    (line) => line < number,
++  ).length;
++  const top = (number - 1) * LINE_PX + rowsAbove * ROW_PX;
++  const before = placed.rowBefore === number ? ROW_PX : 0;
++  const after = placed.rowsAfter.includes(number) ? ROW_PX : 0;
++  const text = { top: top + before, bottom: top + before + LINE_PX, type: BlockType.Text };
++  const parts = [
++    ...(before > 0 ? [{ top, bottom: text.top, type: BlockType.WidgetBefore }] : []),
++    text,
++    ...(after > 0
++      ? [{ top: text.bottom, bottom: text.bottom + after, type: BlockType.WidgetAfter }]
++      : []),
++  ];
++  return { top, bottom: text.bottom + after, type: parts };
++}
++
++function placedColumn(
++  column: Column,
++  placed: PlacedRows,
++  threads: readonly ThreadRow[],
++): FakeColumn {
++  const text = Array.from({ length: placed.lines }, (_, index) => `line ${index}`).join("\n");
++  const state = EditorState.create({ doc: text, extensions: [differenceField, threadField, find] });
++  const { doc } = state;
++  const { from, to, tone } = placed.span;
++  const spans: DiffSpan[] = [
++    { from: toDocPos(doc.line(from).from), to: toDocPos(doc.line(to).from), tone },
++  ];
++  const shown = { column, rows: threads, counts: [], cells: CELLS };
++  const effects = [showDifferences.of({ ...NO_MARKS, spans }), showThreadRows.of(shown)];
++  return fakeColumn(state.update({ effects }).state, (fake, pos) => placedBlock(fake, pos, placed));
++}
++
++function scrollTopsAfterScrolling(
++  views: Readonly<Record<Column, FakeColumn>>,
++  leader: Column,
++  scrollTop: number,
++): Readonly<Record<Column, number>> {
++  const runFrames = stubFrames();
++  const frame = new CompareFrame({
++    views,
++    strip: { paint: () => {} },
++    fields: [differenceField, threadField],
++    anchors: threadAnchors,
++  });
++  views[leader].scrollDOM.scrollTop = scrollTop;
++  views[leader].scrollDOM.dispatchEvent(new Event("scroll"));
++  runFrames();
++  frame.destroy();
++  return { left: views.left.scrollDOM.scrollTop, right: views.right.scrollDOM.scrollTop };
++}
++
++const ROW_AFTER_LINE_20 = [
++  { left: 20 * LINE_PX, right: 20 * LINE_PX },
++  { left: 20 * LINE_PX + ROW_PX, right: 20 * LINE_PX + ROW_PX },
++];
++
++test("an unchanged row on the line before a pure deletion keeps the scroll inside the band continuous", () => {
++  const threads = [UNCHANGED_ROW, DELETION_ROW];
++  const views = {
++    left: placedColumn(
++      "left",
++      {
++        lines: 40,
++        span: { from: 21, to: 23, tone: "deleted" },
++        rowsAfter: [20, 22],
++        rowBefore: null,
++      },
++      threads,
++    ),
++    right: placedColumn(
++      "right",
++      { lines: 38, span: { from: 21, to: 21, tone: "deleted" }, rowsAfter: [20], rowBefore: 21 },
++      threads,
++    ),
++  };
++
++  expect(threadAnchors(views)).toEqual(ROW_AFTER_LINE_20);
++  expect(scrollTopsAfterScrolling(views, "left", 470)).toEqual({ left: 470, right: 450 });
++});
++
++test("an unchanged row on the line before a pure insertion keeps the scroll inside the band continuous", () => {
++  const threads = [UNCHANGED_ROW, ADDITION_ROW];
++  const views = {
++    left: placedColumn(
++      "left",
++      { lines: 38, span: { from: 21, to: 21, tone: "inserted" }, rowsAfter: [20], rowBefore: 21 },
++      threads,
++    ),
++    right: placedColumn(
++      "right",
++      {
++        lines: 40,
++        span: { from: 21, to: 23, tone: "inserted" },
++        rowsAfter: [20, 22],
++        rowBefore: null,
++      },
++      threads,
++    ),
++  };
++
++  expect(threadAnchors(views)).toEqual(ROW_AFTER_LINE_20);
++  expect(scrollTopsAfterScrolling(views, "right", 470)).toEqual({ left: 450, right: 470 });
++});
+diff --git a/frontend/src/editor/internal/threadField.ts b/frontend/src/editor/internal/threadField.ts
+index 7798ff8..deca8e0 100644
+--- a/frontend/src/editor/internal/threadField.ts
++++ b/frontend/src/editor/internal/threadField.ts
+@@ -61,9 +61,7 @@ function bottomAbove(view: AnchorView, place: number): number {
+ 
+ function topBelow(view: AnchorView, place: number): number {
+   const { doc } = view.state;
+-  return place < doc.lines
+-    ? textBlock(view.lineBlockAt(doc.line(place + 1).from)).top
+-    : contentEnd(view);
++  return place < doc.lines ? view.lineBlockAt(doc.line(place + 1).from).top : contentEnd(view);
+ }
+ 
+ export function threadAnchors(views: Readonly<Record<Column, AnchorView>>): Anchor<Column>[] {
+-- 
+2.56.0
+
