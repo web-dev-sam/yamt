@@ -1,0 +1,238 @@
+From c25b2834483c95b6de80663d6a19067912fb421d Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 22:55:39 +0100
+Subject: [PATCH] fix(fixtures): one test-repo isolation, one put for the demo
+ layers
+
+---
+ crates/cli/tests/range.rs | 63 ++++++++++++++-------------------------
+ scripts/demo-repo.sh      | 30 +++++++++----------
+ scripts/git-sandbox.sh    | 17 +++++++++--
+ scripts/range-repo.sh     | 11 -------
+ 4 files changed, 51 insertions(+), 70 deletions(-)
+
+diff --git a/crates/cli/tests/range.rs b/crates/cli/tests/range.rs
+index ee2688b..f81b940 100644
+--- a/crates/cli/tests/range.rs
++++ b/crates/cli/tests/range.rs
+@@ -1,60 +1,42 @@
+ #![cfg(test)]
+ 
+-use std::fs;
+-use std::path::Path;
+-use std::process::Command;
+-
+ use serde_json::{Value, json};
+ use tempfile::TempDir;
++use yamt_conflict_repo::{ConflictFile, FileKind, diverged_repo};
+ 
+ mod yamt_cli;
+ 
+ use yamt_cli::{path, yamt_cli};
+ 
+-fn git(repo: &Path, args: &[&str]) {
+-    let status = Command::new("git")
+-        .arg("-C")
+-        .arg(repo)
+-        .args([
+-            "-c",
+-            "user.name=yamt",
+-            "-c",
+-            "user.email=yamt@example.invalid",
+-            "-c",
+-            "commit.gpgsign=false",
+-        ])
+-        .args(args)
+-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+-        .env("GIT_CONFIG_NOSYSTEM", "1")
+-        .status()
+-        .unwrap();
+-    assert!(status.success(), "git {args:?}");
++fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote: base,
++    }
+ }
+ 
+-fn two_commit_repo(root: &Path) {
+-    git(root, &["init", "-q"]);
+-    fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+-    fs::write(root.join("b.txt"), "gone\n").unwrap();
+-    git(root, &["add", "."]);
+-    git(root, &["commit", "-q", "-m", "first"]);
+-    fs::write(root.join("a.txt"), "one\n2\n").unwrap();
+-    fs::remove_file(root.join("b.txt")).unwrap();
+-    fs::write(root.join("c.bin"), b"\0bytes").unwrap();
+-    git(root, &["add", "-A"]);
+-    git(root, &["commit", "-q", "-m", "second"]);
++fn three_file_repo() -> TempDir {
++    diverged_repo(&[
++        changed("a.txt", Some(b"one\ntwo\n"), Some(b"one\n2\n")),
++        changed("b.txt", Some(b"gone\n"), None),
++        changed("c.bin", None, Some(b"\0bytes")),
++    ])
++    .unwrap()
+ }
+ 
+ // Catches a file answer printed out of list order, so the window's id (the index) would show another file.
+ #[test]
+ fn range_prints_the_start_and_every_file_at_its_id() {
+-    let root = TempDir::new().unwrap();
+-    two_commit_repo(root.path());
++    let root = three_file_repo();
+ 
+-    let output = yamt_cli(&["range", path(root.path()), "HEAD~1..HEAD"]);
++    let output = yamt_cli(&["range", path(root.path()), "main..local"]);
+ 
+     assert_eq!(output.code, 0, "{}", output.stderr);
+     let data: Value = serde_json::from_str(&output.stdout).unwrap();
+-    assert_eq!(data["start"]["range"], "HEAD~1..HEAD");
++    assert_eq!(data["start"]["range"], "main..local");
+     let listed: Vec<(&Value, &Value)> = data["start"]["files"]
+         .as_array()
+         .unwrap()
+@@ -102,13 +84,12 @@ fn a_malformed_range_exits_2_with_its_usage_line() {
+     );
+ }
+ 
+-// Catches a range git cannot resolve exiting 1 like a read failure, or printing a half document.
++// Catches a range git cannot resolve exiting 1 like a read failure.
+ #[test]
+ fn an_unknown_name_exits_2_with_the_range_error() {
+-    let root = TempDir::new().unwrap();
+-    two_commit_repo(root.path());
++    let root = three_file_repo();
+ 
+-    let output = yamt_cli(&["range", path(root.path()), "nope..HEAD"]);
++    let output = yamt_cli(&["range", path(root.path()), "nope..local"]);
+ 
+     assert_eq!(output.code, 2);
+     assert_eq!(output.stdout, "");
+diff --git a/scripts/demo-repo.sh b/scripts/demo-repo.sh
+index 70e70b0..0b8a33f 100755
+--- a/scripts/demo-repo.sh
++++ b/scripts/demo-repo.sh
+@@ -36,14 +36,12 @@ install_typescript_server
+ 
+ declare -A was_put
+ 
+-# $1: the layer under scripts/demo (base, main or feature), then the paths to copy from it into the repo.
+-put() {
++# The arguments of put; also records each path for require_all_put.
++put_recorded() {
+     local layer=$1 path
++    put "$@"
+     shift
+     for path in "$@"; do
+-        mkdir -p "$(dirname "$dir/$path")"
+-        cp "$files/$layer/$path" "$dir/$path"
+-        repo_git add -- "$path"
+         was_put[$layer/$path]=1
+     done
+ }
+@@ -72,33 +70,33 @@ maya="Maya Lindqvist <maya@taskboard.example>"
+ mkdir -p "$dir"
+ git -c init.defaultBranch=main init -q "$dir"
+ 
+-put base package.json tsconfig.json .oxlintrc.json .oxfmtrc.json .gitignore index.html README.md
++put_recorded base package.json tsconfig.json .oxlintrc.json .oxfmtrc.json .gitignore index.html README.md
+ commit_as "$priya" 2026-09-28T10:12:00+02:00 "Set up Vite, TypeScript, oxlint and oxfmt"
+-put base src/board/types.ts src/board/card.ts src/board/board.ts src/board/storage.ts src/ui/cardView.ts \
+-    src/styles.css
++put_recorded base src/board/types.ts src/board/card.ts src/board/board.ts src/board/storage.ts \
++    src/ui/cardView.ts src/styles.css
+ commit_as "$priya" 2026-09-30T16:40:00+02:00 "Board model: columns, cards, labels and the activity feed"
+-put base src/api/client.ts src/api/mockBoards.ts src/main.ts
++put_recorded base src/api/client.ts src/api/mockBoards.ts src/main.ts
+ commit_as "$tomas" 2026-10-02T11:05:00+02:00 "Load boards from the API, with a mock board on localhost"
+-put base public/logo.png docs/shortcuts.md
++put_recorded base public/logo.png docs/shortcuts.md
+ commit_as "$maya" 2026-10-06T09:30:00+02:00 "Add the logo and the list of keyboard shortcuts"
+ require_all_put base
+ 
+ repo_git checkout -q -b feature/reminders
+-put feature src/api/client.ts vite.config.ts README.md
++put_recorded feature src/api/client.ts vite.config.ts README.md
+ repo_git rm -q -- src/api/mockBoards.ts
+ commit_as "$tomas" 2026-10-12T14:20:00+02:00 "Drop the mock board: pnpm dev proxies /api to staging"
+-put feature src/board/types.ts src/board/storage.ts src/board/card.ts src/ui/cardView.ts
++put_recorded feature src/board/types.ts src/board/storage.ts src/board/card.ts src/ui/cardView.ts
+ commit_as "$tomas" 2026-10-14T10:02:00+02:00 "Store due times instead of days (dueDate → dueAt)"
+-put feature src/board/board.ts src/styles.css docs/shortcuts.md public/logo.png
++put_recorded feature src/board/board.ts src/styles.css docs/shortcuts.md public/logo.png
+ commit_as "$tomas" 2026-10-16T17:45:00+02:00 "Reminders before a card is due"
+ require_all_put feature
+ 
+ repo_git checkout -q main
+-put main src/board/board.ts src/board/card.ts src/ui/cardView.ts src/styles.css docs/shortcuts.md README.md
++put_recorded main src/board/board.ts src/board/card.ts src/ui/cardView.ts src/styles.css docs/shortcuts.md README.md
+ commit_as "$maya" 2026-10-13T15:10:00+02:00 "Swimlanes: group a column's cards by person"
+-put main src/api/mockBoards.ts src/api/client.ts
++put_recorded main src/api/mockBoards.ts src/api/client.ts
+ commit_as "$maya" 2026-10-15T11:25:00+02:00 "Mock board: people on the cards, ?mocks on any host"
+-put main public/logo.png
++put_recorded main public/logo.png
+ commit_as "$maya" 2026-10-17T09:50:00+02:00 "Refresh the logo"
+ require_all_put main
+ 
+diff --git a/scripts/git-sandbox.sh b/scripts/git-sandbox.sh
+index c4d0cad..700efae 100644
+--- a/scripts/git-sandbox.sh
++++ b/scripts/git-sandbox.sh
+@@ -1,5 +1,6 @@
+-# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh and operations-repo.sh:
+-# the shared prelude for building a scripted repository in "$dir" without any user or system git config (risk RK19).
++# Sourced by scripts/conflict-repo.sh, demo-repo.sh, golden-repo.sh, lsp-repo.sh, lsp-servers.sh, operations-repo.sh and
++# range-repo.sh: the shared prelude for building a scripted repository in "$dir" without any user or system git config
++# (risk RK19).
+ # GIT_CONFIG_GLOBAL needs git >= 2.32 (git-config(1), ENVIRONMENT).
+ 
+ sandbox_name=$(basename "$0" .sh)
+@@ -48,6 +49,18 @@ write() {
+     repo_git add -- "$1"
+ }
+ 
++# $1: the layer under "$files" (base, main or feature under scripts/demo), then the paths to copy from it into the
++# repo. Stages each path.
++put() {
++    local layer=$1 path
++    shift
++    for path in "$@"; do
++        mkdir -p "$(dirname "$dir/$path")"
++        cp "$files/$layer/$path" "$dir/$path"
++        repo_git add -- "$path"
++    done
++}
++
+ # $1: how many files the merge in "$dir" must leave conflicted. Prints their paths; dies on any other count.
+ require_conflicts() {
+     local conflicted count
+diff --git a/scripts/range-repo.sh b/scripts/range-repo.sh
+index d74dff6..71e05d8 100755
+--- a/scripts/range-repo.sh
++++ b/scripts/range-repo.sh
+@@ -24,17 +24,6 @@ ui_on_feature=2222222222222222222222222222222222222222
+ require_empty_dir "$dir"
+ isolate_git_config
+ 
+-# $1: the layer under scripts/demo (base, main or feature), then the paths to copy from it into the repo.
+-put() {
+-    local layer=$1 path
+-    shift
+-    for path in "$@"; do
+-        mkdir -p "$(dirname "$dir/$path")"
+-        cp "$files/$layer/$path" "$dir/$path"
+-        repo_git add -- "$path"
+-    done
+-}
+-
+ # $1: the path in the repo, $2: the link's target. Stages the link.
+ link() {
+     rm -f "$dir/$1"
+-- 
+2.56.0
+
