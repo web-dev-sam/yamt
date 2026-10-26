@@ -254,6 +254,27 @@ test.each([
   );
 });
 
+test.each([
+  ["ask", "The AI could not answer: the AI is off; start yamt with --ai to use it."],
+  ["diff", "Could not show the diff: the AI is off; start yamt with --ai to use it."],
+  [
+    "discard",
+    "The AI's checkout could not be removed: the AI is off; start yamt with --ai to use it.",
+  ],
+] as const)("a failed AI call at %s says what failed", (step, words) => {
+  expect(text({ action: "ai", step, cause: { kind: "AiOff" } })).toBe(words);
+});
+
+test("a failed discard names the checkout and the system's message", () => {
+  expect(
+    text({
+      action: "ai",
+      step: "discard",
+      cause: { kind: "RemoveFailed", folder: "/d/pair/checkout", message: "busy\n" },
+    }),
+  ).toBe("The AI's checkout could not be removed: removing /d/pair/checkout failed: busy");
+});
+
 test("a save to a tab another call closed says the tab was closed", () => {
   expect(
     text({

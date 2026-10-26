@@ -22,6 +22,8 @@ export type ProblemCause = SourceFailure | Unexpected;
 
 export type ThreadStep = "list" | "add" | "note" | "queue" | "unqueue" | "check" | "send";
 
+export type AiAttempt = "ask" | "diff" | "discard";
+
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
   | {
@@ -44,6 +46,7 @@ export type Problem =
   | { readonly action: "tabs" | "openRange"; readonly cause: ProblemCause }
   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
   | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
+  | { readonly action: "ai"; readonly step: AiAttempt; readonly cause: ProblemCause }
   | {
       readonly action: "saveTab";
       readonly tab: TabId;
@@ -77,6 +80,10 @@ function settingsFields(cause: ProblemCause | KeysUnread): Record<string, string
   return cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : { ...cause };
 }
 
+function stoppedFields(problem: Extract<Problem, { action: "stopped" }>): Record<string, string> {
+  return { operation: problem.operation ?? "none", message: problem.message };
+}
+
 export function logProblem(problem: Problem): void {
   const event = `store.${problem.action}_failed`;
   switch (problem.action) {
@@ -93,10 +100,7 @@ export function logProblem(problem: Problem): void {
       log.info("store.close_refused", { reason: "git_running" });
       return;
     case "stopped":
-      log.info("store.stopped", {
-        operation: problem.operation ?? "none",
-        message: problem.message,
-      });
+      log.info("store.stopped", stoppedFields(problem));
       return;
     case "settings":
       log.error(event, settingsFields(problem.cause));
@@ -113,6 +117,7 @@ export function logProblem(problem: Problem): void {
       log.error(event, { name: problem.name, ...problem.cause });
       return;
     case "threads":
+    case "ai":
       log.error(event, { step: problem.step, ...problem.cause });
       return;
   }

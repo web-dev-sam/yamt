@@ -76,3 +76,9 @@ test("a failed thread call logs its step and cause (catches a log line without t
     '[error] store.threads_failed {step: "queue", kind: "EmptyMessage"}',
   ]);
 });
+
+test("a failed AI call logs its step and cause (catches a log line without the step)", () => {
+  expect(logged({ action: "ai", step: "discard", cause: { kind: "AiOff" } })).toEqual([
+    '[error] store.ai_failed {step: "discard", kind: "AiOff"}',
+  ]);
+});

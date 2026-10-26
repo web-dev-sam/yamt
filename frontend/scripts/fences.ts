@@ -62,6 +62,12 @@ const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
   compare: "PM7",
   range: "PM9",
 };
+const AI_VIEWS: Readonly<Record<string, true>> = {
+  "src/ui/AiTurn": true,
+  "src/ui/AiStep": true,
+  "src/ui/EditDiff": true,
+  "src/ui/AgentSettings": true,
+};
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -159,6 +165,16 @@ function rootFinding(file: string, target: string): Finding | undefined {
   return undefined;
 }
 
+function aiViewFinding(file: string, target: string): Finding | undefined {
+  const shown = Object.hasOwn(AI_VIEWS, target.replace(SOURCE_EXTENSION, ""));
+  const inside = Object.hasOwn(AI_VIEWS, file.replace(SOURCE_EXTENSION, ""));
+  const inRange = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() === "range";
+  if (!shown || inside || inRange) {
+    return undefined;
+  }
+  return { rule: "PM9", reason: "the AI's views are shown only in the range window" };
+}
+
 function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
   type Visit = { readonly index: number; low: number };
   const visits = new Map<string, Visit>();
@@ -245,7 +261,9 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
       const finding =
         target === undefined
           ? packageFinding(module, specifier)
-          : (pathFinding(module, target) ?? rootFinding(file.path, target));
+          : (pathFinding(module, target) ??
+            rootFinding(file.path, target) ??
+            aiViewFinding(file.path, target));
       if (finding !== undefined) {
         violations.push({ ...finding, file: file.path, specifier });
       }

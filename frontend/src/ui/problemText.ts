@@ -2,7 +2,7 @@ import { keyLabel, type KeyProblem } from "../ipc";
 import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, operationName } from "./operationText";
-import type { Problem, ProblemCause, ThreadStep } from "./problem";
+import type { AiAttempt, Problem, ProblemCause, ThreadStep } from "./problem";
 
 type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 
@@ -58,6 +58,12 @@ const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
   send: "Could not send to GitLab",
 };
 
+const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {
+  ask: "The AI could not answer",
+  diff: "Could not show the diff",
+  discard: "The AI's checkout could not be removed",
+};
+
 function attempted(problem: CausedProblem): string {
   switch (problem.action) {
     case "list":
@@ -90,6 +96,8 @@ function attempted(problem: CausedProblem): string {
       return `Could not save ${problem.name}`;
     case "threads":
       return THREAD_STEP_WORDS[problem.step];
+    case "ai":
+      return AI_ATTEMPT_WORDS[problem.step];
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;

@@ -244,3 +244,73 @@ test("closing a tab that holds text asks with its name, Yes or No, and never end
   });
   expect(endsWithStop(question)).toBe(false);
 });
+
+const CHECKOUT = "/home/me/.local/share/yamt/range/repo/pair/checkout";
+
+test("the AI's changes question lists the files and the folder, Keep Changes the confirm", () => {
+  const question = {
+    kind: "keepAiChanges",
+    folder: CHECKOUT,
+    files: ["README.md", "src/a.ts"],
+    headMoved: false,
+    refs: [],
+  } as const;
+
+  expect(questionText(question, LINUX)).toEqual({
+    title: "Keep the AI's changes?",
+    message: `The AI changed these files in its checkout at ${CHECKOUT}:`,
+    list: { kind: "files", files: ["README.md", "src/a.ts"] },
+    note: null,
+    confirm: "Keep Changes",
+    cancel: "Discard Changes",
+  });
+  expect(endsWithStop(question)).toBe(false);
+});
+
+test.each([
+  [true, [], "It also made commits there."],
+  [false, ["fix"], "It also left the branch fix there."],
+  [false, ["fix", "try"], "It also left the branches fix, try there."],
+  [false, ["stash"], "It also left a stash there."],
+  [true, ["fix", "stash"], "It also made commits and left the branch fix and a stash there."],
+] as const)(
+  "a moved HEAD (%s) and the AI's refs %o are named in the note",
+  (headMoved, refs, note) => {
+    const text = questionText(
+      { kind: "keepAiChanges", folder: CHECKOUT, files: ["a"], headMoved, refs },
+      LINUX,
+    );
+
+    expect(text.note).toBe(note);
+  },
+);
+
+test("work without changed files says the AI left work there, without 'also'", () => {
+  const text = questionText(
+    { kind: "keepAiChanges", folder: CHECKOUT, files: [], headMoved: true, refs: [] },
+    LINUX,
+  );
+
+  expect([text.message, text.note]).toEqual([
+    `The AI left work in its checkout at ${CHECKOUT}.`,
+    "It made commits there.",
+  ]);
+});
+
+test("an unreadable checkout asks the same question with git's words, Keep the confirm", () => {
+  const question = {
+    kind: "keepUnreadableCheckout",
+    folder: CHECKOUT,
+    message: "fatal: bad object HEAD\n",
+  } as const;
+
+  expect(questionText(question, LINUX)).toEqual({
+    title: "Keep the AI's changes?",
+    message: `Git cannot read the AI's checkout at ${CHECKOUT}, so yamt cannot tell what the AI changed there: fatal: bad object HEAD`,
+    list: { kind: "none" },
+    note: "Discard Changes removes the checkout.",
+    confirm: "Keep Changes",
+    cancel: "Discard Changes",
+  });
+  expect(endsWithStop(question)).toBe(false);
+});

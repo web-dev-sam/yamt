@@ -558,6 +558,56 @@ test("range files importing shared ui files and their own neighbours violate not
   expect(violationsOf(files)).toEqual([]);
 });
 
+test("the merge root, the compare root or a shared ui file importing an AI view violates PM9", () => {
+  const files = [
+    {
+      path: "src/ui/App.vue",
+      text: `<script setup lang="ts">\nimport AgentSettings from "./AgentSettings.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/CompareView.vue",
+      text: `<script setup lang="ts">\nimport AiTurn from "./AiTurn.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/SettingsView.vue",
+      text: `<script setup lang="ts">\nimport "./AgentSettings";\n</script>`,
+    },
+    { path: "src/ui/store.ts", text: `import "./EditDiff.vue";\nimport "./AiStep.vue";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM9", file: "src/ui/App.vue", specifier: "./AgentSettings.vue" },
+    { rule: "PM9", file: "src/ui/CompareView.vue", specifier: "./AiTurn.vue" },
+    { rule: "PM9", file: "src/ui/SettingsView.vue", specifier: "./AgentSettings" },
+    { rule: "PM9", file: "src/ui/store.ts", specifier: "./EditDiff.vue" },
+    { rule: "PM9", file: "src/ui/store.ts", specifier: "./AiStep.vue" },
+  ]);
+});
+
+test("range files and the AI views importing the AI views, and an AI view importing shared files, violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport AgentSettings from "./AgentSettings.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeThreadBox.vue",
+      text: `<script setup lang="ts">\nimport AiTurn from "./AiTurn.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport AiStep from "./AiStep.vue";\nimport "./aiText";\n</script>`,
+    },
+    {
+      path: "src/ui/AiStep.vue",
+      text: `<script setup lang="ts">\nimport EditDiff from "./EditDiff.vue";\n</script>`,
+    },
+    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
   const files = [
     {
