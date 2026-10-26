@@ -2,6 +2,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { shallowRef, type ShallowRef } from "vue";
 
 import type {
+  AgentSettings,
   LanguageServerSettings,
   SettingsRead,
   SettingsSource,
@@ -23,8 +24,6 @@ type Target = {
   readonly settings: ShallowRef<SettingsInUse>;
   readonly problem: ShallowRef<Problem | null>;
 };
-
-type AgentSettings = StoredSettings["agent"];
 
 const PATH = "/home/me/.config/yamt/settings.json";
 const ROOT = "/home/me/yamt";

@@ -344,7 +344,7 @@ test("a thread is loaded once per process before its prompts", async () => {
   await flush();
   finish("s7");
   await flush();
-  ask(session("s7"));
+  const second = ask(session("s7"));
   await flush();
   expect(first.end?.kind).toBe("finished");
   expect(agent.methods()).toEqual([
@@ -353,6 +353,7 @@ test("a thread is loaded once per process before its prompts", async () => {
     "session/prompt",
     "session/prompt",
   ]);
+  expect(second.sessions).toEqual([]);
 });
 
 test("a load omp cannot find is sessionGone; any other load error is refused", async () => {
@@ -810,6 +811,59 @@ test("Stop while omp starts ends the turn at once and sends no session/new", asy
   await flush();
   expect(agent.methods()).toEqual(["initialize"]);
   expect(turn.sessions).toEqual([]);
+});
+
+test("Stop while a thread loads ends the turn stopped; the late load prompts nothing", async () => {
+  const held: number[] = [];
+  agent.loadAnswer = (id) => held.push(id);
+  const turn = ask(session("s5"));
+  await flush();
+  turn.stop();
+  await flush();
+  expect(turn.end?.kind).toBe("stopped");
+  agent.reply(held[0] ?? -1, {});
+  await flush();
+  expect(agent.methods()).toEqual(["initialize", "session/load"]);
+  const again = ask(session("s5"));
+  await flush();
+  expect(again.end).toBeNull();
+  expect(agent.methods()).toEqual(["initialize", "session/load", "session/prompt"]);
+});
+
+test("Stop while session/new runs reports no session and prompts nothing", async () => {
+  agent.sendToAgent = (_run, message) => {
+    const sent: Sent = JSON.parse(message);
+    agent.sent.push(sent);
+    if (sent.method === "initialize" && sent.id !== undefined) {
+      const { id } = sent;
+      queueMicrotask(() => agent.reply(id, { protocolVersion: 1 }));
+    }
+  };
+  const turn = ask(null);
+  await flush();
+  turn.stop();
+  await flush();
+  expect(turn.end?.kind).toBe("stopped");
+  agent.reply(agent.sent.at(-1)?.id ?? -1, { sessionId: "s1" });
+  await flush();
+  expect(agent.methods()).toEqual(["initialize", "session/new"]);
+  expect(turn.sessions).toEqual([]);
+});
+
+test("a failed load is not kept: the thread's next ask loads again and prompts", async () => {
+  agent.loadAnswer = (id) => {
+    agent.emit({ id, error: { code: -32602, message: "Invalid params" } });
+    agent.loadAnswer = (next) => agent.reply(next, {});
+  };
+  const refused = ask(session("s3"));
+  await flush();
+  expect(refused.end).toMatchObject({ kind: "failed", failure: { kind: "refused" } });
+  const again = ask(session("s3"));
+  await flush();
+  expect(agent.methods()).toEqual(["initialize", "session/load", "session/load", "session/prompt"]);
+  finish("s3");
+  await flush();
+  expect(again.end?.kind).toBe("finished");
 });
 
 test("a load and an ask on one thread send one session/load; the replay turns once, the answer is new", async () => {
