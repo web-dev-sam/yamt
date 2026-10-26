@@ -1,6 +1,6 @@
 import type { EditorView } from "@codemirror/view";
 
-import type { Difference, ThreadLine } from "../ipc";
+import type { Difference, ShownThread, ThreadLine } from "../ipc";
 import type { CompareHosts } from "./compare";
 import { differenceField } from "./internal/compareFields";
 import { moveToDifference } from "./internal/compareFocus";
@@ -19,9 +19,9 @@ import type { PaneSettings, Preferences } from "./internal/pane";
 import { showThreadRows, threadAnchors, threadField } from "./internal/threadField";
 import { ThreadHosts } from "./internal/threadHosts";
 import { lineCounts, numberPress, threadNumbers } from "./internal/threadNumbers";
-import { threadRows, type ShownThread } from "./internal/threadRows";
+import { threadRows } from "./internal/threadRows";
 
-export type { ShownThread } from "./internal/threadRows";
+export type { ShownThread } from "../ipc";
 
 export type RangeTexts = {
   readonly path: string; // the file's path in the range, the old path when deleted: picks the language

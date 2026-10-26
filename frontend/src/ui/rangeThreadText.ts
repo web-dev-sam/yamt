@@ -5,15 +5,10 @@ import type {
   RangeEntry,
   RangeStart,
   SendProgress,
+  SendReply,
   ThreadLine,
 } from "../ipc";
 import { sideLabel } from "./rangeText";
-
-export type SendResult = {
-  readonly sent: number;
-  readonly refused: number;
-  readonly stopped: string | null;
-};
 
 export const CHECKING_TEXT = "Checking GitLab…";
 export const NOTHING_QUEUED = "Nothing queued";
@@ -96,9 +91,18 @@ export function postTitle(mergeRequest: MergeRequestRef): string {
   return `Queue this message as its own comment on ${mergeRequest.reference}`;
 }
 
-export function sendResultText({ sent, refused, stopped }: SendResult): string {
-  const counts = `${sent} sent, ${refused} refused`;
-  return stopped === null ? counts : `${counts}; stopped: ${stopped}. The rest stay queued.`;
+export function sendResultText(reply: Exclude<SendReply, { readonly kind: "notLinedUp" }>): string {
+  const counts = `${reply.sent} sent, ${reply.refused} refused`;
+  switch (reply.kind) {
+    case "sent":
+      return counts;
+    case "stopped":
+      return `${counts}; stopped: ${reply.reason}. The rest stay queued.`;
+    default: {
+      const _exhaustive: never = reply;
+      return _exhaustive;
+    }
+  }
 }
 
 export function threadPlaceText(

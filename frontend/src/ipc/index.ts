@@ -79,7 +79,6 @@ export type {
   SendProgress,
   SendReply,
   Thread,
-  ThreadAdded,
   ThreadList,
 } from "./reviewDomain";
 export type { ReviewSource } from "./ReviewSource";
@@ -127,6 +126,7 @@ export {
   shownColumn,
   shownLine,
   unchangedThreadLine,
+  type ShownThread,
   type ThreadLine,
 } from "./threadLine";
 export { createTauriRangeSource } from "./tauriRange";

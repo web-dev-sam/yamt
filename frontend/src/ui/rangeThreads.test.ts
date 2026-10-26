@@ -11,7 +11,7 @@ import {
   type Thread,
 } from "../ipc";
 import type { Problem } from "./problem";
-import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
 
@@ -110,6 +110,68 @@ test("a second Comment while the first is in flight sends nothing more", async (
   expect(threads.list.value.threads).toHaveLength(1);
 });
 
+test("after a refused Comment the next Comment on that draft is sent and stored once", async () => {
+  let calls = 0;
+  const { threads, problems, board } = await opened("?range=review", (fixture) => ({
+    addThread: async (file, line, text) => {
+      calls += 1;
+      if (calls === 1) {
+        return { ok: false, failure: UNKNOWN };
+      }
+      return fixture.addThread(file, line, text);
+    },
+  }));
+  threads.startThread(board, changedThreadLine("left", 1));
+
+  await threads.addThread("draft-0", "a");
+  await threads.addThread("draft-0", "a");
+
+  expect(calls).toBe(2);
+  expect(problems).toHaveLength(1);
+  expect(threads.list.value.threads.map(texts)).toEqual([["a"]]);
+  expect(threads.drafts.value.size).toBe(0);
+});
+
+test("a Comment on a key with no draft makes no call and reports nothing", async () => {
+  let calls = 0;
+  const { threads, problems } = await opened("?range=review", (fixture) => ({
+    addThread: async (file, line, text) => {
+      calls += 1;
+      return fixture.addThread(file, line, text);
+    },
+  }));
+
+  await threads.addThread("draft-9", "x");
+
+  expect(calls).toBe(0);
+  expect(problems).toEqual([]);
+  expect(threads.drafts.value.size).toBe(0);
+});
+
+test("a refused Comment whose draft was dropped while it ran brings no draft back", async () => {
+  const openers: (() => void)[] = [];
+  const gate = new Promise<void>((resolve) => {
+    openers.push(resolve);
+  });
+  const { threads, problems, board } = await opened("?range=review", () => ({
+    addThread: async () => {
+      await gate;
+      return { ok: false, failure: UNKNOWN };
+    },
+  }));
+  threads.startThread(board, changedThreadLine("left", 1));
+  const adding = threads.addThread("draft-0", "late");
+  threads.dropDraft("draft-0");
+
+  for (const open of openers) {
+    open();
+  }
+  await adding;
+
+  expect(threads.drafts.value.size).toBe(0);
+  expect(problems).toEqual([{ action: "threads", step: "add", cause: UNKNOWN }]);
+});
+
 test("a second press on a line with an open draft focuses it, with no second draft", async () => {
   const { threads, board, other } = await opened();
   const line = unchangedThreadLine("left", { left: 4, right: 6 });
@@ -172,6 +234,16 @@ test("counts per file ignore drafts", async () => {
 
   expect(threads.counts.value.get(other)).toBe(1);
   expect(threads.counts.value.get(board)).toBe(4);
+  expect(threads.shownFor(other)).toEqual([
+    { key: "draft-0", line: changedThreadLine("left", 0), shown: "open" },
+  ]);
+  expect(threads.shownFor(board).map(({ key }) => key)).toEqual([
+    "thread-0",
+    "thread-1",
+    "thread-2",
+    "thread-3",
+    "draft-1",
+  ]);
 });
 
 test("blank text is never sent", async () => {
@@ -226,6 +298,26 @@ test("a note is added to its thread and its draft text cleared; a refused note k
   ]);
 });
 
+test("each thread keeps its own reply text", async () => {
+  const { threads } = await opened(SEEDED);
+  const [a, b] = [threadAt(threads, 0).id, threadAt(threads, 1).id];
+
+  threads.writeNote(a, "x");
+  threads.writeNote(b, "y");
+
+  expect(threads.noteText(a)).toBe("x");
+  expect(threads.noteText(b)).toBe("y");
+});
+
+test("a press on the same line number in the other column opens a second draft", async () => {
+  const { threads, board } = await opened();
+
+  threads.startThread(board, changedThreadLine("left", 3));
+  threads.startThread(board, changedThreadLine("right", 3));
+
+  expect([...threads.drafts.value.keys()]).toEqual(["draft-0", "draft-1"]);
+});
+
 test("writing a blank note drops its draft", async () => {
   const { threads } = await opened(SEEDED);
   const { id } = threadAt(threads, 0);
@@ -272,7 +364,7 @@ test("a failed list reports it and keeps the empty list", async () => {
   expect(problems).toEqual([{ action: "threads", step: "list", cause: { kind: "WorkerStopped" } }]);
 });
 
-test("a reply arriving after the view unmounted is applied to the store only", async () => {
+test("a Cancel while Comment is in flight still adds and opens the thread", async () => {
   const openers: (() => void)[] = [];
   const gate = new Promise<void>((resolve) => {
     openers.push(resolve);
@@ -304,4 +396,12 @@ test("replace mirrors a send's list", async () => {
   threads.replace(list);
 
   expect(threads.list.value).toBe(list);
+});
+
+test("queued and refused postings sit in the queue; not queued and pending do not", () => {
+  const pending = { text: "a", draftNote: 4, mergeRequest: "!12", link: "https://x" };
+  expect(isQueued({ kind: "queued", text: "a" })).toBe(true);
+  expect(isQueued({ kind: "refused", text: "a", reason: "gone" })).toBe(true);
+  expect(isQueued({ kind: "notQueued" })).toBe(false);
+  expect(isQueued({ kind: "pending", ...pending })).toBe(false);
 });

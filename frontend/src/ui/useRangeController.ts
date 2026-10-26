@@ -19,6 +19,7 @@ import {
 import type { RangeEntry, RangeFile } from "../ipc";
 import { useRangeStore } from "./rangeStore";
 import { fileSentence, modeNote } from "./rangeText";
+import type { RangeThreads } from "./rangeThreads";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
@@ -151,18 +152,11 @@ export function shownHosts<D, S>({
     : { left: left.value, right: right.value, strip: strip.value };
 }
 
-export function useRangeController(
-  file: RangeEntry,
-  hosts: HostRefs<HTMLDivElement, SVGSVGElement>,
-  options: { readonly preferences: MaybeRefOrGetter<Preferences> },
-): RangeHandle {
-  const store = useRangeStore();
-  const { threads } = store;
-  return followRange({
-    path: file.path,
-    load: () => store.loadFile(file),
-    hosts: () => shownHosts(hosts),
-    preferences: options.preferences,
+export function rangeThreadParts(
+  threads: RangeThreads,
+  file: Pick<RangeEntry, "id">,
+): Pick<RangeParts<unknown>, "threads" | "events"> {
+  return {
     threads: () => threads.shownFor(file.id),
     events: {
       startThread: (line) => {
@@ -172,6 +166,21 @@ export function useRangeController(
         threads.toggle(keys);
       },
     },
+  };
+}
+
+export function useRangeController(
+  file: RangeEntry,
+  hosts: HostRefs<HTMLDivElement, SVGSVGElement>,
+  options: { readonly preferences: MaybeRefOrGetter<Preferences> },
+): RangeHandle {
+  const store = useRangeStore();
+  return followRange({
+    path: file.path,
+    load: () => store.loadFile(file),
+    hosts: () => shownHosts(hosts),
+    preferences: options.preferences,
+    ...rangeThreadParts(store.threads, file),
     build: (texts, shown, preferences, events) =>
       new RangeController(texts, shown, { preferences }, events),
   });

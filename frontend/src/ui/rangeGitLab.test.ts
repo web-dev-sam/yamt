@@ -283,6 +283,10 @@ test("the progress label counts the message being sent, one send at a time", asy
   await live.gitlab.send();
   expect(progress).toHaveLength(1);
 
+  vi.setSystemTime(T0 + RECHECK_PAUSE_MS);
+  live.gitlab.checkOnFocus();
+  expect(live.checks()).toBe(1);
+
   for (const each of finish) {
     each({ ok: true, value: { kind: "sent", list: { threads: [] }, sent: 2, refused: 0 } });
   }
@@ -293,13 +297,33 @@ test("the progress label counts the message being sent, one send at a time", asy
   expect(live.threads.list.value.threads).toEqual([]);
 });
 
+test("a progress message arriving after the reply leaves Send usable", async () => {
+  const progress: ((done: SendProgress) => void)[] = [];
+  const live = await rig(SEEDED, () => ({
+    sendQueue: async (onProgress) => {
+      progress.push(onProgress);
+      return { ok: true, value: { kind: "sent", list: { threads: [] }, sent: 2, refused: 0 } };
+    },
+  }));
+  await checked(live);
+
+  await live.gitlab.send();
+  for (const each of progress) {
+    each({ done: 1, of: 2 });
+  }
+
+  expect(progress).toHaveLength(1);
+  expect(live.gitlab.sending.value).toBeNull();
+  expect(live.gitlab.sendButton.value.label).toBe("Send to GitLab (0)");
+});
+
 test("the result notice counts sent and refused and replaces the list", async () => {
   const live = await rig(`${SEEDED}&gitlab=refusal`);
   await checked(live);
 
   await sentWithTimers(live);
 
-  expect(live.gitlab.result.value).toEqual({ sent: 1, refused: 1, stopped: null });
+  expect(live.gitlab.result.value).toMatchObject({ kind: "sent", sent: 1, refused: 1 });
   expect(messageAt(live, 0).posting.kind).toBe("pending");
   expect(messageAt(live, 1).posting.kind).toBe("refused");
   expect(live.threads.queued.value).toBe(1);
@@ -314,7 +338,33 @@ test("a stopped send keeps its reason in the result", async () => {
 
   await sentWithTimers(live);
 
-  expect(live.gitlab.result.value).toEqual({ sent: 1, refused: 0, stopped: "glab timed out" });
+  expect(live.gitlab.result.value).toMatchObject({
+    kind: "stopped",
+    sent: 1,
+    refused: 0,
+    reason: "glab timed out",
+  });
+});
+
+test("a send that ends not lined up clears the previous send's result", async () => {
+  let sends = 0;
+  const live = await rig(`${SEEDED}&gitlab=refusal`, (fixture) => ({
+    sendQueue: async (onProgress) => {
+      sends += 1;
+      if (sends === 1) {
+        return fixture.sendQueue(onProgress);
+      }
+      return { ok: true, value: { kind: "notLinedUp", why: { kind: "glabMissing" } } };
+    },
+  }));
+  await checked(live);
+  await sentWithTimers(live);
+  expect(live.gitlab.result.value?.kind).toBe("sent");
+
+  await sentWithTimers(live);
+
+  expect(live.gitlab.check.value).toEqual({ kind: "notLinedUp", why: { kind: "glabMissing" } });
+  expect(live.gitlab.result.value).toBeNull();
 });
 
 test("a failed check and a failed send report their step and keep the last answer", async () => {

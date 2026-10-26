@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import {
+  changedThreadLine,
   createFixtureRangeSource,
   log,
   parseKey,
@@ -263,6 +264,22 @@ test("the 17th file drops the least recently shown and keeps the others' order",
   store.showFile(fileAt(store, MOUNTED_FILES + 1).path);
 
   expect(visitedIndexes(store)).toEqual([0, ...kept.slice(1), MOUNTED_FILES, MOUNTED_FILES + 1]);
+});
+
+test("a draft outlives its file's view: 16 other files evict file 0 and the draft is still there", async () => {
+  const store = await started(MOUNTED_FILES + 1);
+  const first = fileAt(store, 0);
+  const line = changedThreadLine("right", 0);
+  store.threads.startThread(first.id, line);
+  store.threads.writeDraft("draft-0", "Why?");
+
+  for (let index = 1; index <= MOUNTED_FILES; index += 1) {
+    store.showFile(fileAt(store, index).path);
+  }
+
+  expect(store.visited.value).not.toContain(first);
+  expect(store.threads.shownFor(first.id)).toEqual([{ key: "draft-0", line, shown: "draft" }]);
+  expect(store.threads.boxOf("draft-0")).toMatchObject({ kind: "draft", draft: { text: "Why?" } });
 });
 
 test("a failed load reports open with its path and leaves visited; a later success clears the problem", async () => {

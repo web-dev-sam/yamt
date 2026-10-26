@@ -128,10 +128,11 @@ test("the Send and Post hovers name the merge request", () => {
 });
 
 test("the result notice counts sent and refused, and a stop says why", () => {
-  expect(sendResultText({ sent: 5, refused: 1, stopped: null })).toBe("5 sent, 1 refused");
-  expect(sendResultText({ sent: 1, refused: 0, stopped: "glab timed out" })).toBe(
-    "1 sent, 0 refused; stopped: glab timed out. The rest stay queued.",
-  );
+  const list = { threads: [] };
+  expect(sendResultText({ kind: "sent", list, sent: 5, refused: 1 })).toBe("5 sent, 1 refused");
+  expect(
+    sendResultText({ kind: "stopped", list, sent: 1, refused: 0, reason: "glab timed out" }),
+  ).toBe("1 sent, 0 refused; stopped: glab timed out. The rest stay queued.");
 });
 
 test.each([

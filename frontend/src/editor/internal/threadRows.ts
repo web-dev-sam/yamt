@@ -1,11 +1,13 @@
-import { shownColumn, type Column, type Difference, type ThreadLine } from "../../ipc";
+import {
+  shownColumn,
+  type Column,
+  type Difference,
+  type ShownThread,
+  type ThreadLine,
+} from "../../ipc";
 import { linePlace } from "./threadAnchor";
 
-export type ShownThread = {
-  readonly key: string;
-  readonly line: ThreadLine;
-  readonly shown: "open" | "collapsed" | "draft";
-};
+export type { ShownThread } from "../../ipc";
 
 type ThreadPlace = Readonly<Record<Column, number>>;
 

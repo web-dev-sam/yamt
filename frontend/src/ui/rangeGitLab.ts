@@ -7,9 +7,10 @@ import type {
   RangeStart,
   ReviewSource,
   SendProgress,
+  SendReply,
 } from "../ipc";
 import { attempt, type Problem } from "./problem";
-import type { RangeThreads } from "./rangeThreads";
+import { isQueued, type RangeThreads } from "./rangeThreads";
 import {
   AI_ANSWER_TEXT,
   CHECKING_TEXT,
@@ -22,8 +23,9 @@ import {
   sendTitle,
   UNQUEUE_LABEL,
   UNQUEUE_TITLE,
-  type SendResult,
 } from "./rangeThreadText";
+
+type SentReply = Exclude<SendReply, { readonly kind: "notLinedUp" }>;
 
 type ButtonView = {
   readonly label: string;
@@ -35,7 +37,7 @@ export type GitLabState = {
   readonly check: Readonly<ShallowRef<GitLabCheck | null>>;
   readonly checking: Readonly<ShallowRef<boolean>>;
   readonly sending: Readonly<ShallowRef<SendProgress | null>>;
-  readonly result: Readonly<ShallowRef<SendResult | null>>;
+  readonly result: Readonly<ShallowRef<SentReply | null>>;
   readonly sendButton: ComputedRef<ButtonView>;
   postButton(message: Message): ButtonView;
   checkNow(): Promise<void>;
@@ -56,7 +58,7 @@ type State = {
   readonly check: ShallowRef<GitLabCheck | null>;
   readonly checking: ShallowRef<boolean>;
   readonly sending: ShallowRef<SendProgress | null>;
-  readonly result: ShallowRef<SendResult | null>;
+  readonly result: ShallowRef<SentReply | null>;
   lastEnded: number | null;
 };
 
@@ -94,7 +96,7 @@ function postButton(state: State, { body, posting }: Message): ButtonView {
   if (posting.kind === "pending") {
     return { label: POST_LABEL, title: PENDING_TEXT, disabled: true };
   }
-  if (posting.kind !== "notQueued") {
+  if (isQueued(posting)) {
     return { label: UNQUEUE_LABEL, title: UNQUEUE_TITLE, disabled: false };
   }
   const shown = gate(state);
@@ -132,12 +134,17 @@ async function send(state: State): Promise<void> {
   if (state.sending.value !== null) {
     return;
   }
+  state.result.value = null;
   state.sending.value = { done: 0, of: state.threads.queued.value };
+  let running = true;
   const outcome = await attempt(() =>
     state.source.sendQueue((progress) => {
-      state.sending.value = progress;
+      if (running) {
+        state.sending.value = progress;
+      }
     }),
   );
+  running = false;
   state.sending.value = null;
   if (!outcome.ok) {
     state.report({ action: "threads", step: "send", cause: outcome.cause });
@@ -149,8 +156,7 @@ async function send(state: State): Promise<void> {
     return;
   }
   state.threads.replace(reply.list);
-  const stopped = reply.kind === "stopped" ? reply.reason : null;
-  state.result.value = { sent: reply.sent, refused: reply.refused, stopped };
+  state.result.value = reply;
 }
 
 export function createGitLabCheck(
@@ -167,7 +173,7 @@ export function createGitLabCheck(
     check: shallowRef<GitLabCheck | null>(null),
     checking: shallowRef(false),
     sending: shallowRef<SendProgress | null>(null),
-    result: shallowRef<SendResult | null>(null),
+    result: shallowRef<SentReply | null>(null),
     lastEnded: null,
   };
   return {

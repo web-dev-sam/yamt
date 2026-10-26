@@ -9,6 +9,12 @@ export type ThreadLine =
   | { readonly kind: "unchangedOnLeft"; readonly left: LeftLine; readonly right: RightLine }
   | { readonly kind: "unchangedOnRight"; readonly left: LeftLine; readonly right: RightLine };
 
+export type ShownThread = {
+  readonly key: string;
+  readonly line: ThreadLine;
+  readonly shown: "open" | "collapsed" | "draft";
+};
+
 export function shownLine(line: ThreadLine): { readonly column: Column; readonly line: number } {
   switch (line.kind) {
     case "removed":

@@ -1,30 +1,25 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
-import type { ShownThread } from "../editor";
-import {
-  shownLine,
-  type MessageId,
-  type RangeFileId,
-  type ReviewSource,
-  type SourceResult,
-  type Thread,
-  type ThreadId,
-  type ThreadLine,
-  type ThreadList,
+import type {
+  MessageId,
+  Posting,
+  RangeFileId,
+  ReviewSource,
+  ShownThread,
+  SourceResult,
+  Thread,
+  ThreadId,
+  ThreadLine,
+  ThreadList,
 } from "../ipc";
 import { attempt, type Problem, type ThreadStep } from "./problem";
-
-type Draft =
-  | {
-      readonly kind: "thread";
-      readonly file: RangeFileId;
-      readonly line: ThreadLine;
-      readonly text: string;
-      readonly focus: number;
-    }
-  | { readonly kind: "note"; readonly thread: ThreadId; readonly text: string };
-
-type ThreadDraft = Extract<Draft, { readonly kind: "thread" }>;
+import {
+  createRangeDrafts,
+  isBlank,
+  type Draft,
+  type RangeDrafts,
+  type ThreadDraft,
+} from "./rangeDrafts";
 
 type ThreadBox =
   | { readonly kind: "draft"; readonly draft: ThreadDraft }
@@ -57,42 +52,28 @@ type State = {
   readonly report: (problem: Problem) => void;
   readonly list: ShallowRef<ThreadList>;
   readonly open: ShallowRef<ReadonlySet<ThreadId>>;
-  readonly drafts: ShallowRef<ReadonlyMap<string, Draft>>;
+  readonly drafts: RangeDrafts;
   readonly keys: Map<ThreadId, string>;
   readonly adding: Set<string>;
-  nextDraft: number;
 };
 
-function isBlank(text: string): boolean {
-  return text.trim() === "";
+export function isQueued(posting: Posting): boolean {
+  switch (posting.kind) {
+    case "queued":
+    case "refused":
+      return true;
+    case "notQueued":
+    case "pending":
+      return false;
+    default: {
+      const _exhaustive: never = posting;
+      return _exhaustive;
+    }
+  }
 }
 
 function keyOf(state: State, thread: ThreadId): string {
   return state.keys.get(thread) ?? `thread-${thread}`;
-}
-
-function noteKey(thread: ThreadId): string {
-  return `note-${thread}`;
-}
-
-function setDraft(state: State, key: string, draft: Draft | null): void {
-  const drafts = new Map(state.drafts.value);
-  if (draft === null) {
-    drafts.delete(key);
-  } else {
-    drafts.set(key, draft);
-  }
-  state.drafts.value = drafts;
-}
-
-function threadDraft(state: State, key: string): ThreadDraft | null {
-  const draft = state.drafts.value.get(key);
-  return draft?.kind === "thread" ? draft : null;
-}
-
-function sameLine(a: ThreadLine, b: ThreadLine): boolean {
-  const [first, second] = [shownLine(a), shownLine(b)];
-  return first.column === second.column && first.line === second.line;
 }
 
 function shownFor(state: State, file: RangeFileId): ShownThread[] {
@@ -102,7 +83,7 @@ function shownFor(state: State, file: RangeFileId): ShownThread[] {
       const shown = state.open.value.has(id) ? "open" : "collapsed";
       return { key: keyOf(state, id), line, shown };
     });
-  const drafts = [...state.drafts.value].flatMap(([key, draft]): ShownThread[] =>
+  const drafts = [...state.drafts.drafts.value].flatMap(([key, draft]): ShownThread[] =>
     draft.kind === "thread" && draft.file === file
       ? [{ key, line: draft.line, shown: "draft" }]
       : [],
@@ -111,7 +92,7 @@ function shownFor(state: State, file: RangeFileId): ShownThread[] {
 }
 
 function boxOf(state: State, key: string): ThreadBox | null {
-  const draft = threadDraft(state, key);
+  const draft = state.drafts.threadDraft(key);
   if (draft !== null) {
     return { kind: "draft", draft };
   }
@@ -119,18 +100,6 @@ function boxOf(state: State, key: string): ThreadBox | null {
   return thread === undefined
     ? null
     : { kind: "thread", thread, open: state.open.value.has(thread.id) };
-}
-
-function startThread(state: State, file: RangeFileId, line: ThreadLine): void {
-  for (const [key, draft] of state.drafts.value) {
-    if (draft.kind === "thread" && draft.file === file && sameLine(draft.line, line)) {
-      setDraft(state, key, { ...draft, focus: draft.focus + 1 });
-      return;
-    }
-  }
-  const key = `draft-${state.nextDraft}`;
-  state.nextDraft += 1;
-  setDraft(state, key, { kind: "thread", file, line, text: "", focus: 0 });
 }
 
 function toggle(state: State, keys: readonly string[]): void {
@@ -164,7 +133,7 @@ async function changed(
 }
 
 async function addThread(state: State, key: string, text: string): Promise<void> {
-  const draft = threadDraft(state, key);
+  const draft = state.drafts.threadDraft(key);
   if (draft === null || isBlank(text) || state.adding.has(key)) {
     return;
   }
@@ -172,17 +141,14 @@ async function addThread(state: State, key: string, text: string): Promise<void>
   const outcome = await attempt(() => state.source.addThread(draft.file, draft.line, text));
   state.adding.delete(key);
   if (!outcome.ok) {
-    const kept = threadDraft(state, key);
-    if (kept !== null) {
-      setDraft(state, key, { ...kept, text });
-    }
+    state.drafts.writeDraft(key, text);
     state.report({ action: "threads", step: "add", cause: outcome.cause });
     return;
   }
   const { thread, list } = outcome.value;
   state.keys.set(thread, key);
   state.open.value = new Set([...state.open.value, thread]);
-  setDraft(state, key, null);
+  state.drafts.dropDraft(key);
   state.list.value = list;
 }
 
@@ -190,34 +156,8 @@ async function addNote(state: State, thread: ThreadId, text: string): Promise<vo
   if (isBlank(text)) {
     return;
   }
-  if (await changed(state, "note", () => state.source.addNote(thread, text))) {
-    setDraft(state, noteKey(thread), null);
-  } else {
-    setDraft(state, noteKey(thread), { kind: "note", thread, text });
-  }
-}
-
-function writing(
-  state: State,
-): Pick<RangeThreads, "writeDraft" | "dropDraft" | "noteText" | "writeNote"> {
-  return {
-    writeDraft: (key, text) => {
-      const draft = threadDraft(state, key);
-      if (draft !== null) {
-        setDraft(state, key, { ...draft, text });
-      }
-    },
-    dropDraft: (key) => {
-      setDraft(state, key, null);
-    },
-    noteText: (thread) => {
-      const draft = state.drafts.value.get(noteKey(thread));
-      return draft?.kind === "note" ? draft.text : "";
-    },
-    writeNote: (thread, text) => {
-      setDraft(state, noteKey(thread), isBlank(text) ? null : { kind: "note", thread, text });
-    },
-  };
+  const added = await changed(state, "note", () => state.source.addNote(thread, text));
+  state.drafts.writeNote(thread, added ? "" : text);
 }
 
 function counted(state: State): Pick<RangeThreads, "counts" | "queued"> {
@@ -233,7 +173,7 @@ function counted(state: State): Pick<RangeThreads, "counts" | "queued"> {
       () =>
         state.list.value.threads
           .flatMap(({ messages }) => messages)
-          .filter(({ posting }) => posting.kind === "queued" || posting.kind === "refused").length,
+          .filter(({ posting }) => isQueued(posting)).length,
     ),
   };
 }
@@ -267,23 +207,19 @@ export function createRangeThreads(
     report,
     list: shallowRef<ThreadList>({ threads: [] }),
     open: shallowRef<ReadonlySet<ThreadId>>(new Set()),
-    drafts: shallowRef<ReadonlyMap<string, Draft>>(new Map()),
+    drafts: createRangeDrafts(),
     keys: new Map(),
     adding: new Set(),
-    nextDraft: 0,
   };
+  const { threadDraft: _threadDraft, ...drafts } = state.drafts;
   return {
     list: state.list,
     open: state.open,
-    drafts: state.drafts,
+    ...drafts,
     ...counted(state),
     ...replies(state),
     shownFor: (file) => shownFor(state, file),
     boxOf: (key) => boxOf(state, key),
-    startThread: (file, line) => {
-      startThread(state, file, line);
-    },
-    ...writing(state),
     toggle: (keys) => {
       toggle(state, keys);
     },

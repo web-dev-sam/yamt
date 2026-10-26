@@ -2,9 +2,16 @@ import { expect, test } from "vitest";
 import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
 
 import type { Preferences, RangeEvents, RangeTexts, ShownThread } from "../editor";
-import { changedThreadLine, type RangeFile } from "../ipc";
+import { changedThreadLine, createFixtureRangeSource, log, type RangeFile } from "../ipc";
+import { createRangeThreads } from "./rangeThreads";
 import { preferencesOf, startSettings } from "./settings";
-import { followRange, shownHosts, type RangeHandle, type ShownRange } from "./useRangeController";
+import {
+  followRange,
+  rangeThreadParts,
+  shownHosts,
+  type RangeHandle,
+  type ShownRange,
+} from "./useRangeController";
 
 type Built = { readonly texts: RangeTexts; readonly hosts: string; readonly theme: string };
 
@@ -252,3 +259,39 @@ test.each(["left", "right", "strip"] as const)(
     expect(shownHosts(refs)).toBeNull();
   },
 );
+
+test("a press on a line number starts a draft in that file only; toggle opens and closes", async () => {
+  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
+  const start = await fixture.openRange();
+  if (!start.ok) {
+    throw new Error("the fixture did not open");
+  }
+  const { files } = start.value;
+  const first = files.find(({ path }) => path === "src/board/board.ts");
+  const second = files.find(({ path }) => path === "config");
+  if (first === undefined || second === undefined) {
+    throw new Error("the fixture lost board.ts or config");
+  }
+  const threads = createRangeThreads(fixture, () => undefined);
+  await threads.load();
+  const before = threads.shownFor(second.id);
+  const parts = rangeThreadParts(threads, first);
+  const line = changedThreadLine("right", 1);
+
+  parts.events.startThread(line);
+
+  const draft = { key: "draft-0", line, shown: "draft" };
+  expect(parts.threads()).toContainEqual(draft);
+  expect(threads.shownFor(first.id)).toContainEqual(draft);
+  expect(threads.shownFor(second.id)).toEqual(before);
+
+  const stored = threads.list.value.threads.find(({ file }) => file === first.id);
+  if (stored === undefined) {
+    throw new Error("the seeded fixture has no thread on the first file");
+  }
+  const key = `thread-${stored.id}`;
+  parts.events.toggleThreads([key]);
+  expect(threads.open.value.has(stored.id)).toBe(true);
+  parts.events.toggleThreads([key]);
+  expect(threads.open.value.has(stored.id)).toBe(false);
+});
