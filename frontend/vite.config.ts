@@ -38,6 +38,7 @@ export default defineConfig({
             "src/editor/**/*.test.ts",
             "src/lsp/**/*.test.ts",
             "src/jsonrpc/**/*.test.ts",
+            "src/agent/**/*.test.ts",
             "scripts/**/*.test.ts",
           ],
           exclude: [...configDefaults.exclude, "**/*.browser.test.ts"],
