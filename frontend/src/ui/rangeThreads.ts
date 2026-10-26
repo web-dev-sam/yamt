@@ -48,6 +48,8 @@ export type RangeThreads = {
   queue(message: MessageId, text: string): Promise<void>;
   unqueue(message: MessageId): Promise<void>;
   replace(list: ThreadList): void;
+  setSession(thread: ThreadId, session: string): Promise<boolean>;
+  addAiAnswer(thread: ThreadId, session: string): Promise<boolean>;
 };
 
 type State = {
@@ -204,6 +206,16 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
   };
 }
 
+function aiRecords(state: State): Pick<RangeThreads, "setSession" | "addAiAnswer"> {
+  const { source } = state;
+  return {
+    setSession: (thread, session) =>
+      changed(state, "session", () => source.setThreadSession(thread, session)),
+    addAiAnswer: (thread, session) =>
+      changed(state, "answer", () => source.addAiAnswer(thread, session)),
+  };
+}
+
 export function createRangeThreads(
   source: ReviewSource,
   report: (problem: Problem) => void,
@@ -224,6 +236,7 @@ export function createRangeThreads(
     ...drafts,
     ...counted(state),
     ...replies(state),
+    ...aiRecords(state),
     shownFor: (file) => shownFor(state, file),
     boxOf: (key) => boxOf(state, key),
     toggle: (keys) => {

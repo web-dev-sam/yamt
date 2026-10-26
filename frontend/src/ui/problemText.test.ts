@@ -248,6 +248,8 @@ test.each([
   ["unqueue", "Could not unqueue the message: boom"],
   ["check", "Could not check GitLab: boom"],
   ["send", "Could not send to GitLab: boom"],
+  ["session", "Could not store the AI's conversation: boom"],
+  ["answer", "Could not store the AI's answer: boom"],
 ] as const)("a failed thread call at %s says what failed", (step, words) => {
   expect(text({ action: "threads", step, cause: { kind: "Unexpected", message: "boom" } })).toBe(
     words,

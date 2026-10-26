@@ -56,6 +56,8 @@ const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
   unqueue: "Could not unqueue the message",
   check: "Could not check GitLab",
   send: "Could not send to GitLab",
+  session: "Could not store the AI's conversation",
+  answer: "Could not store the AI's answer",
 };
 
 const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {

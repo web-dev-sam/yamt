@@ -18,6 +18,8 @@ const commands = vi.hoisted(() => ({
   addNote: vi.fn(),
   queueMessage: vi.fn(),
   unqueueMessage: vi.fn(),
+  setThreadSession: vi.fn(),
+  addAiAnswer: vi.fn(),
   checkGitlab: vi.fn(),
   sendQueue: vi.fn(),
 }));
@@ -117,6 +119,8 @@ test("each thread command passes its arguments and camelCases the list", async (
     commands.addNote,
     commands.queueMessage,
     commands.unqueueMessage,
+    commands.setThreadSession,
+    commands.addAiAnswer,
   ]) {
     command.mockResolvedValue(ok(PENDING_LIST));
   }
@@ -129,9 +133,16 @@ test("each thread command passes its arguments and camelCases the list", async (
     value: CAMEL_LIST,
   });
   expect(await review.unqueueMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
+  expect(await review.setThreadSession(threadId(2), "s2")).toEqual({
+    ok: true,
+    value: CAMEL_LIST,
+  });
+  expect(await review.addAiAnswer(threadId(2), "s3")).toEqual({ ok: true, value: CAMEL_LIST });
   expect(commands.addNote).toHaveBeenCalledWith(2, "More");
   expect(commands.queueMessage).toHaveBeenCalledWith(4, "Edited");
   expect(commands.unqueueMessage).toHaveBeenCalledWith(4);
+  expect(commands.setThreadSession).toHaveBeenCalledWith(2, "s2");
+  expect(commands.addAiAnswer).toHaveBeenCalledWith(2, "s3");
 });
 
 test("addThread sends the file, the line and the text, and brands the new id", async () => {
@@ -180,6 +191,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
   ["addNote", { kind: "UnknownThread", thread: 9 }],
   ["queueMessage", { kind: "MessagePending", message: 4 }],
   ["unqueueMessage", { kind: "UnknownMessage", message: 5 }],
+  ["setThreadSession", { kind: "UnknownThread", thread: 6 }],
+  ["addAiAnswer", { kind: "WriteFailed", path: "/p/threads.json", message: "full" }],
   ["checkGitlab", { kind: "WorkerStopped" }],
   ["sendQueue", { kind: "SendRunning" }],
 ])("a %s failure comes back unchanged", async (name, failure) => {
@@ -191,6 +204,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
     addNote: () => review.addNote(threadId(9), "x"),
     queueMessage: () => review.queueMessage(messageId(4), "x"),
     unqueueMessage: () => review.unqueueMessage(messageId(5)),
+    setThreadSession: () => review.setThreadSession(threadId(6), "s"),
+    addAiAnswer: () => review.addAiAnswer(threadId(6), "s"),
     checkGitlab: () => review.checkGitLab(),
     sendQueue: () => review.sendQueue(() => undefined),
   };

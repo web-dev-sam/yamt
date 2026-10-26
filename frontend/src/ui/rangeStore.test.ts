@@ -1,5 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
+import { DEFAULT_FIRST_MESSAGE } from "../agent";
 import {
   changedThreadLine,
   createFixtureRangeSource,
@@ -13,7 +14,13 @@ import {
 } from "../ipc";
 import type { KeyPress } from "./fileListKey";
 import { problemText } from "./problemText";
-import { createRangeStore, MOUNTED_FILES, useRangeStore, type RangeStore } from "./rangeStore";
+import {
+  askContext,
+  createRangeStore,
+  MOUNTED_FILES,
+  useRangeStore,
+  type RangeStore,
+} from "./rangeStore";
 import { useSettingsStore } from "./settingsStore";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
@@ -71,7 +78,7 @@ function source(count: number): RangeSource {
 
 async function started(count: number, edit: Edit = () => ({})): Promise<RangeStore> {
   const fixture = source(count);
-  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark");
+  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark", null);
   await store.startUp();
   return store;
 }
@@ -124,7 +131,7 @@ test("an empty range shows no file and mounts none", async () => {
 test("before openRange answers: the files screen, the start theme's preferences, no file to show", async () => {
   quiet();
   const other = await started(4);
-  const store = createRangeStore(source(4), "light");
+  const store = createRangeStore(source(4), "light", null);
 
   expect(store.screen.value).toEqual({ kind: "files" });
   expect(store.preferences.value.theme).toBe("light");
@@ -400,4 +407,44 @@ test("answer settles the waiting question", async () => {
   }
 
   expect(store.question.value).toBeNull();
+});
+
+test("without --ai the store has no AI and the window closes without asking", async () => {
+  const store = await started(2);
+
+  expect(store.ai).toBeNull();
+  expect(await store.mayClose()).toBe(true);
+  expect(store.question.value).toBeNull();
+});
+
+test("First message's values: the thread's place, the range as typed, both short ids", async () => {
+  quiet();
+  const store = createRangeStore(
+    createFixtureRangeSource(log, "?range=review&threads=seeded"),
+    "dark",
+    null,
+  );
+  await store.startUp();
+  const start = store.start.value;
+  const [removed, added] = store.threads.list.value.threads;
+  if (start === null || removed === undefined || added === undefined) {
+    throw new Error("the seeded review did not open");
+  }
+  const custom = { command: null, firstMessage: "Hi {{ MESSAGE }}" };
+
+  expect(askContext(start, { command: null, firstMessage: null }, added)).toEqual({
+    template: DEFAULT_FIRST_MESSAGE,
+    values: {
+      RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:21",
+      RANGE: start.range,
+      OLD_COMMIT: start.left.shortId,
+      NEW_COMMIT: start.right.shortId,
+    },
+  });
+  expect(askContext(start, custom, removed)).toMatchObject({
+    template: "Hi {{ MESSAGE }}",
+    values: { RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:20" },
+  });
+  expect(askContext(null, custom, added)).toBeNull();
+  expect(askContext({ ...start, files: [] }, custom, added)).toBeNull();
 });

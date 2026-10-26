@@ -1,5 +1,5 @@
 import type * as Generated from "./bindings";
-import { invalid, isNonNegativeInteger } from "./validate";
+import { branded, invalid, isNonNegativeInteger } from "./validate";
 import { toSideWords, type SideWords } from "./words";
 
 export type TabId = number & { readonly __brand: "TabId" };
@@ -183,11 +183,7 @@ export function isMessageId(value: number): value is MessageId {
 }
 
 export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
-  const next = version + 1;
-  if (!isColumnVersion(next)) {
-    throw invalid("version", next);
-  }
-  return next;
+  return branded(version + 1, isColumnVersion, "version");
 }
 
 function toWords({
@@ -217,10 +213,8 @@ export function toRange<L extends number>({
   isLine: (n: number) => n is L;
   field: string;
 }): LineRange<L> {
-  const { start, len } = range;
-  if (!isLine(start)) {
-    throw invalid(`${field}.start`, start);
-  }
+  const start = branded(range.start, isLine, `${field}.start`);
+  const { len } = range;
   if (!isNonNegativeInteger(len)) {
     throw invalid(`${field}.len`, len);
   }
@@ -230,10 +224,7 @@ export function toRange<L extends number>({
 function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
   const field = `chunks[${index}]`;
   const { chunk } = merged;
-  const { id } = chunk;
-  if (!isChunkId(id)) {
-    throw invalid(`${field}.chunk.id`, id);
-  }
+  const id = branded(chunk.id, isChunkId, `${field}.chunk.id`);
   return {
     id,
     kind: chunk.kind,
@@ -245,13 +236,6 @@ function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
   };
 }
 
-function toDiskVersion(n: number, field: string): DiskVersion {
-  if (!isDiskVersion(n)) {
-    throw invalid(field, n);
-  }
-  return n;
-}
-
 export function toDomain(dto: Generated.FileMergeData): FileMergeData {
   return {
     path: dto.path,
@@ -261,13 +245,13 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
     deleted: dto.deleted,
     eol: dto.eol,
     chunks: dto.chunks.map(toChunk),
-    diskVersion: toDiskVersion(dto.disk_version, "disk_version"),
+    diskVersion: branded(dto.disk_version, isDiskVersion, "disk_version"),
   };
 }
 
 export function toSides(dto: Generated.FileSides): FileSides {
   const { disk_version: diskVersion, ...sides } = dto;
-  return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
+  return { ...sides, diskVersion: branded(diskVersion, isDiskVersion, "disk_version") };
 }
 
 export function toListing(dto: Generated.Listing): Listing {
@@ -291,9 +275,5 @@ export function toStartReply(dto: Generated.StartReply): StartReply {
   if (dto.kind !== "Started") {
     return dto;
   }
-  const { run } = dto;
-  if (!isRunId(run)) {
-    throw invalid("run", run);
-  }
-  return { kind: "Started", run };
+  return { kind: "Started", run: branded(dto.run, isRunId, "run") };
 }

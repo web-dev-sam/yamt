@@ -15,6 +15,15 @@ export const CHECKING_TEXT = "Checking GitLab…";
 export const NOTHING_QUEUED = "Nothing queued";
 export const PENDING_TEXT = "Pending on GitLab";
 export const AI_ANSWER_TEXT = "An AI answer — start yamt with --ai to see it";
+export const ANSWER_LOADING_TEXT = "Loading the AI's answer…";
+export const ANSWER_GONE_TEXT = "omp no longer has this answer";
+export const ANSWER_UNLOADED_TEXT = "The AI's conversation could not be loaded";
+export const ASK_AI_LABEL = "Ask AI";
+export const ASK_AI_TITLE = "Send your messages since the AI's last answer to the AI";
+export const ASK_AI_WAITING =
+  "Nothing to ask yet: write a message after the AI's last answer, or wait for its conversation to load";
+export const STOP_AI_LABEL = "Stop";
+export const STOP_AI_TITLE = "Stop the AI's turn; what it wrote so far stays";
 export const POST_LABEL = "Post";
 export const UNQUEUE_LABEL = "Unqueue";
 export const UNQUEUE_TITLE = "Take this message out of the queue";

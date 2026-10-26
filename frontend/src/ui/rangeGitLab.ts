@@ -12,7 +12,6 @@ import type {
 import { attempt, type Problem } from "./problem";
 import { isQueued, type RangeThreads } from "./rangeThreads";
 import {
-  AI_ANSWER_TEXT,
   CHECKING_TEXT,
   NOTHING_QUEUED,
   notLinedUpText,
@@ -41,13 +40,18 @@ type PostView = {
   readonly action: PostAction | null;
 };
 
+/** What a message offers to post: its text, or why it has none shown. */
+export type PostBody =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "none"; readonly why: string };
+
 export type GitLabState = {
   readonly check: Readonly<ShallowRef<GitLabCheck | null>>;
   readonly checking: Readonly<ShallowRef<boolean>>;
   readonly sending: Readonly<ShallowRef<SendProgress | null>>;
   readonly result: Readonly<ShallowRef<SentReply | null>>;
   readonly sendButton: ComputedRef<ButtonView>;
-  postButton(message: Message): PostView;
+  postButton(message: Message, body: PostBody): PostView;
   checkNow(): Promise<void>;
   checkOnFocus(): void;
   send(): Promise<void>;
@@ -97,15 +101,15 @@ function sendButton(state: State): ButtonView {
   return { label, title, disabled: state.sending.value !== null };
 }
 
-function postButton(state: State, { body, posting }: Message): PostView {
-  if (body.kind === "aiAnswer") {
-    return { label: POST_LABEL, title: AI_ANSWER_TEXT, action: null };
-  }
+function postButton(state: State, { posting }: Message, body: PostBody): PostView {
   if (posting.kind === "pending") {
     return { label: POST_LABEL, title: PENDING_TEXT, action: null };
   }
   if (isQueued(posting)) {
     return { label: UNQUEUE_LABEL, title: UNQUEUE_TITLE, action: "unqueue" };
+  }
+  if (body.kind === "none") {
+    return { label: POST_LABEL, title: body.why, action: null };
   }
   const shown = gate(state);
   return shown.kind === "blocked"
@@ -190,7 +194,7 @@ export function createGitLabCheck(
     sending: state.sending,
     result: state.result,
     sendButton: computed(() => sendButton(state)),
-    postButton: (message) => postButton(state, message),
+    postButton: (message, body) => postButton(state, message, body),
     checkNow: () => checkNow(state),
     checkOnFocus: () => {
       checkOnFocus(state);

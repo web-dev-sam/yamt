@@ -8,7 +8,7 @@ import {
   type ThreadId,
 } from "./domain";
 import { toThreadLine, type ThreadLine } from "./threadLine";
-import { branded } from "./validate";
+import { branded, invalid, isNonNegativeInteger } from "./validate";
 
 type MessageBody = Readonly<Generated.MessageBody>;
 export type Posting =
@@ -94,10 +94,17 @@ function toPosting(raw: Generated.Posting): Posting {
   return { kind: "pending", text, draftNote, mergeRequest, link };
 }
 
+function toBody(body: Generated.MessageBody, field: string): MessageBody {
+  if (body.kind === "aiAnswer" && !isNonNegativeInteger(body.turn)) {
+    throw invalid(`${field}.turn`, body.turn);
+  }
+  return body;
+}
+
 function toMessage({ id, body, written, posting }: Generated.Message, field: string): Message {
   return {
     id: branded(id, isMessageId, `${field}.id`),
-    body,
+    body: toBody(body, `${field}.body`),
     written,
     posting: toPosting(posting),
   };

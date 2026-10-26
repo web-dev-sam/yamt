@@ -79,6 +79,14 @@ test.each<Generated.MessageBody>([
   expect(converted?.messages[0]?.body).toEqual(body);
 });
 
+test.each([-1, 1.5])("an AI answer whose turn is %d is refused, naming the field", (turn) => {
+  const body: Generated.MessageBody = { kind: "aiAnswer", session: "s1", turn };
+
+  expect(() => toThreadList({ threads: [thread({ kind: "notQueued" }, body)] })).toThrow(
+    `threads[0].messages[0].body.turn must be a non-negative safe integer, got ${turn}`,
+  );
+});
+
 test("a thread keeps its session and every line kind", () => {
   const lines: Generated.ThreadLine[] = [
     { kind: "removed", left: 1 },

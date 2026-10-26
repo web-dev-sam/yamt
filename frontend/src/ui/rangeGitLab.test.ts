@@ -13,8 +13,16 @@ import {
   type SourceResult,
 } from "../ipc";
 import type { Problem } from "./problem";
-import { createGitLabCheck, RECHECK_PAUSE_MS, type GitLabState } from "./rangeGitLab";
+import {
+  createGitLabCheck,
+  RECHECK_PAUSE_MS,
+  type GitLabState,
+  type PostBody,
+} from "./rangeGitLab";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+
+const TEXT: PostBody = { kind: "text", text: "Is this still used?" };
+const UNSHOWN: PostBody = { kind: "none", why: "Loading the AI's answer…" };
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
 
@@ -164,7 +172,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
     title: "Checking GitLab…",
     disabled: true,
   });
-  expect(live.gitlab.postButton(note)).toEqual({
+  expect(live.gitlab.postButton(note, TEXT)).toEqual({
     label: "Post",
     title: "Checking GitLab…",
     action: null,
@@ -177,7 +185,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
     title: "Send the 2 queued comments to your pending review on !12",
     disabled: false,
   });
-  expect(live.gitlab.postButton(note)).toEqual({
+  expect(live.gitlab.postButton(note, TEXT)).toEqual({
     label: "Post",
     title: "Queue this message as its own comment on !12",
     action: "edit",
@@ -206,35 +214,40 @@ test("a not lined-up answer disables both with its sentence; Unqueue stays enabl
     title: sentence,
     disabled: true,
   });
-  expect(live.gitlab.postButton(messageAt(live, 3))).toEqual({
+  expect(live.gitlab.postButton(messageAt(live, 3), TEXT)).toEqual({
     label: "Post",
     title: sentence,
     action: null,
   });
-  expect(live.gitlab.postButton(messageAt(live, 0))).toEqual({
+  expect(live.gitlab.postButton(messageAt(live, 0), UNSHOWN)).toEqual({
     label: "Unqueue",
     title: "Take this message out of the queue",
     action: "unqueue",
   });
-  expect(live.gitlab.postButton(messageAt(live, 1))).toMatchObject({
+  expect(live.gitlab.postButton(messageAt(live, 1), TEXT)).toMatchObject({
     label: "Unqueue",
     action: "unqueue",
   });
 });
 
-test("a pending message and an AI answer cannot be posted", async () => {
+test("a pending message cannot be posted; a message without shown text says why", async () => {
   const live = await rig();
   await checked(live);
 
-  expect(live.gitlab.postButton(messageAt(live, 2))).toEqual({
+  expect(live.gitlab.postButton(messageAt(live, 2), TEXT)).toEqual({
     label: "Post",
     title: "Pending on GitLab",
     action: null,
   });
-  expect(live.gitlab.postButton(messageAt(live, 3, 1))).toEqual({
+  expect(live.gitlab.postButton(messageAt(live, 3, 1), UNSHOWN)).toEqual({
     label: "Post",
-    title: "An AI answer — start yamt with --ai to see it",
+    title: "Loading the AI's answer…",
     action: null,
+  });
+  expect(live.gitlab.postButton(messageAt(live, 3, 1), TEXT)).toEqual({
+    label: "Post",
+    title: "Queue this message as its own comment on !12",
+    action: "edit",
   });
 });
 

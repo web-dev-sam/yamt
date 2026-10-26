@@ -1,17 +1,36 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
-import type { RangeEntry, RangeFile, RangeFileId, RangeSource, RangeStart, Theme } from "../ipc";
+import { DEFAULT_FIRST_MESSAGE, type AgentClient } from "../agent";
+import type {
+  AgentSettings,
+  AgentSource,
+  RangeEntry,
+  RangeFile,
+  RangeFileId,
+  RangeSource,
+  RangeStart,
+  Theme,
+  Thread,
+} from "../ipc";
+import { aiMayClose } from "./aiClose";
 import { createAsking, type Asking } from "./asking";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
+import { createRangeAi, type AskContext, type RangeAi } from "./rangeAi";
 import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+import { threadPlaceText } from "./rangeThreadText";
 import type { Screen } from "./screen";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
 import type { Preferences } from "./useMergeController";
+
+/** What `main.ts` builds only under `data-ai` / `?ai` (plan row 108). */
+export type RangeAgent = { readonly source: AgentSource; readonly client: AgentClient };
+
+type RangeStoreAi = RangeAi & { readonly client: AgentClient };
 
 export type RangeStore = SettingsStore & {
   readonly start: Readonly<ShallowRef<RangeStart | null>>;
@@ -25,6 +44,7 @@ export type RangeStore = SettingsStore & {
   readonly preferences: ComputedRef<Preferences>;
   readonly threads: RangeThreads;
   readonly gitlab: GitLabState;
+  readonly ai: RangeStoreAi | null;
   startUp(): Promise<void>;
   loadSettings(): Promise<void>;
   showFile(path: string): void;
@@ -33,6 +53,7 @@ export type RangeStore = SettingsStore & {
   dismissProblem(): void;
   answer(yes: boolean): void;
   dismissQuestion(): void;
+  mayClose(): Promise<boolean>;
 };
 
 type Refs = {
@@ -50,6 +71,7 @@ type State = Refs & {
   readonly asking: Asking;
   readonly threads: RangeThreads;
   readonly gitlab: GitLabState;
+  readonly agent: RangeAgent | null;
   recent: readonly RangeFileId[];
   latestSettings: number;
 };
@@ -70,30 +92,78 @@ function createRefs(startTheme: Theme): Refs {
   };
 }
 
-export function createRangeStore(source: RangeSource, startTheme: Theme): RangeStore {
-  const refs = createRefs(startTheme);
+/** First message's values for a thread (plan row 113): its place, the range as typed, the compared ids. */
+export function askContext(
+  start: RangeStart | null,
+  agent: AgentSettings,
+  thread: Thread,
+): AskContext | null {
+  const entry = start?.files.find((file) => file.id === thread.file);
+  if (start === null || entry === undefined) {
+    return null;
+  }
+  return {
+    template: agent.firstMessage ?? DEFAULT_FIRST_MESSAGE,
+    values: {
+      RELATIVE_FILE_PATH_WITH_LINE: threadPlaceText(entry, thread.line),
+      RANGE: start.range,
+      OLD_COMMIT: start.left.shortId,
+      NEW_COMMIT: start.right.shortId,
+    },
+  };
+}
+
+function storeAi(state: State): RangeStoreAi | null {
+  const { agent } = state;
+  if (agent === null) {
+    return null;
+  }
+  const ai = createRangeAi(agent.client, state.threads, (thread) =>
+    askContext(state.start.value, state.settings.value.agent, thread),
+  );
+  return { ...ai, client: agent.client };
+}
+
+function mayClose(state: State): Promise<boolean> {
+  const { agent } = state;
+  return agent === null
+    ? Promise.resolve(true)
+    : aiMayClose({ source: agent.source, asking: state.asking, report: (p) => report(state, p) });
+}
+
+function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null): State {
   function problems(problem: Problem): void {
     report(refs, problem);
   }
   const threads = createRangeThreads(source, problems);
-  const gitlab = createGitLabCheck(source, threads, problems, refs.start);
-  const state: State = {
+  return {
     ...refs,
     source,
     asking: createAsking(),
     threads,
-    gitlab,
+    gitlab: createGitLabCheck(source, threads, problems, refs.start),
+    agent,
     recent: [],
     latestSettings: 0,
   };
+}
+
+export function createRangeStore(
+  source: RangeSource,
+  startTheme: Theme,
+  agent: RangeAgent | null,
+): RangeStore {
+  const refs = createRefs(startTheme);
+  const state = createState(refs, source, agent);
   const settings = settingsActions(state);
   const created: RangeStore = {
     ...refs,
     shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),
-    threads,
-    gitlab,
+    threads: state.threads,
+    gitlab: state.gitlab,
+    ai: storeAi(state),
     ...settings,
     startUp: () => startUp(state, settings),
     showFile: (path) => {
@@ -103,6 +173,7 @@ export function createRangeStore(source: RangeSource, startTheme: Theme): RangeS
       }
     },
     loadFile: (entry) => loadFile(state, entry),
+    mayClose: () => mayClose(state),
     ...chromeActions(state),
   };
   store = created;

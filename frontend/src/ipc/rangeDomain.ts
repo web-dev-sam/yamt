@@ -1,7 +1,7 @@
 import type * as Generated from "./bindings";
 import { toDifferences, type Difference } from "./compareDomain";
 import { isRangeFileId, type RangeFileId } from "./domain";
-import { invalid } from "./validate";
+import { branded } from "./validate";
 
 type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
 export type RangeSide = {
@@ -50,10 +50,12 @@ function toRangeEntry(
   { id, path, change, lines }: Generated.RangeEntry,
   index: number,
 ): RangeEntry {
-  if (!isRangeFileId(id)) {
-    throw invalid(`files[${index}].id`, id);
-  }
-  return { id, path, change: toRangeChange(change), lines };
+  return {
+    id: branded(id, isRangeFileId, `files[${index}].id`),
+    path,
+    change: toRangeChange(change),
+    lines,
+  };
 }
 
 export function toRangeStart(raw: Generated.RangeStart): RangeStart {

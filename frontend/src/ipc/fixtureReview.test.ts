@@ -24,6 +24,7 @@ const MERGE_REQUEST = {
 };
 const LINK = `${MERGE_REQUEST.webUrl}/diffs`;
 const NOW_MS = 1_800_000_000_500;
+const NOT_QUEUED = { kind: "notQueued" };
 
 function fileId(n: number): RangeFileId {
   if (!isRangeFileId(n)) {
@@ -226,6 +227,56 @@ test("addNote appends a note; blank text and unknown threads are refused", async
     failure: { kind: "UnknownThread", thread: 9 },
   });
   expect((await threadsOf(source))[1]?.messages).toHaveLength(2);
+});
+
+test("setThreadSession replaces the thread's session; an unknown thread is refused", async () => {
+  const source = review("?threads=seeded");
+
+  const list = valueOf(await source.setThreadSession(threadId(3), "fixture-session-2"));
+
+  expect(list.threads.map((thread) => thread.session)).toEqual([
+    null,
+    null,
+    null,
+    "fixture-session-2",
+  ]);
+  expect(list.threads[3]?.messages).toHaveLength(2);
+  expect(await source.setThreadSession(threadId(9), "s")).toEqual({
+    ok: false,
+    failure: { kind: "UnknownThread", thread: 9 },
+  });
+});
+
+test("addAiAnswer numbers the turn by the session's answers already in the thread, as Rust does", async () => {
+  const source = review("?threads=seeded");
+
+  await source.addAiAnswer(threadId(3), "fixture-session");
+  await source.addAiAnswer(threadId(3), "other");
+  const list = valueOf(await source.addAiAnswer(threadId(3), "fixture-session"));
+
+  const thread = list.threads[3];
+  expect(thread?.session).toBe("fixture-session");
+  expect(thread?.messages.slice(2).map(({ id, body, posting }) => ({ id, body, posting }))).toEqual(
+    [
+      {
+        id: 5,
+        body: { kind: "aiAnswer", session: "fixture-session", turn: 1 },
+        posting: NOT_QUEUED,
+      },
+      { id: 6, body: { kind: "aiAnswer", session: "other", turn: 0 }, posting: NOT_QUEUED },
+      {
+        id: 7,
+        body: { kind: "aiAnswer", session: "fixture-session", turn: 2 },
+        posting: NOT_QUEUED,
+      },
+    ],
+  );
+  expect(thread?.messages[2]?.written).toBe(1_800_000_000);
+  expect(valueOf(await source.addAiAnswer(threadId(0), "new")).threads[0]?.session).toBe("new");
+  expect(await source.addAiAnswer(threadId(9), "s")).toEqual({
+    ok: false,
+    failure: { kind: "UnknownThread", thread: 9 },
+  });
 });
 
 test("queueMessage keeps the edited text and unqueueMessage takes it back", async () => {

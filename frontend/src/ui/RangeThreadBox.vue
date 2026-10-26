@@ -3,16 +3,24 @@ import { computed, onMounted, useTemplateRef, watch } from "vue";
 import ChevronUp from "~icons/lucide/chevron-up";
 
 import type { RangeEntry } from "../ipc";
+import AiTurn from "./AiTurn.vue";
+import { IDLE } from "./rangeAi";
+import { liveTurn } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
 import { boxKeydown } from "./rangeKeys";
 import RangeMessage from "./RangeMessage.vue";
 import { useRangeStore } from "./rangeStore";
 import {
+  ASK_AI_LABEL,
+  ASK_AI_TITLE,
+  ASK_AI_WAITING,
   CANCEL_LABEL,
   COLLAPSE_THREAD,
   COMMENT_LABEL,
   DRAFT_PROMPT,
   REPLY_PROMPT,
+  STOP_AI_LABEL,
+  STOP_AI_TITLE,
   threadPlaceText,
 } from "./rangeThreadText";
 
@@ -24,7 +32,7 @@ const PROMPTS = {
 };
 
 const field = useTemplateRef<HTMLTextAreaElement>("field");
-const { threads } = useRangeStore();
+const { threads, ai } = useRangeStore();
 
 const box = computed(() => threads.boxOf(props.threadKey));
 const draft = computed(() => (box.value?.kind === "draft" ? box.value.draft : null));
@@ -43,6 +51,14 @@ const text = computed(() => {
 });
 const blank = computed(() => isBlank(text.value));
 const prompt = computed(() => (draft.value !== null ? PROMPTS.draft : PROMPTS.reply));
+const threadAi = computed(() =>
+  ai === null || thread.value === null ? null : (ai.byThread.value.get(thread.value.id) ?? IDLE),
+);
+const live = computed(() => (threadAi.value === null ? null : liveTurn(threadAi.value)));
+const answering = computed(
+  () => threadAi.value !== null && threadAi.value.running !== null && threadAi.value.end === null,
+);
+const askable = computed(() => ai !== null && thread.value !== null && ai.canAsk(thread.value.id));
 
 watch(
   () => draft.value?.focus,
@@ -50,6 +66,7 @@ watch(
     focusField();
   },
 );
+watch(() => [thread.value?.id, thread.value?.session], loadConversation, { immediate: true });
 
 onMounted(() => {
   if (draft.value !== null) {
@@ -59,6 +76,30 @@ onMounted(() => {
 
 function focusField(): void {
   field.value?.focus({ preventScroll: true });
+}
+
+function loadConversation(): void {
+  if (thread.value !== null) {
+    ai?.load(thread.value.id);
+  }
+}
+
+function askAi(): void {
+  if (thread.value !== null) {
+    ai?.ask(thread.value.id);
+  }
+}
+
+function stopAi(): void {
+  if (thread.value !== null) {
+    ai?.stop(thread.value.id);
+  }
+}
+
+function retryAi(): void {
+  if (thread.value !== null) {
+    ai?.retry(thread.value.id);
+  }
 }
 
 function write(next: string): void {
@@ -112,6 +153,29 @@ function collapse(): void {
     <header class="flex min-w-0 items-center gap-2 text-fg-muted">
       <span class="min-w-0 flex-1 truncate font-mono">{{ place }}</span>
       <button
+        v-if="answering"
+        type="button"
+        :title="STOP_AI_TITLE"
+        class="shrink-0 rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover"
+        @click="stopAi"
+      >
+        {{ STOP_AI_LABEL }}
+      </button>
+      <span
+        v-else-if="ai !== null && thread !== null"
+        :title="askable ? ASK_AI_TITLE : ASK_AI_WAITING"
+        class="shrink-0"
+      >
+        <button
+          type="button"
+          :disabled="!askable"
+          class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+          @click="askAi"
+        >
+          {{ ASK_AI_LABEL }}
+        </button>
+      </span>
+      <button
         v-if="thread !== null"
         type="button"
         :title="COLLAPSE_THREAD"
@@ -123,8 +187,21 @@ function collapse(): void {
       </button>
     </header>
     <ul v-if="thread !== null" class="flex flex-col divide-y divide-separator">
-      <RangeMessage v-for="message in thread.messages" :key="message.id" :message="message" />
+      <RangeMessage
+        v-for="message in thread.messages"
+        :key="message.id"
+        :message="message"
+        :thread="thread.id"
+      />
     </ul>
+    <AiTurn
+      v-if="live !== null && ai !== null"
+      class="border-t border-separator pt-2"
+      :turn="live.turn"
+      :end="live.end"
+      :client="ai.client"
+      @retry="retryAi"
+    />
     <textarea
       ref="field"
       :value="text"

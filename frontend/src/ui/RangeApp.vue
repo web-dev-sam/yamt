@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { useEventListener, useWindowFocus } from "@vueuse/core";
-import { computed, watch } from "vue";
+import { computed, onMounted, watch } from "vue";
 
+import { log, onWindowClose } from "../ipc";
+import AgentSettings from "./AgentSettings.vue";
 import FileList from "./FileList.vue";
 import NoticeBar from "./NoticeBar.vue";
 import type { NoticeRow } from "./noticeText";
+import { unexpected } from "./problem";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import RangeFileRow from "./RangeFileRow.vue";
@@ -33,6 +36,8 @@ const {
   dismissQuestion,
   gitlab,
   threads,
+  ai,
+  mayClose,
 } = useRangeStore();
 const { counts } = threads;
 
@@ -57,6 +62,20 @@ watch(focused, (now) => {
     gitlab.checkOnFocus();
   }
 });
+
+onMounted(() => {
+  if (ai !== null) {
+    void guardClose();
+  }
+});
+
+async function guardClose(): Promise<void> {
+  try {
+    await onWindowClose(mayClose);
+  } catch (error) {
+    log.error("range.close_guard_failed", { ...unexpected(error) });
+  }
+}
 </script>
 
 <template>
@@ -97,7 +116,9 @@ watch(focused, (now) => {
           </header>
           <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
         </div>
-        <SettingsView v-if="screen.kind === 'settings'" />
+        <SettingsView v-if="screen.kind === 'settings'">
+          <AgentSettings v-if="ai !== null" />
+        </SettingsView>
       </div>
     </div>
     <QuestionDialog

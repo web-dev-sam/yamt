@@ -20,7 +20,16 @@ type KeysUnread = {
 
 export type ProblemCause = SourceFailure | Unexpected;
 
-export type ThreadStep = "list" | "add" | "note" | "queue" | "unqueue" | "check" | "send";
+export type ThreadStep =
+  | "list"
+  | "add"
+  | "note"
+  | "queue"
+  | "unqueue"
+  | "check"
+  | "send"
+  | "session"
+  | "answer";
 
 export type AiAttempt = "ask" | "diff" | "discard";
 

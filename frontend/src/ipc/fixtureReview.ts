@@ -2,14 +2,15 @@ import type * as Generated from "./bindings";
 import type { SourceResult } from "./domain";
 import {
   gitLabCheck,
-  pendingPosting,
   postOutcome,
-  REFUSAL,
   shownGitLabScript,
   TIMED_OUT,
   type GitLabScript,
   type PostOutcome,
+  pendingPosting,
+  REFUSAL,
 } from "./fixtureGitLab";
+import { SEEDED_DRAFT_NOTE, startThreads } from "./fixtureThreads";
 import type { Log } from "./log";
 import type { RangeStart } from "./rangeDomain";
 import {
@@ -35,78 +36,14 @@ type Store = {
 
 type Tally = { sent: number; refused: number };
 
-type Seed = Pick<Generated.Thread, "line" | "session"> & {
-  readonly messages: readonly Omit<Generated.Message, "id" | "written">[];
-};
-
 const CHECKING_MS = 3000;
 const POST_PAUSE_MS = 300;
 const MS_PER_SECOND = 1000;
-
-const SEEDED_PATH = "src/board/board.ts";
-const SEEDED_WRITTEN = 1_767_225_600;
-const SEEDED_DRAFT_NOTE = 101;
-const SEEDED_SESSION = "fixture-session";
-const SEEDED_AI_ANSWER: Generated.MessageBody = {
-  kind: "aiAnswer",
-  session: SEEDED_SESSION,
-  turn: 0,
-};
 
 function pause(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function note(text: string, posting: Generated.Posting): Seed["messages"][number] {
-  return { body: { kind: "note", text }, posting };
-}
-
-function seededThreads(file: number): Generated.Thread[] {
-  const queued = "Why does the overdue check go?";
-  const refused = "This needs a test.";
-  const pending = "Rename this to `cardsOf`?";
-  const seeds: readonly Seed[] = [
-    {
-      line: { kind: "removed", left: 19 },
-      messages: [note(queued, { kind: "queued", text: queued })],
-      session: null,
-    },
-    {
-      line: { kind: "added", right: 20 },
-      messages: [note(refused, { kind: "refused", text: refused, reason: REFUSAL })],
-      session: null,
-    },
-    {
-      line: { kind: "unchangedOnLeft", left: 5, right: 5 },
-      messages: [note(pending, pendingPosting(pending, SEEDED_DRAFT_NOTE))],
-      session: null,
-    },
-    {
-      line: { kind: "unchangedOnRight", left: 100, right: 101 },
-      messages: [
-        note("Is this still used?", { kind: "notQueued" }),
-        { body: SEEDED_AI_ANSWER, posting: { kind: "notQueued" } },
-      ],
-      session: SEEDED_SESSION,
-    },
-  ];
-  let nextMessage = 0;
-  return seeds.map((seed, id) => {
-    const messages = seed.messages.map((each) => {
-      const message = { ...each, id: nextMessage, written: SEEDED_WRITTEN };
-      nextMessage += 1;
-      return message;
-    });
-    return { ...seed, id, file, messages };
-  });
-}
-
-function startThreads(search: string, start: RangeStart): Generated.Thread[] {
-  const seeded = start.files.find((entry) => entry.path === SEEDED_PATH);
-  const asked = new URLSearchParams(search).get("threads");
-  return asked === "seeded" && seeded !== undefined ? seededThreads(seeded.id) : [];
 }
 
 function listed(store: Store): Generated.ThreadList {
@@ -121,15 +58,11 @@ function isBlank(text: string): boolean {
   return text.trim() === "";
 }
 
-function newNote(store: Store, text: string): Generated.Message {
+function newMessage(store: Store, body: Generated.MessageBody): Generated.Message {
   const id = store.next.message;
   store.next.message += 1;
-  return {
-    id,
-    body: { kind: "note", text },
-    written: Math.floor(Date.now() / MS_PER_SECOND),
-    posting: { kind: "notQueued" },
-  };
+  const written = Math.floor(Date.now() / MS_PER_SECOND);
+  return { id, body, written, posting: { kind: "notQueued" } };
 }
 
 function addThread(
@@ -146,21 +79,40 @@ function addThread(
   }
   const id = store.next.thread;
   store.next.thread += 1;
-  const messages = [newNote(store, text)];
+  const messages = [newMessage(store, { kind: "note", text })];
   store.threads.push({ id, file, line: fromThreadLine(line), messages, session: null });
   return { ok: true, value: toThreadAdded({ thread: id, list: listed(store) }) };
 }
 
-function addNote(store: Store, thread: number, text: string): SourceResult<ThreadList> {
-  if (isBlank(text)) {
-    return { ok: false, failure: { kind: "EmptyMessage" } };
-  }
+function changeThread(
+  store: Store,
+  thread: number,
+  change: (found: Generated.Thread) => void,
+): SourceResult<ThreadList> {
   const found = store.threads.find((each) => each.id === thread);
   if (found === undefined) {
     return { ok: false, failure: { kind: "UnknownThread", thread } };
   }
-  found.messages.push(newNote(store, text));
+  change(found);
   return { ok: true, value: toThreadList(listed(store)) };
+}
+
+function addNote(store: Store, thread: number, text: string): SourceResult<ThreadList> {
+  return isBlank(text)
+    ? { ok: false, failure: { kind: "EmptyMessage" } }
+    : changeThread(store, thread, (found) => {
+        found.messages.push(newMessage(store, { kind: "note", text }));
+      });
+}
+
+function addAiAnswer(store: Store, thread: number, session: string): SourceResult<ThreadList> {
+  return changeThread(store, thread, (found) => {
+    const turn = found.messages.filter(
+      ({ body }) => body.kind === "aiAnswer" && body.session === session,
+    ).length;
+    found.session = session;
+    found.messages.push(newMessage(store, { kind: "aiAnswer", session, turn }));
+  });
 }
 
 function changePosting(
@@ -240,6 +192,27 @@ async function sendQueue(
   }
 }
 
+function threadCalls(
+  store: Store,
+): Pick<ReviewSource, "addThread" | "addNote" | "setThreadSession" | "addAiAnswer"> {
+  return {
+    async addThread(file, line, text) {
+      return addThread(store, file, line, text);
+    },
+    async addNote(thread, text) {
+      return addNote(store, thread, text);
+    },
+    async setThreadSession(thread, session) {
+      return changeThread(store, thread, (found) => {
+        found.session = session;
+      });
+    },
+    async addAiAnswer(thread, session) {
+      return addAiAnswer(store, thread, session);
+    },
+  };
+}
+
 export function createFixtureReview(log: Log, search: string, start: RangeStart): ReviewSource {
   const threads = startThreads(search, start);
   const messages = threads.reduce((count, thread) => count + thread.messages.length, 0);
@@ -254,12 +227,7 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
     async listThreads() {
       return { ok: true, value: toThreadList(listed(store)) };
     },
-    async addThread(file, line, text) {
-      return addThread(store, file, line, text);
-    },
-    async addNote(thread, text) {
-      return addNote(store, thread, text);
-    },
+    ...threadCalls(store),
     async queueMessage(message, text) {
       return isBlank(text)
         ? { ok: false, failure: { kind: "EmptyMessage" } }

@@ -1,10 +1,13 @@
 import { createApp } from "vue";
 
+import { AgentClient, DEFAULT_AGENT_COMMAND } from "./agent";
 import {
+  createFixtureAgentSource,
   createFixtureCompareSource,
   createFixtureRangeSource,
   createFixtureServerHost,
   createFixtureSource,
+  createTauriAgentSource,
   createTauriCompareSource,
   createTauriRangeSource,
   createTauriServerHost,
@@ -22,7 +25,8 @@ import CompareApp from "./ui/CompareApp.vue";
 import { createCompareStore } from "./ui/compareStore";
 import { takeLinuxPastes } from "./ui/linuxPaste";
 import RangeApp from "./ui/RangeApp.vue";
-import { createRangeStore } from "./ui/rangeStore";
+import { createRangeStore, type RangeAgent } from "./ui/rangeStore";
+import { useSettingsStore } from "./ui/settingsStore";
 import { createAppStore } from "./ui/store";
 
 import "./style.css";
@@ -58,9 +62,22 @@ function startCompare(startTheme: Theme): void {
   createApp(CompareApp).mount("#app");
 }
 
-function startRange(startTheme: Theme): void {
+function agentCommand(): readonly string[] {
+  return useSettingsStore().settings.value.agent.command ?? DEFAULT_AGENT_COMMAND;
+}
+
+function rangeAgent(dataset: DOMStringMap): RangeAgent | null {
+  const on = IN_APP ? dataset["ai"] === "on" : new URLSearchParams(SEARCH).has("ai");
+  if (!on) {
+    return null;
+  }
+  const source = IN_APP ? createTauriAgentSource(log) : createFixtureAgentSource(log, SEARCH);
+  return { source, client: new AgentClient({ source, command: agentCommand }) };
+}
+
+function startRange(startTheme: Theme, dataset: DOMStringMap): void {
   const source = IN_APP ? createTauriRangeSource() : createFixtureRangeSource(log, SEARCH);
-  const store = createRangeStore(source, startTheme);
+  const store = createRangeStore(source, startTheme, rangeAgent(dataset));
   void store.startUp();
   createApp(RangeApp).mount("#app");
 }
@@ -88,7 +105,7 @@ switch (kind) {
     startCompare(startTheme);
     break;
   case "range":
-    startRange(startTheme);
+    startRange(startTheme, dataset);
     break;
   default: {
     const _exhaustive: never = kind;

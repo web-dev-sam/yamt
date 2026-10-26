@@ -441,7 +441,7 @@ test("a Post text outlives its file's view: 16 other files evict file 0 and the 
   const fixture = createFixtureRangeSource(log, "?range=review", {
     "../../fixtures/range/review.json": manyFiles(MOUNTED_FILES + 1),
   });
-  const store = createRangeStore(fixture, "dark");
+  const store = createRangeStore(fixture, "dark", null);
   await store.startUp();
   const [first, ...others] = store.start.value?.files ?? [];
   if (first === undefined) {
