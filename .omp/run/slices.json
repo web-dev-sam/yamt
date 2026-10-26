@@ -37,11 +37,17 @@
       "frontend/src/ipc/fixtureThreads.ts"
     ]
   },
-  "RVAgentClientR2": {
+  "RVRustTidy": {
     "owned": [
-      "frontend/src/agent/index.test.ts",
-      "frontend/src/agent/internal/*.test.ts",
-      "frontend/src/ui/settings.test.ts"
+      "crates/settings/src/file.rs",
+      "crates/settings/src/lib.rs",
+      "crates/settings/tests/**",
+      "crates/settings/AGENTS.md",
+      "src-tauri/src/review.rs",
+      "src-tauri/src/review/tests.rs",
+      "src-tauri/src/ai.rs",
+      "src-tauri/AGENTS.md",
+      "src-tauri/src/ai/tests.rs"
     ]
   }
 }
