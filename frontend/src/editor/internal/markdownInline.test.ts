@@ -136,19 +136,27 @@ test("a 10,000-deep emphasis stops at MAX_NESTING, the rest literal", () => {
   );
 });
 
-test("unmatched openers, closers, brackets and code spans parse in linear time", () => {
+test("unmatched openers, closers and brackets parse in linear time", () => {
   const unmatched = "*a ".repeat(20_000);
   const brackets = "[](".repeat(20_000);
   const unpaired = `${unmatched}${"a_ ".repeat(20_000)}`;
-  const codeSpans = "`a` ".repeat(20_000);
-  const spanNodes = Array.from({ length: 20_000 }, () => [
-    { kind: "code", text: "a" },
-    { kind: "text", text: " " },
-  ]).flat();
   const started = performance.now();
   expect(parseInline(unmatched)).toEqual([{ kind: "text", text: unmatched }]);
   expect(parseInline(brackets)).toEqual([{ kind: "text", text: brackets }]);
   expect(parseInline(unpaired)).toEqual([{ kind: "text", text: unpaired }]);
-  expect(parseInline(codeSpans)).toEqual(spanNodes);
   expect(performance.now() - started).toBeLessThan(LINEAR_MS);
+});
+
+test("60,000 code spans parse in linear time", () => {
+  const spans = 60_000;
+  const codeSpans = "`a` ".repeat(spans);
+  const started = performance.now();
+  const parsed = parseInline(codeSpans);
+  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
+  expect(parsed).toEqual(
+    Array.from({ length: spans }, () => [
+      { kind: "code", text: "a" },
+      { kind: "text", text: " " },
+    ]).flat(),
+  );
 });
