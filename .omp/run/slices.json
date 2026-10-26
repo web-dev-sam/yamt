@@ -1,42 +1,4 @@
 {
-  "RVAiThreads": {
-    "owned": [
-      "frontend/src/main.ts",
-      "frontend/src/ui/rangeAi.ts",
-      "frontend/src/ui/rangeAi.test.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/rangeThreads.ts",
-      "frontend/src/ui/rangeThreads.test.ts",
-      "frontend/src/ui/rangeDrafts.ts",
-      "frontend/src/ui/rangeGitLab.ts",
-      "frontend/src/ui/rangeGitLab.test.ts",
-      "frontend/src/ui/rangeThreadText.ts",
-      "frontend/src/ui/rangeThreadText.test.ts",
-      "frontend/src/ui/RangeApp.vue",
-      "frontend/src/ui/RangeThreadBox.vue",
-      "frontend/src/ui/RangeMessage.vue",
-      "frontend/src/ui/SettingsView.vue",
-      "frontend/src/ipc/ReviewSource.ts",
-      "frontend/src/ipc/reviewDomain.ts",
-      "frontend/src/ipc/reviewDomain.test.ts",
-      "frontend/src/ipc/tauriReview.ts",
-      "frontend/src/ipc/tauriReview.test.ts",
-      "frontend/src/ipc/fixtureReview.ts",
-      "frontend/src/ipc/fixtureReview.test.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/domain.test.ts",
-      "frontend/src/ipc/rangeDomain.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/rangeAiView.ts",
-      "frontend/src/ui/rangeAiView.test.ts",
-      "frontend/src/ipc/fixtureThreads.ts"
-    ]
-  },
   "RVRustTidy": {
     "owned": [
       "crates/settings/src/file.rs",
@@ -48,6 +10,39 @@
       "src-tauri/src/ai.rs",
       "src-tauri/AGENTS.md",
       "src-tauri/src/ai/tests.rs"
+    ]
+  },
+  "RVAiThreadsSmoke": {
+    "owned": [
+      "frontend/src/main.ts",
+      "frontend/src/ui/rangeAi.ts",
+      "frontend/src/ui/rangeAi.test.ts",
+      "frontend/src/ui/rangeAiView.ts",
+      "frontend/src/ui/rangeAiView.test.ts",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/rangeThreads.ts",
+      "frontend/src/ui/rangeThreads.test.ts",
+      "frontend/src/ui/rangeGitLab.ts",
+      "frontend/src/ui/rangeGitLab.test.ts",
+      "frontend/src/ui/rangeThreadText.ts",
+      "frontend/src/ui/rangeThreadText.test.ts",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/RangeThreadBox.vue",
+      "frontend/src/ui/RangeMessage.vue",
+      "frontend/src/ipc/ReviewSource.ts",
+      "frontend/src/ipc/reviewDomain.ts",
+      "frontend/src/ipc/reviewDomain.test.ts",
+      "frontend/src/ipc/tauriReview.ts",
+      "frontend/src/ipc/tauriReview.test.ts",
+      "frontend/src/ipc/fixtureReview.ts",
+      "frontend/src/ipc/fixtureReview.test.ts",
+      "frontend/src/ipc/fixtureThreads.ts",
+      "frontend/scripts/app-session/args.ts",
+      "frontend/scripts/app-session/args.test.ts",
+      "frontend/scripts/app-session/startArgs.ts",
+      "frontend/scripts/app-session/startArgs.test.ts",
+      "frontend/scripts/app-session/start.ts"
     ]
   }
 }
