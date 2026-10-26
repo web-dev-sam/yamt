@@ -1,10 +1,4 @@
 {
-  "RVPipeR1": {
-    "owned": [
-      "crates/pipe/**",
-      "crates/lsp-host/**"
-    ]
-  },
   "RVAgentClient": {
     "owned": [
       "frontend/src/agent/**",
@@ -20,6 +14,29 @@
       "frontend/scripts/record-agent.ts",
       "frontend/scripts/fences.ts",
       "frontend/scripts/fences.test.ts"
+    ]
+  },
+  "RVThreadState": {
+    "owned": [
+      "frontend/src/ui/rangeThreads.ts",
+      "frontend/src/ui/rangeThreads.test.ts",
+      "frontend/src/ui/rangeGitLab.ts",
+      "frontend/src/ui/rangeGitLab.test.ts",
+      "frontend/src/ui/rangeThreadText.ts",
+      "frontend/src/ui/rangeThreadText.test.ts",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/range.browser.test.ts",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts",
+      "frontend/src/ipc/reviewDomain.ts"
     ]
   }
 }
