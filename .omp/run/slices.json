@@ -1,12 +1,4 @@
 {
-  "RVFixturesR1": {
-    "owned": [
-      "crates/cli/tests/range.rs",
-      "scripts/git-sandbox.sh",
-      "scripts/demo-repo.sh",
-      "scripts/range-repo.sh"
-    ]
-  },
   "RVTurnView": {
     "owned": [
       "frontend/src/ui/AiTurn.vue",
@@ -30,6 +22,26 @@
       "frontend/src/ui/problem.test.ts",
       "frontend/src/ui/problemText.ts",
       "frontend/src/ui/problemText.test.ts"
+    ]
+  },
+  "RVAiShellR1": {
+    "owned": [
+      "src-tauri/src/ai.rs",
+      "src-tauri/src/servers.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/start_script.rs",
+      "src-tauri/src/events.rs",
+      "src-tauri/AGENTS.md",
+      "crates/agent/src/lib.rs",
+      "crates/agent/src/workspace.rs",
+      "crates/agent/src/sweep.rs",
+      "crates/agent/src/checkout.rs",
+      "crates/agent/tests/sweep.rs",
+      "crates/agent/AGENTS.md",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/range.rs",
+      "crates/agent/tests/checkout.rs",
+      "crates/agent/tests/common/mod.rs"
     ]
   }
 }
