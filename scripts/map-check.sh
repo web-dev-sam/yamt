@@ -28,7 +28,7 @@ while IFS= read -r command; do
 done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
 
 # Every window data-source method must be named in architecture (the merge, compare and range windows').
-for source in ChunkSource CompareSource RangeSource; do
+for source in ChunkSource CompareSource RangeSource ReviewSource; do
     while IFS= read -r method; do
         grep -qw -- "$method" "$ARCH" || missing+=("$source.$method (not in $ARCH)")
     done < <(sed -n 's/^  \([a-zA-Z]*\)(.*/\1/p' "frontend/src/ipc/$source.ts")

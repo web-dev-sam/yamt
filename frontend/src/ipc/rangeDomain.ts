@@ -3,7 +3,7 @@ import { toDifferences, type Difference } from "./compareDomain";
 import { isRangeFileId, type RangeFileId } from "./domain";
 import { invalid } from "./validate";
 
-export type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
 export type RangeSide = {
   readonly label: RangeSideLabel;
   readonly shortId: string;

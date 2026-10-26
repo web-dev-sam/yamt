@@ -7,6 +7,8 @@ export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
 export type LeftLine = number & { readonly __brand: "LeftLine" };
 export type RightLine = number & { readonly __brand: "RightLine" };
 export type RangeFileId = number & { readonly __brand: "RangeFileId" };
+export type ThreadId = number & { readonly __brand: "ThreadId" };
+export type MessageId = number & { readonly __brand: "MessageId" };
 
 type MiddleLine = number & { readonly __brand: "MiddleLine" };
 export type DiskVersion = number & { readonly __brand: "DiskVersion" };
@@ -170,6 +172,14 @@ export function isRightLine(n: number): n is RightLine {
 }
 
 export function isRangeFileId(value: number): value is RangeFileId {
+  return isNonNegativeInteger(value);
+}
+
+export function isThreadId(value: number): value is ThreadId {
+  return isNonNegativeInteger(value);
+}
+
+export function isMessageId(value: number): value is MessageId {
   return isNonNegativeInteger(value);
 }
 

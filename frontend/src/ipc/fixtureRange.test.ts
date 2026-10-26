@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
+import type { Column, Difference } from "./compareDomain";
 import { isRangeFileId, type RangeFileId, type SourceResult } from "./domain";
 import { createFixtureRangeSource } from "./fixtureRange";
 import { createLog, type Log, type LogEntry } from "./log";
@@ -200,6 +201,50 @@ test("the committed cases parse: review lists 13 files of every kind, empty none
     [],
   );
   expect(entries).toEqual([]);
+});
+
+function inside(differences: readonly Difference[], column: Column, line: number): boolean {
+  return differences.some(({ [column]: { start, len } }) => line >= start && line < start + len);
+}
+
+function rightOf(differences: readonly Difference[], left: number): number {
+  return differences
+    .filter((difference) => difference.left.start + difference.left.len <= left)
+    .reduce((line, { left: l, right: r }) => line + r.len - l.len, left);
+}
+
+test("?threads=seeded sits on board.ts's lines as their kinds say: inside a difference or paired outside", async () => {
+  const source = createFixtureRangeSource(quietLog().log, "?range=review&threads=seeded");
+
+  const threads = valueOf(await source.listThreads()).threads;
+  const board = valueOf(await source.loadRangeFile(fileId(7)));
+
+  expect(valueOf(await source.openRange()).files[7]?.path).toBe("src/board/board.ts");
+  expect(threads.map((thread) => thread.file)).toEqual([7, 7, 7, 7]);
+  if (board.kind !== "texts") {
+    throw new Error("board.ts is not texts");
+  }
+  const { differences } = board;
+  expect(threads.map((thread) => thread.line)).toEqual([
+    { kind: "removed", left: 19 },
+    { kind: "added", right: 20 },
+    { kind: "unchangedOnLeft", left: 5, right: 5 },
+    { kind: "unchangedOnRight", left: 100, right: 101 },
+  ]);
+  expect([inside(differences, "left", 19), inside(differences, "right", 20)]).toEqual([true, true]);
+  expect([
+    inside(differences, "left", 5),
+    inside(differences, "right", 5),
+    inside(differences, "left", 100),
+    inside(differences, "right", 101),
+  ]).toEqual([false, false, false, false]);
+  expect([rightOf(differences, 5), rightOf(differences, 100)]).toEqual([5, 101]);
+});
+
+test("?range=empty with ?threads=seeded lists no threads", async () => {
+  const source = createFixtureRangeSource(quietLog().log, "?range=empty&threads=seeded");
+
+  expect(valueOf(await source.listThreads()).threads).toEqual([]);
 });
 
 test.each([

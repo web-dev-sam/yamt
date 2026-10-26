@@ -203,6 +203,26 @@ test("a stopped worker says to try again", () => {
   );
 });
 
+test.each<[ProblemCause, string]>([
+  [{ kind: "UnknownThread", thread: 4 }, "that thread is not on a file of this range."],
+  [{ kind: "UnknownMessage", message: 9 }, "that message is not on a file of this range."],
+  [{ kind: "EmptyMessage" }, "the message is empty."],
+  [{ kind: "MessagePending", message: 9 }, "that message is already pending on GitLab."],
+  [{ kind: "SendRunning" }, "a send to GitLab is still running; try again when it is done."],
+  [{ kind: "AiOff" }, "the AI is off; start yamt with --ai to use it."],
+])("the review failure %o has its fixed reason", (cause, reason) => {
+  expect(text({ action: "openRange", cause })).toBe(`Could not open the range: ${reason}`);
+});
+
+test("a failed removal names the folder and the system's message", () => {
+  expect(
+    text({
+      action: "openRange",
+      cause: { kind: "RemoveFailed", folder: "/d/pair/checkout", message: "busy\n" },
+    }),
+  ).toBe("Could not open the range: removing /d/pair/checkout failed: busy");
+});
+
 test.each([
   [{ action: "tabs" }, "Could not update the tabs: boom"],
   [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],

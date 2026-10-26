@@ -16,6 +16,7 @@ export type {
 } from "./compareDomain";
 export type {
   AddedServer,
+  AgentSettings,
   Antialiasing,
   Chunk,
   ClipboardSelection,
@@ -89,7 +90,6 @@ export type {
   RangeLineCounts,
   RangeModeChange,
   RangeSide,
-  RangeSideLabel,
   RangeSides,
   RangeStart,
 } from "./rangeDomain";

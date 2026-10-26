@@ -7,6 +7,7 @@ import { createTauriRangeSource } from "./tauriRange";
 const commands = vi.hoisted(() => ({
   openRange: vi.fn(),
   loadRangeFile: vi.fn(),
+  listThreads: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -104,4 +105,14 @@ test("a texts reply with a negative difference line is refused, naming the field
   await expect(createTauriRangeSource().loadRangeFile(fileId(0))).rejects.toThrow(
     "differences[0].left.start must be a non-negative safe integer, got -1",
   );
+});
+
+test("the range source answers listThreads through the app's command", async () => {
+  commands.listThreads.mockResolvedValue({ status: "ok", data: { threads: [] } });
+
+  expect(await createTauriRangeSource().listThreads()).toEqual({
+    ok: true,
+    value: { threads: [] },
+  });
+  expect(commands.listThreads).toHaveBeenCalledOnce();
 });

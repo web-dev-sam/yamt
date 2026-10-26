@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 import type * as Generated from "./bindings";
 import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
+import { createFixtureReview } from "./fixtureReview";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 import {
@@ -138,6 +139,7 @@ export function createFixtureRangeSource(
         ? { ok: false, failure: { kind: "UnknownRangeFile", file } }
         : { ok: true, value: found };
     },
+    ...createFixtureReview(log, search, shown.start),
     ...createFixtureSettings(),
   };
 }

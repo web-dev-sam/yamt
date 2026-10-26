@@ -6,6 +6,7 @@ import {
   KEY_ACTIONS,
   keyText,
   type AddedServer,
+  type AgentSettings,
   type Antialiasing,
   type Key,
   type KeyAction,
@@ -23,8 +24,6 @@ import type { Asking } from "./asking";
 import { isDefault, planKeyEdit, type KeyEdit } from "./keymapEdit";
 import { attempt, logProblem, report, type Problem } from "./problem";
 import type { Preferences } from "./useMergeController";
-
-type AgentSettings = StoredSettings["agent"];
 
 export type SettingsInUse = {
   readonly read: SettingsRead | null;

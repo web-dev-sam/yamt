@@ -8,6 +8,21 @@ type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
 
+type Cause = CausedProblem["cause"];
+
+type FixedKind =
+  | "NoConfigFolder"
+  | "MergeAborted"
+  | "UnknownTab"
+  | "UnknownRangeFile"
+  | "WorkerStopped"
+  | "UnknownThread"
+  | "UnknownMessage"
+  | "EmptyMessage"
+  | "MessagePending"
+  | "SendRunning"
+  | "AiOff";
+
 const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
 
 const OPERATION_STATE_WORDS: Readonly<
@@ -19,17 +34,18 @@ const OPERATION_STATE_WORDS: Readonly<
   NoOperation: "Git has no operation to continue or abort.",
 };
 
-const FIXED_REASONS: Readonly<
-  Record<
-    "NoConfigFolder" | "MergeAborted" | "UnknownTab" | "UnknownRangeFile" | "WorkerStopped",
-    string
-  >
-> = {
+const FIXED_REASONS: Readonly<Record<FixedKind, string>> = {
   NoConfigFolder: "this system has no config folder to keep it in.",
   MergeAborted: "the merge was aborted.",
   UnknownTab: "that tab was closed.",
   UnknownRangeFile: "that file is not part of this range.",
   WorkerStopped: "yamt's worker stopped; try again.",
+  UnknownThread: "that thread is not on a file of this range.",
+  UnknownMessage: "that message is not on a file of this range.",
+  EmptyMessage: "the message is empty.",
+  MessagePending: "that message is already pending on GitLab.",
+  SendRunning: "a send to GitLab is still running; try again when it is done.",
+  AiOff: "the AI is off; start yamt with --ai to use it.",
 };
 
 function attempted(problem: CausedProblem): string {
@@ -117,8 +133,15 @@ function keyProblemText(path: string, problem: KeyProblem, platform: string): st
   }
 }
 
+function hasFixedReason(cause: Cause): cause is Extract<Cause, { kind: FixedKind }> {
+  return Object.hasOwn(FIXED_REASONS, cause.kind);
+}
+
 function causedText(problem: CausedProblem, platform: string): string {
   const { cause } = problem;
+  if (hasFixedReason(cause)) {
+    return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
+  }
   switch (cause.kind) {
     case "Git":
     case "Unexpected":
@@ -137,12 +160,8 @@ function causedText(problem: CausedProblem, platform: string): string {
       return brokenText(cause.path, cause.message);
     case "NotAbsolute":
       return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
-    case "NoConfigFolder":
-    case "MergeAborted":
-    case "UnknownTab":
-    case "UnknownRangeFile":
-    case "WorkerStopped":
-      return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
+    case "RemoveFailed":
+      return `${attempted(problem)}: removing ${cause.folder} failed: ${cause.message.trim()}`;
     case "StopMovedOn":
     case "GitRunning":
     case "MergeFinished":
