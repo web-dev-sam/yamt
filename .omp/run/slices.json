@@ -29,5 +29,31 @@
       "frontend/src/ipc/rangeDomain.ts",
       "frontend/src/ipc/index.ts"
     ]
+  },
+  "RVTurnViewR1": {
+    "owned": [
+      "frontend/src/ui/AiTurn.vue",
+      "frontend/src/ui/AiStep.vue",
+      "frontend/src/ui/EditDiff.vue",
+      "frontend/src/ui/AgentSettings.vue",
+      "frontend/src/ui/editDiffLines.ts",
+      "frontend/src/ui/editDiffLines.test.ts",
+      "frontend/src/ui/aiText.ts",
+      "frontend/src/ui/aiText.test.ts",
+      "frontend/src/ui/aiClose.ts",
+      "frontend/src/ui/aiClose.test.ts",
+      "frontend/src/ui/agentSettingsFields.ts",
+      "frontend/src/ui/agentSettingsFields.test.ts",
+      "frontend/src/ui/question.ts",
+      "frontend/src/ui/question.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/ipc/agentDomain.ts",
+      "frontend/src/ipc/agentDomain.test.ts",
+      "frontend/src/ipc/tauriAgent.test.ts",
+      "frontend/src/ipc/fixtureAgent.ts",
+      "frontend/src/ipc/fixtureAgent.test.ts",
+      "frontend/scripts/fences.ts",
+      "frontend/scripts/fences.test.ts"
+    ]
   }
 }
