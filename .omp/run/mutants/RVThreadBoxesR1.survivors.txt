@@ -1,0 +1,15 @@
+just mutants 02f67d8 (covers 2f720e6 RVThreadBoxesR1, ac5cc22, df26a5a RVThreadBoxesR2)
+On lines 2f720e6 changed: 2
+NoCoverage StringLiteral frontend/scripts/app-session/start.ts:93 | -     const link = join(dir, "scenario"); => +     const link = join(dir, "");
+Survived OptionalChaining frontend/src/ui/copyOrSelect.ts:7 | -         window.getSelection()?.selectAllChildren(element); => +         window.getSelection().selectAllChildren(element);
+On lines df26a5a changed: 9
+NoCoverage ConditionalExpression frontend/scripts/app-session/start.ts:71 | -     const scenarioFolder = command.glab === null ? null : glabFolder(command.glab, exist => +     const scenarioFolder = true ? null : glabFolder(comman
+NoCoverage ConditionalExpression frontend/scripts/app-session/start.ts:71 | -     const scenarioFolder = command.glab === null ? null : glabFolder(command.glab, exist => +     const scenarioFolder = false ? null : glabFolder(comma
+NoCoverage EqualityOperator frontend/scripts/app-session/start.ts:71 | -     const scenarioFolder = command.glab === null ? null : glabFolder(command.glab, exist => +     const scenarioFolder = command.glab !== null ? null : 
+NoCoverage BlockStatement frontend/scripts/app-session/start.ts:87 | -   function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null { => -     if (scenarioFolder === null) {
+NoCoverage ConditionalExpression frontend/scripts/app-session/start.ts:88 | -     if (scenarioFolder === null) { => +     if (true) {
+NoCoverage ConditionalExpression frontend/scripts/app-session/start.ts:88 | -     if (scenarioFolder === null) { => +     if (false) {
+NoCoverage EqualityOperator frontend/scripts/app-session/start.ts:88 | -     if (scenarioFolder === null) { => +     if (scenarioFolder !== null) {
+NoCoverage BlockStatement frontend/scripts/app-session/start.ts:88 | -     if (scenarioFolder === null) { => -       return null;
+NoCoverage CallExpression frontend/scripts/app-session/start.ts:94 | -     symlinkSync(scenarioFolder, link); => +     ;
+Triage: start.ts lines — the thin real-app start (no node test), exercised by the verifier's real-app --glab steps (c); copyOrSelect.ts:7 getSelection()?. → . — equivalent in a browser (getSelection is non-null for a document with a window). Both dropped.
