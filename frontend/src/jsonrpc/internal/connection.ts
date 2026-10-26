@@ -8,6 +8,9 @@ import {
 } from "./messages";
 import type { Timers } from "./timers";
 
+export const METHOD_NOT_FOUND = -32601;
+export const INVALID_PARAMS = -32602;
+
 export type Answer =
   | { readonly kind: "result"; readonly value: unknown; readonly log: string | null }
   | {
@@ -62,13 +65,11 @@ export class Connection {
   }
 
   request(method: string, params: unknown, timeoutMs: number): Promise<Reply> {
-    return this.#start(method, params, (id, settle) =>
-      this.#timers.setTimeout(() => this.#timedOut(id, method, timeoutMs, settle), timeoutMs),
-    );
+    return this.#start(method, params, timeoutMs);
   }
 
   requestUntilAnswered(method: string, params: unknown): Promise<Reply> {
-    return this.#start(method, params, () => null);
+    return this.#start(method, params, null);
   }
 
   notify(method: string, params: unknown): void {
@@ -96,18 +97,18 @@ export class Connection {
     this.#pending.clear();
   }
 
-  #start(
-    method: string,
-    params: unknown,
-    deadline: (id: number, settle: Settle) => number | null,
-  ): Promise<Reply> {
+  #start(method: string, params: unknown, timeoutMs: number | null): Promise<Reply> {
     if (this.#closed) {
       return Promise.resolve({ kind: "closed" });
     }
     const id = this.#nextId;
     this.#nextId += 1;
     return new Promise((settle) => {
-      this.#pending.set(id, { method, timer: deadline(id, settle), settle });
+      const timer =
+        timeoutMs === null
+          ? null
+          : this.#timers.setTimeout(() => this.#timedOut(id, method, timeoutMs, settle), timeoutMs);
+      this.#pending.set(id, { method, timer, settle });
       this.#handlers.send(requestText(id, method, params));
     });
   }

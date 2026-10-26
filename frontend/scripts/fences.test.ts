@@ -266,25 +266,31 @@ test("lsp importing ipc's index and its own internal/ violates nothing", () => {
 test("jsonrpc importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
   const files = [
     { path: "src/jsonrpc/index.ts", text: `import { ref } from "vue";` },
-    { path: "src/jsonrpc/connection.ts", text: `import { useTimeoutFn } from "@vueuse/core";` },
-    { path: "src/jsonrpc/timers.ts", text: `import { Channel } from "@tauri-apps/api/core";` },
-    { path: "src/jsonrpc/messages.ts", text: `import x from "~icons/lucide/x";` },
+    {
+      path: "src/jsonrpc/internal/connection.ts",
+      text: `import { useTimeoutFn } from "@vueuse/core";`,
+    },
+    {
+      path: "src/jsonrpc/internal/timers.ts",
+      text: `import { Channel } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/jsonrpc/internal/messages.ts", text: `import x from "~icons/lucide/x";` },
   ];
 
   expect(violationsOf(files)).toEqual([
     { rule: "PM3", file: "src/jsonrpc/index.ts", specifier: "vue" },
-    { rule: "PM3", file: "src/jsonrpc/connection.ts", specifier: "@vueuse/core" },
-    { rule: "PM3", file: "src/jsonrpc/timers.ts", specifier: "@tauri-apps/api/core" },
-    { rule: "PM3", file: "src/jsonrpc/messages.ts", specifier: "~icons/lucide/x" },
+    { rule: "PM3", file: "src/jsonrpc/internal/connection.ts", specifier: "@vueuse/core" },
+    { rule: "PM3", file: "src/jsonrpc/internal/timers.ts", specifier: "@tauri-apps/api/core" },
+    { rule: "PM3", file: "src/jsonrpc/internal/messages.ts", specifier: "~icons/lucide/x" },
   ]);
 });
 
 test("jsonrpc importing any other src/ module violates PM2", () => {
   const files = [
     { path: "src/jsonrpc/index.ts", text: `import type { ServerHost } from "../ipc";` },
-    { path: "src/jsonrpc/connection.ts", text: `import "../lsp/index.ts";` },
-    { path: "src/jsonrpc/messages.ts", text: `import { log } from "../ipc/log";` },
-    { path: "src/jsonrpc/timers.ts", text: `import "../main";` },
+    { path: "src/jsonrpc/internal/connection.ts", text: `import "../../lsp/index.ts";` },
+    { path: "src/jsonrpc/internal/messages.ts", text: `import { log } from "../../ipc/log";` },
+    { path: "src/jsonrpc/internal/timers.ts", text: `import "../../main";` },
     { path: "src/jsonrpc/a.ts", text: `import "../jsonrpcx/b";` },
   ];
 
@@ -301,18 +307,35 @@ test("jsonrpc importing any other src/ module violates PM2", () => {
 
 test("jsonrpc importing itself and valibot, and lsp importing jsonrpc, violate nothing", () => {
   const files = [
-    { path: "src/jsonrpc/index.ts", text: `export { Connection } from "./connection";` },
+    { path: "src/jsonrpc/index.ts", text: `export { Connection } from "./internal/connection";` },
     {
-      path: "src/jsonrpc/connection.ts",
+      path: "src/jsonrpc/internal/connection.ts",
       text: `import { parseIncoming } from "./messages";\nimport type { Timers } from "./timers.ts";`,
     },
-    { path: "src/jsonrpc/messages.ts", text: `import * as v from "valibot";` },
+    {
+      path: "src/jsonrpc/internal/connection.test.ts",
+      text: `import { Connection } from "../index";`,
+    },
+    { path: "src/jsonrpc/internal/messages.ts", text: `import * as v from "valibot";` },
     { path: "src/jsonrpc/sample.ts", text: `import "../../fixtures/sample/base.ts.txt?raw";` },
     { path: "src/lsp/internal/attempt.ts", text: `import { Connection } from "../../jsonrpc";` },
     { path: "src/lsp/index.ts", text: `import type { Timers } from "../jsonrpc/index.ts";` },
   ];
 
   expect(violationsOf(files)).toEqual([]);
+});
+
+test("lsp importing jsonrpc's internal/ violates PM5", () => {
+  const files = [
+    {
+      path: "src/lsp/internal/a.ts",
+      text: `import { Connection } from "../../jsonrpc/internal/connection";`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM5", file: "src/lsp/internal/a.ts", specifier: "../../jsonrpc/internal/connection" },
+  ]);
 });
 
 test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {

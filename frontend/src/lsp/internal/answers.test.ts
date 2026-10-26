@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
-import { answer, INVALID_PARAMS, METHOD_NOT_FOUND, type AnswerContext } from "./answers";
+import { INVALID_PARAMS, METHOD_NOT_FOUND } from "../../jsonrpc";
+import { answer, type AnswerContext } from "./answers";
 
 const FOLDER = { uri: "file:///repo/frontend", name: "frontend" };
 

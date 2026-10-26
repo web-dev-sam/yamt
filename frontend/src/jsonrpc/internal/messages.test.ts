@@ -7,7 +7,7 @@ import {
   requestText,
   resultText,
   type Incoming,
-} from "./index";
+} from "../index";
 
 test("an incoming error keeps its data, and reads undefined data when it has none", () => {
   const withData: Incoming = {

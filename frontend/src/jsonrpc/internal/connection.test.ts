@@ -6,7 +6,7 @@ import {
   type ConnectionHandlers,
   type ConnectionOptions,
   type Timers,
-} from "./index";
+} from "../index";
 
 const TIMERS: Timers = {
   now: () => Date.now(),
@@ -152,6 +152,28 @@ test("requestUntilAnswered settles closed on close()", async () => {
   expect(await connection.requestUntilAnswered("again", null)).toEqual({ kind: "closed" });
   expect(sent).toHaveLength(1);
   expect(cleared).toEqual([]);
+});
+
+test("a timed request and an unanswered prompt share ids and settle apart", async () => {
+  const { connection, sent } = harness();
+  const prompt = connection.requestUntilAnswered("session/prompt", { sessionId: "s1" });
+  let promptSettled = false;
+  void prompt.then(() => {
+    promptSettled = true;
+  });
+  const created = connection.request("session/new", { cwd: "/repo" }, 1000);
+
+  expect(sent).toMatchObject([
+    { id: 1, method: "session/prompt" },
+    { id: 2, method: "session/new" },
+  ]);
+  await vi.advanceTimersByTimeAsync(1000);
+
+  expect(await created).toEqual({ kind: "timedOut" });
+  expect(promptSettled).toBe(false);
+  connection.receive(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } }));
+
+  expect(await prompt).toEqual({ kind: "result", value: { stopReason: "end_turn" } });
 });
 
 test("responses with an unknown, string or null id settle nothing", async () => {
