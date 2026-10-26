@@ -1,5 +1,6 @@
 import type {
   AddedServer,
+  AgentSettings,
   Antialiasing,
   ContinueReply,
   DiskVersion,
@@ -56,6 +57,7 @@ export interface ChunkSource {
     current: StoredSettings,
     added: readonly AddedServer[],
   ): Promise<SourceResult<SettingsRead>>;
+  setAgent(current: StoredSettings, agent: AgentSettings): Promise<SourceResult<SettingsRead>>;
 }
 
 export type SettingsSource = Pick<
@@ -68,4 +70,5 @@ export type SettingsSource = Pick<
   | "setServerAnswer"
   | "setServerSwitch"
   | "setAddedServers"
+  | "setAgent"
 >;

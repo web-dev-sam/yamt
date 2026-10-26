@@ -77,6 +77,7 @@ function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
     setServerAnswer: notUsed,
     setServerSwitch: notUsed,
     setAddedServers: notUsed,
+    setAgent: notUsed,
   };
 }
 

@@ -71,6 +71,9 @@ export function createTauriSettings(): SettingsSource {
     async setAddedServers(current, added) {
       return toSettingsResult(await commands.setAddedServers(current, [...added]));
     },
+    async setAgent(current, agent) {
+      return toSettingsResult(await commands.setAgent(current, agent));
+    },
   };
 }
 

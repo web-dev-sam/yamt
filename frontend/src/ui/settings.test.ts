@@ -24,6 +24,8 @@ type Target = {
   readonly problem: ShallowRef<Problem | null>;
 };
 
+type AgentSettings = StoredSettings["agent"];
+
 const PATH = "/home/me/.config/yamt/settings.json";
 const ROOT = "/home/me/yamt";
 const NO_SERVERS: LanguageServerSettings = { repositories: {}, off: {}, added: [] };
@@ -35,6 +37,8 @@ const SERVERS: LanguageServerSettings = {
 };
 const OXFMT_KEY = "oxfmt (repository root)";
 const OFF: LanguageServerSettings = { ...SERVERS, off: { [ROOT]: [OXFMT_KEY] } };
+const NO_AGENT: AgentSettings = { command: null, firstMessage: null };
+const AGENT: AgentSettings = { command: ["omp", "acp"], firstMessage: "Look: {{ MESSAGE }}" };
 const BROKEN: SourceFailure = { kind: "SettingsBroken", path: PATH, message: "x at line 3" };
 
 afterEach(() => {
@@ -81,6 +85,12 @@ function settingsTarget(loads: StoredSettings[]): {
         languageServers: { ...current.languageServers, added: [...added] },
       });
     },
+    setAgent: async (current, agent) => {
+      sent.push(["setAgent", current, agent]);
+      return agent.firstMessage === ""
+        ? { ok: false, failure: BROKEN }
+        : read({ ...current, agent });
+    },
   };
   const target = {
     source,
@@ -93,7 +103,13 @@ function settingsTarget(loads: StoredSettings[]): {
 }
 
 function startStored(): StoredSettings {
-  return { theme: "dark", antialiasing: "subpixel", keys: {}, languageServers: NO_SERVERS };
+  return {
+    theme: "dark",
+    antialiasing: "subpixel",
+    keys: {},
+    languageServers: NO_SERVERS,
+    agent: NO_AGENT,
+  };
 }
 
 test("antialiasing is shown on Linux platforms only", () => {
@@ -245,6 +261,79 @@ test("a load of the same servers entry keeps the settings in use", async () => {
   const { actions, target } = settingsTarget([
     { ...startStored(), languageServers: structuredClone(OFF) },
     { ...startStored(), languageServers: structuredClone(OFF) },
+  ]);
+  await actions.loadSettings();
+  const inUse = target.settings.value;
+
+  await actions.loadSettings();
+
+  expect(target.settings.value).toBe(inUse);
+});
+
+test("before any read the agent entry is all defaults (null), sent so by the first load", async () => {
+  const { actions, target, sent } = settingsTarget([]);
+
+  expect(target.settings.value.agent).toEqual(NO_AGENT);
+
+  await actions.loadSettings();
+
+  expect(sent).toEqual([["loadSettings", startStored()]]);
+});
+
+test("setAgent sends the settings in use and the entry as given, nulls included, and adopts the reply", async () => {
+  const { actions, target, sent } = settingsTarget([{ ...startStored(), theme: "light" }]);
+  await actions.loadSettings();
+
+  await actions.setAgent(AGENT);
+  expect(sent[1]).toEqual(["setAgent", { ...startStored(), theme: "light" }, AGENT]);
+  expect(target.settings.value.agent).toEqual(AGENT);
+  expect(target.settings.value.read?.stored.agent).toEqual(AGENT);
+
+  await actions.setTheme("dark");
+  expect(sent[2]).toEqual(["setTheme", { ...startStored(), theme: "light", agent: AGENT }, "dark"]);
+
+  await actions.setAgent(NO_AGENT);
+  expect(sent[3]).toEqual(["setAgent", { ...startStored(), agent: AGENT }, NO_AGENT]);
+  expect(target.settings.value.agent).toEqual(NO_AGENT);
+});
+
+test("a failed setAgent is reported as a settings problem and keeps the settings", async () => {
+  const { actions, target } = settingsTarget([]);
+  await actions.loadSettings();
+  const inUse = target.settings.value;
+
+  await actions.setAgent({ command: null, firstMessage: "" });
+
+  expect(target.problem.value).toEqual({ action: "settings", cause: BROKEN });
+  expect(target.settings.value).toBe(inUse);
+});
+
+test.each<[string, AgentSettings, AgentSettings]>([
+  ["a command given", NO_AGENT, { ...NO_AGENT, command: ["omp", "acp"] }],
+  ["a command back to the default", AGENT, { ...AGENT, command: null }],
+  ["a command word", AGENT, { ...AGENT, command: ["omp", "rpc"] }],
+  ["a longer command", AGENT, { ...AGENT, command: ["omp", "acp", "-v"] }],
+  ["a first message given", NO_AGENT, { ...NO_AGENT, firstMessage: "Hi" }],
+  ["another first message", AGENT, { ...AGENT, firstMessage: "Hi" }],
+])("a load whose only difference is %s is adopted", async (_difference, before, changed) => {
+  const { actions, target } = settingsTarget([
+    { ...startStored(), agent: before },
+    { ...startStored(), agent: changed },
+  ]);
+  await actions.loadSettings();
+
+  await actions.loadSettings();
+
+  expect(target.settings.value.agent).toEqual(changed);
+});
+
+test.each<[string, AgentSettings]>([
+  ["the defaults", NO_AGENT],
+  ["a command and a first message", AGENT],
+])("a load of the same agent entry (%s) keeps the settings in use", async (_entry, agent) => {
+  const { actions, target } = settingsTarget([
+    { ...startStored(), agent: structuredClone(agent) },
+    { ...startStored(), agent: structuredClone(agent) },
   ]);
   await actions.loadSettings();
   const inUse = target.settings.value;

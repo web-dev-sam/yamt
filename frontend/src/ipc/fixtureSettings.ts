@@ -1,6 +1,7 @@
 import type { SettingsSource } from "./ChunkSource";
 import type {
   AddedServer,
+  AgentSettings,
   KeysChange,
   RepositoryAnswer,
   SettingsRead,
@@ -22,7 +23,17 @@ function copiedServers(added: readonly AddedServer[]): AddedServer[] {
   }));
 }
 
-function copied({ theme, antialiasing, keys, languageServers }: StoredSettings): StoredSettings {
+function copiedAgent({ command, firstMessage }: AgentSettings): AgentSettings {
+  return { command: command === null ? null : [...command], firstMessage };
+}
+
+function copied({
+  theme,
+  antialiasing,
+  keys,
+  languageServers,
+  agent,
+}: StoredSettings): StoredSettings {
   return {
     theme,
     antialiasing,
@@ -34,6 +45,7 @@ function copied({ theme, antialiasing, keys, languageServers }: StoredSettings):
       ),
       added: copiedServers(languageServers.added),
     },
+    agent: copiedAgent(agent),
   };
 }
 
@@ -138,6 +150,9 @@ export function createFixtureSettings(): SettingsSource {
         ...stored,
         keys: withKeys(stored.keys, changes),
       }));
+    },
+    async setAgent(current, agent) {
+      return change(files, current, (stored) => ({ ...stored, agent: copiedAgent(agent) }));
     },
     async moveSettings(current, path) {
       const target = expanded(path);

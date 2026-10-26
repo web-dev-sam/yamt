@@ -66,6 +66,8 @@ export type RepositoryAnswer = Generated.RepositoryAnswer;
 
 export type AddedServer = Generated.AddedServer;
 
+export type AgentSettings = Generated.AgentSettings;
+
 export type RunId = number & { readonly __brand: "RunId" };
 
 export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;

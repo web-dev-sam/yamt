@@ -10,6 +10,7 @@ import {
 } from "../ipc";
 import { addedSpecs, detect, type LanguageServers, type ServerKey, type ServerSpec } from "../lsp";
 import type { Asking, Reply } from "./asking";
+import { commandWords } from "./commandWords";
 import { unexpected } from "./problem";
 import { createServerPins, type ServerPins } from "./serverPins";
 import type { SettingsActions, SettingsInUse } from "./settings";
@@ -54,13 +55,13 @@ const STORED_REPLIES: Readonly<Record<Reply, RepositoryAnswer | null>> = {
 };
 
 export function parseAddedServer(command: string, fileTypes: string): AddedServer | null {
-  const words = command.split(" ").filter((word) => word !== "");
+  const words = commandWords(command);
   const types = fileTypes
     .split(/[\s,]+/)
     .map((type) => type.replace(/^\.+/, "").toLowerCase())
     .filter((type) => type !== "");
   const valid = words.length > 0 && types.length > 0 && !types.some((type) => type.includes("."));
-  return valid ? { command: words, fileTypes: types } : null;
+  return valid ? { command: [...words], fileTypes: types } : null;
 }
 
 export function addedServerFields(server: {

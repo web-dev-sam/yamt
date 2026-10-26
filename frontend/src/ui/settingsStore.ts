@@ -18,6 +18,7 @@ export type SettingsStore = Pick<
   | "removeKey"
   | "removeAllKeys"
   | "resetKeys"
+  | "setAgent"
 > & {
   readonly settings: Readonly<ShallowRef<SettingsInUse>>;
   openSettings(): void;

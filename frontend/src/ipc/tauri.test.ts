@@ -23,6 +23,7 @@ const commands = vi.hoisted(() => ({
   setServerAnswer: vi.fn(),
   setServerSwitch: vi.fn(),
   setAddedServers: vi.fn(),
+  setAgent: vi.fn(),
   serversContext: vi.fn(),
   startServer: vi.fn(),
   sendToServer: vi.fn(),
@@ -383,6 +384,7 @@ const STORED: StoredSettings = {
   antialiasing: "subpixel",
   keys: { undo: ["Alt-Backspace"] },
   languageServers: { repositories: { "/home/me/yamt": "start" }, off: {}, added: [] },
+  agent: { command: ["omp", "acp", "--trace"], firstMessage: null },
 };
 const SETTINGS_DTO: Generated.SettingsRead = {
   path: "/home/me/.config/yamt/settings.json",
@@ -520,6 +522,18 @@ test("setServerSwitch returns the app's error", async () => {
     ok: false,
     failure: broken,
   });
+});
+
+test("setAgent sends the settings in use and the agent entry, and returns the read or the error", async () => {
+  const agent = { command: null, firstMessage: "Look at {{ MESSAGE }}" };
+  const broken = { kind: "SettingsBroken", path: SETTINGS_DTO.path, message: "x" };
+  commands.setAgent.mockResolvedValueOnce({ status: "ok", data: SETTINGS_DTO });
+  commands.setAgent.mockResolvedValueOnce({ status: "error", error: broken });
+  const source = createTauriSource();
+
+  expect(await source.setAgent(STORED, agent)).toEqual({ ok: true, value: SETTINGS_READ });
+  expect(await source.setAgent(STORED, agent)).toEqual({ ok: false, failure: broken });
+  expect(commands.setAgent).toHaveBeenCalledWith(STORED, agent);
 });
 
 type ChannelLike = { readonly onmessage: (event: Generated.HostEvent) => void };

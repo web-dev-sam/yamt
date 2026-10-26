@@ -90,6 +90,7 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
     setServerAnswer: notUsed,
     setServerSwitch: notUsed,
     setAddedServers: notUsed,
+    setAgent: notUsed,
   };
 }
 
