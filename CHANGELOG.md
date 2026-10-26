@@ -7,6 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Review a commit range: `yamt --diff=<a>...<b>` (or `<a>..<b>`) in a repository opens the changes between two
+  commits.
+  - The changed files on the left, as GitLab lists them: added, modified, deleted, renamed, with `+n −m`; binary,
+    too large and submodule changes named instead of shown.
+  - Each file's two versions side by side, read-only, with the compare window's colours and word marks.
+  - One window per repository and commit pair; a second one is refused, naming the open one.
+- Comment threads in the range window, as in GitLab: hover a line number to start a thread on that line; reply,
+  collapse and reopen; a count per file. Threads are kept per repository and commit pair.
+  - "Post" queues a message for GitLab; "Send to GitLab (n)" sends the queue as pending comments of your merge
+    request's review through `glab`, enabled only while the merge request shows exactly this diff; a refused comment
+    stays queued with GitLab's reason; a message already among your drafts is never posted twice.
+- `--ai`: each thread can "Ask AI". The AI (`omp acp` by default) answers in the thread, working in a temporary
+  checkout of the right-hand commit, never in your own folder.
+  - Its answer shows as Markdown; its thinking and steps (reads, searches, commands and their output, edits as diffs)
+    open under it, live while it works. Stop interrupts it; a failure says what went wrong, with Retry.
+  - Each thread is its own conversation and comes back when the same range opens again.
+  - Closing the window removes a checkout the AI did not change; otherwise it asks "Keep the AI's changes?", with
+    Keep Changes as the preferred answer.
+  - Settings gains an AI section with `--ai`: the agent command and the First message template.
+
 ## [0.5.1] - 2026-10-24
 
 ### Added
