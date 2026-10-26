@@ -26,16 +26,12 @@
       "frontend/src/ipc/fixtureGitLab.test.ts"
     ]
   },
-  "RVMarkdownR2": {
+  "RVThreadRowsR2": {
     "owned": [
-      "frontend/src/editor/internal/markdownBlocks.ts",
-      "frontend/src/editor/internal/markdownBlocks.test.ts",
-      "frontend/src/editor/internal/markdownInline.ts",
-      "frontend/src/editor/internal/markdownInline.test.ts",
-      "frontend/src/editor/internal/markdownTree.ts",
-      "frontend/src/editor/internal/markdownTree.test.ts",
-      "frontend/src/editor/internal/markdownTable.ts",
-      "frontend/src/editor/internal/markdownTable.test.ts"
+      "frontend/src/editor/internal/threadField.ts",
+      "frontend/src/editor/internal/threadField.test.ts",
+      "frontend/src/editor/internal/compareFrame.ts",
+      "frontend/src/editor/internal/compareFrame.test.ts"
     ]
   }
 }

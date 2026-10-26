@@ -1,0 +1,139 @@
+From 82b50992342519ec47e983b4a8a5c90928c2991d Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:42:34 +0100
+Subject: [PATCH] fix(markdown): linear item/fence regexes, a dashes row stays
+ in its table
+
+---
+ .../editor/internal/markdownBlocks.test.ts    | 33 +++++++++++++++++++
+ .../src/editor/internal/markdownBlocks.ts     | 17 ++++++----
+ .../editor/internal/markdownInline.test.ts    | 10 +++++-
+ 3 files changed, 52 insertions(+), 8 deletions(-)
+
+diff --git a/frontend/src/editor/internal/markdownBlocks.test.ts b/frontend/src/editor/internal/markdownBlocks.test.ts
+index 0e3923c..f693645 100644
+--- a/frontend/src/editor/internal/markdownBlocks.test.ts
++++ b/frontend/src/editor/internal/markdownBlocks.test.ts
+@@ -108,6 +108,39 @@ test("a quote with a pipe right after a table starts a quote", () => {
+   ]);
+ });
+ 
++test("a row of dashes after a data row stays a row of the same table", () => {
++  expect(blocks("| name | a |\n|---|---|\n| x | 1 |\n| - | - |\n| y | 3 |")).toEqual([
++    {
++      kind: "table",
++      align: ["none", "none"],
++      header: ["name", "a"],
++      rows: [
++        ["x", "1"],
++        ["-", "-"],
++        ["y", "3"],
++      ],
++    },
++  ]);
++});
++
++test("item and fence lines ending in U+2028 parse in linear time", () => {
++  const spaces = " ".repeat(100_000);
++  const backticks = "`".repeat(100_000);
++  const emptyItem = { blocks: [] };
++  const started = performance.now();
++  expect(blocks(`-${spaces}\u2028`)).toEqual([
++    { kind: "list", numbering: { kind: "bullet" }, items: [emptyItem] },
++  ]);
++  expect(blocks(`1.${spaces}\u2028`)).toEqual([
++    { kind: "list", numbering: { kind: "ordered", start: 1 }, items: [emptyItem] },
++  ]);
++  expect(blocks(`${backticks}\u2028`)).toEqual([{ kind: "code", info: "", code: "" }]);
++  expect(blocks(`p\n-${spaces}\u2028`)).toEqual([
++    { kind: "paragraph", text: `p\n-${spaces}\u2028` },
++  ]);
++  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
++});
++
+ test("a heading drops its closing run only after a space, in linear time", () => {
+   expect(blocks("# a#\n## b ##  \n### ###")).toEqual([
+     { kind: "heading", tag: "h1", text: "a#" },
+diff --git a/frontend/src/editor/internal/markdownBlocks.ts b/frontend/src/editor/internal/markdownBlocks.ts
+index 227c645..374558b 100644
+--- a/frontend/src/editor/internal/markdownBlocks.ts
++++ b/frontend/src/editor/internal/markdownBlocks.ts
+@@ -29,12 +29,12 @@ type Starter = (lines: readonly string[], at: number, depth: number) => Parsed |
+ type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
+ 
+ const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
+-const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
++const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/s;
+ const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+ const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/s;
+ const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+-const QUOTE = /^ {0,3}> ?(.*)$/;
+-const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/;
++const QUOTE = /^ {0,3}> ?(.*)$/s;
++const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/s;
+ const WHITESPACE = /^[ \t]$/;
+ const LINE_BREAK = /\r\n|\n|\r/;
+ const TAB_STOP = 4;
+@@ -121,7 +121,7 @@ function table(lines: readonly string[], at: number): Parsed | null {
+     return null;
+   }
+   let end = at + TABLE_HEAD_LINES;
+-  while (end < lines.length && !isBlank(lineAt(lines, end)) && !interrupts(lines, end)) {
++  while (end < lines.length && !isBlank(lineAt(lines, end)) && !startsBlock(lines, end)) {
+     end += 1;
+   }
+   return { block: tableOf(lines.slice(at, end)), end };
+@@ -141,7 +141,7 @@ function itemStart(line: string): ItemStart | null {
+   return { numbering, column: indent.length + marker.length + width, first: extra + first };
+ }
+ 
+-function interrupts(lines: readonly string[], at: number): boolean {
++function startsBlock(lines: readonly string[], at: number): boolean {
+   const line = lineAt(lines, at);
+   const item = itemStart(line);
+   const listStarts =
+@@ -151,11 +151,14 @@ function interrupts(lines: readonly string[], at: number): boolean {
+   return (
+     listStarts ||
+     QUOTE.test(line) ||
+-    [fence, heading, rule].some((starts) => starts(lines, at) !== null) ||
+-    startsTable(line, lineAt(lines, at + 1))
++    [fence, heading, rule].some((starts) => starts(lines, at) !== null)
+   );
+ }
+ 
++function interrupts(lines: readonly string[], at: number): boolean {
++  return startsBlock(lines, at) || startsTable(lineAt(lines, at), lineAt(lines, at + 1));
++}
++
+ function quote(lines: readonly string[], at: number, depth: number): Parsed | null {
+   const inner: string[] = [];
+   let end = at;
+diff --git a/frontend/src/editor/internal/markdownInline.test.ts b/frontend/src/editor/internal/markdownInline.test.ts
+index 11eb49e..b8e627a 100644
+--- a/frontend/src/editor/internal/markdownInline.test.ts
++++ b/frontend/src/editor/internal/markdownInline.test.ts
+@@ -136,11 +136,19 @@ test("a 10,000-deep emphasis stops at MAX_NESTING, the rest literal", () => {
+   );
+ });
+ 
+-test("unmatched openers, brackets and parentheses parse in linear time", () => {
++test("unmatched openers, closers, brackets and code spans parse in linear time", () => {
+   const unmatched = "*a ".repeat(20_000);
+   const brackets = "[](".repeat(20_000);
++  const unpaired = `${unmatched}${"a_ ".repeat(20_000)}`;
++  const codeSpans = "`a` ".repeat(20_000);
++  const spanNodes = Array.from({ length: 20_000 }, () => [
++    { kind: "code", text: "a" },
++    { kind: "text", text: " " },
++  ]).flat();
+   const started = performance.now();
+   expect(parseInline(unmatched)).toEqual([{ kind: "text", text: unmatched }]);
+   expect(parseInline(brackets)).toEqual([{ kind: "text", text: brackets }]);
++  expect(parseInline(unpaired)).toEqual([{ kind: "text", text: unpaired }]);
++  expect(parseInline(codeSpans)).toEqual(spanNodes);
+   expect(performance.now() - started).toBeLessThan(LINEAR_MS);
+ });
+-- 
+2.56.0
+
