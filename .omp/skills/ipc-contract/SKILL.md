@@ -27,7 +27,9 @@ from them and committed.
   `NotAFile { path }`, `ReadFailed { path, message }`; #57: `SettingsBroken { path, message }`,
   `NotAbsolute { path }`, `NoConfigFolder`; #74: `MergeAborted`; #88/#89: `StopMovedOn`, `GitRunning`,
   `MergeFinished`, `NoOperation`; #93–#97, the compare window: `UnknownTab { tab }`, `ColumnTooLarge { limit }`,
-  `WorkerStopped`); never a string. The frontend `switch`es on
+  `WorkerStopped`; #116–#121, the range window's threads: `UnknownThread { thread }`, `UnknownMessage { message }`,
+  `EmptyMessage`, `MessagePending { message }`, `SendRunning`; #108–#110, the AI: `AiOff`, `RemoveFailed { folder,
+  message }`); never a string. The frontend `switch`es on
   `kind` exhaustively. A disk change is a reply (`WriteReply::ChangedOnDisk`, `Listing::Files.disk_changes`), never an error.
 - [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<Merge>` (`src-tauri/src/merge.rs`), call one `session`
   method (or one `merge.rs` function: `list_stop`, and the async `continue_operation`/`abort_operation` that run git
@@ -70,6 +72,19 @@ set_column(tab, column, text, version) -> Comparison { versions, differences }  
 add_tab() / close_tab(tab) / rename_tab(tab, name) / set_tab_language(tab, language) / show_tab(tab) -> TabList
 # both windows (plan §2 #99): the one way the window reads the clipboard, on Linux only
 read_clipboard(selection: ClipboardSelection)    -> Option<String>   async: GTK's text request on the main thread, awaited off it; None = unreadable or no text (paste nothing); never asks for the format list (WebKitGTK 2.54 crashes on a failed one); other systems None
+# settings, every window (plan §2 #113)
+set_agent(current, agent: AgentSettings { command, firstMessage })   -> SettingsRead   null = the window's default; an empty command stored as null
+# the range window (`yamt --diff=<a>..<b>`, plan §2 #103–#107; RangeState: the range, its PairLock, Mutex<ThreadStore>, the send guard)
+open_range()                      -> RangeStart { range, sides, entries }
+load_range_file(file: RangeFileId) -> RangeFile   async: both texts, MAX_TEXT_BYTES each
+# its threads and GitLab (plan §2 #116–#121, crate yamt-review)
+list_threads() -> ThreadList; add_thread(file, line: ThreadLine, text) -> ThreadAdded; add_note(thread, text) / queue_message(message, text) / unqueue_message(message) -> ThreadList
+set_thread_session(thread, session) / add_ai_answer(thread, session) -> ThreadList   the store numbers the AI's turns per session (#121)
+check_gitlab()                    -> GitLabCheck   LinedUp { merge_request } | NotLinedUp { why } (#119)
+send_queue(progress: Channel<SendProgress>) -> SendReply   async: Sent { sent, refused, list } | Stopped { reason, … } | NotLinedUp; a second send while one runs → SendRunning
+# the AI (`--ai` only, plan §2 #108–#115, crate yamt-agent; Mutex<AiState>, AiState::workspace() the one AiOff mapping)
+prepare_checkout() -> CheckoutReply; start_agent(command, events: Channel<HostEvent>) -> AgentStartReply (async); send_to_agent(run, message); stop_agent(run)
+checkout_changes() -> CheckoutLook; discard_checkout() (async; RemoveFailed); diff_texts(old, next) -> Difference[] (merge_core::compare on a worker, #114)
 ```
 
 Plan §2 #37/#41. No `quit_if_done`: after the last file the app stays open, and closing the window
@@ -85,7 +100,13 @@ authority. `SideContent.bytes` is `u64` exported as `number` (`#[specta(type = u
   runtime parse, decision 19). `import.meta.env.VITE_CHUNK_SOURCE === "tauri"` (set by the app's
   dev/build commands) is read only in `main.ts` (source) and `ipc/index.ts` (log forward). The compare window has its
   own interface, `CompareSource` (`ipc/CompareSource.ts`, extends `SettingsSource`): `createTauriCompareSource`
-  (`ipc/tauriCompare.ts`) and `createFixtureCompareSource` (`ipc/fixtureCompare.ts`, `?diff=<case>`).
+  (`ipc/tauriCompare.ts`) and `createFixtureCompareSource` (`ipc/fixtureCompare.ts`, `?diff=<case>`). The range window's
+  is `RangeSource` (`ipc/RangeSource.ts`, extends `SettingsSource, ReviewSource`: `openRange`, `loadRangeFile`;
+  `ReviewSource.ts` the threads and GitLab with `reviewDomain.ts`): `createTauriRangeSource` / `createFixtureRangeSource`
+  (`?range=<case>`, `?threads=seeded`, `?gitlab=<script>`). `AgentSource` (`ipc/AgentSource.ts` + `agentDomain.ts`, the
+  seven agent commands) is built only in `main.ts` with AI on (`createTauriAgentSource` / `createFixtureAgentSource`,
+  `?ai[=<case>]`). Every Tauri source returns through `tauri.ts` `converted`; every brand through `validate.ts`
+  `branded`.
 - [IPC8] `ipc/log.ts` exports `createLog(forward?: (entry: LogEntry) => Promise<unknown> | void)`;
   the logger's `debug/info/warn/error(event, fields)` print a structured console line always and
   call `forward` if given (`debug` only in DEV). The one app logger is created by its first consumer,

@@ -64,7 +64,13 @@ yamt/
 │  │  └─ main.ts              wiring: the merge root (source, store, App) or, for `yamt --diff`, the compare root (plan §2 #94)
 │  └─ fixtures/               golden/<case>.json: the engine's output per golden (`just fixtures`); compare/<case>.json (the compare window's cases); sample/ for `just smoke-cli`
 ├─ tests/golden/<case>/       base.<ext> local.<ext> remote.<ext> expected.json README.md  (real conflicts from public projects, plan §2 #26)
-└─ tests/compare/<case>/      left.txt right.txt: the compare window's fixture pairs (`yamt-cli compare`, plan §2 #95)
+├─ tests/compare/<case>/      left.txt right.txt: the compare window's fixture pairs (`yamt-cli compare`, plan §2 #95)
+├─ crates/range/              yamt-range: the `--diff=<a>..<b>` range, its changed files and texts, the pair lock (§3.8)
+├─ crates/review/             yamt-review: the range window's threads (`threads.json`) and posting to GitLab through glab (§3.8)
+├─ crates/pipe/               yamt-pipe: the process core language servers and the AI share (§3.8)
+├─ crates/agent/              yamt-agent: the AI's temporary checkout and its `omp acp` process (§3.8)
+├─ tests/glab/<scenario>/     the fake glab's answers (scripts/fake-glab/glab), pinned to scripts/range-repo.sh's ids
+└─ tests/agent/<case>/        the fixture agent's diff pairs
 ```
 
 Two toolchains, one entry point: `just check` runs every gate below (§8).
@@ -99,6 +105,12 @@ graph LR
     main --> ipc
   end
 ```
+
+The range window adds (plan §2 #104, #109, #110, #117): `gitio, merge-core ◄── range ◄── review ◄── src-tauri`;
+`pipe ◄── lsp-host`; `gitio, pipe, range ◄── agent ◄── src-tauri`; `settings` gains the `agent` entry. In the window:
+`jsonrpc/` imports no `src/` module; `lsp/` and `agent/` reach it only through `jsonrpc/index.ts`; `agent/` imports only
+the `ipc/` and `jsonrpc/` indexes and is built only in `main.ts`; the range root (`Range*.vue`, `range*.ts`, the AI views)
+never imports the merge or compare roots or `lsp/` (PM9).
 
 Rules (each one is enforced, not advised — §8 says by what):
 
@@ -511,6 +523,53 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
 - Dependencies: `serde`, `serde_json`, `specta`, `thiserror`, `yamt-merge-core`.
 
 ---
+
+### 3.8 The range window, its threads and the AI (plan §2 #103–#122)
+
+- **`range` (yamt-range).** `spec` keeps `a..b` / `a...b` as typed; `open` resolves both sides (the merge base on the
+  left for three dots) into `Compared` with git's `%h` short ids; `entries` reads one `diff-tree -r -z --raw --numstat
+  -M --diff-algorithm=histogram --ignore-submodules=none` run into one entry per file (kind, paths, counts, binary, too
+  large over `MAX_TEXT_BYTES`, submodule); `load` gives a file's two texts; `lock` takes `PairLock` on
+  `<data_dir>/yamt/range/<repo key>/<left>-<right>/lock` (one window per repository and commit pair, #107;
+  `PAIR_SEPARATOR`, `pair_right_commit`).
+- **`review` (yamt-review).** `ThreadStore` owns `threads.json` format 1 in the pair folder (#117): threads on a
+  `ThreadLine`, messages with a `Note { text }` or `AiAnswer { session, turn }` body (#121) and a `Posting`
+  (`NotQueued | Queued | Refused | Pending`); `set_session`/`add_ai_answer` (the one turn-numbering rule: the count of
+  that session's answers in the thread). `check_gitlab` answers `LinedUp | NotLinedUp { why }` from the pure #119 rule.
+  `send_queue` lists the user's drafts first, never lets one draft stand for two messages, re-reads each message just
+  before its post (a message unqueued or edited mid-send wins), posts through `glab api` to the draft-notes route with
+  an explicit position (#118), and reports progress per message.
+- **`pipe` (yamt-pipe).** `Running::start`/`start_without(removed env)`: one supervisor, a stdin writer, a stdout
+  reader per `Framing { ContentLength, Lines }`, stderr as 8 KiB log lines; `Exited` once and last; a stop is a grace,
+  then a kill. `lsp-host` and `agent` both use it (#109).
+- **`agent` (yamt-agent).** `Workspace` owns the AI's checkout and process (#110): a shared clone without remotes,
+  branches or tags made in `checkout.partial` and renamed to `checkout`; the user's `GIT_*` repository variables never
+  reach a git run on it or the agent; `look` answers `Missing | Clean | Changed { files, refs, head_moved } |
+  Unreadable` (ignored-only new files are clean, #115; the AI's branches and stash are changes, #122); `discard` and
+  `end` stop the agent before any removal by construction; a partial-clone source is refused by name; other pairs'
+  leftovers are swept outside the window's AI lock.
+- **`src-tauri`.** `args`: `Invocation::Range { spec, repo, ai }` (`--ai` accepted with every mode, kept only for a
+  range). `start_script` writes `data-window="range"` and `data-ai="on"`. `range.rs`: `RangeState` with
+  `Mutex<ThreadStore>` and the send guard (the guard `try_lock`ed for a whole send, the store locked only between glab
+  calls), commands `open_range` and async `load_range_file`. `review.rs`: `list_threads`, `add_thread`, `add_note`,
+  `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` (a
+  progress `Channel`). `ai.rs`: `Mutex<AiState>` (`AiState { Off | On(Workspace) }`, `AiState::workspace()` the one
+  `AiOff` mapping), commands `prepare_checkout`, async `start_agent`, `send_to_agent`, `stop_agent`,
+  `checkout_changes`, `discard_checkout`, `diff_texts` (`merge_core::compare` on a worker, #114); a page load stops
+  the agent (deferred while the lock is held), the exit ends the workspace. `settings.rs` gains `set_agent`.
+  `IpcError` gains `AiOff`, `RemoveFailed`, `UnknownThread`, `UnknownMessage`, `EmptyMessage`, `MessagePending`,
+  `SendRunning`.
+- **Window.** `RangeSource` extends `SettingsSource, ReviewSource` with `openRange(): RangeStart` and
+  `loadRangeFile(file)`; `ReviewSource`: `listThreads`, `addThread(file, line, text)`, `addNote(thread, text)`,
+  `queueMessage(message, text)`, `unqueueMessage(message)`, `setThreadSession(thread, session)`,
+  `addAiAnswer(thread, session)`, `checkGitLab()`, `sendQueue(onProgress)`; `SettingsSource`/`ChunkSource` gain
+  `setAgent(current, agent)`; `AgentSource` (the seven agent commands) is built only in `main.ts` with AI on.
+  `jsonrpc/` is the one JSON-RPC connection; `agent/` is the ACP client (`AgentClient { ask, loadConversation,
+  editDiff, isRunning, destroy }`, the permission table, the fold of a turn); `editor/range.ts` `RangeController`
+  shows two read-only columns with the threads' block rows; `editor/markdown.ts` renders Markdown as DOM nodes only
+  (#112). The range root (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeDrafts.ts`), GitLab
+  (`rangeGitLab.ts`) and the AI (`rangeAi.ts`); every thread word is in `rangeThreadText.ts`, every AI word in
+  `aiText.ts`; closing asks `aiMayClose` (Keep Changes preferred, #111).
 
 ## 4. IPC contract (generated, the single source of truth)
 
