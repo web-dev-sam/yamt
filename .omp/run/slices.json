@@ -1,1 +1,36 @@
-{}
+{
+  "RVAgentSettingsWeb": {
+    "owned": [
+      "frontend/src/ipc/ChunkSource.ts",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/tauriCompare.ts",
+      "frontend/src/ipc/tauriRange.ts",
+      "frontend/src/ipc/fixtureSettings.ts",
+      "frontend/src/ipc/fixtureSettings.test.ts",
+      "frontend/src/ui/settings.ts",
+      "frontend/src/ui/settings.test.ts",
+      "frontend/src/ui/settingsStore.ts",
+      "frontend/src/ui/serverSetup.ts",
+      "frontend/src/ui/serverSetup.test.ts",
+      "frontend/src/ui/commandWords.ts",
+      "frontend/src/ui/commandWords.test.ts",
+      "frontend/src/ui/store.test.ts",
+      "frontend/src/ui/listing.test.ts",
+      "frontend/src/ui/saving.test.ts",
+      "frontend/src/ui/stops.test.ts",
+      "frontend/src/ui/settingsStore.test.ts"
+    ]
+  },
+  "RVGitlabR1": {
+    "owned": [
+      "crates/review/**",
+      "crates/range/src/lib.rs",
+      "crates/range/src/open.rs",
+      "scripts/fake-glab/glab",
+      "scripts/range-repo.sh",
+      "tests/glab/**"
+    ]
+  }
+}
