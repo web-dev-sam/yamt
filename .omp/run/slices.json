@@ -16,27 +16,28 @@
       "crates/pipe/src/lib.rs",
       "crates/pipe/tests/lines.rs",
       "crates/pipe/AGENTS.md",
-      "crates/gitio/src/lib.rs"
+      "crates/gitio/src/lib.rs",
+      "src-tauri/src/commands.rs"
     ]
   },
-  "RVThreadStateR1": {
+  "RVThreadBoxes": {
     "owned": [
-      "frontend/src/ui/rangeThreads.ts",
-      "frontend/src/ui/rangeThreads.test.ts",
-      "frontend/src/ui/rangeGitLab.ts",
-      "frontend/src/ui/rangeGitLab.test.ts",
-      "frontend/src/ui/rangeThreadText.ts",
-      "frontend/src/ui/rangeThreadText.test.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/useRangeController.ts",
-      "frontend/src/ui/useRangeController.test.ts",
-      "frontend/src/ui/rangeDrafts.ts",
-      "frontend/src/ui/rangeDrafts.test.ts",
-      "frontend/src/ipc/threadLine.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/editor/index.ts",
-      "frontend/src/editor/range.ts",
-      "frontend/src/editor/internal/threadRows.ts"
+      "frontend/src/ui/RangeThreadLayer.vue",
+      "frontend/src/ui/RangeThreadBox.vue",
+      "frontend/src/ui/RangeMessage.vue",
+      "frontend/src/ui/RangePostEditor.vue",
+      "frontend/src/ui/RangeSendButton.vue",
+      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/RangeFileRow.vue",
+      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/rangeKeys.ts",
+      "frontend/src/ui/rangeKeys.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/scripts/app-session/args.ts",
+      "frontend/scripts/app-session/args.test.ts",
+      "frontend/scripts/app-session/startArgs.ts",
+      "frontend/scripts/app-session/startArgs.test.ts",
+      "frontend/scripts/app-session/start.ts"
     ]
   }
 }
