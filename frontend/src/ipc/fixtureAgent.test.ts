@@ -218,7 +218,7 @@ test("?ai-changes reports README.md changed in the checkout", async () => {
       kind: "Changed",
       folder: FIXTURE_CHECKOUT,
       files: ["README.md"],
-      refs: [],
+      refs: { branches: [], stash: false },
       headMoved: false,
     },
   });

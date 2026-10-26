@@ -3,7 +3,7 @@ import type { AgentClient, Step, StepStatus } from "../agent";
 import { refusedText, STEP_STATUS_WORDS } from "./aiText";
 import EditDiff from "./EditDiff.vue";
 
-defineProps<{ step: Step; client: AgentClient }>();
+defineProps<{ step: Step; client: Pick<AgentClient, "editDiff"> }>();
 
 const STATUS_CLASSES: Readonly<Record<StepStatus, string>> = {
   pending: "text-fg-muted",

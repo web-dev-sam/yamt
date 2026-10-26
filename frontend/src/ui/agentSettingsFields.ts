@@ -1,16 +1,8 @@
-import {
-  DEFAULT_AGENT_COMMAND,
-  DEFAULT_FIRST_MESSAGE,
-  PLACEHOLDERS,
-  unknownPlaceholders,
-} from "../agent";
+import { DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE, PLACEHOLDERS } from "../agent";
 import type { AgentSettings } from "../ipc";
 import { commandWords } from "./commandWords";
 
 export const PLACEHOLDER_NAMES: readonly string[] = PLACEHOLDERS.map((name) => `{{ ${name} }}`);
-
-export const YOLO_NOTE =
-  "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.";
 
 /** One field of the AI section: the text in use, and what Use and Default store (null: nothing to press). */
 export type AgentField = {
@@ -44,10 +36,4 @@ export function firstMessageField(agent: AgentSettings, typed: string): AgentFie
     use: typed === inUse ? null : { ...agent, firstMessage: stored },
     reset: agent.firstMessage === null ? null : { ...agent, firstMessage: null },
   };
-}
-
-export function unknownPlaceholderLines(typed: string): readonly string[] {
-  return unknownPlaceholders(typed).map(
-    (text) => `${text} is not a placeholder; it is sent as typed.`,
-  );
 }

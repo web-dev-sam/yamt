@@ -1,18 +1,49 @@
 import type { Difference } from "../ipc";
+import { LINE_ENDING_WORDS, moreLinesText, NO_NEWLINE_TEXT, skippedLinesText } from "./aiText";
 
 export const MAX_DIFF_ROWS = 2000;
 const CONTEXT_LINES = 3;
 const LONGEST_SHOWN_RUN = CONTEXT_LINES + CONTEXT_LINES;
+const CR = "\r";
 
-/** Line numbers count from 1, as an editor's gutter shows them. */
+type LineEnding = keyof typeof LINE_ENDING_WORDS;
+
+/**
+ * Line numbers count from 1, as an editor's gutter shows them. A changed row's `ending` is set
+ * only when its paired row differs from it by nothing but the line ending.
+ */
 export type DiffRow =
   | { readonly kind: "context"; readonly old: number; readonly new: number; readonly text: string }
-  | { readonly kind: "removed"; readonly old: number; readonly text: string }
-  | { readonly kind: "added"; readonly new: number; readonly text: string }
+  | {
+      readonly kind: "removed";
+      readonly old: number;
+      readonly text: string;
+      readonly ending: LineEnding | null;
+    }
+  | {
+      readonly kind: "added";
+      readonly new: number;
+      readonly text: string;
+      readonly ending: LineEnding | null;
+    }
+  | { readonly kind: "noNewline" }
   | { readonly kind: "skipped"; readonly lines: number }
   | { readonly kind: "more"; readonly lines: number };
 
+type DiffRowCells = {
+  readonly old: string;
+  readonly new: string;
+  readonly sign: string;
+  readonly text: string;
+  readonly note: string;
+};
+
 type Placed = Pick<Difference, "left" | "right">;
+
+/** A side's lines as Rust counts them; `open` when its last line has no line break. */
+type Side = { readonly lines: readonly string[]; readonly open: boolean };
+
+type Texts = { readonly old: Side; readonly new: Side };
 
 type Rows = { readonly shown: DiffRow[]; hidden: number };
 
@@ -22,25 +53,44 @@ type Run = { readonly from: number; readonly to: number; readonly shift: number 
 /** Before the first change, between two, or after the last. */
 type RunPlace = "start" | "between" | "end";
 
-function linesOf(text: string): readonly string[] {
+function sideOf(text: string): Side {
   if (text === "") {
-    return [];
+    return { lines: [], open: false };
   }
   const lines = text.split("\n");
-  return text.endsWith("\n") ? lines.slice(0, -1) : lines;
+  return text.endsWith("\n") ? { lines: lines.slice(0, -1), open: false } : { lines, open: true };
+}
+
+function withoutCr(line: string): string {
+  return line.endsWith(CR) ? line.slice(0, -CR.length) : line;
+}
+
+function pairEnding(line: string, pair: string | undefined): LineEnding | null {
+  if (pair === undefined || line === pair || withoutCr(line) !== withoutCr(pair)) {
+    return null;
+  }
+  return line.endsWith(CR) ? "crlf" : "lf";
 }
 
 function add(rows: Rows, row: DiffRow): void {
   if (rows.shown.length < MAX_DIFF_ROWS) {
     rows.shown.push(row);
-  } else if (row.kind !== "skipped") {
+  } else if (row.kind === "context" || row.kind === "removed" || row.kind === "added") {
     rows.hidden += 1;
   }
 }
 
-function addContext(rows: Rows, old: readonly string[], { from, to, shift }: Run): void {
+function addLastLine(rows: Rows, side: Side, line: number): void {
+  if (side.open && line === side.lines.length - 1) {
+    add(rows, { kind: "noNewline" });
+  }
+}
+
+function addContext(rows: Rows, old: Side, { from, to, shift }: Run): void {
   for (let line = from; line < to; line += 1) {
-    add(rows, { kind: "context", old: line + 1, new: line + shift + 1, text: old[line] ?? "" });
+    const text = withoutCr(old.lines[line] ?? "");
+    add(rows, { kind: "context", old: line + 1, new: line + shift + 1, text });
+    addLastLine(rows, old, line);
   }
 }
 
@@ -62,7 +112,7 @@ function keptAround(length: number, place: RunPlace): { start: number; end: numb
   }
 }
 
-function addUnchanged(rows: Rows, old: readonly string[], run: Run, place: RunPlace): void {
+function addUnchanged(rows: Rows, old: Side, run: Run, place: RunPlace): void {
   const { from, to, shift } = run;
   const kept = keptAround(to - from, place);
   addContext(rows, old, { from, to: from + kept.start, shift });
@@ -73,16 +123,30 @@ function addUnchanged(rows: Rows, old: readonly string[], run: Run, place: RunPl
   addContext(rows, old, { from: to - kept.end, to, shift });
 }
 
-function addChange(
-  rows: Rows,
-  texts: { readonly old: readonly string[]; readonly new: readonly string[] },
-  { left, right }: Placed,
-): void {
-  for (let line: number = left.start; line < left.start + left.len; line += 1) {
-    add(rows, { kind: "removed", old: line + 1, text: texts.old[line] ?? "" });
+function addChange(rows: Rows, texts: Texts, { left, right }: Placed): void {
+  for (let index = 0; index < left.len; index += 1) {
+    const line = left.start + index;
+    const text = texts.old.lines[line] ?? "";
+    const pair = index < right.len ? texts.new.lines[right.start + index] : undefined;
+    add(rows, {
+      kind: "removed",
+      old: line + 1,
+      text: withoutCr(text),
+      ending: pairEnding(text, pair),
+    });
+    addLastLine(rows, texts.old, line);
   }
-  for (let line: number = right.start; line < right.start + right.len; line += 1) {
-    add(rows, { kind: "added", new: line + 1, text: texts.new[line] ?? "" });
+  for (let index = 0; index < right.len; index += 1) {
+    const line = right.start + index;
+    const text = texts.new.lines[line] ?? "";
+    const pair = index < left.len ? texts.old.lines[left.start + index] : undefined;
+    add(rows, {
+      kind: "added",
+      new: line + 1,
+      text: withoutCr(text),
+      ending: pairEnding(text, pair),
+    });
+    addLastLine(rows, texts.new, line);
   }
 }
 
@@ -96,7 +160,7 @@ export function editDiffLines(
   newText: string,
   differences: readonly Placed[],
 ): readonly DiffRow[] {
-  const texts = { old: linesOf(oldText), new: linesOf(newText) };
+  const texts: Texts = { old: sideOf(oldText), new: sideOf(newText) };
   const rows: Rows = { shown: [], hidden: 0 };
   let oldAt = 0;
   let shift = 0;
@@ -108,16 +172,45 @@ export function editDiffLines(
     shift = difference.right.start + difference.right.len - oldAt;
   });
   if (differences.length > 0) {
-    addUnchanged(rows, texts.old, { from: oldAt, to: texts.old.length, shift }, "end");
+    addUnchanged(rows, texts.old, { from: oldAt, to: texts.old.lines.length, shift }, "end");
   }
   return finished(rows);
 }
 
 /** A created file: every line added. */
 export function createdFileLines(newText: string): readonly DiffRow[] {
+  const side = sideOf(newText);
   const rows: Rows = { shown: [], hidden: 0 };
-  linesOf(newText).forEach((text, line) => {
-    add(rows, { kind: "added", new: line + 1, text });
+  side.lines.forEach((text, line) => {
+    add(rows, { kind: "added", new: line + 1, text: withoutCr(text), ending: null });
+    addLastLine(rows, side, line);
   });
   return finished(rows);
+}
+
+/** What each of a row's four columns shows, and the note after its text. */
+export function diffRowCells(row: DiffRow): DiffRowCells {
+  const none = { old: "", new: "", sign: "", note: "" };
+  switch (row.kind) {
+    case "context":
+      return { ...none, old: String(row.old), new: String(row.new), sign: " ", text: row.text };
+    case "removed": {
+      const note = row.ending === null ? "" : LINE_ENDING_WORDS[row.ending];
+      return { ...none, old: String(row.old), sign: "−", text: row.text, note };
+    }
+    case "added": {
+      const note = row.ending === null ? "" : LINE_ENDING_WORDS[row.ending];
+      return { ...none, new: String(row.new), sign: "+", text: row.text, note };
+    }
+    case "noNewline":
+      return { ...none, text: NO_NEWLINE_TEXT };
+    case "skipped":
+      return { ...none, text: skippedLinesText(row.lines) };
+    case "more":
+      return { ...none, text: moreLinesText(row.lines) };
+    default: {
+      const _exhaustive: never = row;
+      return _exhaustive;
+    }
+  }
 }

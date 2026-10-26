@@ -602,10 +602,98 @@ test("range files and the AI views importing the AI views, and an AI view import
       path: "src/ui/AiStep.vue",
       text: `<script setup lang="ts">\nimport EditDiff from "./EditDiff.vue";\n</script>`,
     },
-    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
+    { path: "src/ui/rangeStore.ts", text: `import { aiMayClose } from "./aiClose";` },
+    { path: "src/ui/aiClose.ts", text: `import "./question";\nimport "./problem";` },
+    { path: "src/ui/aiClose.test.ts", text: `import { aiMayClose } from "./aiClose";` },
   ];
 
   expect(violationsOf(files)).toEqual([]);
+});
+
+test("an AI view or the close question importing the merge root, the compare root or lsp/ violates PM9; the merge root importing aiClose too", () => {
+  const files = [
+    { path: "src/ui/aiClose.ts", text: `import { useAppStore } from "./store";` },
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
+    },
+    {
+      path: "src/ui/AgentSettings.vue",
+      text: `<script setup lang="ts">\nimport "../lsp";\nimport "./settingsStore";\n</script>`,
+    },
+    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM9",
+      file: "src/ui/aiClose.ts",
+      specifier: "./store",
+      reason: "the range window never imports the merge window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/AiTurn.vue",
+      specifier: "./compareStore",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/AgentSettings.vue",
+      specifier: "../lsp",
+      reason: "the range window never imports lsp/",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/App.vue",
+      specifier: "./aiClose",
+      reason: "the AI's views and close question are the range window's only",
+    },
+  ]);
+});
+
+test("building the agent source or client outside main.ts violates PM9; main.ts and tests may", () => {
+  const files = [
+    { path: "src/ui/rangeStore.ts", text: `const client = new AgentClient({ source, command });` },
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nconst source = ipc.createTauriAgentSource(log);\n</script>`,
+    },
+    {
+      path: "src/agent/index.ts",
+      text: `export const made = createFixtureAgentSource(log, "?ai");`,
+    },
+    {
+      path: "src/main.ts",
+      text: `const agent = new AgentClient({ source: createTauriAgentSource(log), command });`,
+    },
+    { path: "src/agent/index.test.ts", text: `client = new AgentClient({ source, command });` },
+    {
+      path: "src/ipc/fixtureAgent.ts",
+      text: `export function createFixtureAgentSource(log: Log, search: string) {}\nconst c = AgentClient;`,
+    },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM9",
+      file: "src/ui/rangeStore.ts",
+      specifier: "AgentClient",
+      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeApp.vue",
+      specifier: "createTauriAgentSource",
+      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
+    },
+    {
+      rule: "PM9",
+      file: "src/agent/index.ts",
+      specifier: "createFixtureAgentSource",
+      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
+    },
+  ]);
 });
 
 test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {

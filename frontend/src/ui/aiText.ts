@@ -3,9 +3,27 @@ import type { ProblemCause } from "./problem";
 import { problemText } from "./problemText";
 
 export const THINKING_AND_STEPS = "Thinking and steps";
+export const RUNNING_TEXT = "working…";
 export const STOPPED_TEXT = "You stopped the AI.";
 export const RETRY = "Retry";
+export const LOADING_DIFF_TEXT = "Making the diff…";
 export const TOO_LARGE_TEXT = "This edit is too large to show as a diff.";
+export const NO_NEWLINE_TEXT = "\\ No newline at end of file";
+
+export const LINE_ENDING_WORDS = { crlf: "CRLF line ending", lf: "LF line ending" } as const;
+
+export const AI_SETTINGS_TEXT = {
+  title: "AI",
+  command: "Agent command",
+  commandHint: "The command is split on spaces. It speaks the Agent Client Protocol.",
+  message: "First message",
+  messageHint: "Sent as the first message of a thread's conversation. Placeholders:",
+  use: "Use",
+  reset: "Default",
+} as const;
+
+export const YOLO_NOTE =
+  "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.";
 
 export const STEP_STATUS_WORDS: Readonly<Record<StepStatus, string>> = {
   pending: "Waiting",
@@ -78,5 +96,9 @@ export function moreLinesText(lines: number): string {
 }
 
 export function skippedLinesText(lines: number): string {
-  return `${lines} unchanged line${lines === 1 ? "" : "s"}`;
+  return `⋯ ${lines} unchanged line${lines === 1 ? "" : "s"}`;
+}
+
+export function unknownPlaceholderText(name: string): string {
+  return `${name} is not a placeholder; it is sent as typed.`;
 }

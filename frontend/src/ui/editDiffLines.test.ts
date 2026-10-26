@@ -1,7 +1,13 @@
 import { expect, test } from "vitest";
 
 import type { Difference } from "../ipc";
-import { createdFileLines, editDiffLines, MAX_DIFF_ROWS, type DiffRow } from "./editDiffLines";
+import {
+  createdFileLines,
+  diffRowCells,
+  editDiffLines,
+  MAX_DIFF_ROWS,
+  type DiffRow,
+} from "./editDiffLines";
 
 type Placed = Pick<Difference, "left" | "right">;
 type LeftLine = Difference["left"]["start"];
@@ -38,9 +44,11 @@ function shape(rows: readonly DiffRow[]): string[] {
       case "context":
         return ` ${row.old}:${row.new} ${row.text}`;
       case "removed":
-        return `-${row.old} ${row.text}`;
+        return `-${row.old} ${row.text}${row.ending === null ? "" : ` [${row.ending}]`}`;
       case "added":
-        return `+${row.new} ${row.text}`;
+        return `+${row.new} ${row.text}${row.ending === null ? "" : ` [${row.ending}]`}`;
+      case "noNewline":
+        return "\\";
       case "skipped":
         return `… ${row.lines}`;
       case "more":
@@ -117,13 +125,50 @@ test("a change at the first and last line shows no skipped rows and nothing beyo
   ]);
 });
 
-test("a text without a final newline keeps its last line; no differences show nothing", () => {
+test("a side without a final newline gets git's marker after its last line, wherever that row is", () => {
   expect(shape(editDiffLines("a\nb", "a\nc", [placed([1, 1, 1, 1])]))).toEqual([
     " 1:1 a",
     "-2 b",
+    "\\",
     "+2 c",
+    "\\",
+  ]);
+  expect(shape(editDiffLines("a\nb", "a\nb\nc", [placed([1, 1, 1, 2])]))).toEqual([
+    " 1:1 a",
+    "-2 b",
+    "\\",
+    "+2 b",
+    "+3 c",
+    "\\",
+  ]);
+  expect(shape(editDiffLines("a\nb\nc", "A\nb\nc", [placed([0, 1, 0, 1])]))).toEqual([
+    "-1 a",
+    "+1 A",
+    " 2:2 b",
+    " 3:3 c",
+    "\\",
   ]);
   expect(editDiffLines("a\n", "a\n", [])).toEqual([]);
+});
+
+test("a pair differing only by a carriage return is marked with each side's line ending, the \\r never shown", () => {
+  expect(shape(editDiffLines("a\r\nb\r\n", "a\nb\n", [placed([0, 2, 0, 2])]))).toEqual([
+    "-1 a [crlf]",
+    "-2 b [crlf]",
+    "+1 a [lf]",
+    "+2 b [lf]",
+  ]);
+  expect(shape(editDiffLines("x\r\ny\r\nz\r\n", "x\r\nY\nz\r\n", [placed([1, 1, 1, 1])]))).toEqual([
+    " 1:1 x",
+    "-2 y",
+    "+2 Y",
+    " 3:3 z",
+  ]);
+  expect(shape(editDiffLines("a\nb\n", "a\r\n", [placed([0, 2, 0, 1])]))).toEqual([
+    "-1 a [lf]",
+    "-2 b",
+    "+1 a [crlf]",
+  ]);
 });
 
 test("rows stop at 2,000 and a last row counts the changed and unchanged lines not shown", () => {
@@ -140,11 +185,52 @@ test("exactly 2,000 rows need no more row (catches a cap one row early)", () => 
   const rows = createdFileLines(numbered(MAX_DIFF_ROWS));
 
   expect(rows).toHaveLength(MAX_DIFF_ROWS);
-  expect(rows.at(-1)).toEqual({ kind: "added", new: MAX_DIFF_ROWS, text: `line ${MAX_DIFF_ROWS}` });
+  expect(rows.at(-1)).toEqual({
+    kind: "added",
+    new: MAX_DIFF_ROWS,
+    text: `line ${MAX_DIFF_ROWS}`,
+    ending: null,
+  });
 });
 
-test("a created file is every line added, capped like a diff", () => {
-  expect(shape(createdFileLines("a\nb\n"))).toEqual(["+1 a", "+2 b"]);
+test("a created file is every line added, capped like a diff; its marker is not a line", () => {
+  expect(shape(createdFileLines("a\r\nb"))).toEqual(["+1 a", "+2 b", "\\"]);
   expect(shape(createdFileLines(numbered(MAX_DIFF_ROWS + 5)).slice(-1))).toEqual(["more 5"]);
+  expect(shape(createdFileLines(`${numbered(MAX_DIFF_ROWS + 4)}last`).slice(-1))).toEqual([
+    "more 5",
+  ]);
   expect(createdFileLines("")).toEqual([]);
+});
+
+test("past the cap a skipped run counts none of its lines: only context and changed lines are counted", () => {
+  const old = numbered(2100);
+  const next = numbered(1100, "new") + old.slice(old.indexOf("line 1101\n"));
+
+  const rows = editDiffLines(old, next, [placed([0, 1100, 0, 1100]), placed([1990, 1, 1990, 1])]);
+
+  expect(rows).toHaveLength(MAX_DIFF_ROWS + 1);
+  expect(shape(rows).slice(MAX_DIFF_ROWS - 1)).toEqual(["+900 new 900", "more 211"]);
+});
+
+test("each row kind fills its own cells; words come from the AI text", () => {
+  const cells: readonly DiffRow[] = [
+    { kind: "context", old: 4, new: 5, text: "same" },
+    { kind: "removed", old: 6, text: "gone", ending: null },
+    { kind: "added", new: 7, text: "came", ending: "lf" },
+    { kind: "noNewline" },
+    { kind: "skipped", lines: 3 },
+    { kind: "more", lines: 1 },
+  ];
+
+  expect(cells.map(diffRowCells)).toEqual([
+    { old: "4", new: "5", sign: " ", text: "same", note: "" },
+    { old: "6", new: "", sign: "−", text: "gone", note: "" },
+    { old: "", new: "7", sign: "+", text: "came", note: "LF line ending" },
+    { old: "", new: "", sign: "", text: "\\ No newline at end of file", note: "" },
+    { old: "", new: "", sign: "", text: "⋯ 3 unchanged lines", note: "" },
+    { old: "", new: "", sign: "", text: "1 more line not shown", note: "" },
+  ]);
+  expect(diffRowCells({ kind: "removed", old: 1, text: "a", ending: "crlf" }).note).toBe(
+    "CRLF line ending",
+  );
 });

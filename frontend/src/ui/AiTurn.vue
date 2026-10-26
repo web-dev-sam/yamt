@@ -4,13 +4,11 @@ import ChevronRight from "~icons/lucide/chevron-right";
 
 import type { AgentClient, TurnEnd, TurnView } from "../agent";
 import AiStep from "./AiStep.vue";
-import { failureText, RETRY, STOPPED_TEXT, THINKING_AND_STEPS } from "./aiText";
+import { failureText, RETRY, RUNNING_TEXT, STOPPED_TEXT, THINKING_AND_STEPS } from "./aiText";
 import { useMarkdown } from "./useMarkdown";
 
 const props = defineProps<{ turn: TurnView; end: TurnEnd | null; client: AgentClient }>();
 const emit = defineEmits<{ retry: [] }>();
-
-const RUNNING_TEXT = "working…";
 
 const answer = useTemplateRef<HTMLDivElement>("answer");
 const opened = shallowRef(false);

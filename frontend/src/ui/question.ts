@@ -28,7 +28,7 @@ export type Question =
       readonly folder: string;
       readonly files: readonly string[];
       readonly headMoved: boolean;
-      readonly refs: readonly string[];
+      readonly refs: { readonly branches: readonly string[]; readonly stash: boolean };
     }
   | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string };
 
@@ -157,15 +157,16 @@ function closeTabText(name: string): QuestionText {
 const KEEP_TITLE = "Keep the AI's changes?";
 const KEEP = "Keep Changes";
 const DISCARD = "Discard Changes";
-const STASH = "stash";
 
-function leftRefs(refs: readonly string[]): string[] {
-  const branches = refs.filter((ref) => ref !== STASH);
+function leftRefs({
+  branches,
+  stash,
+}: Extract<Question, { readonly kind: "keepAiChanges" }>["refs"]): string[] {
   const left = [
     ...(branches.length === 0
       ? []
       : [`the branch${branches.length === 1 ? "" : "es"} ${branches.join(", ")}`]),
-    ...(refs.includes(STASH) ? ["a stash"] : []),
+    ...(stash ? ["a stash"] : []),
   ];
   return left.length === 0 ? [] : [`left ${left.join(" and ")}`];
 }
@@ -193,7 +194,7 @@ function keepUnreadableText(folder: string, message: string): QuestionText {
     title: KEEP_TITLE,
     message: `Git cannot read the AI's checkout at ${folder}, so yamt cannot tell what the AI changed there: ${message.trim()}`,
     list: { kind: "none" },
-    note: "Discard Changes removes the checkout.",
+    note: `${DISCARD} removes the checkout.`,
     confirm: KEEP,
     cancel: DISCARD,
   };

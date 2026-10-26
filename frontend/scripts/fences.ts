@@ -4,6 +4,7 @@ import { join, posix } from "node:path";
 import { parse } from "@vue/compiler-sfc";
 import ts from "typescript";
 
+import { agentViolations } from "./agentFence";
 import { clipboardViolations } from "./clipboardFence";
 import { markdownViolations } from "./markdownFence";
 
@@ -49,6 +50,7 @@ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"]
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
 const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
+const TEST_SOURCE_EXTENSION = /(?:\.test)?\.(?:ts|vue)$/;
 const ROOT_FILES: Readonly<Record<string, Root>> = {
   "src/ui/store": "merge",
   "src/ui/App": "merge",
@@ -62,11 +64,12 @@ const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
   compare: "PM7",
   range: "PM9",
 };
-const AI_VIEWS: Readonly<Record<string, true>> = {
+const AI_FILES: Readonly<Record<string, true>> = {
   "src/ui/AiTurn": true,
   "src/ui/AiStep": true,
   "src/ui/EditDiff": true,
   "src/ui/AgentSettings": true,
+  "src/ui/aiClose": true,
 };
 
 function scriptTexts(file: SourceFile): string[] {
@@ -149,8 +152,15 @@ function isWindowRoot(name: string): name is WindowRoot {
   return Object.hasOwn(WINDOW_RULES, name);
 }
 
+function windowRoot(file: string): string {
+  if (Object.hasOwn(AI_FILES, file.replace(TEST_SOURCE_EXTENSION, ""))) {
+    return "range";
+  }
+  return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
+}
+
 function rootFinding(file: string, target: string): Finding | undefined {
-  const root = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
+  const root = windowRoot(file);
   if (!isWindowRoot(root)) {
     return undefined;
   }
@@ -165,14 +175,11 @@ function rootFinding(file: string, target: string): Finding | undefined {
   return undefined;
 }
 
-function aiViewFinding(file: string, target: string): Finding | undefined {
-  const shown = Object.hasOwn(AI_VIEWS, target.replace(SOURCE_EXTENSION, ""));
-  const inside = Object.hasOwn(AI_VIEWS, file.replace(SOURCE_EXTENSION, ""));
-  const inRange = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() === "range";
-  if (!shown || inside || inRange) {
-    return undefined;
-  }
-  return { rule: "PM9", reason: "the AI's views are shown only in the range window" };
+function aiFileFinding(file: string, target: string): Finding | undefined {
+  const aiFile = Object.hasOwn(AI_FILES, target.replace(SOURCE_EXTENSION, ""));
+  return aiFile && windowRoot(file) !== "range"
+    ? { rule: "PM9", reason: "the AI's views and close question are the range window's only" }
+    : undefined;
 }
 
 function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
@@ -263,7 +270,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
           ? packageFinding(module, specifier)
           : (pathFinding(module, target) ??
             rootFinding(file.path, target) ??
-            aiViewFinding(file.path, target));
+            aiFileFinding(file.path, target));
       if (finding !== undefined) {
         violations.push({ ...finding, file: file.path, specifier });
       }
@@ -278,6 +285,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
     violations.push(
       ...clipboardViolations(file.path, texts),
       ...markdownViolations(file.path, texts),
+      ...agentViolations(file.path, texts),
     );
     graph.set(file.path, edges);
   }

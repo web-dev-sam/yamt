@@ -32,16 +32,34 @@ test("a ready checkout brands its folder", () => {
   });
 });
 
-test("a changed checkout comes out camelCased with its refs", () => {
+test("a changed checkout comes out camelCased, its short ref names split into branches and the stash", () => {
   expect(
     toCheckoutChanges({
       kind: "Changed",
       folder: "/c",
       files: [],
-      refs: ["refs/stash"],
+      refs: ["fix", "stash", "heads/stash"],
       head_moved: false,
     }),
-  ).toEqual({ kind: "Changed", folder: "/c", files: [], refs: ["refs/stash"], headMoved: false });
+  ).toEqual({
+    kind: "Changed",
+    folder: "/c",
+    files: [],
+    refs: { branches: ["fix", "heads/stash"], stash: true },
+    headMoved: false,
+  });
+});
+
+test("without a stash name the refs are only branches", () => {
+  const look = toCheckoutChanges({
+    kind: "Changed",
+    folder: "/c",
+    files: ["a"],
+    refs: ["ai"],
+    head_moved: true,
+  });
+
+  expect(look.kind === "Changed" && look.refs).toEqual({ branches: ["ai"], stash: false });
 });
 
 test.each<Generated.CheckoutLook>([

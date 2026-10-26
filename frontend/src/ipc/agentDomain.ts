@@ -17,6 +17,9 @@ export type CheckoutReady =
   | { readonly kind: "Ready"; readonly folder: CheckoutFolder }
   | { readonly kind: "Failed"; readonly message: string };
 
+/** The AI's refs: Rust's `branches_and_stash` sends `%(refname:short)`, so `refs/stash` arrives as `stash`. */
+type AiRefs = { readonly branches: readonly string[]; readonly stash: boolean };
+
 export type CheckoutChanges =
   | { readonly kind: "Missing" }
   | { readonly kind: "Clean" }
@@ -24,16 +27,22 @@ export type CheckoutChanges =
       readonly kind: "Changed";
       readonly folder: CheckoutFolder;
       readonly files: readonly string[];
-      readonly refs: readonly string[];
+      readonly refs: AiRefs;
       readonly headMoved: boolean;
     }
   | { readonly kind: "Unreadable"; readonly folder: CheckoutFolder; readonly message: string };
+
+const STASH = "stash";
 
 function toFolder(path: string): CheckoutFolder {
   if (!isCheckoutFolder(path)) {
     throw new Error(`folder must be an absolute path, got ${path}`);
   }
   return path;
+}
+
+function toAiRefs(names: readonly string[]): AiRefs {
+  return { branches: names.filter((name) => name !== STASH), stash: names.includes(STASH) };
 }
 
 export function fromAgentCommand(command: AgentCommand): Generated.AgentCommand {
@@ -66,7 +75,13 @@ export function toCheckoutChanges(dto: Generated.CheckoutLook): CheckoutChanges 
       return { kind: dto.kind };
     case "Changed": {
       const { files, refs, head_moved: headMoved } = dto;
-      return { kind: "Changed", folder: toFolder(dto.folder), files, refs, headMoved };
+      return {
+        kind: "Changed",
+        folder: toFolder(dto.folder),
+        files,
+        refs: toAiRefs(refs),
+        headMoved,
+      };
     }
     case "Unreadable":
       return { kind: "Unreadable", folder: toFolder(dto.folder), message: dto.message };

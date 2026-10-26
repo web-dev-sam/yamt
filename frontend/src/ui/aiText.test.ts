@@ -1,18 +1,25 @@
 import { expect, test } from "vitest";
 
-import type { AgentFailure } from "../agent";
+import { DEFAULT_FIRST_MESSAGE, unknownPlaceholders, type AgentFailure } from "../agent";
 import {
+  AI_SETTINGS_TEXT,
   diffFailureText,
   editTitle,
   failureText,
+  LINE_ENDING_WORDS,
+  LOADING_DIFF_TEXT,
   moreLinesText,
+  NO_NEWLINE_TEXT,
   refusedText,
   RETRY,
+  RUNNING_TEXT,
   skippedLinesText,
   STEP_STATUS_WORDS,
   STOPPED_TEXT,
   THINKING_AND_STEPS,
   TOO_LARGE_TEXT,
+  unknownPlaceholderText,
+  YOLO_NOTE,
 } from "./aiText";
 
 const LINUX = "Linux x86_64";
@@ -36,7 +43,7 @@ const SENTENCES: Readonly<Record<AgentFailure["kind"], readonly [AgentFailure, s
     "The AI stopped unexpectedly (exit code 1): panic: out of memory",
   ],
   refused: [
-    { kind: "refused", method: "session/new", message: "no model configured" },
+    { kind: "refused", method: "session/new", message: " no model configured\n" },
     "The AI refused session/new: no model configured",
   ],
   sessionGone: [{ kind: "sessionGone" }, "omp no longer has this thread's conversation."],
@@ -96,16 +103,54 @@ test("the step words, the refusal and the diff's counts", () => {
     "1000 more lines not shown",
   ]);
   expect([skippedLinesText(1), skippedLinesText(7)]).toEqual([
-    "1 unchanged line",
-    "7 unchanged lines",
+    "⋯ 1 unchanged line",
+    "⋯ 7 unchanged lines",
   ]);
 });
 
 test("the turn view's fixed words", () => {
-  expect([THINKING_AND_STEPS, STOPPED_TEXT, RETRY, TOO_LARGE_TEXT]).toEqual([
+  expect([
+    THINKING_AND_STEPS,
+    RUNNING_TEXT,
+    STOPPED_TEXT,
+    RETRY,
+    LOADING_DIFF_TEXT,
+    TOO_LARGE_TEXT,
+    NO_NEWLINE_TEXT,
+    LINE_ENDING_WORDS,
+  ]).toEqual([
     "Thinking and steps",
+    "working…",
     "You stopped the AI.",
     "Retry",
+    "Making the diff…",
     "This edit is too large to show as a diff.",
+    "\\ No newline at end of file",
+    { crlf: "CRLF line ending", lf: "LF line ending" },
   ]);
+});
+
+test("each unknown placeholder is named once as typed; known ones are not", () => {
+  expect(
+    unknownPlaceholders("{{ FOO }} {{MESSAGE}} {{BAR}} {{ FOO }}").map(unknownPlaceholderText),
+  ).toEqual([
+    "{{ FOO }} is not a placeholder; it is sent as typed.",
+    "{{BAR}} is not a placeholder; it is sent as typed.",
+  ]);
+  expect(unknownPlaceholders(DEFAULT_FIRST_MESSAGE)).toEqual([]);
+});
+
+test("the AI settings section's words and the yolo note", () => {
+  expect(AI_SETTINGS_TEXT).toEqual({
+    title: "AI",
+    command: "Agent command",
+    commandHint: "The command is split on spaces. It speaks the Agent Client Protocol.",
+    message: "First message",
+    messageHint: "Sent as the first message of a thread's conversation. Placeholders:",
+    use: "Use",
+    reset: "Default",
+  });
+  expect(YOLO_NOTE).toBe(
+    "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.",
+  );
 });

@@ -58,7 +58,7 @@ function changed(): Look {
       kind: "Changed",
       folder: folder(),
       files: ["README.md"],
-      refs: ["fix"],
+      refs: { branches: ["fix"], stash: true },
       headMoved: true,
     },
   };
@@ -86,7 +86,7 @@ test("a changed checkout asks with its files, folder, moved HEAD and refs; Keep 
       folder: FOLDER_TEXT,
       files: ["README.md"],
       headMoved: true,
-      refs: ["fix"],
+      refs: { branches: ["fix"], stash: true },
     },
   ]);
   expect(closing.discards).toBe(0);
