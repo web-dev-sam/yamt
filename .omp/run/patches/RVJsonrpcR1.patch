@@ -1,0 +1,318 @@
+From a5a7f38cb649fa0bae4874ad914ed0b6fe06639b Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:39:41 +0100
+Subject: [PATCH] refactor(jsonrpc): internals behind the index, a deadline as
+ a value, shared error codes
+
+---
+ frontend/scripts/fences.test.ts               | 47 ++++++++++++++-----
+ frontend/src/jsonrpc/AGENTS.md                |  2 +-
+ frontend/src/jsonrpc/index.ts                 |  8 ++--
+ .../jsonrpc/{ => internal}/connection.test.ts | 24 +++++++++-
+ .../src/jsonrpc/{ => internal}/connection.ts  | 21 +++++----
+ .../jsonrpc/{ => internal}/messages.test.ts   |  2 +-
+ .../src/jsonrpc/{ => internal}/messages.ts    |  0
+ frontend/src/jsonrpc/{ => internal}/timers.ts |  0
+ frontend/src/lsp/AGENTS.md                    |  4 +-
+ frontend/src/lsp/internal/answers.test.ts     |  3 +-
+ frontend/src/lsp/internal/answers.ts          |  5 +-
+ 11 files changed, 81 insertions(+), 35 deletions(-)
+ rename frontend/src/jsonrpc/{ => internal}/connection.test.ts (91%)
+ rename frontend/src/jsonrpc/{ => internal}/connection.ts (90%)
+ rename frontend/src/jsonrpc/{ => internal}/messages.test.ts (98%)
+ rename frontend/src/jsonrpc/{ => internal}/messages.ts (100%)
+ rename frontend/src/jsonrpc/{ => internal}/timers.ts (100%)
+
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index da2d23b..52b9acf 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -266,25 +266,31 @@ test("lsp importing ipc's index and its own internal/ violates nothing", () => {
+ test("jsonrpc importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+   const files = [
+     { path: "src/jsonrpc/index.ts", text: `import { ref } from "vue";` },
+-    { path: "src/jsonrpc/connection.ts", text: `import { useTimeoutFn } from "@vueuse/core";` },
+-    { path: "src/jsonrpc/timers.ts", text: `import { Channel } from "@tauri-apps/api/core";` },
+-    { path: "src/jsonrpc/messages.ts", text: `import x from "~icons/lucide/x";` },
++    {
++      path: "src/jsonrpc/internal/connection.ts",
++      text: `import { useTimeoutFn } from "@vueuse/core";`,
++    },
++    {
++      path: "src/jsonrpc/internal/timers.ts",
++      text: `import { Channel } from "@tauri-apps/api/core";`,
++    },
++    { path: "src/jsonrpc/internal/messages.ts", text: `import x from "~icons/lucide/x";` },
+   ];
+ 
+   expect(violationsOf(files)).toEqual([
+     { rule: "PM3", file: "src/jsonrpc/index.ts", specifier: "vue" },
+-    { rule: "PM3", file: "src/jsonrpc/connection.ts", specifier: "@vueuse/core" },
+-    { rule: "PM3", file: "src/jsonrpc/timers.ts", specifier: "@tauri-apps/api/core" },
+-    { rule: "PM3", file: "src/jsonrpc/messages.ts", specifier: "~icons/lucide/x" },
++    { rule: "PM3", file: "src/jsonrpc/internal/connection.ts", specifier: "@vueuse/core" },
++    { rule: "PM3", file: "src/jsonrpc/internal/timers.ts", specifier: "@tauri-apps/api/core" },
++    { rule: "PM3", file: "src/jsonrpc/internal/messages.ts", specifier: "~icons/lucide/x" },
+   ]);
+ });
+ 
+ test("jsonrpc importing any other src/ module violates PM2", () => {
+   const files = [
+     { path: "src/jsonrpc/index.ts", text: `import type { ServerHost } from "../ipc";` },
+-    { path: "src/jsonrpc/connection.ts", text: `import "../lsp/index.ts";` },
+-    { path: "src/jsonrpc/messages.ts", text: `import { log } from "../ipc/log";` },
+-    { path: "src/jsonrpc/timers.ts", text: `import "../main";` },
++    { path: "src/jsonrpc/internal/connection.ts", text: `import "../../lsp/index.ts";` },
++    { path: "src/jsonrpc/internal/messages.ts", text: `import { log } from "../../ipc/log";` },
++    { path: "src/jsonrpc/internal/timers.ts", text: `import "../../main";` },
+     { path: "src/jsonrpc/a.ts", text: `import "../jsonrpcx/b";` },
+   ];
+ 
+@@ -301,12 +307,16 @@ test("jsonrpc importing any other src/ module violates PM2", () => {
+ 
+ test("jsonrpc importing itself and valibot, and lsp importing jsonrpc, violate nothing", () => {
+   const files = [
+-    { path: "src/jsonrpc/index.ts", text: `export { Connection } from "./connection";` },
++    { path: "src/jsonrpc/index.ts", text: `export { Connection } from "./internal/connection";` },
+     {
+-      path: "src/jsonrpc/connection.ts",
++      path: "src/jsonrpc/internal/connection.ts",
+       text: `import { parseIncoming } from "./messages";\nimport type { Timers } from "./timers.ts";`,
+     },
+-    { path: "src/jsonrpc/messages.ts", text: `import * as v from "valibot";` },
++    {
++      path: "src/jsonrpc/internal/connection.test.ts",
++      text: `import { Connection } from "../index";`,
++    },
++    { path: "src/jsonrpc/internal/messages.ts", text: `import * as v from "valibot";` },
+     { path: "src/jsonrpc/sample.ts", text: `import "../../fixtures/sample/base.ts.txt?raw";` },
+     { path: "src/lsp/internal/attempt.ts", text: `import { Connection } from "../../jsonrpc";` },
+     { path: "src/lsp/index.ts", text: `import type { Timers } from "../jsonrpc/index.ts";` },
+@@ -315,6 +325,19 @@ test("jsonrpc importing itself and valibot, and lsp importing jsonrpc, violate n
+   expect(violationsOf(files)).toEqual([]);
+ });
+ 
++test("lsp importing jsonrpc's internal/ violates PM5", () => {
++  const files = [
++    {
++      path: "src/lsp/internal/a.ts",
++      text: `import { Connection } from "../../jsonrpc/internal/connection";`,
++    },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM5", file: "src/lsp/internal/a.ts", specifier: "../../jsonrpc/internal/connection" },
++  ]);
++});
++
+ test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {
+   const files = [
+     { path: "src/ui/compareStore.ts", text: `import { useAppStore } from "./store";` },
+diff --git a/frontend/src/jsonrpc/AGENTS.md b/frontend/src/jsonrpc/AGENTS.md
+index 754d2ae..db10b8a 100644
+--- a/frontend/src/jsonrpc/AGENTS.md
++++ b/frontend/src/jsonrpc/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ts-conventions`. One JSON-RPC 2.0 connection over a text channel (plan §2 #70, #109), shared by `lsp/` (language servers) and the window's agent client: `Connection` sends requests and notifications through `ConnectionHandlers.send`, parses every incoming text once (`messages.ts`, valibot; a malformed one is logged and dropped), settles each request with a `Reply` (result, error with `code`/`message`/`data`, timed out, closed) and answers the other side's requests with the handler's `Answer`. `request` has a deadline and on it sends `ConnectionOptions.cancelNotification` when there is one (`"$/cancelRequest"` for language servers, `null` for the agent, which cancels a prompt by its own notification); `requestUntilAnswered` has none and settles on its answer or `close()`. `timers.ts` is the injectable clock. Framework-free (PM3) and imports no other `src/` module (`scripts/fences.ts`); the public surface is `index.ts`.
++Owner skill: `skill://ts-conventions`. One JSON-RPC 2.0 connection over a text channel (plan §2 #70, #109), shared by `lsp/` (language servers) and the window's agent client: `Connection` sends requests and notifications through `ConnectionHandlers.send`, parses every incoming text once (`internal/messages.ts`, valibot; a malformed one is logged and dropped), settles each request with a `Reply` (result, error with `code`/`message`/`data`, timed out, closed) and answers the other side's requests with the handler's `Answer` (its codes `METHOD_NOT_FOUND`, `INVALID_PARAMS` beside it in `internal/connection.ts`). `request` has a deadline and on it sends `ConnectionOptions.cancelNotification` when there is one (`"$/cancelRequest"` for language servers, `null` for the agent, which cancels a prompt by its own notification); `requestUntilAnswered` has none and settles on its answer or `close()`. `internal/timers.ts` is the injectable clock. Framework-free (PM3) and imports no other `src/` module (`scripts/fences.ts`); the public surface is `index.ts`, everything else in `internal/` (PM5).
+diff --git a/frontend/src/jsonrpc/index.ts b/frontend/src/jsonrpc/index.ts
+index b1ea511..ff95778 100644
+--- a/frontend/src/jsonrpc/index.ts
++++ b/frontend/src/jsonrpc/index.ts
+@@ -1,11 +1,13 @@
+ export {
+   Connection,
++  INVALID_PARAMS,
++  METHOD_NOT_FOUND,
+   type Answer,
+   type ConnectionHandlers,
+   type ConnectionOptions,
+   type Reply,
+-} from "./connection";
+-export { type Timers, SYSTEM_TIMERS } from "./timers";
++} from "./internal/connection";
++export { type Timers, SYSTEM_TIMERS } from "./internal/timers";
+ export {
+   type Incoming,
+   type Parsed,
+@@ -15,4 +17,4 @@ export {
+   notificationText,
+   resultText,
+   errorText,
+-} from "./messages";
++} from "./internal/messages";
+diff --git a/frontend/src/jsonrpc/connection.test.ts b/frontend/src/jsonrpc/internal/connection.test.ts
+similarity index 91%
+rename from frontend/src/jsonrpc/connection.test.ts
+rename to frontend/src/jsonrpc/internal/connection.test.ts
+index 44860d9..aa336ad 100644
+--- a/frontend/src/jsonrpc/connection.test.ts
++++ b/frontend/src/jsonrpc/internal/connection.test.ts
+@@ -6,7 +6,7 @@ import {
+   type ConnectionHandlers,
+   type ConnectionOptions,
+   type Timers,
+-} from "./index";
++} from "../index";
+ 
+ const TIMERS: Timers = {
+   now: () => Date.now(),
+@@ -154,6 +154,28 @@ test("requestUntilAnswered settles closed on close()", async () => {
+   expect(cleared).toEqual([]);
+ });
+ 
++test("a timed request and an unanswered prompt share ids and settle apart", async () => {
++  const { connection, sent } = harness();
++  const prompt = connection.requestUntilAnswered("session/prompt", { sessionId: "s1" });
++  let promptSettled = false;
++  void prompt.then(() => {
++    promptSettled = true;
++  });
++  const created = connection.request("session/new", { cwd: "/repo" }, 1000);
++
++  expect(sent).toMatchObject([
++    { id: 1, method: "session/prompt" },
++    { id: 2, method: "session/new" },
++  ]);
++  await vi.advanceTimersByTimeAsync(1000);
++
++  expect(await created).toEqual({ kind: "timedOut" });
++  expect(promptSettled).toBe(false);
++  connection.receive(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { stopReason: "end_turn" } }));
++
++  expect(await prompt).toEqual({ kind: "result", value: { stopReason: "end_turn" } });
++});
++
+ test("responses with an unknown, string or null id settle nothing", async () => {
+   const { connection } = harness();
+   const reply = connection.request("a", null, 1000);
+diff --git a/frontend/src/jsonrpc/connection.ts b/frontend/src/jsonrpc/internal/connection.ts
+similarity index 90%
+rename from frontend/src/jsonrpc/connection.ts
+rename to frontend/src/jsonrpc/internal/connection.ts
+index f457f37..55c430e 100644
+--- a/frontend/src/jsonrpc/connection.ts
++++ b/frontend/src/jsonrpc/internal/connection.ts
+@@ -8,6 +8,9 @@ import {
+ } from "./messages";
+ import type { Timers } from "./timers";
+ 
++export const METHOD_NOT_FOUND = -32601;
++export const INVALID_PARAMS = -32602;
++
+ export type Answer =
+   | { readonly kind: "result"; readonly value: unknown; readonly log: string | null }
+   | {
+@@ -62,13 +65,11 @@ export class Connection {
+   }
+ 
+   request(method: string, params: unknown, timeoutMs: number): Promise<Reply> {
+-    return this.#start(method, params, (id, settle) =>
+-      this.#timers.setTimeout(() => this.#timedOut(id, method, timeoutMs, settle), timeoutMs),
+-    );
++    return this.#start(method, params, timeoutMs);
+   }
+ 
+   requestUntilAnswered(method: string, params: unknown): Promise<Reply> {
+-    return this.#start(method, params, () => null);
++    return this.#start(method, params, null);
+   }
+ 
+   notify(method: string, params: unknown): void {
+@@ -96,18 +97,18 @@ export class Connection {
+     this.#pending.clear();
+   }
+ 
+-  #start(
+-    method: string,
+-    params: unknown,
+-    deadline: (id: number, settle: Settle) => number | null,
+-  ): Promise<Reply> {
++  #start(method: string, params: unknown, timeoutMs: number | null): Promise<Reply> {
+     if (this.#closed) {
+       return Promise.resolve({ kind: "closed" });
+     }
+     const id = this.#nextId;
+     this.#nextId += 1;
+     return new Promise((settle) => {
+-      this.#pending.set(id, { method, timer: deadline(id, settle), settle });
++      const timer =
++        timeoutMs === null
++          ? null
++          : this.#timers.setTimeout(() => this.#timedOut(id, method, timeoutMs, settle), timeoutMs);
++      this.#pending.set(id, { method, timer, settle });
+       this.#handlers.send(requestText(id, method, params));
+     });
+   }
+diff --git a/frontend/src/jsonrpc/messages.test.ts b/frontend/src/jsonrpc/internal/messages.test.ts
+similarity index 98%
+rename from frontend/src/jsonrpc/messages.test.ts
+rename to frontend/src/jsonrpc/internal/messages.test.ts
+index c4c79c6..34f6217 100644
+--- a/frontend/src/jsonrpc/messages.test.ts
++++ b/frontend/src/jsonrpc/internal/messages.test.ts
+@@ -7,7 +7,7 @@ import {
+   requestText,
+   resultText,
+   type Incoming,
+-} from "./index";
++} from "../index";
+ 
+ test("an incoming error keeps its data, and reads undefined data when it has none", () => {
+   const withData: Incoming = {
+diff --git a/frontend/src/jsonrpc/messages.ts b/frontend/src/jsonrpc/internal/messages.ts
+similarity index 100%
+rename from frontend/src/jsonrpc/messages.ts
+rename to frontend/src/jsonrpc/internal/messages.ts
+diff --git a/frontend/src/jsonrpc/timers.ts b/frontend/src/jsonrpc/internal/timers.ts
+similarity index 100%
+rename from frontend/src/jsonrpc/timers.ts
+rename to frontend/src/jsonrpc/internal/timers.ts
+diff --git a/frontend/src/lsp/AGENTS.md b/frontend/src/lsp/AGENTS.md
+index 173b6bb..f730ffd 100644
+--- a/frontend/src/lsp/AGENTS.md
++++ b/frontend/src/lsp/AGENTS.md
+@@ -1,4 +1,4 @@
+-Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. yamt's own language-server client (plan §2 #67, #70): speaks the protocol to programs an `ipc/ServerHost` starts; owns each server's lifecycle and state, the documents open on it, its problems (pushed and pulled into one slot per server: `DocProblems` never shows an answer older than the last one it showed), formatting, and its log. Framework-free: no `vue`, `@vueuse`, `@tauri-apps`, and never imports `editor/`, `ui/`, `model/`, `connectors/` (oxlint + `scripts/fences.ts`); only `ipc/index.ts` types and `jsonrpc/index.ts` (the shared JSON-RPC connection, plan §2 #109; language servers pass `cancelNotification: "$/cancelRequest"`). Public surface is `index.ts` (`LanguageServers`, `isDocVersion`, `serverKey`, `detect`, `addedSpecs`, `presetChoices` and the types); everything else in `internal/`. Every message from a server is external data, parsed once with valibot (`jsonrpc/messages.ts` envelope, `protocol.ts` payloads); a malformed one is logged and dropped.
++Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. yamt's own language-server client (plan §2 #67, #70): speaks the protocol to programs an `ipc/ServerHost` starts; owns each server's lifecycle and state, the documents open on it, its problems (pushed and pulled into one slot per server: `DocProblems` never shows an answer older than the last one it showed), formatting, and its log. Framework-free: no `vue`, `@vueuse`, `@tauri-apps`, and never imports `editor/`, `ui/`, `model/`, `connectors/` (oxlint + `scripts/fences.ts`); only `ipc/index.ts` types and `jsonrpc/index.ts` (the shared JSON-RPC connection, plan §2 #109; language servers pass `cancelNotification: "$/cancelRequest"`). Public surface is `index.ts` (`LanguageServers`, `isDocVersion`, `serverKey`, `detect`, `addedSpecs`, `presetChoices` and the types); everything else in `internal/`. Every message from a server is external data, parsed once with valibot (`jsonrpc/internal/messages.ts` envelope, `protocol.ts` payloads); a malformed one is logged and dropped.
+ 
+ A server's run is one sum type, `Run` in `internal/run.ts` (idle, launching, starting, running, halting), held by `internal/server.ts` (the lifecycle); its `state` and `running` (the documents, the capabilities, the attempt) are derived from it. `internal/attempt.ts` is one process run: it starts and stops the process and routes its messages.
+ 
+@@ -6,4 +6,4 @@ Which specs exist (plan §2 #70 "Detection", "Not installed", #72): `internal/de
+ 
+ A server's identity (plan §2 #83): every `ServerSpec` and `ServerView` carries a `ServerKey` (brand, `internal/spec.ts` `serverKey`) that does not change with its shown name. Detection builds its specs without a key (`FoundSpec`) and gives each one in its last step, beside the shown name: the tool's name with its project always written out (`oxlint (frontend)`, `TypeScript (repository root)`; the shown name is that text only when two projects use the tool), so a suffix coming or going, tsc ↔ tsgo or installed ↔ not installed keep the key, and Vue's spread copy of TypeScript's spec gets its own (`Vue (web)`). `addedSpecs` keys a hand-added server `added: ` plus its command words, never its numbered name. Phpactor and Intelephense are two tools of one preset: their keys differ (`Phpactor (php)`, `Intelephense (php)`). Start, Stop, Restart and the logs still go by the shown name; the key is what the window's off switches and pins hold.
+ 
+-Reading path of one message from a server: `ServerHost` event → `internal/attempt.ts` `#onEvent` → `jsonrpc/connection.ts` `receive` (parse) → a response settles its request; a request goes to `answers.ts` (pure table) and back through `send`; a notification goes to `attempt.ts` `#notified` → `problems.ts` `pushProblems` → `DocProblems` → `ResultDocument.showProblems`. Outward: `index.ts` `open` → `documents.ts` (`DocEntry`: version, 300 ms sync) → `serverDocs.ts` (`didOpen`/`didChange`/`didClose`) → `jsonrpc/connection.ts` → `ServerHost.send`; pulls go from `problems.ts` `DocProblems.pull`, the formatting request from `formatting.ts`.
++Reading path of one message from a server: `ServerHost` event → `internal/attempt.ts` `#onEvent` → `jsonrpc/internal/connection.ts` `receive` (parse) → a response settles its request; a request goes to `answers.ts` (pure table) and back through `send`; a notification goes to `attempt.ts` `#notified` → `problems.ts` `pushProblems` → `DocProblems` → `ResultDocument.showProblems`. Outward: `index.ts` `open` → `documents.ts` (`DocEntry`: version, 300 ms sync) → `serverDocs.ts` (`didOpen`/`didChange`/`didClose`) → `jsonrpc/internal/connection.ts` → `ServerHost.send`; pulls go from `problems.ts` `DocProblems.pull`, the formatting request from `formatting.ts`.
+diff --git a/frontend/src/lsp/internal/answers.test.ts b/frontend/src/lsp/internal/answers.test.ts
+index 7508ce9..a2811da 100644
+--- a/frontend/src/lsp/internal/answers.test.ts
++++ b/frontend/src/lsp/internal/answers.test.ts
+@@ -1,6 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+-import { answer, INVALID_PARAMS, METHOD_NOT_FOUND, type AnswerContext } from "./answers";
++import { INVALID_PARAMS, METHOD_NOT_FOUND } from "../../jsonrpc";
++import { answer, type AnswerContext } from "./answers";
+ 
+ const FOLDER = { uri: "file:///repo/frontend", name: "frontend" };
+ 
+diff --git a/frontend/src/lsp/internal/answers.ts b/frontend/src/lsp/internal/answers.ts
+index 48c4495..e9aadab 100644
+--- a/frontend/src/lsp/internal/answers.ts
++++ b/frontend/src/lsp/internal/answers.ts
+@@ -1,10 +1,7 @@
+-import { parseWith, type Answer } from "../../jsonrpc";
++import { INVALID_PARAMS, METHOD_NOT_FOUND, parseWith, type Answer } from "../../jsonrpc";
+ import { sectionOf } from "./json";
+ import { APPLY_EDIT_PARAMS, CONFIGURATION_PARAMS, MESSAGE_PARAMS } from "./protocol";
+ 
+-export const METHOD_NOT_FOUND = -32601;
+-export const INVALID_PARAMS = -32602;
+-
+ export type WorkspaceFolder = { readonly uri: string; readonly name: string };
+ 
+ export type AnswerContext = {
+-- 
+2.56.0
+
