@@ -2,7 +2,16 @@ import { createLog } from "./log";
 import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
+export type {
+  AgentCommand,
+  AgentSource,
+  AgentStartReply,
+  CheckoutChanges,
+  CheckoutReady,
+} from "./AgentSource";
 export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
+export { createFixtureAgentSource } from "./fixtureAgent";
+export { createTauriAgentSource } from "./tauriAgent";
 export type { CompareSource } from "./CompareSource";
 export type {
   Column,
@@ -16,9 +25,11 @@ export type {
 } from "./compareDomain";
 export type {
   AddedServer,
+  AgentRun,
   AgentSettings,
   Antialiasing,
   Chunk,
+  CheckoutFolder,
   ClipboardSelection,
   ColumnVersion,
   ContinueReply,
@@ -58,6 +69,20 @@ export type {
   WriteReply,
 } from "./domain";
 export { nextColumnVersion } from "./domain";
+export type { MessageId, ThreadId } from "./domain";
+export type {
+  GitLabCheck,
+  MergeRequestRef,
+  Message,
+  NotLinedUp,
+  Posting,
+  SendProgress,
+  SendReply,
+  Thread,
+  ThreadAdded,
+  ThreadList,
+} from "./reviewDomain";
+export type { ReviewSource } from "./ReviewSource";
 export { createFixtureSource, loadFixture } from "./fixture";
 export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
 export { createFixtureRangeSource } from "./fixtureRange";

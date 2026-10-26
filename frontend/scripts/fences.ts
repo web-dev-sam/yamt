@@ -34,6 +34,15 @@ const FRAMEWORK_FREE_MODULES: Record<string, true> = {
   connectors: true,
   lsp: true,
   jsonrpc: true,
+  agent: true,
+};
+const AGENT_IMPORTS: Readonly<Record<string, true>> = {
+  "src/ipc": true,
+  "src/ipc/index": true,
+  "src/ipc/index.ts": true,
+  "src/jsonrpc": true,
+  "src/jsonrpc/index": true,
+  "src/jsonrpc/index.ts": true,
 };
 const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connectors"] as const;
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
@@ -114,6 +123,10 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   }
   if (module === "jsonrpc" && target.startsWith("src/") && !isInside(target, "src/jsonrpc")) {
     return { rule: "PM2", reason: "jsonrpc/ imports no other src/ module" };
+  }
+  const outsideAgent = target.startsWith("src/") && !isInside(target, "src/agent");
+  if (module === "agent" && outsideAgent && !Object.hasOwn(AGENT_IMPORTS, target)) {
+    return { rule: "PM2", reason: "agent/ imports only ipc/index.ts and jsonrpc/index.ts" };
   }
   const targetModule = MODULE_OF.exec(target)?.[1];
   if (

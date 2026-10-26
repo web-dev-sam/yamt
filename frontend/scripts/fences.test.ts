@@ -338,6 +338,71 @@ test("lsp importing jsonrpc's internal/ violates PM5", () => {
   ]);
 });
 
+test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/agent/index.ts", text: `import { ref } from "vue";` },
+    { path: "src/agent/internal/turn.ts", text: `import { useTimeoutFn } from "@vueuse/core";` },
+    {
+      path: "src/agent/internal/process.ts",
+      text: `import { Channel } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/agent/internal/answers.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/agent/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/agent/internal/turn.ts", specifier: "@vueuse/core" },
+    { rule: "PM3", file: "src/agent/internal/process.ts", specifier: "@tauri-apps/api/core" },
+    { rule: "PM3", file: "src/agent/internal/answers.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("agent importing anything but ipc's and jsonrpc's index violates PM2", () => {
+  const files = [
+    { path: "src/agent/index.ts", text: `import { MergeController } from "../editor";` },
+    { path: "src/agent/internal/a.ts", text: `import type { Store } from "../../ui/store";` },
+    { path: "src/agent/internal/b.ts", text: `import { LanguageServers } from "../../lsp";` },
+    { path: "src/agent/internal/c.ts", text: `import { log } from "../../ipc/log";` },
+    {
+      path: "src/agent/internal/d.ts",
+      text: `import { Connection } from "../../jsonrpc/internal/connection";`,
+    },
+    { path: "src/agent/e.ts", text: `import "../agentx/f";` },
+    { path: "src/agent/g.ts", text: `import "../main";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "agent/ imports only ipc/index.ts and jsonrpc/index.ts",
+    })),
+  );
+});
+
+test("agent importing ipc's and jsonrpc's index, itself and fixtures violates nothing", () => {
+  const files = [
+    { path: "src/agent/index.ts", text: `import type { AgentSource } from "../ipc";` },
+    { path: "src/agent/a.ts", text: `import { SYSTEM_TIMERS } from "../jsonrpc/index.ts";` },
+    { path: "src/agent/internal/b.ts", text: `import { log } from "../../ipc/index";` },
+    { path: "src/agent/internal/c.ts", text: `import { Connection } from "../../jsonrpc";` },
+    {
+      path: "src/agent/internal/d.ts",
+      text: `import { e } from "./e";\nimport * as v from "valibot";`,
+    },
+    { path: "src/agent/internal/e.ts", text: `export const e = 1;` },
+    { path: "src/agent/index.test.ts", text: `import { f } from "./internal/f";` },
+    {
+      path: "src/agent/internal/f.test.ts",
+      text: `import x from "../../../fixtures/agent/load.jsonl?raw";`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {
   const files = [
     { path: "src/ui/compareStore.ts", text: `import { useAppStore } from "./store";` },

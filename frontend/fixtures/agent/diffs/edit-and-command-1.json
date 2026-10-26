@@ -1,0 +1,26 @@
+{
+  "differences": [
+    {
+      "left": {
+        "len": 0,
+        "start": 23
+      },
+      "right": {
+        "len": 1,
+        "start": 23
+      },
+      "words": {
+        "left": {
+          "changed": [],
+          "removals": []
+        },
+        "right": {
+          "changed": [],
+          "removals": []
+        }
+      }
+    }
+  ],
+  "left": "# Taskboard\n\nA small kanban board for the web team: columns with work-in-progress limits, cards with labels,\npeople and due dates, and an activity feed.\n\n## Develop\n\n```sh\npnpm install\npnpm dev\n```\n\nOn `localhost` the app shows a mock board (`src/api/mockBoards.ts`) instead of calling the API.\n\n## Check\n\n```sh\npnpm typecheck\npnpm lint\npnpm format --check\n```\n\nKeyboard shortcuts are listed in [docs/shortcuts.md](docs/shortcuts.md).\n",
+  "right": "# Taskboard\n\nA small kanban board for the web team: columns with work-in-progress limits, cards with labels,\npeople and due dates, and an activity feed.\n\n## Develop\n\n```sh\npnpm install\npnpm dev\n```\n\nOn `localhost` the app shows a mock board (`src/api/mockBoards.ts`) instead of calling the API.\n\n## Check\n\n```sh\npnpm typecheck\npnpm lint\npnpm format --check\n```\n\nKeyboard shortcuts are listed in [docs/shortcuts.md](docs/shortcuts.md).\nhello\n"
+}

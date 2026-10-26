@@ -35,25 +35,15 @@ export type FileSides = Omit<Generated.FileSides, "disk_version"> & {
 };
 
 export type SideContent = Generated.SideContent;
-
 export type Side = Generated.Side;
-
 export type SideName = Generated.SideName;
-
 export type SideNames = Generated.SideNames;
-
 export type NotText = Generated.NotText;
-
 export type DiskResult = Generated.DiskResult;
-
 export type DiskChange = Generated.DiskChange;
-
 export type WriteReply = Generated.WriteReply;
-
 export type Theme = Generated.Theme;
-
 export type Antialiasing = Generated.Antialiasing;
-
 export type ClipboardSelection = Generated.ClipboardSelection;
 
 export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
@@ -63,14 +53,13 @@ export type StoredSettings = Omit<Generated.StoredSettings, "languageServers"> &
 };
 
 export type KeysChange = Generated.KeysChange;
-
 export type RepositoryAnswer = Generated.RepositoryAnswer;
-
 export type AddedServer = Generated.AddedServer;
-
 export type AgentSettings = Generated.AgentSettings;
 
 export type RunId = number & { readonly __brand: "RunId" };
+export type AgentRun = number & { readonly __brand: "AgentRun" };
+export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
 
 export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
 export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
@@ -153,6 +142,16 @@ function isChunkId(n: number): n is ChunkId {
 
 function isRunId(n: number): n is RunId {
   return isNonNegativeInteger(n);
+}
+
+export function isAgentRun(n: number): n is AgentRun {
+  return isNonNegativeInteger(n);
+}
+
+const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u;
+
+export function isCheckoutFolder(path: string): path is CheckoutFolder {
+  return ABSOLUTE_PATH.test(path);
 }
 
 export function isTabId(n: number): n is TabId {
