@@ -30,5 +30,27 @@
       "frontend/scripts/app-session/start.ts",
       "frontend/src/ipc/index.ts"
     ]
+  },
+  "RVReviewIpcR1": {
+    "owned": [
+      "frontend/src/ipc/validate.ts",
+      "frontend/src/ipc/validate.test.ts",
+      "frontend/src/ipc/reviewDomain.ts",
+      "frontend/src/ipc/reviewDomain.test.ts",
+      "frontend/src/ipc/threadLine.ts",
+      "frontend/src/ipc/threadLine.test.ts",
+      "frontend/src/ipc/compareDomain.ts",
+      "frontend/src/ipc/compareDomain.test.ts",
+      "frontend/src/ipc/tauriRange.ts",
+      "frontend/src/ipc/tauriRange.test.ts",
+      "frontend/src/ipc/tauriCompare.ts",
+      "frontend/src/ipc/tauriCompare.test.ts",
+      "frontend/src/ipc/tauri.ts",
+      "frontend/src/ipc/tauri.test.ts",
+      "frontend/src/ipc/fixtureReview.ts",
+      "frontend/src/ipc/fixtureReview.test.ts",
+      "frontend/src/ipc/fixtureGitLab.ts",
+      "frontend/src/ipc/fixtureGitLab.test.ts"
+    ]
   }
 }
