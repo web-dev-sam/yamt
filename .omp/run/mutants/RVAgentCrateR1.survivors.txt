@@ -1,0 +1,8 @@
+just mutants ed179ba (covers 8acdd72 RVAgentCrateR1 + bindings 258a358): 91 mutants tested in 5m: 6 missed, 57 caught, 28 unviable
+MISSED   crates/agent/src/checkout.rs:124:19: replace match guard !folder.exists() with false in remove_if_present
+MISSED   crates/agent/src/sweep.rs:46:5: replace logged with ()
+MISSED   src-tauri/src/ai.rs:65:5: replace sweep_while_held with ()   (also missed at 3d746d5)
+MISSED   crates/gitio/src/checkout.rs:87:9: replace Repo::branches_and_stash -> Result<Vec<String>> with Ok(vec![])
+MISSED   crates/gitio/src/checkout.rs:87:9: … with Ok(vec![String::new()])
+MISSED   crates/gitio/src/checkout.rs:87:9: … with Ok(vec!["xyzzy".into()])
+  (gitio's mutants run only gitio's tests (--test-workspace=false); the agent crate's stash/branch test does not count)

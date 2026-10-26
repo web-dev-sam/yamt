@@ -1,0 +1,2129 @@
+From 8acdd72bc1a38214867c0d2e03d8e060217d8849 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 22:30:04 +0100
+Subject: [PATCH] fix(agent): never touch the user's repo, a sweep that never
+ refuses a window, the AI's refs count
+
+---
+ crates/agent/AGENTS.md             |   2 +-
+ crates/agent/src/bin/agent-echo.rs |  15 +-
+ crates/agent/src/checkout.rs       |  75 ++++++--
+ crates/agent/src/lib.rs            |   6 +-
+ crates/agent/src/look.rs           |  29 +++-
+ crates/agent/src/process.rs        |  39 +++--
+ crates/agent/src/sweep.rs          |  55 +++---
+ crates/agent/src/workspace.rs      |  16 +-
+ crates/agent/tests/checkout.rs     | 268 +++++++++++++++++++++--------
+ crates/agent/tests/common/mod.rs   |  77 +++++++++
+ crates/agent/tests/process.rs      |  86 +++++----
+ crates/agent/tests/sweep.rs        | 133 +++++++-------
+ crates/gitio/AGENTS.md             |   4 +-
+ crates/gitio/src/abort_continue.rs |  19 +-
+ crates/gitio/src/checkout.rs       | 102 +++++++----
+ crates/gitio/src/lib.rs            |   5 +
+ crates/gitio/src/repo.rs           |  88 ++++++++--
+ crates/gitio/src/run.rs            |  28 ++-
+ crates/gitio/tests/checkout.rs     | 102 ++++++++++-
+ crates/pipe/AGENTS.md              |   2 +-
+ crates/pipe/src/run.rs             |  18 +-
+ crates/pipe/tests/lines.rs         |  21 +++
+ crates/range/AGENTS.md             |   2 +-
+ crates/range/src/lib.rs            |   2 +-
+ crates/range/src/lock.rs           |  42 ++++-
+ src-tauri/src/ai.rs                |  46 +++--
+ src-tauri/src/commands.rs          |   2 +-
+ 27 files changed, 943 insertions(+), 341 deletions(-)
+ create mode 100644 crates/agent/tests/common/mod.rs
+
+diff --git a/crates/agent/AGENTS.md b/crates/agent/AGENTS.md
+index 15dadb6..ad26bb6 100644
+--- a/crates/agent/AGENTS.md
++++ b/crates/agent/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The AI's workspace for one range window started with `--ai` (plan §2 #108–#111, #115): its temporary checkout of the right commit and the agent process running in it; Rust never reads the agent's messages (ACP is the window's). `lib.rs` (the IPC types `AgentRun`, `AgentCommand`, `AgentStartReply`, `CheckoutReply`, `CheckoutLook` — serde tag `kind`, variants as named; `Error`), `workspace.rs` (`Pair` from `yamt-range`'s pair lock; `Workspace`: `prepare` makes or reuses `<pair folder>/checkout`, `start` only after `prepare` with cwd = the checkout and a running agent stopped and reaped first, `send`/`stop` for the current run only, `stop_agent`, `look_job`, `discard` and `end(self)` stop and reap the agent before any removal), `checkout.rs` (made as `checkout.partial` — `clone --shared --no-checkout`, `remote remove origin`, `checkout --detach` the right commit — then renamed to `checkout`, so a `checkout/` is always complete; removed through `checkout.removing`; `remove_when_clean`), `look.rs` (`LookJob::look`: `Missing`, `Clean`, `Changed` = any `git status` entry, ignored files never, or `HEAD` ≠ the right commit; `Unreadable` when git fails or finds another repository than the checkout's own), `process.rs` (the program through `yamt_pipe::find` without project entries — PATH, then the command's home folders — and `Running::start` with `Framing::Lines`), `sweep.rs` (`sweep_leftovers(range_dir, own)`: in every other pair whose lock `PairLock::try_hold` takes, the partial and removing folders and a clean checkout deleted, a changed or unreadable one kept; the right commit read from the folder name `<left>-<right>`; in `own` only the partial and removing folders). `bin/agent-echo.rs`: the tests' line agent (echo, `pwd`, `edit <file>`, `stderr <text>`, `exit <code>`, `huge`, `hold <file>`). Tests in `tests/{checkout,process,sweep}.rs` run real git in temp folders and start the built `agent-echo` where cargo put it. Depends on `yamt-gitio`, `yamt-pipe` and `yamt-range` only among yamt crates; never tauri, never serde_json (arch-check).
++Owner skill: `skill://rust-conventions`. The AI's workspace for one range window started with `--ai` (plan §2 #108–#111, #115, #122): its temporary checkout of the right commit and the agent process running in it; Rust never reads the agent's messages (ACP is the window's). `lib.rs` (the IPC types `AgentRun`, `AgentCommand`, `AgentStartReply`, `CheckoutReply`, `CheckoutLook` — serde tag `kind`, variants as named; `Error`; `HostEvent` re-exported from `yamt-pipe`, so the shell takes the agent's events from this crate), `workspace.rs` (`Pair` from `yamt-range`'s pair lock; `Workspace`: `prepare` makes or reuses `<pair folder>/checkout`, `start` only after `prepare` with cwd = the checkout and a running agent stopped and reaped first — it blocks up to about 3 s for that —, `send`/`stop` for the current run only, `stop_agent`, `look_job`, `discard` and `end(self)` stop and reap the agent before any removal (only the agent's own process, never one it started), `sweep_leftovers(&mut self, range_dir)` the one writer of this pair's leftovers besides `prepare`), `checkout.rs` (`checkout_folder` the one checkout path; made as `checkout.partial` — `clone --shared --no-checkout`, `remote remove origin`, `checkout --detach` the right commit — then renamed to `checkout`, so a `checkout/` is always complete; removed through `checkout.removing` (`set_aside`, then `remove_set_aside`); `remove_when_clean`; a folder another remover deletes at the same time counts as removed), `look.rs` (`LookJob::look`: `Missing`, `Clean`, `Changed` = any `git status` entry, ignored files never, any branch or `refs/stash` (`refs`, #122: the clone starts with none), or `HEAD` ≠ the right commit; `Unreadable` when git fails or finds another repository than the checkout's own; git through `Repo::discover_from_folder`, never an inherited `GIT_DIR`), `process.rs` (the program through `yamt_pipe::find` without project entries — PATH, then the command's home folders; a relative path with a separator is refused as `NotFound { searched: [] }`, it would run a file of the reviewed commit — and `Running::start_without` with `Framing::Lines` and `yamt_gitio::Repo::REPOSITORY_VARIABLES` left out of the agent's environment), `sweep.rs` (every other pair folder holding a checkout or a leftover, skipped without its lock otherwise; under the lock `PairLock::try_hold` takes: the partial and removing folders deleted and a clean checkout renamed to `checkout.removing`, deleted after the lock is released; a changed or unreadable one kept; the right commit from `yamt_range::pair_right_commit`). `bin/agent-echo.rs`: the tests' line agent (echo, `pwd`, `edit <file>`, `exit <code>`, `hold <file>`). Tests in `tests/{checkout,process,sweep}.rs` share `tests/common/mod.rs` (the source repository, the data folder, the pair folder made by `PairLock::take`, `Pair`, `commit_of`), run real git in temp folders and start the built `agent-echo` where cargo put it, never a file a test just wrote; `prepare` and the agent under an inherited `GIT_DIR` run in a child process (`yamt_conflict_repo::run_ignored_in_child`). Depends on `yamt-gitio`, `yamt-pipe` and `yamt-range` only among yamt crates; never tauri, never serde_json (arch-check).
+diff --git a/crates/agent/src/bin/agent-echo.rs b/crates/agent/src/bin/agent-echo.rs
+index a54ba1b..e4c83d7 100644
+--- a/crates/agent/src/bin/agent-echo.rs
++++ b/crates/agent/src/bin/agent-echo.rs
+@@ -1,15 +1,13 @@
+ //! A line-framed test agent for this crate's tests: answers each line with the same line. `pwd` answers its
+-//! working folder; `edit <file>` appends a line to that file and answers `edited <file>`; `stderr <text>` writes
+-//! `text` on stderr; `exit <code>` exits with that code; `huge` writes one line over 64 MiB, then `after`;
+-//! `hold <file>` keeps that file open, answers `holding <file>`, and once stdin closes waits a moment, writes
+-//! `released` into it (making its folder again if it is gone) and exits.
++//! working folder; `edit <file>` appends a line to that file and answers `edited <file>`; `exit <code>` exits
++//! with that code; `hold <file>` keeps that file open, answers `holding <file>`, and once stdin closes waits a
++//! moment, writes `released` into it (making its folder again if it is gone) and exits.
+ use std::fs::{self, File, OpenOptions};
+ use std::io::{self, BufRead, Write};
+ use std::path::PathBuf;
+ use std::time::Duration;
+ use std::{env, process, thread};
+ 
+-const HUGE_LINE_BYTES: usize = 64 * 1024 * 1024 + 1;
+ const HOLD_RELEASE: Duration = Duration::from_millis(300);
+ const EDITED_LINE: &[u8] = b"edited by agent-echo\n";
+ const RELEASED: &[u8] = b"released\n";
+@@ -60,15 +58,8 @@ fn answer(line: &str) -> io::Result<()> {
+             .open(file)?
+             .write_all(EDITED_LINE)?;
+         write_out(format!("edited {file}\n").as_bytes())
+-    } else if let Some(text) = line.strip_prefix("stderr ") {
+-        eprintln!("{text}");
+-        Ok(())
+     } else if let Some(code) = line.strip_prefix("exit ") {
+         process::exit(code.trim().parse().unwrap_or(1));
+-    } else if line == "huge" {
+-        let mut huge = vec![b'x'; HUGE_LINE_BYTES];
+-        huge.extend_from_slice(b"\nafter\n");
+-        write_out(&huge)
+     } else {
+         write_out(format!("{line}\n").as_bytes())
+     }
+diff --git a/crates/agent/src/checkout.rs b/crates/agent/src/checkout.rs
+index 9e254ef..f08685d 100644
+--- a/crates/agent/src/checkout.rs
++++ b/crates/agent/src/checkout.rs
+@@ -9,18 +9,22 @@ use crate::{CheckoutLook, Error};
+ 
+ /// A `checkout` folder is always complete: it is made as `checkout.partial` and removed as
+ /// `checkout.removing`, so a crash leaves only folders that are safe to delete (plan §2 #110).
+-pub(crate) const CHECKOUT: &str = "checkout";
++const CHECKOUT: &str = "checkout";
+ const PARTIAL: &str = "checkout.partial";
+ const REMOVING: &str = "checkout.removing";
+ const ORIGIN: &str = "origin";
+ 
++pub(crate) fn checkout_folder(pair_folder: &Path) -> PathBuf {
++    pair_folder.join(CHECKOUT)
++}
++
+ /// `<pair folder>/checkout`, reused when it exists, otherwise made from `repo` at `commit`.
+ pub(crate) fn made_or_reused(
+     pair_folder: &Path,
+     repo: &Path,
+     commit: &str,
+ ) -> Result<PathBuf, Error> {
+-    let checkout = pair_folder.join(CHECKOUT);
++    let checkout = checkout_folder(pair_folder);
+     if checkout.is_dir() {
+         return Ok(checkout);
+     }
+@@ -50,41 +54,74 @@ fn make(partial: &Path, repo: &Path, commit: &str) -> Result<(), Error> {
+ 
+ /// Removes `<pair folder>/checkout` through `checkout.removing`; a missing one is already removed.
+ pub(crate) fn remove(pair_folder: &Path) -> Result<(), Error> {
+-    let removing = pair_folder.join(REMOVING);
+-    remove_if_present(&removing)?;
+-    let checkout = pair_folder.join(CHECKOUT);
+-    match fs::rename(&checkout, &removing) {
+-        Ok(()) => remove_if_present(&removing),
+-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+-        Err(source) => Err(Error::Remove {
+-            folder: checkout,
+-            source,
+-        }),
++    if set_aside(pair_folder)? {
++        remove_set_aside(pair_folder)?;
+     }
++    Ok(())
+ }
+ 
+ /// Removes `<pair folder>/checkout` only when a look now finds it clean; a failed removal is logged.
+ pub(crate) fn remove_when_clean(pair_folder: &Path, new_commit: String) {
+-    match LookJob::in_pair(pair_folder, new_commit).look() {
+-        CheckoutLook::Clean => {
+-            if let Err(error) = remove(pair_folder) {
+-                tracing::warn!(%error, "the AI's clean checkout stays");
+-            }
+-        }
+-        CheckoutLook::Missing | CheckoutLook::Changed { .. } | CheckoutLook::Unreadable { .. } => {}
++    let removed = match set_aside_when_clean(pair_folder, new_commit) {
++        Ok(true) => remove_set_aside(pair_folder),
++        Ok(false) => Ok(()),
++        Err(error) => Err(error),
++    };
++    if let Err(error) = removed {
++        tracing::warn!(%error, "the AI's clean checkout stays");
+     }
+ }
+ 
++/// Renames `<pair folder>/checkout` to `checkout.removing` when a look now finds it clean; true once renamed.
++pub(crate) fn set_aside_when_clean(pair_folder: &Path, new_commit: String) -> Result<bool, Error> {
++    match LookJob::in_pair(pair_folder, new_commit).look() {
++        CheckoutLook::Clean => set_aside(pair_folder),
++        CheckoutLook::Missing | CheckoutLook::Changed { .. } | CheckoutLook::Unreadable { .. } => {
++            Ok(false)
++        }
++    }
++}
++
++/// Deletes the `checkout.removing` folder `set_aside` made.
++pub(crate) fn remove_set_aside(pair_folder: &Path) -> Result<(), Error> {
++    remove_if_present(&pair_folder.join(REMOVING))
++}
++
+ /// Deletes the `checkout.partial` and `checkout.removing` folders a crash or kill left.
+ pub(crate) fn remove_leftovers(pair_folder: &Path) -> Result<(), Error> {
+     remove_if_present(&pair_folder.join(PARTIAL))?;
+     remove_if_present(&pair_folder.join(REMOVING))
+ }
+ 
++/// Whether the pair folder holds a checkout or a leftover of one.
++pub(crate) fn has_any(pair_folder: &Path) -> bool {
++    [CHECKOUT, PARTIAL, REMOVING]
++        .iter()
++        .any(|name| pair_folder.join(name).exists())
++}
++
++/// Renames `checkout` to `checkout.removing`, an older `checkout.removing` deleted first; false when there
++/// is no checkout.
++fn set_aside(pair_folder: &Path) -> Result<bool, Error> {
++    let removing = pair_folder.join(REMOVING);
++    remove_if_present(&removing)?;
++    let checkout = checkout_folder(pair_folder);
++    match fs::rename(&checkout, &removing) {
++        Ok(()) => Ok(true),
++        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
++        Err(source) => Err(Error::Remove {
++            folder: checkout,
++            source,
++        }),
++    }
++}
++
++/// A folder another remover (the sweep, a window's `prepare`) deletes at the same time counts as removed.
+ fn remove_if_present(folder: &Path) -> Result<(), Error> {
+     match fs::remove_dir_all(folder) {
+         Ok(()) => Ok(()),
+         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
++        Err(_) if !folder.exists() => Ok(()),
+         Err(source) => Err(Error::Remove {
+             folder: folder.to_owned(),
+             source,
+diff --git a/crates/agent/src/lib.rs b/crates/agent/src/lib.rs
+index c2ca7dd..81ab716 100644
+--- a/crates/agent/src/lib.rs
++++ b/crates/agent/src/lib.rs
+@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ 
+ pub use crate::look::LookJob;
+-pub use crate::sweep::sweep_leftovers;
+ pub use crate::workspace::{Pair, Workspace};
++pub use yamt_pipe::HostEvent;
+ 
+ /// One agent process start; a later start gets a new number.
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+@@ -53,7 +53,7 @@ pub enum CheckoutReply {
+     Failed { message: String },
+ }
+ 
+-/// What the checkout holds now; `Changed` lists at least one file or has `head_moved`.
++/// What the checkout holds now; `Changed` lists at least one file or ref, or has `head_moved`.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(tag = "kind")]
+ pub enum CheckoutLook {
+@@ -62,6 +62,8 @@ pub enum CheckoutLook {
+     Changed {
+         folder: String,
+         files: Vec<String>,
++        /// The AI's branches and stash (plan §2 #122): the clone starts with none.
++        refs: Vec<String>,
+         head_moved: bool,
+     },
+     Unreadable {
+diff --git a/crates/agent/src/look.rs b/crates/agent/src/look.rs
+index 990bbff..dc9f0b8 100644
+--- a/crates/agent/src/look.rs
++++ b/crates/agent/src/look.rs
+@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
+ use yamt_gitio::Repo;
+ 
+ use crate::CheckoutLook;
+-use crate::checkout::CHECKOUT;
++use crate::checkout::checkout_folder;
+ 
+ /// The checkout's folder and the commit it was made at, taken under the shell's lock; `look` runs git outside it.
+ #[derive(Clone, Debug)]
+@@ -16,12 +16,13 @@ pub struct LookJob {
+ impl LookJob {
+     pub(crate) fn in_pair(pair_folder: &Path, new_commit: String) -> LookJob {
+         LookJob {
+-            folder: pair_folder.join(CHECKOUT),
++            folder: checkout_folder(pair_folder),
+             new_commit,
+         }
+     }
+ 
+-    /// "Changed" is any file `git status` lists (an ignored one is not) or `HEAD` away from the commit.
++    /// "Changed" is any file `git status` lists (an ignored one is not), any branch or stash (plan §2 #122),
++    /// or `HEAD` away from the commit.
+     #[must_use]
+     pub fn look(self) -> CheckoutLook {
+         if !self.folder.exists() {
+@@ -29,12 +30,19 @@ impl LookJob {
+         }
+         let folder = self.folder.to_string_lossy().into_owned();
+         match changes(&self.folder, &self.new_commit) {
+-            Ok(Changes { files, head_moved }) if files.is_empty() && !head_moved => {
+-                CheckoutLook::Clean
+-            }
+-            Ok(Changes { files, head_moved }) => CheckoutLook::Changed {
++            Ok(Changes {
++                files,
++                refs,
++                head_moved,
++            }) if files.is_empty() && refs.is_empty() && !head_moved => CheckoutLook::Clean,
++            Ok(Changes {
++                files,
++                refs,
++                head_moved,
++            }) => CheckoutLook::Changed {
+                 folder,
+                 files,
++                refs,
+                 head_moved,
+             },
+             Err(message) => CheckoutLook::Unreadable { folder, message },
+@@ -44,18 +52,23 @@ impl LookJob {
+ 
+ struct Changes {
+     files: Vec<String>,
++    refs: Vec<String>,
+     head_moved: bool,
+ }
+ 
+ fn changes(folder: &Path, new_commit: &str) -> Result<Changes, String> {
+     let repo = own_repo(folder)?;
+     let entries = repo.status_entries().map_err(|error| error.to_string())?;
++    let refs = repo
++        .branches_and_stash()
++        .map_err(|error| error.to_string())?;
+     let head = repo.head_commit().map_err(|error| error.to_string())?;
+     Ok(Changes {
+         files: entries
+             .iter()
+             .map(|entry| entry.path.to_string_lossy().into_owned())
+             .collect(),
++        refs,
+         head_moved: head.as_str() != new_commit,
+     })
+ }
+@@ -63,7 +76,7 @@ fn changes(folder: &Path, new_commit: &str) -> Result<Changes, String> {
+ /// The repository whose work tree is `folder` itself: git looks in parent folders when the checkout's
+ /// own `.git` is broken, and a repository found there is not the checkout.
+ fn own_repo(folder: &Path) -> Result<Repo, String> {
+-    let repo = Repo::discover(folder).map_err(|error| error.to_string())?;
++    let repo = Repo::discover_from_folder(folder).map_err(|error| error.to_string())?;
+     let own = fs::canonicalize(folder).map_err(|error| error.to_string())?;
+     let found = fs::canonicalize(repo.root()).map_err(|error| error.to_string())?;
+     if found == own {
+diff --git a/crates/agent/src/process.rs b/crates/agent/src/process.rs
+index b62bd6a..82bf317 100644
+--- a/crates/agent/src/process.rs
++++ b/crates/agent/src/process.rs
+@@ -1,34 +1,51 @@
+-use std::path::Path;
++use std::path::{Path, is_separator};
+ use std::sync::mpsc::Sender;
+ 
++use yamt_gitio::Repo;
+ use yamt_pipe::{Framing, HostEvent, ProgramFolders, Running, find};
+ 
+ use crate::{AgentCommand, AgentStartReply};
+ 
+ /// Starts the command's program in `checkout`, looked up in PATH, then in the command's home folders;
+-/// `Err` is the reply that says why it did not start.
++/// `Err` is the reply that says why it did not start. A relative path such as `bin/agent` is refused: it
++/// would name a file of the reviewed commit. The agent's environment names no repository
++/// (`Repo::REPOSITORY_VARIABLES`), so its git finds the checkout's own.
+ pub(crate) fn start_in(
+     checkout: &Path,
+     command: &AgentCommand,
+     events: Sender<HostEvent>,
+ ) -> Result<Running, AgentStartReply> {
++    let not_found = |searched: Vec<String>| AgentStartReply::NotFound {
++        program: command.program.clone(),
++        searched,
++    };
++    let program = Path::new(&command.program);
++    if command.program.chars().any(is_separator) && !program.is_absolute() {
++        return Err(not_found(Vec::new()));
++    }
+     let folders = ProgramFolders {
+         project: Vec::new(),
+         home: command.home_folders.clone(),
+     };
+     let found = find(checkout, checkout, &command.program, &folders).map_err(|searched| {
+-        AgentStartReply::NotFound {
+-            program: command.program.clone(),
+-            searched: searched
++        not_found(
++            searched
+                 .iter()
+                 .map(|folder| folder.to_string_lossy().into_owned())
+                 .collect(),
+-        }
++        )
+     })?;
+-    Running::start(&found.path, &command.args, checkout, Framing::Lines, events).map_err(|error| {
+-        AgentStartReply::SpawnFailed {
+-            program: command.program.clone(),
+-            message: error.to_string(),
+-        }
++    let removed = Repo::REPOSITORY_VARIABLES;
++    Running::start_without(
++        &found.path,
++        &command.args,
++        checkout,
++        Framing::Lines,
++        events,
++        &removed,
++    )
++    .map_err(|error| AgentStartReply::SpawnFailed {
++        program: command.program.clone(),
++        message: error.to_string(),
+     })
+ }
+diff --git a/crates/agent/src/sweep.rs b/crates/agent/src/sweep.rs
+index 2c10ddf..54b2b33 100644
+--- a/crates/agent/src/sweep.rs
++++ b/crates/agent/src/sweep.rs
+@@ -1,42 +1,49 @@
+ use std::path::Path;
+ 
+-use yamt_range::{PairLock, pair_folders};
++use yamt_range::{PairLock, pair_folders, pair_right_commit};
+ 
+ use crate::checkout;
+ 
+-/// What crashes and kills left in `range_dir`'s pair folders: in every pair whose lock it takes, the partial and
+-/// removing folders and a clean checkout are deleted; a changed or unreadable one is kept. In `own`, the
+-/// window's own pair folder, only the partial and removing folders go: its checkout is reused.
+-pub fn sweep_leftovers(range_dir: &Path, own: &Path) {
++/// What crashes and kills left in `range_dir`'s pair folders other than `own`. A folder holding no checkout
++/// and no leftover is skipped without its lock. In every other pair whose lock it takes, the partial and
++/// removing folders go and a clean checkout is renamed to `checkout.removing`, which is deleted after the lock
++/// is released, so a window starting on that pair waits for no deletion; a changed or unreadable checkout is kept.
++pub(crate) fn sweep_other_pairs(range_dir: &Path, own: &Path) {
+     for folder in pair_folders(range_dir) {
+-        if folder == own {
+-            remove_leftovers(&folder);
++        if folder == own || !checkout::has_any(&folder) {
+             continue;
+         }
+-        match PairLock::try_hold(&folder) {
+-            Ok(Some(_held)) => {
+-                remove_leftovers(&folder);
+-                if let Some(new_commit) = right_commit(&folder) {
+-                    checkout::remove_when_clean(&folder, new_commit);
+-                }
+-            }
+-            Ok(None) => {}
++        let set_aside = match PairLock::try_hold(&folder) {
++            Ok(Some(_held)) => set_aside_under_lock(&folder),
++            Ok(None) => false,
+             Err(error) => {
+                 tracing::warn!(%error, folder = %folder.display(), "a pair's lock cannot be taken");
++                false
+             }
++        };
++        if set_aside {
++            logged(checkout::remove_set_aside(&folder));
+         }
+     }
+ }
+ 
+-fn remove_leftovers(folder: &Path) {
+-    if let Err(error) = checkout::remove_leftovers(folder) {
++/// The leftovers deleted and a clean checkout renamed to `checkout.removing`; true once renamed.
++fn set_aside_under_lock(folder: &Path) -> bool {
++    logged(checkout::remove_leftovers(folder));
++    let Some(new_commit) = pair_right_commit(folder) else {
++        return false;
++    };
++    match checkout::set_aside_when_clean(folder, new_commit.as_str().to_owned()) {
++        Ok(set_aside) => set_aside,
++        Err(error) => {
++            tracing::warn!(%error, "the AI's clean checkout stays");
++            false
++        }
++    }
++}
++
++pub(crate) fn logged(removed: Result<(), crate::Error>) {
++    if let Err(error) = removed {
+         tracing::warn!(%error, "a leftover of the AI's checkout stays");
+     }
+ }
+-
+-/// The right commit from the pair folder's name `<left id>-<right id>` (`yamt_range::PairLock::take`).
+-fn right_commit(folder: &Path) -> Option<String> {
+-    let name = folder.file_name()?.to_str()?;
+-    let (_left, right) = name.split_once('-')?;
+-    Some(right.to_owned())
+-}
+diff --git a/crates/agent/src/workspace.rs b/crates/agent/src/workspace.rs
+index 66ce826..ea3f2f4 100644
+--- a/crates/agent/src/workspace.rs
++++ b/crates/agent/src/workspace.rs
+@@ -1,4 +1,4 @@
+-use std::path::PathBuf;
++use std::path::{Path, PathBuf};
+ use std::sync::mpsc::Sender;
+ 
+ use yamt_pipe::{HostEvent, Running};
+@@ -6,6 +6,7 @@ use yamt_pipe::{HostEvent, Running};
+ use crate::checkout;
+ use crate::look::LookJob;
+ use crate::process;
++use crate::sweep;
+ use crate::{AgentCommand, AgentRun, AgentStartReply, CheckoutReply, Error};
+ 
+ /// The range window's repository, its pair folder (held by its `PairLock`) and the right commit's full id.
+@@ -16,7 +17,8 @@ pub struct Pair {
+     pub new_commit: String,
+ }
+ 
+-/// The AI's checkout and the agent running in it. Every removal stops and reaps the agent first.
++/// The AI's checkout and the agent running in it. Every removal stops and reaps the agent first; only the
++/// agent's own process is reaped, never a process it started (a build it runs may outlive it).
+ pub struct Workspace {
+     pair: Pair,
+     /// `Some` once `prepare` made or reused a complete checkout.
+@@ -53,7 +55,8 @@ impl Workspace {
+         }
+     }
+ 
+-    /// Starts the agent in the checkout, after stopping and reaping one that runs.
++    /// Starts the agent in the checkout, after stopping and reaping one that runs. Blocks until that
++    /// earlier agent is reaped: up to about 3 s for one that ignores its stdin closing.
+     pub fn start(&mut self, command: &AgentCommand, events: Sender<HostEvent>) -> AgentStartReply {
+         let Some(folder) = self.checkout.clone() else {
+             return AgentStartReply::NoCheckout;
+@@ -108,6 +111,13 @@ impl Workspace {
+         checkout::remove_when_clean(&self.pair.folder, self.pair.new_commit);
+     }
+ 
++    /// What crashes and kills left in `range_dir`: in this pair only the partial and removing folders
++    /// (its checkout is reused); in every other pair no window holds, also a clean checkout.
++    pub fn sweep_leftovers(&mut self, range_dir: &Path) {
++        sweep::logged(checkout::remove_leftovers(&self.pair.folder));
++        sweep::sweep_other_pairs(range_dir, &self.pair.folder);
++    }
++
+     fn running(&self, run: AgentRun) -> Option<&Running> {
+         match &self.agent {
+             Some((current, running)) if *current == run => Some(running),
+diff --git a/crates/agent/tests/checkout.rs b/crates/agent/tests/checkout.rs
+index 4806fee..01b007b 100644
+--- a/crates/agent/tests/checkout.rs
++++ b/crates/agent/tests/checkout.rs
+@@ -1,93 +1,50 @@
+ #![cfg(test)]
+ 
++mod common;
++
++use std::env;
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ 
+-use yamt_agent::{CheckoutLook, CheckoutReply, Pair, Workspace, sweep_leftovers};
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
++use yamt_agent::{CheckoutLook, CheckoutReply, Error, Pair, Workspace};
++use yamt_conflict_repo::{git, git_ok, run_ignored_in_child};
+ 
+-const IGNORE_RULES: &[u8] = b"ignored/\n";
++use common::{Fixture, commit_of, pair_in};
+ 
+-/// The source repository, the data folder standing for `<data_dir>/yamt/range`, and the pair inside it
+-/// whose right commit is the source's `remote`.
+-struct Fixture {
+-    _source: TempDir,
+-    range_dir: TempDir,
+-    pair: Pair,
+-}
++const INHERITED_GIT_DIR_TEST: &str = "preparing_under_an_inherited_git_dir";
++#[cfg(unix)]
++const AGENT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+ 
+ impl Fixture {
+-    fn new() -> Fixture {
+-        let files = [
+-            same_on_every_side(".gitignore", IGNORE_RULES),
+-            ConflictFile {
+-                path: "a.txt",
+-                kind: FileKind::Regular,
+-                base: Some(b"base\n"),
+-                local: Some(b"local\n"),
+-                remote: Some(b"remote\n"),
+-            },
+-        ];
+-        let source = diverged_repo(&files).unwrap();
+-        let range_dir = tempfile::tempdir().unwrap();
+-        let left = commit_of(source.path(), "main");
+-        let right = commit_of(source.path(), "remote");
+-        let folder = range_dir
+-            .path()
+-            .join("source-0123456789abcdef")
+-            .join(format!("{left}-{right}"));
+-        fs::create_dir_all(&folder).unwrap();
+-        let pair = Pair {
+-            repo: source.path().to_owned(),
+-            folder,
+-            new_commit: right,
+-        };
+-        Fixture {
+-            _source: source,
+-            range_dir,
+-            pair,
+-        }
+-    }
+-
+-    fn workspace(&self) -> Workspace {
+-        Workspace::new(self.pair.clone())
+-    }
+-
+-    fn checkout(&self) -> PathBuf {
+-        self.pair.folder.join("checkout")
+-    }
+-
+     fn ready(&self) -> CheckoutReply {
+         CheckoutReply::Ready {
+             folder: self.checkout().to_string_lossy().into_owned(),
+         }
+     }
+ 
+-    fn changed(&self, files: &[&str], head_moved: bool) -> CheckoutLook {
++    fn changed(&self, files: &[&str], refs: &[&str], head_moved: bool) -> CheckoutLook {
+         CheckoutLook::Changed {
+             folder: self.checkout().to_string_lossy().into_owned(),
+             files: files.iter().map(|file| (*file).to_owned()).collect(),
++            refs: refs.iter().map(|name| (*name).to_owned()).collect(),
+             head_moved,
+         }
+     }
+-}
+ 
+-fn same_on_every_side<'a>(path: &'a str, text: &'a [u8]) -> ConflictFile<'a> {
+-    ConflictFile {
+-        path,
+-        kind: FileKind::Regular,
+-        base: Some(text),
+-        local: Some(text),
+-        remote: Some(text),
++    /// The sweep as a window on another pair of the same data folder runs it.
++    fn sweep_from_another_pair(&self) {
++        let other = Pair {
++            folder: self
++                .range_dir
++                .path()
++                .join("other-0123456789abcdef")
++                .join("a-b"),
++            ..self.pair.clone()
++        };
++        Workspace::new(other).sweep_leftovers(self.range_dir.path());
+     }
+ }
+ 
+-fn commit_of(root: &Path, revision: &str) -> String {
+-    text_of(root, &["rev-parse", revision])
+-        .trim_end()
+-        .to_owned()
+-}
+-
+ fn text_of(root: &Path, args: &[&str]) -> String {
+     String::from_utf8(git_ok(root, args).unwrap()).unwrap()
+ }
+@@ -97,6 +54,12 @@ fn commit_everything(root: &Path, message: &str) {
+     git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message]).unwrap();
+ }
+ 
++#[cfg(unix)]
++fn set_mode(folder: &Path, mode: u32) {
++    use std::os::unix::fs::PermissionsExt;
++    fs::set_permissions(folder, fs::Permissions::from_mode(mode)).unwrap();
++}
++
+ #[test]
+ fn prepare_makes_the_checkout_in_the_pair_folder_and_reuses_it_the_second_time() {
+     let fixture = Fixture::new();
+@@ -142,7 +105,10 @@ fn prepare_reuses_a_kept_checkout_with_its_changes_and_commits() {
+         fs::read(checkout.join("new.txt")).unwrap(),
+         b"not committed\n"
+     );
+-    assert_eq!(next.look_job().look(), fixture.changed(&["new.txt"], true));
++    assert_eq!(
++        next.look_job().look(),
++        fixture.changed(&["new.txt"], &[], true)
++    );
+ }
+ 
+ #[test]
+@@ -199,19 +165,43 @@ fn an_edited_file_an_untracked_file_and_a_moved_head_each_count_as_changed() {
+     fs::write(checkout.join("a.txt"), b"edited\n").unwrap();
+     assert_eq!(
+         workspace.look_job().look(),
+-        fixture.changed(&["a.txt"], false)
++        fixture.changed(&["a.txt"], &[], false)
+     );
+     git_ok(&checkout, &["checkout", "--", "a.txt"]).unwrap();
+ 
+     fs::write(checkout.join("untracked.txt"), b"new\n").unwrap();
+     assert_eq!(
+         workspace.look_job().look(),
+-        fixture.changed(&["untracked.txt"], false)
++        fixture.changed(&["untracked.txt"], &[], false)
+     );
+     fs::remove_file(checkout.join("untracked.txt")).unwrap();
+ 
+     commit_everything(&checkout, "an empty commit");
+-    assert_eq!(workspace.look_job().look(), fixture.changed(&[], true));
++    assert_eq!(workspace.look_job().look(), fixture.changed(&[], &[], true));
++}
++
++#[test]
++fn a_stash_alone_counts_as_changed_and_so_does_a_branch() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    let checkout = fixture.checkout();
++    fs::write(checkout.join("a.txt"), b"the AI's stashed work\n").unwrap();
++
++    git_ok(&checkout, &["stash", "--quiet"]).unwrap();
++
++    assert_eq!(
++        workspace.look_job().look(),
++        fixture.changed(&[], &["stash"], false)
++    );
++    git_ok(&checkout, &["stash", "drop", "--quiet"]).unwrap();
++    git_ok(&checkout, &["branch", "ai-work"]).unwrap();
++    assert_eq!(
++        workspace.look_job().look(),
++        fixture.changed(&[], &["ai-work"], false)
++    );
++    workspace.end();
++    assert!(fixture.checkout().exists());
+ }
+ 
+ #[test]
+@@ -249,10 +239,7 @@ fn a_checkout_git_cannot_read_is_unreadable_and_never_removed_by_end_or_sweep()
+     assert_eq!(folder, checkout.to_string_lossy());
+     assert_ne!(message, "");
+ 
+-    sweep_leftovers(
+-        fixture.range_dir.path(),
+-        &fixture.range_dir.path().join("other"),
+-    );
++    fixture.sweep_from_another_pair();
+     assert!(checkout.join("a.txt").exists());
+     workspace.end();
+     assert!(checkout.join("a.txt").exists());
+@@ -300,6 +287,7 @@ fn discard_removes_a_changed_checkout() {
+     let mut workspace = fixture.workspace();
+     workspace.prepare();
+     fs::write(fixture.checkout().join("a.txt"), b"edited\n").unwrap();
++    commit_everything(&fixture.checkout(), "the AI's commit");
+ 
+     workspace.discard().unwrap();
+ 
+@@ -308,6 +296,58 @@ fn discard_removes_a_changed_checkout() {
+     assert_eq!(workspace.look_job().look(), CheckoutLook::Missing);
+ }
+ 
++#[test]
++fn discard_without_a_checkout_succeeds() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++
++    workspace.discard().unwrap();
++    workspace.prepare();
++    workspace.discard().unwrap();
++
++    workspace.discard().unwrap();
++    assert!(!fixture.checkout().exists());
++}
++
++#[cfg(unix)]
++#[test]
++fn discard_that_cannot_rename_the_checkout_answers_remove_and_keeps_it() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++
++    set_mode(&fixture.pair.folder, 0o555);
++    let discarded = workspace.discard();
++    set_mode(&fixture.pair.folder, 0o755);
++
++    assert!(
++        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == fixture.checkout()),
++        "{discarded:?}"
++    );
++    assert!(fixture.checkout().join("a.txt").exists());
++}
++
++#[cfg(unix)]
++#[test]
++fn discard_that_cannot_delete_the_checkout_answers_remove() {
++    let fixture = Fixture::new();
++    let mut workspace = fixture.workspace();
++    workspace.prepare();
++    let sub = fixture.checkout().join("sub");
++    fs::create_dir(&sub).unwrap();
++    fs::write(sub.join("kept.txt"), b"kept\n").unwrap();
++    set_mode(&sub, 0o555);
++
++    let discarded = workspace.discard();
++
++    let removing = fixture.pair.folder.join("checkout.removing");
++    set_mode(&removing.join("sub"), 0o755);
++    assert!(
++        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == removing),
++        "{discarded:?}"
++    );
++}
++
+ #[test]
+ fn a_checkout_left_after_a_kill_is_reused_by_the_next_window() {
+     let fixture = Fixture::new();
+@@ -325,6 +365,86 @@ fn a_checkout_left_after_a_kill_is_reused_by_the_next_window() {
+     );
+     assert_eq!(
+         next.look_job().look(),
+-        fixture.changed(&["untracked.txt"], false)
++        fixture.changed(&["untracked.txt"], &[], false)
++    );
++}
++
++#[test]
++fn prepare_never_acts_on_the_repository_an_inherited_git_dir_names() {
++    let fixture = Fixture::new();
++    let source = &fixture.pair.repo;
++    git_ok(
++        source,
++        &["remote", "add", "origin", "https://example.invalid/r.git"],
++    )
++    .unwrap();
++
++    let ran = run_ignored_in_child(&[INHERITED_GIT_DIR_TEST], |child| {
++        child.env("GIT_DIR", source.join(".git"));
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++/// Branches, remotes and HEAD of `source`, as git lists them.
++fn refs_and_head(source: &Path) -> String {
++    let mut state = text_of(source, &["for-each-ref", "refs/heads"]);
++    state.push_str(&text_of(source, &["remote", "-v"]));
++    state.push_str(&text_of(source, &["symbolic-ref", "HEAD"]));
++    state
++}
++
++#[test]
++#[ignore = "run by prepare_never_acts_on_the_repository_an_inherited_git_dir_names"]
++fn preparing_under_an_inherited_git_dir() {
++    let git_dir = PathBuf::from(env::var_os("GIT_DIR").unwrap());
++    let source = git_dir.parent().unwrap();
++    let before = refs_and_head(source);
++    let (_range_dir, pair) = pair_in(source);
++    let checkout = pair.folder.join("checkout");
++    let mut workspace = Workspace::new(pair);
++
++    let reply = workspace.prepare();
++
++    assert_eq!(
++        reply,
++        CheckoutReply::Ready {
++            folder: checkout.to_string_lossy().into_owned()
++        }
++    );
++    assert_eq!(refs_and_head(source), before);
++    assert_eq!(workspace.look_job().look(), CheckoutLook::Clean);
++    assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"remote\n");
++    #[cfg(unix)]
++    the_agent_finds_the_checkout_s_own_repository(&mut workspace, &checkout);
++}
++
++#[cfg(unix)]
++fn the_agent_finds_the_checkout_s_own_repository(workspace: &mut Workspace, checkout: &Path) {
++    use yamt_agent::{AgentCommand, AgentStartReply, HostEvent};
++
++    let print = AgentCommand {
++        program: "sh".to_owned(),
++        args: vec![
++            "-c".to_owned(),
++            "echo \"${GIT_DIR-unset} $(git rev-parse --show-toplevel)\"".to_owned(),
++        ],
++        home_folders: Vec::new(),
++    };
++    let (sender, events) = std::sync::mpsc::channel();
++    let reply = workspace.start(&print, sender);
++    assert!(
++        matches!(reply, AgentStartReply::Started { .. }),
++        "{reply:?}"
++    );
++    let printed = match events.recv_timeout(AGENT_WAIT).unwrap() {
++        HostEvent::Message { text } => text,
++        other @ (HostEvent::Log { .. } | HostEvent::Exited { .. }) => panic!("{other:?}"),
++    };
++    let (git_dir, top) = printed.split_once(' ').unwrap();
++    assert_eq!(git_dir, "unset");
++    assert_eq!(
++        fs::canonicalize(top).unwrap(),
++        fs::canonicalize(checkout).unwrap()
+     );
+ }
+diff --git a/crates/agent/tests/common/mod.rs b/crates/agent/tests/common/mod.rs
+new file mode 100644
+index 0000000..8d67303
+--- /dev/null
++++ b/crates/agent/tests/common/mod.rs
+@@ -0,0 +1,77 @@
++use std::path::{Path, PathBuf};
++
++use yamt_agent::{Pair, Workspace};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_range::{PairLock, RangeSpec, Resolved};
++
++const IGNORE_RULES: &[u8] = b"ignored/\n";
++
++/// The source repository (`a.txt` differs on every side; `ignored/` is ignored), the data folder standing for
++/// `<data_dir>/yamt/range`, and the pair `main..remote` inside it, its folder made by `PairLock::take`.
++pub struct Fixture {
++    _source: TempDir,
++    pub range_dir: TempDir,
++    pub pair: Pair,
++}
++
++impl Fixture {
++    pub fn new() -> Fixture {
++        let source = diverged_repo(&[
++            same_on_every_side(".gitignore", IGNORE_RULES),
++            ConflictFile {
++                path: "a.txt",
++                kind: FileKind::Regular,
++                base: Some(b"base\n"),
++                local: Some(b"local\n"),
++                remote: Some(b"remote\n"),
++            },
++        ])
++        .unwrap();
++        let (range_dir, pair) = pair_in(source.path());
++        Fixture {
++            _source: source,
++            range_dir,
++            pair,
++        }
++    }
++
++    pub fn workspace(&self) -> Workspace {
++        Workspace::new(self.pair.clone())
++    }
++
++    pub fn checkout(&self) -> PathBuf {
++        self.pair.folder.join("checkout")
++    }
++}
++
++/// A new data folder and the pair `main..remote` of `source` in it; no lock is held on it.
++pub fn pair_in(source: &Path) -> (TempDir, Pair) {
++    let range_dir = tempfile::tempdir().unwrap();
++    let spec = RangeSpec::parse("main..remote").unwrap();
++    let resolved = Resolved::resolve(source, &spec).unwrap();
++    let folder = PairLock::take(range_dir.path(), &resolved)
++        .unwrap()
++        .folder()
++        .to_owned();
++    let pair = Pair {
++        repo: source.to_owned(),
++        folder,
++        new_commit: commit_of(source, "remote"),
++    };
++    (range_dir, pair)
++}
++
++pub fn commit_of(root: &Path, revision: &str) -> String {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn same_on_every_side<'a>(path: &'a str, text: &'a [u8]) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base: Some(text),
++        local: Some(text),
++        remote: Some(text),
++    }
++}
+diff --git a/crates/agent/tests/process.rs b/crates/agent/tests/process.rs
+index ed26825..0f4d8b8 100644
+--- a/crates/agent/tests/process.rs
++++ b/crates/agent/tests/process.rs
+@@ -1,5 +1,7 @@
+ #![cfg(test)]
+ 
++mod common;
++
+ use std::env;
+ use std::fs;
+ use std::path::{Path, PathBuf};
+@@ -7,9 +9,10 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
+ use std::thread;
+ use std::time::Duration;
+ 
+-use yamt_agent::{AgentCommand, AgentRun, AgentStartReply, Pair, Workspace};
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+-use yamt_pipe::HostEvent;
++use yamt_agent::{AgentCommand, AgentRun, AgentStartReply, HostEvent, Workspace};
++use yamt_range::pair_folders;
++
++use common::{Fixture, commit_of};
+ 
+ const ECHO: &str = env!("CARGO_BIN_EXE_agent-echo");
+ const WAIT: Duration = Duration::from_secs(10);
+@@ -17,10 +20,9 @@ const HOLD_RELEASE_AND_MORE: Duration = Duration::from_millis(800);
+ const MISSING_PROGRAM: &str = "yamt-agent-test-no-such-program";
+ const CRASH_CODE: i32 = 3;
+ 
+-/// A workspace whose checkout is prepared, and the folders it lives in.
++/// A workspace and the folders it lives in.
+ struct Prepared {
+-    _source: TempDir,
+-    _range_dir: TempDir,
++    fixture: Fixture,
+     checkout: PathBuf,
+     workspace: Workspace,
+ }
+@@ -32,48 +34,33 @@ fn prepared() -> Prepared {
+ }
+ 
+ fn unprepared() -> Prepared {
+-    let file = ConflictFile {
+-        path: "a.txt",
+-        kind: FileKind::Regular,
+-        base: Some(b"base\n"),
+-        local: Some(b"local\n"),
+-        remote: Some(b"remote\n"),
+-    };
+-    let source = diverged_repo(&[file]).unwrap();
+-    let range_dir = tempfile::tempdir().unwrap();
+-    let new_commit = String::from_utf8(git_ok(source.path(), &["rev-parse", "remote"]).unwrap())
+-        .unwrap()
+-        .trim_end()
+-        .to_owned();
+-    let folder = range_dir
+-        .path()
+-        .join("source-0123456789abcdef")
+-        .join("pair");
+-    fs::create_dir_all(&folder).unwrap();
+-    let pair = Pair {
+-        repo: source.path().to_owned(),
+-        folder: folder.clone(),
+-        new_commit,
+-    };
++    let fixture = Fixture::new();
+     Prepared {
+-        _source: source,
+-        _range_dir: range_dir,
+-        checkout: folder.join("checkout"),
+-        workspace: Workspace::new(pair),
++        checkout: fixture.checkout(),
++        workspace: fixture.workspace(),
++        fixture,
+     }
+ }
+ 
+ fn echo_command() -> AgentCommand {
++    command(ECHO, &[])
++}
++
++fn command(program: &str, args: &[&str]) -> AgentCommand {
+     AgentCommand {
+-        program: ECHO.to_owned(),
+-        args: Vec::new(),
++        program: program.to_owned(),
++        args: args.iter().map(|&arg| arg.to_owned()).collect(),
+         home_folders: Vec::new(),
+     }
+ }
+ 
+ fn start_echo(workspace: &mut Workspace) -> (AgentRun, Receiver<HostEvent>) {
++    started(workspace, &echo_command())
++}
++
++fn started(workspace: &mut Workspace, command: &AgentCommand) -> (AgentRun, Receiver<HostEvent>) {
+     let (sender, events) = mpsc::channel();
+-    match workspace.start(&echo_command(), sender) {
++    match workspace.start(command, sender) {
+         AgentStartReply::Started { run } => (run, events),
+         other @ (AgentStartReply::NotFound { .. }
+         | AgentStartReply::SpawnFailed { .. }
+@@ -115,6 +102,10 @@ fn the_agent_runs_in_the_checkout() {
+     assert_eq!(next_message(&events), "edited a.txt");
+ 
+     assert!(same_folder(Path::new(&folder), &prepared.checkout));
++    assert_eq!(
++        commit_of(&prepared.checkout, "HEAD"),
++        prepared.fixture.pair.new_commit
++    );
+     assert_eq!(
+         fs::read(prepared.checkout.join("a.txt")).unwrap(),
+         b"remote\nedited by agent-echo\n"
+@@ -224,6 +215,25 @@ fn a_missing_program_lists_path_and_the_home_entries() {
+     );
+ }
+ 
++#[test]
++fn a_relative_program_path_is_never_taken_from_the_reviewed_commit() {
++    let mut prepared = prepared();
++    let bin = prepared.checkout.join("bin");
++    fs::create_dir(&bin).unwrap();
++    fs::copy(ECHO, bin.join("agent")).unwrap();
++    let (sender, _events) = mpsc::channel();
++
++    let reply = prepared.workspace.start(&command("bin/agent", &[]), sender);
++
++    assert_eq!(
++        reply,
++        AgentStartReply::NotFound {
++            program: "bin/agent".to_owned(),
++            searched: Vec::new(),
++        }
++    );
++}
++
+ #[test]
+ fn discard_stops_the_agent_before_removing_the_checkout() {
+     let mut prepared = prepared();
+@@ -236,6 +246,10 @@ fn discard_stops_the_agent_before_removing_the_checkout() {
+     assert_eq!(exited_code(&events), Some(0));
+     thread::sleep(HOLD_RELEASE_AND_MORE);
+     assert!(!prepared.checkout.exists());
++    assert_eq!(
++        pair_folders(prepared.fixture.range_dir.path()),
++        [prepared.fixture.pair.folder.clone()]
++    );
+     let (sender, _later) = mpsc::channel();
+     assert_eq!(
+         prepared.workspace.start(&echo_command(), sender),
+diff --git a/crates/agent/tests/sweep.rs b/crates/agent/tests/sweep.rs
+index 03f93ff..739e480 100644
+--- a/crates/agent/tests/sweep.rs
++++ b/crates/agent/tests/sweep.rs
+@@ -1,64 +1,49 @@
+ #![cfg(test)]
+ 
++mod common;
++
+ use std::fs;
+-use std::path::{Path, PathBuf};
++use std::path::PathBuf;
++use std::sync::atomic::{AtomicBool, Ordering};
++use std::thread;
+ 
+-use yamt_agent::{Pair, Workspace, sweep_leftovers};
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+-use yamt_range::PairLock;
++use yamt_agent::{Pair, Workspace};
++use yamt_range::{PairLock, RangeSpec, Resolved};
+ 
+-/// A pair folder `<left>-<right>` in a range folder whose checkout a window made and then lost
+-/// (dropped without `end`), with a `checkout.partial` and a `checkout.removing` beside it.
++use common::Fixture;
++
++const TAKES_DURING_SWEEPS: usize = 200;
++
++/// A pair folder made by `PairLock::take` whose checkout a window made and then lost (dropped without
++/// `end`), with a `checkout.partial` and a `checkout.removing` beside it.
+ struct Leftover {
+-    _source: TempDir,
+-    range_dir: TempDir,
++    fixture: Fixture,
+     folder: PathBuf,
+ }
+ 
+ impl Leftover {
+     fn new() -> Leftover {
+-        let file = ConflictFile {
+-            path: "a.txt",
+-            kind: FileKind::Regular,
+-            base: Some(b"base\n"),
+-            local: Some(b"local\n"),
+-            remote: Some(b"remote\n"),
+-        };
+-        let source = diverged_repo(&[file]).unwrap();
+-        let range_dir = tempfile::tempdir().unwrap();
+-        let left = commit_of(source.path(), "main");
+-        let right = commit_of(source.path(), "remote");
+-        let folder = range_dir
+-            .path()
+-            .join("source-0123456789abcdef")
+-            .join(format!("{left}-{right}"));
+-        fs::create_dir_all(&folder).unwrap();
+-        let mut workspace = Workspace::new(Pair {
+-            repo: source.path().to_owned(),
+-            folder: folder.clone(),
+-            new_commit: right,
+-        });
++        let fixture = Fixture::new();
++        let mut workspace = fixture.workspace();
+         workspace.prepare();
+         drop(workspace);
++        let folder = fixture.pair.folder.clone();
+         for leftover in ["checkout.partial", "checkout.removing"] {
+             fs::create_dir_all(folder.join(leftover).join("inside")).unwrap();
+         }
+-        Leftover {
+-            _source: source,
+-            range_dir,
+-            folder,
+-        }
++        Leftover { fixture, folder }
+     }
+ 
+-    fn sweep_from(&self, own: &Path) {
+-        sweep_leftovers(self.range_dir.path(), own);
+-    }
+-
+-    fn other_pair(&self) -> PathBuf {
+-        self.range_dir
+-            .path()
+-            .join("other-0123456789abcdef")
+-            .join("a-b")
++    fn other_pair(&self) -> Workspace {
++        Workspace::new(Pair {
++            folder: self
++                .fixture
++                .range_dir
++                .path()
++                .join("other-0123456789abcdef")
++                .join("a-b"),
++            ..self.fixture.pair.clone()
++        })
+     }
+ 
+     fn has(&self, name: &str) -> bool {
+@@ -66,18 +51,13 @@ impl Leftover {
+     }
+ }
+ 
+-fn commit_of(root: &Path, revision: &str) -> String {
+-    String::from_utf8(git_ok(root, &["rev-parse", revision]).unwrap())
+-        .unwrap()
+-        .trim_end()
+-        .to_owned()
+-}
+-
+ #[test]
+ fn a_clean_leftover_of_an_unheld_pair_is_removed() {
+     let leftover = Leftover::new();
+ 
+-    leftover.sweep_from(&leftover.other_pair());
++    leftover
++        .other_pair()
++        .sweep_leftovers(leftover.fixture.range_dir.path());
+ 
+     assert!(!leftover.has("checkout"));
+     assert!(!leftover.has("checkout.partial"));
+@@ -87,14 +67,14 @@ fn a_clean_leftover_of_an_unheld_pair_is_removed() {
+ #[test]
+ fn a_changed_leftover_is_kept() {
+     let leftover = Leftover::new();
+-    fs::write(leftover.folder.join("checkout").join("a.txt"), b"edited\n").unwrap();
++    let checkout = leftover.fixture.checkout();
++    fs::write(checkout.join("a.txt"), b"edited\n").unwrap();
+ 
+-    leftover.sweep_from(&leftover.other_pair());
++    leftover
++        .other_pair()
++        .sweep_leftovers(leftover.fixture.range_dir.path());
+ 
+-    assert_eq!(
+-        fs::read(leftover.folder.join("checkout").join("a.txt")).unwrap(),
+-        b"edited\n"
+-    );
++    assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"edited\n");
+     assert!(!leftover.has("checkout.partial"));
+     assert!(!leftover.has("checkout.removing"));
+ }
+@@ -104,7 +84,9 @@ fn a_leftover_of_a_held_pair_is_untouched() {
+     let leftover = Leftover::new();
+     let _window = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
+ 
+-    leftover.sweep_from(&leftover.other_pair());
++    leftover
++        .other_pair()
++        .sweep_leftovers(leftover.fixture.range_dir.path());
+ 
+     assert!(leftover.has("checkout"));
+     assert!(leftover.has("checkout.partial"));
+@@ -116,9 +98,42 @@ fn the_own_pair_keeps_its_checkout_and_loses_partial_and_removing_folders() {
+     let leftover = Leftover::new();
+     let _own = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
+ 
+-    leftover.sweep_from(&leftover.folder);
++    leftover
++        .fixture
++        .workspace()
++        .sweep_leftovers(leftover.fixture.range_dir.path());
+ 
+     assert!(leftover.has("checkout"));
+     assert!(!leftover.has("checkout.partial"));
+     assert!(!leftover.has("checkout.removing"));
+ }
++
++#[test]
++fn a_take_during_a_sweep_of_a_pair_with_nothing_to_sweep_succeeds() {
++    let fixture = Fixture::new();
++    let range_dir = fixture.range_dir.path();
++    let empty = range_dir.join("empty-0123456789abcdef").join("c-d");
++    fs::create_dir_all(&empty).unwrap();
++    let spec = RangeSpec::parse("main..remote").unwrap();
++    let resolved = Resolved::resolve(&fixture.pair.repo, &spec).unwrap();
++    let sweeping = AtomicBool::new(true);
++
++    thread::scope(|scope| {
++        scope.spawn(|| {
++            let mut other = Workspace::new(Pair {
++                folder: range_dir.join("other-0123456789abcdef").join("a-b"),
++                ..fixture.pair.clone()
++            });
++            while sweeping.load(Ordering::Relaxed) {
++                other.sweep_leftovers(range_dir);
++            }
++        });
++        let refused = (0..TAKES_DURING_SWEEPS)
++            .filter(|_| PairLock::take(range_dir, &resolved).is_err())
++            .count();
++        sweeping.store(false, Ordering::Relaxed);
++        assert_eq!(refused, 0);
++    });
++
++    assert!(!empty.join("lock").exists());
++}
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index c9fd648..c6e2fc8 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -2,4 +2,6 @@ Owner skill: `skill://rust-conventions` (RS14–RS15 subprocess rules). Git subp
+ 
+ What git is doing is read in one place, `Repo::stop()` in `src/operation.rs` (plan §2 #85, #91): `Stop { operation, head }` with `Operation` (`Merge`, `SquashMerge`, `Rebase(Rebase)`, `CherryPick`, `Revert`, `Am`) and `Progress` (1 ≤ step ≤ total). Order as git's `wt_status_get_state`: `rebase-apply/` (`am` with `applying`), `rebase-merge/`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, the sequencer's first command, then `SQUASH_MSG`; except that a `CHERRY_PICK_HEAD`/`REVERT_HEAD` inside a rebase is that single pick or revert (run at an `edit` or `break` stop; no progress), and `MERGE_HEAD` at an `edit` stop is a `Merge` of its own (its abort leaves the rebase at the edit), not a `rebase -r` merge step. An **edit stop** is `rebase-merge/amend` with `edit`/`e` as the last line of `rebase-merge/done` (the stopped step): git writes `amend` at a conflicted `squash`/`fixup` step too, which still replays its commit. `Rebase.replaying` is `REBASE_HEAD`, `None` only at an edit stop (where git keeps `REBASE_HEAD`) and at a `break`/`exec` stop (no `REBASE_HEAD`). `Rebase.editor_steps_ahead`: a `reword`, `squash` or `fixup -c` at this stop (the last line of `done`), in `rebase-merge/current-fixups` (the squash chain this stop is in: git opens the editor at the end of a chain with a squash) or left in `git-rebase-todo`. Refs through `commit_named`, state files through one `rev-parse --git-path` call (`Repo::git_paths`; `git_path` is its one-name case), never a `.git/` path; `read_if_present` and `exists` (missing = `None`/`false`, else `ReadFailed`) live in `src/repo.rs` for every git-dir file. A cherry-pick or revert has sequence progress (`src/sequence.rs`) only when the sequencer's first command is the same kind, the range makes commits (`opts` without `no-commit = true`) and `sequencer/head` names a commit. `Stop::id()` is the stop without its progress or editor steps ahead (an `Am` keeps its patch number); Continue, Abort and the moved-on check compare it. `src/todo.rs` reads git's todo files (comments, first command, the stopped step, edit and editor steps). `src/names.rs` reads what names a side (`current_branch`, `branches_at`, `merge_message`, `commit_summary` → `CommitSummary`). `src/rerere.rs` (plan §2 #90): `Repo::rerere_tracked()` reads `MERGE_RR` (`<id>[.<n>]\t<path>\0` records; a replayed path is dropped by rerere.c `write_rr`) only while rerere is enabled as rerere.c `is_rerere_enabled` decides (`config --type=bool rerere.enabled`; unset → whether `rr-cache` is a directory), so the empty `MERGE_RR` a commit leaves is not read once rerere is off; `None` when rerere is off or without the file, a record without a tab or another `rerere.enabled` answer `UnexpectedOutput`; `tests/rerere.rs` on `yamt_conflict_repo::rerere_repo` (the unset case in a child without the user's and system config). `tests/operations.rs` scripts every operation through `yamt_conflict_repo::operation_repo`; `tests/edit_stop.rs` the stops inside a rebase (a pick, revert or merge at an `edit` stop, a conflicted `squash` step, a conflicted `reword` with an empty todo, a conflicted `fixup` ending a chain with and without a squash).
+ 
+-Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end`: no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command` and `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list, and a merge's abort drops staged resolutions, a removal, a saved CRLF file and `MERGE_HEAD` but keeps an untracked file; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
++Abort and Continue (`src/abort_continue.rs`, plan §2 #88/#89): `Repo::abort(&Operation)` runs git's own abort (`merge --abort`, a squash merge `reset --merge`, `rebase`/`cherry-pick`/`revert`/`am --abort`; a refusal is `GitFailed` with git's stderr), `Repo::continue_operation(&Operation)` git's own continue (`merge --continue`, a squash merge `commit`, `rebase`/`cherry-pick`/`revert`/`am --continue`) with `GIT_EDITOR=:`, giving `GitRun { succeeded, output }` (stdout then stderr; a non-zero exit is not an `Err`). Both build their command with `Repo::command_as_user` (`run.rs` `git_command_as_user`: cwd, `core.quotepath=false`, nothing else; `git_command` is that plus `LC_ALL=C` and the `Access` env) and run it through `run_to_end` (abort through `run_to_success`: `run_to_end` with a non-zero exit as `GitFailed`, the one failure rule `run.rs` `failure` that the deadline runner shares): no deadline (a kill mid-commit leaves `index.lock`), stdin closed, stdout and stderr kept apart (`Finished`), and no `LC_ALL=C`, so hooks see the user's locale; it waits for git itself, then reads the pipes for at most `READER_GRACE` (a hook's background process may hold them open). Every other call keeps `Repo::command`, and all but the checkout's clone and checkout (below) keep `GIT_TIMEOUT`. `tests/abort_continue.rs`: abort per operation gives back status, branch tips and stash list, and a merge's abort drops staged resolutions, a removal, a saved CRLF file and `MERGE_HEAD` but keeps an untracked file; the continue-message tests run through `yamt_conflict_repo::run_ignored_in_child` without `GIT_EDITOR`/`VISUAL`/`EDITOR` and with `core.editor=false`.
++
++The AI's checkout (`src/checkout.rs`, plan §2 #110, #122): `clone_shared_into(into)` (an absolute folder; a partial clone — `extensions.partialClone` or a `remote.<name>.promisor` — refused at once as `Error::PartialClone`; `clone --shared --no-checkout --no-tags --origin origin --config core.longpaths=true`, then HEAD detached and every `refs/heads/*` deleted, so the clone holds no branch or tag of the source; ends with `Repo::with_root`, git resolved once), `remove_remote`, `checkout_detached`, `status_entries` (`status --porcelain=v1 -z --untracked-files=all --no-renames`, `Access::Read`; a rename is a `D ` and an `A ` entry), `head_commit` (`commit_revision` + `oid_line`, as `commit_named`), `branches_and_stash` (one `for-each-ref` of `refs/heads` and `refs/stash`, short names). The clone and the checkout use `Repo::command` + `run_to_success`: slow on a large repository, so no deadline, and they run no user-facing hook, so `LC_ALL=C`. A repository of its own — the clone (`with_root`) and `Repo::discover_from_folder` — leaves `Repo::REPOSITORY_VARIABLES` (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_COMMON_DIR`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`) out of every run, the clone command included, so an inherited `GIT_DIR` never makes them act on the user's repository; `Repo::discover` keeps them. `tests/checkout.rs`: tags not cloned, `clone.defaultRemoteName` overridden (child process), a detached source, a partial-clone source, a rename's two entries, Windows paths past `MAX_PATH`.
+diff --git a/crates/gitio/src/abort_continue.rs b/crates/gitio/src/abort_continue.rs
+index ef98a53..41a83e5 100644
+--- a/crates/gitio/src/abort_continue.rs
++++ b/crates/gitio/src/abort_continue.rs
+@@ -1,7 +1,7 @@
++use crate::Result;
+ use crate::operation::Operation;
+ use crate::repo::Repo;
+-use crate::run::{argv, run_to_end};
+-use crate::{Error, Result};
++use crate::run::{run_to_end, run_to_success};
+ 
+ /// What one git run printed, stdout then stderr, and whether it exited 0.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -15,19 +15,8 @@ impl Repo {
+     /// refuses without `MERGE_HEAD`). No deadline: a kill in the middle of a reset leaves `index.lock`.
+     /// A refusal is `Error::GitFailed` with git's stderr.
+     pub fn abort(&self, operation: &Operation) -> Result<()> {
+-        let command = self.command_as_user(&abort_args(operation));
+-        let args = argv(&command);
+-        let finished = run_to_end(command)?;
+-        if finished.status.success() {
+-            return Ok(());
+-        }
+-        Err(Error::GitFailed {
+-            args,
+-            status: finished.status.code(),
+-            stderr: String::from_utf8_lossy(&finished.stderr)
+-                .trim_end()
+-                .to_owned(),
+-        })
++        run_to_success(self.command_as_user(&abort_args(operation)))?;
++        Ok(())
+     }
+ 
+     /// git's own continue for `operation` (plan §2 #89; a squash merge: `commit`). A non-zero exit is not
+diff --git a/crates/gitio/src/checkout.rs b/crates/gitio/src/checkout.rs
+index ee9133e..8b3c16b 100644
+--- a/crates/gitio/src/checkout.rs
++++ b/crates/gitio/src/checkout.rs
+@@ -1,13 +1,16 @@
+ use std::path::{Path, PathBuf};
+-use std::process::Command;
+ 
+ use crate::entry::{Oid, path_from_git};
+-use crate::repo::{REV_PARSE, Repo, without_final_newline};
+-use crate::run::{Access, GIT_TIMEOUT, argv, run, run_to_end};
++use crate::repo::{REV_PARSE, Repo, commit_revision, oid_line, without_repository_variables};
++use crate::run::{Access, GIT_TIMEOUT, run, run_accepting, run_to_success};
+ use crate::{Error, Result};
+ 
+ const STATUS: &str = "status";
+ const FOR_EACH_REF: &str = "for-each-ref";
++const PARTIAL_CLONE_KEY: &str = "extensions.partialClone";
++const PROMISOR_KEYS: &str = r"^remote\..*\.promisor$";
++// git-config(1): `--get` and `--get-regexp` exit with 1 when no key is set.
++const UNSET_STATUS: i32 = 1;
+ 
+ /// One file `git status --porcelain=v1` lists: its two status letters (`??` untracked) and its path.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -17,18 +20,30 @@ pub struct StatusEntry {
+ }
+ 
+ impl Repo {
+-    /// `git clone --shared --no-checkout --quiet <this repository> <into>`, then HEAD detached at the cloned
+-    /// branch's commit and that branch deleted, so the clone holds no branch of this repository. No deadline:
+-    /// a large repository takes long. A relative `into` is relative to this repository's root.
++    /// `git clone --shared --no-checkout --no-tags --origin origin` of this repository into the absolute folder
++    /// `into`, then HEAD detached at the cloned branch's commit and that branch deleted, so the clone holds no
++    /// branch or tag of this repository. No deadline: a large repository takes long. A partial clone is refused:
++    /// its shared clone lacks every file it never fetched.
+     pub fn clone_shared_into(&self, into: &Path) -> Result<Repo> {
+-        let into = self.root().join(into);
+-        let mut command = self.command(
+-            Access::Write,
+-            &["clone", "--shared", "--no-checkout", "--quiet", "--"],
+-        );
+-        command.arg(self.root()).arg(&into);
++        self.require_complete()?;
++        let args = [
++            "clone",
++            "--shared",
++            "--no-checkout",
++            "--no-tags",
++            "--quiet",
++            "--origin",
++            "origin",
++            // Git for Windows refuses a path over MAX_PATH (260) unless `core.longpaths` is set (its
++            // git-config docs, "core.longpaths"); the checkout sits deep in the data folder. Other gits ignore it.
++            "--config",
++            "core.longpaths=true",
++            "--",
++        ];
++        let mut command = without_repository_variables(self.command(Access::Write, &args));
++        command.arg(self.root()).arg(into);
+         run_to_success(command)?;
+-        let clone = Repo::discover(&into)?;
++        let clone = self.with_root(into.to_owned());
+         clone.delete_branches_detaching_head()?;
+         Ok(clone)
+     }
+@@ -43,7 +58,8 @@ impl Repo {
+     /// `git checkout --detach --quiet <commit>`. No deadline: writing a large tree takes long.
+     pub fn checkout_detached(&self, commit: &Oid) -> Result<()> {
+         let args = ["checkout", "--detach", "--quiet", commit.as_str()];
+-        run_to_success(self.command(Access::Write, &args))
++        run_to_success(self.command(Access::Write, &args))?;
++        Ok(())
+     }
+ 
+     /// Every modified, added, deleted and untracked file, never an ignored one:
+@@ -61,9 +77,46 @@ impl Repo {
+ 
+     /// The commit HEAD names: `git rev-parse --verify HEAD^{commit}`.
+     pub fn head_commit(&self) -> Result<Oid> {
+-        let command = self.command(Access::Read, &[REV_PARSE, "--verify", "HEAD^{commit}"]);
+-        let line = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+-        Oid::parse(&String::from_utf8_lossy(&line))
++        let revision = commit_revision("HEAD");
++        let command = self.command(Access::Read, &[REV_PARSE, "--verify", &revision]);
++        oid_line(REV_PARSE, run(command, None, GIT_TIMEOUT)?)
++    }
++
++    /// Every branch and the stash: `refs/heads/*` and `refs/stash` by their short names.
++    pub fn branches_and_stash(&self) -> Result<Vec<String>> {
++        let args = [
++            FOR_EACH_REF,
++            "--format=%(refname:short)",
++            "refs/heads",
++            "refs/stash",
++        ];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        let names = String::from_utf8_lossy(&output);
++        Ok(names.lines().map(str::to_owned).collect())
++    }
++
++    /// Refuses a partial clone, one with a promisor remote: `extensions.partialClone` (gitrepository-layout(5))
++    /// or `remote.<name>.promisor` (git-config(1)); `clone --filter` in git 2.56 sets only the latter.
++    fn require_complete(&self) -> Result<()> {
++        let named = self.config_lines(&["--get", PARTIAL_CLONE_KEY])?;
++        let promisors = self.config_lines(&["--type=bool", "--get-regexp", PROMISOR_KEYS])?;
++        let promised = promisors
++            .split(|&byte| byte == b'\n')
++            .any(|line| line.ends_with(b" true"));
++        if named.is_empty() && !promised {
++            return Ok(());
++        }
++        Err(Error::PartialClone {
++            root: self.root().to_owned(),
++        })
++    }
++
++    fn config_lines(&self, args: &[&str]) -> Result<Vec<u8>> {
++        let mut command = self.command(Access::Read, &["config"]);
++        command.args(args);
++        run_accepting(command, None, GIT_TIMEOUT, |status| {
++            status.success() || status.code() == Some(UNSET_STATUS)
++        })
+     }
+ 
+     fn delete_branches_detaching_head(&self) -> Result<()> {
+@@ -90,21 +143,6 @@ impl Repo {
+     }
+ }
+ 
+-fn run_to_success(command: Command) -> Result<()> {
+-    let args = argv(&command);
+-    let finished = run_to_end(command)?;
+-    if finished.status.success() {
+-        return Ok(());
+-    }
+-    Err(Error::GitFailed {
+-        args,
+-        status: finished.status.code(),
+-        stderr: String::from_utf8_lossy(&finished.stderr)
+-            .trim_end()
+-            .to_owned(),
+-    })
+-}
+-
+ // git-status(1) "Porcelain Format Version 1" with `-z`: records `XY SP <path> NUL`, path unquoted; without
+ // renames no record carries a second path.
+ fn parse_status(output: &[u8]) -> Result<Vec<StatusEntry>> {
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 14e6740..9d8067e 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -77,6 +77,11 @@ pub enum Error {
+         program: std::path::PathBuf,
+         source: std::io::Error,
+     },
++    #[error(
++        "{} is a partial clone: a shared clone of it cannot check out the files it never fetched",
++        root.display()
++    )]
++    PartialClone { root: std::path::PathBuf },
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 12ed5ab..e5f6925 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -18,15 +18,46 @@ const GIT: &str = "git";
+ pub struct Repo {
+     root: PathBuf,
+     git: PathBuf,
++    lookup: Lookup,
++}
++
++/// How git finds this repository: as yamt's environment says (an inherited `GIT_DIR` and its kin
++/// included), or from its folder alone.
++#[derive(Clone, Copy)]
++enum Lookup {
++    Environment,
++    Folder,
+ }
+ 
+ impl Repo {
++    /// The variables that name a repository other than the one a folder holds (git(1) "ENVIRONMENT
++    /// VARIABLES"): every git run on a repository of its own leaves them out, and so does the agent.
++    pub const REPOSITORY_VARIABLES: [&str; 6] = [
++        "GIT_DIR",
++        "GIT_WORK_TREE",
++        "GIT_INDEX_FILE",
++        "GIT_COMMON_DIR",
++        "GIT_OBJECT_DIRECTORY",
++        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
++    ];
++
+     pub fn discover(cwd: &Path) -> Result<Repo> {
+-        let git = find_git_on_path()?;
+-        let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
+-        let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
+-        let root = path_from_git(&output);
+-        Ok(Repo { root, git })
++        discovered(cwd, Lookup::Environment)
++    }
++
++    /// The repository git finds from `cwd` alone, never the one an inherited `GIT_DIR` names; every
++    /// run on it leaves `REPOSITORY_VARIABLES` out.
++    pub fn discover_from_folder(cwd: &Path) -> Result<Repo> {
++        discovered(cwd, Lookup::Folder)
++    }
++
++    /// The repository of its own at `root`, run by the same git as this one; found from its folder alone.
++    pub(crate) fn with_root(&self, root: PathBuf) -> Repo {
++        Repo {
++            root,
++            git: self.git.clone(),
++            lookup: Lookup::Folder,
++        }
+     }
+ 
+     #[must_use]
+@@ -40,7 +71,7 @@ impl Repo {
+     }
+ 
+     pub fn commit_named(&self, name: &str) -> Result<Option<Oid>> {
+-        let revision = format!("{name}^{{commit}}");
++        let revision = commit_revision(name);
+         let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
+         oid_unless_silent(command, REV_PARSE)
+     }
+@@ -182,15 +213,53 @@ impl Repo {
+     }
+ 
+     pub(crate) fn command(&self, access: Access, args: &[&str]) -> Command {
+-        git_command(&self.git, &self.root, access, args)
++        self.lookup
++            .applied(git_command(&self.git, &self.root, access, args))
+     }
+ 
+     /// A command as the user's terminal would run it (`git_command_as_user`): Abort and Continue only.
+     pub(crate) fn command_as_user(&self, args: &[&str]) -> Command {
+-        git_command_as_user(&self.git, &self.root, args)
++        self.lookup
++            .applied(git_command_as_user(&self.git, &self.root, args))
+     }
+ }
+ 
++impl Lookup {
++    fn applied(self, command: Command) -> Command {
++        match self {
++            Lookup::Environment => command,
++            Lookup::Folder => without_repository_variables(command),
++        }
++    }
++}
++
++/// `command` with every one of `Repo::REPOSITORY_VARIABLES` left out of its environment.
++pub(crate) fn without_repository_variables(mut command: Command) -> Command {
++    for variable in Repo::REPOSITORY_VARIABLES {
++        command.env_remove(variable);
++    }
++    command
++}
++
++fn discovered(cwd: &Path, lookup: Lookup) -> Result<Repo> {
++    let git = find_git_on_path()?;
++    let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
++    let output = run(lookup.applied(command), None, GIT_TIMEOUT)?;
++    let root = path_from_git(&without_final_newline(REV_PARSE, output)?);
++    Ok(Repo { root, git, lookup })
++}
++
++/// `<name>^{commit}`: the commit `name` resolves to, a tag peeled.
++pub(crate) fn commit_revision(name: &str) -> String {
++    format!("{name}^{{commit}}")
++}
++
++/// The one commit id a git read printed on its line.
++pub(crate) fn oid_line(command: &'static str, output: Vec<u8>) -> Result<Oid> {
++    let line = without_final_newline(command, output)?;
++    Oid::parse(&String::from_utf8_lossy(&line))
++}
++
+ // git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits 1 without a message; git-merge-base(1)
+ // exits 1 without a message when the commits share no ancestor (builtin/merge-base.c `show_merge_base`).
+ fn oid_unless_silent(command: Command, name: &'static str) -> Result<Option<Oid>> {
+@@ -203,8 +272,7 @@ fn oid_unless_silent(command: Command, name: &'static str) -> Result<Option<Oid>
+         }) if stderr.is_empty() => return Ok(None),
+         Err(error) => return Err(error),
+     };
+-    let line = without_final_newline(name, output)?;
+-    Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
++    Ok(Some(oid_line(name, output)?))
+ }
+ 
+ pub(crate) fn exists(path: &Path) -> Result<bool> {
+diff --git a/crates/gitio/src/run.rs b/crates/gitio/src/run.rs
+index 2215eb7..c113248 100644
+--- a/crates/gitio/src/run.rs
++++ b/crates/gitio/src/run.rs
+@@ -93,6 +93,26 @@ pub(crate) fn run_to_end(command: Command) -> Result<Finished> {
+     })
+ }
+ 
++/// `run_to_end`, with a non-zero exit as `Error::GitFailed`; stdout on success.
++pub(crate) fn run_to_success(command: Command) -> Result<Vec<u8>> {
++    let args = argv(&command);
++    let finished = run_to_end(command)?;
++    if !finished.status.success() {
++        return Err(failure(args, &finished));
++    }
++    Ok(finished.stdout)
++}
++
++fn failure(args: Vec<String>, finished: &Finished) -> Error {
++    Error::GitFailed {
++        args,
++        status: finished.status.code(),
++        stderr: String::from_utf8_lossy(&finished.stderr)
++            .trim_end()
++            .to_owned(),
++    }
++}
++
+ fn output_until(chunks: &Receiver<io::Result<Vec<u8>>>, end: Instant) -> io::Result<Vec<u8>> {
+     match collected(chunks, end)? {
+         Collected::Whole(bytes) => Ok(bytes),
+@@ -125,13 +145,7 @@ pub(crate) fn run_accepting(
+         }
+     };
+     if !accepts(finished.status) {
+-        return Err(Error::GitFailed {
+-            args,
+-            status: finished.status.code(),
+-            stderr: String::from_utf8_lossy(&finished.stderr)
+-                .trim_end()
+-                .to_owned(),
+-        });
++        return Err(failure(args, &finished));
+     }
+     Ok(finished.stdout)
+ }
+diff --git a/crates/gitio/tests/checkout.rs b/crates/gitio/tests/checkout.rs
+index 6cf3803..4a54f37 100644
+--- a/crates/gitio/tests/checkout.rs
++++ b/crates/gitio/tests/checkout.rs
+@@ -3,11 +3,14 @@
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ 
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
+-use yamt_gitio::{Oid, Repo, StatusEntry};
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok, run_ignored_in_child,
++};
++use yamt_gitio::{Error, Oid, Repo, StatusEntry};
+ 
+ const CHECKOUT: &str = "checkout";
+ const ORIGIN: &str = "origin";
++const DEFAULT_REMOTE_NAME_TEST: &str = "cloning_under_another_default_remote_name";
+ 
+ fn oid_of(root: &Path, revision: &str) -> Oid {
+     let output = git_ok(root, &["rev-parse", revision]).unwrap();
+@@ -74,6 +77,7 @@ fn a_shared_clone_without_origin_checks_out_the_commit_detached() {
+ fn the_clone_borrows_objects_and_keeps_no_refs_of_the_source() {
+     let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
+     let into = folder.path().join(CHECKOUT);
++    git_ok(source.path(), &["tag", "v1", "local"]).unwrap();
+ 
+     let clone = Repo::discover(source.path())
+         .unwrap()
+@@ -100,6 +104,7 @@ fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones(
+         file("edited.txt", b"local\n", b"remote\n"),
+         file("staged.txt", b"local\n", b"remote\n"),
+         file("removed.txt", b"local\n", b"remote\n"),
++        file("renamed.txt", b"local\n", b"remote\n"),
+     ]);
+     let (clone, _) = checkout_at_remote(source.path(), folder.path());
+     let root = clone.root();
+@@ -112,6 +117,7 @@ fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones(
+     fs::remove_file(root.join("removed.txt")).unwrap();
+     fs::create_dir(root.join("new folder")).unwrap();
+     fs::write(root.join("new folder/untracked.txt"), "new\n").unwrap();
++    git_ok(root, &["mv", "renamed.txt", "moved.txt"]).unwrap();
+ 
+     let mut entries = clone.status_entries().unwrap();
+ 
+@@ -123,8 +129,10 @@ fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones(
+     let expected = vec![
+         entry(b"A ", "added.txt"),
+         entry(b" M", "edited.txt"),
++        entry(b"A ", "moved.txt"),
+         entry(b"??", "new folder/untracked.txt"),
+         entry(b" D", "removed.txt"),
++        entry(b"D ", "renamed.txt"),
+         entry(b"M ", "staged.txt"),
+     ];
+     assert_eq!(entries, expected);
+@@ -172,3 +180,93 @@ fn a_commit_in_the_clone_leaves_the_source_refs_and_config_untouched() {
+         "the commit went into the source's objects"
+     );
+ }
++
++#[test]
++fn a_clone_of_a_source_on_a_detached_head_holds_no_branch_and_checks_out() {
++    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++    git_ok(
++        source.path(),
++        &["checkout", "--quiet", "--detach", "remote"],
++    )
++    .unwrap();
++
++    let (clone, remote) = checkout_at_remote(source.path(), folder.path());
++
++    assert_eq!(text_of(clone.root(), &["for-each-ref", "refs/heads"]), "");
++    assert_eq!(clone.head_commit().unwrap(), remote);
++    assert_eq!(fs::read(clone.root().join("a.txt")).unwrap(), b"remote\n");
++}
++
++#[test]
++fn the_remote_is_origin_whatever_the_user_names_new_remotes() {
++    let ran = run_ignored_in_child(&[DEFAULT_REMOTE_NAME_TEST], |child| {
++        child
++            .env("GIT_CONFIG_COUNT", "1")
++            .env("GIT_CONFIG_KEY_0", "clone.defaultRemoteName")
++            .env("GIT_CONFIG_VALUE_0", "upstream");
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++#[test]
++#[ignore = "run by the_remote_is_origin_whatever_the_user_names_new_remotes"]
++fn cloning_under_another_default_remote_name() {
++    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++
++    let (clone, _) = checkout_at_remote(source.path(), folder.path());
++
++    assert_eq!(text_of(clone.root(), &["remote"]), "");
++}
++
++#[test]
++fn a_partial_clone_source_is_refused_by_name() {
++    let (origin, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
++    git_ok(origin.path(), &["config", "uploadpack.allowFilter", "true"]).unwrap();
++    let origin_path = origin.path().to_string_lossy().replace('\\', "/");
++    let url = format!(
++        "file://{}{origin_path}",
++        if origin_path.starts_with('/') {
++            ""
++        } else {
++            "/"
++        }
++    );
++    let partial = folder.path().join("partial");
++    let clone_args = ["clone", "--quiet", "--filter=blob:none", &url, "partial"];
++    git_ok(folder.path(), &clone_args).unwrap();
++    let source = Repo::discover(&partial).unwrap();
++    let into = folder.path().join(CHECKOUT);
++
++    let refused = source.clone_shared_into(&into);
++
++    assert!(
++        matches!(&refused, Err(Error::PartialClone { root })
++            if fs::canonicalize(root).unwrap() == fs::canonicalize(&partial).unwrap()),
++        "{:?}",
++        refused.err()
++    );
++    assert!(!into.exists());
++}
++
++#[cfg(windows)]
++#[test]
++fn a_path_past_max_path_under_the_checkout_folder_checks_out() {
++    let folder_name = "f".repeat(60);
++    let long_path = format!("{0}/{0}/{0}/long.txt", "d".repeat(50));
++    let (source, folder) = source_and_folder(&[file(&long_path, b"local\n", b"remote\n")]);
++    let deep = folder.path().join(&folder_name).join(&folder_name);
++    fs::create_dir_all(&deep).unwrap();
++    let into = deep.join(CHECKOUT);
++    assert!(into.join(&long_path).as_os_str().len() > 260);
++
++    let clone = Repo::discover(source.path())
++        .unwrap()
++        .clone_shared_into(&into)
++        .unwrap();
++    clone
++        .checkout_detached(&oid_of(source.path(), "remote"))
++        .unwrap();
++
++    assert_eq!(clone.status_entries().unwrap(), Vec::new());
++}
+diff --git a/crates/pipe/AGENTS.md b/crates/pipe/AGENTS.md
+index a082623..a91fa96 100644
+--- a/crates/pipe/AGENTS.md
++++ b/crates/pipe/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. Starts one program and pipes its messages both ways in one of two framings (plan §2 #70, #109); never parses a message. `lib.rs` (the public surface; `#![warn(missing_docs)]`), `run.rs` (`Running`: start(program, args, folder, framing, events), send, stop, is_finished, wait; per run a supervisor thread owning the `Child` — stop asked, stdout closed or broken, events dropped, or the program gone, then `STOP_GRACE` 2 s, kill, reap, up to `OUTPUT_DRAIN` 1 s for the readers, one `Exited` last; a writer thread owning stdin; a stdout reader sending `Message`s; a stderr reader sending `Log` lines, whose end stops nothing; `HostEvent`, whose serde/specta shape is the generated `HostEvent` in `bindings.ts`; the words of every log line yamt adds, the drop line's size from `MAX_MESSAGE_BYTES`; `CREATE_NO_WINDOW` on Windows), `frame.rs` (`Framing`: `ContentLength` — headers case-insensitive, header lines up to 8 KiB, a bad or too large frame stops the program — or `Lines` — `message + "\n"` out, one line per message in, a trailing `\r` dropped, empty lines skipped, a line over the cap or not UTF-8 dropped (`Frame::Dropped(DropReason)`) with a `Log` line while reading goes on; `MAX_MESSAGE_BYTES` 64 MiB for both; stderr lines cut at 8 KiB), `program.rs` (`find`: a name with a separator relative to the project, else `ProgramFolders` (plan §2 #72): each `project` entry in list order in the project folder and each parent up to the root, then `PATH`, then each `home` entry in the user's home folder (`ProgramPlace::Home`; none without a home folder); an entry that is not plain `/`-separated names (`plain_name`) is skipped; Windows `PATHEXT`; `ProgramFound` is the window's answer shape). std threads and channels only: no `Arc`, no async, no `yamt-*` crate, no tauri, no `serde_json` (arch-check). `src/bin/line-echo.rs` is the line-framed test program `tests/lines.rs` starts as a real child (its commands, incl. `huge`, `bytes`, `burst`, `orphan`, unix `close-stderr`/`close-stdout`, are listed in its header); `tests/lines.rs` is the one home of the run's lifecycle tests (stop grace, kill, idle run, dropped receiver, late output, drain, stderr and stdout closed), `lsp-host` tests only what `Host` adds; framing and lookup have unit tests in their files. Tests start the built binaries in place; never exec a file a test just wrote (ETXTBSY, see `lsp-host`'s `place_echo`).
++Owner skill: `skill://rust-conventions`. Starts one program and pipes its messages both ways in one of two framings (plan §2 #70, #109); never parses a message. `lib.rs` (the public surface; `#![warn(missing_docs)]`), `run.rs` (`Running`: start(program, args, folder, framing, events), start_without(…, removed) — the same with the named environment variables left out (the AI agent: `yamt_gitio::Repo::REPOSITORY_VARIABLES`, plan §2 #110) —, send, stop, is_finished, wait; per run a supervisor thread owning the `Child` — stop asked, stdout closed or broken, events dropped, or the program gone, then `STOP_GRACE` 2 s, kill, reap, up to `OUTPUT_DRAIN` 1 s for the readers, one `Exited` last; a writer thread owning stdin; a stdout reader sending `Message`s; a stderr reader sending `Log` lines, whose end stops nothing; `HostEvent`, whose serde/specta shape is the generated `HostEvent` in `bindings.ts`; the words of every log line yamt adds, the drop line's size from `MAX_MESSAGE_BYTES`; `CREATE_NO_WINDOW` on Windows), `frame.rs` (`Framing`: `ContentLength` — headers case-insensitive, header lines up to 8 KiB, a bad or too large frame stops the program — or `Lines` — `message + "\n"` out, one line per message in, a trailing `\r` dropped, empty lines skipped, a line over the cap or not UTF-8 dropped (`Frame::Dropped(DropReason)`) with a `Log` line while reading goes on; `MAX_MESSAGE_BYTES` 64 MiB for both; stderr lines cut at 8 KiB), `program.rs` (`find`: a name with a separator relative to the project, else `ProgramFolders` (plan §2 #72): each `project` entry in list order in the project folder and each parent up to the root, then `PATH`, then each `home` entry in the user's home folder (`ProgramPlace::Home`; none without a home folder); an entry that is not plain `/`-separated names (`plain_name`) is skipped; Windows `PATHEXT`; `ProgramFound` is the window's answer shape). std threads and channels only: no `Arc`, no async, no `yamt-*` crate, no tauri, no `serde_json` (arch-check). `src/bin/line-echo.rs` is the line-framed test program `tests/lines.rs` starts as a real child (its commands, incl. `huge`, `bytes`, `burst`, `orphan`, unix `close-stderr`/`close-stdout`, are listed in its header); `tests/lines.rs` is the one home of the run's lifecycle tests (stop grace, kill, idle run, dropped receiver, late output, drain, stderr and stdout closed, a variable left out by `start_without`), `lsp-host` tests only what `Host` adds; framing and lookup have unit tests in their files. Tests start the built binaries in place; never exec a file a test just wrote (ETXTBSY, see `lsp-host`'s `place_echo`).
+diff --git a/crates/pipe/src/run.rs b/crates/pipe/src/run.rs
+index c1aaded..86394cd 100644
+--- a/crates/pipe/src/run.rs
++++ b/crates/pipe/src/run.rs
+@@ -62,7 +62,23 @@ impl Running {
+         framing: Framing,
+         events: Sender<HostEvent>,
+     ) -> io::Result<Running> {
+-        let mut child = command(program, args, folder).spawn()?;
++        Running::start_without(program, args, folder, framing, events, &[])
++    }
++
++    /// `start`, with each environment variable named in `removed` left out of the program's environment.
++    pub fn start_without(
++        program: &Path,
++        args: &[String],
++        folder: &Path,
++        framing: Framing,
++        events: Sender<HostEvent>,
++        removed: &[&str],
++    ) -> io::Result<Running> {
++        let mut command = command(program, args, folder);
++        for variable in removed {
++            command.env_remove(variable);
++        }
++        let mut child = command.spawn()?;
+         let (Some(stdin), Some(stdout), Some(stderr)) =
+             (child.stdin.take(), child.stdout.take(), child.stderr.take())
+         else {
+diff --git a/crates/pipe/tests/lines.rs b/crates/pipe/tests/lines.rs
+index 79a20d0..35ef6bc 100644
+--- a/crates/pipe/tests/lines.rs
++++ b/crates/pipe/tests/lines.rs
+@@ -327,3 +327,24 @@ fn a_missing_folder_is_a_start_error() {
+     let started = Running::start(Path::new(ECHO), &[], &folder, Framing::Lines, sender);
+     assert!(started.is_err());
+ }
++
++/// Catches `start_without` passing on a variable it was told to leave out, or leaving out one it was not.
++#[cfg(unix)]
++#[test]
++fn start_without_leaves_the_named_variables_out_of_the_program_s_environment() {
++    let print_home = |removed: &[&str]| {
++        let (sender, events) = mpsc::channel();
++        let args = ["-c".to_owned(), "echo \"${HOME-unset}\"".to_owned()];
++        let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
++        let program = Path::new("sh");
++        let running =
++            Running::start_without(program, &args, folder, Framing::Lines, sender, removed)
++                .unwrap();
++        let printed = next_message(&events);
++        running.wait();
++        printed
++    };
++
++    assert_eq!(print_home(&["HOME"]), "unset");
++    assert_ne!(print_home(&[]), "unset");
++}
+diff --git a/crates/range/AGENTS.md b/crates/range/AGENTS.md
+index ea8af3c..74bf586 100644
+--- a/crates/range/AGENTS.md
++++ b/crates/range/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then one `BlobReader` for at most two blobs, UTF-8 per side, `Texts` with `yamt_merge_core::compare`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read.
++Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then one `BlobReader` for at most two blobs, UTF-8 per side, `Texts` with `yamt_merge_core::compare`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read.
+diff --git a/crates/range/src/lib.rs b/crates/range/src/lib.rs
+index 1826b98..ac24a7a 100644
+--- a/crates/range/src/lib.rs
++++ b/crates/range/src/lib.rs
+@@ -14,7 +14,7 @@ use specta::Type;
+ use yamt_gitio::Oid;
+ use yamt_merge_core::Difference;
+ 
+-pub use crate::lock::{PairLock, pair_folders};
++pub use crate::lock::{PairLock, pair_folders, pair_right_commit};
+ pub use crate::open::{Range, Resolved};
+ pub use crate::spec::{RangeSpec, SpecError};
+ 
+diff --git a/crates/range/src/lock.rs b/crates/range/src/lock.rs
+index 928b36b..73a04c3 100644
+--- a/crates/range/src/lock.rs
++++ b/crates/range/src/lock.rs
+@@ -3,9 +3,12 @@ use std::fs::{self, File, OpenOptions, TryLockError};
+ use std::io;
+ use std::path::{Path, PathBuf};
+ 
++use yamt_gitio::Oid;
++
+ use crate::{Error, Resolved, Result};
+ 
+ const LOCK_FILE: &str = "lock";
++const PAIR_SEPARATOR: char = '-';
+ const GIT_DIR_NAME: &str = ".git";
+ const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+ const FNV_PRIME: u64 = 0x0100_0000_01b3;
+@@ -22,7 +25,7 @@ impl PairLock {
+     pub fn take(range_dir: &Path, resolved: &Resolved) -> Result<PairLock> {
+         let common_dir = resolved.repo.common_dir()?;
+         let pair = format!(
+-            "{}-{}",
++            "{}{PAIR_SEPARATOR}{}",
+             resolved.left.oid.as_str(),
+             resolved.right.oid.as_str()
+         );
+@@ -57,6 +60,14 @@ impl PairLock {
+     }
+ }
+ 
++/// The right commit a pair folder `<left id>-<right id>` (as `PairLock::take` names it) stands for.
++#[must_use]
++pub fn pair_right_commit(folder: &Path) -> Option<Oid> {
++    let name = folder.file_name()?.to_str()?;
++    let (_left, right) = name.split_once(PAIR_SEPARATOR)?;
++    Oid::parse(right).ok()
++}
++
+ /// Every `<range_dir>/<repo key>/<left id>-<right id>/` folder; a folder that cannot be listed adds none.
+ #[must_use]
+ pub fn pair_folders(range_dir: &Path) -> Vec<PathBuf> {
+@@ -128,7 +139,36 @@ fn lock_failed(path: &Path, error: &io::Error) -> Error {
+ 
+ #[cfg(test)]
+ mod tests {
++    use yamt_conflict_repo::{ConflictFile, FileKind, diverged_repo, git_ok};
++
+     use super::*;
++    use crate::RangeSpec;
++
++    #[test]
++    fn pair_right_commit_reads_the_right_commit_of_a_folder_take_made() {
++        let file = ConflictFile {
++            path: "a.txt",
++            kind: FileKind::Regular,
++            base: Some(b"base\n"),
++            local: Some(b"local\n"),
++            remote: Some(b"remote\n"),
++        };
++        let repo = diverged_repo(&[file]).unwrap();
++        let range_dir = tempfile::tempdir().unwrap();
++        let spec = RangeSpec::parse("main..remote").unwrap();
++        let resolved = Resolved::resolve(repo.path(), &spec).unwrap();
++
++        let lock = PairLock::take(range_dir.path(), &resolved).unwrap();
++
++        let remote = git_ok(repo.path(), &["rev-parse", "remote"]).unwrap();
++        let remote = Oid::parse(String::from_utf8(remote).unwrap().trim_end()).unwrap();
++        assert_eq!(pair_right_commit(lock.folder()), Some(remote));
++        assert_eq!(pair_right_commit(Path::new("a-b")), None);
++        assert_eq!(
++            pair_right_commit(&Path::new("no-separator").join("x")),
++            None
++        );
++    }
+ 
+     #[test]
+     fn fnv1a_64_gives_the_published_vectors() {
+diff --git a/src-tauri/src/ai.rs b/src-tauri/src/ai.rs
+index ff37415..caa5ab6 100644
+--- a/src-tauri/src/ai.rs
++++ b/src-tauri/src/ai.rs
+@@ -7,11 +7,10 @@ use tauri::ipc::Channel;
+ use tauri::webview::PageLoadEvent;
+ use tauri::{App, AppHandle, Manager, Runtime, State, WebviewWindow};
+ use yamt_agent::{
+-    AgentCommand, AgentRun, AgentStartReply, CheckoutLook, CheckoutReply, Pair, Workspace,
+-    sweep_leftovers,
++    AgentCommand, AgentRun, AgentStartReply, CheckoutLook, CheckoutReply, HostEvent, Pair,
++    Workspace,
+ };
+ use yamt_compare::Difference;
+-use yamt_lsp_host::HostEvent;
+ use yamt_range::Range;
+ 
+ use crate::args::Ai;
+@@ -57,18 +56,20 @@ pub(crate) fn manage<R: Runtime>(
+     app.manage(Mutex::new(state));
+     match ai {
+         Ai::Off => {}
+-        Ai::On => sweep_while_held(app.handle().clone(), range_dir, pair_folder.to_owned()),
++        Ai::On => sweep_while_held(app.handle().clone(), range_dir),
+     }
+ }
+ 
+ /// Returns once the sweep's thread holds the state.
+-fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf, own: PathBuf) {
++fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf) {
+     let (held, wait) = mpsc::channel();
+     thread::spawn(move || {
+         let state = app.state();
+-        let _ai = lock(&state);
++        let mut ai = lock(&state);
+         held.send(()).ok();
+-        sweep_leftovers(&range_dir, &own);
++        if let AiState::On(workspace) = &mut *ai {
++            workspace.sweep_leftovers(&range_dir);
++        }
+     });
+     wait.recv().ok();
+ }
+@@ -112,19 +113,18 @@ pub(crate) async fn prepare_checkout<R: Runtime>(
+ 
+ #[tauri::command]
+ #[specta::specta]
+-#[expect(
+-    clippy::needless_pass_by_value,
+-    reason = "tauri passes arguments by value"
+-)]
+-pub(crate) fn start_agent(
+-    state: State<'_, Mutex<AiState>>,
++pub(crate) async fn start_agent<R: Runtime>(
++    window: WebviewWindow<R>,
+     command: AgentCommand,
+     events: Channel<HostEvent>,
+ ) -> Result<AgentStartReply, IpcError> {
+-    let (sender, receiver) = mpsc::channel();
+-    let reply = lock(&state).workspace()?.start(&command, sender);
+-    thread::spawn(move || forward(&receiver, &events));
+-    Ok(reply)
++    blocking_reply(move || {
++        let (sender, receiver) = mpsc::channel();
++        let reply = lock(&window.state()).workspace()?.start(&command, sender);
++        thread::spawn(move || forward(&receiver, &events));
++        Ok(reply)
++    })
++    .await
+ }
+ 
+ /// Returning drops `receiver`, which stops the agent once the page cannot take its events.
+@@ -195,6 +195,14 @@ mod tests {
+         window.webview.state()
+     }
+ 
++    fn started(
++        window: &RangeWindow,
++        command: AgentCommand,
++        events: Channel<HostEvent>,
++    ) -> Result<AgentStartReply, IpcError> {
++        tauri::async_runtime::block_on(start_agent(window.webview.clone(), command, events))
++    }
++
+     fn no_events() -> Channel<HostEvent> {
+         Channel::new(|_| Ok(()))
+     }
+@@ -218,7 +226,7 @@ mod tests {
+         assert_eq!(invoke_on(&window.webview, "stop_agent", run), off);
+         let message = json!({ "run": 0, "message": "hello" });
+         assert_eq!(invoke_on(&window.webview, "send_to_agent", message), off);
+-        let started = start_agent(ai_state(&window), command("sh", &[]), no_events());
++        let started = started(&window, command("sh", &[]), no_events());
+         assert!(matches!(started, Err(IpcError::AiOff)), "{started:?}");
+     }
+ 
+@@ -313,7 +321,7 @@ mod tests {
+             let checkout = prepared_checkout(&window);
+             let (sender, events) = mpsc::channel();
+             let cat = command("sh", &["-c", "echo $$ >&2; exec cat"]);
+-            let reply = start_agent(ai_state(&window), cat, channel_into(sender)).unwrap();
++            let reply = started(&window, cat, channel_into(sender)).unwrap();
+             let AgentStartReply::Started { run } = reply else {
+                 panic!("{reply:?}");
+             };
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 3641e2a..ceb79fa 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -57,7 +57,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         review::check_gitlab::<tauri::Wry>,
+         review::send_queue::<tauri::Wry>,
+         ai::prepare_checkout::<tauri::Wry>,
+-        ai::start_agent,
++        ai::start_agent::<tauri::Wry>,
+         ai::send_to_agent,
+         ai::stop_agent,
+         ai::checkout_changes::<tauri::Wry>,
+-- 
+2.56.0
+

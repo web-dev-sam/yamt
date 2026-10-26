@@ -1,25 +1,4 @@
 {
-  "RVAgentCrateR1": {
-    "owned": [
-      "crates/agent/**",
-      "crates/gitio/src/checkout.rs",
-      "crates/gitio/src/run.rs",
-      "crates/gitio/src/repo.rs",
-      "crates/gitio/src/abort_continue.rs",
-      "crates/gitio/tests/checkout.rs",
-      "crates/gitio/AGENTS.md",
-      "crates/range/src/lock.rs",
-      "crates/range/src/lib.rs",
-      "crates/range/AGENTS.md",
-      "src-tauri/src/ai.rs",
-      "crates/pipe/src/run.rs",
-      "crates/pipe/src/lib.rs",
-      "crates/pipe/tests/lines.rs",
-      "crates/pipe/AGENTS.md",
-      "crates/gitio/src/lib.rs",
-      "src-tauri/src/commands.rs"
-    ]
-  },
   "RVThreadBoxes": {
     "owned": [
       "frontend/src/ui/RangeThreadLayer.vue",
@@ -38,6 +17,16 @@
       "frontend/scripts/app-session/startArgs.ts",
       "frontend/scripts/app-session/startArgs.test.ts",
       "frontend/scripts/app-session/start.ts"
+    ]
+  },
+  "RVAiThreadsRust": {
+    "owned": [
+      "crates/review/**",
+      "src-tauri/src/review.rs",
+      "src-tauri/src/range.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/AGENTS.md",
+      "src-tauri/src/commands.rs"
     ]
   }
 }
