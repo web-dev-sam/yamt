@@ -21,17 +21,17 @@
       "frontend/src/ui/problemText.ts",
       "frontend/src/ui/problemText.test.ts",
       "frontend/src/ui/settings.ts",
-      "scripts/map-check.sh"
+      "scripts/map-check.sh",
+      "frontend/src/ipc/fixtureGitLab.ts",
+      "frontend/src/ipc/fixtureGitLab.test.ts"
     ]
   },
-  "RVReviewShellR1": {
+  "RVJsonrpcR1": {
     "owned": [
-      "src-tauri/src/review.rs",
-      "src-tauri/src/range.rs",
-      "src-tauri/src/ipc_error.rs",
-      "src-tauri/src/ipc_error/tests.rs",
-      "tests/glab/**",
-      "src-tauri/AGENTS.md"
+      "frontend/src/jsonrpc/**",
+      "frontend/src/lsp/**",
+      "frontend/scripts/fences.ts",
+      "frontend/scripts/fences.test.ts"
     ]
   }
 }

@@ -1,0 +1,997 @@
+From edb9dda4fca96cf350e4c964ed980308145ba5ab Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:37:19 +0100
+Subject: [PATCH] test(app): real send through fake glab, poison rule;
+ error-mapping tests in one home
+
+---
+ src-tauri/AGENTS.md                      |   2 +-
+ src-tauri/src/ipc_error.rs               | 254 +-----------------
+ src-tauri/src/ipc_error/tests.rs         | 313 +++++++++++++++++++++++
+ src-tauri/src/range.rs                   |  32 ++-
+ src-tauri/src/review.rs                  | 212 ++++++++++-----
+ tests/glab/README.md                     |   2 +
+ tests/glab/slow-post/draft-notes.json    |   1 +
+ tests/glab/slow-post/merge-request.json  |   1 +
+ tests/glab/slow-post/merge-requests.json |   1 +
+ tests/glab/slow-post/post-1.json         |   1 +
+ tests/glab/slow-post/post-1.sleep        |   1 +
+ 11 files changed, 495 insertions(+), 325 deletions(-)
+ create mode 100644 src-tauri/src/ipc_error/tests.rs
+ create mode 100644 tests/glab/slow-post/draft-notes.json
+ create mode 100644 tests/glab/slow-post/merge-request.json
+ create mode 100644 tests/glab/slow-post/merge-requests.json
+ create mode 100644 tests/glab/slow-post/post-1.json
+ create mode 100644 tests/glab/slow-post/post-1.sleep
+
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 4bc43cb..faba716 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts `sweep_leftovers` on a background thread that holds the state until the sweep ends, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; `stop_agent_on_page_start`: a page that starts loading stops the agent with `try_lock`, a prepare holding the state skipped, the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a small thread forwards the agent's events into its `Channel`, as `servers.rs` does), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning` — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script (`start_script(theme, kind, ai)`) sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`; `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` when the window manages a `Mutex<AiState>` (every range window, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; the review mappings' tests live in `review.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (held by a prepare while git makes the checkout, and by the start's sweep). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts `sweep_leftovers` on a background thread that holds the state until the sweep ends, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; `stop_agent_on_page_start`: a page that starts loading stops the agent with `try_lock`, a prepare holding the state skipped, the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a small thread forwards the agent's events into its `Channel`, as `servers.rs` does), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script (`start_script(theme, kind, ai)`) sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`; `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` when the window manages a `Mutex<AiState>` (every range window, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (held by a prepare while git makes the checkout, and by the start's sweep). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index 94cb9a6..4130c5b 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -213,256 +213,4 @@ impl From<yamt_agent::Error> for IpcError {
+ }
+ 
+ #[cfg(test)]
+-mod tests {
+-    use serde_json::{Value, json};
+-    use yamt_conflict_repo::TempDir;
+-    use yamt_session::MergeSession;
+-
+-    use super::*;
+-
+-    fn ipc_json(error: yamt_session::Error) -> Value {
+-        serde_json::to_value(IpcError::from(error)).unwrap()
+-    }
+-
+-    #[test]
+-    fn a_git_error_serialises_with_git_s_message() {
+-        let plain_dir = TempDir::new().unwrap();
+-        let Err(git_error) = MergeSession::open(plain_dir.path()) else {
+-            panic!("a plain directory opened as a merge");
+-        };
+-        let git_json = ipc_json(git_error);
+-        assert_eq!(git_json["kind"], "Git");
+-        assert!(
+-            git_json["message"]
+-                .as_str()
+-                .unwrap()
+-                .contains("not a git repository"),
+-            "{git_json}"
+-        );
+-    }
+-
+-    #[test]
+-    fn every_other_session_error_serialises_with_its_kind_and_fields() {
+-        let unsupported = yamt_session::Error::Unsupported {
+-            path: "logo.png".to_owned(),
+-            reason: UnsupportedReason::Binary,
+-        };
+-        assert_eq!(
+-            ipc_json(unsupported),
+-            json!({ "kind": "Unsupported", "path": "logo.png", "reason": "Binary" })
+-        );
+-        let write_failed = yamt_session::Error::WriteFailed {
+-            path: "a.ts".to_owned(),
+-            source: std::io::Error::other("disk full"),
+-        };
+-        assert_eq!(
+-            ipc_json(write_failed),
+-            json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
+-        );
+-        let not_a_file = yamt_session::Error::NotAFile {
+-            path: "a.ts".to_owned(),
+-        };
+-        assert_eq!(
+-            ipc_json(not_a_file),
+-            json!({ "kind": "NotAFile", "path": "a.ts" })
+-        );
+-        let read_failed = yamt_session::Error::ReadFailed {
+-            path: "a.ts".to_owned(),
+-            source: std::io::Error::other("permission denied"),
+-        };
+-        assert_eq!(
+-            ipc_json(read_failed),
+-            json!({ "kind": "ReadFailed", "path": "a.ts", "message": "permission denied" })
+-        );
+-    }
+-
+-    // A refusal read as "git refused: …" would say it twice under the window's "Could not continue".
+-    #[test]
+-    fn operation_errors_have_their_own_kinds_and_git_s_refusal_is_git_s_text() {
+-        assert_eq!(
+-            ipc_json(yamt_session::Error::NoOperation),
+-            json!({ "kind": "NoOperation" })
+-        );
+-        assert_eq!(
+-            ipc_json(yamt_session::Error::StopMovedOn),
+-            json!({ "kind": "StopMovedOn" })
+-        );
+-        let message = "error: commit is not possible because you have unmerged files.";
+-        let refused = yamt_session::Error::GitRefused {
+-            message: message.to_owned(),
+-        };
+-        assert_eq!(
+-            ipc_json(refused),
+-            json!({ "kind": "Git", "message": message })
+-        );
+-    }
+-
+-    #[test]
+-    fn settings_errors_serialise_with_their_kind_and_fields() {
+-        let settings_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
+-        let broken = yamt_settings::Error::Broken {
+-            path: "/c/yamt/settings.json".into(),
+-            message: "trailing comma at line 3 column 1".to_owned(),
+-        };
+-        assert_eq!(
+-            settings_json(broken),
+-            json!({
+-                "kind": "SettingsBroken",
+-                "path": "/c/yamt/settings.json",
+-                "message": "trailing comma at line 3 column 1",
+-            })
+-        );
+-        let not_absolute = yamt_settings::Error::NotAbsolute {
+-            path: "s.json".to_owned(),
+-        };
+-        assert_eq!(
+-            settings_json(not_absolute),
+-            json!({ "kind": "NotAbsolute", "path": "s.json" })
+-        );
+-        let read_failed = yamt_settings::Error::ReadFailed {
+-            path: "/c/yamt/settings-location".into(),
+-            message: "is a directory".to_owned(),
+-        };
+-        assert_eq!(
+-            settings_json(read_failed),
+-            json!({ "kind": "ReadFailed", "path": "/c/yamt/settings-location", "message": "is a directory" })
+-        );
+-        let write_failed = yamt_settings::Error::WriteFailed {
+-            path: "/locked/s.json".into(),
+-            message: "permission denied".to_owned(),
+-        };
+-        assert_eq!(
+-            settings_json(write_failed),
+-            json!({ "kind": "WriteFailed", "path": "/locked/s.json", "message": "permission denied" })
+-        );
+-        assert_eq!(
+-            serde_json::to_value(IpcError::NoConfigFolder).unwrap(),
+-            json!({ "kind": "NoConfigFolder" })
+-        );
+-    }
+-
+-    fn compare_json(error: yamt_compare::Error) -> Value {
+-        serde_json::to_value(IpcError::from(error)).unwrap()
+-    }
+-
+-    #[test]
+-    fn compare_store_problems_serialise_as_read_failures_naming_the_file() {
+-        let locked = yamt_compare::Error::Locked {
+-            path: "/d/yamt/compare".into(),
+-        };
+-        assert_eq!(
+-            compare_json(locked),
+-            json!({ "kind": "ReadFailed", "path": "/d/yamt/compare", "message": "another yamt --diff window holds it" })
+-        );
+-        let newer = yamt_compare::Error::NewerFormat {
+-            path: "/d/tabs.json".into(),
+-            format: 2,
+-        };
+-        assert_eq!(
+-            compare_json(newer),
+-            json!({ "kind": "ReadFailed", "path": "/d/tabs.json", "message": "written by a newer yamt (format 2)" })
+-        );
+-        let broken = yamt_compare::Error::Broken {
+-            path: "/d/tabs.json".into(),
+-            message: "`tabs` is empty".to_owned(),
+-        };
+-        assert_eq!(
+-            compare_json(broken),
+-            json!({ "kind": "ReadFailed", "path": "/d/tabs.json", "message": "`tabs` is empty" })
+-        );
+-    }
+-
+-    #[test]
+-    fn compare_write_tab_and_size_errors_serialise_with_their_kinds() {
+-        let write_failed = yamt_compare::Error::WriteFailed {
+-            path: "/d/1-left.txt".into(),
+-            message: "disk full".to_owned(),
+-        };
+-        assert_eq!(
+-            compare_json(write_failed),
+-            json!({ "kind": "WriteFailed", "path": "/d/1-left.txt", "message": "disk full" })
+-        );
+-        let too_large = yamt_compare::Error::TooLarge { bytes: 9_000_000 };
+-        assert_eq!(
+-            compare_json(too_large),
+-            json!({ "kind": "ColumnTooLarge", "limit": MAX_COLUMN_BYTES })
+-        );
+-        assert_eq!(
+-            compare_json(yamt_compare::Error::UnknownTab { tab: TabId(7) }),
+-            json!({ "kind": "UnknownTab", "tab": 7 })
+-        );
+-    }
+-
+-    fn range_json(error: yamt_range::Error) -> Value {
+-        serde_json::to_value(IpcError::from(error)).unwrap()
+-    }
+-
+-    #[test]
+-    fn an_unknown_range_file_has_its_kind_and_a_start_refusal_is_its_line() {
+-        let unknown = yamt_range::Error::UnknownFile {
+-            file: RangeFileId(9),
+-        };
+-        assert_eq!(
+-            range_json(unknown),
+-            json!({ "kind": "UnknownRangeFile", "file": 9 })
+-        );
+-        let no_base = yamt_range::Error::NoMergeBase {
+-            left: "main".to_owned(),
+-            right: "other".to_owned(),
+-        };
+-        assert_eq!(
+-            range_json(no_base),
+-            json!({ "kind": "Git", "message": "main and other have no merge base" })
+-        );
+-    }
+-
+-    // The window's close shows the folder it could not remove, so the user can remove it by hand.
+-    #[test]
+-    fn ai_off_and_a_failed_removal_serialise_with_their_kinds() {
+-        assert_eq!(
+-            serde_json::to_value(IpcError::AiOff).unwrap(),
+-            json!({ "kind": "AiOff" })
+-        );
+-        let agent_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
+-        let remove = yamt_agent::Error::Remove {
+-            folder: "/d/pair/checkout.removing".into(),
+-            source: std::io::Error::other("busy"),
+-        };
+-        assert_eq!(
+-            agent_json(remove),
+-            json!({ "kind": "RemoveFailed", "folder": "/d/pair/checkout.removing", "message": "busy" })
+-        );
+-        let rename = yamt_agent::Error::Rename {
+-            from: "/d/pair/checkout".into(),
+-            to: "/d/pair/checkout.removing".into(),
+-            source: std::io::Error::other("permission denied"),
+-        };
+-        assert_eq!(
+-            agent_json(rename),
+-            json!({ "kind": "RemoveFailed", "folder": "/d/pair/checkout", "message": "permission denied" })
+-        );
+-    }
+-
+-    #[test]
+-    fn a_worker_that_panics_answers_worker_stopped() {
+-        let answered =
+-            tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
+-                panic!("worker panic")
+-            }))
+-            .err();
+-        assert!(
+-            matches!(answered, Some(IpcError::WorkerStopped)),
+-            "{answered:?}"
+-        );
+-    }
+-
+-    #[test]
+-    fn a_worker_s_own_answer_is_the_reply() {
+-        let answered = tauri::async_runtime::block_on(blocking_reply(|| Ok(7)));
+-        assert!(matches!(answered, Ok(7)), "{answered:?}");
+-        let refused = tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
+-            Err(IpcError::NoOperation)
+-        }));
+-        assert!(matches!(refused, Err(IpcError::NoOperation)), "{refused:?}");
+-    }
+-}
++mod tests;
+diff --git a/src-tauri/src/ipc_error/tests.rs b/src-tauri/src/ipc_error/tests.rs
+new file mode 100644
+index 0000000..fa90539
+--- /dev/null
++++ b/src-tauri/src/ipc_error/tests.rs
+@@ -0,0 +1,313 @@
++use serde_json::{Value, json};
++use yamt_conflict_repo::TempDir;
++use yamt_session::MergeSession;
++
++use super::*;
++
++fn ipc_json(error: yamt_session::Error) -> Value {
++    serde_json::to_value(IpcError::from(error)).unwrap()
++}
++
++#[test]
++fn a_git_error_serialises_with_git_s_message() {
++    let plain_dir = TempDir::new().unwrap();
++    let Err(git_error) = MergeSession::open(plain_dir.path()) else {
++        panic!("a plain directory opened as a merge");
++    };
++    let git_json = ipc_json(git_error);
++    assert_eq!(git_json["kind"], "Git");
++    assert!(
++        git_json["message"]
++            .as_str()
++            .unwrap()
++            .contains("not a git repository"),
++        "{git_json}"
++    );
++}
++
++#[test]
++fn every_other_session_error_serialises_with_its_kind_and_fields() {
++    let unsupported = yamt_session::Error::Unsupported {
++        path: "logo.png".to_owned(),
++        reason: UnsupportedReason::Binary,
++    };
++    assert_eq!(
++        ipc_json(unsupported),
++        json!({ "kind": "Unsupported", "path": "logo.png", "reason": "Binary" })
++    );
++    let write_failed = yamt_session::Error::WriteFailed {
++        path: "a.ts".to_owned(),
++        source: std::io::Error::other("disk full"),
++    };
++    assert_eq!(
++        ipc_json(write_failed),
++        json!({ "kind": "WriteFailed", "path": "a.ts", "message": "disk full" })
++    );
++    let not_a_file = yamt_session::Error::NotAFile {
++        path: "a.ts".to_owned(),
++    };
++    assert_eq!(
++        ipc_json(not_a_file),
++        json!({ "kind": "NotAFile", "path": "a.ts" })
++    );
++    let read_failed = yamt_session::Error::ReadFailed {
++        path: "a.ts".to_owned(),
++        source: std::io::Error::other("permission denied"),
++    };
++    assert_eq!(
++        ipc_json(read_failed),
++        json!({ "kind": "ReadFailed", "path": "a.ts", "message": "permission denied" })
++    );
++}
++
++// A refusal read as "git refused: …" would say it twice under the window's "Could not continue".
++#[test]
++fn operation_errors_have_their_own_kinds_and_git_s_refusal_is_git_s_text() {
++    assert_eq!(
++        ipc_json(yamt_session::Error::NoOperation),
++        json!({ "kind": "NoOperation" })
++    );
++    assert_eq!(
++        ipc_json(yamt_session::Error::StopMovedOn),
++        json!({ "kind": "StopMovedOn" })
++    );
++    let message = "error: commit is not possible because you have unmerged files.";
++    let refused = yamt_session::Error::GitRefused {
++        message: message.to_owned(),
++    };
++    assert_eq!(
++        ipc_json(refused),
++        json!({ "kind": "Git", "message": message })
++    );
++}
++
++#[test]
++fn settings_errors_serialise_with_their_kind_and_fields() {
++    let settings_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
++    let broken = yamt_settings::Error::Broken {
++        path: "/c/yamt/settings.json".into(),
++        message: "trailing comma at line 3 column 1".to_owned(),
++    };
++    assert_eq!(
++        settings_json(broken),
++        json!({
++            "kind": "SettingsBroken",
++            "path": "/c/yamt/settings.json",
++            "message": "trailing comma at line 3 column 1",
++        })
++    );
++    let not_absolute = yamt_settings::Error::NotAbsolute {
++        path: "s.json".to_owned(),
++    };
++    assert_eq!(
++        settings_json(not_absolute),
++        json!({ "kind": "NotAbsolute", "path": "s.json" })
++    );
++    let read_failed = yamt_settings::Error::ReadFailed {
++        path: "/c/yamt/settings-location".into(),
++        message: "is a directory".to_owned(),
++    };
++    assert_eq!(
++        settings_json(read_failed),
++        json!({ "kind": "ReadFailed", "path": "/c/yamt/settings-location", "message": "is a directory" })
++    );
++    let write_failed = yamt_settings::Error::WriteFailed {
++        path: "/locked/s.json".into(),
++        message: "permission denied".to_owned(),
++    };
++    assert_eq!(
++        settings_json(write_failed),
++        json!({ "kind": "WriteFailed", "path": "/locked/s.json", "message": "permission denied" })
++    );
++    assert_eq!(
++        serde_json::to_value(IpcError::NoConfigFolder).unwrap(),
++        json!({ "kind": "NoConfigFolder" })
++    );
++}
++
++fn compare_json(error: yamt_compare::Error) -> Value {
++    serde_json::to_value(IpcError::from(error)).unwrap()
++}
++
++#[test]
++fn compare_store_problems_serialise_as_read_failures_naming_the_file() {
++    let locked = yamt_compare::Error::Locked {
++        path: "/d/yamt/compare".into(),
++    };
++    assert_eq!(
++        compare_json(locked),
++        json!({ "kind": "ReadFailed", "path": "/d/yamt/compare", "message": "another yamt --diff window holds it" })
++    );
++    let newer = yamt_compare::Error::NewerFormat {
++        path: "/d/tabs.json".into(),
++        format: 2,
++    };
++    assert_eq!(
++        compare_json(newer),
++        json!({ "kind": "ReadFailed", "path": "/d/tabs.json", "message": "written by a newer yamt (format 2)" })
++    );
++    let broken = yamt_compare::Error::Broken {
++        path: "/d/tabs.json".into(),
++        message: "`tabs` is empty".to_owned(),
++    };
++    assert_eq!(
++        compare_json(broken),
++        json!({ "kind": "ReadFailed", "path": "/d/tabs.json", "message": "`tabs` is empty" })
++    );
++}
++
++#[test]
++fn compare_write_tab_and_size_errors_serialise_with_their_kinds() {
++    let write_failed = yamt_compare::Error::WriteFailed {
++        path: "/d/1-left.txt".into(),
++        message: "disk full".to_owned(),
++    };
++    assert_eq!(
++        compare_json(write_failed),
++        json!({ "kind": "WriteFailed", "path": "/d/1-left.txt", "message": "disk full" })
++    );
++    let too_large = yamt_compare::Error::TooLarge { bytes: 9_000_000 };
++    assert_eq!(
++        compare_json(too_large),
++        json!({ "kind": "ColumnTooLarge", "limit": MAX_COLUMN_BYTES })
++    );
++    assert_eq!(
++        compare_json(yamt_compare::Error::UnknownTab { tab: TabId(7) }),
++        json!({ "kind": "UnknownTab", "tab": 7 })
++    );
++}
++
++fn range_json(error: yamt_range::Error) -> Value {
++    serde_json::to_value(IpcError::from(error)).unwrap()
++}
++
++#[test]
++fn an_unknown_range_file_has_its_kind_and_a_start_refusal_is_its_line() {
++    let unknown = yamt_range::Error::UnknownFile {
++        file: RangeFileId(9),
++    };
++    assert_eq!(
++        range_json(unknown),
++        json!({ "kind": "UnknownRangeFile", "file": 9 })
++    );
++    let no_base = yamt_range::Error::NoMergeBase {
++        left: "main".to_owned(),
++        right: "other".to_owned(),
++    };
++    assert_eq!(
++        range_json(no_base),
++        json!({ "kind": "Git", "message": "main and other have no merge base" })
++    );
++}
++
++fn review_json(error: yamt_review::Error) -> Value {
++    serde_json::to_value(IpcError::from(error)).unwrap()
++}
++
++#[test]
++fn each_review_error_has_its_kind_and_a_write_failure_names_the_file() {
++    let write_failed = yamt_review::Error::WriteFailed {
++        path: "/d/threads.json".into(),
++        message: "disk full".to_owned(),
++    };
++    assert_eq!(
++        review_json(write_failed),
++        json!({ "kind": "WriteFailed", "path": "/d/threads.json", "message": "disk full" })
++    );
++    assert_eq!(
++        review_json(yamt_review::Error::UnknownFile {
++            file: RangeFileId(4)
++        }),
++        json!({ "kind": "UnknownRangeFile", "file": 4 })
++    );
++    assert_eq!(
++        review_json(yamt_review::Error::UnknownThread {
++            thread: ThreadId(5)
++        }),
++        json!({ "kind": "UnknownThread", "thread": 5 })
++    );
++    assert_eq!(
++        review_json(yamt_review::Error::UnknownMessage {
++            message: MessageId(6)
++        }),
++        json!({ "kind": "UnknownMessage", "message": 6 })
++    );
++    assert_eq!(
++        review_json(yamt_review::Error::EmptyMessage),
++        json!({ "kind": "EmptyMessage" })
++    );
++    assert_eq!(
++        review_json(yamt_review::Error::MessagePending {
++            message: MessageId(7)
++        }),
++        json!({ "kind": "MessagePending", "message": 7 })
++    );
++    assert_eq!(
++        serde_json::to_value(IpcError::SendRunning).unwrap(),
++        json!({ "kind": "SendRunning" })
++    );
++}
++
++#[test]
++fn a_start_only_review_error_is_its_line() {
++    let newer = yamt_review::Error::NewerFormat {
++        path: "/d/threads.json".into(),
++        format: 2,
++    };
++    assert_eq!(
++        review_json(newer),
++        json!({
++            "kind": "Git",
++            "message": "the review threads /d/threads.json were written by a newer yamt (format 2)",
++        })
++    );
++}
++
++// The window's close shows the folder it could not remove, so the user can remove it by hand.
++#[test]
++fn ai_off_and_a_failed_removal_serialise_with_their_kinds() {
++    assert_eq!(
++        serde_json::to_value(IpcError::AiOff).unwrap(),
++        json!({ "kind": "AiOff" })
++    );
++    let agent_json = |error| serde_json::to_value(IpcError::from(error)).unwrap();
++    let remove = yamt_agent::Error::Remove {
++        folder: "/d/pair/checkout.removing".into(),
++        source: std::io::Error::other("busy"),
++    };
++    assert_eq!(
++        agent_json(remove),
++        json!({ "kind": "RemoveFailed", "folder": "/d/pair/checkout.removing", "message": "busy" })
++    );
++    let rename = yamt_agent::Error::Rename {
++        from: "/d/pair/checkout".into(),
++        to: "/d/pair/checkout.removing".into(),
++        source: std::io::Error::other("permission denied"),
++    };
++    assert_eq!(
++        agent_json(rename),
++        json!({ "kind": "RemoveFailed", "folder": "/d/pair/checkout", "message": "permission denied" })
++    );
++}
++
++#[test]
++fn a_worker_that_panics_answers_worker_stopped() {
++    let answered = tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
++        panic!("worker panic")
++    }))
++    .err();
++    assert!(
++        matches!(answered, Some(IpcError::WorkerStopped)),
++        "{answered:?}"
++    );
++}
++
++#[test]
++fn a_worker_s_own_answer_is_the_reply() {
++    let answered = tauri::async_runtime::block_on(blocking_reply(|| Ok(7)));
++    assert!(matches!(answered, Ok(7)), "{answered:?}");
++    let refused = tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
++        Err(IpcError::NoOperation)
++    }));
++    assert!(matches!(refused, Err(IpcError::NoOperation)), "{refused:?}");
++}
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+index 41ea0dd..f815c30 100644
+--- a/src-tauri/src/range.rs
++++ b/src-tauri/src/range.rs
+@@ -101,7 +101,6 @@ pub(crate) mod tests {
+     use crate::commands::with_commands;
+     use crate::frontend_log::tests::logged;
+     use crate::mock_window::invoke_on;
+-    use crate::outcome::Exit;
+     use crate::window::app_folder;
+ 
+     const RANGE: &str = "main...remote";
+@@ -127,7 +126,11 @@ pub(crate) mod tests {
+     }
+ 
+     fn resolved(root: &Path) -> Resolved {
+-        Resolved::resolve(root, &RangeSpec::parse(RANGE).unwrap()).unwrap()
++        resolved_on(root, RANGE)
++    }
++
++    fn resolved_on(root: &Path, range: &str) -> Resolved {
++        Resolved::resolve(root, &RangeSpec::parse(range).unwrap()).unwrap()
+     }
+ 
+     fn range_app() -> App<MockRuntime> {
+@@ -145,9 +148,26 @@ pub(crate) mod tests {
+         open_range_window_in(repo(), TempDir::new().unwrap(), ai)
+     }
+ 
++    /// A window on `range` of the repository in `repo`'s folder.
++    #[cfg(unix)]
++    pub(crate) fn open_range_window_on(repo: TempDir, range: &str) -> RangeWindow {
++        let resolved = resolved_on(repo.path(), range);
++        open_resolved_window(repo, TempDir::new().unwrap(), resolved, Ai::Off)
++    }
++
+     fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
++        let resolved = resolved(repo.path());
++        open_resolved_window(repo, data, resolved, ai)
++    }
++
++    fn open_resolved_window(
++        repo: TempDir,
++        data: TempDir,
++        resolved: Resolved,
++        ai: Ai,
++    ) -> RangeWindow {
+         let app = range_app();
+-        manage_range_in(&app, &app_folder(data.path()), resolved(repo.path()), ai).unwrap();
++        manage_range_in(&app, &app_folder(data.path()), resolved, ai).unwrap();
+         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+             .build()
+             .unwrap();
+@@ -165,9 +185,10 @@ pub(crate) mod tests {
+         lock.folder().join(THREADS_FILE)
+     }
+ 
+-    // Opening on a file it cannot read would show no threads, and the next add would write over them.
++    // Opening on a file it cannot read would show no threads, and the next add would write over them. That the
++    // refusal ends with exit 2 before any window rests on window.rs:111-113 and the real-app smoke.
+     #[test]
+-    fn a_broken_threads_file_ends_before_any_window_with_exit_2() {
++    fn a_broken_threads_file_is_refused_before_the_range_state_and_left_unchanged() {
+         let (repo, data) = (repo(), TempDir::new().unwrap());
+         let threads = threads_path(repo.path(), data.path());
+         let broken = b"{\"format\":1,";
+@@ -184,7 +205,6 @@ pub(crate) mod tests {
+         let line = refused.unwrap_err();
+         let named = format!("the review threads {} cannot be read: ", threads.display());
+         assert!(line.starts_with(&named), "{line}");
+-        assert_eq!(Ending::failure(line).exit, Exit::Failure);
+         assert!(app.try_state::<RangeState>().is_none());
+         assert_eq!(std::fs::read(&threads).unwrap(), broken);
+     }
+diff --git a/src-tauri/src/review.rs b/src-tauri/src/review.rs
+index 400dee9..8e3cffb 100644
+--- a/src-tauri/src/review.rs
++++ b/src-tauri/src/review.rs
+@@ -126,10 +126,11 @@ pub(crate) async fn send_queue<R: Runtime>(
+ #[cfg(test)]
+ mod tests {
+     use std::sync::mpsc;
++    use std::thread;
+ 
+     use serde_json::{Value, json};
++    use tauri::async_runtime::block_on;
+     use tauri::ipc::InvokeResponseBody;
+-    use yamt_review::Error;
+ 
+     use super::*;
+     use crate::mock_window::invoke_on;
+@@ -221,20 +222,27 @@ mod tests {
+         let _running = send_guard(&state.sending).unwrap();
+ 
+         let progress = Channel::new(|_| Ok(()));
+-        let second = tauri::async_runtime::block_on(send_queue(window.webview.clone(), progress));
++        let second = block_on(send_queue(window.webview.clone(), progress));
+ 
+         assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
+     }
+ 
+     #[test]
+-    fn a_send_guard_let_go_is_taken_again() {
++    fn a_send_guard_whose_holder_panicked_is_taken_again() {
+         let sending = Mutex::new(());
+-        drop(send_guard(&sending).unwrap());
++        thread::scope(|scope| {
++            let holder = scope.spawn(|| {
++                let _held = send_guard(&sending);
++                panic!("a send's worker panics");
++            });
++            assert!(holder.join().is_err());
++        });
++        assert!(sending.is_poisoned());
+         assert!(send_guard(&sending).is_ok());
+     }
+ 
+-    #[test]
+-    fn each_progress_reaches_the_window_s_channel() {
++    /// A channel whose every progress arrives on the receiver as its JSON text.
++    fn collecting_channel() -> (Channel<SendProgress>, mpsc::Receiver<String>) {
+         let (sender, received) = mpsc::channel();
+         let channel = Channel::new(move |body| {
+             let InvokeResponseBody::Json(json) = body else {
+@@ -243,6 +251,12 @@ mod tests {
+             sender.send(json).unwrap();
+             Ok(())
+         });
++        (channel, received)
++    }
++
++    #[test]
++    fn each_progress_reaches_the_window_s_channel() {
++        let (channel, received) = collecting_channel();
+ 
+         forward_progress(&channel, SendProgress { done: 2, of: 3 });
+ 
+@@ -250,66 +264,134 @@ mod tests {
+         assert_eq!(sent, json!({ "done": 2, "of": 3 }));
+     }
+ 
+-    fn review_json(error: Error) -> Value {
+-        serde_json::to_value(IpcError::from(error)).unwrap()
+-    }
++    #[cfg(unix)]
++    mod through_glab {
++        use std::path::PathBuf;
++        use std::process::Command;
++        use std::time::{Duration, Instant};
+ 
+-    #[test]
+-    fn each_review_error_has_its_kind_and_a_write_failure_names_the_file() {
+-        let write_failed = Error::WriteFailed {
+-            path: "/d/threads.json".into(),
+-            message: "disk full".to_owned(),
+-        };
+-        assert_eq!(
+-            review_json(write_failed),
+-            json!({ "kind": "WriteFailed", "path": "/d/threads.json", "message": "disk full" })
+-        );
+-        assert_eq!(
+-            review_json(Error::UnknownFile {
+-                file: RangeFileId(4)
+-            }),
+-            json!({ "kind": "UnknownRangeFile", "file": 4 })
+-        );
+-        assert_eq!(
+-            review_json(Error::UnknownThread {
+-                thread: ThreadId(5)
+-            }),
+-            json!({ "kind": "UnknownThread", "thread": 5 })
+-        );
+-        assert_eq!(
+-            review_json(Error::UnknownMessage {
+-                message: MessageId(6)
+-            }),
+-            json!({ "kind": "UnknownMessage", "message": 6 })
+-        );
+-        assert_eq!(
+-            review_json(Error::EmptyMessage),
+-            json!({ "kind": "EmptyMessage" })
+-        );
+-        assert_eq!(
+-            review_json(Error::MessagePending {
+-                message: MessageId(7)
+-            }),
+-            json!({ "kind": "MessagePending", "message": 7 })
+-        );
+-        assert_eq!(
+-            serde_json::to_value(IpcError::SendRunning).unwrap(),
+-            json!({ "kind": "SendRunning" })
+-        );
+-    }
++        use yamt_conflict_repo::{TempDir, run_ignored_in_child};
+ 
+-    #[test]
+-    fn a_start_only_review_error_is_its_line() {
+-        let newer = Error::NewerFormat {
+-            path: "/d/threads.json".into(),
+-            format: 2,
+-        };
+-        assert_eq!(
+-            review_json(newer),
+-            json!({
+-                "kind": "Git",
+-                "message": "the review threads /d/threads.json were written by a newer yamt (format 2)",
+-            })
+-        );
++        use super::*;
++        use crate::range::tests::open_range_window_on;
++
++        const FAKE_GLAB_LOG: &str = "YAMT_FAKE_GLAB_LOG";
++        const SEND_TEST: &str = "review::tests::through_glab::a_send_on_path_s_glab";
++        const CHECK_TEST: &str = "review::tests::through_glab::check_gitlab_on_path_s_glab";
++        const POST_ARGV: &str =
++            "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
++        const ADDED_FILE: &str = "src/board/reminders.ts";
++        const ADDED_FILE_LINE: u32 = 2;
++        const POST_WAIT: Duration = Duration::from_secs(10);
++        const POLL: Duration = Duration::from_millis(10);
++
++        fn in_this_repository(relative: &str) -> PathBuf {
++            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
++                .join("..")
++                .join(relative)
++        }
++
++        /// Runs `test` in a child whose PATH starts with the committed fake glab (`tests/glab/README.md`) on
++        /// `scenario`, its post count and log in a folder of this test's.
++        fn run_with_fake_glab(test: &str, scenario: &str) {
++            let fake = TempDir::new().unwrap();
++            let inherited = std::env::var_os("PATH").unwrap_or_default();
++            let mut folders = vec![in_this_repository("scripts/fake-glab")];
++            folders.extend(std::env::split_paths(&inherited));
++            let path = std::env::join_paths(folders).unwrap();
++            let scenario = in_this_repository(&format!("tests/glab/{scenario}"));
++
++            let ran = run_ignored_in_child(&[test], |child| {
++                child
++                    .env("PATH", path)
++                    .env("YAMT_FAKE_GLAB", scenario)
++                    .env("YAMT_FAKE_GLAB_STATE", fake.path().join("state"))
++                    .env(FAKE_GLAB_LOG, fake.path().join("log"));
++            });
++
++            ran.unwrap_or_else(|error| panic!("{error}"));
++        }
++
++        /// A window on `scripts/range-repo.sh`'s `main...feature`, the range `tests/glab` pins.
++        fn range_repo_window() -> RangeWindow {
++            let repo = TempDir::new().unwrap();
++            let built = Command::new(in_this_repository("scripts/range-repo.sh"))
++                .arg(repo.path())
++                .output()
++                .unwrap();
++            assert!(built.status.success(), "{built:?}");
++            open_range_window_on(repo, "main...feature")
++        }
++
++        fn queue_one_message(window: &RangeWindow) {
++            let state = window.webview.state::<RangeState>();
++            let entries = state.range.entries();
++            let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
++            let line = json!({ "kind": "added", "right": ADDED_FILE_LINE });
++            let args = json!({ "file": file.unwrap().id, "line": line, "text": "Why?" });
++            let added = invoke(window, "add_thread", args).unwrap();
++            let message = &added["list"]["threads"][0]["messages"][0]["id"];
++            let queued = json!({ "message": message, "text": "Why not a Duration?" });
++            invoke(window, "queue_message", queued).unwrap();
++        }
++
++        fn send(window: &RangeWindow) -> Result<SendReply, IpcError> {
++            block_on(send_queue(window.webview.clone(), Channel::new(|_| Ok(()))))
++        }
++
++        fn wait_for_the_post() {
++            let log = std::env::var_os(FAKE_GLAB_LOG).unwrap();
++            let deadline = Instant::now() + POST_WAIT;
++            loop {
++                let logged = std::fs::read_to_string(&log).unwrap_or_default();
++                if logged.lines().any(|line| line == POST_ARGV) {
++                    return;
++                }
++                assert!(Instant::now() < deadline, "no POST: {logged}");
++                thread::sleep(POLL);
++            }
++        }
++
++        #[test]
++        fn a_send_holds_off_a_second_send_until_its_post_ends() {
++            run_with_fake_glab(SEND_TEST, "slow-post");
++        }
++
++        #[test]
++        #[ignore = "run by a_send_holds_off_a_second_send_until_its_post_ends"]
++        fn a_send_on_path_s_glab() {
++            let window = range_repo_window();
++            queue_one_message(&window);
++            let (progress, received) = collecting_channel();
++            let webview = window.webview.clone();
++            let first = thread::spawn(move || block_on(send_queue(webview, progress)));
++
++            wait_for_the_post();
++            let second = send(&window);
++            let first = first.join().unwrap();
++            let third = send(&window);
++
++            assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
++            let Ok(SendReply::Sent { sent, refused, .. }) = first else {
++                panic!("not sent: {first:?}");
++            };
++            assert_eq!((sent, refused), (1, 0));
++            let steps: Vec<String> = received.try_iter().collect();
++            assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
++            assert!(matches!(third, Ok(SendReply::Sent { .. })), "{third:?}");
++        }
++
++        #[test]
++        fn check_gitlab_answers_lined_up_on_the_lined_up_merge_request() {
++            run_with_fake_glab(CHECK_TEST, "lined-up");
++        }
++
++        #[test]
++        #[ignore = "run by check_gitlab_answers_lined_up_on_the_lined_up_merge_request"]
++        fn check_gitlab_on_path_s_glab() {
++            let window = range_repo_window();
++            let checked = block_on(check_gitlab(window.webview.clone())).unwrap();
++            assert_eq!(serde_json::to_value(checked).unwrap()["kind"], "linedUp");
++        }
+     }
+ }
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index f54949c..b29ec6c 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -69,3 +69,5 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+ - `runner/` — `yamt-gitio`'s own tests (`crates/gitio/tests/glab.rs`): post 1 is accepted, post 2 refused with
+   400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s,
+   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
++- `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
++  2 s before it is accepted, so a second send can arrive while it runs.
+diff --git a/tests/glab/slow-post/draft-notes.json b/tests/glab/slow-post/draft-notes.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/tests/glab/slow-post/draft-notes.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/tests/glab/slow-post/merge-request.json b/tests/glab/slow-post/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/slow-post/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/slow-post/merge-requests.json b/tests/glab/slow-post/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/slow-post/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/slow-post/post-1.json b/tests/glab/slow-post/post-1.json
+new file mode 100644
+index 0000000..1518b85
+--- /dev/null
++++ b/tests/glab/slow-post/post-1.json
+@@ -0,0 +1 @@
++{"id":101,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/slow-post/post-1.sleep b/tests/glab/slow-post/post-1.sleep
+new file mode 100644
+index 0000000..0cfbf08
+--- /dev/null
++++ b/tests/glab/slow-post/post-1.sleep
+@@ -0,0 +1 @@
++2
+-- 
+2.56.0
+
