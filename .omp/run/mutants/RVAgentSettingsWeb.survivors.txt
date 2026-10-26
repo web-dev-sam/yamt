@@ -1,0 +1,5 @@
+just mutants b26b374 (covers baa63f0 RVAgentSettingsWeb and b0c28c1 RVGitlabR1)
+Rust (crates/range, crates/review): 63 mutants tested in 2m: 45 caught, 18 unviable — no survivors (RVGitlabR1 clean)
+Stryker (8 files, 723 mutants): 690 killed, 27 survived, 6 no coverage — none on a line baa63f0 changed
+(the 33 are older lines: module-level fixture constants (#732 class), domain.ts:178/261, serverSetup.ts:60's regex, tauri.ts readClipboard).
+The implementer's own run (all 331 timeouts) was an environment artefact; this run is the record.
