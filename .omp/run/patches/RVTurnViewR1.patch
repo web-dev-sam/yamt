@@ -1,0 +1,1411 @@
+From ac5cc22ae81c21ffa3b5a1baf2f8abec4388f119 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:34:22 +0100
+Subject: [PATCH] fix(ai): every AI word in one module, refs decided at the
+ boundary, line breaks shown in diffs, fences
+
+---
+ frontend/scripts/agentFence.ts              |  42 ++++++
+ frontend/scripts/fences.test.ts             |  90 ++++++++++++-
+ frontend/scripts/fences.ts                  |  30 +++--
+ frontend/src/ipc/agentDomain.test.ts        |  24 +++-
+ frontend/src/ipc/agentDomain.ts             |  19 ++-
+ frontend/src/ipc/fixtureAgent.test.ts       |   2 +-
+ frontend/src/ipc/tauriAgent.test.ts         |   4 +-
+ frontend/src/ui/AGENTS.md                   |   4 +-
+ frontend/src/ui/AgentSettings.vue           |  46 ++++---
+ frontend/src/ui/AiStep.vue                  |   2 +-
+ frontend/src/ui/AiTurn.vue                  |   4 +-
+ frontend/src/ui/EditDiff.vue                |  85 ++++--------
+ frontend/src/ui/agentSettingsFields.test.ts |  22 +---
+ frontend/src/ui/agentSettingsFields.ts      |  16 +--
+ frontend/src/ui/aiClose.test.ts             |   4 +-
+ frontend/src/ui/aiText.test.ts              |  55 +++++++-
+ frontend/src/ui/aiText.ts                   |  24 +++-
+ frontend/src/ui/editDiffLines.test.ts       | 100 +++++++++++++-
+ frontend/src/ui/editDiffLines.ts            | 139 ++++++++++++++++----
+ frontend/src/ui/question.test.ts            |  20 ++-
+ frontend/src/ui/question.ts                 |  13 +-
+ 21 files changed, 548 insertions(+), 197 deletions(-)
+ create mode 100644 frontend/scripts/agentFence.ts
+
+diff --git a/frontend/scripts/agentFence.ts b/frontend/scripts/agentFence.ts
+new file mode 100644
+index 0000000..50d6765
+--- /dev/null
++++ b/frontend/scripts/agentFence.ts
+@@ -0,0 +1,42 @@
++import ts from "typescript";
++
++type AgentViolation = {
++  readonly rule: "PM9";
++  readonly file: string;
++  readonly specifier: string;
++  readonly reason: string;
++};
++
++const AGENT_BUILDERS: Readonly<Record<string, true>> = {
++  createTauriAgentSource: true,
++  createFixtureAgentSource: true,
++  AgentClient: true,
++};
++const AGENT_HOME = "src/main.ts";
++const TEST_FILE = /\.test\.ts$/;
++
++function agentBuilds(text: string): string[] {
++  const builds: string[] = [];
++  function visit(node: ts.Node): void {
++    const callee = ts.isCallExpression(node) || ts.isNewExpression(node) ? node.expression : null;
++    const name = callee !== null && ts.isPropertyAccessExpression(callee) ? callee.name : callee;
++    if (name !== null && ts.isIdentifier(name) && Object.hasOwn(AGENT_BUILDERS, name.text)) {
++      builds.push(name.text);
++    }
++    ts.forEachChild(node, visit);
++  }
++  visit(ts.createSourceFile("script.ts", text, ts.ScriptTarget.Latest, true));
++  return builds;
++}
++
++export function agentViolations(path: string, texts: readonly string[]): AgentViolation[] {
++  if (path === AGENT_HOME || TEST_FILE.test(path)) {
++    return [];
++  }
++  return texts.flatMap(agentBuilds).map((build) => ({
++    rule: "PM9",
++    file: path,
++    specifier: build,
++    reason: "the agent source and client are built only in main.ts (plan §2 #108)",
++  }));
++}
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 8b827be..e096744 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -602,12 +602,100 @@ test("range files and the AI views importing the AI views, and an AI view import
+       path: "src/ui/AiStep.vue",
+       text: `<script setup lang="ts">\nimport EditDiff from "./EditDiff.vue";\n</script>`,
+     },
+-    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
++    { path: "src/ui/rangeStore.ts", text: `import { aiMayClose } from "./aiClose";` },
++    { path: "src/ui/aiClose.ts", text: `import "./question";\nimport "./problem";` },
++    { path: "src/ui/aiClose.test.ts", text: `import { aiMayClose } from "./aiClose";` },
+   ];
+ 
+   expect(violationsOf(files)).toEqual([]);
+ });
+ 
++test("an AI view or the close question importing the merge root, the compare root or lsp/ violates PM9; the merge root importing aiClose too", () => {
++  const files = [
++    { path: "src/ui/aiClose.ts", text: `import { useAppStore } from "./store";` },
++    {
++      path: "src/ui/AiTurn.vue",
++      text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
++    },
++    {
++      path: "src/ui/AgentSettings.vue",
++      text: `<script setup lang="ts">\nimport "../lsp";\nimport "./settingsStore";\n</script>`,
++    },
++    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
++  ];
++
++  expect(findFenceViolations(files)).toEqual([
++    {
++      rule: "PM9",
++      file: "src/ui/aiClose.ts",
++      specifier: "./store",
++      reason: "the range window never imports the merge window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/AiTurn.vue",
++      specifier: "./compareStore",
++      reason: "the range window never imports the compare window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/AgentSettings.vue",
++      specifier: "../lsp",
++      reason: "the range window never imports lsp/",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/App.vue",
++      specifier: "./aiClose",
++      reason: "the AI's views and close question are the range window's only",
++    },
++  ]);
++});
++
++test("building the agent source or client outside main.ts violates PM9; main.ts and tests may", () => {
++  const files = [
++    { path: "src/ui/rangeStore.ts", text: `const client = new AgentClient({ source, command });` },
++    {
++      path: "src/ui/RangeApp.vue",
++      text: `<script setup lang="ts">\nconst source = ipc.createTauriAgentSource(log);\n</script>`,
++    },
++    {
++      path: "src/agent/index.ts",
++      text: `export const made = createFixtureAgentSource(log, "?ai");`,
++    },
++    {
++      path: "src/main.ts",
++      text: `const agent = new AgentClient({ source: createTauriAgentSource(log), command });`,
++    },
++    { path: "src/agent/index.test.ts", text: `client = new AgentClient({ source, command });` },
++    {
++      path: "src/ipc/fixtureAgent.ts",
++      text: `export function createFixtureAgentSource(log: Log, search: string) {}\nconst c = AgentClient;`,
++    },
++  ];
++
++  expect(findFenceViolations(files)).toEqual([
++    {
++      rule: "PM9",
++      file: "src/ui/rangeStore.ts",
++      specifier: "AgentClient",
++      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/RangeApp.vue",
++      specifier: "createTauriAgentSource",
++      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
++    },
++    {
++      rule: "PM9",
++      file: "src/agent/index.ts",
++      specifier: "createFixtureAgentSource",
++      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
++    },
++  ]);
++});
++
+ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
+   const files = [
+     {
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index c6939c0..f9ea145 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -4,6 +4,7 @@ import { join, posix } from "node:path";
+ import { parse } from "@vue/compiler-sfc";
+ import ts from "typescript";
+ 
++import { agentViolations } from "./agentFence";
+ import { clipboardViolations } from "./clipboardFence";
+ import { markdownViolations } from "./markdownFence";
+ 
+@@ -49,6 +50,7 @@ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"]
+ const ICON_PREFIX = "~icons/";
+ const RAW_QUERY = "?raw";
+ const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
++const TEST_SOURCE_EXTENSION = /(?:\.test)?\.(?:ts|vue)$/;
+ const ROOT_FILES: Readonly<Record<string, Root>> = {
+   "src/ui/store": "merge",
+   "src/ui/App": "merge",
+@@ -62,11 +64,12 @@ const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
+   compare: "PM7",
+   range: "PM9",
+ };
+-const AI_VIEWS: Readonly<Record<string, true>> = {
++const AI_FILES: Readonly<Record<string, true>> = {
+   "src/ui/AiTurn": true,
+   "src/ui/AiStep": true,
+   "src/ui/EditDiff": true,
+   "src/ui/AgentSettings": true,
++  "src/ui/aiClose": true,
+ };
+ 
+ function scriptTexts(file: SourceFile): string[] {
+@@ -149,8 +152,15 @@ function isWindowRoot(name: string): name is WindowRoot {
+   return Object.hasOwn(WINDOW_RULES, name);
+ }
+ 
++function windowRoot(file: string): string {
++  if (Object.hasOwn(AI_FILES, file.replace(TEST_SOURCE_EXTENSION, ""))) {
++    return "range";
++  }
++  return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
++}
++
+ function rootFinding(file: string, target: string): Finding | undefined {
+-  const root = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
++  const root = windowRoot(file);
+   if (!isWindowRoot(root)) {
+     return undefined;
+   }
+@@ -165,14 +175,11 @@ function rootFinding(file: string, target: string): Finding | undefined {
+   return undefined;
+ }
+ 
+-function aiViewFinding(file: string, target: string): Finding | undefined {
+-  const shown = Object.hasOwn(AI_VIEWS, target.replace(SOURCE_EXTENSION, ""));
+-  const inside = Object.hasOwn(AI_VIEWS, file.replace(SOURCE_EXTENSION, ""));
+-  const inRange = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() === "range";
+-  if (!shown || inside || inRange) {
+-    return undefined;
+-  }
+-  return { rule: "PM9", reason: "the AI's views are shown only in the range window" };
++function aiFileFinding(file: string, target: string): Finding | undefined {
++  const aiFile = Object.hasOwn(AI_FILES, target.replace(SOURCE_EXTENSION, ""));
++  return aiFile && windowRoot(file) !== "range"
++    ? { rule: "PM9", reason: "the AI's views and close question are the range window's only" }
++    : undefined;
+ }
+ 
+ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
+@@ -263,7 +270,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+           ? packageFinding(module, specifier)
+           : (pathFinding(module, target) ??
+             rootFinding(file.path, target) ??
+-            aiViewFinding(file.path, target));
++            aiFileFinding(file.path, target));
+       if (finding !== undefined) {
+         violations.push({ ...finding, file: file.path, specifier });
+       }
+@@ -278,6 +285,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+     violations.push(
+       ...clipboardViolations(file.path, texts),
+       ...markdownViolations(file.path, texts),
++      ...agentViolations(file.path, texts),
+     );
+     graph.set(file.path, edges);
+   }
+diff --git a/frontend/src/ipc/agentDomain.test.ts b/frontend/src/ipc/agentDomain.test.ts
+index f6efd4d..9c6fd6b 100644
+--- a/frontend/src/ipc/agentDomain.test.ts
++++ b/frontend/src/ipc/agentDomain.test.ts
+@@ -32,16 +32,34 @@ test("a ready checkout brands its folder", () => {
+   });
+ });
+ 
+-test("a changed checkout comes out camelCased with its refs", () => {
++test("a changed checkout comes out camelCased, its short ref names split into branches and the stash", () => {
+   expect(
+     toCheckoutChanges({
+       kind: "Changed",
+       folder: "/c",
+       files: [],
+-      refs: ["refs/stash"],
++      refs: ["fix", "stash", "heads/stash"],
+       head_moved: false,
+     }),
+-  ).toEqual({ kind: "Changed", folder: "/c", files: [], refs: ["refs/stash"], headMoved: false });
++  ).toEqual({
++    kind: "Changed",
++    folder: "/c",
++    files: [],
++    refs: { branches: ["fix", "heads/stash"], stash: true },
++    headMoved: false,
++  });
++});
++
++test("without a stash name the refs are only branches", () => {
++  const look = toCheckoutChanges({
++    kind: "Changed",
++    folder: "/c",
++    files: ["a"],
++    refs: ["ai"],
++    head_moved: true,
++  });
++
++  expect(look.kind === "Changed" && look.refs).toEqual({ branches: ["ai"], stash: false });
+ });
+ 
+ test.each<Generated.CheckoutLook>([
+diff --git a/frontend/src/ipc/agentDomain.ts b/frontend/src/ipc/agentDomain.ts
+index b58904f..bf519bf 100644
+--- a/frontend/src/ipc/agentDomain.ts
++++ b/frontend/src/ipc/agentDomain.ts
+@@ -17,6 +17,9 @@ export type CheckoutReady =
+   | { readonly kind: "Ready"; readonly folder: CheckoutFolder }
+   | { readonly kind: "Failed"; readonly message: string };
+ 
++/** The AI's refs: Rust's `branches_and_stash` sends `%(refname:short)`, so `refs/stash` arrives as `stash`. */
++type AiRefs = { readonly branches: readonly string[]; readonly stash: boolean };
++
+ export type CheckoutChanges =
+   | { readonly kind: "Missing" }
+   | { readonly kind: "Clean" }
+@@ -24,11 +27,13 @@ export type CheckoutChanges =
+       readonly kind: "Changed";
+       readonly folder: CheckoutFolder;
+       readonly files: readonly string[];
+-      readonly refs: readonly string[];
++      readonly refs: AiRefs;
+       readonly headMoved: boolean;
+     }
+   | { readonly kind: "Unreadable"; readonly folder: CheckoutFolder; readonly message: string };
+ 
++const STASH = "stash";
++
+ function toFolder(path: string): CheckoutFolder {
+   if (!isCheckoutFolder(path)) {
+     throw new Error(`folder must be an absolute path, got ${path}`);
+@@ -36,6 +41,10 @@ function toFolder(path: string): CheckoutFolder {
+   return path;
+ }
+ 
++function toAiRefs(names: readonly string[]): AiRefs {
++  return { branches: names.filter((name) => name !== STASH), stash: names.includes(STASH) };
++}
++
+ export function fromAgentCommand(command: AgentCommand): Generated.AgentCommand {
+   return {
+     program: command.program,
+@@ -66,7 +75,13 @@ export function toCheckoutChanges(dto: Generated.CheckoutLook): CheckoutChanges
+       return { kind: dto.kind };
+     case "Changed": {
+       const { files, refs, head_moved: headMoved } = dto;
+-      return { kind: "Changed", folder: toFolder(dto.folder), files, refs, headMoved };
++      return {
++        kind: "Changed",
++        folder: toFolder(dto.folder),
++        files,
++        refs: toAiRefs(refs),
++        headMoved,
++      };
+     }
+     case "Unreadable":
+       return { kind: "Unreadable", folder: toFolder(dto.folder), message: dto.message };
+diff --git a/frontend/src/ipc/fixtureAgent.test.ts b/frontend/src/ipc/fixtureAgent.test.ts
+index 24d3572..82056b3 100644
+--- a/frontend/src/ipc/fixtureAgent.test.ts
++++ b/frontend/src/ipc/fixtureAgent.test.ts
+@@ -218,7 +218,7 @@ test("?ai-changes reports README.md changed in the checkout", async () => {
+       kind: "Changed",
+       folder: FIXTURE_CHECKOUT,
+       files: ["README.md"],
+-      refs: [],
++      refs: { branches: [], stash: false },
+       headMoved: false,
+     },
+   });
+diff --git a/frontend/src/ipc/tauriAgent.test.ts b/frontend/src/ipc/tauriAgent.test.ts
+index 9853247..42c84b2 100644
+--- a/frontend/src/ipc/tauriAgent.test.ts
++++ b/frontend/src/ipc/tauriAgent.test.ts
+@@ -116,14 +116,14 @@ test.each<[Generated.CheckoutLook, object]>([
+       kind: "Changed",
+       folder: "/data/checkout",
+       files: ["a.ts"],
+-      refs: ["refs/heads/ai"],
++      refs: ["ai", "stash"],
+       head_moved: true,
+     },
+     {
+       kind: "Changed",
+       folder: "/data/checkout",
+       files: ["a.ts"],
+-      refs: ["refs/heads/ai"],
++      refs: { branches: ["ai"], stash: true },
+       headMoved: true,
+     },
+   ],
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 39ecfc4..a151394 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -4,9 +4,9 @@ Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over
+ 
+ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeStore.ts`, mounted by `main.ts` when `<html data-window="range">` (app, `yamt --diff=<range>`) or `?range` / `?range=<case>` (fixture mode). Every range-only file carries the prefix — `Range*.vue`, `range*.ts`, `useRange*.ts` — and none imports `store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue` or `lsp/` (fence PM9; PM7 keeps the compare root from `rangeStore.ts`/`RangeApp.vue`). The panel is the shared `FileList.vue` with `RangeFileRow.vue` in its `#file` slot (coloured A/M/D/R with its word as title, the old path of a renamed file muted, `+n −m`). `start` mirrors `openRange`'s reply; `shown` is written only by `showFile` and `startUp` (the first file at start); `visited` keeps first-visit order, at most `MOUNTED_FILES` (16) views mounted, the least recently shown dropped when another file is shown. A failed `loadFile` reports `open` with the path and drops the file from `visited`, so selecting it again retries; that file's later success clears the problem. `RangeView.vue` (one per visited file, `PaneFrame`) shows the header (icon, path or "old → new", the mode note, ↑/↓, gear), the column headers (side and short id, the subject as title) and either the two read-only columns or one sentence. `useRangeController` (`followRange`) keeps a texts reply in a non-reactive slot until the hosts exist, builds `RangeController` once, follows preferences, and drops a reply that lands after unmount; a sentence kind builds nothing. Every range word is in `rangeText.ts`. No close guard: the window closes at once.
+ 
+-Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every lines-up sentence is in `rangeThreadText.ts`. `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). Post opens `RangePostEditor.vue` in the message's place (Queue/Cancel), Unqueue is the same button while queued or refused. Keys in every box field go through `rangeKeys.ts` `boxKeydown`: Ctrl/Cmd+Enter submits, Escape cancels (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp`'s window keydown skips presses that type into a field (`typesIntoField`: a typing target per `isTypingTarget` without Ctrl/Cmd), so Ctrl/Cmd+B still toggles the list from a box or a find field. `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendResultText`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
++Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`edit` | `unqueue` | null); `edit` opens `RangePostEditor.vue` in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field go through `rangeKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the reply's Comment keeps focus in the reply field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
+-The AI in a range thread (plan §2 #111–#115, #122): `AiTurn.vue` (`turn`, `end`, `client`, `@retry`) shows one turn — "Thinking and steps" collapsed (`AiStep.vue` per step, live while running), the answer through `useMarkdown`, then the stopped line or one failure sentence with Retry; `AiStep.vue` shows a step's title, status and outputs, an edit as `EditDiff.vue` (collapsed "Edited/Created <path>"; on opening `client.editDiff`, rows from `editDiffLines.ts`: 3 context lines, 2,000 rows, then "n more lines not shown"; a created file needs no call). `AgentSettings.vue` is the "AI" section the range root puts in `SettingsView`'s slot (rules in `agentSettingsFields.ts`: Use/Default, a default stored as null, unknown placeholders named). Every AI word is in `aiText.ts` (one sentence per `AgentFailure`; the `app` kind, a diff failure and a failed discard through `problemText`'s `ai` action). The four views are importable only from the range root's files (fence PM9 in `scripts/fences.ts`). The range root's close guard calls `aiClose.ts` `aiMayClose`: Missing/Clean close silently, Changed/Unreadable ask `keepAiChanges`/`keepUnreadableCheckout` (Keep Changes the confirm), Discard removes or reports and stays, Escape stays; a failed look closes (the shell removes only a clean checkout at exit).
++The AI in a range thread (plan §2 #111–#115, #122): `AiTurn.vue` (`turn`, `end`, `client`, `@retry`) shows one turn — "Thinking and steps" collapsed (`AiStep.vue` per step, live while running), the answer through `useMarkdown`, then the stopped line or one failure sentence with Retry; `AiStep.vue` shows a step's title, status and outputs, an edit as `EditDiff.vue` (collapsed "Edited/Created <path>"; on opening `client.editDiff`, rows from `editDiffLines.ts`: 3 context lines, 2,000 rows, then "n more lines not shown" counting only context and changed lines; git's "\ No newline at end of file" row after a side's last line without one; a removed/added pair differing only by `\r` marked with each side's line ending, `\r` never shown; a created file needs no call). `AiStep` and `EditDiff` take only `Pick<AgentClient, "editDiff">`; `EditDiff` renders each row's cells from `diffRowCells` (old, new, sign, text, note: one exhaustive switch). `AgentSettings.vue` is the "AI" section the range root puts in `SettingsView`'s slot (rules in `agentSettingsFields.ts`: Use/Default, a default stored as null; the unknown placeholders from `agent`'s `unknownPlaceholders`). Every AI word is in `aiText.ts` (one sentence per `AgentFailure`, the turn's and diff's fixed words, the settings section's words, `YOLO_NOTE`, `unknownPlaceholderText`; the `app` kind, a diff failure and a failed discard through `problemText`'s `ai` action). The four views and `aiClose.ts` count as the range root (fence PM9 in `scripts/fences.ts`): they import no other root or `lsp/`, and only range files import them; the agent source and client are built only in `main.ts` (`scripts/agentFence.ts`, plan §2 #108). The range root's close guard calls `aiClose.ts` `aiMayClose`: Missing/Clean close silently, Changed/Unreadable ask `keepAiChanges`/`keepUnreadableCheckout` (Keep Changes the confirm; refs arrive as `{ branches, stash }` decided by `ipc/agentDomain.ts` `toCheckoutChanges`), Discard removes or reports and stays, Escape stays; a failed look closes (the shell removes only a clean checkout at exit).
+ 
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+diff --git a/frontend/src/ui/AgentSettings.vue b/frontend/src/ui/AgentSettings.vue
+index 80cf90d..822f9b9 100644
+--- a/frontend/src/ui/AgentSettings.vue
++++ b/frontend/src/ui/AgentSettings.vue
+@@ -1,14 +1,10 @@
+ <script setup lang="ts">
+ import { computed, shallowRef, watch } from "vue";
+ 
++import { unknownPlaceholders } from "../agent";
+ import type { AgentSettings } from "../ipc";
+-import {
+-  commandField,
+-  firstMessageField,
+-  PLACEHOLDER_NAMES,
+-  unknownPlaceholderLines,
+-  YOLO_NOTE,
+-} from "./agentSettingsFields";
++import { commandField, firstMessageField, PLACEHOLDER_NAMES } from "./agentSettingsFields";
++import { AI_SETTINGS_TEXT, unknownPlaceholderText, YOLO_NOTE } from "./aiText";
+ import { useSettingsStore } from "./settingsStore";
+ 
+ const BUTTON =
+@@ -20,7 +16,7 @@ const messageText = shallowRef("");
+ 
+ const command = computed(() => commandField(settings.value.agent, commandText.value));
+ const message = computed(() => firstMessageField(settings.value.agent, messageText.value));
+-const unknown = computed(() => unknownPlaceholderLines(messageText.value));
++const unknown = computed(() => unknownPlaceholders(messageText.value).map(unknownPlaceholderText));
+ 
+ watch(() => command.value.shown, restoreCommand, { immediate: true });
+ watch(() => message.value.shown, restoreMessage, { immediate: true });
+@@ -33,7 +29,7 @@ function restoreMessage(): void {
+   messageText.value = message.value.shown;
+ }
+ 
+-async function store(agent: AgentSettings | null): Promise<void> {
++async function save(agent: AgentSettings | null): Promise<void> {
+   if (agent !== null) {
+     await setAgent(agent);
+   }
+@@ -42,10 +38,10 @@ async function store(agent: AgentSettings | null): Promise<void> {
+ 
+ <template>
+   <section aria-labelledby="settings-ai" class="flex flex-col gap-4">
+-    <h3 id="settings-ai" class="font-semibold">AI</h3>
++    <h3 id="settings-ai" class="font-semibold">{{ AI_SETTINGS_TEXT.title }}</h3>
+     <section aria-labelledby="settings-ai-command">
+-      <h4 id="settings-ai-command" class="mb-1 text-fg-muted">Agent command</h4>
+-      <form class="flex gap-2" @submit.prevent="store(command.use)">
++      <h4 id="settings-ai-command" class="mb-1 text-fg-muted">{{ AI_SETTINGS_TEXT.command }}</h4>
++      <form class="flex gap-2" @submit.prevent="save(command.use)">
+         <input
+           v-model="commandText"
+           type="text"
+@@ -54,24 +50,24 @@ async function store(agent: AgentSettings | null): Promise<void> {
+           class="min-w-0 flex-1 rounded border border-control-border bg-panel-inline px-2 py-1 font-mono outline-none focus:border-primary"
+           @keydown.esc="restoreCommand"
+         />
+-        <button type="submit" :disabled="command.use === null" :class="BUTTON">Use</button>
++        <button type="submit" :disabled="command.use === null" :class="BUTTON">
++          {{ AI_SETTINGS_TEXT.use }}
++        </button>
+         <button
+           type="button"
+           :disabled="command.reset === null"
+           :class="BUTTON"
+-          @click="store(command.reset)"
++          @click="save(command.reset)"
+         >
+-          Default
++          {{ AI_SETTINGS_TEXT.reset }}
+         </button>
+       </form>
+-      <p class="mt-1 text-fg-muted">
+-        The command is split on spaces. It speaks the Agent Client Protocol.
+-      </p>
++      <p class="mt-1 text-fg-muted">{{ AI_SETTINGS_TEXT.commandHint }}</p>
+       <p class="mt-1 text-fg-muted">{{ YOLO_NOTE }}</p>
+     </section>
+     <section aria-labelledby="settings-ai-message">
+-      <h4 id="settings-ai-message" class="mb-1 text-fg-muted">First message</h4>
+-      <form class="flex flex-col gap-2" @submit.prevent="store(message.use)">
++      <h4 id="settings-ai-message" class="mb-1 text-fg-muted">{{ AI_SETTINGS_TEXT.message }}</h4>
++      <form class="flex flex-col gap-2" @submit.prevent="save(message.use)">
+         <textarea
+           v-model="messageText"
+           aria-labelledby="settings-ai-message"
+@@ -81,14 +77,16 @@ async function store(agent: AgentSettings | null): Promise<void> {
+           @keydown.esc="restoreMessage"
+         ></textarea>
+         <div class="flex gap-2">
+-          <button type="submit" :disabled="message.use === null" :class="BUTTON">Use</button>
++          <button type="submit" :disabled="message.use === null" :class="BUTTON">
++            {{ AI_SETTINGS_TEXT.use }}
++          </button>
+           <button
+             type="button"
+             :disabled="message.reset === null"
+             :class="BUTTON"
+-            @click="store(message.reset)"
++            @click="save(message.reset)"
+           >
+-            Default
++            {{ AI_SETTINGS_TEXT.reset }}
+           </button>
+         </div>
+       </form>
+@@ -96,7 +94,7 @@ async function store(agent: AgentSettings | null): Promise<void> {
+         <li v-for="line in unknown" :key="line">{{ line }}</li>
+       </ul>
+       <p class="mt-1 text-fg-muted">
+-        Sent as the first message of a thread's conversation. Placeholders:
++        {{ AI_SETTINGS_TEXT.messageHint }}
+         <span
+           v-for="name in PLACEHOLDER_NAMES"
+           :key="name"
+diff --git a/frontend/src/ui/AiStep.vue b/frontend/src/ui/AiStep.vue
+index 89d7cbe..bc9b6b3 100644
+--- a/frontend/src/ui/AiStep.vue
++++ b/frontend/src/ui/AiStep.vue
+@@ -3,7 +3,7 @@ import type { AgentClient, Step, StepStatus } from "../agent";
+ import { refusedText, STEP_STATUS_WORDS } from "./aiText";
+ import EditDiff from "./EditDiff.vue";
+ 
+-defineProps<{ step: Step; client: AgentClient }>();
++defineProps<{ step: Step; client: Pick<AgentClient, "editDiff"> }>();
+ 
+ const STATUS_CLASSES: Readonly<Record<StepStatus, string>> = {
+   pending: "text-fg-muted",
+diff --git a/frontend/src/ui/AiTurn.vue b/frontend/src/ui/AiTurn.vue
+index 0e02ba6..88ebcf9 100644
+--- a/frontend/src/ui/AiTurn.vue
++++ b/frontend/src/ui/AiTurn.vue
+@@ -4,14 +4,12 @@ import ChevronRight from "~icons/lucide/chevron-right";
+ 
+ import type { AgentClient, TurnEnd, TurnView } from "../agent";
+ import AiStep from "./AiStep.vue";
+-import { failureText, RETRY, STOPPED_TEXT, THINKING_AND_STEPS } from "./aiText";
++import { failureText, RETRY, RUNNING_TEXT, STOPPED_TEXT, THINKING_AND_STEPS } from "./aiText";
+ import { useMarkdown } from "./useMarkdown";
+ 
+ const props = defineProps<{ turn: TurnView; end: TurnEnd | null; client: AgentClient }>();
+ const emit = defineEmits<{ retry: [] }>();
+ 
+-const RUNNING_TEXT = "working…";
+-
+ const answer = useTemplateRef<HTMLDivElement>("answer");
+ const opened = shallowRef(false);
+ useMarkdown(answer, () => props.turn.answer);
+diff --git a/frontend/src/ui/EditDiff.vue b/frontend/src/ui/EditDiff.vue
+index 0952939..4ff503b 100644
+--- a/frontend/src/ui/EditDiff.vue
++++ b/frontend/src/ui/EditDiff.vue
+@@ -3,32 +3,23 @@ import { shallowRef, watch } from "vue";
+ import ChevronRight from "~icons/lucide/chevron-right";
+ 
+ import type { AgentClient, EditDiff, FileEdit } from "../agent";
+-import {
+-  diffFailureText,
+-  editTitle,
+-  moreLinesText,
+-  skippedLinesText,
+-  TOO_LARGE_TEXT,
+-} from "./aiText";
+-import { createdFileLines, editDiffLines, type DiffRow } from "./editDiffLines";
++import { diffFailureText, editTitle, LOADING_DIFF_TEXT, TOO_LARGE_TEXT } from "./aiText";
++import { createdFileLines, diffRowCells, editDiffLines, type DiffRow } from "./editDiffLines";
++
++type ShownRow = { readonly tone: string; readonly cells: ReturnType<typeof diffRowCells> };
+ 
+ type Shown =
+   | { readonly kind: "loading" }
+-  | { readonly kind: "rows"; readonly rows: readonly DiffRow[] }
++  | { readonly kind: "rows"; readonly rows: readonly ShownRow[] }
+   | { readonly kind: "note"; readonly text: string };
+ 
+-const props = defineProps<{ edit: FileEdit; client: AgentClient }>();
++const props = defineProps<{ edit: FileEdit; client: Pick<AgentClient, "editDiff"> }>();
+ 
+-const LOADING_TEXT = "Making the diff…";
+-const SIGNS: Readonly<Record<"context" | "removed" | "added", string>> = {
+-  context: " ",
+-  removed: "−",
+-  added: "+",
+-};
+ const ROW_CLASSES: Readonly<Record<DiffRow["kind"], string>> = {
+   context: "",
+   removed: "bg-chunk-deleted",
+   added: "bg-chunk-inserted",
++  noNewline: "text-fg-muted",
+   skipped: "text-fg-muted",
+   more: "text-fg-muted",
+ };
+@@ -46,13 +37,17 @@ watch(
+   },
+ );
+ 
++function rowsShown(rows: readonly DiffRow[]): Shown {
++  return {
++    kind: "rows",
++    rows: rows.map((row) => ({ tone: ROW_CLASSES[row.kind], cells: diffRowCells(row) })),
++  };
++}
++
+ function shownOf(edit: FileEdit, diff: EditDiff): Shown {
+   switch (diff.kind) {
+     case "differences":
+-      return {
+-        kind: "rows",
+-        rows: editDiffLines(edit.oldText ?? "", edit.newText, diff.differences),
+-      };
++      return rowsShown(editDiffLines(edit.oldText ?? "", edit.newText, diff.differences));
+     case "tooLarge":
+       return { kind: "note", text: TOO_LARGE_TEXT };
+     case "appFailed":
+@@ -67,7 +62,7 @@ function shownOf(edit: FileEdit, diff: EditDiff): Shown {
+ 
+ async function load(edit: FileEdit): Promise<void> {
+   if (edit.oldText === null) {
+-    shown.value = { kind: "rows", rows: createdFileLines(edit.newText) };
++    shown.value = rowsShown(createdFileLines(edit.newText));
+     return;
+   }
+   shown.value = { kind: "loading" };
+@@ -83,37 +78,6 @@ function toggle(): void {
+     void load(props.edit);
+   }
+ }
+-
+-function sign(row: DiffRow): string {
+-  return row.kind === "context" || row.kind === "removed" || row.kind === "added"
+-    ? SIGNS[row.kind]
+-    : "";
+-}
+-
+-function oldNumber(row: DiffRow): string {
+-  return row.kind === "context" || row.kind === "removed" ? String(row.old) : "";
+-}
+-
+-function newNumber(row: DiffRow): string {
+-  return row.kind === "context" || row.kind === "added" ? String(row.new) : "";
+-}
+-
+-function rowText(row: DiffRow): string {
+-  switch (row.kind) {
+-    case "context":
+-    case "removed":
+-    case "added":
+-      return row.text;
+-    case "skipped":
+-      return `⋯ ${skippedLinesText(row.lines)}`;
+-    case "more":
+-      return moreLinesText(row.lines);
+-    default: {
+-      const _exhaustive: never = row;
+-      return _exhaustive;
+-    }
+-  }
+-}
+ </script>
+ 
+ <template>
+@@ -132,22 +96,23 @@ function rowText(row: DiffRow): string {
+       <span class="min-w-0 font-mono break-all">{{ editTitle(edit) }}</span>
+     </button>
+     <template v-if="opened && shown !== null">
+-      <p v-if="shown.kind === 'loading'" class="pl-5 text-fg-muted">{{ LOADING_TEXT }}</p>
++      <p v-if="shown.kind === 'loading'" class="pl-5 text-fg-muted">{{ LOADING_DIFF_TEXT }}</p>
+       <p v-else-if="shown.kind === 'note'" class="pl-5 text-fg-muted">{{ shown.text }}</p>
+       <div
+         v-else
+         class="max-h-96 overflow-auto rounded border border-control-border opaque-scroller font-mono"
+       >
+         <div
+-          v-for="(row, index) in shown.rows"
++          v-for="({ tone, cells }, index) in shown.rows"
+           :key="index"
+-          class="grid min-w-max grid-cols-[3.5rem_3.5rem_1.25rem_auto] whitespace-pre"
+-          :class="ROW_CLASSES[row.kind]"
++          class="grid min-w-max grid-cols-[3.5rem_3.5rem_1.25rem_auto_auto] whitespace-pre"
++          :class="tone"
+         >
+-          <span class="pr-2 text-right text-fg-muted select-none">{{ oldNumber(row) }}</span>
+-          <span class="pr-2 text-right text-fg-muted select-none">{{ newNumber(row) }}</span>
+-          <span class="select-none">{{ sign(row) }}</span>
+-          <span class="pr-2">{{ rowText(row) }}</span>
++          <span class="pr-2 text-right text-fg-muted select-none">{{ cells.old }}</span>
++          <span class="pr-2 text-right text-fg-muted select-none">{{ cells.new }}</span>
++          <span class="select-none">{{ cells.sign }}</span>
++          <span class="pr-2">{{ cells.text }}</span>
++          <span class="pr-2 text-fg-muted italic select-none">{{ cells.note }}</span>
+         </div>
+       </div>
+     </template>
+diff --git a/frontend/src/ui/agentSettingsFields.test.ts b/frontend/src/ui/agentSettingsFields.test.ts
+index f2f524f..eb592fe 100644
+--- a/frontend/src/ui/agentSettingsFields.test.ts
++++ b/frontend/src/ui/agentSettingsFields.test.ts
+@@ -2,13 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import { DEFAULT_FIRST_MESSAGE } from "../agent";
+ import type { AgentSettings } from "../ipc";
+-import {
+-  commandField,
+-  firstMessageField,
+-  PLACEHOLDER_NAMES,
+-  unknownPlaceholderLines,
+-  YOLO_NOTE,
+-} from "./agentSettingsFields";
++import { commandField, firstMessageField, PLACEHOLDER_NAMES } from "./agentSettingsFields";
+ 
+ const DEFAULTS: AgentSettings = { command: null, firstMessage: null };
+ const OWN: AgentSettings = { command: ["/opt/omp", "acp"], firstMessage: "Hi {{ MESSAGE }}" };
+@@ -58,14 +52,6 @@ test("the first message field shows the default text, stores typed text as typed
+   expect(firstMessageField(DEFAULTS, DEFAULT_FIRST_MESSAGE).use).toBeNull();
+ });
+ 
+-test("each unknown placeholder is named once as typed; known ones are not", () => {
+-  expect(unknownPlaceholderLines("{{ FOO }} {{MESSAGE}} {{BAR}} {{ FOO }}")).toEqual([
+-    "{{ FOO }} is not a placeholder; it is sent as typed.",
+-    "{{BAR}} is not a placeholder; it is sent as typed.",
+-  ]);
+-  expect(unknownPlaceholderLines(DEFAULT_FIRST_MESSAGE)).toEqual([]);
+-});
+-
+ test("the five placeholders are listed as they are written", () => {
+   expect(PLACEHOLDER_NAMES).toEqual([
+     "{{ RELATIVE_FILE_PATH_WITH_LINE }}",
+@@ -75,9 +61,3 @@ test("the five placeholders are listed as they are written", () => {
+     "{{ NEW_COMMIT }}",
+   ]);
+ });
+-
+-test("the yolo note says what yamt allows and that omp's yolo mode asks nothing", () => {
+-  expect(YOLO_NOTE).toBe(
+-    "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.",
+-  );
+-});
+diff --git a/frontend/src/ui/agentSettingsFields.ts b/frontend/src/ui/agentSettingsFields.ts
+index 1a78e76..82ce860 100644
+--- a/frontend/src/ui/agentSettingsFields.ts
++++ b/frontend/src/ui/agentSettingsFields.ts
+@@ -1,17 +1,9 @@
+-import {
+-  DEFAULT_AGENT_COMMAND,
+-  DEFAULT_FIRST_MESSAGE,
+-  PLACEHOLDERS,
+-  unknownPlaceholders,
+-} from "../agent";
++import { DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE, PLACEHOLDERS } from "../agent";
+ import type { AgentSettings } from "../ipc";
+ import { commandWords } from "./commandWords";
+ 
+ export const PLACEHOLDER_NAMES: readonly string[] = PLACEHOLDERS.map((name) => `{{ ${name} }}`);
+ 
+-export const YOLO_NOTE =
+-  "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.";
+-
+ /** One field of the AI section: the text in use, and what Use and Default store (null: nothing to press). */
+ export type AgentField = {
+   readonly shown: string;
+@@ -45,9 +37,3 @@ export function firstMessageField(agent: AgentSettings, typed: string): AgentFie
+     reset: agent.firstMessage === null ? null : { ...agent, firstMessage: null },
+   };
+ }
+-
+-export function unknownPlaceholderLines(typed: string): readonly string[] {
+-  return unknownPlaceholders(typed).map(
+-    (text) => `${text} is not a placeholder; it is sent as typed.`,
+-  );
+-}
+diff --git a/frontend/src/ui/aiClose.test.ts b/frontend/src/ui/aiClose.test.ts
+index 2b8f18f..8b2d835 100644
+--- a/frontend/src/ui/aiClose.test.ts
++++ b/frontend/src/ui/aiClose.test.ts
+@@ -58,7 +58,7 @@ function changed(): Look {
+       kind: "Changed",
+       folder: folder(),
+       files: ["README.md"],
+-      refs: ["fix"],
++      refs: { branches: ["fix"], stash: true },
+       headMoved: true,
+     },
+   };
+@@ -86,7 +86,7 @@ test("a changed checkout asks with its files, folder, moved HEAD and refs; Keep
+       folder: FOLDER_TEXT,
+       files: ["README.md"],
+       headMoved: true,
+-      refs: ["fix"],
++      refs: { branches: ["fix"], stash: true },
+     },
+   ]);
+   expect(closing.discards).toBe(0);
+diff --git a/frontend/src/ui/aiText.test.ts b/frontend/src/ui/aiText.test.ts
+index c36ac60..ce49ee9 100644
+--- a/frontend/src/ui/aiText.test.ts
++++ b/frontend/src/ui/aiText.test.ts
+@@ -1,18 +1,25 @@
+ import { expect, test } from "vitest";
+ 
+-import type { AgentFailure } from "../agent";
++import { DEFAULT_FIRST_MESSAGE, unknownPlaceholders, type AgentFailure } from "../agent";
+ import {
++  AI_SETTINGS_TEXT,
+   diffFailureText,
+   editTitle,
+   failureText,
++  LINE_ENDING_WORDS,
++  LOADING_DIFF_TEXT,
+   moreLinesText,
++  NO_NEWLINE_TEXT,
+   refusedText,
+   RETRY,
++  RUNNING_TEXT,
+   skippedLinesText,
+   STEP_STATUS_WORDS,
+   STOPPED_TEXT,
+   THINKING_AND_STEPS,
+   TOO_LARGE_TEXT,
++  unknownPlaceholderText,
++  YOLO_NOTE,
+ } from "./aiText";
+ 
+ const LINUX = "Linux x86_64";
+@@ -36,7 +43,7 @@ const SENTENCES: Readonly<Record<AgentFailure["kind"], readonly [AgentFailure, s
+     "The AI stopped unexpectedly (exit code 1): panic: out of memory",
+   ],
+   refused: [
+-    { kind: "refused", method: "session/new", message: "no model configured" },
++    { kind: "refused", method: "session/new", message: " no model configured\n" },
+     "The AI refused session/new: no model configured",
+   ],
+   sessionGone: [{ kind: "sessionGone" }, "omp no longer has this thread's conversation."],
+@@ -96,16 +103,54 @@ test("the step words, the refusal and the diff's counts", () => {
+     "1000 more lines not shown",
+   ]);
+   expect([skippedLinesText(1), skippedLinesText(7)]).toEqual([
+-    "1 unchanged line",
+-    "7 unchanged lines",
++    "⋯ 1 unchanged line",
++    "⋯ 7 unchanged lines",
+   ]);
+ });
+ 
+ test("the turn view's fixed words", () => {
+-  expect([THINKING_AND_STEPS, STOPPED_TEXT, RETRY, TOO_LARGE_TEXT]).toEqual([
++  expect([
++    THINKING_AND_STEPS,
++    RUNNING_TEXT,
++    STOPPED_TEXT,
++    RETRY,
++    LOADING_DIFF_TEXT,
++    TOO_LARGE_TEXT,
++    NO_NEWLINE_TEXT,
++    LINE_ENDING_WORDS,
++  ]).toEqual([
+     "Thinking and steps",
++    "working…",
+     "You stopped the AI.",
+     "Retry",
++    "Making the diff…",
+     "This edit is too large to show as a diff.",
++    "\\ No newline at end of file",
++    { crlf: "CRLF line ending", lf: "LF line ending" },
+   ]);
+ });
++
++test("each unknown placeholder is named once as typed; known ones are not", () => {
++  expect(
++    unknownPlaceholders("{{ FOO }} {{MESSAGE}} {{BAR}} {{ FOO }}").map(unknownPlaceholderText),
++  ).toEqual([
++    "{{ FOO }} is not a placeholder; it is sent as typed.",
++    "{{BAR}} is not a placeholder; it is sent as typed.",
++  ]);
++  expect(unknownPlaceholders(DEFAULT_FIRST_MESSAGE)).toEqual([]);
++});
++
++test("the AI settings section's words and the yolo note", () => {
++  expect(AI_SETTINGS_TEXT).toEqual({
++    title: "AI",
++    command: "Agent command",
++    commandHint: "The command is split on spaces. It speaks the Agent Client Protocol.",
++    message: "First message",
++    messageHint: "Sent as the first message of a thread's conversation. Placeholders:",
++    use: "Use",
++    reset: "Default",
++  });
++  expect(YOLO_NOTE).toBe(
++    "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.",
++  );
++});
+diff --git a/frontend/src/ui/aiText.ts b/frontend/src/ui/aiText.ts
+index 0478e0f..1180b9f 100644
+--- a/frontend/src/ui/aiText.ts
++++ b/frontend/src/ui/aiText.ts
+@@ -3,9 +3,27 @@ import type { ProblemCause } from "./problem";
+ import { problemText } from "./problemText";
+ 
+ export const THINKING_AND_STEPS = "Thinking and steps";
++export const RUNNING_TEXT = "working…";
+ export const STOPPED_TEXT = "You stopped the AI.";
+ export const RETRY = "Retry";
++export const LOADING_DIFF_TEXT = "Making the diff…";
+ export const TOO_LARGE_TEXT = "This edit is too large to show as a diff.";
++export const NO_NEWLINE_TEXT = "\\ No newline at end of file";
++
++export const LINE_ENDING_WORDS = { crlf: "CRLF line ending", lf: "LF line ending" } as const;
++
++export const AI_SETTINGS_TEXT = {
++  title: "AI",
++  command: "Agent command",
++  commandHint: "The command is split on spaces. It speaks the Agent Client Protocol.",
++  message: "First message",
++  messageHint: "Sent as the first message of a thread's conversation. Placeholders:",
++  use: "Use",
++  reset: "Default",
++} as const;
++
++export const YOLO_NOTE =
++  "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.";
+ 
+ export const STEP_STATUS_WORDS: Readonly<Record<StepStatus, string>> = {
+   pending: "Waiting",
+@@ -78,5 +96,9 @@ export function moreLinesText(lines: number): string {
+ }
+ 
+ export function skippedLinesText(lines: number): string {
+-  return `${lines} unchanged line${lines === 1 ? "" : "s"}`;
++  return `⋯ ${lines} unchanged line${lines === 1 ? "" : "s"}`;
++}
++
++export function unknownPlaceholderText(name: string): string {
++  return `${name} is not a placeholder; it is sent as typed.`;
+ }
+diff --git a/frontend/src/ui/editDiffLines.test.ts b/frontend/src/ui/editDiffLines.test.ts
+index 082c029..07e65d1 100644
+--- a/frontend/src/ui/editDiffLines.test.ts
++++ b/frontend/src/ui/editDiffLines.test.ts
+@@ -1,7 +1,13 @@
+ import { expect, test } from "vitest";
+ 
+ import type { Difference } from "../ipc";
+-import { createdFileLines, editDiffLines, MAX_DIFF_ROWS, type DiffRow } from "./editDiffLines";
++import {
++  createdFileLines,
++  diffRowCells,
++  editDiffLines,
++  MAX_DIFF_ROWS,
++  type DiffRow,
++} from "./editDiffLines";
+ 
+ type Placed = Pick<Difference, "left" | "right">;
+ type LeftLine = Difference["left"]["start"];
+@@ -38,9 +44,11 @@ function shape(rows: readonly DiffRow[]): string[] {
+       case "context":
+         return ` ${row.old}:${row.new} ${row.text}`;
+       case "removed":
+-        return `-${row.old} ${row.text}`;
++        return `-${row.old} ${row.text}${row.ending === null ? "" : ` [${row.ending}]`}`;
+       case "added":
+-        return `+${row.new} ${row.text}`;
++        return `+${row.new} ${row.text}${row.ending === null ? "" : ` [${row.ending}]`}`;
++      case "noNewline":
++        return "\\";
+       case "skipped":
+         return `… ${row.lines}`;
+       case "more":
+@@ -117,15 +125,52 @@ test("a change at the first and last line shows no skipped rows and nothing beyo
+   ]);
+ });
+ 
+-test("a text without a final newline keeps its last line; no differences show nothing", () => {
++test("a side without a final newline gets git's marker after its last line, wherever that row is", () => {
+   expect(shape(editDiffLines("a\nb", "a\nc", [placed([1, 1, 1, 1])]))).toEqual([
+     " 1:1 a",
+     "-2 b",
++    "\\",
+     "+2 c",
++    "\\",
++  ]);
++  expect(shape(editDiffLines("a\nb", "a\nb\nc", [placed([1, 1, 1, 2])]))).toEqual([
++    " 1:1 a",
++    "-2 b",
++    "\\",
++    "+2 b",
++    "+3 c",
++    "\\",
++  ]);
++  expect(shape(editDiffLines("a\nb\nc", "A\nb\nc", [placed([0, 1, 0, 1])]))).toEqual([
++    "-1 a",
++    "+1 A",
++    " 2:2 b",
++    " 3:3 c",
++    "\\",
+   ]);
+   expect(editDiffLines("a\n", "a\n", [])).toEqual([]);
+ });
+ 
++test("a pair differing only by a carriage return is marked with each side's line ending, the \\r never shown", () => {
++  expect(shape(editDiffLines("a\r\nb\r\n", "a\nb\n", [placed([0, 2, 0, 2])]))).toEqual([
++    "-1 a [crlf]",
++    "-2 b [crlf]",
++    "+1 a [lf]",
++    "+2 b [lf]",
++  ]);
++  expect(shape(editDiffLines("x\r\ny\r\nz\r\n", "x\r\nY\nz\r\n", [placed([1, 1, 1, 1])]))).toEqual([
++    " 1:1 x",
++    "-2 y",
++    "+2 Y",
++    " 3:3 z",
++  ]);
++  expect(shape(editDiffLines("a\nb\n", "a\r\n", [placed([0, 2, 0, 1])]))).toEqual([
++    "-1 a [lf]",
++    "-2 b",
++    "+1 a [crlf]",
++  ]);
++});
++
+ test("rows stop at 2,000 and a last row counts the changed and unchanged lines not shown", () => {
+   const old = numbered(1500, "old");
+   const next = numbered(1500, "new");
+@@ -140,11 +185,52 @@ test("exactly 2,000 rows need no more row (catches a cap one row early)", () =>
+   const rows = createdFileLines(numbered(MAX_DIFF_ROWS));
+ 
+   expect(rows).toHaveLength(MAX_DIFF_ROWS);
+-  expect(rows.at(-1)).toEqual({ kind: "added", new: MAX_DIFF_ROWS, text: `line ${MAX_DIFF_ROWS}` });
++  expect(rows.at(-1)).toEqual({
++    kind: "added",
++    new: MAX_DIFF_ROWS,
++    text: `line ${MAX_DIFF_ROWS}`,
++    ending: null,
++  });
+ });
+ 
+-test("a created file is every line added, capped like a diff", () => {
+-  expect(shape(createdFileLines("a\nb\n"))).toEqual(["+1 a", "+2 b"]);
++test("a created file is every line added, capped like a diff; its marker is not a line", () => {
++  expect(shape(createdFileLines("a\r\nb"))).toEqual(["+1 a", "+2 b", "\\"]);
+   expect(shape(createdFileLines(numbered(MAX_DIFF_ROWS + 5)).slice(-1))).toEqual(["more 5"]);
++  expect(shape(createdFileLines(`${numbered(MAX_DIFF_ROWS + 4)}last`).slice(-1))).toEqual([
++    "more 5",
++  ]);
+   expect(createdFileLines("")).toEqual([]);
+ });
++
++test("past the cap a skipped run counts none of its lines: only context and changed lines are counted", () => {
++  const old = numbered(2100);
++  const next = numbered(1100, "new") + old.slice(old.indexOf("line 1101\n"));
++
++  const rows = editDiffLines(old, next, [placed([0, 1100, 0, 1100]), placed([1990, 1, 1990, 1])]);
++
++  expect(rows).toHaveLength(MAX_DIFF_ROWS + 1);
++  expect(shape(rows).slice(MAX_DIFF_ROWS - 1)).toEqual(["+900 new 900", "more 211"]);
++});
++
++test("each row kind fills its own cells; words come from the AI text", () => {
++  const cells: readonly DiffRow[] = [
++    { kind: "context", old: 4, new: 5, text: "same" },
++    { kind: "removed", old: 6, text: "gone", ending: null },
++    { kind: "added", new: 7, text: "came", ending: "lf" },
++    { kind: "noNewline" },
++    { kind: "skipped", lines: 3 },
++    { kind: "more", lines: 1 },
++  ];
++
++  expect(cells.map(diffRowCells)).toEqual([
++    { old: "4", new: "5", sign: " ", text: "same", note: "" },
++    { old: "6", new: "", sign: "−", text: "gone", note: "" },
++    { old: "", new: "7", sign: "+", text: "came", note: "LF line ending" },
++    { old: "", new: "", sign: "", text: "\\ No newline at end of file", note: "" },
++    { old: "", new: "", sign: "", text: "⋯ 3 unchanged lines", note: "" },
++    { old: "", new: "", sign: "", text: "1 more line not shown", note: "" },
++  ]);
++  expect(diffRowCells({ kind: "removed", old: 1, text: "a", ending: "crlf" }).note).toBe(
++    "CRLF line ending",
++  );
++});
+diff --git a/frontend/src/ui/editDiffLines.ts b/frontend/src/ui/editDiffLines.ts
+index b4b8b18..87901d4 100644
+--- a/frontend/src/ui/editDiffLines.ts
++++ b/frontend/src/ui/editDiffLines.ts
+@@ -1,19 +1,50 @@
+ import type { Difference } from "../ipc";
++import { LINE_ENDING_WORDS, moreLinesText, NO_NEWLINE_TEXT, skippedLinesText } from "./aiText";
+ 
+ export const MAX_DIFF_ROWS = 2000;
+ const CONTEXT_LINES = 3;
+ const LONGEST_SHOWN_RUN = CONTEXT_LINES + CONTEXT_LINES;
++const CR = "\r";
+ 
+-/** Line numbers count from 1, as an editor's gutter shows them. */
++type LineEnding = keyof typeof LINE_ENDING_WORDS;
++
++/**
++ * Line numbers count from 1, as an editor's gutter shows them. A changed row's `ending` is set
++ * only when its paired row differs from it by nothing but the line ending.
++ */
+ export type DiffRow =
+   | { readonly kind: "context"; readonly old: number; readonly new: number; readonly text: string }
+-  | { readonly kind: "removed"; readonly old: number; readonly text: string }
+-  | { readonly kind: "added"; readonly new: number; readonly text: string }
++  | {
++      readonly kind: "removed";
++      readonly old: number;
++      readonly text: string;
++      readonly ending: LineEnding | null;
++    }
++  | {
++      readonly kind: "added";
++      readonly new: number;
++      readonly text: string;
++      readonly ending: LineEnding | null;
++    }
++  | { readonly kind: "noNewline" }
+   | { readonly kind: "skipped"; readonly lines: number }
+   | { readonly kind: "more"; readonly lines: number };
+ 
++type DiffRowCells = {
++  readonly old: string;
++  readonly new: string;
++  readonly sign: string;
++  readonly text: string;
++  readonly note: string;
++};
++
+ type Placed = Pick<Difference, "left" | "right">;
+ 
++/** A side's lines as Rust counts them; `open` when its last line has no line break. */
++type Side = { readonly lines: readonly string[]; readonly open: boolean };
++
++type Texts = { readonly old: Side; readonly new: Side };
++
+ type Rows = { readonly shown: DiffRow[]; hidden: number };
+ 
+ /** Unchanged old lines `from` up to `to`; `shift` is how far the new text has moved them. */
+@@ -22,25 +53,44 @@ type Run = { readonly from: number; readonly to: number; readonly shift: number
+ /** Before the first change, between two, or after the last. */
+ type RunPlace = "start" | "between" | "end";
+ 
+-function linesOf(text: string): readonly string[] {
++function sideOf(text: string): Side {
+   if (text === "") {
+-    return [];
++    return { lines: [], open: false };
+   }
+   const lines = text.split("\n");
+-  return text.endsWith("\n") ? lines.slice(0, -1) : lines;
++  return text.endsWith("\n") ? { lines: lines.slice(0, -1), open: false } : { lines, open: true };
++}
++
++function withoutCr(line: string): string {
++  return line.endsWith(CR) ? line.slice(0, -CR.length) : line;
++}
++
++function pairEnding(line: string, pair: string | undefined): LineEnding | null {
++  if (pair === undefined || line === pair || withoutCr(line) !== withoutCr(pair)) {
++    return null;
++  }
++  return line.endsWith(CR) ? "crlf" : "lf";
+ }
+ 
+ function add(rows: Rows, row: DiffRow): void {
+   if (rows.shown.length < MAX_DIFF_ROWS) {
+     rows.shown.push(row);
+-  } else if (row.kind !== "skipped") {
++  } else if (row.kind === "context" || row.kind === "removed" || row.kind === "added") {
+     rows.hidden += 1;
+   }
+ }
+ 
+-function addContext(rows: Rows, old: readonly string[], { from, to, shift }: Run): void {
++function addLastLine(rows: Rows, side: Side, line: number): void {
++  if (side.open && line === side.lines.length - 1) {
++    add(rows, { kind: "noNewline" });
++  }
++}
++
++function addContext(rows: Rows, old: Side, { from, to, shift }: Run): void {
+   for (let line = from; line < to; line += 1) {
+-    add(rows, { kind: "context", old: line + 1, new: line + shift + 1, text: old[line] ?? "" });
++    const text = withoutCr(old.lines[line] ?? "");
++    add(rows, { kind: "context", old: line + 1, new: line + shift + 1, text });
++    addLastLine(rows, old, line);
+   }
+ }
+ 
+@@ -62,7 +112,7 @@ function keptAround(length: number, place: RunPlace): { start: number; end: numb
+   }
+ }
+ 
+-function addUnchanged(rows: Rows, old: readonly string[], run: Run, place: RunPlace): void {
++function addUnchanged(rows: Rows, old: Side, run: Run, place: RunPlace): void {
+   const { from, to, shift } = run;
+   const kept = keptAround(to - from, place);
+   addContext(rows, old, { from, to: from + kept.start, shift });
+@@ -73,16 +123,30 @@ function addUnchanged(rows: Rows, old: readonly string[], run: Run, place: RunPl
+   addContext(rows, old, { from: to - kept.end, to, shift });
+ }
+ 
+-function addChange(
+-  rows: Rows,
+-  texts: { readonly old: readonly string[]; readonly new: readonly string[] },
+-  { left, right }: Placed,
+-): void {
+-  for (let line: number = left.start; line < left.start + left.len; line += 1) {
+-    add(rows, { kind: "removed", old: line + 1, text: texts.old[line] ?? "" });
++function addChange(rows: Rows, texts: Texts, { left, right }: Placed): void {
++  for (let index = 0; index < left.len; index += 1) {
++    const line = left.start + index;
++    const text = texts.old.lines[line] ?? "";
++    const pair = index < right.len ? texts.new.lines[right.start + index] : undefined;
++    add(rows, {
++      kind: "removed",
++      old: line + 1,
++      text: withoutCr(text),
++      ending: pairEnding(text, pair),
++    });
++    addLastLine(rows, texts.old, line);
+   }
+-  for (let line: number = right.start; line < right.start + right.len; line += 1) {
+-    add(rows, { kind: "added", new: line + 1, text: texts.new[line] ?? "" });
++  for (let index = 0; index < right.len; index += 1) {
++    const line = right.start + index;
++    const text = texts.new.lines[line] ?? "";
++    const pair = index < left.len ? texts.old.lines[left.start + index] : undefined;
++    add(rows, {
++      kind: "added",
++      new: line + 1,
++      text: withoutCr(text),
++      ending: pairEnding(text, pair),
++    });
++    addLastLine(rows, texts.new, line);
+   }
+ }
+ 
+@@ -96,7 +160,7 @@ export function editDiffLines(
+   newText: string,
+   differences: readonly Placed[],
+ ): readonly DiffRow[] {
+-  const texts = { old: linesOf(oldText), new: linesOf(newText) };
++  const texts: Texts = { old: sideOf(oldText), new: sideOf(newText) };
+   const rows: Rows = { shown: [], hidden: 0 };
+   let oldAt = 0;
+   let shift = 0;
+@@ -108,16 +172,45 @@ export function editDiffLines(
+     shift = difference.right.start + difference.right.len - oldAt;
+   });
+   if (differences.length > 0) {
+-    addUnchanged(rows, texts.old, { from: oldAt, to: texts.old.length, shift }, "end");
++    addUnchanged(rows, texts.old, { from: oldAt, to: texts.old.lines.length, shift }, "end");
+   }
+   return finished(rows);
+ }
+ 
+ /** A created file: every line added. */
+ export function createdFileLines(newText: string): readonly DiffRow[] {
++  const side = sideOf(newText);
+   const rows: Rows = { shown: [], hidden: 0 };
+-  linesOf(newText).forEach((text, line) => {
+-    add(rows, { kind: "added", new: line + 1, text });
++  side.lines.forEach((text, line) => {
++    add(rows, { kind: "added", new: line + 1, text: withoutCr(text), ending: null });
++    addLastLine(rows, side, line);
+   });
+   return finished(rows);
+ }
++
++/** What each of a row's four columns shows, and the note after its text. */
++export function diffRowCells(row: DiffRow): DiffRowCells {
++  const none = { old: "", new: "", sign: "", note: "" };
++  switch (row.kind) {
++    case "context":
++      return { ...none, old: String(row.old), new: String(row.new), sign: " ", text: row.text };
++    case "removed": {
++      const note = row.ending === null ? "" : LINE_ENDING_WORDS[row.ending];
++      return { ...none, old: String(row.old), sign: "−", text: row.text, note };
++    }
++    case "added": {
++      const note = row.ending === null ? "" : LINE_ENDING_WORDS[row.ending];
++      return { ...none, new: String(row.new), sign: "+", text: row.text, note };
++    }
++    case "noNewline":
++      return { ...none, text: NO_NEWLINE_TEXT };
++    case "skipped":
++      return { ...none, text: skippedLinesText(row.lines) };
++    case "more":
++      return { ...none, text: moreLinesText(row.lines) };
++    default: {
++      const _exhaustive: never = row;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index f8580c4..a8980b7 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -246,6 +246,7 @@ test("closing a tab that holds text asks with its name, Yes or No, and never end
+ });
+ 
+ const CHECKOUT = "/home/me/.local/share/yamt/range/repo/pair/checkout";
++const NO_REFS = { branches: [], stash: false } as const;
+ 
+ test("the AI's changes question lists the files and the folder, Keep Changes the confirm", () => {
+   const question = {
+@@ -253,7 +254,7 @@ test("the AI's changes question lists the files and the folder, Keep Changes the
+     folder: CHECKOUT,
+     files: ["README.md", "src/a.ts"],
+     headMoved: false,
+-    refs: [],
++    refs: NO_REFS,
+   } as const;
+ 
+   expect(questionText(question, LINUX)).toEqual({
+@@ -268,11 +269,16 @@ test("the AI's changes question lists the files and the folder, Keep Changes the
+ });
+ 
+ test.each([
+-  [true, [], "It also made commits there."],
+-  [false, ["fix"], "It also left the branch fix there."],
+-  [false, ["fix", "try"], "It also left the branches fix, try there."],
+-  [false, ["stash"], "It also left a stash there."],
+-  [true, ["fix", "stash"], "It also made commits and left the branch fix and a stash there."],
++  [true, NO_REFS, "It also made commits there."],
++  [false, { branches: ["fix"], stash: false }, "It also left the branch fix there."],
++  [false, { branches: ["fix", "try"], stash: false }, "It also left the branches fix, try there."],
++  [false, { branches: [], stash: true }, "It also left a stash there."],
++  [false, { branches: ["stash"], stash: false }, "It also left the branch stash there."],
++  [
++    true,
++    { branches: ["fix"], stash: true },
++    "It also made commits and left the branch fix and a stash there.",
++  ],
+ ] as const)(
+   "a moved HEAD (%s) and the AI's refs %o are named in the note",
+   (headMoved, refs, note) => {
+@@ -287,7 +293,7 @@ test.each([
+ 
+ test("work without changed files says the AI left work there, without 'also'", () => {
+   const text = questionText(
+-    { kind: "keepAiChanges", folder: CHECKOUT, files: [], headMoved: true, refs: [] },
++    { kind: "keepAiChanges", folder: CHECKOUT, files: [], headMoved: true, refs: NO_REFS },
+     LINUX,
+   );
+ 
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index 7b2e75b..6c8c5b0 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -28,7 +28,7 @@ export type Question =
+       readonly folder: string;
+       readonly files: readonly string[];
+       readonly headMoved: boolean;
+-      readonly refs: readonly string[];
++      readonly refs: { readonly branches: readonly string[]; readonly stash: boolean };
+     }
+   | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string };
+ 
+@@ -157,15 +157,16 @@ function closeTabText(name: string): QuestionText {
+ const KEEP_TITLE = "Keep the AI's changes?";
+ const KEEP = "Keep Changes";
+ const DISCARD = "Discard Changes";
+-const STASH = "stash";
+ 
+-function leftRefs(refs: readonly string[]): string[] {
+-  const branches = refs.filter((ref) => ref !== STASH);
++function leftRefs({
++  branches,
++  stash,
++}: Extract<Question, { readonly kind: "keepAiChanges" }>["refs"]): string[] {
+   const left = [
+     ...(branches.length === 0
+       ? []
+       : [`the branch${branches.length === 1 ? "" : "es"} ${branches.join(", ")}`]),
+-    ...(refs.includes(STASH) ? ["a stash"] : []),
++    ...(stash ? ["a stash"] : []),
+   ];
+   return left.length === 0 ? [] : [`left ${left.join(" and ")}`];
+ }
+@@ -193,7 +194,7 @@ function keepUnreadableText(folder: string, message: string): QuestionText {
+     title: KEEP_TITLE,
+     message: `Git cannot read the AI's checkout at ${folder}, so yamt cannot tell what the AI changed there: ${message.trim()}`,
+     list: { kind: "none" },
+-    note: "Discard Changes removes the checkout.",
++    note: `${DISCARD} removes the checkout.`,
+     confirm: KEEP,
+     cancel: DISCARD,
+   };
+-- 
+2.56.0
+
