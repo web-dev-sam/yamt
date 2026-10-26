@@ -98,8 +98,10 @@ export type Antialiasing = "subpixel" | "greyscale";
 /**  0-based line index in the base text. */
 export type BaseLine = number;
 
-/**  What the checkout holds now; `Changed` lists at least one file or has `head_moved`. */
-export type CheckoutLook = { kind: "Missing" } | { kind: "Clean" } | { kind: "Changed"; folder: string; files: string[]; head_moved: boolean } | { kind: "Unreadable"; folder: string; message: string };
+/**  What the checkout holds now; `Changed` lists at least one file or ref, or has `head_moved`. */
+export type CheckoutLook = { kind: "Missing" } | { kind: "Clean" } | { kind: "Changed"; folder: string; files: string[]; 
+/**  The AI's branches and stash (plan §2 #122): the clone starts with none. */
+refs: string[]; head_moved: boolean } | { kind: "Unreadable"; folder: string; message: string };
 
 export type CheckoutReply = { kind: "Ready"; folder: string } | { kind: "Failed"; message: string };
 
