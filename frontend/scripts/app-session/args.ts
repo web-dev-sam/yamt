@@ -16,12 +16,13 @@ import { startCommand, type StartCommand } from "./startArgs";
 
 const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
-                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]]
+                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
                 --glab: scripts/fake-glab first on PATH; its scenario is the link <folder>/glab/scenario
   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
-                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]]
+                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
+                  [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
@@ -91,11 +92,11 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
       "home",
       "glab",
     ],
-    flags: ["fresh-repo", "diff"],
+    flags: ["fresh-repo", "diff", "ai"],
   },
   "start-fixture": {
-    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab"],
-    flags: ["diff"],
+    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case"],
+    flags: ["diff", "ai", "ai-changes"],
   },
   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },

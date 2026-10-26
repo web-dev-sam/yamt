@@ -81,7 +81,8 @@ function prepareApp(command: StartApp, folder: string): Prepared {
   }
   const repoDir = repoFolder(command.opens, folder);
   const glab = fakeGlab(scenarioFolder, folder);
-  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir), glab };
+  const args = appArgs(command.opens, repoDir, command.ai);
+  return { home, configDir, repoDir, binary, args, glab };
 }
 
 function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {

@@ -22,6 +22,7 @@ export type StartCommand =
       readonly record: Recording | null;
       readonly home: string | null;
       readonly glab: string | null;
+      readonly ai: boolean;
     }
   | {
       readonly kind: "start-fixture";
@@ -63,6 +64,21 @@ function opening(parsed: Parsed): Opening {
   return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
 }
 
+function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
+  const named = parsed.values.get("ai-case");
+  const changes = parsed.flags.has("ai-changes");
+  if (!parsed.flags.has("ai")) {
+    if (named !== undefined || changes) {
+      throw new Error("start-fixture takes --ai-case and --ai-changes only with --ai");
+    }
+    return;
+  }
+  review.set("ai", named ?? "");
+  if (changes) {
+    review.set("ai-changes", "");
+  }
+}
+
 function reviewSearch(parsed: Parsed): string {
   const review = new URLSearchParams();
   for (const name of ["threads", "gitlab"]) {
@@ -71,6 +87,7 @@ function reviewSearch(parsed: Parsed): string {
       review.set(name, value);
     }
   }
+  addAiSearch(parsed, review);
   const text = review.toString();
   return text === "" ? "" : `&${text}`;
 }
@@ -87,7 +104,7 @@ function fixtureSearch(parsed: Parsed): string {
     return `?range=${encodeURIComponent(range)}${review}`;
   }
   if (review !== "") {
-    throw new Error("start-fixture takes --threads and --gitlab only with --range-case");
+    throw new Error("start-fixture takes --threads, --gitlab and --ai only with --range-case");
   }
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
 }
@@ -144,16 +161,16 @@ function settingsText(parsed: Parsed): string | null {
   return text;
 }
 
-export function appArgs(opens: Opening, repoDir: string | null): readonly string[] {
-  const repo = repoDir === null ? [] : ["--repo", repoDir];
+export function appArgs(opens: Opening, repoDir: string | null, ai: boolean): readonly string[] {
+  const options = [...(repoDir === null ? [] : ["--repo", repoDir]), ...(ai ? ["--ai"] : [])];
   switch (opens.kind) {
     case "diff":
-      return ["--diff", ...repo];
+      return ["--diff", ...options];
     case "range":
-      return [`--diff=${opens.range}`, ...repo];
+      return [`--diff=${opens.range}`, ...options];
     case "dir":
     case "fresh":
-      return repo;
+      return options;
   }
 }
 
@@ -174,5 +191,6 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
     record: recording(parsed),
     home: parsed.values.get("home") ?? null,
     glab: glabScenario(parsed, opens),
+    ai: parsed.flags.has("ai"),
   };
 }

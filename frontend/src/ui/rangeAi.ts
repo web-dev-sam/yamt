@@ -249,9 +249,17 @@ async function load(state: State, id: ThreadId): Promise<void> {
   }
   put(state, id, { session, loaded: null });
   const loaded = await state.client.loadConversation(session);
-  if (aiOf(state, id).session === session) {
-    put(state, id, { loaded });
+  if (aiOf(state, id).session !== session) {
+    return;
   }
+  const held = loaded.kind === "loaded" ? loaded.turns.length : 0;
+  // Turns omp holds that no answer records (a reload mid-turn) become answers, plan row 121.
+  for (let known = answersIn(thread, session); known < held; known += 1) {
+    if (!(await state.threads.addAiAnswer(id, session))) {
+      break;
+    }
+  }
+  put(state, id, { loaded });
 }
 
 export function createRangeAi(

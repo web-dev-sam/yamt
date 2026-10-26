@@ -364,6 +364,69 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
   expect(askedAt(live, 0).request).toEqual({ session: SEEDED_SESSION, text: "Who calls it?" });
 });
 
+test("turns omp holds without an answer in the thread (a reload mid-turn) become answers before Ask is offered", async () => {
+  const live = await rig();
+  await live.threads.addNote(live.seeded, "Who calls it?");
+  live.ai.load(live.seeded);
+  const turns = [view("Yes"), view("Half"), view("Rest")];
+  loadAt(live, 0).answer({ kind: "loaded", turns });
+  expect(live.ai.canAsk(live.seeded)).toBe(false);
+  await settle();
+
+  expect(bodies(live, live.seeded).slice(1)).toEqual([
+    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 0 },
+    { kind: "note", text: "Who calls it?" },
+    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 1 },
+    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 2 },
+  ]);
+  expect(live.ai.canAsk(live.seeded)).toBe(false);
+  await live.threads.addNote(live.seeded, "And now?");
+  live.ai.ask(live.seeded);
+  expect(askedAt(live, 0).request.text).toBe("And now?");
+  askedAt(live, 0).end({ kind: "finished", turn: view("Now") });
+  await settle();
+  expect(bodies(live, live.seeded).at(-1)).toEqual({
+    kind: "aiAnswer",
+    session: SEEDED_SESSION,
+    turn: 3,
+  });
+  expect(aiOf(live, live.seeded).loaded).toEqual({
+    kind: "loaded",
+    turns: [...turns, view("Now")],
+  });
+});
+
+test("a failed write of an unseen turn's answer stops there and still shows the conversation", async () => {
+  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
+  const failure = { kind: "WriteFailed", path: "/t/threads.json", message: "full" } as const;
+  let writes = 0;
+  const threads = createRangeThreads(
+    {
+      ...fixture,
+      addAiAnswer: async () => {
+        writes += 1;
+        return { ok: false, failure };
+      },
+    },
+    () => undefined,
+  );
+  await threads.load();
+  const client = new FakeClient();
+  const ai = createRangeAi(client, threads, () => CONTEXT);
+  const seeded = threads.list.value.threads[3];
+  if (seeded === undefined) {
+    throw new Error("no seeded thread");
+  }
+
+  ai.load(seeded.id);
+  const turns = [view("Yes"), view("Half"), view("Rest")];
+  client.loads[0]?.answer({ kind: "loaded", turns });
+  await settle();
+
+  expect(writes).toBe(1);
+  expect(ai.byThread.value.get(seeded.id)).toMatchObject({ loaded: { kind: "loaded", turns } });
+});
+
 test("a load that failed for another reason than a lost session is tried again", async () => {
   const live = await rig();
   live.ai.load(live.seeded);
