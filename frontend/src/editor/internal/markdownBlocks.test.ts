@@ -108,6 +108,39 @@ test("a quote with a pipe right after a table starts a quote", () => {
   ]);
 });
 
+test("a row of dashes after a data row stays a row of the same table", () => {
+  expect(blocks("| name | a |\n|---|---|\n| x | 1 |\n| - | - |\n| y | 3 |")).toEqual([
+    {
+      kind: "table",
+      align: ["none", "none"],
+      header: ["name", "a"],
+      rows: [
+        ["x", "1"],
+        ["-", "-"],
+        ["y", "3"],
+      ],
+    },
+  ]);
+});
+
+test("item and fence lines ending in U+2028 parse in linear time", () => {
+  const spaces = " ".repeat(100_000);
+  const backticks = "`".repeat(100_000);
+  const emptyItem = { blocks: [] };
+  const started = performance.now();
+  expect(blocks(`-${spaces}\u2028`)).toEqual([
+    { kind: "list", numbering: { kind: "bullet" }, items: [emptyItem] },
+  ]);
+  expect(blocks(`1.${spaces}\u2028`)).toEqual([
+    { kind: "list", numbering: { kind: "ordered", start: 1 }, items: [emptyItem] },
+  ]);
+  expect(blocks(`${backticks}\u2028`)).toEqual([{ kind: "code", info: "", code: "" }]);
+  expect(blocks(`p\n-${spaces}\u2028`)).toEqual([
+    { kind: "paragraph", text: `p\n-${spaces}\u2028` },
+  ]);
+  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
+});
+
 test("a heading drops its closing run only after a space, in linear time", () => {
   expect(blocks("# a#\n## b ##  \n### ###")).toEqual([
     { kind: "heading", tag: "h1", text: "a#" },

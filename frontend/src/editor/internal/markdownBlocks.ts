@@ -29,12 +29,12 @@ type Starter = (lines: readonly string[], at: number, depth: number) => Parsed |
 type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
 
 const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
-const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/s;
 const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
 const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/s;
 const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
-const QUOTE = /^ {0,3}> ?(.*)$/;
-const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/;
+const QUOTE = /^ {0,3}> ?(.*)$/s;
+const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/s;
 const WHITESPACE = /^[ \t]$/;
 const LINE_BREAK = /\r\n|\n|\r/;
 const TAB_STOP = 4;
@@ -121,7 +121,7 @@ function table(lines: readonly string[], at: number): Parsed | null {
     return null;
   }
   let end = at + TABLE_HEAD_LINES;
-  while (end < lines.length && !isBlank(lineAt(lines, end)) && !interrupts(lines, end)) {
+  while (end < lines.length && !isBlank(lineAt(lines, end)) && !startsBlock(lines, end)) {
     end += 1;
   }
   return { block: tableOf(lines.slice(at, end)), end };
@@ -141,7 +141,7 @@ function itemStart(line: string): ItemStart | null {
   return { numbering, column: indent.length + marker.length + width, first: extra + first };
 }
 
-function interrupts(lines: readonly string[], at: number): boolean {
+function startsBlock(lines: readonly string[], at: number): boolean {
   const line = lineAt(lines, at);
   const item = itemStart(line);
   const listStarts =
@@ -151,9 +151,12 @@ function interrupts(lines: readonly string[], at: number): boolean {
   return (
     listStarts ||
     QUOTE.test(line) ||
-    [fence, heading, rule].some((starts) => starts(lines, at) !== null) ||
-    startsTable(line, lineAt(lines, at + 1))
+    [fence, heading, rule].some((starts) => starts(lines, at) !== null)
   );
+}
+
+function interrupts(lines: readonly string[], at: number): boolean {
+  return startsBlock(lines, at) || startsTable(lineAt(lines, at), lineAt(lines, at + 1));
 }
 
 function quote(lines: readonly string[], at: number, depth: number): Parsed | null {
