@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use yamt_agent::{CheckoutLook, CheckoutReply, Error, Pair, Workspace};
+use yamt_agent::{CheckoutLook, CheckoutReply, Error, Workspace, sweep_other_pairs};
 use yamt_conflict_repo::{git, git_ok, run_ignored_in_child};
 
 use common::{Fixture, commit_of, pair_in};
@@ -33,15 +33,9 @@ impl Fixture {
 
     /// The sweep as a window on another pair of the same data folder runs it.
     fn sweep_from_another_pair(&self) {
-        let other = Pair {
-            folder: self
-                .range_dir
-                .path()
-                .join("other-0123456789abcdef")
-                .join("a-b"),
-            ..self.pair.clone()
-        };
-        Workspace::new(other).sweep_leftovers(self.range_dir.path());
+        let range_dir = self.range_dir.path();
+        let other = range_dir.join("other-0123456789abcdef").join("a-b");
+        sweep_other_pairs(range_dir, &other);
     }
 }
 

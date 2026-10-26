@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub use crate::look::LookJob;
+pub use crate::sweep::sweep_other_pairs;
 pub use crate::workspace::{Pair, Workspace};
 pub use yamt_pipe::HostEvent;
 

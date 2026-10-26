@@ -89,9 +89,7 @@ pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
     builder
         .invoke_handler(specta_builder().invoke_handler())
         .on_page_load(|webview, page| {
-            if let Some(state) = webview.try_state() {
-                ai::stop_agent_on_page_start(&state, page.event());
-            }
+            ai::stop_agent_on_page_start(webview.app_handle(), page.event());
         })
 }
 

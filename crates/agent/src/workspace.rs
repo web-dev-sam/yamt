@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
 use yamt_pipe::{HostEvent, Running};
@@ -111,11 +111,10 @@ impl Workspace {
         checkout::remove_when_clean(&self.pair.folder, self.pair.new_commit);
     }
 
-    /// What crashes and kills left in `range_dir`: in this pair only the partial and removing folders
-    /// (its checkout is reused); in every other pair no window holds, also a clean checkout.
-    pub fn sweep_leftovers(&mut self, range_dir: &Path) {
+    /// What crashes and kills left in this pair: the partial and removing folders (its checkout is reused).
+    /// The other pairs are `sweep_other_pairs`'s, which needs no `Workspace`.
+    pub fn remove_own_leftovers(&mut self) {
         sweep::logged(checkout::remove_leftovers(&self.pair.folder));
-        sweep::sweep_other_pairs(range_dir, &self.pair.folder);
     }
 
     fn running(&self, run: AgentRun) -> Option<&Running> {

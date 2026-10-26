@@ -114,7 +114,7 @@ pub(crate) mod tests {
         _app: App<MockRuntime>,
     }
 
-    fn repo() -> TempDir {
+    pub(crate) fn repo() -> TempDir {
         let file = ConflictFile {
             path: "a.txt",
             kind: FileKind::Regular,
@@ -155,7 +155,7 @@ pub(crate) mod tests {
         open_resolved_window(repo, TempDir::new().unwrap(), resolved, Ai::Off)
     }
 
-    fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
+    pub(crate) fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
         let resolved = resolved(repo.path());
         open_resolved_window(repo, data, resolved, ai)
     }

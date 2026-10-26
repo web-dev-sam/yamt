@@ -23,6 +23,7 @@ mod range;
 mod review;
 mod servers;
 mod settings;
+mod start_script;
 mod window;
 
 use std::path::Path;

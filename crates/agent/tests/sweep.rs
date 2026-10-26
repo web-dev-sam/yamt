@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
-use yamt_agent::{Pair, Workspace};
+use yamt_agent::sweep_other_pairs;
 use yamt_range::{PairLock, RangeSpec, Resolved};
 
 use common::Fixture;
@@ -34,16 +34,16 @@ impl Leftover {
         Leftover { fixture, folder }
     }
 
-    fn other_pair(&self) -> Workspace {
-        Workspace::new(Pair {
-            folder: self
-                .fixture
-                .range_dir
-                .path()
-                .join("other-0123456789abcdef")
-                .join("a-b"),
-            ..self.fixture.pair.clone()
-        })
+    fn other_pair_folder(&self) -> PathBuf {
+        self.fixture
+            .range_dir
+            .path()
+            .join("other-0123456789abcdef")
+            .join("a-b")
+    }
+
+    fn swept_from_another_pair(&self) {
+        sweep_other_pairs(self.fixture.range_dir.path(), &self.other_pair_folder());
     }
 
     fn has(&self, name: &str) -> bool {
@@ -55,9 +55,7 @@ impl Leftover {
 fn a_clean_leftover_of_an_unheld_pair_is_removed() {
     let leftover = Leftover::new();
 
-    leftover
-        .other_pair()
-        .sweep_leftovers(leftover.fixture.range_dir.path());
+    leftover.swept_from_another_pair();
 
     assert!(!leftover.has("checkout"));
     assert!(!leftover.has("checkout.partial"));
@@ -70,9 +68,7 @@ fn a_changed_leftover_is_kept() {
     let checkout = leftover.fixture.checkout();
     fs::write(checkout.join("a.txt"), b"edited\n").unwrap();
 
-    leftover
-        .other_pair()
-        .sweep_leftovers(leftover.fixture.range_dir.path());
+    leftover.swept_from_another_pair();
 
     assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"edited\n");
     assert!(!leftover.has("checkout.partial"));
@@ -84,9 +80,7 @@ fn a_leftover_of_a_held_pair_is_untouched() {
     let leftover = Leftover::new();
     let _window = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
 
-    leftover
-        .other_pair()
-        .sweep_leftovers(leftover.fixture.range_dir.path());
+    leftover.swept_from_another_pair();
 
     assert!(leftover.has("checkout"));
     assert!(leftover.has("checkout.partial"));
@@ -98,14 +92,22 @@ fn the_own_pair_keeps_its_checkout_and_loses_partial_and_removing_folders() {
     let leftover = Leftover::new();
     let _own = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
 
-    leftover
-        .fixture
-        .workspace()
-        .sweep_leftovers(leftover.fixture.range_dir.path());
+    leftover.fixture.workspace().remove_own_leftovers();
 
     assert!(leftover.has("checkout"));
     assert!(!leftover.has("checkout.partial"));
     assert!(!leftover.has("checkout.removing"));
+}
+
+#[test]
+fn the_sweep_of_other_pairs_leaves_the_own_pair_alone_even_when_its_lock_is_free() {
+    let leftover = Leftover::new();
+
+    sweep_other_pairs(leftover.fixture.range_dir.path(), &leftover.folder);
+
+    assert!(leftover.has("checkout"));
+    assert!(leftover.has("checkout.partial"));
+    assert!(leftover.has("checkout.removing"));
 }
 
 #[test]
@@ -120,12 +122,9 @@ fn a_take_during_a_sweep_of_a_pair_with_nothing_to_sweep_succeeds() {
 
     thread::scope(|scope| {
         scope.spawn(|| {
-            let mut other = Workspace::new(Pair {
-                folder: range_dir.join("other-0123456789abcdef").join("a-b"),
-                ..fixture.pair.clone()
-            });
+            let other = range_dir.join("other-0123456789abcdef").join("a-b");
             while sweeping.load(Ordering::Relaxed) {
-                other.sweep_leftovers(range_dir);
+                sweep_other_pairs(range_dir, &other);
             }
         });
         let refused = (0..TAKES_DURING_SWEEPS)

@@ -8,7 +8,7 @@ use crate::checkout;
 /// and no leftover is skipped without its lock. In every other pair whose lock it takes, the partial and
 /// removing folders go and a clean checkout is renamed to `checkout.removing`, which is deleted after the lock
 /// is released, so a window starting on that pair waits for no deletion; a changed or unreadable checkout is kept.
-pub(crate) fn sweep_other_pairs(range_dir: &Path, own: &Path) {
+pub fn sweep_other_pairs(range_dir: &Path, own: &Path) {
     for folder in pair_folders(range_dir) {
         if folder == own || !checkout::has_any(&folder) {
             continue;
