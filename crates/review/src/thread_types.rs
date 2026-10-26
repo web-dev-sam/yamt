@@ -52,7 +52,9 @@ pub enum MessageBody {
     },
     /// An AI answer, kept in the AI's own session.
     AiAnswer {
-        /// The answer's turn in the thread's session.
+        /// The session the answer lives in.
+        session: String,
+        /// The answer's turn among that session's answers in the thread, from 0.
         turn: u32,
     },
 }

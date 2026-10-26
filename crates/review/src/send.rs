@@ -12,7 +12,7 @@ use crate::glab_answer::{Outcome, TIMED_OUT, answer, first_line, posted, run};
 use crate::lines_up::{Found, LinedUp, candidates, lines_up};
 use crate::position::{PostBody, line_place, same_draft};
 use crate::right_branch::right_branch;
-use crate::thread_store::QueuedMessage;
+use crate::thread_store::waiting::QueuedMessage;
 use crate::{
     Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
     ThreadStore,

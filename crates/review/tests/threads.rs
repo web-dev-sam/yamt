@@ -73,6 +73,30 @@ fn note(text: &str) -> MessageBody {
     }
 }
 
+fn ai_answer(session: &str, turn: u32) -> MessageBody {
+    MessageBody::AiAnswer {
+        session: session.to_owned(),
+        turn,
+    }
+}
+
+/// The first message of a new thread on a.txt, through the store.
+fn store_with_one_thread(folder: &TempDir, range: &Range) -> ThreadStore {
+    let mut store = ThreadStore::open(folder.path()).unwrap();
+    store
+        .add_thread(range, RangeFileId(0), added_line(), "Why 300?")
+        .unwrap();
+    store
+}
+
+fn bodies(list: &ThreadList) -> Vec<MessageBody> {
+    let messages = &only_thread(list).messages;
+    messages
+        .iter()
+        .map(|message| message.body.clone())
+        .collect()
+}
+
 fn refusal(folder: &TempDir) -> Error {
     match ThreadStore::open(folder.path()) {
         Ok(_) => panic!("the store opened"),
@@ -126,7 +150,7 @@ const EVERY_KIND: &str = r#"{
     { "id": 1, "path": "a.txt", "line": { "kind": "removed", "left": 3 }, "session": "omp-session-1",
       "messages": [
         { "id": 1, "body": { "kind": "note", "text": "Why 300?" }, "written": 1761300000, "posting": { "kind": "notQueued" } },
-        { "id": 2, "body": { "kind": "aiAnswer", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
+        { "id": 2, "body": { "kind": "aiAnswer", "session": "omp-session-0", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
     { "id": 2, "path": "b.txt", "line": { "kind": "added", "right": 4 }, "session": null,
       "messages": [
         { "id": 3, "body": { "kind": "note", "text": "t" }, "written": 1761300002, "posting": { "kind": "refused", "text": "t", "reason": "400 Bad request" } } ] },
@@ -171,7 +195,7 @@ fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
     let first = &list.threads[0];
     assert_eq!(first.session.as_deref(), Some("omp-session-1"));
     assert_eq!(first.line, ThreadLine::Removed { left: LeftLine(3) });
-    assert_eq!(first.messages[1].body, MessageBody::AiAnswer { turn: 3 });
+    assert_eq!(first.messages[1].body, ai_answer("omp-session-0", 3));
     assert_eq!(first.messages[1].written, 1_761_300_001);
     assert_eq!(
         list.threads[2].messages[0].posting,
@@ -469,6 +493,8 @@ fn a_failed_write_changes_nothing_in_memory() {
             .map(|added| added.list),
         store.add_note(&range, ThreadId(1), "b"),
         store.queue(&range, MessageId(1), "b"),
+        store.set_session(&range, ThreadId(1), "omp-1"),
+        store.add_ai_answer(&range, ThreadId(1), "omp-1"),
     ];
     for failure in failures {
         assert!(
@@ -558,4 +584,124 @@ fn an_unknown_file_thread_or_message_is_its_error() {
     assert_eq!(refused(unqueue), "no review message has the id 5");
     assert_eq!(on_disk(&folder), EVERY_KIND.as_bytes());
     assert_eq!(store.list(&range), list);
+}
+
+#[test]
+fn a_session_is_stored_survives_a_reopen_and_a_second_one_replaces_it() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    let mut store = store_with_one_thread(&folder, &range);
+
+    let list = store.set_session(&range, ThreadId(1), "omp-1").unwrap();
+    assert_eq!(only_thread(&list).session.as_deref(), Some("omp-1"));
+    assert_eq!(only_thread(&list).messages.len(), 1);
+    let mut reopened = ThreadStore::open(folder.path()).unwrap();
+    assert_eq!(reopened.list(&range), list);
+
+    let replaced = reopened.set_session(&range, ThreadId(1), "omp-2").unwrap();
+    assert_eq!(only_thread(&replaced).session.as_deref(), Some("omp-2"));
+    assert_eq!(json_on_disk(&folder)["threads"][0]["session"], "omp-2");
+    assert_eq!(
+        ThreadStore::open(folder.path()).unwrap().list(&range),
+        replaced
+    );
+}
+
+#[test]
+fn answers_number_0_1_2_within_a_session_and_a_new_session_starts_again_at_0() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    let mut store = store_with_one_thread(&folder, &range);
+
+    for _ in 0..3 {
+        store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
+    }
+    let first_answers = store.list(&range);
+    assert_eq!(
+        only_thread(&first_answers).session.as_deref(),
+        Some("omp-1")
+    );
+    store.add_note(&range, ThreadId(1), "And 400?").unwrap();
+    let list = store.add_ai_answer(&range, ThreadId(1), "omp-2").unwrap();
+
+    let expected = [
+        note("Why 300?"),
+        ai_answer("omp-1", 0),
+        ai_answer("omp-1", 1),
+        ai_answer("omp-1", 2),
+        note("And 400?"),
+        ai_answer("omp-2", 0),
+    ];
+    assert_eq!(bodies(&list), expected);
+    let thread = only_thread(&list);
+    assert_eq!(thread.session.as_deref(), Some("omp-2"));
+    let ids: Vec<u32> = thread.messages.iter().map(|message| message.id.0).collect();
+    assert_eq!(ids, [1, 2, 3, 4, 5, 6]);
+    let newest = &thread.messages[5];
+    assert_eq!(newest.posting, Posting::NotQueued);
+    assert!(newest.written > 0, "{}", newest.written);
+    assert_eq!(ThreadStore::open(folder.path()).unwrap().list(&range), list);
+}
+
+#[test]
+fn an_answer_counts_only_its_own_session_s_answers_and_keeps_the_older_ones() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    let mut store = store_with_one_thread(&folder, &range);
+    store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
+    store.add_ai_answer(&range, ThreadId(1), "omp-2").unwrap();
+    store.set_session(&range, ThreadId(1), "omp-1").unwrap();
+
+    let list = store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
+
+    let expected = [
+        note("Why 300?"),
+        ai_answer("omp-1", 0),
+        ai_answer("omp-2", 0),
+        ai_answer("omp-1", 1),
+    ];
+    assert_eq!(bodies(&list), expected);
+    assert_eq!(only_thread(&list).session.as_deref(), Some("omp-1"));
+}
+
+#[test]
+fn format_1_writes_an_ai_answer_with_its_session_and_turn() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    let mut store = store_with_one_thread(&folder, &range);
+
+    let list = store.add_ai_answer(&range, ThreadId(1), "omp-1").unwrap();
+
+    let written = json_on_disk(&folder);
+    let answer = serde_json::json!({ "kind": "aiAnswer", "session": "omp-1", "turn": 0 });
+    assert_eq!(written["threads"][0]["messages"][1]["body"], answer);
+    assert_eq!(written["threads"][0]["session"], "omp-1");
+    assert_eq!(written["nextMessage"], 3);
+    assert_eq!(ThreadStore::open(folder.path()).unwrap().list(&range), list);
+}
+
+#[test]
+fn an_unknown_or_unlisted_thread_gets_no_session_or_answer_and_nothing_is_written() {
+    let repo = repo();
+    let local = local_range(&repo);
+    let remote = range(repo.path(), "main..remote");
+    let folder = tempfile::tempdir().unwrap();
+    stored(&folder, EVERY_KIND);
+    let mut store = ThreadStore::open(folder.path()).unwrap();
+    let list = store.list(&local);
+
+    let session = store.set_session(&local, ThreadId(5), "omp-1");
+    assert_eq!(refused(session), "no review thread has the id 5");
+    let answer = store.add_ai_answer(&local, ThreadId(5), "omp-1");
+    assert_eq!(refused(answer), "no review thread has the id 5");
+    let hidden_session = store.set_session(&remote, ThreadId(1), "omp-1");
+    assert_eq!(refused(hidden_session), "no review thread has the id 1");
+    let hidden_answer = store.add_ai_answer(&remote, ThreadId(1), "omp-1");
+    assert_eq!(refused(hidden_answer), "no review thread has the id 1");
+    assert_eq!(on_disk(&folder), EVERY_KIND.as_bytes());
+    assert_eq!(store.list(&local), list);
 }

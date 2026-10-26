@@ -85,6 +85,28 @@ pub(crate) fn unqueue_message(
     Ok(locked(&state.threads).unqueue(&state.range, message)?)
 }
 
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+pub(crate) fn set_thread_session(
+    state: State<'_, RangeState>,
+    thread: ThreadId,
+    session: String,
+) -> Result<ThreadList, IpcError> {
+    Ok(locked(&state.threads).set_session(&state.range, thread, &session)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+pub(crate) fn add_ai_answer(
+    state: State<'_, RangeState>,
+    thread: ThreadId,
+    session: String,
+) -> Result<ThreadList, IpcError> {
+    Ok(locked(&state.threads).add_ai_answer(&state.range, thread, &session)?)
+}
+
 // The range comes from the window: tauri-macros 2.7 checks an async command with a borrowed
 // argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
 #[tauri::command]
@@ -212,6 +234,35 @@ mod tests {
             invoke(&window, "unqueue_message", json!({ "message": UNKNOWN_ID })),
             Err(json!({ "kind": "UnknownMessage", "message": UNKNOWN_ID }))
         );
+    }
+
+    #[test]
+    fn set_thread_session_and_add_ai_answer_reach_the_thread_store() {
+        let window = open_range_window();
+        let thread = add_first_thread(&window)["thread"].clone();
+
+        let set = invoke(
+            &window,
+            "set_thread_session",
+            json!({ "thread": thread, "session": "omp-1" }),
+        );
+        assert_eq!(set.unwrap()["threads"][0]["session"], "omp-1");
+        let answered = invoke(
+            &window,
+            "add_ai_answer",
+            json!({ "thread": thread, "session": "omp-2" }),
+        )
+        .unwrap();
+
+        let answer = json!({ "kind": "aiAnswer", "session": "omp-2", "turn": 0 });
+        assert_eq!(answered["threads"][0]["messages"][1]["body"], answer);
+        assert_eq!(answered["threads"][0]["session"], "omp-2");
+        assert_eq!(invoke(&window, "list_threads", json!({})), Ok(answered));
+        let unknown = json!({ "thread": UNKNOWN_ID, "session": "omp-1" });
+        let refusal = json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID });
+        for cmd in ["set_thread_session", "add_ai_answer"] {
+            assert_eq!(invoke(&window, cmd, unknown.clone()), Err(refusal.clone()));
+        }
     }
 
     // Two sends at once would post the same queued messages twice.
