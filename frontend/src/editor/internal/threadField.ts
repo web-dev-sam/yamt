@@ -61,9 +61,7 @@ function bottomAbove(view: AnchorView, place: number): number {
 
 function topBelow(view: AnchorView, place: number): number {
   const { doc } = view.state;
-  return place < doc.lines
-    ? textBlock(view.lineBlockAt(doc.line(place + 1).from)).top
-    : contentEnd(view);
+  return place < doc.lines ? view.lineBlockAt(doc.line(place + 1).from).top : contentEnd(view);
 }
 
 export function threadAnchors(views: Readonly<Record<Column, AnchorView>>): Anchor<Column>[] {
