@@ -8,8 +8,10 @@ import { fileIcon } from "./fileIcon";
 import { ACTION_NAMES } from "./keyText";
 import PaneFrame from "./PaneFrame.vue";
 import { compareColumns } from "./paneSplit";
+import RangeSendButton from "./RangeSendButton.vue";
 import { useRangeStore } from "./rangeStore";
 import { fileHeading, sideHeading } from "./rangeText";
+import RangeThreadLayer from "./RangeThreadLayer.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useRangeController } from "./useRangeController";
 
@@ -28,7 +30,7 @@ const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
 const { preferences, question } = useRangeStore();
-const { content, moveToChange } = useRangeController(
+const { content, threadHosts, moveToChange } = useRangeController(
   props.file,
   { left, right, strip },
   { preferences },
@@ -72,7 +74,8 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
         >
           <ArrowDown class="size-4" aria-hidden="true" />
         </button>
-        <SettingsButton class="ml-auto" />
+        <RangeSendButton class="ml-auto" />
+        <SettingsButton />
       </header>
     </template>
     <template #default="{ stripLayer }">
@@ -95,6 +98,7 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
           <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
         </div>
         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
+        <RangeThreadLayer :file="file" :hosts="threadHosts" />
       </template>
       <p v-else-if="sentence !== null" class="col-span-3 col-start-1 row-start-2 px-3 py-4">
         {{ sentence }}

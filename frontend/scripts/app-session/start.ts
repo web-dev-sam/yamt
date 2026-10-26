@@ -6,10 +6,11 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import type { Command } from "./args";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
@@ -29,12 +30,14 @@ import { finishRecording, recordingLaunch, waitForRecording } from "./video";
 import { inSession, isReady, newSession } from "./webdriver";
 
 type StartApp = Extract<Command, { kind: "start-app" }>;
+type FakeGlab = { readonly scenario: string; readonly posts: string; readonly log: string };
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
   readonly repoDir: string | null;
   readonly binary: string;
   readonly args: readonly string[];
+  readonly glab: FakeGlab | null;
 };
 
 const DISPLAY_READY_MS = 10_000;
@@ -76,7 +79,35 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   const repoDir = repoFolder(command.opens, folder);
-  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir) };
+  const glab = fakeGlab(command.glab, folder);
+  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir), glab };
+}
+
+function fakeGlab(scenario: string | null, folder: string): FakeGlab | null {
+  if (scenario === null) {
+    return null;
+  }
+  const recorded = fromRoot(join("tests/glab", scenario));
+  if (!existsSync(recorded)) {
+    throw new Error(`--glab ${scenario}: no scenario folder ${recorded}`);
+  }
+  const dir = join(folder, "glab");
+  mkdirSync(dir);
+  const link = join(dir, "scenario");
+  symlinkSync(recorded, link);
+  return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
+}
+
+function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
+  if (glab === null) {
+    return {};
+  }
+  return {
+    PATH: [fromRoot("scripts/fake-glab"), process.env["PATH"] ?? ""].join(delimiter),
+    YAMT_FAKE_GLAB: glab.scenario,
+    YAMT_FAKE_GLAB_STATE: glab.posts,
+    YAMT_FAKE_GLAB_LOG: glab.log,
+  };
 }
 
 function repoFolder(opens: StartApp["opens"], folder: string): string | null {
@@ -99,6 +130,7 @@ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
 function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...displayEnv(display),
+    ...glabEnv(prepared.glab),
     HOME: prepared.home,
     XDG_CONFIG_HOME: prepared.configDir,
   };
@@ -216,7 +248,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     rmSync(folder, { recursive: true, force: true });
     throw error;
   }
-  const { home, configDir, repoDir } = prepared;
+  const { home, configDir, repoDir, glab } = prepared;
   const empty: AppState = {
     kind: "app",
     name: command.name,
@@ -241,5 +273,6 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     configDir,
     repoDir,
     record: command.record,
+    glab,
   };
 }

@@ -14,6 +14,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
     size: { width: 1600, height: 1000 },
     record: null,
     home: null,
+    glab: null,
   });
 });
 
@@ -46,6 +47,7 @@ test("start-app reads every option of the acceptance run", () => {
     size: { width: 800, height: 600 },
     record: { file: "/tmp/s.mkv", seconds: 5 },
     home: "/tmp/h-home",
+    glab: null,
   });
 });
 
@@ -96,6 +98,24 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
   expect(appArgs({ kind: "diff" }, null)).toEqual(["--diff"]);
   expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r")).toEqual(["--repo", "/tmp/r"]);
   expect(appArgs({ kind: "fresh" }, "/tmp/s/repo")).toEqual(["--repo", "/tmp/s/repo"]);
+});
+
+test("start-app --glab names a tests/glab scenario, only with --range", () => {
+  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+  expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
+  expect(parseCommand(range)).toMatchObject({ glab: null });
+  const needsRange = /--glab <scenario> needs --range/;
+  expect(() =>
+    parseCommand(["start-app", "--name", "r", "--repo", "/r", "--glab", "moved"]),
+  ).toThrow(needsRange);
+  expect(() => parseCommand(["start-app", "--name", "r", "--diff", "--glab", "moved"])).toThrow(
+    needsRange,
+  );
+  const folderName = /--glab .*: expected a folder name under tests\/glab\//;
+  expect(() => parseCommand([...range, "--glab", "../moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "Moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab"])).toThrow(/--glab needs a value/);
 });
 
 test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
@@ -158,6 +178,26 @@ test("start-fixture --range-case opens one range fixture, never with a compare o
   expect(() => parseCommand(["start-fixture", "--name", "fx", "--range-case"])).toThrow(
     /--range-case needs a value/,
   );
+});
+
+test("start-fixture --threads and --gitlab pick the review scripts of a range fixture, and only of one", () => {
+  const ranged = ["start-fixture", "--name", "fx", "--range-case", "review"];
+  expect(parseCommand([...ranged, "--threads", "seeded", "--gitlab", "refusal"])).toMatchObject({
+    search: "?range=review&threads=seeded&gitlab=refusal",
+  });
+  expect(parseCommand([...ranged, "--gitlab", "a b"])).toMatchObject({
+    search: "?range=review&gitlab=a+b",
+  });
+  expect(parseCommand([...ranged, "--threads", "seeded"])).toMatchObject({
+    search: "?range=review&threads=seeded",
+  });
+  const onlyRange = /--threads and --gitlab only with --range-case/;
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--gitlab", "moved"])).toThrow(
+    onlyRange,
+  );
+  expect(() =>
+    parseCommand(["start-fixture", "--name", "fx", "--diff", "--threads", "seeded"]),
+  ).toThrow(onlyRange);
 });
 
 test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {

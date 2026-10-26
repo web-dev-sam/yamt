@@ -18,6 +18,7 @@ export type StartCommand =
       readonly size: Size;
       readonly record: Recording | null;
       readonly home: string | null;
+      readonly glab: string | null;
     }
   | {
       readonly kind: "start-fixture";
@@ -59,17 +60,47 @@ function opening(parsed: Parsed): Opening {
   return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
 }
 
+function reviewSearch(parsed: Parsed): string {
+  const review = new URLSearchParams();
+  for (const name of ["threads", "gitlab"]) {
+    const value = parsed.values.get(name);
+    if (value !== undefined) {
+      review.set(name, value);
+    }
+  }
+  const text = review.toString();
+  return text === "" ? "" : `&${text}`;
+}
+
 function fixtureSearch(parsed: Parsed): string {
   const range = parsed.values.get("range-case");
   const fixture = parsed.values.get("diff-case");
   const diff = parsed.flags.has("diff") ? "?diff" : "";
+  const review = reviewSearch(parsed);
   if (range !== undefined) {
     if (fixture !== undefined || diff !== "") {
       throw new Error("start-fixture takes --range-case without --diff or --diff-case");
     }
-    return `?range=${encodeURIComponent(range)}`;
+    return `?range=${encodeURIComponent(range)}${review}`;
+  }
+  if (review !== "") {
+    throw new Error("start-fixture takes --threads and --gitlab only with --range-case");
   }
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+}
+
+function glabScenario(parsed: Parsed, opens: Opening): string | null {
+  const scenario = parsed.values.get("glab");
+  if (scenario === undefined) {
+    return null;
+  }
+  if (opens.kind !== "range") {
+    throw new Error("start-app --glab <scenario> needs --range: only the range window runs glab");
+  }
+  if (!/^[a-z0-9-]+$/.test(scenario)) {
+    throw new Error(`--glab ${scenario}: expected a folder name under tests/glab/, e.g. lined-up`);
+  }
+  return scenario;
 }
 
 function recording(parsed: Parsed): Recording | null {
@@ -121,14 +152,16 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
   if (kind === "start-fixture") {
     return { kind, name, size: size(parsed), search: fixtureSearch(parsed) };
   }
+  const opens = opening(parsed);
   return {
     kind,
     name,
     binary: parsed.values.get("binary") ?? DEFAULT_BINARY,
-    opens: opening(parsed),
+    opens,
     settings: settingsText(parsed),
     size: size(parsed),
     record: recording(parsed),
     home: parsed.values.get("home") ?? null,
+    glab: glabScenario(parsed, opens),
   };
 }

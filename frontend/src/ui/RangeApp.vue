@@ -3,15 +3,21 @@ import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, watch } from "vue";
 
 import FileList from "./FileList.vue";
+import NoticeBar from "./NoticeBar.vue";
+import type { NoticeRow } from "./noticeText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
 import RangeFileRow from "./RangeFileRow.vue";
+import { typesIntoField } from "./rangeKeys";
 import { useRangeStore } from "./rangeStore";
 import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
+import { sendResultText } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
+
+const SEND_RESULT_CLOSE = "Close the notice about the send to GitLab";
 
 const {
   start,
@@ -29,18 +35,28 @@ const {
   answer,
   dismissQuestion,
   gitlab,
+  threads,
 } = useRangeStore();
+const { counts } = threads;
 
 const focused = useWindowFocus();
 useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
-  fileListKey(event, navigator.platform);
+  if (!typesIntoField(event)) {
+    fileListKey(event, navigator.platform);
+  }
 });
 
 const files = computed(() => start.value?.files ?? []);
 const emptyText = computed(() =>
   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
 );
+const sendNotice = computed((): readonly NoticeRow[] => {
+  const result = gitlab.result.value;
+  return result === null
+    ? []
+    : [{ key: "send", text: sendResultText(result), closeLabel: SEND_RESULT_CLOSE }];
+});
 
 watch(focused, (now) => {
   if (now) {
@@ -60,12 +76,13 @@ watch(focused, (now) => {
       @select="showFile"
     >
       <template #file="{ file, label }">
-        <RangeFileRow :file="file" :label="label" />
+        <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
       </template>
     </FileList>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
         <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
+        <NoticeBar v-if="sendNotice.length > 0" :rows="sendNotice" @close="gitlab.dismissResult" />
       </div>
       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
         <template v-if="start !== null">

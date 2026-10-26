@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import MessageSquare from "~icons/lucide/message-square";
 
 import type { RangeChange, RangeEntry } from "../ipc";
 import { changeMark, lineCounts } from "./rangeText";
 
-const props = defineProps<{ file: RangeEntry; label: string }>();
+const props = defineProps<{ file: RangeEntry; label: string; threads: number }>();
 
 const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
   added: "text-success-signal",
@@ -19,6 +20,9 @@ const oldPath = computed(() =>
   props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
 );
 const counts = computed(() => lineCounts(props.file.lines));
+const threadsTitle = computed(() =>
+  props.threads === 1 ? "1 thread" : `${props.threads} threads`,
+);
 </script>
 
 <template>
@@ -33,7 +37,21 @@ const counts = computed(() => lineCounts(props.file.lines));
   </span>
   <span class="truncate">{{ label }}</span>
   <span v-if="oldPath !== null" class="min-w-0 truncate text-fg-muted">{{ oldPath }}</span>
-  <span v-if="counts !== null" class="ml-auto flex shrink-0 gap-1.5 tabular-nums">
+  <span
+    v-if="threads > 0"
+    role="img"
+    :title="threadsTitle"
+    :aria-label="threadsTitle"
+    class="ml-auto flex shrink-0 items-center gap-0.5 text-fg-muted tabular-nums"
+  >
+    <MessageSquare class="size-3.5" aria-hidden="true" />
+    {{ threads }}
+  </span>
+  <span
+    v-if="counts !== null"
+    class="flex shrink-0 gap-1.5 tabular-nums"
+    :class="{ 'ml-auto': threads === 0 }"
+  >
     <span class="text-success-signal">{{ counts.added }}</span>
     <span class="text-problem-error">{{ counts.removed }}</span>
   </span>
