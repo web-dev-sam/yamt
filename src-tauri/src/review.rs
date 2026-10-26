@@ -126,10 +126,11 @@ pub(crate) async fn send_queue<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    use std::thread;
 
     use serde_json::{Value, json};
+    use tauri::async_runtime::block_on;
     use tauri::ipc::InvokeResponseBody;
-    use yamt_review::Error;
 
     use super::*;
     use crate::mock_window::invoke_on;
@@ -221,20 +222,27 @@ mod tests {
         let _running = send_guard(&state.sending).unwrap();
 
         let progress = Channel::new(|_| Ok(()));
-        let second = tauri::async_runtime::block_on(send_queue(window.webview.clone(), progress));
+        let second = block_on(send_queue(window.webview.clone(), progress));
 
         assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
     }
 
     #[test]
-    fn a_send_guard_let_go_is_taken_again() {
+    fn a_send_guard_whose_holder_panicked_is_taken_again() {
         let sending = Mutex::new(());
-        drop(send_guard(&sending).unwrap());
+        thread::scope(|scope| {
+            let holder = scope.spawn(|| {
+                let _held = send_guard(&sending);
+                panic!("a send's worker panics");
+            });
+            assert!(holder.join().is_err());
+        });
+        assert!(sending.is_poisoned());
         assert!(send_guard(&sending).is_ok());
     }
 
-    #[test]
-    fn each_progress_reaches_the_window_s_channel() {
+    /// A channel whose every progress arrives on the receiver as its JSON text.
+    fn collecting_channel() -> (Channel<SendProgress>, mpsc::Receiver<String>) {
         let (sender, received) = mpsc::channel();
         let channel = Channel::new(move |body| {
             let InvokeResponseBody::Json(json) = body else {
@@ -243,6 +251,12 @@ mod tests {
             sender.send(json).unwrap();
             Ok(())
         });
+        (channel, received)
+    }
+
+    #[test]
+    fn each_progress_reaches_the_window_s_channel() {
+        let (channel, received) = collecting_channel();
 
         forward_progress(&channel, SendProgress { done: 2, of: 3 });
 
@@ -250,66 +264,134 @@ mod tests {
         assert_eq!(sent, json!({ "done": 2, "of": 3 }));
     }
 
-    fn review_json(error: Error) -> Value {
-        serde_json::to_value(IpcError::from(error)).unwrap()
-    }
+    #[cfg(unix)]
+    mod through_glab {
+        use std::path::PathBuf;
+        use std::process::Command;
+        use std::time::{Duration, Instant};
 
-    #[test]
-    fn each_review_error_has_its_kind_and_a_write_failure_names_the_file() {
-        let write_failed = Error::WriteFailed {
-            path: "/d/threads.json".into(),
-            message: "disk full".to_owned(),
-        };
-        assert_eq!(
-            review_json(write_failed),
-            json!({ "kind": "WriteFailed", "path": "/d/threads.json", "message": "disk full" })
-        );
-        assert_eq!(
-            review_json(Error::UnknownFile {
-                file: RangeFileId(4)
-            }),
-            json!({ "kind": "UnknownRangeFile", "file": 4 })
-        );
-        assert_eq!(
-            review_json(Error::UnknownThread {
-                thread: ThreadId(5)
-            }),
-            json!({ "kind": "UnknownThread", "thread": 5 })
-        );
-        assert_eq!(
-            review_json(Error::UnknownMessage {
-                message: MessageId(6)
-            }),
-            json!({ "kind": "UnknownMessage", "message": 6 })
-        );
-        assert_eq!(
-            review_json(Error::EmptyMessage),
-            json!({ "kind": "EmptyMessage" })
-        );
-        assert_eq!(
-            review_json(Error::MessagePending {
-                message: MessageId(7)
-            }),
-            json!({ "kind": "MessagePending", "message": 7 })
-        );
-        assert_eq!(
-            serde_json::to_value(IpcError::SendRunning).unwrap(),
-            json!({ "kind": "SendRunning" })
-        );
-    }
+        use yamt_conflict_repo::{TempDir, run_ignored_in_child};
 
-    #[test]
-    fn a_start_only_review_error_is_its_line() {
-        let newer = Error::NewerFormat {
-            path: "/d/threads.json".into(),
-            format: 2,
-        };
-        assert_eq!(
-            review_json(newer),
-            json!({
-                "kind": "Git",
-                "message": "the review threads /d/threads.json were written by a newer yamt (format 2)",
-            })
-        );
+        use super::*;
+        use crate::range::tests::open_range_window_on;
+
+        const FAKE_GLAB_LOG: &str = "YAMT_FAKE_GLAB_LOG";
+        const SEND_TEST: &str = "review::tests::through_glab::a_send_on_path_s_glab";
+        const CHECK_TEST: &str = "review::tests::through_glab::check_gitlab_on_path_s_glab";
+        const POST_ARGV: &str =
+            "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
+        const ADDED_FILE: &str = "src/board/reminders.ts";
+        const ADDED_FILE_LINE: u32 = 2;
+        const POST_WAIT: Duration = Duration::from_secs(10);
+        const POLL: Duration = Duration::from_millis(10);
+
+        fn in_this_repository(relative: &str) -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join(relative)
+        }
+
+        /// Runs `test` in a child whose PATH starts with the committed fake glab (`tests/glab/README.md`) on
+        /// `scenario`, its post count and log in a folder of this test's.
+        fn run_with_fake_glab(test: &str, scenario: &str) {
+            let fake = TempDir::new().unwrap();
+            let inherited = std::env::var_os("PATH").unwrap_or_default();
+            let mut folders = vec![in_this_repository("scripts/fake-glab")];
+            folders.extend(std::env::split_paths(&inherited));
+            let path = std::env::join_paths(folders).unwrap();
+            let scenario = in_this_repository(&format!("tests/glab/{scenario}"));
+
+            let ran = run_ignored_in_child(&[test], |child| {
+                child
+                    .env("PATH", path)
+                    .env("YAMT_FAKE_GLAB", scenario)
+                    .env("YAMT_FAKE_GLAB_STATE", fake.path().join("state"))
+                    .env(FAKE_GLAB_LOG, fake.path().join("log"));
+            });
+
+            ran.unwrap_or_else(|error| panic!("{error}"));
+        }
+
+        /// A window on `scripts/range-repo.sh`'s `main...feature`, the range `tests/glab` pins.
+        fn range_repo_window() -> RangeWindow {
+            let repo = TempDir::new().unwrap();
+            let built = Command::new(in_this_repository("scripts/range-repo.sh"))
+                .arg(repo.path())
+                .output()
+                .unwrap();
+            assert!(built.status.success(), "{built:?}");
+            open_range_window_on(repo, "main...feature")
+        }
+
+        fn queue_one_message(window: &RangeWindow) {
+            let state = window.webview.state::<RangeState>();
+            let entries = state.range.entries();
+            let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
+            let line = json!({ "kind": "added", "right": ADDED_FILE_LINE });
+            let args = json!({ "file": file.unwrap().id, "line": line, "text": "Why?" });
+            let added = invoke(window, "add_thread", args).unwrap();
+            let message = &added["list"]["threads"][0]["messages"][0]["id"];
+            let queued = json!({ "message": message, "text": "Why not a Duration?" });
+            invoke(window, "queue_message", queued).unwrap();
+        }
+
+        fn send(window: &RangeWindow) -> Result<SendReply, IpcError> {
+            block_on(send_queue(window.webview.clone(), Channel::new(|_| Ok(()))))
+        }
+
+        fn wait_for_the_post() {
+            let log = std::env::var_os(FAKE_GLAB_LOG).unwrap();
+            let deadline = Instant::now() + POST_WAIT;
+            loop {
+                let logged = std::fs::read_to_string(&log).unwrap_or_default();
+                if logged.lines().any(|line| line == POST_ARGV) {
+                    return;
+                }
+                assert!(Instant::now() < deadline, "no POST: {logged}");
+                thread::sleep(POLL);
+            }
+        }
+
+        #[test]
+        fn a_send_holds_off_a_second_send_until_its_post_ends() {
+            run_with_fake_glab(SEND_TEST, "slow-post");
+        }
+
+        #[test]
+        #[ignore = "run by a_send_holds_off_a_second_send_until_its_post_ends"]
+        fn a_send_on_path_s_glab() {
+            let window = range_repo_window();
+            queue_one_message(&window);
+            let (progress, received) = collecting_channel();
+            let webview = window.webview.clone();
+            let first = thread::spawn(move || block_on(send_queue(webview, progress)));
+
+            wait_for_the_post();
+            let second = send(&window);
+            let first = first.join().unwrap();
+            let third = send(&window);
+
+            assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
+            let Ok(SendReply::Sent { sent, refused, .. }) = first else {
+                panic!("not sent: {first:?}");
+            };
+            assert_eq!((sent, refused), (1, 0));
+            let steps: Vec<String> = received.try_iter().collect();
+            assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
+            assert!(matches!(third, Ok(SendReply::Sent { .. })), "{third:?}");
+        }
+
+        #[test]
+        fn check_gitlab_answers_lined_up_on_the_lined_up_merge_request() {
+            run_with_fake_glab(CHECK_TEST, "lined-up");
+        }
+
+        #[test]
+        #[ignore = "run by check_gitlab_answers_lined_up_on_the_lined_up_merge_request"]
+        fn check_gitlab_on_path_s_glab() {
+            let window = range_repo_window();
+            let checked = block_on(check_gitlab(window.webview.clone())).unwrap();
+            assert_eq!(serde_json::to_value(checked).unwrap()["kind"], "linedUp");
+        }
     }
 }

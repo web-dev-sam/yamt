@@ -69,3 +69,5 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
 - `runner/` — `yamt-gitio`'s own tests (`crates/gitio/tests/glab.rs`): post 1 is accepted, post 2 refused with
   400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s,
   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
+- `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
+  2 s before it is accepted, so a second send can arrive while it runs.

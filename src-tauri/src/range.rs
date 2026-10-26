@@ -101,7 +101,6 @@ pub(crate) mod tests {
     use crate::commands::with_commands;
     use crate::frontend_log::tests::logged;
     use crate::mock_window::invoke_on;
-    use crate::outcome::Exit;
     use crate::window::app_folder;
 
     const RANGE: &str = "main...remote";
@@ -127,7 +126,11 @@ pub(crate) mod tests {
     }
 
     fn resolved(root: &Path) -> Resolved {
-        Resolved::resolve(root, &RangeSpec::parse(RANGE).unwrap()).unwrap()
+        resolved_on(root, RANGE)
+    }
+
+    fn resolved_on(root: &Path, range: &str) -> Resolved {
+        Resolved::resolve(root, &RangeSpec::parse(range).unwrap()).unwrap()
     }
 
     fn range_app() -> App<MockRuntime> {
@@ -145,9 +148,26 @@ pub(crate) mod tests {
         open_range_window_in(repo(), TempDir::new().unwrap(), ai)
     }
 
+    /// A window on `range` of the repository in `repo`'s folder.
+    #[cfg(unix)]
+    pub(crate) fn open_range_window_on(repo: TempDir, range: &str) -> RangeWindow {
+        let resolved = resolved_on(repo.path(), range);
+        open_resolved_window(repo, TempDir::new().unwrap(), resolved, Ai::Off)
+    }
+
     fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
+        let resolved = resolved(repo.path());
+        open_resolved_window(repo, data, resolved, ai)
+    }
+
+    fn open_resolved_window(
+        repo: TempDir,
+        data: TempDir,
+        resolved: Resolved,
+        ai: Ai,
+    ) -> RangeWindow {
         let app = range_app();
-        manage_range_in(&app, &app_folder(data.path()), resolved(repo.path()), ai).unwrap();
+        manage_range_in(&app, &app_folder(data.path()), resolved, ai).unwrap();
         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
             .build()
             .unwrap();
@@ -165,9 +185,10 @@ pub(crate) mod tests {
         lock.folder().join(THREADS_FILE)
     }
 
-    // Opening on a file it cannot read would show no threads, and the next add would write over them.
+    // Opening on a file it cannot read would show no threads, and the next add would write over them. That the
+    // refusal ends with exit 2 before any window rests on window.rs:111-113 and the real-app smoke.
     #[test]
-    fn a_broken_threads_file_ends_before_any_window_with_exit_2() {
+    fn a_broken_threads_file_is_refused_before_the_range_state_and_left_unchanged() {
         let (repo, data) = (repo(), TempDir::new().unwrap());
         let threads = threads_path(repo.path(), data.path());
         let broken = b"{\"format\":1,";
@@ -184,7 +205,6 @@ pub(crate) mod tests {
         let line = refused.unwrap_err();
         let named = format!("the review threads {} cannot be read: ", threads.display());
         assert!(line.starts_with(&named), "{line}");
-        assert_eq!(Ending::failure(line).exit, Exit::Failure);
         assert!(app.try_state::<RangeState>().is_none());
         assert_eq!(std::fs::read(&threads).unwrap(), broken);
     }
