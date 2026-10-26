@@ -3,6 +3,7 @@ use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 use std::process;
 
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 
@@ -13,8 +14,6 @@ const ANTIALIASING: &str = "antialiasing";
 const KEYS: &str = "keys";
 const LANGUAGE_SERVERS: &str = "languageServers";
 const AGENT: &str = "agent";
-const AGENT_COMMAND: &str = "command";
-const AGENT_FIRST_MESSAGE: &str = "firstMessage";
 
 /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
 const MAX_LINK_HOPS: usize = 40;
@@ -27,9 +26,11 @@ pub(crate) struct Loaded {
 
 impl Loaded {
     pub(crate) fn from_settings(settings: &StoredSettings) -> Loaded {
+        let mut stored = settings.clone();
+        stored.agent = stored.agent.without_empty_command();
         Loaded {
             others: Map::new(),
-            stored: settings.clone(),
+            stored,
         }
     }
 
@@ -48,30 +49,29 @@ impl Loaded {
             entries.insert(KEYS.to_owned(), Value::Object(keys));
         }
         if self.stored.language_servers != LanguageServerSettings::default() {
-            let servers = serde_json::to_value(self.stored.language_servers).map_err(|error| {
-                Error::WriteFailed {
-                    path: path.to_owned(),
-                    message: error.to_string(),
-                }
-            })?;
+            let servers = written(path, self.stored.language_servers)?;
             entries.insert(LANGUAGE_SERVERS.to_owned(), servers);
         }
-        if let Some(agent) = agent_entry(self.stored.agent) {
+        if let Some(agent) = agent_entry(path, self.stored.agent)? {
             entries.insert(AGENT.to_owned(), agent);
         }
         Ok(entries)
     }
 }
 
-fn agent_entry(agent: AgentSettings) -> Option<Value> {
-    let mut fields = Map::new();
-    if let Some(command) = agent.command {
-        fields.insert(AGENT_COMMAND.to_owned(), Value::from(command));
-    }
-    if let Some(first_message) = agent.first_message {
-        fields.insert(AGENT_FIRST_MESSAGE.to_owned(), Value::from(first_message));
-    }
-    (!fields.is_empty()).then_some(Value::Object(fields))
+fn agent_entry(path: &Path, agent: AgentSettings) -> Result<Option<Value>, Error> {
+    let Value::Object(mut fields) = written(path, agent)? else {
+        return Ok(None);
+    };
+    fields.retain(|_, value| !value.is_null());
+    Ok((!fields.is_empty()).then_some(Value::Object(fields)))
+}
+
+fn written<T: Serialize>(path: &Path, value: T) -> Result<Value, Error> {
+    serde_json::to_value(value).map_err(|error| Error::WriteFailed {
+        path: path.to_owned(),
+        message: error.to_string(),
+    })
 }
 
 /// `None` when there is no file at `path`.
@@ -93,8 +93,10 @@ pub(crate) fn read_or_create(
     if let Some(loaded) = load(path)? {
         return Ok(loaded.stored);
     }
-    write_entries(path, Loaded::from_settings(current))?;
-    Ok(current.clone())
+    let loaded = Loaded::from_settings(current);
+    let stored = loaded.stored.clone();
+    write_entries(path, loaded)?;
+    Ok(stored)
 }
 
 fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {

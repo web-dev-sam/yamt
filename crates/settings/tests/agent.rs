@@ -139,6 +139,20 @@ fn an_empty_command_list_is_written_as_the_default() {
     let emptied = set_agent(&config.places, &current, agent(Some(&[]), None)).unwrap();
     assert_eq!(emptied.stored.agent, AgentSettings::default());
     assert_eq!(json_at(&config.default_file()).get("agent"), None);
+
+    let other = Config::new();
+    let holding_empty = StoredSettings {
+        agent: agent(Some(&[]), None),
+        ..StoredSettings::default()
+    };
+    let themed = set_theme(&other.places, &holding_empty, Theme::Light).unwrap();
+    assert_eq!(themed.stored.agent, AgentSettings::default());
+    assert_eq!(json_at(&other.default_file()).get("agent"), None);
+
+    let created = Config::new();
+    let read_back = read(&created.places, &holding_empty).unwrap();
+    assert_eq!(read_back.stored.agent, AgentSettings::default());
+    assert_eq!(json_at(&created.default_file()).get("agent"), None);
 }
 
 #[test]
