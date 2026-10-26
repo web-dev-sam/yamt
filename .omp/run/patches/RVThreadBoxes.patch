@@ -1,0 +1,1087 @@
+From 062e049d0c2e511fe75b8126c448520848cfb0ee Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 22:51:13 +0100
+Subject: [PATCH] feat(range): thread boxes, Post and the queue, Send to
+ GitLab, counts
+
+---
+ frontend/scripts/app-session/args.test.ts |  40 ++++++
+ frontend/scripts/app-session/args.ts      |  11 +-
+ frontend/scripts/app-session/start.ts     |  39 +++++-
+ frontend/scripts/app-session/startArgs.ts |  37 +++++-
+ frontend/src/ui/AGENTS.md                 |   2 +
+ frontend/src/ui/RangeApp.vue              |  21 ++-
+ frontend/src/ui/RangeFileRow.vue          |  22 +++-
+ frontend/src/ui/RangeMessage.vue          | 114 ++++++++++++++++
+ frontend/src/ui/RangePostEditor.vue       |  69 ++++++++++
+ frontend/src/ui/RangeSendButton.vue       |  28 ++++
+ frontend/src/ui/RangeThreadBox.vue        | 152 ++++++++++++++++++++++
+ frontend/src/ui/RangeThreadLayer.vue      |  16 +++
+ frontend/src/ui/RangeView.vue             |   8 +-
+ frontend/src/ui/rangeKeys.test.ts         | 105 +++++++++++++++
+ frontend/src/ui/rangeKeys.ts              |  69 ++++++++++
+ 15 files changed, 719 insertions(+), 14 deletions(-)
+ create mode 100644 frontend/src/ui/RangeMessage.vue
+ create mode 100644 frontend/src/ui/RangePostEditor.vue
+ create mode 100644 frontend/src/ui/RangeSendButton.vue
+ create mode 100644 frontend/src/ui/RangeThreadBox.vue
+ create mode 100644 frontend/src/ui/RangeThreadLayer.vue
+ create mode 100644 frontend/src/ui/rangeKeys.test.ts
+ create mode 100644 frontend/src/ui/rangeKeys.ts
+
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 1504edf..d497679 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -14,6 +14,7 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
+     size: { width: 1600, height: 1000 },
+     record: null,
+     home: null,
++    glab: null,
+   });
+ });
+ 
+@@ -46,6 +47,7 @@ test("start-app reads every option of the acceptance run", () => {
+     size: { width: 800, height: 600 },
+     record: { file: "/tmp/s.mkv", seconds: 5 },
+     home: "/tmp/h-home",
++    glab: null,
+   });
+ });
+ 
+@@ -98,6 +100,24 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
+   expect(appArgs({ kind: "fresh" }, "/tmp/s/repo")).toEqual(["--repo", "/tmp/s/repo"]);
+ });
+ 
++test("start-app --glab names a tests/glab scenario, only with --range", () => {
++  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
++  expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
++  expect(parseCommand(range)).toMatchObject({ glab: null });
++  const needsRange = /--glab <scenario> needs --range/;
++  expect(() =>
++    parseCommand(["start-app", "--name", "r", "--repo", "/r", "--glab", "moved"]),
++  ).toThrow(needsRange);
++  expect(() => parseCommand(["start-app", "--name", "r", "--diff", "--glab", "moved"])).toThrow(
++    needsRange,
++  );
++  const folderName = /--glab .*: expected a folder name under tests\/glab\//;
++  expect(() => parseCommand([...range, "--glab", "../moved"])).toThrow(folderName);
++  expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);
++  expect(() => parseCommand([...range, "--glab", "Moved"])).toThrow(folderName);
++  expect(() => parseCommand([...range, "--glab"])).toThrow(/--glab needs a value/);
++});
++
+ test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
+   const base = ["start-app", "--name", "a", "--fresh-repo"];
+   expect(() => parseCommand([...base, "--record", "/tmp/s.mkv"])).toThrow(/go together/);
+@@ -160,6 +180,26 @@ test("start-fixture --range-case opens one range fixture, never with a compare o
+   );
+ });
+ 
++test("start-fixture --threads and --gitlab pick the review scripts of a range fixture, and only of one", () => {
++  const ranged = ["start-fixture", "--name", "fx", "--range-case", "review"];
++  expect(parseCommand([...ranged, "--threads", "seeded", "--gitlab", "refusal"])).toMatchObject({
++    search: "?range=review&threads=seeded&gitlab=refusal",
++  });
++  expect(parseCommand([...ranged, "--gitlab", "a b"])).toMatchObject({
++    search: "?range=review&gitlab=a+b",
++  });
++  expect(parseCommand([...ranged, "--threads", "seeded"])).toMatchObject({
++    search: "?range=review&threads=seeded",
++  });
++  const onlyRange = /--threads and --gitlab only with --range-case/;
++  expect(() => parseCommand(["start-fixture", "--name", "fx", "--gitlab", "moved"])).toThrow(
++    onlyRange,
++  );
++  expect(() =>
++    parseCommand(["start-fixture", "--name", "fx", "--diff", "--threads", "seeded"]),
++  ).toThrow(onlyRange);
++});
++
+ test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {
+   expect(parseCommand(["start-fixture", "--name", "fx", "--diff"])).toMatchObject({
+     search: "?diff",
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index ebb8a36..b28eba2 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -16,11 +16,12 @@ import { startCommand, type StartCommand } from "./startArgs";
+ 
+ const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
+   start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
+-                | --range <a..b or a...b> --repo <dir>]
++                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]]
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
++                --glab: scripts/fake-glab first on PATH; its scenario is the link <folder>/glab/scenario
+   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+-                | --range-case <range fixture>]
++                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]]
+   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
+   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
+@@ -88,10 +89,14 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "record",
+       "record-seconds",
+       "home",
++      "glab",
+     ],
+     flags: ["fresh-repo", "diff"],
+   },
+-  "start-fixture": { values: ["name", "size", "diff-case", "range-case"], flags: ["diff"] },
++  "start-fixture": {
++    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab"],
++    flags: ["diff"],
++  },
+   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
+   press: { values: ["name"], flags: ["x11"] },
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 8c9743c..b4df3c1 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -6,10 +6,11 @@ import {
+   readFileSync,
+   realpathSync,
+   rmSync,
++  symlinkSync,
+   writeFileSync,
+ } from "node:fs";
+ import { tmpdir, userInfo } from "node:os";
+-import { join } from "node:path";
++import { delimiter, join } from "node:path";
+ 
+ import type { Command } from "./args";
+ import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
+@@ -29,12 +30,14 @@ import { finishRecording, recordingLaunch, waitForRecording } from "./video";
+ import { inSession, isReady, newSession } from "./webdriver";
+ 
+ type StartApp = Extract<Command, { kind: "start-app" }>;
++type FakeGlab = { readonly scenario: string; readonly posts: string; readonly log: string };
+ type Prepared = {
+   readonly home: string;
+   readonly configDir: string;
+   readonly repoDir: string | null;
+   readonly binary: string;
+   readonly args: readonly string[];
++  readonly glab: FakeGlab | null;
+ };
+ 
+ const DISPLAY_READY_MS = 10_000;
+@@ -76,7 +79,35 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
+   }
+   const repoDir = repoFolder(command.opens, folder);
+-  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir) };
++  const glab = fakeGlab(command.glab, folder);
++  return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir), glab };
++}
++
++function fakeGlab(scenario: string | null, folder: string): FakeGlab | null {
++  if (scenario === null) {
++    return null;
++  }
++  const recorded = fromRoot(join("tests/glab", scenario));
++  if (!existsSync(recorded)) {
++    throw new Error(`--glab ${scenario}: no scenario folder ${recorded}`);
++  }
++  const dir = join(folder, "glab");
++  mkdirSync(dir);
++  const link = join(dir, "scenario");
++  symlinkSync(recorded, link);
++  return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
++}
++
++function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
++  if (glab === null) {
++    return {};
++  }
++  return {
++    PATH: [fromRoot("scripts/fake-glab"), process.env["PATH"] ?? ""].join(delimiter),
++    YAMT_FAKE_GLAB: glab.scenario,
++    YAMT_FAKE_GLAB_STATE: glab.posts,
++    YAMT_FAKE_GLAB_LOG: glab.log,
++  };
+ }
+ 
+ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+@@ -99,6 +130,7 @@ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+ function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
+   const env: NodeJS.ProcessEnv = {
+     ...displayEnv(display),
++    ...glabEnv(prepared.glab),
+     HOME: prepared.home,
+     XDG_CONFIG_HOME: prepared.configDir,
+   };
+@@ -216,7 +248,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
+     rmSync(folder, { recursive: true, force: true });
+     throw error;
+   }
+-  const { home, configDir, repoDir } = prepared;
++  const { home, configDir, repoDir, glab } = prepared;
+   const empty: AppState = {
+     kind: "app",
+     name: command.name,
+@@ -241,5 +273,6 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
+     configDir,
+     repoDir,
+     record: command.record,
++    glab,
+   };
+ }
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index 913fb12..0d0a0d8 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -18,6 +18,7 @@ export type StartCommand =
+       readonly size: Size;
+       readonly record: Recording | null;
+       readonly home: string | null;
++      readonly glab: string | null;
+     }
+   | {
+       readonly kind: "start-fixture";
+@@ -59,19 +60,49 @@ function opening(parsed: Parsed): Opening {
+   return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
+ }
+ 
++function reviewSearch(parsed: Parsed): string {
++  const review = new URLSearchParams();
++  for (const name of ["threads", "gitlab"]) {
++    const value = parsed.values.get(name);
++    if (value !== undefined) {
++      review.set(name, value);
++    }
++  }
++  const text = review.toString();
++  return text === "" ? "" : `&${text}`;
++}
++
+ function fixtureSearch(parsed: Parsed): string {
+   const range = parsed.values.get("range-case");
+   const fixture = parsed.values.get("diff-case");
+   const diff = parsed.flags.has("diff") ? "?diff" : "";
++  const review = reviewSearch(parsed);
+   if (range !== undefined) {
+     if (fixture !== undefined || diff !== "") {
+       throw new Error("start-fixture takes --range-case without --diff or --diff-case");
+     }
+-    return `?range=${encodeURIComponent(range)}`;
++    return `?range=${encodeURIComponent(range)}${review}`;
++  }
++  if (review !== "") {
++    throw new Error("start-fixture takes --threads and --gitlab only with --range-case");
+   }
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+ }
+ 
++function glabScenario(parsed: Parsed, opens: Opening): string | null {
++  const scenario = parsed.values.get("glab");
++  if (scenario === undefined) {
++    return null;
++  }
++  if (opens.kind !== "range") {
++    throw new Error("start-app --glab <scenario> needs --range: only the range window runs glab");
++  }
++  if (!/^[a-z0-9-]+$/.test(scenario)) {
++    throw new Error(`--glab ${scenario}: expected a folder name under tests/glab/, e.g. lined-up`);
++  }
++  return scenario;
++}
++
+ function recording(parsed: Parsed): Recording | null {
+   const file = parsed.values.get("record");
+   const seconds = parsed.values.get("record-seconds");
+@@ -121,14 +152,16 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
+   if (kind === "start-fixture") {
+     return { kind, name, size: size(parsed), search: fixtureSearch(parsed) };
+   }
++  const opens = opening(parsed);
+   return {
+     kind,
+     name,
+     binary: parsed.values.get("binary") ?? DEFAULT_BINARY,
+-    opens: opening(parsed),
++    opens,
+     settings: settingsText(parsed),
+     size: size(parsed),
+     record: recording(parsed),
+     home: parsed.values.get("home") ?? null,
++    glab: glabScenario(parsed, opens),
+   };
+ }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index a45b1fc..db9647a 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -4,6 +4,8 @@ Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over
+ 
+ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeStore.ts`, mounted by `main.ts` when `<html data-window="range">` (app, `yamt --diff=<range>`) or `?range` / `?range=<case>` (fixture mode). Every range-only file carries the prefix — `Range*.vue`, `range*.ts`, `useRange*.ts` — and none imports `store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue` or `lsp/` (fence PM9; PM7 keeps the compare root from `rangeStore.ts`/`RangeApp.vue`). The panel is the shared `FileList.vue` with `RangeFileRow.vue` in its `#file` slot (coloured A/M/D/R with its word as title, the old path of a renamed file muted, `+n −m`). `start` mirrors `openRange`'s reply; `shown` is written only by `showFile` and `startUp` (the first file at start); `visited` keeps first-visit order, at most `MOUNTED_FILES` (16) views mounted, the least recently shown dropped when another file is shown. A failed `loadFile` reports `open` with the path and drops the file from `visited`, so selecting it again retries; that file's later success clears the problem. `RangeView.vue` (one per visited file, `PaneFrame`) shows the header (icon, path or "old → new", the mode note, ↑/↓, gear), the column headers (side and short id, the subject as title) and either the two read-only columns or one sentence. `useRangeController` (`followRange`) keeps a texts reply in a non-reactive slot until the hosts exist, builds `RangeController` once, follows preferences, and drops a reply that lands after unmount; a sentence kind builds nothing. Every range word is in `rangeText.ts`. No close guard: the window closes at once.
+ 
++Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every lines-up sentence is in `rangeThreadText.ts`. `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). Post opens `RangePostEditor.vue` in the message's place (Queue/Cancel), Unqueue is the same button while queued or refused. Keys in every box field go through `rangeKeys.ts` `boxKeydown`: Ctrl/Cmd+Enter submits, Escape cancels (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp`'s window keydown skips presses that type into a field (`typesIntoField`: a typing target per `isTypingTarget` without Ctrl/Cmd), so Ctrl/Cmd+B still toggles the list from a box or a find field. `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendResultText`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
++
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. With no host (fixture mode without `?servers`) it only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index fdb247c..7db1e25 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -3,16 +3,22 @@ import { useEventListener, useWindowFocus } from "@vueuse/core";
+ import { computed, watch } from "vue";
+ 
+ import FileList from "./FileList.vue";
++import NoticeBar from "./NoticeBar.vue";
++import type { NoticeRow } from "./noticeText";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import RangeFileRow from "./RangeFileRow.vue";
++import { typesIntoField } from "./rangeKeys";
+ import { useRangeStore } from "./rangeStore";
+ import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
++import { sendResultText } from "./rangeThreadText";
+ import RangeView from "./RangeView.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { useThemeAttribute } from "./settingsStore";
+ import SettingsView from "./SettingsView.vue";
+ 
++const SEND_RESULT_CLOSE = "Close the notice about the send to GitLab";
++
+ const {
+   start,
+   shown,
+@@ -29,18 +35,28 @@ const {
+   answer,
+   dismissQuestion,
+   gitlab,
++  threads,
+ } = useRangeStore();
++const { counts } = threads;
+ 
+ const focused = useWindowFocus();
+ useThemeAttribute();
+ useEventListener(window, "keydown", (event) => {
+-  fileListKey(event, navigator.platform);
++  if (!typesIntoField(event)) {
++    fileListKey(event, navigator.platform);
++  }
+ });
+ 
+ const files = computed(() => start.value?.files ?? []);
+ const emptyText = computed(() =>
+   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
+ );
++const sendNotice = computed((): readonly NoticeRow[] => {
++  const result = gitlab.result.value;
++  return result === null
++    ? []
++    : [{ key: "send", text: sendResultText(result), closeLabel: SEND_RESULT_CLOSE }];
++});
+ 
+ watch(focused, (now) => {
+   if (now) {
+@@ -60,12 +76,13 @@ watch(focused, (now) => {
+       @select="showFile"
+     >
+       <template #file="{ file, label }">
+-        <RangeFileRow :file="file" :label="label" />
++        <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+       </template>
+     </FileList>
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+         <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
++        <NoticeBar v-if="sendNotice.length > 0" :rows="sendNotice" @close="gitlab.dismissResult" />
+       </div>
+       <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
+         <template v-if="start !== null">
+diff --git a/frontend/src/ui/RangeFileRow.vue b/frontend/src/ui/RangeFileRow.vue
+index 958ceaa..553d8a6 100644
+--- a/frontend/src/ui/RangeFileRow.vue
++++ b/frontend/src/ui/RangeFileRow.vue
+@@ -1,10 +1,11 @@
+ <script setup lang="ts">
+ import { computed } from "vue";
++import MessageSquare from "~icons/lucide/message-square";
+ 
+ import type { RangeChange, RangeEntry } from "../ipc";
+ import { changeMark, lineCounts } from "./rangeText";
+ 
+-const props = defineProps<{ file: RangeEntry; label: string }>();
++const props = defineProps<{ file: RangeEntry; label: string; threads: number }>();
+ 
+ const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
+   added: "text-success-signal",
+@@ -19,6 +20,9 @@ const oldPath = computed(() =>
+   props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
+ );
+ const counts = computed(() => lineCounts(props.file.lines));
++const threadsTitle = computed(() =>
++  props.threads === 1 ? "1 thread" : `${props.threads} threads`,
++);
+ </script>
+ 
+ <template>
+@@ -33,7 +37,21 @@ const counts = computed(() => lineCounts(props.file.lines));
+   </span>
+   <span class="truncate">{{ label }}</span>
+   <span v-if="oldPath !== null" class="min-w-0 truncate text-fg-muted">{{ oldPath }}</span>
+-  <span v-if="counts !== null" class="ml-auto flex shrink-0 gap-1.5 tabular-nums">
++  <span
++    v-if="threads > 0"
++    role="img"
++    :title="threadsTitle"
++    :aria-label="threadsTitle"
++    class="ml-auto flex shrink-0 items-center gap-0.5 text-fg-muted tabular-nums"
++  >
++    <MessageSquare class="size-3.5" aria-hidden="true" />
++    {{ threads }}
++  </span>
++  <span
++    v-if="counts !== null"
++    class="flex shrink-0 gap-1.5 tabular-nums"
++    :class="{ 'ml-auto': threads === 0 }"
++  >
+     <span class="text-success-signal">{{ counts.added }}</span>
+     <span class="text-problem-error">{{ counts.removed }}</span>
+   </span>
+diff --git a/frontend/src/ui/RangeMessage.vue b/frontend/src/ui/RangeMessage.vue
+new file mode 100644
+index 0000000..74176d4
+--- /dev/null
++++ b/frontend/src/ui/RangeMessage.vue
+@@ -0,0 +1,114 @@
++<script setup lang="ts">
++import { computed, shallowRef, useTemplateRef, watch } from "vue";
++import Copy from "~icons/lucide/copy";
++
++import type { Message } from "../ipc";
++import RangePostEditor from "./RangePostEditor.vue";
++import { useRangeStore } from "./rangeStore";
++import { isQueued } from "./rangeThreads";
++import { AI_ANSWER_TEXT, postingLabel } from "./rangeThreadText";
++
++const props = defineProps<{ message: Message }>();
++
++const COPY = "Copy";
++const COPY_TITLE = "Copy the link to the merge request's changes";
++
++const linkText = useTemplateRef<HTMLSpanElement>("linkText");
++const { gitlab, threads } = useRangeStore();
++const editing = shallowRef(false);
++
++const noteText = computed((): string | null => {
++  const { body } = props.message;
++  switch (body.kind) {
++    case "note":
++      return body.text;
++    case "aiAnswer":
++      return null;
++    default: {
++      const _exhaustive: never = body;
++      return _exhaustive;
++    }
++  }
++});
++const queued = computed(() => isQueued(props.message.posting));
++const post = computed(() => gitlab.postButton(props.message));
++const label = computed(() => postingLabel(props.message.posting));
++const refused = computed(() => props.message.posting.kind === "refused");
++const link = computed(() =>
++  props.message.posting.kind === "pending" ? props.message.posting.link : null,
++);
++
++watch(queued, (now) => {
++  if (now) {
++    editing.value = false;
++  }
++});
++
++function pressPost(): void {
++  if (queued.value) {
++    void threads.unqueue(props.message.id);
++  } else if (noteText.value !== null) {
++    editing.value = true;
++  }
++}
++
++function queue(text: string): void {
++  void threads.queue(props.message.id, text);
++}
++
++function copy(text: string): void {
++  navigator.clipboard.writeText(text).catch(() => {
++    if (linkText.value !== null) {
++      window.getSelection()?.selectAllChildren(linkText.value);
++    }
++  });
++}
++</script>
++
++<template>
++  <li class="flex flex-col gap-1 py-2">
++    <RangePostEditor
++      v-if="editing && noteText !== null"
++      :text="noteText"
++      @queue="queue"
++      @cancel="editing = false"
++    />
++    <p v-else-if="noteText !== null" class="wrap-break-word whitespace-pre-wrap">
++      {{ noteText }}
++    </p>
++    <p v-else class="text-fg-muted italic">{{ AI_ANSWER_TEXT }}</p>
++    <div class="flex min-w-0 items-center gap-2 text-fg-muted">
++      <span v-if="!editing" :title="post.title" class="shrink-0">
++        <button
++          type="button"
++          :disabled="post.disabled"
++          :title="post.title"
++          class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @click="pressPost"
++        >
++          {{ post.label }}
++        </button>
++      </span>
++      <span
++        v-if="label !== null"
++        class="min-w-0 wrap-break-word"
++        :class="{ 'text-problem-warning': refused }"
++      >
++        {{ label }}
++      </span>
++    </div>
++    <div v-if="link !== null" class="flex min-w-0 items-center gap-2">
++      <span ref="linkText" class="min-w-0 font-mono break-all select-text">{{ link }}</span>
++      <button
++        type="button"
++        :title="COPY_TITLE"
++        :aria-label="COPY_TITLE"
++        class="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover"
++        @click="copy(link)"
++      >
++        <Copy class="size-3.5" aria-hidden="true" />
++        {{ COPY }}
++      </button>
++    </div>
++  </li>
++</template>
+diff --git a/frontend/src/ui/RangePostEditor.vue b/frontend/src/ui/RangePostEditor.vue
+new file mode 100644
+index 0000000..a409b83
+--- /dev/null
++++ b/frontend/src/ui/RangePostEditor.vue
+@@ -0,0 +1,69 @@
++<script setup lang="ts">
++import { computed, onMounted, shallowRef, useTemplateRef } from "vue";
++
++import { isBlank } from "./rangeDrafts";
++import { boxKeydown } from "./rangeKeys";
++
++const props = defineProps<{ text: string }>();
++const emit = defineEmits<{ queue: [text: string]; cancel: [] }>();
++
++const QUEUE = "Queue";
++const CANCEL = "Cancel";
++const FIELD_LABEL = "Text to post";
++
++const field = useTemplateRef<HTMLTextAreaElement>("field");
++const edited = shallowRef(props.text);
++
++const blank = computed(() => isBlank(edited.value));
++
++onMounted(() => {
++  field.value?.focus({ preventScroll: true });
++});
++
++function typed(event: Event): void {
++  if (event.target instanceof HTMLTextAreaElement) {
++    edited.value = event.target.value;
++  }
++}
++
++function queue(): void {
++  if (!blank.value) {
++    emit("queue", edited.value);
++  }
++}
++
++function keydown(event: KeyboardEvent): void {
++  boxKeydown(event, navigator.platform, { submit: queue, cancel: () => emit("cancel") });
++}
++</script>
++
++<template>
++  <div class="flex flex-col gap-2">
++    <textarea
++      ref="field"
++      :value="edited"
++      :aria-label="FIELD_LABEL"
++      rows="4"
++      class="w-full resize-y rounded border border-control-border bg-panel-inline px-2 py-1 outline-none focus:border-primary"
++      @input="typed"
++      @keydown="keydown"
++    />
++    <div class="flex gap-2">
++      <button
++        type="button"
++        :disabled="blank"
++        class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted disabled:hover:brightness-100"
++        @click="queue"
++      >
++        {{ QUEUE }}
++      </button>
++      <button
++        type="button"
++        class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
++        @click="emit('cancel')"
++      >
++        {{ CANCEL }}
++      </button>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/RangeSendButton.vue b/frontend/src/ui/RangeSendButton.vue
+new file mode 100644
+index 0000000..e7a4e1c
+--- /dev/null
++++ b/frontend/src/ui/RangeSendButton.vue
+@@ -0,0 +1,28 @@
++<script setup lang="ts">
++import Send from "~icons/lucide/send";
++
++import { useRangeStore } from "./rangeStore";
++
++const { gitlab } = useRangeStore();
++const { sendButton } = gitlab;
++
++function send(): void {
++  void gitlab.send();
++}
++</script>
++
++<template>
++  <span :title="sendButton.title" class="shrink-0">
++    <button
++      type="button"
++      :disabled="sendButton.disabled"
++      :title="sendButton.title"
++      class="flex items-center gap-1.5 rounded border border-control-border px-2.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++      @mousedown.prevent
++      @click="send"
++    >
++      <Send class="size-4" aria-hidden="true" />
++      {{ sendButton.label }}
++    </button>
++  </span>
++</template>
+diff --git a/frontend/src/ui/RangeThreadBox.vue b/frontend/src/ui/RangeThreadBox.vue
+new file mode 100644
+index 0000000..dd4d3dd
+--- /dev/null
++++ b/frontend/src/ui/RangeThreadBox.vue
+@@ -0,0 +1,152 @@
++<script setup lang="ts">
++import { computed, onMounted, useTemplateRef, watch } from "vue";
++import ChevronUp from "~icons/lucide/chevron-up";
++
++import type { RangeEntry } from "../ipc";
++import { isBlank } from "./rangeDrafts";
++import { boxKeydown } from "./rangeKeys";
++import RangeMessage from "./RangeMessage.vue";
++import { useRangeStore } from "./rangeStore";
++import { threadPlaceText } from "./rangeThreadText";
++
++const props = defineProps<{ threadKey: string; file: RangeEntry }>();
++
++const COMMENT = "Comment";
++const CANCEL = "Cancel";
++const COLLAPSE = "Collapse the thread";
++const PROMPTS = {
++  draft: { text: "Write a comment…", rows: 3 },
++  reply: { text: "Reply…", rows: 1 },
++};
++
++const field = useTemplateRef<HTMLTextAreaElement>("field");
++const { threads } = useRangeStore();
++
++const box = computed(() => threads.boxOf(props.threadKey));
++const draft = computed(() => (box.value?.kind === "draft" ? box.value.draft : null));
++const thread = computed(() =>
++  box.value?.kind === "thread" && box.value.open ? box.value.thread : null,
++);
++const place = computed(() => {
++  const line = draft.value?.line ?? thread.value?.line;
++  return line === undefined ? "" : threadPlaceText(props.file, line);
++});
++const text = computed(() => {
++  if (draft.value !== null) {
++    return draft.value.text;
++  }
++  return thread.value === null ? "" : threads.noteText(thread.value.id);
++});
++const blank = computed(() => isBlank(text.value));
++const prompt = computed(() => (draft.value !== null ? PROMPTS.draft : PROMPTS.reply));
++
++watch(
++  () => draft.value?.focus,
++  () => {
++    focusField();
++  },
++);
++
++onMounted(() => {
++  if (draft.value !== null) {
++    focusField();
++  }
++});
++
++function focusField(): void {
++  field.value?.focus({ preventScroll: true });
++}
++
++function write(next: string): void {
++  if (draft.value !== null) {
++    threads.writeDraft(props.threadKey, next);
++  } else if (thread.value !== null) {
++    threads.writeNote(thread.value.id, next);
++  }
++}
++
++function typed(event: Event): void {
++  if (event.target instanceof HTMLTextAreaElement) {
++    write(event.target.value);
++  }
++}
++
++function submit(): void {
++  if (blank.value) {
++    return;
++  }
++  if (draft.value !== null) {
++    void threads.addThread(props.threadKey, text.value);
++  } else if (thread.value !== null) {
++    void threads.addNote(thread.value.id, text.value);
++  }
++}
++
++function cancel(): void {
++  if (draft.value !== null) {
++    threads.dropDraft(props.threadKey);
++  } else {
++    write("");
++  }
++}
++
++function keydown(event: KeyboardEvent): void {
++  boxKeydown(event, navigator.platform, { submit, cancel });
++}
++
++function collapse(): void {
++  threads.toggle([props.threadKey]);
++}
++</script>
++
++<template>
++  <section
++    v-if="draft !== null || thread !== null"
++    :aria-label="place"
++    class="mx-2 my-1.5 flex flex-col gap-1 rounded-md border border-control-border bg-panel-inline px-3 py-2"
++  >
++    <header class="flex min-w-0 items-center gap-2 text-fg-muted">
++      <span class="min-w-0 flex-1 truncate font-mono">{{ place }}</span>
++      <button
++        v-if="thread !== null"
++        type="button"
++        :title="COLLAPSE"
++        :aria-label="COLLAPSE"
++        class="shrink-0 rounded p-0.5 hover:bg-hover"
++        @click="collapse"
++      >
++        <ChevronUp class="size-4" aria-hidden="true" />
++      </button>
++    </header>
++    <ul v-if="thread !== null" class="flex flex-col divide-y divide-separator">
++      <RangeMessage v-for="message in thread.messages" :key="message.id" :message="message" />
++    </ul>
++    <textarea
++      ref="field"
++      :value="text"
++      :placeholder="prompt.text"
++      :aria-label="prompt.text"
++      :rows="prompt.rows"
++      class="w-full resize-y rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
++      @input="typed"
++      @keydown="keydown"
++    />
++    <div v-if="draft !== null || !blank" class="flex gap-2">
++      <button
++        type="button"
++        :disabled="blank"
++        class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted disabled:hover:brightness-100"
++        @click="submit"
++      >
++        {{ COMMENT }}
++      </button>
++      <button
++        type="button"
++        class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
++        @click="cancel"
++      >
++        {{ CANCEL }}
++      </button>
++    </div>
++  </section>
++</template>
+diff --git a/frontend/src/ui/RangeThreadLayer.vue b/frontend/src/ui/RangeThreadLayer.vue
+new file mode 100644
+index 0000000..337feef
+--- /dev/null
++++ b/frontend/src/ui/RangeThreadLayer.vue
+@@ -0,0 +1,16 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import type { RangeEntry } from "../ipc";
++import RangeThreadBox from "./RangeThreadBox.vue";
++
++const props = defineProps<{ file: RangeEntry; hosts: ReadonlyMap<string, HTMLElement> }>();
++
++const placed = computed(() => [...props.hosts]);
++</script>
++
++<template>
++  <Teleport v-for="[key, host] in placed" :key="key" :to="host">
++    <RangeThreadBox :thread-key="key" :file="file" />
++  </Teleport>
++</template>
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 98e05d8..6eaa7a6 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -8,8 +8,10 @@ import { fileIcon } from "./fileIcon";
+ import { ACTION_NAMES } from "./keyText";
+ import PaneFrame from "./PaneFrame.vue";
+ import { compareColumns } from "./paneSplit";
++import RangeSendButton from "./RangeSendButton.vue";
+ import { useRangeStore } from "./rangeStore";
+ import { fileHeading, sideHeading } from "./rangeText";
++import RangeThreadLayer from "./RangeThreadLayer.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { useRangeController } from "./useRangeController";
+ 
+@@ -28,7 +30,7 @@ const left = useTemplateRef<HTMLDivElement>("left");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const strip = useTemplateRef<SVGSVGElement>("strip");
+ const { preferences, question } = useRangeStore();
+-const { content, moveToChange } = useRangeController(
++const { content, threadHosts, moveToChange } = useRangeController(
+   props.file,
+   { left, right, strip },
+   { preferences },
+@@ -72,7 +74,8 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
+         >
+           <ArrowDown class="size-4" aria-hidden="true" />
+         </button>
+-        <SettingsButton class="ml-auto" />
++        <RangeSendButton class="ml-auto" />
++        <SettingsButton />
+       </header>
+     </template>
+     <template #default="{ stripLayer }">
+@@ -95,6 +98,7 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
+           <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
+         </div>
+         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
++        <RangeThreadLayer :file="file" :hosts="threadHosts" />
+       </template>
+       <p v-else-if="sentence !== null" class="col-span-3 col-start-1 row-start-2 px-3 py-4">
+         {{ sentence }}
+diff --git a/frontend/src/ui/rangeKeys.test.ts b/frontend/src/ui/rangeKeys.test.ts
+new file mode 100644
+index 0000000..0600d45
+--- /dev/null
++++ b/frontend/src/ui/rangeKeys.test.ts
+@@ -0,0 +1,105 @@
++import { expect, test } from "vitest";
++
++import { boxKeydown, isTypingTarget, typesIntoField } from "./rangeKeys";
++
++const LINUX = "Linux x86_64";
++const MAC = "MacIntel";
++
++type Held = Partial<Record<"ctrl" | "meta" | "alt" | "shift" | "composing", true>>;
++
++function element(fields: Readonly<Record<string, string>>): EventTarget {
++  return Object.assign(new EventTarget(), fields);
++}
++
++function boxPress(key: string, platform: string, held: Held = {}): string {
++  const seen: string[] = [];
++  boxKeydown(
++    {
++      key,
++      ctrlKey: held.ctrl === true,
++      metaKey: held.meta === true,
++      altKey: held.alt === true,
++      shiftKey: held.shift === true,
++      isComposing: held.composing === true,
++      preventDefault: () => {
++        seen.push("prevented");
++      },
++      stopPropagation: () => {
++        seen.push("stopped");
++      },
++    },
++    platform,
++    {
++      submit: () => {
++        seen.push("submit");
++      },
++      cancel: () => {
++        seen.push("cancel");
++      },
++    },
++  );
++  return seen.join(" ");
++}
++
++test("a text area and the text-like inputs are typing targets", () => {
++  expect(isTypingTarget(element({ tagName: "TEXTAREA" }))).toBe(true);
++  for (const type of ["text", "search", "url", "email", "password", "tel", "number"]) {
++    expect(isTypingTarget(element({ tagName: "INPUT", type }))).toBe(true);
++  }
++});
++
++test("buttons, checkboxes, other elements, the window and nothing are not typing targets", () => {
++  expect(isTypingTarget(element({ tagName: "INPUT", type: "checkbox" }))).toBe(false);
++  expect(isTypingTarget(element({ tagName: "INPUT", type: "button" }))).toBe(false);
++  expect(isTypingTarget(element({ tagName: "INPUT" }))).toBe(false);
++  expect(isTypingTarget(element({ tagName: "BUTTON", type: "text" }))).toBe(false);
++  expect(isTypingTarget(element({ tagName: "DIV" }))).toBe(false);
++  expect(isTypingTarget(element({ type: "text" }))).toBe(false);
++  expect(isTypingTarget(new EventTarget())).toBe(false);
++  expect(isTypingTarget(null)).toBe(false);
++});
++
++test("an input whose type is not a string is not a typing target, even one that reads as text", () => {
++  const typed = Object.assign(new EventTarget(), { tagName: "INPUT", type: ["text"] });
++  expect(isTypingTarget(typed)).toBe(false);
++});
++
++test("a press types into a field only without Ctrl or Cmd, so Ctrl/Cmd+B still reaches the window", () => {
++  const field = element({ tagName: "TEXTAREA" });
++  const code = element({ tagName: "DIV" });
++  expect(typesIntoField({ target: field, ctrlKey: false, metaKey: false })).toBe(true);
++  expect(typesIntoField({ target: field, ctrlKey: true, metaKey: false })).toBe(false);
++  expect(typesIntoField({ target: field, ctrlKey: false, metaKey: true })).toBe(false);
++  expect(typesIntoField({ target: code, ctrlKey: false, metaKey: false })).toBe(false);
++});
++
++test("Ctrl+Enter submits on Linux, Cmd+Enter on macOS, each kept from the column and the window", () => {
++  expect(boxPress("Enter", LINUX, { ctrl: true })).toBe("prevented stopped submit");
++  expect(boxPress("Enter", MAC, { meta: true })).toBe("prevented stopped submit");
++  expect(boxPress("Enter", LINUX, { meta: true })).toBe("");
++  expect(boxPress("Enter", MAC, { ctrl: true })).toBe("");
++  expect(boxPress("Enter", LINUX, { ctrl: true, meta: true })).toBe("");
++  expect(boxPress("Enter", MAC, { ctrl: true, meta: true })).toBe("");
++});
++
++test("a plain Enter, Shift or Alt with Ctrl+Enter, and other keys with Ctrl type as usual", () => {
++  expect(boxPress("Enter", LINUX)).toBe("");
++  expect(boxPress("Enter", LINUX, { ctrl: true, shift: true })).toBe("");
++  expect(boxPress("Enter", LINUX, { ctrl: true, alt: true })).toBe("");
++  expect(boxPress("a", LINUX, { ctrl: true })).toBe("");
++  expect(boxPress("ArrowDown", LINUX)).toBe("");
++});
++
++test("Escape alone cancels on every platform, kept from the column and the window; with a modifier it does nothing", () => {
++  expect(boxPress("Escape", LINUX)).toBe("prevented stopped cancel");
++  expect(boxPress("Escape", MAC)).toBe("prevented stopped cancel");
++  expect(boxPress("Escape", LINUX, { ctrl: true })).toBe("");
++  expect(boxPress("Escape", MAC, { meta: true })).toBe("");
++  expect(boxPress("Escape", LINUX, { shift: true })).toBe("");
++  expect(boxPress("Escape", LINUX, { alt: true })).toBe("");
++});
++
++test("keys pressed while an input method composes neither submit nor cancel", () => {
++  expect(boxPress("Enter", LINUX, { ctrl: true, composing: true })).toBe("");
++  expect(boxPress("Escape", LINUX, { composing: true })).toBe("");
++});
+diff --git a/frontend/src/ui/rangeKeys.ts b/frontend/src/ui/rangeKeys.ts
+new file mode 100644
+index 0000000..c062f9d
+--- /dev/null
++++ b/frontend/src/ui/rangeKeys.ts
+@@ -0,0 +1,69 @@
++import { isMac } from "../ipc";
++
++type BoxKey = "submit" | "cancel";
++
++type BoxKeyPress = Pick<
++  KeyboardEvent,
++  "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey" | "isComposing"
++> &
++  Pick<KeyboardEvent, "preventDefault" | "stopPropagation">;
++
++type WindowKeyPress = Pick<KeyboardEvent, "target" | "ctrlKey" | "metaKey">;
++
++const TEXT_INPUT_TYPES: Readonly<Record<string, true>> = {
++  email: true,
++  number: true,
++  password: true,
++  search: true,
++  tel: true,
++  text: true,
++  url: true,
++};
++
++export function isTypingTarget(target: EventTarget | null): boolean {
++  if (target === null || !("tagName" in target)) {
++    return false;
++  }
++  switch (target.tagName) {
++    case "TEXTAREA":
++      return true;
++    case "INPUT":
++      return (
++        "type" in target &&
++        typeof target.type === "string" &&
++        Object.hasOwn(TEXT_INPUT_TYPES, target.type)
++      );
++    default:
++      return false;
++  }
++}
++
++export function typesIntoField(event: WindowKeyPress): boolean {
++  return isTypingTarget(event.target) && !event.ctrlKey && !event.metaKey;
++}
++
++function boxKey(event: BoxKeyPress, platform: string): BoxKey | null {
++  const { key, ctrlKey, metaKey, altKey, shiftKey } = event;
++  if (event.isComposing || altKey || shiftKey) {
++    return null;
++  }
++  if (key === "Escape") {
++    return ctrlKey || metaKey ? null : "cancel";
++  }
++  const command = isMac(platform) ? metaKey && !ctrlKey : ctrlKey && !metaKey;
++  return key === "Enter" && command ? "submit" : null;
++}
++
++export function boxKeydown(
++  event: BoxKeyPress,
++  platform: string,
++  actions: Readonly<Record<BoxKey, () => void>>,
++): void {
++  const action = boxKey(event, platform);
++  if (action === null) {
++    return;
++  }
++  event.preventDefault();
++  event.stopPropagation();
++  actions[action]();
++}
+-- 
+2.56.0
+

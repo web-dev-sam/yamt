@@ -1,24 +1,4 @@
 {
-  "RVThreadBoxes": {
-    "owned": [
-      "frontend/src/ui/RangeThreadLayer.vue",
-      "frontend/src/ui/RangeThreadBox.vue",
-      "frontend/src/ui/RangeMessage.vue",
-      "frontend/src/ui/RangePostEditor.vue",
-      "frontend/src/ui/RangeSendButton.vue",
-      "frontend/src/ui/RangeView.vue",
-      "frontend/src/ui/RangeFileRow.vue",
-      "frontend/src/ui/RangeApp.vue",
-      "frontend/src/ui/rangeKeys.ts",
-      "frontend/src/ui/rangeKeys.test.ts",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/scripts/app-session/args.ts",
-      "frontend/scripts/app-session/args.test.ts",
-      "frontend/scripts/app-session/startArgs.ts",
-      "frontend/scripts/app-session/startArgs.test.ts",
-      "frontend/scripts/app-session/start.ts"
-    ]
-  },
   "RVAgentClientR1": {
     "owned": [
       "frontend/src/agent/**",
@@ -39,7 +19,13 @@
       "frontend/src/ipc/fixtureReview.ts",
       "frontend/src/ipc/reviewDomain.test.ts",
       "frontend/scripts/record-agent.ts",
-      "frontend/fixtures/agent/**"
+      "frontend/fixtures/agent/**",
+      "frontend/src/ipc/fixtureReview.test.ts"
+    ]
+  },
+  "RVMarkdownR3": {
+    "owned": [
+      "frontend/src/editor/internal/markdownInline.test.ts"
     ]
   }
 }
