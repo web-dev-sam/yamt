@@ -37,10 +37,17 @@ const FAILED = "glab api projects/:fullpath/merge_requests: 502 Bad Gateway";
 export const REFUSAL = `400 Bad request - Note {:line_code=>["can't be blank"]}`;
 export const TIMED_OUT = "glab timed out";
 
-function lookedAt(side: RangeSide): Generated.LookedAt {
-  return side.label.kind === "named"
-    ? { kind: "branch", name: side.label.name }
-    : { kind: "commit", short_id: side.shortId };
+function rightBranch({ label }: RangeSide): Generated.LookedAt {
+  switch (label.kind) {
+    case "named":
+      return { kind: "branch", name: label.name };
+    case "mergeBase":
+      throw new Error("a range's right side is never a merge base");
+    default: {
+      const _exhaustive: never = label;
+      return _exhaustive;
+    }
+  }
 }
 
 const GITLAB_SCRIPTS: Readonly<Record<GitLabScript, true>> = {
@@ -84,7 +91,7 @@ function notLinedUp(
     checking: null,
     noGlab: { kind: "glabMissing" },
     loggedOut: { kind: "notLoggedIn", detail: LOGGED_OUT },
-    noMergeRequest: { kind: "noMergeRequest", looked_at: lookedAt(right) },
+    noMergeRequest: { kind: "noMergeRequest", looked_at: rightBranch(right) },
     noBranch: { kind: "noMergeRequest", looked_at: { kind: "commit", short_id: right.shortId } },
     moved: {
       kind: "moved",
@@ -100,7 +107,7 @@ function notLinedUp(
     },
     several: {
       kind: "several",
-      looked_at: lookedAt(right),
+      looked_at: rightBranch(right),
       references: [MERGE_REQUEST.reference, OTHER_REFERENCE],
     },
     preparing: { kind: "preparing", merge_request: MERGE_REQUEST },

@@ -115,6 +115,23 @@ test("each tab command returns the list in domain data, or the app's error uncha
   expect(commands.setTabLanguage).toHaveBeenCalledWith(2, { kind: "picked", name: "JSON" });
 });
 
+test("openCompare, loadTab and setColumn return the app's error unchanged", async () => {
+  const failure: Generated.IpcError = { kind: "WorkerStopped" };
+  commands.openCompare.mockResolvedValue({ status: "error", error: failure });
+  commands.loadTab.mockResolvedValue({ status: "error", error: UNKNOWN });
+  commands.setColumn.mockResolvedValue({ status: "error", error: UNKNOWN });
+  const source = createTauriCompareSource();
+  const tab = toTabList(LIST).shown;
+  const version = toColumnVersions({ left: 0, right: 0 }).left;
+
+  expect(await source.openCompare()).toEqual({ ok: false, failure });
+  expect(await source.loadTab(tab)).toEqual({ ok: false, failure: UNKNOWN });
+  expect(await source.setColumn({ tab, column: "left", text: "", version })).toEqual({
+    ok: false,
+    failure: UNKNOWN,
+  });
+});
+
 test("a reply with a fractional tab id is refused, naming the field", async () => {
   commands.showTab.mockResolvedValue({ status: "ok", data: { ...LIST, shown: 1.5 } });
 

@@ -8,7 +8,7 @@ import {
   type ThreadId,
 } from "./domain";
 import { toThreadLine, type ThreadLine } from "./threadLine";
-import { invalid } from "./validate";
+import { branded } from "./validate";
 
 type MessageBody = Readonly<Generated.MessageBody>;
 export type Posting =
@@ -85,17 +85,6 @@ export type SendReply =
       readonly refused: number;
       readonly reason: string;
     };
-
-function branded<T extends number>(
-  value: number,
-  isBrand: (n: number) => n is T,
-  field: string,
-): T {
-  if (!isBrand(value)) {
-    throw invalid(field, value);
-  }
-  return value;
-}
 
 function toPosting(raw: Generated.Posting): Posting {
   if (raw.kind !== "pending") {

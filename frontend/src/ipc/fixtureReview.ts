@@ -186,13 +186,10 @@ function waitingText(posting: Generated.Posting): string | null {
 function record(
   store: Store,
   message: Generated.Message,
+  text: string,
   outcome: PostOutcome,
   tally: Tally,
 ): void {
-  const text = waitingText(message.posting);
-  if (text === null) {
-    return;
-  }
   if (outcome === "refused") {
     message.posting = { kind: "refused", text, reason: REFUSAL };
     tally.refused += 1;
@@ -211,11 +208,14 @@ async function postQueue(
   const tally: Tally = { sent: 0, refused: 0 };
   for (const [index, message] of queued.entries()) {
     await pause(POST_PAUSE_MS);
-    const outcome = postOutcome(store.script, index);
-    if (outcome === "stopped") {
-      return { kind: "stopped", list: listed(store), ...tally, reason: TIMED_OUT };
+    const text = waitingText(message.posting);
+    if (text !== null) {
+      const outcome = postOutcome(store.script, index);
+      if (outcome === "stopped") {
+        return { kind: "stopped", list: listed(store), ...tally, reason: TIMED_OUT };
+      }
+      record(store, message, text, outcome, tally);
     }
-    record(store, message, outcome, tally);
     onProgress({ done: index + 1, of: queued.length });
   }
   return { kind: "sent", list: listed(store), ...tally };

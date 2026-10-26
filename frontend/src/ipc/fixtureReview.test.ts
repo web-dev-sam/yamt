@@ -511,3 +511,22 @@ test("a message unqueued while the send runs is not posted, and still counts as 
   ]);
   expect(postings(await threadsOf(source))[1]).toEqual({ kind: "notQueued" });
 });
+
+test("?gitlab=stopped skips a message unqueued before its post instead of stopping on it", async () => {
+  const source = review("?threads=seeded&gitlab=stopped");
+  const seen: SendProgress[] = [];
+  const reply = source.sendQueue((progress) => seen.push(progress));
+
+  await source.unqueueMessage(messageId(1));
+  const sent = valueOf(await settled(reply));
+
+  expect(sent).toMatchObject({ kind: "sent", sent: 1, refused: 0 });
+  expect(seen).toEqual([
+    { done: 1, of: 2 },
+    { done: 2, of: 2 },
+  ]);
+  expect(postings(await threadsOf(source)).slice(0, 2)).toEqual([
+    expect.objectContaining({ kind: "pending" }),
+    { kind: "notQueued" },
+  ]);
+});
