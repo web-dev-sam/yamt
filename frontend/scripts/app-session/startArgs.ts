@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { noPositionals, sessionName, wholeNumber, type Parsed } from "./argv";
@@ -93,15 +92,15 @@ function fixtureSearch(parsed: Parsed): string {
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
 }
 
-export function glabFolder(scenario: string): string {
-  return fromRoot(join("tests/glab", scenario));
+export function glabFolder(scenario: string, isFolder: (path: string) => boolean): string {
+  const folder = fromRoot(join("tests/glab", scenario));
+  if (!isFolder(folder)) {
+    throw new Error(`--glab ${scenario}: no scenario folder ${folder}`);
+  }
+  return folder;
 }
 
-export function glabScenario(
-  parsed: Parsed,
-  opens: Opening,
-  isFolder: (path: string) => boolean,
-): string | null {
+function glabScenario(parsed: Parsed, opens: Opening): string | null {
   const scenario = parsed.values.get("glab");
   if (scenario === undefined) {
     return null;
@@ -111,10 +110,6 @@ export function glabScenario(
   }
   if (!/^[a-z0-9-]+$/.test(scenario)) {
     throw new Error(`--glab ${scenario}: expected a folder name under tests/glab/, e.g. lined-up`);
-  }
-  const folder = glabFolder(scenario);
-  if (!isFolder(folder)) {
-    throw new Error(`--glab ${scenario}: no scenario folder ${folder}`);
   }
   return scenario;
 }
@@ -178,6 +173,6 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
     size: size(parsed),
     record: recording(parsed),
     home: parsed.values.get("home") ?? null,
-    glab: glabScenario(parsed, opens, existsSync),
+    glab: glabScenario(parsed, opens),
   };
 }

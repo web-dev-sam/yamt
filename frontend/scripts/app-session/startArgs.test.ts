@@ -1,34 +1,26 @@
 import { expect, test } from "vitest";
 
-import type { Parsed } from "./argv";
-import { glabFolder, glabScenario } from "./startArgs";
+import { glabFolder } from "./startArgs";
 
-const RANGE = { kind: "range", range: "main...feature", dir: "/tmp/rr" } as const;
-
-function withGlab(scenario: string): Parsed {
-  return { values: new Map([["glab", scenario]]), flags: new Set(), positionals: [] };
-}
-
-test("a scenario names its folder under tests/glab", () => {
-  expect(glabFolder("lined-up")).toMatch(/\/tests\/glab\/lined-up$/);
-});
-
-test("a scenario whose folder exists is taken; the lookup is asked about that folder", () => {
+test("a scenario whose folder exists is its folder under tests/glab; the lookup is asked about it", () => {
   const asked: string[] = [];
-  const scenario = glabScenario(withGlab("lined-up"), RANGE, (path) => {
+  const folder = glabFolder("lined-up", (path) => {
     asked.push(path);
     return true;
   });
 
-  expect(scenario).toBe("lined-up");
-  expect(asked).toEqual([glabFolder("lined-up")]);
+  expect(folder).toMatch(/\/tests\/glab\/lined-up$/);
+  expect(asked).toEqual([folder]);
 });
 
 test("an unknown scenario is refused at start, naming the folder it looked for", () => {
-  expect(() => glabScenario(withGlab("lined_up"), RANGE, () => false)).toThrow(
-    /--glab lined_up: expected a folder name/,
-  );
-  expect(() => glabScenario(withGlab("nosuch"), RANGE, () => false)).toThrow(
-    `--glab nosuch: no scenario folder ${glabFolder("nosuch")}`,
-  );
+  const asked: string[] = [];
+  expect(() =>
+    glabFolder("nosuch", (path) => {
+      asked.push(path);
+      return false;
+    }),
+  ).toThrow(/^--glab nosuch: no scenario folder \/.*\/tests\/glab\/nosuch$/);
+  expect(asked).toHaveLength(1);
+  expect(() => glabFolder("nosuch", () => false)).toThrow(`no scenario folder ${asked[0]}`);
 });

@@ -68,6 +68,7 @@ function privateConfig(home: string): string {
 }
 
 function prepareApp(command: StartApp, folder: string): Prepared {
+  const scenarioFolder = command.glab === null ? null : glabFolder(command.glab, existsSync);
   const binary = fromRoot(command.binary);
   if (!existsSync(binary)) {
     throw new Error(`no app at ${binary}; build it with cargo tauri build --debug --no-bundle`);
@@ -79,18 +80,18 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   const repoDir = repoFolder(command.opens, folder);
-  const glab = fakeGlab(command.glab, folder);
+  const glab = fakeGlab(scenarioFolder, folder);
   return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir), glab };
 }
 
-function fakeGlab(scenario: string | null, folder: string): FakeGlab | null {
-  if (scenario === null) {
+function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
+  if (scenarioFolder === null) {
     return null;
   }
   const dir = join(folder, "glab");
   mkdirSync(dir);
   const link = join(dir, "scenario");
-  symlinkSync(glabFolder(scenario), link);
+  symlinkSync(scenarioFolder, link);
   return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
 }
 
