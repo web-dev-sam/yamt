@@ -46,6 +46,8 @@ export const commands = {
 	addNote: (thread: ThreadId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_note", { thread, text })),
 	queueMessage: (message: MessageId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("queue_message", { message, text })),
 	unqueueMessage: (message: MessageId) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("unqueue_message", { message })),
+	setThreadSession: (thread: ThreadId, session: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("set_thread_session", { thread, session })),
+	addAiAnswer: (thread: ThreadId, session: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_ai_answer", { thread, session })),
 	checkGitlab: () => typedError<GitLabCheck, IpcError>(__TAURI_INVOKE("check_gitlab")),
 	sendQueue: (progress: Channel<SendProgress>) => typedError<SendReply, IpcError>(__TAURI_INVOKE("send_queue", { progress })),
 	prepareCheckout: () => typedError<CheckoutReply, IpcError>(__TAURI_INVOKE("prepare_checkout")),
@@ -374,7 +376,9 @@ export type MessageBody =
 text: string } | 
 /**  An AI answer, kept in the AI's own session. */
 { kind: "aiAnswer"; 
-/**  The answer's turn in the thread's session. */
+/**  The session the answer lives in. */
+session: string; 
+/**  The answer's turn among that session's answers in the thread, from 0. */
 turn: number };
 
 /**  A message's identity; ids never repeat within a pair folder. */
