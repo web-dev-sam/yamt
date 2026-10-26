@@ -3,11 +3,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
-use yamt_gitio::{Oid, Repo, StatusEntry};
+use yamt_conflict_repo::{
+    ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok, run_ignored_in_child,
+};
+use yamt_gitio::{Error, Oid, Repo, StatusEntry};
 
 const CHECKOUT: &str = "checkout";
 const ORIGIN: &str = "origin";
+const DEFAULT_REMOTE_NAME_TEST: &str = "cloning_under_another_default_remote_name";
 
 fn oid_of(root: &Path, revision: &str) -> Oid {
     let output = git_ok(root, &["rev-parse", revision]).unwrap();
@@ -74,6 +77,7 @@ fn a_shared_clone_without_origin_checks_out_the_commit_detached() {
 fn the_clone_borrows_objects_and_keeps_no_refs_of_the_source() {
     let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
     let into = folder.path().join(CHECKOUT);
+    git_ok(source.path(), &["tag", "v1", "local"]).unwrap();
 
     let clone = Repo::discover(source.path())
         .unwrap()
@@ -100,6 +104,7 @@ fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones(
         file("edited.txt", b"local\n", b"remote\n"),
         file("staged.txt", b"local\n", b"remote\n"),
         file("removed.txt", b"local\n", b"remote\n"),
+        file("renamed.txt", b"local\n", b"remote\n"),
     ]);
     let (clone, _) = checkout_at_remote(source.path(), folder.path());
     let root = clone.root();
@@ -112,6 +117,7 @@ fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones(
     fs::remove_file(root.join("removed.txt")).unwrap();
     fs::create_dir(root.join("new folder")).unwrap();
     fs::write(root.join("new folder/untracked.txt"), "new\n").unwrap();
+    git_ok(root, &["mv", "renamed.txt", "moved.txt"]).unwrap();
 
     let mut entries = clone.status_entries().unwrap();
 
@@ -123,8 +129,10 @@ fn status_lists_modified_added_deleted_and_untracked_files_but_not_ignored_ones(
     let expected = vec![
         entry(b"A ", "added.txt"),
         entry(b" M", "edited.txt"),
+        entry(b"A ", "moved.txt"),
         entry(b"??", "new folder/untracked.txt"),
         entry(b" D", "removed.txt"),
+        entry(b"D ", "renamed.txt"),
         entry(b"M ", "staged.txt"),
     ];
     assert_eq!(entries, expected);
@@ -171,4 +179,94 @@ fn a_commit_in_the_clone_leaves_the_source_refs_and_config_untouched() {
         !in_source.status.success(),
         "the commit went into the source's objects"
     );
+}
+
+#[test]
+fn a_clone_of_a_source_on_a_detached_head_holds_no_branch_and_checks_out() {
+    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
+    git_ok(
+        source.path(),
+        &["checkout", "--quiet", "--detach", "remote"],
+    )
+    .unwrap();
+
+    let (clone, remote) = checkout_at_remote(source.path(), folder.path());
+
+    assert_eq!(text_of(clone.root(), &["for-each-ref", "refs/heads"]), "");
+    assert_eq!(clone.head_commit().unwrap(), remote);
+    assert_eq!(fs::read(clone.root().join("a.txt")).unwrap(), b"remote\n");
+}
+
+#[test]
+fn the_remote_is_origin_whatever_the_user_names_new_remotes() {
+    let ran = run_ignored_in_child(&[DEFAULT_REMOTE_NAME_TEST], |child| {
+        child
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "clone.defaultRemoteName")
+            .env("GIT_CONFIG_VALUE_0", "upstream");
+    });
+
+    ran.unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+#[ignore = "run by the_remote_is_origin_whatever_the_user_names_new_remotes"]
+fn cloning_under_another_default_remote_name() {
+    let (source, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
+
+    let (clone, _) = checkout_at_remote(source.path(), folder.path());
+
+    assert_eq!(text_of(clone.root(), &["remote"]), "");
+}
+
+#[test]
+fn a_partial_clone_source_is_refused_by_name() {
+    let (origin, folder) = source_and_folder(&[file("a.txt", b"local\n", b"remote\n")]);
+    git_ok(origin.path(), &["config", "uploadpack.allowFilter", "true"]).unwrap();
+    let origin_path = origin.path().to_string_lossy().replace('\\', "/");
+    let url = format!(
+        "file://{}{origin_path}",
+        if origin_path.starts_with('/') {
+            ""
+        } else {
+            "/"
+        }
+    );
+    let partial = folder.path().join("partial");
+    let clone_args = ["clone", "--quiet", "--filter=blob:none", &url, "partial"];
+    git_ok(folder.path(), &clone_args).unwrap();
+    let source = Repo::discover(&partial).unwrap();
+    let into = folder.path().join(CHECKOUT);
+
+    let refused = source.clone_shared_into(&into);
+
+    assert!(
+        matches!(&refused, Err(Error::PartialClone { root })
+            if fs::canonicalize(root).unwrap() == fs::canonicalize(&partial).unwrap()),
+        "{:?}",
+        refused.err()
+    );
+    assert!(!into.exists());
+}
+
+#[cfg(windows)]
+#[test]
+fn a_path_past_max_path_under_the_checkout_folder_checks_out() {
+    let folder_name = "f".repeat(60);
+    let long_path = format!("{0}/{0}/{0}/long.txt", "d".repeat(50));
+    let (source, folder) = source_and_folder(&[file(&long_path, b"local\n", b"remote\n")]);
+    let deep = folder.path().join(&folder_name).join(&folder_name);
+    fs::create_dir_all(&deep).unwrap();
+    let into = deep.join(CHECKOUT);
+    assert!(into.join(&long_path).as_os_str().len() > 260);
+
+    let clone = Repo::discover(source.path())
+        .unwrap()
+        .clone_shared_into(&into)
+        .unwrap();
+    clone
+        .checkout_detached(&oid_of(source.path(), "remote"))
+        .unwrap();
+
+    assert_eq!(clone.status_entries().unwrap(), Vec::new());
 }

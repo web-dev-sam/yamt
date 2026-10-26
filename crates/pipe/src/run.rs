@@ -62,7 +62,23 @@ impl Running {
         framing: Framing,
         events: Sender<HostEvent>,
     ) -> io::Result<Running> {
-        let mut child = command(program, args, folder).spawn()?;
+        Running::start_without(program, args, folder, framing, events, &[])
+    }
+
+    /// `start`, with each environment variable named in `removed` left out of the program's environment.
+    pub fn start_without(
+        program: &Path,
+        args: &[String],
+        folder: &Path,
+        framing: Framing,
+        events: Sender<HostEvent>,
+        removed: &[&str],
+    ) -> io::Result<Running> {
+        let mut command = command(program, args, folder);
+        for variable in removed {
+            command.env_remove(variable);
+        }
+        let mut child = command.spawn()?;
         let (Some(stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {

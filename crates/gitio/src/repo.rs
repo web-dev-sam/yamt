@@ -18,15 +18,46 @@ const GIT: &str = "git";
 pub struct Repo {
     root: PathBuf,
     git: PathBuf,
+    lookup: Lookup,
+}
+
+/// How git finds this repository: as yamt's environment says (an inherited `GIT_DIR` and its kin
+/// included), or from its folder alone.
+#[derive(Clone, Copy)]
+enum Lookup {
+    Environment,
+    Folder,
 }
 
 impl Repo {
+    /// The variables that name a repository other than the one a folder holds (git(1) "ENVIRONMENT
+    /// VARIABLES"): every git run on a repository of its own leaves them out, and so does the agent.
+    pub const REPOSITORY_VARIABLES: [&str; 6] = [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    ];
+
     pub fn discover(cwd: &Path) -> Result<Repo> {
-        let git = find_git_on_path()?;
-        let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
-        let output = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
-        let root = path_from_git(&output);
-        Ok(Repo { root, git })
+        discovered(cwd, Lookup::Environment)
+    }
+
+    /// The repository git finds from `cwd` alone, never the one an inherited `GIT_DIR` names; every
+    /// run on it leaves `REPOSITORY_VARIABLES` out.
+    pub fn discover_from_folder(cwd: &Path) -> Result<Repo> {
+        discovered(cwd, Lookup::Folder)
+    }
+
+    /// The repository of its own at `root`, run by the same git as this one; found from its folder alone.
+    pub(crate) fn with_root(&self, root: PathBuf) -> Repo {
+        Repo {
+            root,
+            git: self.git.clone(),
+            lookup: Lookup::Folder,
+        }
     }
 
     #[must_use]
@@ -40,7 +71,7 @@ impl Repo {
     }
 
     pub fn commit_named(&self, name: &str) -> Result<Option<Oid>> {
-        let revision = format!("{name}^{{commit}}");
+        let revision = commit_revision(name);
         let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
         oid_unless_silent(command, REV_PARSE)
     }
@@ -182,13 +213,51 @@ impl Repo {
     }
 
     pub(crate) fn command(&self, access: Access, args: &[&str]) -> Command {
-        git_command(&self.git, &self.root, access, args)
+        self.lookup
+            .applied(git_command(&self.git, &self.root, access, args))
     }
 
     /// A command as the user's terminal would run it (`git_command_as_user`): Abort and Continue only.
     pub(crate) fn command_as_user(&self, args: &[&str]) -> Command {
-        git_command_as_user(&self.git, &self.root, args)
+        self.lookup
+            .applied(git_command_as_user(&self.git, &self.root, args))
     }
+}
+
+impl Lookup {
+    fn applied(self, command: Command) -> Command {
+        match self {
+            Lookup::Environment => command,
+            Lookup::Folder => without_repository_variables(command),
+        }
+    }
+}
+
+/// `command` with every one of `Repo::REPOSITORY_VARIABLES` left out of its environment.
+pub(crate) fn without_repository_variables(mut command: Command) -> Command {
+    for variable in Repo::REPOSITORY_VARIABLES {
+        command.env_remove(variable);
+    }
+    command
+}
+
+fn discovered(cwd: &Path, lookup: Lookup) -> Result<Repo> {
+    let git = find_git_on_path()?;
+    let command = git_command(&git, cwd, Access::Read, &[REV_PARSE, "--show-toplevel"]);
+    let output = run(lookup.applied(command), None, GIT_TIMEOUT)?;
+    let root = path_from_git(&without_final_newline(REV_PARSE, output)?);
+    Ok(Repo { root, git, lookup })
+}
+
+/// `<name>^{commit}`: the commit `name` resolves to, a tag peeled.
+pub(crate) fn commit_revision(name: &str) -> String {
+    format!("{name}^{{commit}}")
+}
+
+/// The one commit id a git read printed on its line.
+pub(crate) fn oid_line(command: &'static str, output: Vec<u8>) -> Result<Oid> {
+    let line = without_final_newline(command, output)?;
+    Oid::parse(&String::from_utf8_lossy(&line))
 }
 
 // git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits 1 without a message; git-merge-base(1)
@@ -203,8 +272,7 @@ fn oid_unless_silent(command: Command, name: &'static str) -> Result<Option<Oid>
         }) if stderr.is_empty() => return Ok(None),
         Err(error) => return Err(error),
     };
-    let line = without_final_newline(name, output)?;
-    Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
+    Ok(Some(oid_line(name, output)?))
 }
 
 pub(crate) fn exists(path: &Path) -> Result<bool> {

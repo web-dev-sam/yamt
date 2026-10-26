@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
 use yamt_pipe::{HostEvent, Running};
@@ -6,6 +6,7 @@ use yamt_pipe::{HostEvent, Running};
 use crate::checkout;
 use crate::look::LookJob;
 use crate::process;
+use crate::sweep;
 use crate::{AgentCommand, AgentRun, AgentStartReply, CheckoutReply, Error};
 
 /// The range window's repository, its pair folder (held by its `PairLock`) and the right commit's full id.
@@ -16,7 +17,8 @@ pub struct Pair {
     pub new_commit: String,
 }
 
-/// The AI's checkout and the agent running in it. Every removal stops and reaps the agent first.
+/// The AI's checkout and the agent running in it. Every removal stops and reaps the agent first; only the
+/// agent's own process is reaped, never a process it started (a build it runs may outlive it).
 pub struct Workspace {
     pair: Pair,
     /// `Some` once `prepare` made or reused a complete checkout.
@@ -53,7 +55,8 @@ impl Workspace {
         }
     }
 
-    /// Starts the agent in the checkout, after stopping and reaping one that runs.
+    /// Starts the agent in the checkout, after stopping and reaping one that runs. Blocks until that
+    /// earlier agent is reaped: up to about 3 s for one that ignores its stdin closing.
     pub fn start(&mut self, command: &AgentCommand, events: Sender<HostEvent>) -> AgentStartReply {
         let Some(folder) = self.checkout.clone() else {
             return AgentStartReply::NoCheckout;
@@ -106,6 +109,13 @@ impl Workspace {
     pub fn end(mut self) {
         self.stop_and_reap();
         checkout::remove_when_clean(&self.pair.folder, self.pair.new_commit);
+    }
+
+    /// What crashes and kills left in `range_dir`: in this pair only the partial and removing folders
+    /// (its checkout is reused); in every other pair no window holds, also a clean checkout.
+    pub fn sweep_leftovers(&mut self, range_dir: &Path) {
+        sweep::logged(checkout::remove_leftovers(&self.pair.folder));
+        sweep::sweep_other_pairs(range_dir, &self.pair.folder);
     }
 
     fn running(&self, run: AgentRun) -> Option<&Running> {

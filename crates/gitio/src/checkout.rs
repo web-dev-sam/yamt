@@ -1,13 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::entry::{Oid, path_from_git};
-use crate::repo::{REV_PARSE, Repo, without_final_newline};
-use crate::run::{Access, GIT_TIMEOUT, argv, run, run_to_end};
+use crate::repo::{REV_PARSE, Repo, commit_revision, oid_line, without_repository_variables};
+use crate::run::{Access, GIT_TIMEOUT, run, run_accepting, run_to_success};
 use crate::{Error, Result};
 
 const STATUS: &str = "status";
 const FOR_EACH_REF: &str = "for-each-ref";
+const PARTIAL_CLONE_KEY: &str = "extensions.partialClone";
+const PROMISOR_KEYS: &str = r"^remote\..*\.promisor$";
+// git-config(1): `--get` and `--get-regexp` exit with 1 when no key is set.
+const UNSET_STATUS: i32 = 1;
 
 /// One file `git status --porcelain=v1` lists: its two status letters (`??` untracked) and its path.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,18 +20,30 @@ pub struct StatusEntry {
 }
 
 impl Repo {
-    /// `git clone --shared --no-checkout --quiet <this repository> <into>`, then HEAD detached at the cloned
-    /// branch's commit and that branch deleted, so the clone holds no branch of this repository. No deadline:
-    /// a large repository takes long. A relative `into` is relative to this repository's root.
+    /// `git clone --shared --no-checkout --no-tags --origin origin` of this repository into the absolute folder
+    /// `into`, then HEAD detached at the cloned branch's commit and that branch deleted, so the clone holds no
+    /// branch or tag of this repository. No deadline: a large repository takes long. A partial clone is refused:
+    /// its shared clone lacks every file it never fetched.
     pub fn clone_shared_into(&self, into: &Path) -> Result<Repo> {
-        let into = self.root().join(into);
-        let mut command = self.command(
-            Access::Write,
-            &["clone", "--shared", "--no-checkout", "--quiet", "--"],
-        );
-        command.arg(self.root()).arg(&into);
+        self.require_complete()?;
+        let args = [
+            "clone",
+            "--shared",
+            "--no-checkout",
+            "--no-tags",
+            "--quiet",
+            "--origin",
+            "origin",
+            // Git for Windows refuses a path over MAX_PATH (260) unless `core.longpaths` is set (its
+            // git-config docs, "core.longpaths"); the checkout sits deep in the data folder. Other gits ignore it.
+            "--config",
+            "core.longpaths=true",
+            "--",
+        ];
+        let mut command = without_repository_variables(self.command(Access::Write, &args));
+        command.arg(self.root()).arg(into);
         run_to_success(command)?;
-        let clone = Repo::discover(&into)?;
+        let clone = self.with_root(into.to_owned());
         clone.delete_branches_detaching_head()?;
         Ok(clone)
     }
@@ -43,7 +58,8 @@ impl Repo {
     /// `git checkout --detach --quiet <commit>`. No deadline: writing a large tree takes long.
     pub fn checkout_detached(&self, commit: &Oid) -> Result<()> {
         let args = ["checkout", "--detach", "--quiet", commit.as_str()];
-        run_to_success(self.command(Access::Write, &args))
+        run_to_success(self.command(Access::Write, &args))?;
+        Ok(())
     }
 
     /// Every modified, added, deleted and untracked file, never an ignored one:
@@ -61,9 +77,46 @@ impl Repo {
 
     /// The commit HEAD names: `git rev-parse --verify HEAD^{commit}`.
     pub fn head_commit(&self) -> Result<Oid> {
-        let command = self.command(Access::Read, &[REV_PARSE, "--verify", "HEAD^{commit}"]);
-        let line = without_final_newline(REV_PARSE, run(command, None, GIT_TIMEOUT)?)?;
-        Oid::parse(&String::from_utf8_lossy(&line))
+        let revision = commit_revision("HEAD");
+        let command = self.command(Access::Read, &[REV_PARSE, "--verify", &revision]);
+        oid_line(REV_PARSE, run(command, None, GIT_TIMEOUT)?)
+    }
+
+    /// Every branch and the stash: `refs/heads/*` and `refs/stash` by their short names.
+    pub fn branches_and_stash(&self) -> Result<Vec<String>> {
+        let args = [
+            FOR_EACH_REF,
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/stash",
+        ];
+        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+        let names = String::from_utf8_lossy(&output);
+        Ok(names.lines().map(str::to_owned).collect())
+    }
+
+    /// Refuses a partial clone, one with a promisor remote: `extensions.partialClone` (gitrepository-layout(5))
+    /// or `remote.<name>.promisor` (git-config(1)); `clone --filter` in git 2.56 sets only the latter.
+    fn require_complete(&self) -> Result<()> {
+        let named = self.config_lines(&["--get", PARTIAL_CLONE_KEY])?;
+        let promisors = self.config_lines(&["--type=bool", "--get-regexp", PROMISOR_KEYS])?;
+        let promised = promisors
+            .split(|&byte| byte == b'\n')
+            .any(|line| line.ends_with(b" true"));
+        if named.is_empty() && !promised {
+            return Ok(());
+        }
+        Err(Error::PartialClone {
+            root: self.root().to_owned(),
+        })
+    }
+
+    fn config_lines(&self, args: &[&str]) -> Result<Vec<u8>> {
+        let mut command = self.command(Access::Read, &["config"]);
+        command.args(args);
+        run_accepting(command, None, GIT_TIMEOUT, |status| {
+            status.success() || status.code() == Some(UNSET_STATUS)
+        })
     }
 
     fn delete_branches_detaching_head(&self) -> Result<()> {
@@ -88,21 +141,6 @@ impl Repo {
         run(command, Some(deletes), GIT_TIMEOUT)?;
         Ok(())
     }
-}
-
-fn run_to_success(command: Command) -> Result<()> {
-    let args = argv(&command);
-    let finished = run_to_end(command)?;
-    if finished.status.success() {
-        return Ok(());
-    }
-    Err(Error::GitFailed {
-        args,
-        status: finished.status.code(),
-        stderr: String::from_utf8_lossy(&finished.stderr)
-            .trim_end()
-            .to_owned(),
-    })
 }
 
 // git-status(1) "Porcelain Format Version 1" with `-z`: records `XY SP <path> NUL`, path unquoted; without

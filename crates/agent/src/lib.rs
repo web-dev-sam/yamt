@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub use crate::look::LookJob;
-pub use crate::sweep::sweep_leftovers;
 pub use crate::workspace::{Pair, Workspace};
+pub use yamt_pipe::HostEvent;
 
 /// One agent process start; a later start gets a new number.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -53,7 +53,7 @@ pub enum CheckoutReply {
     Failed { message: String },
 }
 
-/// What the checkout holds now; `Changed` lists at least one file or has `head_moved`.
+/// What the checkout holds now; `Changed` lists at least one file or ref, or has `head_moved`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind")]
 pub enum CheckoutLook {
@@ -62,6 +62,8 @@ pub enum CheckoutLook {
     Changed {
         folder: String,
         files: Vec<String>,
+        /// The AI's branches and stash (plan §2 #122): the clone starts with none.
+        refs: Vec<String>,
         head_moved: bool,
     },
     Unreadable {

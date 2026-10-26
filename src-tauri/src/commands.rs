@@ -57,7 +57,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         review::check_gitlab::<tauri::Wry>,
         review::send_queue::<tauri::Wry>,
         ai::prepare_checkout::<tauri::Wry>,
-        ai::start_agent,
+        ai::start_agent::<tauri::Wry>,
         ai::send_to_agent,
         ai::stop_agent,
         ai::checkout_changes::<tauri::Wry>,

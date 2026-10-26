@@ -7,11 +7,10 @@ use tauri::ipc::Channel;
 use tauri::webview::PageLoadEvent;
 use tauri::{App, AppHandle, Manager, Runtime, State, WebviewWindow};
 use yamt_agent::{
-    AgentCommand, AgentRun, AgentStartReply, CheckoutLook, CheckoutReply, Pair, Workspace,
-    sweep_leftovers,
+    AgentCommand, AgentRun, AgentStartReply, CheckoutLook, CheckoutReply, HostEvent, Pair,
+    Workspace,
 };
 use yamt_compare::Difference;
-use yamt_lsp_host::HostEvent;
 use yamt_range::Range;
 
 use crate::args::Ai;
@@ -57,18 +56,20 @@ pub(crate) fn manage<R: Runtime>(
     app.manage(Mutex::new(state));
     match ai {
         Ai::Off => {}
-        Ai::On => sweep_while_held(app.handle().clone(), range_dir, pair_folder.to_owned()),
+        Ai::On => sweep_while_held(app.handle().clone(), range_dir),
     }
 }
 
 /// Returns once the sweep's thread holds the state.
-fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf, own: PathBuf) {
+fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf) {
     let (held, wait) = mpsc::channel();
     thread::spawn(move || {
         let state = app.state();
-        let _ai = lock(&state);
+        let mut ai = lock(&state);
         held.send(()).ok();
-        sweep_leftovers(&range_dir, &own);
+        if let AiState::On(workspace) = &mut *ai {
+            workspace.sweep_leftovers(&range_dir);
+        }
     });
     wait.recv().ok();
 }
@@ -112,19 +113,18 @@ pub(crate) async fn prepare_checkout<R: Runtime>(
 
 #[tauri::command]
 #[specta::specta]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "tauri passes arguments by value"
-)]
-pub(crate) fn start_agent(
-    state: State<'_, Mutex<AiState>>,
+pub(crate) async fn start_agent<R: Runtime>(
+    window: WebviewWindow<R>,
     command: AgentCommand,
     events: Channel<HostEvent>,
 ) -> Result<AgentStartReply, IpcError> {
-    let (sender, receiver) = mpsc::channel();
-    let reply = lock(&state).workspace()?.start(&command, sender);
-    thread::spawn(move || forward(&receiver, &events));
-    Ok(reply)
+    blocking_reply(move || {
+        let (sender, receiver) = mpsc::channel();
+        let reply = lock(&window.state()).workspace()?.start(&command, sender);
+        thread::spawn(move || forward(&receiver, &events));
+        Ok(reply)
+    })
+    .await
 }
 
 /// Returning drops `receiver`, which stops the agent once the page cannot take its events.
@@ -195,6 +195,14 @@ mod tests {
         window.webview.state()
     }
 
+    fn started(
+        window: &RangeWindow,
+        command: AgentCommand,
+        events: Channel<HostEvent>,
+    ) -> Result<AgentStartReply, IpcError> {
+        tauri::async_runtime::block_on(start_agent(window.webview.clone(), command, events))
+    }
+
     fn no_events() -> Channel<HostEvent> {
         Channel::new(|_| Ok(()))
     }
@@ -218,7 +226,7 @@ mod tests {
         assert_eq!(invoke_on(&window.webview, "stop_agent", run), off);
         let message = json!({ "run": 0, "message": "hello" });
         assert_eq!(invoke_on(&window.webview, "send_to_agent", message), off);
-        let started = start_agent(ai_state(&window), command("sh", &[]), no_events());
+        let started = started(&window, command("sh", &[]), no_events());
         assert!(matches!(started, Err(IpcError::AiOff)), "{started:?}");
     }
 
@@ -313,7 +321,7 @@ mod tests {
             let checkout = prepared_checkout(&window);
             let (sender, events) = mpsc::channel();
             let cat = command("sh", &["-c", "echo $$ >&2; exec cat"]);
-            let reply = start_agent(ai_state(&window), cat, channel_into(sender)).unwrap();
+            let reply = started(&window, cat, channel_into(sender)).unwrap();
             let AgentStartReply::Started { run } = reply else {
                 panic!("{reply:?}");
             };

@@ -14,7 +14,7 @@ use specta::Type;
 use yamt_gitio::Oid;
 use yamt_merge_core::Difference;
 
-pub use crate::lock::{PairLock, pair_folders};
+pub use crate::lock::{PairLock, pair_folders, pair_right_commit};
 pub use crate::open::{Range, Resolved};
 pub use crate::spec::{RangeSpec, SpecError};
 

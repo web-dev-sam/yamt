@@ -77,6 +77,11 @@ pub enum Error {
         program: std::path::PathBuf,
         source: std::io::Error,
     },
+    #[error(
+        "{} is a partial clone: a shared clone of it cannot check out the files it never fetched",
+        root.display()
+    )]
+    PartialClone { root: std::path::PathBuf },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

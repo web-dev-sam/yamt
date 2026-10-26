@@ -1,5 +1,7 @@
 #![cfg(test)]
 
+mod common;
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,9 +9,10 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use yamt_agent::{AgentCommand, AgentRun, AgentStartReply, Pair, Workspace};
-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
-use yamt_pipe::HostEvent;
+use yamt_agent::{AgentCommand, AgentRun, AgentStartReply, HostEvent, Workspace};
+use yamt_range::pair_folders;
+
+use common::{Fixture, commit_of};
 
 const ECHO: &str = env!("CARGO_BIN_EXE_agent-echo");
 const WAIT: Duration = Duration::from_secs(10);
@@ -17,10 +20,9 @@ const HOLD_RELEASE_AND_MORE: Duration = Duration::from_millis(800);
 const MISSING_PROGRAM: &str = "yamt-agent-test-no-such-program";
 const CRASH_CODE: i32 = 3;
 
-/// A workspace whose checkout is prepared, and the folders it lives in.
+/// A workspace and the folders it lives in.
 struct Prepared {
-    _source: TempDir,
-    _range_dir: TempDir,
+    fixture: Fixture,
     checkout: PathBuf,
     workspace: Workspace,
 }
@@ -32,48 +34,33 @@ fn prepared() -> Prepared {
 }
 
 fn unprepared() -> Prepared {
-    let file = ConflictFile {
-        path: "a.txt",
-        kind: FileKind::Regular,
-        base: Some(b"base\n"),
-        local: Some(b"local\n"),
-        remote: Some(b"remote\n"),
-    };
-    let source = diverged_repo(&[file]).unwrap();
-    let range_dir = tempfile::tempdir().unwrap();
-    let new_commit = String::from_utf8(git_ok(source.path(), &["rev-parse", "remote"]).unwrap())
-        .unwrap()
-        .trim_end()
-        .to_owned();
-    let folder = range_dir
-        .path()
-        .join("source-0123456789abcdef")
-        .join("pair");
-    fs::create_dir_all(&folder).unwrap();
-    let pair = Pair {
-        repo: source.path().to_owned(),
-        folder: folder.clone(),
-        new_commit,
-    };
+    let fixture = Fixture::new();
     Prepared {
-        _source: source,
-        _range_dir: range_dir,
-        checkout: folder.join("checkout"),
-        workspace: Workspace::new(pair),
+        checkout: fixture.checkout(),
+        workspace: fixture.workspace(),
+        fixture,
     }
 }
 
 fn echo_command() -> AgentCommand {
+    command(ECHO, &[])
+}
+
+fn command(program: &str, args: &[&str]) -> AgentCommand {
     AgentCommand {
-        program: ECHO.to_owned(),
-        args: Vec::new(),
+        program: program.to_owned(),
+        args: args.iter().map(|&arg| arg.to_owned()).collect(),
         home_folders: Vec::new(),
     }
 }
 
 fn start_echo(workspace: &mut Workspace) -> (AgentRun, Receiver<HostEvent>) {
+    started(workspace, &echo_command())
+}
+
+fn started(workspace: &mut Workspace, command: &AgentCommand) -> (AgentRun, Receiver<HostEvent>) {
     let (sender, events) = mpsc::channel();
-    match workspace.start(&echo_command(), sender) {
+    match workspace.start(command, sender) {
         AgentStartReply::Started { run } => (run, events),
         other @ (AgentStartReply::NotFound { .. }
         | AgentStartReply::SpawnFailed { .. }
@@ -115,6 +102,10 @@ fn the_agent_runs_in_the_checkout() {
     assert_eq!(next_message(&events), "edited a.txt");
 
     assert!(same_folder(Path::new(&folder), &prepared.checkout));
+    assert_eq!(
+        commit_of(&prepared.checkout, "HEAD"),
+        prepared.fixture.pair.new_commit
+    );
     assert_eq!(
         fs::read(prepared.checkout.join("a.txt")).unwrap(),
         b"remote\nedited by agent-echo\n"
@@ -225,6 +216,25 @@ fn a_missing_program_lists_path_and_the_home_entries() {
 }
 
 #[test]
+fn a_relative_program_path_is_never_taken_from_the_reviewed_commit() {
+    let mut prepared = prepared();
+    let bin = prepared.checkout.join("bin");
+    fs::create_dir(&bin).unwrap();
+    fs::copy(ECHO, bin.join("agent")).unwrap();
+    let (sender, _events) = mpsc::channel();
+
+    let reply = prepared.workspace.start(&command("bin/agent", &[]), sender);
+
+    assert_eq!(
+        reply,
+        AgentStartReply::NotFound {
+            program: "bin/agent".to_owned(),
+            searched: Vec::new(),
+        }
+    );
+}
+
+#[test]
 fn discard_stops_the_agent_before_removing_the_checkout() {
     let mut prepared = prepared();
     let (run, events) = start_echo(&mut prepared.workspace);
@@ -236,6 +246,10 @@ fn discard_stops_the_agent_before_removing_the_checkout() {
     assert_eq!(exited_code(&events), Some(0));
     thread::sleep(HOLD_RELEASE_AND_MORE);
     assert!(!prepared.checkout.exists());
+    assert_eq!(
+        pair_folders(prepared.fixture.range_dir.path()),
+        [prepared.fixture.pair.folder.clone()]
+    );
     let (sender, _later) = mpsc::channel();
     assert_eq!(
         prepared.workspace.start(&echo_command(), sender),

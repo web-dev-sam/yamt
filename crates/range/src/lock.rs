@@ -3,9 +3,12 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io;
 use std::path::{Path, PathBuf};
 
+use yamt_gitio::Oid;
+
 use crate::{Error, Resolved, Result};
 
 const LOCK_FILE: &str = "lock";
+const PAIR_SEPARATOR: char = '-';
 const GIT_DIR_NAME: &str = ".git";
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0100_0000_01b3;
@@ -22,7 +25,7 @@ impl PairLock {
     pub fn take(range_dir: &Path, resolved: &Resolved) -> Result<PairLock> {
         let common_dir = resolved.repo.common_dir()?;
         let pair = format!(
-            "{}-{}",
+            "{}{PAIR_SEPARATOR}{}",
             resolved.left.oid.as_str(),
             resolved.right.oid.as_str()
         );
@@ -55,6 +58,14 @@ impl PairLock {
     pub fn folder(&self) -> &Path {
         &self.folder
     }
+}
+
+/// The right commit a pair folder `<left id>-<right id>` (as `PairLock::take` names it) stands for.
+#[must_use]
+pub fn pair_right_commit(folder: &Path) -> Option<Oid> {
+    let name = folder.file_name()?.to_str()?;
+    let (_left, right) = name.split_once(PAIR_SEPARATOR)?;
+    Oid::parse(right).ok()
 }
 
 /// Every `<range_dir>/<repo key>/<left id>-<right id>/` folder; a folder that cannot be listed adds none.
@@ -128,7 +139,36 @@ fn lock_failed(path: &Path, error: &io::Error) -> Error {
 
 #[cfg(test)]
 mod tests {
+    use yamt_conflict_repo::{ConflictFile, FileKind, diverged_repo, git_ok};
+
     use super::*;
+    use crate::RangeSpec;
+
+    #[test]
+    fn pair_right_commit_reads_the_right_commit_of_a_folder_take_made() {
+        let file = ConflictFile {
+            path: "a.txt",
+            kind: FileKind::Regular,
+            base: Some(b"base\n"),
+            local: Some(b"local\n"),
+            remote: Some(b"remote\n"),
+        };
+        let repo = diverged_repo(&[file]).unwrap();
+        let range_dir = tempfile::tempdir().unwrap();
+        let spec = RangeSpec::parse("main..remote").unwrap();
+        let resolved = Resolved::resolve(repo.path(), &spec).unwrap();
+
+        let lock = PairLock::take(range_dir.path(), &resolved).unwrap();
+
+        let remote = git_ok(repo.path(), &["rev-parse", "remote"]).unwrap();
+        let remote = Oid::parse(String::from_utf8(remote).unwrap().trim_end()).unwrap();
+        assert_eq!(pair_right_commit(lock.folder()), Some(remote));
+        assert_eq!(pair_right_commit(Path::new("a-b")), None);
+        assert_eq!(
+            pair_right_commit(&Path::new("no-separator").join("x")),
+            None
+        );
+    }
 
     #[test]
     fn fnv1a_64_gives_the_published_vectors() {

@@ -93,6 +93,26 @@ pub(crate) fn run_to_end(command: Command) -> Result<Finished> {
     })
 }
 
+/// `run_to_end`, with a non-zero exit as `Error::GitFailed`; stdout on success.
+pub(crate) fn run_to_success(command: Command) -> Result<Vec<u8>> {
+    let args = argv(&command);
+    let finished = run_to_end(command)?;
+    if !finished.status.success() {
+        return Err(failure(args, &finished));
+    }
+    Ok(finished.stdout)
+}
+
+fn failure(args: Vec<String>, finished: &Finished) -> Error {
+    Error::GitFailed {
+        args,
+        status: finished.status.code(),
+        stderr: String::from_utf8_lossy(&finished.stderr)
+            .trim_end()
+            .to_owned(),
+    }
+}
+
 fn output_until(chunks: &Receiver<io::Result<Vec<u8>>>, end: Instant) -> io::Result<Vec<u8>> {
     match collected(chunks, end)? {
         Collected::Whole(bytes) => Ok(bytes),
@@ -125,13 +145,7 @@ pub(crate) fn run_accepting(
         }
     };
     if !accepts(finished.status) {
-        return Err(Error::GitFailed {
-            args,
-            status: finished.status.code(),
-            stderr: String::from_utf8_lossy(&finished.stderr)
-                .trim_end()
-                .to_owned(),
-        });
+        return Err(failure(args, &finished));
     }
     Ok(finished.stdout)
 }

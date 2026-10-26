@@ -327,3 +327,24 @@ fn a_missing_folder_is_a_start_error() {
     let started = Running::start(Path::new(ECHO), &[], &folder, Framing::Lines, sender);
     assert!(started.is_err());
 }
+
+/// Catches `start_without` passing on a variable it was told to leave out, or leaving out one it was not.
+#[cfg(unix)]
+#[test]
+fn start_without_leaves_the_named_variables_out_of_the_program_s_environment() {
+    let print_home = |removed: &[&str]| {
+        let (sender, events) = mpsc::channel();
+        let args = ["-c".to_owned(), "echo \"${HOME-unset}\"".to_owned()];
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let program = Path::new("sh");
+        let running =
+            Running::start_without(program, &args, folder, Framing::Lines, sender, removed)
+                .unwrap();
+        let printed = next_message(&events);
+        running.wait();
+        printed
+    };
+
+    assert_eq!(print_home(&["HOME"]), "unset");
+    assert_ne!(print_home(&[]), "unset");
+}

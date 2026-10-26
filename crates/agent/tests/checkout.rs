@@ -1,91 +1,48 @@
 #![cfg(test)]
 
+mod common;
+
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use yamt_agent::{CheckoutLook, CheckoutReply, Pair, Workspace, sweep_leftovers};
-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git, git_ok};
+use yamt_agent::{CheckoutLook, CheckoutReply, Error, Pair, Workspace};
+use yamt_conflict_repo::{git, git_ok, run_ignored_in_child};
 
-const IGNORE_RULES: &[u8] = b"ignored/\n";
+use common::{Fixture, commit_of, pair_in};
 
-/// The source repository, the data folder standing for `<data_dir>/yamt/range`, and the pair inside it
-/// whose right commit is the source's `remote`.
-struct Fixture {
-    _source: TempDir,
-    range_dir: TempDir,
-    pair: Pair,
-}
+const INHERITED_GIT_DIR_TEST: &str = "preparing_under_an_inherited_git_dir";
+#[cfg(unix)]
+const AGENT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Fixture {
-    fn new() -> Fixture {
-        let files = [
-            same_on_every_side(".gitignore", IGNORE_RULES),
-            ConflictFile {
-                path: "a.txt",
-                kind: FileKind::Regular,
-                base: Some(b"base\n"),
-                local: Some(b"local\n"),
-                remote: Some(b"remote\n"),
-            },
-        ];
-        let source = diverged_repo(&files).unwrap();
-        let range_dir = tempfile::tempdir().unwrap();
-        let left = commit_of(source.path(), "main");
-        let right = commit_of(source.path(), "remote");
-        let folder = range_dir
-            .path()
-            .join("source-0123456789abcdef")
-            .join(format!("{left}-{right}"));
-        fs::create_dir_all(&folder).unwrap();
-        let pair = Pair {
-            repo: source.path().to_owned(),
-            folder,
-            new_commit: right,
-        };
-        Fixture {
-            _source: source,
-            range_dir,
-            pair,
-        }
-    }
-
-    fn workspace(&self) -> Workspace {
-        Workspace::new(self.pair.clone())
-    }
-
-    fn checkout(&self) -> PathBuf {
-        self.pair.folder.join("checkout")
-    }
-
     fn ready(&self) -> CheckoutReply {
         CheckoutReply::Ready {
             folder: self.checkout().to_string_lossy().into_owned(),
         }
     }
 
-    fn changed(&self, files: &[&str], head_moved: bool) -> CheckoutLook {
+    fn changed(&self, files: &[&str], refs: &[&str], head_moved: bool) -> CheckoutLook {
         CheckoutLook::Changed {
             folder: self.checkout().to_string_lossy().into_owned(),
             files: files.iter().map(|file| (*file).to_owned()).collect(),
+            refs: refs.iter().map(|name| (*name).to_owned()).collect(),
             head_moved,
         }
     }
-}
 
-fn same_on_every_side<'a>(path: &'a str, text: &'a [u8]) -> ConflictFile<'a> {
-    ConflictFile {
-        path,
-        kind: FileKind::Regular,
-        base: Some(text),
-        local: Some(text),
-        remote: Some(text),
+    /// The sweep as a window on another pair of the same data folder runs it.
+    fn sweep_from_another_pair(&self) {
+        let other = Pair {
+            folder: self
+                .range_dir
+                .path()
+                .join("other-0123456789abcdef")
+                .join("a-b"),
+            ..self.pair.clone()
+        };
+        Workspace::new(other).sweep_leftovers(self.range_dir.path());
     }
-}
-
-fn commit_of(root: &Path, revision: &str) -> String {
-    text_of(root, &["rev-parse", revision])
-        .trim_end()
-        .to_owned()
 }
 
 fn text_of(root: &Path, args: &[&str]) -> String {
@@ -95,6 +52,12 @@ fn text_of(root: &Path, args: &[&str]) -> String {
 fn commit_everything(root: &Path, message: &str) {
     git_ok(root, &["add", "--all"]).unwrap();
     git_ok(root, &["commit", "--quiet", "--allow-empty", "-m", message]).unwrap();
+}
+
+#[cfg(unix)]
+fn set_mode(folder: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(folder, fs::Permissions::from_mode(mode)).unwrap();
 }
 
 #[test]
@@ -142,7 +105,10 @@ fn prepare_reuses_a_kept_checkout_with_its_changes_and_commits() {
         fs::read(checkout.join("new.txt")).unwrap(),
         b"not committed\n"
     );
-    assert_eq!(next.look_job().look(), fixture.changed(&["new.txt"], true));
+    assert_eq!(
+        next.look_job().look(),
+        fixture.changed(&["new.txt"], &[], true)
+    );
 }
 
 #[test]
@@ -199,19 +165,43 @@ fn an_edited_file_an_untracked_file_and_a_moved_head_each_count_as_changed() {
     fs::write(checkout.join("a.txt"), b"edited\n").unwrap();
     assert_eq!(
         workspace.look_job().look(),
-        fixture.changed(&["a.txt"], false)
+        fixture.changed(&["a.txt"], &[], false)
     );
     git_ok(&checkout, &["checkout", "--", "a.txt"]).unwrap();
 
     fs::write(checkout.join("untracked.txt"), b"new\n").unwrap();
     assert_eq!(
         workspace.look_job().look(),
-        fixture.changed(&["untracked.txt"], false)
+        fixture.changed(&["untracked.txt"], &[], false)
     );
     fs::remove_file(checkout.join("untracked.txt")).unwrap();
 
     commit_everything(&checkout, "an empty commit");
-    assert_eq!(workspace.look_job().look(), fixture.changed(&[], true));
+    assert_eq!(workspace.look_job().look(), fixture.changed(&[], &[], true));
+}
+
+#[test]
+fn a_stash_alone_counts_as_changed_and_so_does_a_branch() {
+    let fixture = Fixture::new();
+    let mut workspace = fixture.workspace();
+    workspace.prepare();
+    let checkout = fixture.checkout();
+    fs::write(checkout.join("a.txt"), b"the AI's stashed work\n").unwrap();
+
+    git_ok(&checkout, &["stash", "--quiet"]).unwrap();
+
+    assert_eq!(
+        workspace.look_job().look(),
+        fixture.changed(&[], &["stash"], false)
+    );
+    git_ok(&checkout, &["stash", "drop", "--quiet"]).unwrap();
+    git_ok(&checkout, &["branch", "ai-work"]).unwrap();
+    assert_eq!(
+        workspace.look_job().look(),
+        fixture.changed(&[], &["ai-work"], false)
+    );
+    workspace.end();
+    assert!(fixture.checkout().exists());
 }
 
 #[test]
@@ -249,10 +239,7 @@ fn a_checkout_git_cannot_read_is_unreadable_and_never_removed_by_end_or_sweep() 
     assert_eq!(folder, checkout.to_string_lossy());
     assert_ne!(message, "");
 
-    sweep_leftovers(
-        fixture.range_dir.path(),
-        &fixture.range_dir.path().join("other"),
-    );
+    fixture.sweep_from_another_pair();
     assert!(checkout.join("a.txt").exists());
     workspace.end();
     assert!(checkout.join("a.txt").exists());
@@ -300,12 +287,65 @@ fn discard_removes_a_changed_checkout() {
     let mut workspace = fixture.workspace();
     workspace.prepare();
     fs::write(fixture.checkout().join("a.txt"), b"edited\n").unwrap();
+    commit_everything(&fixture.checkout(), "the AI's commit");
 
     workspace.discard().unwrap();
 
     assert!(!fixture.checkout().exists());
     assert!(!fixture.pair.folder.join("checkout.removing").exists());
     assert_eq!(workspace.look_job().look(), CheckoutLook::Missing);
+}
+
+#[test]
+fn discard_without_a_checkout_succeeds() {
+    let fixture = Fixture::new();
+    let mut workspace = fixture.workspace();
+
+    workspace.discard().unwrap();
+    workspace.prepare();
+    workspace.discard().unwrap();
+
+    workspace.discard().unwrap();
+    assert!(!fixture.checkout().exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn discard_that_cannot_rename_the_checkout_answers_remove_and_keeps_it() {
+    let fixture = Fixture::new();
+    let mut workspace = fixture.workspace();
+    workspace.prepare();
+
+    set_mode(&fixture.pair.folder, 0o555);
+    let discarded = workspace.discard();
+    set_mode(&fixture.pair.folder, 0o755);
+
+    assert!(
+        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == fixture.checkout()),
+        "{discarded:?}"
+    );
+    assert!(fixture.checkout().join("a.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn discard_that_cannot_delete_the_checkout_answers_remove() {
+    let fixture = Fixture::new();
+    let mut workspace = fixture.workspace();
+    workspace.prepare();
+    let sub = fixture.checkout().join("sub");
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("kept.txt"), b"kept\n").unwrap();
+    set_mode(&sub, 0o555);
+
+    let discarded = workspace.discard();
+
+    let removing = fixture.pair.folder.join("checkout.removing");
+    set_mode(&removing.join("sub"), 0o755);
+    assert!(
+        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == removing),
+        "{discarded:?}"
+    );
 }
 
 #[test]
@@ -325,6 +365,86 @@ fn a_checkout_left_after_a_kill_is_reused_by_the_next_window() {
     );
     assert_eq!(
         next.look_job().look(),
-        fixture.changed(&["untracked.txt"], false)
+        fixture.changed(&["untracked.txt"], &[], false)
+    );
+}
+
+#[test]
+fn prepare_never_acts_on_the_repository_an_inherited_git_dir_names() {
+    let fixture = Fixture::new();
+    let source = &fixture.pair.repo;
+    git_ok(
+        source,
+        &["remote", "add", "origin", "https://example.invalid/r.git"],
+    )
+    .unwrap();
+
+    let ran = run_ignored_in_child(&[INHERITED_GIT_DIR_TEST], |child| {
+        child.env("GIT_DIR", source.join(".git"));
+    });
+
+    ran.unwrap_or_else(|error| panic!("{error}"));
+}
+
+/// Branches, remotes and HEAD of `source`, as git lists them.
+fn refs_and_head(source: &Path) -> String {
+    let mut state = text_of(source, &["for-each-ref", "refs/heads"]);
+    state.push_str(&text_of(source, &["remote", "-v"]));
+    state.push_str(&text_of(source, &["symbolic-ref", "HEAD"]));
+    state
+}
+
+#[test]
+#[ignore = "run by prepare_never_acts_on_the_repository_an_inherited_git_dir_names"]
+fn preparing_under_an_inherited_git_dir() {
+    let git_dir = PathBuf::from(env::var_os("GIT_DIR").unwrap());
+    let source = git_dir.parent().unwrap();
+    let before = refs_and_head(source);
+    let (_range_dir, pair) = pair_in(source);
+    let checkout = pair.folder.join("checkout");
+    let mut workspace = Workspace::new(pair);
+
+    let reply = workspace.prepare();
+
+    assert_eq!(
+        reply,
+        CheckoutReply::Ready {
+            folder: checkout.to_string_lossy().into_owned()
+        }
+    );
+    assert_eq!(refs_and_head(source), before);
+    assert_eq!(workspace.look_job().look(), CheckoutLook::Clean);
+    assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"remote\n");
+    #[cfg(unix)]
+    the_agent_finds_the_checkout_s_own_repository(&mut workspace, &checkout);
+}
+
+#[cfg(unix)]
+fn the_agent_finds_the_checkout_s_own_repository(workspace: &mut Workspace, checkout: &Path) {
+    use yamt_agent::{AgentCommand, AgentStartReply, HostEvent};
+
+    let print = AgentCommand {
+        program: "sh".to_owned(),
+        args: vec![
+            "-c".to_owned(),
+            "echo \"${GIT_DIR-unset} $(git rev-parse --show-toplevel)\"".to_owned(),
+        ],
+        home_folders: Vec::new(),
+    };
+    let (sender, events) = std::sync::mpsc::channel();
+    let reply = workspace.start(&print, sender);
+    assert!(
+        matches!(reply, AgentStartReply::Started { .. }),
+        "{reply:?}"
+    );
+    let printed = match events.recv_timeout(AGENT_WAIT).unwrap() {
+        HostEvent::Message { text } => text,
+        other @ (HostEvent::Log { .. } | HostEvent::Exited { .. }) => panic!("{other:?}"),
+    };
+    let (git_dir, top) = printed.split_once(' ').unwrap();
+    assert_eq!(git_dir, "unset");
+    assert_eq!(
+        fs::canonicalize(top).unwrap(),
+        fs::canonicalize(checkout).unwrap()
     );
 }

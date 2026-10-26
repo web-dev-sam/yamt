@@ -1,15 +1,13 @@
 //! A line-framed test agent for this crate's tests: answers each line with the same line. `pwd` answers its
-//! working folder; `edit <file>` appends a line to that file and answers `edited <file>`; `stderr <text>` writes
-//! `text` on stderr; `exit <code>` exits with that code; `huge` writes one line over 64 MiB, then `after`;
-//! `hold <file>` keeps that file open, answers `holding <file>`, and once stdin closes waits a moment, writes
-//! `released` into it (making its folder again if it is gone) and exits.
+//! working folder; `edit <file>` appends a line to that file and answers `edited <file>`; `exit <code>` exits
+//! with that code; `hold <file>` keeps that file open, answers `holding <file>`, and once stdin closes waits a
+//! moment, writes `released` into it (making its folder again if it is gone) and exits.
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{env, process, thread};
 
-const HUGE_LINE_BYTES: usize = 64 * 1024 * 1024 + 1;
 const HOLD_RELEASE: Duration = Duration::from_millis(300);
 const EDITED_LINE: &[u8] = b"edited by agent-echo\n";
 const RELEASED: &[u8] = b"released\n";
@@ -60,15 +58,8 @@ fn answer(line: &str) -> io::Result<()> {
             .open(file)?
             .write_all(EDITED_LINE)?;
         write_out(format!("edited {file}\n").as_bytes())
-    } else if let Some(text) = line.strip_prefix("stderr ") {
-        eprintln!("{text}");
-        Ok(())
     } else if let Some(code) = line.strip_prefix("exit ") {
         process::exit(code.trim().parse().unwrap_or(1));
-    } else if line == "huge" {
-        let mut huge = vec![b'x'; HUGE_LINE_BYTES];
-        huge.extend_from_slice(b"\nafter\n");
-        write_out(&huge)
     } else {
         write_out(format!("{line}\n").as_bytes())
     }
