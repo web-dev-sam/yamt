@@ -1,21 +1,4 @@
 {
-  "RVAgentClient": {
-    "owned": [
-      "frontend/src/agent/**",
-      "frontend/src/ipc/AgentSource.ts",
-      "frontend/src/ipc/tauriAgent.ts",
-      "frontend/src/ipc/tauriAgent.test.ts",
-      "frontend/src/ipc/fixtureAgent.ts",
-      "frontend/src/ipc/fixtureAgent.test.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/fixtures/agent/**",
-      "tests/agent/**",
-      "frontend/scripts/record-agent.ts",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts"
-    ]
-  },
   "RVAgentCrateR1": {
     "owned": [
       "crates/agent/**",
@@ -28,7 +11,32 @@
       "crates/range/src/lock.rs",
       "crates/range/src/lib.rs",
       "crates/range/AGENTS.md",
-      "src-tauri/src/ai.rs"
+      "src-tauri/src/ai.rs",
+      "crates/pipe/src/run.rs",
+      "crates/pipe/src/lib.rs",
+      "crates/pipe/tests/lines.rs",
+      "crates/pipe/AGENTS.md",
+      "crates/gitio/src/lib.rs"
+    ]
+  },
+  "RVThreadStateR1": {
+    "owned": [
+      "frontend/src/ui/rangeThreads.ts",
+      "frontend/src/ui/rangeThreads.test.ts",
+      "frontend/src/ui/rangeGitLab.ts",
+      "frontend/src/ui/rangeGitLab.test.ts",
+      "frontend/src/ui/rangeThreadText.ts",
+      "frontend/src/ui/rangeThreadText.test.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/rangeDrafts.ts",
+      "frontend/src/ui/rangeDrafts.test.ts",
+      "frontend/src/ipc/threadLine.ts",
+      "frontend/src/ipc/index.ts",
+      "frontend/src/editor/index.ts",
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/internal/threadRows.ts"
     ]
   }
 }
