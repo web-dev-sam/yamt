@@ -63,8 +63,8 @@ export type {
   Theme,
   WriteReply,
 } from "./domain";
-export { nextColumnVersion } from "./domain";
-export type { MessageId, ThreadId } from "./domain";
+export { agentSessionId, isAgentSessionId, nextColumnVersion } from "./domain";
+export type { AgentSessionId, MessageId, ThreadId } from "./domain";
 export type {
   GitLabCheck,
   MergeRequestRef,

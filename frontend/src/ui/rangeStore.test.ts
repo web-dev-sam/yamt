@@ -1,11 +1,13 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { DEFAULT_FIRST_MESSAGE } from "../agent";
+import { AgentClient, DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
 import {
   changedThreadLine,
+  createFixtureAgentSource,
   createFixtureRangeSource,
   log,
   parseKey,
+  type AgentSource,
   type RangeEntry,
   type RangeFileId,
   type RangeSource,
@@ -447,4 +449,48 @@ test("First message's values: the thread's place, the range as typed, both short
   });
   expect(askContext(null, custom, added)).toBeNull();
   expect(askContext({ ...start, files: [] }, custom, added)).toBeNull();
+});
+
+async function aiStore(discards: string[]): Promise<RangeStore> {
+  const agent = createFixtureAgentSource(log, "?ai-changes");
+  const source: AgentSource = {
+    ...agent,
+    discardCheckout: async () => {
+      discards.push("discard");
+      return agent.discardCheckout();
+    },
+  };
+  const client = new AgentClient({ source, command: () => DEFAULT_AGENT_COMMAND });
+  const store = createRangeStore(createFixtureRangeSource(log, "?range=review"), "dark", {
+    source,
+    client,
+  });
+  await store.startUp();
+  return store;
+}
+
+async function closeQuestion(store: RangeStore): Promise<{ readonly closing: Promise<boolean> }> {
+  const closing = store.mayClose();
+  await vi.waitFor(() => {
+    expect(store.question.value).toMatchObject({ kind: "keepAiChanges", files: ["README.md"] });
+  });
+  return { closing };
+}
+
+test("with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays", async () => {
+  quiet();
+  const discards: string[] = [];
+  const store = await aiStore(discards);
+
+  const kept = await closeQuestion(store);
+  store.answer(true);
+  expect([await kept.closing, discards]).toEqual([true, []]);
+
+  const discarded = await closeQuestion(store);
+  store.answer(false);
+  expect([await discarded.closing, discards]).toEqual([true, ["discard"]]);
+
+  const dismissed = await closeQuestion(store);
+  store.dismissQuestion();
+  expect([await dismissed.closing, discards]).toEqual([false, ["discard"]]);
 });

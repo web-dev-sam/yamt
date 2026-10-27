@@ -1,5 +1,6 @@
 import type { AgentFailure, TurnEnd, TurnView } from "../agent";
 import type { Message } from "../ipc";
+import { failureText } from "./aiText";
 import type { ThreadAi } from "./rangeAi";
 import type { PostBody } from "./rangeGitLab";
 import {
@@ -15,6 +16,8 @@ export type AnswerView =
   | { readonly kind: "gone" }
   | { readonly kind: "failed"; readonly failure: AgentFailure };
 
+export type UnshownAnswer = Exclude<AnswerView, { readonly kind: "turn" }>;
+
 export type ShownTurn = { readonly turn: TurnView; readonly end: TurnEnd | null };
 
 type AnswerBody = Extract<Message["body"], { readonly kind: "aiAnswer" }>;
@@ -22,8 +25,8 @@ type AnswerBody = Extract<Message["body"], { readonly kind: "aiAnswer" }>;
 /** An AI answer's message: turn i of the loaded conversation when it is the answer's session (plan row 121). */
 export function answerView(ai: ThreadAi, { session, turn }: AnswerBody): AnswerView {
   const { loaded } = ai;
-  if (ai.session !== session) {
-    return ai.session === null ? { kind: "loading" } : { kind: "gone" };
+  if (ai.loadedSession !== session) {
+    return ai.loadedSession === null ? { kind: "loading" } : { kind: "gone" };
   }
   if (loaded === null || loaded.kind === "stopped") {
     return { kind: "loading" };
@@ -39,6 +42,11 @@ export function answerView(ai: ThreadAi, { session, turn }: AnswerBody): AnswerV
   return { kind: "turn", turn: shown, end };
 }
 
+/** Whether the thread's turn still runs: Stop instead of Ask AI. */
+export function answering(ai: ThreadAi): boolean {
+  return ai.running !== null && ai.end === null;
+}
+
 /** The turn under the messages: the running one, or an ended one no message shows. */
 export function liveTurn(ai: ThreadAi): ShownTurn | null {
   const { end, running, loaded } = ai;
@@ -47,6 +55,24 @@ export function liveTurn(ai: ThreadAi): ShownTurn | null {
     return { turn: end.turn, end };
   }
   return running === null ? null : { turn: running, end: null };
+}
+
+/** The words in an AI answer's place when no turn shows; null: the window runs without the AI. */
+export function answerText(view: UnshownAnswer | null, platform: string): string {
+  switch (view?.kind) {
+    case undefined:
+      return AI_ANSWER_TEXT;
+    case "loading":
+      return ANSWER_LOADING_TEXT;
+    case "gone":
+      return ANSWER_GONE_TEXT;
+    case "failed":
+      return failureText(view.failure, platform);
+    default: {
+      const _exhaustive: never = view;
+      return _exhaustive;
+    }
+  }
 }
 
 function answerBody(view: AnswerView): PostBody {

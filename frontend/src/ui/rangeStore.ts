@@ -1,6 +1,6 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
-import { DEFAULT_FIRST_MESSAGE, type AgentClient } from "../agent";
+import type { AgentClient } from "../agent";
 import type {
   AgentSettings,
   AgentSource,
@@ -12,6 +12,7 @@ import type {
   Theme,
   Thread,
 } from "../ipc";
+import { firstMessageInUse } from "./agentSettingsFields";
 import { aiMayClose } from "./aiClose";
 import { createAsking, type Asking } from "./asking";
 import { fileListKey, type KeyPress } from "./fileListKey";
@@ -103,7 +104,7 @@ export function askContext(
     return null;
   }
   return {
-    template: agent.firstMessage ?? DEFAULT_FIRST_MESSAGE,
+    template: firstMessageInUse(agent),
     values: {
       RELATIVE_FILE_PATH_WITH_LINE: threadPlaceText(entry, thread.line),
       RANGE: start.range,

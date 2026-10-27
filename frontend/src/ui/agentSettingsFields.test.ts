@@ -1,11 +1,24 @@
 import { expect, test } from "vitest";
 
-import { DEFAULT_FIRST_MESSAGE } from "../agent";
+import { DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
 import type { AgentSettings } from "../ipc";
-import { commandField, firstMessageField, PLACEHOLDER_NAMES } from "./agentSettingsFields";
+import {
+  commandField,
+  commandInUse,
+  firstMessageField,
+  firstMessageInUse,
+  PLACEHOLDER_NAMES,
+} from "./agentSettingsFields";
 
 const DEFAULTS: AgentSettings = { command: null, firstMessage: null };
 const OWN: AgentSettings = { command: ["/opt/omp", "acp"], firstMessage: "Hi {{ MESSAGE }}" };
+
+test("the settings in use are the stored ones, or the defaults when none is stored", () => {
+  expect(commandInUse(DEFAULTS)).toBe(DEFAULT_AGENT_COMMAND);
+  expect(commandInUse(OWN)).toBe(OWN.command);
+  expect(firstMessageInUse(DEFAULTS)).toBe(DEFAULT_FIRST_MESSAGE);
+  expect(firstMessageInUse(OWN)).toBe("Hi {{ MESSAGE }}");
+});
 
 test("the command field shows the default words until the file names its own", () => {
   expect(commandField(DEFAULTS, "").shown).toBe("omp acp");

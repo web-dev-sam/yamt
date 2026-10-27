@@ -102,6 +102,17 @@ test("a thread keeps its session and every line kind", () => {
   expect(converted.map((each) => each.session)).toEqual(["s1", "s1", "s1", "s1"]);
 });
 
+test("an empty session is refused, naming the field, on the thread and on an AI answer", () => {
+  const answer: Generated.MessageBody = { kind: "aiAnswer", session: "", turn: 0 };
+
+  expect(() =>
+    toThreadList({ threads: [{ ...thread({ kind: "notQueued" }), session: "" }] }),
+  ).toThrow("threads[0].session must be a non-empty session id");
+  expect(() => toThreadList({ threads: [thread({ kind: "notQueued" }, answer)] })).toThrow(
+    "threads[0].messages[0].body.session must be a non-empty session id",
+  );
+});
+
 test("toThreadAdded brands the new id and converts the list", () => {
   expect(toThreadAdded({ thread: 3, list: LIST })).toEqual({
     thread: 3,

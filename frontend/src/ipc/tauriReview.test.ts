@@ -2,9 +2,11 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
 import {
+  agentSessionId,
   isMessageId,
   isRangeFileId,
   isThreadId,
+  type AgentSessionId,
   type MessageId,
   type RangeFileId,
   type ThreadId,
@@ -105,6 +107,14 @@ function messageId(n: number): MessageId {
   return n;
 }
 
+function session(text: string): AgentSessionId {
+  const id = agentSessionId(text);
+  if (id === null) {
+    throw new Error(`${text} is no session`);
+  }
+  return id;
+}
+
 function ok<T>(data: T): { status: "ok"; data: T } {
   return { status: "ok", data };
 }
@@ -133,11 +143,14 @@ test("each thread command passes its arguments and camelCases the list", async (
     value: CAMEL_LIST,
   });
   expect(await review.unqueueMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
-  expect(await review.setThreadSession(threadId(2), "s2")).toEqual({
+  expect(await review.setThreadSession(threadId(2), session("s2"))).toEqual({
     ok: true,
     value: CAMEL_LIST,
   });
-  expect(await review.addAiAnswer(threadId(2), "s3")).toEqual({ ok: true, value: CAMEL_LIST });
+  expect(await review.addAiAnswer(threadId(2), session("s3"))).toEqual({
+    ok: true,
+    value: CAMEL_LIST,
+  });
   expect(commands.addNote).toHaveBeenCalledWith(2, "More");
   expect(commands.queueMessage).toHaveBeenCalledWith(4, "Edited");
   expect(commands.unqueueMessage).toHaveBeenCalledWith(4);
@@ -204,8 +217,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
     addNote: () => review.addNote(threadId(9), "x"),
     queueMessage: () => review.queueMessage(messageId(4), "x"),
     unqueueMessage: () => review.unqueueMessage(messageId(5)),
-    setThreadSession: () => review.setThreadSession(threadId(6), "s"),
-    addAiAnswer: () => review.addAiAnswer(threadId(6), "s"),
+    setThreadSession: () => review.setThreadSession(threadId(6), session("s")),
+    addAiAnswer: () => review.addAiAnswer(threadId(6), session("s")),
     checkGitlab: () => review.checkGitLab(),
     sendQueue: () => review.sendQueue(() => undefined),
   };

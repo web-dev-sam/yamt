@@ -3,20 +3,12 @@ import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
 import Copy from "~icons/lucide/copy";
 
 import type { Message, ThreadId } from "../ipc";
-import { failureText } from "./aiText";
 import AiTurn from "./AiTurn.vue";
 import { copyOrSelect } from "./copyOrSelect";
-import { IDLE } from "./rangeAi";
-import { answerView, postBody, type AnswerView } from "./rangeAiView";
+import { answerText, answerView, postBody, type AnswerView } from "./rangeAiView";
 import RangePostEditor from "./RangePostEditor.vue";
 import { useRangeStore } from "./rangeStore";
-import {
-  AI_ANSWER_TEXT,
-  ANSWER_GONE_TEXT,
-  ANSWER_LOADING_TEXT,
-  COPY_LINK_TITLE,
-  postingLabel,
-} from "./rangeThreadText";
+import { COPY_LINK_TITLE, postingLabel } from "./rangeThreadText";
 import { COPIED, COPY } from "./serverText";
 
 const props = defineProps<{ message: Message; thread: ThreadId }>();
@@ -26,32 +18,16 @@ const postButton = useTemplateRef<HTMLButtonElement>("postButton");
 const { gitlab, threads, ai } = useRangeStore();
 const copied = shallowRef(false);
 
-const threadAi = computed(() =>
-  ai === null ? null : (ai.byThread.value.get(props.thread) ?? IDLE),
-);
+const threadAi = computed(() => (ai === null ? null : ai.of(props.thread)));
 const answer = computed((): AnswerView | null => {
   const { body } = props.message;
   return body.kind === "aiAnswer" && threadAi.value !== null
     ? answerView(threadAi.value, body)
     : null;
 });
-const unshownText = computed((): string => {
-  switch (answer.value?.kind) {
-    case "loading":
-      return ANSWER_LOADING_TEXT;
-    case "gone":
-      return ANSWER_GONE_TEXT;
-    case "failed":
-      return failureText(answer.value.failure, navigator.platform);
-    case "turn":
-    case undefined:
-      return AI_ANSWER_TEXT;
-    default: {
-      const _exhaustive: never = answer.value;
-      return _exhaustive;
-    }
-  }
-});
+const unshownText = computed(() =>
+  answer.value?.kind === "turn" ? null : answerText(answer.value, navigator.platform),
+);
 const body = computed(() => postBody(props.message.body, threadAi.value));
 const editing = computed(
   () => body.value.kind === "text" && threads.postDraft(props.message.id) !== null,

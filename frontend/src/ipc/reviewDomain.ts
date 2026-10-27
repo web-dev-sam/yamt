@@ -1,8 +1,10 @@
 import type * as Generated from "./bindings";
 import {
+  agentSessionId,
   isMessageId,
   isRangeFileId,
   isThreadId,
+  type AgentSessionId,
   type MessageId,
   type RangeFileId,
   type ThreadId,
@@ -10,7 +12,9 @@ import {
 import { toThreadLine, type ThreadLine } from "./threadLine";
 import { branded, invalid, isNonNegativeInteger } from "./validate";
 
-type MessageBody = Readonly<Generated.MessageBody>;
+type MessageBody =
+  | Readonly<Extract<Generated.MessageBody, { kind: "note" }>>
+  | { readonly kind: "aiAnswer"; readonly session: AgentSessionId; readonly turn: number };
 export type Posting =
   | Readonly<Exclude<Generated.Posting, { kind: "pending" }>>
   | {
@@ -31,7 +35,7 @@ export type Thread = {
   readonly file: RangeFileId;
   readonly line: ThreadLine;
   readonly messages: readonly Message[];
-  readonly session: string | null;
+  readonly session: AgentSessionId | null;
 };
 export type ThreadList = { readonly threads: readonly Thread[] };
 export type ThreadAdded = { readonly thread: ThreadId; readonly list: ThreadList };
@@ -94,11 +98,22 @@ function toPosting(raw: Generated.Posting): Posting {
   return { kind: "pending", text, draftNote, mergeRequest, link };
 }
 
+function toSession(text: string, field: string): AgentSessionId {
+  const session = agentSessionId(text);
+  if (session === null) {
+    throw new Error(`${field} must be a non-empty session id`);
+  }
+  return session;
+}
+
 function toBody(body: Generated.MessageBody, field: string): MessageBody {
-  if (body.kind === "aiAnswer" && !isNonNegativeInteger(body.turn)) {
+  if (body.kind === "note") {
+    return body;
+  }
+  if (!isNonNegativeInteger(body.turn)) {
     throw invalid(`${field}.turn`, body.turn);
   }
-  return body;
+  return { ...body, session: toSession(body.session, `${field}.session`) };
 }
 
 function toMessage({ id, body, written, posting }: Generated.Message, field: string): Message {
@@ -117,7 +132,7 @@ function toThread(raw: Generated.Thread, index: number): Thread {
     file: branded(raw.file, isRangeFileId, `${field}.file`),
     line: toThreadLine(raw.line, `${field}.line`),
     messages: raw.messages.map((message, at) => toMessage(message, `${field}.messages[${at}]`)),
-    session: raw.session,
+    session: raw.session === null ? null : toSession(raw.session, `${field}.session`),
   };
 }
 

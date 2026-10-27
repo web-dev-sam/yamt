@@ -1,6 +1,7 @@
 import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
+  AgentSessionId,
   MessageId,
   Posting,
   RangeFileId,
@@ -48,8 +49,9 @@ export type RangeThreads = {
   queue(message: MessageId, text: string): Promise<void>;
   unqueue(message: MessageId): Promise<void>;
   replace(list: ThreadList): void;
-  setSession(thread: ThreadId, session: string): Promise<boolean>;
-  addAiAnswer(thread: ThreadId, session: string): Promise<boolean>;
+  setSession(thread: ThreadId, session: AgentSessionId): Promise<boolean>;
+  /** The turn the store numbered the appended answer (plan row 121); null when the write failed. */
+  addAiAnswer(thread: ThreadId, session: AgentSessionId): Promise<number | null>;
 };
 
 type State = {
@@ -127,14 +129,14 @@ async function changed(
   state: State,
   step: ThreadStep,
   call: () => Promise<SourceResult<ThreadList>>,
-): Promise<boolean> {
+): Promise<ThreadList | null> {
   const outcome = await attempt(call);
   if (!outcome.ok) {
     state.report({ action: "threads", step, cause: outcome.cause });
-    return false;
+    return null;
   }
   state.list.value = outcome.value;
-  return true;
+  return outcome.value;
 }
 
 async function addThread(state: State, key: string, text: string): Promise<void> {
@@ -162,7 +164,7 @@ async function addNote(state: State, thread: ThreadId, text: string): Promise<vo
     return;
   }
   const added = await changed(state, "note", () => state.source.addNote(thread, text));
-  state.drafts.writeNote(thread, added ? "" : text);
+  state.drafts.writeNote(thread, added === null ? text : "");
 }
 
 function counted(state: State): Pick<RangeThreads, "counts" | "queued"> {
@@ -192,7 +194,7 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
     queue: async (message, text) => {
       if (
         !isBlank(text) &&
-        (await changed(state, "queue", () => source.queueMessage(message, text)))
+        (await changed(state, "queue", () => source.queueMessage(message, text))) !== null
       ) {
         state.drafts.dropPost(message);
       }
@@ -206,13 +208,20 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
   };
 }
 
+function addedTurn(list: ThreadList, id: ThreadId): number | null {
+  const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body;
+  return body?.kind === "aiAnswer" ? body.turn : null;
+}
+
 function aiRecords(state: State): Pick<RangeThreads, "setSession" | "addAiAnswer"> {
   const { source } = state;
   return {
-    setSession: (thread, session) =>
-      changed(state, "session", () => source.setThreadSession(thread, session)),
-    addAiAnswer: (thread, session) =>
-      changed(state, "answer", () => source.addAiAnswer(thread, session)),
+    setSession: async (thread, session) =>
+      (await changed(state, "session", () => source.setThreadSession(thread, session))) !== null,
+    addAiAnswer: async (thread, session) => {
+      const list = await changed(state, "answer", () => source.addAiAnswer(thread, session));
+      return list === null ? null : addedTurn(list, thread);
+    },
   };
 }
 

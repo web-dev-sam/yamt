@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
+  agentSessionId,
   isMessageId,
   isRangeFileId,
   isThreadId,
+  type AgentSessionId,
   type MessageId,
   type RangeFileId,
   type SourceResult,
@@ -45,6 +47,14 @@ function messageId(n: number): MessageId {
     throw new Error(`${n} is no message id`);
   }
   return n;
+}
+
+function session(text: string): AgentSessionId {
+  const id = agentSessionId(text);
+  if (id === null) {
+    throw new Error(`${text} is no session`);
+  }
+  return id;
 }
 
 function entry(id: number, path: string): RangeEntry {
@@ -232,7 +242,7 @@ test("addNote appends a note; blank text and unknown threads are refused", async
 test("setThreadSession replaces the thread's session; an unknown thread is refused", async () => {
   const source = review("?threads=seeded");
 
-  const list = valueOf(await source.setThreadSession(threadId(3), "fixture-session-2"));
+  const list = valueOf(await source.setThreadSession(threadId(3), session("fixture-session-2")));
 
   expect(list.threads.map((thread) => thread.session)).toEqual([
     null,
@@ -241,7 +251,7 @@ test("setThreadSession replaces the thread's session; an unknown thread is refus
     "fixture-session-2",
   ]);
   expect(list.threads[3]?.messages).toHaveLength(2);
-  expect(await source.setThreadSession(threadId(9), "s")).toEqual({
+  expect(await source.setThreadSession(threadId(9), session("s"))).toEqual({
     ok: false,
     failure: { kind: "UnknownThread", thread: 9 },
   });
@@ -250,9 +260,9 @@ test("setThreadSession replaces the thread's session; an unknown thread is refus
 test("addAiAnswer numbers the turn by the session's answers already in the thread, as Rust does", async () => {
   const source = review("?threads=seeded");
 
-  await source.addAiAnswer(threadId(3), "fixture-session");
-  await source.addAiAnswer(threadId(3), "other");
-  const list = valueOf(await source.addAiAnswer(threadId(3), "fixture-session"));
+  await source.addAiAnswer(threadId(3), session("fixture-session"));
+  await source.addAiAnswer(threadId(3), session("other"));
+  const list = valueOf(await source.addAiAnswer(threadId(3), session("fixture-session")));
 
   const thread = list.threads[3];
   expect(thread?.session).toBe("fixture-session");
@@ -272,8 +282,9 @@ test("addAiAnswer numbers the turn by the session's answers already in the threa
     ],
   );
   expect(thread?.messages[2]?.written).toBe(1_800_000_000);
-  expect(valueOf(await source.addAiAnswer(threadId(0), "new")).threads[0]?.session).toBe("new");
-  expect(await source.addAiAnswer(threadId(9), "s")).toEqual({
+  const added = valueOf(await source.addAiAnswer(threadId(0), session("new")));
+  expect(added.threads[0]?.session).toBe("new");
+  expect(await source.addAiAnswer(threadId(9), session("s"))).toEqual({
     ok: false,
     failure: { kind: "UnknownThread", thread: 9 },
   });

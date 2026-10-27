@@ -4,8 +4,7 @@ import ChevronUp from "~icons/lucide/chevron-up";
 
 import type { RangeEntry } from "../ipc";
 import AiTurn from "./AiTurn.vue";
-import { IDLE } from "./rangeAi";
-import { liveTurn } from "./rangeAiView";
+import { answering, liveTurn } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
 import { boxKeydown } from "./rangeKeys";
 import RangeMessage from "./RangeMessage.vue";
@@ -52,12 +51,10 @@ const text = computed(() => {
 const blank = computed(() => isBlank(text.value));
 const prompt = computed(() => (draft.value !== null ? PROMPTS.draft : PROMPTS.reply));
 const threadAi = computed(() =>
-  ai === null || thread.value === null ? null : (ai.byThread.value.get(thread.value.id) ?? IDLE),
+  ai === null || thread.value === null ? null : ai.of(thread.value.id),
 );
 const live = computed(() => (threadAi.value === null ? null : liveTurn(threadAi.value)));
-const answering = computed(
-  () => threadAi.value !== null && threadAi.value.running !== null && threadAi.value.end === null,
-);
+const stoppable = computed(() => threadAi.value !== null && answering(threadAi.value));
 const askable = computed(() => ai !== null && thread.value !== null && ai.canAsk(thread.value.id));
 
 watch(
@@ -153,7 +150,7 @@ function collapse(): void {
     <header class="flex min-w-0 items-center gap-2 text-fg-muted">
       <span class="min-w-0 flex-1 truncate font-mono">{{ place }}</span>
       <button
-        v-if="answering"
+        v-if="stoppable"
         type="button"
         :title="STOP_AI_TITLE"
         class="shrink-0 rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover"

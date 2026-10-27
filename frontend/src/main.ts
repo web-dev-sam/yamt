@@ -1,6 +1,6 @@
 import { createApp } from "vue";
 
-import { AgentClient, DEFAULT_AGENT_COMMAND } from "./agent";
+import { AgentClient } from "./agent";
 import {
   createFixtureAgentSource,
   createFixtureCompareSource,
@@ -20,6 +20,7 @@ import {
   type Theme,
 } from "./ipc";
 import { LanguageServers } from "./lsp";
+import { commandInUse } from "./ui/agentSettingsFields";
 import App from "./ui/App.vue";
 import CompareApp from "./ui/CompareApp.vue";
 import { createCompareStore } from "./ui/compareStore";
@@ -63,7 +64,7 @@ function startCompare(startTheme: Theme): void {
 }
 
 function agentCommand(): readonly string[] {
-  return useSettingsStore().settings.value.agent.command ?? DEFAULT_AGENT_COMMAND;
+  return commandInUse(useSettingsStore().settings.value.agent);
 }
 
 function rangeAgent(dataset: DOMStringMap): RangeAgent | null {

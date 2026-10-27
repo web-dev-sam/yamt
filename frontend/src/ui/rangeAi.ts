@@ -1,26 +1,24 @@
 import { shallowRef, type ShallowRef } from "vue";
 
 import {
-  agentSessionId,
   firstMessage,
   type AgentClient,
   type AgentFailure,
-  type AgentSessionId,
   type ConversationLoad,
   type Placeholder,
   type RunningTurn,
   type TurnEnd,
   type TurnView,
 } from "../agent";
-import { log, type Message, type Thread, type ThreadId } from "../ipc";
+import { log, type AgentSessionId, type Message, type Thread, type ThreadId } from "../ipc";
 import type { RangeThreads } from "./rangeThreads";
 
-/** `session` is the conversation `loaded` holds; `running` stays until the turn's answer is recorded. */
+/** `running` stays until the turn's answer is recorded. */
 export type ThreadAi = {
   readonly running: TurnView | null;
   readonly end: TurnEnd | null;
   readonly loaded: ConversationLoad | null;
-  readonly session: AgentSessionId | null;
+  readonly loadedSession: AgentSessionId | null;
 };
 
 export type AskContext = {
@@ -29,7 +27,7 @@ export type AskContext = {
 };
 
 export type RangeAi = {
-  readonly byThread: Readonly<ShallowRef<ReadonlyMap<ThreadId, ThreadAi>>>;
+  of(thread: ThreadId): ThreadAi;
   ask(thread: ThreadId): void;
   retry(thread: ThreadId): void;
   stop(thread: ThreadId): void;
@@ -39,6 +37,7 @@ export type RangeAi = {
 
 type AiClient = Pick<AgentClient, "ask" | "loadConversation">;
 type Held = "held" | "notHeld" | "replay";
+type Answered = { readonly session: AgentSessionId; readonly turn: number; readonly end: TurnEnd };
 
 type State = {
   readonly client: AiClient;
@@ -49,10 +48,10 @@ type State = {
   readonly asked: Map<ThreadId, string>;
 };
 
-export const IDLE: ThreadAi = { running: null, end: null, loaded: null, session: null };
+export const IDLE: ThreadAi = { running: null, end: null, loaded: null, loadedSession: null };
 const NOTE_JOIN = "\n\n";
 const STARTING: TurnView = { entries: [], answer: "" };
-/** Whether omp holds a turn's prompt; a stop or crash right after sending it may leave none (measured). */
+/** Whether omp holds a turn's prompt; a stop or crash right after sending it may leave none (plan row 121). */
 const HELD_AT_END: Readonly<Record<Exclude<TurnEnd["kind"], "failed">, Held>> = {
   finished: "held",
   stopped: "replay",
@@ -86,19 +85,15 @@ function threadOf(state: State, id: ThreadId): Thread | undefined {
 
 function isGone(ai: ThreadAi, session: AgentSessionId): boolean {
   return (
-    ai.session === session &&
+    ai.loadedSession === session &&
     ai.loaded?.kind === "failed" &&
     ai.loaded.failure.kind === "sessionGone"
   );
 }
 
-function storedSession(thread: Thread): AgentSessionId | null {
-  return thread.session === null ? null : agentSessionId(thread.session);
-}
-
 /** The conversation the next ask continues: none when omp no longer has the stored one (plan row 115). */
 function askedSession(state: State, thread: Thread): AgentSessionId | null {
-  const stored = storedSession(thread);
+  const stored = thread.session;
   return stored !== null && isGone(aiOf(state, thread.id), stored) ? null : stored;
 }
 
@@ -127,7 +122,7 @@ function promptText(state: State, thread: Thread, session: AgentSessionId | null
 function canAsk(state: State, thread: Thread): boolean {
   const ai = aiOf(state, thread.id);
   const session = askedSession(state, thread);
-  const loading = session !== null && (ai.session !== session || ai.loaded === null);
+  const loading = session !== null && (ai.loadedSession !== session || ai.loaded === null);
   return ai.running === null && !loading && promptText(state, thread, session) !== null;
 }
 
@@ -144,16 +139,28 @@ async function replayHolds(
   const known = answersIn(threadOf(state, thread), session);
   const held = load.turns.length > known;
   const turns = held ? load.turns.slice(0, known) : load.turns;
-  put(state, thread, { session, loaded: { kind: "loaded", turns } });
+  put(state, thread, { loadedSession: session, loaded: { kind: "loaded", turns } });
   return held;
 }
 
-async function isHeld(
+async function recordedTurn(
   state: State,
   { thread, session, end }: { thread: ThreadId; session: AgentSessionId; end: TurnEnd },
-): Promise<boolean> {
+): Promise<number | null> {
   const held = end.kind === "failed" ? HELD_AFTER[end.failure.kind] : HELD_AT_END[end.kind];
-  return held === "replay" ? replayHolds(state, thread, session) : held === "held";
+  const holds = held === "replay" ? await replayHolds(state, thread, session) : held === "held";
+  return holds ? state.threads.addAiAnswer(thread, session) : null;
+}
+
+/** The recorded answer shows as the store's turn; a conversation not loaded loads again to show it. */
+function showAnswer(state: State, thread: ThreadId, { session, turn, end }: Answered): void {
+  const { loaded, loadedSession } = aiOf(state, thread);
+  if (loadedSession !== session || loaded?.kind !== "loaded") {
+    void load(state, thread);
+  } else if (turn <= loaded.turns.length) {
+    const turns = [...loaded.turns.slice(0, turn), end.turn];
+    put(state, thread, { loaded: { kind: "loaded", turns } });
+  }
 }
 
 async function ended(
@@ -165,24 +172,18 @@ async function ended(
   if (end.kind === "failed" && end.failure.kind === "sessionGone" && session !== null) {
     put(state, thread, {
       running: null,
-      session,
+      loadedSession: session,
       loaded: { kind: "failed", failure: end.failure },
     });
     ask(state, thread);
     return;
   }
   put(state, thread, { end });
-  const recorded =
-    session !== null &&
-    (await isHeld(state, { thread, session, end })) &&
-    (await state.threads.addAiAnswer(thread, session));
-  const ai = aiOf(state, thread);
-  const { loaded } = ai;
-  const appended =
-    recorded && ai.session === session && loaded?.kind === "loaded"
-      ? { loaded: { kind: "loaded" as const, turns: [...loaded.turns, end.turn] } }
-      : {};
-  put(state, thread, { running: null, ...appended });
+  const turn = session === null ? null : await recordedTurn(state, { thread, session, end });
+  put(state, thread, { running: null });
+  if (session !== null && turn !== null) {
+    showAnswer(state, thread, { session, turn, end });
+  }
 }
 
 function run(
@@ -196,7 +197,7 @@ function run(
   const turn = state.client.ask(request, {
     session: (created) => {
       asked.session = created;
-      put(state, thread, { session: created, loaded: { kind: "loaded", turns: [] } });
+      put(state, thread, { loadedSession: created, loaded: { kind: "loaded", turns: [] } });
       void state.threads.setSession(thread, created);
     },
     changed: (view) => {
@@ -230,7 +231,7 @@ function retry(state: State, id: ThreadId): void {
   }
   const recorded = ai.loaded?.kind === "loaded" && ai.loaded.turns.includes(ai.end.turn);
   if (text !== undefined && recorded) {
-    run(state, id, { session: ai.session, text });
+    run(state, id, { session: ai.loadedSession, text });
   } else {
     ask(state, id);
   }
@@ -238,24 +239,24 @@ function retry(state: State, id: ThreadId): void {
 
 async function load(state: State, id: ThreadId): Promise<void> {
   const thread = threadOf(state, id);
-  const session = thread === undefined ? null : storedSession(thread);
+  const session = thread?.session ?? null;
   const ai = aiOf(state, id);
   if (session === null || ai.running !== null) {
     return;
   }
   const kept = ai.loaded === null || ai.loaded.kind === "loaded" || isGone(ai, session);
-  if (ai.session === session && kept) {
+  if (ai.loadedSession === session && kept) {
     return;
   }
-  put(state, id, { session, loaded: null });
+  put(state, id, { loadedSession: session, loaded: null });
   const loaded = await state.client.loadConversation(session);
-  if (aiOf(state, id).session !== session) {
+  if (aiOf(state, id).loadedSession !== session) {
     return;
   }
   const held = loaded.kind === "loaded" ? loaded.turns.length : 0;
   // Turns omp holds that no answer records (a reload mid-turn) become answers, plan row 121.
   for (let known = answersIn(thread, session); known < held; known += 1) {
-    if (!(await state.threads.addAiAnswer(id, session))) {
+    if ((await state.threads.addAiAnswer(id, session)) === null) {
       break;
     }
   }
@@ -276,7 +277,7 @@ export function createRangeAi(
     asked: new Map(),
   };
   return {
-    byThread: state.byThread,
+    of: (thread) => aiOf(state, thread),
     ask: (thread) => {
       ask(state, thread);
     },

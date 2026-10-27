@@ -60,6 +60,7 @@ export type AgentSettings = Generated.AgentSettings;
 export type RunId = number & { readonly __brand: "RunId" };
 export type AgentRun = number & { readonly __brand: "AgentRun" };
 export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
+export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
 
 export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
 export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
@@ -152,6 +153,14 @@ const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u;
 
 export function isCheckoutFolder(path: string): path is CheckoutFolder {
   return ABSOLUTE_PATH.test(path);
+}
+
+export function isAgentSessionId(text: string): text is AgentSessionId {
+  return text !== "";
+}
+
+export function agentSessionId(text: string): AgentSessionId | null {
+  return isAgentSessionId(text) ? text : null;
 }
 
 export function isTabId(n: number): n is TabId {
