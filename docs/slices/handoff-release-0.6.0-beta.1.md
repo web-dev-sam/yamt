@@ -5,10 +5,12 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
 
 ## Where things stand
 
-- `main` holds the merge of `feat/review-range` (the commit-range review window, its comment threads sent to GitLab,
-  editing and deleting unsent comments, the AI behind `--ai`) and the release commit (version `0.6.0-beta.1`,
-  changelog). Nothing is pushed: `origin/main` is still at `v0.5.1`. The tag goes on the head of `main`.
-- The final runs are on the board ("Review a commit range" rows 14 and 17, "Release 0.6.0-beta.1" row 2).
+- `main` holds the merge of `feat/review-range` (`a39907b`: the commit-range review window, its comment threads sent
+  to GitLab, editing and deleting unsent comments, the AI behind `--ai`), the release commit `ce2cf46` (version
+  `0.6.0-beta.1`, changelog) and the board updates. Nothing is pushed: `origin/main` is still at `v0.5.1` (`fc2fa97`).
+  The tag goes on the head of `main`.
+- The final runs are on the board ("Review a commit range" rows 14 and 17, "Release 0.6.0-beta.1" row 2; notes
+  `.omp/run/notes/RVVerify2.md`–`RVVerify4.md`, `Release060Beta1Verify.md`): all pass.
 - The README still names the 0.5.1 files: the releases page keeps offering 0.5.1 by default while this is a
   pre-release.
 - Not checked here: a real GitLab merge request (`glab` is not installed on this machine), and the Windows and macOS

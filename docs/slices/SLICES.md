@@ -1072,9 +1072,9 @@ pushed.
 
 | row | slice | owner | status | evidence |
 | --- | ----- | ----- | ------ | -------- |
-| 1   | version 0.6.0-beta.1: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.6.0-beta.1] - 2026-10-27` | orchestrator | done | this commit; no product file changes |
-| 2   | final run before tagging (`briefs/release-0.6.0-beta.1-verify.md`): `just check`, licences, `.deb` name and version, `--version`, the release binary on the conflict project, the range window with edits and a send, one real AI turn, the compare window | verifier | running | |
-| 3   | release build and publishing as a pre-release (`docs/slices/handoff-release-0.6.0-beta.1.md`) | human | waiting for 2 | |
+| 1   | version 0.6.0-beta.1: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.6.0-beta.1] - 2026-10-27` | orchestrator | done | `ce2cf46`; no product file changes; `readmer check` passes |
+| 2   | final run before tagging (`briefs/release-0.6.0-beta.1-verify.md`): `just check`, licences, `.deb` name and version, `--version`, the release binary on the conflict project, the range window with edits and a send, one real AI turn, the compare window | verifier | done | `Release060Beta1Verify` at `ce2cf46`: gate pass (940 Rust, 2711 web tests); licences no diff; `yamt_0.6.0-beta.1_amd64.deb` (Version `0.6.0-beta.1`), `yamt 0.6.0-beta.1`; Mark resolved stages; range window: edit, delete, the edited reply sent and pending after reopen; real omp answer, no omp left; compare window exit 0. Notes `Release060Beta1Verify.md` |
+| 3   | release build and publishing as a pre-release (`docs/slices/handoff-release-0.6.0-beta.1.md`) | human | handed over | |
 
 ## Open product questions
 
