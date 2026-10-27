@@ -3,7 +3,7 @@
 Written 2026-10-27 on the owner's word (#1630: "stop, it ran 26m and only is at 17/791, that will effectively never
 end I need to handover because the token context is overflowing again"). **No agent is running**; the final run was
 cancelled and its `cargo mutants` process is gone. `.omp/run/slices.json` is `{}`. Branch `feat/review-range` off main
-`bc69714`, tree clean, nothing pushed. Next findings id: **#1631**. Previous handoff: `review-range-1.md`.
+`bc69714`, tree clean, nothing pushed. Next findings id: **#1632**. Previous handoff: `review-range-1.md`.
 
 ## State: every build is accepted; only the final run is left
 
@@ -23,12 +23,12 @@ cancelled and its `cargo mutants` process is gone. `.omp/run/slices.json` is `{}
 
 ## Next steps (re-hydrate per `skill://orchestrate` §0 first)
 
-1. **Final run, without the whole-feature mutation run** (#1630): spawn `verifier` alone with
-   `docs/slices/briefs/3.RV-verify.md` but tell it to **skip recipe 2** (`just mutants bc69714`: 791 Rust mutants,
-   ~26 min for 17 — it never ends); the per-slice mutation records stand as the evidence. Recipes 1 (`just check` —
-   never run integrated yet), 3 (browser tests; Playwright WebKit cannot launch here, `libicudata.so.74`), 4 (WebKit
-   fixture steps), 5 (real app incl. one real `omp acp` turn, Keep/Discard, reload mid-turn, the `GIT_DIR` step).
-   Edit the brief's recipe 2 out first (orchestrator-owned file) and note #1630 in it.
+1. **Final run** (#1630): spawn `verifier` alone with `docs/slices/briefs/3.RV-verify.md` as it is now — recipe 2 is
+   already "no mutation run", and since #1631 no agent can start one over the feature (the `mutants` recipe refuses
+   more than one patch's worth; `cargo mutants` outside it is hook-blocked; VF7, verifier.md). The per-slice mutation
+   records are the evidence. Recipes 1 (`just check` — never run integrated yet), 3 (browser tests; Playwright WebKit
+   cannot launch here, `libicudata.so.74`), 4 (WebKit fixture steps), 5 (real app incl. one real `omp acp` turn,
+   Keep/Discard, reload mid-turn, the `GIT_DIR` step).
 2. `gate: fail` → a fix round for the owning slice (§5), never a new slice.
 3. Report to the owner in plain language: what works; the one open product question — **should he be able to delete
    or edit his own comments before they are sent?** (#120 default: neither); the defaults he may veto (#103, #115,
