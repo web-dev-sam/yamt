@@ -1,0 +1,27 @@
+RVNoteEditsWeb (f3eb9a4, base 66cd94f): Stryker, 10 files, 1505 mutants; 76 survivors/no-coverage in those files, 18 on changed lines:
+
+18 of 76 on changed lines
+Survived StringLiteral frontend/src/ui/question.ts:149 | -     title: "Delete Comment", => +     title: "",
+Survived ObjectLiteral frontend/src/ui/question.ts:148 | -   const DELETE_NOTE_TEXT: QuestionText = { => -     title: "Delete Comment",
+Survived StringLiteral frontend/src/ui/question.ts:150 | -     message: "Delete this comment?", => +     message: "",
+Survived StringLiteral frontend/src/ui/question.ts:151 | -     list: { kind: "none" }, => +     list: { kind: "" },
+Survived ObjectLiteral frontend/src/ui/question.ts:151 | -     list: { kind: "none" }, => +     list: {},
+Survived StringLiteral frontend/src/ui/question.ts:153 | -     confirm: "Delete", => +     confirm: "",
+Survived StringLiteral frontend/src/ui/question.ts:154 | -     cancel: "Cancel", => +     cancel: "",
+NoCoverage ConditionalExpression frontend/src/ui/rangeDrafts.ts:96 | -       default: { => -         const _exhaustive: never = draft;
+NoCoverage BlockStatement frontend/src/ui/rangeDrafts.ts:96 | -       default: { => -         const _exhaustive: never = draft;
+Survived BlockStatement frontend/src/ui/rangeDrafts.ts:60 | -   function editKey(message: MessageId): string { => -     return `edit-${message}`;
+Survived StringLiteral frontend/src/ui/rangeDrafts.ts:61 | -     return `edit-${message}`; => +     return ``;
+Survived StringLiteral frontend/src/ui/rangeDrafts.ts:89 | -       case "thread": => +       case "":
+Survived StringLiteral frontend/src/ui/rangeDrafts.ts:93 | -       case "post": => +       case "":
+Survived MethodExpression frontend/src/ui/rangeDrafts.ts:95 | -         return list.threads.some(({ messages }) => messages.some(({ id }) => id === draf => +         return list.threads.some(({ messages }) => message
+Survived ConditionalExpression frontend/src/ui/rangeDrafts.ts:106 | -     if (kept.length < state.drafts.value.size) { => +     if (true) {
+Survived EqualityOperator frontend/src/ui/rangeDrafts.ts:106 | -     if (kept.length < state.drafts.value.size) { => +     if (kept.length <= state.drafts.value.size) {
+Survived ConditionalExpression frontend/src/ui/rangeThreads.ts:97 | -     if (open.length < state.open.value.size) { => +     if (true) {
+Survived EqualityOperator frontend/src/ui/rangeThreads.ts:97 | -     if (open.length < state.open.value.size) { => +     if (open.length <= state.open.value.size) {
+
+Orchestrator triage (VF7):
+- question.ts:148-154 DELETE_NOTE_TEXT (7): dropped, module-level constant (#732 class: not re-evaluated under the vitest runner; question.test.ts asserts the words).
+- rangeDrafts.ts:96 never default (2): dropped, `never` arm.
+- rangeDrafts.ts:106 and rangeThreads.ts:97 `<` guards (4): dropped (a) equivalent: they only skip writing a map with the same contents.
+- rangeDrafts.ts:60-61 editKey (2), :89/:93 case labels (2), :95 some (1): real gaps -> correctness reviewer (edit drafts keyed per message; pruning of thread/post/edit drafts when their thread or message leaves the list).
