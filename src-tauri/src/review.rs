@@ -88,6 +88,29 @@ pub(crate) fn unqueue_message(
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+pub(crate) fn edit_note(
+    state: State<'_, RangeState>,
+    message: MessageId,
+    text: String,
+) -> Result<ThreadList, IpcError> {
+    let _sending = send_guard(&state.sending)?;
+    Ok(locked(&state.threads).edit_note(&state.range, message, &text)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+pub(crate) fn delete_message(
+    state: State<'_, RangeState>,
+    message: MessageId,
+) -> Result<ThreadList, IpcError> {
+    let _sending = send_guard(&state.sending)?;
+    Ok(locked(&state.threads).delete_message(&state.range, message)?)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
 pub(crate) fn set_thread_session(
     state: State<'_, RangeState>,
     thread: ThreadId,

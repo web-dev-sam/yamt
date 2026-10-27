@@ -223,6 +223,12 @@ pub enum Error {
         /// The message.
         message: MessageId,
     },
+    /// The message is an AI answer, which is never edited or deleted.
+    #[error("the message {} is an AI answer, not a note", message.0)]
+    NotANote {
+        /// The message.
+        message: MessageId,
+    },
 }
 
 /// Results of this crate.

@@ -249,6 +249,16 @@ fn each_review_error_has_its_kind_and_a_write_failure_names_the_file() {
 }
 
 #[test]
+fn an_ai_answer_refused_as_a_note_has_its_kind_and_message() {
+    assert_eq!(
+        review_json(yamt_review::Error::NotANote {
+            message: MessageId(8)
+        }),
+        json!({ "kind": "NotANote", "message": 8 })
+    );
+}
+
+#[test]
 fn a_start_only_review_error_is_its_line() {
     let newer = yamt_review::Error::NewerFormat {
         path: "/d/threads.json".into(),

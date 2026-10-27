@@ -54,6 +54,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         review::add_note,
         review::queue_message,
         review::unqueue_message,
+        review::edit_note,
+        review::delete_message,
         review::set_thread_session,
         review::add_ai_answer,
         review::check_gitlab::<tauri::Wry>,

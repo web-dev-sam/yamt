@@ -60,6 +60,9 @@ pub enum IpcError {
     MessagePending {
         message: MessageId,
     },
+    NotANote {
+        message: MessageId,
+    },
     SendRunning,
     AiOff,
     RemoveFailed {
@@ -184,6 +187,7 @@ impl From<yamt_review::Error> for IpcError {
             yamt_review::Error::UnknownMessage { message } => IpcError::UnknownMessage { message },
             yamt_review::Error::EmptyMessage => IpcError::EmptyMessage,
             yamt_review::Error::MessagePending { message } => IpcError::MessagePending { message },
+            yamt_review::Error::NotANote { message } => IpcError::NotANote { message },
             yamt_review::Error::ReadFailed { .. }
             | yamt_review::Error::Broken { .. }
             | yamt_review::Error::NewerFormat { .. } => IpcError::Git {

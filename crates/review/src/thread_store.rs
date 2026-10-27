@@ -145,6 +145,41 @@ impl ThreadStore {
         self.change_posting(range, message, Posting::NotQueued)
     }
 
+    /// Replaces a note's text; a queued or refused note keeps waiting with `text` as what is sent (#123).
+    pub fn edit_note(
+        &mut self,
+        range: &Range,
+        message: MessageId,
+        text: &str,
+    ) -> Result<ThreadList> {
+        let mut next = self.file.clone();
+        let stored = unsent_note_mut(&mut next, range, message)?;
+        require_text(text)?;
+        stored.body = note(text);
+        if matches!(
+            stored.posting,
+            Posting::Queued { .. } | Posting::Refused { .. }
+        ) {
+            stored.posting = Posting::Queued {
+                text: text.to_owned(),
+            };
+        }
+        self.commit(next)?;
+        Ok(self.list(range))
+    }
+
+    /// Removes a note; a thread left with no message is removed (#123).
+    pub fn delete_message(&mut self, range: &Range, message: MessageId) -> Result<ThreadList> {
+        let mut next = self.file.clone();
+        unsent_note_mut(&mut next, range, message)?;
+        for thread in &mut next.threads {
+            thread.messages.retain(|stored| stored.id != message);
+        }
+        next.threads.retain(|thread| !thread.messages.is_empty());
+        self.commit(next)?;
+        Ok(self.list(range))
+    }
+
     fn change_posting(
         &mut self,
         range: &Range,
@@ -152,10 +187,7 @@ impl ThreadStore {
         posting: Posting,
     ) -> Result<ThreadList> {
         let mut next = self.file.clone();
-        let (_, stored) = next
-            .message_mut(message)
-            .filter(|(path, _)| file_at(range, path).is_some())
-            .ok_or(Error::UnknownMessage { message })?;
+        let stored = shown_message_mut(&mut next, range, message)?;
         match stored.posting {
             Posting::Pending { .. } => return Err(Error::MessagePending { message }),
             Posting::NotQueued | Posting::Queued { .. } | Posting::Refused { .. } => {}
@@ -192,6 +224,35 @@ fn shown_thread_mut<'a>(
     next.thread_mut(thread)
         .filter(|stored| file_at(range, &stored.path).is_some())
         .ok_or(Error::UnknownThread { thread })
+}
+
+/// The message when its thread is on a file of `range`.
+fn shown_message_mut<'a>(
+    next: &'a mut ThreadFile,
+    range: &Range,
+    message: MessageId,
+) -> Result<&'a mut Message> {
+    next.message_mut(message)
+        .filter(|(path, _)| file_at(range, path).is_some())
+        .map(|(_, stored)| stored)
+        .ok_or(Error::UnknownMessage { message })
+}
+
+/// The shown message when it is the user's note and not yet on GitLab: what edit and delete may change (#123).
+fn unsent_note_mut<'a>(
+    next: &'a mut ThreadFile,
+    range: &Range,
+    message: MessageId,
+) -> Result<&'a mut Message> {
+    let stored = shown_message_mut(next, range, message)?;
+    match stored.body {
+        MessageBody::AiAnswer { .. } => return Err(Error::NotANote { message }),
+        MessageBody::Note { .. } => {}
+    }
+    match stored.posting {
+        Posting::Pending { .. } => Err(Error::MessagePending { message }),
+        Posting::NotQueued | Posting::Queued { .. } | Posting::Refused { .. } => Ok(stored),
+    }
 }
 
 /// How many of `messages` are answers in `session`: the turn its next answer gets.

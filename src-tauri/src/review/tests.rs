@@ -129,6 +129,53 @@ fn a_second_send_while_one_runs_answers_send_running() {
     assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
 }
 
+// A draft posted for a message deleted or edited meanwhile would leave GitLab and the file apart (#123).
+#[test]
+fn edit_note_and_delete_message_answer_send_running_while_a_send_runs_and_change_nothing() {
+    let window = open_range_window();
+    let list = add_first_thread(&window)["list"].clone();
+    let message = list["threads"][0]["messages"][0]["id"].clone();
+    let state = window.webview.state::<RangeState>();
+    let running = send_guard(&state.sending).unwrap();
+
+    let edit = json!({ "message": message, "text": "Why three?" });
+    assert_eq!(
+        invoke(&window, "edit_note", edit),
+        Err(json!({ "kind": "SendRunning" }))
+    );
+    let delete = json!({ "message": message });
+    assert_eq!(
+        invoke(&window, "delete_message", delete),
+        Err(json!({ "kind": "SendRunning" }))
+    );
+    drop(running);
+    assert_eq!(invoke(&window, "list_threads", json!({})), Ok(list));
+}
+
+#[test]
+fn edit_note_and_delete_message_reach_the_thread_store() {
+    let window = open_range_window();
+    let list = add_first_thread(&window)["list"].clone();
+    let message = list["threads"][0]["messages"][0]["id"].clone();
+
+    let edit = json!({ "message": message, "text": "Why three?" });
+    let edited = invoke(&window, "edit_note", edit).unwrap();
+    let note = json!({ "kind": "note", "text": "Why three?" });
+    assert_eq!(edited["threads"][0]["messages"][0]["body"], note);
+    let blank = json!({ "message": message, "text": " " });
+    assert_eq!(
+        invoke(&window, "edit_note", blank),
+        Err(json!({ "kind": "EmptyMessage" }))
+    );
+
+    let deleted = invoke(&window, "delete_message", json!({ "message": message }));
+    assert_eq!(deleted, Ok(json!({ "threads": [] })));
+    assert_eq!(
+        invoke(&window, "delete_message", json!({ "message": message })),
+        Err(json!({ "kind": "UnknownMessage", "message": message }))
+    );
+}
+
 #[test]
 fn a_send_guard_whose_holder_panicked_is_taken_again() {
     let sending = Mutex::new(());
