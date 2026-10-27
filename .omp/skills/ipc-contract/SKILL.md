@@ -79,6 +79,7 @@ open_range()                      -> RangeStart { range, sides, entries }
 load_range_file(file: RangeFileId) -> RangeFile   async: both texts, MAX_TEXT_BYTES each
 # its threads and GitLab (plan §2 #116–#121, crate yamt-review)
 list_threads() -> ThreadList; add_thread(file, line: ThreadLine, text) -> ThreadAdded; add_note(thread, text) / queue_message(message, text) / unqueue_message(message) -> ThreadList
+edit_note(message, text) / delete_message(message) -> ThreadList   an unsent Note only (#123): AiAnswer → NotANote, Pending → MessagePending; SendRunning while a send runs
 set_thread_session(thread, session) / add_ai_answer(thread, session) -> ThreadList   the store numbers the AI's turns per session (#121)
 check_gitlab()                    -> GitLabCheck   LinedUp { merge_request } | NotLinedUp { why } (#119)
 send_queue(progress: Channel<SendProgress>) -> SendReply   async: Sent { sent, refused, list } | Stopped { reason, … } | NotLinedUp; a second send while one runs → SendRunning

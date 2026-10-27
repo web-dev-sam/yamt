@@ -20,6 +20,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - "Post" queues a message for GitLab; "Send to GitLab (n)" sends the queue as pending comments of your merge
     request's review through `glab`, enabled only while the merge request shows exactly this diff; a refused comment
     stays queued with GitLab's reason; a message already among your drafts is never posted twice.
+  - Your own comments can be edited or deleted until they are sent to GitLab; sent ones stay as they are.
 - `--ai`: each thread can "Ask AI". The AI (`omp acp` by default) answers in the thread, working in a temporary
   checkout of the right-hand commit, never in your own folder.
   - Its answer shows as Markdown; its thinking and steps (reads, searches, commands and their output, edits as diffs)

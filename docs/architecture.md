@@ -534,7 +534,9 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `PAIR_SEPARATOR`, `pair_right_commit`).
 - **`review` (yamt-review).** `ThreadStore` owns `threads.json` format 1 in the pair folder (#117): threads on a
   `ThreadLine`, messages with a `Note { text }` or `AiAnswer { session, turn }` body (#121) and a `Posting`
-  (`NotQueued | Queued | Refused | Pending`); `set_session`/`add_ai_answer` (the one turn-numbering rule: the count of
+  (`NotQueued | Queued | Refused | Pending`); `edit_note`/`delete_message` change only an unsent `Note` (#123: an
+  edited waiting note waits with its new text; a thread emptied by a delete goes; `NotANote` for an AI answer);
+  `set_session`/`add_ai_answer` (the one turn-numbering rule: the count of
   that session's answers in the thread). `check_gitlab` answers `LinedUp | NotLinedUp { why }` from the pure #119 rule.
   `send_queue` lists the user's drafts first, never lets one draft stand for two messages, re-reads each message just
   before its post (a message unqueued or edited mid-send wins), posts through `glab api` to the draft-notes route with
@@ -552,7 +554,8 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   range). `start_script` writes `data-window="range"` and `data-ai="on"`. `range.rs`: `RangeState` with
   `Mutex<ThreadStore>` and the send guard (the guard `try_lock`ed for a whole send, the store locked only between glab
   calls), commands `open_range` and async `load_range_file`. `review.rs`: `list_threads`, `add_thread`, `add_note`,
-  `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` (a
+  `queue_message`, `unqueue_message`, `edit_note`, `delete_message` (both refused with `SendRunning` while a send
+  runs, #123), `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` (a
   progress `Channel`). `ai.rs`: `Mutex<AiState>` (`AiState { Off | On(Workspace) }`, `AiState::workspace()` the one
   `AiOff` mapping), commands `prepare_checkout`, async `start_agent`, `send_to_agent`, `stop_agent`,
   `checkout_changes`, `discard_checkout`, `diff_texts` (`merge_core::compare` on a worker, #114); a page load stops
@@ -561,7 +564,8 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `SendRunning`.
 - **Window.** `RangeSource` extends `SettingsSource, ReviewSource` with `openRange(): RangeStart` and
   `loadRangeFile(file)`; `ReviewSource`: `listThreads`, `addThread(file, line, text)`, `addNote(thread, text)`,
-  `queueMessage(message, text)`, `unqueueMessage(message)`, `setThreadSession(thread, session)`,
+  `queueMessage(message, text)`, `unqueueMessage(message)`, `editNote(message, text)`, `deleteMessage(message)`,
+  `setThreadSession(thread, session)`,
   `addAiAnswer(thread, session)`, `checkGitLab()`, `sendQueue(onProgress)`; `SettingsSource`/`ChunkSource` gain
   `setAgent(current, agent)`; `AgentSource` (the seven agent commands) is built only in `main.ts` with AI on.
   `jsonrpc/` is the one JSON-RPC connection; `agent/` is the ACP client (`AgentClient { ask, loadConversation,

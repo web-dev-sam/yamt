@@ -91,8 +91,8 @@ release             README.md, LICENSE (MIT), CHANGELOG.md, THIRD_PARTY_NOTICES.
                     .github/workflows/ci.yml (every push and PR: `just test` + app build on ubuntu/macos/windows, NSIS artifact, frontend tests; plan §2 #59), .github/actions/setup (the one toolchain setup both workflows use)
 src-tauri (range)   the range window (`yamt --diff=<a>..<b>`, plan §2 #103–#107): args `Invocation::Range { spec, repo, ai: Ai }` (`--ai` accepted everywhere, kept only here), start_script
                     (`start_script`: `data-theme`, `data-window` merge|compare|range, `data-ai="on"` only for a range window with `Ai::On`), range (`RangeState`: the range, `PairLock`,
-                    `threads: Mutex<ThreadStore>`, the send guard; `open_range`, async `load_range_file`; `start_failure` lines), review (the nine thread/GitLab commands: `list_threads`,
-                    `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` with a progress `Channel`; the send
+                    `threads: Mutex<ThreadStore>`, the send guard; `open_range`, async `load_range_file`; `start_failure` lines), review (the eleven thread/GitLab commands: `list_threads`,
+                    `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `edit_note`, `delete_message`, `set_thread_session`, `add_ai_answer`, `check_gitlab`, async `send_queue` with a progress `Channel`; the send
                     guard `try_lock`ed for the whole send, threads locked only between glab calls; tests in review/tests.rs), ai (`Mutex<AiState>`: `AiState { Off | On(Workspace) }`,
                     `AiState::workspace()` the one `AiOff` mapping; `manage` (own-pair leftovers under the lock, other pairs after it — `sweep_own_then_others`), a page load stops the agent
                     (deferred while the lock is held), `end_at_exit`; the seven agent commands `prepare_checkout`, async `start_agent`, `send_to_agent`, `stop_agent`, `checkout_changes`,

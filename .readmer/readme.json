@@ -65,11 +65,17 @@
       "title": "Use",
       "body": [
         "```sh",
-        "yamt          # in the repository, when git stops with conflicts",
-        "yamt --diff   # anywhere: compare any two texts side by side",
+        "yamt                         # in the repository, when git stops with conflicts",
+        "yamt --diff                  # anywhere: compare any two texts side by side",
+        "yamt --diff=main...feature   # in a repository: review the changes between two commits",
+        "yamt --diff=main...feature --ai   # the same, with an AI to ask about each comment",
         "```",
         "",
         "`yamt --diff` opens a two-column compare instead of a merge: paste or type into both columns and the differences show as in the merge window. Format lays out JSON and XML (keys and values kept as written), the language drop-down picks the highlighting (Auto by default), and each comparison is a tab in the left panel. Tabs and their texts are kept between runs.",
+        "",
+        "`yamt --diff=<a>...<b>` (or `<a>..<b>`, with git's meaning) reviews a commit range: the changed files on the left as GitLab lists them, and each file's two versions side by side, read-only. Hover a line number to start a comment thread there, as in GitLab. Each message can be queued with \"Post\", and \"Send to GitLab (n)\" sends the queue as pending comments of your merge request's review through `glab` (installed and logged in; it is enabled only while the merge request shows exactly this diff). Your own comments can be edited or deleted until they are sent. Threads are kept per repository and commit pair.",
+        "",
+        "With `--ai`, each thread has \"Ask AI\": the AI (`omp acp` by default, set in Settings) answers in the thread, working in a temporary checkout of the right-hand commit. Its thinking and steps open under the answer, its edits show as diffs, and closing the window asks whether to keep its changes.",
         "",
         "The gear opens the settings. Theme offers yamt's own Dark and Light and the default dark and light themes of WebStorm (Islands), VS Code (Dark/Light 2026), Zed (One) and Atom (One), in those editors' own colours: window, code and change colours, and their panel shapes."
       ]
