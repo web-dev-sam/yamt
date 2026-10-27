@@ -12,8 +12,8 @@ import {
   type Posting,
   type Thread,
 } from "../ipc";
-import { isChangeable } from "./noteChange";
 import type { Problem } from "./problem";
+import { isChangeable } from "./rangeNoteChange";
 import { createRangeStore, MOUNTED_FILES } from "./rangeStore";
 import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
 

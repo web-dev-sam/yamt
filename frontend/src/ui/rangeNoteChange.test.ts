@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { noteChangeBlock } from "./noteChange";
+import { noteChangeBlock } from "./rangeNoteChange";
 
 const SENDING = { done: 0, of: 2 };
 const TURN = { entries: [], answer: "" };

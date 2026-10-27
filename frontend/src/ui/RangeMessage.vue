@@ -5,9 +5,9 @@ import Copy from "~icons/lucide/copy";
 import type { Message, ThreadId } from "../ipc";
 import AiTurn from "./AiTurn.vue";
 import { copyOrSelect } from "./copyOrSelect";
-import { isChangeable, noteChangeBlock } from "./noteChange";
 import { answerText, answerView, postBody, type AnswerView } from "./rangeAiView";
 import RangeMessageEditor from "./RangeMessageEditor.vue";
+import { isChangeable, noteChangeBlock } from "./rangeNoteChange";
 import { useRangeStore } from "./rangeStore";
 import {
   COPY_LINK_TITLE,

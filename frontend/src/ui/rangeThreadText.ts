@@ -8,8 +8,8 @@ import type {
   SendReply,
   ThreadLine,
 } from "../ipc";
-import type { NoteChangeBlock } from "./noteChange";
 import type { NoticeRow } from "./noticeText";
+import type { NoteChangeBlock } from "./rangeNoteChange";
 import { sideLabel } from "./rangeText";
 
 export const CHECKING_TEXT = "Checking GitLab…";

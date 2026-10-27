@@ -9,7 +9,7 @@ import {
   type ThreadLine,
   type ThreadList,
 } from "../ipc";
-import { isChangeable } from "./noteChange";
+import { isChangeable } from "./rangeNoteChange";
 
 export type Draft =
   | {
