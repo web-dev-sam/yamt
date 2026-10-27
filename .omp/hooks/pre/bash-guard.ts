@@ -25,6 +25,11 @@ const DENIED_FOR_EVERYONE: Rule[] = [
     reason:
       "desktop screenshots can capture the owner's screen; use the WebDriver session screenshot (`GET /session/<id>/screenshot`, tauri-driver for the app) or the private display",
   },
+  {
+    pattern: /\bcargo[\s-]+mutants\b(?![^;&|]*\s--list\b)/,
+    reason:
+      "Rust mutation runs go through `just mutants <the commit before one patch>`, which refuses more than one patch's worth; a whole-feature run takes hours (#1630, VF7)",
+  },
 ];
 
 const DENIED_FOR_SUBAGENTS: Rule[] = [

@@ -132,6 +132,22 @@ test("bash-guard: desktop screenshots are blocked; page and private-display capt
   }
 });
 
+test("bash-guard: mutation runs go through the capped recipe, never cargo mutants directly", async () => {
+  const h = toolCallHandler(bashGuard);
+  const cases: Array<[string, boolean]> = [
+    ["cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false", true],
+    ["cargo mutants -f crates/review/src/thread_store.rs -p yamt-review", true],
+    ["TMPDIR=/var/tmp/x cargo-mutants mutants --in-diff d.diff", true],
+    ["cargo mutants --in-diff target/mutants/rust.diff --list | wc -l", false],
+    ["just mutants 3d746d5", false],
+  ];
+  for (const [command, blocked] of cases) {
+    await assertVerdict(h, bash(command), IMPLEMENTER, blocked);
+    await assertVerdict(h, bash(command), MAIN, blocked);
+    await assertVerdict(h, bash(command), REVIEWER, blocked);
+  }
+});
+
 test("bash-guard: reviewers never run whole-workspace toolchains", async () => {
   const h = toolCallHandler(bashGuard);
   const cases: Array<[string, boolean]> = [

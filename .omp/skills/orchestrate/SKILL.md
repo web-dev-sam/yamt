@@ -93,8 +93,8 @@ it fixes (both only when both did; scope RV8); its `should`/`nit` are dropped wi
 ## 6. Verify (final check)
 
 Update `docs/architecture.md` and `skill://project-map` once per feature, now. Then spawn `verifier` alone (OR10) with
-read-only recipes (VF6): `just check` (incl. `map-check`), then `just mutants <commit before the feature>` as
-confirmation (VF7). `gate: fail` → fix round for the owning slice (§5), never a new slice; survivors: VF7, then OR12. Evidence → board.
+read-only recipes (VF6): `just check` (incl. `map-check`) and the smoke recipes — never `just mutants` over the feature: each
+patch's own run is the evidence (VF7, owner #1630). `gate: fail` → fix round for the owning slice (§5), never a new slice. Evidence → board.
 
 ## 7. Milestone end and retro
 

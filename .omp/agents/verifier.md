@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Runs yamt's `just check` gate, the final `just mutants` confirmation and the layer's smoke recipe once per feature (the final check), alone; reports verbatim evidence, fixes nothing.
+description: Runs yamt's `just check` gate and the layer's smoke recipes once per feature (the final check), alone; never a mutation run; reports verbatim evidence, fixes nothing.
 model: "@verifier"
 tools: [read, bash, grep, glob]
 spawns: ""
@@ -34,9 +34,10 @@ output:
     environment: { type: string }
 ---
 
-Run `just check` from the repository root exactly once and record the result, then
-`just mutants <base>` with the base the orchestrator names (`skill://verification` VF7). Then run the
+Run `just check` from the repository root exactly once and record the result. Then run the
 smoke recipe(s) the orchestrator names from `skill://verification`. Paste what you observed.
+Never run `just mutants` or `cargo mutants`: mutation runs are per patch, done during review
+(`skill://verification` VF7, owner #1630); a brief that asks for one is wrong — report it, skip it.
 You do not edit files, do not retry a failing step to make it pass, and do not interpret a
 flaky test as a pass. If a recipe cannot run on this machine (missing browser, missing
 tool), report that verbatim as a failure of that recipe with the exact error.

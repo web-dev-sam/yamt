@@ -26,12 +26,12 @@ with the failing recipe name and the first 30 relevant lines in `failures[].exce
   tamper-and-restore. Detector: hook `ownership.ts` (no slice ⇒ no repository writes; the scratch dir is exempt).
 - [VF7] `just mutants <base>` (not in `check`) mutates the Rust lines changed since `<base>` (cargo-mutants, report in
   `target/mutants/`) and changed non-test `.ts` under `src/{ipc,ui,model,connectors}`, `scripts/` (StrykerJS, clear-text);
-  `editor/` is not mutated. The orchestrator runs it after each slice's patch is committed (`<base>` = the commit before
-  it) for the correctness reviewer; the verifier runs it once after `just check` in the final check (`<base>` = the commit
-  before the feature), each survivor in `smoke[]` as `file:line mutation`. Drop a survivor only as (a) equivalent: no
-  observable difference, with the reason; (b) gate-covered: another `just check` recipe kills it, which you name; (c) wiring:
-  framework registration or a log call with no decision of its own, observed in the smoke, which you name. A guard,
-  boundary, constant, filter or branch is a real gap → a finding for the owning slice, graded per `skill://review-protocol`.
+  `editor/` is not mutated. One patch per run, by the orchestrator after the patch is committed (`<base>` = the commit
+  before it), for the correctness reviewer; never over a whole feature, by anyone (owner #1630: 791 mutants, ~20 h): the
+  recipe refuses >200 Rust mutants or >30 `.ts` files; `cargo mutants` outside it is hook-blocked. Survivors as `file:line
+  mutation`. Drop one only as (a) equivalent (no observable difference, the reason given); (b) gate-covered (another `just check`
+  recipe kills it, named); (c) wiring (registration or a log call with no decision, observed in the smoke, named). A guard,
+  boundary, constant, filter or branch is a real gap → a finding for the owning slice, per `skill://review-protocol`.
 
 ## Smoke recipes (pick the one for the layer; paste `observed`)
 
