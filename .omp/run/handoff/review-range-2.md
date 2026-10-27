@@ -3,11 +3,14 @@
 Written 2026-10-27 on the owner's word (#1630: "stop, it ran 26m and only is at 17/791, that will effectively never
 end I need to handover because the token context is overflowing again"). **No agent is running**; the final run was
 cancelled and its `cargo mutants` process is gone. `.omp/run/slices.json` is `{}`. Branch `feat/review-range` off main
-`bc69714`, tree clean, nothing pushed. Next findings id: **#1632**. Previous handoff: `review-range-1.md`.
+`bc69714`, tree clean, nothing pushed. Previous handoff: `review-range-1.md`.
 
-## State: every build is accepted; only the final run is left
+## State: the feature is done; the final run passes (session 31, HEAD after `40698ea`)
 
-- Board "Review a commit range" (`docs/slices/SLICES.md`) rows 1–13 **accepted**, row 14 (final run) stopped.
+- Board "Review a commit range" (`docs/slices/SLICES.md`) rows 1–14a **accepted / done**. Final run `RVVerify2`
+  (`174b2dc`) + `RVVerify3` (`40698ea`): `just check` pass, fixture page and real app (real `omp acp`) pass, both range
+  browser files 13/13 twice after thread-rows round 3 (`a93c774`, test-only: the two tests scrolled before CodeMirror's
+  first measure). Next findings id: **#1636**.
 - A (range window), B (threads + GitLab), C (AI) are complete in code, reviewed by both lenses, every fix round
   re-checked and passing. Each committed patch has its own mutation record (`.omp/run/mutants/RV*.survivors.txt`),
   survivors triaged in `.omp/run/findings.jsonl`.
@@ -23,19 +26,12 @@ cancelled and its `cargo mutants` process is gone. `.omp/run/slices.json` is `{}
 
 ## Next steps (re-hydrate per `skill://orchestrate` §0 first)
 
-1. **Final run** (#1630): spawn `verifier` alone with `docs/slices/briefs/3.RV-verify.md` as it is now — recipe 2 is
-   already "no mutation run", and since #1631 no agent can start one over the feature (the `mutants` recipe refuses
-   more than one patch's worth; `cargo mutants` outside it is hook-blocked; VF7, verifier.md). The per-slice mutation
-   records are the evidence. Recipes 1 (`just check` — never run integrated yet), 3 (browser tests; Playwright WebKit
-   cannot launch here, `libicudata.so.74`), 4 (WebKit fixture steps), 5 (real app incl. one real `omp acp` turn,
-   Keep/Discard, reload mid-turn, the `GIT_DIR` step).
-2. `gate: fail` → a fix round for the owning slice (§5), never a new slice.
-3. Report to the owner in plain language: what works; the one open product question — **should he be able to delete
-   or edit his own comments before they are sent?** (#120 default: neither); the defaults he may veto (#103, #115,
-   #120, #122); his real-GitLab check (comments landing on the right lines, the pending review he then publishes —
-   glab is not installed here); the release-notes block in his compact form (OR-h6) if he wants a release.
-4. Gate D candidate for the next retro: #1630 (the final run mutates only lines changed since the last per-slice run,
-   or not at all when every patch has its record).
+1. The owner has been reported to (session 31): what works, the open question — **delete or edit his own comments
+   before they are sent?** (#120 default: neither), the defaults he may veto (#103, #115, #120, #122), his real-GitLab
+   check. His answer to the question becomes a slice in this section (a product change, not a fix round).
+2. Release notes in his compact form (OR-h6) only if he asks for a release.
+3. Next retro (before the next feature's first spawn): curator gets `findings.jsonl` since the last retro; #1630/#1631
+   are already applied (the mutation-run limit).
 
 ## Gotchas learned this session
 
