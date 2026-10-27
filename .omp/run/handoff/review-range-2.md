@@ -5,12 +5,12 @@ end I need to handover because the token context is overflowing again"). **No ag
 cancelled and its `cargo mutants` process is gone. `.omp/run/slices.json` is `{}`. Branch `feat/review-range` off main
 `bc69714`, tree clean, nothing pushed. Previous handoff: `review-range-1.md`.
 
-## State: the feature is done; the final run passes (session 31, HEAD after `40698ea`)
+## State: merged into `main` and prepared as pre-release 0.6.0-beta.1 (session 31, `main` at `69321c1`)
 
-- Board "Review a commit range" (`docs/slices/SLICES.md`) rows 1–14a **accepted / done**. Final run `RVVerify2`
-  (`174b2dc`) + `RVVerify3` (`40698ea`): `just check` pass, fixture page and real app (real `omp acp`) pass, both range
-  browser files 13/13 twice after thread-rows round 3 (`a93c774`, test-only: the two tests scrolled before CodeMirror's
-  first measure). Next findings id: **#1636**.
+- Board "Review a commit range" rows 1–17 **accepted / done** (rows 15–17: edit and delete of unsent comments, plan
+  §2 #123, owner #1636; final run `RVVerify4` pass). "Release 0.6.0-beta.1": `feat/review-range` merged as `a39907b`,
+  release commit `ce2cf46`, final run `Release060Beta1Verify` pass, publishing handed to the owner
+  (`docs/slices/handoff-release-0.6.0-beta.1.md`). Nothing pushed. Next findings id: **#1655**.
 - A (range window), B (threads + GitLab), C (AI) are complete in code, reviewed by both lenses, every fix round
   re-checked and passing. Each committed patch has its own mutation record (`.omp/run/mutants/RV*.survivors.txt`),
   survivors triaged in `.omp/run/findings.jsonl`.
@@ -26,12 +26,11 @@ cancelled and its `cargo mutants` process is gone. `.omp/run/slices.json` is `{}
 
 ## Next steps (re-hydrate per `skill://orchestrate` §0 first)
 
-1. The owner has been reported to (session 31): what works, the open question — **delete or edit his own comments
-   before they are sent?** (#120 default: neither), the defaults he may veto (#103, #115, #120, #122), his real-GitLab
-   check. His answer to the question becomes a slice in this section (a product change, not a fix round).
-2. Release notes in his compact form (OR-h6) only if he asks for a release.
-3. Next retro (before the next feature's first spawn): curator gets `findings.jsonl` since the last retro; #1630/#1631
-   are already applied (the mutation-run limit).
+1. The owner publishes per `docs/slices/handoff-release-0.6.0-beta.1.md` (push `main`, CI green, tag, draft, tick
+   "pre-release", his real-GitLab check). A red CI job or a failed download smoke comes back as a fix on `main`.
+2. Next retro (before the next feature's first spawn): curator gets `findings.jsonl` since the last retro; #1630/#1631
+   are already applied (the mutation-run limit). Candidate: #1638 (`readmer check` in `just check`: the feature's docs
+   pass edited the generated README by hand and nothing caught it).
 
 ## Gotchas learned this session
 
