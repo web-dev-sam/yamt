@@ -8,6 +8,7 @@ import type {
   SendReply,
   ThreadLine,
 } from "../ipc";
+import type { NoteChangeBlock } from "./noteChange";
 import type { NoticeRow } from "./noticeText";
 import { sideLabel } from "./rangeText";
 
@@ -39,9 +40,6 @@ export const EDIT_LABEL = "Edit";
 export const EDIT_FIELD_LABEL = "Comment text";
 export const SAVE_LABEL = "Save";
 export const DELETE_LABEL = "Delete";
-
-/** Why Edit and Delete are off (plan row 123). */
-export type NoteChangeBlock = "sending" | "aiWorking";
 
 const NOTE_CHANGE_TITLES: Readonly<
   Record<"edit" | "delete", Readonly<Record<NoteChangeBlock | "on", string>>>

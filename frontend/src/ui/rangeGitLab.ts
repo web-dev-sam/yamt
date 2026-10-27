@@ -32,7 +32,7 @@ type ButtonView = {
   readonly disabled: boolean;
 };
 
-type PostAction = "edit" | "unqueue";
+type PostAction = "write" | "unqueue";
 
 type PostView = {
   readonly label: string;
@@ -114,7 +114,7 @@ function postButton(state: State, { posting }: Message, body: PostBody): PostVie
   const shown = gate(state);
   return shown.kind === "blocked"
     ? { label: POST_LABEL, title: shown.title, action: null }
-    : { label: POST_LABEL, title: postTitle(shown.mergeRequest), action: "edit" };
+    : { label: POST_LABEL, title: postTitle(shown.mergeRequest), action: "write" };
 }
 
 async function checkNow(state: State): Promise<void> {

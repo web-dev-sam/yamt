@@ -188,7 +188,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
   expect(live.gitlab.postButton(note, TEXT)).toEqual({
     label: "Post",
     title: "Queue this message as its own comment on !12",
-    action: "edit",
+    action: "write",
   });
 });
 
@@ -247,7 +247,7 @@ test("a pending message cannot be posted; a message without shown text says why"
   expect(live.gitlab.postButton(messageAt(live, 3, 1), TEXT)).toEqual({
     label: "Post",
     title: "Queue this message as its own comment on !12",
-    action: "edit",
+    action: "write",
   });
 });
 

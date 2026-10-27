@@ -2,12 +2,14 @@ import { shallowRef, type ShallowRef } from "vue";
 
 import {
   shownLine,
+  type Message,
   type MessageId,
   type RangeFileId,
   type ThreadId,
   type ThreadLine,
   type ThreadList,
 } from "../ipc";
+import { isChangeable } from "./noteChange";
 
 export type Draft =
   | {
@@ -84,6 +86,10 @@ function threadDraft(state: State, key: string): ThreadDraft | null {
   return draft?.kind === "thread" ? draft : null;
 }
 
+function storedMessage(list: ThreadList, message: MessageId): Message | undefined {
+  return list.threads.flatMap(({ messages }) => messages).find(({ id }) => id === message);
+}
+
 function isStored(draft: Draft, list: ThreadList): boolean {
   switch (draft.kind) {
     case "thread":
@@ -91,8 +97,11 @@ function isStored(draft: Draft, list: ThreadList): boolean {
     case "note":
       return list.threads.some(({ id }) => id === draft.thread);
     case "post":
-    case "edit":
-      return list.threads.some(({ messages }) => messages.some(({ id }) => id === draft.message));
+      return storedMessage(list, draft.message) !== undefined;
+    case "edit": {
+      const message = storedMessage(list, draft.message);
+      return message !== undefined && isChangeable(message);
+    }
     default: {
       const _exhaustive: never = draft;
       return _exhaustive;
@@ -100,7 +109,7 @@ function isStored(draft: Draft, list: ThreadList): boolean {
   }
 }
 
-/** Drops the reply, Post and Edit drafts of threads and messages the list no longer holds. */
+/** Drops the drafts of threads and messages the list no longer holds, and Edit drafts of notes now pending. */
 function keepStored(state: State, list: ThreadList): void {
   const kept = [...state.drafts.value].filter(([, draft]) => isStored(draft, list));
   if (kept.length < state.drafts.value.size) {

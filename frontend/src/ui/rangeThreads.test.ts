@@ -9,11 +9,13 @@ import {
   type RangeSource,
   type SourceFailure,
   type Message,
+  type Posting,
   type Thread,
 } from "../ipc";
+import { isChangeable } from "./noteChange";
 import type { Problem } from "./problem";
 import { createRangeStore, MOUNTED_FILES } from "./rangeStore";
-import { createRangeThreads, isChangeable, isQueued, type RangeThreads } from "./rangeThreads";
+import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
 
@@ -494,13 +496,16 @@ test("a Cancel while Comment is in flight still adds and opens the thread", asyn
   expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "open" }]);
 });
 
-test("replace mirrors a send's list", async () => {
+test("replace mirrors a send's list and drops the Post box of a message it no longer holds", async () => {
   const { threads } = await opened(SEEDED);
   const list = { threads: [threadAt(threads, 0)] };
+  const { id } = messageOf(threadAt(threads, 3));
+  threads.writePost(id, "post");
 
   threads.replace(list);
 
   expect(threads.list.value).toBe(list);
+  expect(threads.postDraft(id)).toBeNull();
 });
 
 test("queued and refused postings sit in the queue; not queued and pending do not", () => {
@@ -600,6 +605,43 @@ test("a message's Edit and Post boxes are never open at once", async () => {
   expect([threads.postDraft(id), threads.editDraft(id)]).toEqual([null, null]);
 });
 
+test("each message keeps its own Edit text; a Post on one leaves the other's Edit alone", async () => {
+  const { threads } = await opened(SEEDED);
+  const first = messageOf(threadAt(threads, 0));
+  const second = messageOf(threadAt(threads, 3));
+
+  threads.writeEdit(first.id, "first");
+  threads.writeEdit(second.id, "second");
+  expect([threads.editDraft(first.id), threads.editDraft(second.id)]).toEqual(["first", "second"]);
+
+  threads.writePost(first.id, "post");
+  expect([threads.editDraft(first.id), threads.editDraft(second.id)]).toEqual([null, "second"]);
+});
+
+test("an Edit box on a note a send made pending closes; one on a note still unsent stays", async () => {
+  const { threads } = await opened(SEEDED);
+  const sent = messageOf(threadAt(threads, 0));
+  const unsent = messageOf(threadAt(threads, 3));
+  threads.writeEdit(sent.id, "too late");
+  threads.writeEdit(unsent.id, "still mine");
+  const posting: Posting = {
+    kind: "pending",
+    text: "a",
+    draftNote: 4,
+    mergeRequest: "!12",
+    link: "x",
+  };
+  const list = {
+    threads: threads.list.value.threads.map((thread, index) =>
+      index === 0 ? { ...thread, messages: [{ ...sent, posting }] } : thread,
+    ),
+  };
+
+  threads.replace(list);
+
+  expect([threads.editDraft(sent.id), threads.editDraft(unsent.id)]).toEqual([null, "still mine"]);
+});
+
 test("deleting a note keeps a thread that still has a message", async () => {
   const { threads, board } = await opened(SEEDED);
   const thread = threadAt(threads, 3);
@@ -619,12 +661,18 @@ test("deleting a thread's last note removes the thread, its line, its count, its
   const kept = threadAt(threads, 1);
   const note = messageOf(gone);
   const other = messageOf(kept);
+  const [repliedNote, answer] = threadAt(threads, 3).messages;
+  if (repliedNote === undefined || answer === undefined) {
+    throw new Error("thread 3 holds a note and an answer");
+  }
   threads.toggle([`thread-${gone.id}`, `thread-${kept.id}`]);
   threads.writeNote(gone.id, "reply");
   threads.writeNote(kept.id, "kept reply");
   threads.writeEdit(note.id, "half");
   threads.writePost(other.id, "kept post");
   threads.startThread(board, changedThreadLine("right", 1));
+  threads.writePost(answer.id, "post the answer");
+  threads.writeEdit(repliedNote.id, "edit the replied note");
 
   await threads.deleteMessage(note.id);
 
@@ -638,10 +686,14 @@ test("deleting a thread's last note removes the thread, its line, its count, its
   expect(threads.counts.value.get(board)).toBe(3);
   expect(threads.open.value).toEqual(new Set([kept.id]));
   expect(threads.boxOf(`thread-${gone.id}`)).toBeNull();
-  expect([...threads.drafts.value.keys()].toSorted()).toEqual([
-    "draft-0",
-    `note-${kept.id}`,
-    `post-${other.id}`,
-  ]);
+  expect([...threads.drafts.value.keys()].toSorted()).toEqual(
+    [
+      "draft-0",
+      `edit-${repliedNote.id}`,
+      `note-${kept.id}`,
+      `post-${other.id}`,
+      `post-${answer.id}`,
+    ].toSorted(),
+  );
   expect(problems).toEqual([]);
 });

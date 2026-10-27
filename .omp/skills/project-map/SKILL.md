@@ -204,7 +204,7 @@ frontend/src/ui     Vue 3 chrome: App, FileList (emits select; the panel, its wi
                     root's only ../editor importer; `rangeThreadParts`) + rangeText.ts; threads: rangeThreads.ts (list mirror, open set, counts, `shownFor`, actions, `isQueued`) +
                     rangeDrafts.ts (new-thread, reply and Post drafts kept across eviction) + rangeGitLab.ts (the lines-up check's timing, Send, `postButton` with its action) +
                     rangeThreadText.ts (every thread word) + rangeKeys.ts (box keys through keys.ts) + RangeThreadLayer (teleports each box into its host) + RangeThreadBox +
-                    RangeMessage + RangePostEditor + RangeSendButton + copyOrSelect.ts (shared with ServerMenu); the AI (plan §2 #108–#115, #121): rangeAi.ts (the one owner of the threads'
+                    RangeMessage + RangeMessageEditor (the one in-place Post/Edit box) + noteChange.ts (pure: `isChangeable`, `noteChangeBlock`, #123) + RangeSendButton + copyOrSelect.ts (shared with ServerMenu); the AI (plan §2 #108–#115, #121): rangeAi.ts (the one owner of the threads'
                     AI state: ask, stop, retry, load; the prompt rule; session and answers recorded through ReviewSource) + rangeAiView.ts (pure: an answer's view, the live turn) + AiTurn +
                     AiStep + EditDiff (+ editDiffLines.ts: unified rows, no-newline and line-ending marks, `diffRowCells`) + aiText.ts (every AI word) + aiClose.ts (`aiMayClose`: Keep
                     preferred) + AgentSettings (+ agentSettingsFields.ts) + commandWords.ts (the one command split rule, also serverSetup's) + useMarkdown.ts (the only MarkdownView importer)

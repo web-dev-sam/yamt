@@ -2,7 +2,6 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
   AgentSessionId,
-  Message,
   MessageId,
   Posting,
   RangeFileId,
@@ -84,11 +83,6 @@ export function isQueued(posting: Posting): boolean {
       return _exhaustive;
     }
   }
-}
-
-/** Edit and Delete (plan row 123): your own note, until it is on GitLab. */
-export function isChangeable({ body, posting }: Message): boolean {
-  return body.kind === "note" && posting.kind !== "pending";
 }
 
 function setList(state: State, list: ThreadList): void {
