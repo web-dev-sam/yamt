@@ -65,7 +65,7 @@ crates/range        (yamt-range) the `yamt --diff=<a>..<b>` range (plan §2 #104
 crates/review       (yamt-review) the range window's threads and posting (plan §2 #116–#121): thread_types (`ThreadLine`, `MessageBody { Note | AiAnswer { session, turn } }`,
                     `Posting { NotQueued | Queued | Refused | Pending }`, `Thread.session`), thread_store (`ThreadStore`: add_thread/add_note/queue/unqueue, `edit_note`/`delete_message` (an unsent `Note` only, #123), `set_session`, `add_ai_answer`
                     — the one turn-numbering rule —, `shown_thread_mut`) + thread_store/waiting (what the sender reads: `queued`, `waiting_text`, `pending_draft_notes`,
-                    `record_if_waiting`), thread_file (`threads.json` format 1, temp file + rename, refusals), gitlab (`check_gitlab`: glab found, logged in, candidate MRs) + lines_up
+                    `record_if_waiting`), thread_file (`threads.json` format 1, temp file + rename, refusals; `message`/`message_mut`/`remove_message`, the one lookup by id), gitlab (`check_gitlab`: glab found, logged in, candidate MRs) + lines_up
                     (pure #119 rule) + right_branch, position (GitLab's position from a `ThreadLine`), send (`send_queue`: drafts listed first, a draft owned once, each message
                     re-read before its post, progress per message) + glab_answer (glab's HTTP answer: one status `match`). Depends on range and gitio; NO tauri
 crates/agent        (yamt-agent) the AI's workspace (plan §2 #110, #115, #122): workspace (`Workspace`: prepare, start (blocks ≤ ~3 s reaping an earlier agent), send, stop,

@@ -34,12 +34,7 @@ impl ThreadStore {
 
     /// The text to post when the message still waits for a send; `None` once it is unqueued, pending or gone.
     pub(crate) fn waiting_text(&self, message: MessageId) -> Option<String> {
-        let stored = self
-            .file
-            .threads
-            .iter()
-            .flat_map(|thread| &thread.messages)
-            .find(|stored| stored.id == message)?;
+        let (_, stored) = self.file.message(message)?;
         waiting_text_of(&stored.posting).map(str::to_owned)
     }
 
@@ -77,7 +72,7 @@ impl ThreadStore {
 }
 
 /// The text a send posts: a queued message's, or a refused one's sent again.
-fn waiting_text_of(posting: &Posting) -> Option<&str> {
+pub(super) fn waiting_text_of(posting: &Posting) -> Option<&str> {
     match posting {
         Posting::Queued { text } | Posting::Refused { text, .. } => Some(text),
         Posting::NotQueued | Posting::Pending { .. } => None,

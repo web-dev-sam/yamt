@@ -69,6 +69,16 @@ impl ThreadFile {
     }
 
     /// The message and the path of its thread.
+    pub(crate) fn message(&self, message: MessageId) -> Option<(&str, &Message)> {
+        for thread in &self.threads {
+            if let Some(found) = thread.messages.iter().find(|stored| stored.id == message) {
+                return Some((thread.path.as_str(), found));
+            }
+        }
+        None
+    }
+
+    /// The message and the path of its thread.
     pub(crate) fn message_mut(&mut self, message: MessageId) -> Option<(&str, &mut Message)> {
         for thread in &mut self.threads {
             if let Some(found) = thread
@@ -80,6 +90,24 @@ impl ThreadFile {
             }
         }
         None
+    }
+
+    /// Takes the message out of its thread, and the thread out of the file when it has no message left.
+    pub(crate) fn remove_message(&mut self, message: MessageId) {
+        for (index, thread) in self.threads.iter_mut().enumerate() {
+            let Some(position) = thread
+                .messages
+                .iter()
+                .position(|stored| stored.id == message)
+            else {
+                continue;
+            };
+            thread.messages.remove(position);
+            if thread.messages.is_empty() {
+                self.threads.remove(index);
+            }
+            return;
+        }
     }
 
     fn require_room(&self, path: &Path) -> Result<()> {

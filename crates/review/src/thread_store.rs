@@ -11,6 +11,8 @@ use crate::{
 
 pub(crate) mod waiting;
 
+use waiting::waiting_text_of;
+
 /// The threads of one pair folder; the pair lock makes its process the only writer.
 #[derive(Debug)]
 pub struct ThreadStore {
@@ -153,13 +155,11 @@ impl ThreadStore {
         text: &str,
     ) -> Result<ThreadList> {
         let mut next = self.file.clone();
-        let stored = unsent_note_mut(&mut next, range, message)?;
+        let stored = shown_message_mut(&mut next, range, message)?;
+        require_unsent_note(stored)?;
         require_text(text)?;
         stored.body = note(text);
-        if matches!(
-            stored.posting,
-            Posting::Queued { .. } | Posting::Refused { .. }
-        ) {
+        if waiting_text_of(&stored.posting).is_some() {
             stored.posting = Posting::Queued {
                 text: text.to_owned(),
             };
@@ -170,12 +170,9 @@ impl ThreadStore {
 
     /// Removes a note; a thread left with no message is removed (#123).
     pub fn delete_message(&mut self, range: &Range, message: MessageId) -> Result<ThreadList> {
+        require_unsent_note(shown_message(&self.file, range, message)?)?;
         let mut next = self.file.clone();
-        unsent_note_mut(&mut next, range, message)?;
-        for thread in &mut next.threads {
-            thread.messages.retain(|stored| stored.id != message);
-        }
-        next.threads.retain(|thread| !thread.messages.is_empty());
+        next.remove_message(message);
         self.commit(next)?;
         Ok(self.list(range))
     }
@@ -227,6 +224,18 @@ fn shown_thread_mut<'a>(
 }
 
 /// The message when its thread is on a file of `range`.
+fn shown_message<'a>(
+    file: &'a ThreadFile,
+    range: &Range,
+    message: MessageId,
+) -> Result<&'a Message> {
+    file.message(message)
+        .filter(|(path, _)| file_at(range, path).is_some())
+        .map(|(_, stored)| stored)
+        .ok_or(Error::UnknownMessage { message })
+}
+
+/// As `shown_message`, to change it.
 fn shown_message_mut<'a>(
     next: &'a mut ThreadFile,
     range: &Range,
@@ -238,20 +247,16 @@ fn shown_message_mut<'a>(
         .ok_or(Error::UnknownMessage { message })
 }
 
-/// The shown message when it is the user's note and not yet on GitLab: what edit and delete may change (#123).
-fn unsent_note_mut<'a>(
-    next: &'a mut ThreadFile,
-    range: &Range,
-    message: MessageId,
-) -> Result<&'a mut Message> {
-    let stored = shown_message_mut(next, range, message)?;
+/// Refuses a message that is not the user's note or is already on GitLab: what edit and delete may not change (#123).
+fn require_unsent_note(stored: &Message) -> Result<()> {
+    let message = stored.id;
     match stored.body {
         MessageBody::AiAnswer { .. } => return Err(Error::NotANote { message }),
         MessageBody::Note { .. } => {}
     }
     match stored.posting {
         Posting::Pending { .. } => Err(Error::MessagePending { message }),
-        Posting::NotQueued | Posting::Queued { .. } | Posting::Refused { .. } => Ok(stored),
+        Posting::NotQueued | Posting::Queued { .. } | Posting::Refused { .. } => Ok(()),
     }
 }
 
