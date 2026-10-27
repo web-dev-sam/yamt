@@ -127,6 +127,15 @@ function viewIn(host: HTMLElement): EditorView {
   return view;
 }
 
+async function measured(host: HTMLElement): Promise<EditorView> {
+  const view = viewIn(host);
+  const line = found(view.contentDOM.querySelector<HTMLElement>(".cm-line"), "line");
+  await vi.waitFor(() => expect(view.defaultLineHeight).toBe(line.getBoundingClientRect().height), {
+    timeout: WAIT_MS,
+  });
+  return view;
+}
+
 const controllers: RangeController[] = [];
 
 async function opened(probe: ProbeCase = MODIFIED): Promise<Opened> {
@@ -264,14 +273,19 @@ test("scrolling 10,000 px away and back gives the same host node with the textar
   expect(field.value).toBe("kept");
 });
 
-test("horizontal scroll leaves the box in place", async () => {
+test("a box fits inside its column and horizontal scroll leaves it in place", async () => {
   const probe = await opened();
   const host = hostOf(probe);
   host.append(box("height: 40px"));
   const { scrollDOM } = viewIn(probe.hosts.left);
-  await vi.waitFor(() => expect(host.getBoundingClientRect().height).toBe(40), {
-    timeout: WAIT_MS,
-  });
+  await vi.waitFor(
+    () => {
+      const placed = host.getBoundingClientRect();
+      expect(placed.height).toBe(40);
+      expect(placed.right).toBeLessThanOrEqual(scrollDOM.getBoundingClientRect().right);
+    },
+    { timeout: WAIT_MS },
+  );
   const before = host.getBoundingClientRect().left;
 
   scrollDOM.scrollLeft = SIDEWAYS_PX;
@@ -300,8 +314,9 @@ test("a removed line's row in a pure deletion is inside the band in both columns
   const probe = await opened(DELETION);
   const { hosts } = probe;
   hostOf(probe).append(box(`height: ${GROWN_PX}px`));
-  const left = viewIn(hosts.left).scrollDOM;
-  const lineHeight = viewIn(hosts.left).defaultLineHeight;
+  const view = await measured(hosts.left);
+  const left = view.scrollDOM;
+  const lineHeight = view.defaultLineHeight;
   const aboveBand = lineTop(hosts.left, DELETED_AT + 1) - BAND_BELOW_TOP_PX;
   left.scrollTop = aboveBand - 1;
   await vi.waitFor(
