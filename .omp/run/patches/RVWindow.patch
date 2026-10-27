@@ -1,0 +1,2274 @@
+From 50444c3ffd22e19c189fdac34f1b2a94b01dd2d8 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:54:52 +0200
+Subject: [PATCH] feat(ui): the range window's root: changed-files list,
+ read-only columns, store and words
+
+---
+ .omp/run/mutants/RVShellR1.survivors.txt   |   1 +
+ .omp/run/notes/RVWindow.md                 | 128 ++++++++
+ docs/slices/briefs/3.RV-review-ipc.md      |  74 +++++
+ frontend/scripts/app-session/args.test.ts  |  34 +++
+ frontend/scripts/app-session/args.ts       | 121 ++------
+ frontend/scripts/app-session/start.ts      |   5 +
+ frontend/scripts/app-session/startArgs.ts  | 121 ++++++++
+ frontend/scripts/fences.test.ts            | 109 +++++++
+ frontend/scripts/fences.ts                 |  33 ++-
+ frontend/src/main.ts                       |  47 ++-
+ frontend/src/ui/AGENTS.md                  |  12 +-
+ frontend/src/ui/RangeApp.vue               |  98 ++++++
+ frontend/src/ui/RangeFileRow.vue           |  40 +++
+ frontend/src/ui/RangeView.vue              | 104 +++++++
+ frontend/src/ui/rangeStore.test.ts         | 327 +++++++++++++++++++++
+ frontend/src/ui/rangeStore.ts              | 181 ++++++++++++
+ frontend/src/ui/rangeText.test.ts          | 116 ++++++++
+ frontend/src/ui/rangeText.ts               |  99 +++++++
+ frontend/src/ui/useRangeController.test.ts | 177 +++++++++++
+ frontend/src/ui/useRangeController.ts      | 131 +++++++++
+ 20 files changed, 1831 insertions(+), 127 deletions(-)
+ create mode 100644 .omp/run/mutants/RVShellR1.survivors.txt
+ create mode 100644 .omp/run/notes/RVWindow.md
+ create mode 100644 docs/slices/briefs/3.RV-review-ipc.md
+ create mode 100644 frontend/scripts/app-session/startArgs.ts
+ create mode 100644 frontend/src/ui/RangeApp.vue
+ create mode 100644 frontend/src/ui/RangeFileRow.vue
+ create mode 100644 frontend/src/ui/RangeView.vue
+ create mode 100644 frontend/src/ui/rangeStore.test.ts
+ create mode 100644 frontend/src/ui/rangeStore.ts
+ create mode 100644 frontend/src/ui/rangeText.test.ts
+ create mode 100644 frontend/src/ui/rangeText.ts
+ create mode 100644 frontend/src/ui/useRangeController.test.ts
+ create mode 100644 frontend/src/ui/useRangeController.ts
+
+diff --git a/.omp/run/mutants/RVShellR1.survivors.txt b/.omp/run/mutants/RVShellR1.survivors.txt
+new file mode 100644
+index 0000000..f682d04
+--- /dev/null
++++ b/.omp/run/mutants/RVShellR1.survivors.txt
+@@ -0,0 +1 @@
++just mutants 679f409 (covers e092ff4 RVShellR1): 16 mutants tested in 2m: 7 caught, 9 unviable — no survivors
+diff --git a/.omp/run/notes/RVWindow.md b/.omp/run/notes/RVWindow.md
+new file mode 100644
+index 0000000..90d4f5c
+--- /dev/null
++++ b/.omp/run/notes/RVWindow.md
+@@ -0,0 +1,128 @@
++The range window's root is built: `RangeApp`, `RangeView`, `RangeFileRow`, the store, the words, the editor seam, the `main.ts` switch, fence PM9 and the app-session options. The node tests, the 15 WebKit steps and the four real-app steps all passed. `pnpm -C frontend unused` and `just map-check` still fail because of docs and ipc files that aren't mine (details under deviations and open_risks).
++
++```
++summary
++  A third root: main.ts switches exhaustively over merge|compare|range (app: data-window; fixture: ?range[=case], then ?diff).
++  startRange builds createTauriRangeSource or createFixtureRangeSource, createRangeStore, startUp and RangeApp. No LanguageServers, no merge or compare store, no close guard.
++  New ui files: RangeApp.vue (FileList + RangeFileRow, the visited RangeViews, ProblemBar, SettingsView, QuestionDialog, theme, Ctrl/Cmd+B, settings reload on focus),
++    RangeView.vue, RangeFileRow.vue, rangeStore.ts (MOUNTED_FILES = 16), rangeText.ts, useRangeController.ts (followRange + useRangeController).
++  Fence PM9 and the PM7 addition come from one root table in fences.ts. app-session has start-app --range <r> --repo <dir> and start-fixture --range-case <case>;
++    the start-command parsing moved to the granted startArgs.ts.
++
++files_changed
++  frontend/src/main.ts
++  frontend/src/ui/RangeApp.vue (new)
++  frontend/src/ui/RangeView.vue (new)
++  frontend/src/ui/RangeFileRow.vue (new)
++  frontend/src/ui/rangeStore.ts (new), rangeStore.test.ts (new)
++  frontend/src/ui/rangeText.ts (new), rangeText.test.ts (new)
++  frontend/src/ui/useRangeController.ts (new), useRangeController.test.ts (new)
++  frontend/src/ui/AGENTS.md
++  frontend/scripts/fences.ts, frontend/scripts/fences.test.ts
++  frontend/scripts/app-session/args.ts, args.test.ts, start.ts, startArgs.ts (new, granted by Main)
++
++tests_added
++  rangeStore.test.ts (14 tests):
++    - no store before create
++    - first file shown at start, mounted alone, settings seam registered
++    - an empty range shows none
++    - state before openRange answers: files screen, start-theme preferences, showFile does nothing, a load failure names "file 3"
++    - a failed openRange → "Could not open the range: …"
++    - showFile from settings returns to files
++    - closeSettings, and an unknown path changes nothing
++    - showing a visited file again keeps the order
++    - the 17th file drops the least recently shown and keeps the others' order (twice)
++    - a failed load reports open with its path and leaves visited; another file's success keeps the problem; the same file's later success clears it
++    - after a failure, the next eviction drops the least recent mounted file
++    - dismissProblem clears the problem
++    - Ctrl+B toggles, but not while a clash question waits
++    - answer settles the question
++  rangeText.test.ts:
++    - side labels: named, merge base, HEAD; headings with short ids
++    - the empty-range sentence (the exact words from the brief)
++    - renamed header "old → new"; every change's letter and word
++    - counts "+n −m" or none
++    - the mode note
++    - every RangeFile sentence, 13 cases
++  useRangeController.test.ts (followRange with a fake build):
++    - one build with path, texts and preferences; the columns note
++    - waits for its hosts, builds once, follows preferences and arrows, destroyed on unmount
++    - each of the 6 sentence kinds builds nothing and shows its sentence; the exact binary words
++    - a reply after unmount is dropped
++    - a failed load stays loading
++    - preferences set before the build reach the build
++  fences.test.ts:
++    - PM9 violations: merge root, compare root and lsp/, from .ts, .vue and .test.ts files
++    - PM7: compare files importing rangeStore / RangeApp.vue
++    - range files importing shared ui files violate nothing
++  args.test.ts:
++    - --range opens the range on --repo
++    - --range needs --repo and refuses --fresh-repo and --diff
++    - --range-case gives ?range=<encoded>, refuses --diff and --diff-case, and needs a value
++
++smoke_evidence
++  Worktree (/home/wds/.omp/wt/t9f912e506/m):
++    - pnpm -C frontend typecheck → `$ vue-tsc -b`, exit 0
++    - pnpm -C frontend lint → `$ oxlint --type-aware && eslint …`, exit 0
++    - pnpm -C frontend test → Test Files 159 passed (159), Tests 2069 passed (2069)
++    - sfc-order → exit 0; fmt:check → "All matched files use the correct format."
++    - pnpm -C frontend unused → fails only on RangeSideLabel (src/ipc/index.ts:92, src/ipc/rangeDomain.ts:6), which is not mine
++  Stryker (--mutate on rangeStore.ts, rangeText.ts, useRangeController.ts, --ignoreStatic):
++    - rangeStore.ts 100.00 % (127 killed)
++    - rangeText.ts 59 killed, 0 survived; 2 no-coverage on the `never` default
++    - useRangeController.ts 2 survivors (flush:"post" → {} or ""), only observable with a real DOM; 19 no-coverage in the useRangeController/shownHosts wrapper, which builds a real RangeController
++    - fences.ts and the app-session files were not run through Stryker
++  WebKit (MiniBrowser through app-session start-fixture + just webdriver) ran in /tmp/rvwin: a copy of this worktree plus a766541's frontend/fixtures/range/ and scripts/range-repo.sh. Screenshots are in /tmp/rvwin-shots/.
++    1. Marks and counts: rows "M config +1 −1", "A data/big.txt +1 −0", "R docs/keys.md docs/shortcuts.md +2 −0", "D src/api/mockBoards.ts +0 −43", "M public/logo.png" (no counts). Letter titles modified/added/renamed/deleted. 01-list.png.
++    2. Tree: "View as tree" → data, big.txt, docs, current.md, keys.md docs/shortcuts.md, … (02-tree.png).
++    3. Width: drag "File list width" +120 → aside width 360 (03-wide.png). The dots during the drag were not captured.
++    4. Ctrl+B → aside display "none"; again → "flex".
++    5. First file shown at start: header "config", row aria-selected true, sentence "Changed from a file to a symbolic link."
++    6. Renamed header: "docs/shortcuts.md → docs/keys.md".
++    7. Added reminders.ts: left 1 empty line, right 13 lines. Deleted mockBoards.ts: left 45, right empty.
++    8. Sentences: "Larger than 8 MiB: not shown."; "Neither side is UTF-8 text."; "Binary file: not shown."; "Only the file mode changed: file → executable file.";
++       "Submodule: 1111…1111 → 2222…2222"; kind change as in 5. Texts plus mode: header "tools/deploy.sh Mode changed: file → executable file".
++    9. board.ts: per column words 1, removals 1, chunk lines 3 and 4; strip paths 1. Removal bar hover tooltip ` | { kind: "reminded"; … };` (09-board.png, 09-tooltip.png).
++    10. Locked scroll: left scrollTop 1200 → right 1220.
++    11. Find: left Ctrl+F "Board" → "58 of 161"; right Ctrl+F "remind" → "1 of 22", left panel closed.
++    12. Arrows: Next ×3 → "| { kind: \"restored\"…", "if (from.id !== to.id) {", "const card = createCard(…"; Previous → back to "if (from.id !== to.id) {".
++    13. Syntax: "import" rgb(224, 152, 107) against the line colour rgb(196, 194, 206), both columns.
++    14. Gear → SettingsView (Theme, Antialiasing, Keymap; no "Language servers"; 14-settings.png) → Back → header "src/board/board.ts".
++    15. --range-case empty → "feature (9c1ba3f) and feature (9c1ba3f) have the same files.", 0 rows (15-empty.png).
++  Real app ran in /tmp/rvwin: debug build `cargo tauri build --debug --no-bundle` of that copy; repository from its scripts/range-repo.sh /var/tmp/rr-rvwindow.
++    - Title: xdotool getwindowname → "main...feature — rr-rvwindow — yamt"; <html data-window="range">.
++    - Headers (main...feature): "merge base of main and feature (531ea52)", hover "Build tools, the old notes and the vendored UI kit"; "feature (9c1ba3f)", hover "New logo, staging config and release tools".
++    - Two vs three dots: main..feature lists 14 rows, the first "M README.md +1 −2", left header "main (4378055)" / "README: swimlanes"; main...feature lists 13 rows without README.md.
++    - Close: launched directly on a private Xvfb :97; WM_DELETE_WINDOW sent at 12:53:18.35 by a throwaway ctypes sender (/tmp/rvwin-shots/wmclose.py) → process printed "exit 0" at once (whole run 9.17 s, started ~12:53:09).
++    - Cleanup: no yamt, Xvfb, tauri-driver or WebKitWebDriver of mine left.
++
++deviations_from_brief
++  - frontend/scripts/app-session/startArgs.ts (new, granted by Main): args.ts would have been 329 lines, over the 300 cap. Start-app/start-fixture parsing moved there. args.ts keeps
++    `export type { Recording } from "./startArgs"` because video.ts (not mine) imports Recording from ./args. To drop the re-export, change video.ts:5 to `import type { Recording } from "./startArgs";`.
++    The project-map line for startArgs.ts is Main's.
++  - fences.ts: the PM7/PM9 file test is now one case-insensitive pattern, (use)?(compare|range)…\.(ts|vue). It is slightly broader than before (it also matches e.g. compareX.vue and CompareX.ts) and is symmetric:
++    each root is barred from the other roots' store/App files, all from lsp/. I made this change to keep fences.ts under 300 lines.
++  - Contract choice: showFile(path) takes a path, because the shared FileList emits a path. shown is still a RangeFileId; the store adds a computed shownPath for `active`.
++  - A failed openRange reports {action:"open", path:"the range"} ("Could not open the range: …"). No Problem kind fits and problem.ts is not mine. A loadFile for an id outside the list names it "file <id>".
++  - "A later success clears the problem" is read as that same file's success; another file's success keeps it.
++  - rangeText.fileHeading takes Pick<RangeEntry,"path"|"change">, so tests need no branded id.
++  - Added, not in the brief:
++    - the empty range also shows a gear above its sentence, so Settings stays reachable;
++    - the ↑/↓ buttons are disabled while a file shows a sentence or is loading;
++    - a submodule added or removed reads "none" for the missing side.
++  - The compare window has no previous/next-change keys (only buttons), so RangeView binds none: "as in the compare window".
++  - ui/AGENTS.md also fixes stale notes from earlier slices: FileMark now goes through App's #file slot; PaneFrame, paste and themes now say "every root".
++  - Not mine to edit, needed:
++    - project-map/architecture lines for RangeApp, RangeView, RangeFileRow, rangeStore, rangeText, useRangeController and startArgs, plus the PM9 line;
++    - map-check also lists RVIpc's ipc files and commands.
++  - The /tmp route was used for every WebKit and real-app step, as Main directed. The patch has no unowned paths; .omp/run/slices.json and .omp/run/patches/* in git status are not my edits.
++
++open_risks
++  - frontend/src/ui/useRangeController.ts:84-88 (flush:"post") and :113-131 (useRangeController/shownHosts) have no node test that can tell the difference, because they need a DOM.
++    They were exercised in WebKit and the real app; the Stryker survivors are listed above.
++  - frontend/src/ipc/rangeDomain.ts:6 / ipc/index.ts:92: RangeSideLabel has no importer, so knip fails. rangeText reads the label through RangeSide; either drop the export or use the type.
++  - frontend/scripts/app-session/start.ts:80-84: the range launch arguments have no unit test; they ran for real (`--diff=main...feature --repo …`).
++  - frontend/src/ui/RangeFileRow.vue: in a narrow panel a renamed row truncates both its name and its old path ("docs/… docs/sho…" at 240 px).
++  - The real-app binary was built before a no-behaviour simplification of rangeStore.ts (entryOf, eviction guard); node tests and Stryker cover the final code.
++  - /var/tmp/rr-rvwindow is still there: bash-guard refuses rm -rf outside /tmp.
++```
+\ No newline at end of file
+diff --git a/docs/slices/briefs/3.RV-review-ipc.md b/docs/slices/briefs/3.RV-review-ipc.md
+new file mode 100644
+index 0000000..cd145eb
+--- /dev/null
++++ b/docs/slices/briefs/3.RV-review-ipc.md
+@@ -0,0 +1,74 @@
++# Slice 3.RV-review-ipc — the window's review source: threads and GitLab through `RangeSource`
++
++Board "Review a commit range" row 19 (B; needs row 17's generated bindings, row 18's `ipc/threadLine.ts`, row 8's
++`RangeSource`). Product rules: `docs/plan.md` §2 **#116**–**#120** — read them. Design:
++`.omp/run/notes/ThreadsDesign.md` "7. IPC" ("Window side": `ipc/threadLine.ts`, brands, `ipc/reviewDomain.ts`,
++`ReviewSource`, `RangeSource extends SettingsSource, ReviewSource`), "Fixture mode" (`ipc/fixtureReview.ts`, the
++`?threads=seeded` and `?gitlab=<script>` scripts), "8. Tests" (`reviewDomain.test.ts`, `fixtureReview.test.ts`). Row
++20 (the window's thread state) builds on this surface.
++
++Facts (given):
++
++- Row 17 generated in `bindings.ts`: `ThreadId`, `MessageId`, `ThreadLine`, `MessageBody`, `Posting`, `Message`,
++  `Thread`, `ThreadList`, `ThreadAdded`, `MergeRequestRef`, `LookedAt`, `NotLinedUp`, `GitLabCheck`, `SendProgress`,
++  `SendReply`; `IpcError` gains `UnknownThread`, `UnknownMessage`, `EmptyMessage`, `MessagePending`, `SendRunning`;
++  `commands.listThreads`, `addThread`, `addNote`, `queueMessage`, `unqueueMessage`, `checkGitlab`,
++  `sendQueue(progress: TAURI_CHANNEL<SendProgress>)`.
++- Row 18 added `ipc/threadLine.ts` (the domain `ThreadLine` with `LeftLine`/`RightLine` brands, `shownColumn`).
++- Row 8's pattern (after its fix round): `RangeSource`, `rangeDomain.ts`, `tauriRange.ts` (+ test), `fixtureRange.ts`
++  (shared `DIFFERENCE`, `parsedCases`, `memberOf` from `fixture.ts`); `createTauriServerHost` shows a `Channel` per
++  call (`ipc/tauri.ts`).
++- `ui/problemText.ts` maps every `IpcError` kind (an exhaustive switch; the new kinds break the type check until
++  handled).
++
++## Target
++
++Owned: `frontend/src/ipc/{ReviewSource,reviewDomain,reviewDomain.test,tauriReview,tauriReview.test,fixtureReview,
++fixtureReview.test}.ts` (new), `frontend/src/ipc/{domain,threadLine,RangeSource,tauriRange,fixtureRange,
++fixtureRange.test,index}.ts`, `frontend/src/ipc/AGENTS.md`, `frontend/src/ui/{problemText,problemText.test}.ts`,
++`scripts/map-check.sh`.
++
++Read-only: everything else.
++
++Non-goals: the store, components, editor.
++
++## Contract (fixed; you may add, never change)
++
++```ts
++// ipc/domain.ts: ThreadId, MessageId brands by type guard (IPC3)
++// ipc/threadLine.ts: toThreadLine(raw) / fromThreadLine(line) between the generated and the domain shape
++// ipc/reviewDomain.ts: camelCase shapes (draftNote, mergeRequest, webUrl, lookedAt, shortId, gitlabHead, …) and
++//   toThreadList, toThreadAdded, toGitLabCheck, toSendReply
++// ipc/ReviewSource.ts
++export interface ReviewSource {
++  listThreads(): Promise<SourceResult<ThreadList>>;
++  addThread(file: RangeFileId, line: ThreadLine, text: string): Promise<SourceResult<ThreadAdded>>;
++  addNote(thread: ThreadId, text: string): Promise<SourceResult<ThreadList>>;
++  queueMessage(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
++  unqueueMessage(message: MessageId): Promise<SourceResult<ThreadList>>;
++  checkGitLab(): Promise<SourceResult<GitLabCheck>>;
++  sendQueue(onProgress: (progress: SendProgress) => void): Promise<SourceResult<SendReply>>;
++}
++// ipc/RangeSource.ts: interface RangeSource extends SettingsSource, ReviewSource { openRange; loadRangeFile }
++// createTauriRangeSource / createFixtureRangeSource include the review methods (tauriReview.ts / fixtureReview.ts)
++// fixture: threads in memory; ?threads=seeded (one thread of each ThreadLine kind on the review case, plus one queued,
++// one refused, one pending and one aiAnswer message); ?gitlab=<script>: linedUp (default), checking (answers after
++// 3 s), noGlab, loggedOut, noMergeRequest, noBranch, moved, otherBase, several, preparing, failed, refusal (the
++// second queued message refused: "400 Bad request - Note {:line_code=>[\"can't be blank\"]}"), stopped (a timeout
++// after the first); progress per message with a 300 ms pause
++```
++
++`ui/problemText.ts`: a fixed reason for each new kind; `scripts/map-check.sh`: the loop gains `ReviewSource`.
++
++## Acceptance
++
++`reviewDomain.test.ts` (every arm of `Posting`, `MessageBody`, `NotLinedUp`, `LookedAt`, `SendReply`; bad ids refused
++by the brands), `tauriReview.test.ts` (camelCasing, failures unchanged, progress through the channel),
++`fixtureReview.test.ts` (each script; `seeded`), `problemText.test.ts` (the new reasons). Your tests kill the mutants
++on your lines (Stryker, SP5).
++
++Commands: `pnpm -C frontend typecheck`, `pnpm -C frontend lint`, `pnpm -C frontend test`, `pnpm -C frontend fmt:check`.
++
++## Skills
++
++`skill://ts-conventions`, `skill://ipc-contract` (plus your autoloaded ones).
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index c20c13a..0db43f6 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -68,6 +68,24 @@ test("start-app --diff opens the compare window and no repository", () => {
+   ).toMatchObject({ kind: "start-app", opens: { kind: "diff" }, home: "/tmp/c-home" });
+ });
+ 
++test("start-app --range opens the range window on the --repo folder", () => {
++  expect(
++    parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
++  ).toMatchObject({
++    kind: "start-app",
++    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr" },
++  });
++});
++
++test("start-app --range needs --repo and takes neither --fresh-repo nor --diff", () => {
++  const needsRepo = /--range needs --repo <dir>, and neither --fresh-repo nor --diff/;
++  const range = ["start-app", "--name", "r", "--range", "a..b"];
++  expect(() => parseCommand(range)).toThrow(needsRepo);
++  expect(() => parseCommand([...range, "--fresh-repo"])).toThrow(needsRepo);
++  expect(() => parseCommand([...range, "--repo", "/r", "--diff"])).toThrow(needsRepo);
++  expect(() => parseCommand([...range, "--repo", "/r", "--fresh-repo"])).toThrow(needsRepo);
++});
++
+ test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
+   const base = ["start-app", "--name", "a", "--fresh-repo"];
+   expect(() => parseCommand([...base, "--record", "/tmp/s.mkv"])).toThrow(/go together/);
+@@ -114,6 +132,22 @@ test("start-fixture takes a name and a size, and opens the merge page", () => {
+   });
+ });
+ 
++test("start-fixture --range-case opens one range fixture, never with a compare option", () => {
++  expect(parseCommand(["start-fixture", "--name", "fx", "--range-case", "review"])).toMatchObject({
++    search: "?range=review",
++  });
++  expect(parseCommand(["start-fixture", "--name", "fx", "--range-case", "a b"])).toMatchObject({
++    search: "?range=a%20b",
++  });
++  const alone = /--range-case without --diff or --diff-case/;
++  const ranged = ["start-fixture", "--name", "fx", "--range-case", "empty"];
++  expect(() => parseCommand([...ranged, "--diff"])).toThrow(alone);
++  expect(() => parseCommand([...ranged, "--diff-case", "words"])).toThrow(alone);
++  expect(() => parseCommand(["start-fixture", "--name", "fx", "--range-case"])).toThrow(
++    /--range-case needs a value/,
++  );
++});
++
+ test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {
+   expect(parseCommand(["start-fixture", "--name", "fx", "--diff"])).toMatchObject({
+     search: "?diff",
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index 68bc79c..f99b88b 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -12,17 +12,15 @@ import { parseColour, type Colour } from "./colours";
+ import type { Query } from "./find";
+ import { parseChord, type Chord } from "./keys";
+ import type { ScrollTo } from "./placement";
+-import type { Size } from "./state";
+-
+-const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
+-const DEFAULT_BINARY = "target/debug/yamt";
+-const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
++import { startCommand, type StartCommand } from "./startArgs";
+ 
+ const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
+-  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff]
++  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
++                | --range <a..b or a...b> --repo <dir>]
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
+-  start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>]
++  start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
++                | --range-case <range fixture>]
+   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
+   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
+@@ -36,26 +34,10 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
+   colours       <file.mkv> <hex> [<hex> …]
+   stop          --name <n>`;
+ 
+-type Opening = { readonly kind: "dir"; readonly dir: string } | { readonly kind: "fresh" | "diff" };
+-export type Recording = { readonly file: string; readonly seconds: number };
++export type { Recording } from "./startArgs";
+ 
+ export type Command =
+-  | {
+-      readonly kind: "start-app";
+-      readonly name: string;
+-      readonly binary: string;
+-      readonly opens: Opening;
+-      readonly settings: string | null;
+-      readonly size: Size;
+-      readonly record: Recording | null;
+-      readonly home: string | null;
+-    }
+-  | {
+-      readonly kind: "start-fixture";
+-      readonly name: string;
+-      readonly size: Size;
+-      readonly search: string;
+-    }
++  | StartCommand
+   | {
+       readonly kind: "click";
+       readonly name: string;
+@@ -98,10 +80,20 @@ type CommandKind = Command["kind"];
+ 
+ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+   "start-app": {
+-    values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds", "home"],
++    values: [
++      "name",
++      "binary",
++      "repo",
++      "range",
++      "settings",
++      "size",
++      "record",
++      "record-seconds",
++      "home",
++    ],
+     flags: ["fresh-repo", "diff"],
+   },
+-  "start-fixture": { values: ["name", "size", "diff-case"], flags: ["diff"] },
++  "start-fixture": { values: ["name", "size", "diff-case", "range-case"], flags: ["diff"] },
+   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
+   press: { values: ["name"], flags: ["x11"] },
+@@ -116,63 +108,6 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+   stop: { values: ["name"], flags: [] },
+ };
+ 
+-function size(parsed: Parsed): Size {
+-  const text = parsed.values.get("size");
+-  if (text === undefined) {
+-    return DEFAULT_SIZE;
+-  }
+-  const [, width, height] = SIZE.exec(text) ?? [];
+-  if (width === undefined || height === undefined) {
+-    throw new Error(`--size ${text}: expected <width>x<height>, e.g. 1600x1000`);
+-  }
+-  return { width: Number(width), height: Number(height) };
+-}
+-
+-function opening(parsed: Parsed): Opening {
+-  const dir = parsed.values.get("repo");
+-  const diff = parsed.flags.has("diff");
+-  if ([dir !== undefined, parsed.flags.has("fresh-repo"), diff].filter(Boolean).length !== 1) {
+-    throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
+-  }
+-  return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
+-}
+-
+-function fixtureSearch(parsed: Parsed): string {
+-  const fixture = parsed.values.get("diff-case");
+-  const diff = parsed.flags.has("diff") ? "?diff" : "";
+-  return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+-}
+-
+-function recording(parsed: Parsed): Recording | null {
+-  const file = parsed.values.get("record");
+-  const seconds = parsed.values.get("record-seconds");
+-  if (file === undefined && seconds === undefined) {
+-    return null;
+-  }
+-  if (file === undefined || seconds === undefined) {
+-    throw new Error("--record and --record-seconds go together");
+-  }
+-  return { file, seconds: wholeNumber(seconds, "--record-seconds", 1) };
+-}
+-
+-function settingsText(parsed: Parsed): string | null {
+-  const text = parsed.values.get("settings");
+-  if (text === undefined) {
+-    return null;
+-  }
+-  let value: unknown;
+-  try {
+-    value = JSON.parse(text);
+-  } catch (error) {
+-    const reason = error instanceof Error ? error.message : String(error);
+-    throw new Error(`--settings is not JSON: ${reason}`, { cause: error });
+-  }
+-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+-    throw new Error(`--settings must be a JSON object, got ${text}`);
+-  }
+-  return text;
+-}
+-
+ function scrollTo(parsed: Parsed): ScrollTo {
+   const text = parsed.values.get("to");
+   if (text === undefined) {
+@@ -208,24 +143,6 @@ function dragCommand(parsed: Parsed): Command {
+   };
+ }
+ 
+-function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Command {
+-  noPositionals(parsed);
+-  const name = sessionName(parsed);
+-  if (kind === "start-fixture") {
+-    return { kind, name, size: size(parsed), search: fixtureSearch(parsed) };
+-  }
+-  return {
+-    kind,
+-    name,
+-    binary: parsed.values.get("binary") ?? DEFAULT_BINARY,
+-    opens: opening(parsed),
+-    settings: settingsText(parsed),
+-    size: size(parsed),
+-    record: recording(parsed),
+-    home: parsed.values.get("home") ?? null,
+-  };
+-}
+-
+ function inputCommand(kind: "click" | "press" | "type", parsed: Parsed): Command {
+   const name = sessionName(parsed);
+   const x11 = parsed.flags.has("x11");
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 402cb8c..8a408bd 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -77,6 +77,11 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+   if (command.opens.kind === "diff") {
+     return { home, configDir, repoDir: null, binary, args: ["--diff"] };
+   }
++  if (command.opens.kind === "range") {
++    const repoDir = fromRoot(command.opens.dir);
++    const args = [`--diff=${command.opens.range}`, "--repo", repoDir];
++    return { home, configDir, repoDir, binary, args };
++  }
+   const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
+   if (command.opens.kind === "fresh") {
+     execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+new file mode 100644
+index 0000000..95aab9f
+--- /dev/null
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -0,0 +1,121 @@
++import { noPositionals, sessionName, wholeNumber, type Parsed } from "./argv";
++import type { Size } from "./state";
++
++type Opening =
++  | { readonly kind: "dir"; readonly dir: string }
++  | { readonly kind: "range"; readonly range: string; readonly dir: string }
++  | { readonly kind: "fresh" | "diff" };
++
++export type Recording = { readonly file: string; readonly seconds: number };
++
++export type StartCommand =
++  | {
++      readonly kind: "start-app";
++      readonly name: string;
++      readonly binary: string;
++      readonly opens: Opening;
++      readonly settings: string | null;
++      readonly size: Size;
++      readonly record: Recording | null;
++      readonly home: string | null;
++    }
++  | {
++      readonly kind: "start-fixture";
++      readonly name: string;
++      readonly size: Size;
++      readonly search: string;
++    };
++
++const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
++const DEFAULT_BINARY = "target/debug/yamt";
++const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
++
++function size(parsed: Parsed): Size {
++  const text = parsed.values.get("size");
++  if (text === undefined) {
++    return DEFAULT_SIZE;
++  }
++  const [, width, height] = SIZE.exec(text) ?? [];
++  if (width === undefined || height === undefined) {
++    throw new Error(`--size ${text}: expected <width>x<height>, e.g. 1600x1000`);
++  }
++  return { width: Number(width), height: Number(height) };
++}
++
++function opening(parsed: Parsed): Opening {
++  const dir = parsed.values.get("repo");
++  const range = parsed.values.get("range");
++  const diff = parsed.flags.has("diff");
++  const fresh = parsed.flags.has("fresh-repo");
++  if (range !== undefined) {
++    if (dir === undefined || diff || fresh) {
++      throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
++    }
++    return { kind: "range", range, dir };
++  }
++  if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
++    throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
++  }
++  return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
++}
++
++function fixtureSearch(parsed: Parsed): string {
++  const range = parsed.values.get("range-case");
++  const fixture = parsed.values.get("diff-case");
++  const diff = parsed.flags.has("diff") ? "?diff" : "";
++  if (range !== undefined) {
++    if (fixture !== undefined || diff !== "") {
++      throw new Error("start-fixture takes --range-case without --diff or --diff-case");
++    }
++    return `?range=${encodeURIComponent(range)}`;
++  }
++  return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
++}
++
++function recording(parsed: Parsed): Recording | null {
++  const file = parsed.values.get("record");
++  const seconds = parsed.values.get("record-seconds");
++  if (file === undefined && seconds === undefined) {
++    return null;
++  }
++  if (file === undefined || seconds === undefined) {
++    throw new Error("--record and --record-seconds go together");
++  }
++  return { file, seconds: wholeNumber(seconds, "--record-seconds", 1) };
++}
++
++function settingsText(parsed: Parsed): string | null {
++  const text = parsed.values.get("settings");
++  if (text === undefined) {
++    return null;
++  }
++  let value: unknown;
++  try {
++    value = JSON.parse(text);
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    throw new Error(`--settings is not JSON: ${reason}`, { cause: error });
++  }
++  if (typeof value !== "object" || value === null || Array.isArray(value)) {
++    throw new Error(`--settings must be a JSON object, got ${text}`);
++  }
++  return text;
++}
++
++export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartCommand {
++  noPositionals(parsed);
++  const name = sessionName(parsed);
++  if (kind === "start-fixture") {
++    return { kind, name, size: size(parsed), search: fixtureSearch(parsed) };
++  }
++  return {
++    kind,
++    name,
++    binary: parsed.values.get("binary") ?? DEFAULT_BINARY,
++    opens: opening(parsed),
++    settings: settingsText(parsed),
++    size: size(parsed),
++    record: recording(parsed),
++    home: parsed.values.get("home") ?? null,
++  };
++}
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index c456334..6742710 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -309,6 +309,115 @@ test("merge files importing the store and compare files importing their own neig
+   expect(violationsOf(files)).toEqual([]);
+ });
+ 
++test("a range file importing the merge root, the compare root or lsp/ violates PM9", () => {
++  const files = [
++    { path: "src/ui/rangeStore.ts", text: `import { useAppStore } from "./store";` },
++    {
++      path: "src/ui/RangeApp.vue",
++      text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/RangeView.vue",
++      text: `<script setup lang="ts">\nimport { useCompareStore } from "./compareStore";\n</script>`,
++    },
++    {
++      path: "src/ui/RangeFileRow.vue",
++      text: `<script setup lang="ts">\nimport "./CompareApp.vue";\n</script>`,
++    },
++    { path: "src/ui/rangeText.ts", text: `import "./compareStore.ts";` },
++    { path: "src/ui/useRangeController.ts", text: `import type { X } from "../lsp";` },
++    { path: "src/ui/useRangeLoad.test.ts", text: `import "./store.ts";` },
++  ];
++
++  expect(findFenceViolations(files)).toEqual([
++    {
++      rule: "PM9",
++      file: "src/ui/rangeStore.ts",
++      specifier: "./store",
++      reason: "the range window never imports the merge window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/RangeApp.vue",
++      specifier: "./App.vue",
++      reason: "the range window never imports the merge window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/RangeView.vue",
++      specifier: "./compareStore",
++      reason: "the range window never imports the compare window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/RangeFileRow.vue",
++      specifier: "./CompareApp.vue",
++      reason: "the range window never imports the compare window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/rangeText.ts",
++      specifier: "./compareStore.ts",
++      reason: "the range window never imports the compare window's root",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/useRangeController.ts",
++      specifier: "../lsp",
++      reason: "the range window never imports lsp/",
++    },
++    {
++      rule: "PM9",
++      file: "src/ui/useRangeLoad.test.ts",
++      specifier: "./store.ts",
++      reason: "the range window never imports the merge window's root",
++    },
++  ]);
++});
++
++test("a compare file importing the range root violates PM7", () => {
++  const files = [
++    { path: "src/ui/compareStore.ts", text: `import { useRangeStore } from "./rangeStore";` },
++    {
++      path: "src/ui/CompareApp.vue",
++      text: `<script setup lang="ts">\nimport RangeApp from "./RangeApp.vue";\n</script>`,
++    },
++  ];
++
++  expect(findFenceViolations(files)).toEqual([
++    {
++      rule: "PM7",
++      file: "src/ui/compareStore.ts",
++      specifier: "./rangeStore",
++      reason: "the compare window never imports the range window's root",
++    },
++    {
++      rule: "PM7",
++      file: "src/ui/CompareApp.vue",
++      specifier: "./RangeApp.vue",
++      reason: "the compare window never imports the range window's root",
++    },
++  ]);
++});
++
++test("range files importing shared ui files and their own neighbours violate nothing", () => {
++  const files = [
++    {
++      path: "src/ui/RangeApp.vue",
++      text: `<script setup lang="ts">\nimport FileList from "./FileList.vue";\nimport "./rangeStore";\n</script>`,
++    },
++    { path: "src/ui/rangeStore.ts", text: `import "./settingsStore";\nimport "./fileListKey";` },
++    {
++      path: "src/ui/RangeView.vue",
++      text: `<script setup lang="ts">\nimport "./paneSplit";\n</script>`,
++    },
++    { path: "src/ui/useRangeController.ts", text: `import "../editor";` },
++    { path: "src/ui/storeRange.ts", text: `import "./compareStore";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
+ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
+   const files = [
+     {
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 92d1240..70012bd 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -9,7 +9,7 @@ import { clipboardViolations } from "./clipboardFence";
+ export type SourceFile = { readonly path: string; readonly text: string };
+ 
+ export type FenceViolation = {
+-  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8";
++  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8" | "PM9";
+   readonly file: string;
+   readonly specifier: string;
+   readonly reason: string;
+@@ -33,13 +33,17 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
+ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
+ const ICON_PREFIX = "~icons/";
+ const RAW_QUERY = "?raw";
+-const COMPARE_FILE = /^src\/ui\/(?:Compare[^/]*\.vue|compare[^/]*\.ts|useCompare[^/]*\.ts)$/;
+-const MERGE_ROOT_FILES: Record<string, true> = {
+-  "src/ui/store": true,
+-  "src/ui/store.ts": true,
+-  "src/ui/App": true,
+-  "src/ui/App.vue": true,
++const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
++const ROOT_FILES: Readonly<Record<string, string>> = {
++  "src/ui/store": "merge",
++  "src/ui/App": "merge",
++  "src/ui/compareStore": "compare",
++  "src/ui/CompareApp": "compare",
++  "src/ui/rangeStore": "range",
++  "src/ui/RangeApp": "range",
+ };
++const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
++const WINDOW_RULES: Readonly<Record<string, "PM7" | "PM9">> = { compare: "PM7", range: "PM9" };
+ const MARKDOWN_SEAM = "src/ui/useMarkdown.ts";
+ const MARKDOWN_VIEW = "MarkdownView";
+ const MARKDOWN_MODULE = "src/editor/markdown";
+@@ -113,15 +117,18 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
+   return undefined;
+ }
+ 
+-function compareFinding(file: string, target: string): Finding | undefined {
+-  if (!COMPARE_FILE.test(file)) {
++function rootFinding(file: string, target: string): Finding | undefined {
++  const root = WINDOW_FILE.exec(file)?.[1]?.toLowerCase();
++  const rule = root === undefined ? undefined : WINDOW_RULES[root];
++  if (rule === undefined) {
+     return undefined;
+   }
+-  if (Object.hasOwn(MERGE_ROOT_FILES, target)) {
+-    return { rule: "PM7", reason: "the compare window never imports the merge window's root" };
++  const other = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
++  if (other !== undefined && other !== root) {
++    return { rule, reason: `the ${root} window never imports the ${other} window's root` };
+   }
+   if (isInside(target, "src/lsp")) {
+-    return { rule: "PM7", reason: "the compare window never imports lsp/" };
++    return { rule, reason: `the ${root} window never imports lsp/` };
+   }
+   return undefined;
+ }
+@@ -258,7 +265,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+       const finding =
+         target === undefined
+           ? packageFinding(module, specifier)
+-          : (pathFinding(module, target) ?? compareFinding(file.path, target));
++          : (pathFinding(module, target) ?? rootFinding(file.path, target));
+       if (finding !== undefined) {
+         violations.push({ ...finding, file: file.path, specifier });
+       }
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 57ba1c5..46c3728 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -2,9 +2,11 @@ import { createApp } from "vue";
+ 
+ import {
+   createFixtureCompareSource,
++  createFixtureRangeSource,
+   createFixtureServerHost,
+   createFixtureSource,
+   createTauriCompareSource,
++  createTauriRangeSource,
+   createTauriServerHost,
+   createTauriSource,
+   isLinux,
+@@ -19,13 +21,29 @@ import App from "./ui/App.vue";
+ import CompareApp from "./ui/CompareApp.vue";
+ import { createCompareStore } from "./ui/compareStore";
+ import { takeLinuxPastes } from "./ui/linuxPaste";
++import RangeApp from "./ui/RangeApp.vue";
++import { createRangeStore } from "./ui/rangeStore";
+ import { createAppStore } from "./ui/store";
+ 
+ import "./style.css";
+ 
++type WindowKind = "merge" | "compare" | "range";
++
+ const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
+ const SEARCH = window.location.search;
+ 
++function windowKind(dataset: DOMStringMap): WindowKind {
++  if (IN_APP) {
++    const kind = dataset["window"];
++    return kind === "compare" || kind === "range" ? kind : "merge";
++  }
++  const params = new URLSearchParams(SEARCH);
++  if (params.has("range")) {
++    return "range";
++  }
++  return params.has("diff") ? "compare" : "merge";
++}
++
+ function serverHost(): ServerHost | null {
+   if (IN_APP) {
+     return createTauriServerHost();
+@@ -40,6 +58,13 @@ function startCompare(startTheme: Theme): void {
+   createApp(CompareApp).mount("#app");
+ }
+ 
++function startRange(startTheme: Theme): void {
++  const source = IN_APP ? createTauriRangeSource() : createFixtureRangeSource(log, SEARCH);
++  const store = createRangeStore(source, startTheme);
++  void store.startUp();
++  createApp(RangeApp).mount("#app");
++}
++
+ function startMerge(startTheme: Theme): void {
+   const source = IN_APP ? createTauriSource() : createFixtureSource(log, SEARCH);
+   const host = serverHost();
+@@ -54,11 +79,19 @@ if (IN_APP && isLinux(navigator.platform)) {
+ }
+ const { dataset } = document.documentElement;
+ const startTheme = themeOf(dataset["theme"]);
+-const comparing = IN_APP
+-  ? dataset["window"] === "compare"
+-  : new URLSearchParams(SEARCH).has("diff");
+-if (comparing) {
+-  startCompare(startTheme);
+-} else {
+-  startMerge(startTheme);
++const kind = windowKind(dataset);
++switch (kind) {
++  case "merge":
++    startMerge(startTheme);
++    break;
++  case "compare":
++    startCompare(startTheme);
++    break;
++  case "range":
++    startRange(startTheme);
++    break;
++  default: {
++    const _exhaustive: never = kind;
++    throw new Error(`unknown window ${String(_exhaustive)}`);
++  }
+ }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 91127c7..a45b1fc 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -1,7 +1,9 @@
+-Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()` (merge window) or `useCompareStore()` (compare window); the editor seams are `useMergeController` and `useCompareController`. Section order enforced by `scripts/check-sfc-order.ts`.
++Owner skills: `skill://vue-conventions`, `skill://ts-conventions`. Vue chrome only: never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal`, `model` (oxlint). Store singleton via `useAppStore()` (merge window), `useCompareStore()` (compare window) or `useRangeStore()` (range window); the editor seams are `useMergeController`, `useCompareController` and `useRangeController`. Section order enforced by `scripts/check-sfc-order.ts`.
+ 
+ Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over `compareStore.ts`, mounted by `main.ts` when `<html data-window="compare">` (app, `yamt --diff`) or `?diff` / `?diff=<case>` (fixture mode). Every compare-only file carries the prefix — `Compare*.vue`, `compare*.ts`, `useCompare*.ts` — and none imports `store.ts`, `App.vue` or `lsp/` (fence PM7, `scripts/fences.ts`). `CompareTabList.vue` is the panel in the file list's place (rename inline); the store's `visited` (written with `tabs`/`shown`) holds the tabs shown at least once, and `CompareApp` renders one `CompareView.vue` per entry; showing or adding a tab returns the screen to the tabs. Its controller lives in `useCompareController` (built once the hosts exist and `loadTab` answered; settled → `saveColumn` → `showComparison`; tracked for `flushAll` at close: one close flush at a time, which also waits for every write in flight); `CompareLanguagePicker.vue` is the language drop-down over `useDropdownMenu`, its label "Auto" until the tab's first detection. The gear's `SettingsView` has no slot here, so no language-server section. Both roots set `<html data-theme>` through `settingsStore.ts` `useThemeAttribute`.
+ 
++Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeStore.ts`, mounted by `main.ts` when `<html data-window="range">` (app, `yamt --diff=<range>`) or `?range` / `?range=<case>` (fixture mode). Every range-only file carries the prefix — `Range*.vue`, `range*.ts`, `useRange*.ts` — and none imports `store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue` or `lsp/` (fence PM9; PM7 keeps the compare root from `rangeStore.ts`/`RangeApp.vue`). The panel is the shared `FileList.vue` with `RangeFileRow.vue` in its `#file` slot (coloured A/M/D/R with its word as title, the old path of a renamed file muted, `+n −m`). `start` mirrors `openRange`'s reply; `shown` is written only by `showFile` and `startUp` (the first file at start); `visited` keeps first-visit order, at most `MOUNTED_FILES` (16) views mounted, the least recently shown dropped when another file is shown. A failed `loadFile` reports `open` with the path and drops the file from `visited`, so selecting it again retries; that file's later success clears the problem. `RangeView.vue` (one per visited file, `PaneFrame`) shows the header (icon, path or "old → new", the mode note, ↑/↓, gear), the column headers (side and short id, the subject as title) and either the two read-only columns or one sentence. `useRangeController` (`followRange`) keeps a texts reply in a non-reactive slot until the hosts exist, builds `RangeController` once, follows preferences, and drops a reply that lands after unmount; a sentence kind builds nothing. Every range word is in `rangeText.ts`. No close guard: the window closes at once.
++
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. With no host (fixture mode without `?servers`) it only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+@@ -10,13 +12,13 @@ Header group and pins (plan §2 #83): `ServerStatus.vue` shows the counts and th
+ 
+ Resizing (plan §2 #84): `ResizeDots.vue` draws the three dots of every resize handle (`DotsState` from `useColumnDrag`). `PaneDivider.vue` is the one pane divider shared by `MergeView` and `ChoiceView`: the separator role, its label per side, `usePaneDividers`' listeners and the dots. MergeView's header cells above the strips are dividers and the strip wrappers take the same listeners; ChoiceView's 1 px gutters carry a divider with a 5 px hit box. The side panels (`FileList`, `CompareTabList`) share one width: `usePanelWidth` (`createFileListWidth`, `FILE_LIST_BOUNDS`, the drag) and `PanelWidthHandle.vue` (the handle, its label a prop, its dots centred as an absolute box: flex-centred dots there cost WebKitGTK scroll frames).
+ 
+-Shown views (plan §2 #51): `PaneFrame.vue` is the shell of `MergeView` and `CompareView` — hidden by `invisible [content-visibility:hidden]`, the rounded pane section, the strip layer class (`stripLayer` slot prop) — and emits `shownKeydown` for window keys only while its view is shown and no question waits.
++Shown views (plan §2 #51): `PaneFrame.vue` is the shell of `MergeView`, `CompareView` and `RangeView` — hidden by `invisible [content-visibility:hidden]`, the rounded pane section, the strip layer class (`stripLayer` slot prop) — and emits `shownKeydown` for window keys only while its view is shown and no question waits.
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+ Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` — the writes, Abort, Continue, an open and every reload — goes once to `nextStop({ outside })` through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), the one path. `operationText.ts` holds every operation word (the tag `operationTag`, the line `operationLine` and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationLabel.vue` is the tag (plan §2 #92): `FileList.vue`'s last row under the list or tree while git records an operation, `App.vue` passing the store's `operation`. Its hover is yamt's own tooltip with the line's tooltip text, open at once (plan §2 #100): no `title`; shown from the tag's `mouseenter` to its `mouseleave`, no delay or fade, placed by `operationTooltip.ts` `tooltipBox` (4 px above the tag, left on its text, at most 480 px wide and as tall as the room above, inside the window); a `fixed` sibling of the tag inside the file list, so the list's `v-show` hide takes it in the same frame, and closed by the tag's zero width so it stays closed when the list shows again; `z-500`, over the minimap's 400. The tag and its word are measured on each `mouseenter`, on a resize and on a window resize, never on a scroll (`windowScroll: false`): the tag sits in no scroller, and plan §2 #51 keeps the scroll path free of layout reads. Being a `fixed` sibling places and layers it right only while the file list's `<aside>`, its ancestors and the pane hosts create no containing block or stacking context — no `transform`, `will-change`, `filter`, `contain`, `content-visibility`, `isolation` or positioned `z-index`; adding one there moves the tooltip to a `<Teleport to="body">`. Its look is `style.css`'s `hover-tooltip` (border, radius, background) and `tooltip-text` (colour, font, size) utilities, which `editor/theme.css` applies to the problem and removal tooltips too: one place changes all three. It is a `status` region whose screen-reader text is the line (a `sr-only` span, the visible tag and the tooltip `aria-hidden`), so every step and kind is announced: a live region announces text changes, never an attribute's. Its name is that span through `aria-labelledby`, because a `status` takes its name only from the author; its description is a `hidden` span with the tooltip text through `aria-describedby`, open or not.
+ 
+-File marks (plan §2 #90): `FileMark.vue` renders a file's name and its mark in the list and the tree from one table per `FileStatus` (`Unresolved` none; `Resolved` the check and a muted name; `Remembered` the history icon with the rerere hint as its title and accessible name); `FileList.vue` and `FileTree.vue` pass only the status and the label.
++File marks (plan §2 #90): `FileMark.vue` renders a file's name and its mark in the list and the tree from one table per `FileStatus` (`Unresolved` none; `Resolved` the check and a muted name; `Remembered` the history icon with the rerere hint as its title and accessible name); `App.vue` puts it in the generic `FileList.vue`'s `#file` slot (list and tree rows), passing only the status and the label.
+ 
+ Git running (plan §2 #74, #89): `gitRun.ts` `createGitRun` is the one owner of "git is running": `run(stop, { call, endsApp, landing })` sets `running`, calls through `landed`, lands the reply while still running, and clears it unless the reply is a success that ends the app (`endsApp`: every Abort success, Continue's `Finished`). Abort, Continue and `closeGuard.ts` only read `running`; while it is set `mayClose` refuses with the `close` problem and asks nothing.
+ 
+@@ -24,6 +26,6 @@ Abort (plan §2 #74, #88): `aborting.ts` holds the action; `AbortState` is `none
+ 
+ Continue (plan §2 #89): `continuing.ts` holds `ContinueState` (`noOperation` / `filesLeft` — any file not `Resolved`, a `Remembered` one too — / `writing` / `ready` / `running`), the questions (unsaved files, rewords) and the action: `Stopped` goes to `nextStop`; every refusal goes through `reportFailure` (`StopMovedOn` to `nextStop({ outside })`, any other the `continue` problem), and a `Git` refusal lists again. `operationText.ts` `continueAction` is the one exhaustive rule for its verb (a merge commits), object and label. `OperationButtons.vue` (Continue, and Abort where there is no toolbar) sits in the choice view's, the deleted-side view's and the stop view's header rows and in the toolbar. `StopView.vue` is the merge area of an empty stop: `emptyStop.ts` `emptyStop` (pure) decides it from the operation, the list, the screen, the problem and `stopMessage` — shown on the files screen with git's message, which never goes to the bar while the stop is empty; the store exposes it as `emptyStop`, App only binds it.
+ 
+-Paste on Linux (plan §2 #99): `linuxPaste.ts` `takeLinuxPastes`, installed once by `main.ts` for both roots only with the Tauri source on Linux (`isLinux`), cancels every trusted `paste` in the capture phase before WebKitGTK reads its pasteboard, records the focused element, reads the text through `readClipboard` (the selection after a middle-button release in the same task, else the clipboard) and dispatches the paste again with the text in memory only while that element still has the focus and is not `<body>`: on the original target while it is still in the page, else on the focused element; a field nobody handled gets `insertText`. An unreadable clipboard (`null`) or empty text pastes nothing. No other file reads the clipboard through WebKit: `clipboardData` and `navigator.clipboard.read`/`readText` anywhere else fail `scripts/clipboardFence.ts` (PM8, called by `scripts/fences.ts`).
++Paste on Linux (plan §2 #99): `linuxPaste.ts` `takeLinuxPastes`, installed once by `main.ts` for every root only with the Tauri source on Linux (`isLinux`), cancels every trusted `paste` in the capture phase before WebKitGTK reads its pasteboard, records the focused element, reads the text through `readClipboard` (the selection after a middle-button release in the same task, else the clipboard) and dispatches the paste again with the text in memory only while that element still has the focus and is not `<body>`: on the original target while it is still in the page, else on the focused element; a field nobody handled gets `insertText`. An unreadable clipboard (`null`) or empty text pastes nothing. No other file reads the clipboard through WebKit: `clipboardData` and `navigator.clipboard.read`/`readText` anywhere else fail `scripts/clipboardFence.ts` (PM8, called by `scripts/fences.ts`).
+ 
+-Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, both roots) is the only later writer of `<html data-theme>` and of `documentElement.style.colorScheme` (from `themeKind`; `style.css`'s `color-scheme: dark` covers only the frames before mount). Settings → Theme shows `themeRows()` as five `role="group"` rows named by their editor, one `ChoiceButtons` pair each, `settings.theme` the one pressed button across them.
++Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is the only later writer of `<html data-theme>` and of `documentElement.style.colorScheme` (from `themeKind`; `style.css`'s `color-scheme: dark` covers only the frames before mount). Settings → Theme shows `themeRows()` as five `role="group"` rows named by their editor, one `ChoiceButtons` pair each, `settings.theme` the one pressed button across them.
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+new file mode 100644
+index 0000000..6eb7782
+--- /dev/null
++++ b/frontend/src/ui/RangeApp.vue
+@@ -0,0 +1,98 @@
++<script setup lang="ts">
++import { useEventListener, useWindowFocus } from "@vueuse/core";
++import { computed, watch } from "vue";
++
++import FileList from "./FileList.vue";
++import ProblemBar from "./ProblemBar.vue";
++import QuestionDialog from "./QuestionDialog.vue";
++import RangeFileRow from "./RangeFileRow.vue";
++import { useRangeStore } from "./rangeStore";
++import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
++import RangeView from "./RangeView.vue";
++import SettingsButton from "./SettingsButton.vue";
++import { useThemeAttribute } from "./settingsStore";
++import SettingsView from "./SettingsView.vue";
++
++const {
++  start,
++  shown,
++  shownPath,
++  visited,
++  problem,
++  question,
++  screen,
++  fileListShown,
++  loadSettings,
++  showFile,
++  fileListKey,
++  dismissProblem,
++  answer,
++  dismissQuestion,
++} = useRangeStore();
++
++const focused = useWindowFocus();
++useThemeAttribute();
++useEventListener(window, "keydown", (event) => {
++  fileListKey(event, navigator.platform);
++});
++
++const files = computed(() => start.value?.files ?? []);
++const emptyText = computed(() =>
++  start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
++);
++
++watch(focused, (now) => {
++  if (now) {
++    void loadSettings();
++  }
++});
++</script>
++
++<template>
++  <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
++    <FileList
++      v-show="fileListShown"
++      :files="files"
++      :active="shownPath"
++      :label="RANGE_LIST_LABEL"
++      @select="showFile"
++    >
++      <template #file="{ file, label }">
++        <RangeFileRow :file="file" :label="label" />
++      </template>
++    </FileList>
++    <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
++      <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
++        <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />
++      </div>
++      <div class="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)] grid-rows-[minmax(0,1fr)]">
++        <template v-if="start !== null">
++          <RangeView
++            v-for="file in visited"
++            :key="file.id"
++            :file="file"
++            :left-side="start.left"
++            :right-side="start.right"
++            :shown="file.id === shown && screen.kind === 'files'"
++          />
++        </template>
++        <div
++          v-if="emptyText !== null && screen.kind === 'files'"
++          class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
++        >
++          <header class="flex h-10 shrink-0 items-center px-2">
++            <SettingsButton class="ml-auto" />
++          </header>
++          <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
++        </div>
++        <SettingsView v-if="screen.kind === 'settings'" />
++      </div>
++    </div>
++    <QuestionDialog
++      v-if="question !== null"
++      :question="question"
++      @answer="answer"
++      @dismiss="dismissQuestion"
++    />
++  </div>
++</template>
+diff --git a/frontend/src/ui/RangeFileRow.vue b/frontend/src/ui/RangeFileRow.vue
+new file mode 100644
+index 0000000..958ceaa
+--- /dev/null
++++ b/frontend/src/ui/RangeFileRow.vue
+@@ -0,0 +1,40 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import type { RangeChange, RangeEntry } from "../ipc";
++import { changeMark, lineCounts } from "./rangeText";
++
++const props = defineProps<{ file: RangeEntry; label: string }>();
++
++const LETTER_COLOURS: Readonly<Record<RangeChange["kind"], string>> = {
++  added: "text-success-signal",
++  modified: "text-chunk-modified-removal",
++  deleted: "text-problem-error",
++  renamed: "text-problem-warning",
++};
++
++const mark = computed(() => changeMark(props.file.change));
++const letterColour = computed(() => LETTER_COLOURS[props.file.change.kind]);
++const oldPath = computed(() =>
++  props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
++);
++const counts = computed(() => lineCounts(props.file.lines));
++</script>
++
++<template>
++  <span
++    role="img"
++    :title="mark.word"
++    :aria-label="mark.word"
++    class="w-3 shrink-0 text-center font-semibold"
++    :class="letterColour"
++  >
++    {{ mark.letter }}
++  </span>
++  <span class="truncate">{{ label }}</span>
++  <span v-if="oldPath !== null" class="min-w-0 truncate text-fg-muted">{{ oldPath }}</span>
++  <span v-if="counts !== null" class="ml-auto flex shrink-0 gap-1.5 tabular-nums">
++    <span class="text-success-signal">{{ counts.added }}</span>
++    <span class="text-problem-error">{{ counts.removed }}</span>
++  </span>
++</template>
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+new file mode 100644
+index 0000000..bfd6085
+--- /dev/null
++++ b/frontend/src/ui/RangeView.vue
+@@ -0,0 +1,104 @@
++<script setup lang="ts">
++import { computed, useTemplateRef } from "vue";
++import ArrowDown from "~icons/lucide/arrow-down";
++import ArrowUp from "~icons/lucide/arrow-up";
++
++import type { RangeEntry, RangeSide } from "../ipc";
++import { fileIcon } from "./fileIcon";
++import { ACTION_NAMES } from "./keyText";
++import PaneFrame from "./PaneFrame.vue";
++import { compareColumns } from "./paneSplit";
++import { useRangeStore } from "./rangeStore";
++import { fileHeading, sideHeading } from "./rangeText";
++import SettingsButton from "./SettingsButton.vue";
++import { useRangeController } from "./useRangeController";
++
++const props = defineProps<{
++  file: RangeEntry;
++  leftSide: RangeSide;
++  rightSide: RangeSide;
++  shown: boolean;
++}>();
++
++const GRID_TEMPLATE_COLUMNS = compareColumns();
++const PREVIOUS = ACTION_NAMES["previous-change"];
++const NEXT = ACTION_NAMES["next-change"];
++
++const left = useTemplateRef<HTMLDivElement>("left");
++const right = useTemplateRef<HTMLDivElement>("right");
++const strip = useTemplateRef<SVGSVGElement>("strip");
++const { preferences, question } = useRangeStore();
++const { shown: view, moveToChange } = useRangeController(
++  props.file,
++  { left, right, strip },
++  { preferences },
++);
++
++const icon = computed(() => fileIcon(props.file.path));
++const heading = computed(() => fileHeading(props.file));
++const leftHeading = computed(() => sideHeading(props.leftSide));
++const rightHeading = computed(() => sideHeading(props.rightSide));
++const columns = computed(() => view.value.kind === "columns");
++const note = computed(() => (view.value.kind === "columns" ? view.value.note : null));
++const sentence = computed(() => (view.value.kind === "sentence" ? view.value.text : null));
++</script>
++
++<template>
++  <PaneFrame :shown="shown" :asking="question !== null" :columns="GRID_TEMPLATE_COLUMNS">
++    <template #header>
++      <header class="flex h-10 shrink-0 items-center gap-1 px-2">
++        <component :is="icon" class="ml-1 size-4 shrink-0" aria-hidden="true" />
++        <h2 class="mr-2 ml-1 truncate font-semibold">{{ heading }}</h2>
++        <span v-if="note !== null" class="mr-2 shrink-0 text-fg-muted">{{ note }}</span>
++        <button
++          type="button"
++          :title="PREVIOUS"
++          :aria-label="PREVIOUS"
++          :disabled="!columns"
++          class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @mousedown.prevent
++          @click="moveToChange('up')"
++        >
++          <ArrowUp class="size-4" aria-hidden="true" />
++        </button>
++        <button
++          type="button"
++          :title="NEXT"
++          :aria-label="NEXT"
++          :disabled="!columns"
++          class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @mousedown.prevent
++          @click="moveToChange('down')"
++        >
++          <ArrowDown class="size-4" aria-hidden="true" />
++        </button>
++        <SettingsButton class="ml-auto" />
++      </header>
++    </template>
++    <template #default="{ stripLayer }">
++      <h3
++        class="col-start-1 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
++        :title="leftSide.subject"
++      >
++        {{ leftHeading }}
++      </h3>
++      <div class="col-start-2 row-start-1 border-b border-separator" />
++      <h3
++        class="col-start-3 row-start-1 truncate border-b border-separator px-3 py-1.5 text-fg-muted"
++        :title="rightSide.subject"
++      >
++        {{ rightHeading }}
++      </h3>
++      <template v-if="columns">
++        <div ref="left" class="col-start-1 row-start-2 min-h-0 min-w-0" />
++        <div class="col-start-2 row-start-2" :class="stripLayer">
++          <svg ref="strip" aria-hidden="true" class="block h-full w-full" />
++        </div>
++        <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
++      </template>
++      <p v-else-if="sentence !== null" class="col-span-3 col-start-1 row-start-2 px-3 py-4">
++        {{ sentence }}
++      </p>
++    </template>
++  </PaneFrame>
++</template>
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+new file mode 100644
+index 0000000..9dc1116
+--- /dev/null
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -0,0 +1,327 @@
++import { afterEach, expect, test, vi } from "vitest";
++
++import {
++  createFixtureRangeSource,
++  log,
++  parseKey,
++  type RangeEntry,
++  type RangeFileId,
++  type RangeSource,
++  type SourceFailure,
++  type SourceResult,
++} from "../ipc";
++import type { KeyPress } from "./fileListKey";
++import { problemText } from "./problemText";
++import { createRangeStore, MOUNTED_FILES, useRangeStore, type RangeStore } from "./rangeStore";
++import { useSettingsStore } from "./settingsStore";
++
++type Edit = (fixture: RangeSource) => Partial<RangeSource>;
++
++const LINUX = "Linux x86_64";
++const SIDE = { label: { kind: "named", name: "main" }, short_id: "1b2cfed", subject: "Start" };
++const UNKNOWN: SourceFailure = { kind: "UnknownRangeFile", file: 3 };
++const MICROTASKS = 10;
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function quiet(): string[] {
++  const errors: string[] = [];
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  vi.spyOn(console, "error").mockImplementation((line: string) => {
++    errors.push(line);
++  });
++  return errors;
++}
++
++function rangeCase(count: number): unknown {
++  const paths = Array.from(
++    { length: count },
++    (_, index) => `src/f${String(index).padStart(2, "0")}.ts`,
++  );
++  return {
++    start: {
++      range: "main...feature",
++      left: SIDE,
++      right: { ...SIDE, label: { kind: "named", name: "feature" }, short_id: "2b3b4b5" },
++      files: paths.map((path, id) => ({
++        id,
++        path,
++        change: { kind: "modified" },
++        lines: { kind: "counted", added: 1, removed: 1 },
++      })),
++    },
++    files: paths.map((path) => ({
++      kind: "texts",
++      left: `${path}\n`,
++      right: `${path}!\n`,
++      differences: [],
++      mode: { kind: "same" },
++    })),
++  };
++}
++
++function source(count: number): RangeSource {
++  return createFixtureRangeSource(log, "?range=review", {
++    "../../fixtures/range/review.json": rangeCase(count),
++  });
++}
++
++async function started(count: number, edit: Edit = () => ({})): Promise<RangeStore> {
++  const fixture = source(count);
++  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark");
++  await store.startUp();
++  return store;
++}
++
++function files(store: RangeStore): readonly RangeEntry[] {
++  return store.start.value?.files ?? [];
++}
++
++function fileAt(store: RangeStore, index: number): RangeEntry {
++  const entry = files(store)[index];
++  if (entry === undefined) {
++    throw new Error(`no file at ${index}`);
++  }
++  return entry;
++}
++
++function visitedIndexes(store: RangeStore): number[] {
++  return store.visited.value.map((entry) => files(store).indexOf(entry));
++}
++
++function failed(failure: SourceFailure): Promise<SourceResult<never>> {
++  return Promise.resolve({ ok: false, failure });
++}
++
++test("the window's components get no store before the root creates one", () => {
++  expect(() => useRangeStore()).toThrow("useRangeStore() called before createRangeStore()");
++});
++
++test("the first file is shown at start and is the one file mounted (catches an empty main area at start)", async () => {
++  const store = await started(3);
++
++  expect(useRangeStore()).toBe(store);
++  expect(useSettingsStore()).toBe(store);
++  expect(store.shown.value).toBe(fileAt(store, 0).id);
++  expect(store.shownPath.value).toBe("src/f00.ts");
++  expect(visitedIndexes(store)).toEqual([0]);
++  expect(store.screen.value).toEqual({ kind: "files" });
++  expect(store.problem.value).toBeNull();
++});
++
++test("an empty range shows no file and mounts none", async () => {
++  const store = await started(0);
++
++  expect(store.start.value?.files).toEqual([]);
++  expect(store.shown.value).toBeNull();
++  expect(store.shownPath.value).toBeNull();
++  expect(store.visited.value).toEqual([]);
++});
++
++test("before openRange answers: the files screen, the start theme's preferences, no file to show or load", async () => {
++  quiet();
++  const other = await started(4);
++  const store = createRangeStore(source(4), "light");
++
++  expect(store.screen.value).toEqual({ kind: "files" });
++  expect(store.preferences.value.theme).toBe("light");
++  store.showFile("src/f00.ts");
++  expect([store.shown.value, store.visited.value]).toEqual([null, []]);
++
++  expect(await store.loadFile(fileAt(other, 3).id)).toMatchObject({ kind: "texts" });
++  const refusing = createRangeStore({ ...source(4), loadRangeFile: () => failed(UNKNOWN) }, "dark");
++  await refusing.loadFile(fileAt(other, 3).id);
++  expect(refusing.problem.value).toEqual({ action: "open", path: "file 3", cause: UNKNOWN });
++});
++
++test("a failed openRange reports the range and shows nothing", async () => {
++  const errors = quiet();
++  const store = await started(3, () => ({
++    openRange: () => Promise.reject(new Error("the app is gone")),
++  }));
++
++  expect(store.start.value).toBeNull();
++  expect(store.shown.value).toBeNull();
++  expect(store.problem.value === null ? null : problemText(store.problem.value, LINUX)).toBe(
++    "Could not open the range: the app is gone",
++  );
++  expect(errors).toHaveLength(1);
++});
++
++test("showFile from the settings screen shows the file and returns the screen to files", async () => {
++  const store = await started(3);
++  store.openSettings();
++  expect(store.screen.value).toEqual({ kind: "settings" });
++
++  store.showFile("src/f02.ts");
++
++  expect(store.screen.value).toEqual({ kind: "files" });
++  expect(store.shown.value).toBe(fileAt(store, 2).id);
++  expect(store.shownPath.value).toBe("src/f02.ts");
++  expect(visitedIndexes(store)).toEqual([0, 2]);
++});
++
++test("closeSettings returns to the files; a path not in the range changes nothing", async () => {
++  const store = await started(3);
++  store.openSettings();
++  store.closeSettings();
++  expect(store.screen.value).toEqual({ kind: "files" });
++
++  store.openSettings();
++  store.showFile("src/missing.ts");
++
++  expect(store.screen.value).toEqual({ kind: "settings" });
++  expect(store.shown.value).toBe(fileAt(store, 0).id);
++  expect(visitedIndexes(store)).toEqual([0]);
++});
++
++test("showing a visited file again keeps the mounted order (catches a moved view losing its scroll)", async () => {
++  const store = await started(3);
++  store.showFile("src/f01.ts");
++  store.showFile("src/f02.ts");
++
++  store.showFile("src/f00.ts");
++
++  expect(store.shown.value).toBe(fileAt(store, 0).id);
++  expect(visitedIndexes(store)).toEqual([0, 1, 2]);
++});
++
++test("the 17th file drops the least recently shown and keeps the others' order", async () => {
++  const store = await started(MOUNTED_FILES + 2);
++  for (let index = 1; index < MOUNTED_FILES; index += 1) {
++    store.showFile(fileAt(store, index).path);
++  }
++  store.showFile(fileAt(store, 0).path);
++  expect(store.visited.value).toHaveLength(MOUNTED_FILES);
++
++  store.showFile(fileAt(store, MOUNTED_FILES).path);
++
++  const kept = Array.from({ length: MOUNTED_FILES - 2 }, (_, index) => index + 2);
++  expect(visitedIndexes(store)).toEqual([0, ...kept, MOUNTED_FILES]);
++
++  store.showFile(fileAt(store, MOUNTED_FILES + 1).path);
++
++  expect(visitedIndexes(store)).toEqual([0, ...kept.slice(1), MOUNTED_FILES, MOUNTED_FILES + 1]);
++});
++
++test("a failed load reports open with its path and leaves visited; a later success clears the problem", async () => {
++  const errors = quiet();
++  let refusing = true;
++  const store = await started(3, (fixture) => ({
++    loadRangeFile: (file: RangeFileId) =>
++      refusing ? failed(UNKNOWN) : fixture.loadRangeFile(file),
++  }));
++  const second = fileAt(store, 1);
++  store.showFile(second.path);
++  expect(visitedIndexes(store)).toEqual([0, 1]);
++
++  expect(await store.loadFile(second.id)).toBeNull();
++
++  expect(store.problem.value).toEqual({ action: "open", path: "src/f01.ts", cause: UNKNOWN });
++  expect(visitedIndexes(store)).toEqual([0]);
++  expect(store.shown.value).toBe(second.id);
++  expect(errors).toHaveLength(1);
++
++  refusing = false;
++  expect(await store.loadFile(fileAt(store, 0).id)).toMatchObject({ kind: "texts" });
++  expect(store.problem.value).toEqual({ action: "open", path: "src/f01.ts", cause: UNKNOWN });
++
++  store.showFile(second.path);
++  expect(visitedIndexes(store)).toEqual([0, 1]);
++  expect(await store.loadFile(second.id)).toEqual({
++    kind: "texts",
++    left: "src/f01.ts\n",
++    right: "src/f01.ts!\n",
++    differences: [],
++    mode: { kind: "same" },
++  });
++  expect(store.problem.value).toBeNull();
++});
++
++test("a failed file leaves the eviction order too: the next eviction drops the least recent mounted file", async () => {
++  quiet();
++  const store = await started(MOUNTED_FILES + 2, (fixture) => ({
++    loadRangeFile: (file: RangeFileId) =>
++      file === 0 ? failed(UNKNOWN) : fixture.loadRangeFile(file),
++  }));
++  for (let index = 1; index < MOUNTED_FILES; index += 1) {
++    store.showFile(fileAt(store, index).path);
++  }
++  await store.loadFile(fileAt(store, 0).id);
++  expect(store.visited.value).toHaveLength(MOUNTED_FILES - 1);
++
++  store.showFile(fileAt(store, MOUNTED_FILES).path);
++  store.showFile(fileAt(store, MOUNTED_FILES + 1).path);
++
++  const rest = Array.from({ length: MOUNTED_FILES - 2 }, (_, index) => index + 2);
++  expect(visitedIndexes(store)).toEqual([...rest, MOUNTED_FILES, MOUNTED_FILES + 1]);
++});
++
++test("dismissProblem clears the shown problem", async () => {
++  quiet();
++  const store = await started(2, () => ({ loadRangeFile: () => failed(UNKNOWN) }));
++  await store.loadFile(fileAt(store, 0).id);
++  expect(store.problem.value).not.toBeNull();
++
++  store.dismissProblem();
++
++  expect(store.problem.value).toBeNull();
++});
++
++test("the bound key toggles the file list, never while a question waits", async () => {
++  const store = await started(2);
++  let prevents = 0;
++  const ctrlB: KeyPress = {
++    key: "b",
++    code: "KeyB",
++    ctrlKey: true,
++    metaKey: false,
++    altKey: false,
++    shiftKey: false,
++    defaultPrevented: false,
++    preventDefault: () => {
++      prevents += 1;
++    },
++  };
++
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
++
++  const key = parseKey("Mod-f");
++  if (key === null) {
++    throw new Error("Mod-f does not parse");
++  }
++  const adding = store.addKey("undo", key);
++  await vi.waitFor(() => {
++    expect(store.question.value?.kind).toBe("clash");
++  });
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([false, 1]);
++  store.dismissQuestion();
++  await adding;
++
++  store.fileListKey(ctrlB, LINUX);
++  expect([store.fileListShown.value, prevents]).toEqual([true, 2]);
++});
++
++test("answer settles the waiting question", async () => {
++  const store = await started(1);
++  const key = parseKey("Mod-f");
++  if (key === null) {
++    throw new Error("Mod-f does not parse");
++  }
++  const adding = store.addKey("undo", key);
++  await vi.waitFor(() => {
++    expect(store.question.value).not.toBeNull();
++  });
++
++  store.answer(false);
++  await adding;
++  for (let tick = 0; tick < MICROTASKS; tick += 1) {
++    await Promise.resolve();
++  }
++
++  expect(store.question.value).toBeNull();
++});
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+new file mode 100644
+index 0000000..9d62b95
+--- /dev/null
++++ b/frontend/src/ui/rangeStore.ts
+@@ -0,0 +1,181 @@
++import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
++
++import type { RangeEntry, RangeFile, RangeFileId, RangeSource, RangeStart, Theme } from "../ipc";
++import { createAsking, type Asking } from "./asking";
++import { fileListKey, type KeyPress } from "./fileListKey";
++import { attempt, report, type Problem } from "./problem";
++import type { Question } from "./question";
++import type { Screen } from "./screen";
++import { preferencesOf, settingsActions, startSettings } from "./settings";
++import type { SettingsActions, SettingsInUse } from "./settings";
++import { registerSettingsStore, type SettingsStore } from "./settingsStore";
++import type { Preferences } from "./useMergeController";
++
++export type RangeStore = SettingsStore & {
++  readonly start: Readonly<ShallowRef<RangeStart | null>>;
++  readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
++  readonly shownPath: ComputedRef<string | null>;
++  readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
++  readonly problem: Readonly<ShallowRef<Problem | null>>;
++  readonly question: ComputedRef<Question | null>;
++  readonly screen: Readonly<ShallowRef<Screen>>;
++  readonly fileListShown: ShallowRef<boolean>;
++  readonly preferences: ComputedRef<Preferences>;
++  startUp(): Promise<void>;
++  loadSettings(): Promise<void>;
++  showFile(path: string): void;
++  loadFile(file: RangeFileId): Promise<RangeFile | null>;
++  fileListKey(event: KeyPress, platform: string): void;
++  dismissProblem(): void;
++  answer(yes: boolean): void;
++  dismissQuestion(): void;
++};
++
++type Refs = {
++  readonly start: ShallowRef<RangeStart | null>;
++  readonly shown: ShallowRef<RangeFileId | null>;
++  readonly visited: ShallowRef<readonly RangeEntry[]>;
++  readonly problem: ShallowRef<Problem | null>;
++  readonly screen: ShallowRef<Screen>;
++  readonly settings: ShallowRef<SettingsInUse>;
++  readonly fileListShown: ShallowRef<boolean>;
++};
++
++type State = Refs & {
++  readonly source: RangeSource;
++  readonly asking: Asking;
++  recent: readonly RangeFileId[];
++  latestSettings: number;
++};
++
++export const MOUNTED_FILES = 16;
++
++const RANGE_WORD = "the range";
++
++let store: RangeStore | null = null;
++
++function createRefs(startTheme: Theme): Refs {
++  return {
++    start: shallowRef<RangeStart | null>(null),
++    shown: shallowRef<RangeFileId | null>(null),
++    visited: shallowRef<readonly RangeEntry[]>([]),
++    problem: shallowRef<Problem | null>(null),
++    screen: shallowRef<Screen>({ kind: "files" }),
++    settings: shallowRef(startSettings(startTheme)),
++    fileListShown: shallowRef(true),
++  };
++}
++
++export function createRangeStore(source: RangeSource, startTheme: Theme): RangeStore {
++  const refs = createRefs(startTheme);
++  const state: State = { ...refs, source, asking: createAsking(), recent: [], latestSettings: 0 };
++  const settings = settingsActions(state);
++  const created: RangeStore = {
++    ...refs,
++    shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
++    question: state.asking.question,
++    preferences: computed(() => preferencesOf(refs.settings.value)),
++    ...settings,
++    startUp: () => startUp(state, settings),
++    showFile: (path) => {
++      const entry = state.start.value?.files.find((file) => file.path === path);
++      if (entry !== undefined) {
++        show(state, entry);
++      }
++    },
++    loadFile: (file) => loadFile(state, file),
++    ...chromeActions(state),
++  };
++  store = created;
++  registerSettingsStore(created);
++  return created;
++}
++
++function chromeActions(
++  state: State,
++): Pick<
++  RangeStore,
++  "fileListKey" | "dismissProblem" | "answer" | "dismissQuestion" | "openSettings" | "closeSettings"
++> {
++  return {
++    fileListKey: (event, platform) => {
++      fileListKey(state, event, platform);
++    },
++    dismissProblem: () => {
++      state.problem.value = null;
++    },
++    answer: state.asking.answer,
++    dismissQuestion: state.asking.dismiss,
++    openSettings: () => {
++      state.screen.value = { kind: "settings" };
++    },
++    closeSettings: () => {
++      state.screen.value = { kind: "files" };
++    },
++  };
++}
++
++function entryOf(state: State, file: RangeFileId | null): RangeEntry | undefined {
++  return state.start.value?.files.find((entry) => entry.id === file);
++}
++
++function show(state: State, entry: RangeEntry): void {
++  const { id } = entry;
++  state.screen.value = { kind: "files" };
++  state.shown.value = id;
++  state.recent = [...state.recent.filter((each) => each !== id), id];
++  if (state.visited.value.some((each) => each.id === id)) {
++    return;
++  }
++  const [oldest, ...kept] = state.recent;
++  const visited = [...state.visited.value, entry];
++  if (visited.length > MOUNTED_FILES) {
++    state.recent = kept;
++    state.visited.value = visited.filter((each) => each.id !== oldest);
++  } else {
++    state.visited.value = visited;
++  }
++}
++
++function forget(state: State, file: RangeFileId): void {
++  state.recent = state.recent.filter((each) => each !== file);
++  state.visited.value = state.visited.value.filter((each) => each.id !== file);
++}
++
++async function startUp(state: State, settings: SettingsActions): Promise<void> {
++  const [outcome] = await Promise.all([
++    attempt(() => state.source.openRange()),
++    settings.loadSettings(),
++  ]);
++  if (!outcome.ok) {
++    report(state, { action: "open", path: RANGE_WORD, cause: outcome.cause });
++    return;
++  }
++  state.start.value = outcome.value;
++  const [first] = outcome.value.files;
++  if (first !== undefined) {
++    show(state, first);
++  }
++}
++
++async function loadFile(state: State, file: RangeFileId): Promise<RangeFile | null> {
++  const path = entryOf(state, file)?.path ?? `file ${file}`;
++  const outcome = await attempt(() => state.source.loadRangeFile(file));
++  if (!outcome.ok) {
++    forget(state, file);
++    report(state, { action: "open", path, cause: outcome.cause });
++    return null;
++  }
++  const problem = state.problem.value;
++  if (problem?.action === "open" && problem.path === path) {
++    state.problem.value = null;
++  }
++  return outcome.value;
++}
++
++export function useRangeStore(): RangeStore {
++  if (store === null) {
++    throw new Error("useRangeStore() called before createRangeStore()");
++  }
++  return store;
++}
+diff --git a/frontend/src/ui/rangeText.test.ts b/frontend/src/ui/rangeText.test.ts
+new file mode 100644
+index 0000000..701229d
+--- /dev/null
++++ b/frontend/src/ui/rangeText.test.ts
+@@ -0,0 +1,116 @@
++import { expect, test } from "vitest";
++
++import type { RangeEntry, RangeSide, RangeStart } from "../ipc";
++import {
++  changeMark,
++  emptyRangeText,
++  fileHeading,
++  fileSentence,
++  lineCounts,
++  modeNote,
++  sideHeading,
++  sideLabel,
++  type SentenceFile,
++} from "./rangeText";
++
++const MAIN: RangeSide = {
++  label: { kind: "named", name: "main" },
++  shortId: "1b2cfed",
++  subject: "Start",
++};
++const DEV: RangeSide = {
++  label: { kind: "named", name: "dev" },
++  shortId: "2b3b4b5",
++  subject: "Dev",
++};
++const BASE: RangeSide = {
++  label: { kind: "mergeBase", left: "main", right: "feature" },
++  shortId: "0a1b2c3",
++  subject: "Fork",
++};
++const HEAD: RangeSide = { label: { kind: "named", name: "HEAD" }, shortId: "9f8e7d6", subject: "" };
++
++function entry(change: RangeEntry["change"]): Pick<RangeEntry, "path" | "change"> {
++  return { path: "src/keys.md", change };
++}
++
++test("a named side is its name, the left of three dots the merge base of both names, an empty side HEAD", () => {
++  expect(sideLabel(MAIN)).toBe("main");
++  expect(sideLabel(BASE)).toBe("merge base of main and feature");
++  expect(sideLabel(HEAD)).toBe("HEAD");
++});
++
++test("a column header names the side and its short id", () => {
++  expect(sideHeading(MAIN)).toBe("main (1b2cfed)");
++  expect(sideHeading(BASE)).toBe("merge base of main and feature (0a1b2c3)");
++  expect(sideHeading(HEAD)).toBe("HEAD (9f8e7d6)");
++});
++
++test("an empty range names both sides with their short ids", () => {
++  const start: RangeStart = { range: "main..dev", left: MAIN, right: DEV, files: [] };
++  expect(emptyRangeText(start)).toBe("main (1b2cfed) and dev (2b3b4b5) have the same files.");
++});
++
++test("a renamed file's header is old → new; every other change shows its path", () => {
++  expect(fileHeading(entry({ kind: "renamed", oldPath: "docs/shortcuts.md" }))).toBe(
++    "docs/shortcuts.md → src/keys.md",
++  );
++  expect(fileHeading(entry({ kind: "modified" }))).toBe("src/keys.md");
++  expect(fileHeading(entry({ kind: "added" }))).toBe("src/keys.md");
++  expect(fileHeading(entry({ kind: "deleted" }))).toBe("src/keys.md");
++});
++
++test("each change has its letter and word", () => {
++  expect((["added", "modified", "deleted"] as const).map((kind) => changeMark({ kind }))).toEqual([
++    { letter: "A", word: "added" },
++    { letter: "M", word: "modified" },
++    { letter: "D", word: "deleted" },
++  ]);
++  expect(changeMark({ kind: "renamed", oldPath: "a" })).toEqual({ letter: "R", word: "renamed" });
++});
++
++test("counted lines read +n −m with a real minus sign; a binary file has no counts", () => {
++  expect(lineCounts({ kind: "counted", added: 12, removed: 3 })).toEqual({
++    added: "+12",
++    removed: "−3",
++  });
++  expect(lineCounts({ kind: "counted", added: 0, removed: 0 })).toEqual({
++    added: "+0",
++    removed: "−0",
++  });
++  expect(lineCounts({ kind: "notCounted" })).toBeNull();
++});
++
++test("a mode change beside a content change is a header note; the same mode none", () => {
++  expect(modeNote({ kind: "changed", old: "file", new: "executable" })).toBe(
++    "Mode changed: file → executable file",
++  );
++  expect(modeNote({ kind: "same" })).toBeNull();
++});
++
++test.each<[SentenceFile, string]>([
++  [{ kind: "binary" }, "Binary file: not shown."],
++  [{ kind: "tooLarge", limit: 8_388_608 }, "Larger than 8 MiB: not shown."],
++  [{ kind: "notUtf8", sides: "left" }, "The left side is not UTF-8 text."],
++  [{ kind: "notUtf8", sides: "right" }, "The right side is not UTF-8 text."],
++  [{ kind: "notUtf8", sides: "both" }, "Neither side is UTF-8 text."],
++  [
++    { kind: "modeOnly", old: "file", new: "executable" },
++    "Only the file mode changed: file → executable file.",
++  ],
++  [
++    { kind: "modeOnly", old: "executable", new: "file" },
++    "Only the file mode changed: executable file → file.",
++  ],
++  [{ kind: "kindChanged", old: "file", new: "link" }, "Changed from a file to a symbolic link."],
++  [
++    { kind: "kindChanged", old: "link", new: "executable" },
++    "Changed from a symbolic link to an executable file.",
++  ],
++  [{ kind: "kindChanged", old: "submodule", new: "file" }, "Changed from a submodule to a file."],
++  [{ kind: "submodule", old: "1a2b3c", new: "3c4d5e" }, "Submodule: 1a2b3c → 3c4d5e"],
++  [{ kind: "submodule", old: null, new: "3c4d5e" }, "Submodule: none → 3c4d5e"],
++  [{ kind: "submodule", old: "1a2b3c", new: null }, "Submodule: 1a2b3c → none"],
++])("the %o sentence is %s", (file, sentence) => {
++  expect(fileSentence(file)).toBe(sentence);
++});
+diff --git a/frontend/src/ui/rangeText.ts b/frontend/src/ui/rangeText.ts
+new file mode 100644
+index 0000000..ef7ac42
+--- /dev/null
++++ b/frontend/src/ui/rangeText.ts
+@@ -0,0 +1,99 @@
++import type {
++  RangeChange,
++  RangeEntry,
++  RangeEntryKind,
++  RangeFile,
++  RangeLineCounts,
++  RangeModeChange,
++  RangeSide,
++  RangeSides,
++  RangeStart,
++} from "../ipc";
++
++export type SentenceFile = Exclude<RangeFile, { readonly kind: "texts" }>;
++
++export type ChangeMark = { readonly letter: string; readonly word: string };
++
++export type LineCounts = { readonly added: string; readonly removed: string };
++
++const BYTES_PER_MIB = 1_048_576;
++
++export const RANGE_LIST_LABEL = "Changed files";
++
++const CHANGE_MARKS: Readonly<Record<RangeChange["kind"], ChangeMark>> = {
++  added: { letter: "A", word: "added" },
++  modified: { letter: "M", word: "modified" },
++  deleted: { letter: "D", word: "deleted" },
++  renamed: { letter: "R", word: "renamed" },
++};
++
++const KIND_WORDS: Readonly<Record<RangeEntryKind, string>> = {
++  file: "file",
++  executable: "executable file",
++  link: "symbolic link",
++  submodule: "submodule",
++};
++
++const NOT_UTF8: Readonly<Record<RangeSides, string>> = {
++  left: "The left side is not UTF-8 text.",
++  right: "The right side is not UTF-8 text.",
++  both: "Neither side is UTF-8 text.",
++};
++
++export function changeMark(change: RangeChange): ChangeMark {
++  return CHANGE_MARKS[change.kind];
++}
++
++export function sideLabel({ label }: RangeSide): string {
++  return label.kind === "named" ? label.name : `merge base of ${label.left} and ${label.right}`;
++}
++
++export function sideHeading(side: RangeSide): string {
++  return `${sideLabel(side)} (${side.shortId})`;
++}
++
++export function emptyRangeText({ left, right }: RangeStart): string {
++  return `${sideHeading(left)} and ${sideHeading(right)} have the same files.`;
++}
++
++export function fileHeading({ path, change }: Pick<RangeEntry, "path" | "change">): string {
++  return change.kind === "renamed" ? `${change.oldPath} → ${path}` : path;
++}
++
++export function lineCounts(lines: RangeLineCounts): LineCounts | null {
++  return lines.kind === "counted"
++    ? { added: `+${lines.added}`, removed: `−${lines.removed}` }
++    : null;
++}
++
++function withArticle(kind: RangeEntryKind): string {
++  const word = KIND_WORDS[kind];
++  return /^[aeiou]/u.test(word) ? `an ${word}` : `a ${word}`;
++}
++
++export function modeNote(mode: RangeModeChange): string | null {
++  return mode.kind === "changed"
++    ? `Mode changed: ${KIND_WORDS[mode.old]} → ${KIND_WORDS[mode.new]}`
++    : null;
++}
++
++export function fileSentence(file: SentenceFile): string {
++  switch (file.kind) {
++    case "binary":
++      return "Binary file: not shown.";
++    case "tooLarge":
++      return `Larger than ${file.limit / BYTES_PER_MIB} MiB: not shown.`;
++    case "notUtf8":
++      return NOT_UTF8[file.sides];
++    case "modeOnly":
++      return `Only the file mode changed: ${KIND_WORDS[file.old]} → ${KIND_WORDS[file.new]}.`;
++    case "kindChanged":
++      return `Changed from ${withArticle(file.old)} to ${withArticle(file.new)}.`;
++    case "submodule":
++      return `Submodule: ${file.old ?? "none"} → ${file.new ?? "none"}`;
++    default: {
++      const _exhaustive: never = file;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+new file mode 100644
+index 0000000..d06801e
+--- /dev/null
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -0,0 +1,177 @@
++import { expect, test } from "vitest";
++import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
++
++import type { Preferences, RangeTexts } from "../editor";
++import type { RangeFile } from "../ipc";
++import { preferencesOf, startSettings } from "./settings";
++import { followRange, type RangeHandle, type ShownRange } from "./useRangeController";
++
++type Built = { readonly texts: RangeTexts; readonly hosts: string; readonly theme: string };
++
++type Run = {
++  readonly handle: RangeHandle;
++  readonly built: Built[];
++  readonly calls: string[];
++  readonly hosts: ShallowRef<string | null>;
++  readonly preferences: ShallowRef<Preferences>;
++  readonly answer: (file: RangeFile | null) => Promise<void>;
++  readonly stop: () => void;
++};
++
++const DARK = preferencesOf(startSettings("dark"));
++const LIGHT = preferencesOf(startSettings("light"));
++const TEXTS: RangeFile = {
++  kind: "texts",
++  left: "a\n",
++  right: "b\n",
++  differences: [],
++  mode: { kind: "changed", old: "file", new: "executable" },
++};
++
++function run(firstHosts: string | null): Run {
++  const built: Built[] = [];
++  const calls: string[] = [];
++  const hosts = shallowRef<string | null>(firstHosts);
++  const preferences = shallowRef(DARK);
++  const answers: ((file: RangeFile | null) => void)[] = [];
++  const loaded = new Promise<RangeFile | null>((resolve) => {
++    answers.push(resolve);
++  });
++  const scope = effectScope();
++  const shown: ShownRange = {
++    setPreferences: (next) => calls.push(`preferences ${next.theme}`),
++    moveToChange: (direction) => calls.push(`move ${direction}`),
++    destroy: () => calls.push("destroy"),
++  };
++  const handle = scope.run(() =>
++    followRange({
++      path: "src/board.ts",
++      load: () => loaded,
++      hosts: () => hosts.value,
++      preferences,
++      build: (texts, at, chosen) => {
++        built.push({ texts, hosts: at, theme: chosen.theme });
++        return shown;
++      },
++    }),
++  );
++  if (handle === undefined) {
++    throw new Error("the scope did not run");
++  }
++  return {
++    handle,
++    built,
++    calls,
++    hosts,
++    preferences,
++    answer: async (file) => {
++      for (const answer of answers) {
++        answer(file);
++      }
++      await loaded;
++      await nextTick();
++    },
++    stop: () => {
++      scope.stop();
++    },
++  };
++}
++
++test("a texts reply builds one controller on the hosts with the path, both texts and the preferences", async () => {
++  const live = run("hosts");
++  expect(live.handle.shown.value).toEqual({ kind: "loading" });
++
++  await live.answer(TEXTS);
++
++  expect(live.handle.shown.value).toEqual({
++    kind: "columns",
++    note: "Mode changed: file → executable file",
++  });
++  expect(live.built).toEqual([
++    {
++      texts: { path: "src/board.ts", left: "a\n", right: "b\n", differences: [] },
++      hosts: "hosts",
++      theme: "dark",
++    },
++  ]);
++});
++
++test("the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view", async () => {
++  const live = run(null);
++  live.handle.moveToChange("down");
++  await live.answer(TEXTS);
++  expect(live.built).toEqual([]);
++
++  live.hosts.value = "mounted";
++  await nextTick();
++  expect(live.built.map(({ hosts }) => hosts)).toEqual(["mounted"]);
++
++  live.hosts.value = "again";
++  await nextTick();
++  expect(live.built).toHaveLength(1);
++
++  live.preferences.value = LIGHT;
++  await nextTick();
++  live.handle.moveToChange("up");
++  live.stop();
++  live.handle.moveToChange("down");
++
++  expect(live.calls).toEqual(["preferences light", "move up", "destroy"]);
++});
++
++test.each<RangeFile>([
++  { kind: "binary" },
++  { kind: "tooLarge", limit: 8_388_608 },
++  { kind: "notUtf8", sides: "both" },
++  { kind: "modeOnly", old: "file", new: "executable" },
++  { kind: "kindChanged", old: "file", new: "link" },
++  { kind: "submodule", old: null, new: "abc" },
++])("a $kind reply builds no controller and shows its sentence", async (file) => {
++  const live = run("hosts");
++
++  await live.answer(file);
++
++  expect(live.built).toEqual([]);
++  expect(live.handle.shown.value.kind).toBe("sentence");
++});
++
++test("the binary sentence is the one rangeText words", async () => {
++  const live = run("hosts");
++
++  await live.answer({ kind: "binary" });
++
++  expect(live.handle.shown.value).toEqual({ kind: "sentence", text: "Binary file: not shown." });
++});
++
++test("a reply arriving after unmount is dropped: nothing built, nothing shown", async () => {
++  const live = run("hosts");
++  live.stop();
++
++  await live.answer(TEXTS);
++
++  expect(live.built).toEqual([]);
++  expect(live.handle.shown.value).toEqual({ kind: "loading" });
++  expect(live.calls).toEqual([]);
++});
++
++test("a failed load builds nothing and stays loading", async () => {
++  const live = run("hosts");
++
++  await live.answer(null);
++
++  expect(live.built).toEqual([]);
++  expect(live.handle.shown.value).toEqual({ kind: "loading" });
++});
++
++test("preferences changed before the controller exists reach it at build, not through a missing controller", async () => {
++  const live = run(null);
++  live.preferences.value = LIGHT;
++  await nextTick();
++
++  await live.answer(TEXTS);
++  live.hosts.value = "mounted";
++  await nextTick();
++
++  expect(live.built.map(({ theme }) => theme)).toEqual(["light"]);
++  expect(live.calls).toEqual([]);
++});
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+new file mode 100644
+index 0000000..c3b9ca0
+--- /dev/null
++++ b/frontend/src/ui/useRangeController.ts
+@@ -0,0 +1,131 @@
++import {
++  onScopeDispose,
++  shallowRef,
++  toRef,
++  toValue,
++  watch,
++  type MaybeRefOrGetter,
++  type ShallowRef,
++} from "vue";
++
++import {
++  RangeController,
++  type CompareHosts,
++  type Direction,
++  type Preferences,
++  type RangeTexts,
++} from "../editor";
++import type { RangeEntry, RangeFile } from "../ipc";
++import { useRangeStore } from "./rangeStore";
++import { fileSentence, modeNote } from "./rangeText";
++
++type Host<T> = Readonly<ShallowRef<T | null>>;
++
++type RangeHostRefs = {
++  readonly left: Host<HTMLDivElement>;
++  readonly right: Host<HTMLDivElement>;
++  readonly strip: Host<SVGSVGElement>;
++};
++
++type RangeShown =
++  | { readonly kind: "loading" }
++  | { readonly kind: "columns"; readonly note: string | null }
++  | { readonly kind: "sentence"; readonly text: string };
++
++export type ShownRange = Pick<RangeController, "setPreferences" | "moveToChange" | "destroy">;
++
++export type RangeHandle = {
++  readonly shown: Readonly<ShallowRef<RangeShown>>;
++  moveToChange(direction: Direction): void;
++};
++
++export type RangeParts<H> = {
++  readonly path: string;
++  readonly load: () => Promise<RangeFile | null>;
++  readonly hosts: () => H | null;
++  readonly preferences: MaybeRefOrGetter<Preferences>;
++  readonly build: (texts: RangeTexts, hosts: H, preferences: Preferences) => ShownRange;
++};
++
++type Live = {
++  readonly shown: ShallowRef<RangeShown>;
++  waiting: RangeTexts | null;
++  controller: ShownRange | null;
++  disposed: boolean;
++};
++
++function land(live: Live, path: string, file: RangeFile | null): void {
++  if (live.disposed || file === null) {
++    return;
++  }
++  if (file.kind !== "texts") {
++    live.shown.value = { kind: "sentence", text: fileSentence(file) };
++    return;
++  }
++  const { left, right, differences, mode } = file;
++  live.waiting = { path, left, right, differences };
++  live.shown.value = { kind: "columns", note: modeNote(mode) };
++}
++
++export function followRange<H>(parts: RangeParts<H>): RangeHandle {
++  const live: Live = {
++    shown: shallowRef<RangeShown>({ kind: "loading" }),
++    waiting: null,
++    controller: null,
++    disposed: false,
++  };
++
++  watch(
++    [live.shown, parts.hosts],
++    () => {
++      const hosts = parts.hosts();
++      if (live.waiting === null || hosts === null) {
++        return;
++      }
++      live.controller = parts.build(live.waiting, hosts, toValue(parts.preferences));
++      live.waiting = null;
++    },
++    { flush: "post" },
++  );
++  watch(toRef(parts.preferences), (next) => {
++    live.controller?.setPreferences(next);
++  });
++  void parts.load().then((file) => {
++    land(live, parts.path, file);
++  });
++
++  onScopeDispose(() => {
++    live.disposed = true;
++    live.waiting = null;
++    live.controller?.destroy();
++    live.controller = null;
++  });
++
++  return {
++    shown: live.shown,
++    moveToChange: (direction) => {
++      live.controller?.moveToChange(direction);
++    },
++  };
++}
++
++function shownHosts({ left, right, strip }: RangeHostRefs): CompareHosts | null {
++  return left.value === null || right.value === null || strip.value === null
++    ? null
++    : { left: left.value, right: right.value, strip: strip.value };
++}
++
++export function useRangeController(
++  file: RangeEntry,
++  hosts: RangeHostRefs,
++  options: { readonly preferences: MaybeRefOrGetter<Preferences> },
++): RangeHandle {
++  const store = useRangeStore();
++  return followRange({
++    path: file.path,
++    load: () => store.loadFile(file.id),
++    hosts: () => shownHosts(hosts),
++    preferences: options.preferences,
++    build: (texts, shown, preferences) => new RangeController(texts, shown, { preferences }),
++  });
++}
+-- 
+2.56.0
+

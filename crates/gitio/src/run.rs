@@ -18,16 +18,13 @@ pub(crate) enum Access {
     Write,
 }
 
-enum Waited {
-    Exited {
-        status: ExitStatus,
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-    },
+/// How a run with a deadline ended.
+pub(crate) enum Waited {
+    Exited(Finished),
     TimedOut,
 }
 
-/// What a git run printed on each stream, and how it exited.
+/// What a run printed on each stream, and how it exited.
 pub(crate) struct Finished {
     pub(crate) status: ExitStatus,
     pub(crate) stdout: Vec<u8>,
@@ -96,6 +93,26 @@ pub(crate) fn run_to_end(command: Command) -> Result<Finished> {
     })
 }
 
+/// `run_to_end`, with a non-zero exit as `Error::GitFailed`; stdout on success.
+pub(crate) fn run_to_success(command: Command) -> Result<Vec<u8>> {
+    let args = argv(&command);
+    let finished = run_to_end(command)?;
+    if !finished.status.success() {
+        return Err(failure(args, &finished));
+    }
+    Ok(finished.stdout)
+}
+
+fn failure(args: Vec<String>, finished: &Finished) -> Error {
+    Error::GitFailed {
+        args,
+        status: finished.status.code(),
+        stderr: String::from_utf8_lossy(&finished.stderr)
+            .trim_end()
+            .to_owned(),
+    }
+}
+
 fn output_until(chunks: &Receiver<io::Result<Vec<u8>>>, end: Instant) -> io::Result<Vec<u8>> {
     match collected(chunks, end)? {
         Collected::Whole(bytes) => Ok(bytes),
@@ -118,19 +135,8 @@ pub(crate) fn run_accepting(
 ) -> Result<Vec<u8>> {
     let args = argv(&command);
     tracing::debug!(?args, "running git");
-    let deadline = Instant::now() + timeout;
-    let mut child = spawn_piped(command, stdin.is_some())?;
-    let writer = if let (Some(mut pipe), Some(bytes)) = (child.stdin.take(), stdin) {
-        Some(thread::spawn(move || pipe.write_all(&bytes)))
-    } else {
-        None
-    };
-    let (status, stdout, stderr) = match wait_with_deadline(&mut child, deadline)? {
-        Waited::Exited {
-            status,
-            stdout,
-            stderr,
-        } => (status, stdout, stderr),
+    let finished = match run_with_deadline(command, stdin, timeout)? {
+        Waited::Exited(finished) => finished,
         Waited::TimedOut => {
             return Err(Error::Timeout {
                 args,
@@ -138,18 +144,34 @@ pub(crate) fn run_accepting(
             });
         }
     };
-    if !accepts(status) {
-        return Err(Error::GitFailed {
-            args,
-            status: status.code(),
-            stderr: String::from_utf8_lossy(&stderr).trim_end().to_owned(),
-        });
+    if !accepts(finished.status) {
+        return Err(failure(args, &finished));
     }
-    if let Some(writer) = writer {
+    Ok(finished.stdout)
+}
+
+/// Runs `command` with stdin closed, or given `stdin` written and closed, and kills it at `timeout`. A failed
+/// write counts only after an exit 0: a program that failed may well have stopped reading.
+pub(crate) fn run_with_deadline(
+    command: Command,
+    stdin: Option<Vec<u8>>,
+    timeout: Duration,
+) -> io::Result<Waited> {
+    let deadline = Instant::now() + timeout;
+    let mut child = spawn_piped(command, stdin.is_some())?;
+    let writer = if let (Some(mut pipe), Some(bytes)) = (child.stdin.take(), stdin) {
+        Some(thread::spawn(move || pipe.write_all(&bytes)))
+    } else {
+        None
+    };
+    let waited = wait_with_deadline(&mut child, deadline)?;
+    if let (Waited::Exited(finished), Some(writer)) = (&waited, writer)
+        && finished.status.success()
+    {
         let written = writer.join().map_err(|_| thread_panicked())?;
         written?;
     }
-    Ok(stdout)
+    Ok(waited)
 }
 
 fn spawn_piped(mut command: Command, with_stdin: bool) -> io::Result<Child> {
@@ -226,11 +248,11 @@ fn receive_output(
     let Collected::Whole(stderr) = collected(stderr, deadline)? else {
         return Ok(Waited::TimedOut);
     };
-    Ok(Waited::Exited {
+    Ok(Waited::Exited(Finished {
         status,
         stdout,
         stderr,
-    })
+    }))
 }
 
 fn closed_pipe() -> io::Error {
@@ -238,7 +260,7 @@ fn closed_pipe() -> io::Error {
 }
 
 fn thread_panicked() -> io::Error {
-    io::Error::other("git pipe thread panicked")
+    io::Error::other("pipe thread panicked")
 }
 
 #[cfg(test)]

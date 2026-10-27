@@ -1,0 +1,1 @@
+just mutants c505b80 (covers 57ad173 RVCrateR1): 11 mutants tested in 30s: 8 caught, 3 unviable — no survivors

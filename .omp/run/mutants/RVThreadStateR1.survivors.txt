@@ -1,0 +1,6 @@
+just mutants 5354026 (covers 698a642 RVThreadStateR1): Stryker 7 files, 610 mutants; 574 killed, 9 survived, 19 no coverage, 1 timeout.
+On lines 698a642 changed: 9 —
+  rangeDrafts.ts:62 draft.kind === "thread" → true: equivalent (a note draft has no `file`; the correctness review's drop verdict for the same line before the move)
+  rangeThreads.ts:68, rangeThreadText.ts:101 (×4 NoCoverage): `never` default arms — unreachable by type
+  useRangeController.ts:176-181 (×4 NoCoverage): the composable's thin body (useRangeStore, followRange's load/hosts) — needs a mounted component; the thread boxes build's MiniBrowser and real-app steps exercise it
+Triage: all dropped (equivalent / unreachable / thin wiring observed in the next build's smoke).

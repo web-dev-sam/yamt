@@ -1,7 +1,7 @@
+use crate::Result;
 use crate::operation::Operation;
 use crate::repo::Repo;
-use crate::run::{argv, run_to_end};
-use crate::{Error, Result};
+use crate::run::{run_to_end, run_to_success};
 
 /// What one git run printed, stdout then stderr, and whether it exited 0.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,19 +15,8 @@ impl Repo {
     /// refuses without `MERGE_HEAD`). No deadline: a kill in the middle of a reset leaves `index.lock`.
     /// A refusal is `Error::GitFailed` with git's stderr.
     pub fn abort(&self, operation: &Operation) -> Result<()> {
-        let command = self.command_as_user(&abort_args(operation));
-        let args = argv(&command);
-        let finished = run_to_end(command)?;
-        if finished.status.success() {
-            return Ok(());
-        }
-        Err(Error::GitFailed {
-            args,
-            status: finished.status.code(),
-            stderr: String::from_utf8_lossy(&finished.stderr)
-                .trim_end()
-                .to_owned(),
-        })
+        run_to_success(self.command_as_user(&abort_args(operation)))?;
+        Ok(())
     }
 
     /// git's own continue for `operation` (plan §2 #89; a squash merge: `commit`). A non-zero exit is not

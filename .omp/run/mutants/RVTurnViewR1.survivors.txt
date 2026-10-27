@@ -1,0 +1,18 @@
+just mutants 1d98e28 (covers ac5cc22 RVTurnViewR1)
+On lines ac5cc22 changed: 16 of 86 survivors/no-coverage:
+Survived OptionalChaining frontend/scripts/fences.ts:159 | -     return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? ""; => +     return WINDOW_FILE.exec(file)?.[1].toLowerCase() ?? ""
+Survived StringLiteral frontend/scripts/fences.ts:159 | -     return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? ""; => +     return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "
+Survived StringLiteral frontend/src/ipc/agentDomain.ts:35 | -   const STASH = "stash"; => +   const STASH = "";
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:91 | -       const text = withoutCr(old.lines[line] ?? ""); => +       const text = withoutCr(old.lines[line] ?? "Stryker w
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:129 | -       const text = texts.old.lines[line] ?? ""; => +       const text = texts.old.lines[line] ?? "Stryker was h
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:141 | -       const text = texts.new.lines[line] ?? ""; => +       const text = texts.new.lines[line] ?? "Stryker was h
+NoCoverage StringLiteral frontend/src/ui/editDiffLines.ts:202 | -         const note = row.ending === null ? "" : LINE_ENDING_WORDS[row.ending]; => +         const note = row.ending === null ? "Stryker was he
+NoCoverage ConditionalExpression frontend/src/ui/editDiffLines.ts:211 | -       default: { => -         const _exhaustive: never = row;
+NoCoverage BlockStatement frontend/src/ui/editDiffLines.ts:211 | -       default: { => -         const _exhaustive: never = row;
+Survived BooleanLiteral frontend/src/ui/editDiffLines.ts:58 | -       return { lines: [], open: false }; => +       return { lines: [], open: true };
+Survived UnaryOperator frontend/src/ui/editDiffLines.ts:65 | -     return line.endsWith(CR) ? line.slice(0, -CR.length) : line; => +     return line.endsWith(CR) ? line.slice(0, +CR.length) :
+Survived EqualityOperator frontend/src/ui/editDiffLines.ts:130 | -       const pair = index < right.len ? texts.new.lines[right.start + index] : undefined; => +       const pair = index <= right.len ? texts.new.lines[ri
+Survived ConditionalExpression frontend/src/ui/editDiffLines.ts:130 | -       const pair = index < right.len ? texts.new.lines[right.start + index] : undefined; => +       const pair = true ? texts.new.lines[right.start + in
+Survived ConditionalExpression frontend/src/ui/editDiffLines.ts:142 | -       const pair = index < left.len ? texts.old.lines[left.start + index] : undefined; => +       const pair = true ? texts.old.lines[left.start + ind
+Survived EqualityOperator frontend/src/ui/editDiffLines.ts:142 | -       const pair = index < left.len ? texts.old.lines[left.start + index] : undefined; => +       const pair = index <= left.len ? texts.old.lines[lef
+Survived ConditionalExpression frontend/src/ui/editDiffLines.ts:202 | -         const note = row.ending === null ? "" : LINE_ENDING_WORDS[row.ending]; => +         const note = false ? "" : LINE_ENDING_WORDS[row.en

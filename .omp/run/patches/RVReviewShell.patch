@@ -1,0 +1,720 @@
+From bed557d70e76d26c6522d9bb77cc9a8a3a91f679 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 14:11:47 +0200
+Subject: [PATCH] feat(app): thread and GitLab commands for the range window;
+ threads opened before any window
+
+---
+ .omp/run/notes/RVReviewShell.md |  88 +++++++++
+ crates/review/src/lib.rs        |   1 +
+ src-tauri/AGENTS.md             |   2 +-
+ src-tauri/src/commands.rs       |  13 +-
+ src-tauri/src/ipc_error.rs      |  33 ++++
+ src-tauri/src/lib.rs            |   1 +
+ src-tauri/src/range.rs          |  95 ++++++++--
+ src-tauri/src/review.rs         | 315 ++++++++++++++++++++++++++++++++
+ 8 files changed, 534 insertions(+), 14 deletions(-)
+ create mode 100644 .omp/run/notes/RVReviewShell.md
+ create mode 100644 src-tauri/src/review.rs
+
+diff --git a/.omp/run/notes/RVReviewShell.md b/.omp/run/notes/RVReviewShell.md
+new file mode 100644
+index 0000000..68f4b07
+--- /dev/null
++++ b/.omp/run/notes/RVReviewShell.md
+@@ -0,0 +1,88 @@
++The seven thread and GitLab commands now exist as Tauri commands in the range window. A broken `threads.json` ends `yamt --diff=<range>` with exit 2 before any window opens, and the file is left as it was. fmt, clippy, the `yamt-app` and `yamt-review` tests and arch-check pass, and both real-app checks behaved as the brief asks. Mutants were not run, and check/send have not run against a real or fake glab.
++
++```
++summary
++  RangeState now also holds `threads: Mutex<ThreadStore>` and `sending: Mutex<()>`. run_range opens the pair
++  folder's threads.json after the lock and before any window (unreadable, broken or newer → one `yamt: …` line,
++  exit 2, file untouched), then logs any stored paths the range does not list once with tracing::warn!.
++  New src-tauri/src/review.rs has the seven commands; send_queue answers SendRunning while another send runs.
++  IpcError gains UnknownThread, UnknownMessage, EmptyMessage, MessagePending and SendRunning, plus an
++  exhaustive From<yamt_review::Error>.
++
++files_changed
++  src-tauri/src/review.rs (new)
++  src-tauri/src/range.rs
++  src-tauri/src/commands.rs
++  src-tauri/src/ipc_error.rs
++  src-tauri/src/lib.rs (`mod review;`; ownership granted by Main)
++  crates/review/src/lib.rs (`pub use yamt_gitio::Glab;`; ownership granted by Main)
++  src-tauri/AGENTS.md
++
++tests_added
++  range::tests::a_broken_threads_file_ends_before_any_window_with_exit_2 — the refusal line names the file,
++    Exit::Failure, no RangeState managed, the file bytes unchanged
++  range::tests::threads_on_a_path_the_range_does_not_list_are_kept_and_logged_once — exactly one WARN line with
++    paths=["gone.txt"]; list_threads answers no threads; the file is not rewritten
++  range::tests::a_range_whose_threads_are_all_listed_logs_no_warning — catches an inverted is_empty check
++  review::tests::a_thread_added_through_add_thread_comes_back_from_list_threads — list_threads equals
++    ThreadAdded.list; id, file, line and note body round-trip
++  review::tests::a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back — add_note, then
++    queue_message gives queued{text}, then unqueue_message gives notQueued
++  review::tests::thread_commands_answer_the_store_s_refusals_as_their_kinds — EmptyMessage, UnknownThread and
++    UnknownMessage reach the window as tagged errors
++  review::tests::a_second_send_while_one_runs_answers_send_running — with the guard held, the real send_queue
++    command answers SendRunning
++  review::tests::a_send_guard_let_go_is_taken_again — a released guard can be taken again
++  review::tests::each_progress_reaches_the_window_s_channel — forward_progress sends {"done":2,"of":3} to the
++    call's Channel
++  review::tests::each_review_error_has_its_kind_and_a_write_failure_names_the_file — the IpcError mapping for
++    every new kind (WriteFailed, UnknownRangeFile, UnknownThread, UnknownMessage, EmptyMessage, MessagePending,
++    SendRunning)
++  review::tests::a_start_only_review_error_is_its_line — NewerFormat maps to Git with its line
++
++smoke_evidence
++  cargo fmt --check → fmt-ok
++  cargo clippy --workspace --all-targets -- -D warnings → Finished `dev` profile … (no warnings)
++  cargo test -p yamt-app → test result: ok. 116 passed; 0 failed (lib), 5 passed (other target)
++    (filtered run: all 16 range::/review:: tests ok, the 11 above included)
++  cargo test -p yamt-review → 31 / 10 / 15 passed, 0 failed
++  just arch-check → arch-check: ok
++  Real app (debug build, XDG_DATA_HOME=/tmp/rv-shell/data, repo from scripts/range-repo.sh /tmp/rv-shell/repo):
++    timeout 10 xvfb-run -a target/debug/yamt --diff=main...feature --repo /tmp/rv-shell/repo
++      → exit=124: the window stayed open until the timeout killed it; pair lock created under yamt/range/…/
++      (only that it stays up — the page content was not looked at)
++    threads.json in that pair folder written by hand as `{"format":1,"nextThread":`, same command →
++      yamt: the review threads /tmp/rv-shell/data/yamt/range/repo-44a6a337eb346d6b/531ea52dfb892e20206010fb6cd6161d9c88964a-9c1ba3fc606a3776061d23006b83e2af2a357112/threads.json cannot be read: EOF while parsing a value at line 1 column 25; nothing was changed
++      exit=2
++      cmp <threads.json> /tmp/rv-shell/before.json → cmp: identical
++
++deviations_from_brief
++  - crates/review/src/lib.rs: added `pub use yamt_gitio::Glab;` (Main granted the file). The file now has it
++    after the `crate::` re-exports.
++  - src-tauri/src/lib.rs: added `mod review;` (Main granted the file).
++  - commands.rs specta_builder went over clippy's 40-line limit with the 7 new entries; added
++    #[expect(clippy::too_many_lines, reason = "one line per command of every window")].
++  - list_threads keeps the fixed signature Result<ThreadList, IpcError>, although listing cannot fail. It carries
++    #[expect(clippy::unnecessary_wraps)], as compare.rs open_compare does.
++  - range.rs tests module is now `pub(crate) mod tests`, and RangeWindow/open_range_window are pub(crate), so
++    review.rs tests reuse the range mock window. RangeState fields range/threads/sending are pub(crate) for
++    review.rs.
++  - The new error mappings are tested in review.rs, not ipc_error.rs, to keep ipc_error.rs near the 400-line limit.
++  - Glab::find() runs at every check_gitlab/send_queue call, so a glab installed while the window is open is
++    picked up.
++  - Lock order: plan row #117 says "taken in that order" (threads, then the send guard). As built, a send takes
++    the send guard first with try_lock, holds it for the whole send, and yamt_review::send_queue locks threads
++    only between glab calls. The guard is never waited for (try_lock), so this cannot deadlock. The RangeState doc
++    and AGENTS.md describe this order.
++
++open_risks
++  - src-tauri/src/ipc_error.rs is about 417 lines, over RS6's 400 (it was 384 before). Splitting it needs a file
++    outside Owned, e.g. src-tauri/src/ipc_error/tests.rs.
++  - review.rs check_gitlab and the send_queue path past the guard only run with a real glab on PATH. No test drives
++    them through the fake glab, because PATH is process-wide. A mutant replacing the check_gitlab body may survive;
++    the progress forwarding is covered through forward_progress. `just mutants` was not run.
++  - frontend/src/ipc/bindings.ts is not regenerated (it belongs to the orchestrator); `just bindings` is needed
++    before row 19.
++```
++
++Checks for you to run: `just bindings` (then `just bindings-check`), `just check`, and `just mutants` on src-tauri/src/{review,range,ipc_error}.rs.
+\ No newline at end of file
+diff --git a/crates/review/src/lib.rs b/crates/review/src/lib.rs
+index c3ad79a..b9e932f 100644
+--- a/crates/review/src/lib.rs
++++ b/crates/review/src/lib.rs
+@@ -22,6 +22,7 @@ pub use crate::thread_store::ThreadStore;
+ pub use crate::thread_types::{
+     Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine, ThreadList,
+ };
++pub use yamt_gitio::Glab;
+ 
+ /// A merge request as the window names it.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 381e02b..d5fd371 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` (plan §2 #103–#107): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_range`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), manages `RangeState { range, _lock }` without a `Mutex` (nothing changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and ends with exit 0 and no message at close; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`)), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one; `with_compare` and `with_range` set only the invoke handler), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`) and from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Three `Mutex`es, never held together: a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare` and `range` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_range`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and ends with exit 0 and no message at close; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`RangeWindow` are shared with `review.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning` — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the app's one page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; Tauri keeps only the last `on_page_load`, so no other place registers one; `with_compare` and `with_range` set only the invoke handler), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line) and from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`; the review mappings' tests live in `review.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>` and the send guard `Mutex<()>`. Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range` and `review` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index b894dcd..17bd466 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -6,8 +6,12 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
+ use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
+-use crate::{clipboard, compare, range, servers, settings};
++use crate::{clipboard, compare, range, review, servers, settings};
+ 
++#[expect(
++    clippy::too_many_lines,
++    reason = "one line per command of every window"
++)]
+ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
+         load_file,
+@@ -44,6 +48,13 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         compare::show_tab,
+         range::open_range,
+         range::load_range_file::<tauri::Wry>,
++        review::list_threads,
++        review::add_thread,
++        review::add_note,
++        review::queue_message,
++        review::unqueue_message,
++        review::check_gitlab::<tauri::Wry>,
++        review::send_queue::<tauri::Wry>,
+         clipboard::read_clipboard::<tauri::Wry>,
+     ])
+ }
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index 53eb8e2..79943c3 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -1,5 +1,6 @@
+ use yamt_compare::{MAX_COLUMN_BYTES, TabId};
+ use yamt_range::RangeFileId;
++use yamt_review::{MessageId, ThreadId};
+ use yamt_session::UnsupportedReason;
+ 
+ #[derive(Debug, serde::Serialize, specta::Type)]
+@@ -49,6 +50,17 @@ pub enum IpcError {
+         file: RangeFileId,
+     },
+     WorkerStopped,
++    UnknownThread {
++        thread: ThreadId,
++    },
++    UnknownMessage {
++        message: MessageId,
++    },
++    EmptyMessage,
++    MessagePending {
++        message: MessageId,
++    },
++    SendRunning,
+ }
+ 
+ /// Runs `work` on a blocking worker; a worker that panicked is logged and answers `WorkerStopped`.
+@@ -155,6 +167,27 @@ impl From<yamt_range::Error> for IpcError {
+     }
+ }
+ 
++impl From<yamt_review::Error> for IpcError {
++    fn from(error: yamt_review::Error) -> IpcError {
++        match error {
++            yamt_review::Error::WriteFailed { path, message } => IpcError::WriteFailed {
++                path: path.display().to_string(),
++                message,
++            },
++            yamt_review::Error::UnknownFile { file } => IpcError::UnknownRangeFile { file },
++            yamt_review::Error::UnknownThread { thread } => IpcError::UnknownThread { thread },
++            yamt_review::Error::UnknownMessage { message } => IpcError::UnknownMessage { message },
++            yamt_review::Error::EmptyMessage => IpcError::EmptyMessage,
++            yamt_review::Error::MessagePending { message } => IpcError::MessagePending { message },
++            yamt_review::Error::ReadFailed { .. }
++            | yamt_review::Error::Broken { .. }
++            | yamt_review::Error::NewerFormat { .. } => IpcError::Git {
++                message: error.to_string(),
++            },
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use serde_json::{Value, json};
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index dbd53a1..feee652 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -18,6 +18,7 @@ mod merge;
+ mod mock_window;
+ mod outcome;
+ mod range;
++mod review;
+ mod servers;
+ mod settings;
+ mod window;
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+index e4040f5..c146c10 100644
+--- a/src-tauri/src/range.rs
++++ b/src-tauri/src/range.rs
+@@ -1,7 +1,9 @@
+ use std::path::{Path, PathBuf};
++use std::sync::Mutex;
+ 
+ use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
++use yamt_review::ThreadStore;
+ 
+ use crate::ipc_error::{IpcError, blocking_reply};
+ use crate::outcome::Ending;
+@@ -9,9 +11,12 @@ use crate::window::{WindowKind, open_with_data_folder, window_title};
+ 
+ const RANGE_FOLDER: &str = "range";
+ 
+-/// The range the window shows and the lock on its commit pair, both held for the run (plan §2 #104, #107).
++/// The range the window shows, its review threads and the lock on its commit pair, held for the run
++/// (plan §2 #104, #107, #117): a send holds `sending` throughout and locks `threads` only between glab calls.
+ pub(crate) struct RangeState {
+-    range: Range,
++    pub(crate) range: Range,
++    pub(crate) threads: Mutex<ThreadStore>,
++    pub(crate) sending: Mutex<()>,
+     _lock: PairLock,
+ }
+ 
+@@ -29,7 +34,8 @@ pub(crate) fn run_range(repo: &Path, spec: &RangeSpec) -> Ending {
+     }
+ }
+ 
+-/// Takes the pair's lock in `<app_folder>/range/` before listing, then hands the range to the app.
++/// Takes the pair's lock in `<app_folder>/range/` before listing and reading the pair's threads, then
++/// hands the range to the app.
+ fn manage_range_in<R: Runtime>(
+     app: &App<R>,
+     app_folder: &Path,
+@@ -38,7 +44,17 @@ fn manage_range_in<R: Runtime>(
+     let lock =
+         PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
+     let range = resolved.list().map_err(|error| error.to_string())?;
+-    app.manage(RangeState { range, _lock: lock });
++    let threads = ThreadStore::open(lock.folder()).map_err(|error| error.to_string())?;
++    let unlisted = threads.unlisted_paths(&range);
++    if !unlisted.is_empty() {
++        tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");
++    }
++    app.manage(RangeState {
++        range,
++        threads: Mutex::new(threads),
++        sending: Mutex::new(()),
++        _lock: lock,
++    });
+     Ok(())
+ }
+ 
+@@ -69,7 +85,7 @@ pub(crate) async fn load_range_file<R: Runtime>(
+ }
+ 
+ #[cfg(test)]
+-mod tests {
++pub(crate) mod tests {
+     use serde_json::json;
+     use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
+     use tauri::{WebviewUrl, WebviewWindowBuilder};
+@@ -77,15 +93,19 @@ mod tests {
+ 
+     use super::*;
+     use crate::commands::with_commands;
++    use crate::frontend_log::tests::logged;
+     use crate::mock_window::invoke_on;
++    use crate::outcome::Exit;
+     use crate::window::app_folder;
+ 
+     const RANGE: &str = "main...remote";
++    const THREADS_FILE: &str = "threads.json";
++    const GONE_THREAD: &str = r#"{"format":1,"nextThread":2,"nextMessage":2,"threads":[{"id":1,"path":"gone.txt","line":{"kind":"added","right":0},"session":null,"messages":[{"id":1,"body":{"kind":"note","text":"Why?"},"written":0,"posting":{"kind":"notQueued"}}]}]}"#;
+ 
+-    struct RangeWindow {
+-        repo: TempDir,
+-        data: TempDir,
+-        webview: WebviewWindow<MockRuntime>,
++    pub(crate) struct RangeWindow {
++        pub(crate) repo: TempDir,
++        pub(crate) data: TempDir,
++        pub(crate) webview: WebviewWindow<MockRuntime>,
+         _app: App<MockRuntime>,
+     }
+ 
+@@ -110,9 +130,12 @@ mod tests {
+             .unwrap()
+     }
+ 
+-    fn open_range_window() -> RangeWindow {
+-        let repo = repo();
+-        let data = TempDir::new().unwrap();
++    /// A window on `main...remote` of a repository whose one file `a.txt` changes from "one" to "two".
++    pub(crate) fn open_range_window() -> RangeWindow {
++        open_range_window_in(repo(), TempDir::new().unwrap())
++    }
++
++    fn open_range_window_in(repo: TempDir, data: TempDir) -> RangeWindow {
+         let app = range_app();
+         manage_range_in(&app, &app_folder(data.path()), resolved(repo.path())).unwrap();
+         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+@@ -126,6 +149,54 @@ mod tests {
+         }
+     }
+ 
++    /// The threads file the window will read; the pair's lock is let go again.
++    fn threads_path(repo: &Path, data: &Path) -> PathBuf {
++        let lock = PairLock::take(&range_folder(&app_folder(data)), &resolved(repo)).unwrap();
++        lock.folder().join(THREADS_FILE)
++    }
++
++    // Opening on a file it cannot read would show no threads, and the next add would write over them.
++    #[test]
++    fn a_broken_threads_file_ends_before_any_window_with_exit_2() {
++        let (repo, data) = (repo(), TempDir::new().unwrap());
++        let threads = threads_path(repo.path(), data.path());
++        let broken = b"{\"format\":1,";
++        std::fs::write(&threads, broken).unwrap();
++        let app = range_app();
++
++        let refused = manage_range_in(&app, &app_folder(data.path()), resolved(repo.path()));
++
++        let line = refused.unwrap_err();
++        let named = format!("the review threads {} cannot be read: ", threads.display());
++        assert!(line.starts_with(&named), "{line}");
++        assert_eq!(Ending::failure(line).exit, Exit::Failure);
++        assert!(app.try_state::<RangeState>().is_none());
++        assert_eq!(std::fs::read(&threads).unwrap(), broken);
++    }
++
++    // A thread on a file this range does not list must survive, and its absence must be traceable.
++    #[test]
++    fn threads_on_a_path_the_range_does_not_list_are_kept_and_logged_once() {
++        let (repo, data) = (repo(), TempDir::new().unwrap());
++        let threads = threads_path(repo.path(), data.path());
++        std::fs::write(&threads, GONE_THREAD).unwrap();
++
++        let (window, log) = logged(|| open_range_window_in(repo, data));
++
++        let warnings: Vec<&str> = log.lines().filter(|line| line.contains("WARN")).collect();
++        assert_eq!(warnings.len(), 1, "{log}");
++        assert!(warnings[0].contains(r#"paths=["gone.txt"]"#), "{log}");
++        let listed = invoke_on(&window.webview, "list_threads", json!({}));
++        assert_eq!(listed, Ok(json!({ "threads": [] })));
++        assert_eq!(std::fs::read_to_string(&threads).unwrap(), GONE_THREAD);
++    }
++
++    #[test]
++    fn a_range_whose_threads_are_all_listed_logs_no_warning() {
++        let (_window, log) = logged(open_range_window);
++        assert!(!log.contains("WARN"), "{log}");
++    }
++
+     #[test]
+     fn open_range_answers_the_range_s_start() {
+         let window = open_range_window();
+diff --git a/src-tauri/src/review.rs b/src-tauri/src/review.rs
+new file mode 100644
+index 0000000..400dee9
+--- /dev/null
++++ b/src-tauri/src/review.rs
+@@ -0,0 +1,315 @@
++use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
++
++use tauri::ipc::Channel;
++use tauri::{Manager, Runtime, State, WebviewWindow};
++use yamt_range::RangeFileId;
++use yamt_review::{
++    GitLabCheck, Glab, MessageId, SendProgress, SendReply, ThreadAdded, ThreadId, ThreadLine,
++    ThreadList, ThreadStore,
++};
++
++use crate::ipc_error::{IpcError, blocking_reply};
++use crate::range::RangeState;
++
++fn locked(threads: &Mutex<ThreadStore>) -> MutexGuard<'_, ThreadStore> {
++    threads.lock().unwrap_or_else(PoisonError::into_inner)
++}
++
++/// The send guard, or `SendRunning` while another send holds it.
++fn send_guard(sending: &Mutex<()>) -> Result<MutexGuard<'_, ()>, IpcError> {
++    match sending.try_lock() {
++        Ok(guard) => Ok(guard),
++        Err(TryLockError::Poisoned(poisoned)) => Ok(poisoned.into_inner()),
++        Err(TryLockError::WouldBlock) => Err(IpcError::SendRunning),
++    }
++}
++
++fn forward_progress(channel: &Channel<SendProgress>, progress: SendProgress) {
++    if let Err(error) = channel.send(progress) {
++        tracing::warn!(%error, "a send's progress did not reach the window");
++    }
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++#[expect(
++    clippy::unnecessary_wraps,
++    reason = "every command answers a Result the window checks"
++)]
++pub(crate) fn list_threads(state: State<'_, RangeState>) -> Result<ThreadList, IpcError> {
++    Ok(locked(&state.threads).list(&state.range))
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn add_thread(
++    state: State<'_, RangeState>,
++    file: RangeFileId,
++    line: ThreadLine,
++    text: String,
++) -> Result<ThreadAdded, IpcError> {
++    Ok(locked(&state.threads).add_thread(&state.range, file, line, &text)?)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn add_note(
++    state: State<'_, RangeState>,
++    thread: ThreadId,
++    text: String,
++) -> Result<ThreadList, IpcError> {
++    Ok(locked(&state.threads).add_note(&state.range, thread, &text)?)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn queue_message(
++    state: State<'_, RangeState>,
++    message: MessageId,
++    text: String,
++) -> Result<ThreadList, IpcError> {
++    Ok(locked(&state.threads).queue(&state.range, message, &text)?)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
++pub(crate) fn unqueue_message(
++    state: State<'_, RangeState>,
++    message: MessageId,
++) -> Result<ThreadList, IpcError> {
++    Ok(locked(&state.threads).unqueue(&state.range, message)?)
++}
++
++// The range comes from the window: tauri-macros 2.7 checks an async command with a borrowed
++// argument such as `State<'_, _>` by an `unreachable!()` that clippy denies (command/wrapper.rs:222).
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn check_gitlab<R: Runtime>(
++    window: WebviewWindow<R>,
++) -> Result<GitLabCheck, IpcError> {
++    blocking_reply(move || {
++        let state = window.state::<RangeState>();
++        Ok(yamt_review::check_gitlab(
++            &state.range,
++            Glab::find().as_ref(),
++        ))
++    })
++    .await
++}
++
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn send_queue<R: Runtime>(
++    window: WebviewWindow<R>,
++    progress: Channel<SendProgress>,
++) -> Result<SendReply, IpcError> {
++    blocking_reply(move || {
++        let state = window.state::<RangeState>();
++        let _sending = send_guard(&state.sending)?;
++        let forward = |done| forward_progress(&progress, done);
++        let glab = Glab::find();
++        Ok(yamt_review::send_queue(
++            &state.range,
++            glab.as_ref(),
++            &state.threads,
++            &forward,
++        )?)
++    })
++    .await
++}
++
++#[cfg(test)]
++mod tests {
++    use std::sync::mpsc;
++
++    use serde_json::{Value, json};
++    use tauri::ipc::InvokeResponseBody;
++    use yamt_review::Error;
++
++    use super::*;
++    use crate::mock_window::invoke_on;
++    use crate::range::tests::{RangeWindow, open_range_window};
++
++    const FILE: u32 = 0;
++    const ADDED_LINE: u32 = 0;
++    const UNKNOWN_ID: u32 = 9;
++
++    fn invoke(window: &RangeWindow, cmd: &str, args: Value) -> Result<Value, Value> {
++        invoke_on(&window.webview, cmd, args)
++    }
++
++    fn add_first_thread(window: &RangeWindow) -> Value {
++        let line = json!({ "kind": "added", "right": ADDED_LINE });
++        let args = json!({ "file": FILE, "line": line, "text": "Why two?" });
++        invoke(window, "add_thread", args).unwrap()
++    }
++
++    #[test]
++    fn a_thread_added_through_add_thread_comes_back_from_list_threads() {
++        let window = open_range_window();
++
++        let added = add_first_thread(&window);
++
++        let listed = invoke(&window, "list_threads", json!({})).unwrap();
++        assert_eq!(listed, added["list"]);
++        let thread = &listed["threads"][0];
++        assert_eq!(thread["id"], added["thread"]);
++        assert_eq!(thread["file"], FILE);
++        assert_eq!(
++            thread["line"],
++            json!({ "kind": "added", "right": ADDED_LINE })
++        );
++        let note = json!({ "kind": "note", "text": "Why two?" });
++        assert_eq!(thread["messages"][0]["body"], note);
++    }
++
++    #[test]
++    fn a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back() {
++        let window = open_range_window();
++        let added = add_first_thread(&window);
++        let thread = &added["thread"];
++
++        let noted = invoke(
++            &window,
++            "add_note",
++            json!({ "thread": thread, "text": "Ok." }),
++        );
++        let message = noted.unwrap()["threads"][0]["messages"][1]["id"].clone();
++        let queued = invoke(
++            &window,
++            "queue_message",
++            json!({ "message": message, "text": "Ok!" }),
++        );
++        let posting = |list: &Value| list["threads"][0]["messages"][1]["posting"].clone();
++        assert_eq!(
++            posting(&queued.unwrap()),
++            json!({ "kind": "queued", "text": "Ok!" })
++        );
++        let unqueued = invoke(&window, "unqueue_message", json!({ "message": message }));
++        assert_eq!(posting(&unqueued.unwrap()), json!({ "kind": "notQueued" }));
++    }
++
++    #[test]
++    fn thread_commands_answer_the_store_s_refusals_as_their_kinds() {
++        let window = open_range_window();
++        let blank = json!({ "file": FILE, "line": { "kind": "added", "right": 0 }, "text": " " });
++        assert_eq!(
++            invoke(&window, "add_thread", blank),
++            Err(json!({ "kind": "EmptyMessage" }))
++        );
++        let note = json!({ "thread": UNKNOWN_ID, "text": "Ok." });
++        assert_eq!(
++            invoke(&window, "add_note", note),
++            Err(json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID }))
++        );
++        assert_eq!(
++            invoke(&window, "unqueue_message", json!({ "message": UNKNOWN_ID })),
++            Err(json!({ "kind": "UnknownMessage", "message": UNKNOWN_ID }))
++        );
++    }
++
++    // Two sends at once would post the same queued messages twice.
++    #[test]
++    fn a_second_send_while_one_runs_answers_send_running() {
++        let window = open_range_window();
++        let state = window.webview.state::<RangeState>();
++        let _running = send_guard(&state.sending).unwrap();
++
++        let progress = Channel::new(|_| Ok(()));
++        let second = tauri::async_runtime::block_on(send_queue(window.webview.clone(), progress));
++
++        assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
++    }
++
++    #[test]
++    fn a_send_guard_let_go_is_taken_again() {
++        let sending = Mutex::new(());
++        drop(send_guard(&sending).unwrap());
++        assert!(send_guard(&sending).is_ok());
++    }
++
++    #[test]
++    fn each_progress_reaches_the_window_s_channel() {
++        let (sender, received) = mpsc::channel();
++        let channel = Channel::new(move |body| {
++            let InvokeResponseBody::Json(json) = body else {
++                panic!("progress that is not JSON");
++            };
++            sender.send(json).unwrap();
++            Ok(())
++        });
++
++        forward_progress(&channel, SendProgress { done: 2, of: 3 });
++
++        let sent: Value = serde_json::from_str(&received.recv().unwrap()).unwrap();
++        assert_eq!(sent, json!({ "done": 2, "of": 3 }));
++    }
++
++    fn review_json(error: Error) -> Value {
++        serde_json::to_value(IpcError::from(error)).unwrap()
++    }
++
++    #[test]
++    fn each_review_error_has_its_kind_and_a_write_failure_names_the_file() {
++        let write_failed = Error::WriteFailed {
++            path: "/d/threads.json".into(),
++            message: "disk full".to_owned(),
++        };
++        assert_eq!(
++            review_json(write_failed),
++            json!({ "kind": "WriteFailed", "path": "/d/threads.json", "message": "disk full" })
++        );
++        assert_eq!(
++            review_json(Error::UnknownFile {
++                file: RangeFileId(4)
++            }),
++            json!({ "kind": "UnknownRangeFile", "file": 4 })
++        );
++        assert_eq!(
++            review_json(Error::UnknownThread {
++                thread: ThreadId(5)
++            }),
++            json!({ "kind": "UnknownThread", "thread": 5 })
++        );
++        assert_eq!(
++            review_json(Error::UnknownMessage {
++                message: MessageId(6)
++            }),
++            json!({ "kind": "UnknownMessage", "message": 6 })
++        );
++        assert_eq!(
++            review_json(Error::EmptyMessage),
++            json!({ "kind": "EmptyMessage" })
++        );
++        assert_eq!(
++            review_json(Error::MessagePending {
++                message: MessageId(7)
++            }),
++            json!({ "kind": "MessagePending", "message": 7 })
++        );
++        assert_eq!(
++            serde_json::to_value(IpcError::SendRunning).unwrap(),
++            json!({ "kind": "SendRunning" })
++        );
++    }
++
++    #[test]
++    fn a_start_only_review_error_is_its_line() {
++        let newer = Error::NewerFormat {
++            path: "/d/threads.json".into(),
++            format: 2,
++        };
++        assert_eq!(
++            review_json(newer),
++            json!({
++                "kind": "Git",
++                "message": "the review threads /d/threads.json were written by a newer yamt (format 2)",
++            })
++        );
++    }
++}
+-- 
+2.56.0
+

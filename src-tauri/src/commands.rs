@@ -6,8 +6,12 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{clipboard, compare, servers, settings};
+use crate::{ai, clipboard, compare, range, review, servers, settings};
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one line per command of every window"
+)]
 pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
     tauri_specta::Builder::new().commands(tauri_specta::collect_commands![
         load_file,
@@ -28,6 +32,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         settings::set_server_answer::<tauri::Wry>,
         settings::set_server_switch::<tauri::Wry>,
         settings::set_added_servers::<tauri::Wry>,
+        settings::set_agent::<tauri::Wry>,
         servers::servers_context,
         servers::start_server,
         servers::send_to_server,
@@ -42,6 +47,26 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         compare::rename_tab,
         compare::set_tab_language,
         compare::show_tab,
+        range::open_range,
+        range::load_range_file::<tauri::Wry>,
+        review::list_threads,
+        review::add_thread,
+        review::add_note,
+        review::queue_message,
+        review::unqueue_message,
+        review::edit_note,
+        review::delete_message,
+        review::set_thread_session,
+        review::add_ai_answer,
+        review::check_gitlab::<tauri::Wry>,
+        review::send_queue::<tauri::Wry>,
+        ai::prepare_checkout::<tauri::Wry>,
+        ai::start_agent::<tauri::Wry>,
+        ai::send_to_agent,
+        ai::stop_agent,
+        ai::checkout_changes::<tauri::Wry>,
+        ai::discard_checkout::<tauri::Wry>,
+        ai::diff_texts,
         clipboard::read_clipboard::<tauri::Wry>,
     ])
 }
@@ -60,9 +85,14 @@ pub(crate) fn with_session<R: Runtime>(
         })
 }
 
-/// The compare window's commands; its `CompareState` is managed once the data folder is known.
-pub(crate) fn with_compare<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
-    builder.invoke_handler(specta_builder().invoke_handler())
+/// A window whose state is managed once the data folder is known: the compare and range windows. A
+/// range window's page that starts loading stops the agent of the page before.
+pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
+        .invoke_handler(specta_builder().invoke_handler())
+        .on_page_load(|webview, page| {
+            ai::stop_agent_on_page_start(webview.app_handle(), page.event());
+        })
 }
 
 #[tauri::command]

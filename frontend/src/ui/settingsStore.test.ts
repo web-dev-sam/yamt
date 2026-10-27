@@ -26,6 +26,7 @@ function settingsStore(settings = shallowRef(startSettings("dark"))): SettingsSt
     removeKey: nothing,
     removeAllKeys: nothing,
     resetKeys: nothing,
+    setAgent: nothing,
   };
 }
 

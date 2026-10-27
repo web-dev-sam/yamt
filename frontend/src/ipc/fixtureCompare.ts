@@ -16,7 +16,7 @@ import {
 } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
 import type { SourceResult } from "./domain";
-import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
+import { COLUMN_LIMIT_BYTES, DIFFERENCE, parsedCases } from "./fixture";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
@@ -50,33 +50,20 @@ const CASE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
 );
 // Stryker restore all
 
-const COLUMN_LIMIT_BYTES = 8_388_608;
-
 const FIRST_TAB_ID = 1;
 
 const CASE = v.object({
-  differences: v.array(
-    v.object({
-      left: LINE_RANGE,
-      right: LINE_RANGE,
-      words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
-    }),
-  ),
+  differences: v.array(DIFFERENCE),
   left: v.string(),
   right: v.string(),
 });
 
 function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
-  return new Map(
-    Object.entries(files).map(([file, json]) => [
-      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
-      parsedFixture(CASE, `compare fixture ${file}`, json, ({ left, right, differences }) => ({
-        left,
-        right,
-        differences: toDifferences(differences),
-      })),
-    ]),
-  );
+  return parsedCases(CASE, "compare fixture", files, ({ left, right, differences }) => ({
+    left,
+    right,
+    differences: toDifferences(differences),
+  }));
 }
 
 function addTab(tabs: Tabs): FixtureTab {

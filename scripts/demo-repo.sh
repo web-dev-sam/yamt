@@ -36,14 +36,12 @@ install_typescript_server
 
 declare -A was_put
 
-# $1: the layer under scripts/demo (base, main or feature), then the paths to copy from it into the repo.
-put() {
+# The arguments of put; also records each path for require_all_put.
+put_recorded() {
     local layer=$1 path
+    put "$@"
     shift
     for path in "$@"; do
-        mkdir -p "$(dirname "$dir/$path")"
-        cp "$files/$layer/$path" "$dir/$path"
-        repo_git add -- "$path"
         was_put[$layer/$path]=1
     done
 }
@@ -72,33 +70,33 @@ maya="Maya Lindqvist <maya@taskboard.example>"
 mkdir -p "$dir"
 git -c init.defaultBranch=main init -q "$dir"
 
-put base package.json tsconfig.json .oxlintrc.json .oxfmtrc.json .gitignore index.html README.md
+put_recorded base package.json tsconfig.json .oxlintrc.json .oxfmtrc.json .gitignore index.html README.md
 commit_as "$priya" 2026-09-28T10:12:00+02:00 "Set up Vite, TypeScript, oxlint and oxfmt"
-put base src/board/types.ts src/board/card.ts src/board/board.ts src/board/storage.ts src/ui/cardView.ts \
-    src/styles.css
+put_recorded base src/board/types.ts src/board/card.ts src/board/board.ts src/board/storage.ts \
+    src/ui/cardView.ts src/styles.css
 commit_as "$priya" 2026-09-30T16:40:00+02:00 "Board model: columns, cards, labels and the activity feed"
-put base src/api/client.ts src/api/mockBoards.ts src/main.ts
+put_recorded base src/api/client.ts src/api/mockBoards.ts src/main.ts
 commit_as "$tomas" 2026-10-02T11:05:00+02:00 "Load boards from the API, with a mock board on localhost"
-put base public/logo.png docs/shortcuts.md
+put_recorded base public/logo.png docs/shortcuts.md
 commit_as "$maya" 2026-10-06T09:30:00+02:00 "Add the logo and the list of keyboard shortcuts"
 require_all_put base
 
 repo_git checkout -q -b feature/reminders
-put feature src/api/client.ts vite.config.ts README.md
+put_recorded feature src/api/client.ts vite.config.ts README.md
 repo_git rm -q -- src/api/mockBoards.ts
 commit_as "$tomas" 2026-10-12T14:20:00+02:00 "Drop the mock board: pnpm dev proxies /api to staging"
-put feature src/board/types.ts src/board/storage.ts src/board/card.ts src/ui/cardView.ts
+put_recorded feature src/board/types.ts src/board/storage.ts src/board/card.ts src/ui/cardView.ts
 commit_as "$tomas" 2026-10-14T10:02:00+02:00 "Store due times instead of days (dueDate → dueAt)"
-put feature src/board/board.ts src/styles.css docs/shortcuts.md public/logo.png
+put_recorded feature src/board/board.ts src/styles.css docs/shortcuts.md public/logo.png
 commit_as "$tomas" 2026-10-16T17:45:00+02:00 "Reminders before a card is due"
 require_all_put feature
 
 repo_git checkout -q main
-put main src/board/board.ts src/board/card.ts src/ui/cardView.ts src/styles.css docs/shortcuts.md README.md
+put_recorded main src/board/board.ts src/board/card.ts src/ui/cardView.ts src/styles.css docs/shortcuts.md README.md
 commit_as "$maya" 2026-10-13T15:10:00+02:00 "Swimlanes: group a column's cards by person"
-put main src/api/mockBoards.ts src/api/client.ts
+put_recorded main src/api/mockBoards.ts src/api/client.ts
 commit_as "$maya" 2026-10-15T11:25:00+02:00 "Mock board: people on the cards, ?mocks on any host"
-put main public/logo.png
+put_recorded main public/logo.png
 commit_as "$maya" 2026-10-17T09:50:00+02:00 "Refresh the logo"
 require_all_put main
 

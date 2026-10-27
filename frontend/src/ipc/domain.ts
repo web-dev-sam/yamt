@@ -1,11 +1,14 @@
 import type * as Generated from "./bindings";
-import { invalid, isNonNegativeInteger } from "./validate";
+import { branded, invalid, isNonNegativeInteger } from "./validate";
 import { toSideWords, type SideWords } from "./words";
 
 export type TabId = number & { readonly __brand: "TabId" };
 export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
 export type LeftLine = number & { readonly __brand: "LeftLine" };
 export type RightLine = number & { readonly __brand: "RightLine" };
+export type RangeFileId = number & { readonly __brand: "RangeFileId" };
+export type ThreadId = number & { readonly __brand: "ThreadId" };
+export type MessageId = number & { readonly __brand: "MessageId" };
 
 type MiddleLine = number & { readonly __brand: "MiddleLine" };
 export type DiskVersion = number & { readonly __brand: "DiskVersion" };
@@ -32,25 +35,15 @@ export type FileSides = Omit<Generated.FileSides, "disk_version"> & {
 };
 
 export type SideContent = Generated.SideContent;
-
 export type Side = Generated.Side;
-
 export type SideName = Generated.SideName;
-
 export type SideNames = Generated.SideNames;
-
 export type NotText = Generated.NotText;
-
 export type DiskResult = Generated.DiskResult;
-
 export type DiskChange = Generated.DiskChange;
-
 export type WriteReply = Generated.WriteReply;
-
 export type Theme = Generated.Theme;
-
 export type Antialiasing = Generated.Antialiasing;
-
 export type ClipboardSelection = Generated.ClipboardSelection;
 
 export type LanguageServerSettings = Required<Generated.LanguageServerSettings>;
@@ -60,12 +53,14 @@ export type StoredSettings = Omit<Generated.StoredSettings, "languageServers"> &
 };
 
 export type KeysChange = Generated.KeysChange;
-
 export type RepositoryAnswer = Generated.RepositoryAnswer;
-
 export type AddedServer = Generated.AddedServer;
+export type AgentSettings = Generated.AgentSettings;
 
 export type RunId = number & { readonly __brand: "RunId" };
+export type AgentRun = number & { readonly __brand: "AgentRun" };
+export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
+export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
 
 export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
 export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
@@ -150,6 +145,24 @@ function isRunId(n: number): n is RunId {
   return isNonNegativeInteger(n);
 }
 
+export function isAgentRun(n: number): n is AgentRun {
+  return isNonNegativeInteger(n);
+}
+
+const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u;
+
+export function isCheckoutFolder(path: string): path is CheckoutFolder {
+  return ABSOLUTE_PATH.test(path);
+}
+
+export function isAgentSessionId(text: string): text is AgentSessionId {
+  return text !== "";
+}
+
+export function agentSessionId(text: string): AgentSessionId | null {
+  return isAgentSessionId(text) ? text : null;
+}
+
 export function isTabId(n: number): n is TabId {
   return isNonNegativeInteger(n);
 }
@@ -166,12 +179,20 @@ export function isRightLine(n: number): n is RightLine {
   return isNonNegativeInteger(n);
 }
 
+export function isRangeFileId(value: number): value is RangeFileId {
+  return isNonNegativeInteger(value);
+}
+
+export function isThreadId(value: number): value is ThreadId {
+  return isNonNegativeInteger(value);
+}
+
+export function isMessageId(value: number): value is MessageId {
+  return isNonNegativeInteger(value);
+}
+
 export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
-  const next = version + 1;
-  if (!isColumnVersion(next)) {
-    throw invalid("version", next);
-  }
-  return next;
+  return branded(version + 1, isColumnVersion, "version");
 }
 
 function toWords({
@@ -201,10 +222,8 @@ export function toRange<L extends number>({
   isLine: (n: number) => n is L;
   field: string;
 }): LineRange<L> {
-  const { start, len } = range;
-  if (!isLine(start)) {
-    throw invalid(`${field}.start`, start);
-  }
+  const start = branded(range.start, isLine, `${field}.start`);
+  const { len } = range;
   if (!isNonNegativeInteger(len)) {
     throw invalid(`${field}.len`, len);
   }
@@ -214,10 +233,7 @@ export function toRange<L extends number>({
 function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
   const field = `chunks[${index}]`;
   const { chunk } = merged;
-  const { id } = chunk;
-  if (!isChunkId(id)) {
-    throw invalid(`${field}.chunk.id`, id);
-  }
+  const id = branded(chunk.id, isChunkId, `${field}.chunk.id`);
   return {
     id,
     kind: chunk.kind,
@@ -229,13 +245,6 @@ function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
   };
 }
 
-function toDiskVersion(n: number, field: string): DiskVersion {
-  if (!isDiskVersion(n)) {
-    throw invalid(field, n);
-  }
-  return n;
-}
-
 export function toDomain(dto: Generated.FileMergeData): FileMergeData {
   return {
     path: dto.path,
@@ -245,13 +254,13 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
     deleted: dto.deleted,
     eol: dto.eol,
     chunks: dto.chunks.map(toChunk),
-    diskVersion: toDiskVersion(dto.disk_version, "disk_version"),
+    diskVersion: branded(dto.disk_version, isDiskVersion, "disk_version"),
   };
 }
 
 export function toSides(dto: Generated.FileSides): FileSides {
   const { disk_version: diskVersion, ...sides } = dto;
-  return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
+  return { ...sides, diskVersion: branded(diskVersion, isDiskVersion, "disk_version") };
 }
 
 export function toListing(dto: Generated.Listing): Listing {
@@ -275,9 +284,5 @@ export function toStartReply(dto: Generated.StartReply): StartReply {
   if (dto.kind !== "Started") {
     return dto;
   }
-  const { run } = dto;
-  if (!isRunId(run)) {
-    throw invalid("run", run);
-  }
-  return { kind: "Started", run };
+  return { kind: "Started", run: branded(dto.run, isRunId, "run") };
 }

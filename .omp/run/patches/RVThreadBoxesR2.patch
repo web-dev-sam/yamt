@@ -1,0 +1,179 @@
+From df26a5a4b524ea88c5dc83b18d3d10cbea60325b Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:36:55 +0100
+Subject: [PATCH] fix(app-session): --glab parsing never reads the disk; the
+ folder is checked at start
+
+---
+ frontend/scripts/app-session/args.test.ts     |  6 ++--
+ frontend/scripts/app-session/start.ts         |  9 ++---
+ .../scripts/app-session/startArgs.test.ts     | 36 ++++++++-----------
+ frontend/scripts/app-session/startArgs.ts     | 21 +++++------
+ 4 files changed, 29 insertions(+), 43 deletions(-)
+
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 380f265..1b244c0 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -100,7 +100,7 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
+   expect(appArgs({ kind: "fresh" }, "/tmp/s/repo")).toEqual(["--repo", "/tmp/s/repo"]);
+ });
+ 
+-test("start-app --glab names a tests/glab scenario, only with --range", () => {
++test("start-app --glab names a tests/glab scenario by its form, only with --range", () => {
+   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+   expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
+   expect(parseCommand(range)).toMatchObject({ glab: null });
+@@ -116,9 +116,7 @@ test("start-app --glab names a tests/glab scenario, only with --range", () => {
+   expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);
+   expect(() => parseCommand([...range, "--glab", "Moved"])).toThrow(folderName);
+   expect(() => parseCommand([...range, "--glab", "lined-up/../moved"])).toThrow(folderName);
+-  expect(() => parseCommand([...range, "--glab", "nosuch"])).toThrow(
+-    /--glab nosuch: no scenario folder .*tests\/glab\/nosuch$/,
+-  );
++  expect(parseCommand([...range, "--glab", "nosuch"])).toMatchObject({ glab: "nosuch" });
+   expect(() => parseCommand([...range, "--glab"])).toThrow(/--glab needs a value/);
+ });
+ 
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 703fd0f..7f8fa62 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -68,6 +68,7 @@ function privateConfig(home: string): string {
+ }
+ 
+ function prepareApp(command: StartApp, folder: string): Prepared {
++  const scenarioFolder = command.glab === null ? null : glabFolder(command.glab, existsSync);
+   const binary = fromRoot(command.binary);
+   if (!existsSync(binary)) {
+     throw new Error(`no app at ${binary}; build it with cargo tauri build --debug --no-bundle`);
+@@ -79,18 +80,18 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
+   }
+   const repoDir = repoFolder(command.opens, folder);
+-  const glab = fakeGlab(command.glab, folder);
++  const glab = fakeGlab(scenarioFolder, folder);
+   return { home, configDir, repoDir, binary, args: appArgs(command.opens, repoDir), glab };
+ }
+ 
+-function fakeGlab(scenario: string | null, folder: string): FakeGlab | null {
+-  if (scenario === null) {
++function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
++  if (scenarioFolder === null) {
+     return null;
+   }
+   const dir = join(folder, "glab");
+   mkdirSync(dir);
+   const link = join(dir, "scenario");
+-  symlinkSync(glabFolder(scenario), link);
++  symlinkSync(scenarioFolder, link);
+   return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
+ }
+ 
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index 149ca54..228e4a0 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -1,34 +1,26 @@
+ import { expect, test } from "vitest";
+ 
+-import type { Parsed } from "./argv";
+-import { glabFolder, glabScenario } from "./startArgs";
++import { glabFolder } from "./startArgs";
+ 
+-const RANGE = { kind: "range", range: "main...feature", dir: "/tmp/rr" } as const;
+-
+-function withGlab(scenario: string): Parsed {
+-  return { values: new Map([["glab", scenario]]), flags: new Set(), positionals: [] };
+-}
+-
+-test("a scenario names its folder under tests/glab", () => {
+-  expect(glabFolder("lined-up")).toMatch(/\/tests\/glab\/lined-up$/);
+-});
+-
+-test("a scenario whose folder exists is taken; the lookup is asked about that folder", () => {
++test("a scenario whose folder exists is its folder under tests/glab; the lookup is asked about it", () => {
+   const asked: string[] = [];
+-  const scenario = glabScenario(withGlab("lined-up"), RANGE, (path) => {
++  const folder = glabFolder("lined-up", (path) => {
+     asked.push(path);
+     return true;
+   });
+ 
+-  expect(scenario).toBe("lined-up");
+-  expect(asked).toEqual([glabFolder("lined-up")]);
++  expect(folder).toMatch(/\/tests\/glab\/lined-up$/);
++  expect(asked).toEqual([folder]);
+ });
+ 
+ test("an unknown scenario is refused at start, naming the folder it looked for", () => {
+-  expect(() => glabScenario(withGlab("lined_up"), RANGE, () => false)).toThrow(
+-    /--glab lined_up: expected a folder name/,
+-  );
+-  expect(() => glabScenario(withGlab("nosuch"), RANGE, () => false)).toThrow(
+-    `--glab nosuch: no scenario folder ${glabFolder("nosuch")}`,
+-  );
++  const asked: string[] = [];
++  expect(() =>
++    glabFolder("nosuch", (path) => {
++      asked.push(path);
++      return false;
++    }),
++  ).toThrow(/^--glab nosuch: no scenario folder \/.*\/tests\/glab\/nosuch$/);
++  expect(asked).toHaveLength(1);
++  expect(() => glabFolder("nosuch", () => false)).toThrow(`no scenario folder ${asked[0]}`);
+ });
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index 2fa74d3..b746799 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -1,4 +1,3 @@
+-import { existsSync } from "node:fs";
+ import { join } from "node:path";
+ 
+ import { noPositionals, sessionName, wholeNumber, type Parsed } from "./argv";
+@@ -93,15 +92,15 @@ function fixtureSearch(parsed: Parsed): string {
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+ }
+ 
+-export function glabFolder(scenario: string): string {
+-  return fromRoot(join("tests/glab", scenario));
++export function glabFolder(scenario: string, isFolder: (path: string) => boolean): string {
++  const folder = fromRoot(join("tests/glab", scenario));
++  if (!isFolder(folder)) {
++    throw new Error(`--glab ${scenario}: no scenario folder ${folder}`);
++  }
++  return folder;
+ }
+ 
+-export function glabScenario(
+-  parsed: Parsed,
+-  opens: Opening,
+-  isFolder: (path: string) => boolean,
+-): string | null {
++function glabScenario(parsed: Parsed, opens: Opening): string | null {
+   const scenario = parsed.values.get("glab");
+   if (scenario === undefined) {
+     return null;
+@@ -112,10 +111,6 @@ export function glabScenario(
+   if (!/^[a-z0-9-]+$/.test(scenario)) {
+     throw new Error(`--glab ${scenario}: expected a folder name under tests/glab/, e.g. lined-up`);
+   }
+-  const folder = glabFolder(scenario);
+-  if (!isFolder(folder)) {
+-    throw new Error(`--glab ${scenario}: no scenario folder ${folder}`);
+-  }
+   return scenario;
+ }
+ 
+@@ -178,6 +173,6 @@ export function startCommand(kind: StartCommand["kind"], parsed: Parsed): StartC
+     size: size(parsed),
+     record: recording(parsed),
+     home: parsed.values.get("home") ?? null,
+-    glab: glabScenario(parsed, opens, existsSync),
++    glab: glabScenario(parsed, opens),
+   };
+ }
+-- 
+2.56.0
+

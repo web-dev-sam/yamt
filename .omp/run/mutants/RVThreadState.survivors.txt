@@ -1,0 +1,15 @@
+just mutants 0849cc3 (covers fd06743 RVThreadState): Stryker 8 files, 1017 mutants; 919 killed, 30 survived, 28 no coverage, 1 timeout.
+On lines fd06743 changed: 28 —
+Survived rangeGitLab.ts:68     if (check === null || start === null) → || false
+Survived rangeGitLab.ts:123    if (state.sending.value !== null || lastEnded === null) → false || …
+NoCoverage rangeThreads.ts:108 : [] → ["Stryker was here"]
+Survived rangeThreads.ts:74-75 noteKey body / `note-${thread}` → ``
+Survived rangeThreads.ts:95    sameLine: first.column === second.column → true
+Survived rangeThreads.ts:99-100 shownFor: .filter((thread) => thread.file === file) removed / → true
+Survived rangeThreads.ts:106 (×4) draft.kind === "thread" && draft.file === file → true / || / each side true
+Survived rangeThreads.ts:126   startThread's draft match: draft.kind === "thread" → true
+Survived rangeThreads.ts:168   draft === null → false
+Survived rangeThreads.ts:173   state.adding.delete(key) removed
+Survived rangeThreads.ts:176   if (kept !== null) → true
+NoCoverage rangeThreadText.ts:60, :77 (×4): `never` default arms — unreachable by type
+NoCoverage useRangeController.ts:166-176 (×8): the per-file controller build closure (threads, startThread, toggleThreads, build) — no node test builds a column

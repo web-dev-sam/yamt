@@ -1,0 +1,188 @@
+just mutants bc5fc7a (covers f23dc3c RVAgentClient): Stryker 18 files, 2066 mutants; 1483 killed, 181 survived, 256 no coverage, 3 timeout.
+On lines f23dc3c changed: 186 (failure.ts 18, process.ts 43, protocol.ts 15, session.ts 7, turn.ts 9, agent/index.ts 32, AgentSource.ts 6, domain.ts 3, fixtureAgent.ts 51, firstMessage.ts 1, inside.ts 1):
+NoCoverage ConditionalExpression frontend/src/agent/internal/failure.ts:30 | -     return "message" in failure && typeof failure.message === "string" => +     return "message" in failure && true
+NoCoverage EqualityOperator frontend/src/agent/internal/failure.ts:30 | -     return "message" in failure && typeof failure.message === "string" => +     return "message" in failure && typeof failure.message 
+NoCoverage StringLiteral frontend/src/agent/internal/failure.ts:30 | -     return "message" in failure && typeof failure.message === "string" => +     return "message" in failure && typeof failure.message 
+NoCoverage ConditionalExpression frontend/src/agent/internal/failure.ts:43 | -       default: { => -         const _exhaustive: never = reply;
+NoCoverage BlockStatement frontend/src/agent/internal/failure.ts:43 | -       default: { => -         const _exhaustive: never = reply;
+NoCoverage ConditionalExpression frontend/src/agent/internal/failure.ts:57 | -       case "timedOut": => -         return { kind: "refused", method, message: "no ans
+NoCoverage StringLiteral frontend/src/agent/internal/failure.ts:57 | -       case "timedOut": => +       case "":
+NoCoverage ObjectLiteral frontend/src/agent/internal/failure.ts:58 | -         return { kind: "refused", method, message: "no answer" }; => +         return {};
+NoCoverage StringLiteral frontend/src/agent/internal/failure.ts:58 | -         return { kind: "refused", method, message: "no answer" }; => +         return { kind: "", method, message: "no answer" };
+NoCoverage StringLiteral frontend/src/agent/internal/failure.ts:58 | -         return { kind: "refused", method, message: "no answer" }; => +         return { kind: "refused", method, message: "" };
+NoCoverage ConditionalExpression frontend/src/agent/internal/failure.ts:59 | -       default: { => -         const _exhaustive: never = reply;
+NoCoverage BlockStatement frontend/src/agent/internal/failure.ts:59 | -       default: { => -         const _exhaustive: never = reply;
+Survived ConditionalExpression frontend/src/agent/internal/failure.ts:30 | -     return "message" in failure && typeof failure.message === "string" => +     return false
+Survived StringLiteral frontend/src/agent/internal/failure.ts:30 | -     return "message" in failure && typeof failure.message === "string" => +     return "" in failure && typeof failure.message === "st
+Survived LogicalOperator frontend/src/agent/internal/failure.ts:30 | -     return "message" in failure && typeof failure.message === "string" => +     return "message" in failure || typeof failure.message 
+Survived OptionalChaining frontend/src/agent/internal/failure.ts:56 | -         return { kind: "crashed", code: exit?.code ?? null, lastLog: exit?.lastLog ?? nu => +         return { kind: "crashed", code: exit.code ?? null,
+Survived OptionalChaining frontend/src/agent/internal/failure.ts:56 | -         return { kind: "crashed", code: exit?.code ?? null, lastLog: exit?.lastLog ?? nu => +         return { kind: "crashed", code: exit?.code ?? null
+Survived ConditionalExpression frontend/src/agent/internal/failure.ts:70 | -     if (reply.kind === "error" && SESSION_NOT_FOUND.test(errorWords(reply))) { => +     if (true && SESSION_NOT_FOUND.test(errorWords(reply)))
+Survived ConditionalExpression frontend/src/agent/internal/firstMessage.ts:41 | -       name === undefined || placeholderNamed(name) !== undefined ? [] : [text], => +       false || placeholderNamed(name) !== undefined ? [] :
+NoCoverage StringLiteral frontend/src/agent/internal/inside.ts:24 | -     const foldsCase = DRIVE.test(base[0] ?? ""); => +     const foldsCase = DRIVE.test(base[0] ?? "Stryker was h
+NoCoverage BlockStatement frontend/src/agent/internal/process.ts:169 | -       } catch (error) { => -         return { ok: false, failure: { kind: "spawnFailed"
+NoCoverage ObjectLiteral frontend/src/agent/internal/process.ts:170 | -         return { ok: false, failure: { kind: "spawnFailed", program, message: String(err => +         return {};
+NoCoverage BooleanLiteral frontend/src/agent/internal/process.ts:170 | -         return { ok: false, failure: { kind: "spawnFailed", program, message: String(err => +         return { ok: true, failure: { kind: "spawnFailed",
+NoCoverage ObjectLiteral frontend/src/agent/internal/process.ts:170 | -         return { ok: false, failure: { kind: "spawnFailed", program, message: String(err => +         return { ok: false, failure: {} };
+NoCoverage StringLiteral frontend/src/agent/internal/process.ts:170 | -         return { ok: false, failure: { kind: "spawnFailed", program, message: String(err => +         return { ok: false, failure: { kind: "", program, 
+NoCoverage BlockStatement frontend/src/agent/internal/process.ts:180 | -       if (reply.kind !== "result") { => -         return requestFailure("initialize", reply, this.#e
+NoCoverage StringLiteral frontend/src/agent/internal/process.ts:181 | -         return requestFailure("initialize", reply, this.#exit); => +         return requestFailure("", reply, this.#exit);
+NoCoverage BlockStatement frontend/src/agent/internal/process.ts:211 | -       if (method !== "session/update") { => -         return;
+NoCoverage BlockStatement frontend/src/agent/internal/process.ts:215 | -       if (!parsed.ok) { => -         log.warn("agent.update_dropped", { reason: parsed.
+NoCoverage StringLiteral frontend/src/agent/internal/process.ts:216 | -         log.warn("agent.update_dropped", { reason: parsed.reason }); => +         log.warn("", { reason: parsed.reason });
+NoCoverage ObjectLiteral frontend/src/agent/internal/process.ts:216 | -         log.warn("agent.update_dropped", { reason: parsed.reason }); => +         log.warn("agent.update_dropped", {});
+NoCoverage ConditionalExpression frontend/src/agent/internal/process.ts:237 | -         default: { => -           const _exhaustive: never = event;
+NoCoverage BlockStatement frontend/src/agent/internal/process.ts:237 | -         default: { => -           const _exhaustive: never = event;
+Survived StringLiteral frontend/src/agent/internal/process.ts:68 | -           log: (text) => log.info("agent.connection", { text }), => +           log: (text) => log.info("", { text }),
+Survived ObjectLiteral frontend/src/agent/internal/process.ts:68 | -           log: (text) => log.info("agent.connection", { text }), => +           log: (text) => log.info("agent.connection", {}),
+Survived ArrowFunction frontend/src/agent/internal/process.ts:68 | -           log: (text) => log.info("agent.connection", { text }), => +           log: () => undefined,
+Survived ObjectLiteral frontend/src/agent/internal/process.ts:71 | -         { cancelNotification: null }, => +         {},
+Survived BlockStatement frontend/src/agent/internal/process.ts:86 | -     get isStopping(): boolean { => -       return this.#stopping;
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:105 | -         if (this.#listeners.get(session) === listener) { => +         if (true) {
+Survived BlockStatement frontend/src/agent/internal/process.ts:104 | -       return () => { => -         if (this.#listeners.get(session) === listener) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:105 | -         if (this.#listeners.get(session) === listener) { => +         if (false) {
+Survived CallExpression frontend/src/agent/internal/process.ts:106 | -           this.#listeners.delete(session); => +           ;
+Survived EqualityOperator frontend/src/agent/internal/process.ts:105 | -         if (this.#listeners.get(session) === listener) { => +         if (this.#listeners.get(session) !== listener) {
+Survived BlockStatement frontend/src/agent/internal/process.ts:105 | -         if (this.#listeners.get(session) === listener) { => -           this.#listeners.delete(session);
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:125 | -         if (this.#loads.get(session) === loading) { => +         if (true) {
+Survived CallExpression frontend/src/agent/internal/process.ts:142 | -       unlisten(); => +       ;
+Survived ArrayDeclaration frontend/src/agent/internal/process.ts:136 | -       const updates: TurnUpdate[] = []; => +       const updates: TurnUpdate[] = ["Stryker was here"];
+Survived BooleanLiteral frontend/src/agent/internal/process.ts:151 | -       this.#stopping = true; => +       this.#stopping = false;
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:152 | -       if (this.#run !== null && this.#exit === null) { => +       if (true) {
+Survived LogicalOperator frontend/src/agent/internal/process.ts:152 | -       if (this.#run !== null && this.#exit === null) { => +       if (this.#run !== null || this.#exit === null) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:152 | -       if (this.#run !== null && this.#exit === null) { => +       if (true && this.#exit === null) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:152 | -       if (this.#run !== null && this.#exit === null) { => +       if (this.#run !== null && true) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:180 | -       if (reply.kind !== "result") { => +       if (false) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:197 | -       if (this.#run !== null) { => +       if (true) {
+Survived OptionalChaining frontend/src/agent/internal/process.ts:205 | -         this.#listeners.get(refused.session)?.refuse(refused.refusal); => +         this.#listeners.get(refused.session).refuse(refuse
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:211 | -       if (method !== "session/update") { => +       if (false) {
+Survived ConditionalExpression frontend/src/agent/internal/process.ts:215 | -       if (!parsed.ok) { => +       if (false) {
+Survived ObjectLiteral frontend/src/agent/internal/process.ts:229 | -           log.debug("agent.stderr", { line: event.line }); => +           log.debug("agent.stderr", {});
+Survived StringLiteral frontend/src/agent/internal/process.ts:229 | -           log.debug("agent.stderr", { line: event.line }); => +           log.debug("", { line: event.line });
+Survived StringLiteral frontend/src/agent/internal/process.ts:233 | -           log.info("agent.exited", { code: event.code ?? "none", stopping: this.#stoppin => +           log.info("agent.exited", { code: event.code ?? "
+Survived LogicalOperator frontend/src/agent/internal/process.ts:233 | -           log.info("agent.exited", { code: event.code ?? "none", stopping: this.#stoppin => +           log.info("agent.exited", { code: event.code && "
+Survived ObjectLiteral frontend/src/agent/internal/process.ts:233 | -           log.info("agent.exited", { code: event.code ?? "none", stopping: this.#stoppin => +           log.info("agent.exited", {});
+Survived StringLiteral frontend/src/agent/internal/process.ts:233 | -           log.info("agent.exited", { code: event.code ?? "none", stopping: this.#stoppin => +           log.info("", { code: event.code ?? "none", stopp
+NoCoverage StringLiteral frontend/src/agent/internal/protocol.ts:98 | -     return text.ok ? text.value.text : ""; => +     return text.ok ? text.value.text : "Stryker was here!"
+NoCoverage BlockStatement frontend/src/agent/internal/protocol.ts:103 | -     if (!parsed.ok) { => -       return [];
+NoCoverage ArrayDeclaration frontend/src/agent/internal/protocol.ts:104 | -       return []; => +       return ["Stryker was here"];
+NoCoverage ArrayDeclaration frontend/src/agent/internal/protocol.ts:109 | -       return text.ok ? [{ kind: "text", text: text.value.text }] : []; => +       return text.ok ? [{ kind: "text", text: text.value.t
+NoCoverage StringLiteral frontend/src/agent/internal/protocol.ts:123 | -         kind: kind === undefined || kind === null ? null : (STEP_KINDS[kind] ?? "other") => +         kind: kind === undefined || kind === null ? null :
+NoCoverage BlockStatement frontend/src/agent/internal/protocol.ts:137 | -     if (!envelope.ok) { => -       return envelope;
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:103 | -     if (!parsed.ok) { => +     if (false) {
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:124 | -         status: status === undefined || status === null ? null : (STEP_STATUSES[status]  => +         status: false ? null : (STEP_STATUSES[status] ?? n
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:124 | -         status: status === undefined || status === null ? null : (STEP_STATUSES[status]  => +         status: status === undefined || false ? null : (ST
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:123 | -         kind: kind === undefined || kind === null ? null : (STEP_KINDS[kind] ?? "other") => +         kind: kind === undefined || false ? null : (STEP_K
+Survived LogicalOperator frontend/src/agent/internal/protocol.ts:124 | -         status: status === undefined || status === null ? null : (STEP_STATUSES[status]  => +         status: status === undefined && status === null ? 
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:124 | -         status: status === undefined || status === null ? null : (STEP_STATUSES[status]  => +         status: false || status === null ? null : (STEP_ST
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:126 | -           content === undefined || content === null => +           content === undefined || false
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:146 | -     const isRead = read.ok && Object.hasOwn(READ_KINDS, read.value.sessionUpdate); => +     const isRead = false;
+Survived ConditionalExpression frontend/src/agent/internal/protocol.ts:137 | -     if (!envelope.ok) { => +     if (false) {
+NoCoverage BlockStatement frontend/src/agent/internal/session.ts:82 | -       if (this.#done) { => -         return;
+NoCoverage BlockStatement frontend/src/agent/internal/session.ts:95 | -       if (this.#done) { => -         return;
+Survived ConditionalExpression frontend/src/agent/internal/session.ts:82 | -       if (this.#done) { => +       if (false) {
+Survived ConditionalExpression frontend/src/agent/internal/session.ts:86 | -       if (this.#flush !== null) { => +       if (true) {
+Survived BooleanLiteral frontend/src/agent/internal/session.ts:85 | -       this.#done = true; => +       this.#done = false;
+Survived ConditionalExpression frontend/src/agent/internal/session.ts:95 | -       if (this.#done) { => +       if (false) {
+Survived ConditionalExpression frontend/src/agent/internal/session.ts:91 | -       this.#settle(ending.kind === "failed" ? { ...ending, turn } : { kind: ending.kind, => +       this.#settle(true ? { ...ending, turn } : { kind: en
+NoCoverage ConditionalExpression frontend/src/agent/internal/turn.ts:108 | -       default: { => -         const _exhaustive: never = update;
+NoCoverage BlockStatement frontend/src/agent/internal/turn.ts:108 | -       default: { => -         const _exhaustive: never = update;
+Survived ArrayDeclaration frontend/src/agent/internal/turn.ts:73 | -     const refused = step?.outputs.filter((output) => output.kind === "refused") ?? []; => +     const refused = step?.outputs.filter((output) => outpu
+Survived ConditionalExpression frontend/src/agent/internal/turn.ts:117 | -     const known = turn.entries.some((entry) => entry.kind === "step" && entry.step.id == => +     const known = turn.entries.some((entry) => false);
+Survived ConditionalExpression frontend/src/agent/internal/turn.ts:117 | -     const known = turn.entries.some((entry) => entry.kind === "step" && entry.step.id == => +     const known = turn.entries.some((entry) => true);
+Survived ConditionalExpression frontend/src/agent/internal/turn.ts:117 | -     const known = turn.entries.some((entry) => entry.kind === "step" && entry.step.id == => +     const known = turn.entries.some((entry) => entry.kind 
+Survived EqualityOperator frontend/src/agent/internal/turn.ts:117 | -     const known = turn.entries.some((entry) => entry.kind === "step" && entry.step.id == => +     const known = turn.entries.some((entry) => entry.kind 
+Survived StringLiteral frontend/src/agent/internal/turn.ts:117 | -     const known = turn.entries.some((entry) => entry.kind === "step" && entry.step.id == => +     const known = turn.entries.some((entry) => entry.kind 
+Survived ArrowFunction frontend/src/agent/internal/turn.ts:117 | -     const known = turn.entries.some((entry) => entry.kind === "step" && entry.step.id == => +     const known = turn.entries.some(() => undefined);
+NoCoverage BlockStatement frontend/src/agent/index.ts:116 | -       if (!agent.ok) { => -         return { kind: "failed", failure: agent.failure };
+NoCoverage ObjectLiteral frontend/src/agent/index.ts:117 | -         return { kind: "failed", failure: agent.failure }; => +         return {};
+NoCoverage StringLiteral frontend/src/agent/index.ts:117 | -         return { kind: "failed", failure: agent.failure }; => +         return { kind: "", failure: agent.failure };
+NoCoverage BlockStatement frontend/src/agent/index.ts:190 | -       if (created === null) { => -         const message = parsed.ok ? "an empty session id" 
+NoCoverage StringLiteral frontend/src/agent/index.ts:191 | -         const message = parsed.ok ? "an empty session id" : parsed.reason; => +         const message = parsed.ok ? "" : parsed.reason;
+NoCoverage ObjectLiteral frontend/src/agent/index.ts:192 | -         return { ok: false, failure: { kind: "refused", method: "session/new", message } => +         return {};
+NoCoverage BooleanLiteral frontend/src/agent/index.ts:192 | -         return { ok: false, failure: { kind: "refused", method: "session/new", message } => +         return { ok: true, failure: { kind: "refused", met
+NoCoverage ObjectLiteral frontend/src/agent/index.ts:192 | -         return { ok: false, failure: { kind: "refused", method: "session/new", message } => +         return { ok: false, failure: {} };
+NoCoverage StringLiteral frontend/src/agent/index.ts:192 | -         return { ok: false, failure: { kind: "refused", method: "session/new", message } => +         return { ok: false, failure: { kind: "", method: "
+NoCoverage StringLiteral frontend/src/agent/index.ts:192 | -         return { ok: false, failure: { kind: "refused", method: "session/new", message } => +         return { ok: false, failure: { kind: "refused", me
+NoCoverage ObjectLiteral frontend/src/agent/index.ts:214 | -       return this.#destroyed ? { kind: "stopped" } : { kind: "failed", failure }; => +       return this.#destroyed ? {} : { kind: "failed", fail
+NoCoverage StringLiteral frontend/src/agent/index.ts:214 | -       return this.#destroyed ? { kind: "stopped" } : { kind: "failed", failure }; => +       return this.#destroyed ? { kind: "" } : { kind: "fai
+Survived ConditionalExpression frontend/src/agent/index.ts:88 | -       if (session !== null && this.#bySession.has(session)) { => +       if (true && this.#bySession.has(session)) {
+Survived ObjectLiteral frontend/src/agent/index.ts:96 | -       const asking: Asking = { stopped: false, prompted: null }; => +       const asking: Asking = {};
+Survived ConditionalExpression frontend/src/agent/index.ts:98 | -       if (session !== null) { => +       if (true) {
+Survived ConditionalExpression frontend/src/agent/index.ts:116 | -       if (!agent.ok) { => +       if (false) {
+Survived OptionalChaining frontend/src/agent/index.ts:148 | -       void this.#agent?.then((agent) => (agent.ok ? agent.value.stop() : undefined)); => +       void this.#agent.then((agent) => (agent.ok ? agent.v
+Survived CallExpression frontend/src/agent/index.ts:164 | -         unlisten(); => +         ;
+Survived CallExpression frontend/src/agent/index.ts:171 | -       unlisten(); => +       ;
+Survived ConditionalExpression frontend/src/agent/index.ts:190 | -       if (created === null) { => +       if (false) {
+Survived CallExpression frontend/src/agent/index.ts:195 | -       this.#bySession.set(created, run); => +       ;
+Survived CallExpression frontend/src/agent/index.ts:194 | -       agent.created(created); => +       ;
+Survived ConditionalExpression frontend/src/agent/index.ts:207 | -       if (reply.kind === "closed" && agent.isStopping) { => +       if (false) {
+Survived ConditionalExpression frontend/src/agent/index.ts:207 | -       if (reply.kind === "closed" && agent.isStopping) { => +       if (true && agent.isStopping) {
+Survived EqualityOperator frontend/src/agent/index.ts:207 | -       if (reply.kind === "closed" && agent.isStopping) { => +       if (reply.kind !== "closed" && agent.isStopping) {
+Survived BlockStatement frontend/src/agent/index.ts:207 | -       if (reply.kind === "closed" && agent.isStopping) { => -         return { kind: "stopped" };
+Survived StringLiteral frontend/src/agent/index.ts:207 | -       if (reply.kind === "closed" && agent.isStopping) { => +       if (reply.kind === "" && agent.isStopping) {
+Survived StringLiteral frontend/src/agent/index.ts:210 | -       return this.#failed(requestFailure("session/prompt", reply, agent.exit)); => +       return this.#failed(requestFailure("", reply, agent.
+Survived ConditionalExpression frontend/src/agent/index.ts:220 | -         if (each === run) { => +         if (true) {
+Survived ConditionalExpression frontend/src/agent/index.ts:234 | -       if (!started.ok && this.#agent === starting) { => +       if (!started.ok && true) {
+Survived ConditionalExpression frontend/src/agent/index.ts:247 | -       if (!prepared.ok && this.#checkout === preparing) { => +       if (!prepared.ok && true) {
+Survived ConditionalExpression frontend/src/agent/index.ts:282 | -           if (this.#agent === starting) { => +           if (true) {
+NoCoverage ConditionalExpression frontend/src/ipc/AgentSource.ts:83 | -       default: { => -         const _exhaustive: never = dto;
+NoCoverage BlockStatement frontend/src/ipc/AgentSource.ts:83 | -       default: { => -         const _exhaustive: never = dto;
+Survived StringLiteral frontend/src/ipc/AgentSource.ts:76 | -       case "Missing": => +       case "":
+Survived StringLiteral frontend/src/ipc/AgentSource.ts:79 | -       case "Changed": => +       case "":
+Survived ConditionalExpression frontend/src/ipc/AgentSource.ts:79 | -       case "Changed": => -         return { ...dto, folder: toFolder(dto.folder) };
+Survived StringLiteral frontend/src/ipc/AgentSource.ts:77 | -       case "Clean": => +       case "":
+Survived Regex frontend/src/ipc/domain.ts:151 | -   const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u; => +   const ABSOLUTE_PATH = /(?:\/|[A-Za-z]:[\\/]|\\\\)/u;
+Survived Regex frontend/src/ipc/domain.ts:151 | -   const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u; => +   const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[^\\/]|\\\\)/u;
+Survived Regex frontend/src/ipc/domain.ts:151 | -   const ABSOLUTE_PATH = /^(?:\/|[A-Za-z]:[\\/]|\\\\)/u; => +   const ABSOLUTE_PATH = /^(?:\/|[^A-Za-z]:[\\/]|\\\\)/u;
+NoCoverage ArrayDeclaration frontend/src/ipc/fixtureAgent.ts:129 | -     for (const timer of running.timers.get(session) ?? []) { => +     for (const timer of running.timers.get(session) ?? ["S
+NoCoverage StringLiteral frontend/src/ipc/fixtureAgent.ts:243 | -     const asked = params.get("ai") ?? ""; => +     const asked = params.get("ai") ?? "Stryker was here!";
+NoCoverage StringLiteral frontend/src/ipc/fixtureAgent.ts:248 | -         return [each, recorded(each, typeof text === "string" ? text : "")]; => +         return [each, recorded(each, typeof text === "stri
+Survived LogicalOperator frontend/src/ipc/fixtureAgent.ts:96 | -         if (!each.success || message === null || !message.success) { => +         if (!each.success && message === null || !message.
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:96 | -         if (!each.success || message === null || !message.success) { => +         if (!each.success || false || !message.success) {
+Survived OptionalChaining frontend/src/ipc/fixtureAgent.ts:112 | -     return at === -1 ? null : { id: recording[at]?.id, lines }; => +     return at === -1 ? null : { id: recording[at].id, line
+Survived UnaryOperator frontend/src/ipc/fixtureAgent.ts:112 | -     return at === -1 ? null : { id: recording[at]?.id, lines }; => +     return at === +1 ? null : { id: recording[at]?.id, lin
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:112 | -     return at === -1 ? null : { id: recording[at]?.id, lines }; => +     return false ? null : { id: recording[at]?.id, lines }
+Survived LogicalOperator frontend/src/ipc/fixtureAgent.ts:124 | -     const isReply = message.method === undefined && id !== undefined && id === recordedI => +     const isReply = message.method === undefined && id !==
+Survived LogicalOperator frontend/src/ipc/fixtureAgent.ts:124 | -     const isReply = message.method === undefined && id !== undefined && id === recordedI => +     const isReply = message.method === undefined || id !==
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:124 | -     const isReply = message.method === undefined && id !== undefined && id === recordedI => +     const isReply = true && id !== undefined && id === rec
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:124 | -     const isReply = message.method === undefined && id !== undefined && id === recordedI => +     const isReply = true && id === recordedId;
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:124 | -     const isReply = message.method === undefined && id !== undefined && id === recordedI => +     const isReply = message.method === undefined && id !==
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:124 | -     const isReply = message.method === undefined && id !== undefined && id === recordedI => +     const isReply = message.method === undefined && true &
+Survived CallExpression frontend/src/ipc/fixtureAgent.ts:132 | -     running.timers.delete(session); => +     ;
+Survived ArithmeticOperator frontend/src/ipc/fixtureAgent.ts:137 | -       globalThis.setTimeout(() => running.onEvent({ kind: "Message", text }), PLAY_MS *  => +       globalThis.setTimeout(() => running.onEvent({ kind: 
+Survived ArithmeticOperator frontend/src/ipc/fixtureAgent.ts:139 | -     timers.push(globalThis.setTimeout(then, PLAY_MS * (texts.length + 1))); => +     timers.push(globalThis.setTimeout(then, PLAY_MS / (tex
+Survived ArithmeticOperator frontend/src/ipc/fixtureAgent.ts:139 | -     timers.push(globalThis.setTimeout(then, PLAY_MS * (texts.length + 1))); => +     timers.push(globalThis.setTimeout(then, PLAY_MS * (tex
+Survived ArrayDeclaration frontend/src/ipc/fixtureAgent.ts:140 | -     running.timers.set(session, [...(running.timers.get(session) ?? []), ...timers]); => +     running.timers.set(session, [...(running.timers.get(se
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:165 | -     if (id !== undefined) { => +     if (true) {
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:175 | -         : (params?.sessionId ?? ""); => +         : (params?.sessionId ?? "Stryker was here!");
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:181 | -       method === undefined => +       false
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:184 | -     if (found === null || id === undefined) { => +     if (found === null || false) {
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:189 | -     if (method === "session/prompt") { => +     if (true) {
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:206 | -       (each) => each.left === old && each.right === next, => +       (each) => each.left === old && true,
+Survived LogicalOperator frontend/src/ipc/fixtureAgent.ts:206 | -       (each) => each.left === old && each.right === next, => +       (each) => each.left === old || each.right === next,
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:208 | -     if (found === undefined) { => +     if (true) {
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:206 | -       (each) => each.left === old && each.right === next, => +       (each) => true && each.right === next,
+Survived BooleanLiteral frontend/src/ipc/fixtureAgent.ts:234 | -         endRunning(state, false); => +         endRunning(state, true);
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:254 | -       throw new Error(`no agent fixture ${name}; known: ${[...cases.keys()].join(", ")}` => +       throw new Error(`no agent fixture ${name}; known: ${
+Survived Regex frontend/src/ipc/fixtureAgent.ts:247 | -         const each = file.replace(/^.*\//u, "").replace(/\.jsonl$/u, ""); => +         const each = file.replace(/.*\//u, "").replace(/\.
+Survived Regex frontend/src/ipc/fixtureAgent.ts:247 | -         const each = file.replace(/^.*\//u, "").replace(/\.jsonl$/u, ""); => +         const each = file.replace(/^.*\//u, "").replace(/\
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:248 | -         return [each, recorded(each, typeof text === "string" ? text : "")]; => +         return [each, recorded(each, true ? text : "")];
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:253 | -     if (prompts === undefined || load === undefined) { => +     if (prompts === undefined || false) {
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:256 | -     const diffs = parsedCases(DIFF_CASE, "agent diff fixture", files.diffs, (parsed) =>  => +     const diffs = parsedCases(DIFF_CASE, "", files.diffs, 
+Survived ConditionalExpression frontend/src/ipc/fixtureAgent.ts:288 | -         if (state.running?.run === run) { => +         if (true) {
+Survived BooleanLiteral frontend/src/ipc/fixtureAgent.ts:274 | -         endRunning(state, false); => +         endRunning(state, true);
+Survived OptionalChaining frontend/src/ipc/fixtureAgent.ts:288 | -         if (state.running?.run === run) { => +         if (state.running.run === run) {
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:69 | -   export const FIXTURE_CHECKOUT = "/fixture/data/yamt/range/repository/main...feature/ch => +   export const FIXTURE_CHECKOUT = "";
+Survived ObjectLiteral frontend/src/ipc/fixtureAgent.ts:75 | -   const SCRIPTED: Readonly<Record<string, true>> = { "": true, crash: true, "checkout-fa => +   const SCRIPTED: Readonly<Record<string, true>> = {};
+Survived BooleanLiteral frontend/src/ipc/fixtureAgent.ts:75 | -   const SCRIPTED: Readonly<Record<string, true>> = { "": true, crash: true, "checkout-fa => +   const SCRIPTED: Readonly<Record<string, true>> = { "": f
+Survived BooleanLiteral frontend/src/ipc/fixtureAgent.ts:75 | -   const SCRIPTED: Readonly<Record<string, true>> = { "": true, crash: true, "checkout-fa => +   const SCRIPTED: Readonly<Record<string, true>> = { "": t
+Survived BooleanLiteral frontend/src/ipc/fixtureAgent.ts:75 | -   const SCRIPTED: Readonly<Record<string, true>> = { "": true, crash: true, "checkout-fa => +   const SCRIPTED: Readonly<Record<string, true>> = { "": t
+Survived ObjectLiteral frontend/src/ipc/fixtureAgent.ts:77 | -   const LINE = v.object({ from: v.picklist(["agent", "yamt"]), line: v.string() }); => +   const LINE = v.object({});
+Survived ArrayDeclaration frontend/src/ipc/fixtureAgent.ts:77 | -   const LINE = v.object({ from: v.picklist(["agent", "yamt"]), line: v.string() }); => +   const LINE = v.object({ from: v.picklist([]), line: v.st
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:77 | -   const LINE = v.object({ from: v.picklist(["agent", "yamt"]), line: v.string() }); => +   const LINE = v.object({ from: v.picklist(["", "yamt"]), 
+Survived ObjectLiteral frontend/src/ipc/fixtureAgent.ts:78 | -   const MESSAGE = v.looseObject({ => -     id: v.optional(v.union([v.number(), v.string()])),
+Survived ArrayDeclaration frontend/src/ipc/fixtureAgent.ts:79 | -     id: v.optional(v.union([v.number(), v.string()])), => +     id: v.optional(v.union([])),
+Survived StringLiteral frontend/src/ipc/fixtureAgent.ts:77 | -   const LINE = v.object({ from: v.picklist(["agent", "yamt"]), line: v.string() }); => +   const LINE = v.object({ from: v.picklist(["agent", ""]),
+Survived ObjectLiteral frontend/src/ipc/fixtureAgent.ts:83 | -   const DIFF_CASE = v.object({ => -     differences: v.array(DIFFERENCE),
+Survived ObjectLiteral frontend/src/ipc/fixtureAgent.ts:81 | -     params: v.optional(v.looseObject({ sessionId: v.optional(v.string()) })), => +     params: v.optional(v.looseObject({})),

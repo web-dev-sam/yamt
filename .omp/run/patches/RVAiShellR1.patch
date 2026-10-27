@@ -1,0 +1,838 @@
+From 79037b54ac85bb62d045bb39dfb6e31684df4641 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:06:34 +0100
+Subject: [PATCH] fix(app): one event forwarder, a reload during a start still
+ stops the agent, the sweep outside the AI lock
+
+---
+ crates/agent/AGENTS.md         |   2 +-
+ crates/agent/src/lib.rs        |   1 +
+ crates/agent/src/sweep.rs      |   2 +-
+ crates/agent/src/workspace.rs  |   9 +-
+ crates/agent/tests/checkout.rs |  14 +-
+ crates/agent/tests/sweep.rs    |  57 ++++-----
+ src-tauri/AGENTS.md            |   2 +-
+ src-tauri/src/ai.rs            | 227 ++++++++++++++++++++-------------
+ src-tauri/src/commands.rs      |   4 +-
+ src-tauri/src/lib.rs           |   1 +
+ src-tauri/src/range.rs         |   4 +-
+ src-tauri/src/servers.rs       |   8 +-
+ src-tauri/src/start_script.rs  |  57 +++++++++
+ src-tauri/src/window.rs        |  52 +-------
+ 14 files changed, 247 insertions(+), 193 deletions(-)
+ create mode 100644 src-tauri/src/start_script.rs
+
+diff --git a/crates/agent/AGENTS.md b/crates/agent/AGENTS.md
+index ad26bb6..f61e517 100644
+--- a/crates/agent/AGENTS.md
++++ b/crates/agent/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The AI's workspace for one range window started with `--ai` (plan §2 #108–#111, #115, #122): its temporary checkout of the right commit and the agent process running in it; Rust never reads the agent's messages (ACP is the window's). `lib.rs` (the IPC types `AgentRun`, `AgentCommand`, `AgentStartReply`, `CheckoutReply`, `CheckoutLook` — serde tag `kind`, variants as named; `Error`; `HostEvent` re-exported from `yamt-pipe`, so the shell takes the agent's events from this crate), `workspace.rs` (`Pair` from `yamt-range`'s pair lock; `Workspace`: `prepare` makes or reuses `<pair folder>/checkout`, `start` only after `prepare` with cwd = the checkout and a running agent stopped and reaped first — it blocks up to about 3 s for that —, `send`/`stop` for the current run only, `stop_agent`, `look_job`, `discard` and `end(self)` stop and reap the agent before any removal (only the agent's own process, never one it started), `sweep_leftovers(&mut self, range_dir)` the one writer of this pair's leftovers besides `prepare`), `checkout.rs` (`checkout_folder` the one checkout path; made as `checkout.partial` — `clone --shared --no-checkout`, `remote remove origin`, `checkout --detach` the right commit — then renamed to `checkout`, so a `checkout/` is always complete; removed through `checkout.removing` (`set_aside`, then `remove_set_aside`); `remove_when_clean`; a folder another remover deletes at the same time counts as removed), `look.rs` (`LookJob::look`: `Missing`, `Clean`, `Changed` = any `git status` entry, ignored files never, any branch or `refs/stash` (`refs`, #122: the clone starts with none), or `HEAD` ≠ the right commit; `Unreadable` when git fails or finds another repository than the checkout's own; git through `Repo::discover_from_folder`, never an inherited `GIT_DIR`), `process.rs` (the program through `yamt_pipe::find` without project entries — PATH, then the command's home folders; a relative path with a separator is refused as `NotFound { searched: [] }`, it would run a file of the reviewed commit — and `Running::start_without` with `Framing::Lines` and `yamt_gitio::Repo::REPOSITORY_VARIABLES` left out of the agent's environment), `sweep.rs` (every other pair folder holding a checkout or a leftover, skipped without its lock otherwise; under the lock `PairLock::try_hold` takes: the partial and removing folders deleted and a clean checkout renamed to `checkout.removing`, deleted after the lock is released; a changed or unreadable one kept; the right commit from `yamt_range::pair_right_commit`). `bin/agent-echo.rs`: the tests' line agent (echo, `pwd`, `edit <file>`, `exit <code>`, `hold <file>`). Tests in `tests/{checkout,process,sweep}.rs` share `tests/common/mod.rs` (the source repository, the data folder, the pair folder made by `PairLock::take`, `Pair`, `commit_of`), run real git in temp folders and start the built `agent-echo` where cargo put it, never a file a test just wrote; `prepare` and the agent under an inherited `GIT_DIR` run in a child process (`yamt_conflict_repo::run_ignored_in_child`). Depends on `yamt-gitio`, `yamt-pipe` and `yamt-range` only among yamt crates; never tauri, never serde_json (arch-check).
++Owner skill: `skill://rust-conventions`. The AI's workspace for one range window started with `--ai` (plan §2 #108–#111, #115, #122): its temporary checkout of the right commit and the agent process running in it; Rust never reads the agent's messages (ACP is the window's). `lib.rs` (the IPC types `AgentRun`, `AgentCommand`, `AgentStartReply`, `CheckoutReply`, `CheckoutLook` — serde tag `kind`, variants as named; `Error`; `HostEvent` re-exported from `yamt-pipe`, so the shell takes the agent's events from this crate), `workspace.rs` (`Pair` from `yamt-range`'s pair lock; `Workspace`: `prepare` makes or reuses `<pair folder>/checkout`, `start` only after `prepare` with cwd = the checkout and a running agent stopped and reaped first — it blocks up to about 3 s for that —, `send`/`stop` for the current run only, `stop_agent`, `look_job`, `discard` and `end(self)` stop and reap the agent before any removal (only the agent's own process, never one it started), `remove_own_leftovers(&mut self)` the one writer of this pair's leftovers besides `prepare`), `checkout.rs` (`checkout_folder` the one checkout path; made as `checkout.partial` — `clone --shared --no-checkout`, `remote remove origin`, `checkout --detach` the right commit — then renamed to `checkout`, so a `checkout/` is always complete; removed through `checkout.removing` (`set_aside`, then `remove_set_aside`); `remove_when_clean`; a folder another remover deletes at the same time counts as removed), `look.rs` (`LookJob::look`: `Missing`, `Clean`, `Changed` = any `git status` entry, ignored files never, any branch or `refs/stash` (`refs`, #122: the clone starts with none), or `HEAD` ≠ the right commit; `Unreadable` when git fails or finds another repository than the checkout's own; git through `Repo::discover_from_folder`, never an inherited `GIT_DIR`), `process.rs` (the program through `yamt_pipe::find` without project entries — PATH, then the command's home folders; a relative path with a separator is refused as `NotFound { searched: [] }`, it would run a file of the reviewed commit — and `Running::start_without` with `Framing::Lines` and `yamt_gitio::Repo::REPOSITORY_VARIABLES` left out of the agent's environment), `sweep.rs` (`sweep_other_pairs(range_dir, own)`, free of any `Workspace` so the shell runs it without its AI lock: every pair folder but `own` holding a checkout or a leftover, skipped without its lock otherwise; under the lock `PairLock::try_hold` takes: the partial and removing folders deleted and a clean checkout renamed to `checkout.removing`, deleted after the lock is released; a changed or unreadable one kept; the right commit from `yamt_range::pair_right_commit`). `bin/agent-echo.rs`: the tests' line agent (echo, `pwd`, `edit <file>`, `exit <code>`, `hold <file>`). Tests in `tests/{checkout,process,sweep}.rs` share `tests/common/mod.rs` (the source repository, the data folder, the pair folder made by `PairLock::take`, `Pair`, `commit_of`), run real git in temp folders and start the built `agent-echo` where cargo put it, never a file a test just wrote; `prepare` and the agent under an inherited `GIT_DIR` run in a child process (`yamt_conflict_repo::run_ignored_in_child`). Depends on `yamt-gitio`, `yamt-pipe` and `yamt-range` only among yamt crates; never tauri, never serde_json (arch-check).
+diff --git a/crates/agent/src/lib.rs b/crates/agent/src/lib.rs
+index 81ab716..e2ee169 100644
+--- a/crates/agent/src/lib.rs
++++ b/crates/agent/src/lib.rs
+@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ 
+ pub use crate::look::LookJob;
++pub use crate::sweep::sweep_other_pairs;
+ pub use crate::workspace::{Pair, Workspace};
+ pub use yamt_pipe::HostEvent;
+ 
+diff --git a/crates/agent/src/sweep.rs b/crates/agent/src/sweep.rs
+index 54b2b33..9ba3b71 100644
+--- a/crates/agent/src/sweep.rs
++++ b/crates/agent/src/sweep.rs
+@@ -8,7 +8,7 @@ use crate::checkout;
+ /// and no leftover is skipped without its lock. In every other pair whose lock it takes, the partial and
+ /// removing folders go and a clean checkout is renamed to `checkout.removing`, which is deleted after the lock
+ /// is released, so a window starting on that pair waits for no deletion; a changed or unreadable checkout is kept.
+-pub(crate) fn sweep_other_pairs(range_dir: &Path, own: &Path) {
++pub fn sweep_other_pairs(range_dir: &Path, own: &Path) {
+     for folder in pair_folders(range_dir) {
+         if folder == own || !checkout::has_any(&folder) {
+             continue;
+diff --git a/crates/agent/src/workspace.rs b/crates/agent/src/workspace.rs
+index ea3f2f4..43e6009 100644
+--- a/crates/agent/src/workspace.rs
++++ b/crates/agent/src/workspace.rs
+@@ -1,4 +1,4 @@
+-use std::path::{Path, PathBuf};
++use std::path::PathBuf;
+ use std::sync::mpsc::Sender;
+ 
+ use yamt_pipe::{HostEvent, Running};
+@@ -111,11 +111,10 @@ impl Workspace {
+         checkout::remove_when_clean(&self.pair.folder, self.pair.new_commit);
+     }
+ 
+-    /// What crashes and kills left in `range_dir`: in this pair only the partial and removing folders
+-    /// (its checkout is reused); in every other pair no window holds, also a clean checkout.
+-    pub fn sweep_leftovers(&mut self, range_dir: &Path) {
++    /// What crashes and kills left in this pair: the partial and removing folders (its checkout is reused).
++    /// The other pairs are `sweep_other_pairs`'s, which needs no `Workspace`.
++    pub fn remove_own_leftovers(&mut self) {
+         sweep::logged(checkout::remove_leftovers(&self.pair.folder));
+-        sweep::sweep_other_pairs(range_dir, &self.pair.folder);
+     }
+ 
+     fn running(&self, run: AgentRun) -> Option<&Running> {
+diff --git a/crates/agent/tests/checkout.rs b/crates/agent/tests/checkout.rs
+index 01b007b..d277cd0 100644
+--- a/crates/agent/tests/checkout.rs
++++ b/crates/agent/tests/checkout.rs
+@@ -6,7 +6,7 @@ use std::env;
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ 
+-use yamt_agent::{CheckoutLook, CheckoutReply, Error, Pair, Workspace};
++use yamt_agent::{CheckoutLook, CheckoutReply, Error, Workspace, sweep_other_pairs};
+ use yamt_conflict_repo::{git, git_ok, run_ignored_in_child};
+ 
+ use common::{Fixture, commit_of, pair_in};
+@@ -33,15 +33,9 @@ impl Fixture {
+ 
+     /// The sweep as a window on another pair of the same data folder runs it.
+     fn sweep_from_another_pair(&self) {
+-        let other = Pair {
+-            folder: self
+-                .range_dir
+-                .path()
+-                .join("other-0123456789abcdef")
+-                .join("a-b"),
+-            ..self.pair.clone()
+-        };
+-        Workspace::new(other).sweep_leftovers(self.range_dir.path());
++        let range_dir = self.range_dir.path();
++        let other = range_dir.join("other-0123456789abcdef").join("a-b");
++        sweep_other_pairs(range_dir, &other);
+     }
+ }
+ 
+diff --git a/crates/agent/tests/sweep.rs b/crates/agent/tests/sweep.rs
+index 739e480..d8959bb 100644
+--- a/crates/agent/tests/sweep.rs
++++ b/crates/agent/tests/sweep.rs
+@@ -7,7 +7,7 @@ use std::path::PathBuf;
+ use std::sync::atomic::{AtomicBool, Ordering};
+ use std::thread;
+ 
+-use yamt_agent::{Pair, Workspace};
++use yamt_agent::sweep_other_pairs;
+ use yamt_range::{PairLock, RangeSpec, Resolved};
+ 
+ use common::Fixture;
+@@ -34,16 +34,16 @@ impl Leftover {
+         Leftover { fixture, folder }
+     }
+ 
+-    fn other_pair(&self) -> Workspace {
+-        Workspace::new(Pair {
+-            folder: self
+-                .fixture
+-                .range_dir
+-                .path()
+-                .join("other-0123456789abcdef")
+-                .join("a-b"),
+-            ..self.fixture.pair.clone()
+-        })
++    fn other_pair_folder(&self) -> PathBuf {
++        self.fixture
++            .range_dir
++            .path()
++            .join("other-0123456789abcdef")
++            .join("a-b")
++    }
++
++    fn swept_from_another_pair(&self) {
++        sweep_other_pairs(self.fixture.range_dir.path(), &self.other_pair_folder());
+     }
+ 
+     fn has(&self, name: &str) -> bool {
+@@ -55,9 +55,7 @@ impl Leftover {
+ fn a_clean_leftover_of_an_unheld_pair_is_removed() {
+     let leftover = Leftover::new();
+ 
+-    leftover
+-        .other_pair()
+-        .sweep_leftovers(leftover.fixture.range_dir.path());
++    leftover.swept_from_another_pair();
+ 
+     assert!(!leftover.has("checkout"));
+     assert!(!leftover.has("checkout.partial"));
+@@ -70,9 +68,7 @@ fn a_changed_leftover_is_kept() {
+     let checkout = leftover.fixture.checkout();
+     fs::write(checkout.join("a.txt"), b"edited\n").unwrap();
+ 
+-    leftover
+-        .other_pair()
+-        .sweep_leftovers(leftover.fixture.range_dir.path());
++    leftover.swept_from_another_pair();
+ 
+     assert_eq!(fs::read(checkout.join("a.txt")).unwrap(), b"edited\n");
+     assert!(!leftover.has("checkout.partial"));
+@@ -84,9 +80,7 @@ fn a_leftover_of_a_held_pair_is_untouched() {
+     let leftover = Leftover::new();
+     let _window = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
+ 
+-    leftover
+-        .other_pair()
+-        .sweep_leftovers(leftover.fixture.range_dir.path());
++    leftover.swept_from_another_pair();
+ 
+     assert!(leftover.has("checkout"));
+     assert!(leftover.has("checkout.partial"));
+@@ -98,16 +92,24 @@ fn the_own_pair_keeps_its_checkout_and_loses_partial_and_removing_folders() {
+     let leftover = Leftover::new();
+     let _own = PairLock::try_hold(&leftover.folder).unwrap().unwrap();
+ 
+-    leftover
+-        .fixture
+-        .workspace()
+-        .sweep_leftovers(leftover.fixture.range_dir.path());
++    leftover.fixture.workspace().remove_own_leftovers();
+ 
+     assert!(leftover.has("checkout"));
+     assert!(!leftover.has("checkout.partial"));
+     assert!(!leftover.has("checkout.removing"));
+ }
+ 
++#[test]
++fn the_sweep_of_other_pairs_leaves_the_own_pair_alone_even_when_its_lock_is_free() {
++    let leftover = Leftover::new();
++
++    sweep_other_pairs(leftover.fixture.range_dir.path(), &leftover.folder);
++
++    assert!(leftover.has("checkout"));
++    assert!(leftover.has("checkout.partial"));
++    assert!(leftover.has("checkout.removing"));
++}
++
+ #[test]
+ fn a_take_during_a_sweep_of_a_pair_with_nothing_to_sweep_succeeds() {
+     let fixture = Fixture::new();
+@@ -120,12 +122,9 @@ fn a_take_during_a_sweep_of_a_pair_with_nothing_to_sweep_succeeds() {
+ 
+     thread::scope(|scope| {
+         scope.spawn(|| {
+-            let mut other = Workspace::new(Pair {
+-                folder: range_dir.join("other-0123456789abcdef").join("a-b"),
+-                ..fixture.pair.clone()
+-            });
++            let other = range_dir.join("other-0123456789abcdef").join("a-b");
+             while sweeping.load(Ordering::Relaxed) {
+-                other.sweep_leftovers(range_dir);
++                sweep_other_pairs(range_dir, &other);
+             }
+         });
+         let refused = (0..TAKES_DURING_SWEEPS)
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 16a54a8..d1b0f33 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts `sweep_leftovers` on a background thread that holds the state until the sweep ends, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; `stop_agent_on_page_start`: a page that starts loading stops the agent with `try_lock`, a prepare holding the state skipped, the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a small thread forwards the agent's events into its `Channel`, as `servers.rs` does), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview; the start script (`start_script(theme, kind, ai)`) sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`; `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` when the window manages a `Mutex<AiState>` (every range window, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; the six language server commands, plan §2 #70: `servers_context`, `start_server` — a small thread forwards the run's events into its Tauri `Channel` and, when a send fails, drops them so the run stops itself —, `send_to_server`, `stop_server`, `find_program`, `project_files`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (held by a prepare while git makes the checkout, and by the start's sweep). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it, so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/ai.rs b/src-tauri/src/ai.rs
+index caa5ab6..cef3fc0 100644
+--- a/src-tauri/src/ai.rs
++++ b/src-tauri/src/ai.rs
+@@ -1,5 +1,5 @@
+ use std::path::{Path, PathBuf};
+-use std::sync::mpsc::{self, Receiver};
++use std::sync::mpsc;
+ use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
+ use std::thread;
+ 
+@@ -15,6 +15,7 @@ use yamt_range::Range;
+ 
+ use crate::args::Ai;
+ use crate::ipc_error::{IpcError, blocking_reply};
++use crate::servers::forward;
+ 
+ /// The range window's AI (plan §2 #108): `On` only when it was started with `--ai`.
+ pub(crate) enum AiState {
+@@ -31,13 +32,13 @@ impl AiState {
+     }
+ }
+ 
+-pub(crate) fn lock(state: &Mutex<AiState>) -> MutexGuard<'_, AiState> {
++fn lock(state: &Mutex<AiState>) -> MutexGuard<'_, AiState> {
+     state.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
+ /// Manages the range window's `Mutex<AiState>`. With `--ai`, the workspace on its pair, and a background
+-/// thread that sweeps what earlier runs left in `range_dir` while it holds the state, so no command makes
+-/// or removes this pair's checkout during the sweep.
++/// thread that removes this pair's leftovers while it holds the state, so no command makes or removes the
++/// checkout meanwhile, then sweeps the other pairs in `range_dir` with the state released.
+ pub(crate) fn manage<R: Runtime>(
+     app: &App<R>,
+     ai: Ai,
+@@ -56,42 +57,56 @@ pub(crate) fn manage<R: Runtime>(
+     app.manage(Mutex::new(state));
+     match ai {
+         Ai::Off => {}
+-        Ai::On => sweep_while_held(app.handle().clone(), range_dir),
++        Ai::On => sweep_while_held(app.handle().clone(), range_dir, pair_folder.to_owned()),
+     }
+ }
+ 
+ /// Returns once the sweep's thread holds the state.
+-fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf) {
++fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf, pair_folder: PathBuf) {
+     let (held, wait) = mpsc::channel();
+     thread::spawn(move || {
+-        let state = app.state();
+-        let mut ai = lock(&state);
+-        held.send(()).ok();
+-        if let AiState::On(workspace) = &mut *ai {
+-            workspace.sweep_leftovers(&range_dir);
++        {
++            let state = app.state();
++            let mut ai = lock(&state);
++            held.send(()).ok();
++            if let AiState::On(workspace) = &mut *ai {
++                workspace.remove_own_leftovers();
++            }
+         }
++        yamt_agent::sweep_other_pairs(&range_dir, &pair_folder);
+     });
+     wait.recv().ok();
+ }
+ 
+-/// A page that starts loading stops the agent of the page before; a prepare holding the state is
+-/// left alone (no agent runs during one). The checkout stays.
+-pub(crate) fn stop_agent_on_page_start(state: &Mutex<AiState>, event: PageLoadEvent) {
++/// A page that starts loading stops the agent of the page before. While a command holds the state (a
++/// prepare, a start, a discard, the own-pair sweep), a thread waits for it and stops the agent then, so an
++/// agent a start in flight spawns for the old page stops too. The checkout stays.
++pub(crate) fn stop_agent_on_page_start<R: Runtime>(app: &AppHandle<R>, event: PageLoadEvent) {
+     match event {
+         PageLoadEvent::Started => {
+-            let ai = match state.try_lock() {
+-                Ok(ai) => ai,
+-                Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+-                Err(TryLockError::WouldBlock) => return,
++            let Some(state) = app.try_state::<Mutex<AiState>>() else {
++                return;
+             };
+-            if let AiState::On(workspace) = &*ai {
+-                workspace.stop_agent();
++            match state.try_lock() {
++                Ok(ai) => stop_agent_in(&ai),
++                Err(TryLockError::Poisoned(poisoned)) => stop_agent_in(&poisoned.into_inner()),
++                Err(TryLockError::WouldBlock) => {
++                    let app = app.clone();
++                    thread::spawn(move || stop_agent_in(&lock(&app.state())));
++                }
+             }
+         }
+         PageLoadEvent::Finished => {}
+     }
+ }
+ 
++fn stop_agent_in(ai: &AiState) {
++    match ai {
++        AiState::On(workspace) => workspace.stop_agent(),
++        AiState::Off => {}
++    }
++}
++
+ /// After the window closed: stops the agent, looks again and removes the checkout only when clean.
+ pub(crate) fn end_at_exit(state: &Mutex<AiState>) {
+     let ai = std::mem::replace(&mut *lock(state), AiState::Off);
+@@ -127,15 +142,6 @@ pub(crate) async fn start_agent<R: Runtime>(
+     .await
+ }
+ 
+-/// Returning drops `receiver`, which stops the agent once the page cannot take its events.
+-fn forward(receiver: &Receiver<HostEvent>, events: &Channel<HostEvent>) {
+-    for event in receiver {
+-        if events.send(event).is_err() {
+-            return;
+-        }
+-    }
+-}
+-
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+@@ -184,12 +190,20 @@ pub(crate) async fn diff_texts(old: String, next: String) -> Result<Vec<Differen
+ 
+ #[cfg(test)]
+ mod tests {
+-    use serde_json::json;
++    use std::fs;
++    use std::time::{Duration, Instant};
++
++    use serde_json::{Value, json};
+     use yamt_compare::MAX_COLUMN_BYTES;
++    use yamt_conflict_repo::TempDir;
++    use yamt_range::{PairLock, RangeSpec, Resolved};
+ 
+     use super::*;
+     use crate::mock_window::invoke_on;
+-    use crate::range::tests::{RangeWindow, open_range_window_with};
++    use crate::range::tests::{RangeWindow, open_range_window_in, open_range_window_with, repo};
++
++    const WAIT: Duration = Duration::from_secs(10);
++    const POLL: Duration = Duration::from_millis(50);
+ 
+     fn ai_state(window: &RangeWindow) -> State<'_, Mutex<AiState>> {
+         window.webview.state()
+@@ -203,10 +217,6 @@ mod tests {
+         tauri::async_runtime::block_on(start_agent(window.webview.clone(), command, events))
+     }
+ 
+-    fn no_events() -> Channel<HostEvent> {
+-        Channel::new(|_| Ok(()))
+-    }
+-
+     fn command(program: &str, args: &[&str]) -> AgentCommand {
+         AgentCommand {
+             program: program.to_owned(),
+@@ -226,7 +236,7 @@ mod tests {
+         assert_eq!(invoke_on(&window.webview, "stop_agent", run), off);
+         let message = json!({ "run": 0, "message": "hello" });
+         assert_eq!(invoke_on(&window.webview, "send_to_agent", message), off);
+-        let started = started(&window, command("sh", &[]), no_events());
++        let started = started(&window, command("sh", &[]), Channel::new(|_| Ok(())));
+         assert!(matches!(started, Err(IpcError::AiOff)), "{started:?}");
+     }
+ 
+@@ -250,32 +260,44 @@ mod tests {
+     fn prepared_checkout(window: &RangeWindow) -> PathBuf {
+         let ready = invoke_on(&window.webview, "prepare_checkout", json!({})).unwrap();
+         assert_eq!(ready["kind"], "Ready", "{ready}");
+-        PathBuf::from(ready["folder"].as_str().unwrap())
++        let checkout = PathBuf::from(ready["folder"].as_str().unwrap());
++        let right_text = fs::read_to_string(checkout.join("a.txt")).unwrap();
++        assert_eq!(right_text, "two\n", "the right commit's text");
++        let pair_lock = checkout.parent().unwrap().join("lock");
++        assert!(pair_lock.is_file(), "{}", pair_lock.display());
++        checkout
++    }
++
++    fn look(window: &RangeWindow) -> Result<Value, Value> {
++        invoke_on(&window.webview, "checkout_changes", json!({}))
+     }
+ 
+     #[test]
+     fn the_exit_removes_a_clean_checkout_and_leaves_the_ai_off() {
+         let window = open_range_window_with(Ai::On);
+         let checkout = prepared_checkout(&window);
+-        assert_eq!(
+-            invoke_on(&window.webview, "checkout_changes", json!({})),
+-            Ok(json!({ "kind": "Clean" }))
+-        );
++        assert_eq!(look(&window), Ok(json!({ "kind": "Clean" })));
+         end_at_exit(&ai_state(&window));
+         assert!(!checkout.exists(), "{}", checkout.display());
+-        let off = Err(json!({ "kind": "AiOff" }));
+-        assert_eq!(
+-            invoke_on(&window.webview, "checkout_changes", json!({})),
+-            off
+-        );
++        assert_eq!(look(&window), Err(json!({ "kind": "AiOff" })));
++    }
++
++    #[test]
++    fn the_exit_keeps_a_changed_checkout_and_leaves_the_ai_off() {
++        let window = open_range_window_with(Ai::On);
++        let checkout = prepared_checkout(&window);
++        fs::write(checkout.join("new.txt"), "new\n").unwrap();
++        end_at_exit(&ai_state(&window));
++        assert!(checkout.join("new.txt").is_file(), "{}", checkout.display());
++        assert_eq!(look(&window), Err(json!({ "kind": "AiOff" })));
+     }
+ 
+     #[test]
+     fn discard_removes_a_changed_checkout() {
+         let window = open_range_window_with(Ai::On);
+         let checkout = prepared_checkout(&window);
+-        std::fs::write(checkout.join("new.txt"), "new\n").unwrap();
+-        let changed = invoke_on(&window.webview, "checkout_changes", json!({})).unwrap();
++        fs::write(checkout.join("new.txt"), "new\n").unwrap();
++        let changed = look(&window).unwrap();
+         assert_eq!(changed["files"], json!(["new.txt"]), "{changed}");
+         assert_eq!(
+             invoke_on(&window.webview, "discard_checkout", json!({})),
+@@ -284,60 +306,91 @@ mod tests {
+         assert!(!checkout.exists(), "{}", checkout.display());
+     }
+ 
++    /// The pair folder a window on `main...remote` will hold; its lock is let go again.
++    fn own_pair_folder(repo: &Path, range_dir: &Path) -> PathBuf {
++        let spec = RangeSpec::parse("main...remote").unwrap();
++        let resolved = Resolved::resolve(repo, &spec).unwrap();
++        PairLock::take(range_dir, &resolved)
++            .unwrap()
++            .folder()
++            .to_owned()
++    }
++
++    fn gone_within_wait(folder: &Path) -> bool {
++        let deadline = Instant::now() + WAIT;
++        while folder.exists() && Instant::now() < deadline {
++            thread::sleep(POLL);
++        }
++        !folder.exists()
++    }
++
++    // The own pair's partial must be gone before any command holds the state; the other pair's must go while
++    // the state stays held, or the sweep of every kept checkout would stall Ask AI and the close question.
++    #[test]
++    fn an_ai_start_sweeps_its_own_pair_under_the_state_and_other_pairs_without_it() {
++        let (repo, data) = (repo(), TempDir::new().unwrap());
++        let range_dir = data.path().join("yamt").join("range");
++        let own_partial = own_pair_folder(repo.path(), &range_dir).join("checkout.partial");
++        let other_partial = range_dir
++            .join("x-0123456789abcdef")
++            .join("a-b")
++            .join("checkout.partial");
++        for partial in [&own_partial, &other_partial] {
++            fs::create_dir_all(partial.join("inside")).unwrap();
++        }
++
++        let window = open_range_window_in(repo, data, Ai::On);
++
++        let state = ai_state(&window);
++        let _held = lock(&state);
++        assert!(!own_partial.exists(), "{}", own_partial.display());
++        assert!(
++            gone_within_wait(&other_partial),
++            "{}",
++            other_partial.display()
++        );
++    }
++
+     #[cfg(unix)]
+     mod page_load {
+-        use std::process::Command;
+-        use std::sync::mpsc::Sender;
+-        use std::time::Duration;
+-
+-        use serde_json::Value;
+-        use tauri::ipc::InvokeResponseBody;
++        use std::sync::mpsc::Receiver;
+ 
+         use super::*;
++        use crate::servers::run_tests::{channel_into, is_alive};
+ 
+-        const WAIT: Duration = Duration::from_secs(10);
+-
+-        fn channel_into(events: Sender<Value>) -> Channel<HostEvent> {
+-            Channel::new(move |body| {
+-                let InvokeResponseBody::Json(json) = body else {
+-                    panic!("an event that is not JSON");
+-                };
+-                events.send(serde_json::from_str(&json).unwrap()).unwrap();
+-                Ok(())
+-            })
+-        }
+-
+-        fn is_alive(pid: u32) -> bool {
+-            let status = Command::new("kill")
+-                .args(["-0", &pid.to_string()])
+-                .status()
+-                .unwrap();
+-            status.success()
+-        }
+-
+-        #[test]
+-        fn a_page_load_stops_the_agent_and_keeps_the_checkout() {
+-            let window = open_range_window_with(Ai::On);
+-            let checkout = prepared_checkout(&window);
++        /// `sh` writes its pid to stderr and becomes `cat`; answers its run, its pid and its events.
++        fn started_cat(window: &RangeWindow) -> (AgentRun, u32, Receiver<Value>) {
+             let (sender, events) = mpsc::channel();
+             let cat = command("sh", &["-c", "echo $$ >&2; exec cat"]);
+-            let reply = started(&window, cat, channel_into(sender)).unwrap();
++            let reply = started(window, cat, channel_into(sender, true)).unwrap();
+             let AgentStartReply::Started { run } = reply else {
+                 panic!("{reply:?}");
+             };
+             let first = events.recv_timeout(WAIT).unwrap();
+-            let pid: u32 = first["line"].as_str().unwrap().parse().unwrap();
++            let pid = first["line"].as_str().unwrap().parse().unwrap();
++            (run, pid, events)
++        }
+ 
++        // A reload while a start, prepare or discard holds the state must still stop the old page's agent.
++        #[test]
++        fn a_page_load_stops_the_agent_at_once_or_once_the_state_is_free_and_keeps_the_checkout() {
++            let window = open_range_window_with(Ai::On);
++            let checkout = prepared_checkout(&window);
++            let app = window.webview.app_handle();
++            let (run, pid, events) = started_cat(&window);
++            stop_agent_on_page_start(app, PageLoadEvent::Finished);
++            send_to_agent(ai_state(&window), run, "still here".to_owned()).unwrap();
++            assert_eq!(events.recv_timeout(WAIT).unwrap()["text"], "still here");
++            stop_agent_on_page_start(app, PageLoadEvent::Started);
++            assert_eq!(events.recv_timeout(WAIT).unwrap()["kind"], "Exited");
++            assert!(!is_alive(pid));
++
++            let (_, pid, events) = started_cat(&window);
+             let state = ai_state(&window);
+             let held = lock(&state);
+-            stop_agent_on_page_start(&state, PageLoadEvent::Started);
++            stop_agent_on_page_start(app, PageLoadEvent::Started);
++            assert!(is_alive(pid));
+             drop(held);
+-            stop_agent_on_page_start(&state, PageLoadEvent::Finished);
+-            send_to_agent(ai_state(&window), run, "still here".to_owned()).unwrap();
+-            let echoed = json!({ "kind": "Message", "text": "still here" });
+-            assert_eq!(events.recv_timeout(WAIT).unwrap(), echoed);
+-
+-            stop_agent_on_page_start(&state, PageLoadEvent::Started);
+             assert_eq!(events.recv_timeout(WAIT).unwrap()["kind"], "Exited");
+             assert!(!is_alive(pid));
+             assert!(checkout.is_dir(), "{}", checkout.display());
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 7906b2e..30ff13d 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -89,9 +89,7 @@ pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Bu
+     builder
+         .invoke_handler(specta_builder().invoke_handler())
+         .on_page_load(|webview, page| {
+-            if let Some(state) = webview.try_state() {
+-                ai::stop_agent_on_page_start(&state, page.event());
+-            }
++            ai::stop_agent_on_page_start(webview.app_handle(), page.event());
+         })
+ }
+ 
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index e176b3a..76dbf1b 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -23,6 +23,7 @@ mod range;
+ mod review;
+ mod servers;
+ mod settings;
++mod start_script;
+ mod window;
+ 
+ use std::path::Path;
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+index f815c30..548a070 100644
+--- a/src-tauri/src/range.rs
++++ b/src-tauri/src/range.rs
+@@ -114,7 +114,7 @@ pub(crate) mod tests {
+         _app: App<MockRuntime>,
+     }
+ 
+-    fn repo() -> TempDir {
++    pub(crate) fn repo() -> TempDir {
+         let file = ConflictFile {
+             path: "a.txt",
+             kind: FileKind::Regular,
+@@ -155,7 +155,7 @@ pub(crate) mod tests {
+         open_resolved_window(repo, TempDir::new().unwrap(), resolved, Ai::Off)
+     }
+ 
+-    fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
++    pub(crate) fn open_range_window_in(repo: TempDir, data: TempDir, ai: Ai) -> RangeWindow {
+         let resolved = resolved(repo.path());
+         open_resolved_window(repo, data, resolved, ai)
+     }
+diff --git a/src-tauri/src/servers.rs b/src-tauri/src/servers.rs
+index a51b2bb..3ea99c4 100644
+--- a/src-tauri/src/servers.rs
++++ b/src-tauri/src/servers.rs
+@@ -54,7 +54,7 @@ pub(crate) fn start_server(
+ }
+ 
+ /// Returning drops `receiver`, which stops the run once the page cannot take its events.
+-fn forward(receiver: &Receiver<HostEvent>, events: &Channel<HostEvent>) {
++pub(crate) fn forward(receiver: &Receiver<HostEvent>, events: &Channel<HostEvent>) {
+     for event in receiver {
+         if events.send(event).is_err() {
+             return;
+@@ -166,7 +166,7 @@ mod tests {
+ 
+ #[cfg(test)]
+ #[cfg(unix)]
+-mod run_tests {
++pub(crate) mod run_tests {
+     use std::process::Command;
+     use std::sync::mpsc::{RecvTimeoutError, Sender};
+     use std::time::{Duration, Instant};
+@@ -197,7 +197,7 @@ mod run_tests {
+     }
+ 
+     /// A channel that hands each event to `events` and answers like a page that takes it or not.
+-    fn channel_into(events: Sender<Value>, takes_events: bool) -> Channel<HostEvent> {
++    pub(crate) fn channel_into(events: Sender<Value>, takes_events: bool) -> Channel<HostEvent> {
+         Channel::new(move |body| {
+             let InvokeResponseBody::Json(json) = body else {
+                 panic!("an event that is not JSON");
+@@ -219,7 +219,7 @@ mod run_tests {
+         first_event["line"].as_str().unwrap().parse().unwrap()
+     }
+ 
+-    fn is_alive(pid: u32) -> bool {
++    pub(crate) fn is_alive(pid: u32) -> bool {
+         let status = Command::new("kill")
+             .args(["-0", &pid.to_string()])
+             .status()
+diff --git a/src-tauri/src/start_script.rs b/src-tauri/src/start_script.rs
+new file mode 100644
+index 0000000..766285d
+--- /dev/null
++++ b/src-tauri/src/start_script.rs
+@@ -0,0 +1,57 @@
++use yamt_settings::Theme;
++
++use crate::args::Ai;
++use crate::window::WindowKind;
++
++// wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
++// document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
++pub(crate) fn start_script(theme: Theme, kind: WindowKind, ai: Ai) -> String {
++    let ai_line = match (kind, ai) {
++        (WindowKind::Range, Ai::On) => " document.documentElement.dataset.ai = \"on\";",
++        (WindowKind::Range, Ai::Off)
++        | (WindowKind::Merge | WindowKind::Compare, Ai::On | Ai::Off) => "",
++    };
++    format!(
++        "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";{ai_line}",
++        theme.name(),
++        kind.name()
++    )
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_start_script_names_the_theme_and_the_window() {
++        assert_eq!(
++            start_script(Theme::Light, WindowKind::Merge, Ai::Off),
++            r#"document.documentElement.dataset.theme = "light"; document.documentElement.dataset.window = "merge";"#
++        );
++        assert_eq!(
++            start_script(Theme::Dark, WindowKind::Compare, Ai::Off),
++            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
++        );
++        assert_eq!(
++            start_script(Theme::ZedLight, WindowKind::Merge, Ai::Off),
++            r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
++        );
++        assert_eq!(
++            start_script(Theme::Dark, WindowKind::Range, Ai::Off),
++            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range";"#
++        );
++    }
++
++    // The page builds its agent client only under `data-ai`; a merge or compare page must never get it.
++    #[test]
++    fn the_start_script_marks_ai_only_when_on() {
++        assert_eq!(
++            start_script(Theme::Dark, WindowKind::Range, Ai::On),
++            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range"; document.documentElement.dataset.ai = "on";"#
++        );
++        for kind in [WindowKind::Merge, WindowKind::Compare] {
++            assert!(!start_script(Theme::Dark, kind, Ai::On).contains("dataset.ai"));
++        }
++        assert!(!start_script(Theme::Dark, WindowKind::Range, Ai::Off).contains("dataset.ai"));
++    }
++}
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 4d078b9..a0e8021 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -12,13 +12,13 @@ use yamt_session::MergeSession;
+ use yamt_settings::{StoredSettings, Theme};
+ 
+ use crate::args::Ai;
+-
+ use crate::commands::{with_commands, with_session};
+ use crate::compare;
+ use crate::merge::MergeState;
+ use crate::outcome::{Ending, Exit, ending_when_git_is_done};
+ use crate::servers::{self, HostState};
+ use crate::settings;
++use crate::start_script::start_script;
+ 
+ const WINDOW_LABEL: &str = "main";
+ const COMPARE_TITLE: &str = "Compare — yamt";
+@@ -53,7 +53,7 @@ pub(crate) enum WindowKind {
+ }
+ 
+ impl WindowKind {
+-    fn name(self) -> &'static str {
++    pub(crate) fn name(self) -> &'static str {
+         match self {
+             WindowKind::Merge => "merge",
+             WindowKind::Compare => "compare",
+@@ -177,21 +177,6 @@ fn background(theme: Theme) -> Color {
+     }
+ }
+ 
+-// wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
+-// document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
+-fn start_script(theme: Theme, kind: WindowKind, ai: Ai) -> String {
+-    let ai_line = match (kind, ai) {
+-        (WindowKind::Range, Ai::On) => " document.documentElement.dataset.ai = \"on\";",
+-        (WindowKind::Range, Ai::Off)
+-        | (WindowKind::Merge | WindowKind::Compare, Ai::On | Ai::Off) => "",
+-    };
+-    format!(
+-        "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";{ai_line}",
+-        theme.name(),
+-        kind.name()
+-    )
+-}
+-
+ pub(crate) fn window_title(root: &Path) -> String {
+     let folder = root.file_name().unwrap_or(root.as_os_str());
+     format!("{} — yamt", folder.to_string_lossy())
+@@ -296,39 +281,6 @@ mod tests {
+         assert!(!answered("null"));
+     }
+ 
+-    #[test]
+-    fn the_start_script_names_the_theme_and_the_window() {
+-        assert_eq!(
+-            start_script(Theme::Light, WindowKind::Merge, Ai::Off),
+-            r#"document.documentElement.dataset.theme = "light"; document.documentElement.dataset.window = "merge";"#
+-        );
+-        assert_eq!(
+-            start_script(Theme::Dark, WindowKind::Compare, Ai::Off),
+-            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
+-        );
+-        assert_eq!(
+-            start_script(Theme::ZedLight, WindowKind::Merge, Ai::Off),
+-            r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
+-        );
+-        assert_eq!(
+-            start_script(Theme::Dark, WindowKind::Range, Ai::Off),
+-            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range";"#
+-        );
+-    }
+-
+-    // The page builds its agent client only under `data-ai`; a merge or compare page must never get it.
+-    #[test]
+-    fn the_start_script_marks_ai_only_when_on() {
+-        assert_eq!(
+-            start_script(Theme::Dark, WindowKind::Range, Ai::On),
+-            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "range"; document.documentElement.dataset.ai = "on";"#
+-        );
+-        for kind in [WindowKind::Merge, WindowKind::Compare] {
+-            assert!(!start_script(Theme::Dark, kind, Ai::On).contains("dataset.ai"));
+-        }
+-        assert!(!start_script(Theme::Dark, WindowKind::Range, Ai::Off).contains("dataset.ai"));
+-    }
+-
+     fn second_request_after(delay: Duration) -> CloseRequest {
+         let asked = Instant::now();
+         let mut watch = CloseWatch::new();
+-- 
+2.56.0
+

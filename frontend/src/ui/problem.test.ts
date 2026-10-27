@@ -64,3 +64,21 @@ test("a settings failure logs its cause, and only the file's path for key proble
     }),
   ).toEqual(['[error] store.settings_failed {kind: "Keys", path: "/home/me/settings.json"}']);
 });
+
+test("a failed openRange logs its cause under its own event (catches a log line without the cause)", () => {
+  expect(logged({ action: "openRange", cause: { kind: "Git", message: "bad revision" } })).toEqual([
+    '[error] store.openRange_failed {kind: "Git", message: "bad revision"}',
+  ]);
+});
+
+test("a failed thread call logs its step and cause (catches a log line without the step)", () => {
+  expect(logged({ action: "threads", step: "queue", cause: { kind: "EmptyMessage" } })).toEqual([
+    '[error] store.threads_failed {step: "queue", kind: "EmptyMessage"}',
+  ]);
+});
+
+test("a failed AI call logs its step and cause (catches a log line without the step)", () => {
+  expect(logged({ action: "ai", step: "discard", cause: { kind: "AiOff" } })).toEqual([
+    '[error] store.ai_failed {step: "discard", kind: "AiOff"}',
+  ]);
+});

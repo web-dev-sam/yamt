@@ -1,0 +1,37 @@
+```json
+{
+  "verdict": "fail",
+  "findings": [
+    {
+      "severity": "block",
+      "rule_id": "SP5",
+      "file": "crates/review/src/thread_file.rs",
+      "line": 157,
+      "problem": "Surviving mutant `error.kind() == ErrorKind::NotFound` → `true`. Nothing tests the design §3 / #117 refusal \"unreadable → ReadFailed, the file untouched\". If this guard broke, an unreadable `threads.json` (a mode-000 file, or a directory at the path) would open as an empty store. The next add would then rename a one-thread file over the user's threads, which is silent loss of every stored thread. The brief's Change 2 requires every §3 Reading refusal, and its Acceptance requires that the tests kill the mutants on the changed lines.",
+      "fix": "Add an integration test in tests/threads.rs that follows compare's `a_tabs_json_that_cannot_be_read_is_read_failed_and_nothing_in_the_folder_changes` (crates/compare/tests/opening.rs:123). It does `fs::create_dir(folder/threads.json)` and asserts that `ThreadStore::open` answers `Error::ReadFailed { path }` with `path == threads_path(&folder)`. It also asserts that `folder_names` is still only `[\"threads.json\"]`."
+    },
+    {
+      "severity": "should",
+      "rule_id": "SP5",
+      "file": "crates/review/src/thread_store.rs",
+      "line": 55,
+      "problem": "Surviving mutant `delete ! in list`. The guard decides whether the brief's \"one warn line naming them\" appears at all. Nothing observes it, so a flipped guard would log an empty-paths warn on every reply and stay silent exactly when threads are hidden. This is not dropped under VF7 (c), because the guard is a decision and not the log call itself. Nothing else builds on it, so it is not graded `block`. If it stays, the warning that tells the owner a thread was hidden can rot unnoticed.",
+      "fix": "Once the boundary review's change to a pure `list` plus a returned unlisted-paths value lands, assert that value directly: `[\"a.txt\", \"b.txt\"]` through `main..remote` and `[]` through `main..local` in `threads_on_paths_no_longer_listed_are_kept_on_every_write`. Until then, assert the warn by capturing it with `tracing-subscriber` (already a workspace dependency) as a dev dependency."
+    }
+  ],
+  "checked": [
+    "Survivor triage under VF7. thread_file.rs:157 is a real guard whose loss means data loss, so it is graded block. thread_store.rs:55 is a branch that only decides logging, graded should. Neither is equivalent and no gate recipe kills either. I ran no tests.",
+    "Format 1 matches design §3 field for field: `format`, `nextThread`, `nextMessage`, `threads[]{id, path, line, session, messages[]{id, body, written, posting}}`. `format_1_round_trips_every_body_and_posting_kind_and_a_session` compares the JSON written back against the original minus the one added message, so a renamed or dropped field fails it. The posting fields are snake_case `draft_note`/`merge_request`, which is deviation 3, already accepted by the boundary review.",
+    "Refusals leave the file untouched. `parsed` reads `FormatOnly` first, so `{\"format\":2,...}` with unknown fields is `NewerFormat` and not `Broken`. Format 0 is `Broken` (unit test `format_0_is_broken_not_newer`). Serde's errors carry the line and column (the test checks \"line 3 column 3\"). `problem()` covers repeated thread and message ids (including across threads, `a_message_id_repeated_in_another_thread_is_broken`), ids at their counter, threads without messages, and counters at u32::MAX. Every integration case asserts the bytes are unchanged, and the broken and newer cases assert no temp file is left.",
+    "Ids never repeat. `take_*_id` advance the counter in the clone `next`, which is committed only after the write. Deleting the increment would write a thread at `nextThread` that the reopen refuses as `Broken`, so `ids_never_repeat_after_reopening` (10/20 → 11/21) catches it. The room rule (`saturating_add`, then `require_room` on both counters) matches compare's `no_room_left`, and the unit test `taking_the_id_below_u32_max_is_refused...` pins its boundary at MAX-1 → refused and MAX-2 → given.",
+    "Write before memory: `commit` calls `write_threads` and only then `self.file = next`, and every mutation (add_thread, add_note, change_posting, record) works on a clone. `a_failed_write_changes_nothing_in_memory` blocks the temp path with a non-empty directory, gets `WriteFailed{path}` from add_thread, add_note and queue, and checks that the list and the disk bytes are unchanged and the next ids after recovery are still 2/2. Swapping the two statements in `commit` would fail its list and id asserts.",
+    "Blank text is checked by `require_text` before any id is taken or any write, in add_thread, add_note and queue. `blank_text_is_refused_and_nothing_written` would fail if any one of the three checks were deleted: an empty folder after add_thread, unchanged bytes after add_note and queue. Text is stored as typed.",
+    "Queue and unqueue rules: `change_posting` refuses `Pending` with `MessagePending` before changing anything, and accepts NotQueued, Queued or Refused. `queue` stores `Queued{text}` and leaves the body untouched. A refused message queued again becomes `Queued` (`queue_keeps_the_edited_text_and_unqueue_drops_it`, checked after a reopen). `a_pending_message_cannot_be_queued_or_unqueued` asserts both errors with id 4 and the bytes unchanged. An aiAnswer message can be queued, which matches design §2's seam (C queues through the same command).",
+    "Threads on unlisted paths: `file_at` matches the stored path against `entry.path` (the new path, or the old one for a deleted file, as the brief says). The replies map back to the current `RangeFileId`: c.txt is 2 in `main..local` and 0 in `main..remote`, and the test asserts both. A hidden thread or message answers UnknownThread or UnknownMessage (deviation 5, accepted). Writes through the narrower range keep the hidden thread, which is verified by reopening through the wider range.",
+    "A leftover `threads.json.tmp` is never read, and `fs::write` truncates it before the rename. `a_leftover_temp_file_is_ignored` ends with only `threads.json` in the folder. The write follows compare's `write_atomically` exactly, with the same lack of fsync, so this is no divergence.",
+    "The range split keeps yamt-range's behaviour. The old `files_at` gave ids with `(0..).zip(changed)`, and `entries_at` does the same over the same sorted `changed`, so `entries[i].id == i` and `files[i]` is the same file. `load`'s change from `find(entry.id == file)` to `files.get(list_index(file))` is therefore equivalent, and an unknown id is still `UnknownFile` (range.rs:358 still asserts it). `start().files` is now `entries.clone()`, the same rows. No code in load.rs read `FileAt.entry`. Accessors are tested in open.rs `the_accessors_answer_the_listed_rows_both_commits_and_the_work_tree`, including `entry(2) == None`.",
+    "Unknown ids: `an_unknown_file_thread_or_message_is_its_error` asserts each error's words with the id asked for, for add_thread, add_note, queue and unqueue, with the bytes and the list unchanged.",
+    "I did not repeat the boundary review's findings: `queued` takes no range, and `list` logs a warn on every reply. The second survivor's fix builds on the latter."
+  ]
+}
+```

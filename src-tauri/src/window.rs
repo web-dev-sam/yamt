@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -11,15 +11,18 @@ use tauri::{
 use yamt_session::MergeSession;
 use yamt_settings::{StoredSettings, Theme};
 
-use crate::commands::{with_compare, with_session};
+use crate::args::Ai;
+use crate::commands::{with_commands, with_session};
 use crate::compare;
 use crate::merge::MergeState;
 use crate::outcome::{Ending, Exit, ending_when_git_is_done};
 use crate::servers::{self, HostState};
 use crate::settings;
+use crate::start_script::start_script;
 
 const WINDOW_LABEL: &str = "main";
 const COMPARE_TITLE: &str = "Compare — yamt";
+const APP_FOLDER: &str = "yamt";
 const WIDTH: f64 = 1600.0;
 const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
@@ -43,16 +46,18 @@ const PAGE_ANSWER: &str = "true";
 
 /// Which page the window shows: `<html data-window>` before the first frame (plan §2 #94).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowKind {
+pub(crate) enum WindowKind {
     Merge,
     Compare,
+    Range,
 }
 
 impl WindowKind {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             WindowKind::Merge => "merge",
             WindowKind::Compare => "compare",
+            WindowKind::Range => "range",
         }
     }
 }
@@ -78,29 +83,48 @@ fn context() -> tauri::Context<tauri::Wry> {
 
 fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> {
     let app = with_session(tauri::Builder::default(), session).build(context())?;
-    let handle = open_and_wait(app, title, WindowKind::Merge)?;
+    let handle = open_and_wait(app, title, WindowKind::Merge, Ai::Off)?;
     servers::lock(&handle.state::<HostState>()).stop_all();
     Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
 }
 
 fn open_compare() -> tauri::Result<Ending> {
-    let app = with_compare(tauri::Builder::default()).build(context())?;
+    let manage = compare::manage_store_in;
+    open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, Ai::Off, manage, |_| {})
+}
+
+/// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens;
+/// its refusal is the one line the run ends with, a closed window is exit 0 after `at_exit`.
+pub(crate) fn open_with_data_folder(
+    title: &str,
+    kind: WindowKind,
+    ai: Ai,
+    manage: impl FnOnce(&App, &Path) -> Result<(), String>,
+    at_exit: impl FnOnce(&AppHandle),
+) -> tauri::Result<Ending> {
+    let app = with_commands(tauri::Builder::default()).build(context())?;
     let managed = app
         .path()
         .data_dir()
         .map_err(|error| format!("no data folder: {error}"))
-        .and_then(|data_dir| compare::manage_store_in(&app, &data_dir));
+        .and_then(|data_dir| manage(&app, &app_folder(&data_dir)));
     if let Err(problem) = managed {
         return Ok(Ending::failure(problem));
     }
-    open_and_wait(app, COMPARE_TITLE, WindowKind::Compare)?;
+    let handle = open_and_wait(app, title, kind, ai)?;
+    at_exit(&handle);
     Ok(Ending {
         exit: Exit::Success,
         message: None,
     })
 }
 
-fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
+/// yamt's own folder in the user's data folder: the compare tabs and the range locks live under it.
+pub(crate) fn app_folder(data_dir: &Path) -> PathBuf {
+    data_dir.join(APP_FOLDER)
+}
+
+fn open_and_wait(app: App, title: &str, kind: WindowKind, ai: Ai) -> tauri::Result<AppHandle> {
     let stored = start_settings(app.path());
     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
     #[cfg(target_os = "linux")]
@@ -111,7 +135,7 @@ fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHa
         .inner_size(WIDTH, HEIGHT)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .background_color(background(theme))
-        .initialization_script(start_script(theme, kind))
+        .initialization_script(start_script(theme, kind, ai))
         .build()?;
     let handle = app.handle().clone();
     let mut close_watch = CloseWatch::new();
@@ -153,17 +177,7 @@ fn background(theme: Theme) -> Color {
     }
 }
 
-// wry 0.57 injects it at document start (webkitgtk/mod.rs:822, wkwebview/mod.rs:787): "after the
-// document element is created, but before any other content is loaded" (WKUserScriptInjectionTime).
-fn start_script(theme: Theme, kind: WindowKind) -> String {
-    format!(
-        "document.documentElement.dataset.theme = \"{}\"; document.documentElement.dataset.window = \"{}\";",
-        theme.name(),
-        kind.name()
-    )
-}
-
-fn window_title(root: &Path) -> String {
+pub(crate) fn window_title(root: &Path) -> String {
     let folder = root.file_name().unwrap_or(root.as_os_str());
     format!("{} — yamt", folder.to_string_lossy())
 }
@@ -265,22 +279,6 @@ mod tests {
         assert!(!answered(""));
         assert!(!answered("false"));
         assert!(!answered("null"));
-    }
-
-    #[test]
-    fn the_start_script_names_the_theme_and_the_window() {
-        assert_eq!(
-            start_script(Theme::Light, WindowKind::Merge),
-            r#"document.documentElement.dataset.theme = "light"; document.documentElement.dataset.window = "merge";"#
-        );
-        assert_eq!(
-            start_script(Theme::Dark, WindowKind::Compare),
-            r#"document.documentElement.dataset.theme = "dark"; document.documentElement.dataset.window = "compare";"#
-        );
-        assert_eq!(
-            start_script(Theme::ZedLight, WindowKind::Merge),
-            r#"document.documentElement.dataset.theme = "zed-light"; document.documentElement.dataset.window = "merge";"#
-        );
     }
 
     fn second_request_after(delay: Duration) -> CloseRequest {

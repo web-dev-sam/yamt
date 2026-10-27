@@ -1,0 +1,12 @@
+just mutants 040cc47~1 (covers 040cc47 RVAgentCrate)
+MISSED   crates/agent/src/bin/agent-echo.rs:12:49: replace + with - in 0s build + 1s test
+MISSED   crates/agent/src/bin/agent-echo.rs:12:49: replace + with * in 0s build + 1s test
+MISSED   crates/agent/src/bin/agent-echo.rs:12:42: replace * with + in 0s build + 1s test
+MISSED   crates/agent/src/bin/agent-echo.rs:12:42: replace * with / in 0s build + 1s test
+MISSED   crates/agent/src/bin/agent-echo.rs:12:35: replace * with + in 0s build + 1s test
+MISSED   crates/agent/src/bin/agent-echo.rs:12:35: replace * with / in 0s build + 1s test
+MISSED   crates/agent/src/checkout.rs:58:23: replace match guard error.kind() == io::ErrorKind::NotFound with true in remove in 0s build + 1s test
+MISSED   crates/agent/src/checkout.rs:58:23: replace match guard error.kind() == io::ErrorKind::NotFound with false in remove in 0s build + 1s test
+MISSED   crates/agent/src/checkout.rs:58:36: replace == with != in remove in 0s build + 1s test
+MISSED   crates/agent/src/checkout.rs:87:23: replace match guard error.kind() == io::ErrorKind::NotFound with true in remove_if_present in 0s build + 1s test
+67 mutants tested in 3m: 10 missed, 44 caught, 13 unviable

@@ -1,5 +1,6 @@
 import { searchPanelOpen } from "@codemirror/search";
-import type { ViewUpdate } from "@codemirror/view";
+import type { StateField } from "@codemirror/state";
+import { BlockType, type ViewUpdate } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
 import type { Column } from "../../ipc";
@@ -10,23 +11,41 @@ import { syncFindSpace, type FindSpaceView } from "./find";
 import { rangeSpan, rowsChanged } from "./geometry";
 import { contentEnd, ScrollSync, type Anchor, type ScrollPane } from "./scrollSync";
 
+export type LineBlock = Span & { readonly type: BlockType | readonly LineBlock[] };
 type FrameView = ScrollPane &
   FindSpaceView & {
     readonly documentTop: number;
-    lineBlockAt(pos: number): Span;
+    lineBlockAt(pos: number): LineBlock;
   };
 type FrameViews = Readonly<Record<Column, FrameView>>;
+type ExtraAnchors = (views: FrameViews) => readonly Anchor<Column>[];
 
 type CompareLayout = {
   readonly rows: readonly CompareRow[];
   readonly anchors: readonly Anchor<Column>[];
 };
 
-function columnSpan(view: FrameView, range: { readonly from: number; readonly to: number }): Span {
-  return rangeSpan(view.state.doc, range, (pos) => view.lineBlockAt(pos));
+export function textBlock(block: LineBlock): Span {
+  if (typeof block.type === "number") {
+    return block;
+  }
+  return block.type.find((part) => part.type === BlockType.Text) ?? block;
 }
 
-function measure({ left, right }: FrameViews): CompareLayout {
+function columnSpan(view: FrameView, range: { readonly from: number; readonly to: number }): Span {
+  const { doc } = view.state;
+  if (range.from !== range.to) {
+    return rangeSpan(doc, range, (pos) => view.lineBlockAt(pos));
+  }
+  const block = view.lineBlockAt(range.from);
+  const text = textBlock(block);
+  return doc.lineAt(range.from).from === range.from
+    ? { top: block.top, bottom: text.top }
+    : { top: text.bottom, bottom: block.bottom };
+}
+
+function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {
+  const { left, right } = views;
   const rightSpans = right.state.field(differenceField).spans;
   const rows = left.state.field(differenceField).spans.flatMap((span, index) => {
     const other = rightSpans[index];
@@ -39,12 +58,17 @@ function measure({ left, right }: FrameViews): CompareLayout {
     { left: row.left.bottom, right: row.right.bottom },
   ]);
   const ends = { left: contentEnd(left), right: contentEnd(right) };
-  return { rows, anchors: [{ left: 0, right: 0 }, ...edges, ends] };
+  const anchors = [{ left: 0, right: 0 }, ...edges, ...extra(views), ends].sort((a, b) =>
+    a.left === b.left ? a.right - b.right : a.left - b.left,
+  );
+  return { rows, anchors };
 }
 
 export class CompareFrame {
   readonly #views: FrameViews;
   readonly #strip: Pick<CompareStrip, "paint">;
+  readonly #fields: readonly StateField<unknown>[];
+  readonly #anchors: ExtraAnchors;
   readonly #scroll: ScrollSync<Column>;
   #frameId: number | null = null;
   #layoutCache: CompareLayout | null = null;
@@ -52,19 +76,25 @@ export class CompareFrame {
   constructor({
     views,
     strip,
+    fields,
+    anchors,
   }: {
     readonly views: FrameViews;
     readonly strip: Pick<CompareStrip, "paint">;
+    readonly fields: readonly StateField<unknown>[];
+    readonly anchors: ExtraAnchors;
   }) {
     this.#views = views;
     this.#strip = strip;
+    this.#fields = fields;
+    this.#anchors = anchors;
     this.#scroll = new ScrollSync(views, COLUMNS, () => {
       this.request();
     });
   }
 
   changed(update: Pick<ViewUpdate, "geometryChanged" | "startState" | "state">): void {
-    const moved = rowsChanged(update, [differenceField]);
+    const moved = rowsChanged(update, this.#fields);
     if (moved) {
       this.#layoutCache = null;
     }
@@ -78,7 +108,7 @@ export class CompareFrame {
       this.#frameId = null;
       const views = this.#views;
       syncFindSpace([views.left, views.right]);
-      this.#layoutCache ??= measure(views);
+      this.#layoutCache ??= measure(views, this.#anchors);
       const layout = this.#layoutCache;
       this.#scroll.sync(layout.anchors);
       this.#strip.paint(views, layout.rows);

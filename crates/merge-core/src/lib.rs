@@ -21,3 +21,6 @@ pub use line::{
 };
 pub use line_map::{LineMap, line_map};
 pub use word::{Removal, SideWordChanges, WordChanges, word_changes};
+
+/// The most bytes a text may hold to be shown: larger files are answered "too large", never diffed.
+pub const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;

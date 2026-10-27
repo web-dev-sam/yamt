@@ -1,0 +1,1770 @@
+From 24af2963105b81b70856ed5e098dc5e294dc2903 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:13:05 +0100
+Subject: [PATCH] feat(ai): the AI's turn view, edit diffs, the close question,
+ the AI settings section
+
+---
+ frontend/scripts/fences.test.ts             |  50 ++++++
+ frontend/scripts/fences.ts                  |  20 ++-
+ frontend/src/ui/AGENTS.md                   |   2 +
+ frontend/src/ui/AgentSettings.vue           | 109 +++++++++++++
+ frontend/src/ui/AiStep.vue                  |  37 +++++
+ frontend/src/ui/AiTurn.vue                  |  71 +++++++++
+ frontend/src/ui/EditDiff.vue                | 155 ++++++++++++++++++
+ frontend/src/ui/agentSettingsFields.test.ts |  83 ++++++++++
+ frontend/src/ui/agentSettingsFields.ts      |  53 ++++++
+ frontend/src/ui/aiClose.test.ts             | 168 ++++++++++++++++++++
+ frontend/src/ui/aiClose.ts                  |  63 ++++++++
+ frontend/src/ui/aiText.test.ts              | 111 +++++++++++++
+ frontend/src/ui/aiText.ts                   |  82 ++++++++++
+ frontend/src/ui/editDiffLines.test.ts       | 150 +++++++++++++++++
+ frontend/src/ui/editDiffLines.ts            | 123 ++++++++++++++
+ frontend/src/ui/problem.test.ts             |   6 +
+ frontend/src/ui/problem.ts                  |  13 +-
+ frontend/src/ui/problemText.test.ts         |  21 +++
+ frontend/src/ui/problemText.ts              |  10 +-
+ frontend/src/ui/question.test.ts            |  70 ++++++++
+ frontend/src/ui/question.ts                 |  81 ++++++++--
+ 21 files changed, 1463 insertions(+), 15 deletions(-)
+ create mode 100644 frontend/src/ui/AgentSettings.vue
+ create mode 100644 frontend/src/ui/AiStep.vue
+ create mode 100644 frontend/src/ui/AiTurn.vue
+ create mode 100644 frontend/src/ui/EditDiff.vue
+ create mode 100644 frontend/src/ui/agentSettingsFields.test.ts
+ create mode 100644 frontend/src/ui/agentSettingsFields.ts
+ create mode 100644 frontend/src/ui/aiClose.test.ts
+ create mode 100644 frontend/src/ui/aiClose.ts
+ create mode 100644 frontend/src/ui/aiText.test.ts
+ create mode 100644 frontend/src/ui/aiText.ts
+ create mode 100644 frontend/src/ui/editDiffLines.test.ts
+ create mode 100644 frontend/src/ui/editDiffLines.ts
+
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 2820089..8b827be 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -558,6 +558,56 @@ test("range files importing shared ui files and their own neighbours violate not
+   expect(violationsOf(files)).toEqual([]);
+ });
+ 
++test("the merge root, the compare root or a shared ui file importing an AI view violates PM9", () => {
++  const files = [
++    {
++      path: "src/ui/App.vue",
++      text: `<script setup lang="ts">\nimport AgentSettings from "./AgentSettings.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/CompareView.vue",
++      text: `<script setup lang="ts">\nimport AiTurn from "./AiTurn.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/SettingsView.vue",
++      text: `<script setup lang="ts">\nimport "./AgentSettings";\n</script>`,
++    },
++    { path: "src/ui/store.ts", text: `import "./EditDiff.vue";\nimport "./AiStep.vue";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM9", file: "src/ui/App.vue", specifier: "./AgentSettings.vue" },
++    { rule: "PM9", file: "src/ui/CompareView.vue", specifier: "./AiTurn.vue" },
++    { rule: "PM9", file: "src/ui/SettingsView.vue", specifier: "./AgentSettings" },
++    { rule: "PM9", file: "src/ui/store.ts", specifier: "./EditDiff.vue" },
++    { rule: "PM9", file: "src/ui/store.ts", specifier: "./AiStep.vue" },
++  ]);
++});
++
++test("range files and the AI views importing the AI views, and an AI view importing shared files, violate nothing", () => {
++  const files = [
++    {
++      path: "src/ui/RangeApp.vue",
++      text: `<script setup lang="ts">\nimport AgentSettings from "./AgentSettings.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/RangeThreadBox.vue",
++      text: `<script setup lang="ts">\nimport AiTurn from "./AiTurn.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/AiTurn.vue",
++      text: `<script setup lang="ts">\nimport AiStep from "./AiStep.vue";\nimport "./aiText";\n</script>`,
++    },
++    {
++      path: "src/ui/AiStep.vue",
++      text: `<script setup lang="ts">\nimport EditDiff from "./EditDiff.vue";\n</script>`,
++    },
++    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
+ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
+   const files = [
+     {
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 5d14197..c6939c0 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -62,6 +62,12 @@ const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
+   compare: "PM7",
+   range: "PM9",
+ };
++const AI_VIEWS: Readonly<Record<string, true>> = {
++  "src/ui/AiTurn": true,
++  "src/ui/AiStep": true,
++  "src/ui/EditDiff": true,
++  "src/ui/AgentSettings": true,
++};
+ 
+ function scriptTexts(file: SourceFile): string[] {
+   if (!file.path.endsWith(".vue")) {
+@@ -159,6 +165,16 @@ function rootFinding(file: string, target: string): Finding | undefined {
+   return undefined;
+ }
+ 
++function aiViewFinding(file: string, target: string): Finding | undefined {
++  const shown = Object.hasOwn(AI_VIEWS, target.replace(SOURCE_EXTENSION, ""));
++  const inside = Object.hasOwn(AI_VIEWS, file.replace(SOURCE_EXTENSION, ""));
++  const inRange = WINDOW_FILE.exec(file)?.[1]?.toLowerCase() === "range";
++  if (!shown || inside || inRange) {
++    return undefined;
++  }
++  return { rule: "PM9", reason: "the AI's views are shown only in the range window" };
++}
++
+ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
+   type Visit = { readonly index: number; low: number };
+   const visits = new Map<string, Visit>();
+@@ -245,7 +261,9 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+       const finding =
+         target === undefined
+           ? packageFinding(module, specifier)
+-          : (pathFinding(module, target) ?? rootFinding(file.path, target));
++          : (pathFinding(module, target) ??
++            rootFinding(file.path, target) ??
++            aiViewFinding(file.path, target));
+       if (finding !== undefined) {
+         violations.push({ ...finding, file: file.path, specifier });
+       }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index db9647a..39ecfc4 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -6,6 +6,8 @@ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeSto
+ 
+ Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every lines-up sentence is in `rangeThreadText.ts`. `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). Post opens `RangePostEditor.vue` in the message's place (Queue/Cancel), Unqueue is the same button while queued or refused. Keys in every box field go through `rangeKeys.ts` `boxKeydown`: Ctrl/Cmd+Enter submits, Escape cancels (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp`'s window keydown skips presses that type into a field (`typesIntoField`: a typing target per `isTypingTarget` without Ctrl/Cmd), so Ctrl/Cmd+B still toggles the list from a box or a find field. `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendResultText`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
++The AI in a range thread (plan §2 #111–#115, #122): `AiTurn.vue` (`turn`, `end`, `client`, `@retry`) shows one turn — "Thinking and steps" collapsed (`AiStep.vue` per step, live while running), the answer through `useMarkdown`, then the stopped line or one failure sentence with Retry; `AiStep.vue` shows a step's title, status and outputs, an edit as `EditDiff.vue` (collapsed "Edited/Created <path>"; on opening `client.editDiff`, rows from `editDiffLines.ts`: 3 context lines, 2,000 rows, then "n more lines not shown"; a created file needs no call). `AgentSettings.vue` is the "AI" section the range root puts in `SettingsView`'s slot (rules in `agentSettingsFields.ts`: Use/Default, a default stored as null, unknown placeholders named). Every AI word is in `aiText.ts` (one sentence per `AgentFailure`; the `app` kind, a diff failure and a failed discard through `problemText`'s `ai` action). The four views are importable only from the range root's files (fence PM9 in `scripts/fences.ts`). The range root's close guard calls `aiClose.ts` `aiMayClose`: Missing/Clean close silently, Changed/Unreadable ask `keepAiChanges`/`keepUnreadableCheckout` (Keep Changes the confirm), Discard removes or reports and stays, Escape stays; a failed look closes (the shell removes only a clean checkout at exit).
++
+ Language servers (plan §2 #67, #70): the store holds the app's one `LanguageServers` (built in `main.ts`) through `servers.ts` (`serverViews` follows `onChange`, the shown log, the actions, `screen` for the log); `ServerStatus.vue` sits left of the gear in all three header rows, `ServerMenu.vue` and `ServerLogView.vue` hang off it; every word is in `serverText.ts`, except an install hint's text (the commands per package manager, steps and lines), which is `installText.ts`. The menu reads each `ServerView`'s `help` and `notes` (plan §2 #72): a failed start or an exit (`failureHelp`) shows "If it is not installed:" and the same install text as "Not installed"; each note is one muted line under the state (`noteLine`).
+ 
+ Which servers exist (plan §2 #67, #70, #71): `serverSetup.ts` owns the start and focus sequences — `startUp` (from `main.ts`) loads the file list and the settings, then detects and asks the question when the repository (the host context's root) has no answer; `refocus` (App's focus watch) refreshes both, then detects again without asking, once `startUp` has run. The answer in force is always what the settings file holds after a write (a failed write changes nothing); "Don't start" halts the runs (`haltAll`) without marking them stopped by the user. With no host (fixture mode without `?servers`) it only loads and refreshes. Its Settings section is `LanguageServerSettings.vue`, whose add form starts with `PresetPicker.vue` ("From the list": `presetChoices()` in the key list's row-menu pattern, filling Command and File types, plan §2 #72); the question's wording is in `question.ts`, every server word (folder labels, "Not installed") in `serverText.ts`.
+diff --git a/frontend/src/ui/AgentSettings.vue b/frontend/src/ui/AgentSettings.vue
+new file mode 100644
+index 0000000..80cf90d
+--- /dev/null
++++ b/frontend/src/ui/AgentSettings.vue
+@@ -0,0 +1,109 @@
++<script setup lang="ts">
++import { computed, shallowRef, watch } from "vue";
++
++import type { AgentSettings } from "../ipc";
++import {
++  commandField,
++  firstMessageField,
++  PLACEHOLDER_NAMES,
++  unknownPlaceholderLines,
++  YOLO_NOTE,
++} from "./agentSettingsFields";
++import { useSettingsStore } from "./settingsStore";
++
++const BUTTON =
++  "rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent";
++
++const { settings, setAgent } = useSettingsStore();
++const commandText = shallowRef("");
++const messageText = shallowRef("");
++
++const command = computed(() => commandField(settings.value.agent, commandText.value));
++const message = computed(() => firstMessageField(settings.value.agent, messageText.value));
++const unknown = computed(() => unknownPlaceholderLines(messageText.value));
++
++watch(() => command.value.shown, restoreCommand, { immediate: true });
++watch(() => message.value.shown, restoreMessage, { immediate: true });
++
++function restoreCommand(): void {
++  commandText.value = command.value.shown;
++}
++
++function restoreMessage(): void {
++  messageText.value = message.value.shown;
++}
++
++async function store(agent: AgentSettings | null): Promise<void> {
++  if (agent !== null) {
++    await setAgent(agent);
++  }
++}
++</script>
++
++<template>
++  <section aria-labelledby="settings-ai" class="flex flex-col gap-4">
++    <h3 id="settings-ai" class="font-semibold">AI</h3>
++    <section aria-labelledby="settings-ai-command">
++      <h4 id="settings-ai-command" class="mb-1 text-fg-muted">Agent command</h4>
++      <form class="flex gap-2" @submit.prevent="store(command.use)">
++        <input
++          v-model="commandText"
++          type="text"
++          aria-labelledby="settings-ai-command"
++          spellcheck="false"
++          class="min-w-0 flex-1 rounded border border-control-border bg-panel-inline px-2 py-1 font-mono outline-none focus:border-primary"
++          @keydown.esc="restoreCommand"
++        />
++        <button type="submit" :disabled="command.use === null" :class="BUTTON">Use</button>
++        <button
++          type="button"
++          :disabled="command.reset === null"
++          :class="BUTTON"
++          @click="store(command.reset)"
++        >
++          Default
++        </button>
++      </form>
++      <p class="mt-1 text-fg-muted">
++        The command is split on spaces. It speaks the Agent Client Protocol.
++      </p>
++      <p class="mt-1 text-fg-muted">{{ YOLO_NOTE }}</p>
++    </section>
++    <section aria-labelledby="settings-ai-message">
++      <h4 id="settings-ai-message" class="mb-1 text-fg-muted">First message</h4>
++      <form class="flex flex-col gap-2" @submit.prevent="store(message.use)">
++        <textarea
++          v-model="messageText"
++          aria-labelledby="settings-ai-message"
++          spellcheck="false"
++          rows="8"
++          class="min-w-0 resize-y rounded border border-control-border bg-panel-inline px-2 py-1 font-mono outline-none focus:border-primary"
++          @keydown.esc="restoreMessage"
++        ></textarea>
++        <div class="flex gap-2">
++          <button type="submit" :disabled="message.use === null" :class="BUTTON">Use</button>
++          <button
++            type="button"
++            :disabled="message.reset === null"
++            :class="BUTTON"
++            @click="store(message.reset)"
++          >
++            Default
++          </button>
++        </div>
++      </form>
++      <ul v-if="unknown.length > 0" class="mt-1 text-problem-warning">
++        <li v-for="line in unknown" :key="line">{{ line }}</li>
++      </ul>
++      <p class="mt-1 text-fg-muted">
++        Sent as the first message of a thread's conversation. Placeholders:
++        <span
++          v-for="name in PLACEHOLDER_NAMES"
++          :key="name"
++          class="mr-2 font-mono whitespace-nowrap"
++          >{{ name }}</span
++        >
++      </p>
++    </section>
++  </section>
++</template>
+diff --git a/frontend/src/ui/AiStep.vue b/frontend/src/ui/AiStep.vue
+new file mode 100644
+index 0000000..89d7cbe
+--- /dev/null
++++ b/frontend/src/ui/AiStep.vue
+@@ -0,0 +1,37 @@
++<script setup lang="ts">
++import type { AgentClient, Step, StepStatus } from "../agent";
++import { refusedText, STEP_STATUS_WORDS } from "./aiText";
++import EditDiff from "./EditDiff.vue";
++
++defineProps<{ step: Step; client: AgentClient }>();
++
++const STATUS_CLASSES: Readonly<Record<StepStatus, string>> = {
++  pending: "text-fg-muted",
++  running: "text-primary",
++  done: "text-fg-muted",
++  failed: "text-problem-error",
++  noResult: "text-problem-warning",
++};
++</script>
++
++<template>
++  <li class="flex min-w-0 flex-col gap-1">
++    <div class="flex min-w-0 items-baseline gap-2">
++      <span class="min-w-0 font-medium wrap-break-word">{{ step.title }}</span>
++      <span class="shrink-0 text-xs" :class="STATUS_CLASSES[step.status]">
++        {{ STEP_STATUS_WORDS[step.status] }}
++      </span>
++    </div>
++    <template v-for="(output, index) in step.outputs" :key="index">
++      <pre
++        v-if="output.kind === 'text'"
++        class="max-h-48 overflow-auto rounded bg-panel-inline px-2 py-1 font-mono text-xs whitespace-pre-wrap"
++        >{{ output.text }}</pre>
++      <EditDiff v-else-if="output.kind === 'edit'" :edit="output.edit" :client="client" />
++      <div v-else class="text-problem-warning">
++        <p>{{ refusedText(output.title) }}</p>
++        <p v-for="path in output.paths" :key="path" class="font-mono break-all">{{ path }}</p>
++      </div>
++    </template>
++  </li>
++</template>
+diff --git a/frontend/src/ui/AiTurn.vue b/frontend/src/ui/AiTurn.vue
+new file mode 100644
+index 0000000..0e02ba6
+--- /dev/null
++++ b/frontend/src/ui/AiTurn.vue
+@@ -0,0 +1,71 @@
++<script setup lang="ts">
++import { computed, shallowRef, useTemplateRef } from "vue";
++import ChevronRight from "~icons/lucide/chevron-right";
++
++import type { AgentClient, TurnEnd, TurnView } from "../agent";
++import AiStep from "./AiStep.vue";
++import { failureText, RETRY, STOPPED_TEXT, THINKING_AND_STEPS } from "./aiText";
++import { useMarkdown } from "./useMarkdown";
++
++const props = defineProps<{ turn: TurnView; end: TurnEnd | null; client: AgentClient }>();
++const emit = defineEmits<{ retry: [] }>();
++
++const RUNNING_TEXT = "working…";
++
++const answer = useTemplateRef<HTMLDivElement>("answer");
++const opened = shallowRef(false);
++useMarkdown(answer, () => props.turn.answer);
++
++const running = computed(() => props.end === null);
++const failure = computed(() =>
++  props.end?.kind === "failed" ? failureText(props.end.failure, navigator.platform) : null,
++);
++const hasSteps = computed(() => running.value || props.turn.entries.length > 0);
++</script>
++
++<template>
++  <div class="flex min-w-0 flex-col gap-2">
++    <section v-if="hasSteps" class="flex min-w-0 flex-col gap-1">
++      <button
++        type="button"
++        :aria-expanded="opened"
++        class="flex items-center gap-1 self-start rounded px-1 py-0.5 text-fg-muted hover:bg-hover"
++        @click="opened = !opened"
++      >
++        <ChevronRight
++          class="size-3.5 shrink-0 transition-transform"
++          :class="{ 'rotate-90': opened }"
++          aria-hidden="true"
++        />
++        {{ THINKING_AND_STEPS }}
++        <span v-if="running" class="text-primary">{{ RUNNING_TEXT }}</span>
++      </button>
++      <ol v-if="opened" class="flex min-w-0 flex-col gap-2 border-l border-control-border pl-3">
++        <template v-for="(entry, index) in turn.entries" :key="index">
++          <li
++            v-if="entry.kind === 'thought'"
++            class="wrap-break-word whitespace-pre-wrap text-fg-muted italic"
++          >
++            {{ entry.text.trim() }}
++          </li>
++          <li v-else-if="entry.kind === 'said'" class="wrap-break-word whitespace-pre-wrap">
++            {{ entry.text.trim() }}
++          </li>
++          <AiStep v-else :step="entry.step" :client="client" />
++        </template>
++      </ol>
++    </section>
++    <div ref="answer" class="min-w-0 wrap-break-word select-text empty:hidden"></div>
++    <p v-if="end?.kind === 'stopped'" class="text-fg-muted">{{ STOPPED_TEXT }}</p>
++    <div v-else-if="failure !== null" class="flex min-w-0 items-baseline gap-2">
++      <p class="min-w-0 wrap-break-word text-problem-error">{{ failure }}</p>
++      <button
++        type="button"
++        class="shrink-0 rounded border border-control-border px-2 py-0.5 hover:bg-hover"
++        @click="emit('retry')"
++      >
++        {{ RETRY }}
++      </button>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/EditDiff.vue b/frontend/src/ui/EditDiff.vue
+new file mode 100644
+index 0000000..0952939
+--- /dev/null
++++ b/frontend/src/ui/EditDiff.vue
+@@ -0,0 +1,155 @@
++<script setup lang="ts">
++import { shallowRef, watch } from "vue";
++import ChevronRight from "~icons/lucide/chevron-right";
++
++import type { AgentClient, EditDiff, FileEdit } from "../agent";
++import {
++  diffFailureText,
++  editTitle,
++  moreLinesText,
++  skippedLinesText,
++  TOO_LARGE_TEXT,
++} from "./aiText";
++import { createdFileLines, editDiffLines, type DiffRow } from "./editDiffLines";
++
++type Shown =
++  | { readonly kind: "loading" }
++  | { readonly kind: "rows"; readonly rows: readonly DiffRow[] }
++  | { readonly kind: "note"; readonly text: string };
++
++const props = defineProps<{ edit: FileEdit; client: AgentClient }>();
++
++const LOADING_TEXT = "Making the diff…";
++const SIGNS: Readonly<Record<"context" | "removed" | "added", string>> = {
++  context: " ",
++  removed: "−",
++  added: "+",
++};
++const ROW_CLASSES: Readonly<Record<DiffRow["kind"], string>> = {
++  context: "",
++  removed: "bg-chunk-deleted",
++  added: "bg-chunk-inserted",
++  skipped: "text-fg-muted",
++  more: "text-fg-muted",
++};
++
++const opened = shallowRef(false);
++const shown = shallowRef<Shown | null>(null);
++
++watch(
++  () => props.edit,
++  (edit) => {
++    shown.value = null;
++    if (opened.value) {
++      void load(edit);
++    }
++  },
++);
++
++function shownOf(edit: FileEdit, diff: EditDiff): Shown {
++  switch (diff.kind) {
++    case "differences":
++      return {
++        kind: "rows",
++        rows: editDiffLines(edit.oldText ?? "", edit.newText, diff.differences),
++      };
++    case "tooLarge":
++      return { kind: "note", text: TOO_LARGE_TEXT };
++    case "appFailed":
++    case "failed":
++      return { kind: "note", text: diffFailureText(diff, navigator.platform) };
++    default: {
++      const _exhaustive: never = diff;
++      return _exhaustive;
++    }
++  }
++}
++
++async function load(edit: FileEdit): Promise<void> {
++  if (edit.oldText === null) {
++    shown.value = { kind: "rows", rows: createdFileLines(edit.newText) };
++    return;
++  }
++  shown.value = { kind: "loading" };
++  const diff = await props.client.editDiff(edit);
++  if (props.edit === edit) {
++    shown.value = shownOf(edit, diff);
++  }
++}
++
++function toggle(): void {
++  opened.value = !opened.value;
++  if (opened.value && shown.value === null) {
++    void load(props.edit);
++  }
++}
++
++function sign(row: DiffRow): string {
++  return row.kind === "context" || row.kind === "removed" || row.kind === "added"
++    ? SIGNS[row.kind]
++    : "";
++}
++
++function oldNumber(row: DiffRow): string {
++  return row.kind === "context" || row.kind === "removed" ? String(row.old) : "";
++}
++
++function newNumber(row: DiffRow): string {
++  return row.kind === "context" || row.kind === "added" ? String(row.new) : "";
++}
++
++function rowText(row: DiffRow): string {
++  switch (row.kind) {
++    case "context":
++    case "removed":
++    case "added":
++      return row.text;
++    case "skipped":
++      return `⋯ ${skippedLinesText(row.lines)}`;
++    case "more":
++      return moreLinesText(row.lines);
++    default: {
++      const _exhaustive: never = row;
++      return _exhaustive;
++    }
++  }
++}
++</script>
++
++<template>
++  <div class="flex min-w-0 flex-col gap-1">
++    <button
++      type="button"
++      :aria-expanded="opened"
++      class="flex min-w-0 items-center gap-1 self-start rounded px-1 py-0.5 text-left hover:bg-hover"
++      @click="toggle"
++    >
++      <ChevronRight
++        class="size-3.5 shrink-0 transition-transform"
++        :class="{ 'rotate-90': opened }"
++        aria-hidden="true"
++      />
++      <span class="min-w-0 font-mono break-all">{{ editTitle(edit) }}</span>
++    </button>
++    <template v-if="opened && shown !== null">
++      <p v-if="shown.kind === 'loading'" class="pl-5 text-fg-muted">{{ LOADING_TEXT }}</p>
++      <p v-else-if="shown.kind === 'note'" class="pl-5 text-fg-muted">{{ shown.text }}</p>
++      <div
++        v-else
++        class="max-h-96 overflow-auto rounded border border-control-border opaque-scroller font-mono"
++      >
++        <div
++          v-for="(row, index) in shown.rows"
++          :key="index"
++          class="grid min-w-max grid-cols-[3.5rem_3.5rem_1.25rem_auto] whitespace-pre"
++          :class="ROW_CLASSES[row.kind]"
++        >
++          <span class="pr-2 text-right text-fg-muted select-none">{{ oldNumber(row) }}</span>
++          <span class="pr-2 text-right text-fg-muted select-none">{{ newNumber(row) }}</span>
++          <span class="select-none">{{ sign(row) }}</span>
++          <span class="pr-2">{{ rowText(row) }}</span>
++        </div>
++      </div>
++    </template>
++  </div>
++</template>
+diff --git a/frontend/src/ui/agentSettingsFields.test.ts b/frontend/src/ui/agentSettingsFields.test.ts
+new file mode 100644
+index 0000000..f2f524f
+--- /dev/null
++++ b/frontend/src/ui/agentSettingsFields.test.ts
+@@ -0,0 +1,83 @@
++import { expect, test } from "vitest";
++
++import { DEFAULT_FIRST_MESSAGE } from "../agent";
++import type { AgentSettings } from "../ipc";
++import {
++  commandField,
++  firstMessageField,
++  PLACEHOLDER_NAMES,
++  unknownPlaceholderLines,
++  YOLO_NOTE,
++} from "./agentSettingsFields";
++
++const DEFAULTS: AgentSettings = { command: null, firstMessage: null };
++const OWN: AgentSettings = { command: ["/opt/omp", "acp"], firstMessage: "Hi {{ MESSAGE }}" };
++
++test("the command field shows the default words until the file names its own", () => {
++  expect(commandField(DEFAULTS, "").shown).toBe("omp acp");
++  expect(commandField(OWN, "").shown).toBe("/opt/omp acp");
++});
++
++test("Use stores the typed words split on spaces and keeps the first message", () => {
++  expect(commandField(DEFAULTS, "  bunx  omp acp ").use).toEqual({
++    command: ["bunx", "omp", "acp"],
++    firstMessage: null,
++  });
++  expect(commandField(OWN, "omp").use).toEqual({
++    command: ["omp"],
++    firstMessage: OWN.firstMessage,
++  });
++});
++
++test("Use of the default's words stores null, so a later default still reaches the user", () => {
++  expect(commandField(OWN, "omp  acp").use).toEqual({ ...OWN, command: null });
++});
++
++test("Use is off for the words in use and for no words", () => {
++  expect(commandField(DEFAULTS, "omp acp").use).toBeNull();
++  expect(commandField(OWN, "/opt/omp acp").use).toBeNull();
++  expect(commandField(OWN, "   ").use).toBeNull();
++});
++
++test("Default stores null and is off while the default is in use", () => {
++  expect(commandField(OWN, "x").reset).toEqual({ ...OWN, command: null });
++  expect(commandField(DEFAULTS, "x").reset).toBeNull();
++  expect(firstMessageField(OWN, "x").reset).toEqual({ ...OWN, firstMessage: null });
++  expect(firstMessageField(DEFAULTS, "x").reset).toBeNull();
++});
++
++test("the first message field shows the default text, stores typed text as typed and the default as null", () => {
++  expect(firstMessageField(DEFAULTS, "").shown).toBe(DEFAULT_FIRST_MESSAGE);
++  expect(firstMessageField(OWN, "").shown).toBe("Hi {{ MESSAGE }}");
++  expect(firstMessageField(DEFAULTS, " Look at {{ MESSAGE }}\n").use).toEqual({
++    command: null,
++    firstMessage: " Look at {{ MESSAGE }}\n",
++  });
++  expect(firstMessageField(OWN, DEFAULT_FIRST_MESSAGE).use).toEqual({ ...OWN, firstMessage: null });
++  expect(firstMessageField(OWN, "Hi {{ MESSAGE }}").use).toBeNull();
++  expect(firstMessageField(DEFAULTS, DEFAULT_FIRST_MESSAGE).use).toBeNull();
++});
++
++test("each unknown placeholder is named once as typed; known ones are not", () => {
++  expect(unknownPlaceholderLines("{{ FOO }} {{MESSAGE}} {{BAR}} {{ FOO }}")).toEqual([
++    "{{ FOO }} is not a placeholder; it is sent as typed.",
++    "{{BAR}} is not a placeholder; it is sent as typed.",
++  ]);
++  expect(unknownPlaceholderLines(DEFAULT_FIRST_MESSAGE)).toEqual([]);
++});
++
++test("the five placeholders are listed as they are written", () => {
++  expect(PLACEHOLDER_NAMES).toEqual([
++    "{{ RELATIVE_FILE_PATH_WITH_LINE }}",
++    "{{ MESSAGE }}",
++    "{{ RANGE }}",
++    "{{ OLD_COMMIT }}",
++    "{{ NEW_COMMIT }}",
++  ]);
++});
++
++test("the yolo note says what yamt allows and that omp's yolo mode asks nothing", () => {
++  expect(YOLO_NOTE).toBe(
++    "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.",
++  );
++});
+diff --git a/frontend/src/ui/agentSettingsFields.ts b/frontend/src/ui/agentSettingsFields.ts
+new file mode 100644
+index 0000000..1a78e76
+--- /dev/null
++++ b/frontend/src/ui/agentSettingsFields.ts
+@@ -0,0 +1,53 @@
++import {
++  DEFAULT_AGENT_COMMAND,
++  DEFAULT_FIRST_MESSAGE,
++  PLACEHOLDERS,
++  unknownPlaceholders,
++} from "../agent";
++import type { AgentSettings } from "../ipc";
++import { commandWords } from "./commandWords";
++
++export const PLACEHOLDER_NAMES: readonly string[] = PLACEHOLDERS.map((name) => `{{ ${name} }}`);
++
++export const YOLO_NOTE =
++  "yamt allows the AI's commands, and its deletes and moves only inside its checkout. With omp's approval mode set to yolo, omp asks yamt nothing about deletes and moves, so they are allowed anywhere.";
++
++/** One field of the AI section: the text in use, and what Use and Default store (null: nothing to press). */
++export type AgentField = {
++  readonly shown: string;
++  readonly use: AgentSettings | null;
++  readonly reset: AgentSettings | null;
++};
++
++function sameWords(a: readonly string[], b: readonly string[]): boolean {
++  return a.length === b.length && a.every((word, index) => word === b[index]);
++}
++
++/** Use stores the typed words, or null (the default) when they are the default's; never no words. */
++export function commandField(agent: AgentSettings, typed: string): AgentField {
++  const words = commandWords(typed);
++  const inUse = agent.command ?? DEFAULT_AGENT_COMMAND;
++  const stored = sameWords(words, DEFAULT_AGENT_COMMAND) ? null : [...words];
++  const usable = words.length > 0 && !sameWords(words, inUse);
++  return {
++    shown: inUse.join(" "),
++    use: usable ? { ...agent, command: stored } : null,
++    reset: agent.command === null ? null : { ...agent, command: null },
++  };
++}
++
++export function firstMessageField(agent: AgentSettings, typed: string): AgentField {
++  const inUse = agent.firstMessage ?? DEFAULT_FIRST_MESSAGE;
++  const stored = typed === DEFAULT_FIRST_MESSAGE ? null : typed;
++  return {
++    shown: inUse,
++    use: typed === inUse ? null : { ...agent, firstMessage: stored },
++    reset: agent.firstMessage === null ? null : { ...agent, firstMessage: null },
++  };
++}
++
++export function unknownPlaceholderLines(typed: string): readonly string[] {
++  return unknownPlaceholders(typed).map(
++    (text) => `${text} is not a placeholder; it is sent as typed.`,
++  );
++}
+diff --git a/frontend/src/ui/aiClose.test.ts b/frontend/src/ui/aiClose.test.ts
+new file mode 100644
+index 0000000..2b8f18f
+--- /dev/null
++++ b/frontend/src/ui/aiClose.test.ts
+@@ -0,0 +1,168 @@
++import { expect, test } from "vitest";
++
++import type { AgentSource, CheckoutFolder, SourceResult } from "../ipc";
++import { aiMayClose } from "./aiClose";
++import type { Reply } from "./asking";
++import type { Problem } from "./problem";
++import type { Question } from "./question";
++
++type Look = Awaited<ReturnType<AgentSource["checkoutChanges"]>>;
++
++const FOLDER_TEXT = "/data/yamt/range/repo/pair/checkout";
++
++function isFolder(path: string): path is CheckoutFolder {
++  return path.startsWith("/");
++}
++
++function folder(): CheckoutFolder {
++  if (!isFolder(FOLDER_TEXT)) {
++    throw new Error(FOLDER_TEXT);
++  }
++  return FOLDER_TEXT;
++}
++
++class Closing {
++  readonly asked: Question[] = [];
++  readonly reported: Problem[] = [];
++  discards = 0;
++  look: Look = { ok: true, value: { kind: "Clean" } };
++  reply: Reply = "yes";
++  discarded: SourceResult<null> = { ok: true, value: null };
++
++  async mayClose(): Promise<boolean> {
++    return aiMayClose({
++      source: {
++        checkoutChanges: async () => this.look,
++        discardCheckout: async () => {
++          this.discards += 1;
++          return this.discarded;
++        },
++      },
++      asking: {
++        ask: async (question) => {
++          this.asked.push(question);
++          return this.reply;
++        },
++      },
++      report: (problem) => {
++        this.reported.push(problem);
++      },
++    });
++  }
++}
++
++function changed(): Look {
++  return {
++    ok: true,
++    value: {
++      kind: "Changed",
++      folder: folder(),
++      files: ["README.md"],
++      refs: ["fix"],
++      headMoved: true,
++    },
++  };
++}
++
++test.each([["Missing"], ["Clean"]] as const)(
++  "a %s checkout closes without asking or discarding",
++  async (kind) => {
++    const closing = new Closing();
++    closing.look = { ok: true, value: { kind } };
++
++    expect(await closing.mayClose()).toBe(true);
++    expect([closing.asked, closing.discards]).toEqual([[], 0]);
++  },
++);
++
++test("a changed checkout asks with its files, folder, moved HEAD and refs; Keep closes and discards nothing", async () => {
++  const closing = new Closing();
++  closing.look = changed();
++
++  expect(await closing.mayClose()).toBe(true);
++  expect(closing.asked).toEqual([
++    {
++      kind: "keepAiChanges",
++      folder: FOLDER_TEXT,
++      files: ["README.md"],
++      headMoved: true,
++      refs: ["fix"],
++    },
++  ]);
++  expect(closing.discards).toBe(0);
++});
++
++test("Discard removes the checkout, then closes", async () => {
++  const closing = new Closing();
++  closing.look = changed();
++  closing.reply = "no";
++
++  expect(await closing.mayClose()).toBe(true);
++  expect([closing.discards, closing.reported]).toEqual([1, []]);
++});
++
++test("a failed discard stays open and shows the problem", async () => {
++  const closing = new Closing();
++  closing.look = changed();
++  closing.reply = "no";
++  const cause = { kind: "RemoveFailed", folder: FOLDER_TEXT, message: "busy" } as const;
++  closing.discarded = { ok: false, failure: cause };
++
++  expect(await closing.mayClose()).toBe(false);
++  expect(closing.reported).toEqual([{ action: "ai", step: "discard", cause }]);
++});
++
++test("a discard that throws stays open and shows the problem", async () => {
++  const closing = new Closing();
++  closing.look = changed();
++  closing.reply = "no";
++  const asked = aiMayClose({
++    source: {
++      checkoutChanges: async () => closing.look,
++      discardCheckout: async () => {
++        throw new Error("ipc gone");
++      },
++    },
++    asking: { ask: async () => "no" },
++    report: (problem) => {
++      closing.reported.push(problem);
++    },
++  });
++
++  expect(await asked).toBe(false);
++  expect(closing.reported).toEqual([
++    { action: "ai", step: "discard", cause: { kind: "Unexpected", message: "ipc gone" } },
++  ]);
++});
++
++test("Escape keeps the window open and discards nothing", async () => {
++  const closing = new Closing();
++  closing.look = changed();
++  closing.reply = "dismissed";
++
++  expect(await closing.mayClose()).toBe(false);
++  expect([closing.discards, closing.reported]).toEqual([0, []]);
++});
++
++test("an unreadable checkout asks its own question with git's words", async () => {
++  const closing = new Closing();
++  closing.look = {
++    ok: true,
++    value: { kind: "Unreadable", folder: folder(), message: "fatal: bad object HEAD" },
++  };
++  closing.reply = "no";
++
++  expect(await closing.mayClose()).toBe(true);
++  expect(closing.asked).toEqual([
++    { kind: "keepUnreadableCheckout", folder: FOLDER_TEXT, message: "fatal: bad object HEAD" },
++  ]);
++  expect(closing.discards).toBe(1);
++});
++
++test("a look that fails closes without asking: the shell keeps a changed checkout at exit", async () => {
++  const closing = new Closing();
++  closing.look = { ok: false, failure: { kind: "AiOff" } };
++
++  expect(await closing.mayClose()).toBe(true);
++  expect([closing.asked, closing.discards]).toEqual([[], 0]);
++});
+diff --git a/frontend/src/ui/aiClose.ts b/frontend/src/ui/aiClose.ts
+new file mode 100644
+index 0000000..1615f0b
+--- /dev/null
++++ b/frontend/src/ui/aiClose.ts
+@@ -0,0 +1,63 @@
++import { log, type AgentSource } from "../ipc";
++import type { Asking } from "./asking";
++import { attempt, type Problem } from "./problem";
++import type { Question } from "./question";
++
++type CloseTarget = {
++  readonly source: Pick<AgentSource, "checkoutChanges" | "discardCheckout">;
++  readonly asking: Pick<Asking, "ask">;
++  readonly report: (problem: Problem) => void;
++};
++
++async function changesQuestion(target: CloseTarget): Promise<Question | null> {
++  const look = await attempt(() => target.source.checkoutChanges());
++  if (!look.ok) {
++    log.warn("ai.close_look_failed", { ...look.cause });
++    return null;
++  }
++  const changes = look.value;
++  switch (changes.kind) {
++    case "Missing":
++    case "Clean":
++      return null;
++    case "Changed": {
++      const { folder, files, headMoved, refs } = changes;
++      return { kind: "keepAiChanges", folder, files, headMoved, refs };
++    }
++    case "Unreadable":
++      return { kind: "keepUnreadableCheckout", folder: changes.folder, message: changes.message };
++    default: {
++      const _exhaustive: never = changes;
++      return _exhaustive;
++    }
++  }
++}
++
++/**
++ * Whether the range window may close: a changed or unreadable checkout asks first.
++ * A look that fails closes, since the shell removes the checkout at exit only when it is clean.
++ */
++export async function aiMayClose(target: CloseTarget): Promise<boolean> {
++  const question = await changesQuestion(target);
++  if (question === null) {
++    return true;
++  }
++  const reply = await target.asking.ask(question);
++  switch (reply) {
++    case "yes":
++      return true;
++    case "dismissed":
++      return false;
++    case "no": {
++      const discarded = await attempt(() => target.source.discardCheckout());
++      if (!discarded.ok) {
++        target.report({ action: "ai", step: "discard", cause: discarded.cause });
++      }
++      return discarded.ok;
++    }
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/aiText.test.ts b/frontend/src/ui/aiText.test.ts
+new file mode 100644
+index 0000000..c36ac60
+--- /dev/null
++++ b/frontend/src/ui/aiText.test.ts
+@@ -0,0 +1,111 @@
++import { expect, test } from "vitest";
++
++import type { AgentFailure } from "../agent";
++import {
++  diffFailureText,
++  editTitle,
++  failureText,
++  moreLinesText,
++  refusedText,
++  RETRY,
++  skippedLinesText,
++  STEP_STATUS_WORDS,
++  STOPPED_TEXT,
++  THINKING_AND_STEPS,
++  TOO_LARGE_TEXT,
++} from "./aiText";
++
++const LINUX = "Linux x86_64";
++
++const SENTENCES: Readonly<Record<AgentFailure["kind"], readonly [AgentFailure, string]>> = {
++  checkoutFailed: [
++    { kind: "checkoutFailed", message: "fatal: not a git repository\n" },
++    "The AI's checkout could not be made: fatal: not a git repository",
++  ],
++  notFound: [
++    { kind: "notFound", program: "omp", searched: ["/usr/bin", "/home/me/.bun/bin"] },
++    "omp was not found (searched: /usr/bin, /home/me/.bun/bin). Set the Agent command in Settings.",
++  ],
++  spawnFailed: [
++    { kind: "spawnFailed", program: "omp", message: "permission denied\n" },
++    "omp could not be started: permission denied",
++  ],
++  noCommand: [{ kind: "noCommand" }, "The Agent command in Settings is empty."],
++  crashed: [
++    { kind: "crashed", code: 1, lastLog: "panic: out of memory\n" },
++    "The AI stopped unexpectedly (exit code 1): panic: out of memory",
++  ],
++  refused: [
++    { kind: "refused", method: "session/new", message: "no model configured" },
++    "The AI refused session/new: no model configured",
++  ],
++  sessionGone: [{ kind: "sessionGone" }, "omp no longer has this thread's conversation."],
++  ended: [{ kind: "ended", reason: "max_tokens" }, "The AI ended the turn: max_tokens."],
++  busy: [{ kind: "busy" }, "The AI is still answering in this thread."],
++  app: [
++    { kind: "app", failure: { kind: "AiOff" } },
++    "The AI could not answer: the AI is off; start yamt with --ai to use it.",
++  ],
++};
++
++test.each(Object.values(SENTENCES))("a %o failure reads as one sentence", (failure, sentence) => {
++  expect(failureText(failure, LINUX)).toBe(sentence);
++});
++
++test("a crash without an exit code or a last log line says only that the AI stopped", () => {
++  expect(failureText({ kind: "crashed", code: null, lastLog: null }, LINUX)).toBe(
++    "The AI stopped unexpectedly.",
++  );
++  expect(failureText({ kind: "crashed", code: 2, lastLog: " \n" }, LINUX)).toBe(
++    "The AI stopped unexpectedly (exit code 2).",
++  );
++});
++
++test("a program not found with no searched folders names none", () => {
++  expect(failureText({ kind: "notFound", program: "omp", searched: [] }, LINUX)).toBe(
++    "omp was not found. Set the Agent command in Settings.",
++  );
++});
++
++test("an edit is named Edited, a new file Created", () => {
++  expect(editTitle({ path: "README.md", oldText: "a\n", newText: "b\n" })).toBe("Edited README.md");
++  expect(editTitle({ path: "notes.md", oldText: "", newText: "b\n" })).toBe("Edited notes.md");
++  expect(editTitle({ path: "new.md", oldText: null, newText: "b\n" })).toBe("Created new.md");
++});
++
++test("a diff the app or the call could not make says so in the window's problem words", () => {
++  expect(diffFailureText({ kind: "appFailed", failure: { kind: "WorkerStopped" } }, LINUX)).toBe(
++    "Could not show the diff: yamt's worker stopped; try again.",
++  );
++  expect(diffFailureText({ kind: "failed", message: "Error: ipc gone" }, LINUX)).toBe(
++    "Could not show the diff: Error: ipc gone",
++  );
++});
++
++test("the step words, the refusal and the diff's counts", () => {
++  expect(Object.values(STEP_STATUS_WORDS)).toEqual([
++    "Waiting",
++    "Running",
++    "Done",
++    "Failed",
++    "No result",
++  ]);
++  expect(refusedText("Move a to b")).toBe("yamt refused: Move a to b — outside the AI's checkout");
++  expect([moreLinesText(1), moreLinesText(1000)]).toEqual([
++    "1 more line not shown",
++    "1000 more lines not shown",
++  ]);
++  expect([skippedLinesText(1), skippedLinesText(7)]).toEqual([
++    "1 unchanged line",
++    "7 unchanged lines",
++  ]);
++});
++
++test("the turn view's fixed words", () => {
++  expect([THINKING_AND_STEPS, STOPPED_TEXT, RETRY, TOO_LARGE_TEXT]).toEqual([
++    "Thinking and steps",
++    "You stopped the AI.",
++    "Retry",
++    "This edit is too large to show as a diff.",
++  ]);
++});
+diff --git a/frontend/src/ui/aiText.ts b/frontend/src/ui/aiText.ts
+new file mode 100644
+index 0000000..0478e0f
+--- /dev/null
++++ b/frontend/src/ui/aiText.ts
+@@ -0,0 +1,82 @@
++import type { AgentFailure, EditDiff, FileEdit, StepStatus } from "../agent";
++import type { ProblemCause } from "./problem";
++import { problemText } from "./problemText";
++
++export const THINKING_AND_STEPS = "Thinking and steps";
++export const STOPPED_TEXT = "You stopped the AI.";
++export const RETRY = "Retry";
++export const TOO_LARGE_TEXT = "This edit is too large to show as a diff.";
++
++export const STEP_STATUS_WORDS: Readonly<Record<StepStatus, string>> = {
++  pending: "Waiting",
++  running: "Running",
++  done: "Done",
++  failed: "Failed",
++  noResult: "No result",
++};
++
++function crashedText(code: number | null, lastLog: string | null): string {
++  const exit = code === null ? "" : ` (exit code ${code})`;
++  const log = lastLog === null || lastLog.trim() === "" ? "." : `: ${lastLog.trim()}`;
++  return `The AI stopped unexpectedly${exit}${log}`;
++}
++
++function notFoundText(program: string, searched: readonly string[]): string {
++  const where = searched.length === 0 ? "" : ` (searched: ${searched.join(", ")})`;
++  return `${program} was not found${where}. Set the Agent command in Settings.`;
++}
++
++/** One sentence per failure; `app` in the window's own problem words. */
++export function failureText(failure: AgentFailure, platform: string): string {
++  switch (failure.kind) {
++    case "checkoutFailed":
++      return `The AI's checkout could not be made: ${failure.message.trim()}`;
++    case "notFound":
++      return notFoundText(failure.program, failure.searched);
++    case "spawnFailed":
++      return `${failure.program} could not be started: ${failure.message.trim()}`;
++    case "noCommand":
++      return "The Agent command in Settings is empty.";
++    case "crashed":
++      return crashedText(failure.code, failure.lastLog);
++    case "refused":
++      return `The AI refused ${failure.method}: ${failure.message.trim()}`;
++    case "sessionGone":
++      return "omp no longer has this thread's conversation.";
++    case "ended":
++      return `The AI ended the turn: ${failure.reason}.`;
++    case "busy":
++      return "The AI is still answering in this thread.";
++    case "app":
++      return problemText({ action: "ai", step: "ask", cause: failure.failure }, platform);
++    default: {
++      const _exhaustive: never = failure;
++      return _exhaustive;
++    }
++  }
++}
++
++export function diffFailureText(
++  diff: Extract<EditDiff, { readonly kind: "appFailed" | "failed" }>,
++  platform: string,
++): string {
++  const cause: ProblemCause =
++    diff.kind === "appFailed" ? diff.failure : { kind: "Unexpected", message: diff.message };
++  return problemText({ action: "ai", step: "diff", cause }, platform);
++}
++
++export function editTitle({ path, oldText }: FileEdit): string {
++  return oldText === null ? `Created ${path}` : `Edited ${path}`;
++}
++
++export function refusedText(title: string): string {
++  return `yamt refused: ${title} — outside the AI's checkout`;
++}
++
++export function moreLinesText(lines: number): string {
++  return `${lines} more line${lines === 1 ? "" : "s"} not shown`;
++}
++
++export function skippedLinesText(lines: number): string {
++  return `${lines} unchanged line${lines === 1 ? "" : "s"}`;
++}
+diff --git a/frontend/src/ui/editDiffLines.test.ts b/frontend/src/ui/editDiffLines.test.ts
+new file mode 100644
+index 0000000..082c029
+--- /dev/null
++++ b/frontend/src/ui/editDiffLines.test.ts
+@@ -0,0 +1,150 @@
++import { expect, test } from "vitest";
++
++import type { Difference } from "../ipc";
++import { createdFileLines, editDiffLines, MAX_DIFF_ROWS, type DiffRow } from "./editDiffLines";
++
++type Placed = Pick<Difference, "left" | "right">;
++type LeftLine = Difference["left"]["start"];
++type RightLine = Difference["right"]["start"];
++
++function isLeft(_line: number): _line is LeftLine {
++  return true;
++}
++
++function isRight(_line: number): _line is RightLine {
++  return true;
++}
++
++/** `[oldStart, oldLen, newStart, newLen]`, 0-based as Rust's reply. */
++function placed([oldStart, oldLen, newStart, newLen]: readonly [
++  number,
++  number,
++  number,
++  number,
++]): Placed {
++  if (!isLeft(oldStart) || !isRight(newStart)) {
++    throw new Error("unreachable");
++  }
++  return { left: { start: oldStart, len: oldLen }, right: { start: newStart, len: newLen } };
++}
++
++function numbered(count: number, prefix = "line"): string {
++  return Array.from({ length: count }, (_, index) => `${prefix} ${index + 1}\n`).join("");
++}
++
++function shape(rows: readonly DiffRow[]): string[] {
++  return rows.map((row) => {
++    switch (row.kind) {
++      case "context":
++        return ` ${row.old}:${row.new} ${row.text}`;
++      case "removed":
++        return `-${row.old} ${row.text}`;
++      case "added":
++        return `+${row.new} ${row.text}`;
++      case "skipped":
++        return `… ${row.lines}`;
++      case "more":
++        return `more ${row.lines}`;
++      default: {
++        const _exhaustive: never = row;
++        return _exhaustive;
++      }
++    }
++  });
++}
++
++test("a change in the middle shows 3 unchanged lines on each side and skips the rest, with both line numbers", () => {
++  const old = numbered(20);
++  const next = old.replace("line 10\n", "ten\n");
++
++  expect(shape(editDiffLines(old, next, [placed([9, 1, 9, 1])]))).toEqual([
++    "… 6",
++    " 7:7 line 7",
++    " 8:8 line 8",
++    " 9:9 line 9",
++    "-10 line 10",
++    "+10 ten",
++    " 11:11 line 11",
++    " 12:12 line 12",
++    " 13:13 line 13",
++    "… 7",
++  ]);
++});
++
++test("after an inserted line the new numbers run one ahead of the old (catches a shift taken from the wrong side)", () => {
++  const old = numbered(10);
++  const next = old.replace("line 5\n", "line 5\nnew\n");
++
++  expect(shape(editDiffLines(old, next, [placed([5, 0, 5, 1])]))).toEqual([
++    "… 2",
++    " 3:3 line 3",
++    " 4:4 line 4",
++    " 5:5 line 5",
++    "+6 new",
++    " 6:7 line 6",
++    " 7:8 line 7",
++    " 8:9 line 8",
++    "… 2",
++  ]);
++});
++
++test("two changes 6 unchanged lines apart are one hunk; 7 apart are two with the line between skipped", () => {
++  const old = numbered(30);
++  const joined = editDiffLines(old, old, [placed([5, 1, 5, 1]), placed([12, 1, 12, 1])]);
++  const split = editDiffLines(old, old, [placed([5, 1, 5, 1]), placed([13, 1, 13, 1])]);
++
++  expect(shape(joined).filter((row) => row.startsWith("…"))).toEqual(["… 2", "… 14"]);
++  expect(shape(joined).filter((row) => row.startsWith(" "))).toHaveLength(12);
++  expect(shape(split).filter((row) => row.startsWith("…"))).toEqual(["… 2", "… 1", "… 13"]);
++  expect(shape(split).slice(8, 12)).toEqual([
++    " 9:9 line 9",
++    "… 1",
++    " 11:11 line 11",
++    " 12:12 line 12",
++  ]);
++});
++
++test("a change at the first and last line shows no skipped rows and nothing beyond the text", () => {
++  const old = "a\nb\nc\n";
++  const next = "A\nb\nC\n";
++
++  expect(shape(editDiffLines(old, next, [placed([0, 1, 0, 1]), placed([2, 1, 2, 1])]))).toEqual([
++    "-1 a",
++    "+1 A",
++    " 2:2 b",
++    "-3 c",
++    "+3 C",
++  ]);
++});
++
++test("a text without a final newline keeps its last line; no differences show nothing", () => {
++  expect(shape(editDiffLines("a\nb", "a\nc", [placed([1, 1, 1, 1])]))).toEqual([
++    " 1:1 a",
++    "-2 b",
++    "+2 c",
++  ]);
++  expect(editDiffLines("a\n", "a\n", [])).toEqual([]);
++});
++
++test("rows stop at 2,000 and a last row counts the changed and unchanged lines not shown", () => {
++  const old = numbered(1500, "old");
++  const next = numbered(1500, "new");
++
++  const rows = editDiffLines(old, next, [placed([0, 1500, 0, 1500])]);
++
++  expect(rows).toHaveLength(MAX_DIFF_ROWS + 1);
++  expect(shape(rows).slice(MAX_DIFF_ROWS - 1)).toEqual(["+500 new 500", "more 1000"]);
++});
++
++test("exactly 2,000 rows need no more row (catches a cap one row early)", () => {
++  const rows = createdFileLines(numbered(MAX_DIFF_ROWS));
++
++  expect(rows).toHaveLength(MAX_DIFF_ROWS);
++  expect(rows.at(-1)).toEqual({ kind: "added", new: MAX_DIFF_ROWS, text: `line ${MAX_DIFF_ROWS}` });
++});
++
++test("a created file is every line added, capped like a diff", () => {
++  expect(shape(createdFileLines("a\nb\n"))).toEqual(["+1 a", "+2 b"]);
++  expect(shape(createdFileLines(numbered(MAX_DIFF_ROWS + 5)).slice(-1))).toEqual(["more 5"]);
++  expect(createdFileLines("")).toEqual([]);
++});
+diff --git a/frontend/src/ui/editDiffLines.ts b/frontend/src/ui/editDiffLines.ts
+new file mode 100644
+index 0000000..b4b8b18
+--- /dev/null
++++ b/frontend/src/ui/editDiffLines.ts
+@@ -0,0 +1,123 @@
++import type { Difference } from "../ipc";
++
++export const MAX_DIFF_ROWS = 2000;
++const CONTEXT_LINES = 3;
++const LONGEST_SHOWN_RUN = CONTEXT_LINES + CONTEXT_LINES;
++
++/** Line numbers count from 1, as an editor's gutter shows them. */
++export type DiffRow =
++  | { readonly kind: "context"; readonly old: number; readonly new: number; readonly text: string }
++  | { readonly kind: "removed"; readonly old: number; readonly text: string }
++  | { readonly kind: "added"; readonly new: number; readonly text: string }
++  | { readonly kind: "skipped"; readonly lines: number }
++  | { readonly kind: "more"; readonly lines: number };
++
++type Placed = Pick<Difference, "left" | "right">;
++
++type Rows = { readonly shown: DiffRow[]; hidden: number };
++
++/** Unchanged old lines `from` up to `to`; `shift` is how far the new text has moved them. */
++type Run = { readonly from: number; readonly to: number; readonly shift: number };
++
++/** Before the first change, between two, or after the last. */
++type RunPlace = "start" | "between" | "end";
++
++function linesOf(text: string): readonly string[] {
++  if (text === "") {
++    return [];
++  }
++  const lines = text.split("\n");
++  return text.endsWith("\n") ? lines.slice(0, -1) : lines;
++}
++
++function add(rows: Rows, row: DiffRow): void {
++  if (rows.shown.length < MAX_DIFF_ROWS) {
++    rows.shown.push(row);
++  } else if (row.kind !== "skipped") {
++    rows.hidden += 1;
++  }
++}
++
++function addContext(rows: Rows, old: readonly string[], { from, to, shift }: Run): void {
++  for (let line = from; line < to; line += 1) {
++    add(rows, { kind: "context", old: line + 1, new: line + shift + 1, text: old[line] ?? "" });
++  }
++}
++
++function keptAround(length: number, place: RunPlace): { start: number; end: number } {
++  const context = Math.min(CONTEXT_LINES, length);
++  switch (place) {
++    case "start":
++      return { start: 0, end: context };
++    case "end":
++      return { start: context, end: 0 };
++    case "between":
++      return length <= LONGEST_SHOWN_RUN
++        ? { start: length, end: 0 }
++        : { start: context, end: context };
++    default: {
++      const _exhaustive: never = place;
++      return _exhaustive;
++    }
++  }
++}
++
++function addUnchanged(rows: Rows, old: readonly string[], run: Run, place: RunPlace): void {
++  const { from, to, shift } = run;
++  const kept = keptAround(to - from, place);
++  addContext(rows, old, { from, to: from + kept.start, shift });
++  const skipped = to - from - kept.start - kept.end;
++  if (skipped > 0) {
++    add(rows, { kind: "skipped", lines: skipped });
++  }
++  addContext(rows, old, { from: to - kept.end, to, shift });
++}
++
++function addChange(
++  rows: Rows,
++  texts: { readonly old: readonly string[]; readonly new: readonly string[] },
++  { left, right }: Placed,
++): void {
++  for (let line: number = left.start; line < left.start + left.len; line += 1) {
++    add(rows, { kind: "removed", old: line + 1, text: texts.old[line] ?? "" });
++  }
++  for (let line: number = right.start; line < right.start + right.len; line += 1) {
++    add(rows, { kind: "added", new: line + 1, text: texts.new[line] ?? "" });
++  }
++}
++
++function finished(rows: Rows): readonly DiffRow[] {
++  return rows.hidden === 0 ? rows.shown : [...rows.shown, { kind: "more", lines: rows.hidden }];
++}
++
++/** Unified rows: 3 unchanged lines around each change, the rest skipped, at most 2,000 rows. */
++export function editDiffLines(
++  oldText: string,
++  newText: string,
++  differences: readonly Placed[],
++): readonly DiffRow[] {
++  const texts = { old: linesOf(oldText), new: linesOf(newText) };
++  const rows: Rows = { shown: [], hidden: 0 };
++  let oldAt = 0;
++  let shift = 0;
++  differences.forEach((difference, index) => {
++    const run = { from: oldAt, to: difference.left.start, shift };
++    addUnchanged(rows, texts.old, run, index === 0 ? "start" : "between");
++    addChange(rows, texts, difference);
++    oldAt = difference.left.start + difference.left.len;
++    shift = difference.right.start + difference.right.len - oldAt;
++  });
++  if (differences.length > 0) {
++    addUnchanged(rows, texts.old, { from: oldAt, to: texts.old.length, shift }, "end");
++  }
++  return finished(rows);
++}
++
++/** A created file: every line added. */
++export function createdFileLines(newText: string): readonly DiffRow[] {
++  const rows: Rows = { shown: [], hidden: 0 };
++  linesOf(newText).forEach((text, line) => {
++    add(rows, { kind: "added", new: line + 1, text });
++  });
++  return finished(rows);
++}
+diff --git a/frontend/src/ui/problem.test.ts b/frontend/src/ui/problem.test.ts
+index 6776fa4..cad58fe 100644
+--- a/frontend/src/ui/problem.test.ts
++++ b/frontend/src/ui/problem.test.ts
+@@ -76,3 +76,9 @@ test("a failed thread call logs its step and cause (catches a log line without t
+     '[error] store.threads_failed {step: "queue", kind: "EmptyMessage"}',
+   ]);
+ });
++
++test("a failed AI call logs its step and cause (catches a log line without the step)", () => {
++  expect(logged({ action: "ai", step: "discard", cause: { kind: "AiOff" } })).toEqual([
++    '[error] store.ai_failed {step: "discard", kind: "AiOff"}',
++  ]);
++});
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 4077a25..a2891a7 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -22,6 +22,8 @@ export type ProblemCause = SourceFailure | Unexpected;
+ 
+ export type ThreadStep = "list" | "add" | "note" | "queue" | "unqueue" | "check" | "send";
+ 
++export type AiAttempt = "ask" | "diff" | "discard";
++
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+   | {
+@@ -44,6 +46,7 @@ export type Problem =
+   | { readonly action: "tabs" | "openRange"; readonly cause: ProblemCause }
+   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
+   | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
++  | { readonly action: "ai"; readonly step: AiAttempt; readonly cause: ProblemCause }
+   | {
+       readonly action: "saveTab";
+       readonly tab: TabId;
+@@ -77,6 +80,10 @@ function settingsFields(cause: ProblemCause | KeysUnread): Record<string, string
+   return cause.kind === "Keys" ? { kind: cause.kind, path: cause.path } : { ...cause };
+ }
+ 
++function stoppedFields(problem: Extract<Problem, { action: "stopped" }>): Record<string, string> {
++  return { operation: problem.operation ?? "none", message: problem.message };
++}
++
+ export function logProblem(problem: Problem): void {
+   const event = `store.${problem.action}_failed`;
+   switch (problem.action) {
+@@ -93,10 +100,7 @@ export function logProblem(problem: Problem): void {
+       log.info("store.close_refused", { reason: "git_running" });
+       return;
+     case "stopped":
+-      log.info("store.stopped", {
+-        operation: problem.operation ?? "none",
+-        message: problem.message,
+-      });
++      log.info("store.stopped", stoppedFields(problem));
+       return;
+     case "settings":
+       log.error(event, settingsFields(problem.cause));
+@@ -113,6 +117,7 @@ export function logProblem(problem: Problem): void {
+       log.error(event, { name: problem.name, ...problem.cause });
+       return;
+     case "threads":
++    case "ai":
+       log.error(event, { step: problem.step, ...problem.cause });
+       return;
+   }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index bb1cb1a..3df70c8 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -254,6 +254,27 @@ test.each([
+   );
+ });
+ 
++test.each([
++  ["ask", "The AI could not answer: the AI is off; start yamt with --ai to use it."],
++  ["diff", "Could not show the diff: the AI is off; start yamt with --ai to use it."],
++  [
++    "discard",
++    "The AI's checkout could not be removed: the AI is off; start yamt with --ai to use it.",
++  ],
++] as const)("a failed AI call at %s says what failed", (step, words) => {
++  expect(text({ action: "ai", step, cause: { kind: "AiOff" } })).toBe(words);
++});
++
++test("a failed discard names the checkout and the system's message", () => {
++  expect(
++    text({
++      action: "ai",
++      step: "discard",
++      cause: { kind: "RemoveFailed", folder: "/d/pair/checkout", message: "busy\n" },
++    }),
++  ).toBe("The AI's checkout could not be removed: removing /d/pair/checkout failed: busy");
++});
++
+ test("a save to a tab another call closed says the tab was closed", () => {
+   expect(
+     text({
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 2a6b465..0b4feb5 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -2,7 +2,7 @@ import { keyLabel, type KeyProblem } from "../ipc";
+ import { columnLimitText } from "./compareText";
+ import { ACTION_NAMES } from "./keyText";
+ import { continueAction, operationName } from "./operationText";
+-import type { Problem, ProblemCause, ThreadStep } from "./problem";
++import type { AiAttempt, Problem, ProblemCause, ThreadStep } from "./problem";
+ 
+ type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
+ 
+@@ -58,6 +58,12 @@ const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
+   send: "Could not send to GitLab",
+ };
+ 
++const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {
++  ask: "The AI could not answer",
++  diff: "Could not show the diff",
++  discard: "The AI's checkout could not be removed",
++};
++
+ function attempted(problem: CausedProblem): string {
+   switch (problem.action) {
+     case "list":
+@@ -90,6 +96,8 @@ function attempted(problem: CausedProblem): string {
+       return `Could not save ${problem.name}`;
+     case "threads":
+       return THREAD_STEP_WORDS[problem.step];
++    case "ai":
++      return AI_ATTEMPT_WORDS[problem.step];
+     default: {
+       const _exhaustive: never = problem;
+       return _exhaustive;
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index 5133afa..f8580c4 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -244,3 +244,73 @@ test("closing a tab that holds text asks with its name, Yes or No, and never end
+   });
+   expect(endsWithStop(question)).toBe(false);
+ });
++
++const CHECKOUT = "/home/me/.local/share/yamt/range/repo/pair/checkout";
++
++test("the AI's changes question lists the files and the folder, Keep Changes the confirm", () => {
++  const question = {
++    kind: "keepAiChanges",
++    folder: CHECKOUT,
++    files: ["README.md", "src/a.ts"],
++    headMoved: false,
++    refs: [],
++  } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Keep the AI's changes?",
++    message: `The AI changed these files in its checkout at ${CHECKOUT}:`,
++    list: { kind: "files", files: ["README.md", "src/a.ts"] },
++    note: null,
++    confirm: "Keep Changes",
++    cancel: "Discard Changes",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++test.each([
++  [true, [], "It also made commits there."],
++  [false, ["fix"], "It also left the branch fix there."],
++  [false, ["fix", "try"], "It also left the branches fix, try there."],
++  [false, ["stash"], "It also left a stash there."],
++  [true, ["fix", "stash"], "It also made commits and left the branch fix and a stash there."],
++] as const)(
++  "a moved HEAD (%s) and the AI's refs %o are named in the note",
++  (headMoved, refs, note) => {
++    const text = questionText(
++      { kind: "keepAiChanges", folder: CHECKOUT, files: ["a"], headMoved, refs },
++      LINUX,
++    );
++
++    expect(text.note).toBe(note);
++  },
++);
++
++test("work without changed files says the AI left work there, without 'also'", () => {
++  const text = questionText(
++    { kind: "keepAiChanges", folder: CHECKOUT, files: [], headMoved: true, refs: [] },
++    LINUX,
++  );
++
++  expect([text.message, text.note]).toEqual([
++    `The AI left work in its checkout at ${CHECKOUT}.`,
++    "It made commits there.",
++  ]);
++});
++
++test("an unreadable checkout asks the same question with git's words, Keep the confirm", () => {
++  const question = {
++    kind: "keepUnreadableCheckout",
++    folder: CHECKOUT,
++    message: "fatal: bad object HEAD\n",
++  } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Keep the AI's changes?",
++    message: `Git cannot read the AI's checkout at ${CHECKOUT}, so yamt cannot tell what the AI changed there: fatal: bad object HEAD`,
++    list: { kind: "none" },
++    note: "Discard Changes removes the checkout.",
++    confirm: "Keep Changes",
++    cancel: "Discard Changes",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index 7098586..7b2e75b 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -22,7 +22,15 @@ export type Question =
+       readonly found: readonly ServerSpec[];
+       readonly added: readonly ServerSpec[];
+     }
+-  | { readonly kind: "closeTab"; readonly name: string };
++  | { readonly kind: "closeTab"; readonly name: string }
++  | {
++      readonly kind: "keepAiChanges";
++      readonly folder: string;
++      readonly files: readonly string[];
++      readonly headMoved: boolean;
++      readonly refs: readonly string[];
++    }
++  | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string };
+ 
+ type QuestionList =
+   | { readonly kind: "none" }
+@@ -75,6 +83,8 @@ export function endsWithStop(question: Question): boolean {
+     case "clash":
+     case "servers":
+     case "closeTab":
++    case "keepAiChanges":
++    case "keepUnreadableCheckout":
+       return false;
+     default: {
+       const _exhaustive: never = question;
+@@ -144,19 +154,68 @@ function closeTabText(name: string): QuestionText {
+   };
+ }
+ 
++const KEEP_TITLE = "Keep the AI's changes?";
++const KEEP = "Keep Changes";
++const DISCARD = "Discard Changes";
++const STASH = "stash";
++
++function leftRefs(refs: readonly string[]): string[] {
++  const branches = refs.filter((ref) => ref !== STASH);
++  const left = [
++    ...(branches.length === 0
++      ? []
++      : [`the branch${branches.length === 1 ? "" : "es"} ${branches.join(", ")}`]),
++    ...(refs.includes(STASH) ? ["a stash"] : []),
++  ];
++  return left.length === 0 ? [] : [`left ${left.join(" and ")}`];
++}
++
++function keepAiChangesText(
++  question: Extract<Question, { readonly kind: "keepAiChanges" }>,
++): QuestionText {
++  const { folder, files, headMoved, refs } = question;
++  const changed = files.length > 0;
++  const done = [...(headMoved ? ["made commits"] : []), ...leftRefs(refs)];
++  return {
++    title: KEEP_TITLE,
++    message: changed
++      ? `The AI changed these files in its checkout at ${folder}:`
++      : `The AI left work in its checkout at ${folder}.`,
++    list: { kind: "files", files },
++    note: done.length === 0 ? null : `It ${changed ? "also " : ""}${done.join(" and ")} there.`,
++    confirm: KEEP,
++    cancel: DISCARD,
++  };
++}
++
++function keepUnreadableText(folder: string, message: string): QuestionText {
++  return {
++    title: KEEP_TITLE,
++    message: `Git cannot read the AI's checkout at ${folder}, so yamt cannot tell what the AI changed there: ${message.trim()}`,
++    list: { kind: "none" },
++    note: "Discard Changes removes the checkout.",
++    confirm: KEEP,
++    cancel: DISCARD,
++  };
++}
++
++function exitText(files: readonly string[]): QuestionText {
++  return {
++    title: "Unsaved Changes",
++    message: "These files have changes that are not saved to disk. Exit without saving them?",
++    list: { kind: "files", files },
++    note: null,
++    confirm: "Exit Without Saving",
++    cancel: "Cancel",
++  };
++}
++
+ export function questionText(question: Question, platform: string): QuestionText {
+   switch (question.kind) {
+     case "unprocessed":
+       return unprocessedText(question.summary);
+     case "exit":
+-      return {
+-        title: "Unsaved Changes",
+-        message: "These files have changes that are not saved to disk. Exit without saving them?",
+-        list: { kind: "files", files: question.files },
+-        note: null,
+-        confirm: "Exit Without Saving",
+-        cancel: "Cancel",
+-      };
++      return exitText(question.files);
+     case "clash":
+       return {
+         title: "Key Already in Use",
+@@ -176,6 +235,10 @@ export function questionText(question: Question, platform: string): QuestionText
+       return REWORDS_TEXT;
+     case "closeTab":
+       return closeTabText(question.name);
++    case "keepAiChanges":
++      return keepAiChangesText(question);
++    case "keepUnreadableCheckout":
++      return keepUnreadableText(question.folder, question.message);
+     default: {
+       const _exhaustive: never = question;
+       return _exhaustive;
+-- 
+2.56.0
+

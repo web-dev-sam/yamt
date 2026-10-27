@@ -1,21 +1,21 @@
-<script setup lang="ts">
+<script setup lang="ts" generic="F extends ListedFile">
 import type { Component } from "vue";
 import ChevronDown from "~icons/lucide/chevron-down";
 import ChevronRight from "~icons/lucide/chevron-right";
 
 import { fileIcon } from "./fileIcon";
-import FileMark from "./FileMark.vue";
-import type { TreeRow } from "./fileTree";
+import type { ListedFile, TreeRow } from "./fileTree";
 import { folderIcon } from "./folderIcon";
 
-defineProps<{ rows: readonly TreeRow[]; active: string | null }>();
+defineProps<{ rows: readonly TreeRow<F>[]; active: string | null; label: string }>();
 const emit = defineEmits<{ select: [path: string]; toggle: [path: string] }>();
+defineSlots<{ file(props: { file: F; label: string }): unknown }>();
 
 const ROW_PADDING_PX = 8;
 const INDENT_PX = 8;
 const TWISTIE_CENTRE_PX = 8;
 
-function rowIcon(row: TreeRow): Component {
+function rowIcon(row: TreeRow<F>): Component {
   switch (row.kind) {
     case "folder":
       return folderIcon(row.path, row.open);
@@ -36,7 +36,7 @@ function guideLeft(level: number): string {
   return `${rowStart(level - 1) + TWISTIE_CENTRE_PX}px`;
 }
 
-function pressed(row: TreeRow): void {
+function pressed(row: TreeRow<F>): void {
   switch (row.kind) {
     case "folder":
       emit("toggle", row.path);
@@ -51,7 +51,7 @@ function pressed(row: TreeRow): void {
 <template>
   <ul
     role="tree"
-    aria-label="Conflicted files"
+    :aria-label="label"
     class="group mr-0.5 flex-1 overflow-y-auto rounded-b-island opaque-sidebar-scroller"
   >
     <li
@@ -79,7 +79,7 @@ function pressed(row: TreeRow): void {
         </template>
       </span>
       <component :is="rowIcon(row)" class="size-4 shrink-0" aria-hidden="true" />
-      <FileMark v-if="row.kind === 'file'" :status="row.file.status" :label="row.label" />
+      <slot v-if="row.kind === 'file'" name="file" :file="row.file" :label="row.label" />
       <span v-else class="truncate">{{ row.label }}</span>
     </li>
   </ul>

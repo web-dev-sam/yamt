@@ -1,9 +1,6 @@
+import { INVALID_PARAMS, METHOD_NOT_FOUND, parseWith, type Answer } from "../../jsonrpc";
 import { sectionOf } from "./json";
-import { parseWith } from "./messages";
 import { APPLY_EDIT_PARAMS, CONFIGURATION_PARAMS, MESSAGE_PARAMS } from "./protocol";
-
-export const METHOD_NOT_FOUND = -32601;
-export const INVALID_PARAMS = -32602;
 
 export type WorkspaceFolder = { readonly uri: string; readonly name: string };
 
@@ -11,15 +8,6 @@ export type AnswerContext = {
   readonly settings: unknown;
   readonly folder: WorkspaceFolder | null;
 };
-
-export type Answer =
-  | { readonly kind: "result"; readonly value: unknown; readonly log: string | null }
-  | {
-      readonly kind: "error";
-      readonly code: number;
-      readonly message: string;
-      readonly log: string;
-    };
 
 const NULL_ANSWERS: Readonly<Record<string, true>> = {
   "client/registerCapability": true,

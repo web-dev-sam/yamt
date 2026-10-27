@@ -1,0 +1,1884 @@
+From 189fb06b29c56f9388284c6e381657bf3c5fc558 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:14:47 +0200
+Subject: [PATCH] fix(editor): linear, depth-bounded Markdown parsers; one
+ highlighter and one language loader; fence in its own file
+
+---
+ .omp/run/notes/RVMarkdownR1.md                |  96 +++++
+ .omp/run/notes/RVShellR1Check.md              |  21 +
+ frontend/scripts/fences.test.ts               |   6 +
+ frontend/scripts/fences.ts                    |  50 +--
+ frontend/scripts/markdownFence.ts             |  64 +++
+ frontend/src/editor/internal/codeBlock.ts     |  55 +--
+ frontend/src/editor/internal/language.ts      |  24 +-
+ .../editor/internal/markdownBlocks.test.ts    |  61 ++-
+ .../src/editor/internal/markdownBlocks.ts     | 110 ++----
+ frontend/src/editor/internal/markdownDom.ts   |  60 ++-
+ .../editor/internal/markdownInline.test.ts    |  65 +++
+ .../src/editor/internal/markdownInline.ts     | 369 ++++++++----------
+ frontend/src/editor/internal/markdownTable.ts |  46 +++
+ frontend/src/editor/internal/markdownTree.ts  | 214 ++++++++++
+ .../src/editor/internal/removalTooltip.ts     |  20 +-
+ frontend/src/editor/internal/syntax.ts        |  31 +-
+ frontend/src/editor/markdown.ts               |   4 +-
+ frontend/src/ui/useMarkdown.test.ts           |  88 +++++
+ 18 files changed, 971 insertions(+), 413 deletions(-)
+ create mode 100644 .omp/run/notes/RVMarkdownR1.md
+ create mode 100644 .omp/run/notes/RVShellR1Check.md
+ create mode 100644 frontend/scripts/markdownFence.ts
+ create mode 100644 frontend/src/editor/internal/markdownTable.ts
+ create mode 100644 frontend/src/editor/internal/markdownTree.ts
+ create mode 100644 frontend/src/ui/useMarkdown.test.ts
+
+diff --git a/.omp/run/notes/RVMarkdownR1.md b/.omp/run/notes/RVMarkdownR1.md
+new file mode 100644
+index 0000000..442597e
+--- /dev/null
++++ b/.omp/run/notes/RVMarkdownR1.md
+@@ -0,0 +1,96 @@
++All ten items are fixed. The node tests, the WebKit (MiniBrowser) checks and the removal-tooltip check pass. `pnpm -C frontend unused` exits 1 on `RangeSideLabel` in `src/ipc/index.ts` and `src/ipc/rangeDomain.ts`, files this round does not touch.
++
++## summary
++- One highlighter for code outside a pane: `highlightedNodes(document, code, parser)` and `CODE_HIGHLIGHTERS` live in `syntax.ts`, beside the colour table. `paintCode` and `removalTooltip.ts` both call it. One `loadedSupport(description, fields)` in `language.ts` logs `language.load_failed`; `loadLanguage` and `paintCode` both use it.
++- The parsers are linear and their nesting is bounded.
++  - One `MAX_NESTING` (16) is passed through `blocksOf`/`quote`/`list` and limits the inline tree; past it, the text stays literal.
++  - Heading match: the brief's regex plus string operations; `HEADING_CLOSE` is gone.
++  - Inline parsing is now a single left-to-right scan:
++    - Links and images use a bracket stack, with no links inside links.
++    - Parentheses and backticks are matched by tables built once per text.
++    - CommonMark's process_emphasis with `openers_bottom` per link level, then the tree is built in one pass.
++- Table rows now stop at a blank line or at the start of another block (`!isBlank(line) && !interrupts(lines, end)`).
++- Item 8: `paint(element, block)`, `codeNode(document, block, paint)`, `paintCode(element, block, live)`, and `textElement`/`withInlines` take `{ tag, className, text }`. The doubled `ordered` check in `listNode` is gone.
++- The MarkdownView fence moved to `scripts/markdownFence.ts` (`markdownViolations`, called from `fences.ts`, now 246 lines). `ui/useMarkdown.ts` now has tests.
++
++## files_changed
++- frontend/src/editor/markdown.ts
++- frontend/src/editor/internal/codeBlock.ts
++- frontend/src/editor/internal/language.ts
++- frontend/src/editor/internal/syntax.ts
++- frontend/src/editor/internal/removalTooltip.ts
++- frontend/src/editor/internal/markdownBlocks.ts (272 lines)
++- frontend/src/editor/internal/markdownBlocks.test.ts
++- frontend/src/editor/internal/markdownInline.ts (233 lines: the scan and `parseInline`)
++- frontend/src/editor/internal/markdownInline.test.ts
++- frontend/src/editor/internal/markdownDom.ts
++- frontend/src/editor/internal/markdownTable.ts (new; you granted it)
++- frontend/src/editor/internal/markdownTree.ts (new; you granted it)
++- frontend/scripts/fences.ts
++- frontend/scripts/fences.test.ts
++- frontend/scripts/markdownFence.ts (new)
++- frontend/src/ui/useMarkdown.test.ts (new)
++
++## tests_added
++- **markdownBlocks.test.ts**
++  - "a quote with a pipe right after a table starts a quote": `| a |\n|---|\n> q | x` gives a table with no rows, then a quote.
++  - "a heading drops its closing run only after a space, in linear time": `# a#` gives "a#", `## b ##  ` gives "b", `### ###` gives "". A heading with 100,000 inner spaces parses to its text in under 500 ms.
++  - "a 10,000-deep quote and list stop nesting at MAX_NESTING, the rest a paragraph": nesting stops at depth 16, and the innermost block is a paragraph holding the remaining `>`/`- ` text.
++  - "a table needs its delimiter row" is changed: under GFM example 202, `end` is now a row (`["end",""]`), and a blank line ends the table.
++- **markdownInline.test.ts**
++  - "emphasis never crosses a link's text, and a link inside a link stays text".
++  - "a strong closer shared by two openers and the rule of three": `***a***` gives em(strong); `*a**b*` gives em("a**b").
++  - "a 10,000-deep emphasis stops at MAX_NESTING, the rest literal": depth is exactly 16, and the flattened text is the source minus the 16 outer pairs.
++  - "unmatched openers, brackets and parentheses parse in linear time": `*a `×20000 and `[](`×20000 each come back as one text, under 500 ms in total.
++- **fences.test.ts**
++  - Violation test: `src/ui/star.ts` (`export * from "../editor"`) and `src/ui/direct2.ts` (`../editor/markdown.ts`) each violate PM2.
++  - No-violation test: `src/ui/ns.ts` (`import * as sides from "./sides"`) and `src/ui/re.ts` (`export { MergeController } from "../editor"`) violate nothing.
++- **useMarkdown.test.ts** runs `useMarkdown` in an `effectScope`, with `vi.mock("../editor")` returning a fake view that records each call.
++  - A null host builds nothing, even when the text changes.
++  - A set host gives build, show(text), show on a text change, then destroy on `scope.stop()`.
++  - A host swap destroys the old view and builds and shows a new one; a null host only destroys, and a later text change shows nothing.
++
++## smoke_evidence
++- `pnpm -C frontend typecheck` → `$ vue-tsc -b`, exit 0.
++- `pnpm -C frontend lint` → oxlint `--type-aware` and eslint, exit 0, nothing reported.
++- `pnpm -C frontend test` → `Test Files 162 passed (162)`, `Tests 2092 passed (2092)`.
++- `pnpm -C frontend fmt:check` → `All matched files use the correct format.`
++- `pnpm -C frontend unused` → exit 1: `Unused exported types (2) RangeSideLabel type src/ipc/index.ts:92:3 / src/ipc/rangeDomain.ts:6:13`. This round does not touch those files.
++- Timings, `pnpm exec tsx -e` importing the two parsers (Node 24):
++  - heading with 100k spaces: **0.5 ms** (200k: 0.3 ms; the review measured 55 s at 200k)
++  - `*a `×20000: **33.6 ms**
++  - `[](`×20000: **25.9 ms**
++  - `[`×20000: 1.5 ms
++  - quote 10000 deep: 0.6 ms
++  - list 10000 deep: 2.5 ms
++  - emphasis 10000 deep: 34.5 ms
++- WebKit: Playwright WebKit cannot launch here. I used `just app-session start-fixture --name rvmd1` (MiniBrowser through `just webdriver`) and the round-1 throwaway `/tmp/md-probe/probe.mjs`, with one depth check added:
++  - **hostile:** `{"elements":33,"badTags":[],"badAttributes":[],"ran":null,"scriptText":true,"linkText":true,"imageText":true,"address":"javascript:window.ran=true","pass":true}`
++  - **highlight:** `constClass "ͼx"`, `constColour "rgb(224, 152, 107)"` equals `definitionKeywordColour`; `numberColour "rgb(82, 188, 207)"` equals `syntaxNumberColour`; `stylesMounted 1`, `pass true`.
++  - **streaming:** `{"keptTitle":true,"replacedParagraph":true,"paragraph":"First paragraph, done.","em":"paragraph","count":3,"pass":true}`
++  - **deep** (10k quote, 10k list, 10k-deep emphasis, `[](`×20000 and a heading with 100k spaces in one `show()`): `{"ms":60,"blocks":5,"quoteChainDepth":17,"ems":16,"heading":100002,"pass":true}`
++- Removal tooltip, merge window in fixture mode, same session: `hover '.chunk-removal' --nth 2`, then a read gave:
++  - `{"kind":"removal-tooltip removal-tooltip-code cm-tooltip-section","text":"\t\t: \`globalThis.JSX.IntrinsicAttributes\`;","spans":3}`
++  - spans: `[":","ͼ1i","rgb(196, 194, 206)"]`, ``["`globalThis.JSX.IntrinsicAttributes`","ͼ11","rgb(120, 191, 123)"]``, `[";","ͼ1i","rgb(196, 194, 206)"]` — the code is still coloured.
++  - Session stopped: `{"stopped":"rvmd1","session":"ended",…webdriver stopped, vite stopped, folder removed}`.
++
++## deviations_from_brief
++- **Two new files, both granted by you:**
++  - `markdownTable.ts`: `Align`, `Table`, `startsTable(header, delimiter)`, `tableOf(lines)`. `markdownBlocks.ts` would otherwise have been 311 lines.
++  - `markdownTree.ts`: the `Inline` type, the scan's pieces, process_emphasis and the bounded-depth tree build. The inline parser would otherwise have been 438 lines.
++  - `MAX_NESTING` lives in `markdownTree.ts`. `markdownDom.ts` now imports `Inline` from `markdownTree` and `Align` from `markdownTable`; there is no re-export.
++- **Item 4, a different way to stay linear for `]`/`)`:** instead of remembering one failure position, the parentheses are matched once per text with a stack pass. For each `(` this gives the same answer as the old depth scan. Code spans use a table of backtick runs per length, with a cursor that only moves forward (the old search was also quadratic).
++- **Two behaviour changes that move the parser closer to CommonMark:**
++  - A link can no longer hold another link; the outer one becomes literal brackets.
++  - The rule of three now applies, so `*a**b*` gives em("a**b").
++- **Heading regex:** I added the `s` flag so `.` also matches U+2028 and U+2029, which keeps the match linear on such a line.
++- **Paint failure field:** `paintCode` logs the failure as `language.load_failed` with `{ place: "markdown" }` (the panes' entries use `{ path }`).
++- **No `markdownFence.test.ts`:** the fence's tests stay in `fences.test.ts`, which exercises it through `findFenceViolations`, the same way `clipboardFence.ts` is tested.
++- **Docs outside Owned need updating:**
++  - `editor/AGENTS.md`'s Markdown paragraph and the project map's `editor/internal` list: `markdownTable`, `markdownTree`, `highlightedNodes`/`CODE_HIGHLIGHTERS` in `syntax`, `loadedSupport` in `language`.
++  - The project map's `frontend/scripts` row: `markdownFence.ts` (PM2's MarkdownView rule, called by `fences.ts`).
++
++## open_risks
++- `frontend/src/editor/internal/markdownTree.ts:105` (`Tree.close`): the build trusts that openers and closers nest properly. That holds because the barriers truncate the stack at link ends and matches truncate it too. A wrong pairing would put content in the wrong frame, but nothing would throw.
++- `frontend/src/editor/internal/markdownInline.ts` (the global paren and backtick tables): they are built over the whole inline text. A backtick inside an autolink can still be read as a code-span opener; the old `bracketEnd` did the same.
++- The new `markdownTree.ts`/`markdownInline.ts` lines have not been through `just mutants` yet.
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVShellR1Check.md b/.omp/run/notes/RVShellR1Check.md
+new file mode 100644
+index 0000000..3392776
+--- /dev/null
++++ b/.omp/run/notes/RVShellR1Check.md
+@@ -0,0 +1,21 @@
++```json
++{
++  "verdict": "pass",
++  "findings": [],
++  "checked": [
++    "Item 1 is fixed (help/version win over range errors). In args.rs:67–89, `window` is now a `Result<Window, String>` that `and_then(Window::with_compare)` (:72) and `and_then(|window| window.with_range(range))` (:81) carry through the loop. It is applied as `window?` after the loop (:86), so `--help`/`--version` (:70–71) return before any range error surfaces. `help_wins_over_a_range_error` (args.rs:167–177) asserts `--diff --diff=a..b --help` → Help and `--diff=main --version` → Version. A first range error is kept, because later `and_then`s skip on Err. DIFF_TWICE and DIFF_WITH_REPO behave as before (with_compare/with_range bodies are unchanged).",
++    "Accepted change of order, not a block: when a range error is followed by another usage error (`--diff=main --repo`, or `--diff=main --bogus`), the later loop error is now reported instead of the range error. This is the same precedence DIFF_WITH_REPO already had: exit 2, USAGE printed either way (lib.rs:62).",
++    "Item 2 is fixed (range folder test). `the_pair_lock_lives_under_the_data_folder_s_yamt_range` (range.rs:139–146) reads `<data>/yamt/range/<one repo>/<one pair>/lock` built from the literal folder names \"yamt\" and \"range\". The setup goes through the real `app_folder` + `range_folder` joins (range.rs:117), so `range_folder -> Default`, a changed RANGE_FOLDER/APP_FOLDER or a dropped join makes `read_dir(...).unwrap()` fail. The implementer's hand-removed joins (both runs FAILED) and a round with no survivors agree. Accepted deviation: it reads the lock on disk instead of `_lock.folder()`, because clippy `used_underscore_binding` flags `_lock`.",
++    "Item 3 is fixed (one worker-panic helper). `blocking_reply<T: Send + 'static>` at ipc_error.rs:54–64, beside `WorkerStopped`, has the brief's signature. It holds the rule once: `tracing::error!` → `Err(IpcError::WorkerStopped)`. compare.rs `on_worker` (:50–65) and range.rs `load_range_file` (:68) both call it. A grep finds no other copy of the rule (merge.rs:157 and clipboard.rs:27 use different recovery rules, which predate this round). The panic test moved to `a_worker_that_panics_answers_worker_stopped` (ipc_error.rs:362–373). `a_worker_s_own_answer_is_the_reply` pins Ok and Err pass-through. Compare's remaining test pins only its own rule, that a panic under the lock leaves the store answering (`with_store`'s `PoisonError::into_inner`): accepted. The log line is now 'yamt's worker stopped' instead of per window: accepted.",
++    "Item 4 is fixed (one opener, one APP_FOLDER). `window::open_with_data_folder(title, kind, manage)` (window.rs:94–114) holds the build, the data_dir lookup with 'no data folder: …', the early `Ending::failure`, `open_and_wait` and exit 0 once. `open_compare` (:90–92) and `range::run_range` (range.rs:25–26) call it, and the range.rs copy `open_window` is gone. `APP_FOLDER` exists only at window.rs:23 (grep: no copy left in compare.rs or range.rs). `compare_folder`/`range_folder` join only COMPARE_FOLDER/RANGE_FOLDER. Accepted deviation: the opener builds the app itself, so the `app` parameter is dropped, and `context`/`open_and_wait` are private again. Accepted deviation: `app_folder` is pub(crate) so that tests go through the production join (compare.rs:287/291/301, range.rs:117/174, mock_window.rs:94).",
++    "Item 5 is fixed (one with_commands). commands.rs:65–68 has one `with_commands` with the brief's doc meaning. `with_compare`/`with_range` are gone from all code under src-tauri/src (grep). Callers: window.rs:100, mock_window.rs `compare_app`, range.rs `range_app`. Accepted deviation: the mock_window.rs edit is needed for the rename and for `manage_store_in`'s new folder meaning.",
++    "No regression in the compare window's shell. `run_compare` → `open_compare` → `open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, compare::manage_store_in)`. The store folder is still `<data_dir>/yamt/compare` (app_folder + COMPARE_FOLDER), so the second-window refusal text and its folder are unchanged (compare.rs:298–305). The title, the start script kind, the close via `open_and_wait`'s CloseWatch and exit 0 all stay the same. lib.rs dispatch (:51, :57–61) is untouched. The implementer's real Xvfb run shows 'Compare — yamt', the second `--diff` refused with exit 2, close with exit 0, and the range window titled 'main...feature — proj — yamt' with its lock under data/yamt/range.",
++    "PM1 holds: no new crate edges. range.rs imports only yamt_range, tauri and crate modules, and window.rs gains only `PathBuf`.",
++    "Growth: window.rs now owns the one 'window whose state is managed in the data folder' opener, an existing job of window.rs (before this round it already held open_compare), so it takes on no second job. ipc_error.rs holds the WorkerStopped rule next to its variant, as the brief asks. No new state; RangeState/CompareState writers are unchanged (manage_range_in / manage_store_in, once each).",
++    "RS6: window.rs is 384 lines and ipc_error.rs 384, by the read and the implementer's report, and commands.rs is 387 by the implementer's report. All are under 400, and no function is over 40 lines (open_with_data_folder is 21). The implementer's open risk on the line counts is accepted and noted.",
++    "Comments: the `///` lines on `blocking_reply`, `open_with_data_folder`, `app_folder`, `with_commands`, `manage_store_in` and `manage_range_in` each say what the item is (CP2). No narration or TODO.",
++    "Docs that still name the old functions (src-tauri/AGENTS.md: 'builds the app with `with_range`', `pub(crate)` context; project-map SKILL.md:60 'commands `with_compare`') are outside Owned. The implementer listed the replacement text for the orchestrator's docs pass, so they are not graded here.",
++    "I ran no checks of my own; this re-check comes from reading the patch, the files as committed, and grep."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 6742710..2515469 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -427,6 +427,8 @@ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.
+     { path: "src/ui/answer.ts", text: `export { MarkdownView } from "../editor";` },
+     { path: "src/ui/whole.ts", text: `import * as editor from "../editor";` },
+     { path: "src/ui/direct.ts", text: `import type { X } from "../editor/markdown";` },
++    { path: "src/ui/star.ts", text: `export * from "../editor";` },
++    { path: "src/ui/direct2.ts", text: `import { X } from "../editor/markdown.ts";` },
+   ];
+ 
+   expect(violationsOf(files)).toEqual([
+@@ -434,6 +436,8 @@ test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.
+     { rule: "PM2", file: "src/ui/answer.ts", specifier: "../editor" },
+     { rule: "PM2", file: "src/ui/whole.ts", specifier: "../editor" },
+     { rule: "PM2", file: "src/ui/direct.ts", specifier: "../editor/markdown" },
++    { rule: "PM2", file: "src/ui/star.ts", specifier: "../editor" },
++    { rule: "PM2", file: "src/ui/direct2.ts", specifier: "../editor/markdown.ts" },
+   ]);
+ });
+ 
+@@ -446,6 +450,8 @@ test("useMarkdown.ts importing MarkdownView and other ui files importing the edi
+       text: `<script setup lang="ts">\nimport { useMarkdown } from "./useMarkdown";\n</script>`,
+     },
+     { path: "src/editor/index.ts", text: `export { MarkdownView } from "./markdown";` },
++    { path: "src/ui/ns.ts", text: `import * as sides from "./sides";` },
++    { path: "src/ui/re.ts", text: `export { MergeController } from "../editor";` },
+   ];
+ 
+   expect(violationsOf(files)).toEqual([]);
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 70012bd..31a68fa 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -5,6 +5,7 @@ import { parse } from "@vue/compiler-sfc";
+ import ts from "typescript";
+ 
+ import { clipboardViolations } from "./clipboardFence";
++import { markdownViolations } from "./markdownFence";
+ 
+ export type SourceFile = { readonly path: string; readonly text: string };
+ 
+@@ -44,9 +45,6 @@ const ROOT_FILES: Readonly<Record<string, string>> = {
+ };
+ const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
+ const WINDOW_RULES: Readonly<Record<string, "PM7" | "PM9">> = { compare: "PM7", range: "PM9" };
+-const MARKDOWN_SEAM = "src/ui/useMarkdown.ts";
+-const MARKDOWN_VIEW = "MarkdownView";
+-const MARKDOWN_MODULE = "src/editor/markdown";
+ 
+ function scriptTexts(file: SourceFile): string[] {
+   if (!file.path.endsWith(".vue")) {
+@@ -133,52 +131,6 @@ function rootFinding(file: string, target: string): Finding | undefined {
+   return undefined;
+ }
+ 
+-function namesOf(statement: ts.ImportDeclaration | ts.ExportDeclaration): string[] | "all" {
+-  const bindings = ts.isImportDeclaration(statement)
+-    ? statement.importClause?.namedBindings
+-    : statement.exportClause;
+-  if (bindings === undefined) {
+-    return ts.isExportDeclaration(statement) ? "all" : [];
+-  }
+-  if (ts.isNamespaceImport(bindings) || ts.isNamespaceExport(bindings)) {
+-    return "all";
+-  }
+-  const elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[] = bindings.elements;
+-  return elements.map((element) => (element.propertyName ?? element.name).text);
+-}
+-
+-function exposesMarkdownView(path: string, statement: ts.Statement): string | undefined {
+-  if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) {
+-    return undefined;
+-  }
+-  const literal = statement.moduleSpecifier;
+-  const specifier = literal !== undefined && ts.isStringLiteral(literal) ? literal.text : "";
+-  const target = relativeTarget(path, specifier.replace(QUERY_SUFFIX, "")) ?? "";
+-  if (!isInside(target, "src/editor")) {
+-    return undefined;
+-  }
+-  const names = namesOf(statement);
+-  const direct = target === MARKDOWN_MODULE || target === `${MARKDOWN_MODULE}.ts`;
+-  return direct || names === "all" || names.includes(MARKDOWN_VIEW) ? specifier : undefined;
+-}
+-
+-function markdownViolations(path: string, texts: readonly string[]): FenceViolation[] {
+-  if (MODULE_OF.exec(path)?.[1] !== "ui" || path === MARKDOWN_SEAM) {
+-    return [];
+-  }
+-  return texts.flatMap((text) =>
+-    ts
+-      .createSourceFile(path, text, ts.ScriptTarget.Latest)
+-      .statements.flatMap((statement) => exposesMarkdownView(path, statement) ?? [])
+-      .map((specifier): FenceViolation => ({
+-        rule: "PM2",
+-        file: path,
+-        specifier,
+-        reason: "ui/ reaches MarkdownView only through ui/useMarkdown.ts (plan §2 #112)",
+-      })),
+-  );
+-}
+-
+ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
+   type Visit = { readonly index: number; low: number };
+   const visits = new Map<string, Visit>();
+diff --git a/frontend/scripts/markdownFence.ts b/frontend/scripts/markdownFence.ts
+new file mode 100644
+index 0000000..4c2a27a
+--- /dev/null
++++ b/frontend/scripts/markdownFence.ts
+@@ -0,0 +1,64 @@
++import { posix } from "node:path";
++
++import ts from "typescript";
++
++type MarkdownViolation = {
++  readonly rule: "PM2";
++  readonly file: string;
++  readonly specifier: string;
++  readonly reason: string;
++};
++
++const QUERY_SUFFIX = /\?.*$/;
++const UI_FILE = /^src\/ui\//;
++const EDITOR = "src/editor";
++const MARKDOWN_SEAM = "src/ui/useMarkdown.ts";
++const MARKDOWN_VIEW = "MarkdownView";
++const MARKDOWN_MODULE = "src/editor/markdown";
++
++function namesOf(statement: ts.ImportDeclaration | ts.ExportDeclaration): string[] | "all" {
++  const bindings = ts.isImportDeclaration(statement)
++    ? statement.importClause?.namedBindings
++    : statement.exportClause;
++  if (bindings === undefined) {
++    return ts.isExportDeclaration(statement) ? "all" : [];
++  }
++  if (ts.isNamespaceImport(bindings) || ts.isNamespaceExport(bindings)) {
++    return "all";
++  }
++  const elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[] = bindings.elements;
++  return elements.map((element) => (element.propertyName ?? element.name).text);
++}
++
++function exposesMarkdownView(path: string, statement: ts.Statement): string | undefined {
++  if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) {
++    return undefined;
++  }
++  const literal = statement.moduleSpecifier;
++  const specifier = literal !== undefined && ts.isStringLiteral(literal) ? literal.text : "";
++  const bare = specifier.replace(QUERY_SUFFIX, "");
++  const target = bare.startsWith(".") ? posix.join(posix.dirname(path), bare) : "";
++  if (target !== EDITOR && !target.startsWith(`${EDITOR}/`)) {
++    return undefined;
++  }
++  const names = namesOf(statement);
++  const direct = target === MARKDOWN_MODULE || target === `${MARKDOWN_MODULE}.ts`;
++  return direct || names === "all" || names.includes(MARKDOWN_VIEW) ? specifier : undefined;
++}
++
++export function markdownViolations(path: string, texts: readonly string[]): MarkdownViolation[] {
++  if (!UI_FILE.test(path) || path === MARKDOWN_SEAM) {
++    return [];
++  }
++  return texts.flatMap((text) =>
++    ts
++      .createSourceFile(path, text, ts.ScriptTarget.Latest)
++      .statements.flatMap((statement) => exposesMarkdownView(path, statement) ?? [])
++      .map((specifier): MarkdownViolation => ({
++        rule: "PM2",
++        file: path,
++        specifier,
++        reason: "ui/ reaches MarkdownView only through ui/useMarkdown.ts (plan §2 #112)",
++      })),
++  );
++}
+diff --git a/frontend/src/editor/internal/codeBlock.ts b/frontend/src/editor/internal/codeBlock.ts
+index 27ea352..46ade87 100644
+--- a/frontend/src/editor/internal/codeBlock.ts
++++ b/frontend/src/editor/internal/codeBlock.ts
+@@ -1,11 +1,7 @@
+-import type { HighlightStyle, LanguageSupport } from "@codemirror/language";
+-import { highlightCode } from "@lezer/highlight";
++import { languageNamed, loadedSupport } from "./language";
++import type { CodeBlock } from "./markdownBlocks";
++import { CODE_HIGHLIGHTERS, highlightedNodes } from "./syntax";
+ 
+-import { log } from "../../ipc";
+-import { languageNamed } from "./language";
+-import { fontHighlight, paletteHighlight } from "./syntax";
+-
+-const HIGHLIGHTERS: readonly HighlightStyle[] = [paletteHighlight, fontHighlight];
+ const STYLES_CLASS = "markdown-highlight-styles";
+ 
+ // `StyleModule.mount` lives in style-mod, which pnpm keeps private to @codemirror/view (not in
+@@ -16,54 +12,27 @@ function mountStyles(document: Document): void {
+   }
+   const style = document.createElement("style");
+   style.className = STYLES_CLASS;
+-  style.textContent = HIGHLIGHTERS.map((highlighter) => highlighter.module?.getRules() ?? "").join(
+-    "\n",
+-  );
++  style.textContent = CODE_HIGHLIGHTERS.map(
++    (highlighter) => highlighter.module?.getRules() ?? "",
++  ).join("\n");
+   document.head.append(style);
+ }
+ 
+-function highlighted(document: Document, code: string, support: LanguageSupport): Node[] {
+-  const nodes: Node[] = [];
+-  highlightCode(
+-    code,
+-    support.language.parser.parse(code),
+-    HIGHLIGHTERS,
+-    (text, classes) => {
+-      if (classes === "") {
+-        nodes.push(document.createTextNode(text));
+-        return;
+-      }
+-      const span = document.createElement("span");
+-      span.className = classes;
+-      span.textContent = text;
+-      nodes.push(span);
+-    },
+-    () => nodes.push(document.createTextNode("\n")),
+-  );
+-  return nodes;
+-}
+-
+ export async function paintCode(
+   element: HTMLElement,
+-  info: string,
+-  code: string,
++  { info, code }: CodeBlock,
+   live: () => boolean,
+ ): Promise<void> {
+   const description = info === "" ? null : languageNamed(info);
+   if (description === null) {
+     return;
+   }
+-  let support: LanguageSupport;
+-  try {
+-    support = await description.load();
+-  } catch (error) {
+-    const reason = error instanceof Error ? error.message : String(error);
+-    log.warn("markdown.language_failed", { language: description.name, reason });
+-    return;
+-  }
+-  if (!live()) {
++  const support = await loadedSupport(description, { place: "markdown" });
++  if (support === null || !live()) {
+     return;
+   }
+   mountStyles(element.ownerDocument);
+-  element.replaceChildren(...highlighted(element.ownerDocument, code, support));
++  element.replaceChildren(
++    ...highlightedNodes(element.ownerDocument, code, support.language.parser),
++  );
+ }
+diff --git a/frontend/src/editor/internal/language.ts b/frontend/src/editor/internal/language.ts
+index f0089c0..240652e 100644
+--- a/frontend/src/editor/internal/language.ts
++++ b/frontend/src/editor/internal/language.ts
+@@ -24,21 +24,27 @@ export function languageNames(): readonly string[] {
+   return LANGUAGE_NAMES;
+ }
+ 
++export async function loadedSupport(
++  description: LanguageDescription,
++  fields: Readonly<Record<string, string>>,
++): Promise<LanguageSupport | null> {
++  try {
++    return await description.load();
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    log.warn("language.load_failed", { ...fields, language: description.name, reason });
++    return null;
++  }
++}
++
+ export async function loadLanguage(
+   description: LanguageDescription,
+   path: string,
+   views: readonly LanguageView[],
+   stale: () => boolean,
+ ): Promise<void> {
+-  let support: LanguageSupport;
+-  try {
+-    support = await description.load();
+-  } catch (error) {
+-    const reason = error instanceof Error ? error.message : String(error);
+-    log.warn("language.load_failed", { path, language: description.name, reason });
+-    return;
+-  }
+-  if (stale()) {
++  const support = await loadedSupport(description, { path });
++  if (support === null || stale()) {
+     return;
+   }
+   const effects = languageCompartment.reconfigure(support.language);
+diff --git a/frontend/src/editor/internal/markdownBlocks.test.ts b/frontend/src/editor/internal/markdownBlocks.test.ts
+index c1b5fd6..0e3923c 100644
+--- a/frontend/src/editor/internal/markdownBlocks.test.ts
++++ b/frontend/src/editor/internal/markdownBlocks.test.ts
+@@ -1,11 +1,30 @@
+ import { expect, test } from "vitest";
+ 
+ import { parseBlocks, type Block } from "./markdownBlocks";
++import { MAX_NESTING } from "./markdownTree";
++
++const LINEAR_MS = 500;
+ 
+ function blocks(text: string): Block[] {
+   return parseBlocks(text).map(({ block }) => block);
+ }
+ 
++function innermost(
++  outer: readonly Block[],
++  kind: "quote" | "list",
++): { readonly depth: number; readonly blocks: readonly Block[] } {
++  let depth = 0;
++  let inside = outer;
++  for (;;) {
++    const [only] = inside;
++    if (inside.length !== 1 || only?.kind !== kind) {
++      return { depth, blocks: inside };
++    }
++    depth += 1;
++    inside = only.kind === "quote" ? only.blocks : (only.items[0]?.blocks ?? []);
++  }
++}
++
+ test("a fenced block keeps a line that looks like a heading", () => {
+   expect(blocks("```ts\n# not a heading\nconst a = 1;\n```\n# A heading")).toEqual([
+     { kind: "code", info: "ts", code: "# not a heading\nconst a = 1;" },
+@@ -68,17 +87,53 @@ test("a table needs its delimiter row", () => {
+   expect(blocks("| a | b |\n| c | d |")).toEqual([
+     { kind: "paragraph", text: "| a | b |\n| c | d |" },
+   ]);
+-  expect(blocks("| a | b |\n|:--|--:|\n| c \\| d | e |\nend")).toEqual([
++  expect(blocks("| a | b |\n|:--|--:|\n| c \\| d | e |\nend\n\nafter")).toEqual([
+     {
+       kind: "table",
+       align: ["left", "right"],
+       header: ["a", "b"],
+-      rows: [["c \\| d", "e"]],
++      rows: [
++        ["c \\| d", "e"],
++        ["end", ""],
++      ],
+     },
+-    { kind: "paragraph", text: "end" },
++    { kind: "paragraph", text: "after" },
+   ]);
+ });
+ 
++test("a quote with a pipe right after a table starts a quote", () => {
++  expect(blocks("| a |\n|---|\n> q | x")).toEqual([
++    { kind: "table", align: ["none"], header: ["a"], rows: [] },
++    { kind: "quote", blocks: [{ kind: "paragraph", text: "q | x" }] },
++  ]);
++});
++
++test("a heading drops its closing run only after a space, in linear time", () => {
++  expect(blocks("# a#\n## b ##  \n### ###")).toEqual([
++    { kind: "heading", tag: "h1", text: "a#" },
++    { kind: "heading", tag: "h2", text: "b" },
++    { kind: "heading", tag: "h3", text: "" },
++  ]);
++  const inner = " ".repeat(100_000);
++  const started = performance.now();
++  expect(blocks(`# a${inner}b`)).toEqual([{ kind: "heading", tag: "h1", text: `a${inner}b` }]);
++  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
++});
++
++test("a 10,000-deep quote and list stop nesting at MAX_NESTING, the rest a paragraph", () => {
++  const levels = 10_000;
++  const quote = blocks(`${">".repeat(levels)} deep`);
++  expect(innermost(quote, "quote")).toEqual({
++    depth: MAX_NESTING,
++    blocks: [{ kind: "paragraph", text: `${">".repeat(levels - MAX_NESTING)} deep` }],
++  });
++  const list = blocks(`${"- ".repeat(levels)}x`);
++  expect(innermost(list, "list")).toEqual({
++    depth: MAX_NESTING,
++    blocks: [{ kind: "paragraph", text: `${"- ".repeat(levels - MAX_NESTING)}x` }],
++  });
++});
++
+ test("raw HTML stays text", () => {
+   expect(blocks('<div onclick="x()">\n<script>alert(1)</script>\n</div>')).toEqual([
+     { kind: "paragraph", text: '<div onclick="x()">\n<script>alert(1)</script>\n</div>' },
+diff --git a/frontend/src/editor/internal/markdownBlocks.ts b/frontend/src/editor/internal/markdownBlocks.ts
+index 33a8cbf..227c645 100644
+--- a/frontend/src/editor/internal/markdownBlocks.ts
++++ b/frontend/src/editor/internal/markdownBlocks.ts
+@@ -1,6 +1,7 @@
+-type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
++import { startsTable, tableOf, type Table } from "./markdownTable";
++import { MAX_NESTING } from "./markdownTree";
+ 
+-export type Align = "none" | "left" | "center" | "right";
++type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
+ 
+ export type Numbering =
+   | { readonly kind: "bullet" }
+@@ -14,33 +15,26 @@ export type Block =
+   | { readonly kind: "code"; readonly info: string; readonly code: string }
+   | { readonly kind: "list"; readonly numbering: Numbering; readonly items: readonly ListItem[] }
+   | { readonly kind: "quote"; readonly blocks: readonly Block[] }
+-  | {
+-      readonly kind: "table";
+-      readonly align: readonly Align[];
+-      readonly header: readonly string[];
+-      readonly rows: readonly (readonly string[])[];
+-    }
++  | Table
+   | { readonly kind: "rule" };
+ 
+ export type SourcedBlock = { readonly source: string; readonly block: Block };
+ 
++export type CodeBlock = Extract<Block, { kind: "code" }>;
++
+ type Parsed = { readonly block: Block; readonly end: number };
+ 
++type Starter = (lines: readonly string[], at: number, depth: number) => Parsed | null;
++
+ type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
+ 
+ const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
+ const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
+ const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+-const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
+-const HEADING_CLOSE = /(?:^|[ \t]+)#+$/;
++const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/s;
+ const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
+ const QUOTE = /^ {0,3}> ?(.*)$/;
+ const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/;
+-const DELIMITER_CELL = /^:?-+:?$/;
+-const ALIGN: Readonly<Record<string, Align>> = { "::": "center", ":-": "left", "-:": "right" };
+-const LEADING_PIPE = /^\|/;
+-const TRAILING_PIPE = /(?<!\\)\|$/;
+-const CELL_PIPE = /(?<!\\)\|/;
+ const WHITESPACE = /^[ \t]$/;
+ const LINE_BREAK = /\r\n|\n|\r/;
+ const TAB_STOP = 4;
+@@ -90,14 +84,23 @@ function fence(lines: readonly string[], at: number): Parsed | null {
+   }
+   const info = rest.trim().split(/\s+/)[0] ?? "";
+   const code: string[] = [];
+-  for (let end = at + 1; end < lines.length; end += 1) {
+-    const line = lineAt(lines, end);
+-    if (closesFence(line, marks)) {
+-      return { block: { kind: "code", info, code: code.join("\n") }, end: end + 1 };
+-    }
+-    code.push(stripColumns(line, indent.length));
++  let end = at + 1;
++  while (end < lines.length && !closesFence(lineAt(lines, end), marks)) {
++    code.push(stripColumns(lineAt(lines, end), indent.length));
++    end += 1;
+   }
+-  return { block: { kind: "code", info, code: code.join("\n") }, end: lines.length };
++  const closed = Math.min(end + 1, lines.length);
++  return { block: { kind: "code", info, code: code.join("\n") }, end: closed };
++}
++
++function headingText(content: string): string {
++  const text = content.trimEnd();
++  let close = text.length;
++  while (text[close - 1] === "#") {
++    close -= 1;
++  }
++  const before = text[close - 1];
++  return close === 0 || before === " " || before === "\t" ? text.slice(0, close).trimEnd() : text;
+ }
+ 
+ function heading(lines: readonly string[], at: number): Parsed | null {
+@@ -106,50 +109,22 @@ function heading(lines: readonly string[], at: number): Parsed | null {
+   if (tag === undefined) {
+     return null;
+   }
+-  return { block: { kind: "heading", tag, text: content.replace(HEADING_CLOSE, "") }, end: at + 1 };
++  return { block: { kind: "heading", tag, text: headingText(content) }, end: at + 1 };
+ }
+ 
+ function rule(lines: readonly string[], at: number): Parsed | null {
+   return RULE.test(lineAt(lines, at)) ? { block: { kind: "rule" }, end: at + 1 } : null;
+ }
+ 
+-function cells(line: string): string[] {
+-  const inner = line.trim().replace(LEADING_PIPE, "").replace(TRAILING_PIPE, "");
+-  return inner.split(CELL_PIPE).map((cell) => cell.trim());
+-}
+-
+-function delimiterRow(line: string, columns: number): Align[] | null {
+-  const row = cells(line);
+-  if (
+-    !line.includes("|") ||
+-    row.length !== columns ||
+-    !row.every((cell) => DELIMITER_CELL.test(cell))
+-  ) {
+-    return null;
+-  }
+-  return row.map((cell) => ALIGN[`${cell.at(0)}${cell.at(-1)}`] ?? "none");
+-}
+-
+-function startsTable(lines: readonly string[], at: number): boolean {
+-  const header = lineAt(lines, at);
+-  const next = lineAt(lines, at + 1);
+-  return header.includes("|") && delimiterRow(next, cells(header).length) !== null;
+-}
+-
+ function table(lines: readonly string[], at: number): Parsed | null {
+-  if (!startsTable(lines, at)) {
++  if (!startsTable(lineAt(lines, at), lineAt(lines, at + 1))) {
+     return null;
+   }
+-  const header = cells(lineAt(lines, at));
+-  const align = delimiterRow(lineAt(lines, at + 1), header.length) ?? [];
+-  const rows: string[][] = [];
+   let end = at + TABLE_HEAD_LINES;
+-  while (end < lines.length && lineAt(lines, end).includes("|")) {
+-    const row = cells(lineAt(lines, end));
+-    rows.push(header.map((_, column) => row[column] ?? ""));
++  while (end < lines.length && !isBlank(lineAt(lines, end)) && !interrupts(lines, end)) {
+     end += 1;
+   }
+-  return { block: { kind: "table", align, header, rows }, end };
++  return { block: tableOf(lines.slice(at, end)), end };
+ }
+ 
+ function itemStart(line: string): ItemStart | null {
+@@ -177,11 +152,11 @@ function interrupts(lines: readonly string[], at: number): boolean {
+     listStarts ||
+     QUOTE.test(line) ||
+     [fence, heading, rule].some((starts) => starts(lines, at) !== null) ||
+-    startsTable(lines, at)
++    startsTable(line, lineAt(lines, at + 1))
+   );
+ }
+ 
+-function quote(lines: readonly string[], at: number): Parsed | null {
++function quote(lines: readonly string[], at: number, depth: number): Parsed | null {
+   const inner: string[] = [];
+   let end = at;
+   while (end < lines.length) {
+@@ -197,7 +172,7 @@ function quote(lines: readonly string[], at: number): Parsed | null {
+     }
+     end += 1;
+   }
+-  return end === at ? null : { block: { kind: "quote", blocks: blocksOf(inner) }, end };
++  return end === at ? null : { block: { kind: "quote", blocks: blocksOf(inner, depth + 1) }, end };
+ }
+ 
+ function itemEnd(
+@@ -226,7 +201,7 @@ function itemEnd(
+   return end;
+ }
+ 
+-function list(lines: readonly string[], at: number): Parsed | null {
++function list(lines: readonly string[], at: number, depth: number): Parsed | null {
+   const first = itemStart(lineAt(lines, at));
+   if (first === null) {
+     return null;
+@@ -237,7 +212,7 @@ function list(lines: readonly string[], at: number): Parsed | null {
+   for (;;) {
+     const content = [start.first];
+     end = itemEnd(lines, end, start, content);
+-    items.push({ blocks: blocksOf(content) });
++    items.push({ blocks: blocksOf(content, depth + 1) });
+     let next = end;
+     while (next < lines.length && isBlank(lineAt(lines, next))) {
+       next += 1;
+@@ -261,10 +236,11 @@ function paragraph(lines: readonly string[], at: number): Parsed {
+   return { block: { kind: "paragraph", text: text.join("\n") }, end };
+ }
+ 
+-function parsedAt(lines: readonly string[], at: number): Parsed {
+-  const starters = [fence, heading, rule, quote, list, table];
++function parsedAt(lines: readonly string[], at: number, depth: number): Parsed {
++  const nested = depth < MAX_NESTING ? [quote, list] : [];
++  const starters: readonly Starter[] = [fence, heading, rule, ...nested, table];
+   for (const starts of starters) {
+-    const parsed = starts(lines, at);
++    const parsed = starts(lines, at, depth);
+     if (parsed !== null) {
+       return parsed;
+     }
+@@ -272,7 +248,7 @@ function parsedAt(lines: readonly string[], at: number): Parsed {
+   return paragraph(lines, at);
+ }
+ 
+-function sourced(lines: readonly string[]): SourcedBlock[] {
++function sourced(lines: readonly string[], depth: number): SourcedBlock[] {
+   const blocks: SourcedBlock[] = [];
+   let at = 0;
+   while (at < lines.length) {
+@@ -280,17 +256,17 @@ function sourced(lines: readonly string[]): SourcedBlock[] {
+       at += 1;
+       continue;
+     }
+-    const { block, end } = parsedAt(lines, at);
++    const { block, end } = parsedAt(lines, at, depth);
+     blocks.push({ source: lines.slice(at, end).join("\n"), block });
+     at = end;
+   }
+   return blocks;
+ }
+ 
+-function blocksOf(lines: readonly string[]): Block[] {
+-  return sourced(lines).map(({ block }) => block);
++function blocksOf(lines: readonly string[], depth: number): Block[] {
++  return sourced(lines, depth).map(({ block }) => block);
+ }
+ 
+ export function parseBlocks(text: string): SourcedBlock[] {
+-  return sourced(text.split(LINE_BREAK));
++  return sourced(text.split(LINE_BREAK), 0);
+ }
+diff --git a/frontend/src/editor/internal/markdownDom.ts b/frontend/src/editor/internal/markdownDom.ts
+index 1cd240d..43ec16d 100644
+--- a/frontend/src/editor/internal/markdownDom.ts
++++ b/frontend/src/editor/internal/markdownDom.ts
+@@ -1,7 +1,9 @@
+-import type { Align, Block, ListItem, Numbering } from "./markdownBlocks";
+-import { parseInline, type Inline } from "./markdownInline";
++import type { Block, CodeBlock, ListItem, Numbering } from "./markdownBlocks";
++import { parseInline } from "./markdownInline";
++import type { Align } from "./markdownTable";
++import type { Inline } from "./markdownTree";
+ 
+-export type CodePainter = (element: HTMLElement, info: string, code: string) => void;
++export type CodePainter = (element: HTMLElement, block: CodeBlock) => void;
+ 
+ type Tag = keyof Pick<
+   HTMLElementTagNameMap,
+@@ -32,6 +34,8 @@ type Tag = keyof Pick<
+   | "br"
+ >;
+ 
++type TextElement = { readonly tag: Tag; readonly className: string; readonly text: string };
++
+ const STYLED_TAG = { emphasis: "em", strong: "strong", strike: "del" } as const satisfies Readonly<
+   Record<string, Tag>
+ >;
+@@ -55,7 +59,7 @@ function element<K extends Tag>(
+   return created;
+ }
+ 
+-function textElement(document: Document, tag: Tag, className: string, text: string): HTMLElement {
++function textElement(document: Document, { tag, className, text }: TextElement): HTMLElement {
+   const created = element(document, tag, className);
+   created.textContent = text;
+   return created;
+@@ -67,7 +71,13 @@ function inlineNodes(document: Document, inlines: readonly Inline[]): Node[] {
+       case "text":
+         return [document.createTextNode(inline.text)];
+       case "code":
+-        return [textElement(document, "code", "markdown-inline-code", inline.text)];
++        return [
++          textElement(document, {
++            tag: "code",
++            className: "markdown-inline-code",
++            text: inline.text,
++          }),
++        ];
+       case "break":
+         return [element(document, "br", "")];
+       case "emphasis":
+@@ -94,21 +104,25 @@ function linkNodes(document: Document, children: readonly Inline[], address: str
+   if (address === "" || sameText) {
+     return shown;
+   }
+-  const addressNode = textElement(document, "span", "markdown-address", address);
++  const addressNode = textElement(document, {
++    tag: "span",
++    className: "markdown-address",
++    text: address,
++  });
+   return [...shown, document.createTextNode(" "), addressNode];
+ }
+ 
+-function withInlines(document: Document, tag: Tag, className: string, text: string): HTMLElement {
++function withInlines(document: Document, { tag, className, text }: TextElement): HTMLElement {
+   const created = element(document, tag, className);
+   created.append(...inlineNodes(document, parseInline(text)));
+   return created;
+ }
+ 
+-function codeNode(document: Document, info: string, code: string, paint: CodePainter): HTMLElement {
++function codeNode(document: Document, block: CodeBlock, paint: CodePainter): HTMLElement {
+   const pre = element(document, "pre", "markdown-code");
+-  const inner = textElement(document, "code", "", code);
++  const inner = textElement(document, { tag: "code", className: "", text: block.code });
+   pre.append(inner);
+-  paint(inner, info, code);
++  paint(inner, block);
+   return pre;
+ }
+ 
+@@ -118,14 +132,17 @@ function listNode(
+   items: readonly ListItem[],
+   paint: CodePainter,
+ ): HTMLElement {
+-  const ordered = numbering.kind === "ordered";
+-  const list = ordered
+-    ? element(document, "ol", "markdown-list markdown-ordered")
+-    : element(document, "ul", "markdown-list");
++  const list =
++    numbering.kind === "ordered"
++      ? element(document, "ol", "markdown-list markdown-ordered")
++      : element(document, "ul", "markdown-list");
+   items.forEach((item, index) => {
+     const entry = element(document, "li", "markdown-item");
+     if (numbering.kind === "ordered") {
+-      entry.append(textElement(document, "span", "markdown-number", `${numbering.start + index}.`));
++      const number = `${numbering.start + index}.`;
++      entry.append(
++        textElement(document, { tag: "span", className: "markdown-number", text: number }),
++      );
+     }
+     entry.append(...item.blocks.map((block) => blockNode(document, block, paint)));
+     list.append(entry);
+@@ -141,7 +158,8 @@ function rowNode(
+ ): HTMLElement {
+   const tableRow = element(document, "tr", "");
+   row.forEach((cell, column) => {
+-    tableRow.append(withInlines(document, tag, ALIGN_CLASS[align[column] ?? "none"], cell));
++    const className = ALIGN_CLASS[align[column] ?? "none"];
++    tableRow.append(withInlines(document, { tag, className, text: cell }));
+   });
+   return tableRow;
+ }
+@@ -162,11 +180,15 @@ function tableNode(
+ function kindNode(document: Document, block: Block, paint: CodePainter): HTMLElement {
+   switch (block.kind) {
+     case "paragraph":
+-      return withInlines(document, "p", "markdown-paragraph", block.text);
++      return withInlines(document, { tag: "p", className: "markdown-paragraph", text: block.text });
+     case "heading":
+-      return withInlines(document, block.tag, "markdown-heading", block.text);
++      return withInlines(document, {
++        tag: block.tag,
++        className: "markdown-heading",
++        text: block.text,
++      });
+     case "code":
+-      return codeNode(document, block.info, block.code, paint);
++      return codeNode(document, block, paint);
+     case "list":
+       return listNode(document, block.numbering, block.items, paint);
+     case "quote": {
+diff --git a/frontend/src/editor/internal/markdownInline.test.ts b/frontend/src/editor/internal/markdownInline.test.ts
+index 1265d21..11eb49e 100644
+--- a/frontend/src/editor/internal/markdownInline.test.ts
++++ b/frontend/src/editor/internal/markdownInline.test.ts
+@@ -1,6 +1,24 @@
+ import { expect, test } from "vitest";
+ 
+ import { parseInline } from "./markdownInline";
++import { MAX_NESTING, type Inline } from "./markdownTree";
++
++const LINEAR_MS = 500;
++
++function depthOf(inlines: readonly Inline[]): number {
++  return Math.max(
++    0,
++    ...inlines.map((inline) => ("children" in inline ? 1 + depthOf(inline.children) : 0)),
++  );
++}
++
++function textOf(inlines: readonly Inline[]): string {
++  return inlines
++    .map((inline) =>
++      "children" in inline ? textOf(inline.children) : "text" in inline ? inline.text : "",
++    )
++    .join("");
++}
+ 
+ test("backticks win over emphasis", () => {
+   expect(parseInline("*a `b*` c*")).toEqual([
+@@ -79,3 +97,50 @@ test("escapes, hard breaks and soft breaks", () => {
+     { kind: "text", text: "c\nd" },
+   ]);
+ });
++
++test("emphasis never crosses a link's text, and a link inside a link stays text", () => {
++  expect(parseInline("*a [b*](c) d* [x [y](z)](w)")).toEqual([
++    {
++      kind: "emphasis",
++      children: [
++        { kind: "text", text: "a " },
++        { kind: "link", children: [{ kind: "text", text: "b*" }], address: "c" },
++        { kind: "text", text: " d" },
++      ],
++    },
++    { kind: "text", text: " [x " },
++    { kind: "link", children: [{ kind: "text", text: "y" }], address: "z" },
++    { kind: "text", text: "](w)" },
++  ]);
++});
++
++test("a strong closer shared by two openers and the rule of three", () => {
++  expect(parseInline("***a***")).toEqual([
++    {
++      kind: "emphasis",
++      children: [{ kind: "strong", children: [{ kind: "text", text: "a" }] }],
++    },
++  ]);
++  expect(parseInline("*a**b*")).toEqual([
++    { kind: "emphasis", children: [{ kind: "text", text: "a**b" }] },
++  ]);
++});
++
++test("a 10,000-deep emphasis stops at MAX_NESTING, the rest literal", () => {
++  const levels = 10_000;
++  const inner = levels - MAX_NESTING;
++  const parsed = parseInline(`${"*a ".repeat(levels)}${"a* ".repeat(levels)}`);
++  expect(depthOf(parsed)).toBe(MAX_NESTING);
++  expect(textOf(parsed)).toBe(
++    `${"a ".repeat(MAX_NESTING)}${"*a ".repeat(inner)}${"a* ".repeat(inner)}${"a ".repeat(MAX_NESTING)}`,
++  );
++});
++
++test("unmatched openers, brackets and parentheses parse in linear time", () => {
++  const unmatched = "*a ".repeat(20_000);
++  const brackets = "[](".repeat(20_000);
++  const started = performance.now();
++  expect(parseInline(unmatched)).toEqual([{ kind: "text", text: unmatched }]);
++  expect(parseInline(brackets)).toEqual([{ kind: "text", text: brackets }]);
++  expect(performance.now() - started).toBeLessThan(LINEAR_MS);
++});
+diff --git a/frontend/src/editor/internal/markdownInline.ts b/frontend/src/editor/internal/markdownInline.ts
+index cf3044c..c31db30 100644
+--- a/frontend/src/editor/internal/markdownInline.ts
++++ b/frontend/src/editor/internal/markdownInline.ts
+@@ -1,24 +1,24 @@
+-type Styled = "emphasis" | "strong" | "strike";
+-
+-export type Inline =
+-  | { readonly kind: "text"; readonly text: string }
+-  | { readonly kind: "code"; readonly text: string }
+-  | { readonly kind: "break" }
+-  | { readonly kind: Styled; readonly children: readonly Inline[] }
+-  | { readonly kind: "link"; readonly children: readonly Inline[]; readonly address: string };
++import {
++  IMAGE_OPEN,
++  inlineTree,
++  STRIKE_RUN,
++  type Bracket,
++  type Delimiter,
++  type Inline,
++  type Piece,
++  type Run,
++} from "./markdownTree";
+ 
+ type Step = { readonly inlines: readonly Inline[]; readonly end: number };
+ 
+ type Target = { readonly address: string; readonly end: number };
+ 
+-type Delimiter = "*" | "_" | "~";
++type OpenBracket = { readonly bracket: Bracket; readonly piece: number; readonly at: number };
+ 
+ const PUNCTUATION = /^[!-/:-@[-`{-~]$/;
+ const SPACE = /^\s$/;
+ const WORD = /^[\p{L}\p{N}]$/u;
+ const AUTOLINK = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>/;
+-const STRIKE_RUN = 2;
+-const STRONG_RUN = 2;
+ const ESCAPE_WIDTH = "\\*".length;
+ 
+ function runLength(text: string, at: number, char: string): number {
+@@ -33,31 +33,44 @@ function text(value: string, end: number): Step {
+   return { inlines: [{ kind: "text", text: value }], end };
+ }
+ 
+-function codeSpanEnd(source: string, at: number): number | null {
+-  const run = runLength(source, at, "`");
+-  let from = at + run;
+-  for (;;) {
+-    const next = source.indexOf("`", from);
+-    if (next < 0) {
+-      return null;
++class CodeSpans {
++  readonly #starts = new Map<number, number[]>();
++  readonly #next = new Map<number, number>();
++
++  constructor(source: string) {
++    let at = source.indexOf("`");
++    while (at >= 0) {
++      const run = runLength(source, at, "`");
++      const starts = this.#starts.get(run) ?? [];
++      starts.push(at);
++      this.#starts.set(run, starts);
++      at = source.indexOf("`", at + run);
+     }
+-    const closing = runLength(source, next, "`");
+-    if (closing === run) {
+-      return next + closing;
++  }
++
++  closing(from: number, run: number): number | null {
++    const starts = this.#starts.get(run) ?? [];
++    let index = this.#next.get(run) ?? 0;
++    while (index < starts.length && (starts[index] ?? from) < from) {
++      index += 1;
+     }
+-    from = next + closing;
++    this.#next.set(run, index);
++    return starts[index] ?? null;
+   }
+ }
+ 
+-function codeSpan(source: string, at: number): Step {
++function codeSpan(source: string, at: number, spans: CodeSpans): Step {
+   const run = runLength(source, at, "`");
+-  const end = codeSpanEnd(source, at);
+-  if (end === null) {
++  const close = spans.closing(at + run, run);
++  if (close === null) {
+     return text("`".repeat(run), at + run);
+   }
+-  const inner = source.slice(at + run, end - run).replaceAll("\n", " ");
++  const inner = source.slice(at + run, close).replaceAll("\n", " ");
+   const padded = inner.startsWith(" ") && inner.endsWith(" ") && inner.trim() !== "";
+-  return { inlines: [{ kind: "code", text: padded ? inner.slice(1, -1) : inner }], end };
++  return {
++    inlines: [{ kind: "code", text: padded ? inner.slice(1, -1) : inner }],
++    end: close + run,
++  };
+ }
+ 
+ function escape(source: string, at: number): Step {
+@@ -76,191 +89,145 @@ function spaces(source: string, at: number): Step {
+   return run > 1 ? { inlines: [{ kind: "break" }], end: at + run + 1 } : text("\n", at + run + 1);
+ }
+ 
+-function canOpen(source: string, at: number, run: number, char: Delimiter): boolean {
+-  const next = source.charAt(at + run);
+-  const before = source.charAt(at - 1);
+-  return next !== "" && !SPACE.test(next) && (char !== "_" || !WORD.test(before));
+-}
+-
+-function canClose(source: string, at: number, run: number, char: Delimiter): boolean {
+-  const before = source.charAt(at - 1);
+-  const after = source.charAt(at + run);
+-  return before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after));
+-}
+-
+-function widthOf(run: number, char: Delimiter): number {
+-  return char === "~" ? STRIKE_RUN : Math.min(run, STRONG_RUN);
+-}
+-
+-function skipped(source: string, at: number): number | null {
+-  const char = source[at];
+-  if (char === "\\") {
+-    return at + ESCAPE_WIDTH;
+-  }
+-  if (char === "`") {
+-    return codeSpanEnd(source, at) ?? at + runLength(source, at, "`");
+-  }
+-  return null;
+-}
+-
+-function closer(source: string, from: number, char: Delimiter, width: number): number | null {
+-  let at = from;
+-  while (at < source.length) {
+-    const past = skipped(source, at);
+-    if (past !== null) {
+-      at = past;
+-      continue;
+-    }
+-    if (source[at] !== char) {
+-      at += 1;
+-      continue;
+-    }
+-    const run = runLength(source, at, char);
+-    if (canClose(source, at, run, char) && run >= width) {
+-      return at;
+-    }
+-    if (!canOpen(source, at, run, char)) {
+-      at += run;
+-      continue;
+-    }
+-    const inner = widthOf(run, char);
+-    const nested = closer(source, at + inner, char, inner);
+-    if (nested === null) {
+-      return null;
+-    }
+-    at = nested + inner;
+-  }
+-  return null;
+-}
+-
+-function styledKind(char: Delimiter, width: number): Styled {
+-  if (char === "~") {
+-    return "strike";
+-  }
+-  return width === STRONG_RUN ? "strong" : "emphasis";
+-}
+-
+-function delimited(source: string, at: number, char: Delimiter): Step {
+-  const run = runLength(source, at, char);
+-  if ((char === "~" && run !== STRIKE_RUN) || !canOpen(source, at, run, char)) {
+-    return text(char.repeat(run), at + run);
+-  }
+-  const width = widthOf(run, char);
+-  const end = closer(source, at + width, char, width);
+-  if (end === null) {
+-    return text(char, at + 1);
+-  }
+-  const children = parseInline(source.slice(at + width, end));
+-  return { inlines: [{ kind: styledKind(char, width), children }], end: end + width };
+-}
+-
+-function bracketEnd(source: string, at: number): number | null {
+-  let depth = 0;
+-  let index = at;
+-  while (index < source.length) {
+-    const past = skipped(source, index);
+-    if (past !== null) {
+-      index = past;
+-      continue;
+-    }
+-    const char = source[index];
+-    depth += char === "[" ? 1 : char === "]" ? -1 : 0;
+-    if (depth === 0) {
+-      return index;
+-    }
+-    index += 1;
+-  }
+-  return null;
+-}
+-
+-function destination(source: string, open: number): Target | null {
+-  if (source[open] !== "(") {
+-    return null;
+-  }
+-  let depth = 0;
+-  for (let index = open; index < source.length; index += 1) {
+-    const char = source[index];
+-    depth += char === "(" ? 1 : char === ")" ? -1 : 0;
+-    if (depth === 0) {
+-      const inner = source.slice(open + 1, index).trim();
+-      const address = inner.startsWith("<") ? inner.slice(1, inner.indexOf(">")) : inner;
+-      return { address: address.split(/\s+/)[0] ?? "", end: index + 1 };
+-    }
+-  }
+-  return null;
+-}
+-
+-function link(source: string, at: number): Step | null {
+-  const close = bracketEnd(source, at);
+-  const target = close === null ? null : destination(source, close + 1);
+-  if (close === null || target === null) {
+-    return null;
+-  }
+-  const children = parseInline(source.slice(at + 1, close));
+-  return { inlines: [{ kind: "link", children, address: target.address }], end: target.end };
+-}
+-
+-function image(source: string, at: number): Step | null {
+-  const close = source[at + 1] === "[" ? bracketEnd(source, at + 1) : null;
+-  const target = close === null ? null : destination(source, close + 1);
+-  if (close === null || target === null) {
+-    return null;
+-  }
+-  return text(`${source.slice(at + "![".length, close)} (${target.address})`, target.end);
+-}
+-
+-function autolink(source: string, at: number): Step | null {
++function autolink(source: string, at: number): Step {
+   const match = AUTOLINK.exec(source.slice(at));
+-  return match === null ? null : text(match[1] ?? "", at + match[0].length);
++  return match === null ? text("<", at + 1) : text(match[1] ?? "", at + match[0].length);
+ }
+ 
+-function stepAt(source: string, at: number): Step | null {
+-  const char = source.charAt(at);
+-  switch (char) {
+-    case "\\":
+-      return escape(source, at);
+-    case "`":
+-      return codeSpan(source, at);
+-    case " ":
+-      return spaces(source, at);
+-    case "!":
+-      return image(source, at);
+-    case "[":
+-      return link(source, at);
+-    case "<":
+-      return autolink(source, at);
+-    case "*":
+-    case "_":
+-    case "~":
+-      return delimited(source, at, char);
+-    default:
+-      return null;
++function parenMatches(source: string): Map<number, number> {
++  const matches = new Map<number, number>();
++  const open: number[] = [];
++  for (let at = 0; at < source.length; at += 1) {
++    if (source[at] === "(") {
++      open.push(at);
++    } else if (source[at] === ")") {
++      const start = open.pop();
++      if (start !== undefined) {
++        matches.set(start, at);
++      }
++    }
+   }
++  return matches;
+ }
+ 
+-function append(inlines: Inline[], next: Inline): void {
+-  const last = inlines.at(-1);
+-  if (last?.kind === "text" && next.kind === "text") {
+-    inlines[inlines.length - 1] = { kind: "text", text: last.text + next.text };
+-  } else {
+-    inlines.push(next);
++function destination(
++  source: string,
++  open: number,
++  parens: ReadonlyMap<number, number>,
++): Target | null {
++  const close = source[open] === "(" ? parens.get(open) : undefined;
++  if (close === undefined) {
++    return null;
++  }
++  const inner = source.slice(open + 1, close).trim();
++  const address = inner.startsWith("<") ? inner.slice(1, inner.indexOf(">")) : inner;
++  return { address: address.split(/\s+/)[0] ?? "", end: close + 1 };
++}
++
++function delimiterRun(source: string, at: number, char: Delimiter): Run {
++  const length = runLength(source, at, char);
++  const before = source.charAt(at - 1);
++  const after = source.charAt(at + length);
++  return {
++    kind: "run",
++    char,
++    length,
++    canOpen: after !== "" && !SPACE.test(after) && (char !== "_" || !WORD.test(before)),
++    canClose: before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after)),
++    closes: [],
++    opens: [],
++  };
++}
++
++class InlineScan {
++  readonly pieces: Piece[] = [];
++  readonly #source: string;
++  readonly #spans: CodeSpans;
++  readonly #parens: ReadonlyMap<number, number>;
++  readonly #brackets: OpenBracket[] = [];
++  #inactiveBelow = 0;
++
++  constructor(source: string) {
++    this.#source = source;
++    this.#spans = new CodeSpans(source);
++    this.#parens = parenMatches(source);
++  }
++
++  step(at: number): number {
++    const source = this.#source;
++    const char = source.charAt(at);
++    switch (char) {
++      case "\\":
++        return this.#push(escape(source, at));
++      case "`":
++        return this.#push(codeSpan(source, at, this.#spans));
++      case " ":
++        return this.#push(spaces(source, at));
++      case "<":
++        return this.#push(autolink(source, at));
++      case "!":
++        return source[at + 1] === "[" ? this.#open(at, true) : this.#push(text(char, at + 1));
++      case "[":
++        return this.#open(at, false);
++      case "]":
++        return this.#close(at);
++      case "*":
++      case "_":
++      case "~":
++        return this.#run(at, char);
++      default:
++        return this.#push(text(char, at + 1));
++    }
++  }
++
++  #push({ inlines, end }: Step): number {
++    this.pieces.push(...inlines.map((inline): Piece => ({ kind: "inline", inline })));
++    return end;
++  }
++
++  #run(at: number, char: Delimiter): number {
++    const run = delimiterRun(this.#source, at, char);
++    if (char === "~" && run.length !== STRIKE_RUN) {
++      return this.#push(text(char.repeat(run.length), at + run.length));
++    }
++    this.pieces.push(run);
++    return at + run.length;
++  }
++
++  #open(at: number, image: boolean): number {
++    const bracket: Bracket = { kind: "bracket", image, linked: false };
++    this.#brackets.push({ bracket, piece: this.pieces.length, at });
++    this.pieces.push(bracket);
++    return at + (image ? IMAGE_OPEN.length : 1);
++  }
++
++  #close(at: number): number {
++    const open = this.#brackets.pop();
++    const depth = this.#brackets.length;
++    const active = open !== undefined && (open.bracket.image || depth >= this.#inactiveBelow);
++    this.#inactiveBelow = Math.min(this.#inactiveBelow, depth);
++    const target = active ? destination(this.#source, at + 1, this.#parens) : null;
++    if (open === undefined || target === null) {
++      return this.#push(text("]", at + 1));
++    }
++    if (open.bracket.image) {
++      const alt = this.#source.slice(open.at + IMAGE_OPEN.length, at);
++      this.pieces.length = open.piece;
++      return this.#push(text(`${alt} (${target.address})`, target.end));
++    }
++    open.bracket.linked = true;
++    const raw = this.#source.slice(at, target.end);
++    this.pieces.push({ kind: "linkEnd", open: open.bracket, address: target.address, raw });
++    this.#inactiveBelow = depth;
++    return target.end;
+   }
+ }
+ 
+ export function parseInline(source: string): Inline[] {
+-  const inlines: Inline[] = [];
++  const scan = new InlineScan(source);
+   let at = 0;
+   while (at < source.length) {
+-    const step = stepAt(source, at);
+-    if (step === null) {
+-      append(inlines, { kind: "text", text: source.charAt(at) });
+-      at += 1;
+-      continue;
+-    }
+-    for (const inline of step.inlines) {
+-      append(inlines, inline);
+-    }
+-    at = step.end;
++    at = scan.step(at);
+   }
+-  return inlines;
++  return inlineTree(scan.pieces);
+ }
+diff --git a/frontend/src/editor/internal/markdownTable.ts b/frontend/src/editor/internal/markdownTable.ts
+new file mode 100644
+index 0000000..cf41675
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownTable.ts
+@@ -0,0 +1,46 @@
++export type Align = "none" | "left" | "center" | "right";
++
++export type Table = {
++  readonly kind: "table";
++  readonly align: readonly Align[];
++  readonly header: readonly string[];
++  readonly rows: readonly (readonly string[])[];
++};
++
++const DELIMITER_CELL = /^:?-+:?$/;
++const ALIGN: Readonly<Record<string, Align>> = { "::": "center", ":-": "left", "-:": "right" };
++const LEADING_PIPE = /^\|/;
++const TRAILING_PIPE = /(?<!\\)\|$/;
++const CELL_PIPE = /(?<!\\)\|/;
++
++function cells(line: string): string[] {
++  const inner = line.trim().replace(LEADING_PIPE, "").replace(TRAILING_PIPE, "");
++  return inner.split(CELL_PIPE).map((cell) => cell.trim());
++}
++
++function delimiterRow(line: string, columns: number): Align[] | null {
++  const row = cells(line);
++  if (
++    !line.includes("|") ||
++    row.length !== columns ||
++    !row.every((cell) => DELIMITER_CELL.test(cell))
++  ) {
++    return null;
++  }
++  return row.map((cell) => ALIGN[`${cell.at(0)}${cell.at(-1)}`] ?? "none");
++}
++
++export function startsTable(header: string, delimiter: string): boolean {
++  return header.includes("|") && delimiterRow(delimiter, cells(header).length) !== null;
++}
++
++export function tableOf(lines: readonly string[]): Table {
++  const [headerLine = "", delimiterLine = "", ...rowLines] = lines;
++  const header = cells(headerLine);
++  const align = delimiterRow(delimiterLine, header.length) ?? [];
++  const rows = rowLines.map((line) => {
++    const row = cells(line);
++    return header.map((_, column) => row[column] ?? "");
++  });
++  return { kind: "table", align, header, rows };
++}
+diff --git a/frontend/src/editor/internal/markdownTree.ts b/frontend/src/editor/internal/markdownTree.ts
+new file mode 100644
+index 0000000..8061c36
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownTree.ts
+@@ -0,0 +1,214 @@
++type Styled = "emphasis" | "strong" | "strike";
++
++export type Inline =
++  | { readonly kind: "text"; readonly text: string }
++  | { readonly kind: "code"; readonly text: string }
++  | { readonly kind: "break" }
++  | { readonly kind: Styled; readonly children: readonly Inline[] }
++  | { readonly kind: "link"; readonly children: readonly Inline[]; readonly address: string };
++
++export type Delimiter = "*" | "_" | "~";
++
++type Mark = { readonly kind: Styled };
++
++export type Run = {
++  readonly kind: "run";
++  readonly char: Delimiter;
++  readonly length: number;
++  readonly canOpen: boolean;
++  readonly canClose: boolean;
++  readonly closes: Mark[];
++  readonly opens: Mark[];
++};
++
++export type Bracket = { readonly kind: "bracket"; readonly image: boolean; linked: boolean };
++
++export type Piece =
++  | { readonly kind: "inline"; readonly inline: Inline }
++  | Run
++  | Bracket
++  | {
++      readonly kind: "linkEnd";
++      readonly open: Bracket;
++      readonly address: string;
++      readonly raw: string;
++    };
++
++type Opener = { readonly run: Run; left: number };
++
++type Level = { readonly barrier: number; readonly bottoms: Map<string, number> };
++
++type Frame = { readonly opener: Mark | Bracket; readonly children: Inline[] };
++
++export const MAX_NESTING = 16;
++export const STRIKE_RUN = 2;
++export const IMAGE_OPEN = "![";
++
++const STRONG_RUN = 2;
++const RULE_OF_THREE = 3;
++const WIDTH: Readonly<Record<Styled, number>> = {
++  emphasis: 1,
++  strong: STRONG_RUN,
++  strike: STRIKE_RUN,
++};
++
++function pairs(opener: Run, closer: Run): boolean {
++  const either = opener.canClose || closer.canOpen;
++  const sum = opener.length + closer.length;
++  const thirds = opener.length % RULE_OF_THREE === 0 && closer.length % RULE_OF_THREE === 0;
++  return opener.char === closer.char && !(either && sum % RULE_OF_THREE === 0 && !thirds);
++}
++
++function styledKind(char: Delimiter, available: number): Styled {
++  if (char === "~") {
++    return "strike";
++  }
++  return available >= STRONG_RUN ? "strong" : "emphasis";
++}
++
++class Emphasis {
++  readonly #stack: Opener[] = [];
++  readonly #root: Level = { barrier: 0, bottoms: new Map() };
++  readonly #links: Level[] = [];
++
++  enterLink(): void {
++    this.#links.push({ barrier: this.#stack.length, bottoms: new Map() });
++  }
++
++  leaveLink(): void {
++    this.#truncate(this.#links.pop()?.barrier ?? 0);
++  }
++
++  add(run: Run): void {
++    let left = run.length;
++    let found = run.canClose ? this.#opener(run) : null;
++    let opener = found === null ? undefined : this.#stack[found];
++    while (found !== null && opener !== undefined) {
++      const kind = styledKind(run.char, Math.min(opener.left, left));
++      const mark: Mark = { kind };
++      opener.run.opens.push(mark);
++      run.closes.push(mark);
++      opener.left -= WIDTH[kind];
++      left -= WIDTH[kind];
++      this.#truncate(opener.left > 0 ? found + 1 : found);
++      found = left > 0 ? this.#opener(run) : null;
++      opener = found === null ? undefined : this.#stack[found];
++    }
++    if (left > 0 && run.canOpen) {
++      this.#stack.push({ run, left });
++    }
++  }
++
++  // CommonMark's process_emphasis: openers_bottom per closer type, so a failed search is never
++  // repeated (spec.commonmark.org/0.31.2, "Phase 2: inline structure").
++  #opener(closer: Run): number | null {
++    const level = this.#links.at(-1) ?? this.#root;
++    const key = `${closer.char}${String(closer.canOpen)}${closer.length % RULE_OF_THREE}`;
++    const lowest = Math.max(level.barrier, level.bottoms.get(key) ?? 0);
++    for (let index = this.#stack.length - 1; index >= lowest; index -= 1) {
++      const opener = this.#stack[index];
++      if (opener !== undefined && pairs(opener.run, closer)) {
++        return index;
++      }
++    }
++    level.bottoms.set(key, this.#stack.length);
++    return null;
++  }
++
++  #truncate(length: number): void {
++    this.#stack.length = Math.min(this.#stack.length, length);
++    const { bottoms } = this.#links.at(-1) ?? this.#root;
++    for (const [key, bottom] of bottoms) {
++      bottoms.set(key, Math.min(bottom, length));
++    }
++  }
++}
++
++function matchEmphasis(pieces: readonly Piece[]): void {
++  const emphasis = new Emphasis();
++  for (const piece of pieces) {
++    if (piece.kind === "run") {
++      emphasis.add(piece);
++    } else if (piece.kind === "bracket" && piece.linked) {
++      emphasis.enterLink();
++    } else if (piece.kind === "linkEnd") {
++      emphasis.leaveLink();
++    }
++  }
++}
++
++class Tree {
++  readonly root: Inline[] = [];
++  readonly #frames: Frame[] = [];
++  readonly #literal = new Set<Mark | Bracket>();
++
++  add(inline: Inline): void {
++    const inlines = this.#frames.at(-1)?.children ?? this.root;
++    const last = inlines.at(-1);
++    if (last?.kind === "text" && inline.kind === "text") {
++      inlines[inlines.length - 1] = { kind: "text", text: last.text + inline.text };
++    } else {
++      inlines.push(inline);
++    }
++  }
++
++  open(opener: Mark | Bracket, literal: string): void {
++    if (this.#frames.length < MAX_NESTING) {
++      this.#frames.push({ opener, children: [] });
++      return;
++    }
++    this.#literal.add(opener);
++    this.add({ kind: "text", text: literal });
++  }
++
++  close(opener: Mark | Bracket, literal: string, node: (children: Inline[]) => Inline): void {
++    const frame = this.#literal.has(opener) ? undefined : this.#frames.pop();
++    this.add(frame === undefined ? { kind: "text", text: literal } : node(frame.children));
++  }
++}
++
++function addRun(tree: Tree, run: Run): void {
++  for (const mark of run.closes) {
++    const { kind } = mark;
++    tree.close(mark, run.char.repeat(WIDTH[kind]), (children) => ({ kind, children }));
++  }
++  const used = [...run.closes, ...run.opens].reduce((sum, { kind }) => sum + WIDTH[kind], 0);
++  if (run.length > used) {
++    tree.add({ kind: "text", text: run.char.repeat(run.length - used) });
++  }
++  for (const mark of [...run.opens].reverse()) {
++    tree.open(mark, run.char.repeat(WIDTH[mark.kind]));
++  }
++}
++
++export function inlineTree(pieces: readonly Piece[]): Inline[] {
++  matchEmphasis(pieces);
++  const tree = new Tree();
++  for (const piece of pieces) {
++    switch (piece.kind) {
++      case "inline":
++        tree.add(piece.inline);
++        break;
++      case "run":
++        addRun(tree, piece);
++        break;
++      case "bracket":
++        if (piece.linked) {
++          tree.open(piece, "[");
++        } else {
++          tree.add({ kind: "text", text: piece.image ? IMAGE_OPEN : "[" });
++        }
++        break;
++      case "linkEnd": {
++        const { address } = piece;
++        tree.close(piece.open, piece.raw, (children) => ({ kind: "link", children, address }));
++        break;
++      }
++      default: {
++        const _exhaustive: never = piece;
++        return _exhaustive;
++      }
++    }
++  }
++  return tree.root;
++}
+diff --git a/frontend/src/editor/internal/removalTooltip.ts b/frontend/src/editor/internal/removalTooltip.ts
+index 9965120..2cd3c53 100644
+--- a/frontend/src/editor/internal/removalTooltip.ts
++++ b/frontend/src/editor/internal/removalTooltip.ts
+@@ -1,10 +1,9 @@
+ import { language } from "@codemirror/language";
+ import type { Extension } from "@codemirror/state";
+ import { hoverTooltip, type EditorView, type Tooltip } from "@codemirror/view";
+-import { highlightCode } from "@lezer/highlight";
+ 
+ import { barPlace, shownRemoval, type ShownRemoval } from "./removalText";
+-import { fontHighlight, paletteHighlight } from "./syntax";
++import { highlightedNodes } from "./syntax";
+ import { REMOVAL_BAR_CLASS, removalAt } from "./words";
+ 
+ function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
+@@ -24,22 +23,7 @@ function codeBlock(view: EditorView, shown: ShownRemoval): HTMLElement {
+     block.textContent = shown.text;
+     return block;
+   }
+-  highlightCode(
+-    shown.text,
+-    grammar.parser.parse(shown.text),
+-    [paletteHighlight, fontHighlight],
+-    (text, classes) => {
+-      if (classes === "") {
+-        block.append(text);
+-        return;
+-      }
+-      const span = document.createElement("span");
+-      span.className = classes;
+-      span.textContent = text;
+-      block.append(span);
+-    },
+-    () => block.append("\n"),
+-  );
++  block.append(...highlightedNodes(document, shown.text, grammar.parser));
+   return block;
+ }
+ 
+diff --git a/frontend/src/editor/internal/syntax.ts b/frontend/src/editor/internal/syntax.ts
+index 2e7b895..a523257 100644
+--- a/frontend/src/editor/internal/syntax.ts
++++ b/frontend/src/editor/internal/syntax.ts
+@@ -1,5 +1,5 @@
+-import { HighlightStyle } from "@codemirror/language";
+-import { tagHighlighter, tags, type Highlighter, type Tag } from "@lezer/highlight";
++import { HighlightStyle, type Language } from "@codemirror/language";
++import { highlightCode, tagHighlighter, tags, type Highlighter, type Tag } from "@lezer/highlight";
+ 
+ const FONT_PROPERTY = {
+   "--syntax-comment-style": "fontStyle",
+@@ -136,3 +136,30 @@ export const fontHighlight = HighlightStyle.define(
+       ...Object.fromEntries(fonts.map((font) => [FONT_PROPERTY[font], `var(${font})`])),
+     })),
+ );
++
++export const CODE_HIGHLIGHTERS: readonly HighlightStyle[] = [paletteHighlight, fontHighlight];
++
++export function highlightedNodes(
++  document: Document,
++  code: string,
++  parser: Language["parser"],
++): Node[] {
++  const nodes: Node[] = [];
++  highlightCode(
++    code,
++    parser.parse(code),
++    CODE_HIGHLIGHTERS,
++    (text, classes) => {
++      if (classes === "") {
++        nodes.push(document.createTextNode(text));
++        return;
++      }
++      const span = document.createElement("span");
++      span.className = classes;
++      span.textContent = text;
++      nodes.push(span);
++    },
++    () => nodes.push(document.createTextNode("\n")),
++  );
++  return nodes;
++}
+diff --git a/frontend/src/editor/markdown.ts b/frontend/src/editor/markdown.ts
+index b9f12a6..2e4de60 100644
+--- a/frontend/src/editor/markdown.ts
++++ b/frontend/src/editor/markdown.ts
+@@ -13,8 +13,8 @@ export class MarkdownView {
+ 
+   constructor(host: HTMLElement) {
+     this.#host = host;
+-    this.#paint = (element, info, code) => {
+-      void paintCode(element, info, code, () => !this.#destroyed && host.contains(element));
++    this.#paint = (element, block) => {
++      void paintCode(element, block, () => !this.#destroyed && host.contains(element));
+     };
+   }
+ 
+diff --git a/frontend/src/ui/useMarkdown.test.ts b/frontend/src/ui/useMarkdown.test.ts
+new file mode 100644
+index 0000000..ea9b9d9
+--- /dev/null
++++ b/frontend/src/ui/useMarkdown.test.ts
+@@ -0,0 +1,88 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { effectScope, nextTick, shallowRef, type EffectScope, type ShallowRef } from "vue";
++
++import { useMarkdown } from "./useMarkdown";
++
++const editor = vi.hoisted(() => {
++  const state = { built: 0, calls: new Array<string>() };
++  class MarkdownView {
++    readonly #id: number;
++    constructor(_host: unknown) {
++      state.built += 1;
++      this.#id = state.built;
++      state.calls.push(`build ${this.#id}`);
++    }
++    show(text: string): void {
++      state.calls.push(`show ${this.#id} ${text}`);
++    }
++    destroy(): void {
++      state.calls.push(`destroy ${this.#id}`);
++    }
++  }
++  return { state, MarkdownView };
++});
++
++vi.mock("../editor", () => ({ MarkdownView: editor.MarkdownView }));
++
++afterEach(() => {
++  editor.state.built = 0;
++  editor.state.calls = [];
++});
++
++function element(): HTMLElement {
++  return Object.create(null);
++}
++
++function mount(host: ShallowRef<HTMLElement | null>, text: ShallowRef<string>): EffectScope {
++  const scope = effectScope();
++  scope.run(() => {
++    useMarkdown(host, () => text.value);
++  });
++  return scope;
++}
++
++test("a null host builds nothing, even when the text changes", async () => {
++  const text = shallowRef("# Hi");
++  const scope = mount(shallowRef(null), text);
++  await nextTick();
++  text.value = "# Hi there";
++  await nextTick();
++
++  expect(editor.state.calls).toEqual([]);
++  scope.stop();
++  expect(editor.state.calls).toEqual([]);
++});
++
++test("a set host shows the text, a text change shows again, and stopping the scope destroys", async () => {
++  const text = shallowRef("a");
++  const scope = mount(shallowRef(element()), text);
++  await nextTick();
++  text.value = "ab";
++  await nextTick();
++  scope.stop();
++
++  expect(editor.state.calls).toEqual(["build 1", "show 1 a", "show 1 ab", "destroy 1"]);
++});
++
++test("a host swap destroys the old view and shows the text in a new one; a null host only destroys", async () => {
++  const host = shallowRef<HTMLElement | null>(element());
++  const text = shallowRef("a");
++  const scope = mount(host, text);
++  await nextTick();
++  host.value = element();
++  await nextTick();
++  host.value = null;
++  await nextTick();
++  text.value = "b";
++  await nextTick();
++  scope.stop();
++
++  expect(editor.state.calls).toEqual([
++    "build 1",
++    "show 1 a",
++    "destroy 1",
++    "build 2",
++    "show 2 a",
++    "destroy 2",
++  ]);
++});
+-- 
+2.56.0
+

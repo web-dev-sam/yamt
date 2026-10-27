@@ -1,0 +1,5 @@
+just mutants 89acdb9 (covers 8fdd485 RVReviewIpcR1)
+On lines 8fdd485 changed: 2 of 44 survivors/no-coverage:
+NoCoverage ConditionalExpression frontend/src/ipc/fixtureGitLab.ts:46 | -       default: { => -         const _exhaustive: never = label;
+NoCoverage BlockStatement frontend/src/ipc/fixtureGitLab.ts:46 | -       default: { => -         const _exhaustive: never = label;
+Triage: both dropped — a never default arm, unreachable by type.

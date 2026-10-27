@@ -2,7 +2,11 @@ import { createLog } from "./log";
 import { forwardLog } from "./tauri";
 import { guardWindowClose } from "./window";
 
+export type { AgentCommand, AgentStartReply, CheckoutReady } from "./agentDomain";
+export type { AgentSource } from "./AgentSource";
 export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
+export { createFixtureAgentSource } from "./fixtureAgent";
+export { createTauriAgentSource } from "./tauriAgent";
 export type { CompareSource } from "./CompareSource";
 export type {
   Column,
@@ -16,8 +20,11 @@ export type {
 } from "./compareDomain";
 export type {
   AddedServer,
+  AgentRun,
+  AgentSettings,
   Antialiasing,
   Chunk,
+  CheckoutFolder,
   ClipboardSelection,
   ColumnVersion,
   ContinueReply,
@@ -38,6 +45,7 @@ export type {
   ProgramFound,
   ProgressView,
   ProjectFile,
+  RangeFileId,
   RepositoryAnswer,
   RunId,
   ServerCommand,
@@ -55,9 +63,23 @@ export type {
   Theme,
   WriteReply,
 } from "./domain";
-export { nextColumnVersion } from "./domain";
+export { agentSessionId, isAgentSessionId, nextColumnVersion } from "./domain";
+export type { AgentSessionId, MessageId, ThreadId } from "./domain";
+export type {
+  GitLabCheck,
+  MergeRequestRef,
+  Message,
+  NotLinedUp,
+  Posting,
+  SendProgress,
+  SendReply,
+  Thread,
+  ThreadList,
+} from "./reviewDomain";
+export type { ReviewSource } from "./ReviewSource";
 export { createFixtureSource, loadFixture } from "./fixture";
 export { createFixtureCompareSource, loadCompareFixture } from "./fixtureCompare";
+export { createFixtureRangeSource } from "./fixtureRange";
 export { createFixtureServerHost } from "./fixtureServers";
 export {
   bindingsOf,
@@ -67,6 +89,7 @@ export {
   isMac,
   KEY_ACTIONS,
   keyLabel,
+  keyList,
   keyOfEvent,
   keyText,
   parseKey,
@@ -79,9 +102,30 @@ export {
   type KeyProblem,
   type KeysRead,
 } from "./keys";
+export type {
+  RangeChange,
+  RangeEntry,
+  RangeEntryKind,
+  RangeFile,
+  RangeLineCounts,
+  RangeModeChange,
+  RangeSide,
+  RangeSides,
+  RangeStart,
+} from "./rangeDomain";
+export type { RangeSource } from "./RangeSource";
 export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
 export { THEMES, themeKind, themeOf, themeRows } from "./themes";
 export { createTauriCompareSource } from "./tauriCompare";
+export {
+  changedThreadLine,
+  shownColumn,
+  shownLine,
+  unchangedThreadLine,
+  type ShownThread,
+  type ThreadLine,
+} from "./threadLine";
+export { createTauriRangeSource } from "./tauriRange";
 export type { ServerHost } from "./ServerHost";
 export type { SideWords } from "./words";
 

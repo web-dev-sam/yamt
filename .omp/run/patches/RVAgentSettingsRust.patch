@@ -1,0 +1,564 @@
+From 2a7eadba5b825b63f0728fedf0d5536ba2d00c36 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 14:17:57 +0200
+Subject: [PATCH] feat(settings): the settings file's agent entry and set_agent
+
+---
+ .omp/run/notes/RVAgentSettingsRust.md |  42 ++++++++
+ .omp/run/notes/RVGitlabBoundary.md    |  91 ++++++++++++++++
+ crates/settings/src/file.rs           |  20 +++-
+ crates/settings/src/lib.rs            |  45 ++++++++
+ crates/settings/tests/agent.rs        | 150 ++++++++++++++++++++++++++
+ crates/settings/tests/antialiasing.rs |   5 +-
+ crates/settings/tests/config/mod.rs   |   5 +-
+ crates/settings/tests/settings.rs     |   5 +-
+ src-tauri/src/commands.rs             |   1 +
+ src-tauri/src/settings.rs             |  20 +++-
+ 10 files changed, 376 insertions(+), 8 deletions(-)
+ create mode 100644 .omp/run/notes/RVAgentSettingsRust.md
+ create mode 100644 .omp/run/notes/RVGitlabBoundary.md
+ create mode 100644 crates/settings/tests/agent.rs
+
+diff --git a/.omp/run/notes/RVAgentSettingsRust.md b/.omp/run/notes/RVAgentSettingsRust.md
+new file mode 100644
+index 0000000..99028e4
+--- /dev/null
++++ b/.omp/run/notes/RVAgentSettingsRust.md
+@@ -0,0 +1,42 @@
++The `agent` entry and the `set_agent` command are in place, and fmt, clippy and the tests for both packages pass. Two things differ from the brief: I left `default` out of the struct's serde attribute, and there is no src-tauri round-trip test.
++
++## summary
++- `yamt_settings::AgentSettings { command, first_message }` now exists, and `StoredSettings` has an `agent` field. A file without the entry reads as the defaults. Each field is written only when it is set, and the entry is left out when neither is. An entry of the wrong shape is reported as `Broken` with a message starting "`agent`: ", and nothing is written. Unknown entries are kept.
++- An empty `command` list counts as "use the default", whether `set_agent` is given one or the file contains one by hand.
++- The `set_agent(places, current, agent)` function works like the other setters. The Tauri command `settings::set_agent` is registered in `specta_builder`.
++- I exported the bindings into `target/`. The generated TS matches the brief: `AgentSettings = { command: string[] | null, firstMessage: string | null }`, `StoredSettings.agent`, and `setAgent(current, agent)`.
++
++## files_changed
++- `crates/settings/src/lib.rs`
++- `crates/settings/src/file.rs`
++- `crates/settings/tests/agent.rs` (new)
++- `crates/settings/tests/config/mod.rs`, `crates/settings/tests/settings.rs`, `crates/settings/tests/antialiasing.rs` (their `StoredSettings` literals gain `agent`)
++- `src-tauri/src/settings.rs`
++- `src-tauri/src/commands.rs`
++
++## tests_added
++- `set_agent_writes_only_the_fields_given_and_keeps_unknown_entries`: only the given field is written, `window` and `theme` stay, and setting the defaults removes the `agent` entry. Catches a writer that writes `null`s or always writes the entry.
++- `a_file_without_agent_reads_as_defaults`: a file with no entry, `{}`, or explicit `null`s reads as the defaults and is not rewritten.
++- `a_set_field_reads_back_and_the_other_stays_the_default`: a stored command with a space in its path reads back as a list.
++- `an_agent_entry_of_the_wrong_shape_is_reported_broken`: a string command, a list for the message, and a list for the whole entry are all `Broken` ("`agent`: …"), and neither `set_theme` nor `set_agent` rewrites the file.
++- `an_empty_command_list_is_written_as_the_default`: an empty command is stored as `None`, never written as `[]`.
++- `a_hand_written_empty_command_list_reads_as_the_default`: covers the reading side of the same rule.
++- `lib.rs::tests::the_agent_entry_crosses_the_ipc_with_both_fields_and_reads_with_none`: the IPC spelling `{command, firstMessage: null}` round-trips, and `{}` deserializes to the defaults.
++
++## smoke_evidence
++- `cargo fmt --check`: passed (exit 0, no output).
++- `cargo clippy --workspace --all-targets -- -D warnings`: `Finished \`dev\` profile … in 34.73s`, with no warnings or errors.
++- `cargo test -p yamt-settings -p yamt-app`: every suite `ok`. That includes `116 passed` for yamt-app, `6 passed` for the agent tests and `4 passed` for the settings lib tests, with 0 failures.
++- `cargo run -p yamt-app --features bindings --bin export-bindings -- target/bindings-agent.ts` then `diff -u frontend/src/ipc/bindings.ts target/bindings-agent.ts` adds exactly:
++  `setAgent: (current: StoredSettings, agent: AgentSettings) => …("set_agent", { current, agent })`, `export type AgentSettings = { command: string[] | null, firstMessage: string | null }`, and `agent: AgentSettings` in `StoredSettings`.
++- The brief's "round trip as the siblings": no test written in src-tauri; see deviations.
++
++## deviations_from_brief
++- **`AgentSettings` uses `#[serde(rename_all = "camelCase")]` without `default`.** The two parts of the Contract conflict. With the container-level `default`, the specta tooling (specta-serde 0.0.12, lib.rs:850) exports both fields as optional (`command?: string[] | null`, which I saw in the first export). That breaks the generated TS the web half builds on. Without it, serde still reads a missing `Option` field as `None`, which the unit test checks with `{}`. A code comment at the attribute records the reason.
++- **No src-tauri round-trip test.** None of the existing settings commands has one, because their `Places` come from the real config directory. A bare `cargo test` would therefore write the user's own settings file; only `just` isolates it with `XDG_CONFIG_HOME=/nonexistent`. I took the siblings' actual round-trip test, the IPC-spelling test in `lib.rs`, as the model and added the agent version there.
++- **Files I could not change** (owned by others): `src-tauri/AGENTS.md` says "the eight settings commands" and is now nine. `docs/architecture.md` §3.6/§4 and `.omp/skills/ipc-contract/SKILL.md` need the `set_agent` line and the `agent` entry. `frontend/src/ipc/bindings.ts` needs regenerating (`just bindings`).
++- **Extra decision:** a hand-written `"command": []` in the file also reads as the default, so the window never gets an empty command.
++
++## open_risks
++- `crates/settings/src/lib.rs:79`: `StoredSettings.agent` is a required field over the IPC. Until the web half sends `current.agent`, every settings command from the current window fails to deserialize, and `vue-tsc` fails on the regenerated bindings. Both halves need to land together.
++- `crates/settings/src/file.rs:66-75`: unknown keys inside the `agent` object are dropped on the next write, unlike unknown top-level entries, which are kept.
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVGitlabBoundary.md b/.omp/run/notes/RVGitlabBoundary.md
+new file mode 100644
+index 0000000..fa0fcd0
+--- /dev/null
++++ b/.omp/run/notes/RVGitlabBoundary.md
+@@ -0,0 +1,91 @@
++```json
++{
++  "verdict": "fail",
++  "findings": [
++    {
++      "severity": "block",
++      "rule_id": "vision-2 / RV-growth: second rule for one fact",
++      "file": "crates/review/src/lines_up.rs",
++      "line": 88,
++      "problem": "`shown_head`, `shown_base` (lines 78, 84) and `LookedAt::Commit.short_id` (send.rs:269) cut the window's own commits to 7 characters. The range window already names those same commits in its column headers with git's `%h` (`RangeSide.short_id` from `commit_summary`). git's `%h` grows past 7 characters in a repository with more than about 65k objects, so there the hover says \"this window shows 9c1ba3f\" while the header above it shows \"9c1ba3fc60\". That is two sources for one shown fact. The implementer listed this as an open risk.",
++      "fix": "Ask the orchestrator for a yamt-range addition: `Compared` gains `left_short_id`/`right_short_id`, the same strings `RangeSide.short_id` holds. Plan #117 limits yamt-review to `entry`/`compared`/`root`, so `range.start()` is not the way. Then use them for `shown_*` and `LookedAt::Commit`, and cut GitLab's head/base to the shown id's length."
++    },
++    {
++      "severity": "should",
++      "rule_id": "RS6 / RV-growth",
++      "file": "crates/review/src/send.rs",
++      "line": 219,
++      "problem": "send.rs is at 398 of 400 lines and holds three jobs: the check flow (`lined_up`, `lookup`, `require_logged_in`), the send loop, and reading glab's process output (`HttpAnswer`, `http_answer_from`, `posted`, `answer`, `run`, `first_line`, `last_line`, `exit_words`, `TIMED_OUT`, `NO_HTTP_ANSWER`). The next change cannot add a line without a split under pressure. Examples: the open risk about skipping `100 Continue`, or row 17 needing a different stop reason.",
++      "fix": "Move the glab-output reading, about 90 lines with its two unit tests, into its own module (e.g. `crates/review/src/glab_answer.rs`; the orchestrator adds it to Owned). send.rs then keeps `check_gitlab`/`send_queue` and their flow."
++    },
++    {
++      "severity": "should",
++      "rule_id": "RV-growth: hidden coupling",
++      "file": "crates/review/tests/review.rs",
++      "line": 22,
++      "problem": "Ten integration tests, the unit tests in lines_up.rs and all twelve `tests/glab/*` folders hard-code the commit ids that `scripts/range-repo.sh` produces. Those ids depend on every byte copied from `scripts/demo/{base,main,feature}`, which `demo-repo.sh` and the README screenshot share. Any edit to the demo project or to the range smoke script fails the review tests as an opaque `OtherBase`/`Moved` mismatch, and every scenario JSON has to be fixed by hand.",
++      "fix": "Add a first test (e.g. `range_repo_has_the_scenarios_commit_ids`) that rev-parses the merge base, `main` and `feature` of `range_repo()` and asserts the three constants, with a message naming `tests/glab/*`. Report a header line for `scripts/range-repo.sh` saying `tests/glab` and `crates/review/tests` pin its ids."
++    },
++    {
++      "severity": "should",
++      "rule_id": "RV-growth: fixture that cannot state its case",
++      "file": "crates/review/tests/review.rs",
++      "line": 518,
++      "problem": "`several_and_none_name_what_was_looked_at` asserts `Several { references: [\"!12\", \"!12\"] }`, an answer GitLab can never give. It exists only because the fake serves `merge-request.json` for every iid. The `several` folder's `merge-request-14.json` is never served, so an app session on `several` shows the same impossible sentence, and anyone building on this scenario inherits it.",
++      "fix": "Report a fake change: serve `merge-request-<iid>.json` before `merge-request.json`. Then assert `LinedUp` !14 on `several`, and add a scenario where neither request lines up (e.g. `several-none`) that asserts `Several [\"!12\", \"!14\"]`."
++    },
++    {
++      "severity": "should",
++      "rule_id": "RS5",
++      "file": "crates/review/tests/review.rs",
++      "line": 148,
++      "problem": "This brings the workspace's first `RefCell`, which RS5 excludes. The next test author copies the precedent.",
++      "fix": "Collect progress through `std::sync::mpsc::channel()`: `let report = |step| sender.send(step).unwrap();` and then `receiver.try_iter().collect()`. This works with the fixed `&dyn Fn` contract and mirrors row 17's `Channel`."
++    },
++    {
++      "severity": "should",
++      "rule_id": "CP1",
++      "file": "crates/review/src/gitlab.rs",
++      "line": 154,
++      "problem": "\"`glab api --paginate`, which prints one array per page\" states an external fact as measured. The implementer's open risks say it was not measured, and tests/glab/README.md does not record it. A later reader may trust it when changing the parser.",
++      "fix": "Either measure it with glab 1.124.0 and cite the README section, or reword it to say what the code accepts: \"one JSON array, or one per page\"."
++    },
++    {
++      "severity": "nit",
++      "rule_id": "vision-1",
++      "file": "crates/review/src/send.rs",
++      "line": 25,
++      "problem": "`use std::ops::Range as Span` plus three constants (`ACCEPTED`, `CLIENT_ERRORS`, `STOPPING_CLIENT_ERRORS`) and two `contains` calls hide one status rule from a Rust beginner. Nothing gets harder as the app grows.",
++      "fix": "Write one `match answer.status { 200..=299 => …, 401 | 403 | 429 => stop, 400..=499 => refused, _ => stop }` and keep the rationale line above the 401/403/429 arm."
++    },
++    {
++      "severity": "nit",
++      "rule_id": "RV-growth: dead weight",
++      "file": "crates/review/src/thread_store.rs",
++      "line": 22,
++      "problem": "With the `expect(dead_code)` lines removed, `QueuedMessage.thread` is read only by thread_store's own unit test (line 276). The sender never uses it; only the derived `PartialEq` keeps the lint quiet. Nothing gets harder as the app grows.",
++      "fix": "Drop the field and its test tuple slot (row 14's file, so the orchestrator decides)."
++    }
++  ],
++  "checked": [
++    "Ownership: every changed file is in Owned, except Cargo.lock (cargo), thread_store.rs (only the three `expect(dead_code)` lines, as permitted) and the notes file; tests/glab/README.md, runner/ and scripts/fake-glab are untouched",
++    "PM1 / plan #117: yamt-review's normal deps are yamt-range, yamt-gitio and yamt-merge-core, which scripts/arch-check.sh:59 allows; no tauri; no new external crate (serde_json is a workspace dep)",
++    "Contract matches the brief: MergeRequestRef, LookedAt, NotLinedUp (8 variants, same fields), GitLabCheck, SendProgress, SendReply; serde tag \"kind\", camelCase on sums, snake_case fields; `check_gitlab(&Range, Option<&Glab>) -> GitLabCheck`; `send_queue(..) -> Result<SendReply>` uses the crate alias for `Result<SendReply, Error>`",
++    "Lock discipline: send.rs `post_queue` uses only temporary `locked(threads)` guards that drop at the end of their statement (snapshot, record, list); none is held across `answer`/`outcome`/`run`",
++    "MAX_MERGE_REQUESTS_CHECKED = 5 sits next to its one user `candidates` (lines_up.rs:7); `at_most_five_merge_requests_are_checked` covers it",
++    "lines_up is pure over `&Compared` + `Found`; `start_sha` is not compared; one non-lining-up request gives Moved (head first), then OtherBase; null diff_refs gives Preparing; several give Several (design §6, plan #119)",
++    "Commit route: `candidates` keeps open MRs whose `sha` is the right commit (plan #120); branch route trusts `state=opened`",
++    "right_branch: `refs/heads/x` → x, `refs/remotes/<longest remote>/x` → x, a tag/commit/detached HEAD → None; an empty side reaches it as `HEAD` (RangeSideLabel doc, range/src/lib.rs:29)",
++    "position.rs: 1-based lines; removed → old_line only, added → new_line only, unchanged → both; renamed uses `old_path`; deleted/added use `entry.path` for both paths; U+FFFD refusal follows design §1 wording",
++    "Post classification matches plan #118: 2xx → Pending with `<web_url>/diffs`; 4xx except 401/403/429 → Refused with GitLab's `message` and the send goes on; timeout/5xx/401/403/429/no HTTP answer/glab gone → Stopped with the rest queued",
++    "Draft matching (design §5 step 4): same note, head_sha and LinePlace; each draft is taken once (`swap_remove`); a draft with no position is `placed: None` and matches nothing",
++    "Endpoint argv in gitlab.rs matches the design §5 glab-calls table, and integration tests check it exactly (review.rs branch/commit/draft/post argv)",
++    "No second HTTP-status parser: gitio/src/glab.rs returns bytes only; `http_answer_from` is the one reader",
++    "Deviations accepted: `Glab::at(link)` instead of a temp PATH (the contract takes `Option<&Glab>`); unexpected_json test in gitlab.rs where the reading is; a matching draft counted in `sent`; `UnknownFile` unreachable (the snapshot's ids come from the same range); stop-reason words; refusal/post-2.err is unmeasured but never asserted, since the body's `message` wins",
++    "All 18 acceptance test names are present (lines_up.rs 8, gitlab.rs 1, position.rs 2, tests/review.rs 7); mutation has no survivors (.omp/run/mutants/RVGitlab.survivors.txt)",
++    "Comments: the STOPPING_CLIENT_ERRORS rationale and the http_answer_from measurement citation are acceptable under CP1; no TODOs, section headers or narration",
++    "RS6 on test files not reported: tests/review.rs is 532 lines, but threads.rs (561) and gitio/tests/operations.rs (471) set the existing practice",
++    "docs/map/architecture/AGENTS.md and the tests/glab/README.md scenario list are the orchestrator's docs pass, as the task says"
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/crates/settings/src/file.rs b/crates/settings/src/file.rs
+index ba55f83..d83aaae 100644
+--- a/crates/settings/src/file.rs
++++ b/crates/settings/src/file.rs
+@@ -6,12 +6,15 @@ use std::process;
+ use serde::de::DeserializeOwned;
+ use serde_json::{Map, Value};
+ 
+-use crate::{Error, LanguageServerSettings, StoredSettings};
++use crate::{AgentSettings, Error, LanguageServerSettings, StoredSettings};
+ 
+ const THEME: &str = "theme";
+ const ANTIALIASING: &str = "antialiasing";
+ const KEYS: &str = "keys";
+ const LANGUAGE_SERVERS: &str = "languageServers";
++const AGENT: &str = "agent";
++const AGENT_COMMAND: &str = "command";
++const AGENT_FIRST_MESSAGE: &str = "firstMessage";
+ 
+ /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
+ const MAX_LINK_HOPS: usize = 40;
+@@ -53,10 +56,24 @@ impl Loaded {
+             })?;
+             entries.insert(LANGUAGE_SERVERS.to_owned(), servers);
+         }
++        if let Some(agent) = agent_entry(self.stored.agent) {
++            entries.insert(AGENT.to_owned(), agent);
++        }
+         Ok(entries)
+     }
+ }
+ 
++fn agent_entry(agent: AgentSettings) -> Option<Value> {
++    let mut fields = Map::new();
++    if let Some(command) = agent.command {
++        fields.insert(AGENT_COMMAND.to_owned(), Value::from(command));
++    }
++    if let Some(first_message) = agent.first_message {
++        fields.insert(AGENT_FIRST_MESSAGE.to_owned(), Value::from(first_message));
++    }
++    (!fields.is_empty()).then_some(Value::Object(fields))
++}
++
+ /// `None` when there is no file at `path`.
+ pub(crate) fn load(path: &Path) -> Result<Option<Loaded>, Error> {
+     match fs::read_to_string(path) {
+@@ -88,6 +105,7 @@ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+         antialiasing: entry(path, ANTIALIASING, others.remove(ANTIALIASING))?,
+         keys: entry(path, KEYS, others.remove(KEYS))?,
+         language_servers: entry(path, LANGUAGE_SERVERS, others.remove(LANGUAGE_SERVERS))?,
++        agent: entry::<AgentSettings>(path, AGENT, others.remove(AGENT))?.without_empty_command(),
+     };
+     Ok(Loaded { others, stored })
+ }
+diff --git a/crates/settings/src/lib.rs b/crates/settings/src/lib.rs
+index 8792024..1071402 100644
+--- a/crates/settings/src/lib.rs
++++ b/crates/settings/src/lib.rs
+@@ -76,6 +76,26 @@ pub struct StoredSettings {
+     pub keys: BTreeMap<String, Vec<String>>,
+     #[serde(rename = "languageServers")]
+     pub language_servers: LanguageServerSettings,
++    pub agent: AgentSettings,
++}
++
++/// The AI agent the window starts and its first message; `None` = the window's default.
++#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
++// No `serde(default)`: serde already reads a missing `Option` field as `None`, and specta-serde
++// 0.0.12 exports every field of a `default` container as optional (`command?:`, lib.rs:850).
++#[serde(rename_all = "camelCase")]
++pub struct AgentSettings {
++    pub command: Option<Vec<String>>,
++    pub first_message: Option<String>,
++}
++
++impl AgentSettings {
++    pub(crate) fn without_empty_command(self) -> AgentSettings {
++        AgentSettings {
++            command: self.command.filter(|words| !words.is_empty()),
++            first_message: self.first_message,
++        }
++    }
+ }
+ 
+ /// `repositories`: the answer to "Start this project's language servers?" per repository root
+@@ -242,6 +262,17 @@ pub fn set_added_servers(
+     })
+ }
+ 
++/// An empty `command` is stored as `None`: the window's default.
++pub fn set_agent(
++    places: &Places,
++    current: &StoredSettings,
++    agent: AgentSettings,
++) -> Result<SettingsRead, Error> {
++    change(places, current, |stored| {
++        stored.agent = agent.without_empty_command();
++    })
++}
++
+ /// Makes `to` the file in use: an existing file there is used, a missing one is created from
+ /// `current`; the location is recorded only once that file is readable.
+ pub fn relocate(
+@@ -339,4 +370,18 @@ mod tests {
+             expected
+         );
+     }
++
++    #[test]
++    fn the_agent_entry_crosses_the_ipc_with_both_fields_and_reads_with_none() {
++        let agent = AgentSettings {
++            command: Some(vec!["omp".to_owned(), "acp".to_owned()]),
++            first_message: None,
++        };
++        let sent = serde_json::json!({ "command": ["omp", "acp"], "firstMessage": null });
++        assert_eq!(serde_json::to_value(&agent).unwrap(), sent);
++        let read: AgentSettings = serde_json::from_value(sent).unwrap();
++        assert_eq!(read, agent);
++        let missing: AgentSettings = serde_json::from_value(serde_json::json!({})).unwrap();
++        assert_eq!(missing, AgentSettings::default());
++    }
+ }
+diff --git a/crates/settings/tests/agent.rs b/crates/settings/tests/agent.rs
+new file mode 100644
+index 0000000..a973451
+--- /dev/null
++++ b/crates/settings/tests/agent.rs
+@@ -0,0 +1,150 @@
++#![cfg(test)]
++
++#[expect(dead_code, reason = "these tests use part of the shared helpers")]
++mod config;
++
++use std::fs;
++
++use serde_json::json;
++use yamt_settings::{AgentSettings, Error, StoredSettings, Theme, read, set_agent, set_theme};
++
++use crate::config::{Config, json_at, write};
++
++fn words(list: &[&str]) -> Vec<String> {
++    list.iter().map(|word| (*word).to_owned()).collect()
++}
++
++fn agent(command: Option<&[&str]>, first_message: Option<&str>) -> AgentSettings {
++    AgentSettings {
++        command: command.map(words),
++        first_message: first_message.map(str::to_owned),
++    }
++}
++
++#[test]
++fn set_agent_writes_only_the_fields_given_and_keeps_unknown_entries() {
++    let config = Config::new();
++    write(
++        &config.default_file(),
++        r#"{"window": {"x": 1}, "theme": "light"}"#,
++    );
++    let current = StoredSettings::default();
++
++    let command = agent(Some(&["omp", "acp", "--fast"]), None);
++    let written = set_agent(&config.places, &current, command.clone()).unwrap();
++    assert_eq!(written.stored.agent, command);
++    assert_eq!(written.stored.theme, Theme::Light);
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({
++            "window": { "x": 1 },
++            "theme": "light",
++            "antialiasing": "subpixel",
++            "agent": { "command": ["omp", "acp", "--fast"] },
++        })
++    );
++
++    let message = agent(None, Some("Look at {{ RANGE }}"));
++    let written = set_agent(&config.places, &current, message.clone()).unwrap();
++    assert_eq!(written.stored.agent, message);
++    assert_eq!(
++        json_at(&config.default_file())["agent"],
++        json!({ "firstMessage": "Look at {{ RANGE }}" })
++    );
++    assert_eq!(
++        read(&config.places, &current).unwrap().stored.agent,
++        message
++    );
++
++    let defaults = set_agent(&config.places, &current, AgentSettings::default()).unwrap();
++    assert_eq!(defaults.stored.agent, AgentSettings::default());
++    assert_eq!(
++        json_at(&config.default_file()),
++        json!({ "window": { "x": 1 }, "theme": "light", "antialiasing": "subpixel" })
++    );
++}
++
++#[test]
++fn a_file_without_agent_reads_as_defaults() {
++    let defaults = [
++        r#"{"theme": "light"}"#,
++        r#"{"agent": {}}"#,
++        r#"{"agent": {"command": null, "firstMessage": null}}"#,
++    ];
++    for text in defaults {
++        let config = Config::new();
++        write(&config.default_file(), text);
++        let settings = read(&config.places, &StoredSettings::default()).unwrap();
++        assert_eq!(settings.stored.agent, AgentSettings::default(), "{text}");
++        assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++    }
++}
++
++#[test]
++fn a_set_field_reads_back_and_the_other_stays_the_default() {
++    let config = Config::new();
++    write(
++        &config.default_file(),
++        r#"{"agent": {"command": ["/opt/my agent/omp", "acp"]}}"#,
++    );
++    let settings = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(
++        settings.stored.agent,
++        agent(Some(&["/opt/my agent/omp", "acp"]), None)
++    );
++}
++
++#[test]
++fn an_agent_entry_of_the_wrong_shape_is_reported_broken() {
++    let malformed = [
++        r#"{"agent": {"command": "omp acp"}}"#,
++        r#"{"agent": {"firstMessage": ["hi"]}}"#,
++        r#"{"agent": ["omp", "acp"]}"#,
++    ];
++    for text in malformed {
++        let config = Config::new();
++        write(&config.default_file(), text);
++        let current = StoredSettings::default();
++        let error = read(&config.places, &current).unwrap_err();
++        let Error::Broken { message, .. } = error else {
++            panic!("not broken: {error:?}");
++        };
++        assert!(message.starts_with("`agent`: "), "{message}");
++        let theme_error = set_theme(&config.places, &current, Theme::Light).unwrap_err();
++        assert!(
++            matches!(theme_error, Error::Broken { .. }),
++            "{theme_error:?}"
++        );
++        let agent_error = set_agent(&config.places, &current, agent(None, Some("hi"))).unwrap_err();
++        assert!(
++            matches!(agent_error, Error::Broken { .. }),
++            "{agent_error:?}"
++        );
++        assert_eq!(fs::read_to_string(config.default_file()).unwrap(), text);
++    }
++}
++
++#[test]
++fn an_empty_command_list_is_written_as_the_default() {
++    let config = Config::new();
++    let current = StoredSettings::default();
++
++    let written = set_agent(&config.places, &current, agent(Some(&[]), Some("hi"))).unwrap();
++
++    assert_eq!(written.stored.agent, agent(None, Some("hi")));
++    assert_eq!(
++        json_at(&config.default_file())["agent"],
++        json!({ "firstMessage": "hi" })
++    );
++    let emptied = set_agent(&config.places, &current, agent(Some(&[]), None)).unwrap();
++    assert_eq!(emptied.stored.agent, AgentSettings::default());
++    assert_eq!(json_at(&config.default_file()).get("agent"), None);
++}
++
++#[test]
++fn a_hand_written_empty_command_list_reads_as_the_default() {
++    let config = Config::new();
++    write(&config.default_file(), r#"{"agent": {"command": []}}"#);
++    let settings = read(&config.places, &StoredSettings::default()).unwrap();
++    assert_eq!(settings.stored.agent, AgentSettings::default());
++}
+diff --git a/crates/settings/tests/antialiasing.rs b/crates/settings/tests/antialiasing.rs
+index b0bd7ec..ebb891d 100644
+--- a/crates/settings/tests/antialiasing.rs
++++ b/crates/settings/tests/antialiasing.rs
+@@ -7,8 +7,8 @@ use std::fs;
+ 
+ use serde_json::json;
+ use yamt_settings::{
+-    Antialiasing, Error, LanguageServerSettings, StoredSettings, Theme, read, set_antialiasing,
+-    set_theme,
++    AgentSettings, Antialiasing, Error, LanguageServerSettings, StoredSettings, Theme, read,
++    set_antialiasing, set_theme,
+ };
+ 
+ use crate::config::{Config, json_at, keys, write};
+@@ -75,6 +75,7 @@ fn set_antialiasing_keeps_unknown_entries_and_the_other_settings() {
+         antialiasing: Antialiasing::Greyscale,
+         keys: keys(&[("apply", &["F2"])]),
+         language_servers: LanguageServerSettings::default(),
++        agent: AgentSettings::default(),
+     };
+     assert_eq!(settings.stored, expected);
+     assert_eq!(
+diff --git a/crates/settings/tests/config/mod.rs b/crates/settings/tests/config/mod.rs
+index e4f8bfe..b29e156 100644
+--- a/crates/settings/tests/config/mod.rs
++++ b/crates/settings/tests/config/mod.rs
+@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
+ 
+ use serde_json::Value;
+ use tempfile::TempDir;
+-use yamt_settings::{Antialiasing, LanguageServerSettings, Places, StoredSettings, Theme};
++use yamt_settings::{
++    AgentSettings, Antialiasing, LanguageServerSettings, Places, StoredSettings, Theme,
++};
+ 
+ pub struct Config {
+     pub dir: TempDir,
+@@ -70,5 +72,6 @@ pub fn light_with_apply() -> StoredSettings {
+         antialiasing: Antialiasing::Subpixel,
+         keys: keys(&[("apply", &["Mod-Enter"]), ("ignore", &[])]),
+         language_servers: LanguageServerSettings::default(),
++        agent: AgentSettings::default(),
+     }
+ }
+diff --git a/crates/settings/tests/settings.rs b/crates/settings/tests/settings.rs
+index a9f3b19..83315ff 100644
+--- a/crates/settings/tests/settings.rs
++++ b/crates/settings/tests/settings.rs
+@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
+ 
+ use serde_json::json;
+ use yamt_settings::{
+-    Antialiasing, Error, KeysChange, LanguageServerSettings, StoredSettings, Theme, read, relocate,
+-    set_keys, set_theme, stored_at_start,
++    AgentSettings, Antialiasing, Error, KeysChange, LanguageServerSettings, StoredSettings, Theme,
++    read, relocate, set_keys, set_theme, stored_at_start,
+ };
+ 
+ use crate::config::{Config, json_at, keys, light_with_apply, names_in, write};
+@@ -367,6 +367,7 @@ fn stored_at_start_gives_the_defaults_whenever_anything_is_missing_or_broken() {
+         antialiasing: Antialiasing::Greyscale,
+         keys: keys(&[("apply", &["F2"])]),
+         language_servers: LanguageServerSettings::default(),
++        agent: AgentSettings::default(),
+     };
+     assert_eq!(stored_at_start(&config.places), stored);
+     write(&config.default_file(), r#"{"keys": {}}"#);
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index 17bd466..cd4274f 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -32,6 +32,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         settings::set_server_answer::<tauri::Wry>,
+         settings::set_server_switch::<tauri::Wry>,
+         settings::set_added_servers::<tauri::Wry>,
++        settings::set_agent::<tauri::Wry>,
+         servers::servers_context,
+         servers::start_server,
+         servers::send_to_server,
+diff --git a/src-tauri/src/settings.rs b/src-tauri/src/settings.rs
+index 5481703..b57999c 100644
+--- a/src-tauri/src/settings.rs
++++ b/src-tauri/src/settings.rs
+@@ -1,8 +1,8 @@
+ use tauri::path::PathResolver;
+ use tauri::{Manager, Runtime, State, WebviewWindow};
+ use yamt_settings::{
+-    AddedServer, Antialiasing, KeysChange, Places, RepositoryAnswer, SettingsRead, StoredSettings,
+-    Theme,
++    AddedServer, AgentSettings, Antialiasing, KeysChange, Places, RepositoryAnswer, SettingsRead,
++    StoredSettings, Theme,
+ };
+ 
+ use crate::ipc_error::IpcError;
+@@ -165,3 +165,19 @@ pub(crate) fn set_added_servers<R: Runtime>(
+     show_theme(&window, read.stored.theme);
+     Ok(read)
+ }
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes arguments by value"
++)]
++pub(crate) fn set_agent<R: Runtime>(
++    window: WebviewWindow<R>,
++    current: StoredSettings,
++    agent: AgentSettings,
++) -> Result<SettingsRead, IpcError> {
++    let read = yamt_settings::set_agent(&places(window.path())?, &current, agent)?;
++    show_theme(&window, read.stored.theme);
++    Ok(read)
++}
+-- 
+2.56.0
+

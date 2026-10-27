@@ -1,0 +1,1410 @@
+From b0c28c1852512f6dabe08ba1d4f2e693b70d521d Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:27:37 +0100
+Subject: [PATCH] fix(review): mid-send edits win, a draft owned once, one
+ short id per commit
+
+---
+ crates/range/src/lib.rs                       |   5 +-
+ crates/range/src/open.rs                      |   9 +
+ crates/review/AGENTS.md                       |   2 +-
+ crates/review/src/gitlab.rs                   |   2 +-
+ crates/review/src/glab_answer.rs              | 193 ++++++++++
+ crates/review/src/lib.rs                      |   1 +
+ crates/review/src/lines_up.rs                 |  45 ++-
+ crates/review/src/send.rs                     | 350 ++++++------------
+ crates/review/src/thread_store.rs             | 138 +++++--
+ crates/review/tests/review.rs                 | 203 +++++++++-
+ scripts/fake-glab/glab                        |   7 +-
+ scripts/range-repo.sh                         |   3 +-
+ tests/glab/README.md                          |   3 +-
+ tests/glab/drafted/post-3.json                |   1 +
+ tests/glab/several-none/merge-request-14.json |   1 +
+ tests/glab/several-none/merge-request.json    |   1 +
+ tests/glab/several-none/merge-requests.json   |   1 +
+ 17 files changed, 659 insertions(+), 306 deletions(-)
+ create mode 100644 crates/review/src/glab_answer.rs
+ create mode 100644 tests/glab/drafted/post-3.json
+ create mode 100644 tests/glab/several-none/merge-request-14.json
+ create mode 100644 tests/glab/several-none/merge-request.json
+ create mode 100644 tests/glab/several-none/merge-requests.json
+
+diff --git a/crates/range/src/lib.rs b/crates/range/src/lib.rs
+index b900900..1826b98 100644
+--- a/crates/range/src/lib.rs
++++ b/crates/range/src/lib.rs
+@@ -64,11 +64,14 @@ pub struct RangeEntry {
+     pub lines: RangeLineCounts,
+ }
+ 
+-/// The two commits the range compares, and how the right one was named.
++/// The two commits the range compares, their short ids as the column headers show them, and how the right one
++/// was named.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub struct Compared {
+     pub left: Oid,
+     pub right: Oid,
++    pub left_short_id: String,
++    pub right_short_id: String,
+     pub right_label: RangeSideLabel,
+ }
+ 
+diff --git a/crates/range/src/open.rs b/crates/range/src/open.rs
+index 88833ac..ec3a1cf 100644
+--- a/crates/range/src/open.rs
++++ b/crates/range/src/open.rs
+@@ -114,6 +114,8 @@ impl Range {
+         Compared {
+             left: self.resolved.left.oid.clone(),
+             right: self.resolved.right.oid.clone(),
++            left_short_id: self.resolved.left.side.short_id.clone(),
++            right_short_id: self.resolved.right.side.short_id.clone(),
+             right_label: self.resolved.right.side.label.clone(),
+         }
+     }
+@@ -186,6 +188,11 @@ mod tests {
+         Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
+     }
+ 
++    fn short_commit(root: &Path, revision: &str) -> String {
++        let output = git_ok(root, &["rev-parse", "--short", revision]).unwrap();
++        String::from_utf8(output).unwrap().trim_end().to_owned()
++    }
++
+     #[test]
+     fn the_accessors_answer_the_listed_rows_both_commits_and_the_work_tree() {
+         let repo =
+@@ -209,6 +216,8 @@ mod tests {
+             Compared {
+                 left: commit(root, "main"),
+                 right: commit(root, "local"),
++                left_short_id: short_commit(root, "main"),
++                right_short_id: short_commit(root, "local"),
+                 right_label: named("local"),
+             }
+         );
+diff --git a/crates/review/AGENTS.md b/crates/review/AGENTS.md
+index 1192ef9..90566d1 100644
+--- a/crates/review/AGENTS.md
++++ b/crates/review/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer`, `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread, add_note, queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`); blank text is `EmptyMessage`, a pending message is `MessagePending`; ids from the counters, never reused; the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule; `pub(crate)` `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order) and `record` for the sender). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store.rs`; `tests/threads.rs` on real temp folders with a `Range` over a `yamt-conflict-repo` repository.
++Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer`, `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread, add_note, queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`); blank text is `EmptyMessage`, a pending message is `MessagePending`; ids from the counters, never reused; the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule; for the sender, `pub(crate)` `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did)). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store.rs`; `tests/threads.rs` on real temp folders with a `Range` over a `yamt-conflict-repo` repository.
+diff --git a/crates/review/src/gitlab.rs b/crates/review/src/gitlab.rs
+index 5ca7299..65e6e54 100644
+--- a/crates/review/src/gitlab.rs
++++ b/crates/review/src/gitlab.rs
+@@ -151,7 +151,7 @@ pub(crate) fn merge_request_from(json: &[u8]) -> Result<MergeRequest, String> {
+     })
+ }
+ 
+-/// The drafts of `glab api --paginate`, which prints one array per page.
++/// The drafts `glab api --paginate` printed: one JSON array, or one per page.
+ pub(crate) fn draft_notes_from(json: &[u8]) -> Result<Vec<DraftNote>, String> {
+     let mut drafts = Vec::new();
+     for page in serde_json::Deserializer::from_slice(json).into_iter::<Value>() {
+diff --git a/crates/review/src/glab_answer.rs b/crates/review/src/glab_answer.rs
+new file mode 100644
+index 0000000..bc6b75a
+--- /dev/null
++++ b/crates/review/src/glab_answer.rs
+@@ -0,0 +1,193 @@
++use std::path::Path;
++
++use yamt_gitio::{Glab, GlabRun};
++
++use crate::gitlab::{draft_id_from, error_message_from};
++
++pub(crate) const TIMED_OUT: &str = "glab timed out";
++const NO_HTTP_ANSWER: &str = "glab printed no HTTP answer";
++
++/// What one message's post came to.
++#[derive(Debug, PartialEq, Eq)]
++pub(crate) enum Outcome {
++    Drafted(u64),
++    Refused(String),
++    Stop(String),
++}
++
++/// What `glab api --include` printed: the HTTP status and the body after the headers.
++#[derive(Clone, Debug, PartialEq, Eq)]
++struct HttpAnswer {
++    status: u16,
++    body: Vec<u8>,
++}
++
++/// A 2xx is a draft; another 4xx a refusal of this message; anything else stops the send.
++pub(crate) fn posted(run: std::result::Result<GlabRun, String>) -> Outcome {
++    let (stdout, stderr) = match run {
++        Err(reason) => return Outcome::Stop(reason),
++        Ok(GlabRun::TimedOut) => return Outcome::Stop(TIMED_OUT.to_owned()),
++        Ok(GlabRun::Printed { stdout }) => (stdout, Vec::new()),
++        Ok(GlabRun::Failed { stdout, stderr, .. }) => (stdout, stderr),
++    };
++    let Some(answer) = http_answer_from(&stdout) else {
++        let reason = last_line(&stderr).unwrap_or_else(|| NO_HTTP_ANSWER.to_owned());
++        return Outcome::Stop(reason);
++    };
++    let reason = || {
++        error_message_from(&answer.body)
++            .or_else(|| last_line(&stderr))
++            .unwrap_or_else(|| format!("HTTP {}", answer.status))
++    };
++    match answer.status {
++        200..=299 => match draft_id_from(&answer.body) {
++            Ok(id) => Outcome::Drafted(id),
++            Err(reason) => Outcome::Stop(reason),
++        },
++        // 401, 403 and 429 are about the user or the rate, not the message: the rest would fail the same way.
++        401 | 403 | 429 => Outcome::Stop(reason()),
++        400..=499 => Outcome::Refused(reason()),
++        _ => Outcome::Stop(reason()),
++    }
++}
++
++/// The status line and body `glab api --include` prints: `HTTP/2.0 201 Created`, headers, an empty line, each
++/// ending in CRLF, then the body (glab 1.124.0, measured in `tests/glab/README.md`).
++fn http_answer_from(stdout: &[u8]) -> Option<HttpAnswer> {
++    const HEADERS_END: &[u8] = b"\r\n\r\n";
++    let status_line = stdout.split(|byte| *byte == b'\n').next()?;
++    let status_line = std::str::from_utf8(status_line).ok()?;
++    let mut words = status_line.split_whitespace();
++    if !words.next()?.starts_with("HTTP/") {
++        return None;
++    }
++    let status = words.next()?.parse().ok()?;
++    let body = stdout
++        .windows(HEADERS_END.len())
++        .position(|window| window == HEADERS_END)
++        .map_or(&[][..], |end| &stdout[end + HEADERS_END.len()..]);
++    Some(HttpAnswer {
++        status,
++        body: body.to_vec(),
++    })
++}
++
++/// What a GET printed; `Err` holds what went wrong, glab's own line when it printed one.
++pub(crate) fn answer(
++    glab: &Glab,
++    root: &Path,
++    args: &[String],
++) -> std::result::Result<Vec<u8>, String> {
++    match run(glab, root, args, None)? {
++        GlabRun::Printed { stdout } => Ok(stdout),
++        GlabRun::Failed { status, stderr, .. } => {
++            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
++        }
++        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
++    }
++}
++
++fn exit_words(status: Option<i32>) -> String {
++    match status {
++        Some(code) => format!("glab exited with status {code}"),
++        None => "glab was stopped by a signal".to_owned(),
++    }
++}
++
++/// `Err` when glab could not run at all, in gitio's words.
++pub(crate) fn run(
++    glab: &Glab,
++    root: &Path,
++    args: &[String],
++    stdin: Option<Vec<u8>>,
++) -> std::result::Result<GlabRun, String> {
++    let args: Vec<&str> = args.iter().map(String::as_str).collect();
++    glab.run(root, &args, stdin)
++        .map_err(|error| error.to_string())
++}
++
++pub(crate) fn first_line(output: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(output);
++    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
++    line.map(str::to_owned)
++}
++
++/// glab prints its error last, after any notice such as a first run's "What's new".
++fn last_line(output: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(output);
++    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty());
++    line.map(str::to_owned)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_http_status_and_body_come_from_the_included_headers() {
++        let read = |printed: &[u8]| http_answer_from(printed).map(|got| (got.status, got.body));
++        let headers = b"HTTP/2.0 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{}";
++        assert_eq!(read(headers), Some((400, b"{}".to_vec())));
++        assert_eq!(
++            read(b"HTTP/1.1 204 No Content\r\n"),
++            Some((204, Vec::new()))
++        );
++        assert_eq!(read(b"{\"id\":1}"), None);
++        assert_eq!(read(b"HTTP/2.0 OK\r\n\r\n"), None);
++        assert_eq!(read(b""), None);
++    }
++
++    #[test]
++    fn a_refusal_keeps_gitlab_s_words_and_a_failure_of_user_or_server_stops() {
++        let answered = |status: &str| {
++            let stdout = format!("HTTP/2.0 {status}\r\n\r\n{{\"message\":\"{status}\"}}");
++            let stdout = stdout.into_bytes();
++            let stderr = Vec::new();
++            posted(Ok(GlabRun::Failed {
++                status: Some(1),
++                stdout,
++                stderr,
++            }))
++        };
++        let stop = |words: &str| Outcome::Stop(words.to_owned());
++        for status in ["400 Bad Request", "404 Not Found", "499 Client Closed"] {
++            assert_eq!(answered(status), Outcome::Refused(status.to_owned()));
++        }
++        for status in [
++            "401 Unauthorized",
++            "403 Forbidden",
++            "429 Too Many",
++            "500 Error",
++            "302 Found",
++        ] {
++            assert_eq!(answered(status), stop(status));
++        }
++        let created = b"HTTP/2.0 201 Created\r\n\r\n{\"id\":7}".to_vec();
++        assert_eq!(
++            posted(Ok(GlabRun::Printed { stdout: created })),
++            Outcome::Drafted(7)
++        );
++        let accepted = b"HTTP/2.0 299 Fine\r\n\r\n{\"id\":8}".to_vec();
++        assert_eq!(
++            posted(Ok(GlabRun::Printed { stdout: accepted })),
++            Outcome::Drafted(8)
++        );
++    }
++
++    #[test]
++    fn no_http_answer_a_timeout_or_glab_gone_stops_in_glab_s_words() {
++        let stop = |words: &str| Outcome::Stop(words.to_owned());
++        let no_answer = |stderr: &[u8]| GlabRun::Failed {
++            status: Some(1),
++            stdout: Vec::new(),
++            stderr: stderr.to_vec(),
++        };
++        let with_notice = no_answer(b"What's new\n  glab: no route  \n\n");
++        assert_eq!(posted(Ok(with_notice)), stop("glab: no route"));
++        assert_eq!(posted(Ok(no_answer(b""))), stop(NO_HTTP_ANSWER));
++        assert_eq!(posted(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
++        assert_eq!(posted(Err("gone".to_owned())), stop("gone"));
++        assert_eq!(exit_words(Some(2)), "glab exited with status 2");
++        assert_eq!(exit_words(None), "glab was stopped by a signal");
++    }
++}
+diff --git a/crates/review/src/lib.rs b/crates/review/src/lib.rs
+index b9e932f..eacd7ca 100644
+--- a/crates/review/src/lib.rs
++++ b/crates/review/src/lib.rs
+@@ -3,6 +3,7 @@
+ #![warn(missing_docs)]
+ 
+ mod gitlab;
++mod glab_answer;
+ mod lines_up;
+ mod position;
+ mod right_branch;
+diff --git a/crates/review/src/lines_up.rs b/crates/review/src/lines_up.rs
+index 754ed75..f5a2708 100644
+--- a/crates/review/src/lines_up.rs
++++ b/crates/review/src/lines_up.rs
+@@ -5,8 +5,6 @@ use crate::gitlab::{DiffRefs, Listed, MergeRequest};
+ use crate::{LookedAt, MergeRequestRef, NotLinedUp};
+ 
+ const MAX_MERGE_REQUESTS_CHECKED: usize = 5;
+-/// git's default abbreviation.
+-const SHORT_ID_CHARS: usize = 7;
+ 
+ /// The merge requests whose details were fetched, and what they were looked up by.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -74,19 +72,20 @@ fn why_it_does_not(compared: &Compared, request: &MergeRequest) -> NotLinedUp {
+     if diff_refs.head_sha != compared.right.as_str() {
+         return NotLinedUp::Moved {
+             merge_request,
+-            gitlab_head: short_id(&diff_refs.head_sha),
+-            shown_head: short_id(compared.right.as_str()),
++            gitlab_head: as_long_as(&diff_refs.head_sha, &compared.right_short_id),
++            shown_head: compared.right_short_id.clone(),
+         };
+     }
+     NotLinedUp::OtherBase {
+         merge_request,
+-        gitlab_base: short_id(&diff_refs.base_sha),
+-        shown_base: short_id(compared.left.as_str()),
++        gitlab_base: as_long_as(&diff_refs.base_sha, &compared.left_short_id),
++        shown_base: compared.left_short_id.clone(),
+     }
+ }
+ 
+-pub(crate) fn short_id(sha: &str) -> String {
+-    sha.get(..SHORT_ID_CHARS).unwrap_or(sha).to_owned()
++/// GitLab's full id cut to the length of the id the window shows.
++fn as_long_as(sha: &str, shown: &str) -> String {
++    sha.get(..shown.len()).unwrap_or(sha).to_owned()
+ }
+ 
+ #[cfg(test)]
+@@ -100,10 +99,18 @@ mod tests {
+     const MAIN: &str = "437805506eab02eaba409bdeffd00e0383476e35";
+     const FEATURE: &str = "9c1ba3fc606a3776061d23006b83e2af2a357112";
+ 
++    const GIT_SHORT_ID_CHARS: usize = 7;
++
+     fn compared(left: &str, right: &str) -> Compared {
++        compared_shown(left, right, GIT_SHORT_ID_CHARS)
++    }
++
++    fn compared_shown(left: &str, right: &str, shown_chars: usize) -> Compared {
+         Compared {
+             left: Oid::parse(left).unwrap(),
+             right: Oid::parse(right).unwrap(),
++            left_short_id: left[..shown_chars].to_owned(),
++            right_short_id: right[..shown_chars].to_owned(),
+             right_label: RangeSideLabel::Named {
+                 name: "feature".to_owned(),
+             },
+@@ -215,6 +222,28 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn gitlab_s_ids_are_cut_to_the_length_of_the_shown_ones() {
++        const LONGER_SHORT_ID_CHARS: usize = 10;
++        let longer = compared_shown(MERGE_BASE, FEATURE, LONGER_SHORT_ID_CHARS);
++        assert_eq!(
++            checked(&longer, "other-base").map(|_| ()),
++            Err(NotLinedUp::OtherBase {
++                merge_request: named("other-base", "merge-request.json"),
++                gitlab_base: "5f9d381d23".to_owned(),
++                shown_base: "531ea52dfb".to_owned(),
++            })
++        );
++        assert_eq!(
++            checked(&longer, "moved").map(|_| ()),
++            Err(NotLinedUp::Moved {
++                merge_request: named("moved", "merge-request.json"),
++                gitlab_head: "d1e2f3a4b5".to_owned(),
++                shown_head: "9c1ba3fc60".to_owned(),
++            })
++        );
++    }
++
+     #[test]
+     fn no_open_merge_request_from_the_branch() {
+         let listed = listed_from(&recorded("no-merge-request", "merge-requests.json")).unwrap();
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+index e28757d..24553b1 100644
+--- a/crates/review/src/send.rs
++++ b/crates/review/src/send.rs
+@@ -1,16 +1,15 @@
+-use std::ops::Range as Span;
+ use std::path::Path;
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use yamt_gitio::{Glab, GlabRun, Repo};
+-use yamt_range::Range;
++use yamt_range::{Compared, Range};
+ 
+ use crate::gitlab::{
+-    DraftNote, draft_id_from, draft_notes, draft_notes_from, error_message_from, listed_from,
+-    merge_request_details, merge_request_from, merge_requests_from_branch,
+-    merge_requests_of_commit, post_draft_note,
++    DraftNote, draft_notes, draft_notes_from, listed_from, merge_request_details,
++    merge_request_from, merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
+ };
+-use crate::lines_up::{Found, LinedUp, candidates, lines_up, short_id};
++use crate::glab_answer::{Outcome, TIMED_OUT, answer, first_line, posted, run};
++use crate::lines_up::{Found, LinedUp, candidates, lines_up};
+ use crate::position::{PostBody, line_place, same_draft};
+ use crate::right_branch::right_branch;
+ use crate::thread_store::QueuedMessage;
+@@ -19,13 +18,7 @@ use crate::{
+     ThreadStore,
+ };
+ 
+-const TIMED_OUT: &str = "glab timed out";
+-const NO_HTTP_ANSWER: &str = "glab printed no HTTP answer";
+ const DIFFS_PAGE: &str = "/diffs";
+-const ACCEPTED: Span<u16> = 200..300;
+-const CLIENT_ERRORS: Span<u16> = 400..500;
+-/// 401, 403 and 429 are about the user or the rate, not the message: the rest would fail the same way.
+-const STOPPING_CLIENT_ERRORS: [u16; 3] = [401, 403, 429];
+ 
+ /// Whether GitLab's diff of the merge request for the range's right side is exactly the window's (plan §2 #119).
+ #[must_use]
+@@ -60,6 +53,13 @@ pub fn send_queue(
+     }
+ }
+ 
++struct Tally {
++    done: u32,
++    of: u32,
++    sent: u32,
++    refused: u32,
++}
++
+ fn post_queue(
+     glab: &Glab,
+     range: &Range,
+@@ -67,33 +67,35 @@ fn post_queue(
+     threads: &Mutex<ThreadStore>,
+     progress: &dyn Fn(SendProgress),
+ ) -> Result<SendReply> {
+-    let queued = locked(threads).queued(range);
++    let (queued, owned) = {
++        let store = locked(threads);
++        (store.queued(range), store.pending_draft_notes())
++    };
+     let mut tally = Tally {
+         done: 0,
+         of: u32::try_from(queued.len()).unwrap_or(u32::MAX),
+         sent: 0,
+         refused: 0,
+     };
+-    let drafts = answer(glab, range.root(), &draft_notes(&target.merge_request))
++    let listed = answer(glab, range.root(), &draft_notes(&target.merge_request))
+         .and_then(|json| draft_notes_from(&json));
+-    let mut drafts = match drafts {
+-        Ok(drafts) => drafts,
++    let mut drafts = match listed {
++        Ok(drafts) => unowned(drafts, &owned),
+         Err(reason) => return Ok(tally.stopped(locked(threads).list(range), reason)),
+     };
+     for message in queued {
+-        let posting = match outcome(glab, range, target, &mut drafts, &message)? {
+-            Outcome::Drafted(draft_note) => {
+-                tally.sent += 1;
+-                pending(target, message.text, draft_note)
+-            }
+-            Outcome::Refused(reason) => {
+-                tally.refused += 1;
+-                let text = message.text;
+-                Posting::Refused { text, reason }
+-            }
+-            Outcome::Stop(reason) => return Ok(tally.stopped(locked(threads).list(range), reason)),
+-        };
+-        locked(threads).record(message.message, posting)?;
++        let stop = send_one(
++            glab,
++            range,
++            target,
++            threads,
++            &mut drafts,
++            &message,
++            &mut tally,
++        )?;
++        if let Some(reason) = stop {
++            return Ok(tally.stopped(locked(threads).list(range), reason));
++        }
+         tally.done += 1;
+         progress(SendProgress {
+             done: tally.done,
+@@ -103,26 +105,77 @@ fn post_queue(
+     Ok(tally.sent(locked(threads).list(range)))
+ }
+ 
+-/// What one message's post came to.
+-#[derive(Debug, PartialEq, Eq)]
+-enum Outcome {
+-    Drafted(u64),
+-    Refused(String),
+-    Stop(String),
++/// Posts the message's text as it is now, unless it no longer waits, and records the result only if the message
++/// still waits with that text: the user may unqueue or edit it while the send runs. `Some` is why the send stops.
++fn send_one(
++    glab: &Glab,
++    range: &Range,
++    target: &LinedUp,
++    threads: &Mutex<ThreadStore>,
++    drafts: &mut Vec<DraftNote>,
++    message: &QueuedMessage,
++    tally: &mut Tally,
++) -> Result<Option<String>> {
++    let Some(text) = locked(threads).waiting_text(message.message) else {
++        return Ok(None);
++    };
++    let (posting, count) = match outcome(glab, range, target, drafts, message, &text)? {
++        Outcome::Drafted(draft_note) => (pending(target, &text, draft_note), &mut tally.sent),
++        Outcome::Refused(reason) => {
++            let refused = Posting::Refused {
++                text: text.clone(),
++                reason,
++            };
++            (refused, &mut tally.refused)
++        }
++        Outcome::Stop(reason) => return Ok(Some(reason)),
++    };
++    let recorded = locked(threads).record_if_waiting(message.message, &text, posting)?;
++    if recorded {
++        *count += 1;
++    }
++    Ok(None)
+ }
+ 
+-/// What `glab api --include` printed: the HTTP status and the body after the headers.
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub(crate) struct HttpAnswer {
+-    pub(crate) status: u16,
+-    pub(crate) body: Vec<u8>,
++/// A draft GitLab already holds for the message is taken (once) instead of posting it again.
++fn outcome(
++    glab: &Glab,
++    range: &Range,
++    target: &LinedUp,
++    drafts: &mut Vec<DraftNote>,
++    message: &QueuedMessage,
++    text: &str,
++) -> Result<Outcome> {
++    let file = message.file;
++    let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
++    let place = match line_place(entry, message.line) {
++        Ok(place) => place,
++        Err(reason) => return Ok(Outcome::Refused(reason.to_owned())),
++    };
++    let body = PostBody {
++        note: text.to_owned(),
++        diff_refs: target.diff_refs.clone(),
++        place,
++    };
++    if let Some(index) = drafts.iter().position(|draft| same_draft(&body, draft)) {
++        return Ok(Outcome::Drafted(drafts.swap_remove(index).id));
++    }
++    let args = post_draft_note(&target.merge_request);
++    Ok(posted(run(glab, range.root(), &args, Some(body.json()))))
+ }
+ 
+-struct Tally {
+-    done: u32,
+-    of: u32,
+-    sent: u32,
+-    refused: u32,
++fn pending(target: &LinedUp, text: &str, draft_note: u64) -> Posting {
++    let named = &target.merge_request.named;
++    Posting::Pending {
++        text: text.to_owned(),
++        draft_note,
++        merge_request: named.reference.clone(),
++        link: format!("{}{DIFFS_PAGE}", named.web_url),
++    }
++}
++
++fn locked(threads: &Mutex<ThreadStore>) -> MutexGuard<'_, ThreadStore> {
++    threads.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
+ impl Tally {
+@@ -144,95 +197,10 @@ impl Tally {
+     }
+ }
+ 
+-fn locked(threads: &Mutex<ThreadStore>) -> MutexGuard<'_, ThreadStore> {
+-    threads.lock().unwrap_or_else(PoisonError::into_inner)
+-}
+-
+-fn pending(target: &LinedUp, text: String, draft_note: u64) -> Posting {
+-    let named = &target.merge_request.named;
+-    Posting::Pending {
+-        text,
+-        draft_note,
+-        merge_request: named.reference.clone(),
+-        link: format!("{}{DIFFS_PAGE}", named.web_url),
+-    }
+-}
+-
+-/// A draft GitLab already holds for the message is taken (once) instead of posting it again.
+-fn outcome(
+-    glab: &Glab,
+-    range: &Range,
+-    target: &LinedUp,
+-    drafts: &mut Vec<DraftNote>,
+-    message: &QueuedMessage,
+-) -> Result<Outcome> {
+-    let file = message.file;
+-    let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
+-    let place = match line_place(entry, message.line) {
+-        Ok(place) => place,
+-        Err(reason) => return Ok(Outcome::Refused(reason.to_owned())),
+-    };
+-    let body = PostBody {
+-        note: message.text.clone(),
+-        diff_refs: target.diff_refs.clone(),
+-        place,
+-    };
+-    if let Some(index) = drafts.iter().position(|draft| same_draft(&body, draft)) {
+-        return Ok(Outcome::Drafted(drafts.swap_remove(index).id));
+-    }
+-    let args = post_draft_note(&target.merge_request);
+-    Ok(posted(run(glab, range.root(), &args, Some(body.json()))))
+-}
+-
+-/// A 2xx is a draft; another 4xx a refusal of this message; anything else stops the send.
+-fn posted(run: std::result::Result<GlabRun, String>) -> Outcome {
+-    let (stdout, stderr) = match run {
+-        Err(reason) => return Outcome::Stop(reason),
+-        Ok(GlabRun::TimedOut) => return Outcome::Stop(TIMED_OUT.to_owned()),
+-        Ok(GlabRun::Printed { stdout }) => (stdout, Vec::new()),
+-        Ok(GlabRun::Failed { stdout, stderr, .. }) => (stdout, stderr),
+-    };
+-    let Some(answer) = http_answer_from(&stdout) else {
+-        let reason = last_line(&stderr).unwrap_or_else(|| NO_HTTP_ANSWER.to_owned());
+-        return Outcome::Stop(reason);
+-    };
+-    if ACCEPTED.contains(&answer.status) {
+-        return match draft_id_from(&answer.body) {
+-            Ok(id) => Outcome::Drafted(id),
+-            Err(reason) => Outcome::Stop(reason),
+-        };
+-    }
+-    let reason = error_message_from(&answer.body)
+-        .or_else(|| last_line(&stderr))
+-        .unwrap_or_else(|| format!("HTTP {}", answer.status));
+-    let refused =
+-        CLIENT_ERRORS.contains(&answer.status) && !STOPPING_CLIENT_ERRORS.contains(&answer.status);
+-    if refused {
+-        Outcome::Refused(reason)
+-    } else {
+-        Outcome::Stop(reason)
+-    }
+-}
+-
+-/// The status line and body `glab api --include` prints: `HTTP/2.0 201 Created`, headers, an empty line, each
+-/// ending in CRLF, then the body (glab 1.124.0, measured in `tests/glab/README.md`).
+-pub(crate) fn http_answer_from(stdout: &[u8]) -> Option<HttpAnswer> {
+-    const HEADERS_END: &[u8] = b"\r\n\r\n";
+-    let status_line = stdout.split(|byte| *byte == b'\n').next()?;
+-    let status_line = std::str::from_utf8(status_line).ok()?;
+-    let mut words = status_line.split_whitespace();
+-    if !words.next()?.starts_with("HTTP/") {
+-        return None;
+-    }
+-    let status = words.next()?.parse().ok()?;
+-    let body = stdout
+-        .windows(HEADERS_END.len())
+-        .position(|window| window == HEADERS_END)
+-        .map_or(&[][..], |end| &stdout[end + HEADERS_END.len()..]);
+-    Some(HttpAnswer {
+-        status,
+-        body: body.to_vec(),
+-    })
++/// The drafts no message of the store already owns: only those may stand in for a post that timed out.
++fn unowned(mut drafts: Vec<DraftNote>, owned: &[u64]) -> Vec<DraftNote> {
++    drafts.retain(|draft| !owned.contains(&draft.id));
++    drafts
+ }
+ 
+ fn lined_up(glab: &Glab, range: &Range) -> std::result::Result<LinedUp, NotLinedUp> {
+@@ -242,7 +210,7 @@ fn lined_up(glab: &Glab, range: &Range) -> std::result::Result<LinedUp, NotLined
+     let repo = Repo::discover(root).map_err(|error| failed(error.to_string()))?;
+     let branch =
+         right_branch(&repo, &compared.right_label).map_err(|error| failed(error.to_string()))?;
+-    let (looked_at, args) = lookup(branch, compared.right.as_str());
++    let (looked_at, args) = lookup(branch, &compared);
+     let listed = answer(glab, root, &args)
+         .and_then(|json| listed_from(&json))
+         .map_err(failed)?;
+@@ -261,15 +229,15 @@ fn lined_up(glab: &Glab, range: &Range) -> std::result::Result<LinedUp, NotLined
+ }
+ 
+ /// What the merge requests are looked up by, and the glab call that lists them.
+-fn lookup(branch: Option<String>, right: &str) -> (LookedAt, Vec<String>) {
++fn lookup(branch: Option<String>, compared: &Compared) -> (LookedAt, Vec<String>) {
+     if let Some(name) = branch {
+         let args = merge_requests_from_branch(&name);
+         return (LookedAt::Branch { name }, args);
+     }
+-    let short_id = short_id(right);
++    let short_id = compared.right_short_id.clone();
+     (
+         LookedAt::Commit { short_id },
+-        merge_requests_of_commit(right),
++        merge_requests_of_commit(compared.right.as_str()),
+     )
+ }
+ 
+@@ -290,109 +258,3 @@ fn require_logged_in(glab: &Glab, root: &Path) -> std::result::Result<(), NotLin
+ fn failed(message: String) -> NotLinedUp {
+     NotLinedUp::Failed { message }
+ }
+-
+-/// What a GET printed; `Err` holds what went wrong, glab's own line when it printed one.
+-fn answer(glab: &Glab, root: &Path, args: &[String]) -> std::result::Result<Vec<u8>, String> {
+-    match run(glab, root, args, None)? {
+-        GlabRun::Printed { stdout } => Ok(stdout),
+-        GlabRun::Failed { status, stderr, .. } => {
+-            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
+-        }
+-        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
+-    }
+-}
+-
+-fn exit_words(status: Option<i32>) -> String {
+-    match status {
+-        Some(code) => format!("glab exited with status {code}"),
+-        None => "glab was stopped by a signal".to_owned(),
+-    }
+-}
+-
+-/// `Err` when glab could not run at all, in gitio's words.
+-fn run(
+-    glab: &Glab,
+-    root: &Path,
+-    args: &[String],
+-    stdin: Option<Vec<u8>>,
+-) -> std::result::Result<GlabRun, String> {
+-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+-    glab.run(root, &args, stdin)
+-        .map_err(|error| error.to_string())
+-}
+-
+-fn first_line(output: &[u8]) -> Option<String> {
+-    let text = String::from_utf8_lossy(output);
+-    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
+-    line.map(str::to_owned)
+-}
+-
+-/// glab prints its error last, after any notice such as a first run's "What's new".
+-fn last_line(output: &[u8]) -> Option<String> {
+-    let text = String::from_utf8_lossy(output);
+-    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty());
+-    line.map(str::to_owned)
+-}
+-
+-#[cfg(test)]
+-mod tests {
+-    use super::*;
+-
+-    #[test]
+-    fn the_http_status_and_body_come_from_the_included_headers() {
+-        let read = |printed: &[u8]| http_answer_from(printed).map(|got| (got.status, got.body));
+-        let headers = b"HTTP/2.0 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{}";
+-        assert_eq!(read(headers), Some((400, b"{}".to_vec())));
+-        assert_eq!(
+-            read(b"HTTP/1.1 204 No Content\r\n"),
+-            Some((204, Vec::new()))
+-        );
+-        assert_eq!(read(b"{\"id\":1}"), None);
+-        assert_eq!(read(b"HTTP/2.0 OK\r\n\r\n"), None);
+-        assert_eq!(read(b""), None);
+-    }
+-
+-    #[test]
+-    fn a_refusal_keeps_gitlab_s_words_and_a_failure_of_user_server_or_glab_stops() {
+-        let answered = |status: &str| {
+-            let stdout = format!("HTTP/2.0 {status}\r\n\r\n{{\"message\":\"{status}\"}}");
+-            let stdout = stdout.into_bytes();
+-            let stderr = Vec::new();
+-            posted(Ok(GlabRun::Failed {
+-                status: Some(1),
+-                stdout,
+-                stderr,
+-            }))
+-        };
+-        let stop = |words: &str| Outcome::Stop(words.to_owned());
+-        for status in ["400 Bad Request", "404 Not Found"] {
+-            assert_eq!(answered(status), Outcome::Refused(status.to_owned()));
+-        }
+-        for status in [
+-            "401 Unauthorized",
+-            "403 Forbidden",
+-            "429 Too Many",
+-            "500 Error",
+-            "302 Found",
+-        ] {
+-            assert_eq!(answered(status), stop(status));
+-        }
+-        let created = b"HTTP/2.0 201 Created\r\n\r\n{\"id\":7}".to_vec();
+-        assert_eq!(
+-            posted(Ok(GlabRun::Printed { stdout: created })),
+-            Outcome::Drafted(7)
+-        );
+-        let no_answer = |stderr: &[u8]| GlabRun::Failed {
+-            status: Some(1),
+-            stdout: Vec::new(),
+-            stderr: stderr.to_vec(),
+-        };
+-        let with_notice = no_answer(b"What's new\n  glab: no route  \n\n");
+-        assert_eq!(posted(Ok(with_notice)), stop("glab: no route"));
+-        assert_eq!(posted(Ok(no_answer(b""))), stop(NO_HTTP_ANSWER));
+-        assert_eq!(posted(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
+-        assert_eq!(posted(Err("gone".to_owned())), stop("gone"));
+-        assert_eq!(exit_words(Some(2)), "glab exited with status 2");
+-        assert_eq!(exit_words(None), "glab was stopped by a signal");
+-    }
+-}
+diff --git a/crates/review/src/thread_store.rs b/crates/review/src/thread_store.rs
+index 0d0c0e4..d959f1d 100644
+--- a/crates/review/src/thread_store.rs
++++ b/crates/review/src/thread_store.rs
+@@ -16,14 +16,12 @@ pub struct ThreadStore {
+     file: ThreadFile,
+ }
+ 
+-/// A message waiting for the next send: queued, or refused and sent again.
++/// A message waiting for the next send: queued, or refused and sent again. Its text is read again before the post.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub(crate) struct QueuedMessage {
+-    pub(crate) thread: ThreadId,
+     pub(crate) message: MessageId,
+     pub(crate) file: RangeFileId,
+     pub(crate) line: ThreadLine,
+-    pub(crate) text: String,
+ }
+ 
+ impl ThreadStore {
+@@ -129,30 +127,59 @@ impl ThreadStore {
+                 continue;
+             };
+             for message in &thread.messages {
+-                let text = match &message.posting {
+-                    Posting::Queued { text } | Posting::Refused { text, .. } => text,
+-                    Posting::NotQueued | Posting::Pending { .. } => continue,
+-                };
+-                queued.push(QueuedMessage {
+-                    thread: thread.id,
+-                    message: message.id,
+-                    file,
+-                    line: thread.line,
+-                    text: text.clone(),
+-                });
++                if waiting_text_of(&message.posting).is_some() {
++                    queued.push(QueuedMessage {
++                        message: message.id,
++                        file,
++                        line: thread.line,
++                    });
++                }
+             }
+         }
+         queued
+     }
+ 
+-    /// Stores what a send made of the message.
+-    pub(crate) fn record(&mut self, message: MessageId, posting: Posting) -> Result<()> {
++    /// The text to post when the message still waits for a send; `None` once it is unqueued, pending or gone.
++    pub(crate) fn waiting_text(&self, message: MessageId) -> Option<String> {
++        let stored = self
++            .file
++            .threads
++            .iter()
++            .flat_map(|thread| &thread.messages)
++            .find(|stored| stored.id == message)?;
++        waiting_text_of(&stored.posting).map(str::to_owned)
++    }
++
++    /// The draft notes the store's pending messages own.
++    pub(crate) fn pending_draft_notes(&self) -> Vec<u64> {
++        let mut owned = Vec::new();
++        for thread in &self.file.threads {
++            for message in &thread.messages {
++                if let Posting::Pending { draft_note, .. } = message.posting {
++                    owned.push(draft_note);
++                }
++            }
++        }
++        owned
++    }
++
++    /// Stores what a send made of the message, only while it still waits with `posted_text`; whether it did.
++    pub(crate) fn record_if_waiting(
++        &mut self,
++        message: MessageId,
++        posted_text: &str,
++        posting: Posting,
++    ) -> Result<bool> {
+         let mut next = self.file.clone();
+         let (_, stored) = next
+             .message_mut(message)
+             .ok_or(Error::UnknownMessage { message })?;
++        if waiting_text_of(&stored.posting) != Some(posted_text) {
++            return Ok(false);
++        }
+         stored.posting = posting;
+-        self.commit(next)
++        self.commit(next)?;
++        Ok(true)
+     }
+ 
+     fn change_posting(
+@@ -193,6 +220,14 @@ fn file_at(range: &Range, path: &str) -> Option<RangeFileId> {
+         .map(|entry| entry.id)
+ }
+ 
++/// The text a send posts: a queued message's, or a refused one's sent again.
++fn waiting_text_of(posting: &Posting) -> Option<&str> {
++    match posting {
++        Posting::Queued { text } | Posting::Refused { text, .. } => Some(text),
++        Posting::NotQueued | Posting::Pending { .. } => None,
++    }
++}
++
+ fn require_text(text: &str) -> Result<()> {
+     if text.trim().is_empty() {
+         return Err(Error::EmptyMessage);
+@@ -273,19 +308,38 @@ mod tests {
+         let queued: Vec<_> = store
+             .queued(&range(&repo, "main..local"))
+             .into_iter()
+-            .map(|q| (q.thread.0, q.message.0, q.file, q.line, q.text))
++            .map(|q| (q.message.0, q.file, q.line))
+             .collect();
+         let line = ThreadLine::Added {
+             right: RightLine(4),
+         };
+         let expected = vec![
+-            (2, 5, RangeFileId(1), line, "first".to_owned()),
+-            (2, 1, RangeFileId(1), line, "second".to_owned()),
+-            (1, 4, RangeFileId(0), line, "third".to_owned()),
++            (5, RangeFileId(1), line),
++            (1, RangeFileId(1), line),
++            (4, RangeFileId(0), line),
+         ];
+         assert_eq!(queued, expected);
+     }
+ 
++    #[test]
++    fn waiting_text_is_a_queued_or_refused_message_s_text_now() {
++        let dir = tempfile::tempdir().unwrap();
++        let store = stored_in(dir.path());
++        let texts: Vec<Option<String>> = [5, 1, 2, 3, 42]
++            .into_iter()
++            .map(|id| store.waiting_text(MessageId(id)))
++            .collect();
++        let first = Some("first".to_owned());
++        let second = Some("second".to_owned());
++        assert_eq!(texts, [first, second, None, None, None]);
++    }
++
++    #[test]
++    fn pending_draft_notes_are_the_drafts_pending_messages_own() {
++        let dir = tempfile::tempdir().unwrap();
++        assert_eq!(stored_in(dir.path()).pending_draft_notes(), [7]);
++    }
++
+     #[test]
+     fn queued_leaves_out_messages_on_paths_the_range_does_not_list() {
+         let repo = repo();
+@@ -300,33 +354,43 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn record_writes_the_posting_and_keeps_it() {
++    fn record_if_waiting_writes_the_posting_and_keeps_it() {
+         let dir = tempfile::tempdir().unwrap();
+         let mut store = stored_in(dir.path());
+-        let pending = Posting::Pending {
+-            text: "first".to_owned(),
+-            draft_note: 9,
+-            merge_request: "!1".to_owned(),
+-            link: "l".to_owned(),
+-        };
+-        store.record(MessageId(5), pending).unwrap();
++        let applied = store.record_if_waiting(MessageId(5), "first", pending("first"));
++        assert!(applied.unwrap());
+         let reopened = ThreadStore::open(dir.path()).unwrap();
+         assert_eq!(reopened.file, store.file);
+         let local = range(&repo(), "main..local");
+         let ids: Vec<u32> = store.queued(&local).iter().map(|q| q.message.0).collect();
+         assert_eq!(ids, [1, 4]);
++        assert_eq!(store.pending_draft_notes(), [9, 7]);
+     }
+ 
+     #[test]
+-    fn record_on_an_unknown_message_is_unknown_message() {
++    fn record_if_waiting_leaves_a_changed_message_alone_and_refuses_an_unknown_one() {
+         let dir = tempfile::tempdir().unwrap();
+         let mut store = stored_in(dir.path());
+-        let result = store.record(MessageId(42), Posting::NotQueued);
+-        assert!(matches!(
+-            result,
+-            Err(Error::UnknownMessage {
+-                message: MessageId(42)
+-            })
+-        ));
++        let before = store.file.clone();
++        let edited = store.record_if_waiting(MessageId(5), "older text", pending("older text"));
++        assert!(!edited.unwrap());
++        let unqueued = store.record_if_waiting(MessageId(2), "d", pending("d"));
++        assert!(!unqueued.unwrap());
++        let already_pending = store.record_if_waiting(MessageId(3), "e", pending("e"));
++        assert!(!already_pending.unwrap());
++        assert_eq!(store.file, before);
++        assert_eq!(ThreadStore::open(dir.path()).unwrap().file, before);
++        let unknown = store.record_if_waiting(MessageId(42), "x", Posting::NotQueued);
++        let message = MessageId(42);
++        assert!(matches!(unknown, Err(Error::UnknownMessage { message: m }) if m == message));
++    }
++
++    fn pending(text: &str) -> Posting {
++        Posting::Pending {
++            text: text.to_owned(),
++            draft_note: 9,
++            merge_request: "!1".to_owned(),
++            link: "l".to_owned(),
++        }
+     }
+ }
+diff --git a/crates/review/tests/review.rs b/crates/review/tests/review.rs
+index 4c79826..2f6427d 100644
+--- a/crates/review/tests/review.rs
++++ b/crates/review/tests/review.rs
+@@ -1,11 +1,10 @@
+ #![cfg(test)]
+ #![cfg(unix)]
+ 
+-use std::cell::RefCell;
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+-use std::sync::Mutex;
++use std::sync::{Mutex, mpsc};
+ use std::time::Duration;
+ 
+ use serde_json::{Value, json};
+@@ -14,8 +13,8 @@ use yamt_gitio::Glab;
+ use yamt_merge_core::{LeftLine, RightLine};
+ use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
+ use yamt_review::{
+-    GitLabCheck, LookedAt, MergeRequestRef, NotLinedUp, Posting, SendProgress, SendReply,
+-    ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
++    GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
++    SendReply, ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
+ };
+ 
+ /// `scripts/range-repo.sh`'s commits, fixed by its names and dates.
+@@ -120,8 +119,12 @@ struct Review {
+ 
+ impl Review {
+     fn new() -> Review {
++        Review::on("main...feature")
++    }
++
++    fn on(range_text: &str) -> Review {
+         let repo = range_repo();
+-        let range = range_of(&repo, "main...feature");
++        let range = range_of(&repo, range_text);
+         let pair = tempfile::tempdir().unwrap();
+         let mut store = ThreadStore::open(pair.path()).unwrap();
+         let threads = [
+@@ -145,10 +148,37 @@ impl Review {
+     }
+ 
+     fn send(&self, glab: &Glab) -> (SendReply, Vec<SendProgress>) {
+-        let progress = RefCell::new(Vec::new());
+-        let report = |step: SendProgress| progress.borrow_mut().push(step);
++        self.send_reacting(glab, &|_| {})
++    }
++
++    /// A send whose progress callback also runs `react`, as the user acting while the send runs.
++    fn send_reacting(
++        &self,
++        glab: &Glab,
++        react: &dyn Fn(SendProgress),
++    ) -> (SendReply, Vec<SendProgress>) {
++        let (sender, receiver) = mpsc::channel();
++        let report = |step: SendProgress| {
++            sender.send(step).unwrap();
++            react(step);
++        };
+         let reply = send_queue(&self.range, Some(glab), &self.threads, &report).unwrap();
+-        (reply, progress.into_inner())
++        (reply, receiver.try_iter().collect())
++    }
++
++    /// The first message of the thread at `index` in creation order.
++    fn first_message(&self, index: usize) -> MessageId {
++        let list = self.threads.lock().unwrap().list(&self.range);
++        list.threads[index].messages[0].id
++    }
++
++    /// Adds `text` as a note to the thread at `index` and queues it with that text.
++    fn add_queued_note(&self, index: usize, text: &str) {
++        let mut store = self.threads.lock().unwrap();
++        let thread = store.list(&self.range).threads[index].id;
++        let list = store.add_note(&self.range, thread, text).unwrap();
++        let note = list.threads[index].messages.last().unwrap().id;
++        store.queue(&self.range, note, text).unwrap();
+     }
+ 
+     fn postings(&self) -> Vec<Posting> {
+@@ -225,6 +255,25 @@ fn merge_request_12() -> MergeRequestRef {
+     }
+ }
+ 
++#[test]
++fn range_repo_has_the_scenarios_commit_ids() {
++    let repo = range_repo();
++    let commit = |args: &[&str]| {
++        let output = git_ok(&repo_root(&repo), args).unwrap();
++        String::from_utf8(output).unwrap().trim_end().to_owned()
++    };
++    let found = [
++        commit(&["merge-base", "main", "feature"]),
++        commit(&["rev-parse", "main"]),
++        commit(&["rev-parse", "feature"]),
++    ];
++    assert_eq!(
++        found,
++        [MERGE_BASE, MAIN, FEATURE],
++        "scripts/range-repo.sh made other commits: tests/glab/* and these constants pin its ids"
++    );
++}
++
+ #[test]
+ fn sending_posts_in_thread_order_and_records_pending_with_the_link() {
+     let review = Review::new();
+@@ -389,6 +438,126 @@ fn a_message_already_among_the_drafts_is_recorded_without_posting_again() {
+     );
+ }
+ 
++#[test]
++fn a_draft_a_pending_message_owns_never_stands_in_for_another_message() {
++    let review = Review::new();
++    let fake = Fake::new("drafted");
++    review.send(&fake.glab);
++    review.add_queued_note(0, ADDED_TEXT);
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let SendReply::Sent { sent: 1, .. } = reply else {
++        panic!("not sent once: {reply:?}");
++    };
++    let expected = vec![
++        pending(ADDED_TEXT, 301),
++        pending(ADDED_TEXT, 305),
++        pending(RENAMED_TEXT, 303),
++        pending(REMOVED_TEXT, 304),
++    ];
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1], 1));
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [RENAMED_TEXT, REMOVED_TEXT, ADDED_TEXT]);
++}
++
++#[test]
++fn a_message_unqueued_while_the_send_runs_is_neither_posted_nor_pending() {
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++    let second = review.first_message(1);
++    let unqueue_second = |step: SendProgress| {
++        if step.done == 1 {
++            let mut store = review.threads.lock().unwrap();
++            store.unqueue(&review.range, second).unwrap();
++        }
++    };
++
++    let (reply, steps) = review.send_reacting(&fake.glab, &unqueue_second);
++
++    let expected = vec![
++        pending(ADDED_TEXT, 101),
++        Posting::NotQueued,
++        pending(REMOVED_TEXT, 102),
++    ];
++    let SendReply::Sent { sent: 2, .. } = reply else {
++        panic!("not sent twice: {reply:?}");
++    };
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1, 2, 3], 3));
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [ADDED_TEXT, REMOVED_TEXT]);
++}
++
++#[test]
++fn a_message_edited_while_the_send_runs_is_posted_with_its_new_text() {
++    const EDITED: &str = "Keep the old title, or name both?";
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++    let second = review.first_message(1);
++    let edit_second = |step: SendProgress| {
++        if step.done == 1 {
++            let mut store = review.threads.lock().unwrap();
++            store.queue(&review.range, second, EDITED).unwrap();
++        }
++    };
++
++    review.send_reacting(&fake.glab, &edit_second);
++
++    let expected = vec![
++        pending(ADDED_TEXT, 101),
++        pending(EDITED, 102),
++        pending(REMOVED_TEXT, 103),
++    ];
++    assert_eq!(review.postings_on_disk(), expected);
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [ADDED_TEXT, EDITED, REMOVED_TEXT]);
++}
++
++#[test]
++fn a_send_that_cannot_list_the_drafts_posts_nothing() {
++    let review = Review::on(&format!("main...{FEATURE}"));
++    let fake = Fake::new("commit-route");
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let SendReply::Stopped {
++        sent,
++        refused,
++        reason,
++        ..
++    } = reply
++    else {
++        panic!("not stopped: {reply:?}");
++    };
++    assert_eq!(
++        (sent, refused, reason.as_str()),
++        (0, 0, "glab: 404 Not Found (HTTP 404)")
++    );
++    assert_eq!(steps, []);
++    assert!(!fake.log().contains("stdin:"), "{}", fake.log());
++    let unchanged = vec![
++        queued(ADDED_TEXT),
++        queued(RENAMED_TEXT),
++        queued(REMOVED_TEXT),
++    ];
++    assert_eq!(review.postings(), unchanged);
++    assert_eq!(review.postings_on_disk(), unchanged);
++}
++
+ #[test]
+ fn send_rechecks_and_posts_nothing_when_the_merge_request_moved() {
+     let review = Review::new();
+@@ -506,22 +675,34 @@ fn a_commit_id_side_asks_for_the_commit_s_merge_requests() {
+ }
+ 
+ #[test]
+-fn several_and_none_name_what_was_looked_at() {
++fn several_line_up_as_the_one_that_matches_and_none_name_what_was_looked_at() {
+     let repo = range_repo();
+     let range = range_of(&repo, "main...feature");
+     let several = Fake::new("several");
++    let several_none = Fake::new("several-none");
+     let none = Fake::new("no-merge-request");
+ 
++    let fourteen = MergeRequestRef {
++        reference: "!14".to_owned(),
++        title: "Reminders before a card is due".to_owned(),
++        web_url: "https://gitlab.example/taskboard/taskboard/-/merge_requests/14".to_owned(),
++    };
++    assert_eq!(
++        check_gitlab(&range, Some(&several.glab)),
++        GitLabCheck::LinedUp {
++            merge_request: fourteen
++        }
++    );
+     let feature = LookedAt::Branch {
+         name: "feature".to_owned(),
+     };
+-    let references = vec!["!12".to_owned(), "!12".to_owned()];
++    let references = vec!["!12".to_owned(), "!14".to_owned()];
+     let why = NotLinedUp::Several {
+         looked_at: feature.clone(),
+         references,
+     };
+     assert_eq!(
+-        check_gitlab(&range, Some(&several.glab)),
++        check_gitlab(&range, Some(&several_none.glab)),
+         GitLabCheck::NotLinedUp { why }
+     );
+     let why = NotLinedUp::NoMergeRequest { looked_at: feature };
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index a57f254..225f6cc 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -143,7 +143,12 @@ api() {
+ 	"POST "*/draft_notes) post ;;
+ 	"GET "*/draft_notes) answer_file draft-notes.json ;;
+ 	"GET "*/merge_requests) answer_file merge-requests.json ;;
+-	"GET "*/merge_requests/*) answer_file merge-request.json ;;
++	"GET "*/merge_requests/*)
++		if [ -f "$scenario/merge-request-${endpoint##*/}.json" ]; then
++			answer_file "merge-request-${endpoint##*/}.json"
++		fi
++		answer_file merge-request.json
++		;;
+ 	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
+ 	esac
+ }
+diff --git a/scripts/range-repo.sh b/scripts/range-repo.sh
+index 159c7ca..d74dff6 100755
+--- a/scripts/range-repo.sh
++++ b/scripts/range-repo.sh
+@@ -7,7 +7,8 @@
+ # executable only, the gitlink vendor/ui moved to another commit, data/big.txt added at 8 MiB + 1, the Latin-1
+ # docs/legacy.txt edited, the CRLF tools/setup.cmd edited, the link docs/current.md retargeted, config turned from a
+ # file into a link, tools/deploy.sh made executable and edited. `main` then moves on (README.md), so main..feature
+-# lists README.md and main...feature does not. Names and dates are fixed, so the commit ids never change.
++# lists README.md and main...feature does not. Names and dates are fixed, so the commit ids never change:
++# tests/glab and crates/review/tests pin them, so any change to this script or to scripts/demo updates both.
+ # Prints the command that opens the review. Uses no user or system git config (risk RK19).
+ set -euo pipefail
+ # shellcheck source=scripts/git-sandbox.sh
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index d437568..f54949c 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -23,7 +23,8 @@ test ever runs a file it has just written (ETXTBSY).
+ | `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
+ | `auth-status.exit` | its exit status (missing = 0) |
+ | `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
+-| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` |
++| `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
++| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
+ | `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
+ | `post-<n>.json` | the body of the n-th POST `…/draft_notes` (n from 1, counted in the state file) |
+ | `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
+diff --git a/tests/glab/drafted/post-3.json b/tests/glab/drafted/post-3.json
+new file mode 100644
+index 0000000..7cde459
+--- /dev/null
++++ b/tests/glab/drafted/post-3.json
+@@ -0,0 +1 @@
++{"id":305,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/several-none/merge-request-14.json b/tests/glab/several-none/merge-request-14.json
+new file mode 100644
+index 0000000..040ca48
+--- /dev/null
++++ b/tests/glab/several-none/merge-request-14.json
+@@ -0,0 +1 @@
++{"id":1014,"iid":14,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/14","references":{"short":"!14","relative":"!14","full":"taskboard/taskboard!14"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/several-none/merge-request.json b/tests/glab/several-none/merge-request.json
+new file mode 100644
+index 0000000..40464d1
+--- /dev/null
++++ b/tests/glab/several-none/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due (release)","state":"opened","source_branch":"feature","target_branch":"release","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"5f9d381d2306ae5110df08ef1fa0d0cbd04edb3b","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"5f9d381d2306ae5110df08ef1fa0d0cbd04edb3b"}}
+\ No newline at end of file
+diff --git a/tests/glab/several-none/merge-requests.json b/tests/glab/several-none/merge-requests.json
+new file mode 100644
+index 0000000..d14abb6
+--- /dev/null
++++ b/tests/glab/several-none/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due (release)","state":"opened","source_branch":"feature","target_branch":"release","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}},{"id":1014,"iid":14,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/14","references":{"short":"!14","relative":"!14","full":"taskboard/taskboard!14"}}]
+\ No newline at end of file
+-- 
+2.56.0
+

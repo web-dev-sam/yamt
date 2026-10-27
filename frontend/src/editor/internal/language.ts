@@ -24,21 +24,27 @@ export function languageNames(): readonly string[] {
   return LANGUAGE_NAMES;
 }
 
+export async function loadedSupport(
+  description: LanguageDescription,
+  fields: Readonly<Record<string, string>>,
+): Promise<LanguageSupport | null> {
+  try {
+    return await description.load();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    log.warn("language.load_failed", { ...fields, language: description.name, reason });
+    return null;
+  }
+}
+
 export async function loadLanguage(
   description: LanguageDescription,
   path: string,
   views: readonly LanguageView[],
   stale: () => boolean,
 ): Promise<void> {
-  let support: LanguageSupport;
-  try {
-    support = await description.load();
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    log.warn("language.load_failed", { path, language: description.name, reason });
-    return;
-  }
-  if (stale()) {
+  const support = await loadedSupport(description, { path });
+  if (support === null || stale()) {
     return;
   }
   const effects = languageCompartment.reconfigure(support.language);

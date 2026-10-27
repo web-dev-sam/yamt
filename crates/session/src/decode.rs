@@ -1,9 +1,9 @@
 use serde::Serialize;
 use specta::Type;
+pub(crate) use yamt_merge_core::MAX_TEXT_BYTES;
 
 // git's binary heuristic: a NUL within the first 8000 bytes (xdiff-interface.c FIRST_FEW_BYTES).
 const BINARY_PROBE_LEN: usize = 8000;
-pub(crate) const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
 pub enum Eol {

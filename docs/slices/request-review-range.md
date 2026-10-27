@@ -1,7 +1,8 @@
-# Owner request — review a commit range (`yamt --diff=<range>`), threads posted to GitLab, an AI behind `--ai` (2026-10-24) — PLANNING
+# Owner request — review a commit range (`yamt --diff=<range>`), threads posted to GitLab, an AI behind `--ai` (2026-10-24) — DESIGNING
 
-For the orchestrator. Status: intent captured; every question answered (#1625–#1627); no build started. Everything
-under "Orchestrator defaults" is the boring choice the owner may veto. What is left open is design (designer).
+For the orchestrator. Status: intent captured; every question answered (#1625–#1627); the owner's go (2026-10-24:
+"design and implement the plan"). Everything under "Orchestrator defaults" is the boring choice the owner may veto.
+What is left open is design (designer).
 
 ## The owner's words
 
@@ -131,9 +132,12 @@ Follow-ups:
 - **Thinking and steps reach the client**: `acp-event-mapper.ts:304` streams thinking as `agent_thought_chunk`;
   `:216`/`:239` each step as `tool_call_update` (running, then completed or failed, with its output); `:737` an edit as
   `{ type: "diff", path, oldText, newText }` (C rule 3).
-- **omp asks nothing by default**: `src/tools/settings.ts:313-317` `tools.approvalMode` defaults to `yolo` ("auto-
-  approves every tier"); `always-ask` prompts for write and exec tools, `write` only for exec; the CLI flag is
-  `--approval-mode` (`omp --help`). Whether `omp acp` honours that flag is unverified [INFERENCE].
+- **omp asks before commands, deletes and moves** (measured 2026-10-24 with a throwaway client over `omp acp`; the
+  configuration's `tools.approvalMode` default `yolo`, `src/tools/settings.ts:313-317`, is not what an ACP session
+  does): `session/request_permission` before every command and every delete or move, never before an edit or a new
+  file (`src/session/acp-permission-gate.ts:7-12`, `src/session/session-tools.ts:921-932`). `omp acp` honours
+  `--approval-mode` (`src/cli-commands.ts:313`, `src/main.ts:1929`). `session/cancel` ended a turn mid-command in 3 ms
+  (`stopReason: "cancelled"`). The full measured list is in `briefs/3.RV-agent-design.md`.
 - **glab** (`docs.gitlab.com/cli/mr/note/create`, `…/draft/create`, GitLab docs 19.6): `glab mr note create [<id> |
   <branch>] --file <path> --line <n|a:b> | --old-line <n> -m <text>` and `glab mr note draft create` (same flags, a
   pending review). Both **target the latest merge-request diff version** and both are marked EXPERIMENTAL. glab is not
@@ -155,14 +159,16 @@ window or the pasted-text window; agents other than through the one command sett
 
 - **Lines drift between yamt and GitLab**: glab posts against the MR's latest diff; a stale local branch or a two-dot
   range puts the comment on the wrong line. B rule 7 is the guard.
-- **The AI can still reach outside its checkout**: a command or an absolute path writes wherever it likes, and omp's
-  default approval asks yamt about nothing, so yamt never sees a command before it runs. The checkout as its working
-  folder is the boundary; a hard one would need a sandbox (not planned).
+- **The AI can still reach outside its checkout**: an edit or a new file at an absolute path is never asked about, and
+  a command allowed to run writes wherever it likes. yamt sees each command and each delete or move before it runs and
+  refuses the ones naming a path outside; the checkout as its working folder is the boundary; a hard one would need a
+  sandbox (not planned).
 - **A crash or kill skips the close question**: the checkout stays (and, if it is a git worktree, its entry in the
   repository's worktree list). Never deleted unasked: the next window on the same pair continues in it; only a
   leftover without changes is removed.
-- **A restored conversation needs its folder**: omp's sessions record their working folder; the checkout must come back
-  at the same path for the same repository and commit pair, or `session/load` may refuse (design checks).
+- **A restored conversation needs its folder**: measured, `session/load` refuses any other folder than the one the
+  conversation started in, so the checkout comes back at the same path for the same repository and commit pair. Two
+  agent processes can load the same conversation at once: the one window per pair is the only guard.
 - **glab's line-comment commands are experimental**; GitLab's discussions REST API through `glab api` is the stable
   fallback (design decides).
 - **omp's sessions can be cleaned up by omp** (`omp gc`); a thread whose session is gone shows that in one sentence.

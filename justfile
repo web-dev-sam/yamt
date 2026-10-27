@@ -34,15 +34,19 @@ fixtures-check: (fixtures-into "target/fixtures-check")
     diff -ru frontend/fixtures/golden target/fixtures-check/golden
     diff -ru frontend/fixtures/showcase target/fixtures-check/showcase
     diff -ru frontend/fixtures/compare target/fixtures-check/compare
+    diff -ru frontend/fixtures/range target/fixtures-check/range
 
-# Window fixtures: goldens, tests/showcase/ demo cases, tests/compare/ pairs (plan §2 #95).
+# Window fixtures: goldens, tests/showcase/ demo cases, tests/compare/ pairs (plan §2 #95), range cases over scripts/range-repo.sh (#103).
 [private]
 fixtures-into dir:
-    rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare
+    rm -rf {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare {{ dir }}/range && mkdir -p {{ dir }}/golden {{ dir }}/showcase {{ dir }}/compare {{ dir }}/range
     cargo build --quiet -p yamt-cli
     for case in tests/golden/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/golden/$(basename "$case").json"; done
     for case in tests/showcase/*/; do target/debug/yamt-cli fixture "$case" > "{{ dir }}/showcase/$(basename "$case").json"; done
     for case in tests/compare/*/; do target/debug/yamt-cli compare "$case" > "{{ dir }}/compare/$(basename "$case").json"; done
+    rm -rf target/range-repo && scripts/range-repo.sh target/range-repo > /dev/null
+    {{ hermetic_git }} target/debug/yamt-cli range target/range-repo main...feature > "{{ dir }}/range/review.json"
+    {{ hermetic_git }} target/debug/yamt-cli range target/range-repo feature..feature > "{{ dir }}/range/empty.json"
 
 web-lint: (frontend "lint")
 
@@ -116,22 +120,37 @@ golden-show case:
 golden-repo case dir:
     scripts/golden-repo.sh {{ case }} {{ dir }}
 
-# Mutation testing of the lines changed since <base> (not in `check`; the orchestrator runs it after each slice, the verifier once per feature).
+# Mutation testing of the lines ONE patch changed since <base> (not in `check`; the orchestrator runs it after each
+# slice's patch, <base> = the commit before it). A whole feature is refused: 791 Rust mutants ran at ~1.5 min each (#1630).
 mutants base:
     #!/usr/bin/env bash
     set -euo pipefail
+    # One patch's worth: the largest single-patch runs were 143 Rust mutants and 19 TypeScript files.
+    max_rust_mutants=200
+    max_web_files=30
     # cargo-mutants copies and builds the tree in TMPDIR, and the tests make temp repos there: on disk (/tmp is RAM
     # here) and outside any git work tree (tests need a plain directory) (#574, #578).
     mkdir -p target/mutants /var/tmp/yamt-mutants
     git diff --no-color --no-ext-diff --no-renames --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
+    rust_mutants=0
     if [ -s target/mutants/rust.diff ]; then
+        rust_mutants=$(cargo mutants --in-diff target/mutants/rust.diff --list | wc -l)
+    fi
+    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
+    web_count=$(printf '%s' "$web_files" | tr ',' '\n' | grep -c . || true)
+    if [ "$rust_mutants" -gt "$max_rust_mutants" ] || [ "$web_count" -gt "$max_web_files" ]; then
+        echo "mutants: refused: {{ base }} covers $rust_mutants Rust mutants and $web_count TypeScript files," >&2
+        echo "  more than one patch (at most $max_rust_mutants and $max_web_files). Mutate each patch on its own:" >&2
+        echo "  just mutants <the commit before that patch>. A whole-feature run takes hours (#1630, VF7)." >&2
+        exit 1
+    fi
+    if [ "$rust_mutants" -gt 0 ]; then
         status=0
         TMPDIR=/var/tmp/yamt-mutants {{ hermetic_git }} {{ capped_tests }} cargo mutants --in-diff target/mutants/rust.diff --test-workspace=false --output target/mutants || status=$?
         if [ "$status" -ne 0 ] && [ "$status" -ne 2 ] && [ "$status" -ne 3 ]; then exit "$status"; fi
     else
         echo "mutants: no Rust changes since {{ base }}"
     fi
-    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     if [ -n "$web_files" ]; then
         # --ignoreStatic: module-level mutants are not re-evaluated under the vitest runner, so they survive
         # whatever the tests assert (#732: 134 false survivors).

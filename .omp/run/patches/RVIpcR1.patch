@@ -1,0 +1,506 @@
+From 3d9d0ce2b8587f68b3359c92bf9686f669acb27b Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:57:06 +0200
+Subject: [PATCH] fix(ipc): one fixture Difference schema and case parser;
+ committed range cases and the Tauri source tested
+
+---
+ .omp/run/notes/RVIpcR1.md             |  50 ++++++++++++
+ frontend/src/ipc/fixture.test.ts      |  14 +++-
+ frontend/src/ipc/fixture.ts           |  28 ++++++-
+ frontend/src/ipc/fixtureCompare.ts    |  25 ++----
+ frontend/src/ipc/fixtureRange.test.ts |  59 +++++++++++++-
+ frontend/src/ipc/fixtureRange.ts      |  43 +++++------
+ frontend/src/ipc/tauriRange.test.ts   | 107 ++++++++++++++++++++++++++
+ 7 files changed, 280 insertions(+), 46 deletions(-)
+ create mode 100644 .omp/run/notes/RVIpcR1.md
+ create mode 100644 frontend/src/ipc/tauriRange.test.ts
+
+diff --git a/.omp/run/notes/RVIpcR1.md b/.omp/run/notes/RVIpcR1.md
+new file mode 100644
+index 0000000..89db2b3
+--- /dev/null
++++ b/.omp/run/notes/RVIpcR1.md
+@@ -0,0 +1,50 @@
++All five items in the brief are done. typecheck, lint and fmt:check pass. `pnpm -C frontend unused` still exits 1, on 21 findings that were already there before this round (detail in `open_risks`). One full test run had a single failure I couldn't name; the next two runs passed.
++
++## summary
++- `fixture.ts` now exports `DIFFERENCE`, `memberOf` and `parsedCases(schema, label, files, convert): Map<string, T>`, which holds the one rule turning a path into a case name. `fixtureCompare.ts` and `fixtureRange.ts` both use them, so their two copies are gone.
++- The two `v.picklist`s in `fixtureRange.ts` are replaced by `memberOf(ENTRY_KINDS)` and `memberOf(RANGE_SIDES)`, typed `Readonly<Record<Generated.RangeEntryKind | RangeSides, true>>`.
++- New tests: the committed range cases are parsed, the Tauri range source has its own test file (`tauriRange.test.ts`), and the no-parameter default `""` is pinned.
++
++## files_changed
++- `frontend/src/ipc/fixture.ts`
++- `frontend/src/ipc/fixture.test.ts`
++- `frontend/src/ipc/fixtureRange.ts`
++- `frontend/src/ipc/fixtureRange.test.ts`
++- `frontend/src/ipc/fixtureCompare.ts`
++- `frontend/src/ipc/tauriRange.test.ts` (new)
++
++## tests_added
++- **fixtureRange.test.ts**
++  - "the committed cases parse: review lists 13 files of every kind, empty none" uses the default glob. `?range` lists 13 entries; entry 3 is `docs/keys.md` renamed from `docs/shortcuts.md` (as `oldPath`), entry 6 is the deleted `src/api/mockBoards.ts`. The `loadRangeFile` kinds come back in the brief's order: kindChanged, tooLarge, texts, texts, notUtf8, binary, texts, texts, texts, modeOnly, texts, texts, submodule. File 10's mode is changed from `file` to `executable`. `?range=empty` lists none, and nothing is logged.
++  - `test.each(["", "?range", "?range="])` "'%s' without a case loads review" pins the case with no `range` parameter at all.
++  - Three new rows in the parse-failure table: an unknown entry kind, an entry kind that is no string (`["file"]`, which kills the `typeof` half of `memberOf`), and unknown sides. Each checks the `expected one of …` message.
++- **tauriRange.test.ts**
++  - "openRange and loadRangeFile turn the app's replies into domain data": `shortId` and `oldPath` are camelCased, and the id is sent unchanged.
++  - "an UnknownRangeFile error comes back unchanged": the reply is `{ ok: false, failure }`.
++  - "a texts reply with a negative difference line is refused, naming the field": it rejects with `differences[0].left.start must be a non-negative safe integer, got -1`.
++- **fixture.test.ts**
++  - "parsedCases names each case by its file name without the last .json": `../a.json/v1.jsonc.json` → `v1.jsonc`. This kills the mutant that removes the `$` anchor.
++  - "parsedCases names the file in a parse failure": the error starts `range fixture bad.json: `.
++
++## smoke_evidence
++- `pnpm -C frontend typecheck` → `$ vue-tsc -b`, no errors.
++- With `submodule: true` removed from `ENTRY_KINDS` for one run, then restored, typecheck fails: `src/ipc/fixtureRange.ts(29,7): error TS2741: Property 'submodule' is missing in type '{ file: true; executable: true; link: true; }' but required in type 'Readonly<Record<RangeEntryKind, true>>'.`
++- `pnpm -C frontend lint` → `$ oxlint --type-aware && eslint --max-warnings 0 "src/**/*.vue"`, no findings.
++- `pnpm -C frontend fmt:check` → `All matched files use the correct format.`
++- `pnpm -C frontend test` → `Test Files 157 passed (157)  Tests 2027 passed (2027)`, the last two runs. One run before that, under load (15.9 s instead of the usual 4.6 s), reported `1 failed | 2026 passed`; see `open_risks`.
++- `vitest run --project node src/ipc` → `Tests 236 passed (236)`.
++- `pnpm -C frontend unused` → `Unused exports (2)`, `Unused exported types (19)`. All 21 are the range surface in `index.ts` and `rangeDomain.ts`, which have no importers yet. I touched neither file, and none of the findings are the new exports `DIFFERENCE`, `memberOf` or `parsedCases`.
++- Stryker on the changed lines that run at call time (`fixture.ts:51-56,160-172`, `fixtureRange.ts:101-143`, `tauriRange.ts`, with `--ignoreStatic`): `fixtureRange.ts 100.00`, `tauriRange.ts 100.00`, `fixture.ts 78.95 (15 killed, 4 survived)`. The four survivors:
++  - `fixture.ts:53:5` (the arrow becomes `() => undefined`) and `fixture.ts:54:5` / `54:50` (the message): `memberOf` is called at module scope, so these are module-level mutants the vitest runner never re-evaluates (#732 / #1609). The new parse-failure rows would kill them once they are re-evaluated.
++  - `fixture.ts:168:20`: removing the `^` from `/^.*\//u` changes nothing, because `.*` is greedy.
++  - On the whole of `fixtureRange.ts`, the only survivors are its module-level schema constants, the same class the correctness review already dropped.
++
++## deviations_from_brief
++- `LINE_RANGE`, `SIDE_WORD_CHANGES` and `parsedFixture` are no longer exported from `fixture.ts`; their only outside users now go through `DIFFERENCE` and `parsedCases`, and knip would flag the leftover exports.
++- `fixtureRange.ts`'s local `parseCases` would have had a single caller, so it is folded into `createFixtureRangeSource`. `fixtureCompare.ts` keeps its `parseCases`, which has two callers.
++- I added the two `parsedCases` tests in `fixture.test.ts` and the three `memberOf` refusal rows in `fixtureRange.test.ts` for SP5's mutant kills; the brief didn't list them.
++
++## open_risks
++- One full `pnpm -C frontend test` run had one failure, during the slow run noted above. I didn't capture its name, and the next two runs passed. It's probably a timing test that fails under load, not one of the ipc changes: the ipc project passed every time.
++- `pnpm -C frontend unused` exits 1 on this branch before this round too (`frontend/src/ipc/index.ts:41-100`, `frontend/src/ipc/rangeDomain.ts:6-30`). It will stay that way until row 9 imports the range surface.
++- Neither committed fixture uses the `submodule` entry kind, so `ENTRY_KINDS.submodule` (`frontend/src/ipc/fixtureRange.ts:33`) is covered only by the type check, not by a test.
+\ No newline at end of file
+diff --git a/frontend/src/ipc/fixture.test.ts b/frontend/src/ipc/fixture.test.ts
+index d70139a..43ce05c 100644
+--- a/frontend/src/ipc/fixture.test.ts
++++ b/frontend/src/ipc/fixture.test.ts
+@@ -2,7 +2,7 @@ import * as v from "valibot";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import type { ChunkSource } from "./ChunkSource";
+-import { createFixtureSource, loadFixture } from "./fixture";
++import { createFixtureSource, loadFixture, parsedCases } from "./fixture";
+ import type { DiskChange, DiskVersion, FileEntry, Side, SourceResult } from "./index";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+@@ -760,3 +760,15 @@ test("loadFixture reads a committed or an in-memory record and rejects an unknow
+     "no fixture for nope.ts",
+   );
+ });
++
++test("parsedCases names each case by its file name without the last .json", () => {
++  const cases = parsedCases(v.string(), "case", { "../a.json/v1.jsonc.json": "x" }, (text) => text);
++
++  expect([...cases]).toEqual([["v1.jsonc", "x"]]);
++});
++
++test("parsedCases names the file in a parse failure", () => {
++  expect(() => parsedCases(v.string(), "range fixture", { "bad.json": 1 }, (text) => text)).toThrow(
++    /^range fixture bad\.json: /,
++  );
++});
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 9a5990f..1d3caca 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -48,14 +48,14 @@ const NOT_TEXT: Readonly<Record<Generated.NotText, true>> = {
+   Directory: true,
+ };
+ 
+-function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
++export function memberOf<T extends string>(members: Readonly<Record<T, true>>): v.GenericSchema<T> {
+   return v.custom<T>(
+     (input) => typeof input === "string" && Object.hasOwn(members, input),
+     `expected one of ${Object.keys(members).join(", ")}`,
+   );
+ }
+ 
+-export const LINE_RANGE = v.object({
++const LINE_RANGE = v.object({
+   start: v.number(),
+   len: v.number(),
+ } satisfies SchemaOf<Generated.LineRange<number>>);
+@@ -84,11 +84,17 @@ const REMOVAL = v.object({
+   text: v.string(),
+ } satisfies SchemaOf<Generated.Removal<number>>);
+ 
+-export const SIDE_WORD_CHANGES = v.object({
++const SIDE_WORD_CHANGES = v.object({
+   changed: v.array(INLINE_RANGE),
+   removals: v.array(REMOVAL),
+ } satisfies SchemaOf<Generated.SideWordChanges<number>>);
+ 
++export const DIFFERENCE = v.object({
++  left: LINE_RANGE,
++  right: LINE_RANGE,
++  words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
++} satisfies SchemaOf<Generated.Difference>);
++
+ const WORD_CHANGES = v.object({
+   chunk: v.number(),
+   local: SIDE_WORD_CHANGES,
+@@ -132,7 +138,7 @@ const FILE_MERGE_DATA = v.object({
+   disk_version: v.number(),
+ } satisfies SchemaOf<Generated.FileMergeData>);
+ 
+-export function parsedFixture<O, T>(
++function parsedFixture<O, T>(
+   schema: v.GenericSchema<unknown, O>,
+   name: string,
+   json: unknown,
+@@ -151,6 +157,20 @@ export function parsedFixture<O, T>(
+   }
+ }
+ 
++export function parsedCases<O, T>(
++  schema: v.GenericSchema<unknown, O>,
++  label: string,
++  files: Readonly<Record<string, unknown>>,
++  convert: (parsed: O) => T,
++): Map<string, T> {
++  return new Map(
++    Object.entries(files).map(([file, json]) => [
++      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
++      parsedFixture(schema, `${label} ${file}`, json, convert),
++    ]),
++  );
++}
++
+ function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, FileMergeData> {
+   const parsed = Object.entries(files).map(([file, json]) =>
+     parsedFixture(FILE_MERGE_DATA, `fixture ${file}`, json, toDomain),
+diff --git a/frontend/src/ipc/fixtureCompare.ts b/frontend/src/ipc/fixtureCompare.ts
+index dd60844..af0d67a 100644
+--- a/frontend/src/ipc/fixtureCompare.ts
++++ b/frontend/src/ipc/fixtureCompare.ts
+@@ -16,7 +16,7 @@ import {
+ } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+ import type { SourceResult } from "./domain";
+-import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
++import { DIFFERENCE, parsedCases } from "./fixture";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ 
+@@ -55,28 +55,17 @@ const COLUMN_LIMIT_BYTES = 8_388_608;
+ const FIRST_TAB_ID = 1;
+ 
+ const CASE = v.object({
+-  differences: v.array(
+-    v.object({
+-      left: LINE_RANGE,
+-      right: LINE_RANGE,
+-      words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
+-    }),
+-  ),
++  differences: v.array(DIFFERENCE),
+   left: v.string(),
+   right: v.string(),
+ });
+ 
+ function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
+-  return new Map(
+-    Object.entries(files).map(([file, json]) => [
+-      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
+-      parsedFixture(CASE, `compare fixture ${file}`, json, ({ left, right, differences }) => ({
+-        left,
+-        right,
+-        differences: toDifferences(differences),
+-      })),
+-    ]),
+-  );
++  return parsedCases(CASE, "compare fixture", files, ({ left, right, differences }) => ({
++    left,
++    right,
++    differences: toDifferences(differences),
++  }));
+ }
+ 
+ function addTab(tabs: Tabs): FixtureTab {
+diff --git a/frontend/src/ipc/fixtureRange.test.ts b/frontend/src/ipc/fixtureRange.test.ts
+index fda4446..9523e36 100644
+--- a/frontend/src/ipc/fixtureRange.test.ts
++++ b/frontend/src/ipc/fixtureRange.test.ts
+@@ -113,7 +113,7 @@ test("?range=review lists the case's sides and files and loads each file by its
+   expect(entries).toEqual([]);
+ });
+ 
+-test.each(["?range", "?range="])("%s without a case loads review", async (search) => {
++test.each(["", "?range", "?range="])("'%s' without a case loads review", async (search) => {
+   const source = createFixtureRangeSource(quietLog().log, search, FILES);
+ 
+   expect(valueOf(await source.openRange())).toEqual(REVIEW_START);
+@@ -160,8 +160,65 @@ test("loadRangeFile of an id past the list answers UnknownRangeFile with that id
+   });
+ });
+ 
++test("the committed cases parse: review lists 13 files of every kind, empty none", async () => {
++  const { log, entries } = quietLog();
++  const review = createFixtureRangeSource(log, "?range");
++
++  const start = valueOf(await review.openRange());
++  const loaded = await Promise.all(
++    start.files.map(async ({ id }) => valueOf(await review.loadRangeFile(id))),
++  );
++
++  expect(start.files).toHaveLength(13);
++  expect(start.files[3]).toMatchObject({
++    path: "docs/keys.md",
++    change: { kind: "renamed", oldPath: "docs/shortcuts.md" },
++  });
++  expect(start.files[6]).toMatchObject({
++    path: "src/api/mockBoards.ts",
++    change: { kind: "deleted" },
++  });
++  expect(loaded.map((file) => file.kind)).toEqual([
++    "kindChanged",
++    "tooLarge",
++    "texts",
++    "texts",
++    "notUtf8",
++    "binary",
++    "texts",
++    "texts",
++    "texts",
++    "modeOnly",
++    "texts",
++    "texts",
++    "submodule",
++  ]);
++  expect(loaded[10]).toMatchObject({
++    mode: { kind: "changed", old: "file", new: "executable" },
++  });
++  expect(valueOf(await createFixtureRangeSource(log, "?range=empty").openRange()).files).toEqual(
++    [],
++  );
++  expect(entries).toEqual([]);
++});
++
+ test.each([
+   ["a missing start", { files: [] }, 'Invalid key: Expected "start"'],
++  [
++    "an unknown entry kind",
++    { start: EMPTY.start, files: [{ kind: "modeOnly", old: "file", new: "nope" }] },
++    "expected one of file, executable, link, submodule",
++  ],
++  [
++    "an entry kind that is no string",
++    { start: EMPTY.start, files: [{ kind: "modeOnly", old: ["file"], new: "link" }] },
++    "expected one of file, executable, link, submodule",
++  ],
++  [
++    "unknown sides",
++    { start: EMPTY.start, files: [{ kind: "notUtf8", sides: "middle" }] },
++    "expected one of left, right, both",
++  ],
+   ["an unknown file kind", { start: EMPTY.start, files: [{ kind: "nope" }] }, "kind"],
+   [
+     "a negative file id",
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+index 61fcc08..aa61fb7 100644
+--- a/frontend/src/ipc/fixtureRange.ts
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -1,7 +1,7 @@
+ import * as v from "valibot";
+ 
+ import type * as Generated from "./bindings";
+-import { LINE_RANGE, parsedFixture, SIDE_WORD_CHANGES } from "./fixture";
++import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ import {
+@@ -26,7 +26,20 @@ const DEFAULT_CASE = "review";
+ 
+ const NULL_SHORT_ID = "0000000";
+ 
+-const ENTRY_KIND = v.picklist(["file", "executable", "link", "submodule"]);
++const ENTRY_KINDS: Readonly<Record<Generated.RangeEntryKind, true>> = {
++  file: true,
++  executable: true,
++  link: true,
++  submodule: true,
++};
++
++const RANGE_SIDES: Readonly<Record<Generated.RangeSides, true>> = {
++  left: true,
++  right: true,
++  both: true,
++};
++
++const ENTRY_KIND = memberOf(ENTRY_KINDS);
+ 
+ const RANGE_SIDE: v.GenericSchema<Generated.RangeSide> = v.object({
+   label: v.variant("kind", [
+@@ -52,12 +65,6 @@ const RANGE_ENTRY: v.GenericSchema<Generated.RangeEntry> = v.object({
+   ]),
+ });
+ 
+-const DIFFERENCE: v.GenericSchema<Generated.Difference> = v.object({
+-  left: LINE_RANGE,
+-  right: LINE_RANGE,
+-  words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
+-});
+-
+ const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
+   v.object({
+     kind: v.literal("texts"),
+@@ -71,7 +78,7 @@ const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
+   }),
+   v.object({ kind: v.literal("binary") }),
+   v.object({ kind: v.literal("tooLarge"), limit: v.number() }),
+-  v.object({ kind: v.literal("notUtf8"), sides: v.picklist(["left", "right", "both"]) }),
++  v.object({ kind: v.literal("notUtf8"), sides: memberOf(RANGE_SIDES) }),
+   v.object({ kind: v.literal("modeOnly"), old: ENTRY_KIND, new: ENTRY_KIND }),
+   v.object({ kind: v.literal("kindChanged"), old: ENTRY_KIND, new: ENTRY_KIND }),
+   v.object({
+@@ -91,18 +98,6 @@ const CASE = v.object({
+   files: v.array(RANGE_FILE),
+ });
+ 
+-function parseCases(files: Readonly<Record<string, unknown>>): Map<string, Case> {
+-  return new Map(
+-    Object.entries(files).map(([file, json]) => [
+-      file.replace(/^.*\//u, "").replace(/\.json$/u, ""),
+-      parsedFixture(CASE, `range fixture ${file}`, json, ({ start, files: loaded }) => ({
+-        start: toRangeStart(start),
+-        files: loaded.map(toRangeFile),
+-      })),
+-    ]),
+-  );
+-}
+-
+ function missingCase(name: string): Case {
+   const side: RangeSide = {
+     label: { kind: "named", name: "HEAD" },
+@@ -128,7 +123,11 @@ export function createFixtureRangeSource(
+   search: string,
+   files: Readonly<Record<string, unknown>> = CASE_FILES,
+ ): RangeSource {
+-  const shown = shownCase(log, search, parseCases(files));
++  const cases = parsedCases(CASE, "range fixture", files, ({ start, files: loaded }) => ({
++    start: toRangeStart(start),
++    files: loaded.map(toRangeFile),
++  }));
++  const shown = shownCase(log, search, cases);
+   return {
+     async openRange() {
+       return { ok: true, value: shown.start };
+diff --git a/frontend/src/ipc/tauriRange.test.ts b/frontend/src/ipc/tauriRange.test.ts
+new file mode 100644
+index 0000000..a5ba08e
+--- /dev/null
++++ b/frontend/src/ipc/tauriRange.test.ts
+@@ -0,0 +1,107 @@
++import { beforeEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import { isRangeFileId, type RangeFileId } from "./domain";
++import { createTauriRangeSource } from "./tauriRange";
++
++const commands = vi.hoisted(() => ({
++  openRange: vi.fn(),
++  loadRangeFile: vi.fn(),
++}));
++
++vi.mock("./bindings", () => ({ commands }));
++
++vi.mock("@tauri-apps/api/core", () => ({ Channel: class {} }));
++
++const START: Generated.RangeStart = {
++  range: "main...feature",
++  left: {
++    label: { kind: "mergeBase", left: "main", right: "feature" },
++    short_id: "1b2cfed",
++    subject: "Start",
++  },
++  right: { label: { kind: "named", name: "feature" }, short_id: "2b3b4b5", subject: "Remind" },
++  files: [
++    {
++      id: 0,
++      path: "docs/keys.md",
++      change: { kind: "renamed", old_path: "docs/shortcuts.md" },
++      lines: { kind: "counted", added: 2, removed: 0 },
++    },
++  ],
++};
++
++const DIFFERENCE: Generated.Difference = {
++  left: { start: 0, len: 1 },
++  right: { start: 0, len: 2 },
++  words: {
++    left: { changed: [{ line: 0, start: 1, len: 2 }], removals: [] },
++    right: { changed: [], removals: [{ at: { line: 1, column: 0 }, text: "y" }] },
++  },
++};
++
++const TEXTS: Generated.RangeFile = {
++  kind: "texts",
++  left: "a\n",
++  right: "b\nc\n",
++  differences: [DIFFERENCE],
++  mode: { kind: "changed", old: "file", new: "executable" },
++};
++
++function fileId(n: number): RangeFileId {
++  if (!isRangeFileId(n)) {
++    throw new Error(`${n} is no file id`);
++  }
++  return n;
++}
++
++beforeEach(() => {
++  vi.resetAllMocks();
++});
++
++test("openRange and loadRangeFile turn the app's replies into domain data", async () => {
++  commands.openRange.mockResolvedValue(START);
++  commands.loadRangeFile.mockResolvedValue({ status: "ok", data: TEXTS });
++  const source = createTauriRangeSource();
++
++  expect(await source.openRange()).toEqual({
++    ok: true,
++    value: {
++      range: "main...feature",
++      left: {
++        label: { kind: "mergeBase", left: "main", right: "feature" },
++        shortId: "1b2cfed",
++        subject: "Start",
++      },
++      right: { label: { kind: "named", name: "feature" }, shortId: "2b3b4b5", subject: "Remind" },
++      files: [
++        {
++          id: 0,
++          path: "docs/keys.md",
++          change: { kind: "renamed", oldPath: "docs/shortcuts.md" },
++          lines: { kind: "counted", added: 2, removed: 0 },
++        },
++      ],
++    },
++  });
++  expect(await source.loadRangeFile(fileId(4))).toEqual({ ok: true, value: TEXTS });
++  expect(commands.loadRangeFile).toHaveBeenCalledWith(4);
++});
++
++test("an UnknownRangeFile error comes back unchanged", async () => {
++  const failure: Generated.IpcError = { kind: "UnknownRangeFile", file: 7 };
++  commands.loadRangeFile.mockResolvedValue({ status: "error", error: failure });
++
++  expect(await createTauriRangeSource().loadRangeFile(fileId(7))).toEqual({ ok: false, failure });
++});
++
++test("a texts reply with a negative difference line is refused, naming the field", async () => {
++  commands.loadRangeFile.mockResolvedValue({
++    status: "ok",
++    data: { ...TEXTS, differences: [{ ...DIFFERENCE, left: { start: -1, len: 1 } }] },
++  });
++
++  await expect(createTauriRangeSource().loadRangeFile(fileId(0))).rejects.toThrow(
++    "differences[0].left.start must be a non-negative safe integer, got -1",
++  );
++});
+-- 
+2.56.0
+

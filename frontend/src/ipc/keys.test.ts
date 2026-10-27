@@ -8,6 +8,7 @@ import {
   isLinux,
   isMac,
   keyLabel,
+  keyList,
   keyOfEvent,
   keyText,
   parseKey,
@@ -172,6 +173,12 @@ test("anything else is refused", () => {
   ]) {
     expect(parseKey(text)).toBeNull();
   }
+});
+
+test("keyList parses each text in order and refuses one that does not parse", () => {
+  expect(texts(keyList("Mod-Enter", "Escape"))).toEqual(["Mod-Enter", "Escape"]);
+  expect(keyList()).toEqual([]);
+  expect(() => keyList("Escape", "Ctrl-z")).toThrow("key Ctrl-z does not parse");
 });
 
 test("sameKey compares every modifier and the name", () => {

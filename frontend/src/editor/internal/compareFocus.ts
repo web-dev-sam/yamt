@@ -9,7 +9,12 @@ import { rangeSpan } from "./geometry";
 import type { Direction } from "./navigation";
 import { revealSpan } from "./viewport";
 
-export function keyboardColumn(views: ColumnViews): Column | null {
+type Focusable = {
+  readonly dom: Pick<Node, "contains">;
+  readonly root: Pick<DocumentOrShadowRoot, "activeElement">;
+};
+
+export function keyboardColumn(views: Readonly<Record<Column, Focusable>>): Column | null {
   return (
     COLUMNS.find((column) => {
       const view = views[column];
@@ -18,7 +23,15 @@ export function keyboardColumn(views: ColumnViews): Column | null {
   );
 }
 
-export function revealDifference(view: EditorView, direction: Direction): void {
+export function arrowColumn(views: Readonly<Record<Column, Focusable>>): Column {
+  return keyboardColumn(views) ?? "left";
+}
+
+export function moveToDifference(views: ColumnViews, direction: Direction): void {
+  revealDifference(views[arrowColumn(views)], direction);
+}
+
+function revealDifference(view: EditorView, direction: Direction): void {
   const { state } = view;
   const target = nextDifference(
     state.doc,

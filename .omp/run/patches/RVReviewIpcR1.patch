@@ -1,0 +1,539 @@
+From 8fdd485558f12c3f4f6a2ef3399f1753b29e69ee Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:18:59 +0100
+Subject: [PATCH] fix(ipc): one brand-or-throw, one result conversion, the
+ fixture send as Rust's
+
+---
+ frontend/src/ipc/compareDomain.ts      | 24 ++++--------------
+ frontend/src/ipc/fixtureGitLab.test.ts | 34 +++++++++++++++++---------
+ frontend/src/ipc/fixtureGitLab.ts      | 19 +++++++++-----
+ frontend/src/ipc/fixtureReview.test.ts | 19 ++++++++++++++
+ frontend/src/ipc/fixtureReview.ts      | 16 ++++++------
+ frontend/src/ipc/reviewDomain.ts       | 13 +---------
+ frontend/src/ipc/tauri.ts              |  9 +++----
+ frontend/src/ipc/tauriCompare.test.ts  | 17 +++++++++++++
+ frontend/src/ipc/tauriCompare.ts       | 29 +++++++++-------------
+ frontend/src/ipc/tauriRange.ts         |  5 ++--
+ frontend/src/ipc/threadLine.ts         | 32 +++++++-----------------
+ frontend/src/ipc/validate.test.ts      | 14 +++++++++++
+ frontend/src/ipc/validate.ts           | 11 +++++++++
+ 13 files changed, 136 insertions(+), 106 deletions(-)
+ create mode 100644 frontend/src/ipc/validate.test.ts
+
+diff --git a/frontend/src/ipc/compareDomain.ts b/frontend/src/ipc/compareDomain.ts
+index 211f13b..fe66944 100644
+--- a/frontend/src/ipc/compareDomain.ts
++++ b/frontend/src/ipc/compareDomain.ts
+@@ -11,7 +11,7 @@ import {
+   type RightLine,
+   type TabId,
+ } from "./domain";
+-import { invalid, isNonNegativeInteger } from "./validate";
++import { branded, invalid, isNonNegativeInteger } from "./validate";
+ import { toSideWords, type SideWords } from "./words";
+ 
+ export type Column = Generated.Column;
+@@ -46,29 +46,15 @@ export type ColumnWrite = {
+   readonly version: ColumnVersion;
+ };
+ 
+-function toTabId(n: number, field: string): TabId {
+-  if (!isTabId(n)) {
+-    throw invalid(field, n);
+-  }
+-  return n;
+-}
+-
+-function toColumnVersion(n: number, field: string): ColumnVersion {
+-  if (!isColumnVersion(n)) {
+-    throw invalid(field, n);
+-  }
+-  return n;
+-}
+-
+ export function toTabList(dto: Generated.TabList): TabList {
+   return {
+     tabs: dto.tabs.map(({ id, name, language, holds_text: holdsText }, index) => ({
+-      id: toTabId(id, `tabs[${index}].id`),
++      id: branded(id, isTabId, `tabs[${index}].id`),
+       name,
+       language,
+       holdsText,
+     })),
+-    shown: toTabId(dto.shown, "shown"),
++    shown: branded(dto.shown, isTabId, "shown"),
+   };
+ }
+ 
+@@ -82,8 +68,8 @@ export function toCompareStart(dto: Generated.CompareStart): CompareStart {
+ 
+ export function toColumnVersions(dto: Generated.ColumnVersions): ColumnVersions {
+   return {
+-    left: toColumnVersion(dto.left, "versions.left"),
+-    right: toColumnVersion(dto.right, "versions.right"),
++    left: branded(dto.left, isColumnVersion, "versions.left"),
++    right: branded(dto.right, isColumnVersion, "versions.right"),
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/fixtureGitLab.test.ts b/frontend/src/ipc/fixtureGitLab.test.ts
+index 1f33dc6..3ecd2e5 100644
+--- a/frontend/src/ipc/fixtureGitLab.test.ts
++++ b/frontend/src/ipc/fixtureGitLab.test.ts
+@@ -3,31 +3,27 @@ import { expect, test } from "vitest";
+ import { gitLabCheck, pendingPosting, postOutcome, type GitLabScript } from "./fixtureGitLab";
+ import type { RangeStart } from "./rangeDomain";
+ 
+-const DETACHED: RangeStart = {
++const COMMIT_ID_RIGHT: RangeStart = {
+   range: "1a2b3c4..5d6e7f8",
+   left: { label: { kind: "named", name: "1a2b3c4" }, shortId: "1a2b3c4", subject: "Old" },
+-  right: {
+-    label: { kind: "mergeBase", left: "main", right: "feature" },
+-    shortId: "5d6e7f8",
+-    subject: "New",
+-  },
++  right: { label: { kind: "named", name: "5d6e7f8" }, shortId: "5d6e7f8", subject: "New" },
+   files: [],
+ };
+ 
+ test.each<GitLabScript>(["noMergeRequest", "several"])(
+-  "%s looks the merge requests up by commit when the right side names no branch",
++  "%s looks the merge requests up by the right side's name as a branch, even a commit id",
+   (script) => {
+-    expect(gitLabCheck(script, DETACHED)).toMatchObject({
++    expect(gitLabCheck(script, COMMIT_ID_RIGHT)).toMatchObject({
+       kind: "notLinedUp",
+-      why: { looked_at: { kind: "commit", short_id: "5d6e7f8" } },
++      why: { looked_at: { kind: "branch", name: "5d6e7f8" } },
+     });
+   },
+ );
+ 
+-test("noBranch looks up by the right commit even when the right side names a branch", () => {
++test("only noBranch looks up by the right commit, even when the right side names a branch", () => {
+   const named: RangeStart = {
+-    ...DETACHED,
+-    right: { ...DETACHED.right, label: { kind: "named", name: "feature" } },
++    ...COMMIT_ID_RIGHT,
++    right: { ...COMMIT_ID_RIGHT.right, label: { kind: "named", name: "feature" } },
+   };
+ 
+   expect(gitLabCheck("noBranch", named)).toEqual({
+@@ -36,6 +32,20 @@ test("noBranch looks up by the right commit even when the right side names a bra
+   });
+ });
+ 
++test("a right side labelled as a merge base is refused as impossible", () => {
++  const mergeBaseRight: RangeStart = {
++    ...COMMIT_ID_RIGHT,
++    right: {
++      ...COMMIT_ID_RIGHT.right,
++      label: { kind: "mergeBase", left: "main", right: "feature" },
++    },
++  };
++
++  expect(() => gitLabCheck("noMergeRequest", mergeBaseRight)).toThrow(
++    "a range's right side is never a merge base",
++  );
++});
++
+ test("a pending posting links the merge request's Changes page", () => {
+   expect(pendingPosting("Hi", 7)).toEqual({
+     kind: "pending",
+diff --git a/frontend/src/ipc/fixtureGitLab.ts b/frontend/src/ipc/fixtureGitLab.ts
+index 990123e..84a1363 100644
+--- a/frontend/src/ipc/fixtureGitLab.ts
++++ b/frontend/src/ipc/fixtureGitLab.ts
+@@ -37,10 +37,17 @@ const FAILED = "glab api projects/:fullpath/merge_requests: 502 Bad Gateway";
+ export const REFUSAL = `400 Bad request - Note {:line_code=>["can't be blank"]}`;
+ export const TIMED_OUT = "glab timed out";
+ 
+-function lookedAt(side: RangeSide): Generated.LookedAt {
+-  return side.label.kind === "named"
+-    ? { kind: "branch", name: side.label.name }
+-    : { kind: "commit", short_id: side.shortId };
++function rightBranch({ label }: RangeSide): Generated.LookedAt {
++  switch (label.kind) {
++    case "named":
++      return { kind: "branch", name: label.name };
++    case "mergeBase":
++      throw new Error("a range's right side is never a merge base");
++    default: {
++      const _exhaustive: never = label;
++      return _exhaustive;
++    }
++  }
+ }
+ 
+ const GITLAB_SCRIPTS: Readonly<Record<GitLabScript, true>> = {
+@@ -84,7 +91,7 @@ function notLinedUp(
+     checking: null,
+     noGlab: { kind: "glabMissing" },
+     loggedOut: { kind: "notLoggedIn", detail: LOGGED_OUT },
+-    noMergeRequest: { kind: "noMergeRequest", looked_at: lookedAt(right) },
++    noMergeRequest: { kind: "noMergeRequest", looked_at: rightBranch(right) },
+     noBranch: { kind: "noMergeRequest", looked_at: { kind: "commit", short_id: right.shortId } },
+     moved: {
+       kind: "moved",
+@@ -100,7 +107,7 @@ function notLinedUp(
+     },
+     several: {
+       kind: "several",
+-      looked_at: lookedAt(right),
++      looked_at: rightBranch(right),
+       references: [MERGE_REQUEST.reference, OTHER_REFERENCE],
+     },
+     preparing: { kind: "preparing", merge_request: MERGE_REQUEST },
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+index 0fcfd7d..265fd6e 100644
+--- a/frontend/src/ipc/fixtureReview.test.ts
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -511,3 +511,22 @@ test("a message unqueued while the send runs is not posted, and still counts as
+   ]);
+   expect(postings(await threadsOf(source))[1]).toEqual({ kind: "notQueued" });
+ });
++
++test("?gitlab=stopped skips a message unqueued before its post instead of stopping on it", async () => {
++  const source = review("?threads=seeded&gitlab=stopped");
++  const seen: SendProgress[] = [];
++  const reply = source.sendQueue((progress) => seen.push(progress));
++
++  await source.unqueueMessage(messageId(1));
++  const sent = valueOf(await settled(reply));
++
++  expect(sent).toMatchObject({ kind: "sent", sent: 1, refused: 0 });
++  expect(seen).toEqual([
++    { done: 1, of: 2 },
++    { done: 2, of: 2 },
++  ]);
++  expect(postings(await threadsOf(source)).slice(0, 2)).toEqual([
++    expect.objectContaining({ kind: "pending" }),
++    { kind: "notQueued" },
++  ]);
++});
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+index c968ac0..8271451 100644
+--- a/frontend/src/ipc/fixtureReview.ts
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -186,13 +186,10 @@ function waitingText(posting: Generated.Posting): string | null {
+ function record(
+   store: Store,
+   message: Generated.Message,
++  text: string,
+   outcome: PostOutcome,
+   tally: Tally,
+ ): void {
+-  const text = waitingText(message.posting);
+-  if (text === null) {
+-    return;
+-  }
+   if (outcome === "refused") {
+     message.posting = { kind: "refused", text, reason: REFUSAL };
+     tally.refused += 1;
+@@ -211,11 +208,14 @@ async function postQueue(
+   const tally: Tally = { sent: 0, refused: 0 };
+   for (const [index, message] of queued.entries()) {
+     await pause(POST_PAUSE_MS);
+-    const outcome = postOutcome(store.script, index);
+-    if (outcome === "stopped") {
+-      return { kind: "stopped", list: listed(store), ...tally, reason: TIMED_OUT };
++    const text = waitingText(message.posting);
++    if (text !== null) {
++      const outcome = postOutcome(store.script, index);
++      if (outcome === "stopped") {
++        return { kind: "stopped", list: listed(store), ...tally, reason: TIMED_OUT };
++      }
++      record(store, message, text, outcome, tally);
+     }
+-    record(store, message, outcome, tally);
+     onProgress({ done: index + 1, of: queued.length });
+   }
+   return { kind: "sent", list: listed(store), ...tally };
+diff --git a/frontend/src/ipc/reviewDomain.ts b/frontend/src/ipc/reviewDomain.ts
+index cb57761..45b53b4 100644
+--- a/frontend/src/ipc/reviewDomain.ts
++++ b/frontend/src/ipc/reviewDomain.ts
+@@ -8,7 +8,7 @@ import {
+   type ThreadId,
+ } from "./domain";
+ import { toThreadLine, type ThreadLine } from "./threadLine";
+-import { invalid } from "./validate";
++import { branded } from "./validate";
+ 
+ type MessageBody = Readonly<Generated.MessageBody>;
+ export type Posting =
+@@ -86,17 +86,6 @@ export type SendReply =
+       readonly reason: string;
+     };
+ 
+-function branded<T extends number>(
+-  value: number,
+-  isBrand: (n: number) => n is T,
+-  field: string,
+-): T {
+-  if (!isBrand(value)) {
+-    throw invalid(field, value);
+-  }
+-  return value;
+-}
+-
+ function toPosting(raw: Generated.Posting): Posting {
+   if (raw.kind !== "pending") {
+     return raw;
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index fc22f1b..a1d9ae0 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -86,8 +86,7 @@ function createTauriStops(): Pick<
+ > {
+   return {
+     async listStop() {
+-      const result = toResult(await commands.listStop());
+-      return result.ok ? { ok: true, value: toListing(result.value) } : result;
++      return converted(toResult(await commands.listStop()), toListing);
+     },
+     async continueOperation() {
+       return toResult(await commands.continueOperation());
+@@ -101,8 +100,7 @@ function createTauriStops(): Pick<
+ export function createTauriSource(): ChunkSource {
+   return {
+     async loadFile(path) {
+-      const result = toResult(await commands.loadFile(path));
+-      return result.ok ? { ok: true, value: toDomain(result.value) } : result;
++      return converted(toResult(await commands.loadFile(path)), toDomain);
+     },
+     async finishFile({ path, text, diskVersion }) {
+       return toResult(await commands.finishFile(path, text, diskVersion));
+@@ -114,8 +112,7 @@ export function createTauriSource(): ChunkSource {
+       return toResult(await commands.resetFile(path, diskVersion));
+     },
+     async describeFile(path) {
+-      const result = toResult(await commands.describeFile(path));
+-      return result.ok ? { ok: true, value: toSides(result.value) } : result;
++      return converted(toResult(await commands.describeFile(path)), toSides);
+     },
+     async takeSide(path, side, diskVersion) {
+       return toResult(await commands.takeSide(path, side, diskVersion));
+diff --git a/frontend/src/ipc/tauriCompare.test.ts b/frontend/src/ipc/tauriCompare.test.ts
+index d99cdec..f853e5e 100644
+--- a/frontend/src/ipc/tauriCompare.test.ts
++++ b/frontend/src/ipc/tauriCompare.test.ts
+@@ -115,6 +115,23 @@ test("each tab command returns the list in domain data, or the app's error uncha
+   expect(commands.setTabLanguage).toHaveBeenCalledWith(2, { kind: "picked", name: "JSON" });
+ });
+ 
++test("openCompare, loadTab and setColumn return the app's error unchanged", async () => {
++  const failure: Generated.IpcError = { kind: "WorkerStopped" };
++  commands.openCompare.mockResolvedValue({ status: "error", error: failure });
++  commands.loadTab.mockResolvedValue({ status: "error", error: UNKNOWN });
++  commands.setColumn.mockResolvedValue({ status: "error", error: UNKNOWN });
++  const source = createTauriCompareSource();
++  const tab = toTabList(LIST).shown;
++  const version = toColumnVersions({ left: 0, right: 0 }).left;
++
++  expect(await source.openCompare()).toEqual({ ok: false, failure });
++  expect(await source.loadTab(tab)).toEqual({ ok: false, failure: UNKNOWN });
++  expect(await source.setColumn({ tab, column: "left", text: "", version })).toEqual({
++    ok: false,
++    failure: UNKNOWN,
++  });
++});
++
+ test("a reply with a fractional tab id is refused, naming the field", async () => {
+   commands.showTab.mockResolvedValue({ status: "ok", data: { ...LIST, shown: 1.5 } });
+ 
+diff --git a/frontend/src/ipc/tauriCompare.ts b/frontend/src/ipc/tauriCompare.ts
+index 34b7a82..211f4a1 100644
+--- a/frontend/src/ipc/tauriCompare.ts
++++ b/frontend/src/ipc/tauriCompare.ts
+@@ -1,41 +1,36 @@
+ import { commands } from "./bindings";
+ import { toComparison, toCompareStart, toTabList, toTabTexts } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+-import { createTauriSettings, toResult } from "./tauri";
++import { converted, createTauriSettings, toResult } from "./tauri";
+ 
+ export function createTauriCompareSource(): CompareSource {
+   return {
+     async openCompare() {
+-      const result = toResult(await commands.openCompare());
+-      return result.ok ? { ok: true, value: toCompareStart(result.value) } : result;
++      return converted(toResult(await commands.openCompare()), toCompareStart);
+     },
+     async loadTab(tab) {
+-      const result = toResult(await commands.loadTab(tab));
+-      return result.ok ? { ok: true, value: toTabTexts(result.value) } : result;
++      return converted(toResult(await commands.loadTab(tab)), toTabTexts);
+     },
+     async setColumn({ tab, column, text, version }) {
+-      const result = toResult(await commands.setColumn(tab, column, text, version));
+-      return result.ok ? { ok: true, value: toComparison(result.value) } : result;
++      return converted(
++        toResult(await commands.setColumn(tab, column, text, version)),
++        toComparison,
++      );
+     },
+     async addTab() {
+-      const result = toResult(await commands.addTab());
+-      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
++      return converted(toResult(await commands.addTab()), toTabList);
+     },
+     async closeTab(tab) {
+-      const result = toResult(await commands.closeTab(tab));
+-      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
++      return converted(toResult(await commands.closeTab(tab)), toTabList);
+     },
+     async renameTab(tab, name) {
+-      const result = toResult(await commands.renameTab(tab, name));
+-      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
++      return converted(toResult(await commands.renameTab(tab, name)), toTabList);
+     },
+     async setTabLanguage(tab, language) {
+-      const result = toResult(await commands.setTabLanguage(tab, language));
+-      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
++      return converted(toResult(await commands.setTabLanguage(tab, language)), toTabList);
+     },
+     async showTab(tab) {
+-      const result = toResult(await commands.showTab(tab));
+-      return result.ok ? { ok: true, value: toTabList(result.value) } : result;
++      return converted(toResult(await commands.showTab(tab)), toTabList);
+     },
+     ...createTauriSettings(),
+   };
+diff --git a/frontend/src/ipc/tauriRange.ts b/frontend/src/ipc/tauriRange.ts
+index f4996d5..2d90e46 100644
+--- a/frontend/src/ipc/tauriRange.ts
++++ b/frontend/src/ipc/tauriRange.ts
+@@ -1,7 +1,7 @@
+ import { commands } from "./bindings";
+ import { toRangeFile, toRangeStart } from "./rangeDomain";
+ import type { RangeSource } from "./RangeSource";
+-import { createTauriSettings, toResult } from "./tauri";
++import { converted, createTauriSettings, toResult } from "./tauri";
+ import { createTauriReview } from "./tauriReview";
+ 
+ export function createTauriRangeSource(): RangeSource {
+@@ -10,8 +10,7 @@ export function createTauriRangeSource(): RangeSource {
+       return { ok: true, value: toRangeStart(await commands.openRange()) };
+     },
+     async loadRangeFile(file) {
+-      const result = toResult(await commands.loadRangeFile(file));
+-      return result.ok ? { ok: true, value: toRangeFile(result.value) } : result;
++      return converted(toResult(await commands.loadRangeFile(file)), toRangeFile);
+     },
+     ...createTauriReview(),
+     ...createTauriSettings(),
+diff --git a/frontend/src/ipc/threadLine.ts b/frontend/src/ipc/threadLine.ts
+index a3f78aa..541657b 100644
+--- a/frontend/src/ipc/threadLine.ts
++++ b/frontend/src/ipc/threadLine.ts
+@@ -1,7 +1,7 @@
+ import type * as Generated from "./bindings";
+ import type { Column } from "./compareDomain";
+ import { isLeftLine, isRightLine, type LeftLine, type RightLine } from "./domain";
+-import { invalid } from "./validate";
++import { branded } from "./validate";
+ 
+ export type ThreadLine =
+   | { readonly kind: "removed"; readonly left: LeftLine }
+@@ -34,32 +34,18 @@ export function shownColumn(line: ThreadLine): Column {
+   return shownLine(line).column;
+ }
+ 
+-function leftLine(n: number, field: string): LeftLine {
+-  if (!isLeftLine(n)) {
+-    throw invalid(field, n);
+-  }
+-  return n;
+-}
+-
+-function rightLine(n: number, field: string): RightLine {
+-  if (!isRightLine(n)) {
+-    throw invalid(field, n);
+-  }
+-  return n;
+-}
+-
+ export function changedThreadLine(column: Column, line: number): ThreadLine {
+   return column === "left"
+-    ? { kind: "removed", left: leftLine(line, "left line") }
+-    : { kind: "added", right: rightLine(line, "right line") };
++    ? { kind: "removed", left: branded(line, isLeftLine, "left line") }
++    : { kind: "added", right: branded(line, isRightLine, "right line") };
+ }
+ 
+ export function unchangedThreadLine(
+   column: Column,
+   lines: { readonly left: number; readonly right: number },
+ ): ThreadLine {
+-  const left = leftLine(lines.left, "left line");
+-  const right = rightLine(lines.right, "right line");
++  const left = branded(lines.left, isLeftLine, "left line");
++  const right = branded(lines.right, isRightLine, "right line");
+   return column === "left"
+     ? { kind: "unchangedOnLeft", left, right }
+     : { kind: "unchangedOnRight", left, right };
+@@ -68,15 +54,15 @@ export function unchangedThreadLine(
+ export function toThreadLine(raw: Generated.ThreadLine, field = "line"): ThreadLine {
+   switch (raw.kind) {
+     case "removed":
+-      return { kind: "removed", left: leftLine(raw.left, `${field}.left`) };
++      return { kind: "removed", left: branded(raw.left, isLeftLine, `${field}.left`) };
+     case "added":
+-      return { kind: "added", right: rightLine(raw.right, `${field}.right`) };
++      return { kind: "added", right: branded(raw.right, isRightLine, `${field}.right`) };
+     case "unchangedOnLeft":
+     case "unchangedOnRight":
+       return {
+         kind: raw.kind,
+-        left: leftLine(raw.left, `${field}.left`),
+-        right: rightLine(raw.right, `${field}.right`),
++        left: branded(raw.left, isLeftLine, `${field}.left`),
++        right: branded(raw.right, isRightLine, `${field}.right`),
+       };
+     default: {
+       const _exhaustive: never = raw;
+diff --git a/frontend/src/ipc/validate.test.ts b/frontend/src/ipc/validate.test.ts
+new file mode 100644
+index 0000000..8a51734
+--- /dev/null
++++ b/frontend/src/ipc/validate.test.ts
+@@ -0,0 +1,14 @@
++import { expect, test } from "vitest";
++
++import { isTabId } from "./domain";
++import { branded } from "./validate";
++
++test("branded returns a value its guard accepts", () => {
++  expect(branded(3, isTabId, "tab")).toBe(3);
++});
++
++test.each([-1, 0.5])("branded refuses %s, naming the field", (bad) => {
++  expect(() => branded(bad, isTabId, "tabs[2].id")).toThrow(
++    `tabs[2].id must be a non-negative safe integer, got ${bad}`,
++  );
++});
+diff --git a/frontend/src/ipc/validate.ts b/frontend/src/ipc/validate.ts
+index 59c0580..464e19d 100644
+--- a/frontend/src/ipc/validate.ts
++++ b/frontend/src/ipc/validate.ts
+@@ -5,3 +5,14 @@ export function isNonNegativeInteger(n: number): boolean {
+ export function invalid(field: string, value: number): Error {
+   return new Error(`${field} must be a non-negative safe integer, got ${value}`);
+ }
++
++export function branded<T extends number>(
++  value: number,
++  isBrand: (n: number) => n is T,
++  field: string,
++): T {
++  if (!isBrand(value)) {
++    throw invalid(field, value);
++  }
++  return value;
++}
+-- 
+2.56.0
+

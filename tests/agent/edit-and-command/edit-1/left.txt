@@ -1,0 +1,23 @@
+# Taskboard
+
+A small kanban board for the web team: columns with work-in-progress limits, cards with labels,
+people and due dates, and an activity feed.
+
+## Develop
+
+```sh
+pnpm install
+pnpm dev
+```
+
+On `localhost` the app shows a mock board (`src/api/mockBoards.ts`) instead of calling the API.
+
+## Check
+
+```sh
+pnpm typecheck
+pnpm lint
+pnpm format --check
+```
+
+Keyboard shortcuts are listed in [docs/shortcuts.md](docs/shortcuts.md).

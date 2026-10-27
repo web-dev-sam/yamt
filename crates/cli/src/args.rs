@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use yamt_merge_core::Options;
+use yamt_range::RangeSpec;
 
 use crate::{Error, Result};
 
@@ -29,6 +30,10 @@ pub(crate) enum Command {
     Compare {
         case_dir: PathBuf,
     },
+    Range {
+        repo: PathBuf,
+        spec: RangeSpec,
+    },
 }
 
 pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
@@ -48,6 +53,7 @@ pub(crate) fn parse(args: &[OsString]) -> Result<Command> {
         "compare" => Ok(Command::Compare {
             case_dir: required_path(rest, "<case-dir>")?,
         }),
+        "range" => parse_range(rest),
         other => Err(usage(format!("unknown command `{other}`"))),
     }
 }
@@ -102,6 +108,16 @@ fn parse_golden(args: &[String]) -> Result<Command> {
         "run" => Ok(Command::GoldenRun { dir }),
         "update" => Ok(Command::GoldenUpdate { dir }),
         other => Err(usage(format!("unknown golden action `{other}`"))),
+    }
+}
+
+fn parse_range(args: &[String]) -> Result<Command> {
+    match args {
+        [repo, range] => Ok(Command::Range {
+            repo: PathBuf::from(repo),
+            spec: RangeSpec::parse(range).map_err(|error| usage(error.to_string()))?,
+        }),
+        _ => Err(usage("range needs exactly <repo-dir> <range>".to_owned())),
     }
 }
 

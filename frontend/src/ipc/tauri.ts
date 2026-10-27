@@ -40,9 +40,12 @@ export function toResult<T>(result: CommandResult<T>): SourceResult<T> {
   return { ok: false, failure: result.error };
 }
 
+export function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
+  return result.ok ? { ok: true, value: to(result.value) } : result;
+}
+
 function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<SettingsRead> {
-  const settings = toResult(result);
-  return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
+  return converted(toResult(result), toSettingsRead);
 }
 
 export function createTauriSettings(): SettingsSource {
@@ -71,6 +74,9 @@ export function createTauriSettings(): SettingsSource {
     async setAddedServers(current, added) {
       return toSettingsResult(await commands.setAddedServers(current, [...added]));
     },
+    async setAgent(current, agent) {
+      return toSettingsResult(await commands.setAgent(current, agent));
+    },
   };
 }
 
@@ -80,8 +86,7 @@ function createTauriStops(): Pick<
 > {
   return {
     async listStop() {
-      const result = toResult(await commands.listStop());
-      return result.ok ? { ok: true, value: toListing(result.value) } : result;
+      return converted(toResult(await commands.listStop()), toListing);
     },
     async continueOperation() {
       return toResult(await commands.continueOperation());
@@ -95,8 +100,7 @@ function createTauriStops(): Pick<
 export function createTauriSource(): ChunkSource {
   return {
     async loadFile(path) {
-      const result = toResult(await commands.loadFile(path));
-      return result.ok ? { ok: true, value: toDomain(result.value) } : result;
+      return converted(toResult(await commands.loadFile(path)), toDomain);
     },
     async finishFile({ path, text, diskVersion }) {
       return toResult(await commands.finishFile(path, text, diskVersion));
@@ -108,8 +112,7 @@ export function createTauriSource(): ChunkSource {
       return toResult(await commands.resetFile(path, diskVersion));
     },
     async describeFile(path) {
-      const result = toResult(await commands.describeFile(path));
-      return result.ok ? { ok: true, value: toSides(result.value) } : result;
+      return converted(toResult(await commands.describeFile(path)), toSides);
     },
     async takeSide(path, side, diskVersion) {
       return toResult(await commands.takeSide(path, side, diskVersion));

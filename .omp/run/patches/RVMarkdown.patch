@@ -1,0 +1,1942 @@
+From ae46983b6b96525643ca0d1aa9664e52367002df Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:34:18 +0200
+Subject: [PATCH] feat(editor): MarkdownView, yamt's own Markdown subset as DOM
+ nodes with the editor's code colours
+
+---
+ .omp/run/findings.jsonl                       |   1 +
+ .omp/run/mutants/RVIpc.survivors.txt          |  62 ++++
+ .omp/run/notes/RVColumnsCorrect.md            |  38 +++
+ .omp/run/notes/RVMarkdown.md                  |  75 +++++
+ .../slices/briefs/3.RV-agent-settings-rust.md |  64 ++++
+ docs/slices/briefs/3.RV-columns-rework-1.md   |  45 +++
+ frontend/scripts/fences.test.ts               |  33 ++
+ frontend/scripts/fences.ts                    |  54 +++-
+ frontend/src/editor/AGENTS.md                 |   4 +-
+ frontend/src/editor/index.ts                  |   1 +
+ frontend/src/editor/internal/codeBlock.ts     |  69 ++++
+ .../editor/internal/markdownBlocks.test.ts    | 105 +++++++
+ .../src/editor/internal/markdownBlocks.ts     | 296 ++++++++++++++++++
+ .../internal/markdownDom.browser.test.ts      | 152 +++++++++
+ frontend/src/editor/internal/markdownDom.ts   | 192 ++++++++++++
+ .../editor/internal/markdownInline.test.ts    |  81 +++++
+ .../src/editor/internal/markdownInline.ts     | 266 ++++++++++++++++
+ frontend/src/editor/markdown.ts               |  46 +++
+ frontend/src/editor/theme.css                 | 123 ++++++++
+ frontend/src/ui/useMarkdown.ts                |  28 ++
+ 20 files changed, 1733 insertions(+), 2 deletions(-)
+ create mode 100644 .omp/run/mutants/RVIpc.survivors.txt
+ create mode 100644 .omp/run/notes/RVColumnsCorrect.md
+ create mode 100644 .omp/run/notes/RVMarkdown.md
+ create mode 100644 docs/slices/briefs/3.RV-agent-settings-rust.md
+ create mode 100644 docs/slices/briefs/3.RV-columns-rework-1.md
+ create mode 100644 frontend/src/editor/internal/codeBlock.ts
+ create mode 100644 frontend/src/editor/internal/markdownBlocks.test.ts
+ create mode 100644 frontend/src/editor/internal/markdownBlocks.ts
+ create mode 100644 frontend/src/editor/internal/markdownDom.browser.test.ts
+ create mode 100644 frontend/src/editor/internal/markdownDom.ts
+ create mode 100644 frontend/src/editor/internal/markdownInline.test.ts
+ create mode 100644 frontend/src/editor/internal/markdownInline.ts
+ create mode 100644 frontend/src/editor/markdown.ts
+ create mode 100644 frontend/src/ui/useMarkdown.ts
+
+diff --git a/.omp/run/findings.jsonl b/.omp/run/findings.jsonl
+index ac72974..09b912f 100644
+--- a/.omp/run/findings.jsonl
++++ b/.omp/run/findings.jsonl
+@@ -1540,3 +1540,4 @@
+ {"ts": "2026-10-24T13:15:00+00:00", "slice": "RVColumns", "source": "boundary", "severity": "should", "rule_id": "growth: copied decision", "file": "frontend/src/editor/range.ts", "line": 40, "problem": "range.ts copies three bodies from CompareController: columnMarks→showDifferences loop, preferenceEffects loop, keyboardColumn(views) ?? 'left' arrow rule", "fix": "one helper each in compareMarks.ts, compareFocus.ts and beside COLUMNS, used by both controllers", "triage": "promoted: a copied rule; the two windows would drift"}
+ {"ts": "2026-10-24T13:15:00+00:00", "slice": "RVColumns", "source": "boundary", "severity": "should", "rule_id": "VU2", "file": "frontend/src/ui/FileList.vue", "line": 15, "problem": "first defineSlots calls; check-sfc-order.ts CALLEE_SECTIONS does not list defineSlots, so a misplaced one passes unnoticed", "fix": "defineSlots: 'macro' in CALLEE_SECTIONS with a failing case in check-sfc-order.test.ts", "triage": "promoted: a detector gap under an existing rule (VU2), one entry"}
+ {"ts": "2026-10-24T13:15:00+00:00", "slice": "RVColumns", "source": "boundary", "severity": "nit", "rule_id": "TS16", "file": "frontend/src/editor/internal/compareViews.ts", "line": 23, "problem": "ReadOnlyWiring exported but unused; repeats ColumnWiring's fields", "fix": "unexported Pick<ColumnWiring,…> & { extensions }", "triage": "dropped: one extra symbol, no growth harm"}
++{"ts": "2026-10-24T13:30:00+00:00", "slice": "RVColumns", "source": "correctness", "severity": "should", "rule_id": null, "file": "frontend/src/editor/range.browser.test.ts", "line": 138, "problem": "the 'both columns marked' probe passes if one column gets the other's marks: differences on the same lines in both columns, counts only", "fix": "assert the right column's own word mark and removal-bar line; give the right side an extra leading line", "triage": "promoted: an untested column argument the shared-helper fix moves"}
+diff --git a/.omp/run/mutants/RVIpc.survivors.txt b/.omp/run/mutants/RVIpc.survivors.txt
+new file mode 100644
+index 0000000..234acba
+--- /dev/null
++++ b/.omp/run/mutants/RVIpc.survivors.txt
+@@ -0,0 +1,62 @@
++just mutants b253096 (covers 516810c RVIpc) — Stryker
++All files         |  77.36 |   80.78 |      311 |         0 |         74 |       17 |        0 |
++  domain.ts       |  95.74 |   97.83 |       90 |         0 |          2 |        2 |        0 |
++  fixtureRange.ts |  44.35 |   44.35 |       51 |         0 |         64 |        0 |        0 |
++  index.ts        |   0.00 |    0.00 |        0 |         0 |          4 |        1 |        0 |
++  rangeDomain.ts  | 100.00 |  100.00 |       26 |         0 |          0 |        0 |        0 |
++  tauriRange.ts   |   0.00 |    0.00 |        0 |         0 |          0 |        8 |        0 |
++  problemText.ts  |  93.51 |   97.30 |      144 |         0 |          4 |        6 |        0 |
++
++Survived/NoCoverage by line:
++      2 src/ipc/domain.ts:176
++      1 src/ipc/domain.ts:177
++      1 src/ipc/domain.ts:259
++      1 src/ipc/fixtureRange.ts:117
++      1 src/ipc/fixtureRange.ts:25
++      1 src/ipc/fixtureRange.ts:27
++      5 src/ipc/fixtureRange.ts:29
++      1 src/ipc/fixtureRange.ts:31
++      2 src/ipc/fixtureRange.ts:32
++      2 src/ipc/fixtureRange.ts:33
++      2 src/ipc/fixtureRange.ts:34
++      1 src/ipc/fixtureRange.ts:40
++      2 src/ipc/fixtureRange.ts:43
++      2 src/ipc/fixtureRange.ts:44
++      2 src/ipc/fixtureRange.ts:45
++      2 src/ipc/fixtureRange.ts:46
++      2 src/ipc/fixtureRange.ts:47
++      2 src/ipc/fixtureRange.ts:49
++      2 src/ipc/fixtureRange.ts:50
++      2 src/ipc/fixtureRange.ts:51
++      1 src/ipc/fixtureRange.ts:55
++      1 src/ipc/fixtureRange.ts:58
++      2 src/ipc/fixtureRange.ts:61
++      1 src/ipc/fixtureRange.ts:62
++      1 src/ipc/fixtureRange.ts:63
++      2 src/ipc/fixtureRange.ts:67
++      2 src/ipc/fixtureRange.ts:68
++      2 src/ipc/fixtureRange.ts:69
++      2 src/ipc/fixtureRange.ts:72
++      2 src/ipc/fixtureRange.ts:73
++      6 src/ipc/fixtureRange.ts:74
++      2 src/ipc/fixtureRange.ts:75
++      2 src/ipc/fixtureRange.ts:76
++      1 src/ipc/fixtureRange.ts:77
++      1 src/ipc/fixtureRange.ts:78
++      1 src/ipc/fixtureRange.ts:84
++      1 src/ipc/fixtureRange.ts:85
++      2 src/ipc/fixtureRange.ts:97
++      4 src/ipc/index.ts:104
++      1 src/ipc/index.ts:108
++      1 src/ipc/tauriRange.ts:11
++      2 src/ipc/tauriRange.ts:13
++      1 src/ipc/tauriRange.ts:6
++      1 src/ipc/tauriRange.ts:7
++      1 src/ipc/tauriRange.ts:8
++      2 src/ipc/tauriRange.ts:9
++      2 src/ui/problemText.ts:111
++      1 src/ui/problemText.ts:129
++      2 src/ui/problemText.ts:63
++      2 src/ui/problemText.ts:86
++      1 src/ui/problemText.ts:95
++      2 src/ui/problemText.ts:96
+diff --git a/.omp/run/notes/RVColumnsCorrect.md b/.omp/run/notes/RVColumnsCorrect.md
+new file mode 100644
+index 0000000..b7399c4
+--- /dev/null
++++ b/.omp/run/notes/RVColumnsCorrect.md
+@@ -0,0 +1,38 @@
++I found no blocking issues, so the verdict is pass. There is one `should` finding: the WebKit probe's marks test cannot tell the two columns apart. I ran no tests or mutations myself; everything below comes from reading the code.
++
++```json
++{
++  "verdict": "pass",
++  "findings": [
++    {
++      "severity": "should",
++      "rule_id": null,
++      "file": "frontend/src/editor/range.browser.test.ts",
++      "line": 138,
++      "problem": "The probe for \"both columns marked from one reply\" would still pass if `RangeController` marked both columns with the same column's marks, in either direction. Its two differences sit on the same lines in both columns (1 and 3). Each host is only checked for 2 band lines, more than 0 word marks and 1 removal bar. The one text check (\"old\" first in the left column) also passes when the left column gets the right column's marks. So a left/right mix-up in the `columnMarks(…, column)` loop goes unnoticed, and that loop is about to be moved into shared helpers. This acceptance line is still covered by the MiniBrowser output (right column word marks `[\"new\", \", y\"]`), so this test is not the only evidence. If it stays, nothing guards the column argument in the range or compare loops when they are merged.",
++      "fix": "Assert the right column's own marks: its first `.chunk-word-modified` is \"new\" and its `.chunk-removal` is on line 1 (the left column's is on line 4). Better still, give the right side an extra leading line so its difference line numbers differ from the left side's."
++    }
++  ],
++  "checked": [
++    "Read-only enforcement: `readOnlyCenter` adds `EditorState.readOnly.of(true)` after `centerExtensions` (pane.ts:209-210). The `readOnly` facet takes its first value, and `kindExtensions` comes before `pane.extensions`, so the `extensions` seam left for delivery B cannot override it.",
++    "In @codemirror/view, a DOM change on a read-only state is ignored (dist/index.js:4179), and paste and drop are refused (5137/5168). So typing in a contenteditable `readOnlyCenter` column changes nothing. This matches the MiniBrowser typing check (`same: true`).",
++    "Node test 1 (compareViews.test.ts) checks `at.readOnly`, that `insertNewlineAndIndent` returns false, and that the text is unchanged. It fails under the brief's \"readOnlyCenter\"→\"center\" mutation (the report shows `expected false to be true`). By reading, it also catches any read-only path built on the editable kind.",
++    "Node test 2 checks that `differenceField` spans equal `{2,11,modified}`. Dropping the field from the read-only extensions gives `undefined`, so the test fails.",
++    "Node test 3: the column limit equals RIGHT.length (all ASCII, so bytes equal characters), and Enter adds bytes, so the edit is refused and `refused` is called with \"right\". Deleting `columnLimit` makes it fail. The editable path is otherwise unchanged (\"center\", `differenceField`, `removalTooltip`, `everyPane`, update listener, in the same order).",
++    "Swapping the factories (`createColumnViews` ↔ `readOnlyColumnState`) is a type error: `ColumnWiring` has no `extensions`, and `ReadOnlyWiring` has no `columnLimit`/`refused`.",
++    "Differences land once: range.ts:41-44 dispatches `showDifferences` once per column in the constructor and never recomputes (plan #106). The read-only docs never change, so no mapping is needed. The `showDifferences` dispatch reaches `CompareFrame.changed` (`rowsChanged` over `differenceField`), which clears the layout cache and requests one paint.",
++    "Language: `languageOf(texts.path)` plus `loadLanguage(…, [left, right], () => this.#destroyed)` is the same rule as `MergeController` (index.ts:79,106). The basename rule lives in language.ts:14, and a load that finishes after `destroy()` is dropped.",
++    "`moveToChange`: `revealDifference(views[keyboardColumn ?? \"left\"])` is identical to `CompareController`. The selection-only dispatch is allowed on a read-only state, there is no wrap (`nextDifference`), and focus goes to the column. The MiniBrowser lines were [line 1, line 3, line 3].",
++    "`destroy` (CM14) sets `#destroyed`, cancels the frame (rAF and `ScrollSync`), destroys both views and empties the strip. `CompareStrip`'s constructor puts a `<g>` in the strip, so the probe's [0,0,0] would catch a missing `strip.destroy()`.",
++    "`setPreferences`: `preferenceEffects(\"center\")` reconfigures `themeCompartment`, `findKeysCompartment` and `middleKeysCompartment`, and all three are present in `readOnlyCenter` through `centerExtensions`.",
++    "The `updated` callback reads `#frame` before it is assigned. `EditorView`'s constructor never runs update listeners, and the first dispatch comes after `CompareFrame` is built. This is the same as `CompareController`, so I accept the implementer's open risk.",
++    "No `format`, `settleNow`, `historyKey`, `setLanguage` or `holdsText` on `RangeController` (vision 4, design §6). The surface matches the brief's contract exactly. index.ts adds two lines.",
++    "Merge window: App.vue passes `FileMark` with `file.status`. The slot's `label` is `file.path` in the list and `row.label` in the tree, the same as the old hard-coded `FileMark` props. `OperationLabel` sits in the footer slot in the same place under the list. Both `aria-label`s come from `label=\"Conflicted files\"`. FileList and FileTree have no other users (searched under frontend/). `F` is inferred as `FileEntry` from `:files`. The MiniBrowser before/after pixel diffs are 0 for tree, hidden and wide; the list's 304 px all lie outside the sidebar.",
++    "fileTree.ts: the generic is purely a type change; the row-building logic is unchanged. The new fileTree.test.ts case pins the generic through `row.file.added`, which `vue-tsc -b` checks because tsconfig.app.json includes src/**/*.ts. The existing merge-row tests are unchanged.",
++    "Browser probe file, by reading: the class names it queries match decorations.ts:36, words.ts:8,59 and compareStrip.ts:43. Its fixture word ranges are correct (\"old\" at 14, \", b\" at 19, the removal at column 6 of \"call(x);\"). Playwright did not run it (libicudata.so.74). I accept the MiniBrowser reproduction as the brief's `just webdriver` route, as the task allows.",
++    "Mutation: editor/ is not mutated (VF7). The Stryker survivors in ui/fileTree.ts are on lines whose logic is unchanged, so they are dropped as the task states.",
++    "Deviations accepted: `columnState` without the unused `column` argument; the `editableColumnState`/`readOnlyColumnState` exports used by the node tests; the `document` stub for `everyPane()`. The stale ui/AGENTS.md lines 17/19 and the project-map entries are outside this patch's Owned list and were reported to the orchestrator.",
++    "Not repeated (already promoted by the boundary review): shared helpers for the three bodies range.ts copies from `CompareController`, and `defineSlots` in check-sfc-order."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVMarkdown.md b/.omp/run/notes/RVMarkdown.md
+new file mode 100644
+index 0000000..8366676
+--- /dev/null
++++ b/.omp/run/notes/RVMarkdown.md
+@@ -0,0 +1,75 @@
++## summary
++- The AI's answers now render through yamt's own Markdown subset, plan §2 #112. `editor/markdown.ts` holds `MarkdownView` (`show`, `destroy`), which re-renders from the first block whose source changed.
++- Two pure parsers do the reading: `internal/markdownBlocks.ts` (lines → blocks, each top-level block keeps its source lines) and `internal/markdownInline.ts`. Raw HTML stays literal text. Images show as `alt (url)` text. Links show their text plus the address, muted, and are never navigable.
++- `internal/markdownDom.ts` builds the DOM from a fixed tag set, with `class` as the only attribute and no `innerHTML`. `internal/codeBlock.ts` colours fenced code with the panes' `paletteHighlight` and `fontHighlight`, and does not paint into a view that is gone.
++- `ui/useMarkdown.ts` is the ui seam. A new PM2 rule in `scripts/fences.ts` refuses `MarkdownView` anywhere else in `ui/`.
++- The answer's look lives in `editor/theme.css` (`.markdown-*`, palette tokens only), and `editor/AGENTS.md` describes the whole module.
++
++## files_changed
++- New: `frontend/src/editor/markdown.ts`, `frontend/src/editor/internal/{markdownBlocks,markdownInline,markdownDom,codeBlock}.ts`, `frontend/src/editor/internal/{markdownBlocks,markdownInline}.test.ts`, `frontend/src/editor/internal/markdownDom.browser.test.ts`, `frontend/src/ui/useMarkdown.ts`
++- Changed: `frontend/src/editor/index.ts` (one line: `export { MarkdownView } from "./markdown";`), `frontend/src/editor/theme.css`, `frontend/src/editor/AGENTS.md`, `frontend/scripts/fences.ts`, `frontend/scripts/fences.test.ts`
++
++## tests_added
++Each test below was run once against a one-line hand mutation and failed under it; every mutation was then reverted.
++
++**`markdownBlocks.test.ts`**
++- "a fenced block keeps a line that looks like a heading". Mutation: `if (HEADING.test(line) || closesFence(line, marks))` in `fence` → `× … 1 failed`.
++- "a list item's indented continuation joins the item". Mutation: `indentOf(line) >= start.column` → `true` → `×`.
++- "a table needs its delimiter row". Mutation: `startsTable` returns `header.includes("|")` → `×`.
++- "raw HTML stays text": a `<div onclick>`/`<script>` block stays a paragraph.
++- Also pinned, without a mutation: the tilde fence and an unclosed fence, a lazy line plus a nested list, headings/quotes/rules interrupting a paragraph, and the block sources used for streaming.
++
++**`markdownInline.test.ts`**
++- "backticks win over emphasis". Mutation: code-span skipping off in `skipped` (`char === "\`" && false`) → `×`.
++- "an unmatched `*` stays literal". Mutation: an unmatched marker becomes `text("", …)` → `×`.
++- "raw HTML stays text". Mutation: `AUTOLINK = /^<([^>]*)>/` → `×`.
++- "an image is its alt text and address". Mutation: the address is dropped → `×`.
++- Also pinned: `snake_case` underscores, strong/strike/nesting, a `javascript:` link kept as text, escapes and breaks.
++
++**`markdownDom.browser.test.ts`**
++- The three acceptance tests as named in the brief. They have not run as a file (see smoke_evidence).
++
++**`fences.test.ts`**
++- "a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2" covers a renamed import, a re-export, a namespace import and a direct `../editor/markdown` import. Mutation: `markdownViolations(file.path, [])` → `× … Tests 1 failed | 28 passed`.
++- A second test checks that `useMarkdown.ts`, other editor names and `editor/index.ts` itself violate nothing.
++
++## smoke_evidence
++- `pnpm -C frontend typecheck` → `$ vue-tsc -b`, exit 0.
++- `pnpm -C frontend lint` → oxlint and eslint, exit 0, nothing reported.
++- `pnpm -C frontend fmt:check` → `All matched files use the correct format.`
++- `pnpm -C frontend unused` → knip, exit 0.
++- `pnpm -C frontend test` → `Test Files 154 passed (154)`, `Tests 1996 passed (1996)`.
++
++**Browser test: Playwright WebKit cannot launch on this host, so the file never ran.**
++- `pnpm -C frontend exec vitest run --project browser src/editor/internal/markdownDom.browser.test.ts` stopped at `MiniBrowser: error while loading shared libraries: libicudata.so.74` (#423/#1074).
++- Instead, as RVColumns did: `just app-session start-fixture --name rvmd` (which starts `just webdriver` and MiniBrowser). A throwaway WebDriver script, `/tmp/md-probe/probe.mjs`, imports `/src/editor/index.ts` in the page and runs the file's three checks. Final run on the finished tree:
++  - **hostile:** `{"elements":33,"badTags":[],"badAttributes":[],"ran":null,"scriptText":true,"linkText":true,"imageText":true,"address":"javascript:window.ran=true","pass":true}`. `ran` is `undefined` in the page; JSON prints it as `null`.
++  - **highlight:** `"constClass":"ͼx","constRules":[".ͼx {color: var(--color-syntax-definition-keyword);}"],"constColour":"rgb(224, 152, 107)"` equals the colour of `var(--color-syntax-definition-keyword)`. `"numberRules":[".ͼ13 {color: var(--color-syntax-number);}"]`, `"stylesMounted":1`, `"pass":true`.
++  - **streaming:** `{"keptTitle":true,"replacedParagraph":true,"paragraph":"First paragraph, done.","em":"paragraph","count":3,"pass":true}`.
++- The same probe under each mutation:
++  - `innerHTML` for paragraphs: `hostile: False`, with `badTags: ['IMG','DIV','IFRAME','B','A']`, `badAttributes: ['src','onerror','onclick','src','onmouseover','href']`, `ran: True` (the `onerror` really ran).
++  - Highlighter dropped (`HIGHLIGHTERS = []`): `highlight: False`, `constClass: None`.
++  - Re-render from block 0: `streaming: False`, `keptTitle: False`.
++- **Screenshots** (MiniBrowser, through `/tmp/md-probe/shot.mjs`): `/tmp/md-probe/answer-dark.png` and `/tmp/md-probe/answer-light.png`. One answer with an h2, inline code, strong/em/strike, a nested bullet list, an ordered list, a table aligned left/right/center, a quote, a coloured `ts` block, and a link with its muted address. Tags present: `H2,CODE,P,STRONG,EM,DEL,UL,LI,OL,SPAN,TABLE,THEAD,TR,TH,TBODY,TD,BLOCKQUOTE,PRE`; 76 highlight spans. I looked at both images; they render as intended.
++- `just map-check` → `map-check: ok`, but only because it reads `git ls-files` and the new files are untracked. See deviations.
++
++## deviations_from_brief
++- **`StyleModule.mount` is not used.** style-mod is not in `frontend/package.json`; pnpm keeps it private to `@codemirror/view`, and the brief forbids a dependency. `codeBlock.ts` instead puts `paletteHighlight.module.getRules()` and `fontHighlight.module.getRules()` into one `<style class="markdown-highlight-styles">` in `<head>`, mounted once per document (it checks the DOM; no module state). These are the same rules from the same HighlightStyles, so there is still only one colour table. The CSP allows inline styles (`style-src 'self' 'unsafe-inline'`).
++- **Ordered lists carry their start number in a `span.markdown-number`.** `class` is the only allowed attribute, so `<ol start>` cannot be used; the list is `list-style: none` and the number is positioned in the margin.
++- **Every block also carries the class `markdown-block`.** Tailwind's preflight resets margins and list styles, so `theme.css` styles spacing, headings and lists as well as the brief's code block, table, quote and address.
++- **A `.markdown-address` is left out when it adds nothing.** If a link's address is empty or equals its text, only the text is shown.
++- **The fence also refuses a namespace import or `export *` of `editor/` in `ui/` outside `useMarkdown.ts`, and any `ui/` import of `editor/markdown`.** Both expose `MarkdownView`.
++- **Shared files outside my ownership need these edits** (PM6 will fail once the new files are committed):
++  - `.omp/skills/project-map/SKILL.md`, `frontend/src/editor` row, add: "the AI's answers (plan §2 #112): markdown.ts (`MarkdownView(host)`: show, destroy; reached only through ui/useMarkdown.ts); internal/: markdownBlocks (pure: lines → blocks with their source lines), markdownInline (pure: inlines; code spans win), markdownDom (createElement/textContent/className only, fixed tags, `class` the only attribute), codeBlock (`languageNamed` + `highlightCode` with `paletteHighlight` + `fontHighlight`, their rules in one `<style>`)".
++  - Same file, `frontend/src/ui` row, add: "useMarkdown.ts (`useMarkdown(host, text)`: the ui seam of `MarkdownView`, PM2)".
++  - Same file, PM2 detector line: "`ui/` imports `MarkdownView` only in `ui/useMarkdown.ts` (`scripts/fences.ts`)".
++  - `frontend/src/ui/AGENTS.md` line 1: add `useMarkdown` to "the editor seams are …".
++  - `docs/architecture.md` §5.2: name `MarkdownView` as a public class.
++- `pnpm -C frontend install --frozen-lockfile --offline` was run because the worktree had no `node_modules` (gitignored).
++
++## open_risks
++- `frontend/src/editor/internal/markdownDom.browser.test.ts` has never run in Playwright WebKit; only its scenario was reproduced in MiniBrowser. Its `expect.poll` waits and the `tags.definitionKeyword` / `tags.number` classes match what the probe saw (`ͼx`, `ͼ13`).
++- Unmatched emphasis is approximate in `frontend/src/editor/internal/markdownInline.ts` (`closer`): an inner opener with no closer makes the outer one fail too, so `*a **b c*` shows as literal `*a *` plus emphasis on "b c", where CommonMark gives `<em>a **b c</em>`. This was chosen to keep the scan from going exponential.
++- `frontend/src/editor/internal/markdownBlocks.ts` (`itemEnd`): a lazy line can join an item whose last content is an open fence. Tabs count to 4-column stops, but a tab split by a strip is dropped, not split into spaces.
++- `frontend/src/editor/internal/markdownBlocks.ts` (`delimiterRow`) and `markdownBlocks.ts:50` hold the whole parser in 296 lines, close to the 300-line cap.
++- Table cells are split with a lookbehind regex (`(?<!\\)\|`), which needs WebKit ≥ 16.4; WebKitGTK 2.54 has it.
+\ No newline at end of file
+diff --git a/docs/slices/briefs/3.RV-agent-settings-rust.md b/docs/slices/briefs/3.RV-agent-settings-rust.md
+new file mode 100644
+index 0000000..df1c57c
+--- /dev/null
++++ b/docs/slices/briefs/3.RV-agent-settings-rust.md
+@@ -0,0 +1,64 @@
++# Slice 3.RV-agent-settings-rust — the settings file's `agent` entry and the `set_agent` command
++
++Board "Review a commit range" row 11 (C2, Rust half; needs nothing of A or B). Product rule: `docs/plan.md` §2 **#113**
++(read in full) and #57 (the settings file: the window owns defaults; a field written only when it differs). Design:
++`.omp/run/notes/AgentDesign.md` "6. Settings" ("File entry", "Rust"), "9. IPC" (`AgentSettings`, `setAgent`), §10
++"settings" tests. The web half (`briefs/3.RV-agent-settings-web.md`) builds on the generated types.
++
++Facts (given):
++
++- `crates/settings/src/lib.rs`: `StoredSettings` (`:73`, theme, antialiasing, keys, the language-server answers…),
++  the setters `set_theme`, `set_antialiasing`, `set_keys`, `set_repository_answer`, `set_server_switch`,
++  `set_added_servers` (`:155–:240`), each `fn(places, current, value) -> Result<SettingsRead, Error>`; `file.rs` keeps
++  entries it does not know, writes temp file + rename. `src-tauri/src/settings.rs` holds one Tauri command per setter
++  (`:40–:160`); `commands.rs` registers them; `just bindings` (the orchestrator) regenerates `bindings.ts`.
++
++## Target
++
++Owned: `crates/settings/src/{lib,file}.rs`, `crates/settings/tests/**`, `src-tauri/src/settings.rs`,
++`src-tauri/src/commands.rs`.
++
++Read-only: everything else.
++
++Non-goals: the window's defaults, the settings view, `--ai`, any agent code.
++
++## Contract (fixed; you may add, never change)
++
++```rust
++// crates/settings/src/lib.rs
++#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
++#[serde(default, rename_all = "camelCase")]
++pub struct AgentSettings {
++    pub command: Option<Vec<String>>,       // None = the window's default (["omp", "acp"]); never an empty list on disk
++    pub first_message: Option<String>,      // None = the window's default template
++}
++// StoredSettings gains `pub agent: AgentSettings` (a missing entry reads as the default; the entry is written only
++// when a field is Some)
++pub fn set_agent(places: &Places, current: &StoredSettings, agent: AgentSettings) -> Result<SettingsRead, Error>;
++// src-tauri/src/settings.rs
++#[tauri::command] #[specta::specta]
++pub(crate) fn set_agent<R: Runtime>(…, current: StoredSettings, agent: AgentSettings) -> Result<SettingsRead, IpcError>;
++```
++
++Generated TS: `AgentSettings = { command: string[] | null; firstMessage: string | null }`, `StoredSettings.agent`,
++`commands.setAgent(current, agent)`.
++
++## Change
++
++`AgentSettings` and the `agent` entry in the file's format (kept entries untouched, unknown entries kept); an entry of
++the wrong shape is reported broken as other entries are; `set_agent` as the other setters; the Tauri command and its
++registration.
++
++## Acceptance
++
++Tests (each naming its bug): `set_agent_writes_only_the_fields_given_and_keeps_unknown_entries`,
++`a_file_without_agent_reads_as_defaults`, `an_agent_entry_of_the_wrong_shape_is_reported_broken`,
++`an_empty_command_list_is_written_as_the_default`; the src-tauri command's round trip as the sibling setters test
++theirs. Your tests kill the mutants on your lines (SP5).
++
++Commands: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test -p yamt-settings
++-p yamt-app`.
++
++## Skills
++
++`skill://rust-conventions`, `skill://ipc-contract` (plus your autoloaded ones). Read `docs/architecture.md` §3.6 first.
+diff --git a/docs/slices/briefs/3.RV-columns-rework-1.md b/docs/slices/briefs/3.RV-columns-rework-1.md
+new file mode 100644
+index 0000000..d00abeb
+--- /dev/null
++++ b/docs/slices/briefs/3.RV-columns-rework-1.md
+@@ -0,0 +1,45 @@
++# Slice 3.RV-columns — fix round 1
++
++Board "Review a commit range" row 4. Original brief: `briefs/3.RV-columns.md` (its Contract stands). Your round-1 patch
++is committed (`8e68d49`); the reviews are `.omp/run/notes/RVColumnsBoundary.md` and
++`.omp/run/notes/RVColumnsCorrect.md`. Later builds extend `RangeController` (threads): keep its public surface.
++
++## Target
++
++Owned: `frontend/src/editor/{range,compare}.ts`, `frontend/src/editor/internal/{compareMarks,compareFocus,
++compareViews}.ts` and their `.test.ts` files (new or changed), `frontend/src/editor/range.browser.test.ts`,
++`frontend/scripts/check-sfc-order.ts`, `frontend/scripts/check-sfc-order.test.ts`.
++
++Read-only: everything else (`editor/index.ts`, `editor/theme.css`, `frontend/scripts/fences.ts` are another build's
++right now).
++
++## Blocks to fix (verbatim from the reviews, each promoted)
++
++1. **Share the three bodies `range.ts` copies from `CompareController`** (`editor/range.ts:40`, growth: copied
++   decision): the per-column `columnMarks` → `showDifferences` loop (`range.ts:40–44` = `compare.ts`
++   `showComparison`), the `preferenceEffects("center", …)` loop in `setPreferences`, and the arrows' rule
++   `keyboardColumn(views) ?? "left"` in `moveToChange`. Move each body into the internal file that owns the rule —
++   e.g. `showColumnDifferences(views, differences)` in `compareMarks.ts`, `moveToDifference(views, direction)` in
++   `compareFocus.ts`, a column-preferences helper beside `COLUMNS` in `compareViews.ts` — and have both controllers
++   call them. The compare window behaves exactly as before.
++2. **`defineSlots` in the SFC order check** (`frontend/src/ui/FileList.vue:15`, VU2): add `defineSlots: "macro"` to
++   `CALLEE_SECTIONS` in `frontend/scripts/check-sfc-order.ts`, with a failing case in `check-sfc-order.test.ts` (a
++   `defineSlots` after state is reported).
++3. **The probe tells the columns apart** (`range.browser.test.ts:138`): give the right side an extra leading line so
++   its difference lines differ from the left's, and assert each column's own marks (the right column's first
++   `.chunk-word-modified` is "new"; each column's `.chunk-removal` on its own line).
++
++## Acceptance
++
++The node tests pass (add one per new helper if it carries a rule: e.g. `moveToDifference` uses the left column when
++no column has focus); the compare window in fixture mode (`?diff`) unchanged — word marks, bands, arrows, preferences
++(screenshot or observed values); the probe's assertions run in MiniBrowser through `just app-session start-fixture` +
++`just webdriver` (Playwright WebKit cannot launch here, libicudata.so.74) — paste the observed values; `pnpm -C
++frontend sfc-order` passes and the new test fails without the entry.
++
++Commands: `pnpm -C frontend typecheck`, `pnpm -C frontend lint`, `pnpm -C frontend test`, `pnpm -C frontend sfc-order`,
++`pnpm -C frontend fmt:check`.
++
++## Skills
++
++`skill://cm6-rules`, `skill://ts-conventions` (plus your autoloaded ones).
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 95dceb9..c456334 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -309,6 +309,39 @@ test("merge files importing the store and compare files importing their own neig
+   expect(violationsOf(files)).toEqual([]);
+ });
+ 
++test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
++  const files = [
++    {
++      path: "src/ui/AiTurn.vue",
++      text: `<script setup lang="ts">\nimport { MarkdownView as View } from "../editor/index.ts";\n</script>`,
++    },
++    { path: "src/ui/answer.ts", text: `export { MarkdownView } from "../editor";` },
++    { path: "src/ui/whole.ts", text: `import * as editor from "../editor";` },
++    { path: "src/ui/direct.ts", text: `import type { X } from "../editor/markdown";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM2", file: "src/ui/AiTurn.vue", specifier: "../editor/index.ts" },
++    { rule: "PM2", file: "src/ui/answer.ts", specifier: "../editor" },
++    { rule: "PM2", file: "src/ui/whole.ts", specifier: "../editor" },
++    { rule: "PM2", file: "src/ui/direct.ts", specifier: "../editor/markdown" },
++  ]);
++});
++
++test("useMarkdown.ts importing MarkdownView and other ui files importing the editor's other names violate nothing", () => {
++  const files = [
++    { path: "src/ui/useMarkdown.ts", text: `import { MarkdownView } from "../editor";` },
++    { path: "src/ui/useMergeController.ts", text: `import { MergeController } from "../editor";` },
++    {
++      path: "src/ui/AiTurn.vue",
++      text: `<script setup lang="ts">\nimport { useMarkdown } from "./useMarkdown";\n</script>`,
++    },
++    { path: "src/editor/index.ts", text: `export { MarkdownView } from "./markdown";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
+ test("reading clipboardData or navigator.clipboard outside ui/linuxPaste.ts violates PM8", () => {
+   const files = [
+     {
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index a7dd309..92d1240 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -40,6 +40,9 @@ const MERGE_ROOT_FILES: Record<string, true> = {
+   "src/ui/App": true,
+   "src/ui/App.vue": true,
+ };
++const MARKDOWN_SEAM = "src/ui/useMarkdown.ts";
++const MARKDOWN_VIEW = "MarkdownView";
++const MARKDOWN_MODULE = "src/editor/markdown";
+ 
+ function scriptTexts(file: SourceFile): string[] {
+   if (!file.path.endsWith(".vue")) {
+@@ -123,6 +126,52 @@ function compareFinding(file: string, target: string): Finding | undefined {
+   return undefined;
+ }
+ 
++function namesOf(statement: ts.ImportDeclaration | ts.ExportDeclaration): string[] | "all" {
++  const bindings = ts.isImportDeclaration(statement)
++    ? statement.importClause?.namedBindings
++    : statement.exportClause;
++  if (bindings === undefined) {
++    return ts.isExportDeclaration(statement) ? "all" : [];
++  }
++  if (ts.isNamespaceImport(bindings) || ts.isNamespaceExport(bindings)) {
++    return "all";
++  }
++  const elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[] = bindings.elements;
++  return elements.map((element) => (element.propertyName ?? element.name).text);
++}
++
++function exposesMarkdownView(path: string, statement: ts.Statement): string | undefined {
++  if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) {
++    return undefined;
++  }
++  const literal = statement.moduleSpecifier;
++  const specifier = literal !== undefined && ts.isStringLiteral(literal) ? literal.text : "";
++  const target = relativeTarget(path, specifier.replace(QUERY_SUFFIX, "")) ?? "";
++  if (!isInside(target, "src/editor")) {
++    return undefined;
++  }
++  const names = namesOf(statement);
++  const direct = target === MARKDOWN_MODULE || target === `${MARKDOWN_MODULE}.ts`;
++  return direct || names === "all" || names.includes(MARKDOWN_VIEW) ? specifier : undefined;
++}
++
++function markdownViolations(path: string, texts: readonly string[]): FenceViolation[] {
++  if (MODULE_OF.exec(path)?.[1] !== "ui" || path === MARKDOWN_SEAM) {
++    return [];
++  }
++  return texts.flatMap((text) =>
++    ts
++      .createSourceFile(path, text, ts.ScriptTarget.Latest)
++      .statements.flatMap((statement) => exposesMarkdownView(path, statement) ?? [])
++      .map((specifier): FenceViolation => ({
++        rule: "PM2",
++        file: path,
++        specifier,
++        reason: "ui/ reaches MarkdownView only through ui/useMarkdown.ts (plan §2 #112)",
++      })),
++  );
++}
++
+ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
+   type Visit = { readonly index: number; low: number };
+   const visits = new Map<string, Visit>();
+@@ -221,7 +270,10 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+         edges.push({ specifier, file: resolved });
+       }
+     }
+-    violations.push(...clipboardViolations(file.path, texts));
++    violations.push(
++      ...clipboardViolations(file.path, texts),
++      ...markdownViolations(file.path, texts),
++    );
+     graph.set(file.path, edges);
+   }
+   return [...violations, ...cycleViolations(graph)];
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index eb08712..248c300 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -1,4 +1,4 @@
+-Owner skills: `skill://cm6-rules`, `skill://ts-conventions`. Framework-free: no `vue`, no `@vueuse`, no `@tauri-apps` (oxlint). Public surface is `index.ts` (`MergeController`, and `CompareController` from `compare.ts`); everything else in `internal/`. Layout tests run in the Vitest browser project (WebKit); the browser tests mount the three panes and two strips through `paneHarness.ts` (the app's grid inside `will-change: transform` wrappers), imported by tests only.
++Owner skills: `skill://cm6-rules`, `skill://ts-conventions`. Framework-free: no `vue`, no `@vueuse`, no `@tauri-apps` (oxlint). Public surface is `index.ts` (`MergeController`, `CompareController` from `compare.ts`, `RangeController` from `range.ts`, `MarkdownView` from `markdown.ts`); everything else in `internal/`. Layout tests run in the Vitest browser project (WebKit); the browser tests mount the three panes and two strips through `paneHarness.ts` (the app's grid inside `will-change: transform` wrappers), imported by tests only.
+ 
+ An editable Result is one document of `lsp/` (plan §2 #67, #70): `internal/serverDoc.ts` opens it on `LanguageServers`, says changed on each edit and closes it on destroy; `problems.ts` keeps the versions handed out and shows each server's problems through `@codemirror/lint` in the middle pane only (tooltips in `document.body`), relying on `lsp/` never to hand it an answer older than the last one shown, and leaves the diagnostics untouched when an answer changes nothing shown (an open tooltip stays); `format.ts` splits a formatter's result on any line break and applies it as yamt's own line diff (`lineDiff.ts`), each old line paired with a new one and changed only in the characters that differ, extra lines inserted or deleted whole, in one `yamt.format` transaction.
+ 
+@@ -13,3 +13,5 @@ Far scrolls (#1240, plan §2 #82): every pane carries `exactScroll` (`internal/e
+ Compare (plan §2 #93, #96, #98): `compare.ts` (`CompareController`, re-exported by `index.ts`) is the second public class, two `"center"` panes built by `internal/compareViews.ts` (each with `differenceField`, `columnLimit`, the removal tooltip, `everyPane`), never a flag through `MergeController`'s parts. `compareFrame.ts` (`CompareFrame`) is its once-per-frame paint: find space over both columns, rows and anchors cached until `differenceField` or the measured heights change (never per scroll, plan §2 #51), `ScrollSync<Column>` over `COLUMNS`, then `compareStrip.ts` (keyed `chunk-<tone> chunk-band` paths, `mousedown` prevented). `compareFormat.ts` formats each column alone as one whole-document `yamt.format` replace (`isolateHistory`: one undo step, never joined with typing); `compareLanguage.ts` keeps the tab's language and Auto's finding (`detected` only when it changed) and puts it into both `languageCompartment`s. `ScrollSync`, `syncFindSpace` and `loadLanguage` take any list of panes; the merge `Frame` passes `PANES` and its three views.
+ 
+ Themes (plan §2 #102): `internal/syntax.ts` holds the code colours — one row per `--color-syntax-<token>` (39) with the Lezer tags it colours and only its own `--syntax-<token>-{style,weight,line}` font styles — and builds from that one table `paletteHighlight` (colours: Markdown containers first and what they hold later), `fontHighlight` (font styles: link and url before the containers, so a container's style wins) — both on the text and the removal tooltip — and `syntaxColourClasses` (the minimap); the minimap takes the matching class defined last, as CSS does. A tag whose parent has a row but which means something else needs its own row (CodeMirror takes the first tag in `tag.set` with a rule: `function(definition(variableName))`, `derefOperator`, `angleBracket`, `attributeName`, …). The theme compartment in `pane.ts` holds the dark flag from `themeKind` and the `themeName` facet; the minimap drops its look when `themeName` changes (two dark themes included) and softens by the dark flag. `themes.browser.test.ts` checks every theme's computed values against its CSS text.
++
++Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only through `ui/useMarkdown.ts`, fence PM2 in `scripts/fences.ts`) renders yamt's own subset of the AI's answers. `internal/markdownBlocks.ts` (pure: lines → `Block`s, each top-level block with its source lines) and `internal/markdownInline.ts` (pure: a block's text → `Inline`s; code spans and escapes are skipped while an emphasis looks for its closer, so backticks win) never build markup; anything outside the subset, raw HTML included, stays literal text; images become `alt (url)` text and links their text plus the address in `.markdown-address`, never navigable. `internal/markdownDom.ts` builds nodes with `createElement`, `createTextNode`, `textContent` and `className` only, from a fixed tag set, `class` the only attribute — never `innerHTML` or a URL attribute, since the page reaches the IPC. `show(text)` keeps every leading block whose source is unchanged and rebuilds from the first that differs (streaming). `internal/codeBlock.ts` colours a fenced block by its info string through `languageNamed` and `highlightCode` with the panes' own `paletteHighlight` + `fontHighlight` (their rules in one `<style class="markdown-highlight-styles">`, mounted once per document; style-mod's `StyleModule.mount` is not reachable from yamt's own packages), after `load()` only while the block is still in a live view; an unknown language stays plain. The answer's look (spacing, code block, table, quote, list numbers, muted address) is the `.markdown-*` rules in `theme.css`, palette tokens only.
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 1239422..3f9a501 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -41,6 +41,7 @@ export type { ProblemCounts } from "./internal/problems";
+ export type { ResultSnapshot } from "./internal/savedPoint";
+ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
++export { MarkdownView } from "./markdown";
+ export { RangeController } from "./range";
+ export type { RangeOptions, RangeTexts } from "./range";
+ 
+diff --git a/frontend/src/editor/internal/codeBlock.ts b/frontend/src/editor/internal/codeBlock.ts
+new file mode 100644
+index 0000000..27ea352
+--- /dev/null
++++ b/frontend/src/editor/internal/codeBlock.ts
+@@ -0,0 +1,69 @@
++import type { HighlightStyle, LanguageSupport } from "@codemirror/language";
++import { highlightCode } from "@lezer/highlight";
++
++import { log } from "../../ipc";
++import { languageNamed } from "./language";
++import { fontHighlight, paletteHighlight } from "./syntax";
++
++const HIGHLIGHTERS: readonly HighlightStyle[] = [paletteHighlight, fontHighlight];
++const STYLES_CLASS = "markdown-highlight-styles";
++
++// `StyleModule.mount` lives in style-mod, which pnpm keeps private to @codemirror/view (not in
++// package.json); the modules' own `getRules()` in one `<style>` give the panes' class rules.
++function mountStyles(document: Document): void {
++  if (document.head.querySelector(`style.${STYLES_CLASS}`) !== null) {
++    return;
++  }
++  const style = document.createElement("style");
++  style.className = STYLES_CLASS;
++  style.textContent = HIGHLIGHTERS.map((highlighter) => highlighter.module?.getRules() ?? "").join(
++    "\n",
++  );
++  document.head.append(style);
++}
++
++function highlighted(document: Document, code: string, support: LanguageSupport): Node[] {
++  const nodes: Node[] = [];
++  highlightCode(
++    code,
++    support.language.parser.parse(code),
++    HIGHLIGHTERS,
++    (text, classes) => {
++      if (classes === "") {
++        nodes.push(document.createTextNode(text));
++        return;
++      }
++      const span = document.createElement("span");
++      span.className = classes;
++      span.textContent = text;
++      nodes.push(span);
++    },
++    () => nodes.push(document.createTextNode("\n")),
++  );
++  return nodes;
++}
++
++export async function paintCode(
++  element: HTMLElement,
++  info: string,
++  code: string,
++  live: () => boolean,
++): Promise<void> {
++  const description = info === "" ? null : languageNamed(info);
++  if (description === null) {
++    return;
++  }
++  let support: LanguageSupport;
++  try {
++    support = await description.load();
++  } catch (error) {
++    const reason = error instanceof Error ? error.message : String(error);
++    log.warn("markdown.language_failed", { language: description.name, reason });
++    return;
++  }
++  if (!live()) {
++    return;
++  }
++  mountStyles(element.ownerDocument);
++  element.replaceChildren(...highlighted(element.ownerDocument, code, support));
++}
+diff --git a/frontend/src/editor/internal/markdownBlocks.test.ts b/frontend/src/editor/internal/markdownBlocks.test.ts
+new file mode 100644
+index 0000000..c1b5fd6
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownBlocks.test.ts
+@@ -0,0 +1,105 @@
++import { expect, test } from "vitest";
++
++import { parseBlocks, type Block } from "./markdownBlocks";
++
++function blocks(text: string): Block[] {
++  return parseBlocks(text).map(({ block }) => block);
++}
++
++test("a fenced block keeps a line that looks like a heading", () => {
++  expect(blocks("```ts\n# not a heading\nconst a = 1;\n```\n# A heading")).toEqual([
++    { kind: "code", info: "ts", code: "# not a heading\nconst a = 1;" },
++    { kind: "heading", tag: "h1", text: "A heading" },
++  ]);
++});
++
++test("a tilde fence closes only on its own marks and an open fence runs to the end", () => {
++  expect(blocks("~~~\n```\n~~\n~~~~\nafter")).toEqual([
++    { kind: "code", info: "", code: "```\n~~" },
++    { kind: "paragraph", text: "after" },
++  ]);
++  expect(blocks("```python run\nprint(1)")).toEqual([
++    { kind: "code", info: "python", code: "print(1)" },
++  ]);
++});
++
++test("a list item's indented continuation joins the item", () => {
++  expect(blocks("- one\n\n  more\n- two\n\nafter")).toEqual([
++    {
++      kind: "list",
++      numbering: { kind: "bullet" },
++      items: [
++        {
++          blocks: [
++            { kind: "paragraph", text: "one" },
++            { kind: "paragraph", text: "more" },
++          ],
++        },
++        { blocks: [{ kind: "paragraph", text: "two" }] },
++      ],
++    },
++    { kind: "paragraph", text: "after" },
++  ]);
++});
++
++test("a lazy line joins the item's paragraph and an indented list nests", () => {
++  expect(blocks("1. first\nlazy\n   - inner\n2. second")).toEqual([
++    {
++      kind: "list",
++      numbering: { kind: "ordered", start: 1 },
++      items: [
++        {
++          blocks: [
++            { kind: "paragraph", text: "first\nlazy" },
++            {
++              kind: "list",
++              numbering: { kind: "bullet" },
++              items: [{ blocks: [{ kind: "paragraph", text: "inner" }] }],
++            },
++          ],
++        },
++        { blocks: [{ kind: "paragraph", text: "second" }] },
++      ],
++    },
++  ]);
++});
++
++test("a table needs its delimiter row", () => {
++  expect(blocks("| a | b |\n| c | d |")).toEqual([
++    { kind: "paragraph", text: "| a | b |\n| c | d |" },
++  ]);
++  expect(blocks("| a | b |\n|:--|--:|\n| c \\| d | e |\nend")).toEqual([
++    {
++      kind: "table",
++      align: ["left", "right"],
++      header: ["a", "b"],
++      rows: [["c \\| d", "e"]],
++    },
++    { kind: "paragraph", text: "end" },
++  ]);
++});
++
++test("raw HTML stays text", () => {
++  expect(blocks('<div onclick="x()">\n<script>alert(1)</script>\n</div>')).toEqual([
++    { kind: "paragraph", text: '<div onclick="x()">\n<script>alert(1)</script>\n</div>' },
++  ]);
++});
++
++test("headings, quotes with a lazy line and rules interrupt a paragraph", () => {
++  expect(blocks("text\n## Two ##\n> quoted\nlazy\n\n---")).toEqual([
++    { kind: "paragraph", text: "text" },
++    { kind: "heading", tag: "h2", text: "Two" },
++    { kind: "quote", blocks: [{ kind: "paragraph", text: "quoted\nlazy" }] },
++    { kind: "rule" },
++  ]);
++  expect(blocks("#hashtag\n####### seven")).toEqual([
++    { kind: "paragraph", text: "#hashtag\n####### seven" },
++  ]);
++});
++
++test("each block carries its source lines, so a streamed text keeps its earlier blocks", () => {
++  expect(parseBlocks("# Title\n\nsome *text\n").map(({ source }) => source)).toEqual([
++    "# Title",
++    "some *text",
++  ]);
++});
+diff --git a/frontend/src/editor/internal/markdownBlocks.ts b/frontend/src/editor/internal/markdownBlocks.ts
+new file mode 100644
+index 0000000..33a8cbf
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownBlocks.ts
+@@ -0,0 +1,296 @@
++type HeadingTag = "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
++
++export type Align = "none" | "left" | "center" | "right";
++
++export type Numbering =
++  | { readonly kind: "bullet" }
++  | { readonly kind: "ordered"; readonly start: number };
++
++export type ListItem = { readonly blocks: readonly Block[] };
++
++export type Block =
++  | { readonly kind: "paragraph"; readonly text: string }
++  | { readonly kind: "heading"; readonly tag: HeadingTag; readonly text: string }
++  | { readonly kind: "code"; readonly info: string; readonly code: string }
++  | { readonly kind: "list"; readonly numbering: Numbering; readonly items: readonly ListItem[] }
++  | { readonly kind: "quote"; readonly blocks: readonly Block[] }
++  | {
++      readonly kind: "table";
++      readonly align: readonly Align[];
++      readonly header: readonly string[];
++      readonly rows: readonly (readonly string[])[];
++    }
++  | { readonly kind: "rule" };
++
++export type SourcedBlock = { readonly source: string; readonly block: Block };
++
++type Parsed = { readonly block: Block; readonly end: number };
++
++type ItemStart = { readonly numbering: Numbering; readonly column: number; readonly first: string };
++
++const HEADING_TAGS = ["h1", "h2", "h3", "h4", "h5", "h6"] as const satisfies readonly HeadingTag[];
++const FENCE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
++const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
++const HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
++const HEADING_CLOSE = /(?:^|[ \t]+)#+$/;
++const RULE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
++const QUOTE = /^ {0,3}> ?(.*)$/;
++const ITEM = /^( {0,3})([-*]|\d{1,9}\.)(?:( +)(.*))?$/;
++const DELIMITER_CELL = /^:?-+:?$/;
++const ALIGN: Readonly<Record<string, Align>> = { "::": "center", ":-": "left", "-:": "right" };
++const LEADING_PIPE = /^\|/;
++const TRAILING_PIPE = /(?<!\\)\|$/;
++const CELL_PIPE = /(?<!\\)\|/;
++const WHITESPACE = /^[ \t]$/;
++const LINE_BREAK = /\r\n|\n|\r/;
++const TAB_STOP = 4;
++const MAX_ITEM_GAP = 4;
++const TABLE_HEAD_LINES = 2;
++
++function lineAt(lines: readonly string[], at: number): string {
++  return lines[at] ?? "";
++}
++
++function isBlank(line: string): boolean {
++  return line.trim() === "";
++}
++
++function indentOf(line: string): number {
++  let width = 0;
++  for (const char of line) {
++    if (char === " ") {
++      width += 1;
++    } else if (char === "\t") {
++      width += TAB_STOP - (width % TAB_STOP);
++    } else {
++      break;
++    }
++  }
++  return width;
++}
++
++function stripColumns(line: string, columns: number): string {
++  let at = 0;
++  while (WHITESPACE.test(line.charAt(at)) && indentOf(line.slice(0, at + 1)) <= columns) {
++    at += 1;
++  }
++  return line.slice(at);
++}
++
++function closesFence(line: string, marks: string): boolean {
++  const close = CLOSING_FENCE.exec(line)?.[1];
++  return close !== undefined && close[0] === marks[0] && close.length >= marks.length;
++}
++
++function fence(lines: readonly string[], at: number): Parsed | null {
++  const open = FENCE.exec(lineAt(lines, at));
++  const [, indent = "", marks = "", rest = ""] = open ?? [];
++  if (open === null || (marks.startsWith("`") && rest.includes("`"))) {
++    return null;
++  }
++  const info = rest.trim().split(/\s+/)[0] ?? "";
++  const code: string[] = [];
++  for (let end = at + 1; end < lines.length; end += 1) {
++    const line = lineAt(lines, end);
++    if (closesFence(line, marks)) {
++      return { block: { kind: "code", info, code: code.join("\n") }, end: end + 1 };
++    }
++    code.push(stripColumns(line, indent.length));
++  }
++  return { block: { kind: "code", info, code: code.join("\n") }, end: lines.length };
++}
++
++function heading(lines: readonly string[], at: number): Parsed | null {
++  const [, marks = "", content = ""] = HEADING.exec(lineAt(lines, at)) ?? [];
++  const tag = HEADING_TAGS[marks.length - 1];
++  if (tag === undefined) {
++    return null;
++  }
++  return { block: { kind: "heading", tag, text: content.replace(HEADING_CLOSE, "") }, end: at + 1 };
++}
++
++function rule(lines: readonly string[], at: number): Parsed | null {
++  return RULE.test(lineAt(lines, at)) ? { block: { kind: "rule" }, end: at + 1 } : null;
++}
++
++function cells(line: string): string[] {
++  const inner = line.trim().replace(LEADING_PIPE, "").replace(TRAILING_PIPE, "");
++  return inner.split(CELL_PIPE).map((cell) => cell.trim());
++}
++
++function delimiterRow(line: string, columns: number): Align[] | null {
++  const row = cells(line);
++  if (
++    !line.includes("|") ||
++    row.length !== columns ||
++    !row.every((cell) => DELIMITER_CELL.test(cell))
++  ) {
++    return null;
++  }
++  return row.map((cell) => ALIGN[`${cell.at(0)}${cell.at(-1)}`] ?? "none");
++}
++
++function startsTable(lines: readonly string[], at: number): boolean {
++  const header = lineAt(lines, at);
++  const next = lineAt(lines, at + 1);
++  return header.includes("|") && delimiterRow(next, cells(header).length) !== null;
++}
++
++function table(lines: readonly string[], at: number): Parsed | null {
++  if (!startsTable(lines, at)) {
++    return null;
++  }
++  const header = cells(lineAt(lines, at));
++  const align = delimiterRow(lineAt(lines, at + 1), header.length) ?? [];
++  const rows: string[][] = [];
++  let end = at + TABLE_HEAD_LINES;
++  while (end < lines.length && lineAt(lines, end).includes("|")) {
++    const row = cells(lineAt(lines, end));
++    rows.push(header.map((_, column) => row[column] ?? ""));
++    end += 1;
++  }
++  return { block: { kind: "table", align, header, rows }, end };
++}
++
++function itemStart(line: string): ItemStart | null {
++  const match = ITEM.exec(line);
++  if (match === null) {
++    return null;
++  }
++  const [, indent = "", marker = "", gap = "", first = ""] = match;
++  const width = gap.length === 0 || gap.length > MAX_ITEM_GAP ? 1 : gap.length;
++  const extra = gap.length > MAX_ITEM_GAP ? gap.slice(1) : "";
++  const numbering: Numbering = marker.endsWith(".")
++    ? { kind: "ordered", start: Number.parseInt(marker, 10) }
++    : { kind: "bullet" };
++  return { numbering, column: indent.length + marker.length + width, first: extra + first };
++}
++
++function interrupts(lines: readonly string[], at: number): boolean {
++  const line = lineAt(lines, at);
++  const item = itemStart(line);
++  const listStarts =
++    item !== null &&
++    item.first.trim() !== "" &&
++    (item.numbering.kind === "bullet" || item.numbering.start === 1);
++  return (
++    listStarts ||
++    QUOTE.test(line) ||
++    [fence, heading, rule].some((starts) => starts(lines, at) !== null) ||
++    startsTable(lines, at)
++  );
++}
++
++function quote(lines: readonly string[], at: number): Parsed | null {
++  const inner: string[] = [];
++  let end = at;
++  while (end < lines.length) {
++    const line = lineAt(lines, end);
++    const quoted = QUOTE.exec(line)?.[1];
++    const lazy = end > at && !isBlank(line) && !isBlank(inner.at(-1) ?? "");
++    if (quoted !== undefined) {
++      inner.push(quoted);
++    } else if (lazy && !interrupts(lines, end)) {
++      inner.push(line);
++    } else {
++      break;
++    }
++    end += 1;
++  }
++  return end === at ? null : { block: { kind: "quote", blocks: blocksOf(inner) }, end };
++}
++
++function itemEnd(
++  lines: readonly string[],
++  at: number,
++  start: ItemStart,
++  content: string[],
++): number {
++  let end = at + 1;
++  let blanks = 0;
++  for (let next = at + 1; next < lines.length; next += 1) {
++    const line = lineAt(lines, next);
++    if (isBlank(line)) {
++      blanks += 1;
++    } else if (indentOf(line) >= start.column) {
++      content.push(...Array.from({ length: blanks }, () => ""), stripColumns(line, start.column));
++      blanks = 0;
++      end = next + 1;
++    } else if (blanks === 0 && itemStart(line) === null && !interrupts(lines, next)) {
++      content.push(line.trimStart());
++      end = next + 1;
++    } else {
++      break;
++    }
++  }
++  return end;
++}
++
++function list(lines: readonly string[], at: number): Parsed | null {
++  const first = itemStart(lineAt(lines, at));
++  if (first === null) {
++    return null;
++  }
++  const items: ListItem[] = [];
++  let start = first;
++  let end = at;
++  for (;;) {
++    const content = [start.first];
++    end = itemEnd(lines, end, start, content);
++    items.push({ blocks: blocksOf(content) });
++    let next = end;
++    while (next < lines.length && isBlank(lineAt(lines, next))) {
++      next += 1;
++    }
++    const following = next < lines.length ? itemStart(lineAt(lines, next)) : null;
++    if (following === null || following.numbering.kind !== first.numbering.kind) {
++      return { block: { kind: "list", numbering: first.numbering, items }, end };
++    }
++    start = following;
++    end = next;
++  }
++}
++
++function paragraph(lines: readonly string[], at: number): Parsed {
++  const text: string[] = [lineAt(lines, at).trimStart()];
++  let end = at + 1;
++  while (end < lines.length && !isBlank(lineAt(lines, end)) && !interrupts(lines, end)) {
++    text.push(lineAt(lines, end).trimStart());
++    end += 1;
++  }
++  return { block: { kind: "paragraph", text: text.join("\n") }, end };
++}
++
++function parsedAt(lines: readonly string[], at: number): Parsed {
++  const starters = [fence, heading, rule, quote, list, table];
++  for (const starts of starters) {
++    const parsed = starts(lines, at);
++    if (parsed !== null) {
++      return parsed;
++    }
++  }
++  return paragraph(lines, at);
++}
++
++function sourced(lines: readonly string[]): SourcedBlock[] {
++  const blocks: SourcedBlock[] = [];
++  let at = 0;
++  while (at < lines.length) {
++    if (isBlank(lineAt(lines, at))) {
++      at += 1;
++      continue;
++    }
++    const { block, end } = parsedAt(lines, at);
++    blocks.push({ source: lines.slice(at, end).join("\n"), block });
++    at = end;
++  }
++  return blocks;
++}
++
++function blocksOf(lines: readonly string[]): Block[] {
++  return sourced(lines).map(({ block }) => block);
++}
++
++export function parseBlocks(text: string): SourcedBlock[] {
++  return sourced(text.split(LINE_BREAK));
++}
+diff --git a/frontend/src/editor/internal/markdownDom.browser.test.ts b/frontend/src/editor/internal/markdownDom.browser.test.ts
+new file mode 100644
+index 0000000..20f0f55
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownDom.browser.test.ts
+@@ -0,0 +1,152 @@
++import "../../style.css";
++import type { HighlightStyle } from "@codemirror/language";
++import { tags, type Tag } from "@lezer/highlight";
++import { afterEach, expect, test } from "vitest";
++
++import { MarkdownView } from "../index";
++import { fontHighlight, paletteHighlight } from "./syntax";
++
++const ALLOWED_TAGS: Readonly<Record<string, true>> = {
++  P: true,
++  H1: true,
++  H2: true,
++  H3: true,
++  H4: true,
++  H5: true,
++  H6: true,
++  PRE: true,
++  CODE: true,
++  UL: true,
++  OL: true,
++  LI: true,
++  BLOCKQUOTE: true,
++  TABLE: true,
++  THEAD: true,
++  TBODY: true,
++  TR: true,
++  TH: true,
++  TD: true,
++  HR: true,
++  EM: true,
++  STRONG: true,
++  DEL: true,
++  SPAN: true,
++  BR: true,
++};
++
++const HOSTILE = [
++  "# Answer <script>window.ran = true</script>",
++  "",
++  'Here <img src=x onerror="window.ran = true"> and [click](javascript:window.ran=true).',
++  "",
++  '<div onclick="window.ran = true">',
++  '<iframe src="https://x.test"></iframe>',
++  "</div>",
++  "",
++  '- item with <b onmouseover="x()">bold</b> and ![pic](https://x.test/p.png)',
++  "",
++  "| a | <i>b</i> |",
++  "| - | - |",
++  "| `<svg onload=x()>` | **c** |",
++  "",
++  '> <a href="https://x.test">quote</a>',
++  "",
++  "```html",
++  "<script>window.ran = true</script>",
++  "```",
++].join("\n");
++
++const hosts: HTMLElement[] = [];
++const views: MarkdownView[] = [];
++
++function mounted(): { readonly host: HTMLElement; readonly view: MarkdownView } {
++  const host = document.createElement("div");
++  document.body.append(host);
++  const view = new MarkdownView(host);
++  hosts.push(host);
++  views.push(view);
++  return { host, view };
++}
++
++function classOf(highlighter: HighlightStyle, tag: Tag): string {
++  const name = highlighter.style([tag]);
++  if (name === null) {
++    throw new Error("the highlighter styles no such tag");
++  }
++  return name;
++}
++
++function spanWith(host: HTMLElement, text: string): Element | undefined {
++  return [...host.querySelectorAll("pre code span")].find((span) => span.textContent === text);
++}
++
++function present<T>(value: T | undefined): T {
++  if (value === undefined) {
++    throw new Error("missing");
++  }
++  return value;
++}
++
++afterEach(() => {
++  for (const view of views.splice(0)) {
++    view.destroy();
++  }
++  for (const host of hosts.splice(0)) {
++    host.remove();
++  }
++});
++
++test("the tree holds only allowed tags and only `class` attributes for an answer with <script>, <img onerror>, an HTML block and a javascript: link", async () => {
++  const { host, view } = mounted();
++  view.show(HOSTILE);
++  await expect
++    .poll(() => host.querySelectorAll("pre code span").length, { timeout: 5000 })
++    .toBeGreaterThan(0);
++
++  const elements = [...host.querySelectorAll("*")];
++  expect(elements.length).toBeGreaterThan(10);
++  expect(
++    elements.map((element) => element.tagName).filter((tag) => !Object.hasOwn(ALLOWED_TAGS, tag)),
++  ).toEqual([]);
++  expect(
++    elements.flatMap((element) => element.getAttributeNames().filter((name) => name !== "class")),
++  ).toEqual([]);
++  expect(Reflect.get(window, "ran")).toBeUndefined();
++  expect(host.textContent).toContain("<script>window.ran = true</script>");
++  expect(host.textContent).toContain("click javascript:window.ran=true");
++  expect(host.textContent).toContain("pic (https://x.test/p.png)");
++  expect(host.querySelector(".markdown-address")?.textContent).toBe("javascript:window.ran=true");
++});
++
++test("a ts code block carries the editor's highlight classes", async () => {
++  const { host, view } = mounted();
++  view.show("```ts\nconst answer: number = 42;\n```");
++  const keyword = classOf(paletteHighlight, tags.definitionKeyword);
++
++  await expect.poll(() => spanWith(host, "const")?.className, { timeout: 5000 }).toContain(keyword);
++  const probe = document.createElement("span");
++  probe.style.color = "var(--color-syntax-definition-keyword)";
++  host.append(probe);
++  expect(getComputedStyle(present(spanWith(host, "const"))).color).toBe(
++    getComputedStyle(probe).color,
++  );
++  expect(present(spanWith(host, "42")).className).toContain(classOf(paletteHighlight, tags.number));
++  expect(host.querySelector("pre code")?.textContent).toBe("const answer: number = 42;");
++  expect(document.head.querySelector("style.markdown-highlight-styles")?.textContent).toContain(
++    classOf(fontHighlight, tags.comment),
++  );
++});
++
++test("show() with a longer text keeps the unchanged first block's node", () => {
++  const { host, view } = mounted();
++  view.show("# Title\n\nFirst *para");
++  const [title, paragraph] = [...host.children];
++
++  view.show("# Title\n\nFirst *paragraph*, done.\n\n- next");
++
++  expect(host.children[0]).toBe(title);
++  expect(host.children[1]).not.toBe(paragraph);
++  expect(host.children[1]?.textContent).toBe("First paragraph, done.");
++  expect(host.children[1]?.querySelector("em")?.textContent).toBe("paragraph");
++  expect(host.children).toHaveLength(3);
++});
+diff --git a/frontend/src/editor/internal/markdownDom.ts b/frontend/src/editor/internal/markdownDom.ts
+new file mode 100644
+index 0000000..1cd240d
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownDom.ts
+@@ -0,0 +1,192 @@
++import type { Align, Block, ListItem, Numbering } from "./markdownBlocks";
++import { parseInline, type Inline } from "./markdownInline";
++
++export type CodePainter = (element: HTMLElement, info: string, code: string) => void;
++
++type Tag = keyof Pick<
++  HTMLElementTagNameMap,
++  | "p"
++  | "h1"
++  | "h2"
++  | "h3"
++  | "h4"
++  | "h5"
++  | "h6"
++  | "pre"
++  | "code"
++  | "ul"
++  | "ol"
++  | "li"
++  | "blockquote"
++  | "table"
++  | "thead"
++  | "tbody"
++  | "tr"
++  | "th"
++  | "td"
++  | "hr"
++  | "em"
++  | "strong"
++  | "del"
++  | "span"
++  | "br"
++>;
++
++const STYLED_TAG = { emphasis: "em", strong: "strong", strike: "del" } as const satisfies Readonly<
++  Record<string, Tag>
++>;
++
++const ALIGN_CLASS: Readonly<Record<Align, string>> = {
++  none: "",
++  left: "markdown-align-left",
++  center: "markdown-align-center",
++  right: "markdown-align-right",
++};
++
++function element<K extends Tag>(
++  document: Document,
++  tag: K,
++  className: string,
++): HTMLElementTagNameMap[K] {
++  const created = document.createElement(tag);
++  if (className !== "") {
++    created.className = className;
++  }
++  return created;
++}
++
++function textElement(document: Document, tag: Tag, className: string, text: string): HTMLElement {
++  const created = element(document, tag, className);
++  created.textContent = text;
++  return created;
++}
++
++function inlineNodes(document: Document, inlines: readonly Inline[]): Node[] {
++  return inlines.flatMap((inline): Node[] => {
++    switch (inline.kind) {
++      case "text":
++        return [document.createTextNode(inline.text)];
++      case "code":
++        return [textElement(document, "code", "markdown-inline-code", inline.text)];
++      case "break":
++        return [element(document, "br", "")];
++      case "emphasis":
++      case "strong":
++      case "strike": {
++        const styled = element(document, STYLED_TAG[inline.kind], "");
++        styled.append(...inlineNodes(document, inline.children));
++        return [styled];
++      }
++      case "link":
++        return linkNodes(document, inline.children, inline.address);
++      default: {
++        const _exhaustive: never = inline;
++        return _exhaustive;
++      }
++    }
++  });
++}
++
++function linkNodes(document: Document, children: readonly Inline[], address: string): Node[] {
++  const shown = inlineNodes(document, children);
++  const sameText =
++    children.length === 1 && children[0]?.kind === "text" && children[0].text === address;
++  if (address === "" || sameText) {
++    return shown;
++  }
++  const addressNode = textElement(document, "span", "markdown-address", address);
++  return [...shown, document.createTextNode(" "), addressNode];
++}
++
++function withInlines(document: Document, tag: Tag, className: string, text: string): HTMLElement {
++  const created = element(document, tag, className);
++  created.append(...inlineNodes(document, parseInline(text)));
++  return created;
++}
++
++function codeNode(document: Document, info: string, code: string, paint: CodePainter): HTMLElement {
++  const pre = element(document, "pre", "markdown-code");
++  const inner = textElement(document, "code", "", code);
++  pre.append(inner);
++  paint(inner, info, code);
++  return pre;
++}
++
++function listNode(
++  document: Document,
++  numbering: Numbering,
++  items: readonly ListItem[],
++  paint: CodePainter,
++): HTMLElement {
++  const ordered = numbering.kind === "ordered";
++  const list = ordered
++    ? element(document, "ol", "markdown-list markdown-ordered")
++    : element(document, "ul", "markdown-list");
++  items.forEach((item, index) => {
++    const entry = element(document, "li", "markdown-item");
++    if (numbering.kind === "ordered") {
++      entry.append(textElement(document, "span", "markdown-number", `${numbering.start + index}.`));
++    }
++    entry.append(...item.blocks.map((block) => blockNode(document, block, paint)));
++    list.append(entry);
++  });
++  return list;
++}
++
++function rowNode(
++  document: Document,
++  tag: "th" | "td",
++  row: readonly string[],
++  align: readonly Align[],
++): HTMLElement {
++  const tableRow = element(document, "tr", "");
++  row.forEach((cell, column) => {
++    tableRow.append(withInlines(document, tag, ALIGN_CLASS[align[column] ?? "none"], cell));
++  });
++  return tableRow;
++}
++
++function tableNode(
++  document: Document,
++  { align, header, rows }: Extract<Block, { kind: "table" }>,
++): HTMLElement {
++  const table = element(document, "table", "markdown-table");
++  const head = element(document, "thead", "");
++  head.append(rowNode(document, "th", header, align));
++  const body = element(document, "tbody", "");
++  body.append(...rows.map((row) => rowNode(document, "td", row, align)));
++  table.append(head, ...(rows.length > 0 ? [body] : []));
++  return table;
++}
++
++function kindNode(document: Document, block: Block, paint: CodePainter): HTMLElement {
++  switch (block.kind) {
++    case "paragraph":
++      return withInlines(document, "p", "markdown-paragraph", block.text);
++    case "heading":
++      return withInlines(document, block.tag, "markdown-heading", block.text);
++    case "code":
++      return codeNode(document, block.info, block.code, paint);
++    case "list":
++      return listNode(document, block.numbering, block.items, paint);
++    case "quote": {
++      const quote = element(document, "blockquote", "markdown-quote");
++      quote.append(...block.blocks.map((inner) => blockNode(document, inner, paint)));
++      return quote;
++    }
++    case "table":
++      return tableNode(document, block);
++    case "rule":
++      return element(document, "hr", "markdown-rule");
++    default: {
++      const _exhaustive: never = block;
++      return _exhaustive;
++    }
++  }
++}
++
++export function blockNode(document: Document, block: Block, paint: CodePainter): HTMLElement {
++  const node = kindNode(document, block, paint);
++  node.className = `markdown-block ${node.className}`;
++  return node;
++}
+diff --git a/frontend/src/editor/internal/markdownInline.test.ts b/frontend/src/editor/internal/markdownInline.test.ts
+new file mode 100644
+index 0000000..1265d21
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownInline.test.ts
+@@ -0,0 +1,81 @@
++import { expect, test } from "vitest";
++
++import { parseInline } from "./markdownInline";
++
++test("backticks win over emphasis", () => {
++  expect(parseInline("*a `b*` c*")).toEqual([
++    {
++      kind: "emphasis",
++      children: [
++        { kind: "text", text: "a " },
++        { kind: "code", text: "b*" },
++        { kind: "text", text: " c" },
++      ],
++    },
++  ]);
++});
++
++test("an unmatched `*` stays literal", () => {
++  expect(parseInline("2 * 3 and *open and **half*")).toEqual([
++    { kind: "text", text: "2 * 3 and *open and *" },
++    { kind: "emphasis", children: [{ kind: "text", text: "half" }] },
++  ]);
++});
++
++test("snake_case words keep their underscores", () => {
++  expect(parseInline("call snake_case_name and _this_")).toEqual([
++    { kind: "text", text: "call snake_case_name and " },
++    { kind: "emphasis", children: [{ kind: "text", text: "this" }] },
++  ]);
++});
++
++test("strong, strike and nested emphasis", () => {
++  expect(parseInline("**a *b* c** ~~gone~~")).toEqual([
++    {
++      kind: "strong",
++      children: [
++        { kind: "text", text: "a " },
++        { kind: "emphasis", children: [{ kind: "text", text: "b" }] },
++        { kind: "text", text: " c" },
++      ],
++    },
++    { kind: "text", text: " " },
++    { kind: "strike", children: [{ kind: "text", text: "gone" }] },
++  ]);
++});
++
++test("raw HTML stays text", () => {
++  expect(parseInline('<script>alert(1)</script><img src=x onerror="y()">')).toEqual([
++    { kind: "text", text: '<script>alert(1)</script><img src=x onerror="y()">' },
++  ]);
++});
++
++test("an image is its alt text and address", () => {
++  expect(parseInline('see ![the logo](https://x.test/logo.png "t") here')).toEqual([
++    { kind: "text", text: "see the logo (https://x.test/logo.png) here" },
++  ]);
++});
++
++test("a link is its text and address, an autolink its address", () => {
++  expect(parseInline("[the `docs`](javascript:alert(1)) or <https://x.test/a>")).toEqual([
++    {
++      kind: "link",
++      children: [
++        { kind: "text", text: "the " },
++        { kind: "code", text: "docs" },
++      ],
++      address: "javascript:alert(1)",
++    },
++    { kind: "text", text: " or https://x.test/a" },
++  ]);
++});
++
++test("escapes, hard breaks and soft breaks", () => {
++  expect(parseInline("\\*not\\* a  \nb\\\nc\nd")).toEqual([
++    { kind: "text", text: "*not* a" },
++    { kind: "break" },
++    { kind: "text", text: "b" },
++    { kind: "break" },
++    { kind: "text", text: "c\nd" },
++  ]);
++});
+diff --git a/frontend/src/editor/internal/markdownInline.ts b/frontend/src/editor/internal/markdownInline.ts
+new file mode 100644
+index 0000000..cf3044c
+--- /dev/null
++++ b/frontend/src/editor/internal/markdownInline.ts
+@@ -0,0 +1,266 @@
++type Styled = "emphasis" | "strong" | "strike";
++
++export type Inline =
++  | { readonly kind: "text"; readonly text: string }
++  | { readonly kind: "code"; readonly text: string }
++  | { readonly kind: "break" }
++  | { readonly kind: Styled; readonly children: readonly Inline[] }
++  | { readonly kind: "link"; readonly children: readonly Inline[]; readonly address: string };
++
++type Step = { readonly inlines: readonly Inline[]; readonly end: number };
++
++type Target = { readonly address: string; readonly end: number };
++
++type Delimiter = "*" | "_" | "~";
++
++const PUNCTUATION = /^[!-/:-@[-`{-~]$/;
++const SPACE = /^\s$/;
++const WORD = /^[\p{L}\p{N}]$/u;
++const AUTOLINK = /^<([a-zA-Z][a-zA-Z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+)>/;
++const STRIKE_RUN = 2;
++const STRONG_RUN = 2;
++const ESCAPE_WIDTH = "\\*".length;
++
++function runLength(text: string, at: number, char: string): number {
++  let end = at;
++  while (text[end] === char) {
++    end += 1;
++  }
++  return end - at;
++}
++
++function text(value: string, end: number): Step {
++  return { inlines: [{ kind: "text", text: value }], end };
++}
++
++function codeSpanEnd(source: string, at: number): number | null {
++  const run = runLength(source, at, "`");
++  let from = at + run;
++  for (;;) {
++    const next = source.indexOf("`", from);
++    if (next < 0) {
++      return null;
++    }
++    const closing = runLength(source, next, "`");
++    if (closing === run) {
++      return next + closing;
++    }
++    from = next + closing;
++  }
++}
++
++function codeSpan(source: string, at: number): Step {
++  const run = runLength(source, at, "`");
++  const end = codeSpanEnd(source, at);
++  if (end === null) {
++    return text("`".repeat(run), at + run);
++  }
++  const inner = source.slice(at + run, end - run).replaceAll("\n", " ");
++  const padded = inner.startsWith(" ") && inner.endsWith(" ") && inner.trim() !== "";
++  return { inlines: [{ kind: "code", text: padded ? inner.slice(1, -1) : inner }], end };
++}
++
++function escape(source: string, at: number): Step {
++  const next = source.charAt(at + 1);
++  if (next === "\n") {
++    return { inlines: [{ kind: "break" }], end: at + ESCAPE_WIDTH };
++  }
++  return PUNCTUATION.test(next) ? text(next, at + ESCAPE_WIDTH) : text("\\", at + 1);
++}
++
++function spaces(source: string, at: number): Step {
++  const run = runLength(source, at, " ");
++  if (source[at + run] !== "\n") {
++    return text(" ".repeat(run), at + run);
++  }
++  return run > 1 ? { inlines: [{ kind: "break" }], end: at + run + 1 } : text("\n", at + run + 1);
++}
++
++function canOpen(source: string, at: number, run: number, char: Delimiter): boolean {
++  const next = source.charAt(at + run);
++  const before = source.charAt(at - 1);
++  return next !== "" && !SPACE.test(next) && (char !== "_" || !WORD.test(before));
++}
++
++function canClose(source: string, at: number, run: number, char: Delimiter): boolean {
++  const before = source.charAt(at - 1);
++  const after = source.charAt(at + run);
++  return before !== "" && !SPACE.test(before) && (char !== "_" || !WORD.test(after));
++}
++
++function widthOf(run: number, char: Delimiter): number {
++  return char === "~" ? STRIKE_RUN : Math.min(run, STRONG_RUN);
++}
++
++function skipped(source: string, at: number): number | null {
++  const char = source[at];
++  if (char === "\\") {
++    return at + ESCAPE_WIDTH;
++  }
++  if (char === "`") {
++    return codeSpanEnd(source, at) ?? at + runLength(source, at, "`");
++  }
++  return null;
++}
++
++function closer(source: string, from: number, char: Delimiter, width: number): number | null {
++  let at = from;
++  while (at < source.length) {
++    const past = skipped(source, at);
++    if (past !== null) {
++      at = past;
++      continue;
++    }
++    if (source[at] !== char) {
++      at += 1;
++      continue;
++    }
++    const run = runLength(source, at, char);
++    if (canClose(source, at, run, char) && run >= width) {
++      return at;
++    }
++    if (!canOpen(source, at, run, char)) {
++      at += run;
++      continue;
++    }
++    const inner = widthOf(run, char);
++    const nested = closer(source, at + inner, char, inner);
++    if (nested === null) {
++      return null;
++    }
++    at = nested + inner;
++  }
++  return null;
++}
++
++function styledKind(char: Delimiter, width: number): Styled {
++  if (char === "~") {
++    return "strike";
++  }
++  return width === STRONG_RUN ? "strong" : "emphasis";
++}
++
++function delimited(source: string, at: number, char: Delimiter): Step {
++  const run = runLength(source, at, char);
++  if ((char === "~" && run !== STRIKE_RUN) || !canOpen(source, at, run, char)) {
++    return text(char.repeat(run), at + run);
++  }
++  const width = widthOf(run, char);
++  const end = closer(source, at + width, char, width);
++  if (end === null) {
++    return text(char, at + 1);
++  }
++  const children = parseInline(source.slice(at + width, end));
++  return { inlines: [{ kind: styledKind(char, width), children }], end: end + width };
++}
++
++function bracketEnd(source: string, at: number): number | null {
++  let depth = 0;
++  let index = at;
++  while (index < source.length) {
++    const past = skipped(source, index);
++    if (past !== null) {
++      index = past;
++      continue;
++    }
++    const char = source[index];
++    depth += char === "[" ? 1 : char === "]" ? -1 : 0;
++    if (depth === 0) {
++      return index;
++    }
++    index += 1;
++  }
++  return null;
++}
++
++function destination(source: string, open: number): Target | null {
++  if (source[open] !== "(") {
++    return null;
++  }
++  let depth = 0;
++  for (let index = open; index < source.length; index += 1) {
++    const char = source[index];
++    depth += char === "(" ? 1 : char === ")" ? -1 : 0;
++    if (depth === 0) {
++      const inner = source.slice(open + 1, index).trim();
++      const address = inner.startsWith("<") ? inner.slice(1, inner.indexOf(">")) : inner;
++      return { address: address.split(/\s+/)[0] ?? "", end: index + 1 };
++    }
++  }
++  return null;
++}
++
++function link(source: string, at: number): Step | null {
++  const close = bracketEnd(source, at);
++  const target = close === null ? null : destination(source, close + 1);
++  if (close === null || target === null) {
++    return null;
++  }
++  const children = parseInline(source.slice(at + 1, close));
++  return { inlines: [{ kind: "link", children, address: target.address }], end: target.end };
++}
++
++function image(source: string, at: number): Step | null {
++  const close = source[at + 1] === "[" ? bracketEnd(source, at + 1) : null;
++  const target = close === null ? null : destination(source, close + 1);
++  if (close === null || target === null) {
++    return null;
++  }
++  return text(`${source.slice(at + "![".length, close)} (${target.address})`, target.end);
++}
++
++function autolink(source: string, at: number): Step | null {
++  const match = AUTOLINK.exec(source.slice(at));
++  return match === null ? null : text(match[1] ?? "", at + match[0].length);
++}
++
++function stepAt(source: string, at: number): Step | null {
++  const char = source.charAt(at);
++  switch (char) {
++    case "\\":
++      return escape(source, at);
++    case "`":
++      return codeSpan(source, at);
++    case " ":
++      return spaces(source, at);
++    case "!":
++      return image(source, at);
++    case "[":
++      return link(source, at);
++    case "<":
++      return autolink(source, at);
++    case "*":
++    case "_":
++    case "~":
++      return delimited(source, at, char);
++    default:
++      return null;
++  }
++}
++
++function append(inlines: Inline[], next: Inline): void {
++  const last = inlines.at(-1);
++  if (last?.kind === "text" && next.kind === "text") {
++    inlines[inlines.length - 1] = { kind: "text", text: last.text + next.text };
++  } else {
++    inlines.push(next);
++  }
++}
++
++export function parseInline(source: string): Inline[] {
++  const inlines: Inline[] = [];
++  let at = 0;
++  while (at < source.length) {
++    const step = stepAt(source, at);
++    if (step === null) {
++      append(inlines, { kind: "text", text: source.charAt(at) });
++      at += 1;
++      continue;
++    }
++    for (const inline of step.inlines) {
++      append(inlines, inline);
++    }
++    at = step.end;
++  }
++  return inlines;
++}
+diff --git a/frontend/src/editor/markdown.ts b/frontend/src/editor/markdown.ts
+new file mode 100644
+index 0000000..b9f12a6
+--- /dev/null
++++ b/frontend/src/editor/markdown.ts
+@@ -0,0 +1,46 @@
++import "./theme.css";
++import { paintCode } from "./internal/codeBlock";
++import { parseBlocks } from "./internal/markdownBlocks";
++import { blockNode, type CodePainter } from "./internal/markdownDom";
++
++type ShownBlock = { readonly source: string; readonly node: HTMLElement };
++
++export class MarkdownView {
++  readonly #host: HTMLElement;
++  readonly #paint: CodePainter;
++  #shown: ShownBlock[] = [];
++  #destroyed = false;
++
++  constructor(host: HTMLElement) {
++    this.#host = host;
++    this.#paint = (element, info, code) => {
++      void paintCode(element, info, code, () => !this.#destroyed && host.contains(element));
++    };
++  }
++
++  show(text: string): void {
++    if (this.#destroyed) {
++      return;
++    }
++    const blocks = parseBlocks(text);
++    let kept = 0;
++    while (kept < this.#shown.length && this.#shown[kept]?.source === blocks[kept]?.source) {
++      kept += 1;
++    }
++    for (const { node } of this.#shown.splice(kept)) {
++      node.remove();
++    }
++    const document = this.#host.ownerDocument;
++    for (const { source, block } of blocks.slice(kept)) {
++      const node = blockNode(document, block, this.#paint);
++      this.#host.append(node);
++      this.#shown.push({ source, node });
++    }
++  }
++
++  destroy(): void {
++    this.#destroyed = true;
++    this.#shown = [];
++    this.#host.replaceChildren();
++  }
++}
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index a0b6e08..90fcc6d 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -361,3 +361,126 @@ path.chunk-band {
+ .minimap-slider[hidden] {
+   display: none;
+ }
++
++.markdown-block {
++  margin-block: 0.6em;
++}
++
++.markdown-block:first-child {
++  margin-top: 0;
++}
++
++.markdown-block:last-child {
++  margin-bottom: 0;
++}
++
++.markdown-number + .markdown-block {
++  margin-top: 0;
++}
++
++.markdown-heading {
++  font-weight: 600;
++  line-height: 1.3;
++}
++
++h1.markdown-heading {
++  font-size: 1.4em;
++}
++
++h2.markdown-heading {
++  font-size: 1.25em;
++}
++
++h3.markdown-heading {
++  font-size: 1.1em;
++}
++
++.markdown-list {
++  padding-left: 1.6em;
++}
++
++ul.markdown-list {
++  list-style: disc;
++}
++
++.markdown-ordered {
++  list-style: none;
++}
++
++.markdown-item {
++  position: relative;
++}
++
++.markdown-item > :is(.markdown-paragraph, .markdown-list) {
++  margin-block: 0;
++}
++
++.markdown-number {
++  position: absolute;
++  right: 100%;
++  margin-right: 0.4em;
++  font-variant-numeric: tabular-nums;
++}
++
++.markdown-code {
++  overflow-x: auto;
++  padding: 6px 10px;
++  border: 1px solid var(--color-control-border);
++  border-radius: 6px;
++  background: var(--color-panel);
++  color: var(--color-code);
++  font-family: var(--font-mono);
++  font-size: 12px;
++  line-height: 1.5;
++  white-space: pre;
++  tab-size: 4;
++}
++
++.markdown-inline-code {
++  padding: 0 4px;
++  border-radius: 4px;
++  background: var(--color-panel-inline);
++  color: var(--color-code);
++  font-family: var(--font-mono);
++  font-size: 0.92em;
++}
++
++.markdown-quote {
++  padding-left: 10px;
++  border-left: 3px solid var(--color-control-border);
++  color: var(--color-fg-muted);
++}
++
++.markdown-table {
++  border-collapse: collapse;
++}
++
++.markdown-table :is(th, td) {
++  padding: 3px 8px;
++  border: 1px solid var(--color-control-border);
++  text-align: left;
++}
++
++.markdown-table th {
++  background: var(--color-panel-inline);
++  font-weight: 600;
++}
++
++.markdown-table .markdown-align-center {
++  text-align: center;
++}
++
++.markdown-table .markdown-align-right {
++  text-align: right;
++}
++
++.markdown-rule {
++  border: none;
++  border-top: 1px solid var(--color-control-border);
++}
++
++.markdown-address {
++  color: var(--color-fg-muted);
++  user-select: text;
++  -webkit-user-select: text;
++}
+diff --git a/frontend/src/ui/useMarkdown.ts b/frontend/src/ui/useMarkdown.ts
+new file mode 100644
+index 0000000..fda1553
+--- /dev/null
++++ b/frontend/src/ui/useMarkdown.ts
+@@ -0,0 +1,28 @@
++import { onScopeDispose, watch, type ShallowRef } from "vue";
++
++import { MarkdownView } from "../editor";
++
++export function useMarkdown(
++  host: Readonly<ShallowRef<HTMLElement | null>>,
++  text: () => string,
++): void {
++  let view: MarkdownView | null = null;
++
++  watch(
++    host,
++    (element) => {
++      view?.destroy();
++      view = element === null ? null : new MarkdownView(element);
++      view?.show(text());
++    },
++    { immediate: true, flush: "post" },
++  );
++  watch(text, (next) => {
++    view?.show(next);
++  });
++
++  onScopeDispose(() => {
++    view?.destroy();
++    view = null;
++  });
++}
+-- 
+2.56.0
+

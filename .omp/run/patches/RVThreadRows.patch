@@ -1,0 +1,1993 @@
+From 049bf0fdd29e295e76bbf93bba6b9658a687ee76 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:39:25 +0200
+Subject: [PATCH] feat(editor): thread rows inside the range columns: anchor,
+ aligned rows, persistent hosts, line marks
+
+---
+ .omp/run/notes/RVThreadRows.md                | 151 ++++++++++++
+ frontend/src/editor/AGENTS.md                 |   2 +
+ frontend/src/editor/compare.ts                |   8 +-
+ frontend/src/editor/index.ts                  |   2 +-
+ .../src/editor/internal/compareFrame.test.ts  | 146 +++++++++--
+ frontend/src/editor/internal/compareFrame.ts  |  27 +-
+ .../src/editor/internal/threadAnchor.test.ts  |  56 +++++
+ frontend/src/editor/internal/threadAnchor.ts  |  45 ++++
+ .../src/editor/internal/threadField.test.ts   |  55 +++++
+ frontend/src/editor/internal/threadField.ts   |  83 +++++++
+ frontend/src/editor/internal/threadHosts.ts   | 218 +++++++++++++++++
+ .../src/editor/internal/threadNumbers.test.ts |  41 ++++
+ frontend/src/editor/internal/threadNumbers.ts | 137 +++++++++++
+ .../src/editor/internal/threadRows.test.ts    | 105 ++++++++
+ frontend/src/editor/internal/threadRows.ts    |  73 ++++++
+ frontend/src/editor/internal/threadWidget.ts  |  59 +++++
+ frontend/src/editor/range.ts                  |  81 +++++-
+ .../src/editor/rangeThreads.browser.test.ts   | 230 ++++++++++++++++++
+ frontend/src/editor/theme.css                 |  53 ++++
+ frontend/src/ipc/index.ts                     |   1 +
+ frontend/src/ipc/threadLine.ts                |  55 +++++
+ 21 files changed, 1589 insertions(+), 39 deletions(-)
+ create mode 100644 .omp/run/notes/RVThreadRows.md
+ create mode 100644 frontend/src/editor/internal/threadAnchor.test.ts
+ create mode 100644 frontend/src/editor/internal/threadAnchor.ts
+ create mode 100644 frontend/src/editor/internal/threadField.test.ts
+ create mode 100644 frontend/src/editor/internal/threadField.ts
+ create mode 100644 frontend/src/editor/internal/threadHosts.ts
+ create mode 100644 frontend/src/editor/internal/threadNumbers.test.ts
+ create mode 100644 frontend/src/editor/internal/threadNumbers.ts
+ create mode 100644 frontend/src/editor/internal/threadRows.test.ts
+ create mode 100644 frontend/src/editor/internal/threadRows.ts
+ create mode 100644 frontend/src/editor/internal/threadWidget.ts
+ create mode 100644 frontend/src/editor/rangeThreads.browser.test.ts
+ create mode 100644 frontend/src/ipc/threadLine.ts
+
+diff --git a/.omp/run/notes/RVThreadRows.md b/.omp/run/notes/RVThreadRows.md
+new file mode 100644
+index 0000000..36fb78c
+--- /dev/null
++++ b/.omp/run/notes/RVThreadRows.md
+@@ -0,0 +1,151 @@
++Thread rows now sit inside both read-only range columns, and every acceptance item was observed, with two caveats. The probe file itself has never run: Playwright WebKit cannot launch here, so its checks ran in MiniBrowser. Second, `RangeController` gives `events` a default no-op so the tree still compiles; row 20 should pass real events and remove that default.
++
++```
++summary                 Range threads are block rows in both read-only columns: `anchorAt` turns a pressed line into a ThreadLine;
++                        `threadRows` groups threads by aligned place; one shared `threadField` gives each row a block widget per column,
++                        filled with persistent hosts that Vue will use.
++                        `ThreadHosts` sizes each row to the larger column (ResizeObserver, then `requestMeasure`), keeps rows still under
++                        horizontal scroll and gives focus back to a field after CodeMirror redraws it.
++                        Line numbers carry a count badge and a hover comment icon, and a press reports `startThread` or `toggleThreads`.
++                        `CompareFrame` now takes `{ views, strip, fields, anchors }` and merges extra anchors, sorted. The compare window
++                        passes `[differenceField]` and `() => []`, and behaves as before.
++files_changed           new: frontend/src/ipc/threadLine.ts
++                             frontend/src/editor/internal/{threadAnchor,threadRows,threadField,threadWidget,threadHosts,threadNumbers}.ts
++                             frontend/src/editor/internal/{threadAnchor,threadRows,threadField,threadNumbers}.test.ts
++                             frontend/src/editor/rangeThreads.browser.test.ts
++                        changed: frontend/src/editor/{range,index,compare}.ts, frontend/src/editor/internal/compareFrame.ts,
++                             frontend/src/editor/internal/compareFrame.test.ts, frontend/src/editor/theme.css (the .markdown-* rules kept;
++                             thread rules added at the end), frontend/src/editor/AGENTS.md, frontend/src/ipc/index.ts
++tests_added             The design's 13-row editor table. Each test was checked once with its hand mutation (results under smoke_evidence):
++                        threadAnchor.test.ts
++                          "a left line inside a modified difference is removed"
++                          "an unchanged right line after two differences pairs with its left line"
++                          "a line just past a pure insertion is unchanged, the last inserted line added"
++                        threadRows.test.ts
++                          "a removed line's gap sits after the difference's right lines"
++                          "an unchanged line's threads from both columns share one row"
++                          "rows at one place keep their order by the other column's place"
++                          "collapsed threads place no row, drafts do"
++                          "a row's height is the larger column's sum"
++                        threadField.test.ts
++                          "a row widget with the same keys eqs the old one, so its DOM is kept when heights change"
++                          extra: "each row is a block widget after its place's line, in row order; place 0 sits above line 1"
++                            (positions and sides)
++                        threadNumbers.test.ts
++                          "the count mark counts open and collapsed threads shown in this column, not drafts"
++                          "a press on the badge reports the line's keys; a press on the number starts a thread"
++                        compareFrame.test.ts (the existing test kept, its fake given `type`, `fields` and `anchors`)
++                          "an unchanged-line row adds the lines around it as anchors in both columns"
++                            (`threadAnchors` values over joined [text, widget] blocks, then the follower lands at 210, not 166.67)
++                          "merged anchors stay sorted in both columns"
++                        rangeThreads.browser.test.ts: the four acceptance checks, plus number press → startThread and badge press →
++                          toggleThreads.
++smoke_evidence          pnpm -C frontend typecheck → exit 0
++                        pnpm -C frontend lint → exit 0, nothing reported
++                        pnpm -C frontend test → "Test Files 166 passed (166)", "Tests 2106 passed (2106)"
++                        pnpm -C frontend fmt:check → "All matched files use the correct format."
++                        pnpm -C frontend sfc-order → exit 0
++                        pnpm -C frontend unused → fails only on RangeSideLabel (ipc/index.ts:92, rangeDomain.ts:6), which was there before
++                          this slice and is not mine.
++                        Hand mutations (vitest run --project node <file>); each failed its test, and every file was restored (tags back
++                          to the originals #1B31, #9A00, #0739, #54D9, #718C):
++                          1  threadAnchor `line < start + len` → `line < start`: × "a left line inside a modified difference is removed"
++                             (and × the pure-insertion test)
++                          2  `offset +=` → `offset =`: × "an unchanged right line after two differences…"
++                          3  `<` → `<=` at the end test: × "a line just past a pure insertion…"
++                          4  gapAfter returns the unchanged pairing (line + 1): × "a removed line's gap sits after…"
++                             (and × the order test)
++                          5  row key = place + shown column: × "an unchanged line's threads from both columns share one row"
++                          6  sort by left only: × "rows at one place keep their order…"
++                          7  collapsed treated like open: × "collapsed threads place no row, drafts do"
++                          8  Math.max → a + b: × "a row's height is the larger column's sum"
++                          9  a height snapshot in the widget, compared in eq: × "a row widget with the same keys eqs the old one…"
++                          10 drafts counted: × "the count mark counts open and collapsed threads…"
++                          11 press branches swapped: × "a press on the badge reports the line's keys…"
++                          12 extra anchors dropped from measure: × "an unchanged-line row adds the lines around it…"
++                             (and × the sorted test)
++                          13 no sort: × "merged anchors stay sorted in both columns"
++                        WebKit probe: `vitest run --project browser src/editor/rangeThreads.browser.test.ts` → "MiniBrowser: error while
++                          loading shared libraries: libicudata.so.74" (#423/#1074). The same checks were run in MiniBrowser instead
++                          (`just app-session start-fixture --name rvthreads --range-case review` + `just webdriver`, throwaway
++                          /tmp/rvthreads/probe.mjs; it imports /src/editor/index.ts in the page, builds a RangeController with 800 lines,
++                          one difference and an open unchanged thread on line 3, and uses real WebDriver key and click actions):
++                          grow   {"before":{"left":104,"right":104,"band":244},"after":{"left":304,"right":304,"band":444},
++                                  "moved":{"left":200,"right":200,"band":200},"cells":[200,200],"hostHeight":200}
++                          typing (textarea in the host; h e l l o, Enter, Backspace, then Ctrl+F)
++                                 {"value":"hello","focused":true,"findBars":[0,0],"panels":[0,0],
++                                  "leftUnchanged":true,"rightUnchanged":true}
++                          scroll away {"scrollTop":10000,"rightScrollTop":10000,"connected":false,"active":"BODY"}
++                          scroll back {"connected":true,"sameHost":true,"value":"hello","focused":true,"scrollTop":0}
++                          sideways {"scrollLeft":300,"before":{"host":46.40625},"after":{"host":46.40625,"line":-253.59375},
++                                    "vars":{"left":"46.40625px","width":"733.59375px"}}
++                          presses {"started":[{"kind":"unchangedOnLeft","left":4,"right":4}],"toggled":[["thread-1"]],"count":"1",
++                                   "gutterWidth":46.40625}
++                          hover (`just app-session hover` on right line 7)
++                                {"hovered":true,"content":"\"\"","width":"14px","colour":"rgb(129, 126, 141)"
++                                 (= --color-fg-muted #817e8d),"gutter":46.40625}
++                          Screenshots: /tmp/rvthreads/hover.png (icon beside 7), badge-zoom.png (badge "1" on line 3), grown.png,
++                            sideways.png.
++                        Compare window before/after, fixture `--diff-case words` and `--diff-case json-payload --size 1200x320`
++                          ("before" = `git archive HEAD` of this tree's base, served from its own vite):
++                          words, both trees: the same 5 band paths, character for character
++                            ("chunk-modified chunk-band M0 4 C19 4 19 4 38 4 L38 24 …", …), bandLines [4,5], words 6, threadLines 0;
++                            Ctrl+F → {"findBars":[0,1],"focused":"find-field"}; typing "the" → "1 of 13".
++                          json-payload, both trees: bands identical; scroll left 140 → {"left":140,"right":120}; find "1 of 3".
++                          Screenshots: /tmp/rvthreads/compare-{before,after}{,2}-{1,scrolled,find}.png. `magick compare -metric AE`
++                            gives 0.4 % per pair, and the diff image (diff-1.png) covers only glyph edges. A 3× crop (ba.png) shows the
++                            text, bands and word marks the same in both: the two MiniBrowser instances antialias text differently.
++deviations_from_brief   - `RangeController`'s `events` argument defaults to a no-op (`NO_EVENTS`), so `ui/useRangeController.ts:129` and
++                          `editor/range.browser.test.ts:119` still compile with three arguments. Row 20 should change
++                          useRangeController.ts:129 to `new RangeController(texts, shown, { preferences }, events)`, wiring startThread
++                          and toggleThreads to the store and hosts into a shallowRef. Then the default in range.ts should go.
++                        - `destroy()` also calls `events.hosts(new Map())` when hosts existed, so ui drops its teleports. This is how
++                          "drops every host" is reported.
++                        - `threadRows(differences, shown)` takes the reply's `Difference`s, not "spans". It shares `linePlace` with
++                          `anchorAt` (one rule for the anchor and for the gap).
++                        - `ThreadRow` gains `key` (`"<left>:<right>"`, used by the widget's eq and by RowHeights) and `unchanged`
++                          (which rows `threadAnchors` uses).
++                        - Rows at place 0 use `side: index − rows.length` (all negative, ending at −1), not a flat −1, so several
++                          rows above line 1 keep their order.
++                        - There is one module-level `threadField`, not one per column. `ReadOnlyWiring.extensions` is shared by both
++                          columns and compareViews.ts is not owned, so each column's `showThreadRows` payload carries its column, rows,
++                          counts and the `RowCells` (ThreadHosts). The frame's list is `[differenceField, threadField]` as the contract
++                          says.
++                        - The unchanged-row anchors use the text part of a joined line block (`BlockInfo.type` array). CodeMirror's
++                          `lineBlockAt` joins a line with the block widgets after it. For this, `compareFrame.ts` exports `LineBlock`,
++                          and its `FrameView.lineBlockAt` returns `Span & { type }`.
++                        - ipc/threadLine.ts adds `changedThreadLine(column, line)` and `unchangedThreadLine(column, { left, right })`,
++                          both exported from ipc/index.ts. They brand through domain.ts's `isLeftLine`/`isRightLine` and throw
++                          `invalid` otherwise, because the editor cannot create brands.
++                        - The lucide raw SVG has no `xmlns`, so as a CSS mask it drew nothing (seen in MiniBrowser).
++                          threadNumbers.ts adds the namespace before building `--thread-icon` (two-line CP1 comment).
++                        - Focus return: ThreadHosts records focus inside its hosts (document `focusin`). When a field's host was
++                          detached, or rebuilt into a new cell, it refocuses the field on the next view update, with `preventScroll`,
++                          if focus fell to `<body>`.
++                        - Shared docs this slice does not own and that are needed (`just map-check` already fails on the base for
++                          range files):
++                          .omp/skills/project-map/SKILL.md, frontend/src/editor entry: name threadAnchor, threadRows, threadField,
++                            threadWidget, threadHosts, threadNumbers.
++                          The frontend/src/ipc entry: name threadLine.ts (`ThreadLine`, `shownColumn`, `changedThreadLine`,
++                            `unchangedThreadLine`).
++                          frontend/src/ipc/AGENTS.md: one line on threadLine.ts.
++                          cm6-rules CM15 (design D0) if not yet written.
++                        - The probe ran in MiniBrowser through a throwaway script outside the tree. rangeThreads.browser.test.ts
++                          exists as asked but has never run.
++open_risks              - frontend/src/editor/rangeThreads.browser.test.ts: never run in Playwright WebKit. Its waits and selectors
++                          (`.cm-lineNumbers .cm-gutterElement` with textContent "5", `.cm-thread-count`) were only proven through the
++                          MiniBrowser script.
++                        - frontend/src/editor/internal/threadHosts.ts `restoreFocus`: while a focused field's row is scrolled out of
++                          the viewport, focus is on `<body>`. Keys typed then go to the window, and the ui's keydown guard sees `body`,
++                          not a typing target. Focus comes back only when the row is drawn again.
++                        - The same `restoreFocus` relies on `focusin` to forget the field. Clicking a non-focusable area does not
++                          forget it, so if the field's row is redrawn later, focus returns to it.
++                        - threadField.ts `threadAnchors`: the anchors around a row add nothing when both columns are measured exactly
++                          (an unchanged region keeps a constant offset). The node test uses fake geometry to prove the frame uses them.
++                        - Rows for added or removed lines next to a pure insertion or deletion: the insertion point of an empty side
++                          sits below the widget, so that band edge starts at the row's bottom (an inference; not seen in MiniBrowser).
++                        - theme.css `.cm-thread-count`: the badge sits in a 20 px left padding, so counts of three digits or more would
++                          overflow it.
++```
++
++Checks for Main: `pnpm -C frontend test:browser src/editor/rangeThreads.browser.test.ts` on a machine where Playwright WebKit launches, then `just check` on the merged tree (`just map-check` stays red until the docs above are updated).
+\ No newline at end of file
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 248c300..e4257c9 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -15,3 +15,5 @@ Compare (plan §2 #93, #96, #98): `compare.ts` (`CompareController`, re-exported
+ Themes (plan §2 #102): `internal/syntax.ts` holds the code colours — one row per `--color-syntax-<token>` (39) with the Lezer tags it colours and only its own `--syntax-<token>-{style,weight,line}` font styles — and builds from that one table `paletteHighlight` (colours: Markdown containers first and what they hold later), `fontHighlight` (font styles: link and url before the containers, so a container's style wins) — both on the text and the removal tooltip — and `syntaxColourClasses` (the minimap); the minimap takes the matching class defined last, as CSS does. A tag whose parent has a row but which means something else needs its own row (CodeMirror takes the first tag in `tag.set` with a rule: `function(definition(variableName))`, `derefOperator`, `angleBracket`, `attributeName`, …). The theme compartment in `pane.ts` holds the dark flag from `themeKind` and the `themeName` facet; the minimap drops its look when `themeName` changes (two dark themes included) and softens by the dark flag. `themes.browser.test.ts` checks every theme's computed values against its CSS text.
+ 
+ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only through `ui/useMarkdown.ts`, fence PM2 in `scripts/fences.ts`) renders yamt's own subset of the AI's answers. `internal/markdownBlocks.ts` (pure: lines → `Block`s, each top-level block with its source lines) and `internal/markdownInline.ts` (pure: a block's text → `Inline`s; code spans and escapes are skipped while an emphasis looks for its closer, so backticks win) never build markup; anything outside the subset, raw HTML included, stays literal text; images become `alt (url)` text and links their text plus the address in `.markdown-address`, never navigable. `internal/markdownDom.ts` builds nodes with `createElement`, `createTextNode`, `textContent` and `className` only, from a fixed tag set, `class` the only attribute — never `innerHTML` or a URL attribute, since the page reaches the IPC. `show(text)` keeps every leading block whose source is unchanged and rebuilds from the first that differs (streaming). `internal/codeBlock.ts` colours a fenced block by its info string through `languageNamed` and `highlightCode` with the panes' own `paletteHighlight` + `fontHighlight` (their rules in one `<style class="markdown-highlight-styles">`, mounted once per document; style-mod's `StyleModule.mount` is not reachable from yamt's own packages), after `load()` only while the block is still in a live view; an unknown language stays plain. The answer's look (spacing, code block, table, quote, list numbers, muted address) is the `.markdown-*` rules in `theme.css`, palette tokens only.
++
++Range threads (plan §2 #116): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. `internal/threadAnchor.ts` (`anchorAt`, `linePlace`) is the one rule from a column line to a `ThreadLine` and to its partner line; `threadRows.ts` (pure) groups the shown threads by aligned place (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`, before line 1 for place 0), plus `threadAnchors` (the text lines around each unchanged row in both columns) that `CompareFrame` merges, sorted, into its scroll anchors; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), and gives focus back to a field inside a host after CodeMirror re-attaches it; `threadNumbers.ts` merges a `mousedown` into the number gutter (a number starts a thread, the count badge toggles that line's threads) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`.
+diff --git a/frontend/src/editor/compare.ts b/frontend/src/editor/compare.ts
+index 39b0381..c374202 100644
+--- a/frontend/src/editor/compare.ts
++++ b/frontend/src/editor/compare.ts
+@@ -2,6 +2,7 @@ import { redo, undo } from "@codemirror/commands";
+ import type { ViewUpdate } from "@codemirror/view";
+ 
+ import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
++import { differenceField } from "./internal/compareFields";
+ import { keyboardColumn, moveToDifference } from "./internal/compareFocus";
+ import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
+ import { CompareFrame } from "./internal/compareFrame";
+@@ -81,7 +82,12 @@ export class CompareController {
+       },
+     });
+     this.#strip = new CompareStrip(hosts.strip);
+-    this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
++    this.#frame = new CompareFrame({
++      views: this.#views,
++      strip: this.#strip,
++      fields: [differenceField],
++      anchors: () => [],
++    });
+     this.showComparison(texts.comparison);
+     this.#language = new CompareLanguage(options.language, this.#views, events.detected);
+     this.#frame.request();
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index 3f9a501..d7f5dde 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -43,7 +43,7 @@ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
+ export { MarkdownView } from "./markdown";
+ export { RangeController } from "./range";
+-export type { RangeOptions, RangeTexts } from "./range";
++export type { RangeEvents, RangeOptions, RangeTexts, ShownThread } from "./range";
+ 
+ export type MergeHosts = {
+   readonly left: HTMLElement;
+diff --git a/frontend/src/editor/internal/compareFrame.test.ts b/frontend/src/editor/internal/compareFrame.test.ts
+index d853fd5..e6657fa 100644
+--- a/frontend/src/editor/internal/compareFrame.test.ts
++++ b/frontend/src/editor/internal/compareFrame.test.ts
+@@ -1,17 +1,27 @@
+ import { EditorState, type TransactionSpec } from "@codemirror/state";
+-import { Decoration } from "@codemirror/view";
++import { BlockType, Decoration } from "@codemirror/view";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { Span } from "../../connectors";
++import type { Column } from "../../ipc";
+ import { differenceField, showDifferences } from "./compareFields";
+-import { CompareFrame } from "./compareFrame";
++import { CompareFrame, type LineBlock } from "./compareFrame";
+ import type { DiffSpan } from "./compareMarks";
+ import type { CompareRow } from "./compareStrip";
+ import { toDocPos } from "./docPos";
+ import { find } from "./find";
++import { showThreadRows, threadAnchors, threadField } from "./threadField";
++import type { ThreadRow } from "./threadRows";
+ 
+ const LINE_PX = 20;
++const ROW_PX = 100;
+ const TEXT = Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\n");
++const NO_MARKS = { bands: Decoration.none, words: Decoration.none };
++const CELLS = {
++  height: () => ROW_PX,
++  host: () => undefined,
++  addCell: () => {},
++  dropCell: () => {},
++};
+ 
+ type FakeColumn = {
+   state: EditorState;
+@@ -19,25 +29,31 @@ type FakeColumn = {
+   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+   readonly documentPadding: { readonly top: number };
+   readonly documentTop: number;
+-  lineBlockAt(pos: number): Span;
++  lineBlockAt(pos: number): LineBlock;
+ };
+ 
+ afterEach(() => {
+   vi.unstubAllGlobals();
+ });
+ 
++function stubFrames(): () => void {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  return () => {
++    for (const frame of frames.splice(0)) {
++      frame();
++    }
++  };
++}
++
+ function fakeColumn(
+-  measured: { count: number },
+-  changed: (startState: EditorState, state: EditorState) => void,
++  state: EditorState,
++  blockAt: (column: FakeColumn, pos: number) => LineBlock,
++  changed: (startState: EditorState, state: EditorState) => void = () => {},
+ ): FakeColumn {
+-  const state = EditorState.create({ doc: TEXT, extensions: [differenceField, find] });
+-  const line = state.doc.line(5);
+-  const marks = { bands: Decoration.none, words: Decoration.none };
+-  const spans: readonly DiffSpan[] = [
+-    { from: toDocPos(line.from), to: toDocPos(line.to + 1), tone: "modified" },
+-  ];
+   const column: FakeColumn = {
+-    state: state.update({ effects: showDifferences.of({ ...marks, spans }) }).state,
++    state,
+     dispatch(spec) {
+       const startState = column.state;
+       column.state = startState.update(spec).state;
+@@ -46,31 +62,41 @@ function fakeColumn(
+     scrollDOM: Object.assign(new EventTarget(), { scrollTop: 0, clientHeight: 10 * LINE_PX }),
+     documentPadding: { top: 0 },
+     documentTop: 0,
+-    lineBlockAt(pos) {
+-      measured.count += 1;
+-      const number = column.state.doc.lineAt(pos).number;
+-      return { top: (number - 1) * LINE_PX, bottom: number * LINE_PX };
+-    },
++    lineBlockAt: (pos) => blockAt(column, pos),
+   };
+   return column;
+ }
+ 
++function plainColumn(
++  measured: { count: number },
++  changed: (startState: EditorState, state: EditorState) => void,
++): FakeColumn {
++  const state = EditorState.create({ doc: TEXT, extensions: [differenceField, find] });
++  const line = state.doc.line(5);
++  const spans: readonly DiffSpan[] = [
++    { from: toDocPos(line.from), to: toDocPos(line.to + 1), tone: "modified" },
++  ];
++  const marked = state.update({ effects: showDifferences.of({ ...NO_MARKS, spans }) }).state;
++  return fakeColumn(
++    marked,
++    (column, pos) => {
++      measured.count += 1;
++      const number = column.state.doc.lineAt(pos).number;
++      return { top: (number - 1) * LINE_PX, bottom: number * LINE_PX, type: BlockType.Text };
++    },
++    changed,
++  );
++}
++
+ test("a scroll paints the strip from the cached rows; an edit measures them again", () => {
+-  const frames: (() => void)[] = [];
+-  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+-  vi.stubGlobal("cancelAnimationFrame", () => {});
+-  function runFrames(): void {
+-    for (const frame of frames.splice(0)) {
+-      frame();
+-    }
+-  }
++  const runFrames = stubFrames();
+   const measured = { count: 0 };
+   const painted: (readonly CompareRow[])[] = [];
+   const holder: { frame: CompareFrame | null } = { frame: null };
+   function changed(startState: EditorState, state: EditorState): void {
+     holder.frame?.changed({ startState, state, geometryChanged: false });
+   }
+-  const views = { left: fakeColumn(measured, changed), right: fakeColumn(measured, changed) };
++  const views = { left: plainColumn(measured, changed), right: plainColumn(measured, changed) };
+   const frame = new CompareFrame({
+     views,
+     strip: {
+@@ -78,6 +104,8 @@ test("a scroll paints the strip from the cached rows; an edit measures them agai
+         painted.push(rows);
+       },
+     },
++    fields: [differenceField],
++    anchors: () => [],
+   });
+   holder.frame = frame;
+ 
+@@ -105,3 +133,67 @@ test("a scroll paints the strip from the cached rows; an edit measures them agai
+     tone: "modified",
+   });
+ });
++
++const ROW: ThreadRow = {
++  key: "10:13",
++  place: { left: 10, right: 13 },
++  keys: { left: ["thread-1"], right: [] },
++  unchanged: true,
++};
++
++function rowBlock(column: FakeColumn, pos: number, above: number): LineBlock {
++  const number = column.state.doc.lineAt(pos).number;
++  const top = (number - 1) * LINE_PX + (number > above ? ROW_PX : 0);
++  const text = { top, bottom: top + LINE_PX, type: BlockType.Text };
++  if (number !== above) {
++    return text;
++  }
++  const row = { top: text.bottom, bottom: text.bottom + ROW_PX, type: BlockType.WidgetAfter };
++  return { top, bottom: row.bottom, type: [text, row] };
++}
++
++function rowColumn(column: Column, lines: number, spanLine: number | null): FakeColumn {
++  const text = Array.from({ length: lines }, (_, index) => `line ${index}`).join("\n");
++  const state = EditorState.create({ doc: text, extensions: [differenceField, threadField, find] });
++  const spans: DiffSpan[] = [];
++  if (spanLine !== null) {
++    const { from, to } = state.doc.line(spanLine);
++    spans.push({ from: toDocPos(from), to: toDocPos(to + 1), tone: "modified" });
++  }
++  const shown = { column, rows: [ROW], counts: [], cells: CELLS };
++  const effects = [showDifferences.of({ ...NO_MARKS, spans }), showThreadRows.of(shown)];
++  return fakeColumn(state.update({ effects }).state, (fake, pos) =>
++    rowBlock(fake, pos, ROW.place[column]),
++  );
++}
++
++function rightTopAfterScrollingLeft(views: Readonly<Record<Column, FakeColumn>>): number {
++  const runFrames = stubFrames();
++  const frame = new CompareFrame({
++    views,
++    strip: { paint: () => {} },
++    fields: [differenceField, threadField],
++    anchors: threadAnchors,
++  });
++  views.left.scrollDOM.scrollTop = 150;
++  views.left.scrollDOM.dispatchEvent(new Event("scroll"));
++  runFrames();
++  frame.destroy();
++  return views.right.scrollDOM.scrollTop;
++}
++
++test("an unchanged-line row adds the lines around it as anchors in both columns", () => {
++  const views = { left: rowColumn("left", 40, null), right: rowColumn("right", 43, null) };
++
++  expect(threadAnchors(views)).toEqual([
++    { left: 10 * LINE_PX, right: 13 * LINE_PX },
++    { left: 10 * LINE_PX + ROW_PX, right: 13 * LINE_PX + ROW_PX },
++  ]);
++  expect(rightTopAfterScrollingLeft(views)).toBe(210);
++});
++
++test("merged anchors stay sorted in both columns", () => {
++  const views = { left: rowColumn("left", 40, 31), right: rowColumn("right", 43, 34) };
++
++  expect(rightTopAfterScrollingLeft(views)).toBe(210);
++});
+diff --git a/frontend/src/editor/internal/compareFrame.ts b/frontend/src/editor/internal/compareFrame.ts
+index 5434dfc..bcc4647 100644
+--- a/frontend/src/editor/internal/compareFrame.ts
++++ b/frontend/src/editor/internal/compareFrame.ts
+@@ -1,5 +1,6 @@
+ import { searchPanelOpen } from "@codemirror/search";
+-import type { ViewUpdate } from "@codemirror/view";
++import type { StateField } from "@codemirror/state";
++import type { BlockType, ViewUpdate } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+ import type { Column } from "../../ipc";
+@@ -10,12 +11,14 @@ import { syncFindSpace, type FindSpaceView } from "./find";
+ import { rangeSpan, rowsChanged } from "./geometry";
+ import { contentEnd, ScrollSync, type Anchor, type ScrollPane } from "./scrollSync";
+ 
++export type LineBlock = Span & { readonly type: BlockType | readonly LineBlock[] };
+ type FrameView = ScrollPane &
+   FindSpaceView & {
+     readonly documentTop: number;
+-    lineBlockAt(pos: number): Span;
++    lineBlockAt(pos: number): LineBlock;
+   };
+ type FrameViews = Readonly<Record<Column, FrameView>>;
++type ExtraAnchors = (views: FrameViews) => readonly Anchor<Column>[];
+ 
+ type CompareLayout = {
+   readonly rows: readonly CompareRow[];
+@@ -26,7 +29,8 @@ function columnSpan(view: FrameView, range: { readonly from: number; readonly to
+   return rangeSpan(view.state.doc, range, (pos) => view.lineBlockAt(pos));
+ }
+ 
+-function measure({ left, right }: FrameViews): CompareLayout {
++function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {
++  const { left, right } = views;
+   const rightSpans = right.state.field(differenceField).spans;
+   const rows = left.state.field(differenceField).spans.flatMap((span, index) => {
+     const other = rightSpans[index];
+@@ -39,12 +43,17 @@ function measure({ left, right }: FrameViews): CompareLayout {
+     { left: row.left.bottom, right: row.right.bottom },
+   ]);
+   const ends = { left: contentEnd(left), right: contentEnd(right) };
+-  return { rows, anchors: [{ left: 0, right: 0 }, ...edges, ends] };
++  const anchors = [{ left: 0, right: 0 }, ...edges, ...extra(views), ends].sort((a, b) =>
++    a.left === b.left ? a.right - b.right : a.left - b.left,
++  );
++  return { rows, anchors };
+ }
+ 
+ export class CompareFrame {
+   readonly #views: FrameViews;
+   readonly #strip: Pick<CompareStrip, "paint">;
++  readonly #fields: readonly StateField<unknown>[];
++  readonly #anchors: ExtraAnchors;
+   readonly #scroll: ScrollSync<Column>;
+   #frameId: number | null = null;
+   #layoutCache: CompareLayout | null = null;
+@@ -52,19 +61,25 @@ export class CompareFrame {
+   constructor({
+     views,
+     strip,
++    fields,
++    anchors,
+   }: {
+     readonly views: FrameViews;
+     readonly strip: Pick<CompareStrip, "paint">;
++    readonly fields: readonly StateField<unknown>[];
++    readonly anchors: ExtraAnchors;
+   }) {
+     this.#views = views;
+     this.#strip = strip;
++    this.#fields = fields;
++    this.#anchors = anchors;
+     this.#scroll = new ScrollSync(views, COLUMNS, () => {
+       this.request();
+     });
+   }
+ 
+   changed(update: Pick<ViewUpdate, "geometryChanged" | "startState" | "state">): void {
+-    const moved = rowsChanged(update, [differenceField]);
++    const moved = rowsChanged(update, this.#fields);
+     if (moved) {
+       this.#layoutCache = null;
+     }
+@@ -78,7 +93,7 @@ export class CompareFrame {
+       this.#frameId = null;
+       const views = this.#views;
+       syncFindSpace([views.left, views.right]);
+-      this.#layoutCache ??= measure(views);
++      this.#layoutCache ??= measure(views, this.#anchors);
+       const layout = this.#layoutCache;
+       this.#scroll.sync(layout.anchors);
+       this.#strip.paint(views, layout.rows);
+diff --git a/frontend/src/editor/internal/threadAnchor.test.ts b/frontend/src/editor/internal/threadAnchor.test.ts
+new file mode 100644
+index 0000000..c979a62
+--- /dev/null
++++ b/frontend/src/editor/internal/threadAnchor.test.ts
+@@ -0,0 +1,56 @@
++import { expect, test } from "vitest";
++
++import { loadCompareFixture, type Difference } from "../../ipc";
++import { anchorAt } from "./threadAnchor";
++
++type Lines = { readonly start: number; readonly len: number };
++
++const NO_WORDS = { changed: [], removals: [] };
++
++async function differencesOf(
++  ranges: readonly { readonly left: Lines; readonly right: Lines }[],
++): Promise<readonly Difference[]> {
++  const differences = ranges.map((range) => ({
++    ...range,
++    words: { left: NO_WORDS, right: NO_WORDS },
++  }));
++  const files = { "case.json": { left: "", right: "", differences } };
++  return (await loadCompareFixture("case", files)).comparison.differences;
++}
++
++test("a left line inside a modified difference is removed", async () => {
++  const differences = await differencesOf([
++    { left: { start: 2, len: 2 }, right: { start: 2, len: 3 } },
++  ]);
++
++  expect(anchorAt(differences, "left", 3)).toEqual({ kind: "removed", left: 3 });
++  expect(anchorAt(differences, "left", 2)).toEqual({ kind: "removed", left: 2 });
++});
++
++test("an unchanged right line after two differences pairs with its left line", async () => {
++  const differences = await differencesOf([
++    { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
++    { left: { start: 5, len: 1 }, right: { start: 7, len: 2 } },
++  ]);
++
++  expect(anchorAt(differences, "right", 12)).toEqual({
++    kind: "unchangedOnRight",
++    left: 9,
++    right: 12,
++  });
++  expect(anchorAt(differences, "left", 9)).toEqual({ kind: "unchangedOnLeft", left: 9, right: 12 });
++});
++
++test("a line just past a pure insertion is unchanged, the last inserted line added", async () => {
++  const differences = await differencesOf([
++    { left: { start: 3, len: 0 }, right: { start: 3, len: 2 } },
++  ]);
++
++  expect(anchorAt(differences, "right", 4)).toEqual({ kind: "added", right: 4 });
++  expect(anchorAt(differences, "right", 5)).toEqual({
++    kind: "unchangedOnRight",
++    left: 3,
++    right: 5,
++  });
++  expect(anchorAt(differences, "left", 3)).toEqual({ kind: "unchangedOnLeft", left: 3, right: 5 });
++});
+diff --git a/frontend/src/editor/internal/threadAnchor.ts b/frontend/src/editor/internal/threadAnchor.ts
+new file mode 100644
+index 0000000..4425ee2
+--- /dev/null
++++ b/frontend/src/editor/internal/threadAnchor.ts
+@@ -0,0 +1,45 @@
++import {
++  changedThreadLine,
++  unchangedThreadLine,
++  type Column,
++  type Difference,
++  type ThreadLine,
++} from "../../ipc";
++
++export type LinePlace =
++  | { readonly kind: "inside"; readonly difference: Difference }
++  | { readonly kind: "between"; readonly partner: number };
++
++export function linePlace(
++  differences: readonly Difference[],
++  column: Column,
++  line: number,
++): LinePlace {
++  const other = column === "left" ? "right" : "left";
++  let offset = 0;
++  for (const difference of differences) {
++    const here = difference[column];
++    if (line < here.start) {
++      break;
++    }
++    if (line < here.start + here.len) {
++      return { kind: "inside", difference };
++    }
++    offset += difference[other].len - here.len;
++  }
++  return { kind: "between", partner: line + offset };
++}
++
++export function anchorAt(
++  differences: readonly Difference[],
++  column: Column,
++  line: number,
++): ThreadLine {
++  const place = linePlace(differences, column, line);
++  if (place.kind === "inside") {
++    return changedThreadLine(column, line);
++  }
++  const lines =
++    column === "left" ? { left: line, right: place.partner } : { left: place.partner, right: line };
++  return unchangedThreadLine(column, lines);
++}
+diff --git a/frontend/src/editor/internal/threadField.test.ts b/frontend/src/editor/internal/threadField.test.ts
+new file mode 100644
+index 0000000..d9e072c
+--- /dev/null
++++ b/frontend/src/editor/internal/threadField.test.ts
+@@ -0,0 +1,55 @@
++import { Text } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { rowDecorations, type ColumnThreads } from "./threadField";
++import type { ThreadRow } from "./threadRows";
++import { ThreadRowWidget, type RowCells } from "./threadWidget";
++
++function cellsWith(heights: Map<string, number>): RowCells {
++  return {
++    height: (row) => heights.get(row) ?? 0,
++    host: () => undefined,
++    addCell: () => {},
++    dropCell: () => {},
++  };
++}
++
++function row(key: string, place: ThreadRow["place"], left: readonly string[]): ThreadRow {
++  return { key, place, keys: { left, right: [] }, unchanged: false };
++}
++
++test("a row widget with the same keys eqs the old one, so its DOM is kept when heights change", () => {
++  const heights = new Map([["2:3", 40]]);
++  const cells = cellsWith(heights);
++  const before = new ThreadRowWidget(row("2:3", { left: 2, right: 3 }, ["a"]), "left", cells);
++  heights.set("2:3", 90);
++  const grown = new ThreadRowWidget(row("2:3", { left: 2, right: 3 }, ["a"]), "left", cells);
++  const added = new ThreadRowWidget(row("2:3", { left: 2, right: 3 }, ["a", "b"]), "left", cells);
++
++  expect(grown.eq(before)).toBe(true);
++  expect(grown.estimatedHeight).toBe(90);
++  expect(added.eq(before)).toBe(false);
++});
++
++test("each row is a block widget after its place's line, in row order; place 0 sits above line 1", () => {
++  const doc = Text.of(["one", "two", "three"]);
++  const rows = [
++    row("0:1", { left: 0, right: 1 }, []),
++    row("0:2", { left: 0, right: 2 }, []),
++    row("2:3", { left: 2, right: 3 }, []),
++    row("2:4", { left: 2, right: 4 }, []),
++  ];
++  const threads: ColumnThreads = { column: "left", rows, counts: [], cells: cellsWith(new Map()) };
++  const placed: unknown[] = [];
++
++  rowDecorations(doc, threads).between(0, doc.length, (from, _to, decoration) => {
++    placed.push({ from, side: decoration.spec.side, block: decoration.spec.block });
++  });
++
++  expect(placed).toEqual([
++    { from: 0, side: -4, block: true },
++    { from: 0, side: -3, block: true },
++    { from: 7, side: 3, block: true },
++    { from: 7, side: 4, block: true },
++  ]);
++});
+diff --git a/frontend/src/editor/internal/threadField.ts b/frontend/src/editor/internal/threadField.ts
+new file mode 100644
+index 0000000..6adce7e
+--- /dev/null
++++ b/frontend/src/editor/internal/threadField.ts
+@@ -0,0 +1,83 @@
++import { StateEffect, StateField, type EditorState, type Text } from "@codemirror/state";
++import { BlockType, Decoration, EditorView, type DecorationSet } from "@codemirror/view";
++
++import type { Span } from "../../connectors";
++import type { Column } from "../../ipc";
++import type { LineBlock } from "./compareFrame";
++import { contentEnd, type Anchor } from "./scrollSync";
++import type { ThreadRow } from "./threadRows";
++import { ThreadRowWidget, type RowCells } from "./threadWidget";
++
++export type LineCount = { readonly line: number; readonly keys: readonly string[] };
++
++export type ColumnThreads = {
++  readonly column: Column;
++  readonly rows: readonly ThreadRow[];
++  readonly counts: readonly LineCount[];
++  readonly cells: RowCells;
++};
++
++type AnchorView = { readonly state: EditorState; lineBlockAt(pos: number): LineBlock };
++
++export const showThreadRows = StateEffect.define<ColumnThreads>();
++
++export function rowDecorations(doc: Text, threads: ColumnThreads | null): DecorationSet {
++  if (threads === null) {
++    return Decoration.none;
++  }
++  const { column, rows, cells } = threads;
++  const widgets = rows.map((row, index) => {
++    const widget = new ThreadRowWidget(row, column, cells);
++    const place = Math.min(row.place[column], doc.lines);
++    return place === 0
++      ? Decoration.widget({ widget, block: true, side: index - rows.length }).range(0)
++      : Decoration.widget({ widget, block: true, side: 1 + index }).range(doc.line(place).to);
++  });
++  return Decoration.set(widgets, true);
++}
++
++export const threadField = StateField.define<ColumnThreads | null>({
++  create: () => null,
++  update(threads, tr) {
++    let shown = threads;
++    for (const effect of tr.effects) {
++      if (effect.is(showThreadRows)) {
++        shown = effect.value;
++      }
++    }
++    return shown;
++  },
++  provide: (field) =>
++    EditorView.decorations.compute([field], (state) =>
++      rowDecorations(state.doc, state.field(field)),
++    ),
++});
++
++function textBlock(block: LineBlock): Span {
++  if (typeof block.type === "number") {
++    return block;
++  }
++  return block.type.find((part) => part.type === BlockType.Text) ?? block;
++}
++
++function bottomAbove(view: AnchorView, place: number): number {
++  const { doc } = view.state;
++  return textBlock(view.lineBlockAt(doc.line(Math.min(place, doc.lines)).from)).bottom;
++}
++
++function topBelow(view: AnchorView, place: number): number {
++  const { doc } = view.state;
++  return place < doc.lines
++    ? textBlock(view.lineBlockAt(doc.line(place + 1).from)).top
++    : contentEnd(view);
++}
++
++export function threadAnchors(views: Readonly<Record<Column, AnchorView>>): Anchor<Column>[] {
++  const rows = views.left.state.field(threadField, false)?.rows ?? [];
++  return rows
++    .filter((row) => row.unchanged)
++    .flatMap(({ place }) => [
++      { left: bottomAbove(views.left, place.left), right: bottomAbove(views.right, place.right) },
++      { left: topBelow(views.left, place.left), right: topBelow(views.right, place.right) },
++    ]);
++}
+diff --git a/frontend/src/editor/internal/threadHosts.ts b/frontend/src/editor/internal/threadHosts.ts
+new file mode 100644
+index 0000000..503a815
+--- /dev/null
++++ b/frontend/src/editor/internal/threadHosts.ts
+@@ -0,0 +1,218 @@
++import type { EditorView } from "@codemirror/view";
++
++import type { Column } from "../../ipc";
++import { COLUMNS } from "./compareViews";
++import { rowHeight, type ThreadRow } from "./threadRows";
++import type { RowCells } from "./threadWidget";
++
++type ThreadViews = Readonly<Record<Column, EditorView>>;
++type ColumnHosts = Readonly<Record<Column, HTMLElement>>;
++
++const HOST_CLASS = "cm-thread-host";
++const KEY_ATTRIBUTE = "data-thread";
++const LEFT_VAR = "--thread-left";
++const WIDTH_VAR = "--thread-width";
++
++function px(value: number): string {
++  return `${value}px`;
++}
++
++export class ThreadHosts implements RowCells {
++  readonly #views: () => ThreadViews;
++  readonly #columns: ColumnHosts;
++  readonly #hosts = new Map<string, HTMLElement>();
++  readonly #measured = new Map<string, number>();
++  readonly #heights = new Map<string, number>();
++  readonly #cells: Readonly<Record<Column, Map<string, HTMLElement>>> = {
++    left: new Map(),
++    right: new Map(),
++  };
++  readonly #observer = new ResizeObserver((entries) => {
++    this.#resized(entries);
++  });
++  #rows: readonly ThreadRow[] = [];
++  #focused: HTMLElement | null = null;
++  #focusLost = false;
++
++  constructor({
++    views,
++    columns,
++  }: {
++    readonly views: () => ThreadViews;
++    readonly columns: ColumnHosts;
++  }) {
++    this.#views = views;
++    this.#columns = columns;
++    document.addEventListener("focusin", this.#focusIn, true);
++  }
++
++  watchColumns(): void {
++    for (const column of COLUMNS) {
++      const { scrollDOM } = this.#views()[column];
++      this.#observer.observe(scrollDOM);
++      const gutters = scrollDOM.querySelector(":scope > .cm-gutters");
++      if (gutters !== null) {
++        this.#observer.observe(gutters);
++      }
++    }
++  }
++
++  height(row: string): number {
++    return this.#heights.get(row) ?? 0;
++  }
++
++  host(key: string): HTMLElement | undefined {
++    return this.#hosts.get(key);
++  }
++
++  addCell(column: Column, row: string, cell: HTMLElement): void {
++    this.#cells[column].set(row, cell);
++    if (this.#focused !== null && cell.contains(this.#focused)) {
++      this.#focusLost = true;
++    }
++  }
++
++  dropCell(column: Column, row: string, cell: HTMLElement): void {
++    if (this.#cells[column].get(row) === cell) {
++      this.#cells[column].delete(row);
++    }
++  }
++
++  hosts(): ReadonlyMap<string, HTMLElement> {
++    return new Map(this.#hosts);
++  }
++
++  show(rows: readonly ThreadRow[]): boolean {
++    const keys = new Set(rows.flatMap((row) => [...row.keys.left, ...row.keys.right]));
++    const rowKeys = new Set(rows.map((row) => row.key));
++    let changed = false;
++    for (const [key, host] of this.#hosts) {
++      if (!keys.has(key)) {
++        this.#drop(key, host);
++        changed = true;
++      }
++    }
++    for (const key of keys) {
++      if (!this.#hosts.has(key)) {
++        this.#create(key);
++        changed = true;
++      }
++    }
++    for (const row of this.#heights.keys()) {
++      if (!rowKeys.has(row)) {
++        this.#heights.delete(row);
++      }
++    }
++    this.#rows = rows;
++    this.#measure();
++    return changed;
++  }
++
++  restoreFocus(): void {
++    const focused = this.#focused;
++    if (focused === null) {
++      return;
++    }
++    if (!focused.isConnected) {
++      this.#focusLost = true;
++      return;
++    }
++    const active = document.activeElement;
++    if (this.#focusLost && (active === null || active === document.body)) {
++      focused.focus({ preventScroll: true });
++    }
++    this.#focusLost = false;
++  }
++
++  destroy(): void {
++    this.#observer.disconnect();
++    document.removeEventListener("focusin", this.#focusIn, true);
++    for (const host of this.#hosts.values()) {
++      host.remove();
++    }
++    this.#hosts.clear();
++    this.#focused = null;
++    for (const column of COLUMNS) {
++      this.#columns[column].style.removeProperty(LEFT_VAR);
++      this.#columns[column].style.removeProperty(WIDTH_VAR);
++    }
++  }
++
++  readonly #focusIn = (event: FocusEvent): void => {
++    const { target } = event;
++    const host = target instanceof HTMLElement ? target.closest(`.${HOST_CLASS}`) : null;
++    const ours = host !== null && this.#hosts.get(host.getAttribute(KEY_ATTRIBUTE) ?? "") === host;
++    this.#focused = ours && target instanceof HTMLElement ? target : null;
++    this.#focusLost = false;
++  };
++
++  #create(key: string): void {
++    const host = document.createElement("div");
++    host.className = HOST_CLASS;
++    host.setAttribute(KEY_ATTRIBUTE, key);
++    this.#hosts.set(key, host);
++    this.#observer.observe(host);
++  }
++
++  #drop(key: string, host: HTMLElement): void {
++    this.#observer.unobserve(host);
++    host.remove();
++    this.#hosts.delete(key);
++    this.#measured.delete(key);
++    if (this.#focused !== null && host.contains(this.#focused)) {
++      this.#focused = null;
++    }
++  }
++
++  #resized(entries: readonly ResizeObserverEntry[]): void {
++    let columnsResized = false;
++    for (const { target, borderBoxSize } of entries) {
++      const key = target.getAttribute(KEY_ATTRIBUTE);
++      if (key === null) {
++        columnsResized = true;
++      } else if (target.isConnected) {
++        const [size] = borderBoxSize;
++        this.#measured.set(key, size?.blockSize ?? target.getBoundingClientRect().height);
++      }
++    }
++    if (columnsResized) {
++      this.#placeColumns();
++    }
++    this.#measure();
++  }
++
++  #placeColumns(): void {
++    for (const column of COLUMNS) {
++      const { contentDOM, scrollDOM } = this.#views()[column];
++      const left =
++        contentDOM.getBoundingClientRect().left -
++        scrollDOM.getBoundingClientRect().left +
++        scrollDOM.scrollLeft;
++      const { style } = this.#columns[column];
++      style.setProperty(LEFT_VAR, px(left));
++      style.setProperty(WIDTH_VAR, px(scrollDOM.clientWidth - left));
++    }
++  }
++
++  #measure(): void {
++    let changed = false;
++    for (const row of this.#rows) {
++      const height = rowHeight(row, (key) => this.#measured.get(key) ?? 0);
++      if (this.#heights.get(row.key) !== height) {
++        this.#heights.set(row.key, height);
++        for (const column of COLUMNS) {
++          const cell = this.#cells[column].get(row.key);
++          if (cell !== undefined) {
++            cell.style.height = px(height);
++          }
++        }
++        changed = true;
++      }
++    }
++    if (changed) {
++      for (const column of COLUMNS) {
++        this.#views()[column].requestMeasure();
++      }
++    }
++  }
++}
+diff --git a/frontend/src/editor/internal/threadNumbers.test.ts b/frontend/src/editor/internal/threadNumbers.test.ts
+new file mode 100644
+index 0000000..b3c1fdf
+--- /dev/null
++++ b/frontend/src/editor/internal/threadNumbers.test.ts
+@@ -0,0 +1,41 @@
++import { expect, test } from "vitest";
++
++import { changedThreadLine, unchangedThreadLine } from "../../ipc";
++import { lineCounts, numberPress } from "./threadNumbers";
++import type { ShownThread } from "./threadRows";
++
++test("the count mark counts open and collapsed threads shown in this column, not drafts", () => {
++  const unchanged = { left: 5, right: 6 };
++  const threads: ShownThread[] = [
++    { key: "open", line: changedThreadLine("left", 2), shown: "open" },
++    { key: "collapsed", line: changedThreadLine("left", 2), shown: "collapsed" },
++    { key: "draft", line: changedThreadLine("left", 2), shown: "draft" },
++    { key: "added", line: changedThreadLine("right", 2), shown: "open" },
++    { key: "on-right", line: unchangedThreadLine("right", unchanged), shown: "open" },
++    { key: "on-left", line: unchangedThreadLine("left", unchanged), shown: "collapsed" },
++  ];
++
++  expect(lineCounts(threads, "left")).toEqual([
++    { line: 2, keys: ["open", "collapsed"] },
++    { line: 5, keys: ["on-left"] },
++  ]);
++  expect(lineCounts(threads, "right")).toEqual([
++    { line: 2, keys: ["added"] },
++    { line: 6, keys: ["on-right"] },
++  ]);
++});
++
++test("a press on the badge reports the line's keys; a press on the number starts a thread", () => {
++  const press = {
++    differences: [],
++    column: "left",
++    line: 2,
++    counts: [{ line: 2, keys: ["a", "b"] }],
++  } as const;
++
++  expect(numberPress({ ...press, onBadge: true })).toEqual({ kind: "toggle", keys: ["a", "b"] });
++  expect(numberPress({ ...press, onBadge: false })).toEqual({
++    kind: "start",
++    line: { kind: "unchangedOnLeft", left: 2, right: 2 },
++  });
++});
+diff --git a/frontend/src/editor/internal/threadNumbers.ts b/frontend/src/editor/internal/threadNumbers.ts
+new file mode 100644
+index 0000000..8cf1fe5
+--- /dev/null
++++ b/frontend/src/editor/internal/threadNumbers.ts
+@@ -0,0 +1,137 @@
++import {
++  RangeSetBuilder,
++  type EditorState,
++  type Extension,
++  type RangeSet,
++} from "@codemirror/state";
++import { EditorView, GutterMarker, lineNumberMarkers, lineNumbers } from "@codemirror/view";
++import messageSquarePlusIcon from "~icons/lucide/message-square-plus?raw";
++
++import { shownColumn, type Column, type Difference, type ThreadLine } from "../../ipc";
++import { anchorAt } from "./threadAnchor";
++import { threadField, type LineCount } from "./threadField";
++import type { ShownThread } from "./threadRows";
++
++export type NumberPress =
++  | { readonly kind: "start"; readonly line: ThreadLine }
++  | { readonly kind: "toggle"; readonly keys: readonly string[] };
++
++const COUNT_CLASS = "cm-thread-count";
++
++function lineInShownColumn(line: ThreadLine): number {
++  switch (line.kind) {
++    case "removed":
++    case "unchangedOnLeft":
++      return line.left;
++    case "added":
++    case "unchangedOnRight":
++      return line.right;
++    default: {
++      const _exhaustive: never = line;
++      return _exhaustive;
++    }
++  }
++}
++
++export function lineCounts(threads: readonly ShownThread[], column: Column): LineCount[] {
++  const counts = new Map<number, string[]>();
++  for (const thread of threads) {
++    if (thread.shown === "draft" || shownColumn(thread.line) !== column) {
++      continue;
++    }
++    const line = lineInShownColumn(thread.line);
++    counts.set(line, [...(counts.get(line) ?? []), thread.key]);
++  }
++  return [...counts].map(([line, keys]) => ({ line, keys })).sort((a, b) => a.line - b.line);
++}
++
++export function numberPress(press: {
++  readonly differences: readonly Difference[];
++  readonly column: Column;
++  readonly line: number;
++  readonly onBadge: boolean;
++  readonly counts: readonly LineCount[];
++}): NumberPress {
++  const count = press.onBadge ? press.counts.find(({ line }) => line === press.line) : undefined;
++  return count === undefined
++    ? { kind: "start", line: anchorAt(press.differences, press.column, press.line) }
++    : { kind: "toggle", keys: count.keys };
++}
++
++class CountMarker extends GutterMarker {
++  readonly number: number;
++  readonly count: number;
++
++  constructor(number: number, count: number) {
++    super();
++    this.number = number;
++    this.count = count;
++  }
++
++  override eq(other: CountMarker): boolean {
++    return other.number === this.number && other.count === this.count;
++  }
++
++  override toDOM(): Node {
++    const number = document.createElement("span");
++    number.textContent = String(this.number);
++    const badge = document.createElement("span");
++    badge.className = COUNT_CLASS;
++    badge.textContent = String(this.count);
++    number.append(badge);
++    return number;
++  }
++}
++
++function countMarkers(state: EditorState): RangeSet<GutterMarker> {
++  const builder = new RangeSetBuilder<GutterMarker>();
++  const { doc } = state;
++  for (const { line, keys } of state.field(threadField)?.counts ?? []) {
++    if (line < doc.lines) {
++      const from = doc.line(line + 1).from;
++      builder.add(from, from, new CountMarker(line + 1, keys.length));
++    }
++  }
++  return builder.finish();
++}
++
++// An SVG image is parsed as XML, so its root needs the SVG namespace (MDN "Namespaces crash course");
++// the icon's raw markup is written for inline HTML and has none.
++const iconImage = messageSquarePlusIcon.replace(
++  "<svg ",
++  `<svg xmlns="http://www.w3.org/2000/svg" `,
++);
++
++const iconTheme = EditorView.theme({
++  "&": { "--thread-icon": `url("data:image/svg+xml,${encodeURIComponent(iconImage)}")` },
++});
++
++export function threadNumbers(
++  pressed: (view: EditorView, line: number, onBadge: boolean) => void,
++): Extension {
++  return [
++    lineNumbers({
++      domEventHandlers: {
++        mousedown(view, block, event) {
++          const { target } = event;
++          if (
++            !(target instanceof Element) ||
++            !(event instanceof MouseEvent) ||
++            event.button !== 0
++          ) {
++            return false;
++          }
++          if (target.closest(".cm-gutterElement") === null) {
++            return false;
++          }
++          const line = view.state.doc.lineAt(block.from).number - 1;
++          pressed(view, line, target.closest(`.${COUNT_CLASS}`) !== null);
++          return true;
++        },
++      },
++    }),
++    lineNumberMarkers.compute([threadField], countMarkers),
++    EditorView.editorAttributes.of({ class: "cm-thread-lines" }),
++    iconTheme,
++  ];
++}
+diff --git a/frontend/src/editor/internal/threadRows.test.ts b/frontend/src/editor/internal/threadRows.test.ts
+new file mode 100644
+index 0000000..8cb4ba0
+--- /dev/null
++++ b/frontend/src/editor/internal/threadRows.test.ts
+@@ -0,0 +1,105 @@
++import { expect, test } from "vitest";
++
++import {
++  changedThreadLine,
++  loadCompareFixture,
++  unchangedThreadLine,
++  type Difference,
++} from "../../ipc";
++import { rowHeight, threadRows, type ShownThread, type ThreadRow } from "./threadRows";
++
++type Lines = { readonly start: number; readonly len: number };
++
++const NO_WORDS = { changed: [], removals: [] };
++
++async function differencesOf(
++  ranges: readonly { readonly left: Lines; readonly right: Lines }[],
++): Promise<readonly Difference[]> {
++  const differences = ranges.map((range) => ({
++    ...range,
++    words: { left: NO_WORDS, right: NO_WORDS },
++  }));
++  const files = { "case.json": { left: "", right: "", differences } };
++  return (await loadCompareFixture("case", files)).comparison.differences;
++}
++
++function places(rows: readonly ThreadRow[]): unknown[] {
++  return rows.map(({ place, keys }) => ({ place, keys }));
++}
++
++test("a removed line's gap sits after the difference's right lines", async () => {
++  const differences = await differencesOf([
++    { left: { start: 1, len: 2 }, right: { start: 1, len: 4 } },
++  ]);
++  const threads: ShownThread[] = [
++    { key: "removed", line: changedThreadLine("left", 1), shown: "open" },
++    { key: "added", line: changedThreadLine("right", 2), shown: "open" },
++  ];
++
++  expect(places(threadRows(differences, threads))).toEqual([
++    { place: { left: 2, right: 5 }, keys: { left: ["removed"], right: [] } },
++    { place: { left: 3, right: 3 }, keys: { left: [], right: ["added"] } },
++  ]);
++});
++
++test("an unchanged line's threads from both columns share one row", async () => {
++  const differences = await differencesOf([
++    { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
++  ]);
++  const lines = { left: 7, right: 9 };
++  const threads: ShownThread[] = [
++    { key: "on-left", line: unchangedThreadLine("left", lines), shown: "open" },
++    { key: "on-right", line: unchangedThreadLine("right", lines), shown: "draft" },
++    { key: "second", line: unchangedThreadLine("left", lines), shown: "open" },
++  ];
++
++  const rows = threadRows(differences, threads);
++
++  expect(places(rows)).toEqual([
++    { place: { left: 8, right: 10 }, keys: { left: ["on-left", "second"], right: ["on-right"] } },
++  ]);
++  expect(rows[0]?.unchanged).toBe(true);
++});
++
++test("rows at one place keep their order by the other column's place", async () => {
++  const differences = await differencesOf([
++    { left: { start: 3, len: 0 }, right: { start: 3, len: 3 } },
++  ]);
++  const threads: ShownThread[] = [
++    { key: "later", line: changedThreadLine("right", 5), shown: "open" },
++    { key: "earlier", line: changedThreadLine("right", 3), shown: "open" },
++  ];
++
++  expect(places(threadRows(differences, threads))).toEqual([
++    { place: { left: 3, right: 4 }, keys: { left: [], right: ["earlier"] } },
++    { place: { left: 3, right: 6 }, keys: { left: [], right: ["later"] } },
++  ]);
++});
++
++test("collapsed threads place no row, drafts do", async () => {
++  const differences = await differencesOf([]);
++  const threads: ShownThread[] = [
++    {
++      key: "collapsed",
++      line: unchangedThreadLine("left", { left: 0, right: 0 }),
++      shown: "collapsed",
++    },
++    { key: "draft", line: unchangedThreadLine("right", { left: 4, right: 4 }), shown: "draft" },
++  ];
++
++  expect(places(threadRows(differences, threads))).toEqual([
++    { place: { left: 5, right: 5 }, keys: { left: [], right: ["draft"] } },
++  ]);
++});
++
++test("a row's height is the larger column's sum", () => {
++  const heights: Readonly<Record<string, number>> = { a: 30, b: 40, c: 50 };
++  const row = {
++    key: "1:1",
++    place: { left: 1, right: 1 },
++    keys: { left: ["a", "b"], right: ["c"] },
++    unchanged: true,
++  };
++
++  expect(rowHeight(row, (key) => heights[key] ?? 0)).toBe(70);
++});
+diff --git a/frontend/src/editor/internal/threadRows.ts b/frontend/src/editor/internal/threadRows.ts
+new file mode 100644
+index 0000000..1b88337
+--- /dev/null
++++ b/frontend/src/editor/internal/threadRows.ts
+@@ -0,0 +1,73 @@
++import { shownColumn, type Column, type Difference, type ThreadLine } from "../../ipc";
++import { linePlace } from "./threadAnchor";
++
++export type ShownThread = {
++  readonly key: string;
++  readonly line: ThreadLine;
++  readonly shown: "open" | "collapsed" | "draft";
++};
++
++type ThreadPlace = Readonly<Record<Column, number>>;
++
++export type ThreadRow = {
++  readonly key: string;
++  readonly place: ThreadPlace;
++  readonly keys: Readonly<Record<Column, readonly string[]>>;
++  readonly unchanged: boolean;
++};
++
++type GrowingRow = Omit<ThreadRow, "keys"> & { readonly keys: Record<Column, string[]> };
++
++function gapAfter(differences: readonly Difference[], column: Column, line: number): number {
++  const place = linePlace(differences, column, line);
++  if (place.kind === "between") {
++    return place.partner + 1;
++  }
++  const other = column === "left" ? place.difference.right : place.difference.left;
++  return other.start + other.len;
++}
++
++function placeOf(differences: readonly Difference[], line: ThreadLine): ThreadPlace {
++  switch (line.kind) {
++    case "removed":
++      return { left: line.left + 1, right: gapAfter(differences, "left", line.left) };
++    case "added":
++      return { left: gapAfter(differences, "right", line.right), right: line.right + 1 };
++    case "unchangedOnLeft":
++    case "unchangedOnRight":
++      return { left: line.left + 1, right: line.right + 1 };
++    default: {
++      const _exhaustive: never = line;
++      return _exhaustive;
++    }
++  }
++}
++
++export function threadRows(
++  differences: readonly Difference[],
++  shown: readonly ShownThread[],
++): ThreadRow[] {
++  const rows = new Map<string, GrowingRow>();
++  for (const thread of shown) {
++    if (thread.shown === "collapsed") {
++      continue;
++    }
++    const place = placeOf(differences, thread.line);
++    const key = `${place.left}:${place.right}`;
++    const unchanged =
++      thread.line.kind === "unchangedOnLeft" || thread.line.kind === "unchangedOnRight";
++    const row = rows.get(key) ?? { key, place, keys: { left: [], right: [] }, unchanged };
++    row.keys[shownColumn(thread.line)].push(thread.key);
++    rows.set(key, row);
++  }
++  return [...rows.values()].sort(({ place: a }, { place: b }) =>
++    a.left === b.left ? a.right - b.right : a.left - b.left,
++  );
++}
++
++export function rowHeight(row: ThreadRow, heightOf: (key: string) => number): number {
++  function summed(keys: readonly string[]): number {
++    return keys.reduce((total, key) => total + heightOf(key), 0);
++  }
++  return Math.max(summed(row.keys.left), summed(row.keys.right));
++}
+diff --git a/frontend/src/editor/internal/threadWidget.ts b/frontend/src/editor/internal/threadWidget.ts
+new file mode 100644
+index 0000000..808e352
+--- /dev/null
++++ b/frontend/src/editor/internal/threadWidget.ts
+@@ -0,0 +1,59 @@
++import { WidgetType } from "@codemirror/view";
++
++import type { Column } from "../../ipc";
++import type { ThreadRow } from "./threadRows";
++
++export type RowCells = {
++  readonly height: (row: string) => number;
++  readonly host: (key: string) => HTMLElement | undefined;
++  readonly addCell: (column: Column, row: string, cell: HTMLElement) => void;
++  readonly dropCell: (column: Column, row: string, cell: HTMLElement) => void;
++};
++
++const THREAD_ROW_CLASS = "cm-thread-row";
++
++export class ThreadRowWidget extends WidgetType {
++  readonly row: ThreadRow;
++  readonly column: Column;
++  readonly #cells: RowCells;
++
++  constructor(row: ThreadRow, column: Column, cells: RowCells) {
++    super();
++    this.row = row;
++    this.column = column;
++    this.#cells = cells;
++  }
++
++  override eq(other: ThreadRowWidget): boolean {
++    const keys = this.row.keys[this.column];
++    const others = other.row.keys[other.column];
++    return (
++      other.row.key === this.row.key &&
++      other.column === this.column &&
++      others.length === keys.length &&
++      others.every((key, index) => key === keys[index])
++    );
++  }
++
++  toDOM(): HTMLElement {
++    const cell = document.createElement("div");
++    cell.className = THREAD_ROW_CLASS;
++    cell.style.height = `${this.#cells.height(this.row.key)}px`;
++    for (const key of this.row.keys[this.column]) {
++      const host = this.#cells.host(key);
++      if (host !== undefined) {
++        cell.append(host);
++      }
++    }
++    this.#cells.addCell(this.column, this.row.key, cell);
++    return cell;
++  }
++
++  override get estimatedHeight(): number {
++    return this.#cells.height(this.row.key);
++  }
++
++  override destroy(dom: HTMLElement): void {
++    this.#cells.dropCell(this.column, this.row.key, dom);
++  }
++}
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+index 308eb12..ea9a2ae 100644
+--- a/frontend/src/editor/range.ts
++++ b/frontend/src/editor/range.ts
+@@ -1,5 +1,8 @@
+-import type { Difference } from "../ipc";
++import type { EditorView } from "@codemirror/view";
++
++import type { Difference, ThreadLine } from "../ipc";
+ import type { CompareHosts } from "./compare";
++import { differenceField } from "./internal/compareFields";
+ import { moveToDifference } from "./internal/compareFocus";
+ import { CompareFrame } from "./internal/compareFrame";
+ import { CompareStrip } from "./internal/compareStrip";
+@@ -13,6 +16,12 @@ import {
+ import { languageOf, loadLanguage } from "./internal/language";
+ import type { Direction } from "./internal/navigation";
+ import type { PaneSettings, Preferences } from "./internal/pane";
++import { showThreadRows, threadAnchors, threadField } from "./internal/threadField";
++import { ThreadHosts } from "./internal/threadHosts";
++import { lineCounts, numberPress, threadNumbers } from "./internal/threadNumbers";
++import { threadRows, type ShownThread } from "./internal/threadRows";
++
++export type { ShownThread } from "./internal/threadRows";
+ 
+ export type RangeTexts = {
+   readonly path: string; // the file's path in the range, the old path when deleted: picks the language
+@@ -23,24 +32,59 @@ export type RangeTexts = {
+ 
+ export type RangeOptions = { readonly preferences: Preferences };
+ 
++export type RangeEvents = {
++  readonly startThread: (line: ThreadLine) => void;
++  readonly toggleThreads: (keys: readonly string[]) => void;
++  readonly hosts: (hosts: ReadonlyMap<string, HTMLElement>) => void;
++};
++
++const NO_EVENTS: RangeEvents = {
++  startThread: () => {},
++  toggleThreads: () => {},
++  hosts: () => {},
++};
++
+ export class RangeController {
++  readonly #differences: readonly Difference[];
++  readonly #events: RangeEvents;
++  readonly #threadHosts: ThreadHosts;
+   readonly #views: ColumnViews;
+   readonly #strip: CompareStrip;
+   readonly #frame: CompareFrame;
+   #settings: PaneSettings;
+   #destroyed = false;
+ 
+-  constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions) {
++  constructor(
++    texts: RangeTexts,
++    hosts: CompareHosts,
++    options: RangeOptions,
++    events: RangeEvents = NO_EVENTS,
++  ) {
++    this.#differences = texts.differences;
++    this.#events = events;
+     this.#settings = { preferences: options.preferences, platform: navigator.platform };
++    this.#threadHosts = new ThreadHosts({ views: () => this.#views, columns: hosts });
+     this.#views = createReadOnlyColumnViews(texts, hosts, {
+       settings: this.#settings,
+       updated: (_column, update) => {
++        this.#threadHosts.restoreFocus();
+         this.#frame.changed(update);
+       },
+-      extensions: [],
++      extensions: [
++        threadField,
++        threadNumbers((view, line, onBadge) => {
++          this.#pressed(view, line, onBadge);
++        }),
++      ],
+     });
++    this.#threadHosts.watchColumns();
+     this.#strip = new CompareStrip(hosts.strip);
+-    this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
++    this.#frame = new CompareFrame({
++      views: this.#views,
++      strip: this.#strip,
++      fields: [differenceField, threadField],
++      anchors: threadAnchors,
++    });
+     showColumnDifferences(this.#views, texts.differences);
+     const description = languageOf(texts.path);
+     if (description !== null) {
+@@ -50,6 +94,17 @@ export class RangeController {
+     this.#frame.request();
+   }
+ 
++  #pressed(view: EditorView, line: number, onBadge: boolean): void {
++    const column = view === this.#views.left ? "left" : "right";
++    const counts = view.state.field(threadField)?.counts ?? [];
++    const press = numberPress({ differences: this.#differences, column, line, onBadge, counts });
++    if (press.kind === "start") {
++      this.#events.startThread(press.line);
++    } else {
++      this.#events.toggleThreads(press.keys);
++    }
++  }
++
+   setPreferences(preferences: Preferences): void {
+     this.#settings = { ...this.#settings, preferences };
+     setColumnPreferences(this.#views, this.#settings);
+@@ -59,8 +114,26 @@ export class RangeController {
+     moveToDifference(this.#views, direction);
+   }
+ 
++  showThreads(threads: readonly ShownThread[]): void {
++    const rows = threadRows(this.#differences, threads);
++    const hostsChanged = this.#threadHosts.show(rows);
++    for (const column of COLUMNS) {
++      const counts = lineCounts(threads, column);
++      const shown = { column, rows, counts, cells: this.#threadHosts };
++      this.#views[column].dispatch({ effects: showThreadRows.of(shown) });
++    }
++    if (hostsChanged) {
++      this.#events.hosts(this.#threadHosts.hosts());
++    }
++  }
++
+   destroy(): void {
+     this.#destroyed = true;
++    const hadHosts = this.#threadHosts.hosts().size > 0;
++    this.#threadHosts.destroy();
++    if (hadHosts) {
++      this.#events.hosts(new Map());
++    }
+     this.#frame.destroy();
+     for (const column of COLUMNS) {
+       this.#views[column].destroy();
+diff --git a/frontend/src/editor/rangeThreads.browser.test.ts b/frontend/src/editor/rangeThreads.browser.test.ts
+new file mode 100644
+index 0000000..485a836
+--- /dev/null
++++ b/frontend/src/editor/rangeThreads.browser.test.ts
+@@ -0,0 +1,230 @@
++import "../style.css";
++import { searchPanelOpen } from "@codemirror/search";
++import { EditorView } from "@codemirror/view";
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { page, userEvent } from "vitest/browser";
++
++import { DEFAULT_KEYS, loadCompareFixture, unchangedThreadLine, type ThreadLine } from "../ipc";
++import { RangeController, type CompareHosts, type RangeEvents, type ShownThread } from "./index";
++import { found } from "./paneHarness";
++
++const WIDTH = 1200;
++const HEIGHT = 700;
++const PANE_PX = 500;
++const WAIT_MS = 3000;
++const GROWN_PX = 200;
++const FAR_PX = 10_000;
++const SIDEWAYS_PX = 300;
++const LINES = 800;
++const LONG_LINE = `const long = "${"x".repeat(400)}";`;
++const MOUNTED = "data-range-threads-probe";
++const KEY = "thread-1";
++
++function text(changed: string): string {
++  const lines = Array.from({ length: LINES }, (_, index) => `const line${index} = ${index};`);
++  lines[0] = LONG_LINE;
++  lines[10] = changed;
++  return lines.join("\n");
++}
++
++const LEFT = text("const changed = old;");
++const RIGHT = text("const changed = new;");
++const NO_WORDS = { changed: [], removals: [] };
++const CASE = {
++  left: LEFT,
++  right: RIGHT,
++  differences: [
++    {
++      left: { start: 10, len: 1 },
++      right: { start: 10, len: 1 },
++      words: { left: NO_WORDS, right: NO_WORDS },
++    },
++  ],
++};
++const THREAD: ShownThread = {
++  key: KEY,
++  line: unchangedThreadLine("left", { left: 2, right: 2 }),
++  shown: "open",
++};
++
++type Opened = {
++  readonly hosts: CompareHosts;
++  readonly controller: RangeController;
++  readonly threadHosts: () => ReadonlyMap<string, HTMLElement>;
++  readonly started: ThreadLine[];
++  readonly toggled: (readonly string[])[];
++};
++
++function box(style: string): HTMLDivElement {
++  const node = document.createElement("div");
++  node.setAttribute("style", style);
++  return node;
++}
++
++function mount(): CompareHosts {
++  const wrapper = box(
++    `position: fixed; inset: 40px 0 auto 0; height: ${PANE_PX}px; display: grid; grid-template-columns: 1fr 40px 1fr; will-change: transform`,
++  );
++  wrapper.setAttribute(MOUNTED, "");
++  const pane = `min-width: 0; min-height: 0; height: ${PANE_PX}px`;
++  const strip = document.createElementNS("http://www.w3.org/2000/svg", "svg");
++  strip.setAttribute("style", "display: block; width: 100%; height: 100%");
++  const layer = box("min-height: 0; will-change: transform");
++  layer.append(strip);
++  const hosts = { left: box(pane), right: box(pane), strip };
++  wrapper.append(hosts.left, layer, hosts.right);
++  document.body.append(wrapper);
++  return hosts;
++}
++
++function viewIn(host: HTMLElement): EditorView {
++  const view = EditorView.findFromDOM(
++    found(host.querySelector<HTMLElement>(".cm-editor"), "editor"),
++  );
++  if (view === null) {
++    throw new Error("no view");
++  }
++  return view;
++}
++
++const controllers: RangeController[] = [];
++
++async function opened(): Promise<Opened> {
++  const hosts = mount();
++  const { comparison } = await loadCompareFixture("threads", { "threads.json": CASE });
++  let shown: ReadonlyMap<string, HTMLElement> = new Map();
++  const started: ThreadLine[] = [];
++  const toggled: (readonly string[])[] = [];
++  const events: RangeEvents = {
++    startThread: (line) => started.push(line),
++    toggleThreads: (keys) => toggled.push(keys),
++    hosts: (next) => {
++      shown = next;
++    },
++  };
++  const controller = new RangeController(
++    { path: "src/probe.ts", left: LEFT, right: RIGHT, differences: comparison.differences },
++    hosts,
++    { preferences: { theme: "dark", keys: DEFAULT_KEYS } },
++    events,
++  );
++  controllers.push(controller);
++  controller.showThreads([THREAD]);
++  return { hosts, controller, threadHosts: () => shown, started, toggled };
++}
++
++function hostOf({ threadHosts }: Opened): HTMLElement {
++  return found(threadHosts().get(KEY) ?? null, "thread host");
++}
++
++function lineTop(host: HTMLElement, number: number): number {
++  const view = viewIn(host);
++  return view.lineBlockAt(view.state.doc.line(number).from).top;
++}
++
++function bandTop(strip: SVGSVGElement): number {
++  return found(strip.querySelector("path.chunk-band"), "band").getBoundingClientRect().top;
++}
++
++beforeEach(async () => {
++  await page.viewport(WIDTH, HEIGHT);
++});
++
++afterEach(() => {
++  controllers.splice(0).forEach((controller) => controller.destroy());
++  document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
++});
++
++test("a host growing by 200 px moves the next line in both columns by 200 px and the band's edges with it", async () => {
++  const probe = await opened();
++  const { hosts } = probe;
++  await vi.waitFor(() => expect(hosts.strip.querySelector("path.chunk-band")).not.toBeNull(), {
++    timeout: WAIT_MS,
++  });
++  const before = { left: lineTop(hosts.left, 4), right: lineTop(hosts.right, 4) };
++  const band = bandTop(hosts.strip);
++
++  hostOf(probe).append(box(`height: ${GROWN_PX}px`));
++
++  await vi.waitFor(
++    () => {
++      expect(lineTop(hosts.left, 4) - before.left).toBe(GROWN_PX);
++      expect(lineTop(hosts.right, 4) - before.right).toBe(GROWN_PX);
++      expect(bandTop(hosts.strip) - band).toBe(GROWN_PX);
++    },
++    { timeout: WAIT_MS },
++  );
++  const cells = [hosts.left, hosts.right].map(
++    (host) => found(host.querySelector<HTMLElement>(".cm-thread-row"), "row").offsetHeight,
++  );
++  expect(cells).toEqual([GROWN_PX, GROWN_PX]);
++});
++
++test("typing in a textarea inside a host leaves both documents unchanged and Ctrl+F there opens no find bar", async () => {
++  const probe = await opened();
++  const field = document.createElement("textarea");
++  hostOf(probe).append(field);
++
++  await userEvent.click(field);
++  await userEvent.keyboard("hello{Enter}{Backspace}{Control>}f{/Control}");
++
++  expect(field.value).toBe("hello");
++  expect(document.activeElement).toBe(field);
++  for (const host of [probe.hosts.left, probe.hosts.right]) {
++    const view = viewIn(host);
++    expect(searchPanelOpen(view.state)).toBe(false);
++  }
++  expect(viewIn(probe.hosts.left).state.sliceDoc()).toBe(LEFT);
++  expect(viewIn(probe.hosts.right).state.sliceDoc()).toBe(RIGHT);
++});
++
++test("scrolling 10,000 px away and back gives the same host node with the textarea's text and focus kept", async () => {
++  const probe = await opened();
++  const host = hostOf(probe);
++  const field = document.createElement("textarea");
++  host.append(field);
++  await userEvent.click(field);
++  await userEvent.keyboard("kept");
++  const { scrollDOM } = viewIn(probe.hosts.left);
++
++  scrollDOM.scrollTop = FAR_PX;
++  await vi.waitFor(() => expect(host.isConnected).toBe(false), { timeout: WAIT_MS });
++  scrollDOM.scrollTop = 0;
++  await vi.waitFor(() => expect(host.isConnected).toBe(true), { timeout: WAIT_MS });
++  await vi.waitFor(() => expect(document.activeElement).toBe(field), { timeout: WAIT_MS });
++
++  expect(probe.threadHosts().get(KEY)).toBe(host);
++  expect(field.value).toBe("kept");
++});
++
++test("horizontal scroll leaves the box in place", async () => {
++  const probe = await opened();
++  const host = hostOf(probe);
++  host.append(box("height: 40px"));
++  const { scrollDOM } = viewIn(probe.hosts.left);
++  await vi.waitFor(() => expect(host.getBoundingClientRect().height).toBe(40), {
++    timeout: WAIT_MS,
++  });
++  const before = host.getBoundingClientRect().left;
++
++  scrollDOM.scrollLeft = SIDEWAYS_PX;
++  await vi.waitFor(() => expect(scrollDOM.scrollLeft).toBe(SIDEWAYS_PX), { timeout: WAIT_MS });
++
++  expect(host.getBoundingClientRect().left).toBe(before);
++});
++
++test("a press on a line number starts a thread there; a press on the count toggles that line's threads", async () => {
++  const probe = await opened();
++  const numbers = [
++    ...probe.hosts.left.querySelectorAll<HTMLElement>(".cm-lineNumbers .cm-gutterElement"),
++  ];
++  const count = found(probe.hosts.left.querySelector<HTMLElement>(".cm-thread-count"), "count");
++  const fifth = found(numbers.find((number) => number.textContent === "5") ?? null, "line 5");
++
++  await userEvent.click(fifth);
++  await userEvent.click(count);
++
++  expect(probe.started).toEqual([{ kind: "unchangedOnLeft", left: 4, right: 4 }]);
++  expect(probe.toggled).toEqual([[KEY]]);
++  expect(count.textContent).toBe("1");
++});
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 90fcc6d..27fa87b 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -484,3 +484,56 @@ ul.markdown-list {
+   user-select: text;
+   -webkit-user-select: text;
+ }
++
++.cm-editor .cm-thread-row {
++  position: sticky;
++  left: var(--thread-left, 0px);
++  box-sizing: border-box;
++  width: var(--thread-width, 100%);
++  color: var(--color-fg);
++  font-family: var(--font-sans);
++  white-space: normal;
++  cursor: auto;
++}
++
++.cm-editor .cm-thread-host {
++  display: flow-root;
++}
++
++.cm-editor.cm-thread-lines .cm-lineNumbers .cm-gutterElement {
++  position: relative;
++  padding-left: 20px;
++  cursor: pointer;
++}
++
++.cm-editor.cm-thread-lines
++  .cm-lineNumbers
++  .cm-gutterElement:hover:not(:has(.cm-thread-count))::before {
++  position: absolute;
++  top: 0;
++  bottom: 0;
++  left: 3px;
++  width: 14px;
++  background-color: var(--color-fg-muted);
++  content: "";
++  -webkit-mask: var(--thread-icon) center / 14px 14px no-repeat;
++  mask: var(--thread-icon) center / 14px 14px no-repeat;
++}
++
++.cm-editor .cm-thread-count {
++  position: absolute;
++  top: 50%;
++  left: 2px;
++  box-sizing: border-box;
++  min-width: 14px;
++  height: 14px;
++  padding: 0 3px;
++  border-radius: 7px;
++  background-color: var(--color-primary);
++  color: var(--color-on-primary);
++  font-family: var(--font-sans);
++  font-size: 10px;
++  line-height: 14px;
++  text-align: center;
++  transform: translateY(-50%);
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index d8afeb0..f918c4f 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -97,6 +97,7 @@ export type { RangeSource } from "./RangeSource";
+ export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
+ export { THEMES, themeKind, themeOf, themeRows } from "./themes";
+ export { createTauriCompareSource } from "./tauriCompare";
++export { changedThreadLine, shownColumn, unchangedThreadLine, type ThreadLine } from "./threadLine";
+ export { createTauriRangeSource } from "./tauriRange";
+ export type { ServerHost } from "./ServerHost";
+ export type { SideWords } from "./words";
+diff --git a/frontend/src/ipc/threadLine.ts b/frontend/src/ipc/threadLine.ts
+new file mode 100644
+index 0000000..e6bc36e
+--- /dev/null
++++ b/frontend/src/ipc/threadLine.ts
+@@ -0,0 +1,55 @@
++import type { Column } from "./compareDomain";
++import { isLeftLine, isRightLine, type LeftLine, type RightLine } from "./domain";
++import { invalid } from "./validate";
++
++export type ThreadLine =
++  | { readonly kind: "removed"; readonly left: LeftLine }
++  | { readonly kind: "added"; readonly right: RightLine }
++  | { readonly kind: "unchangedOnLeft"; readonly left: LeftLine; readonly right: RightLine }
++  | { readonly kind: "unchangedOnRight"; readonly left: LeftLine; readonly right: RightLine };
++
++export function shownColumn(line: ThreadLine): Column {
++  switch (line.kind) {
++    case "removed":
++    case "unchangedOnLeft":
++      return "left";
++    case "added":
++    case "unchangedOnRight":
++      return "right";
++    default: {
++      const _exhaustive: never = line;
++      return _exhaustive;
++    }
++  }
++}
++
++function leftLine(n: number): LeftLine {
++  if (!isLeftLine(n)) {
++    throw invalid("left line", n);
++  }
++  return n;
++}
++
++function rightLine(n: number): RightLine {
++  if (!isRightLine(n)) {
++    throw invalid("right line", n);
++  }
++  return n;
++}
++
++export function changedThreadLine(column: Column, line: number): ThreadLine {
++  return column === "left"
++    ? { kind: "removed", left: leftLine(line) }
++    : { kind: "added", right: rightLine(line) };
++}
++
++export function unchangedThreadLine(
++  column: Column,
++  lines: { readonly left: number; readonly right: number },
++): ThreadLine {
++  const left = leftLine(lines.left);
++  const right = rightLine(lines.right);
++  return column === "left"
++    ? { kind: "unchangedOnLeft", left, right }
++    : { kind: "unchangedOnRight", left, right };
++}
+-- 
+2.56.0
+

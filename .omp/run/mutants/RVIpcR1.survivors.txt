@@ -1,0 +1,6 @@
+just mutants 3131449 (covers 3d9d0ce RVIpcR1) — Stryker
+All files          |  74.50 |   74.50 |      333 |         0 |        114 |        0 |        0 |
+ fixture.ts        |  69.54 |   69.54 |      121 |         0 |         53 |        0 |        0 |
+ fixtureCompare.ts |  98.81 |   98.81 |      166 |         0 |          2 |        0 |        0 |
+ fixtureRange.ts   |  43.81 |   43.81 |       46 |         0 |         59 |        0 |        0 |
+Survivors: module-level valibot schema constants in fixtureRange.ts/fixture.ts (the #732/#1609 class: vitest never re-evaluates module scope; killed by the committed-case and parse-failure tests once evaluated) — dropped, as the RVIpc correctness review dropped the same class.

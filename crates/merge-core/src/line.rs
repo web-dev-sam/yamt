@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
 /// 0-based line index in the base text.
@@ -16,11 +16,15 @@ pub struct LocalLine(pub u32);
 pub struct RemoteLine(pub u32);
 
 /// 0-based line index in the left text of a 2-way compare.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type,
+)]
 pub struct LeftLine(pub u32);
 
 /// 0-based line index in the right text of a 2-way compare.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Type)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type,
+)]
 pub struct RightLine(pub u32);
 
 /// The lines `start .. start + len` of one text; built from a length, so it cannot be inverted.

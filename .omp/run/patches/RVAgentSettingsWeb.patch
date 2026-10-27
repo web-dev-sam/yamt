@@ -1,0 +1,677 @@
+From baa63f02c22e2e82082fdf79206e8f5b94657921 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:27:20 +0100
+Subject: [PATCH] feat(settings): agent entry through every settings source,
+ one command-split rule
+
+---
+ frontend/src/ipc/ChunkSource.ts          |  3 +
+ frontend/src/ipc/domain.ts               |  2 +
+ frontend/src/ipc/fixtureSettings.test.ts | 50 ++++++++++++-
+ frontend/src/ipc/fixtureSettings.ts      | 17 ++++-
+ frontend/src/ipc/tauri.test.ts           | 14 ++++
+ frontend/src/ipc/tauri.ts                |  3 +
+ frontend/src/ui/commandWords.test.ts     | 18 +++++
+ frontend/src/ui/commandWords.ts          |  3 +
+ frontend/src/ui/listing.test.ts          |  1 +
+ frontend/src/ui/saving.test.ts           |  1 +
+ frontend/src/ui/serverSetup.ts           |  5 +-
+ frontend/src/ui/settings.test.ts         | 91 +++++++++++++++++++++++-
+ frontend/src/ui/settings.ts              | 32 +++++++--
+ frontend/src/ui/settingsStore.test.ts    |  1 +
+ frontend/src/ui/settingsStore.ts         |  1 +
+ frontend/src/ui/stops.test.ts            |  1 +
+ frontend/src/ui/store.test.ts            |  5 ++
+ 17 files changed, 239 insertions(+), 9 deletions(-)
+ create mode 100644 frontend/src/ui/commandWords.test.ts
+ create mode 100644 frontend/src/ui/commandWords.ts
+
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index f3b52e3..2f48c0a 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -1,5 +1,6 @@
+ import type {
+   AddedServer,
++  AgentSettings,
+   Antialiasing,
+   ContinueReply,
+   DiskVersion,
+@@ -56,6 +57,7 @@ export interface ChunkSource {
+     current: StoredSettings,
+     added: readonly AddedServer[],
+   ): Promise<SourceResult<SettingsRead>>;
++  setAgent(current: StoredSettings, agent: AgentSettings): Promise<SourceResult<SettingsRead>>;
+ }
+ 
+ export type SettingsSource = Pick<
+@@ -68,4 +70,5 @@ export type SettingsSource = Pick<
+   | "setServerAnswer"
+   | "setServerSwitch"
+   | "setAddedServers"
++  | "setAgent"
+ >;
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index d6a2fb2..fb37c28 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -66,6 +66,8 @@ export type RepositoryAnswer = Generated.RepositoryAnswer;
+ 
+ export type AddedServer = Generated.AddedServer;
+ 
++export type AgentSettings = Generated.AgentSettings;
++
+ export type RunId = number & { readonly __brand: "RunId" };
+ 
+ export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
+diff --git a/frontend/src/ipc/fixtureSettings.test.ts b/frontend/src/ipc/fixtureSettings.test.ts
+index 85938ba..ced9c5e 100644
+--- a/frontend/src/ipc/fixtureSettings.test.ts
++++ b/frontend/src/ipc/fixtureSettings.test.ts
+@@ -5,17 +5,20 @@ import { createFixtureSettings } from "./fixtureSettings";
+ 
+ const DEFAULT_PATH = "/fixture/settings.json";
+ const NO_SERVERS = { repositories: {}, off: {}, added: [] };
++const NO_AGENT = { command: null, firstMessage: null };
+ const IN_USE: StoredSettings = {
+   theme: "dark",
+   antialiasing: "subpixel",
+   keys: { apply: ["a"] },
+   languageServers: NO_SERVERS,
++  agent: NO_AGENT,
+ };
+ const LIGHT: StoredSettings = {
+   theme: "light",
+   antialiasing: "subpixel",
+   keys: {},
+   languageServers: NO_SERVERS,
++  agent: NO_AGENT,
+ };
+ const REPOSITORY = "/fixture/repository";
+ const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
+@@ -41,10 +44,17 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
+     antialiasing: "greyscale",
+     keys: { "later-action": ["Mod-q"] },
+     languageServers: NO_SERVERS,
++    agent: NO_AGENT,
+   });
+ 
+   const read = await settings.setTheme(
+-    { theme: "dark", antialiasing: "greyscale", keys: {}, languageServers: NO_SERVERS },
++    {
++      theme: "dark",
++      antialiasing: "greyscale",
++      keys: {},
++      languageServers: NO_SERVERS,
++      agent: NO_AGENT,
++    },
+     "light",
+   );
+ 
+@@ -58,6 +68,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
+         antialiasing: "greyscale",
+         keys: { "later-action": ["Mod-q"] },
+         languageServers: NO_SERVERS,
++        agent: NO_AGENT,
+       },
+     },
+   });
+@@ -75,6 +86,7 @@ test("setAntialiasing replaces the antialiasing, keeps the rest, and the next lo
+     antialiasing: "greyscale",
+     keys: { "later-action": ["Mod-q"] },
+     languageServers: NO_SERVERS,
++    agent: NO_AGENT,
+   };
+   expect(read).toEqual({
+     ok: true,
+@@ -90,6 +102,7 @@ test("setKeys sets an entry with a list, removes it with null, and leaves the ot
+     antialiasing: "subpixel",
+     keys: { apply: ["a"], undo: ["Alt-Backspace"] },
+     languageServers: NO_SERVERS,
++    agent: NO_AGENT,
+   });
+ 
+   const read = await settings.setKeys(IN_USE, [
+@@ -115,6 +128,7 @@ test("a change before any load creates the file from the settings in use", async
+     antialiasing: "subpixel",
+     keys: { apply: ["a"] },
+     languageServers: NO_SERVERS,
++    agent: NO_AGENT,
+   });
+ });
+ 
+@@ -130,6 +144,40 @@ test("a reply is a copy: changing it changes nothing stored", async () => {
+   expect(again.ok && again.value.stored.keys).toEqual({ apply: ["a"] });
+ });
+ 
++test("setAgent replaces the agent entry, keeps the rest, and the next load reads it", async () => {
++  const settings = createFixtureSettings();
++  await settings.loadSettings(IN_USE);
++  const agent = { command: ["omp", "acp", "--trace"], firstMessage: null };
++
++  const read = await settings.setAgent(LIGHT, agent);
++  const load = await settings.loadSettings(LIGHT);
++  const back = await settings.setAgent(IN_USE, NO_AGENT);
++
++  expect(read).toEqual({
++    ok: true,
++    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: { ...IN_USE, agent } },
++  });
++  expect(load).toEqual(read);
++  expect(back.ok && back.value.stored).toEqual(IN_USE);
++});
++
++test("an agent command in a reply and the sent one are copies: changing them changes nothing stored", async () => {
++  const settings = createFixtureSettings();
++  const sent = { command: ["omp", "acp"], firstMessage: "Hi {{ MESSAGE }}" };
++  const first = await settings.setAgent(IN_USE, sent);
++  sent.command.push("--sent");
++  if (first.ok) {
++    first.value.stored.agent.command?.push("--reply");
++  }
++
++  const again = await settings.loadSettings(IN_USE);
++
++  expect(again.ok && again.value.stored.agent).toEqual({
++    command: ["omp", "acp"],
++    firstMessage: "Hi {{ MESSAGE }}",
++  });
++});
++
+ test("moving to an unknown path creates it from the settings in use, a known one is used", async () => {
+   const settings = createFixtureSettings();
+   await settings.loadSettings(IN_USE);
+diff --git a/frontend/src/ipc/fixtureSettings.ts b/frontend/src/ipc/fixtureSettings.ts
+index 1a40301..51de135 100644
+--- a/frontend/src/ipc/fixtureSettings.ts
++++ b/frontend/src/ipc/fixtureSettings.ts
+@@ -1,6 +1,7 @@
+ import type { SettingsSource } from "./ChunkSource";
+ import type {
+   AddedServer,
++  AgentSettings,
+   KeysChange,
+   RepositoryAnswer,
+   SettingsRead,
+@@ -22,7 +23,17 @@ function copiedServers(added: readonly AddedServer[]): AddedServer[] {
+   }));
+ }
+ 
+-function copied({ theme, antialiasing, keys, languageServers }: StoredSettings): StoredSettings {
++function copiedAgent({ command, firstMessage }: AgentSettings): AgentSettings {
++  return { command: command === null ? null : [...command], firstMessage };
++}
++
++function copied({
++  theme,
++  antialiasing,
++  keys,
++  languageServers,
++  agent,
++}: StoredSettings): StoredSettings {
+   return {
+     theme,
+     antialiasing,
+@@ -34,6 +45,7 @@ function copied({ theme, antialiasing, keys, languageServers }: StoredSettings):
+       ),
+       added: copiedServers(languageServers.added),
+     },
++    agent: copiedAgent(agent),
+   };
+ }
+ 
+@@ -139,6 +151,9 @@ export function createFixtureSettings(): SettingsSource {
+         keys: withKeys(stored.keys, changes),
+       }));
+     },
++    async setAgent(current, agent) {
++      return change(files, current, (stored) => ({ ...stored, agent: copiedAgent(agent) }));
++    },
+     async moveSettings(current, path) {
+       const target = expanded(path);
+       if (target === null) {
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index f8f1138..f6178c5 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -23,6 +23,7 @@ const commands = vi.hoisted(() => ({
+   setServerAnswer: vi.fn(),
+   setServerSwitch: vi.fn(),
+   setAddedServers: vi.fn(),
++  setAgent: vi.fn(),
+   serversContext: vi.fn(),
+   startServer: vi.fn(),
+   sendToServer: vi.fn(),
+@@ -383,6 +384,7 @@ const STORED: StoredSettings = {
+   antialiasing: "subpixel",
+   keys: { undo: ["Alt-Backspace"] },
+   languageServers: { repositories: { "/home/me/yamt": "start" }, off: {}, added: [] },
++  agent: { command: ["omp", "acp", "--trace"], firstMessage: null },
+ };
+ const SETTINGS_DTO: Generated.SettingsRead = {
+   path: "/home/me/.config/yamt/settings.json",
+@@ -522,6 +524,18 @@ test("setServerSwitch returns the app's error", async () => {
+   });
+ });
+ 
++test("setAgent sends the settings in use and the agent entry, and returns the read or the error", async () => {
++  const agent = { command: null, firstMessage: "Look at {{ MESSAGE }}" };
++  const broken = { kind: "SettingsBroken", path: SETTINGS_DTO.path, message: "x" };
++  commands.setAgent.mockResolvedValueOnce({ status: "ok", data: SETTINGS_DTO });
++  commands.setAgent.mockResolvedValueOnce({ status: "error", error: broken });
++  const source = createTauriSource();
++
++  expect(await source.setAgent(STORED, agent)).toEqual({ ok: true, value: SETTINGS_READ });
++  expect(await source.setAgent(STORED, agent)).toEqual({ ok: false, failure: broken });
++  expect(commands.setAgent).toHaveBeenCalledWith(STORED, agent);
++});
++
+ type ChannelLike = { readonly onmessage: (event: Generated.HostEvent) => void };
+ 
+ test("the server host starts a run with a channel whose messages reach onEvent, branding the run", async () => {
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index 80d5b3f..a755fa4 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -71,6 +71,9 @@ export function createTauriSettings(): SettingsSource {
+     async setAddedServers(current, added) {
+       return toSettingsResult(await commands.setAddedServers(current, [...added]));
+     },
++    async setAgent(current, agent) {
++      return toSettingsResult(await commands.setAgent(current, agent));
++    },
+   };
+ }
+ 
+diff --git a/frontend/src/ui/commandWords.test.ts b/frontend/src/ui/commandWords.test.ts
+new file mode 100644
+index 0000000..2de4915
+--- /dev/null
++++ b/frontend/src/ui/commandWords.test.ts
+@@ -0,0 +1,18 @@
++import { expect, test } from "vitest";
++
++import { commandWords } from "./commandWords";
++
++test("a command splits at each run of spaces, leading and trailing spaces dropped", () => {
++  expect(commandWords("omp acp")).toEqual(["omp", "acp"]);
++  expect(commandWords("  ruff   server --preview ")).toEqual(["ruff", "server", "--preview"]);
++  expect(commandWords("pylsp")).toEqual(["pylsp"]);
++});
++
++test("an empty or all-space command has no words", () => {
++  expect(commandWords("")).toEqual([]);
++  expect(commandWords("   ")).toEqual([]);
++});
++
++test("only spaces split: quotes and tabs stay inside the words", () => {
++  expect(commandWords('"my tool"\t--x')).toEqual(['"my', 'tool"\t--x']);
++});
+diff --git a/frontend/src/ui/commandWords.ts b/frontend/src/ui/commandWords.ts
+new file mode 100644
+index 0000000..8cc7311
+--- /dev/null
++++ b/frontend/src/ui/commandWords.ts
+@@ -0,0 +1,3 @@
++export function commandWords(text: string): readonly string[] {
++  return text.split(" ").filter((word) => word !== "");
++}
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index 81f046b..eb3f778 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -77,6 +77,7 @@ function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
+     setServerAnswer: notUsed,
+     setServerSwitch: notUsed,
+     setAddedServers: notUsed,
++    setAgent: notUsed,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 63a8530..9589bd7 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -146,6 +146,7 @@ function writeTarget(
+     setServerAnswer: notUsed,
+     setServerSwitch: notUsed,
+     setAddedServers: notUsed,
++    setAgent: notUsed,
+   };
+   return {
+     source,
+diff --git a/frontend/src/ui/serverSetup.ts b/frontend/src/ui/serverSetup.ts
+index 3c8c4cd..aeaca1b 100644
+--- a/frontend/src/ui/serverSetup.ts
++++ b/frontend/src/ui/serverSetup.ts
+@@ -10,6 +10,7 @@ import {
+ } from "../ipc";
+ import { addedSpecs, detect, type LanguageServers, type ServerKey, type ServerSpec } from "../lsp";
+ import type { Asking, Reply } from "./asking";
++import { commandWords } from "./commandWords";
+ import { unexpected } from "./problem";
+ import { createServerPins, type ServerPins } from "./serverPins";
+ import type { SettingsActions, SettingsInUse } from "./settings";
+@@ -54,13 +55,13 @@ const STORED_REPLIES: Readonly<Record<Reply, RepositoryAnswer | null>> = {
+ };
+ 
+ export function parseAddedServer(command: string, fileTypes: string): AddedServer | null {
+-  const words = command.split(" ").filter((word) => word !== "");
++  const words = commandWords(command);
+   const types = fileTypes
+     .split(/[\s,]+/)
+     .map((type) => type.replace(/^\.+/, "").toLowerCase())
+     .filter((type) => type !== "");
+   const valid = words.length > 0 && types.length > 0 && !types.some((type) => type.includes("."));
+-  return valid ? { command: words, fileTypes: types } : null;
++  return valid ? { command: [...words], fileTypes: types } : null;
+ }
+ 
+ export function addedServerFields(server: {
+diff --git a/frontend/src/ui/settings.test.ts b/frontend/src/ui/settings.test.ts
+index 851f584..95b78d1 100644
+--- a/frontend/src/ui/settings.test.ts
++++ b/frontend/src/ui/settings.test.ts
+@@ -24,6 +24,8 @@ type Target = {
+   readonly problem: ShallowRef<Problem | null>;
+ };
+ 
++type AgentSettings = StoredSettings["agent"];
++
+ const PATH = "/home/me/.config/yamt/settings.json";
+ const ROOT = "/home/me/yamt";
+ const NO_SERVERS: LanguageServerSettings = { repositories: {}, off: {}, added: [] };
+@@ -35,6 +37,8 @@ const SERVERS: LanguageServerSettings = {
+ };
+ const OXFMT_KEY = "oxfmt (repository root)";
+ const OFF: LanguageServerSettings = { ...SERVERS, off: { [ROOT]: [OXFMT_KEY] } };
++const NO_AGENT: AgentSettings = { command: null, firstMessage: null };
++const AGENT: AgentSettings = { command: ["omp", "acp"], firstMessage: "Look: {{ MESSAGE }}" };
+ const BROKEN: SourceFailure = { kind: "SettingsBroken", path: PATH, message: "x at line 3" };
+ 
+ afterEach(() => {
+@@ -81,6 +85,12 @@ function settingsTarget(loads: StoredSettings[]): {
+         languageServers: { ...current.languageServers, added: [...added] },
+       });
+     },
++    setAgent: async (current, agent) => {
++      sent.push(["setAgent", current, agent]);
++      return agent.firstMessage === ""
++        ? { ok: false, failure: BROKEN }
++        : read({ ...current, agent });
++    },
+   };
+   const target = {
+     source,
+@@ -93,7 +103,13 @@ function settingsTarget(loads: StoredSettings[]): {
+ }
+ 
+ function startStored(): StoredSettings {
+-  return { theme: "dark", antialiasing: "subpixel", keys: {}, languageServers: NO_SERVERS };
++  return {
++    theme: "dark",
++    antialiasing: "subpixel",
++    keys: {},
++    languageServers: NO_SERVERS,
++    agent: NO_AGENT,
++  };
+ }
+ 
+ test("antialiasing is shown on Linux platforms only", () => {
+@@ -253,3 +269,76 @@ test("a load of the same servers entry keeps the settings in use", async () => {
+ 
+   expect(target.settings.value).toBe(inUse);
+ });
++
++test("before any read the agent entry is all defaults (null), sent so by the first load", async () => {
++  const { actions, target, sent } = settingsTarget([]);
++
++  expect(target.settings.value.agent).toEqual(NO_AGENT);
++
++  await actions.loadSettings();
++
++  expect(sent).toEqual([["loadSettings", startStored()]]);
++});
++
++test("setAgent sends the settings in use and the entry as given, nulls included, and adopts the reply", async () => {
++  const { actions, target, sent } = settingsTarget([{ ...startStored(), theme: "light" }]);
++  await actions.loadSettings();
++
++  await actions.setAgent(AGENT);
++  expect(sent[1]).toEqual(["setAgent", { ...startStored(), theme: "light" }, AGENT]);
++  expect(target.settings.value.agent).toEqual(AGENT);
++  expect(target.settings.value.read?.stored.agent).toEqual(AGENT);
++
++  await actions.setTheme("dark");
++  expect(sent[2]).toEqual(["setTheme", { ...startStored(), theme: "light", agent: AGENT }, "dark"]);
++
++  await actions.setAgent(NO_AGENT);
++  expect(sent[3]).toEqual(["setAgent", { ...startStored(), agent: AGENT }, NO_AGENT]);
++  expect(target.settings.value.agent).toEqual(NO_AGENT);
++});
++
++test("a failed setAgent is reported as a settings problem and keeps the settings", async () => {
++  const { actions, target } = settingsTarget([]);
++  await actions.loadSettings();
++  const inUse = target.settings.value;
++
++  await actions.setAgent({ command: null, firstMessage: "" });
++
++  expect(target.problem.value).toEqual({ action: "settings", cause: BROKEN });
++  expect(target.settings.value).toBe(inUse);
++});
++
++test.each<[string, AgentSettings, AgentSettings]>([
++  ["a command given", NO_AGENT, { ...NO_AGENT, command: ["omp", "acp"] }],
++  ["a command back to the default", AGENT, { ...AGENT, command: null }],
++  ["a command word", AGENT, { ...AGENT, command: ["omp", "rpc"] }],
++  ["a longer command", AGENT, { ...AGENT, command: ["omp", "acp", "-v"] }],
++  ["a first message given", NO_AGENT, { ...NO_AGENT, firstMessage: "Hi" }],
++  ["another first message", AGENT, { ...AGENT, firstMessage: "Hi" }],
++])("a load whose only difference is %s is adopted", async (_difference, before, changed) => {
++  const { actions, target } = settingsTarget([
++    { ...startStored(), agent: before },
++    { ...startStored(), agent: changed },
++  ]);
++  await actions.loadSettings();
++
++  await actions.loadSettings();
++
++  expect(target.settings.value.agent).toEqual(changed);
++});
++
++test.each<[string, AgentSettings]>([
++  ["the defaults", NO_AGENT],
++  ["a command and a first message", AGENT],
++])("a load of the same agent entry (%s) keeps the settings in use", async (_entry, agent) => {
++  const { actions, target } = settingsTarget([
++    { ...startStored(), agent: structuredClone(agent) },
++    { ...startStored(), agent: structuredClone(agent) },
++  ]);
++  await actions.loadSettings();
++  const inUse = target.settings.value;
++
++  await actions.loadSettings();
++
++  expect(target.settings.value).toBe(inUse);
++});
+diff --git a/frontend/src/ui/settings.ts b/frontend/src/ui/settings.ts
+index d793329..3ea6126 100644
+--- a/frontend/src/ui/settings.ts
++++ b/frontend/src/ui/settings.ts
+@@ -24,12 +24,15 @@ import { isDefault, planKeyEdit, type KeyEdit } from "./keymapEdit";
+ import { attempt, logProblem, report, type Problem } from "./problem";
+ import type { Preferences } from "./useMergeController";
+ 
++type AgentSettings = StoredSettings["agent"];
++
+ export type SettingsInUse = {
+   readonly read: SettingsRead | null;
+   readonly theme: Theme;
+   readonly antialiasing: Antialiasing;
+   readonly keys: KeysRead;
+   readonly languageServers: LanguageServerSettings;
++  readonly agent: AgentSettings;
+ };
+ 
+ type SettingsTarget = {
+@@ -53,6 +56,7 @@ export type SettingsActions = {
+   setServerAnswer(answer: RepositoryAnswer | null): Promise<void>;
+   setAddedServers(added: readonly AddedServer[]): Promise<void>;
+   setServerSwitch(server: string, on: boolean): Promise<void>;
++  setAgent(agent: AgentSettings): Promise<void>;
+ };
+ 
+ type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
+@@ -64,6 +68,7 @@ export function startSettings(theme: Theme): SettingsInUse {
+     antialiasing: "subpixel",
+     keys: bindingsOf({}),
+     languageServers: { repositories: {}, off: {}, added: [] },
++    agent: { command: null, firstMessage: null },
+   };
+ }
+ 
+@@ -80,6 +85,7 @@ function storedSettings({
+   antialiasing,
+   keys,
+   languageServers,
++  agent,
+ }: SettingsInUse): StoredSettings {
+   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
+   return {
+@@ -87,6 +93,7 @@ function storedSettings({
+     antialiasing,
+     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
+     languageServers,
++    agent,
+   };
+ }
+ 
+@@ -132,18 +139,27 @@ function sameKeys(before: StoredSettings["keys"], after: StoredSettings["keys"])
+   );
+ }
+ 
++function sameAgent(a: AgentSettings, b: AgentSettings): boolean {
++  const { command, firstMessage, ...rest } = a;
++  rest satisfies Record<string, never>;
++  const sameCommand =
++    command === null || b.command === null ? command === b.command : sameTexts(command, b.command);
++  return sameCommand && firstMessage === b.firstMessage;
++}
++
+ function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
+   if (inUse === null || inUse.path !== read.path) {
+     return false;
+   }
+-  const { theme, antialiasing, keys, languageServers, ...rest } = read.stored;
++  const { theme, antialiasing, keys, languageServers, agent, ...rest } = read.stored;
+   rest satisfies Record<string, never>;
+   const before = inUse.stored;
+   return (
+     theme === before.theme &&
+     antialiasing === before.antialiasing &&
+     sameServers(before.languageServers, languageServers) &&
+-    sameKeys(before.keys, keys)
++    sameKeys(before.keys, keys) &&
++    sameAgent(before.agent, agent)
+   );
+ }
+ 
+@@ -174,8 +190,15 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
+ function adopt(target: SettingsTarget, read: SettingsRead): void {
+   const before = target.settings.value;
+   if (!sameStored(before.read, read)) {
+-    const { theme, antialiasing, keys, languageServers } = read.stored;
+-    target.settings.value = { read, theme, antialiasing, keys: bindingsOf(keys), languageServers };
++    const { theme, antialiasing, keys, languageServers, agent } = read.stored;
++    target.settings.value = {
++      read,
++      theme,
++      antialiasing,
++      keys: bindingsOf(keys),
++      languageServers,
++      agent,
++    };
+   }
+   showKeyProblems(target, read, before);
+ }
+@@ -235,5 +258,6 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
+     setAddedServers: (added) => send(target, (current) => source.setAddedServers(current, added)),
+     setServerSwitch: (server, on) =>
+       send(target, (current) => source.setServerSwitch(current, server, on)),
++    setAgent: (agent) => send(target, (current) => source.setAgent(current, agent)),
+   };
+ }
+diff --git a/frontend/src/ui/settingsStore.test.ts b/frontend/src/ui/settingsStore.test.ts
+index fb6253e..a446bdf 100644
+--- a/frontend/src/ui/settingsStore.test.ts
++++ b/frontend/src/ui/settingsStore.test.ts
+@@ -26,6 +26,7 @@ function settingsStore(settings = shallowRef(startSettings("dark"))): SettingsSt
+     removeKey: nothing,
+     removeAllKeys: nothing,
+     resetKeys: nothing,
++    setAgent: nothing,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/settingsStore.ts b/frontend/src/ui/settingsStore.ts
+index 963a58c..c98204d 100644
+--- a/frontend/src/ui/settingsStore.ts
++++ b/frontend/src/ui/settingsStore.ts
+@@ -18,6 +18,7 @@ export type SettingsStore = Pick<
+   | "removeKey"
+   | "removeAllKeys"
+   | "resetKeys"
++  | "setAgent"
+ > & {
+   readonly settings: Readonly<ShallowRef<SettingsInUse>>;
+   openSettings(): void;
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index ad8bddf..90c365c 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -90,6 +90,7 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
+     setServerAnswer: notUsed,
+     setServerSwitch: notUsed,
+     setAddedServers: notUsed,
++    setAgent: notUsed,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 79dcab0..9e28861 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -55,17 +55,21 @@ const NO_SETTINGS: SettingsSource = {
+   setServerAnswer: () => Promise.reject(new Error("not used")),
+   setServerSwitch: () => Promise.reject(new Error("not used")),
+   setAddedServers: () => Promise.reject(new Error("not used")),
++  setAgent: () => Promise.reject(new Error("not used")),
+ };
+ const NO_SERVERS = { repositories: {}, off: {}, added: [] };
++const DEFAULT_AGENT = { command: null, firstMessage: null };
+ const DARK = {
+   theme: "dark",
+   antialiasing: "subpixel",
+   languageServers: NO_SERVERS,
++  agent: DEFAULT_AGENT,
+ } satisfies Omit<StoredSettings, "keys">;
+ const LIGHT = {
+   theme: "light",
+   antialiasing: "subpixel",
+   languageServers: NO_SERVERS,
++  agent: DEFAULT_AGENT,
+ } satisfies Omit<StoredSettings, "keys">;
+ 
+ afterEach(() => {
+@@ -1824,6 +1828,7 @@ test("settings start with the start theme and the default keys, before any file
+     antialiasing: "subpixel",
+     keys: { bindings: DEFAULT_KEYS, problems: [] },
+     languageServers: NO_SERVERS,
++    agent: DEFAULT_AGENT,
+   });
+   expect(store.preferences.value).toEqual({ theme: "light", keys: DEFAULT_KEYS });
+ });
+-- 
+2.56.0
+

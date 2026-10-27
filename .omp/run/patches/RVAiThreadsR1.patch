@@ -1,0 +1,1422 @@
+From 88a5e09ca0b77c1621f07d736a7800123f59feef Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Tue, 27 Oct 2026 19:23:53 +0100
+Subject: [PATCH] fix(range): the store's turn numbers shown, the record rule
+ tested past the first turn, the session brand at the boundary
+
+---
+ frontend/src/agent/internal/session.ts      |  10 +-
+ frontend/src/ipc/ReviewSource.ts            |   6 +-
+ frontend/src/ipc/domain.ts                  |   9 +
+ frontend/src/ipc/fixtureReview.test.ts      |  25 ++-
+ frontend/src/ipc/index.ts                   |   4 +-
+ frontend/src/ipc/reviewDomain.test.ts       |  11 +
+ frontend/src/ipc/reviewDomain.ts            |  25 ++-
+ frontend/src/ipc/tauriReview.test.ts        |  21 +-
+ frontend/src/main.ts                        |   5 +-
+ frontend/src/ui/RangeMessage.vue            |  36 +---
+ frontend/src/ui/RangeThreadBox.vue          |  11 +-
+ frontend/src/ui/agentSettingsFields.test.ts |  17 +-
+ frontend/src/ui/agentSettingsFields.ts      |  13 +-
+ frontend/src/ui/rangeAi.test.ts             | 214 +++++++++++++++++++-
+ frontend/src/ui/rangeAi.ts                  |  79 ++++----
+ frontend/src/ui/rangeAiView.test.ts         |  63 +++---
+ frontend/src/ui/rangeAiView.ts              |  30 ++-
+ frontend/src/ui/rangeStore.test.ts          |  48 ++++-
+ frontend/src/ui/rangeStore.ts               |   5 +-
+ frontend/src/ui/rangeThreads.ts             |  31 ++-
+ 20 files changed, 502 insertions(+), 161 deletions(-)
+
+diff --git a/frontend/src/agent/internal/session.ts b/frontend/src/agent/internal/session.ts
+index b718faa..4e3a185 100644
+--- a/frontend/src/agent/internal/session.ts
++++ b/frontend/src/agent/internal/session.ts
+@@ -1,9 +1 @@
+-export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
+-
+-export function isAgentSessionId(text: string): text is AgentSessionId {
+-  return text !== "";
+-}
+-
+-export function agentSessionId(text: string): AgentSessionId | null {
+-  return isAgentSessionId(text) ? text : null;
+-}
++export { agentSessionId, isAgentSessionId, type AgentSessionId } from "../../ipc";
+diff --git a/frontend/src/ipc/ReviewSource.ts b/frontend/src/ipc/ReviewSource.ts
+index 7e03513..d4b7458 100644
+--- a/frontend/src/ipc/ReviewSource.ts
++++ b/frontend/src/ipc/ReviewSource.ts
+@@ -1,4 +1,4 @@
+-import type { MessageId, RangeFileId, SourceResult, ThreadId } from "./domain";
++import type { AgentSessionId, MessageId, RangeFileId, SourceResult, ThreadId } from "./domain";
+ import type { GitLabCheck, SendProgress, SendReply, ThreadAdded, ThreadList } from "./reviewDomain";
+ import type { ThreadLine } from "./threadLine";
+ 
+@@ -8,8 +8,8 @@ export interface ReviewSource {
+   addNote(thread: ThreadId, text: string): Promise<SourceResult<ThreadList>>;
+   queueMessage(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
+   unqueueMessage(message: MessageId): Promise<SourceResult<ThreadList>>;
+-  setThreadSession(thread: ThreadId, session: string): Promise<SourceResult<ThreadList>>;
+-  addAiAnswer(thread: ThreadId, session: string): Promise<SourceResult<ThreadList>>;
++  setThreadSession(thread: ThreadId, session: AgentSessionId): Promise<SourceResult<ThreadList>>;
++  addAiAnswer(thread: ThreadId, session: AgentSessionId): Promise<SourceResult<ThreadList>>;
+   checkGitLab(): Promise<SourceResult<GitLabCheck>>;
+   sendQueue(onProgress: (progress: SendProgress) => void): Promise<SourceResult<SendReply>>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 4400652..bcc173a 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -60,6 +60,7 @@ export type AgentSettings = Generated.AgentSettings;
+ export type RunId = number & { readonly __brand: "RunId" };
+ export type AgentRun = number & { readonly __brand: "AgentRun" };
+ export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
++export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
+ 
+ export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
+ export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
+@@ -154,6 +155,14 @@ export function isCheckoutFolder(path: string): path is CheckoutFolder {
+   return ABSOLUTE_PATH.test(path);
+ }
+ 
++export function isAgentSessionId(text: string): text is AgentSessionId {
++  return text !== "";
++}
++
++export function agentSessionId(text: string): AgentSessionId | null {
++  return isAgentSessionId(text) ? text : null;
++}
++
+ export function isTabId(n: number): n is TabId {
+   return isNonNegativeInteger(n);
+ }
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+index f93bced..34a53e8 100644
+--- a/frontend/src/ipc/fixtureReview.test.ts
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -1,9 +1,11 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ 
+ import {
++  agentSessionId,
+   isMessageId,
+   isRangeFileId,
+   isThreadId,
++  type AgentSessionId,
+   type MessageId,
+   type RangeFileId,
+   type SourceResult,
+@@ -47,6 +49,14 @@ function messageId(n: number): MessageId {
+   return n;
+ }
+ 
++function session(text: string): AgentSessionId {
++  const id = agentSessionId(text);
++  if (id === null) {
++    throw new Error(`${text} is no session`);
++  }
++  return id;
++}
++
+ function entry(id: number, path: string): RangeEntry {
+   return {
+     id: fileId(id),
+@@ -232,7 +242,7 @@ test("addNote appends a note; blank text and unknown threads are refused", async
+ test("setThreadSession replaces the thread's session; an unknown thread is refused", async () => {
+   const source = review("?threads=seeded");
+ 
+-  const list = valueOf(await source.setThreadSession(threadId(3), "fixture-session-2"));
++  const list = valueOf(await source.setThreadSession(threadId(3), session("fixture-session-2")));
+ 
+   expect(list.threads.map((thread) => thread.session)).toEqual([
+     null,
+@@ -241,7 +251,7 @@ test("setThreadSession replaces the thread's session; an unknown thread is refus
+     "fixture-session-2",
+   ]);
+   expect(list.threads[3]?.messages).toHaveLength(2);
+-  expect(await source.setThreadSession(threadId(9), "s")).toEqual({
++  expect(await source.setThreadSession(threadId(9), session("s"))).toEqual({
+     ok: false,
+     failure: { kind: "UnknownThread", thread: 9 },
+   });
+@@ -250,9 +260,9 @@ test("setThreadSession replaces the thread's session; an unknown thread is refus
+ test("addAiAnswer numbers the turn by the session's answers already in the thread, as Rust does", async () => {
+   const source = review("?threads=seeded");
+ 
+-  await source.addAiAnswer(threadId(3), "fixture-session");
+-  await source.addAiAnswer(threadId(3), "other");
+-  const list = valueOf(await source.addAiAnswer(threadId(3), "fixture-session"));
++  await source.addAiAnswer(threadId(3), session("fixture-session"));
++  await source.addAiAnswer(threadId(3), session("other"));
++  const list = valueOf(await source.addAiAnswer(threadId(3), session("fixture-session")));
+ 
+   const thread = list.threads[3];
+   expect(thread?.session).toBe("fixture-session");
+@@ -272,8 +282,9 @@ test("addAiAnswer numbers the turn by the session's answers already in the threa
+     ],
+   );
+   expect(thread?.messages[2]?.written).toBe(1_800_000_000);
+-  expect(valueOf(await source.addAiAnswer(threadId(0), "new")).threads[0]?.session).toBe("new");
+-  expect(await source.addAiAnswer(threadId(9), "s")).toEqual({
++  const added = valueOf(await source.addAiAnswer(threadId(0), session("new")));
++  expect(added.threads[0]?.session).toBe("new");
++  expect(await source.addAiAnswer(threadId(9), session("s"))).toEqual({
+     ok: false,
+     failure: { kind: "UnknownThread", thread: 9 },
+   });
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 6f06a4f..29e11fc 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -63,8 +63,8 @@ export type {
+   Theme,
+   WriteReply,
+ } from "./domain";
+-export { nextColumnVersion } from "./domain";
+-export type { MessageId, ThreadId } from "./domain";
++export { agentSessionId, isAgentSessionId, nextColumnVersion } from "./domain";
++export type { AgentSessionId, MessageId, ThreadId } from "./domain";
+ export type {
+   GitLabCheck,
+   MergeRequestRef,
+diff --git a/frontend/src/ipc/reviewDomain.test.ts b/frontend/src/ipc/reviewDomain.test.ts
+index e8f39c9..e5b8bff 100644
+--- a/frontend/src/ipc/reviewDomain.test.ts
++++ b/frontend/src/ipc/reviewDomain.test.ts
+@@ -102,6 +102,17 @@ test("a thread keeps its session and every line kind", () => {
+   expect(converted.map((each) => each.session)).toEqual(["s1", "s1", "s1", "s1"]);
+ });
+ 
++test("an empty session is refused, naming the field, on the thread and on an AI answer", () => {
++  const answer: Generated.MessageBody = { kind: "aiAnswer", session: "", turn: 0 };
++
++  expect(() =>
++    toThreadList({ threads: [{ ...thread({ kind: "notQueued" }), session: "" }] }),
++  ).toThrow("threads[0].session must be a non-empty session id");
++  expect(() => toThreadList({ threads: [thread({ kind: "notQueued" }, answer)] })).toThrow(
++    "threads[0].messages[0].body.session must be a non-empty session id",
++  );
++});
++
+ test("toThreadAdded brands the new id and converts the list", () => {
+   expect(toThreadAdded({ thread: 3, list: LIST })).toEqual({
+     thread: 3,
+diff --git a/frontend/src/ipc/reviewDomain.ts b/frontend/src/ipc/reviewDomain.ts
+index 071af87..02328ad 100644
+--- a/frontend/src/ipc/reviewDomain.ts
++++ b/frontend/src/ipc/reviewDomain.ts
+@@ -1,8 +1,10 @@
+ import type * as Generated from "./bindings";
+ import {
++  agentSessionId,
+   isMessageId,
+   isRangeFileId,
+   isThreadId,
++  type AgentSessionId,
+   type MessageId,
+   type RangeFileId,
+   type ThreadId,
+@@ -10,7 +12,9 @@ import {
+ import { toThreadLine, type ThreadLine } from "./threadLine";
+ import { branded, invalid, isNonNegativeInteger } from "./validate";
+ 
+-type MessageBody = Readonly<Generated.MessageBody>;
++type MessageBody =
++  | Readonly<Extract<Generated.MessageBody, { kind: "note" }>>
++  | { readonly kind: "aiAnswer"; readonly session: AgentSessionId; readonly turn: number };
+ export type Posting =
+   | Readonly<Exclude<Generated.Posting, { kind: "pending" }>>
+   | {
+@@ -31,7 +35,7 @@ export type Thread = {
+   readonly file: RangeFileId;
+   readonly line: ThreadLine;
+   readonly messages: readonly Message[];
+-  readonly session: string | null;
++  readonly session: AgentSessionId | null;
+ };
+ export type ThreadList = { readonly threads: readonly Thread[] };
+ export type ThreadAdded = { readonly thread: ThreadId; readonly list: ThreadList };
+@@ -94,11 +98,22 @@ function toPosting(raw: Generated.Posting): Posting {
+   return { kind: "pending", text, draftNote, mergeRequest, link };
+ }
+ 
++function toSession(text: string, field: string): AgentSessionId {
++  const session = agentSessionId(text);
++  if (session === null) {
++    throw new Error(`${field} must be a non-empty session id`);
++  }
++  return session;
++}
++
+ function toBody(body: Generated.MessageBody, field: string): MessageBody {
+-  if (body.kind === "aiAnswer" && !isNonNegativeInteger(body.turn)) {
++  if (body.kind === "note") {
++    return body;
++  }
++  if (!isNonNegativeInteger(body.turn)) {
+     throw invalid(`${field}.turn`, body.turn);
+   }
+-  return body;
++  return { ...body, session: toSession(body.session, `${field}.session`) };
+ }
+ 
+ function toMessage({ id, body, written, posting }: Generated.Message, field: string): Message {
+@@ -117,7 +132,7 @@ function toThread(raw: Generated.Thread, index: number): Thread {
+     file: branded(raw.file, isRangeFileId, `${field}.file`),
+     line: toThreadLine(raw.line, `${field}.line`),
+     messages: raw.messages.map((message, at) => toMessage(message, `${field}.messages[${at}]`)),
+-    session: raw.session,
++    session: raw.session === null ? null : toSession(raw.session, `${field}.session`),
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/tauriReview.test.ts b/frontend/src/ipc/tauriReview.test.ts
+index dd47f42..53055fb 100644
+--- a/frontend/src/ipc/tauriReview.test.ts
++++ b/frontend/src/ipc/tauriReview.test.ts
+@@ -2,9 +2,11 @@ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+ import {
++  agentSessionId,
+   isMessageId,
+   isRangeFileId,
+   isThreadId,
++  type AgentSessionId,
+   type MessageId,
+   type RangeFileId,
+   type ThreadId,
+@@ -105,6 +107,14 @@ function messageId(n: number): MessageId {
+   return n;
+ }
+ 
++function session(text: string): AgentSessionId {
++  const id = agentSessionId(text);
++  if (id === null) {
++    throw new Error(`${text} is no session`);
++  }
++  return id;
++}
++
+ function ok<T>(data: T): { status: "ok"; data: T } {
+   return { status: "ok", data };
+ }
+@@ -133,11 +143,14 @@ test("each thread command passes its arguments and camelCases the list", async (
+     value: CAMEL_LIST,
+   });
+   expect(await review.unqueueMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
+-  expect(await review.setThreadSession(threadId(2), "s2")).toEqual({
++  expect(await review.setThreadSession(threadId(2), session("s2"))).toEqual({
++    ok: true,
++    value: CAMEL_LIST,
++  });
++  expect(await review.addAiAnswer(threadId(2), session("s3"))).toEqual({
+     ok: true,
+     value: CAMEL_LIST,
+   });
+-  expect(await review.addAiAnswer(threadId(2), "s3")).toEqual({ ok: true, value: CAMEL_LIST });
+   expect(commands.addNote).toHaveBeenCalledWith(2, "More");
+   expect(commands.queueMessage).toHaveBeenCalledWith(4, "Edited");
+   expect(commands.unqueueMessage).toHaveBeenCalledWith(4);
+@@ -204,8 +217,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
+     addNote: () => review.addNote(threadId(9), "x"),
+     queueMessage: () => review.queueMessage(messageId(4), "x"),
+     unqueueMessage: () => review.unqueueMessage(messageId(5)),
+-    setThreadSession: () => review.setThreadSession(threadId(6), "s"),
+-    addAiAnswer: () => review.addAiAnswer(threadId(6), "s"),
++    setThreadSession: () => review.setThreadSession(threadId(6), session("s")),
++    addAiAnswer: () => review.addAiAnswer(threadId(6), session("s")),
+     checkGitlab: () => review.checkGitLab(),
+     sendQueue: () => review.sendQueue(() => undefined),
+   };
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 8f42d7e..5d497ec 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -1,6 +1,6 @@
+ import { createApp } from "vue";
+ 
+-import { AgentClient, DEFAULT_AGENT_COMMAND } from "./agent";
++import { AgentClient } from "./agent";
+ import {
+   createFixtureAgentSource,
+   createFixtureCompareSource,
+@@ -20,6 +20,7 @@ import {
+   type Theme,
+ } from "./ipc";
+ import { LanguageServers } from "./lsp";
++import { commandInUse } from "./ui/agentSettingsFields";
+ import App from "./ui/App.vue";
+ import CompareApp from "./ui/CompareApp.vue";
+ import { createCompareStore } from "./ui/compareStore";
+@@ -63,7 +64,7 @@ function startCompare(startTheme: Theme): void {
+ }
+ 
+ function agentCommand(): readonly string[] {
+-  return useSettingsStore().settings.value.agent.command ?? DEFAULT_AGENT_COMMAND;
++  return commandInUse(useSettingsStore().settings.value.agent);
+ }
+ 
+ function rangeAgent(dataset: DOMStringMap): RangeAgent | null {
+diff --git a/frontend/src/ui/RangeMessage.vue b/frontend/src/ui/RangeMessage.vue
+index 39d086b..3984205 100644
+--- a/frontend/src/ui/RangeMessage.vue
++++ b/frontend/src/ui/RangeMessage.vue
+@@ -3,20 +3,12 @@ import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
+ import Copy from "~icons/lucide/copy";
+ 
+ import type { Message, ThreadId } from "../ipc";
+-import { failureText } from "./aiText";
+ import AiTurn from "./AiTurn.vue";
+ import { copyOrSelect } from "./copyOrSelect";
+-import { IDLE } from "./rangeAi";
+-import { answerView, postBody, type AnswerView } from "./rangeAiView";
++import { answerText, answerView, postBody, type AnswerView } from "./rangeAiView";
+ import RangePostEditor from "./RangePostEditor.vue";
+ import { useRangeStore } from "./rangeStore";
+-import {
+-  AI_ANSWER_TEXT,
+-  ANSWER_GONE_TEXT,
+-  ANSWER_LOADING_TEXT,
+-  COPY_LINK_TITLE,
+-  postingLabel,
+-} from "./rangeThreadText";
++import { COPY_LINK_TITLE, postingLabel } from "./rangeThreadText";
+ import { COPIED, COPY } from "./serverText";
+ 
+ const props = defineProps<{ message: Message; thread: ThreadId }>();
+@@ -26,32 +18,16 @@ const postButton = useTemplateRef<HTMLButtonElement>("postButton");
+ const { gitlab, threads, ai } = useRangeStore();
+ const copied = shallowRef(false);
+ 
+-const threadAi = computed(() =>
+-  ai === null ? null : (ai.byThread.value.get(props.thread) ?? IDLE),
+-);
++const threadAi = computed(() => (ai === null ? null : ai.of(props.thread)));
+ const answer = computed((): AnswerView | null => {
+   const { body } = props.message;
+   return body.kind === "aiAnswer" && threadAi.value !== null
+     ? answerView(threadAi.value, body)
+     : null;
+ });
+-const unshownText = computed((): string => {
+-  switch (answer.value?.kind) {
+-    case "loading":
+-      return ANSWER_LOADING_TEXT;
+-    case "gone":
+-      return ANSWER_GONE_TEXT;
+-    case "failed":
+-      return failureText(answer.value.failure, navigator.platform);
+-    case "turn":
+-    case undefined:
+-      return AI_ANSWER_TEXT;
+-    default: {
+-      const _exhaustive: never = answer.value;
+-      return _exhaustive;
+-    }
+-  }
+-});
++const unshownText = computed(() =>
++  answer.value?.kind === "turn" ? null : answerText(answer.value, navigator.platform),
++);
+ const body = computed(() => postBody(props.message.body, threadAi.value));
+ const editing = computed(
+   () => body.value.kind === "text" && threads.postDraft(props.message.id) !== null,
+diff --git a/frontend/src/ui/RangeThreadBox.vue b/frontend/src/ui/RangeThreadBox.vue
+index 51231e3..63de496 100644
+--- a/frontend/src/ui/RangeThreadBox.vue
++++ b/frontend/src/ui/RangeThreadBox.vue
+@@ -4,8 +4,7 @@ import ChevronUp from "~icons/lucide/chevron-up";
+ 
+ import type { RangeEntry } from "../ipc";
+ import AiTurn from "./AiTurn.vue";
+-import { IDLE } from "./rangeAi";
+-import { liveTurn } from "./rangeAiView";
++import { answering, liveTurn } from "./rangeAiView";
+ import { isBlank } from "./rangeDrafts";
+ import { boxKeydown } from "./rangeKeys";
+ import RangeMessage from "./RangeMessage.vue";
+@@ -52,12 +51,10 @@ const text = computed(() => {
+ const blank = computed(() => isBlank(text.value));
+ const prompt = computed(() => (draft.value !== null ? PROMPTS.draft : PROMPTS.reply));
+ const threadAi = computed(() =>
+-  ai === null || thread.value === null ? null : (ai.byThread.value.get(thread.value.id) ?? IDLE),
++  ai === null || thread.value === null ? null : ai.of(thread.value.id),
+ );
+ const live = computed(() => (threadAi.value === null ? null : liveTurn(threadAi.value)));
+-const answering = computed(
+-  () => threadAi.value !== null && threadAi.value.running !== null && threadAi.value.end === null,
+-);
++const stoppable = computed(() => threadAi.value !== null && answering(threadAi.value));
+ const askable = computed(() => ai !== null && thread.value !== null && ai.canAsk(thread.value.id));
+ 
+ watch(
+@@ -153,7 +150,7 @@ function collapse(): void {
+     <header class="flex min-w-0 items-center gap-2 text-fg-muted">
+       <span class="min-w-0 flex-1 truncate font-mono">{{ place }}</span>
+       <button
+-        v-if="answering"
++        v-if="stoppable"
+         type="button"
+         :title="STOP_AI_TITLE"
+         class="shrink-0 rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover"
+diff --git a/frontend/src/ui/agentSettingsFields.test.ts b/frontend/src/ui/agentSettingsFields.test.ts
+index eb592fe..62275f0 100644
+--- a/frontend/src/ui/agentSettingsFields.test.ts
++++ b/frontend/src/ui/agentSettingsFields.test.ts
+@@ -1,12 +1,25 @@
+ import { expect, test } from "vitest";
+ 
+-import { DEFAULT_FIRST_MESSAGE } from "../agent";
++import { DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
+ import type { AgentSettings } from "../ipc";
+-import { commandField, firstMessageField, PLACEHOLDER_NAMES } from "./agentSettingsFields";
++import {
++  commandField,
++  commandInUse,
++  firstMessageField,
++  firstMessageInUse,
++  PLACEHOLDER_NAMES,
++} from "./agentSettingsFields";
+ 
+ const DEFAULTS: AgentSettings = { command: null, firstMessage: null };
+ const OWN: AgentSettings = { command: ["/opt/omp", "acp"], firstMessage: "Hi {{ MESSAGE }}" };
+ 
++test("the settings in use are the stored ones, or the defaults when none is stored", () => {
++  expect(commandInUse(DEFAULTS)).toBe(DEFAULT_AGENT_COMMAND);
++  expect(commandInUse(OWN)).toBe(OWN.command);
++  expect(firstMessageInUse(DEFAULTS)).toBe(DEFAULT_FIRST_MESSAGE);
++  expect(firstMessageInUse(OWN)).toBe("Hi {{ MESSAGE }}");
++});
++
+ test("the command field shows the default words until the file names its own", () => {
+   expect(commandField(DEFAULTS, "").shown).toBe("omp acp");
+   expect(commandField(OWN, "").shown).toBe("/opt/omp acp");
+diff --git a/frontend/src/ui/agentSettingsFields.ts b/frontend/src/ui/agentSettingsFields.ts
+index 82ce860..a97735c 100644
+--- a/frontend/src/ui/agentSettingsFields.ts
++++ b/frontend/src/ui/agentSettingsFields.ts
+@@ -15,10 +15,19 @@ function sameWords(a: readonly string[], b: readonly string[]): boolean {
+   return a.length === b.length && a.every((word, index) => word === b[index]);
+ }
+ 
++/** The command the AI starts with: the stored one, or the default when none is stored (plan row 113). */
++export function commandInUse(agent: AgentSettings): readonly string[] {
++  return agent.command ?? DEFAULT_AGENT_COMMAND;
++}
++
++export function firstMessageInUse(agent: AgentSettings): string {
++  return agent.firstMessage ?? DEFAULT_FIRST_MESSAGE;
++}
++
+ /** Use stores the typed words, or null (the default) when they are the default's; never no words. */
+ export function commandField(agent: AgentSettings, typed: string): AgentField {
+   const words = commandWords(typed);
+-  const inUse = agent.command ?? DEFAULT_AGENT_COMMAND;
++  const inUse = commandInUse(agent);
+   const stored = sameWords(words, DEFAULT_AGENT_COMMAND) ? null : [...words];
+   const usable = words.length > 0 && !sameWords(words, inUse);
+   return {
+@@ -29,7 +38,7 @@ export function commandField(agent: AgentSettings, typed: string): AgentField {
+ }
+ 
+ export function firstMessageField(agent: AgentSettings, typed: string): AgentField {
+-  const inUse = agent.firstMessage ?? DEFAULT_FIRST_MESSAGE;
++  const inUse = firstMessageInUse(agent);
+   const stored = typed === DEFAULT_FIRST_MESSAGE ? null : typed;
+   return {
+     shown: inUse,
+diff --git a/frontend/src/ui/rangeAi.test.ts b/frontend/src/ui/rangeAi.test.ts
+index 28a2f9d..7c6cce8 100644
+--- a/frontend/src/ui/rangeAi.test.ts
++++ b/frontend/src/ui/rangeAi.test.ts
+@@ -11,9 +11,10 @@ import {
+   type TurnEvents,
+   type TurnView,
+ } from "../agent";
+-import { createFixtureRangeSource, log, type Thread, type ThreadId } from "../ipc";
++import { createFixtureRangeSource, log, type Message, type Thread, type ThreadId } from "../ipc";
+ import type { Problem } from "./problem";
+-import { createRangeAi, IDLE, type AskContext, type RangeAi, type ThreadAi } from "./rangeAi";
++import { createRangeAi, type AskContext, type RangeAi, type ThreadAi } from "./rangeAi";
++import { answerView, postBody } from "./rangeAiView";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+ 
+ type Asked = {
+@@ -127,7 +128,7 @@ function threadOf(live: Rig, id: ThreadId): Thread {
+ }
+ 
+ function aiOf(live: Rig, id: ThreadId): ThreadAi {
+-  return live.ai.byThread.value.get(id) ?? IDLE;
++  return live.ai.of(id);
+ }
+ 
+ function askedAt(live: Rig, index: number): Asked {
+@@ -178,7 +179,7 @@ test("the session is stored on omp's event, before the turn ends", async () => {
+ 
+   expect(threadOf(live, live.fresh).session).toBe("s1");
+   expect(aiOf(live, live.fresh)).toMatchObject({
+-    session: "s1",
++    loadedSession: "s1",
+     loaded: { kind: "loaded", turns: [] },
+     end: null,
+   });
+@@ -351,14 +352,16 @@ test("a stored session is loaded once when shown, and Ask waits for it", async (
+   live.ai.load(live.fresh);
+ 
+   expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION]);
+-  expect(aiOf(live, live.seeded)).toMatchObject({ session: SEEDED_SESSION, loaded: null });
++  expect(aiOf(live, live.seeded)).toMatchObject({ loadedSession: SEEDED_SESSION, loaded: null });
++  await live.threads.addNote(live.seeded, "Who calls it?");
++  expect(live.ai.canAsk(live.seeded)).toBe(false);
++  live.ai.ask(live.seeded);
++  expect(live.client.asks).toEqual([]);
++
+   loadAt(live, 0).answer({ kind: "loaded", turns: [view("Yes")] });
+   await settle();
+   live.ai.load(live.seeded);
+   expect(live.client.loads).toHaveLength(1);
+-  expect(live.ai.canAsk(live.seeded)).toBe(false);
+-
+-  await live.threads.addNote(live.seeded, "Who calls it?");
+   expect(live.ai.canAsk(live.seeded)).toBe(true);
+   live.ai.ask(live.seeded);
+   expect(askedAt(live, 0).request).toEqual({ session: SEEDED_SESSION, text: "Who calls it?" });
+@@ -424,7 +427,7 @@ test("a failed write of an unseen turn's answer stops there and still shows the
+   await settle();
+ 
+   expect(writes).toBe(1);
+-  expect(ai.byThread.value.get(seeded.id)).toMatchObject({ loaded: { kind: "loaded", turns } });
++  expect(ai.of(seeded.id)).toMatchObject({ loaded: { kind: "loaded", turns } });
+ });
+ 
+ test("a load that failed for another reason than a lost session is tried again", async () => {
+@@ -520,7 +523,7 @@ test("a failed write of the session or the answer is reported as such", async ()
+     "session",
+     "answer",
+   ]);
+-  expect(ai.byThread.value.get(fresh.id)).toMatchObject({
++  expect(ai.of(fresh.id)).toMatchObject({
+     running: null,
+     loaded: { kind: "loaded", turns: [] },
+   });
+@@ -534,3 +537,194 @@ test("no First message context (the range not open) means nothing to ask", async
+   ai.ask(live.fresh);
+   expect(live.client.asks).toEqual([]);
+ });
++
++async function askedSeeded(live: Rig, turns: readonly TurnView[]): Promise<Asked> {
++  await loadedSeeded(live, turns);
++  await live.threads.addNote(live.seeded, "Who calls it?");
++  live.ai.ask(live.seeded);
++  return askedAt(live, live.client.asks.length - 1);
++}
++
++function lastAnswer(live: Rig, id: ThreadId): Extract<Message["body"], { kind: "aiAnswer" }> {
++  const body = threadOf(live, id).messages.at(-1)?.body;
++  if (body?.kind !== "aiAnswer") {
++    throw new Error("the last message is no AI answer");
++  }
++  return body;
++}
++
++async function failedSeededLoad(live: Rig): Promise<void> {
++  live.ai.load(live.seeded);
++  loadAt(live, 0).answer({ kind: "failed", failure: CRASHED });
++  await settle();
++  await live.threads.addNote(live.seeded, "Who calls it?");
++}
++
++test("a session's second turn stopped before omp held it (replay of one turn) adds no answer", async () => {
++  const live = await rig();
++  const first = view("Yes");
++  const asked = await askedSeeded(live, [first]);
++
++  asked.end({ kind: "stopped", turn: view("") });
++  await settle();
++  loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes")] });
++  await settle();
++
++  expect(bodies(live, live.seeded)).toHaveLength(3);
++  expect(aiOf(live, live.seeded)).toMatchObject({
++    running: null,
++    loaded: { kind: "loaded", turns: [first] },
++  });
++});
++
++test("a session's second turn stopped after omp held it is answer 1, shown with its own end", async () => {
++  const live = await rig();
++  const asked = await askedSeeded(live, [view("Yes")]);
++  const stopped: TurnEnd = { kind: "stopped", turn: view("Half") };
++
++  asked.end(stopped);
++  await settle();
++  loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes"), view("Half")] });
++  await settle();
++
++  expect(lastAnswer(live, live.seeded)).toEqual({
++    kind: "aiAnswer",
++    session: SEEDED_SESSION,
++    turn: 1,
++  });
++  const { loaded } = aiOf(live, live.seeded);
++  expect(loaded).toEqual({ kind: "loaded", turns: [view("Yes"), stopped.turn] });
++  expect(loaded?.kind === "loaded" && loaded.turns[1]).toBe(stopped.turn);
++});
++
++test("a checkout failure on the stored session adds no answer and asks for no replay", async () => {
++  const live = await rig();
++  const asked = await askedSeeded(live, [view("Yes")]);
++
++  asked.end({
++    kind: "failed",
++    turn: view(""),
++    failure: { kind: "checkoutFailed", message: "no git" },
++  });
++  await settle();
++
++  expect(live.client.loads).toHaveLength(1);
++  expect(bodies(live, live.seeded)).toHaveLength(3);
++});
++
++test.each<[string, TurnEnd]>([
++  ["stopped", { kind: "stopped", turn: view("") }],
++  ["crashed", { kind: "failed", turn: view(""), failure: CRASHED }],
++])("a new thread's turn %s before omp named the session asks for no replay", async (_case, end) => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++
++  askedAt(live, 0).end(end);
++  await settle();
++
++  expect(live.client.loads).toEqual([]);
++  expect(bodies(live, live.fresh)).toHaveLength(1);
++});
++
++test("a crash after a failed load replaces the failed load with the replay", async () => {
++  const live = await rig();
++  await failedSeededLoad(live);
++  live.ai.ask(live.seeded);
++
++  askedAt(live, 0).end({ kind: "failed", turn: view(""), failure: CRASHED });
++  await settle();
++  loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes")] });
++  await settle();
++
++  expect(aiOf(live, live.seeded).loaded).toEqual({ kind: "loaded", turns: [view("Yes")] });
++  expect(bodies(live, live.seeded)).toHaveLength(3);
++});
++
++test("an answer recorded after a failed load loads the conversation again and shows as its turn", async () => {
++  const live = await rig();
++  await failedSeededLoad(live);
++  live.ai.ask(live.seeded);
++
++  askedAt(live, 0).end({ kind: "finished", turn: view("board.ts") });
++  await settle();
++  expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION, SEEDED_SESSION]);
++  loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes"), view("board.ts")] });
++  await settle();
++
++  const answer = lastAnswer(live, live.seeded);
++  expect(answer.turn).toBe(1);
++  expect(answerView(aiOf(live, live.seeded), answer)).toEqual({
++    kind: "turn",
++    turn: view("board.ts"),
++    end: { kind: "finished", turn: view("board.ts") },
++  });
++  expect(postBody(answer, aiOf(live, live.seeded))).toEqual({ kind: "text", text: "board.ts" });
++});
++
++test("showing the box again while a turn runs after a failed load loads nothing", async () => {
++  const live = await rig();
++  await failedSeededLoad(live);
++  live.ai.ask(live.seeded);
++
++  live.ai.load(live.seeded);
++
++  expect(live.client.loads).toHaveLength(1);
++});
++
++test("an answer shows as the turn the store numbered, not after a replayed turn no answer records", async () => {
++  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
++  let writes = 0;
++  const threads = createRangeThreads(
++    {
++      ...fixture,
++      addAiAnswer: async (thread, session) => {
++        writes += 1;
++        return writes === 1
++          ? {
++              ok: false,
++              failure: { kind: "WriteFailed", path: "/t/threads.json", message: "full" },
++            }
++          : fixture.addAiAnswer(thread, session);
++      },
++    },
++    () => undefined,
++  );
++  await threads.load();
++  const client = new FakeClient();
++  const ai = createRangeAi(client, threads, () => CONTEXT);
++  const seeded = threads.list.value.threads[3]?.id;
++  if (seeded === undefined) {
++    throw new Error("no seeded thread");
++  }
++  ai.load(seeded);
++  client.loads[0]?.answer({ kind: "loaded", turns: [view("Yes"), view("Half")] });
++  await settle();
++  await threads.addNote(seeded, "And now?");
++  ai.ask(seeded);
++  const now = view("Now");
++
++  client.asks[0]?.end({ kind: "finished", turn: now });
++  await settle();
++
++  const last = threads.list.value.threads[3]?.messages.at(-1)?.body;
++  expect(last).toEqual({ kind: "aiAnswer", session: SEEDED_SESSION, turn: 1 });
++  expect(ai.of(seeded).loaded).toEqual({ kind: "loaded", turns: [view("Yes"), now] });
++});
++
++test("Retry after a crash omp never held asks again with the notes added since", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  askedAt(live, 0).events.session(session("s1"));
++  askedAt(live, 0).end({ kind: "failed", turn: view(""), failure: CRASHED });
++  await settle();
++  loadAt(live, 0).answer({ kind: "loaded", turns: [] });
++  await settle();
++  await live.threads.addNote(live.fresh, "Also X");
++
++  live.ai.retry(live.fresh);
++
++  expect(askedAt(live, 1).request).toEqual({
++    session: "s1",
++    text: `${WRAP}Why does the overdue check go?\n\nAlso X`,
++  });
++});
+diff --git a/frontend/src/ui/rangeAi.ts b/frontend/src/ui/rangeAi.ts
+index c4547d9..5382214 100644
+--- a/frontend/src/ui/rangeAi.ts
++++ b/frontend/src/ui/rangeAi.ts
+@@ -1,26 +1,24 @@
+ import { shallowRef, type ShallowRef } from "vue";
+ 
+ import {
+-  agentSessionId,
+   firstMessage,
+   type AgentClient,
+   type AgentFailure,
+-  type AgentSessionId,
+   type ConversationLoad,
+   type Placeholder,
+   type RunningTurn,
+   type TurnEnd,
+   type TurnView,
+ } from "../agent";
+-import { log, type Message, type Thread, type ThreadId } from "../ipc";
++import { log, type AgentSessionId, type Message, type Thread, type ThreadId } from "../ipc";
+ import type { RangeThreads } from "./rangeThreads";
+ 
+-/** `session` is the conversation `loaded` holds; `running` stays until the turn's answer is recorded. */
++/** `running` stays until the turn's answer is recorded. */
+ export type ThreadAi = {
+   readonly running: TurnView | null;
+   readonly end: TurnEnd | null;
+   readonly loaded: ConversationLoad | null;
+-  readonly session: AgentSessionId | null;
++  readonly loadedSession: AgentSessionId | null;
+ };
+ 
+ export type AskContext = {
+@@ -29,7 +27,7 @@ export type AskContext = {
+ };
+ 
+ export type RangeAi = {
+-  readonly byThread: Readonly<ShallowRef<ReadonlyMap<ThreadId, ThreadAi>>>;
++  of(thread: ThreadId): ThreadAi;
+   ask(thread: ThreadId): void;
+   retry(thread: ThreadId): void;
+   stop(thread: ThreadId): void;
+@@ -39,6 +37,7 @@ export type RangeAi = {
+ 
+ type AiClient = Pick<AgentClient, "ask" | "loadConversation">;
+ type Held = "held" | "notHeld" | "replay";
++type Answered = { readonly session: AgentSessionId; readonly turn: number; readonly end: TurnEnd };
+ 
+ type State = {
+   readonly client: AiClient;
+@@ -49,10 +48,10 @@ type State = {
+   readonly asked: Map<ThreadId, string>;
+ };
+ 
+-export const IDLE: ThreadAi = { running: null, end: null, loaded: null, session: null };
++export const IDLE: ThreadAi = { running: null, end: null, loaded: null, loadedSession: null };
+ const NOTE_JOIN = "\n\n";
+ const STARTING: TurnView = { entries: [], answer: "" };
+-/** Whether omp holds a turn's prompt; a stop or crash right after sending it may leave none (measured). */
++/** Whether omp holds a turn's prompt; a stop or crash right after sending it may leave none (plan row 121). */
+ const HELD_AT_END: Readonly<Record<Exclude<TurnEnd["kind"], "failed">, Held>> = {
+   finished: "held",
+   stopped: "replay",
+@@ -86,19 +85,15 @@ function threadOf(state: State, id: ThreadId): Thread | undefined {
+ 
+ function isGone(ai: ThreadAi, session: AgentSessionId): boolean {
+   return (
+-    ai.session === session &&
++    ai.loadedSession === session &&
+     ai.loaded?.kind === "failed" &&
+     ai.loaded.failure.kind === "sessionGone"
+   );
+ }
+ 
+-function storedSession(thread: Thread): AgentSessionId | null {
+-  return thread.session === null ? null : agentSessionId(thread.session);
+-}
+-
+ /** The conversation the next ask continues: none when omp no longer has the stored one (plan row 115). */
+ function askedSession(state: State, thread: Thread): AgentSessionId | null {
+-  const stored = storedSession(thread);
++  const stored = thread.session;
+   return stored !== null && isGone(aiOf(state, thread.id), stored) ? null : stored;
+ }
+ 
+@@ -127,7 +122,7 @@ function promptText(state: State, thread: Thread, session: AgentSessionId | null
+ function canAsk(state: State, thread: Thread): boolean {
+   const ai = aiOf(state, thread.id);
+   const session = askedSession(state, thread);
+-  const loading = session !== null && (ai.session !== session || ai.loaded === null);
++  const loading = session !== null && (ai.loadedSession !== session || ai.loaded === null);
+   return ai.running === null && !loading && promptText(state, thread, session) !== null;
+ }
+ 
+@@ -144,16 +139,28 @@ async function replayHolds(
+   const known = answersIn(threadOf(state, thread), session);
+   const held = load.turns.length > known;
+   const turns = held ? load.turns.slice(0, known) : load.turns;
+-  put(state, thread, { session, loaded: { kind: "loaded", turns } });
++  put(state, thread, { loadedSession: session, loaded: { kind: "loaded", turns } });
+   return held;
+ }
+ 
+-async function isHeld(
++async function recordedTurn(
+   state: State,
+   { thread, session, end }: { thread: ThreadId; session: AgentSessionId; end: TurnEnd },
+-): Promise<boolean> {
++): Promise<number | null> {
+   const held = end.kind === "failed" ? HELD_AFTER[end.failure.kind] : HELD_AT_END[end.kind];
+-  return held === "replay" ? replayHolds(state, thread, session) : held === "held";
++  const holds = held === "replay" ? await replayHolds(state, thread, session) : held === "held";
++  return holds ? state.threads.addAiAnswer(thread, session) : null;
++}
++
++/** The recorded answer shows as the store's turn; a conversation not loaded loads again to show it. */
++function showAnswer(state: State, thread: ThreadId, { session, turn, end }: Answered): void {
++  const { loaded, loadedSession } = aiOf(state, thread);
++  if (loadedSession !== session || loaded?.kind !== "loaded") {
++    void load(state, thread);
++  } else if (turn <= loaded.turns.length) {
++    const turns = [...loaded.turns.slice(0, turn), end.turn];
++    put(state, thread, { loaded: { kind: "loaded", turns } });
++  }
+ }
+ 
+ async function ended(
+@@ -165,24 +172,18 @@ async function ended(
+   if (end.kind === "failed" && end.failure.kind === "sessionGone" && session !== null) {
+     put(state, thread, {
+       running: null,
+-      session,
++      loadedSession: session,
+       loaded: { kind: "failed", failure: end.failure },
+     });
+     ask(state, thread);
+     return;
+   }
+   put(state, thread, { end });
+-  const recorded =
+-    session !== null &&
+-    (await isHeld(state, { thread, session, end })) &&
+-    (await state.threads.addAiAnswer(thread, session));
+-  const ai = aiOf(state, thread);
+-  const { loaded } = ai;
+-  const appended =
+-    recorded && ai.session === session && loaded?.kind === "loaded"
+-      ? { loaded: { kind: "loaded" as const, turns: [...loaded.turns, end.turn] } }
+-      : {};
+-  put(state, thread, { running: null, ...appended });
++  const turn = session === null ? null : await recordedTurn(state, { thread, session, end });
++  put(state, thread, { running: null });
++  if (session !== null && turn !== null) {
++    showAnswer(state, thread, { session, turn, end });
++  }
+ }
+ 
+ function run(
+@@ -196,7 +197,7 @@ function run(
+   const turn = state.client.ask(request, {
+     session: (created) => {
+       asked.session = created;
+-      put(state, thread, { session: created, loaded: { kind: "loaded", turns: [] } });
++      put(state, thread, { loadedSession: created, loaded: { kind: "loaded", turns: [] } });
+       void state.threads.setSession(thread, created);
+     },
+     changed: (view) => {
+@@ -230,7 +231,7 @@ function retry(state: State, id: ThreadId): void {
+   }
+   const recorded = ai.loaded?.kind === "loaded" && ai.loaded.turns.includes(ai.end.turn);
+   if (text !== undefined && recorded) {
+-    run(state, id, { session: ai.session, text });
++    run(state, id, { session: ai.loadedSession, text });
+   } else {
+     ask(state, id);
+   }
+@@ -238,24 +239,24 @@ function retry(state: State, id: ThreadId): void {
+ 
+ async function load(state: State, id: ThreadId): Promise<void> {
+   const thread = threadOf(state, id);
+-  const session = thread === undefined ? null : storedSession(thread);
++  const session = thread?.session ?? null;
+   const ai = aiOf(state, id);
+   if (session === null || ai.running !== null) {
+     return;
+   }
+   const kept = ai.loaded === null || ai.loaded.kind === "loaded" || isGone(ai, session);
+-  if (ai.session === session && kept) {
++  if (ai.loadedSession === session && kept) {
+     return;
+   }
+-  put(state, id, { session, loaded: null });
++  put(state, id, { loadedSession: session, loaded: null });
+   const loaded = await state.client.loadConversation(session);
+-  if (aiOf(state, id).session !== session) {
++  if (aiOf(state, id).loadedSession !== session) {
+     return;
+   }
+   const held = loaded.kind === "loaded" ? loaded.turns.length : 0;
+   // Turns omp holds that no answer records (a reload mid-turn) become answers, plan row 121.
+   for (let known = answersIn(thread, session); known < held; known += 1) {
+-    if (!(await state.threads.addAiAnswer(id, session))) {
++    if ((await state.threads.addAiAnswer(id, session)) === null) {
+       break;
+     }
+   }
+@@ -276,7 +277,7 @@ export function createRangeAi(
+     asked: new Map(),
+   };
+   return {
+-    byThread: state.byThread,
++    of: (thread) => aiOf(state, thread),
+     ask: (thread) => {
+       ask(state, thread);
+     },
+diff --git a/frontend/src/ui/rangeAiView.test.ts b/frontend/src/ui/rangeAiView.test.ts
+index 7bd7bba..8d94626 100644
+--- a/frontend/src/ui/rangeAiView.test.ts
++++ b/frontend/src/ui/rangeAiView.test.ts
+@@ -1,9 +1,10 @@
+ import { expect, test } from "vitest";
+ 
+-import { agentSessionId, type AgentSessionId, type TurnEnd, type TurnView } from "../agent";
+-import type { Message } from "../ipc";
++import type { TurnEnd, TurnView } from "../agent";
++import { agentSessionId, type AgentSessionId, type Message } from "../ipc";
++import { failureText } from "./aiText";
+ import { IDLE, type ThreadAi } from "./rangeAi";
+-import { answerView, liveTurn, postBody } from "./rangeAiView";
++import { answering, answerText, answerView, liveTurn, postBody } from "./rangeAiView";
+ 
+ function session(text: string): AgentSessionId {
+   const id = agentSessionId(text);
+@@ -17,37 +18,34 @@ function view(answer: string): TurnView {
+   return { entries: [], answer };
+ }
+ 
+-function message(body: Message["body"]): Message["body"] {
+-  return body;
++function answerOf(text: string, turn: number): Extract<Message["body"], { kind: "aiAnswer" }> {
++  return { kind: "aiAnswer", session: session(text), turn };
+ }
+ 
++const LINUX = "Linux x86_64";
+ const S1 = session("s1");
+ const FIRST = view("first");
+ const SECOND = view("second");
+ const LOADED: ThreadAi = {
+   ...IDLE,
+-  session: S1,
++  loadedSession: S1,
+   loaded: { kind: "loaded", turns: [FIRST, SECOND] },
+ };
+ 
+ test("an answer of the loaded session shows its turn, finished unless this window saw it end", () => {
+   const stopped: TurnEnd = { kind: "stopped", turn: SECOND };
+ 
+-  expect(answerView(LOADED, { kind: "aiAnswer", session: "s1", turn: 0 })).toEqual({
++  expect(answerView(LOADED, answerOf("s1", 0))).toEqual({
+     kind: "turn",
+     turn: FIRST,
+     end: { kind: "finished", turn: FIRST },
+   });
+-  expect(
+-    answerView({ ...LOADED, end: stopped }, { kind: "aiAnswer", session: "s1", turn: 1 }),
+-  ).toEqual({
++  expect(answerView({ ...LOADED, end: stopped }, answerOf("s1", 1))).toEqual({
+     kind: "turn",
+     turn: SECOND,
+     end: stopped,
+   });
+-  expect(
+-    answerView({ ...LOADED, end: stopped }, { kind: "aiAnswer", session: "s1", turn: 0 }),
+-  ).toEqual({
++  expect(answerView({ ...LOADED, end: stopped }, answerOf("s1", 0))).toEqual({
+     kind: "turn",
+     turn: FIRST,
+     end: { kind: "finished", turn: FIRST },
+@@ -56,10 +54,10 @@ test("an answer of the loaded session shows its turn, finished unless this windo
+ 
+ test.each<[string, ThreadAi, string, number, unknown]>([
+   ["nothing loaded yet", IDLE, "s1", 0, { kind: "loading" }],
+-  ["a load in flight", { ...IDLE, session: S1 }, "s1", 0, { kind: "loading" }],
++  ["a load in flight", { ...IDLE, loadedSession: S1 }, "s1", 0, { kind: "loading" }],
+   [
+     "a load the closing window stopped",
+-    { ...IDLE, session: S1, loaded: { kind: "stopped" } },
++    { ...IDLE, loadedSession: S1, loaded: { kind: "stopped" } },
+     "s1",
+     0,
+     { kind: "loading" },
+@@ -68,20 +66,20 @@ test.each<[string, ThreadAi, string, number, unknown]>([
+   ["a turn the replay lacks", LOADED, "s1", 2, { kind: "gone" }],
+   [
+     "a lost session",
+-    { ...IDLE, session: S1, loaded: { kind: "failed", failure: { kind: "sessionGone" } } },
++    { ...IDLE, loadedSession: S1, loaded: { kind: "failed", failure: { kind: "sessionGone" } } },
+     "s1",
+     0,
+     { kind: "gone" },
+   ],
+   [
+     "a failed load",
+-    { ...IDLE, session: S1, loaded: { kind: "failed", failure: { kind: "noCommand" } } },
++    { ...IDLE, loadedSession: S1, loaded: { kind: "failed", failure: { kind: "noCommand" } } },
+     "s1",
+     0,
+     { kind: "failed", failure: { kind: "noCommand" } },
+   ],
+ ])("an answer with %s", (_case, ai, answerSession, turn, expected) => {
+-  expect(answerView(ai, { kind: "aiAnswer", session: answerSession, turn })).toEqual(expected);
++  expect(answerView(ai, answerOf(answerSession, turn))).toEqual(expected);
+ });
+ 
+ test("the live turn: the running view, then its end until a message shows it", () => {
+@@ -90,6 +88,7 @@ test("the live turn: the running view, then its end until a message shows it", (
+ 
+   expect(liveTurn(IDLE)).toBeNull();
+   expect(liveTurn({ ...IDLE, running: FIRST })).toEqual({ turn: FIRST, end: null });
++  expect(liveTurn({ ...LOADED, running: FIRST })).toEqual({ turn: FIRST, end: null });
+   expect(liveTurn({ ...LOADED, running: SECOND, end: ended })).toEqual({
+     turn: SECOND,
+     end: ended,
+@@ -99,10 +98,28 @@ test("the live turn: the running view, then its end until a message shows it", (
+   expect(liveTurn({ ...IDLE, end: ended })).toEqual({ turn: SECOND, end: ended });
+ });
+ 
+-test("Post offers a note's text, a loaded answer's final text, or why it cannot", () => {
+-  const answer = message({ kind: "aiAnswer", session: "s1", turn: 1 });
++test("a turn is answering while it runs without an end; Stop gives way to Ask AI after it ends", () => {
++  const ended: TurnEnd = { kind: "stopped", turn: FIRST };
+ 
+-  expect(postBody(message({ kind: "note", text: "Why?" }), null)).toEqual({
++  expect(answering(IDLE)).toBe(false);
++  expect(answering({ ...LOADED, running: FIRST })).toBe(true);
++  expect(answering({ ...LOADED, running: FIRST, end: ended })).toBe(false);
++  expect(answering({ ...LOADED, end: ended })).toBe(false);
++});
++
++test("an answer not shown reads why: no AI, loading, gone, or the failure in words", () => {
++  expect(answerText(null, LINUX)).toBe("An AI answer — start yamt with --ai to see it");
++  expect(answerText({ kind: "loading" }, LINUX)).toBe("Loading the AI's answer…");
++  expect(answerText({ kind: "gone" }, LINUX)).toBe("omp no longer has this answer");
++  expect(answerText({ kind: "failed", failure: { kind: "noCommand" } }, LINUX)).toBe(
++    failureText({ kind: "noCommand" }, LINUX),
++  );
++});
++
++test("Post offers a note's text, a loaded answer's final text, or why it cannot", () => {
++  const answer = answerOf("s1", 1);
++
++  expect(postBody({ kind: "note", text: "Why?" }, null)).toEqual({
+     kind: "text",
+     text: "Why?",
+   });
+@@ -112,14 +129,14 @@ test("Post offers a note's text, a loaded answer's final text, or why it cannot"
+     why: "An AI answer — start yamt with --ai to see it",
+   });
+   expect(postBody(answer, IDLE)).toEqual({ kind: "none", why: "Loading the AI's answer…" });
+-  expect(postBody(message({ kind: "aiAnswer", session: "s0", turn: 0 }), LOADED)).toEqual({
++  expect(postBody(answerOf("s0", 0), LOADED)).toEqual({
+     kind: "none",
+     why: "omp no longer has this answer",
+   });
+   expect(
+     postBody(answer, {
+       ...IDLE,
+-      session: S1,
++      loadedSession: S1,
+       loaded: { kind: "failed", failure: { kind: "noCommand" } },
+     }),
+   ).toEqual({ kind: "none", why: "The AI's conversation could not be loaded" });
+diff --git a/frontend/src/ui/rangeAiView.ts b/frontend/src/ui/rangeAiView.ts
+index f064e34..fd8b156 100644
+--- a/frontend/src/ui/rangeAiView.ts
++++ b/frontend/src/ui/rangeAiView.ts
+@@ -1,5 +1,6 @@
+ import type { AgentFailure, TurnEnd, TurnView } from "../agent";
+ import type { Message } from "../ipc";
++import { failureText } from "./aiText";
+ import type { ThreadAi } from "./rangeAi";
+ import type { PostBody } from "./rangeGitLab";
+ import {
+@@ -15,6 +16,8 @@ export type AnswerView =
+   | { readonly kind: "gone" }
+   | { readonly kind: "failed"; readonly failure: AgentFailure };
+ 
++export type UnshownAnswer = Exclude<AnswerView, { readonly kind: "turn" }>;
++
+ export type ShownTurn = { readonly turn: TurnView; readonly end: TurnEnd | null };
+ 
+ type AnswerBody = Extract<Message["body"], { readonly kind: "aiAnswer" }>;
+@@ -22,8 +25,8 @@ type AnswerBody = Extract<Message["body"], { readonly kind: "aiAnswer" }>;
+ /** An AI answer's message: turn i of the loaded conversation when it is the answer's session (plan row 121). */
+ export function answerView(ai: ThreadAi, { session, turn }: AnswerBody): AnswerView {
+   const { loaded } = ai;
+-  if (ai.session !== session) {
+-    return ai.session === null ? { kind: "loading" } : { kind: "gone" };
++  if (ai.loadedSession !== session) {
++    return ai.loadedSession === null ? { kind: "loading" } : { kind: "gone" };
+   }
+   if (loaded === null || loaded.kind === "stopped") {
+     return { kind: "loading" };
+@@ -39,6 +42,11 @@ export function answerView(ai: ThreadAi, { session, turn }: AnswerBody): AnswerV
+   return { kind: "turn", turn: shown, end };
+ }
+ 
++/** Whether the thread's turn still runs: Stop instead of Ask AI. */
++export function answering(ai: ThreadAi): boolean {
++  return ai.running !== null && ai.end === null;
++}
++
+ /** The turn under the messages: the running one, or an ended one no message shows. */
+ export function liveTurn(ai: ThreadAi): ShownTurn | null {
+   const { end, running, loaded } = ai;
+@@ -49,6 +57,24 @@ export function liveTurn(ai: ThreadAi): ShownTurn | null {
+   return running === null ? null : { turn: running, end: null };
+ }
+ 
++/** The words in an AI answer's place when no turn shows; null: the window runs without the AI. */
++export function answerText(view: UnshownAnswer | null, platform: string): string {
++  switch (view?.kind) {
++    case undefined:
++      return AI_ANSWER_TEXT;
++    case "loading":
++      return ANSWER_LOADING_TEXT;
++    case "gone":
++      return ANSWER_GONE_TEXT;
++    case "failed":
++      return failureText(view.failure, platform);
++    default: {
++      const _exhaustive: never = view;
++      return _exhaustive;
++    }
++  }
++}
++
+ function answerBody(view: AnswerView): PostBody {
+   switch (view.kind) {
+     case "turn":
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index d504472..594159e 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -1,11 +1,13 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { DEFAULT_FIRST_MESSAGE } from "../agent";
++import { AgentClient, DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
+ import {
+   changedThreadLine,
++  createFixtureAgentSource,
+   createFixtureRangeSource,
+   log,
+   parseKey,
++  type AgentSource,
+   type RangeEntry,
+   type RangeFileId,
+   type RangeSource,
+@@ -448,3 +450,47 @@ test("First message's values: the thread's place, the range as typed, both short
+   expect(askContext(null, custom, added)).toBeNull();
+   expect(askContext({ ...start, files: [] }, custom, added)).toBeNull();
+ });
++
++async function aiStore(discards: string[]): Promise<RangeStore> {
++  const agent = createFixtureAgentSource(log, "?ai-changes");
++  const source: AgentSource = {
++    ...agent,
++    discardCheckout: async () => {
++      discards.push("discard");
++      return agent.discardCheckout();
++    },
++  };
++  const client = new AgentClient({ source, command: () => DEFAULT_AGENT_COMMAND });
++  const store = createRangeStore(createFixtureRangeSource(log, "?range=review"), "dark", {
++    source,
++    client,
++  });
++  await store.startUp();
++  return store;
++}
++
++async function closeQuestion(store: RangeStore): Promise<{ readonly closing: Promise<boolean> }> {
++  const closing = store.mayClose();
++  await vi.waitFor(() => {
++    expect(store.question.value).toMatchObject({ kind: "keepAiChanges", files: ["README.md"] });
++  });
++  return { closing };
++}
++
++test("with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays", async () => {
++  quiet();
++  const discards: string[] = [];
++  const store = await aiStore(discards);
++
++  const kept = await closeQuestion(store);
++  store.answer(true);
++  expect([await kept.closing, discards]).toEqual([true, []]);
++
++  const discarded = await closeQuestion(store);
++  store.answer(false);
++  expect([await discarded.closing, discards]).toEqual([true, ["discard"]]);
++
++  const dismissed = await closeQuestion(store);
++  store.dismissQuestion();
++  expect([await dismissed.closing, discards]).toEqual([false, ["discard"]]);
++});
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 0985654..7354e40 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -1,6 +1,6 @@
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+-import { DEFAULT_FIRST_MESSAGE, type AgentClient } from "../agent";
++import type { AgentClient } from "../agent";
+ import type {
+   AgentSettings,
+   AgentSource,
+@@ -12,6 +12,7 @@ import type {
+   Theme,
+   Thread,
+ } from "../ipc";
++import { firstMessageInUse } from "./agentSettingsFields";
+ import { aiMayClose } from "./aiClose";
+ import { createAsking, type Asking } from "./asking";
+ import { fileListKey, type KeyPress } from "./fileListKey";
+@@ -103,7 +104,7 @@ export function askContext(
+     return null;
+   }
+   return {
+-    template: agent.firstMessage ?? DEFAULT_FIRST_MESSAGE,
++    template: firstMessageInUse(agent),
+     values: {
+       RELATIVE_FILE_PATH_WITH_LINE: threadPlaceText(entry, thread.line),
+       RANGE: start.range,
+diff --git a/frontend/src/ui/rangeThreads.ts b/frontend/src/ui/rangeThreads.ts
+index af03aa1..fbd8f26 100644
+--- a/frontend/src/ui/rangeThreads.ts
++++ b/frontend/src/ui/rangeThreads.ts
+@@ -1,6 +1,7 @@
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+ import type {
++  AgentSessionId,
+   MessageId,
+   Posting,
+   RangeFileId,
+@@ -48,8 +49,9 @@ export type RangeThreads = {
+   queue(message: MessageId, text: string): Promise<void>;
+   unqueue(message: MessageId): Promise<void>;
+   replace(list: ThreadList): void;
+-  setSession(thread: ThreadId, session: string): Promise<boolean>;
+-  addAiAnswer(thread: ThreadId, session: string): Promise<boolean>;
++  setSession(thread: ThreadId, session: AgentSessionId): Promise<boolean>;
++  /** The turn the store numbered the appended answer (plan row 121); null when the write failed. */
++  addAiAnswer(thread: ThreadId, session: AgentSessionId): Promise<number | null>;
+ };
+ 
+ type State = {
+@@ -127,14 +129,14 @@ async function changed(
+   state: State,
+   step: ThreadStep,
+   call: () => Promise<SourceResult<ThreadList>>,
+-): Promise<boolean> {
++): Promise<ThreadList | null> {
+   const outcome = await attempt(call);
+   if (!outcome.ok) {
+     state.report({ action: "threads", step, cause: outcome.cause });
+-    return false;
++    return null;
+   }
+   state.list.value = outcome.value;
+-  return true;
++  return outcome.value;
+ }
+ 
+ async function addThread(state: State, key: string, text: string): Promise<void> {
+@@ -162,7 +164,7 @@ async function addNote(state: State, thread: ThreadId, text: string): Promise<vo
+     return;
+   }
+   const added = await changed(state, "note", () => state.source.addNote(thread, text));
+-  state.drafts.writeNote(thread, added ? "" : text);
++  state.drafts.writeNote(thread, added === null ? text : "");
+ }
+ 
+ function counted(state: State): Pick<RangeThreads, "counts" | "queued"> {
+@@ -192,7 +194,7 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue"
+     queue: async (message, text) => {
+       if (
+         !isBlank(text) &&
+-        (await changed(state, "queue", () => source.queueMessage(message, text)))
++        (await changed(state, "queue", () => source.queueMessage(message, text))) !== null
+       ) {
+         state.drafts.dropPost(message);
+       }
+@@ -206,13 +208,20 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue"
+   };
+ }
+ 
++function addedTurn(list: ThreadList, id: ThreadId): number | null {
++  const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body;
++  return body?.kind === "aiAnswer" ? body.turn : null;
++}
++
+ function aiRecords(state: State): Pick<RangeThreads, "setSession" | "addAiAnswer"> {
+   const { source } = state;
+   return {
+-    setSession: (thread, session) =>
+-      changed(state, "session", () => source.setThreadSession(thread, session)),
+-    addAiAnswer: (thread, session) =>
+-      changed(state, "answer", () => source.addAiAnswer(thread, session)),
++    setSession: async (thread, session) =>
++      (await changed(state, "session", () => source.setThreadSession(thread, session))) !== null,
++    addAiAnswer: async (thread, session) => {
++      const list = await changed(state, "answer", () => source.addAiAnswer(thread, session));
++      return list === null ? null : addedTurn(list, thread);
++    },
+   };
+ }
+ 
+-- 
+2.56.0
+

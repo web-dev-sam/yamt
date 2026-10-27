@@ -4,26 +4,20 @@ use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tempfile::TempDir;
 use yamt_lsp_host::{Host, HostEvent, ProgramFolders, RunId, ServerCommand, StartReply};
 
 const ECHO: &str = env!("CARGO_BIN_EXE_lsp-echo");
 const WAIT: Duration = Duration::from_secs(10);
-const STOP_GRACE: Duration = Duration::from_secs(2);
 const LOG_LINE_BYTES: usize = 8 * 1024;
-const IDLE: Duration = Duration::from_millis(300);
-const BURST_LINES: usize = 1000;
-const BURST_PADDING: usize = 40;
 
 struct Echo {
     _repo: TempDir,
     host: Host,
     run: RunId,
     events: Receiver<HostEvent>,
-    pid: u32,
 }
 
 fn echo_command(args: &[&str], project: &str) -> ServerCommand {
@@ -35,20 +29,19 @@ fn echo_command(args: &[&str], project: &str) -> ServerCommand {
     }
 }
 
-fn start_echo(args: &[&str]) -> Echo {
+fn start_echo() -> Echo {
     let repo = tempfile::tempdir().unwrap();
     let mut host = Host::new(repo.path());
     let (sender, events) = mpsc::channel();
-    let StartReply::Started { run } = host.start(&echo_command(args, ""), sender) else {
+    let StartReply::Started { run } = host.start(&echo_command(&[], ""), sender) else {
         panic!("lsp-echo did not start");
     };
-    let pid = pid_of(&next_log(&events));
+    pid_of(&next_log(&events));
     Echo {
         _repo: repo,
         host,
         run,
         events,
-        pid,
     }
 }
 
@@ -84,25 +77,13 @@ fn next_log(events: &Receiver<HostEvent>) -> String {
     }
 }
 
-/// Every event before the one `Exited`, and its code, after checking nothing follows it.
-fn events_until_exited(events: &Receiver<HostEvent>) -> (Vec<HostEvent>, Option<i32>) {
-    let mut before = Vec::new();
-    loop {
-        match next_event(events) {
-            HostEvent::Exited { code } => {
-                assert_eq!(
-                    events.recv_timeout(WAIT),
-                    Err(RecvTimeoutError::Disconnected)
-                );
-                return (before, code);
-            }
-            event @ (HostEvent::Message { .. } | HostEvent::Log { .. }) => before.push(event),
-        }
-    }
-}
-
-fn exited_once(events: &Receiver<HostEvent>) -> Option<i32> {
-    events_until_exited(events).1
+/// Waits for the one `Exited` and checks nothing follows it.
+fn exited_once(events: &Receiver<HostEvent>) {
+    while !matches!(next_event(events), HostEvent::Exited { .. }) {}
+    assert_eq!(
+        events.recv_timeout(WAIT),
+        Err(RecvTimeoutError::Disconnected)
+    );
 }
 
 #[cfg(unix)]
@@ -124,34 +105,18 @@ fn is_alive(pid: u32) -> bool {
     String::from_utf8_lossy(&output.stdout).contains(&pid.to_string())
 }
 
+/// Catches a host that starts its runs with another framing than `Content-Length`.
 #[test]
 fn a_message_comes_back_whole_with_a_multi_byte_body() {
-    let echo = start_echo(&[]);
+    let echo = start_echo();
     let text = "{\"text\":\"héllo → 世界 🦀\"}";
     echo.host.send(echo.run, text.to_owned());
     assert_eq!(next_message(&echo.events), text);
 }
 
 #[test]
-fn a_frame_split_across_two_writes_arrives_as_one_message() {
-    let echo = start_echo(&[]);
-    echo.host.send(echo.run, "split ü→世界 split".to_owned());
-    assert_eq!(next_message(&echo.events), "ü→世界 split");
-}
-
-#[test]
-fn two_frames_in_one_write_arrive_as_two_messages() {
-    let echo = start_echo(&[]);
-    echo.host.send(echo.run, "twice abc".to_owned());
-    echo.host.send(echo.run, "after".to_owned());
-    assert_eq!(next_message(&echo.events), "abc");
-    assert_eq!(next_message(&echo.events), "abc");
-    assert_eq!(next_message(&echo.events), "after");
-}
-
-#[test]
 fn stderr_lines_arrive_as_log_lines_and_a_long_one_is_cut_at_8_kib() {
-    let echo = start_echo(&[]);
+    let echo = start_echo();
     echo.host.send(echo.run, "short".to_owned());
     assert_eq!(next_log(&echo.events), "lsp-echo got short");
     let long = "x".repeat(LOG_LINE_BYTES * 2);
@@ -161,114 +126,6 @@ fn stderr_lines_arrive_as_log_lines_and_a_long_one_is_cut_at_8_kib() {
     assert_eq!(line, format!("lsp-echo got {long}")[..LOG_LINE_BYTES]);
     echo.host.send(echo.run, "next".to_owned());
     assert_eq!(next_log(&echo.events), "lsp-echo got next");
-}
-
-#[test]
-fn stop_closes_the_input_and_a_cooperative_server_exits_once_within_the_grace() {
-    let echo = start_echo(&[]);
-    let asked = Instant::now();
-    echo.host.stop(echo.run);
-    assert_eq!(exited_once(&echo.events), Some(0));
-    assert!(asked.elapsed() < STOP_GRACE, "{:?}", asked.elapsed());
-    echo.host.stop(echo.run);
-    echo.host.send(echo.run, "ignored".to_owned());
-    assert!(!is_alive(echo.pid));
-}
-
-#[test]
-fn stop_kills_a_server_that_ignores_it_after_the_grace_and_exits_once() {
-    let echo = start_echo(&["--ignore-stop"]);
-    let asked = Instant::now();
-    echo.host.stop(echo.run);
-    let code = exited_once(&echo.events);
-    assert!(asked.elapsed() >= STOP_GRACE, "{:?}", asked.elapsed());
-    if cfg!(unix) {
-        assert_eq!(code, None);
-    }
-    assert!(!is_alive(echo.pid));
-}
-
-#[test]
-fn a_server_exiting_by_itself_reports_its_code() {
-    let echo = start_echo(&[]);
-    echo.host.send(echo.run, "exit 7".to_owned());
-    assert_eq!(exited_once(&echo.events), Some(7));
-}
-
-#[test]
-fn an_idle_server_keeps_running_and_answers_later() {
-    let echo = start_echo(&[]);
-    thread::sleep(IDLE);
-    assert!(is_alive(echo.pid));
-    echo.host.send(echo.run, "still here".to_owned());
-    assert_eq!(next_message(&echo.events), "still here");
-}
-
-#[test]
-fn stderr_lines_written_after_the_server_exited_all_come_before_its_exited() {
-    let echo = start_echo(&[]);
-    echo.host.send(echo.run, format!("burst {BURST_LINES}"));
-    let (before, code) = events_until_exited(&echo.events);
-    assert_eq!(code, Some(0));
-    let burst: Vec<HostEvent> = before
-        .into_iter()
-        .filter(
-            |event| matches!(event, HostEvent::Log { line } if line.starts_with("lsp-echo burst ")),
-        )
-        .collect();
-    let padding = "-".repeat(BURST_PADDING);
-    let expected: Vec<HostEvent> = (0..BURST_LINES)
-        .map(|line| HostEvent::Log {
-            line: format!("lsp-echo burst {line} {padding}"),
-        })
-        .collect();
-    assert_eq!(burst, expected);
-}
-
-#[cfg(unix)]
-#[test]
-fn a_server_whose_child_holds_its_output_exits_after_at_most_the_drain() {
-    const OUTPUT_DRAIN: Duration = Duration::from_secs(1);
-    const DRAIN_SLACK: Duration = Duration::from_secs(1);
-    let echo = start_echo(&[]);
-    let asked = Instant::now();
-    echo.host.send(echo.run, "orphan".to_owned());
-    let code = loop {
-        if let HostEvent::Exited { code } = next_event(&echo.events) {
-            break code;
-        }
-    };
-    let took = asked.elapsed();
-    assert_eq!(code, Some(3));
-    assert!(took < OUTPUT_DRAIN + DRAIN_SLACK, "{took:?}");
-}
-
-#[cfg(unix)]
-#[test]
-fn a_server_that_closes_its_stderr_keeps_serving() {
-    let echo = start_echo(&[]);
-    echo.host.send(echo.run, "close-stderr".to_owned());
-    assert_eq!(next_message(&echo.events), "stderr closed");
-    echo.host.send(echo.run, "still here".to_owned());
-    assert_eq!(next_message(&echo.events), "still here");
-}
-
-#[test]
-fn a_dropped_event_receiver_stops_the_run_at_its_next_output() {
-    let Echo {
-        _repo,
-        host,
-        run,
-        events,
-        pid,
-    } = start_echo(&[]);
-    drop(events);
-    host.send(run, "anyone there".to_owned());
-    let deadline = Instant::now() + WAIT;
-    while is_alive(pid) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(50));
-    }
-    assert!(!is_alive(pid));
 }
 
 #[test]

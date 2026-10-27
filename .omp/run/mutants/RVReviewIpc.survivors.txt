@@ -1,0 +1,5 @@
+just mutants da05430 (covers 6919af1 RVReviewIpc): Stryker 14 files, 1206 mutants; 1044 killed, 114 survived, 20 no coverage.
+On lines 6919af1 changed: 37 —
+  fixtureGitLab.ts:24-59 (26) and fixtureReview.ts:46,49 (2): module-level constants and the script table — #732 class.
+  reviewDomain.ts:174, :194, threadLine.ts:75 (6 NoCoverage): the `never` default arms of exhaustive switches — unreachable by type.
+  reviewDomain.ts:150-152 (3 Survived): case labels "glabMissing"/"notLoggedIn"/"failed" → "" survive — for the correctness reviewer.

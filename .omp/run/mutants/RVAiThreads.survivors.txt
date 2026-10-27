@@ -1,0 +1,62 @@
+just mutants 9a75c6f (covers 7292c02 RVAiThreads; Rust: ed09b53 RVRustTidy 11 mutants, 10 caught, 1 unviable — clean)
+On lines 7292c02 changed: 60 of 98 survivors/no-coverage:
+Survived ConditionalExpression frontend/src/ipc/fixtureReview.ts:111 | -         ({ body }) => body.kind === "aiAnswer" && body.session === session, => +         ({ body }) => true && body.session === session,
+Survived StringLiteral frontend/src/ipc/fixtureThreads.ts:11 | -   const SEEDED_PATH = "src/board/board.ts"; => +   const SEEDED_PATH = "";
+Survived StringLiteral frontend/src/ipc/fixtureThreads.ts:13 | -   const SEEDED_SESSION = "fixture-session"; => +   const SEEDED_SESSION = "";
+Survived ObjectLiteral frontend/src/ipc/fixtureThreads.ts:14 | -   const NOT_QUEUED: Generated.Posting = { kind: "notQueued" }; => +   const NOT_QUEUED: Generated.Posting = {};
+Survived StringLiteral frontend/src/ipc/fixtureThreads.ts:14 | -   const NOT_QUEUED: Generated.Posting = { kind: "notQueued" }; => +   const NOT_QUEUED: Generated.Posting = { kind: "" };
+NoCoverage BlockStatement frontend/src/ui/rangeAi.ts:228 | -     if (ai.running !== null || ai.end?.kind !== "failed") { => -       return;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:89 | -       ai.session === session && => +       true &&
+Survived OptionalChaining frontend/src/ui/rangeAi.ts:90 | -       ai.loaded?.kind === "failed" && => +       ai.loaded.kind === "failed" &&
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:96 | -     return thread.session === null ? null : agentSessionId(thread.session); => +     return false ? null : agentSessionId(thread.session);
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:102 | -     return stored !== null && isGone(aiOf(state, thread.id), stored) ? null : stored; => +     return true && isGone(aiOf(state, thread.id), stored) 
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:106 | -     return message.body.kind === "aiAnswer" && message.body.session === session; => +     return true && message.body.session === session;
+Survived LogicalOperator frontend/src/ui/rangeAi.ts:110 | -     return thread?.messages.filter((message) => isAnswerIn(message, session)).length ??  => +     return thread?.messages.filter(message => isAnswerIn(m
+Survived OptionalChaining frontend/src/ui/rangeAi.ts:110 | -     return thread?.messages.filter((message) => isAnswerIn(message, session)).length ??  => +     return thread.messages.filter((message) => isAnswerIn(
+Survived ArrowFunction frontend/src/ui/rangeAi.ts:110 | -     return thread?.messages.filter((message) => isAnswerIn(message, session)).length ??  => +     return thread?.messages.filter(() => undefined).length
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:130 | -     const loading = session !== null && (ai.session !== session || ai.loaded === null); => +     const loading = false;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:130 | -     const loading = session !== null && (ai.session !== session || ai.loaded === null); => +     const loading = session !== null && (ai.session !== se
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:130 | -     const loading = session !== null && (ai.session !== session || ai.loaded === null); => +     const loading = session !== null && (false || ai.loade
+Survived LogicalOperator frontend/src/ui/rangeAi.ts:130 | -     const loading = session !== null && (ai.session !== session || ai.loaded === null); => +     const loading = session !== null && (ai.session !== se
+Survived ObjectLiteral frontend/src/ui/rangeAi.ts:141 | -       log.warn("ai.replay_failed", { thread, load: load.kind }); => +       log.warn("ai.replay_failed", {});
+Survived StringLiteral frontend/src/ui/rangeAi.ts:141 | -       log.warn("ai.replay_failed", { thread, load: load.kind }); => +       log.warn("", { thread, load: load.kind });
+Survived ObjectLiteral frontend/src/ui/rangeAi.ts:147 | -     put(state, thread, { session, loaded: { kind: "loaded", turns } }); => +     put(state, thread, {});
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:156 | -     return held === "replay" ? replayHolds(state, thread, session) : held === "held"; => +     return held === "replay" ? replayHolds(state, thread, 
+Survived CallExpression frontend/src/ui/rangeAi.ts:164 | -     state.turns.delete(thread); => +     ;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:165 | -     if (end.kind === "failed" && end.failure.kind === "sessionGone" && session !== null) => +     if (end.kind === "failed" && end.failure.kind === "ses
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:176 | -       session !== null && => +       true &&
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:182 | -       recorded && ai.session === session && loaded?.kind === "loaded" => +       recorded && true && loaded?.kind === "loaded"
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:182 | -       recorded && ai.session === session && loaded?.kind === "loaded" => +       recorded && ai.session === session && true
+Survived OptionalChaining frontend/src/ui/rangeAi.ts:182 | -       recorded && ai.session === session && loaded?.kind === "loaded" => +       recorded && ai.session === session && loaded.kind ==
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:203 | -         if (aiOf(state, thread).end === null) { => +         if (true) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:214 | -     if (thread === undefined || !canAsk(state, thread)) { => +     if (false || !canAsk(state, thread)) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:228 | -     if (ai.running !== null || ai.end?.kind !== "failed") { => +     if (false) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:228 | -     if (ai.running !== null || ai.end?.kind !== "failed") { => +     if (false || ai.end?.kind !== "failed") {
+Survived LogicalOperator frontend/src/ui/rangeAi.ts:228 | -     if (ai.running !== null || ai.end?.kind !== "failed") { => +     if (ai.running !== null && ai.end?.kind !== "failed") 
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:219 | -     if (text !== null) { => +     if (true) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:228 | -     if (ai.running !== null || ai.end?.kind !== "failed") { => +     if (ai.running !== null || false) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:231 | -     const recorded = ai.loaded?.kind === "loaded" && ai.loaded.turns.includes(ai.end.tur => +     const recorded = true;
+Survived OptionalChaining frontend/src/ui/rangeAi.ts:228 | -     if (ai.running !== null || ai.end?.kind !== "failed") { => +     if (ai.running !== null || ai.end.kind !== "failed") {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:232 | -     if (text !== undefined && recorded) { => +     if (true) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:232 | -     if (text !== undefined && recorded) { => +     if (true && recorded) {
+Survived LogicalOperator frontend/src/ui/rangeAi.ts:232 | -     if (text !== undefined && recorded) { => +     if (text !== undefined || recorded) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:241 | -     const session = thread === undefined ? null : storedSession(thread); => +     const session = false ? null : storedSession(thread);
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:243 | -     if (session === null || ai.running !== null) { => +     if (false || ai.running !== null) {
+Survived BlockStatement frontend/src/ui/rangeAi.ts:243 | -     if (session === null || ai.running !== null) { => -       return;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:243 | -     if (session === null || ai.running !== null) { => +     if (false) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:243 | -     if (session === null || ai.running !== null) { => +     if (session === null || false) {
+Survived LogicalOperator frontend/src/ui/rangeAi.ts:243 | -     if (session === null || ai.running !== null) { => +     if (session === null && ai.running !== null) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:252 | -     if (aiOf(state, id).session === session) { => +     if (true) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:286 | -         return thread !== undefined && canAsk(state, thread); => +         return true && canAsk(state, thread);
+NoCoverage ConditionalExpression frontend/src/ui/rangeAiView.ts:62 | -       default: { => -         const _exhaustive: never = view;
+NoCoverage BlockStatement frontend/src/ui/rangeAiView.ts:62 | -       default: { => -         const _exhaustive: never = view;
+NoCoverage ConditionalExpression frontend/src/ui/rangeAiView.ts:76 | -       default: { => -         const _exhaustive: never = body;
+NoCoverage BlockStatement frontend/src/ui/rangeAiView.ts:76 | -       default: { => -         const _exhaustive: never = body;
+Survived ConditionalExpression frontend/src/ui/rangeAiView.ts:45 | -     const recorded = end !== null && loaded?.kind === "loaded" && loaded.turns.includes( => +     const recorded = true && loaded?.kind === "loaded" && 
+NoCoverage ArrowFunction frontend/src/ui/rangeStore.ts:121 | -     const ai = createRangeAi(agent.client, state.threads, (thread) => => -       askContext(state.start.value, state.settings.value.a
+NoCoverage ObjectLiteral frontend/src/ui/rangeStore.ts:124 | -     return { ...ai, client: agent.client }; => +     return {};
+NoCoverage ObjectLiteral frontend/src/ui/rangeStore.ts:131 | -       : aiMayClose({ source: agent.source, asking: state.asking, report: (p) => report(s => +       : aiMayClose({});
+NoCoverage ArrowFunction frontend/src/ui/rangeStore.ts:131 | -       : aiMayClose({ source: agent.source, asking: state.asking, report: (p) => report(s => +       : aiMayClose({ source: agent.source, asking: state.a
+Survived ConditionalExpression frontend/src/ui/rangeStore.ts:102 | -     if (start === null || entry === undefined) { => +     if (false || entry === undefined) {
+Survived ConditionalExpression frontend/src/ui/rangeStore.ts:129 | -     return agent === null => +     return true
+Survived ConditionalExpression frontend/src/ui/rangeStore.ts:118 | -     if (agent === null) { => +     if (true) {

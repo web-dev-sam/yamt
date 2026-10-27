@@ -1,0 +1,2288 @@
+From 6919af1ff64a08bb1efd2ae4430c414425e1681d Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 21:51:06 +0100
+Subject: [PATCH] feat(ipc): review source for threads and GitLab, fixture
+ scripts, problem words
+
+---
+ frontend/src/ipc/AGENTS.md             |   2 +
+ frontend/src/ipc/RangeSource.ts        |   3 +-
+ frontend/src/ipc/ReviewSource.ts       |  13 +
+ frontend/src/ipc/domain.ts             |  10 +
+ frontend/src/ipc/fixtureGitLab.test.ts |  60 +++
+ frontend/src/ipc/fixtureGitLab.ts      | 136 +++++++
+ frontend/src/ipc/fixtureRange.test.ts  |  45 +++
+ frontend/src/ipc/fixtureRange.ts       |   2 +
+ frontend/src/ipc/fixtureReview.test.ts | 513 +++++++++++++++++++++++++
+ frontend/src/ipc/fixtureReview.ts      | 274 +++++++++++++
+ frontend/src/ipc/index.ts              |   2 +-
+ frontend/src/ipc/rangeDomain.ts        |   2 +-
+ frontend/src/ipc/reviewDomain.test.ts  | 302 +++++++++++++++
+ frontend/src/ipc/reviewDomain.ts       | 199 ++++++++++
+ frontend/src/ipc/tauriRange.test.ts    |  11 +
+ frontend/src/ipc/tauriRange.ts         |   2 +
+ frontend/src/ipc/tauriReview.test.ts   | 213 ++++++++++
+ frontend/src/ipc/tauriReview.ts        |  40 ++
+ frontend/src/ipc/threadLine.ts         |  41 +-
+ frontend/src/ui/problemText.test.ts    |  20 +
+ frontend/src/ui/problemText.ts         |  43 ++-
+ frontend/src/ui/settings.ts            |   3 +-
+ scripts/map-check.sh                   |   2 +-
+ 23 files changed, 1912 insertions(+), 26 deletions(-)
+ create mode 100644 frontend/src/ipc/ReviewSource.ts
+ create mode 100644 frontend/src/ipc/fixtureGitLab.test.ts
+ create mode 100644 frontend/src/ipc/fixtureGitLab.ts
+ create mode 100644 frontend/src/ipc/fixtureReview.test.ts
+ create mode 100644 frontend/src/ipc/fixtureReview.ts
+ create mode 100644 frontend/src/ipc/reviewDomain.test.ts
+ create mode 100644 frontend/src/ipc/reviewDomain.ts
+ create mode 100644 frontend/src/ipc/tauriReview.test.ts
+ create mode 100644 frontend/src/ipc/tauriReview.ts
+
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 23b7d6d..389811a 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -2,6 +2,8 @@ Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. `bindings.ts` is
+ 
+ The range window (`yamt --diff=<range>`, plan §2 #103–#107) has its own `RangeSource` (`RangeSource.ts`, read-only: `openRange`, `loadRangeFile`): the `RangeFileId` brand in `domain.ts`, camelCase shapes and their conversions in `rangeDomain.ts` (a texts reply's differences through `compareDomain.ts` `toDifferences`), the app's in `tauriRange.ts`, fixture mode's in `fixtureRange.ts` (`fixtures/range/<case>.json` = `{ start, files }`, a file's id its index; `?range` loads `review`, `?range=<case>` that case, an unknown case logs `range.fixture_miss` and lists nothing).
+ 
++The range window's threads and GitLab (plan §2 #116–#120) come through `ReviewSource` (`ReviewSource.ts`: `listThreads`, `addThread`, `addNote`, `queueMessage`, `unqueueMessage`, `checkGitLab`, `sendQueue` with a progress callback over a `Channel`), which `RangeSource` extends: the `ThreadId`/`MessageId` brands in `domain.ts`, `toThreadLine`/`fromThreadLine` in `threadLine.ts`, camelCase shapes and their conversions in `reviewDomain.ts`, the app's in `tauriReview.ts`, fixture mode's in memory in `fixtureReview.ts` (`?threads=seeded`: one thread of each line kind on the review case's `src/board/board.ts` with a queued, a refused, a pending and an `aiAnswer` message; the store's refusals as Rust's: `EmptyMessage`, `UnknownRangeFile`, `UnknownThread`, `UnknownMessage`, `MessagePending`, `SendRunning`; each post after a 300 ms pause, progress per message) over `fixtureGitLab.ts` (`?gitlab=<script>`: `linedUp` by default, `checking` answers after 3 s, one not-lined-up answer per script, `refusal` refuses and `stopped` times out at the second post; an unknown script logs `review.fixture_miss`).
++
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+ 
+ `themes.ts` (plan §2 #102) is the one table of the ten themes' group, button words and kind (`THEMES`, exhaustive over the generated `Theme`): `themeOf` reads `<html data-theme>` (anything not a name is yamt Dark), `themeKind` gives dark or light to the editor's dark flag and `color-scheme`, `themeRows` the Settings picker's five editors, each its dark then its light. Colours live only in the CSS blocks.
+diff --git a/frontend/src/ipc/RangeSource.ts b/frontend/src/ipc/RangeSource.ts
+index b43d6a7..0d29de8 100644
+--- a/frontend/src/ipc/RangeSource.ts
++++ b/frontend/src/ipc/RangeSource.ts
+@@ -1,8 +1,9 @@
+ import type { SettingsSource } from "./ChunkSource";
+ import type { RangeFileId, SourceResult } from "./domain";
+ import type { RangeFile, RangeStart } from "./rangeDomain";
++import type { ReviewSource } from "./ReviewSource";
+ 
+-export interface RangeSource extends SettingsSource {
++export interface RangeSource extends SettingsSource, ReviewSource {
+   openRange(): Promise<SourceResult<RangeStart>>;
+   loadRangeFile(file: RangeFileId): Promise<SourceResult<RangeFile>>;
+ }
+diff --git a/frontend/src/ipc/ReviewSource.ts b/frontend/src/ipc/ReviewSource.ts
+new file mode 100644
+index 0000000..b6601b4
+--- /dev/null
++++ b/frontend/src/ipc/ReviewSource.ts
+@@ -0,0 +1,13 @@
++import type { MessageId, RangeFileId, SourceResult, ThreadId } from "./domain";
++import type { GitLabCheck, SendProgress, SendReply, ThreadAdded, ThreadList } from "./reviewDomain";
++import type { ThreadLine } from "./threadLine";
++
++export interface ReviewSource {
++  listThreads(): Promise<SourceResult<ThreadList>>;
++  addThread(file: RangeFileId, line: ThreadLine, text: string): Promise<SourceResult<ThreadAdded>>;
++  addNote(thread: ThreadId, text: string): Promise<SourceResult<ThreadList>>;
++  queueMessage(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
++  unqueueMessage(message: MessageId): Promise<SourceResult<ThreadList>>;
++  checkGitLab(): Promise<SourceResult<GitLabCheck>>;
++  sendQueue(onProgress: (progress: SendProgress) => void): Promise<SourceResult<SendReply>>;
++}
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index fb37c28..48acdd1 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -7,6 +7,8 @@ export type ColumnVersion = number & { readonly __brand: "ColumnVersion" };
+ export type LeftLine = number & { readonly __brand: "LeftLine" };
+ export type RightLine = number & { readonly __brand: "RightLine" };
+ export type RangeFileId = number & { readonly __brand: "RangeFileId" };
++export type ThreadId = number & { readonly __brand: "ThreadId" };
++export type MessageId = number & { readonly __brand: "MessageId" };
+ 
+ type MiddleLine = number & { readonly __brand: "MiddleLine" };
+ export type DiskVersion = number & { readonly __brand: "DiskVersion" };
+@@ -173,6 +175,14 @@ export function isRangeFileId(value: number): value is RangeFileId {
+   return isNonNegativeInteger(value);
+ }
+ 
++export function isThreadId(value: number): value is ThreadId {
++  return isNonNegativeInteger(value);
++}
++
++export function isMessageId(value: number): value is MessageId {
++  return isNonNegativeInteger(value);
++}
++
+ export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
+   const next = version + 1;
+   if (!isColumnVersion(next)) {
+diff --git a/frontend/src/ipc/fixtureGitLab.test.ts b/frontend/src/ipc/fixtureGitLab.test.ts
+new file mode 100644
+index 0000000..1f33dc6
+--- /dev/null
++++ b/frontend/src/ipc/fixtureGitLab.test.ts
+@@ -0,0 +1,60 @@
++import { expect, test } from "vitest";
++
++import { gitLabCheck, pendingPosting, postOutcome, type GitLabScript } from "./fixtureGitLab";
++import type { RangeStart } from "./rangeDomain";
++
++const DETACHED: RangeStart = {
++  range: "1a2b3c4..5d6e7f8",
++  left: { label: { kind: "named", name: "1a2b3c4" }, shortId: "1a2b3c4", subject: "Old" },
++  right: {
++    label: { kind: "mergeBase", left: "main", right: "feature" },
++    shortId: "5d6e7f8",
++    subject: "New",
++  },
++  files: [],
++};
++
++test.each<GitLabScript>(["noMergeRequest", "several"])(
++  "%s looks the merge requests up by commit when the right side names no branch",
++  (script) => {
++    expect(gitLabCheck(script, DETACHED)).toMatchObject({
++      kind: "notLinedUp",
++      why: { looked_at: { kind: "commit", short_id: "5d6e7f8" } },
++    });
++  },
++);
++
++test("noBranch looks up by the right commit even when the right side names a branch", () => {
++  const named: RangeStart = {
++    ...DETACHED,
++    right: { ...DETACHED.right, label: { kind: "named", name: "feature" } },
++  };
++
++  expect(gitLabCheck("noBranch", named)).toEqual({
++    kind: "notLinedUp",
++    why: { kind: "noMergeRequest", looked_at: { kind: "commit", short_id: "5d6e7f8" } },
++  });
++});
++
++test("a pending posting links the merge request's Changes page", () => {
++  expect(pendingPosting("Hi", 7)).toEqual({
++    kind: "pending",
++    text: "Hi",
++    draft_note: 7,
++    merge_request: "!12",
++    link: "https://gitlab.example.com/team/taskboard/-/merge_requests/12/diffs",
++  });
++});
++
++test.each<[GitLabScript, number, string]>([
++  ["linedUp", 0, "pending"],
++  ["linedUp", 1, "pending"],
++  ["refusal", 0, "pending"],
++  ["refusal", 1, "refused"],
++  ["refusal", 2, "pending"],
++  ["stopped", 0, "pending"],
++  ["stopped", 1, "stopped"],
++  ["checking", 1, "pending"],
++])("%s's post %i is %s", (script, index, outcome) => {
++  expect(postOutcome(script, index)).toBe(outcome);
++});
+diff --git a/frontend/src/ipc/fixtureGitLab.ts b/frontend/src/ipc/fixtureGitLab.ts
+new file mode 100644
+index 0000000..990123e
+--- /dev/null
++++ b/frontend/src/ipc/fixtureGitLab.ts
+@@ -0,0 +1,136 @@
++import type * as Generated from "./bindings";
++import type { Log } from "./log";
++import type { RangeSide, RangeStart } from "./rangeDomain";
++
++export type GitLabScript =
++  | "linedUp"
++  | "checking"
++  | "noGlab"
++  | "loggedOut"
++  | "noMergeRequest"
++  | "noBranch"
++  | "moved"
++  | "otherBase"
++  | "several"
++  | "preparing"
++  | "failed"
++  | "refusal"
++  | "stopped";
++
++export type PostOutcome = "pending" | "refused" | "stopped";
++
++const FAILING_POST = 1;
++
++const MERGE_REQUEST: Generated.MergeRequestRef = {
++  reference: "!12",
++  title: "Reminders on cards",
++  web_url: "https://gitlab.example.com/team/taskboard/-/merge_requests/12",
++};
++const DIFFS_PAGE = "/diffs";
++const OTHER_REFERENCE = "!14";
++const GITLAB_HEAD = "7d6c5b4";
++const GITLAB_BASE = "3e2f1a0";
++const LOGGED_OUT =
++  "gitlab.example.com: No token found (checked config file, keyring, and environment variables).";
++const FAILED = "glab api projects/:fullpath/merge_requests: 502 Bad Gateway";
++
++export const REFUSAL = `400 Bad request - Note {:line_code=>["can't be blank"]}`;
++export const TIMED_OUT = "glab timed out";
++
++function lookedAt(side: RangeSide): Generated.LookedAt {
++  return side.label.kind === "named"
++    ? { kind: "branch", name: side.label.name }
++    : { kind: "commit", short_id: side.shortId };
++}
++
++const GITLAB_SCRIPTS: Readonly<Record<GitLabScript, true>> = {
++  linedUp: true,
++  checking: true,
++  noGlab: true,
++  loggedOut: true,
++  noMergeRequest: true,
++  noBranch: true,
++  moved: true,
++  otherBase: true,
++  several: true,
++  preparing: true,
++  failed: true,
++  refusal: true,
++  stopped: true,
++};
++
++function isGitLabScript(name: string): name is GitLabScript {
++  return Object.hasOwn(GITLAB_SCRIPTS, name);
++}
++
++export function shownGitLabScript(log: Log, search: string): GitLabScript {
++  const asked = new URLSearchParams(search).get("gitlab");
++  if (asked === null || asked === "") {
++    return "linedUp";
++  }
++  if (isGitLabScript(asked)) {
++    return asked;
++  }
++  log.info("review.fixture_miss", { gitlab: asked, known: Object.keys(GITLAB_SCRIPTS).join(", ") });
++  return "linedUp";
++}
++
++function notLinedUp(
++  script: GitLabScript,
++  { left, right }: RangeStart,
++): Generated.NotLinedUp | null {
++  const answers: Readonly<Record<GitLabScript, Generated.NotLinedUp | null>> = {
++    linedUp: null,
++    checking: null,
++    noGlab: { kind: "glabMissing" },
++    loggedOut: { kind: "notLoggedIn", detail: LOGGED_OUT },
++    noMergeRequest: { kind: "noMergeRequest", looked_at: lookedAt(right) },
++    noBranch: { kind: "noMergeRequest", looked_at: { kind: "commit", short_id: right.shortId } },
++    moved: {
++      kind: "moved",
++      merge_request: MERGE_REQUEST,
++      gitlab_head: GITLAB_HEAD,
++      shown_head: right.shortId,
++    },
++    otherBase: {
++      kind: "otherBase",
++      merge_request: MERGE_REQUEST,
++      gitlab_base: GITLAB_BASE,
++      shown_base: left.shortId,
++    },
++    several: {
++      kind: "several",
++      looked_at: lookedAt(right),
++      references: [MERGE_REQUEST.reference, OTHER_REFERENCE],
++    },
++    preparing: { kind: "preparing", merge_request: MERGE_REQUEST },
++    failed: { kind: "failed", message: FAILED },
++    refusal: null,
++    stopped: null,
++  };
++  return answers[script];
++}
++
++export function gitLabCheck(script: GitLabScript, start: RangeStart): Generated.GitLabCheck {
++  const why = notLinedUp(script, start);
++  return why === null
++    ? { kind: "linedUp", merge_request: MERGE_REQUEST }
++    : { kind: "notLinedUp", why };
++}
++
++export function pendingPosting(text: string, draftNote: number): Generated.Posting {
++  return {
++    kind: "pending",
++    text,
++    draft_note: draftNote,
++    merge_request: MERGE_REQUEST.reference,
++    link: `${MERGE_REQUEST.web_url}${DIFFS_PAGE}`,
++  };
++}
++
++export function postOutcome(script: GitLabScript, index: number): PostOutcome {
++  if (index === FAILING_POST && script === "refusal") {
++    return "refused";
++  }
++  return index === FAILING_POST && script === "stopped" ? "stopped" : "pending";
++}
+diff --git a/frontend/src/ipc/fixtureRange.test.ts b/frontend/src/ipc/fixtureRange.test.ts
+index 9523e36..1799ace 100644
+--- a/frontend/src/ipc/fixtureRange.test.ts
++++ b/frontend/src/ipc/fixtureRange.test.ts
+@@ -1,6 +1,7 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
++import type { Column, Difference } from "./compareDomain";
+ import { isRangeFileId, type RangeFileId, type SourceResult } from "./domain";
+ import { createFixtureRangeSource } from "./fixtureRange";
+ import { createLog, type Log, type LogEntry } from "./log";
+@@ -202,6 +203,50 @@ test("the committed cases parse: review lists 13 files of every kind, empty none
+   expect(entries).toEqual([]);
+ });
+ 
++function inside(differences: readonly Difference[], column: Column, line: number): boolean {
++  return differences.some(({ [column]: { start, len } }) => line >= start && line < start + len);
++}
++
++function rightOf(differences: readonly Difference[], left: number): number {
++  return differences
++    .filter((difference) => difference.left.start + difference.left.len <= left)
++    .reduce((line, { left: l, right: r }) => line + r.len - l.len, left);
++}
++
++test("?threads=seeded sits on board.ts's lines as their kinds say: inside a difference or paired outside", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review&threads=seeded");
++
++  const threads = valueOf(await source.listThreads()).threads;
++  const board = valueOf(await source.loadRangeFile(fileId(7)));
++
++  expect(valueOf(await source.openRange()).files[7]?.path).toBe("src/board/board.ts");
++  expect(threads.map((thread) => thread.file)).toEqual([7, 7, 7, 7]);
++  if (board.kind !== "texts") {
++    throw new Error("board.ts is not texts");
++  }
++  const { differences } = board;
++  expect(threads.map((thread) => thread.line)).toEqual([
++    { kind: "removed", left: 19 },
++    { kind: "added", right: 20 },
++    { kind: "unchangedOnLeft", left: 5, right: 5 },
++    { kind: "unchangedOnRight", left: 100, right: 101 },
++  ]);
++  expect([inside(differences, "left", 19), inside(differences, "right", 20)]).toEqual([true, true]);
++  expect([
++    inside(differences, "left", 5),
++    inside(differences, "right", 5),
++    inside(differences, "left", 100),
++    inside(differences, "right", 101),
++  ]).toEqual([false, false, false, false]);
++  expect([rightOf(differences, 5), rightOf(differences, 100)]).toEqual([5, 101]);
++});
++
++test("?range=empty with ?threads=seeded lists no threads", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=empty&threads=seeded");
++
++  expect(valueOf(await source.listThreads()).threads).toEqual([]);
++});
++
+ test.each([
+   ["a missing start", { files: [] }, 'Invalid key: Expected "start"'],
+   [
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+index aa61fb7..3fa1ad9 100644
+--- a/frontend/src/ipc/fixtureRange.ts
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -2,6 +2,7 @@ import * as v from "valibot";
+ 
+ import type * as Generated from "./bindings";
+ import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
++import { createFixtureReview } from "./fixtureReview";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ import {
+@@ -138,6 +139,7 @@ export function createFixtureRangeSource(
+         ? { ok: false, failure: { kind: "UnknownRangeFile", file } }
+         : { ok: true, value: found };
+     },
++    ...createFixtureReview(log, search, shown.start),
+     ...createFixtureSettings(),
+   };
+ }
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+new file mode 100644
+index 0000000..3daff6d
+--- /dev/null
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -0,0 +1,513 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import {
++  isMessageId,
++  isRangeFileId,
++  isThreadId,
++  type MessageId,
++  type RangeFileId,
++  type SourceResult,
++  type ThreadId,
++} from "./domain";
++import { createFixtureReview } from "./fixtureReview";
++import { createLog, type Log, type LogEntry } from "./log";
++import type { RangeEntry, RangeStart } from "./rangeDomain";
++import type { SendProgress, Thread } from "./reviewDomain";
++import type { ReviewSource } from "./ReviewSource";
++import { changedThreadLine } from "./threadLine";
++
++const REFUSAL = `400 Bad request - Note {:line_code=>["can't be blank"]}`;
++const MERGE_REQUEST = {
++  reference: "!12",
++  title: "Reminders on cards",
++  webUrl: "https://gitlab.example.com/team/taskboard/-/merge_requests/12",
++};
++const LINK = `${MERGE_REQUEST.webUrl}/diffs`;
++const NOW_MS = 1_800_000_000_500;
++
++function fileId(n: number): RangeFileId {
++  if (!isRangeFileId(n)) {
++    throw new Error(`${n} is no file id`);
++  }
++  return n;
++}
++
++function threadId(n: number): ThreadId {
++  if (!isThreadId(n)) {
++    throw new Error(`${n} is no thread id`);
++  }
++  return n;
++}
++
++function messageId(n: number): MessageId {
++  if (!isMessageId(n)) {
++    throw new Error(`${n} is no message id`);
++  }
++  return n;
++}
++
++function entry(id: number, path: string): RangeEntry {
++  return {
++    id: fileId(id),
++    path,
++    change: { kind: "modified" },
++    lines: { kind: "counted", added: 1, removed: 1 },
++  };
++}
++
++const START: RangeStart = {
++  range: "main...feature",
++  left: {
++    label: { kind: "mergeBase", left: "main", right: "feature" },
++    shortId: "531ea52",
++    subject: "Base",
++  },
++  right: { label: { kind: "named", name: "feature" }, shortId: "9c1ba3f", subject: "Tip" },
++  files: [entry(0, "config"), entry(7, "src/board/board.ts")],
++};
++
++function quietLog(): { log: Log; entries: LogEntry[] } {
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const entries: LogEntry[] = [];
++  const log = createLog((each) => {
++    entries.push(each);
++  });
++  return { log, entries };
++}
++
++function review(search: string, start: RangeStart = START): ReviewSource {
++  return createFixtureReview(quietLog().log, search, start);
++}
++
++function valueOf<T>(result: SourceResult<T>): T {
++  if (!result.ok) {
++    throw new Error(`expected a value, got ${JSON.stringify(result.failure)}`);
++  }
++  return result.value;
++}
++
++async function threadsOf(source: ReviewSource): Promise<readonly Thread[]> {
++  return valueOf(await source.listThreads()).threads;
++}
++
++function postings(threads: readonly Thread[]): unknown[] {
++  return threads.flatMap((thread) => thread.messages.map((message) => message.posting));
++}
++
++async function settled<T>(pending: Promise<T>): Promise<T> {
++  await vi.runAllTimersAsync();
++  return pending;
++}
++
++beforeEach(() => {
++  vi.useFakeTimers({ now: NOW_MS });
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++
++test.each(["", "?threads", "?threads=", "?threads=other"])(
++  "'%s' starts without threads",
++  async (search) => {
++    expect(await threadsOf(review(search))).toEqual([]);
++  },
++);
++
++test("?threads=seeded puts one thread of each line kind on board.ts with every posting kind", async () => {
++  const threads = await threadsOf(review("?threads=seeded"));
++
++  expect(threads.map(({ id, file, line, session }) => ({ id, file, line, session }))).toEqual([
++    { id: 0, file: 7, line: { kind: "removed", left: 19 }, session: null },
++    { id: 1, file: 7, line: { kind: "added", right: 20 }, session: null },
++    { id: 2, file: 7, line: { kind: "unchangedOnLeft", left: 5, right: 5 }, session: null },
++    {
++      id: 3,
++      file: 7,
++      line: { kind: "unchangedOnRight", left: 100, right: 101 },
++      session: "fixture-session",
++    },
++  ]);
++  expect(threads.flatMap((thread) => thread.messages.map((message) => message.id))).toEqual([
++    0, 1, 2, 3, 4,
++  ]);
++  expect(postings(threads)).toEqual([
++    { kind: "queued", text: "Why does the overdue check go?" },
++    { kind: "refused", text: "This needs a test.", reason: REFUSAL },
++    {
++      kind: "pending",
++      text: "Rename this to `cardsOf`?",
++      draftNote: 101,
++      mergeRequest: "!12",
++      link: LINK,
++    },
++    { kind: "notQueued" },
++    { kind: "notQueued" },
++  ]);
++  expect(threads[3]?.messages.map((message) => message.body)).toEqual([
++    { kind: "note", text: "Is this still used?" },
++    { kind: "aiAnswer", turn: 0 },
++  ]);
++  expect(threads[0]?.messages[0]?.written).toBe(1_767_225_600);
++});
++
++test("?threads=seeded on a range without board.ts starts without threads", async () => {
++  expect(
++    await threadsOf(review("?threads=seeded", { ...START, files: [entry(0, "config")] })),
++  ).toEqual([]);
++});
++
++test("addThread stores the first note with new ids after the seeded ones and the time in seconds", async () => {
++  const source = review("?threads=seeded");
++
++  const added = valueOf(await source.addThread(fileId(0), changedThreadLine("left", 2), "Typo"));
++
++  expect(added.thread).toBe(4);
++  expect(added.list.threads.at(-1)).toEqual({
++    id: 4,
++    file: 0,
++    line: { kind: "removed", left: 2 },
++    messages: [
++      {
++        id: 5,
++        body: { kind: "note", text: "Typo" },
++        written: 1_800_000_000,
++        posting: { kind: "notQueued" },
++      },
++    ],
++    session: null,
++  });
++  expect(await threadsOf(source)).toEqual(added.list.threads);
++  const next = valueOf(await source.addThread(fileId(7), changedThreadLine("right", 1), "Two"));
++  expect(next.thread).toBe(5);
++  expect(next.list.threads.at(-1)?.messages[0]?.id).toBe(6);
++});
++
++test.each(["", "  \n\t"])(
++  "addThread with blank text %j answers EmptyMessage and stores nothing",
++  async (text) => {
++    const source = review("");
++
++    expect(await source.addThread(fileId(0), changedThreadLine("left", 0), text)).toEqual({
++      ok: false,
++      failure: { kind: "EmptyMessage" },
++    });
++    expect(await threadsOf(source)).toEqual([]);
++  },
++);
++
++test("addThread on a file the range does not list answers UnknownRangeFile", async () => {
++  const source = review("");
++
++  expect(await source.addThread(fileId(3), changedThreadLine("left", 0), "x")).toEqual({
++    ok: false,
++    failure: { kind: "UnknownRangeFile", file: 3 },
++  });
++  expect(await threadsOf(source)).toEqual([]);
++});
++
++test("addNote appends a note; blank text and unknown threads are refused", async () => {
++  const source = review("?threads=seeded");
++
++  const list = valueOf(await source.addNote(threadId(1), "Still?"));
++
++  expect(list.threads[1]?.messages.map((message) => message.body)).toEqual([
++    { kind: "note", text: "This needs a test." },
++    { kind: "note", text: "Still?" },
++  ]);
++  expect(list.threads[1]?.messages[1]?.id).toBe(5);
++  expect(await source.addNote(threadId(1), " ")).toEqual({
++    ok: false,
++    failure: { kind: "EmptyMessage" },
++  });
++  expect(await source.addNote(threadId(9), "x")).toEqual({
++    ok: false,
++    failure: { kind: "UnknownThread", thread: 9 },
++  });
++  expect((await threadsOf(source))[1]?.messages).toHaveLength(2);
++});
++
++test("queueMessage keeps the edited text and unqueueMessage takes it back", async () => {
++  const source = review("?threads=seeded");
++
++  const queued = valueOf(await source.queueMessage(messageId(3), "Is `oldBoard` still used?"));
++  expect(queued.threads[3]?.messages[0]?.posting).toEqual({
++    kind: "queued",
++    text: "Is `oldBoard` still used?",
++  });
++
++  const unqueued = valueOf(await source.unqueueMessage(messageId(1)));
++  expect(unqueued.threads[1]?.messages[0]?.posting).toEqual({ kind: "notQueued" });
++});
++
++test("queue and unqueue refuse a pending, an unknown or a blank message and change nothing", async () => {
++  const source = review("?threads=seeded");
++  const before = await threadsOf(source);
++
++  expect(await source.queueMessage(messageId(2), "x")).toEqual({
++    ok: false,
++    failure: { kind: "MessagePending", message: 2 },
++  });
++  expect(await source.unqueueMessage(messageId(2))).toEqual({
++    ok: false,
++    failure: { kind: "MessagePending", message: 2 },
++  });
++  expect(await source.unqueueMessage(messageId(40))).toEqual({
++    ok: false,
++    failure: { kind: "UnknownMessage", message: 40 },
++  });
++  expect(await source.queueMessage(messageId(0), "")).toEqual({
++    ok: false,
++    failure: { kind: "EmptyMessage" },
++  });
++  expect(await threadsOf(source)).toEqual(before);
++});
++
++test.each<[string, unknown]>([
++  ["", { kind: "linedUp", mergeRequest: MERGE_REQUEST }],
++  ["?gitlab=linedUp", { kind: "linedUp", mergeRequest: MERGE_REQUEST }],
++  ["?gitlab=refusal", { kind: "linedUp", mergeRequest: MERGE_REQUEST }],
++  ["?gitlab=stopped", { kind: "linedUp", mergeRequest: MERGE_REQUEST }],
++  ["?gitlab=noGlab", { kind: "notLinedUp", why: { kind: "glabMissing" } }],
++  [
++    "?gitlab=loggedOut",
++    {
++      kind: "notLinedUp",
++      why: {
++        kind: "notLoggedIn",
++        detail:
++          "gitlab.example.com: No token found (checked config file, keyring, and environment variables).",
++      },
++    },
++  ],
++  [
++    "?gitlab=noMergeRequest",
++    {
++      kind: "notLinedUp",
++      why: { kind: "noMergeRequest", lookedAt: { kind: "branch", name: "feature" } },
++    },
++  ],
++  [
++    "?gitlab=noBranch",
++    {
++      kind: "notLinedUp",
++      why: { kind: "noMergeRequest", lookedAt: { kind: "commit", shortId: "9c1ba3f" } },
++    },
++  ],
++  [
++    "?gitlab=moved",
++    {
++      kind: "notLinedUp",
++      why: {
++        kind: "moved",
++        mergeRequest: MERGE_REQUEST,
++        gitlabHead: "7d6c5b4",
++        shownHead: "9c1ba3f",
++      },
++    },
++  ],
++  [
++    "?gitlab=otherBase",
++    {
++      kind: "notLinedUp",
++      why: {
++        kind: "otherBase",
++        mergeRequest: MERGE_REQUEST,
++        gitlabBase: "3e2f1a0",
++        shownBase: "531ea52",
++      },
++    },
++  ],
++  [
++    "?gitlab=several",
++    {
++      kind: "notLinedUp",
++      why: {
++        kind: "several",
++        lookedAt: { kind: "branch", name: "feature" },
++        references: ["!12", "!14"],
++      },
++    },
++  ],
++  [
++    "?gitlab=preparing",
++    { kind: "notLinedUp", why: { kind: "preparing", mergeRequest: MERGE_REQUEST } },
++  ],
++  [
++    "?gitlab=failed",
++    {
++      kind: "notLinedUp",
++      why: {
++        kind: "failed",
++        message: "glab api projects/:fullpath/merge_requests: 502 Bad Gateway",
++      },
++    },
++  ],
++])("checkGitLab with '%s' answers at once", async (search, expected) => {
++  const answer = vi.fn();
++  void review(search).checkGitLab().then(answer);
++
++  await vi.advanceTimersByTimeAsync(0);
++
++  expect(answer).toHaveBeenCalledWith({ ok: true, value: expected });
++});
++
++test("?gitlab=checking answers lined up only after 3 s", async () => {
++  const answer = vi.fn();
++  void review("?gitlab=checking").checkGitLab().then(answer);
++
++  await vi.advanceTimersByTimeAsync(2999);
++  expect(answer).not.toHaveBeenCalled();
++  await vi.advanceTimersByTimeAsync(1);
++  expect(answer).toHaveBeenCalledWith({
++    ok: true,
++    value: { kind: "linedUp", mergeRequest: MERGE_REQUEST },
++  });
++});
++
++test("an unknown ?gitlab script logs review.fixture_miss naming the scripts and lines up", async () => {
++  const { log, entries } = quietLog();
++  const source = createFixtureReview(log, "?gitlab=nope", START);
++
++  expect(entries).toEqual([
++    {
++      level: "info",
++      event: "review.fixture_miss",
++      fields: {
++        gitlab: "nope",
++        known:
++          "linedUp, checking, noGlab, loggedOut, noMergeRequest, noBranch, moved, otherBase, several, preparing, failed, refusal, stopped",
++      },
++    },
++  ]);
++  expect(await settled(source.checkGitLab())).toEqual({
++    ok: true,
++    value: { kind: "linedUp", mergeRequest: MERGE_REQUEST },
++  });
++});
++
++test.each(["", "?gitlab", "?gitlab="])("'%s' lines up without logging a miss", async (search) => {
++  const { log, entries } = quietLog();
++
++  const check = await settled(createFixtureReview(log, search, START).checkGitLab());
++
++  expect(check).toEqual({ ok: true, value: { kind: "linedUp", mergeRequest: MERGE_REQUEST } });
++  expect(entries).toEqual([]);
++});
++
++test("a send posts each waiting message after a 300 ms pause, reporting progress per message", async () => {
++  const source = review("?threads=seeded");
++  const seen: SendProgress[] = [];
++  const reply = source.sendQueue((progress) => seen.push(progress));
++
++  await vi.advanceTimersByTimeAsync(299);
++  expect(seen).toEqual([]);
++  await vi.advanceTimersByTimeAsync(1);
++  expect(seen).toEqual([{ done: 1, of: 2 }]);
++  await vi.advanceTimersByTimeAsync(300);
++  expect(seen).toEqual([
++    { done: 1, of: 2 },
++    { done: 2, of: 2 },
++  ]);
++
++  const sent = valueOf(await reply);
++  expect(sent).toMatchObject({ kind: "sent", sent: 2, refused: 0 });
++  const posted = [
++    {
++      kind: "pending",
++      text: "Why does the overdue check go?",
++      draftNote: 102,
++      mergeRequest: "!12",
++      link: LINK,
++    },
++    {
++      kind: "pending",
++      text: "This needs a test.",
++      draftNote: 103,
++      mergeRequest: "!12",
++      link: LINK,
++    },
++  ];
++  expect(sent.kind === "notLinedUp" ? [] : postings(sent.list.threads).slice(0, 2)).toEqual(posted);
++  expect(postings(await threadsOf(source)).slice(0, 2)).toEqual(posted);
++});
++
++test("?gitlab=refusal refuses the second queued message with GitLab's words", async () => {
++  const source = review("?threads=seeded&gitlab=refusal");
++  await source.queueMessage(messageId(3), "Third");
++
++  const reply = valueOf(await settled(source.sendQueue(() => undefined)));
++
++  expect(reply).toMatchObject({ kind: "sent", sent: 2, refused: 1 });
++  expect(postings(await threadsOf(source))).toEqual([
++    expect.objectContaining({ kind: "pending", draftNote: 102 }),
++    { kind: "refused", text: "This needs a test.", reason: REFUSAL },
++    expect.objectContaining({ kind: "pending", draftNote: 101 }),
++    expect.objectContaining({ kind: "pending", text: "Third", draftNote: 103 }),
++    { kind: "notQueued" },
++  ]);
++});
++
++test("?gitlab=stopped times out after the first post and leaves the rest waiting", async () => {
++  const source = review("?threads=seeded&gitlab=stopped");
++  const seen: SendProgress[] = [];
++
++  const reply = valueOf(await settled(source.sendQueue((progress) => seen.push(progress))));
++
++  expect(reply).toMatchObject({ kind: "stopped", sent: 1, refused: 0, reason: "glab timed out" });
++  expect(seen).toEqual([{ done: 1, of: 2 }]);
++  expect(postings(await threadsOf(source)).slice(0, 2)).toEqual([
++    expect.objectContaining({ kind: "pending" }),
++    { kind: "refused", text: "This needs a test.", reason: REFUSAL },
++  ]);
++});
++
++test.each(["noGlab", "moved", "preparing"])(
++  "?gitlab=%s sends nothing and answers why",
++  async (script) => {
++    const source = review(`?threads=seeded&gitlab=${script}`);
++    const before = await threadsOf(source);
++    const progress = vi.fn();
++
++    const reply = valueOf(await settled(source.sendQueue(progress)));
++
++    const check = valueOf(await settled(source.checkGitLab()));
++    expect(check.kind).toBe("notLinedUp");
++    expect(reply).toEqual(check);
++    expect(progress).not.toHaveBeenCalled();
++    expect(await threadsOf(source)).toEqual(before);
++  },
++);
++
++test("a second send while one runs answers SendRunning; after it ends another may start", async () => {
++  const source = review("?threads=seeded");
++  const first = source.sendQueue(() => undefined);
++
++  expect(await source.sendQueue(() => undefined)).toEqual({
++    ok: false,
++    failure: { kind: "SendRunning" },
++  });
++  await settled(first);
++  expect(valueOf(await settled(source.sendQueue(() => undefined)))).toMatchObject({
++    kind: "sent",
++    sent: 0,
++    refused: 0,
++  });
++});
++
++test("a message unqueued while the send runs is not posted, and still counts as done", async () => {
++  const source = review("?threads=seeded");
++  const seen: SendProgress[] = [];
++  const reply = source.sendQueue((progress) => seen.push(progress));
++
++  await source.unqueueMessage(messageId(1));
++  const sent = valueOf(await settled(reply));
++
++  expect(sent).toMatchObject({ kind: "sent", sent: 1, refused: 0 });
++  expect(seen).toEqual([
++    { done: 1, of: 2 },
++    { done: 2, of: 2 },
++  ]);
++  expect(postings(await threadsOf(source))[1]).toEqual({ kind: "notQueued" });
++});
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+new file mode 100644
+index 0000000..2240365
+--- /dev/null
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -0,0 +1,274 @@
++import type * as Generated from "./bindings";
++import type { SourceResult } from "./domain";
++import {
++  gitLabCheck,
++  pendingPosting,
++  postOutcome,
++  REFUSAL,
++  shownGitLabScript,
++  TIMED_OUT,
++  type GitLabScript,
++  type PostOutcome,
++} from "./fixtureGitLab";
++import type { Log } from "./log";
++import type { RangeStart } from "./rangeDomain";
++import {
++  toGitLabCheck,
++  toSendReply,
++  toThreadAdded,
++  toThreadList,
++  type SendProgress,
++  type SendReply,
++  type ThreadAdded,
++  type ThreadList,
++} from "./reviewDomain";
++import type { ReviewSource } from "./ReviewSource";
++import { fromThreadLine, type ThreadLine } from "./threadLine";
++
++type Store = {
++  readonly start: RangeStart;
++  readonly script: GitLabScript;
++  readonly threads: Generated.Thread[];
++  readonly next: { thread: number; message: number; draftNote: number };
++  sending: boolean;
++};
++
++type Tally = { sent: number; refused: number };
++
++type Seed = Pick<Generated.Thread, "line" | "session"> & {
++  readonly messages: readonly Omit<Generated.Message, "id" | "written">[];
++};
++
++const CHECKING_MS = 3000;
++const POST_PAUSE_MS = 300;
++const MS_PER_SECOND = 1000;
++
++const SEEDED_PATH = "src/board/board.ts";
++const SEEDED_WRITTEN = 1_767_225_600;
++const SEEDED_DRAFT_NOTE = 101;
++const SEEDED_SESSION = "fixture-session";
++
++function pause(ms: number): Promise<void> {
++  return new Promise((resolve) => {
++    setTimeout(resolve, ms);
++  });
++}
++
++function note(text: string, posting: Generated.Posting): Seed["messages"][number] {
++  return { body: { kind: "note", text }, posting };
++}
++
++function seededThreads(file: number): Generated.Thread[] {
++  const queued = "Why does the overdue check go?";
++  const refused = "This needs a test.";
++  const pending = "Rename this to `cardsOf`?";
++  const seeds: readonly Seed[] = [
++    {
++      line: { kind: "removed", left: 19 },
++      messages: [note(queued, { kind: "queued", text: queued })],
++      session: null,
++    },
++    {
++      line: { kind: "added", right: 20 },
++      messages: [note(refused, { kind: "refused", text: refused, reason: REFUSAL })],
++      session: null,
++    },
++    {
++      line: { kind: "unchangedOnLeft", left: 5, right: 5 },
++      messages: [note(pending, pendingPosting(pending, SEEDED_DRAFT_NOTE))],
++      session: null,
++    },
++    {
++      line: { kind: "unchangedOnRight", left: 100, right: 101 },
++      messages: [
++        note("Is this still used?", { kind: "notQueued" }),
++        { body: { kind: "aiAnswer", turn: 0 }, posting: { kind: "notQueued" } },
++      ],
++      session: SEEDED_SESSION,
++    },
++  ];
++  let nextMessage = 0;
++  return seeds.map((seed, id) => {
++    const messages = seed.messages.map((each) => {
++      const message = { ...each, id: nextMessage, written: SEEDED_WRITTEN };
++      nextMessage += 1;
++      return message;
++    });
++    return { ...seed, id, file, messages };
++  });
++}
++
++function startThreads(search: string, start: RangeStart): Generated.Thread[] {
++  const seeded = start.files.find((entry) => entry.path === SEEDED_PATH);
++  const asked = new URLSearchParams(search).get("threads");
++  return asked === "seeded" && seeded !== undefined ? seededThreads(seeded.id) : [];
++}
++
++function listed(store: Store): Generated.ThreadList {
++  return { threads: store.threads };
++}
++
++function messagesOf(store: Store): Generated.Message[] {
++  return store.threads.flatMap((thread) => thread.messages);
++}
++
++function isBlank(text: string): boolean {
++  return text.trim() === "";
++}
++
++function newNote(store: Store, text: string): Generated.Message {
++  const id = store.next.message;
++  store.next.message += 1;
++  return {
++    id,
++    body: { kind: "note", text },
++    written: Math.floor(Date.now() / MS_PER_SECOND),
++    posting: { kind: "notQueued" },
++  };
++}
++
++function addThread(
++  store: Store,
++  file: number,
++  line: ThreadLine,
++  text: string,
++): SourceResult<ThreadAdded> {
++  if (isBlank(text)) {
++    return { ok: false, failure: { kind: "EmptyMessage" } };
++  }
++  if (!store.start.files.some((entry) => entry.id === file)) {
++    return { ok: false, failure: { kind: "UnknownRangeFile", file } };
++  }
++  const id = store.next.thread;
++  store.next.thread += 1;
++  const messages = [newNote(store, text)];
++  store.threads.push({ id, file, line: fromThreadLine(line), messages, session: null });
++  return { ok: true, value: toThreadAdded({ thread: id, list: listed(store) }) };
++}
++
++function addNote(store: Store, thread: number, text: string): SourceResult<ThreadList> {
++  if (isBlank(text)) {
++    return { ok: false, failure: { kind: "EmptyMessage" } };
++  }
++  const found = store.threads.find((each) => each.id === thread);
++  if (found === undefined) {
++    return { ok: false, failure: { kind: "UnknownThread", thread } };
++  }
++  found.messages.push(newNote(store, text));
++  return { ok: true, value: toThreadList(listed(store)) };
++}
++
++function changePosting(
++  store: Store,
++  message: number,
++  posting: Generated.Posting,
++): SourceResult<ThreadList> {
++  const found = messagesOf(store).find((each) => each.id === message);
++  if (found === undefined) {
++    return { ok: false, failure: { kind: "UnknownMessage", message } };
++  }
++  if (found.posting.kind === "pending") {
++    return { ok: false, failure: { kind: "MessagePending", message } };
++  }
++  found.posting = posting;
++  return { ok: true, value: toThreadList(listed(store)) };
++}
++
++function waitingText(posting: Generated.Posting): string | null {
++  return posting.kind === "queued" || posting.kind === "refused" ? posting.text : null;
++}
++
++function record(
++  store: Store,
++  message: Generated.Message,
++  outcome: PostOutcome,
++  tally: Tally,
++): void {
++  const text = waitingText(message.posting);
++  if (text === null) {
++    return;
++  }
++  if (outcome === "refused") {
++    message.posting = { kind: "refused", text, reason: REFUSAL };
++    tally.refused += 1;
++    return;
++  }
++  message.posting = pendingPosting(text, store.next.draftNote);
++  store.next.draftNote += 1;
++  tally.sent += 1;
++}
++
++async function postQueue(
++  store: Store,
++  onProgress: (progress: SendProgress) => void,
++): Promise<Generated.SendReply> {
++  const queued = messagesOf(store).filter((message) => waitingText(message.posting) !== null);
++  const tally: Tally = { sent: 0, refused: 0 };
++  for (const [index, message] of queued.entries()) {
++    await pause(POST_PAUSE_MS);
++    const outcome = postOutcome(store.script, index);
++    if (outcome === "stopped") {
++      return { kind: "stopped", list: listed(store), ...tally, reason: TIMED_OUT };
++    }
++    record(store, message, outcome, tally);
++    onProgress({ done: index + 1, of: queued.length });
++  }
++  return { kind: "sent", list: listed(store), ...tally };
++}
++
++async function sendQueue(
++  store: Store,
++  onProgress: (progress: SendProgress) => void,
++): Promise<SourceResult<SendReply>> {
++  if (store.sending) {
++    return { ok: false, failure: { kind: "SendRunning" } };
++  }
++  const check = gitLabCheck(store.script, store.start);
++  if (check.kind === "notLinedUp") {
++    return { ok: true, value: toSendReply({ kind: "notLinedUp", why: check.why }) };
++  }
++  store.sending = true;
++  try {
++    return { ok: true, value: toSendReply(await postQueue(store, onProgress)) };
++  } finally {
++    store.sending = false;
++  }
++}
++
++export function createFixtureReview(log: Log, search: string, start: RangeStart): ReviewSource {
++  const threads = startThreads(search, start);
++  const messages = threads.reduce((count, thread) => count + thread.messages.length, 0);
++  const store: Store = {
++    start,
++    script: shownGitLabScript(log, search),
++    threads,
++    next: { thread: threads.length, message: messages, draftNote: SEEDED_DRAFT_NOTE + 1 },
++    sending: false,
++  };
++  return {
++    async listThreads() {
++      return { ok: true, value: toThreadList(listed(store)) };
++    },
++    async addThread(file, line, text) {
++      return addThread(store, file, line, text);
++    },
++    async addNote(thread, text) {
++      return addNote(store, thread, text);
++    },
++    async queueMessage(message, text) {
++      return isBlank(text)
++        ? { ok: false, failure: { kind: "EmptyMessage" } }
++        : changePosting(store, message, { kind: "queued", text });
++    },
++    async unqueueMessage(message) {
++      return changePosting(store, message, { kind: "notQueued" });
++    },
++    async checkGitLab() {
++      if (store.script === "checking") {
++        await pause(CHECKING_MS);
++      }
++      return { ok: true, value: toGitLabCheck(gitLabCheck(store.script, store.start)) };
++    },
++    sendQueue: (onProgress) => sendQueue(store, onProgress),
++  };
++}
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 468b477..b2b4737 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -16,6 +16,7 @@ export type {
+ } from "./compareDomain";
+ export type {
+   AddedServer,
++  AgentSettings,
+   Antialiasing,
+   Chunk,
+   ClipboardSelection,
+@@ -89,7 +90,6 @@ export type {
+   RangeLineCounts,
+   RangeModeChange,
+   RangeSide,
+-  RangeSideLabel,
+   RangeSides,
+   RangeStart,
+ } from "./rangeDomain";
+diff --git a/frontend/src/ipc/rangeDomain.ts b/frontend/src/ipc/rangeDomain.ts
+index 3ac86f8..1f0e576 100644
+--- a/frontend/src/ipc/rangeDomain.ts
++++ b/frontend/src/ipc/rangeDomain.ts
+@@ -3,7 +3,7 @@ import { toDifferences, type Difference } from "./compareDomain";
+ import { isRangeFileId, type RangeFileId } from "./domain";
+ import { invalid } from "./validate";
+ 
+-export type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
++type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+ export type RangeSide = {
+   readonly label: RangeSideLabel;
+   readonly shortId: string;
+diff --git a/frontend/src/ipc/reviewDomain.test.ts b/frontend/src/ipc/reviewDomain.test.ts
+new file mode 100644
+index 0000000..0c9d983
+--- /dev/null
++++ b/frontend/src/ipc/reviewDomain.test.ts
+@@ -0,0 +1,302 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { toGitLabCheck, toSendReply, toThreadAdded, toThreadList } from "./reviewDomain";
++import { changedThreadLine, fromThreadLine, toThreadLine, unchangedThreadLine } from "./threadLine";
++
++const MERGE_REQUEST: Generated.MergeRequestRef = {
++  reference: "!12",
++  title: "Reminders",
++  web_url: "https://gitlab.example.com/t/-/merge_requests/12",
++};
++
++const CAMEL_MERGE_REQUEST = {
++  reference: "!12",
++  title: "Reminders",
++  webUrl: "https://gitlab.example.com/t/-/merge_requests/12",
++};
++
++function thread(posting: Generated.Posting, body?: Generated.MessageBody): Generated.Thread {
++  return {
++    id: 3,
++    file: 7,
++    line: { kind: "removed", left: 19 },
++    messages: [{ id: 9, body: body ?? { kind: "note", text: "Why?" }, written: 1700, posting }],
++    session: null,
++  };
++}
++
++const LIST: Generated.ThreadList = { threads: [thread({ kind: "notQueued" })] };
++
++test.each<[Generated.Posting, unknown]>([
++  [{ kind: "notQueued" }, { kind: "notQueued" }],
++  [
++    { kind: "queued", text: "Edited" },
++    { kind: "queued", text: "Edited" },
++  ],
++  [
++    { kind: "refused", text: "Edited", reason: "400 Bad request" },
++    { kind: "refused", text: "Edited", reason: "400 Bad request" },
++  ],
++  [
++    {
++      kind: "pending",
++      text: "Edited",
++      draft_note: 55,
++      merge_request: "!12",
++      link: "https://x/diffs",
++    },
++    {
++      kind: "pending",
++      text: "Edited",
++      draftNote: 55,
++      mergeRequest: "!12",
++      link: "https://x/diffs",
++    },
++  ],
++])("posting %j comes out camelCased", (posting, expected) => {
++  expect(toThreadList({ threads: [thread(posting)] })).toEqual({
++    threads: [
++      {
++        id: 3,
++        file: 7,
++        line: { kind: "removed", left: 19 },
++        messages: [
++          { id: 9, body: { kind: "note", text: "Why?" }, written: 1700, posting: expected },
++        ],
++        session: null,
++      },
++    ],
++  });
++});
++
++test.each<Generated.MessageBody>([
++  { kind: "note", text: "Why?" },
++  { kind: "aiAnswer", turn: 2 },
++])("message body %j is kept as it came", (body) => {
++  const [converted] = toThreadList({ threads: [thread({ kind: "notQueued" }, body)] }).threads;
++
++  expect(converted?.messages[0]?.body).toEqual(body);
++});
++
++test("a thread keeps its session and every line kind", () => {
++  const lines: Generated.ThreadLine[] = [
++    { kind: "removed", left: 1 },
++    { kind: "added", right: 2 },
++    { kind: "unchangedOnLeft", left: 3, right: 4 },
++    { kind: "unchangedOnRight", left: 5, right: 6 },
++  ];
++  const threads = lines.map((line) => ({ ...thread({ kind: "notQueued" }), line, session: "s1" }));
++
++  const converted = toThreadList({ threads }).threads;
++
++  expect(converted.map((each) => each.line)).toEqual(lines);
++  expect(converted.map((each) => each.session)).toEqual(["s1", "s1", "s1", "s1"]);
++});
++
++test("toThreadAdded brands the new id and converts the list", () => {
++  expect(toThreadAdded({ thread: 3, list: LIST })).toEqual({
++    thread: 3,
++    list: toThreadList(LIST),
++  });
++});
++
++test.each<[string, Generated.ThreadList, string]>([
++  ["thread id", { threads: [{ ...thread({ kind: "notQueued" }), id: -1 }] }, "threads[0].id"],
++  ["file id", { threads: [{ ...thread({ kind: "notQueued" }), file: 1.5 }] }, "threads[0].file"],
++  [
++    "message id",
++    {
++      threads: [
++        thread({ kind: "notQueued" }),
++        {
++          ...thread({ kind: "notQueued" }),
++          messages: [
++            {
++              id: 1,
++              body: { kind: "note", text: "a" },
++              written: 0,
++              posting: { kind: "notQueued" },
++            },
++            {
++              id: -2,
++              body: { kind: "note", text: "b" },
++              written: 0,
++              posting: { kind: "notQueued" },
++            },
++          ],
++        },
++      ],
++    },
++    "threads[1].messages[1].id",
++  ],
++  [
++    "left line",
++    { threads: [{ ...thread({ kind: "notQueued" }), line: { kind: "removed", left: -1 } }] },
++    "threads[0].line.left",
++  ],
++  [
++    "right line",
++    {
++      threads: [
++        {
++          ...thread({ kind: "notQueued" }),
++          line: { kind: "unchangedOnRight", left: 0, right: -3 },
++        },
++      ],
++    },
++    "threads[0].line.right",
++  ],
++])("a bad %s is refused, naming the field", (_what, list, field) => {
++  expect(() => toThreadList(list)).toThrow(`${field} must be a non-negative safe integer`);
++});
++
++test("a bad new thread id is refused", () => {
++  expect(() => toThreadAdded({ thread: -1, list: LIST })).toThrow(
++    "thread must be a non-negative safe integer, got -1",
++  );
++});
++
++test.each<Generated.ThreadLine>([
++  { kind: "removed", left: -1 },
++  { kind: "added", right: -1 },
++  { kind: "unchangedOnLeft", left: -1, right: 0 },
++  { kind: "unchangedOnLeft", left: 0, right: -1 },
++])("toThreadLine refuses %j, naming the line field", (line) => {
++  expect(() => toThreadLine(line)).toThrow(/^line\.(left|right) must be/);
++});
++
++test.each<[string, () => unknown]>([
++  ["left line", () => changedThreadLine("left", -1)],
++  ["right line", () => changedThreadLine("right", -1)],
++  ["left line", () => unchangedThreadLine("left", { left: -1, right: 0 })],
++  ["right line", () => unchangedThreadLine("right", { left: 0, right: -1 })],
++])("a line builder refuses a bad %s, naming it", (field, build) => {
++  expect(build).toThrow(`${field} must be a non-negative safe integer, got -1`);
++});
++
++test("fromThreadLine hands the app the same line", () => {
++  const line = toThreadLine({ kind: "unchangedOnLeft", left: 3, right: 4 });
++
++  expect(fromThreadLine(line)).toEqual({ kind: "unchangedOnLeft", left: 3, right: 4 });
++});
++
++const NOT_LINED_UP: [Generated.NotLinedUp, unknown][] = [
++  [{ kind: "glabMissing" }, { kind: "glabMissing" }],
++  [
++    { kind: "notLoggedIn", detail: "gitlab.com: no token" },
++    { kind: "notLoggedIn", detail: "gitlab.com: no token" },
++  ],
++  [
++    { kind: "noMergeRequest", looked_at: { kind: "branch", name: "feature" } },
++    { kind: "noMergeRequest", lookedAt: { kind: "branch", name: "feature" } },
++  ],
++  [
++    { kind: "noMergeRequest", looked_at: { kind: "commit", short_id: "9c1ba3f" } },
++    { kind: "noMergeRequest", lookedAt: { kind: "commit", shortId: "9c1ba3f" } },
++  ],
++  [
++    { kind: "several", looked_at: { kind: "branch", name: "feature" }, references: ["!1", "!2"] },
++    { kind: "several", lookedAt: { kind: "branch", name: "feature" }, references: ["!1", "!2"] },
++  ],
++  [
++    { kind: "moved", merge_request: MERGE_REQUEST, gitlab_head: "aaa", shown_head: "bbb" },
++    { kind: "moved", mergeRequest: CAMEL_MERGE_REQUEST, gitlabHead: "aaa", shownHead: "bbb" },
++  ],
++  [
++    { kind: "otherBase", merge_request: MERGE_REQUEST, gitlab_base: "ccc", shown_base: "ddd" },
++    { kind: "otherBase", mergeRequest: CAMEL_MERGE_REQUEST, gitlabBase: "ccc", shownBase: "ddd" },
++  ],
++  [
++    { kind: "preparing", merge_request: MERGE_REQUEST },
++    { kind: "preparing", mergeRequest: CAMEL_MERGE_REQUEST },
++  ],
++  [
++    { kind: "failed", message: "502 Bad Gateway" },
++    { kind: "failed", message: "502 Bad Gateway" },
++  ],
++];
++
++test.each(NOT_LINED_UP)("check: not lined up %j comes out camelCased", (why, expected) => {
++  expect(toGitLabCheck({ kind: "notLinedUp", why })).toEqual({ kind: "notLinedUp", why: expected });
++});
++
++test.each(NOT_LINED_UP)("send: not lined up %j comes out camelCased", (why, expected) => {
++  expect(toSendReply({ kind: "notLinedUp", why })).toEqual({ kind: "notLinedUp", why: expected });
++});
++
++test("a lined-up check names the merge request camelCased", () => {
++  expect(toGitLabCheck({ kind: "linedUp", merge_request: MERGE_REQUEST })).toEqual({
++    kind: "linedUp",
++    mergeRequest: CAMEL_MERGE_REQUEST,
++  });
++});
++
++test("a sent reply keeps its counts and converts the list", () => {
++  const pending: Generated.Posting = {
++    kind: "pending",
++    text: "t",
++    draft_note: 1,
++    merge_request: "!12",
++    link: "l",
++  };
++
++  expect(
++    toSendReply({ kind: "sent", list: { threads: [thread(pending)] }, sent: 5, refused: 1 }),
++  ).toEqual({
++    kind: "sent",
++    list: toThreadList({ threads: [thread(pending)] }),
++    sent: 5,
++    refused: 1,
++  });
++  expect(toSendReply({ kind: "sent", list: LIST, sent: 0, refused: 0 })).toMatchObject({
++    list: { threads: [{ messages: [{ posting: { kind: "notQueued" } }] }] },
++  });
++});
++
++test("a stopped reply keeps its counts and reason and converts the list", () => {
++  const pending: Generated.Posting = {
++    kind: "pending",
++    text: "t",
++    draft_note: 4,
++    merge_request: "!12",
++    link: "l",
++  };
++
++  expect(
++    toSendReply({
++      kind: "stopped",
++      list: { threads: [thread(pending)] },
++      sent: 1,
++      refused: 0,
++      reason: "glab timed out",
++    }),
++  ).toEqual({
++    kind: "stopped",
++    list: {
++      threads: [
++        expect.objectContaining({
++          messages: [
++            expect.objectContaining({
++              posting: { kind: "pending", text: "t", draftNote: 4, mergeRequest: "!12", link: "l" },
++            }),
++          ],
++        }),
++      ],
++    },
++    sent: 1,
++    refused: 0,
++    reason: "glab timed out",
++  });
++});
++
++test("a sent reply with a bad thread id is refused", () => {
++  expect(() =>
++    toSendReply({
++      kind: "sent",
++      list: { threads: [{ ...thread({ kind: "notQueued" }), id: -1 }] },
++      sent: 0,
++      refused: 0,
++    }),
++  ).toThrow("threads[0].id must be");
++});
+diff --git a/frontend/src/ipc/reviewDomain.ts b/frontend/src/ipc/reviewDomain.ts
+new file mode 100644
+index 0000000..1bb2938
+--- /dev/null
++++ b/frontend/src/ipc/reviewDomain.ts
+@@ -0,0 +1,199 @@
++import type * as Generated from "./bindings";
++import {
++  isMessageId,
++  isRangeFileId,
++  isThreadId,
++  type MessageId,
++  type RangeFileId,
++  type ThreadId,
++} from "./domain";
++import { toThreadLine, type ThreadLine } from "./threadLine";
++import { invalid } from "./validate";
++
++type MessageBody = Readonly<Generated.MessageBody>;
++type Posting =
++  | Readonly<Exclude<Generated.Posting, { kind: "pending" }>>
++  | {
++      readonly kind: "pending";
++      readonly text: string;
++      readonly draftNote: number;
++      readonly mergeRequest: string;
++      readonly link: string;
++    };
++type Message = {
++  readonly id: MessageId;
++  readonly body: MessageBody;
++  readonly written: number;
++  readonly posting: Posting;
++};
++export type Thread = {
++  readonly id: ThreadId;
++  readonly file: RangeFileId;
++  readonly line: ThreadLine;
++  readonly messages: readonly Message[];
++  readonly session: string | null;
++};
++export type ThreadList = { readonly threads: readonly Thread[] };
++export type ThreadAdded = { readonly thread: ThreadId; readonly list: ThreadList };
++type MergeRequestRef = {
++  readonly reference: string;
++  readonly title: string;
++  readonly webUrl: string;
++};
++type LookedAt =
++  | { readonly kind: "branch"; readonly name: string }
++  | { readonly kind: "commit"; readonly shortId: string };
++type NotLinedUp =
++  | { readonly kind: "glabMissing" }
++  | { readonly kind: "notLoggedIn"; readonly detail: string }
++  | { readonly kind: "noMergeRequest"; readonly lookedAt: LookedAt }
++  | {
++      readonly kind: "several";
++      readonly lookedAt: LookedAt;
++      readonly references: readonly string[];
++    }
++  | {
++      readonly kind: "moved";
++      readonly mergeRequest: MergeRequestRef;
++      readonly gitlabHead: string;
++      readonly shownHead: string;
++    }
++  | {
++      readonly kind: "otherBase";
++      readonly mergeRequest: MergeRequestRef;
++      readonly gitlabBase: string;
++      readonly shownBase: string;
++    }
++  | { readonly kind: "preparing"; readonly mergeRequest: MergeRequestRef }
++  | { readonly kind: "failed"; readonly message: string };
++export type GitLabCheck =
++  | { readonly kind: "linedUp"; readonly mergeRequest: MergeRequestRef }
++  | { readonly kind: "notLinedUp"; readonly why: NotLinedUp };
++export type SendProgress = Readonly<Generated.SendProgress>;
++export type SendReply =
++  | { readonly kind: "notLinedUp"; readonly why: NotLinedUp }
++  | {
++      readonly kind: "sent";
++      readonly list: ThreadList;
++      readonly sent: number;
++      readonly refused: number;
++    }
++  | {
++      readonly kind: "stopped";
++      readonly list: ThreadList;
++      readonly sent: number;
++      readonly refused: number;
++      readonly reason: string;
++    };
++
++function branded<T extends number>(
++  value: number,
++  isBrand: (n: number) => n is T,
++  field: string,
++): T {
++  if (!isBrand(value)) {
++    throw invalid(field, value);
++  }
++  return value;
++}
++
++function toPosting(raw: Generated.Posting): Posting {
++  if (raw.kind !== "pending") {
++    return raw;
++  }
++  const { text, draft_note: draftNote, merge_request: mergeRequest, link } = raw;
++  return { kind: "pending", text, draftNote, mergeRequest, link };
++}
++
++function toMessage({ id, body, written, posting }: Generated.Message, field: string): Message {
++  return {
++    id: branded(id, isMessageId, `${field}.id`),
++    body,
++    written,
++    posting: toPosting(posting),
++  };
++}
++
++function toThread(raw: Generated.Thread, index: number): Thread {
++  const field = `threads[${index}]`;
++  return {
++    id: branded(raw.id, isThreadId, `${field}.id`),
++    file: branded(raw.file, isRangeFileId, `${field}.file`),
++    line: toThreadLine(raw.line, `${field}.line`),
++    messages: raw.messages.map((message, at) => toMessage(message, `${field}.messages[${at}]`)),
++    session: raw.session,
++  };
++}
++
++export function toThreadList(raw: Generated.ThreadList): ThreadList {
++  return { threads: raw.threads.map(toThread) };
++}
++
++export function toThreadAdded(raw: Generated.ThreadAdded): ThreadAdded {
++  return { thread: branded(raw.thread, isThreadId, "thread"), list: toThreadList(raw.list) };
++}
++
++function toMergeRequest({
++  reference,
++  title,
++  web_url: webUrl,
++}: Generated.MergeRequestRef): MergeRequestRef {
++  return { reference, title, webUrl };
++}
++
++function toLookedAt(raw: Generated.LookedAt): LookedAt {
++  return raw.kind === "branch" ? raw : { kind: "commit", shortId: raw.short_id };
++}
++
++function toNotLinedUp(raw: Generated.NotLinedUp): NotLinedUp {
++  switch (raw.kind) {
++    case "glabMissing":
++    case "notLoggedIn":
++    case "failed":
++      return raw;
++    case "noMergeRequest":
++      return { kind: "noMergeRequest", lookedAt: toLookedAt(raw.looked_at) };
++    case "several":
++      return { kind: "several", lookedAt: toLookedAt(raw.looked_at), references: raw.references };
++    case "moved":
++      return {
++        kind: "moved",
++        mergeRequest: toMergeRequest(raw.merge_request),
++        gitlabHead: raw.gitlab_head,
++        shownHead: raw.shown_head,
++      };
++    case "otherBase":
++      return {
++        kind: "otherBase",
++        mergeRequest: toMergeRequest(raw.merge_request),
++        gitlabBase: raw.gitlab_base,
++        shownBase: raw.shown_base,
++      };
++    case "preparing":
++      return { kind: "preparing", mergeRequest: toMergeRequest(raw.merge_request) };
++    default: {
++      const _exhaustive: never = raw;
++      return _exhaustive;
++    }
++  }
++}
++
++export function toGitLabCheck(raw: Generated.GitLabCheck): GitLabCheck {
++  return raw.kind === "linedUp"
++    ? { kind: "linedUp", mergeRequest: toMergeRequest(raw.merge_request) }
++    : { kind: "notLinedUp", why: toNotLinedUp(raw.why) };
++}
++
++export function toSendReply(raw: Generated.SendReply): SendReply {
++  switch (raw.kind) {
++    case "notLinedUp":
++      return { kind: "notLinedUp", why: toNotLinedUp(raw.why) };
++    case "sent":
++    case "stopped":
++      return { ...raw, list: toThreadList(raw.list) };
++    default: {
++      const _exhaustive: never = raw;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ipc/tauriRange.test.ts b/frontend/src/ipc/tauriRange.test.ts
+index a5ba08e..f778c13 100644
+--- a/frontend/src/ipc/tauriRange.test.ts
++++ b/frontend/src/ipc/tauriRange.test.ts
+@@ -7,6 +7,7 @@ import { createTauriRangeSource } from "./tauriRange";
+ const commands = vi.hoisted(() => ({
+   openRange: vi.fn(),
+   loadRangeFile: vi.fn(),
++  listThreads: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -105,3 +106,13 @@ test("a texts reply with a negative difference line is refused, naming the field
+     "differences[0].left.start must be a non-negative safe integer, got -1",
+   );
+ });
++
++test("the range source answers listThreads through the app's command", async () => {
++  commands.listThreads.mockResolvedValue({ status: "ok", data: { threads: [] } });
++
++  expect(await createTauriRangeSource().listThreads()).toEqual({
++    ok: true,
++    value: { threads: [] },
++  });
++  expect(commands.listThreads).toHaveBeenCalledOnce();
++});
+diff --git a/frontend/src/ipc/tauriRange.ts b/frontend/src/ipc/tauriRange.ts
+index 4325918..f4996d5 100644
+--- a/frontend/src/ipc/tauriRange.ts
++++ b/frontend/src/ipc/tauriRange.ts
+@@ -2,6 +2,7 @@ import { commands } from "./bindings";
+ import { toRangeFile, toRangeStart } from "./rangeDomain";
+ import type { RangeSource } from "./RangeSource";
+ import { createTauriSettings, toResult } from "./tauri";
++import { createTauriReview } from "./tauriReview";
+ 
+ export function createTauriRangeSource(): RangeSource {
+   return {
+@@ -12,6 +13,7 @@ export function createTauriRangeSource(): RangeSource {
+       const result = toResult(await commands.loadRangeFile(file));
+       return result.ok ? { ok: true, value: toRangeFile(result.value) } : result;
+     },
++    ...createTauriReview(),
+     ...createTauriSettings(),
+   };
+ }
+diff --git a/frontend/src/ipc/tauriReview.test.ts b/frontend/src/ipc/tauriReview.test.ts
+new file mode 100644
+index 0000000..ebbf073
+--- /dev/null
++++ b/frontend/src/ipc/tauriReview.test.ts
+@@ -0,0 +1,213 @@
++import { beforeEach, expect, test, vi } from "vitest";
++
++import type * as Generated from "./bindings";
++import {
++  isMessageId,
++  isRangeFileId,
++  isThreadId,
++  type MessageId,
++  type RangeFileId,
++  type ThreadId,
++} from "./domain";
++import { createTauriReview } from "./tauriReview";
++import { changedThreadLine } from "./threadLine";
++
++const commands = vi.hoisted(() => ({
++  listThreads: vi.fn(),
++  addThread: vi.fn(),
++  addNote: vi.fn(),
++  queueMessage: vi.fn(),
++  unqueueMessage: vi.fn(),
++  checkGitlab: vi.fn(),
++  sendQueue: vi.fn(),
++}));
++
++vi.mock("./bindings", () => ({ commands }));
++
++vi.mock("@tauri-apps/api/core", () => ({
++  Channel: class {
++    constructor(readonly onmessage: (message: unknown) => void) {}
++  },
++}));
++
++const PENDING_LIST: Generated.ThreadList = {
++  threads: [
++    {
++      id: 2,
++      file: 7,
++      line: { kind: "unchangedOnLeft", left: 5, right: 6 },
++      messages: [
++        {
++          id: 4,
++          body: { kind: "note", text: "Rename?" },
++          written: 1700,
++          posting: {
++            kind: "pending",
++            text: "Rename?",
++            draft_note: 88,
++            merge_request: "!12",
++            link: "l",
++          },
++        },
++      ],
++      session: "s",
++    },
++  ],
++};
++
++const CAMEL_LIST = {
++  threads: [
++    {
++      id: 2,
++      file: 7,
++      line: { kind: "unchangedOnLeft", left: 5, right: 6 },
++      messages: [
++        {
++          id: 4,
++          body: { kind: "note", text: "Rename?" },
++          written: 1700,
++          posting: {
++            kind: "pending",
++            text: "Rename?",
++            draftNote: 88,
++            mergeRequest: "!12",
++            link: "l",
++          },
++        },
++      ],
++      session: "s",
++    },
++  ],
++};
++
++const MERGE_REQUEST: Generated.MergeRequestRef = { reference: "!12", title: "T", web_url: "u" };
++
++function fileId(n: number): RangeFileId {
++  if (!isRangeFileId(n)) {
++    throw new Error(`${n} is no file id`);
++  }
++  return n;
++}
++
++function threadId(n: number): ThreadId {
++  if (!isThreadId(n)) {
++    throw new Error(`${n} is no thread id`);
++  }
++  return n;
++}
++
++function messageId(n: number): MessageId {
++  if (!isMessageId(n)) {
++    throw new Error(`${n} is no message id`);
++  }
++  return n;
++}
++
++function ok<T>(data: T): { status: "ok"; data: T } {
++  return { status: "ok", data };
++}
++
++beforeEach(() => {
++  vi.resetAllMocks();
++});
++
++test("each thread command passes its arguments and camelCases the list", async () => {
++  for (const command of [
++    commands.listThreads,
++    commands.addNote,
++    commands.queueMessage,
++    commands.unqueueMessage,
++  ]) {
++    command.mockResolvedValue(ok(PENDING_LIST));
++  }
++  const review = createTauriReview();
++
++  expect(await review.listThreads()).toEqual({ ok: true, value: CAMEL_LIST });
++  expect(await review.addNote(threadId(2), "More")).toEqual({ ok: true, value: CAMEL_LIST });
++  expect(await review.queueMessage(messageId(4), "Edited")).toEqual({
++    ok: true,
++    value: CAMEL_LIST,
++  });
++  expect(await review.unqueueMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
++  expect(commands.addNote).toHaveBeenCalledWith(2, "More");
++  expect(commands.queueMessage).toHaveBeenCalledWith(4, "Edited");
++  expect(commands.unqueueMessage).toHaveBeenCalledWith(4);
++});
++
++test("addThread sends the file, the line and the text, and brands the new id", async () => {
++  commands.addThread.mockResolvedValue(ok({ thread: 2, list: PENDING_LIST }));
++
++  const added = await createTauriReview().addThread(fileId(7), changedThreadLine("right", 3), "Hm");
++
++  expect(added).toEqual({ ok: true, value: { thread: 2, list: CAMEL_LIST } });
++  expect(commands.addThread).toHaveBeenCalledWith(7, { kind: "added", right: 3 }, "Hm");
++});
++
++test("checkGitLab camelCases the merge request", async () => {
++  commands.checkGitlab.mockResolvedValue(ok({ kind: "linedUp", merge_request: MERGE_REQUEST }));
++
++  expect(await createTauriReview().checkGitLab()).toEqual({
++    ok: true,
++    value: { kind: "linedUp", mergeRequest: { reference: "!12", title: "T", webUrl: "u" } },
++  });
++});
++
++test("sendQueue hands each progress from the channel to the callback and camelCases the reply", async () => {
++  const seen: unknown[] = [];
++  commands.sendQueue.mockImplementation(
++    async (channel: { onmessage: (progress: Generated.SendProgress) => void }) => {
++      channel.onmessage({ done: 1, of: 2 });
++      channel.onmessage({ done: 2, of: 2 });
++      return ok({ kind: "sent", list: PENDING_LIST, sent: 2, refused: 0 });
++    },
++  );
++
++  const reply = await createTauriReview().sendQueue((progress) => seen.push(progress));
++
++  expect(seen).toEqual([
++    { done: 1, of: 2 },
++    { done: 2, of: 2 },
++  ]);
++  expect(reply).toEqual({
++    ok: true,
++    value: { kind: "sent", list: CAMEL_LIST, sent: 2, refused: 0 },
++  });
++});
++
++test.each<[keyof typeof commands, Generated.IpcError]>([
++  ["listThreads", { kind: "WriteFailed", path: "/p/threads.json", message: "full" }],
++  ["addThread", { kind: "EmptyMessage" }],
++  ["addNote", { kind: "UnknownThread", thread: 9 }],
++  ["queueMessage", { kind: "MessagePending", message: 4 }],
++  ["unqueueMessage", { kind: "UnknownMessage", message: 5 }],
++  ["checkGitlab", { kind: "WorkerStopped" }],
++  ["sendQueue", { kind: "SendRunning" }],
++])("a %s failure comes back unchanged", async (name, failure) => {
++  commands[name].mockResolvedValue({ status: "error", error: failure });
++  const review = createTauriReview();
++  const calls = {
++    listThreads: () => review.listThreads(),
++    addThread: () => review.addThread(fileId(0), changedThreadLine("left", 0), "x"),
++    addNote: () => review.addNote(threadId(9), "x"),
++    queueMessage: () => review.queueMessage(messageId(4), "x"),
++    unqueueMessage: () => review.unqueueMessage(messageId(5)),
++    checkGitlab: () => review.checkGitLab(),
++    sendQueue: () => review.sendQueue(() => undefined),
++  };
++
++  expect(await calls[name]()).toEqual({ ok: false, failure });
++});
++
++test("a reply with a bad message id is refused, naming the field", async () => {
++  const [first] = PENDING_LIST.threads;
++  if (first === undefined) {
++    throw new Error("no thread");
++  }
++  commands.listThreads.mockResolvedValue(
++    ok({ threads: [{ ...first, messages: first.messages.map((each) => ({ ...each, id: -1 })) }] }),
++  );
++
++  await expect(createTauriReview().listThreads()).rejects.toThrow(
++    "threads[0].messages[0].id must be a non-negative safe integer, got -1",
++  );
++});
+diff --git a/frontend/src/ipc/tauriReview.ts b/frontend/src/ipc/tauriReview.ts
+new file mode 100644
+index 0000000..314626c
+--- /dev/null
++++ b/frontend/src/ipc/tauriReview.ts
+@@ -0,0 +1,40 @@
++import { Channel } from "@tauri-apps/api/core";
++
++import { commands, type SendProgress } from "./bindings";
++import type { SourceResult } from "./domain";
++import { toGitLabCheck, toSendReply, toThreadAdded, toThreadList } from "./reviewDomain";
++import type { ReviewSource } from "./ReviewSource";
++import { toResult } from "./tauri";
++import { fromThreadLine } from "./threadLine";
++
++function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
++  return result.ok ? { ok: true, value: to(result.value) } : result;
++}
++
++export function createTauriReview(): ReviewSource {
++  return {
++    async listThreads() {
++      return converted(toResult(await commands.listThreads()), toThreadList);
++    },
++    async addThread(file, line, text) {
++      const reply = await commands.addThread(file, fromThreadLine(line), text);
++      return converted(toResult(reply), toThreadAdded);
++    },
++    async addNote(thread, text) {
++      return converted(toResult(await commands.addNote(thread, text)), toThreadList);
++    },
++    async queueMessage(message, text) {
++      return converted(toResult(await commands.queueMessage(message, text)), toThreadList);
++    },
++    async unqueueMessage(message) {
++      return converted(toResult(await commands.unqueueMessage(message)), toThreadList);
++    },
++    async checkGitLab() {
++      return converted(toResult(await commands.checkGitlab()), toGitLabCheck);
++    },
++    async sendQueue(onProgress) {
++      const progress = new Channel<SendProgress>(onProgress);
++      return converted(toResult(await commands.sendQueue(progress)), toSendReply);
++    },
++  };
++}
+diff --git a/frontend/src/ipc/threadLine.ts b/frontend/src/ipc/threadLine.ts
+index 02e666e..1c58b01 100644
+--- a/frontend/src/ipc/threadLine.ts
++++ b/frontend/src/ipc/threadLine.ts
+@@ -1,3 +1,4 @@
++import type * as Generated from "./bindings";
+ import type { Column } from "./compareDomain";
+ import { isLeftLine, isRightLine, type LeftLine, type RightLine } from "./domain";
+ import { invalid } from "./validate";
+@@ -27,33 +28,57 @@ export function shownColumn(line: ThreadLine): Column {
+   return shownLine(line).column;
+ }
+ 
+-function leftLine(n: number): LeftLine {
++function leftLine(n: number, field: string): LeftLine {
+   if (!isLeftLine(n)) {
+-    throw invalid("left line", n);
++    throw invalid(field, n);
+   }
+   return n;
+ }
+ 
+-function rightLine(n: number): RightLine {
++function rightLine(n: number, field: string): RightLine {
+   if (!isRightLine(n)) {
+-    throw invalid("right line", n);
++    throw invalid(field, n);
+   }
+   return n;
+ }
+ 
+ export function changedThreadLine(column: Column, line: number): ThreadLine {
+   return column === "left"
+-    ? { kind: "removed", left: leftLine(line) }
+-    : { kind: "added", right: rightLine(line) };
++    ? { kind: "removed", left: leftLine(line, "left line") }
++    : { kind: "added", right: rightLine(line, "right line") };
+ }
+ 
+ export function unchangedThreadLine(
+   column: Column,
+   lines: { readonly left: number; readonly right: number },
+ ): ThreadLine {
+-  const left = leftLine(lines.left);
+-  const right = rightLine(lines.right);
++  const left = leftLine(lines.left, "left line");
++  const right = rightLine(lines.right, "right line");
+   return column === "left"
+     ? { kind: "unchangedOnLeft", left, right }
+     : { kind: "unchangedOnRight", left, right };
+ }
++
++export function toThreadLine(raw: Generated.ThreadLine, field = "line"): ThreadLine {
++  switch (raw.kind) {
++    case "removed":
++      return { kind: "removed", left: leftLine(raw.left, `${field}.left`) };
++    case "added":
++      return { kind: "added", right: rightLine(raw.right, `${field}.right`) };
++    case "unchangedOnLeft":
++    case "unchangedOnRight":
++      return {
++        kind: raw.kind,
++        left: leftLine(raw.left, `${field}.left`),
++        right: rightLine(raw.right, `${field}.right`),
++      };
++    default: {
++      const _exhaustive: never = raw;
++      return _exhaustive;
++    }
++  }
++}
++
++export function fromThreadLine(line: ThreadLine): Generated.ThreadLine {
++  return line;
++}
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index bc3bd3f..c4f633d 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -203,6 +203,26 @@ test("a stopped worker says to try again", () => {
+   );
+ });
+ 
++test.each<[ProblemCause, string]>([
++  [{ kind: "UnknownThread", thread: 4 }, "that thread is not on a file of this range."],
++  [{ kind: "UnknownMessage", message: 9 }, "that message is not on a file of this range."],
++  [{ kind: "EmptyMessage" }, "the message is empty."],
++  [{ kind: "MessagePending", message: 9 }, "that message is already pending on GitLab."],
++  [{ kind: "SendRunning" }, "a send to GitLab is still running; try again when it is done."],
++  [{ kind: "AiOff" }, "the AI is off; start yamt with --ai to use it."],
++])("the review failure %o has its fixed reason", (cause, reason) => {
++  expect(text({ action: "openRange", cause })).toBe(`Could not open the range: ${reason}`);
++});
++
++test("a failed removal names the folder and the system's message", () => {
++  expect(
++    text({
++      action: "openRange",
++      cause: { kind: "RemoveFailed", folder: "/d/pair/checkout", message: "busy\n" },
++    }),
++  ).toBe("Could not open the range: removing /d/pair/checkout failed: busy");
++});
++
+ test.each([
+   [{ action: "tabs" }, "Could not update the tabs: boom"],
+   [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 2e554d3..333e636 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -8,6 +8,21 @@ type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
+ 
+ type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+ 
++type Cause = CausedProblem["cause"];
++
++type FixedKind =
++  | "NoConfigFolder"
++  | "MergeAborted"
++  | "UnknownTab"
++  | "UnknownRangeFile"
++  | "WorkerStopped"
++  | "UnknownThread"
++  | "UnknownMessage"
++  | "EmptyMessage"
++  | "MessagePending"
++  | "SendRunning"
++  | "AiOff";
++
+ const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
+ 
+ const OPERATION_STATE_WORDS: Readonly<
+@@ -19,17 +34,18 @@ const OPERATION_STATE_WORDS: Readonly<
+   NoOperation: "Git has no operation to continue or abort.",
+ };
+ 
+-const FIXED_REASONS: Readonly<
+-  Record<
+-    "NoConfigFolder" | "MergeAborted" | "UnknownTab" | "UnknownRangeFile" | "WorkerStopped",
+-    string
+-  >
+-> = {
++const FIXED_REASONS: Readonly<Record<FixedKind, string>> = {
+   NoConfigFolder: "this system has no config folder to keep it in.",
+   MergeAborted: "the merge was aborted.",
+   UnknownTab: "that tab was closed.",
+   UnknownRangeFile: "that file is not part of this range.",
+   WorkerStopped: "yamt's worker stopped; try again.",
++  UnknownThread: "that thread is not on a file of this range.",
++  UnknownMessage: "that message is not on a file of this range.",
++  EmptyMessage: "the message is empty.",
++  MessagePending: "that message is already pending on GitLab.",
++  SendRunning: "a send to GitLab is still running; try again when it is done.",
++  AiOff: "the AI is off; start yamt with --ai to use it.",
+ };
+ 
+ function attempted(problem: CausedProblem): string {
+@@ -117,8 +133,15 @@ function keyProblemText(path: string, problem: KeyProblem, platform: string): st
+   }
+ }
+ 
++function hasFixedReason(cause: Cause): cause is Extract<Cause, { kind: FixedKind }> {
++  return Object.hasOwn(FIXED_REASONS, cause.kind);
++}
++
+ function causedText(problem: CausedProblem, platform: string): string {
+   const { cause } = problem;
++  if (hasFixedReason(cause)) {
++    return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
++  }
+   switch (cause.kind) {
+     case "Git":
+     case "Unexpected":
+@@ -137,12 +160,8 @@ function causedText(problem: CausedProblem, platform: string): string {
+       return brokenText(cause.path, cause.message);
+     case "NotAbsolute":
+       return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
+-    case "NoConfigFolder":
+-    case "MergeAborted":
+-    case "UnknownTab":
+-    case "UnknownRangeFile":
+-    case "WorkerStopped":
+-      return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
++    case "RemoveFailed":
++      return `${attempted(problem)}: removing ${cause.folder} failed: ${cause.message.trim()}`;
+     case "StopMovedOn":
+     case "GitRunning":
+     case "MergeFinished":
+diff --git a/frontend/src/ui/settings.ts b/frontend/src/ui/settings.ts
+index 3ea6126..0030551 100644
+--- a/frontend/src/ui/settings.ts
++++ b/frontend/src/ui/settings.ts
+@@ -6,6 +6,7 @@ import {
+   KEY_ACTIONS,
+   keyText,
+   type AddedServer,
++  type AgentSettings,
+   type Antialiasing,
+   type Key,
+   type KeyAction,
+@@ -24,8 +25,6 @@ import { isDefault, planKeyEdit, type KeyEdit } from "./keymapEdit";
+ import { attempt, logProblem, report, type Problem } from "./problem";
+ import type { Preferences } from "./useMergeController";
+ 
+-type AgentSettings = StoredSettings["agent"];
+-
+ export type SettingsInUse = {
+   readonly read: SettingsRead | null;
+   readonly theme: Theme;
+diff --git a/scripts/map-check.sh b/scripts/map-check.sh
+index c6ec52f..deac176 100755
+--- a/scripts/map-check.sh
++++ b/scripts/map-check.sh
+@@ -28,7 +28,7 @@ while IFS= read -r command; do
+ done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
+ 
+ # Every window data-source method must be named in architecture (the merge, compare and range windows').
+-for source in ChunkSource CompareSource RangeSource; do
++for source in ChunkSource CompareSource RangeSource ReviewSource; do
+     while IFS= read -r method; do
+         grep -qw -- "$method" "$ARCH" || missing+=("$source.$method (not in $ARCH)")
+     done < <(sed -n 's/^  \([a-zA-Z]*\)(.*/\1/p' "frontend/src/ipc/$source.ts")
+-- 
+2.56.0
+

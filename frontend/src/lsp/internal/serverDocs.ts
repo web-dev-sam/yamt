@@ -1,4 +1,4 @@
-import type { Connection } from "./connection";
+import type { Connection } from "../../jsonrpc";
 import type { DocEntry, Sent } from "./documents";
 import { languageId } from "./languageIds";
 import { DocProblems } from "./problems";

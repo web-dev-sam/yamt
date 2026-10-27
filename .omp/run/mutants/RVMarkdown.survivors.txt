@@ -1,0 +1,58 @@
+just mutants 516810c (covers ae46983 RVMarkdown) — Stryker; editor/ not mutated
+All files         |  78.75 |   83.77 |      286 |         3 |         56 |       22 |        0 |
+  fences.ts       |  81.87 |   83.77 |      286 |         3 |         56 |        8 |        0 |
+   useMarkdown.ts |   0.00 |    0.00 |        0 |         0 |          0 |       14 |        0 |
+Survived/NoCoverage by line:
+      1 scripts/fences.ts:111
+      1 scripts/fences.ts:121
+      1 scripts/fences.ts:124
+      1 scripts/fences.ts:131
+      2 scripts/fences.ts:133
+      2 scripts/fences.ts:134
+      2 scripts/fences.ts:144
+      4 scripts/fences.ts:148
+      2 scripts/fences.ts:149
+      2 scripts/fences.ts:150
+      2 scripts/fences.ts:154
+      1 scripts/fences.ts:170
+      1 scripts/fences.ts:178
+      1 scripts/fences.ts:187
+      1 scripts/fences.ts:204
+      2 scripts/fences.ts:216
+     10 scripts/fences.ts:217
+      1 scripts/fences.ts:222
+      1 scripts/fences.ts:227
+      1 scripts/fences.ts:229
+      5 scripts/fences.ts:230
+      1 scripts/fences.ts:231
+      2 scripts/fences.ts:238
+      1 scripts/fences.ts:250
+      1 scripts/fences.ts:253
+      1 scripts/fences.ts:266
+      1 scripts/fences.ts:269
+      2 scripts/fences.ts:48
+      1 scripts/fences.ts:51
+      1 scripts/fences.ts:53
+      1 scripts/fences.ts:65
+      1 scripts/fences.ts:69
+      1 scripts/fences.ts:71
+      1 scripts/fences.ts:74
+      1 scripts/fences.ts:76
+      1 scripts/fences.ts:80
+      1 scripts/fences.ts:85
+      1 scripts/fences.ts:95
+      1 scripts/fences.ts:99
+      1 src/ui/useMarkdown.ts:13
+      1 src/ui/useMarkdown.ts:14
+      3 src/ui/useMarkdown.ts:15
+      1 src/ui/useMarkdown.ts:16
+      3 src/ui/useMarkdown.ts:18
+      1 src/ui/useMarkdown.ts:20
+      1 src/ui/useMarkdown.ts:21
+      1 src/ui/useMarkdown.ts:24
+      1 src/ui/useMarkdown.ts:25
+      1 src/ui/useMarkdown.ts:8
+changed hunks in fences.ts:
+@@ -42,0 +43,3 @@ const MERGE_ROOT_FILES: Record<string, true> = {
+@@ -125,0 +129,46 @@ function compareFinding(file: string, target: string): Finding | undefined {
+@@ -224 +273,4 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio

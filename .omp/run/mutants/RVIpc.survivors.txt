@@ -1,0 +1,62 @@
+just mutants b253096 (covers 516810c RVIpc) — Stryker
+All files         |  77.36 |   80.78 |      311 |         0 |         74 |       17 |        0 |
+  domain.ts       |  95.74 |   97.83 |       90 |         0 |          2 |        2 |        0 |
+  fixtureRange.ts |  44.35 |   44.35 |       51 |         0 |         64 |        0 |        0 |
+  index.ts        |   0.00 |    0.00 |        0 |         0 |          4 |        1 |        0 |
+  rangeDomain.ts  | 100.00 |  100.00 |       26 |         0 |          0 |        0 |        0 |
+  tauriRange.ts   |   0.00 |    0.00 |        0 |         0 |          0 |        8 |        0 |
+  problemText.ts  |  93.51 |   97.30 |      144 |         0 |          4 |        6 |        0 |
+
+Survived/NoCoverage by line:
+      2 src/ipc/domain.ts:176
+      1 src/ipc/domain.ts:177
+      1 src/ipc/domain.ts:259
+      1 src/ipc/fixtureRange.ts:117
+      1 src/ipc/fixtureRange.ts:25
+      1 src/ipc/fixtureRange.ts:27
+      5 src/ipc/fixtureRange.ts:29
+      1 src/ipc/fixtureRange.ts:31
+      2 src/ipc/fixtureRange.ts:32
+      2 src/ipc/fixtureRange.ts:33
+      2 src/ipc/fixtureRange.ts:34
+      1 src/ipc/fixtureRange.ts:40
+      2 src/ipc/fixtureRange.ts:43
+      2 src/ipc/fixtureRange.ts:44
+      2 src/ipc/fixtureRange.ts:45
+      2 src/ipc/fixtureRange.ts:46
+      2 src/ipc/fixtureRange.ts:47
+      2 src/ipc/fixtureRange.ts:49
+      2 src/ipc/fixtureRange.ts:50
+      2 src/ipc/fixtureRange.ts:51
+      1 src/ipc/fixtureRange.ts:55
+      1 src/ipc/fixtureRange.ts:58
+      2 src/ipc/fixtureRange.ts:61
+      1 src/ipc/fixtureRange.ts:62
+      1 src/ipc/fixtureRange.ts:63
+      2 src/ipc/fixtureRange.ts:67
+      2 src/ipc/fixtureRange.ts:68
+      2 src/ipc/fixtureRange.ts:69
+      2 src/ipc/fixtureRange.ts:72
+      2 src/ipc/fixtureRange.ts:73
+      6 src/ipc/fixtureRange.ts:74
+      2 src/ipc/fixtureRange.ts:75
+      2 src/ipc/fixtureRange.ts:76
+      1 src/ipc/fixtureRange.ts:77
+      1 src/ipc/fixtureRange.ts:78
+      1 src/ipc/fixtureRange.ts:84
+      1 src/ipc/fixtureRange.ts:85
+      2 src/ipc/fixtureRange.ts:97
+      4 src/ipc/index.ts:104
+      1 src/ipc/index.ts:108
+      1 src/ipc/tauriRange.ts:11
+      2 src/ipc/tauriRange.ts:13
+      1 src/ipc/tauriRange.ts:6
+      1 src/ipc/tauriRange.ts:7
+      1 src/ipc/tauriRange.ts:8
+      2 src/ipc/tauriRange.ts:9
+      2 src/ui/problemText.ts:111
+      1 src/ui/problemText.ts:129
+      2 src/ui/problemText.ts:63
+      2 src/ui/problemText.ts:86
+      1 src/ui/problemText.ts:95
+      2 src/ui/problemText.ts:96

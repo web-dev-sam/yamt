@@ -1,0 +1,2727 @@
+From 94f50625167565729932567ff2141d7a999ef8be Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 14:03:29 +0200
+Subject: [PATCH] feat(review): check that GitLab's merge request lines up and
+ send the queue as draft notes through glab
+
+---
+ .omp/run/notes/RVGitlab.md                    |  88 +++
+ Cargo.lock                                    |   1 +
+ crates/review/Cargo.toml                      |   1 +
+ crates/review/src/gitlab.rs                   | 381 +++++++++++++
+ crates/review/src/lib.rs                      | 144 +++++
+ crates/review/src/lines_up.rs                 | 305 ++++++++++
+ crates/review/src/position.rs                 | 237 ++++++++
+ crates/review/src/right_branch.rs             |  68 +++
+ crates/review/src/send.rs                     | 398 +++++++++++++
+ crates/review/src/thread_store.rs             |   3 -
+ crates/review/tests/review.rs                 | 532 ++++++++++++++++++
+ tests/glab/commit-route/merge-request.json    |   1 +
+ tests/glab/commit-route/merge-requests.json   |   1 +
+ tests/glab/drafted/draft-notes.json           |   1 +
+ tests/glab/drafted/merge-request.json         |   1 +
+ tests/glab/drafted/merge-requests.json        |   1 +
+ tests/glab/drafted/post-1.json                |   1 +
+ tests/glab/drafted/post-2.json                |   1 +
+ tests/glab/lined-up/draft-notes.json          |   1 +
+ tests/glab/lined-up/merge-request.json        |   1 +
+ tests/glab/lined-up/merge-requests.json       |   1 +
+ tests/glab/lined-up/post-1.json               |   1 +
+ tests/glab/lined-up/post-2.json               |   1 +
+ tests/glab/lined-up/post-3.json               |   1 +
+ tests/glab/logged-out/auth-status.exit        |   1 +
+ tests/glab/logged-out/auth-status.out         |  11 +
+ tests/glab/moved/merge-request.json           |   1 +
+ tests/glab/moved/merge-requests.json          |   1 +
+ .../glab/no-merge-request/merge-requests.json |   1 +
+ tests/glab/other-base/merge-request.json      |   1 +
+ tests/glab/other-base/merge-requests.json     |   1 +
+ tests/glab/preparing/merge-request.json       |   1 +
+ tests/glab/preparing/merge-requests.json      |   1 +
+ tests/glab/refusal/draft-notes.json           |   1 +
+ tests/glab/refusal/merge-request.json         |   1 +
+ tests/glab/refusal/merge-requests.json        |   1 +
+ tests/glab/refusal/post-1.json                |   1 +
+ tests/glab/refusal/post-2.err                 |   1 +
+ tests/glab/refusal/post-2.json                |   1 +
+ tests/glab/refusal/post-2.status              |   1 +
+ tests/glab/refusal/post-3.json                |   1 +
+ tests/glab/several/merge-request-14.json      |   1 +
+ tests/glab/several/merge-request.json         |   1 +
+ tests/glab/several/merge-requests.json        |   1 +
+ tests/glab/timeout/draft-notes.json           |   1 +
+ tests/glab/timeout/merge-request.json         |   1 +
+ tests/glab/timeout/merge-requests.json        |   1 +
+ tests/glab/timeout/post-1.json                |   1 +
+ tests/glab/timeout/post-2.json                |   1 +
+ tests/glab/timeout/post-2.sleep               |   1 +
+ tests/glab/timeout/post-3.json                |   1 +
+ tests/glab/two-dots/merge-request.json        |   1 +
+ tests/glab/two-dots/merge-requests.json       |   1 +
+ 53 files changed, 2207 insertions(+), 3 deletions(-)
+ create mode 100644 .omp/run/notes/RVGitlab.md
+ create mode 100644 crates/review/src/gitlab.rs
+ create mode 100644 crates/review/src/lines_up.rs
+ create mode 100644 crates/review/src/position.rs
+ create mode 100644 crates/review/src/right_branch.rs
+ create mode 100644 crates/review/src/send.rs
+ create mode 100644 crates/review/tests/review.rs
+ create mode 100644 tests/glab/commit-route/merge-request.json
+ create mode 100644 tests/glab/commit-route/merge-requests.json
+ create mode 100644 tests/glab/drafted/draft-notes.json
+ create mode 100644 tests/glab/drafted/merge-request.json
+ create mode 100644 tests/glab/drafted/merge-requests.json
+ create mode 100644 tests/glab/drafted/post-1.json
+ create mode 100644 tests/glab/drafted/post-2.json
+ create mode 100644 tests/glab/lined-up/draft-notes.json
+ create mode 100644 tests/glab/lined-up/merge-request.json
+ create mode 100644 tests/glab/lined-up/merge-requests.json
+ create mode 100644 tests/glab/lined-up/post-1.json
+ create mode 100644 tests/glab/lined-up/post-2.json
+ create mode 100644 tests/glab/lined-up/post-3.json
+ create mode 100644 tests/glab/logged-out/auth-status.exit
+ create mode 100644 tests/glab/logged-out/auth-status.out
+ create mode 100644 tests/glab/moved/merge-request.json
+ create mode 100644 tests/glab/moved/merge-requests.json
+ create mode 100644 tests/glab/no-merge-request/merge-requests.json
+ create mode 100644 tests/glab/other-base/merge-request.json
+ create mode 100644 tests/glab/other-base/merge-requests.json
+ create mode 100644 tests/glab/preparing/merge-request.json
+ create mode 100644 tests/glab/preparing/merge-requests.json
+ create mode 100644 tests/glab/refusal/draft-notes.json
+ create mode 100644 tests/glab/refusal/merge-request.json
+ create mode 100644 tests/glab/refusal/merge-requests.json
+ create mode 100644 tests/glab/refusal/post-1.json
+ create mode 100644 tests/glab/refusal/post-2.err
+ create mode 100644 tests/glab/refusal/post-2.json
+ create mode 100644 tests/glab/refusal/post-2.status
+ create mode 100644 tests/glab/refusal/post-3.json
+ create mode 100644 tests/glab/several/merge-request-14.json
+ create mode 100644 tests/glab/several/merge-request.json
+ create mode 100644 tests/glab/several/merge-requests.json
+ create mode 100644 tests/glab/timeout/draft-notes.json
+ create mode 100644 tests/glab/timeout/merge-request.json
+ create mode 100644 tests/glab/timeout/merge-requests.json
+ create mode 100644 tests/glab/timeout/post-1.json
+ create mode 100644 tests/glab/timeout/post-2.json
+ create mode 100644 tests/glab/timeout/post-2.sleep
+ create mode 100644 tests/glab/timeout/post-3.json
+ create mode 100644 tests/glab/two-dots/merge-request.json
+ create mode 100644 tests/glab/two-dots/merge-requests.json
+
+diff --git a/.omp/run/notes/RVGitlab.md b/.omp/run/notes/RVGitlab.md
+new file mode 100644
+index 0000000..9c96e4c
+--- /dev/null
++++ b/.omp/run/notes/RVGitlab.md
+@@ -0,0 +1,88 @@
++I've built the GitLab side of the review: `check_gitlab` and `send_queue` (row 16), plus the twelve recorded scenarios. All four acceptance commands pass, and cargo-mutants caught every viable mutant in my files.
++
++## summary
++- **`check_gitlab`** goes through `glab auth status`, then the right side's branch (or, when the side is a commit id, the merge requests of that commit), up to `MAX_MERGE_REQUESTS_CHECKED = 5` candidates and each one's `diff_refs`. The rule is the pure `lines_up`: base equals the left commit and head equals the right one; `start_sha` is not compared.
++- **`send_queue`** checks again first, then takes a snapshot of the queue under the lock and lists the existing drafts. It then works through the messages in thread order: a message that matches a draft is recorded as pending without posting again; anything else is posted with the three commits and the position.
++  - A 2xx becomes `Pending { link: <web_url>/diffs }`.
++  - Any other 4xx becomes `Refused` with GitLab's message, and the send continues.
++  - A timeout, 401/403/429, 5xx, glab missing or output with no HTTP status stops the send as `Stopped`.
++  - After each message it locks the store, writes the result and reports progress. The lock is never held across a glab call.
++- **New modules:** `right_branch.rs`, `gitlab.rs` (GitLab's JSON read with `serde_json`; an unexpected shape becomes `Failed` naming the field, e.g. `references.short`), `lines_up.rs`, `position.rs` (1-based lines, both paths, `same_draft`) and `send.rs`. The IPC types from the contract are in `lib.rs`.
++- **Scenarios** in `tests/glab/` use the real commit ids of `scripts/range-repo.sh`, whose names and dates are fixed: merge base `531ea52…`, `feature` `9c1ba3f…`, `main` `4378055…`. The same folders therefore work for the Rust tests and for an app session on the range repository.
++
++## files_changed
++- `crates/review/Cargo.toml` (adds `yamt-gitio`)
++- `crates/review/src/lib.rs`, `crates/review/src/thread_store.rs` (only the three `expect(dead_code)` lines removed, as you allowed)
++- New: `crates/review/src/{right_branch,gitlab,lines_up,position,send}.rs`, `crates/review/tests/review.rs`
++- New: `tests/glab/{lined-up,two-dots,moved,other-base,several,preparing,no-merge-request,commit-route,logged-out,refusal,timeout,drafted}/*`
++- `Cargo.lock` (changed by cargo for the new dependency)
++
++## tests_added
++**`lines_up.rs`** (over the recorded JSON):
++- `three_dots_lines_up_when_base_and_head_are_the_two_commits`: lines up, including `start_sha`; with `main` as the left side it is `OtherBase`.
++- `two_dots_lines_up_only_when_the_left_is_the_merge_base`: the merge base lines up; `main` gives `OtherBase` 531ea52 / 4378055.
++- `a_moved_head_names_both_short_ids`: d1e2f3a / 9c1ba3f.
++- `another_base_names_both_short_ids`: 5f9d381 / 531ea52.
++- `no_open_merge_request_from_the_branch`
++- `several_open_merge_requests_take_the_one_that_lines_up`: picks !14; with none lining up it is `Several` ["!12", "!14"].
++- `a_commit_id_side_uses_the_merge_request_ending_at_it`: drops the merged !9 and !11, which ends elsewhere.
++- `null_diff_refs_is_preparing`
++- `at_most_five_merge_requests_are_checked`
++
++**`gitlab.rs`:**
++- `unexpected_json_is_failed_naming_the_field`: `project_id`, `references.short`, `diff_refs.head_sha`, `sha`, `id`, not-JSON, not-a-list.
++- Plus drafts read across `--paginate` pages, GitLab's `message`/`error` words, and the endpoint argv.
++
++**`position.rs`:**
++- `removed_added_and_unchanged_give_one_based_old_and_new_lines`
++- `renamed_added_and_deleted_files_give_both_paths`: also the not-UTF-8 refusal.
++- A body test showing the missing side's line is left out.
++- `same_draft` is checked field by field.
++
++**`send.rs` and `right_branch.rs`:** how each post result is sorted (refused, drafted, stopped), glab's last stderr line, the exit wording, `--include` parsing, and choosing the longest matching remote.
++
++**`tests/review.rs`** (`#[cfg(unix)]`; runs `scripts/range-repo.sh` and the fake through a symlink beside its `glab.env`):
++- `sending_posts_in_thread_order_and_records_pending_with_the_link`
++- `the_post_body_names_the_three_commits_and_the_position`
++- `a_refused_message_keeps_its_reason_and_stays_queued_while_the_others_are_sent`
++- `a_timeout_stops_the_send_and_leaves_the_rest_queued`
++- `a_message_already_among_the_drafts_is_recorded_without_posting_again`
++- `send_rechecks_and_posts_nothing_when_the_merge_request_moved`
++- `glab_missing_and_logged_out_are_their_reasons`
++- Extra: `a_branch_side_asks_for_the_branch_s_open_merge_requests` (a local and a remote-tracking side, exact argv, cwd), `a_commit_id_side_asks_for_the_commit_s_merge_requests`, `several_and_none_name_what_was_looked_at`
++
++## smoke_evidence
++- `cargo fmt --check`: no output.
++- `cargo clippy --workspace --all-targets -- -D warnings`: `Finished`, no warnings.
++- `cargo test -p yamt-review`:
++  - lib: `ok. 31 passed`
++  - review: `ok. 10 passed; … finished in 2.60s`
++  - threads: `ok. 15 passed`
++- `just arch-check`: `arch-check: ok`
++- `cargo mutants -p yamt-review -f …` on all five new files:
++  - first run: `133 mutants tested: 8 missed, 94 caught, 31 unviable`
++  - I added tests and rewrote `branch_after_remote`; the rerun on `send.rs`, `right_branch.rs` and `gitlab.rs` gave `102 mutants tested in 2m: 78 caught, 24 unviable`.
++
++## deviations_from_brief
++- **Edits outside my list:** `thread_store.rs` — the three `expect(dead_code)` lines removed, with your permission. `Cargo.lock` changed through cargo.
++- **The fake is passed as `Some(&Glab::at(link))`, not put on a temp PATH.** The contract takes `Option<&Glab>`, so this is simpler.
++- **Tests build their repository with `scripts/range-repo.sh`** (bash, about 0.4 s each) rather than `yamt-conflict-repo`. This keeps the commit ids fixed, so the recorded JSON holds real ids.
++- **Test placement:** `unexpected_json_is_failed_naming_the_field` is in `gitlab.rs`, where the reading happens, not in `lines_up.rs`. `candidates()`, the commit-route filter, is in `lines_up.rs`.
++- **Decisions the brief left open:**
++  - Short ids are 7 characters (`SHORT_ID_CHARS`).
++  - A draft that matches is counted in `sent` and in progress; each draft is used once.
++  - A draft whose position cannot be read matches no message instead of failing the send.
++  - A path containing U+FFFD is refused with "the path is not UTF-8" without posting (design point 1). It is detected through the lossy path.
++  - Stop reasons read "glab timed out" and "glab printed no HTTP answer". Otherwise the reason is glab's last stderr line, or "glab exited with status N".
++  - `send_queue` returns `UnknownFile` if a queued file has no entry. That cannot happen.
++- **For you to add to `tests/glab/README.md`** (not mine):
++  - The twelve scenarios, and that they use `range-repo.sh`'s commit ids.
++  - `several/merge-request-14.json` is read only by the unit test. The fake serves `merge-request.json` for every iid, so an app session on `several` shows `Several` ["!12", "!12"].
++  - `refusal/post-2.err` is my imitation of glab's `glab: <message> (HTTP 400)` line, because the fake's sed cut a message containing quotes. It was not measured.
++- **Docs not updated (not mine):** the project map, `docs/architecture.md` and `crates/review/AGENTS.md` need the new modules, `check_gitlab`/`send_queue` and the scenarios.
++
++## open_risks
++- `crates/review/src/gitlab.rs:184` (`draft_notes_from`): I assumed `glab api --paginate` prints one JSON array per page; a single array also parses. Not measured.
++- `crates/review/src/send.rs:187` (`posted`): a 3xx or 1xx stops the send. HTTP/1.1 `100 Continue` blocks are not skipped.
++- `crates/review/tests/review.rs`: the timeout test leaves a `sleep 25` running behind it after glab is killed. It holds no lock or file.
++- `crates/review/src/lines_up.rs:85` (`short_id`): 7 characters, while the window header uses git's own `%h` length, which can be longer in a large repository.
+\ No newline at end of file
+diff --git a/Cargo.lock b/Cargo.lock
+index f97ac7d..ed43ad5 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4713,6 +4713,7 @@ dependencies = [
+  "tempfile",
+  "thiserror 2.0.21",
+  "yamt-conflict-repo",
++ "yamt-gitio",
+  "yamt-merge-core",
+  "yamt-range",
+ ]
+diff --git a/crates/review/Cargo.toml b/crates/review/Cargo.toml
+index 3027c7b..699a3f4 100644
+--- a/crates/review/Cargo.toml
++++ b/crates/review/Cargo.toml
+@@ -7,6 +7,7 @@ license.workspace = true
+ 
+ [dependencies]
+ yamt-range.workspace = true
++yamt-gitio.workspace = true
+ yamt-merge-core.workspace = true
+ serde.workspace = true
+ serde_json.workspace = true
+diff --git a/crates/review/src/gitlab.rs b/crates/review/src/gitlab.rs
+new file mode 100644
+index 0000000..5ca7299
+--- /dev/null
++++ b/crates/review/src/gitlab.rs
+@@ -0,0 +1,381 @@
++use serde_json::Value;
++
++use crate::MergeRequestRef;
++
++const OPENED: &str = "opened";
++
++/// One merge request of a list: enough to ask for its details.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct Listed {
++    pub(crate) project_id: u64,
++    pub(crate) iid: u64,
++    pub(crate) is_open: bool,
++    pub(crate) head: String,
++}
++
++/// One merge request's details: what it is called and which commits its diff compares.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct MergeRequest {
++    pub(crate) project_id: u64,
++    pub(crate) iid: u64,
++    pub(crate) named: MergeRequestRef,
++    /// `None` while GitLab still prepares the diff.
++    pub(crate) diff_refs: Option<DiffRefs>,
++}
++
++/// The three commits of a merge request's diff, as GitLab names them in a position.
++#[derive(Clone, Debug, PartialEq, Eq)]
++#[expect(
++    clippy::struct_field_names,
++    reason = "GitLab's own names, written as it writes them"
++)]
++pub(crate) struct DiffRefs {
++    pub(crate) base_sha: String,
++    pub(crate) start_sha: String,
++    pub(crate) head_sha: String,
++}
++
++/// Where a comment sits in a merge request's diff; GitLab's lines are 1-based.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct LinePlace {
++    pub(crate) old_path: String,
++    pub(crate) new_path: String,
++    pub(crate) old_line: Option<u32>,
++    pub(crate) new_line: Option<u32>,
++}
++
++/// One of the user's draft notes on the merge request.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct DraftNote {
++    pub(crate) id: u64,
++    pub(crate) note: String,
++    /// `None` for a draft on no line.
++    pub(crate) placed: Option<PlacedDraft>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct PlacedDraft {
++    pub(crate) head_sha: String,
++    pub(crate) place: LinePlace,
++}
++
++pub(crate) fn merge_requests_from_branch(branch: &str) -> Vec<String> {
++    owned(&[
++        "api",
++        "--method",
++        "GET",
++        "projects/:fullpath/merge_requests",
++        "-f",
++        "state=opened",
++        "-f",
++        &format!("source_branch={branch}"),
++    ])
++}
++
++pub(crate) fn merge_requests_of_commit(commit: &str) -> Vec<String> {
++    owned(&[
++        "api",
++        &format!("projects/:fullpath/repository/commits/{commit}/merge_requests"),
++    ])
++}
++
++pub(crate) fn merge_request_details(listed: &Listed) -> Vec<String> {
++    let endpoint = merge_request_endpoint(listed.project_id, listed.iid);
++    owned(&["api", &endpoint])
++}
++
++pub(crate) fn draft_notes(request: &MergeRequest) -> Vec<String> {
++    let endpoint = draft_notes_endpoint(request);
++    owned(&["api", "--paginate", &endpoint])
++}
++
++pub(crate) fn post_draft_note(request: &MergeRequest) -> Vec<String> {
++    let endpoint = draft_notes_endpoint(request);
++    owned(&[
++        "api",
++        "--include",
++        "--method",
++        "POST",
++        &endpoint,
++        "--input",
++        "-",
++    ])
++}
++
++fn merge_request_endpoint(project_id: u64, iid: u64) -> String {
++    format!("projects/{project_id}/merge_requests/{iid}")
++}
++
++fn draft_notes_endpoint(request: &MergeRequest) -> String {
++    let endpoint = merge_request_endpoint(request.project_id, request.iid);
++    format!("{endpoint}/draft_notes")
++}
++
++fn owned(args: &[&str]) -> Vec<String> {
++    args.iter().map(|arg| (*arg).to_owned()).collect()
++}
++
++/// A list of merge requests; an unexpected shape is a message naming the field.
++pub(crate) fn listed_from(json: &[u8]) -> Result<Vec<Listed>, String> {
++    let mut listed = Vec::new();
++    for item in array_from(json)? {
++        listed.push(Listed {
++            project_id: number_at(&item, "project_id")?,
++            iid: number_at(&item, "iid")?,
++            is_open: text_at(&item, "state")? == OPENED,
++            head: text_at(&item, "sha")?,
++        });
++    }
++    Ok(listed)
++}
++
++pub(crate) fn merge_request_from(json: &[u8]) -> Result<MergeRequest, String> {
++    let value = value_from(json)?;
++    let diff_refs = match value.get("diff_refs") {
++        None | Some(Value::Null) => None,
++        Some(_) => Some(DiffRefs {
++            base_sha: text_at(&value, "diff_refs.base_sha")?,
++            start_sha: text_at(&value, "diff_refs.start_sha")?,
++            head_sha: text_at(&value, "diff_refs.head_sha")?,
++        }),
++    };
++    Ok(MergeRequest {
++        project_id: number_at(&value, "project_id")?,
++        iid: number_at(&value, "iid")?,
++        named: MergeRequestRef {
++            reference: text_at(&value, "references.short")?,
++            title: text_at(&value, "title")?,
++            web_url: text_at(&value, "web_url")?,
++        },
++        diff_refs,
++    })
++}
++
++/// The drafts of `glab api --paginate`, which prints one array per page.
++pub(crate) fn draft_notes_from(json: &[u8]) -> Result<Vec<DraftNote>, String> {
++    let mut drafts = Vec::new();
++    for page in serde_json::Deserializer::from_slice(json).into_iter::<Value>() {
++        let page = page.map_err(|error| format!("GitLab's answer is not JSON: {error}"))?;
++        let Value::Array(items) = page else {
++            return Err(unexpected("draft notes", "list"));
++        };
++        for item in items {
++            drafts.push(draft_note_from(&item)?);
++        }
++    }
++    Ok(drafts)
++}
++
++fn draft_note_from(item: &Value) -> Result<DraftNote, String> {
++    Ok(DraftNote {
++        id: number_at(item, "id")?,
++        note: text_at(item, "note")?,
++        placed: placed_draft_from(item).ok(),
++    })
++}
++
++/// A draft on no line has no position, or one without paths: it matches no message.
++fn placed_draft_from(item: &Value) -> Result<PlacedDraft, String> {
++    Ok(PlacedDraft {
++        head_sha: text_at(item, "position.head_sha")?,
++        place: LinePlace {
++            old_path: text_at(item, "position.old_path")?,
++            new_path: text_at(item, "position.new_path")?,
++            old_line: optional_line_at(item, "position.old_line")?,
++            new_line: optional_line_at(item, "position.new_line")?,
++        },
++    })
++}
++
++/// The new draft's id from a post's answer.
++pub(crate) fn draft_id_from(json: &[u8]) -> Result<u64, String> {
++    number_at(&value_from(json)?, "id")
++}
++
++/// GitLab's words in an error body: its `message`, or its `error`.
++pub(crate) fn error_message_from(json: &[u8]) -> Option<String> {
++    let value = serde_json::from_slice::<Value>(json).ok()?;
++    match value.get("message") {
++        Some(Value::String(message)) => Some(message.clone()),
++        Some(Value::Null) | None => value.get("error")?.as_str().map(str::to_owned),
++        Some(message) => Some(message.to_string()),
++    }
++}
++
++fn value_from(json: &[u8]) -> Result<Value, String> {
++    serde_json::from_slice(json).map_err(|error| format!("GitLab's answer is not JSON: {error}"))
++}
++
++fn array_from(json: &[u8]) -> Result<Vec<Value>, String> {
++    let Value::Array(items) = value_from(json)? else {
++        return Err(unexpected("merge requests", "list"));
++    };
++    Ok(items)
++}
++
++/// `path` names a field, `references.short` one inside another.
++fn field_at<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
++    value.pointer(&format!("/{}", path.replace('.', "/")))
++}
++
++fn text_at(value: &Value, path: &str) -> Result<String, String> {
++    field_at(value, path)
++        .and_then(Value::as_str)
++        .map(str::to_owned)
++        .ok_or_else(|| unexpected(path, "text"))
++}
++
++fn number_at(value: &Value, path: &str) -> Result<u64, String> {
++    field_at(value, path)
++        .and_then(Value::as_u64)
++        .ok_or_else(|| unexpected(path, "number"))
++}
++
++fn optional_line_at(value: &Value, path: &str) -> Result<Option<u32>, String> {
++    match field_at(value, path) {
++        None | Some(Value::Null) => Ok(None),
++        Some(line) => line
++            .as_u64()
++            .and_then(|line| u32::try_from(line).ok())
++            .map(Some)
++            .ok_or_else(|| unexpected(path, "line number")),
++    }
++}
++
++fn unexpected(field: &str, kind: &str) -> String {
++    format!("unexpected answer from GitLab: `{field}` is not a {kind}")
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const REQUEST: &str = r#"{"iid":12,"project_id":7,"title":"T","web_url":"https://gitlab.example/p/-/merge_requests/12",
++        "references":{"short":"!12"},"diff_refs":{"base_sha":"b","start_sha":"s","head_sha":"h"}}"#;
++
++    fn changed(from: &str, to: &str) -> Vec<u8> {
++        REQUEST.replacen(from, to, 1).into_bytes()
++    }
++
++    #[test]
++    fn unexpected_json_is_failed_naming_the_field() {
++        let parsed = merge_request_from(REQUEST.as_bytes()).unwrap();
++        assert_eq!(parsed.named.reference, "!12");
++        assert_eq!(
++            parsed.diff_refs.map(|refs| refs.start_sha),
++            Some("s".to_owned())
++        );
++        let field_named = |json: &[u8]| merge_request_from(json).unwrap_err();
++        assert_eq!(
++            field_named(&changed(r#""project_id":7"#, r#""project_id":"7""#)),
++            "unexpected answer from GitLab: `project_id` is not a number"
++        );
++        assert_eq!(
++            field_named(&changed(r#""short":"!12""#, r#""long":"!12""#)),
++            "unexpected answer from GitLab: `references.short` is not a text"
++        );
++        assert_eq!(
++            field_named(&changed(r#""head_sha":"h""#, r#""head_sha":null"#)),
++            "unexpected answer from GitLab: `diff_refs.head_sha` is not a text"
++        );
++        assert!(field_named(b"<html>").starts_with("GitLab's answer is not JSON: "));
++        assert_eq!(
++            listed_from(br#"{"message":"404 Not Found"}"#),
++            Err("unexpected answer from GitLab: `merge requests` is not a list".to_owned())
++        );
++        assert_eq!(
++            listed_from(br#"[{"project_id":7,"iid":12,"state":"opened"}]"#),
++            Err("unexpected answer from GitLab: `sha` is not a text".to_owned())
++        );
++        assert_eq!(
++            draft_id_from(br#"{"id":-1}"#),
++            Err("unexpected answer from GitLab: `id` is not a number".to_owned())
++        );
++    }
++
++    #[test]
++    fn every_page_of_drafts_is_read_and_a_draft_on_no_line_is_kept_unplaced() {
++        let pages = br#"[{"id":1,"note":"a","position":{"head_sha":"h","old_path":"x","new_path":"y","old_line":null,"new_line":2}}]
++[{"id":2,"note":"b","position":null},{"id":3,"note":"c","position":{"head_sha":"h","old_path":null}}]"#;
++        let drafts = draft_notes_from(pages).unwrap();
++        let place = LinePlace {
++            old_path: "x".to_owned(),
++            new_path: "y".to_owned(),
++            old_line: None,
++            new_line: Some(2),
++        };
++        let placed = PlacedDraft {
++            head_sha: "h".to_owned(),
++            place,
++        };
++        let unplaced = |id: u64, note: &str| DraftNote {
++            id,
++            note: note.to_owned(),
++            placed: None,
++        };
++        let first = DraftNote {
++            placed: Some(placed),
++            ..unplaced(1, "a")
++        };
++        assert_eq!(drafts, [first, unplaced(2, "b"), unplaced(3, "c")]);
++        assert_eq!(draft_notes_from(b"[]").unwrap(), []);
++        assert_eq!(
++            draft_notes_from(br#"[{"id":4}]"#),
++            Err("unexpected answer from GitLab: `note` is not a text".to_owned())
++        );
++        assert!(draft_notes_from(br#"{"id":4}"#).is_err());
++    }
++
++    #[test]
++    fn gitlab_s_words_are_its_message_or_its_error() {
++        let words = |json: &[u8]| error_message_from(json);
++        assert_eq!(
++            words(br#"{"message":"400 Bad request"}"#),
++            Some("400 Bad request".to_owned())
++        );
++        assert_eq!(
++            words(br#"{"message":{"note":["is too long"]}}"#),
++            Some(r#"{"note":["is too long"]}"#.to_owned())
++        );
++        assert_eq!(
++            words(br#"{"error":"invalid_token"}"#),
++            Some("invalid_token".to_owned())
++        );
++        assert_eq!(
++            words(br#"{"message":null,"error":"x"}"#),
++            Some("x".to_owned())
++        );
++        assert_eq!(words(b"{}"), None);
++        assert_eq!(words(b"Bad Gateway"), None);
++    }
++
++    #[test]
++    fn the_calls_name_the_merge_request_s_project_and_iid() {
++        let listed = Listed {
++            project_id: 7,
++            iid: 12,
++            is_open: true,
++            head: "h".to_owned(),
++        };
++        assert_eq!(
++            merge_request_details(&listed),
++            ["api", "projects/7/merge_requests/12"]
++        );
++        let request = merge_request_from(REQUEST.as_bytes()).unwrap();
++        assert_eq!(
++            draft_notes(&request),
++            [
++                "api",
++                "--paginate",
++                "projects/7/merge_requests/12/draft_notes"
++            ]
++        );
++        assert_eq!(
++            merge_requests_of_commit("abc"),
++            [
++                "api",
++                "projects/:fullpath/repository/commits/abc/merge_requests"
++            ]
++        );
++    }
++}
+diff --git a/crates/review/src/lib.rs b/crates/review/src/lib.rs
+index 5c568ac..c3ad79a 100644
+--- a/crates/review/src/lib.rs
++++ b/crates/review/src/lib.rs
+@@ -2,19 +2,163 @@
+ #![forbid(unsafe_code)]
+ #![warn(missing_docs)]
+ 
++mod gitlab;
++mod lines_up;
++mod position;
++mod right_branch;
++mod send;
+ mod thread_file;
+ mod thread_store;
+ mod thread_types;
+ 
+ use std::path::PathBuf;
+ 
++use serde::Serialize;
++use specta::Type;
+ use yamt_range::RangeFileId;
+ 
++pub use crate::send::{check_gitlab, send_queue};
+ pub use crate::thread_store::ThreadStore;
+ pub use crate::thread_types::{
+     Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine, ThreadList,
+ };
+ 
++/// A merge request as the window names it.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct MergeRequestRef {
++    /// Its short reference, "!12".
++    pub reference: String,
++    /// Its title.
++    pub title: String,
++    /// Its page on GitLab.
++    pub web_url: String,
++}
++
++/// What the merge requests were looked up by.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum LookedAt {
++    /// The right side's branch: its open merge requests.
++    Branch {
++        /// The branch, without `refs/heads/` or a remote.
++        name: String,
++    },
++    /// The right commit, as the range names no branch: the open merge requests ending at it.
++    Commit {
++        /// The commit's short id.
++        short_id: String,
++    },
++}
++
++/// Why posting is disabled: GitLab's diff is not the window's, or GitLab could not be asked.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum NotLinedUp {
++    /// glab is not found on PATH.
++    GlabMissing,
++    /// `glab auth status` failed.
++    NotLoggedIn {
++        /// glab's first output line, which names the instance.
++        detail: String,
++    },
++    /// No open merge request was found.
++    NoMergeRequest {
++        /// What was looked up.
++        looked_at: LookedAt,
++    },
++    /// Several open merge requests, none of them lining up.
++    Several {
++        /// What was looked up.
++        looked_at: LookedAt,
++        /// Their references, "!12".
++        references: Vec<String>,
++    },
++    /// The merge request's diff ends at another commit.
++    Moved {
++        /// The merge request.
++        merge_request: MergeRequestRef,
++        /// The short id GitLab's diff ends at.
++        gitlab_head: String,
++        /// The short id the window's right side is.
++        shown_head: String,
++    },
++    /// The merge request's diff starts from another commit.
++    OtherBase {
++        /// The merge request.
++        merge_request: MergeRequestRef,
++        /// The short id GitLab's diff starts from.
++        gitlab_base: String,
++        /// The short id the window's left side is.
++        shown_base: String,
++    },
++    /// GitLab still prepares the merge request's diff.
++    Preparing {
++        /// The merge request.
++        merge_request: MergeRequestRef,
++    },
++    /// glab failed, timed out or answered something unexpected.
++    Failed {
++        /// What went wrong, in glab's or yamt's words.
++        message: String,
++    },
++}
++
++/// Whether GitLab's diff is exactly the window's.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum GitLabCheck {
++    /// It is: posting goes to this merge request.
++    LinedUp {
++        /// The merge request.
++        merge_request: MergeRequestRef,
++    },
++    /// It is not.
++    NotLinedUp {
++        /// Why.
++        why: NotLinedUp,
++    },
++}
++
++/// How far a send is: `done` of `of` messages.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct SendProgress {
++    /// The messages handled so far.
++    pub done: u32,
++    /// The messages the send handles.
++    pub of: u32,
++}
++
++/// How a send ended.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum SendReply {
++    /// GitLab's diff is not the window's; nothing was sent.
++    NotLinedUp {
++        /// Why.
++        why: NotLinedUp,
++    },
++    /// Every queued message was handled.
++    Sent {
++        /// The threads after the send.
++        list: ThreadList,
++        /// Messages now pending on GitLab.
++        sent: u32,
++        /// Messages GitLab refused, still queued.
++        refused: u32,
++    },
++    /// The send stopped; the message it stopped at and the rest stay queued.
++    Stopped {
++        /// The threads after the send.
++        list: ThreadList,
++        /// Messages now pending on GitLab.
++        sent: u32,
++        /// Messages GitLab refused, still queued.
++        refused: u32,
++        /// Why it stopped.
++        reason: String,
++    },
++}
++
+ /// Why a thread store operation failed.
+ #[derive(Debug, thiserror::Error)]
+ pub enum Error {
+diff --git a/crates/review/src/lines_up.rs b/crates/review/src/lines_up.rs
+new file mode 100644
+index 0000000..754ed75
+--- /dev/null
++++ b/crates/review/src/lines_up.rs
+@@ -0,0 +1,305 @@
++use yamt_gitio::Oid;
++use yamt_range::Compared;
++
++use crate::gitlab::{DiffRefs, Listed, MergeRequest};
++use crate::{LookedAt, MergeRequestRef, NotLinedUp};
++
++const MAX_MERGE_REQUESTS_CHECKED: usize = 5;
++/// git's default abbreviation.
++const SHORT_ID_CHARS: usize = 7;
++
++/// The merge requests whose details were fetched, and what they were looked up by.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct Found {
++    pub(crate) looked_at: LookedAt,
++    pub(crate) merge_requests: Vec<MergeRequest>,
++}
++
++/// The merge request whose diff is the window's, with the commits a position names.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct LinedUp {
++    pub(crate) merge_request: MergeRequest,
++    pub(crate) diff_refs: DiffRefs,
++}
++
++/// The merge requests worth fetching: from a branch, every listed one (GitLab filtered them); for a commit, the
++/// open ones whose head is `right`.
++pub(crate) fn candidates(listed: Vec<Listed>, looked_at: &LookedAt, right: &Oid) -> Vec<Listed> {
++    let mut kept: Vec<Listed> = match looked_at {
++        LookedAt::Branch { .. } => listed,
++        LookedAt::Commit { .. } => listed
++            .into_iter()
++            .filter(|request| request.is_open && request.head == right.as_str())
++            .collect(),
++    };
++    kept.truncate(MAX_MERGE_REQUESTS_CHECKED);
++    kept
++}
++
++/// One lines up when GitLab's diff goes from the left commit to the right one; `start_sha` is not compared.
++pub(crate) fn lines_up(compared: &Compared, found: Found) -> Result<LinedUp, NotLinedUp> {
++    for request in &found.merge_requests {
++        if let Some(diff_refs) = &request.diff_refs
++            && diff_refs.base_sha == compared.left.as_str()
++            && diff_refs.head_sha == compared.right.as_str()
++        {
++            return Ok(LinedUp {
++                merge_request: request.clone(),
++                diff_refs: diff_refs.clone(),
++            });
++        }
++    }
++    let Found {
++        looked_at,
++        merge_requests,
++    } = found;
++    match merge_requests.as_slice() {
++        [] => Err(NotLinedUp::NoMergeRequest { looked_at }),
++        [only] => Err(why_it_does_not(compared, only)),
++        several => Err(NotLinedUp::Several {
++            looked_at,
++            references: several
++                .iter()
++                .map(|request| request.named.reference.clone())
++                .collect(),
++        }),
++    }
++}
++
++fn why_it_does_not(compared: &Compared, request: &MergeRequest) -> NotLinedUp {
++    let merge_request: MergeRequestRef = request.named.clone();
++    let Some(diff_refs) = &request.diff_refs else {
++        return NotLinedUp::Preparing { merge_request };
++    };
++    if diff_refs.head_sha != compared.right.as_str() {
++        return NotLinedUp::Moved {
++            merge_request,
++            gitlab_head: short_id(&diff_refs.head_sha),
++            shown_head: short_id(compared.right.as_str()),
++        };
++    }
++    NotLinedUp::OtherBase {
++        merge_request,
++        gitlab_base: short_id(&diff_refs.base_sha),
++        shown_base: short_id(compared.left.as_str()),
++    }
++}
++
++pub(crate) fn short_id(sha: &str) -> String {
++    sha.get(..SHORT_ID_CHARS).unwrap_or(sha).to_owned()
++}
++
++#[cfg(test)]
++mod tests {
++    use yamt_range::RangeSideLabel;
++
++    use super::*;
++    use crate::gitlab::{listed_from, merge_request_from};
++
++    const MERGE_BASE: &str = "531ea52dfb892e20206010fb6cd6161d9c88964a";
++    const MAIN: &str = "437805506eab02eaba409bdeffd00e0383476e35";
++    const FEATURE: &str = "9c1ba3fc606a3776061d23006b83e2af2a357112";
++
++    fn compared(left: &str, right: &str) -> Compared {
++        Compared {
++            left: Oid::parse(left).unwrap(),
++            right: Oid::parse(right).unwrap(),
++            right_label: RangeSideLabel::Named {
++                name: "feature".to_owned(),
++            },
++        }
++    }
++
++    fn branch() -> LookedAt {
++        LookedAt::Branch {
++            name: "feature".to_owned(),
++        }
++    }
++
++    fn recorded(scenario: &str, file: &str) -> Vec<u8> {
++        let path = format!(
++            "{}/../../tests/glab/{scenario}/{file}",
++            env!("CARGO_MANIFEST_DIR")
++        );
++        std::fs::read(path).unwrap()
++    }
++
++    fn merge_request(scenario: &str, file: &str) -> MergeRequest {
++        merge_request_from(&recorded(scenario, file)).unwrap()
++    }
++
++    fn found(looked_at: LookedAt, merge_requests: Vec<MergeRequest>) -> Found {
++        Found {
++            looked_at,
++            merge_requests,
++        }
++    }
++
++    fn checked(compared: &Compared, scenario: &str) -> Result<LinedUp, NotLinedUp> {
++        let request = merge_request(scenario, "merge-request.json");
++        lines_up(compared, found(branch(), vec![request]))
++    }
++
++    fn named(scenario: &str, file: &str) -> MergeRequestRef {
++        merge_request(scenario, file).named
++    }
++
++    #[test]
++    fn three_dots_lines_up_when_base_and_head_are_the_two_commits() {
++        let request = merge_request("lined-up", "merge-request.json");
++        let lined_up = checked(&compared(MERGE_BASE, FEATURE), "lined-up");
++        assert_eq!(
++            lined_up,
++            Ok(LinedUp {
++                diff_refs: DiffRefs {
++                    base_sha: MERGE_BASE.to_owned(),
++                    start_sha: MAIN.to_owned(),
++                    head_sha: FEATURE.to_owned(),
++                },
++                merge_request: request,
++            })
++        );
++        assert_eq!(
++            checked(&compared(MAIN, FEATURE), "lined-up").map(|_| ()),
++            Err(NotLinedUp::OtherBase {
++                merge_request: named("lined-up", "merge-request.json"),
++                gitlab_base: "531ea52".to_owned(),
++                shown_base: "4378055".to_owned(),
++            })
++        );
++    }
++
++    #[test]
++    fn two_dots_lines_up_only_when_the_left_is_the_merge_base() {
++        let from_the_merge_base = checked(&compared(MERGE_BASE, FEATURE), "two-dots");
++        assert!(from_the_merge_base.is_ok());
++        assert_eq!(
++            checked(&compared(MAIN, FEATURE), "two-dots").map(|_| ()),
++            Err(NotLinedUp::OtherBase {
++                merge_request: named("two-dots", "merge-request.json"),
++                gitlab_base: "531ea52".to_owned(),
++                shown_base: "4378055".to_owned(),
++            })
++        );
++    }
++
++    #[test]
++    fn a_moved_head_names_both_short_ids() {
++        assert_eq!(
++            checked(&compared(MERGE_BASE, FEATURE), "moved").map(|_| ()),
++            Err(NotLinedUp::Moved {
++                merge_request: named("moved", "merge-request.json"),
++                gitlab_head: "d1e2f3a".to_owned(),
++                shown_head: "9c1ba3f".to_owned(),
++            })
++        );
++        assert_eq!(
++            checked(&compared(MAIN, FEATURE), "moved").map(|_| ()),
++            Err(NotLinedUp::Moved {
++                merge_request: named("moved", "merge-request.json"),
++                gitlab_head: "d1e2f3a".to_owned(),
++                shown_head: "9c1ba3f".to_owned(),
++            })
++        );
++    }
++
++    #[test]
++    fn another_base_names_both_short_ids() {
++        assert_eq!(
++            checked(&compared(MERGE_BASE, FEATURE), "other-base").map(|_| ()),
++            Err(NotLinedUp::OtherBase {
++                merge_request: named("other-base", "merge-request.json"),
++                gitlab_base: "5f9d381".to_owned(),
++                shown_base: "531ea52".to_owned(),
++            })
++        );
++    }
++
++    #[test]
++    fn no_open_merge_request_from_the_branch() {
++        let listed = listed_from(&recorded("no-merge-request", "merge-requests.json")).unwrap();
++        let right = Oid::parse(FEATURE).unwrap();
++        assert_eq!(candidates(listed, &branch(), &right), Vec::new());
++        assert_eq!(
++            lines_up(&compared(MERGE_BASE, FEATURE), found(branch(), Vec::new())).map(|_| ()),
++            Err(NotLinedUp::NoMergeRequest {
++                looked_at: branch()
++            })
++        );
++    }
++
++    #[test]
++    fn several_open_merge_requests_take_the_one_that_lines_up() {
++        let listed = listed_from(&recorded("several", "merge-requests.json")).unwrap();
++        let right = Oid::parse(FEATURE).unwrap();
++        let iids: Vec<u64> = candidates(listed, &branch(), &right)
++            .iter()
++            .map(|request| request.iid)
++            .collect();
++        assert_eq!(iids, [12, 14]);
++        let twelve = merge_request("several", "merge-request.json");
++        let fourteen = merge_request("several", "merge-request-14.json");
++        let both = found(branch(), vec![twelve.clone(), fourteen.clone()]);
++        let lined_up = lines_up(&compared(MERGE_BASE, FEATURE), both);
++        assert_eq!(
++            lined_up.map(|lined_up| lined_up.merge_request),
++            Ok(fourteen.clone())
++        );
++
++        let preparing = MergeRequest {
++            diff_refs: None,
++            ..fourteen
++        };
++        let neither = found(branch(), vec![twelve, preparing]);
++        assert_eq!(
++            lines_up(&compared(MERGE_BASE, FEATURE), neither).map(|_| ()),
++            Err(NotLinedUp::Several {
++                looked_at: branch(),
++                references: vec!["!12".to_owned(), "!14".to_owned()],
++            })
++        );
++    }
++
++    #[test]
++    fn a_commit_id_side_uses_the_merge_request_ending_at_it() {
++        let listed = listed_from(&recorded("commit-route", "merge-requests.json")).unwrap();
++        let right = Oid::parse(FEATURE).unwrap();
++        let commit = LookedAt::Commit {
++            short_id: "9c1ba3f".to_owned(),
++        };
++        let kept = candidates(listed.clone(), &commit, &right);
++        let iids: Vec<u64> = kept.iter().map(|request| request.iid).collect();
++        assert_eq!(iids, [12]);
++        assert_eq!(candidates(listed, &branch(), &right).len(), 3);
++        let request = merge_request("commit-route", "merge-request.json");
++        let lined_up = lines_up(
++            &compared(MERGE_BASE, FEATURE),
++            found(commit, vec![request.clone()]),
++        );
++        assert_eq!(lined_up.map(|lined_up| lined_up.merge_request), Ok(request));
++    }
++
++    #[test]
++    fn at_most_five_merge_requests_are_checked() {
++        let listed: Vec<Listed> = (1..=7)
++            .map(|iid| Listed {
++                project_id: 7,
++                iid,
++                is_open: true,
++                head: FEATURE.to_owned(),
++            })
++            .collect();
++        let right = Oid::parse(FEATURE).unwrap();
++        assert_eq!(candidates(listed, &branch(), &right).len(), 5);
++    }
++
++    #[test]
++    fn null_diff_refs_is_preparing() {
++        assert_eq!(
++            checked(&compared(MERGE_BASE, FEATURE), "preparing").map(|_| ()),
++            Err(NotLinedUp::Preparing {
++                merge_request: named("preparing", "merge-request.json"),
++            })
++        );
++    }
++}
+diff --git a/crates/review/src/position.rs b/crates/review/src/position.rs
+new file mode 100644
+index 0000000..0c82d17
+--- /dev/null
++++ b/crates/review/src/position.rs
+@@ -0,0 +1,237 @@
++use serde_json::{Map, Value};
++use yamt_range::{RangeChange, RangeEntry};
++
++use crate::ThreadLine;
++use crate::gitlab::{DiffRefs, DraftNote, LinePlace};
++
++/// What the range shows in place of a byte it could not read as UTF-8.
++const REPLACEMENT: char = '\u{FFFD}';
++pub(crate) const NOT_UTF8: &str = "the path is not UTF-8";
++
++/// One draft note to post: its text and where it sits in the merge request's diff.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct PostBody {
++    pub(crate) note: String,
++    pub(crate) diff_refs: DiffRefs,
++    pub(crate) place: LinePlace,
++}
++
++/// GitLab's place for `line` of `entry`: a removed line has `old_line` only, an added one `new_line` only, an
++/// unchanged one both (docs.gitlab.com, discussions API); `Err` names why it cannot be posted.
++pub(crate) fn line_place(entry: &RangeEntry, line: ThreadLine) -> Result<LinePlace, &'static str> {
++    let old_path = match &entry.change {
++        RangeChange::Renamed { old_path } => old_path,
++        RangeChange::Added | RangeChange::Modified | RangeChange::Deleted => &entry.path,
++    };
++    if old_path.contains(REPLACEMENT) || entry.path.contains(REPLACEMENT) {
++        return Err(NOT_UTF8);
++    }
++    let (old_line, new_line) = match line {
++        ThreadLine::Removed { left } => (Some(left.0), None),
++        ThreadLine::Added { right } => (None, Some(right.0)),
++        ThreadLine::UnchangedOnLeft { left, right }
++        | ThreadLine::UnchangedOnRight { left, right } => (Some(left.0), Some(right.0)),
++    };
++    Ok(LinePlace {
++        old_path: old_path.clone(),
++        new_path: entry.path.clone(),
++        old_line: old_line.map(one_based),
++        new_line: new_line.map(one_based),
++    })
++}
++
++fn one_based(line: u32) -> u32 {
++    line.saturating_add(1)
++}
++
++impl PostBody {
++    /// `{ note, position: { position_type: "text", base_sha, start_sha, head_sha, old_path, new_path, old_line?,
++    /// new_line? } }`, the draft-notes route's body.
++    pub(crate) fn json(&self) -> Vec<u8> {
++        let mut position = Map::new();
++        position.insert("position_type".to_owned(), "text".into());
++        position.insert(
++            "base_sha".to_owned(),
++            self.diff_refs.base_sha.clone().into(),
++        );
++        position.insert(
++            "start_sha".to_owned(),
++            self.diff_refs.start_sha.clone().into(),
++        );
++        position.insert(
++            "head_sha".to_owned(),
++            self.diff_refs.head_sha.clone().into(),
++        );
++        position.insert("old_path".to_owned(), self.place.old_path.clone().into());
++        position.insert("new_path".to_owned(), self.place.new_path.clone().into());
++        if let Some(line) = self.place.old_line {
++            position.insert("old_line".to_owned(), line.into());
++        }
++        if let Some(line) = self.place.new_line {
++            position.insert("new_line".to_owned(), line.into());
++        }
++        let mut body = Map::new();
++        body.insert("note".to_owned(), self.note.clone().into());
++        body.insert("position".to_owned(), Value::Object(position));
++        Value::Object(body).to_string().into_bytes()
++    }
++}
++
++/// A draft GitLab already holds for this body: the same text, paths, lines and head commit.
++pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
++    let Some(placed) = &draft.placed else {
++        return false;
++    };
++    draft.note == body.note
++        && placed.head_sha == body.diff_refs.head_sha
++        && placed.place == body.place
++}
++
++#[cfg(test)]
++mod tests {
++    use yamt_merge_core::{LeftLine, RightLine};
++    use yamt_range::{RangeFileId, RangeLineCounts};
++
++    use super::*;
++    use crate::gitlab::PlacedDraft;
++
++    fn entry(path: &str, change: RangeChange) -> RangeEntry {
++        RangeEntry {
++            id: RangeFileId(0),
++            path: path.to_owned(),
++            change,
++            lines: RangeLineCounts::NotCounted,
++        }
++    }
++
++    fn place(old_path: &str, new_path: &str, old: Option<u32>, new: Option<u32>) -> LinePlace {
++        LinePlace {
++            old_path: old_path.to_owned(),
++            new_path: new_path.to_owned(),
++            old_line: old,
++            new_line: new,
++        }
++    }
++
++    fn body() -> PostBody {
++        PostBody {
++            note: "Why 300?".to_owned(),
++            diff_refs: DiffRefs {
++                base_sha: "b".repeat(40),
++                start_sha: "s".repeat(40),
++                head_sha: "h".repeat(40),
++            },
++            place: place("a.ts", "a.ts", Some(3), Some(4)),
++        }
++    }
++
++    #[test]
++    fn removed_added_and_unchanged_give_one_based_old_and_new_lines() {
++        let modified = entry("a.ts", RangeChange::Modified);
++        let removed = ThreadLine::Removed { left: LeftLine(0) };
++        let added = ThreadLine::Added {
++            right: RightLine(6),
++        };
++        let on_left = ThreadLine::UnchangedOnLeft {
++            left: LeftLine(10),
++            right: RightLine(12),
++        };
++        let on_right = ThreadLine::UnchangedOnRight {
++            left: LeftLine(10),
++            right: RightLine(12),
++        };
++        let at = |line| line_place(&modified, line);
++        assert_eq!(at(removed), Ok(place("a.ts", "a.ts", Some(1), None)));
++        assert_eq!(at(added), Ok(place("a.ts", "a.ts", None, Some(7))));
++        assert_eq!(at(on_left), Ok(place("a.ts", "a.ts", Some(11), Some(13))));
++        assert_eq!(at(on_right), Ok(place("a.ts", "a.ts", Some(11), Some(13))));
++    }
++
++    #[test]
++    fn renamed_added_and_deleted_files_give_both_paths() {
++        let line = ThreadLine::UnchangedOnRight {
++            left: LeftLine(0),
++            right: RightLine(0),
++        };
++        let renamed = RangeChange::Renamed {
++            old_path: "docs/shortcuts.md".to_owned(),
++        };
++        let at = |path, change| {
++            line_place(&entry(path, change), line).map(|place| (place.old_path, place.new_path))
++        };
++        let both = |old: &str, new: &str| Ok((old.to_owned(), new.to_owned()));
++        assert_eq!(
++            at("docs/keys.md", renamed),
++            both("docs/shortcuts.md", "docs/keys.md")
++        );
++        assert_eq!(
++            at("src/new.ts", RangeChange::Added),
++            both("src/new.ts", "src/new.ts")
++        );
++        assert_eq!(
++            at("src/gone.ts", RangeChange::Deleted),
++            both("src/gone.ts", "src/gone.ts")
++        );
++        let lossy = RangeChange::Renamed {
++            old_path: "caf\u{FFFD}.txt".to_owned(),
++        };
++        assert_eq!(at("cafe.txt", lossy), Err(NOT_UTF8));
++        assert_eq!(at("caf\u{FFFD}.txt", RangeChange::Added), Err(NOT_UTF8));
++    }
++
++    #[test]
++    fn the_body_leaves_out_the_line_a_side_does_not_have() {
++        let mut removed = body();
++        removed.place.new_line = None;
++        let json: Value = serde_json::from_slice(&removed.json()).unwrap();
++        let expected = serde_json::json!({
++            "note": "Why 300?",
++            "position": {
++                "position_type": "text",
++                "base_sha": "b".repeat(40),
++                "start_sha": "s".repeat(40),
++                "head_sha": "h".repeat(40),
++                "old_path": "a.ts",
++                "new_path": "a.ts",
++                "old_line": 3,
++            },
++        });
++        assert_eq!(json, expected);
++        let mut added = body();
++        added.place.old_line = None;
++        let json: Value = serde_json::from_slice(&added.json()).unwrap();
++        assert_eq!(json["position"].get("old_line"), None);
++        assert_eq!(json["position"]["new_line"], 4);
++    }
++
++    #[test]
++    fn a_draft_is_the_same_only_with_the_same_text_place_and_head() {
++        let draft = |note: &str, head: &str, place: LinePlace| DraftNote {
++            id: 301,
++            note: note.to_owned(),
++            placed: Some(PlacedDraft {
++                head_sha: head.to_owned(),
++                place,
++            }),
++        };
++        let head = "h".repeat(40);
++        let here = body().place;
++        assert!(same_draft(&body(), &draft("Why 300?", &head, here.clone())));
++        assert!(!same_draft(
++            &body(),
++            &draft("Why 300 ms?", &head, here.clone())
++        ));
++        assert!(!same_draft(
++            &body(),
++            &draft("Why 300?", &"b".repeat(40), here)
++        ));
++        let elsewhere = place("a.ts", "a.ts", Some(3), Some(5));
++        assert!(!same_draft(&body(), &draft("Why 300?", &head, elsewhere)));
++        let on_no_line = DraftNote {
++            id: 302,
++            note: "Why 300?".to_owned(),
++            placed: None,
++        };
++        assert!(!same_draft(&body(), &on_no_line));
++    }
++}
+diff --git a/crates/review/src/right_branch.rs b/crates/review/src/right_branch.rs
+new file mode 100644
+index 0000000..74a87ca
+--- /dev/null
++++ b/crates/review/src/right_branch.rs
+@@ -0,0 +1,68 @@
++use yamt_gitio::Repo;
++use yamt_range::RangeSideLabel;
++
++const HEADS: &str = "refs/heads/";
++const REMOTES: &str = "refs/remotes/";
++
++/// The branch the right side names: `refs/heads/x` and `refs/remotes/<remote>/x` give `x`; a commit id, a tag,
++/// `HEAD~2` or a detached `HEAD` give `None`. An empty side reaches here as `HEAD`, the current branch.
++pub(crate) fn right_branch(
++    repo: &Repo,
++    right_label: &RangeSideLabel,
++) -> yamt_gitio::Result<Option<String>> {
++    let name = match right_label {
++        RangeSideLabel::Named { name } => name,
++        RangeSideLabel::MergeBase { right, .. } => right,
++    };
++    let Some(full_name) = repo.symbolic_full_name(name)? else {
++        return Ok(None);
++    };
++    let Ok(full_name) = String::from_utf8(full_name) else {
++        return Ok(None);
++    };
++    if let Some(branch) = full_name.strip_prefix(HEADS) {
++        return Ok(Some(branch.to_owned()));
++    }
++    let Some(remote_and_branch) = full_name.strip_prefix(REMOTES) else {
++        return Ok(None);
++    };
++    Ok(branch_after_remote(
++        remote_and_branch,
++        &repo.remote_names()?,
++    ))
++}
++
++/// `origin/x` gives `x`; the longest remote name wins, as a remote's name may hold a slash.
++fn branch_after_remote(remote_and_branch: &str, remotes: &[Vec<u8>]) -> Option<String> {
++    let remote = remotes
++        .iter()
++        .filter_map(|remote| std::str::from_utf8(remote).ok())
++        .filter(|remote| remote_and_branch.starts_with(&format!("{remote}/")))
++        .max_by_key(|remote| remote.len())?;
++    let branch = remote_and_branch.strip_prefix(remote)?.strip_prefix('/')?;
++    Some(branch.to_owned())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn remotes(names: &[&str]) -> Vec<Vec<u8>> {
++        names.iter().map(|name| name.as_bytes().to_vec()).collect()
++    }
++
++    #[test]
++    fn a_remote_tracking_name_drops_the_longest_remote() {
++        let names = remotes(&["origin", "my", "my/fork"]);
++        assert_eq!(
++            branch_after_remote("my/fork/dev", &names),
++            Some("dev".to_owned())
++        );
++        assert_eq!(
++            branch_after_remote("origin/feature/x", &names),
++            Some("feature/x".to_owned())
++        );
++        assert_eq!(branch_after_remote("gone/dev", &names), None);
++        assert_eq!(branch_after_remote("origindev", &names), None);
++    }
++}
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+new file mode 100644
+index 0000000..e28757d
+--- /dev/null
++++ b/crates/review/src/send.rs
+@@ -0,0 +1,398 @@
++use std::ops::Range as Span;
++use std::path::Path;
++use std::sync::{Mutex, MutexGuard, PoisonError};
++
++use yamt_gitio::{Glab, GlabRun, Repo};
++use yamt_range::Range;
++
++use crate::gitlab::{
++    DraftNote, draft_id_from, draft_notes, draft_notes_from, error_message_from, listed_from,
++    merge_request_details, merge_request_from, merge_requests_from_branch,
++    merge_requests_of_commit, post_draft_note,
++};
++use crate::lines_up::{Found, LinedUp, candidates, lines_up, short_id};
++use crate::position::{PostBody, line_place, same_draft};
++use crate::right_branch::right_branch;
++use crate::thread_store::QueuedMessage;
++use crate::{
++    Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
++    ThreadStore,
++};
++
++const TIMED_OUT: &str = "glab timed out";
++const NO_HTTP_ANSWER: &str = "glab printed no HTTP answer";
++const DIFFS_PAGE: &str = "/diffs";
++const ACCEPTED: Span<u16> = 200..300;
++const CLIENT_ERRORS: Span<u16> = 400..500;
++/// 401, 403 and 429 are about the user or the rate, not the message: the rest would fail the same way.
++const STOPPING_CLIENT_ERRORS: [u16; 3] = [401, 403, 429];
++
++/// Whether GitLab's diff of the merge request for the range's right side is exactly the window's (plan §2 #119).
++#[must_use]
++pub fn check_gitlab(range: &Range, glab: Option<&Glab>) -> GitLabCheck {
++    let checked = match glab {
++        None => Err(NotLinedUp::GlabMissing),
++        Some(glab) => lined_up(glab, range),
++    };
++    match checked {
++        Ok(lined_up) => GitLabCheck::LinedUp {
++            merge_request: lined_up.merge_request.named,
++        },
++        Err(why) => GitLabCheck::NotLinedUp { why },
++    }
++}
++
++/// Checks again, then posts every queued message as a draft note, one at a time in thread order, recording
++/// each result in `threads` (locked only between glab calls) and reporting progress after each (plan §2 #118).
++pub fn send_queue(
++    range: &Range,
++    glab: Option<&Glab>,
++    threads: &Mutex<ThreadStore>,
++    progress: &dyn Fn(SendProgress),
++) -> Result<SendReply> {
++    let Some(glab) = glab else {
++        let why = NotLinedUp::GlabMissing;
++        return Ok(SendReply::NotLinedUp { why });
++    };
++    match lined_up(glab, range) {
++        Ok(target) => post_queue(glab, range, &target, threads, progress),
++        Err(why) => Ok(SendReply::NotLinedUp { why }),
++    }
++}
++
++fn post_queue(
++    glab: &Glab,
++    range: &Range,
++    target: &LinedUp,
++    threads: &Mutex<ThreadStore>,
++    progress: &dyn Fn(SendProgress),
++) -> Result<SendReply> {
++    let queued = locked(threads).queued(range);
++    let mut tally = Tally {
++        done: 0,
++        of: u32::try_from(queued.len()).unwrap_or(u32::MAX),
++        sent: 0,
++        refused: 0,
++    };
++    let drafts = answer(glab, range.root(), &draft_notes(&target.merge_request))
++        .and_then(|json| draft_notes_from(&json));
++    let mut drafts = match drafts {
++        Ok(drafts) => drafts,
++        Err(reason) => return Ok(tally.stopped(locked(threads).list(range), reason)),
++    };
++    for message in queued {
++        let posting = match outcome(glab, range, target, &mut drafts, &message)? {
++            Outcome::Drafted(draft_note) => {
++                tally.sent += 1;
++                pending(target, message.text, draft_note)
++            }
++            Outcome::Refused(reason) => {
++                tally.refused += 1;
++                let text = message.text;
++                Posting::Refused { text, reason }
++            }
++            Outcome::Stop(reason) => return Ok(tally.stopped(locked(threads).list(range), reason)),
++        };
++        locked(threads).record(message.message, posting)?;
++        tally.done += 1;
++        progress(SendProgress {
++            done: tally.done,
++            of: tally.of,
++        });
++    }
++    Ok(tally.sent(locked(threads).list(range)))
++}
++
++/// What one message's post came to.
++#[derive(Debug, PartialEq, Eq)]
++enum Outcome {
++    Drafted(u64),
++    Refused(String),
++    Stop(String),
++}
++
++/// What `glab api --include` printed: the HTTP status and the body after the headers.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct HttpAnswer {
++    pub(crate) status: u16,
++    pub(crate) body: Vec<u8>,
++}
++
++struct Tally {
++    done: u32,
++    of: u32,
++    sent: u32,
++    refused: u32,
++}
++
++impl Tally {
++    fn sent(&self, list: ThreadList) -> SendReply {
++        SendReply::Sent {
++            list,
++            sent: self.sent,
++            refused: self.refused,
++        }
++    }
++
++    fn stopped(&self, list: ThreadList, reason: String) -> SendReply {
++        SendReply::Stopped {
++            list,
++            sent: self.sent,
++            refused: self.refused,
++            reason,
++        }
++    }
++}
++
++fn locked(threads: &Mutex<ThreadStore>) -> MutexGuard<'_, ThreadStore> {
++    threads.lock().unwrap_or_else(PoisonError::into_inner)
++}
++
++fn pending(target: &LinedUp, text: String, draft_note: u64) -> Posting {
++    let named = &target.merge_request.named;
++    Posting::Pending {
++        text,
++        draft_note,
++        merge_request: named.reference.clone(),
++        link: format!("{}{DIFFS_PAGE}", named.web_url),
++    }
++}
++
++/// A draft GitLab already holds for the message is taken (once) instead of posting it again.
++fn outcome(
++    glab: &Glab,
++    range: &Range,
++    target: &LinedUp,
++    drafts: &mut Vec<DraftNote>,
++    message: &QueuedMessage,
++) -> Result<Outcome> {
++    let file = message.file;
++    let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
++    let place = match line_place(entry, message.line) {
++        Ok(place) => place,
++        Err(reason) => return Ok(Outcome::Refused(reason.to_owned())),
++    };
++    let body = PostBody {
++        note: message.text.clone(),
++        diff_refs: target.diff_refs.clone(),
++        place,
++    };
++    if let Some(index) = drafts.iter().position(|draft| same_draft(&body, draft)) {
++        return Ok(Outcome::Drafted(drafts.swap_remove(index).id));
++    }
++    let args = post_draft_note(&target.merge_request);
++    Ok(posted(run(glab, range.root(), &args, Some(body.json()))))
++}
++
++/// A 2xx is a draft; another 4xx a refusal of this message; anything else stops the send.
++fn posted(run: std::result::Result<GlabRun, String>) -> Outcome {
++    let (stdout, stderr) = match run {
++        Err(reason) => return Outcome::Stop(reason),
++        Ok(GlabRun::TimedOut) => return Outcome::Stop(TIMED_OUT.to_owned()),
++        Ok(GlabRun::Printed { stdout }) => (stdout, Vec::new()),
++        Ok(GlabRun::Failed { stdout, stderr, .. }) => (stdout, stderr),
++    };
++    let Some(answer) = http_answer_from(&stdout) else {
++        let reason = last_line(&stderr).unwrap_or_else(|| NO_HTTP_ANSWER.to_owned());
++        return Outcome::Stop(reason);
++    };
++    if ACCEPTED.contains(&answer.status) {
++        return match draft_id_from(&answer.body) {
++            Ok(id) => Outcome::Drafted(id),
++            Err(reason) => Outcome::Stop(reason),
++        };
++    }
++    let reason = error_message_from(&answer.body)
++        .or_else(|| last_line(&stderr))
++        .unwrap_or_else(|| format!("HTTP {}", answer.status));
++    let refused =
++        CLIENT_ERRORS.contains(&answer.status) && !STOPPING_CLIENT_ERRORS.contains(&answer.status);
++    if refused {
++        Outcome::Refused(reason)
++    } else {
++        Outcome::Stop(reason)
++    }
++}
++
++/// The status line and body `glab api --include` prints: `HTTP/2.0 201 Created`, headers, an empty line, each
++/// ending in CRLF, then the body (glab 1.124.0, measured in `tests/glab/README.md`).
++pub(crate) fn http_answer_from(stdout: &[u8]) -> Option<HttpAnswer> {
++    const HEADERS_END: &[u8] = b"\r\n\r\n";
++    let status_line = stdout.split(|byte| *byte == b'\n').next()?;
++    let status_line = std::str::from_utf8(status_line).ok()?;
++    let mut words = status_line.split_whitespace();
++    if !words.next()?.starts_with("HTTP/") {
++        return None;
++    }
++    let status = words.next()?.parse().ok()?;
++    let body = stdout
++        .windows(HEADERS_END.len())
++        .position(|window| window == HEADERS_END)
++        .map_or(&[][..], |end| &stdout[end + HEADERS_END.len()..]);
++    Some(HttpAnswer {
++        status,
++        body: body.to_vec(),
++    })
++}
++
++fn lined_up(glab: &Glab, range: &Range) -> std::result::Result<LinedUp, NotLinedUp> {
++    let root = range.root();
++    require_logged_in(glab, root)?;
++    let compared = range.compared();
++    let repo = Repo::discover(root).map_err(|error| failed(error.to_string()))?;
++    let branch =
++        right_branch(&repo, &compared.right_label).map_err(|error| failed(error.to_string()))?;
++    let (looked_at, args) = lookup(branch, compared.right.as_str());
++    let listed = answer(glab, root, &args)
++        .and_then(|json| listed_from(&json))
++        .map_err(failed)?;
++    let mut merge_requests = Vec::new();
++    for listed in candidates(listed, &looked_at, &compared.right) {
++        let request = answer(glab, root, &merge_request_details(&listed))
++            .and_then(|json| merge_request_from(&json))
++            .map_err(failed)?;
++        merge_requests.push(request);
++    }
++    let found = Found {
++        looked_at,
++        merge_requests,
++    };
++    lines_up(&compared, found)
++}
++
++/// What the merge requests are looked up by, and the glab call that lists them.
++fn lookup(branch: Option<String>, right: &str) -> (LookedAt, Vec<String>) {
++    if let Some(name) = branch {
++        let args = merge_requests_from_branch(&name);
++        return (LookedAt::Branch { name }, args);
++    }
++    let short_id = short_id(right);
++    (
++        LookedAt::Commit { short_id },
++        merge_requests_of_commit(right),
++    )
++}
++
++fn require_logged_in(glab: &Glab, root: &Path) -> std::result::Result<(), NotLinedUp> {
++    let args = ["auth".to_owned(), "status".to_owned()];
++    match run(glab, root, &args, None).map_err(failed)? {
++        GlabRun::Printed { .. } => Ok(()),
++        GlabRun::Failed { stdout, stderr, .. } => {
++            let detail = first_line(&stderr).or_else(|| first_line(&stdout));
++            Err(NotLinedUp::NotLoggedIn {
++                detail: detail.unwrap_or_default(),
++            })
++        }
++        GlabRun::TimedOut => Err(failed(TIMED_OUT.to_owned())),
++    }
++}
++
++fn failed(message: String) -> NotLinedUp {
++    NotLinedUp::Failed { message }
++}
++
++/// What a GET printed; `Err` holds what went wrong, glab's own line when it printed one.
++fn answer(glab: &Glab, root: &Path, args: &[String]) -> std::result::Result<Vec<u8>, String> {
++    match run(glab, root, args, None)? {
++        GlabRun::Printed { stdout } => Ok(stdout),
++        GlabRun::Failed { status, stderr, .. } => {
++            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
++        }
++        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
++    }
++}
++
++fn exit_words(status: Option<i32>) -> String {
++    match status {
++        Some(code) => format!("glab exited with status {code}"),
++        None => "glab was stopped by a signal".to_owned(),
++    }
++}
++
++/// `Err` when glab could not run at all, in gitio's words.
++fn run(
++    glab: &Glab,
++    root: &Path,
++    args: &[String],
++    stdin: Option<Vec<u8>>,
++) -> std::result::Result<GlabRun, String> {
++    let args: Vec<&str> = args.iter().map(String::as_str).collect();
++    glab.run(root, &args, stdin)
++        .map_err(|error| error.to_string())
++}
++
++fn first_line(output: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(output);
++    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
++    line.map(str::to_owned)
++}
++
++/// glab prints its error last, after any notice such as a first run's "What's new".
++fn last_line(output: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(output);
++    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty());
++    line.map(str::to_owned)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_http_status_and_body_come_from_the_included_headers() {
++        let read = |printed: &[u8]| http_answer_from(printed).map(|got| (got.status, got.body));
++        let headers = b"HTTP/2.0 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{}";
++        assert_eq!(read(headers), Some((400, b"{}".to_vec())));
++        assert_eq!(
++            read(b"HTTP/1.1 204 No Content\r\n"),
++            Some((204, Vec::new()))
++        );
++        assert_eq!(read(b"{\"id\":1}"), None);
++        assert_eq!(read(b"HTTP/2.0 OK\r\n\r\n"), None);
++        assert_eq!(read(b""), None);
++    }
++
++    #[test]
++    fn a_refusal_keeps_gitlab_s_words_and_a_failure_of_user_server_or_glab_stops() {
++        let answered = |status: &str| {
++            let stdout = format!("HTTP/2.0 {status}\r\n\r\n{{\"message\":\"{status}\"}}");
++            let stdout = stdout.into_bytes();
++            let stderr = Vec::new();
++            posted(Ok(GlabRun::Failed {
++                status: Some(1),
++                stdout,
++                stderr,
++            }))
++        };
++        let stop = |words: &str| Outcome::Stop(words.to_owned());
++        for status in ["400 Bad Request", "404 Not Found"] {
++            assert_eq!(answered(status), Outcome::Refused(status.to_owned()));
++        }
++        for status in [
++            "401 Unauthorized",
++            "403 Forbidden",
++            "429 Too Many",
++            "500 Error",
++            "302 Found",
++        ] {
++            assert_eq!(answered(status), stop(status));
++        }
++        let created = b"HTTP/2.0 201 Created\r\n\r\n{\"id\":7}".to_vec();
++        assert_eq!(
++            posted(Ok(GlabRun::Printed { stdout: created })),
++            Outcome::Drafted(7)
++        );
++        let no_answer = |stderr: &[u8]| GlabRun::Failed {
++            status: Some(1),
++            stdout: Vec::new(),
++            stderr: stderr.to_vec(),
++        };
++        let with_notice = no_answer(b"What's new\n  glab: no route  \n\n");
++        assert_eq!(posted(Ok(with_notice)), stop("glab: no route"));
++        assert_eq!(posted(Ok(no_answer(b""))), stop(NO_HTTP_ANSWER));
++        assert_eq!(posted(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
++        assert_eq!(posted(Err("gone".to_owned())), stop("gone"));
++        assert_eq!(exit_words(Some(2)), "glab exited with status 2");
++        assert_eq!(exit_words(None), "glab was stopped by a signal");
++    }
++}
+diff --git a/crates/review/src/thread_store.rs b/crates/review/src/thread_store.rs
+index ad60fe6..0d0c0e4 100644
+--- a/crates/review/src/thread_store.rs
++++ b/crates/review/src/thread_store.rs
+@@ -18,7 +18,6 @@ pub struct ThreadStore {
+ 
+ /// A message waiting for the next send: queued, or refused and sent again.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+-#[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 reads it"))]
+ pub(crate) struct QueuedMessage {
+     pub(crate) thread: ThreadId,
+     pub(crate) message: MessageId,
+@@ -123,7 +122,6 @@ impl ThreadStore {
+     }
+ 
+     /// Every queued or refused message on a file of `range`, in thread order, then message order.
+-    #[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 calls it"))]
+     pub(crate) fn queued(&self, range: &Range) -> Vec<QueuedMessage> {
+         let mut queued = Vec::new();
+         for thread in &self.file.threads {
+@@ -148,7 +146,6 @@ impl ThreadStore {
+     }
+ 
+     /// Stores what a send made of the message.
+-    #[cfg_attr(not(test), expect(dead_code, reason = "the sender of row 16 calls it"))]
+     pub(crate) fn record(&mut self, message: MessageId, posting: Posting) -> Result<()> {
+         let mut next = self.file.clone();
+         let (_, stored) = next
+diff --git a/crates/review/tests/review.rs b/crates/review/tests/review.rs
+new file mode 100644
+index 0000000..4c79826
+--- /dev/null
++++ b/crates/review/tests/review.rs
+@@ -0,0 +1,532 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++use std::cell::RefCell;
++use std::fs;
++use std::path::{Path, PathBuf};
++use std::process::Command;
++use std::sync::Mutex;
++use std::time::Duration;
++
++use serde_json::{Value, json};
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_gitio::Glab;
++use yamt_merge_core::{LeftLine, RightLine};
++use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
++use yamt_review::{
++    GitLabCheck, LookedAt, MergeRequestRef, NotLinedUp, Posting, SendProgress, SendReply,
++    ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
++};
++
++/// `scripts/range-repo.sh`'s commits, fixed by its names and dates.
++const MERGE_BASE: &str = "531ea52dfb892e20206010fb6cd6161d9c88964a";
++const MAIN: &str = "437805506eab02eaba409bdeffd00e0383476e35";
++const FEATURE: &str = "9c1ba3fc606a3776061d23006b83e2af2a357112";
++const SHORT_TIMEOUT: Duration = Duration::from_secs(2);
++const LINK: &str = "https://gitlab.example/taskboard/taskboard/-/merge_requests/12/diffs";
++const ADDED_TEXT: &str = "Why not a Duration type?";
++const RENAMED_TEXT: &str = "Keep the old title?";
++const REMOVED_TEXT: &str = "Who still uses the mock boards?";
++const REFUSAL: &str = r#"400 Bad request - Note {:line_code=>["can't be blank"]}"#;
++const POST_ARGV: &str =
++    "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
++
++fn in_this_repository(relative: &str) -> PathBuf {
++    Path::new(env!("CARGO_MANIFEST_DIR"))
++        .join("../..")
++        .join(relative)
++}
++
++/// The range window's smoke repository, with its `main` and `feature`.
++fn range_repo() -> TempDir {
++    let dir = tempfile::tempdir().unwrap();
++    let status = Command::new(in_this_repository("scripts/range-repo.sh"))
++        .arg(dir.path().join("rr"))
++        .output()
++        .unwrap();
++    assert!(status.status.success(), "{status:?}");
++    dir
++}
++
++fn repo_root(repo: &TempDir) -> PathBuf {
++    repo.path().join("rr")
++}
++
++fn range_of(repo: &TempDir, text: &str) -> Range {
++    Resolved::resolve(&repo_root(repo), &RangeSpec::parse(text).unwrap())
++        .unwrap()
++        .list()
++        .unwrap()
++}
++
++/// The fake glab on a scenario through a symlink beside its `glab.env`, never a file written here (ETXTBSY); the
++/// post count and the log live beside it (`tests/glab/README.md`).
++struct Fake {
++    dir: TempDir,
++    glab: Glab,
++}
++
++impl Fake {
++    fn new(scenario: &str) -> Fake {
++        let dir = tempfile::tempdir().unwrap();
++        let settings = format!(
++            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_STATE={}\nYAMT_FAKE_GLAB_LOG={}\n",
++            in_this_repository(&format!("tests/glab/{scenario}")).display(),
++            dir.path().join("state").display(),
++            dir.path().join("log").display(),
++        );
++        fs::write(dir.path().join("glab.env"), settings).unwrap();
++        let link = dir.path().join("glab");
++        std::os::unix::fs::symlink(in_this_repository("scripts/fake-glab/glab"), &link).unwrap();
++        Fake {
++            glab: Glab::at(link),
++            dir,
++        }
++    }
++
++    fn log(&self) -> String {
++        fs::read_to_string(self.dir.path().join("log")).unwrap_or_default()
++    }
++
++    fn argv(&self) -> Vec<String> {
++        self.logged("argv: ")
++    }
++
++    /// Each posted body, parsed.
++    fn bodies(&self) -> Vec<Value> {
++        let bodies = self.logged("stdin: ");
++        bodies
++            .iter()
++            .map(|body| serde_json::from_str(body.trim_start_matches("stdin: ")).unwrap())
++            .collect()
++    }
++
++    fn logged(&self, prefix: &str) -> Vec<String> {
++        let log = self.log();
++        let lines = log.lines().filter(|line| line.starts_with(prefix));
++        lines.map(str::to_owned).collect()
++    }
++}
++
++/// A range `main...feature` with three threads, each first message queued: an added line of the added
++/// `src/board/reminders.ts`, an unchanged line of the renamed `docs/keys.md`, a removed line of the deleted
++/// `src/api/mockBoards.ts`, in that order.
++struct Review {
++    _repo: TempDir,
++    pair: TempDir,
++    range: Range,
++    threads: Mutex<ThreadStore>,
++}
++
++impl Review {
++    fn new() -> Review {
++        let repo = range_repo();
++        let range = range_of(&repo, "main...feature");
++        let pair = tempfile::tempdir().unwrap();
++        let mut store = ThreadStore::open(pair.path()).unwrap();
++        let threads = [
++            ("src/board/reminders.ts", added(2), ADDED_TEXT),
++            ("docs/keys.md", unchanged(0, 0), RENAMED_TEXT),
++            ("src/api/mockBoards.ts", removed(1), REMOVED_TEXT),
++        ];
++        for (path, line, text) in threads {
++            let added = store
++                .add_thread(&range, file(&range, path), line, "first thought")
++                .unwrap();
++            let thread = added.list.threads.last().unwrap();
++            store.queue(&range, thread.messages[0].id, text).unwrap();
++        }
++        Review {
++            _repo: repo,
++            pair,
++            range,
++            threads: Mutex::new(store),
++        }
++    }
++
++    fn send(&self, glab: &Glab) -> (SendReply, Vec<SendProgress>) {
++        let progress = RefCell::new(Vec::new());
++        let report = |step: SendProgress| progress.borrow_mut().push(step);
++        let reply = send_queue(&self.range, Some(glab), &self.threads, &report).unwrap();
++        (reply, progress.into_inner())
++    }
++
++    fn postings(&self) -> Vec<Posting> {
++        let list = self.threads.lock().unwrap().list(&self.range);
++        postings(&list)
++    }
++
++    fn postings_on_disk(&self) -> Vec<Posting> {
++        let reopened = ThreadStore::open(self.pair.path()).unwrap();
++        postings(&reopened.list(&self.range))
++    }
++}
++
++fn postings(list: &ThreadList) -> Vec<Posting> {
++    let messages = list.threads.iter().flat_map(|thread| &thread.messages);
++    messages.map(|message| message.posting.clone()).collect()
++}
++
++fn file(range: &Range, path: &str) -> RangeFileId {
++    let entry = range.entries().iter().find(|entry| entry.path == path);
++    entry.unwrap().id
++}
++
++fn added(right: u32) -> ThreadLine {
++    ThreadLine::Added {
++        right: RightLine(right),
++    }
++}
++
++fn removed(left: u32) -> ThreadLine {
++    ThreadLine::Removed {
++        left: LeftLine(left),
++    }
++}
++
++fn unchanged(left: u32, right: u32) -> ThreadLine {
++    ThreadLine::UnchangedOnRight {
++        left: LeftLine(left),
++        right: RightLine(right),
++    }
++}
++
++fn queued(text: &str) -> Posting {
++    Posting::Queued {
++        text: text.to_owned(),
++    }
++}
++
++fn pending(text: &str, draft_note: u64) -> Posting {
++    Posting::Pending {
++        text: text.to_owned(),
++        draft_note,
++        merge_request: "!12".to_owned(),
++        link: LINK.to_owned(),
++    }
++}
++
++fn progress(steps: &[u32], of: u32) -> Vec<SendProgress> {
++    steps
++        .iter()
++        .map(|&done| SendProgress { done, of })
++        .collect()
++}
++
++fn note_of(body: &Value) -> &str {
++    body["note"].as_str().unwrap()
++}
++
++fn merge_request_12() -> MergeRequestRef {
++    MergeRequestRef {
++        reference: "!12".to_owned(),
++        title: "Reminders before a card is due".to_owned(),
++        web_url: "https://gitlab.example/taskboard/taskboard/-/merge_requests/12".to_owned(),
++    }
++}
++
++#[test]
++fn sending_posts_in_thread_order_and_records_pending_with_the_link() {
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let expected = vec![
++        pending(ADDED_TEXT, 101),
++        pending(RENAMED_TEXT, 102),
++        pending(REMOVED_TEXT, 103),
++    ];
++    let SendReply::Sent {
++        list,
++        sent,
++        refused,
++    } = reply
++    else {
++        panic!("not sent: {reply:?}");
++    };
++    assert_eq!((sent, refused), (3, 0));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1, 2, 3], 3));
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [ADDED_TEXT, RENAMED_TEXT, REMOVED_TEXT]);
++}
++
++#[test]
++fn the_post_body_names_the_three_commits_and_the_position() {
++    let review = Review::new();
++    let fake = Fake::new("lined-up");
++
++    review.send(&fake.glab);
++
++    let position = |old_path: &str, new_path: &str, lines: Value| {
++        let mut position = json!({
++            "position_type": "text",
++            "base_sha": MERGE_BASE,
++            "start_sha": MAIN,
++            "head_sha": FEATURE,
++            "old_path": old_path,
++            "new_path": new_path,
++        });
++        position
++            .as_object_mut()
++            .unwrap()
++            .extend(lines.as_object().unwrap().clone());
++        position
++    };
++    let reminders = "src/board/reminders.ts";
++    let mock_boards = "src/api/mockBoards.ts";
++    let expected = [
++        json!({ "note": ADDED_TEXT, "position": position(reminders, reminders, json!({ "new_line": 3 })) }),
++        json!({ "note": RENAMED_TEXT, "position": position("docs/shortcuts.md", "docs/keys.md", json!({ "old_line": 1, "new_line": 1 })) }),
++        json!({ "note": REMOVED_TEXT, "position": position(mock_boards, mock_boards, json!({ "old_line": 2 })) }),
++    ];
++    assert_eq!(fake.bodies(), expected);
++    let posts = fake.argv().into_iter().filter(|argv| argv == POST_ARGV);
++    assert_eq!(posts.count(), 3, "{}", fake.log());
++}
++
++#[test]
++fn a_refused_message_keeps_its_reason_and_stays_queued_while_the_others_are_sent() {
++    let review = Review::new();
++    let fake = Fake::new("refusal");
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let refused = Posting::Refused {
++        text: RENAMED_TEXT.to_owned(),
++        reason: REFUSAL.to_owned(),
++    };
++    let expected = vec![
++        pending(ADDED_TEXT, 101),
++        refused,
++        pending(REMOVED_TEXT, 103),
++    ];
++    let SendReply::Sent {
++        list,
++        sent,
++        refused,
++    } = reply
++    else {
++        panic!("not sent: {reply:?}");
++    };
++    assert_eq!((sent, refused), (2, 1));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1, 2, 3], 3));
++}
++
++#[test]
++fn a_timeout_stops_the_send_and_leaves_the_rest_queued() {
++    let review = Review::new();
++    let fake = Fake::new("timeout");
++    let glab = Glab::at(fake.dir.path().join("glab")).with_timeout(SHORT_TIMEOUT);
++
++    let (reply, steps) = review.send(&glab);
++
++    let expected = vec![
++        pending(ADDED_TEXT, 101),
++        queued(RENAMED_TEXT),
++        queued(REMOVED_TEXT),
++    ];
++    let SendReply::Stopped {
++        list,
++        sent,
++        refused,
++        reason,
++    } = reply
++    else {
++        panic!("not stopped: {reply:?}");
++    };
++    assert_eq!((sent, refused, reason.as_str()), (1, 0, "glab timed out"));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1], 3));
++    let posts = fake.argv().into_iter().filter(|argv| argv == POST_ARGV);
++    assert_eq!(posts.count(), 2, "{}", fake.log());
++}
++
++#[test]
++fn a_message_already_among_the_drafts_is_recorded_without_posting_again() {
++    let review = Review::new();
++    let fake = Fake::new("drafted");
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let expected = vec![
++        pending(ADDED_TEXT, 301),
++        pending(RENAMED_TEXT, 303),
++        pending(REMOVED_TEXT, 304),
++    ];
++    let SendReply::Sent {
++        list,
++        sent,
++        refused,
++    } = reply
++    else {
++        panic!("not sent: {reply:?}");
++    };
++    assert_eq!((sent, refused), (3, 0));
++    assert_eq!(postings(&list), expected);
++    assert_eq!(review.postings_on_disk(), expected);
++    assert_eq!(steps, progress(&[1, 2, 3], 3));
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [RENAMED_TEXT, REMOVED_TEXT]);
++    let drafts_listed = "argv: api --paginate projects/7/merge_requests/12/draft_notes";
++    assert!(
++        fake.argv().iter().any(|argv| argv == drafts_listed),
++        "{}",
++        fake.log()
++    );
++}
++
++#[test]
++fn send_rechecks_and_posts_nothing_when_the_merge_request_moved() {
++    let review = Review::new();
++    let fake = Fake::new("moved");
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let why = NotLinedUp::Moved {
++        merge_request: merge_request_12(),
++        gitlab_head: "d1e2f3a".to_owned(),
++        shown_head: "9c1ba3f".to_owned(),
++    };
++    assert_eq!(reply, SendReply::NotLinedUp { why });
++    assert_eq!(steps, []);
++    assert_eq!(fake.bodies(), Vec::<Value>::new());
++    assert!(!fake.log().contains("draft_notes"), "{}", fake.log());
++    let unchanged = vec![
++        queued(ADDED_TEXT),
++        queued(RENAMED_TEXT),
++        queued(REMOVED_TEXT),
++    ];
++    assert_eq!(review.postings(), unchanged);
++    assert_eq!(review.postings_on_disk(), unchanged);
++}
++
++#[test]
++fn glab_missing_and_logged_out_are_their_reasons() {
++    let review = Review::new();
++    let no_progress = |_: SendProgress| panic!("progress without glab");
++
++    let missing = check_gitlab(&review.range, None);
++    let sent_without = send_queue(&review.range, None, &review.threads, &no_progress).unwrap();
++    let fake = Fake::new("logged-out");
++    let logged_out = check_gitlab(&review.range, Some(&fake.glab));
++    let sent_logged_out = send_queue(
++        &review.range,
++        Some(&fake.glab),
++        &review.threads,
++        &no_progress,
++    )
++    .unwrap();
++
++    let why = NotLinedUp::GlabMissing;
++    assert_eq!(missing, GitLabCheck::NotLinedUp { why: why.clone() });
++    assert_eq!(sent_without, SendReply::NotLinedUp { why });
++    let why = NotLinedUp::NotLoggedIn {
++        detail: "gitlab.com".to_owned(),
++    };
++    assert_eq!(logged_out, GitLabCheck::NotLinedUp { why: why.clone() });
++    assert_eq!(sent_logged_out, SendReply::NotLinedUp { why });
++    assert_eq!(fake.argv(), ["argv: auth status", "argv: auth status"]);
++}
++
++#[test]
++fn a_branch_side_asks_for_the_branch_s_open_merge_requests() {
++    let repo = range_repo();
++    git_ok(
++        &repo_root(&repo),
++        &["remote", "add", "origin", "https://gitlab.example/t.git"],
++    )
++    .unwrap();
++    git_ok(
++        &repo_root(&repo),
++        &["update-ref", "refs/remotes/origin/feature", "feature"],
++    )
++    .unwrap();
++    let fake = Fake::new("lined-up");
++
++    let by_branch = check_gitlab(&range_of(&repo, "main...feature"), Some(&fake.glab));
++    let by_remote = check_gitlab(&range_of(&repo, "main...origin/feature"), Some(&fake.glab));
++
++    let lined_up = GitLabCheck::LinedUp {
++        merge_request: merge_request_12(),
++    };
++    assert_eq!((&by_branch, &by_remote), (&lined_up, &lined_up));
++    let one_check = [
++        "argv: auth status",
++        "argv: api --method GET projects/:fullpath/merge_requests -f state=opened -f source_branch=feature",
++        "argv: api projects/7/merge_requests/12",
++    ];
++    assert_eq!(fake.argv(), [one_check, one_check].concat());
++    let cwd = format!(
++        "cwd: {}",
++        fs::canonicalize(repo_root(&repo)).unwrap().display()
++    );
++    assert!(
++        fake.log()
++            .lines()
++            .all(|line| !line.starts_with("cwd: ") || line == cwd)
++    );
++}
++
++#[test]
++fn a_commit_id_side_asks_for_the_commit_s_merge_requests() {
++    let repo = range_repo();
++    let fake = Fake::new("commit-route");
++
++    let checked = check_gitlab(
++        &range_of(&repo, &format!("main...{FEATURE}")),
++        Some(&fake.glab),
++    );
++
++    let lined_up = GitLabCheck::LinedUp {
++        merge_request: merge_request_12(),
++    };
++    assert_eq!(checked, lined_up);
++    let by_commit =
++        format!("argv: api projects/:fullpath/repository/commits/{FEATURE}/merge_requests");
++    let expected = [
++        "argv: auth status",
++        &by_commit,
++        "argv: api projects/7/merge_requests/12",
++    ];
++    assert_eq!(fake.argv(), expected);
++}
++
++#[test]
++fn several_and_none_name_what_was_looked_at() {
++    let repo = range_repo();
++    let range = range_of(&repo, "main...feature");
++    let several = Fake::new("several");
++    let none = Fake::new("no-merge-request");
++
++    let feature = LookedAt::Branch {
++        name: "feature".to_owned(),
++    };
++    let references = vec!["!12".to_owned(), "!12".to_owned()];
++    let why = NotLinedUp::Several {
++        looked_at: feature.clone(),
++        references,
++    };
++    assert_eq!(
++        check_gitlab(&range, Some(&several.glab)),
++        GitLabCheck::NotLinedUp { why }
++    );
++    let why = NotLinedUp::NoMergeRequest { looked_at: feature };
++    assert_eq!(
++        check_gitlab(&range, Some(&none.glab)),
++        GitLabCheck::NotLinedUp { why }
++    );
++}
+diff --git a/tests/glab/commit-route/merge-request.json b/tests/glab/commit-route/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/commit-route/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/commit-route/merge-requests.json b/tests/glab/commit-route/merge-requests.json
+new file mode 100644
+index 0000000..da2f0fb
+--- /dev/null
++++ b/tests/glab/commit-route/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1009,"iid":9,"project_id":7,"title":"Reminders, first try","state":"merged","source_branch":"reminders","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/9","references":{"short":"!9","relative":"!9","full":"taskboard/taskboard!9"}},{"id":1011,"iid":11,"project_id":7,"title":"Reminders, part one","state":"opened","source_branch":"reminders-1","target_branch":"main","sha":"7685b254e6e1b9199692006c4d3bcd647ca7f914","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/11","references":{"short":"!11","relative":"!11","full":"taskboard/taskboard!11"}},{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/drafted/draft-notes.json b/tests/glab/drafted/draft-notes.json
+new file mode 100644
+index 0000000..7b67c40
+--- /dev/null
++++ b/tests/glab/drafted/draft-notes.json
+@@ -0,0 +1 @@
++[{"id":300,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"note":"Why not a Duration type?","commit_id":null,"line_code":"8f2e_0_4","position":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","start_sha":"437805506eab02eaba409bdeffd00e0383476e35","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","old_path":"src/board/reminders.ts","new_path":"src/board/reminders.ts","position_type":"text","old_line":null,"new_line":4,"line_range":null}},{"id":301,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"note":"Why not a Duration type?","commit_id":null,"line_code":"8f2e_0_3","position":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","start_sha":"437805506eab02eaba409bdeffd00e0383476e35","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","old_path":"src/board/reminders.ts","new_path":"src/board/reminders.ts","position_type":"text","old_line":null,"new_line":3,"line_range":null}},{"id":302,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"note":"Looks good overall.","commit_id":null,"line_code":null,"position":null}]
+\ No newline at end of file
+diff --git a/tests/glab/drafted/merge-request.json b/tests/glab/drafted/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/drafted/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/drafted/merge-requests.json b/tests/glab/drafted/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/drafted/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/drafted/post-1.json b/tests/glab/drafted/post-1.json
+new file mode 100644
+index 0000000..ce59c2f
+--- /dev/null
++++ b/tests/glab/drafted/post-1.json
+@@ -0,0 +1 @@
++{"id":303,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/drafted/post-2.json b/tests/glab/drafted/post-2.json
+new file mode 100644
+index 0000000..7e3ac3e
+--- /dev/null
++++ b/tests/glab/drafted/post-2.json
+@@ -0,0 +1 @@
++{"id":304,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/lined-up/draft-notes.json b/tests/glab/lined-up/draft-notes.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/tests/glab/lined-up/draft-notes.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/tests/glab/lined-up/merge-request.json b/tests/glab/lined-up/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/lined-up/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/lined-up/merge-requests.json b/tests/glab/lined-up/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/lined-up/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/lined-up/post-1.json b/tests/glab/lined-up/post-1.json
+new file mode 100644
+index 0000000..1518b85
+--- /dev/null
++++ b/tests/glab/lined-up/post-1.json
+@@ -0,0 +1 @@
++{"id":101,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/lined-up/post-2.json b/tests/glab/lined-up/post-2.json
+new file mode 100644
+index 0000000..951a797
+--- /dev/null
++++ b/tests/glab/lined-up/post-2.json
+@@ -0,0 +1 @@
++{"id":102,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/lined-up/post-3.json b/tests/glab/lined-up/post-3.json
+new file mode 100644
+index 0000000..da86a33
+--- /dev/null
++++ b/tests/glab/lined-up/post-3.json
+@@ -0,0 +1 @@
++{"id":103,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/logged-out/auth-status.exit b/tests/glab/logged-out/auth-status.exit
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/glab/logged-out/auth-status.exit
+@@ -0,0 +1 @@
++1
+diff --git a/tests/glab/logged-out/auth-status.out b/tests/glab/logged-out/auth-status.out
+new file mode 100644
+index 0000000..de30a11
+--- /dev/null
++++ b/tests/glab/logged-out/auth-status.out
+@@ -0,0 +1,11 @@
++gitlab.com
++  x gitlab.com: API call failed: GET https://gitlab.com/api/v4/user: 401 {message: 401 Unauthorized}
++  ✓ Git operations for gitlab.com configured to use ssh protocol.
++  ✓ API calls for gitlab.com are made over https protocol.
++  ✓ REST API Endpoint: https://gitlab.com/api/v4/
++  ✓ GraphQL Endpoint: https://gitlab.com/api/graphql/
++  ! No token found (checked config file, keyring, and environment variables).
++
++   ERROR
++
++  X could not authenticate to one or more of the configured GitLab instances.
+diff --git a/tests/glab/moved/merge-request.json b/tests/glab/moved/merge-request.json
+new file mode 100644
+index 0000000..23fe64d
+--- /dev/null
++++ b/tests/glab/moved/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/moved/merge-requests.json b/tests/glab/moved/merge-requests.json
+new file mode 100644
+index 0000000..cc4084b
+--- /dev/null
++++ b/tests/glab/moved/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/no-merge-request/merge-requests.json b/tests/glab/no-merge-request/merge-requests.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/tests/glab/no-merge-request/merge-requests.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/tests/glab/other-base/merge-request.json b/tests/glab/other-base/merge-request.json
+new file mode 100644
+index 0000000..f87c1d9
+--- /dev/null
++++ b/tests/glab/other-base/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"release","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"5f9d381d2306ae5110df08ef1fa0d0cbd04edb3b","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"5f9d381d2306ae5110df08ef1fa0d0cbd04edb3b"}}
+\ No newline at end of file
+diff --git a/tests/glab/other-base/merge-requests.json b/tests/glab/other-base/merge-requests.json
+new file mode 100644
+index 0000000..9d299e5
+--- /dev/null
++++ b/tests/glab/other-base/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"release","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/preparing/merge-request.json b/tests/glab/preparing/merge-request.json
+new file mode 100644
+index 0000000..c756ea0
+--- /dev/null
++++ b/tests/glab/preparing/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":null}
+\ No newline at end of file
+diff --git a/tests/glab/preparing/merge-requests.json b/tests/glab/preparing/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/preparing/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/refusal/draft-notes.json b/tests/glab/refusal/draft-notes.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/tests/glab/refusal/draft-notes.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/tests/glab/refusal/merge-request.json b/tests/glab/refusal/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/refusal/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/refusal/merge-requests.json b/tests/glab/refusal/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/refusal/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/refusal/post-1.json b/tests/glab/refusal/post-1.json
+new file mode 100644
+index 0000000..1518b85
+--- /dev/null
++++ b/tests/glab/refusal/post-1.json
+@@ -0,0 +1 @@
++{"id":101,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/refusal/post-2.err b/tests/glab/refusal/post-2.err
+new file mode 100644
+index 0000000..79b03bc
+--- /dev/null
++++ b/tests/glab/refusal/post-2.err
+@@ -0,0 +1 @@
++glab: 400 Bad request - Note {:line_code=>["can't be blank"]} (HTTP 400)
+diff --git a/tests/glab/refusal/post-2.json b/tests/glab/refusal/post-2.json
+new file mode 100644
+index 0000000..a0dd198
+--- /dev/null
++++ b/tests/glab/refusal/post-2.json
+@@ -0,0 +1 @@
++{"message":"400 Bad request - Note {:line_code=>[\"can't be blank\"]}"}
+\ No newline at end of file
+diff --git a/tests/glab/refusal/post-2.status b/tests/glab/refusal/post-2.status
+new file mode 100644
+index 0000000..59db10c
+--- /dev/null
++++ b/tests/glab/refusal/post-2.status
+@@ -0,0 +1 @@
++400 Bad Request
+diff --git a/tests/glab/refusal/post-3.json b/tests/glab/refusal/post-3.json
+new file mode 100644
+index 0000000..da86a33
+--- /dev/null
++++ b/tests/glab/refusal/post-3.json
+@@ -0,0 +1 @@
++{"id":103,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/several/merge-request-14.json b/tests/glab/several/merge-request-14.json
+new file mode 100644
+index 0000000..f51060d
+--- /dev/null
++++ b/tests/glab/several/merge-request-14.json
+@@ -0,0 +1 @@
++{"id":1014,"iid":14,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/14","references":{"short":"!14","relative":"!14","full":"taskboard/taskboard!14"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/several/merge-request.json b/tests/glab/several/merge-request.json
+new file mode 100644
+index 0000000..40464d1
+--- /dev/null
++++ b/tests/glab/several/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due (release)","state":"opened","source_branch":"feature","target_branch":"release","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"5f9d381d2306ae5110df08ef1fa0d0cbd04edb3b","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"5f9d381d2306ae5110df08ef1fa0d0cbd04edb3b"}}
+\ No newline at end of file
+diff --git a/tests/glab/several/merge-requests.json b/tests/glab/several/merge-requests.json
+new file mode 100644
+index 0000000..d14abb6
+--- /dev/null
++++ b/tests/glab/several/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due (release)","state":"opened","source_branch":"feature","target_branch":"release","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}},{"id":1014,"iid":14,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/14","references":{"short":"!14","relative":"!14","full":"taskboard/taskboard!14"}}]
+\ No newline at end of file
+diff --git a/tests/glab/timeout/draft-notes.json b/tests/glab/timeout/draft-notes.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/tests/glab/timeout/draft-notes.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/tests/glab/timeout/merge-request.json b/tests/glab/timeout/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/timeout/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/timeout/merge-requests.json b/tests/glab/timeout/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/timeout/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/timeout/post-1.json b/tests/glab/timeout/post-1.json
+new file mode 100644
+index 0000000..1518b85
+--- /dev/null
++++ b/tests/glab/timeout/post-1.json
+@@ -0,0 +1 @@
++{"id":101,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/timeout/post-2.json b/tests/glab/timeout/post-2.json
+new file mode 100644
+index 0000000..951a797
+--- /dev/null
++++ b/tests/glab/timeout/post-2.json
+@@ -0,0 +1 @@
++{"id":102,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/timeout/post-2.sleep b/tests/glab/timeout/post-2.sleep
+new file mode 100644
+index 0000000..7273c0f
+--- /dev/null
++++ b/tests/glab/timeout/post-2.sleep
+@@ -0,0 +1 @@
++25
+diff --git a/tests/glab/timeout/post-3.json b/tests/glab/timeout/post-3.json
+new file mode 100644
+index 0000000..da86a33
+--- /dev/null
++++ b/tests/glab/timeout/post-3.json
+@@ -0,0 +1 @@
++{"id":103,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/two-dots/merge-request.json b/tests/glab/two-dots/merge-request.json
+new file mode 100644
+index 0000000..9d663b4
+--- /dev/null
++++ b/tests/glab/two-dots/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a"}}
+\ No newline at end of file
+diff --git a/tests/glab/two-dots/merge-requests.json b/tests/glab/two-dots/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/two-dots/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+-- 
+2.56.0
+

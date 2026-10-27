@@ -1,0 +1,4 @@
+just mutants 3d9d0ce (covers 2e9555f RVColumnsR1) — Stryker; editor/ not mutated
+All files           |  55.88 |   70.37 |       38 |         0 |         16 |       14 |        0 |
+ check-sfc-order.ts |  55.88 |   70.37 |       38 |         0 |         16 |       14 |        0 |
+Survivors only in check-sfc-order.ts lines 51-110 (unchanged logic; the patch added one CALLEE_SECTIONS entry, killed by the new test) — pre-existing, dropped (OR12).

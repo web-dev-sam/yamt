@@ -76,6 +76,26 @@ pub struct StoredSettings {
     pub keys: BTreeMap<String, Vec<String>>,
     #[serde(rename = "languageServers")]
     pub language_servers: LanguageServerSettings,
+    pub agent: AgentSettings,
+}
+
+/// The AI agent the window starts and its first message; `None` = the window's default.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+// No `serde(default)`: serde already reads a missing `Option` field as `None`, and specta-serde
+// 0.0.12 exports every field of a `default` container as optional (`command?:`, lib.rs:850).
+#[serde(rename_all = "camelCase")]
+pub struct AgentSettings {
+    pub command: Option<Vec<String>>,
+    pub first_message: Option<String>,
+}
+
+impl AgentSettings {
+    pub(crate) fn without_empty_command(self) -> AgentSettings {
+        AgentSettings {
+            command: self.command.filter(|words| !words.is_empty()),
+            first_message: self.first_message,
+        }
+    }
 }
 
 /// `repositories`: the answer to "Start this project's language servers?" per repository root
@@ -242,6 +262,17 @@ pub fn set_added_servers(
     })
 }
 
+/// An empty `command` is stored as `None`: the window's default.
+pub fn set_agent(
+    places: &Places,
+    current: &StoredSettings,
+    agent: AgentSettings,
+) -> Result<SettingsRead, Error> {
+    change(places, current, |stored| {
+        stored.agent = agent.without_empty_command();
+    })
+}
+
 /// Makes `to` the file in use: an existing file there is used, a missing one is created from
 /// `current`; the location is recorded only once that file is readable.
 pub fn relocate(
@@ -338,5 +369,19 @@ mod tests {
             serde_json::to_value(&stored).unwrap()["languageServers"],
             expected
         );
+    }
+
+    #[test]
+    fn the_agent_entry_crosses_the_ipc_with_both_fields_and_reads_with_none() {
+        let agent = AgentSettings {
+            command: Some(vec!["omp".to_owned(), "acp".to_owned()]),
+            first_message: None,
+        };
+        let sent = serde_json::json!({ "command": ["omp", "acp"], "firstMessage": null });
+        assert_eq!(serde_json::to_value(&agent).unwrap(), sent);
+        let read: AgentSettings = serde_json::from_value(sent).unwrap();
+        assert_eq!(read, agent);
+        let missing: AgentSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(missing, AgentSettings::default());
     }
 }

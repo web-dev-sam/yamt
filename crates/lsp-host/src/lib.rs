@@ -2,9 +2,6 @@
 #![forbid(unsafe_code)]
 
 mod files;
-mod frame;
-mod program;
-mod run;
 
 use std::collections::BTreeMap;
 use std::mem;
@@ -12,11 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
 use serde::{Deserialize, Serialize};
+use yamt_pipe::{Framing, Running};
 
 pub use crate::files::ProjectFile;
-pub use crate::program::{ProgramFolders, ProgramFound, ProgramPlace};
-pub use crate::run::HostEvent;
-use crate::run::Running;
+pub use yamt_pipe::{HostEvent, ProgramFolders, ProgramFound, ProgramPlace};
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, specta::Type,
@@ -92,17 +88,18 @@ impl Host {
                 project: command.project.clone(),
             };
         };
-        let program = match program::find(&self.root, &project, &command.program, &command.folders)
-        {
-            Ok(found) => found.path,
-            Err(searched) => {
-                return StartReply::NotFound {
-                    program: command.program.clone(),
-                    searched: texts(&searched),
-                };
-            }
-        };
-        match Running::start(&program, &command.args, &project, events) {
+        let program =
+            match yamt_pipe::find(&self.root, &project, &command.program, &command.folders) {
+                Ok(found) => found.path,
+                Err(searched) => {
+                    return StartReply::NotFound {
+                        program: command.program.clone(),
+                        searched: texts(&searched),
+                    };
+                }
+            };
+        let framing = Framing::ContentLength;
+        match Running::start(&program, &command.args, &project, framing, events) {
             Ok(running) => {
                 let run = RunId(self.next_run);
                 self.next_run = self.next_run.wrapping_add(1);
@@ -158,7 +155,7 @@ impl Host {
                 searched: Vec::new(),
             };
         };
-        match program::find(&self.root, &project, program, folders) {
+        match yamt_pipe::find(&self.root, &project, program, folders) {
             Ok(found) => ProgramFound::Found {
                 path: found.path.display().to_string(),
                 place: found.place,

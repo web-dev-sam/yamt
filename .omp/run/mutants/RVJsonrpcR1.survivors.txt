@@ -1,0 +1,5 @@
+just mutants e4e3f91 (covers a5a7f38 RVJsonrpcR1): Stryker 5 files, 221 mutants; 194 killed, 25 survived, 2 no coverage.
+On lines a5a7f38 changed: 2 survived —
+  connection.ts:11 METHOD_NOT_FOUND = -32601 → +32601; connection.ts:12 INVALID_PARAMS = -32602 → +32602
+  Triage: dropped — module-level constants, the #732 class (not re-evaluated under the vitest runner whatever the tests assert).
+The rest are older lines (messages.ts/timers.ts module-level, answers.ts).

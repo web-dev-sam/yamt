@@ -1,8 +1,8 @@
 use tauri::path::PathResolver;
 use tauri::{Manager, Runtime, State, WebviewWindow};
 use yamt_settings::{
-    AddedServer, Antialiasing, KeysChange, Places, RepositoryAnswer, SettingsRead, StoredSettings,
-    Theme,
+    AddedServer, AgentSettings, Antialiasing, KeysChange, Places, RepositoryAnswer, SettingsRead,
+    StoredSettings, Theme,
 };
 
 use crate::ipc_error::IpcError;
@@ -162,6 +162,22 @@ pub(crate) fn set_added_servers<R: Runtime>(
     added: Vec<AddedServer>,
 ) -> Result<SettingsRead, IpcError> {
     let read = yamt_settings::set_added_servers(&places(window.path())?, &current, added)?;
+    show_theme(&window, read.stored.theme);
+    Ok(read)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes arguments by value"
+)]
+pub(crate) fn set_agent<R: Runtime>(
+    window: WebviewWindow<R>,
+    current: StoredSettings,
+    agent: AgentSettings,
+) -> Result<SettingsRead, IpcError> {
+    let read = yamt_settings::set_agent(&places(window.path())?, &current, agent)?;
     show_theme(&window, read.stored.theme);
     Ok(read)
 }

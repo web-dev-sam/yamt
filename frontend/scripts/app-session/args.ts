@@ -12,17 +12,17 @@ import { parseColour, type Colour } from "./colours";
 import type { Query } from "./find";
 import { parseChord, type Chord } from "./keys";
 import type { ScrollTo } from "./placement";
-import type { Size } from "./state";
-
-const DEFAULT_SIZE: Size = { width: 1600, height: 1000 };
-const DEFAULT_BINARY = "target/debug/yamt";
-const SIZE = /^([1-9][0-9]*)x([1-9][0-9]*)$/;
+import { startCommand, type StartCommand } from "./startArgs";
 
 const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
-  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff]
+  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
+                | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
-  start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>]
+                --glab: scripts/fake-glab first on PATH; its scenario is the link <folder>/glab/scenario
+  start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+                | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
+                  [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
@@ -36,26 +36,8 @@ const USAGE = `usage: app-session <command> …   (relative paths are taken from
   colours       <file.mkv> <hex> [<hex> …]
   stop          --name <n>`;
 
-type Opening = { readonly kind: "dir"; readonly dir: string } | { readonly kind: "fresh" | "diff" };
-export type Recording = { readonly file: string; readonly seconds: number };
-
 export type Command =
-  | {
-      readonly kind: "start-app";
-      readonly name: string;
-      readonly binary: string;
-      readonly opens: Opening;
-      readonly settings: string | null;
-      readonly size: Size;
-      readonly record: Recording | null;
-      readonly home: string | null;
-    }
-  | {
-      readonly kind: "start-fixture";
-      readonly name: string;
-      readonly size: Size;
-      readonly search: string;
-    }
+  | StartCommand
   | {
       readonly kind: "click";
       readonly name: string;
@@ -98,10 +80,24 @@ type CommandKind = Command["kind"];
 
 const SPECS: Readonly<Record<CommandKind, Spec>> = {
   "start-app": {
-    values: ["name", "binary", "repo", "settings", "size", "record", "record-seconds", "home"],
-    flags: ["fresh-repo", "diff"],
+    values: [
+      "name",
+      "binary",
+      "repo",
+      "range",
+      "settings",
+      "size",
+      "record",
+      "record-seconds",
+      "home",
+      "glab",
+    ],
+    flags: ["fresh-repo", "diff", "ai"],
   },
-  "start-fixture": { values: ["name", "size", "diff-case"], flags: ["diff"] },
+  "start-fixture": {
+    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case"],
+    flags: ["diff", "ai", "ai-changes"],
+  },
   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
   drag: { values: ["name", "dx", "dy", "role", "nth"], flags: [] },
   press: { values: ["name"], flags: ["x11"] },
@@ -115,63 +111,6 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
   colours: { values: [], flags: [] },
   stop: { values: ["name"], flags: [] },
 };
-
-function size(parsed: Parsed): Size {
-  const text = parsed.values.get("size");
-  if (text === undefined) {
-    return DEFAULT_SIZE;
-  }
-  const [, width, height] = SIZE.exec(text) ?? [];
-  if (width === undefined || height === undefined) {
-    throw new Error(`--size ${text}: expected <width>x<height>, e.g. 1600x1000`);
-  }
-  return { width: Number(width), height: Number(height) };
-}
-
-function opening(parsed: Parsed): Opening {
-  const dir = parsed.values.get("repo");
-  const diff = parsed.flags.has("diff");
-  if ([dir !== undefined, parsed.flags.has("fresh-repo"), diff].filter(Boolean).length !== 1) {
-    throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
-  }
-  return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
-}
-
-function fixtureSearch(parsed: Parsed): string {
-  const fixture = parsed.values.get("diff-case");
-  const diff = parsed.flags.has("diff") ? "?diff" : "";
-  return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
-}
-
-function recording(parsed: Parsed): Recording | null {
-  const file = parsed.values.get("record");
-  const seconds = parsed.values.get("record-seconds");
-  if (file === undefined && seconds === undefined) {
-    return null;
-  }
-  if (file === undefined || seconds === undefined) {
-    throw new Error("--record and --record-seconds go together");
-  }
-  return { file, seconds: wholeNumber(seconds, "--record-seconds", 1) };
-}
-
-function settingsText(parsed: Parsed): string | null {
-  const text = parsed.values.get("settings");
-  if (text === undefined) {
-    return null;
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    throw new Error(`--settings is not JSON: ${reason}`, { cause: error });
-  }
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error(`--settings must be a JSON object, got ${text}`);
-  }
-  return text;
-}
 
 function scrollTo(parsed: Parsed): ScrollTo {
   const text = parsed.values.get("to");
@@ -205,24 +144,6 @@ function dragCommand(parsed: Parsed): Command {
     query: query(parsed),
     dx: offsetPx(dx, "--dx"),
     dy: dy === undefined ? 0 : offsetPx(dy, "--dy"),
-  };
-}
-
-function startCommand(kind: "start-app" | "start-fixture", parsed: Parsed): Command {
-  noPositionals(parsed);
-  const name = sessionName(parsed);
-  if (kind === "start-fixture") {
-    return { kind, name, size: size(parsed), search: fixtureSearch(parsed) };
-  }
-  return {
-    kind,
-    name,
-    binary: parsed.values.get("binary") ?? DEFAULT_BINARY,
-    opens: opening(parsed),
-    settings: settingsText(parsed),
-    size: size(parsed),
-    record: recording(parsed),
-    home: parsed.values.get("home") ?? null,
   };
 }
 

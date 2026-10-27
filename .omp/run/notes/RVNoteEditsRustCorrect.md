@@ -1,0 +1,35 @@
+# RVNoteEditsRustCorrect — correctness review of d7f2968
+
+Verbatim output:
+
+```json
+{
+  "verdict": "fail",
+  "findings": [
+    {
+      "severity": "block",
+      "file": "frontend/src/ui/problemText.ts",
+      "line": 162,
+      "rule_id": "IPC4",
+      "problem": "The commit adds `NotANote` to the `IpcError` union in the regenerated `bindings.ts`, but `causedText` has no case for it and `FixedKind`/`FIXED_REASONS` don't list it. Its `switch` therefore no longer covers every kind and the window's typecheck fails with `TS2366: Function lacks ending return statement` at 162:64. So `just check` fails at d7f2968 and at HEAD (b356cca does not touch problemText.ts). The window would also have no words for this refusal.",
+      "fix": "Land the frontend half together with the regenerated bindings: add `NotANote` to `FixedKind` and `FIXED_REASONS` (for example \"that message is an AI answer, which is never edited or deleted.\") with a row in `problemText.test.ts`. Otherwise keep the regenerated `bindings.ts` out of the tree until row 16 adds that case."
+    }
+  ],
+  "checked": [
+    "Targeted check that the block rests on (allowed by RV6): `node_modules/.bin/tsc --noEmit --strict … src/ui/problemText.ts` in frontend/ gave `src/ui/problemText.ts(162,64): error TS2366`. The second error it printed, on `toSorted`, came from my ad-hoc `--target` lib choice and is unrelated. All other kinds in the `IpcError` union are handled; the one new kind is NotANote (union listed from `git show d7f2968:frontend/src/ipc/bindings.ts`).",
+    "Check order is unknown → NotANote → MessagePending → blank. `unsent_note_mut` (thread_store.rs:241-257) runs `shown_message_mut` (path filter, `UnknownMessage`), then the body match, then the posting match. `edit_note` calls `require_text` only after that (thread_store.rs:155-156). Exhaustive matches, no wildcards.",
+    "Posting rules: a `NotQueued` note stays `NotQueued`. `Queued`/`Refused` become `Queued { text }`, so the Post text and a refusal's reason are dropped (#123). `Pending` cannot reach this point. `written` and `id` are untouched, so there is no 'edited' mark. Pinned by `editing_a_note_replaces_its_text_and_a_waiting_note_waits_with_the_new_text`: message 1 stays NotQueued, message 3 Refused→Queued, message 6's Post text replaced; reopened after each edit.",
+    "Delete: `retain` by id, then `retain` of non-empty threads (thread_store.rs:175-178). The sweep over every thread is safe because ids are unique and `ThreadFile::problem` refuses an empty thread on read (thread_file.rs:110), so no other thread can be empty. A remaining thread's `session` is untouched; pinned by `deleting_a_note_takes_it_out_of_its_thread_and_the_thread_keeps_its_session`.",
+    "Emptied thread removed while its neighbours keep order, ids and file ids, and `nextThread`/`nextMessage` stay on disk: `a_thread_loses_its_last_message_and_goes_while_its_neighbours_keep_order_and_ids`. Ids are never reused: `ids_stay_fresh_after_a_delete` would catch a counter recomputed from the largest id still stored (it expects 3, then thread 2 and message 4 after everything is deleted and the file is reopened).",
+    "Refusals write nothing. Each one returns before `commit`, and `commit` writes only when the file differs. `edit_and_delete_refuse_in_the_order_…_and_write_nothing` checks the file byte for byte and the in-memory list. Pairing blank text with the unknown, AI-answer and pending refusals pins each of them before `EmptyMessage`. `an_ai_answer_is_not_a_note_even_when_pending` pins NotANote before MessagePending. A failed write leaves memory unchanged: `a_failed_write_changes_nothing_in_memory` was extended with edit and delete, and both reach `commit`.",
+    "#121 turn numbering: `answers_in` counts only `AiAnswer`s of the session, and an AI answer cannot be deleted. `deleting_a_note_before_an_answer_leaves_the_turn_numbering_as_it_was` expects [answer 0, note, answer 1], so it would also catch a delete that removed the answer.",
+    "Lock order (#117/brief): both commands take `send_guard` (a `try_lock`) and only then `locked(&state.threads)` (review.rs:96-97, 107-108), the same order as `send_queue` (guard for the whole send, store only between glab calls). The guard is never waited on, so no deadlock is possible in any order. The #117 row's wording 'Mutex<ThreadStore> and a send guard, taken in that order' predates this patch; architecture.md:555 and src-tauri/AGENTS.md describe guard then store.",
+    "Running send: edit and delete cannot happen during a send because the guard answers `SendRunning`. So `waiting_text`'s and `record_if_waiting`'s answer for a gone message (`UnknownMessage`) is unchanged and unreachable, as the brief says. `edit_note_and_delete_message_answer_send_running_while_a_send_runs_and_change_nothing` would fail if the guard line were removed, because the edit would answer Ok.",
+    "`IpcError::NotANote` is mapped at ipc_error.rs:190 with no wildcard; its JSON is pinned by `an_ai_answer_refused_as_a_note_has_its_kind_and_message`. Both commands are registered in commands.rs. `edit_note_and_delete_message_reach_the_thread_store` checks the edit, the blank refusal, the delete answering `{threads:[]}` and a second delete answering UnknownMessage.",
+    "Mutants (`just mutants f8eb4fa`: 2 caught, 12 unviable). The two viable mutants are the delete `retain` predicates (`!=`→`==`, delete `!`). The 12 unviable ones replace whole functions returning `Result<&mut _>`/`Result<ThreadList>`, which have no `Default`. cargo-mutants generates nothing for the `matches!` posting rule, wildcard-free match arms, the check order, or the `let _sending = send_guard(..)?;` statement. So the mutation run proves only the delete sweep. Reading the tests by hand, each of the other rules has a test that fails when the rule changes: posting (edit test), order (refusal-order and pending-AI-answer tests), guard (src-tauri test), session (delete test), ids, turns, and byte-identical refusals. No rule is left untested.",
+    "Implementer's deviations accepted: `change_posting` reuses `shown_message_mut` with unchanged behaviour (`queue`/`unqueue` tests still apply); a separate NotANote JSON test because of the 40-line clippy limit; the `reopened_list` helper. The open risk that threads.rs is now 939 lines (RS6) and the missing docs (since added in b2ac7e3) are for the boundary lens and the orchestrator.",
+    "`frontend/src/ipc/bindings.ts` in the commit has the generated shape (`editNote`/`deleteMessage` through `typedError`, `NotANote` in the union). The implementer didn't list it, which is consistent with the orchestrator running `just bindings`. `just bindings-check` is the verifier's.",
+    "Risk register: none of RK32–RK36 is weakened. RK33 (stale draft after an edit mid-send) is closed for edit and delete by the guard and its test. RK36 (a refused read is never overwritten) is untouched, since edit and delete go through the same `commit`."
+  ]
+}
+```

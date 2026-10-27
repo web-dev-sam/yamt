@@ -1,4 +1,5 @@
 import type { ServerHost } from "../ipc";
+import { SYSTEM_TIMERS, type Timers } from "../jsonrpc";
 import { DocEntry, type ResultDocument } from "./internal/documents";
 import { format, type FormatReply, type FormattingOptions } from "./internal/formatting";
 import { hostContext, type HostContext } from "./internal/handshake";
@@ -6,7 +7,6 @@ import { LogBook, type LogLine } from "./internal/log";
 import { Server, type ServerEnv } from "./internal/server";
 import type { ServerSpec } from "./internal/spec";
 import type { ServerView } from "./internal/state";
-import { SYSTEM_TIMERS, type Timers } from "./internal/timers";
 
 export type { DocVersion } from "./internal/version";
 export { isDocVersion } from "./internal/version";
@@ -27,7 +27,6 @@ export {
   type SpecNote,
 } from "./internal/spec";
 export type { FailReason, ServerState, ServerView } from "./internal/state";
-export type { Timers } from "./internal/timers";
 
 export interface OpenDocument {
   changed(): void;

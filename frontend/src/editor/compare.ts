@@ -2,18 +2,23 @@ import { redo, undo } from "@codemirror/commands";
 import type { ViewUpdate } from "@codemirror/view";
 
 import type { Column, ColumnVersion, Comparison, TabLanguage, TabTexts } from "../ipc";
-import { showDifferences } from "./internal/compareFields";
-import { keyboardColumn, revealDifference } from "./internal/compareFocus";
+import { differenceField } from "./internal/compareFields";
+import { keyboardColumn, moveToDifference } from "./internal/compareFocus";
 import { formatColumns, type FormatLanguage, type FormatReport } from "./internal/compareFormat";
 import { CompareFrame } from "./internal/compareFrame";
 import { CompareLanguage } from "./internal/compareLanguage";
-import { columnMarks } from "./internal/compareMarks";
 import { Settle } from "./internal/compareSettle";
 import { CompareStrip } from "./internal/compareStrip";
-import { COLUMNS, createColumnViews, type ColumnViews } from "./internal/compareViews";
+import {
+  COLUMNS,
+  createColumnViews,
+  setColumnPreferences,
+  showColumnDifferences,
+  type ColumnViews,
+} from "./internal/compareViews";
 import { historyCommand } from "./internal/historyKey";
 import type { Direction } from "./internal/navigation";
-import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
+import type { PaneSettings, Preferences } from "./internal/pane";
 
 export type { ColumnFormat, FormatReport } from "./internal/compareFormat";
 export { FORMAT_LANGUAGES } from "./internal/compareFormat";
@@ -77,7 +82,12 @@ export class CompareController {
       },
     });
     this.#strip = new CompareStrip(hosts.strip);
-    this.#frame = new CompareFrame({ views: this.#views, strip: this.#strip });
+    this.#frame = new CompareFrame({
+      views: this.#views,
+      strip: this.#strip,
+      fields: [differenceField],
+      anchors: () => [],
+    });
     this.showComparison(texts.comparison);
     this.#language = new CompareLanguage(options.language, this.#views, events.detected);
     this.#frame.request();
@@ -104,11 +114,7 @@ export class CompareController {
     if (!this.#settle.accepts(comparison.versions)) {
       return false;
     }
-    for (const column of COLUMNS) {
-      const view = this.#views[column];
-      const marks = columnMarks(view.state.doc, comparison.differences, column);
-      view.dispatch({ effects: showDifferences.of(marks) });
-    }
+    showColumnDifferences(this.#views, comparison.differences);
     return true;
   }
 
@@ -118,10 +124,7 @@ export class CompareController {
 
   setPreferences(preferences: Preferences): void {
     this.#settings = { ...this.#settings, preferences };
-    const effects = preferenceEffects("center", this.#settings);
-    for (const column of COLUMNS) {
-      this.#views[column].dispatch({ effects });
-    }
+    setColumnPreferences(this.#views, this.#settings);
   }
 
   formatLanguage(): FormatLanguage | null {
@@ -134,7 +137,7 @@ export class CompareController {
   }
 
   moveToChange(direction: Direction): void {
-    revealDifference(this.#views[keyboardColumn(this.#views) ?? "left"], direction);
+    moveToDifference(this.#views, direction);
   }
 
   historyKey(event: KeyboardEvent): boolean {

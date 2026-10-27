@@ -1,0 +1,5 @@
+just mutants f7694f2 (covers 062e049 RVThreadBoxes): Stryker 4 files, 681 mutants; 379 killed, 18 survived, 176 no coverage (start.ts has no node test).
+On lines 062e049 changed: 31 —
+  scripts/app-session/start.ts:83-106 (30 NoCoverage): fakeGlab/glabEnv — the thin real-app start; the real-app steps 1-6 with --glab ran through it (notes RVThreadBoxes.md)
+  Survived Regex scripts/app-session/startArgs.ts:100  /^[a-z0-9-]+$/ → /^[a-z0-9-]+/ — a scenario with a trailing path part would pass: for the correctness reviewer
+rangeKeys.ts: 100 % (73 killed).

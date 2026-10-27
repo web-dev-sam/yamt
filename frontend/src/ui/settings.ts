@@ -6,6 +6,7 @@ import {
   KEY_ACTIONS,
   keyText,
   type AddedServer,
+  type AgentSettings,
   type Antialiasing,
   type Key,
   type KeyAction,
@@ -30,6 +31,7 @@ export type SettingsInUse = {
   readonly antialiasing: Antialiasing;
   readonly keys: KeysRead;
   readonly languageServers: LanguageServerSettings;
+  readonly agent: AgentSettings;
 };
 
 type SettingsTarget = {
@@ -53,6 +55,7 @@ export type SettingsActions = {
   setServerAnswer(answer: RepositoryAnswer | null): Promise<void>;
   setAddedServers(added: readonly AddedServer[]): Promise<void>;
   setServerSwitch(server: string, on: boolean): Promise<void>;
+  setAgent(agent: AgentSettings): Promise<void>;
 };
 
 type Send = (current: StoredSettings) => Promise<SourceResult<SettingsRead>>;
@@ -64,6 +67,7 @@ export function startSettings(theme: Theme): SettingsInUse {
     antialiasing: "subpixel",
     keys: bindingsOf({}),
     languageServers: { repositories: {}, off: {}, added: [] },
+    agent: { command: null, firstMessage: null },
   };
 }
 
@@ -80,6 +84,7 @@ function storedSettings({
   antialiasing,
   keys,
   languageServers,
+  agent,
 }: SettingsInUse): StoredSettings {
   const changed = KEY_ACTIONS.filter((action) => !isDefault(action, keys.bindings[action]));
   return {
@@ -87,6 +92,7 @@ function storedSettings({
     antialiasing,
     keys: Object.fromEntries(changed.map((action) => [action, keys.bindings[action].map(keyText)])),
     languageServers,
+    agent,
   };
 }
 
@@ -132,18 +138,27 @@ function sameKeys(before: StoredSettings["keys"], after: StoredSettings["keys"])
   );
 }
 
+function sameAgent(a: AgentSettings, b: AgentSettings): boolean {
+  const { command, firstMessage, ...rest } = a;
+  rest satisfies Record<string, never>;
+  const sameCommand =
+    command === null || b.command === null ? command === b.command : sameTexts(command, b.command);
+  return sameCommand && firstMessage === b.firstMessage;
+}
+
 function sameStored(inUse: SettingsRead | null, read: SettingsRead): boolean {
   if (inUse === null || inUse.path !== read.path) {
     return false;
   }
-  const { theme, antialiasing, keys, languageServers, ...rest } = read.stored;
+  const { theme, antialiasing, keys, languageServers, agent, ...rest } = read.stored;
   rest satisfies Record<string, never>;
   const before = inUse.stored;
   return (
     theme === before.theme &&
     antialiasing === before.antialiasing &&
     sameServers(before.languageServers, languageServers) &&
-    sameKeys(before.keys, keys)
+    sameKeys(before.keys, keys) &&
+    sameAgent(before.agent, agent)
   );
 }
 
@@ -174,8 +189,15 @@ function showKeyProblems(target: SettingsTarget, read: SettingsRead, before: Set
 function adopt(target: SettingsTarget, read: SettingsRead): void {
   const before = target.settings.value;
   if (!sameStored(before.read, read)) {
-    const { theme, antialiasing, keys, languageServers } = read.stored;
-    target.settings.value = { read, theme, antialiasing, keys: bindingsOf(keys), languageServers };
+    const { theme, antialiasing, keys, languageServers, agent } = read.stored;
+    target.settings.value = {
+      read,
+      theme,
+      antialiasing,
+      keys: bindingsOf(keys),
+      languageServers,
+      agent,
+    };
   }
   showKeyProblems(target, read, before);
 }
@@ -235,5 +257,6 @@ export function settingsActions(target: SettingsTarget): SettingsActions {
     setAddedServers: (added) => send(target, (current) => source.setAddedServers(current, added)),
     setServerSwitch: (server, on) =>
       send(target, (current) => source.setServerSwitch(current, server, on)),
+    setAgent: (agent) => send(target, (current) => source.setAgent(current, agent)),
   };
 }

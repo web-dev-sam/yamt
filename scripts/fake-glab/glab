@@ -1,0 +1,166 @@
+#!/bin/sh
+# A stand-in for glab 1.124.0 in yamt's tests and app sessions: answers `glab auth status` and `glab api` from
+# the scenario folder $YAMT_FAKE_GLAB, counts posts in $YAMT_FAKE_GLAB_STATE and logs every call to
+# $YAMT_FAKE_GLAB_LOG; each variable left unset is read from a glab.env beside $0 when there is one. The folder
+# layout, glab.env and the log format are in tests/glab/README.md.
+# What it imitates, as glab 1.124.0 printed it: `auth status` writes everything on stderr; `api` prints the body
+# as GitLab sent it (no final newline), after the status line, the headers and an empty line, each ending in
+# CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1.
+set -u
+
+fail() {
+	printf 'fake glab: %s\n' "$1" >&2
+	exit 2
+}
+
+log() {
+	if [ -n "${YAMT_FAKE_GLAB_LOG:-}" ]; then
+		printf '%s\n' "$1" >>"$YAMT_FAKE_GLAB_LOG"
+	fi
+}
+
+# $1 file, $2 default: the file's text, or the default when there is no file.
+text_or() {
+	if [ -f "$1" ]; then
+		cat "$1"
+	else
+		printf '%s' "$2"
+	fi
+}
+
+# Run through a symlink, the folder of $0 is the link's: tests place one beside their glab.env.
+settings="$(dirname "$0")/glab.env"
+if [ -f "$settings" ]; then
+	while IFS= read -r line; do
+		value=${line#*=}
+		case $line in
+		YAMT_FAKE_GLAB=*) : "${YAMT_FAKE_GLAB=$value}" ;;
+		YAMT_FAKE_GLAB_STATE=*) : "${YAMT_FAKE_GLAB_STATE=$value}" ;;
+		YAMT_FAKE_GLAB_LOG=*) : "${YAMT_FAKE_GLAB_LOG=$value}" ;;
+		*) fail "unknown line in $settings: $line" ;;
+		esac
+	done <"$settings"
+fi
+
+scenario=${YAMT_FAKE_GLAB:-}
+[ -n "$scenario" ] || fail 'YAMT_FAKE_GLAB names no scenario folder'
+[ -d "$scenario" ] || fail "no scenario folder $scenario"
+
+log "argv: $*"
+log "cwd: $(pwd -P)"
+log "env: NO_COLOR=${NO_COLOR-unset} GIT_TERMINAL_PROMPT=${GIT_TERMINAL_PROMPT-unset}"
+
+auth_status() {
+	if [ -f "$scenario/auth-status.out" ]; then
+		cat "$scenario/auth-status.out" >&2
+	fi
+	exit "$(text_or "$scenario/auth-status.exit" 0)"
+}
+
+include=no
+method=
+input=
+endpoint=
+
+# $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
+# error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
+answer() {
+	if [ "$include" = yes ]; then
+		printf 'HTTP/2.0 %s\r\nContent-Type: application/json\r\n\r\n' "$1"
+	fi
+	printf '%s' "$2"
+	code=${1%% *}
+	if [ "$code" -lt 400 ]; then
+		exit 0
+	fi
+	if [ -f "${3-}" ]; then
+		cat "$3" >&2
+		exit 1
+	fi
+	message=$(printf '%s' "$2" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
+	[ -n "$message" ] || fail 'no recorded stderr for this body'
+	printf 'glab: %s (HTTP %s)\n' "$message" "$code" >&2
+	exit 1
+}
+
+answer_file() {
+	if [ -f "$scenario/$1" ]; then
+		answer '200 OK' "$(cat "$scenario/$1")"
+	fi
+	answer '404 Not Found' '{"message":"404 Not Found"}'
+}
+
+post() {
+	state=${YAMT_FAKE_GLAB_STATE:-}
+	[ -n "$state" ] || fail 'YAMT_FAKE_GLAB_STATE names no file'
+	count=$(text_or "$state" 0)
+	number=$((count + 1))
+	printf '%s\n' "$number" >"$state"
+	answer_at="$scenario/post-$number"
+	if [ -f "$answer_at.sleep" ]; then
+		sleep "$(cat "$answer_at.sleep")"
+	fi
+	if [ -f "$answer_at.exit" ]; then
+		if [ -f "$answer_at.err" ]; then
+			cat "$answer_at.err" >&2
+		fi
+		exit "$(cat "$answer_at.exit")"
+	fi
+	[ -f "$answer_at.json" ] || fail "the scenario has no answer for post $number"
+	answer "$(text_or "$answer_at.status" '201 Created')" "$(cat "$answer_at.json")" "$answer_at.err"
+}
+
+api() {
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-i | --include) include=yes ;;
+		-X | --method)
+			method=${2-}
+			shift
+			;;
+		--input)
+			input=${2-}
+			shift
+			;;
+		-f | --field | -F | --raw-field | -H | --header | --hostname) shift ;;
+		--paginate) ;;
+		-*) fail "unknown api option $1" ;;
+		*) [ -n "$endpoint" ] || endpoint=$1 ;;
+		esac
+		shift
+	done
+	if [ "$input" = - ]; then
+		body=$(
+			cat
+			printf x
+		)
+		log "stdin: ${body%x}"
+	fi
+	if [ -z "$method" ]; then
+		if [ -n "$input" ]; then method=POST; else method=GET; fi
+	fi
+	case "$method $endpoint" in
+	"POST "*/draft_notes) post ;;
+	"GET "*/draft_notes) answer_file draft-notes.json ;;
+	"GET "*/merge_requests) answer_file merge-requests.json ;;
+	"GET "*/merge_requests/*)
+		if [ -f "$scenario/merge-request-${endpoint##*/}.json" ]; then
+			answer_file "merge-request-${endpoint##*/}.json"
+		fi
+		answer_file merge-request.json
+		;;
+	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
+	esac
+}
+
+case ${1-} in
+auth)
+	[ "${2-}" = status ] || fail "unknown command: $*"
+	auth_status
+	;;
+api)
+	shift
+	api "$@"
+	;;
+*) fail "unknown command: $*" ;;
+esac

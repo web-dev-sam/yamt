@@ -1,0 +1,1207 @@
+From e0cbf9409ce4814e3e915525f9422183c87c8e0a Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 13:23:55 +0200
+Subject: [PATCH] feat(gitio): run glab with a deadline; branch and remote
+ reads; a fake glab for tests
+
+---
+ .omp/run/notes/RVGlab.md             |  79 +++++++
+ crates/gitio/src/glab.rs             |  84 +++++++
+ crates/gitio/src/lib.rs              |   9 +-
+ crates/gitio/src/names.rs            |  31 ++-
+ crates/gitio/src/repo.rs             |  64 +++---
+ crates/gitio/src/run.rs              |  64 +++---
+ crates/gitio/tests/diff.rs           |  16 ++
+ crates/gitio/tests/glab.rs           | 316 +++++++++++++++++++++++++++
+ scripts/fake-glab/glab               | 145 ++++++++++++
+ tests/glab/README.md                 |  64 ++++++
+ tests/glab/runner/auth-status.exit   |   1 +
+ tests/glab/runner/auth-status.out    |  11 +
+ tests/glab/runner/merge-request.json |   1 +
+ tests/glab/runner/post-1.json        |   1 +
+ tests/glab/runner/post-2.json        |   1 +
+ tests/glab/runner/post-2.status      |   1 +
+ tests/glab/runner/post-3.err         |   1 +
+ tests/glab/runner/post-3.exit        |   1 +
+ tests/glab/runner/post-4.json        |   1 +
+ tests/glab/runner/post-4.sleep       |   1 +
+ 20 files changed, 832 insertions(+), 60 deletions(-)
+ create mode 100644 .omp/run/notes/RVGlab.md
+ create mode 100644 crates/gitio/src/glab.rs
+ create mode 100644 crates/gitio/tests/glab.rs
+ create mode 100755 scripts/fake-glab/glab
+ create mode 100644 tests/glab/README.md
+ create mode 100644 tests/glab/runner/auth-status.exit
+ create mode 100644 tests/glab/runner/auth-status.out
+ create mode 100644 tests/glab/runner/merge-request.json
+ create mode 100644 tests/glab/runner/post-1.json
+ create mode 100644 tests/glab/runner/post-2.json
+ create mode 100644 tests/glab/runner/post-2.status
+ create mode 100644 tests/glab/runner/post-3.err
+ create mode 100644 tests/glab/runner/post-3.exit
+ create mode 100644 tests/glab/runner/post-4.json
+ create mode 100644 tests/glab/runner/post-4.sleep
+
+diff --git a/.omp/run/notes/RVGlab.md b/.omp/run/notes/RVGlab.md
+new file mode 100644
+index 0000000..5836519
+--- /dev/null
++++ b/.omp/run/notes/RVGlab.md
+@@ -0,0 +1,79 @@
++All five Change items from the brief are in. Every Acceptance test passes. `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo test -p yamt-gitio` all came back clean, and cargo-mutants caught every mutant on the changed functions. shellcheck isn't installed, so it was not run.
++
++**summary**
++- `yamt-gitio` can now run glab: `Glab::find` / `at` / `with_timeout` / `run` → `GlabRun::{Printed, Failed, TimedOut}`, with `GLAB_TIMEOUT` set to 20 s. stdin is closed unless a body is given (then it is written and closed). The child gets the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`, runs in the folder passed in, and its argv is logged at debug.
++- Git and glab share one deadline runner, `run.rs` `run_with_deadline`, and one PATH lookup, `program_in(path, name)`, which replaces `git_in`.
++- Two new reads on `Repo`: `symbolic_full_name` (`rev-parse --verify --symbolic-full-name`) and `remote_names` (`git remote`).
++- A POSIX-sh fake glab (`scripts/fake-glab/glab`), a `runner` scenario for it, and `tests/glab/README.md` describing the folder layout, the log format and the real glab outputs I measured.
++- New test that "exit 1 with a message is a failure": `commit_named("treetag")` returns `GitFailed { status: Some(1), stderr: …expected commit type… }`.
++
++**files_changed**
++- `crates/gitio/src/glab.rs` (new), `crates/gitio/src/lib.rs`, `crates/gitio/src/run.rs`, `crates/gitio/src/repo.rs`, `crates/gitio/src/names.rs`
++- `crates/gitio/tests/glab.rs` (new), `crates/gitio/tests/diff.rs`
++- `scripts/fake-glab/glab` (new, mode 755)
++- `tests/glab/runner/{auth-status.out, auth-status.exit, merge-request.json, post-1.json, post-2.status, post-2.json, post-3.exit, post-3.err, post-4.sleep, post-4.json}` (new)
++- `tests/glab/README.md` (new)
++
++**tests_added**
++- `glab_missing_on_path_is_none`: a child process whose PATH has only an empty folder and a non-executable `glab` gets `None` from `find()`.
++- `glab_on_path_is_found`: with the fake's folder first on PATH, `find()` returns the fake, and `auth status` gives exit 1, empty stdout, and stderr equal to `auth-status.out`.
++- `stdin_reaches_glab_and_stdout_comes_back`: the POST body appears in the fake's log, and stdout is `post-1.json` without its final newline.
++- `a_failing_glab_keeps_its_exit_stdout_and_stderr`: three cases, compared byte for byte:
++  - a 400 with `--include` keeps the CRLF headers, the body and `glab: … (HTTP 400)`;
++  - a failure before any HTTP answer keeps empty stdout and the scenario's stderr;
++  - a GET 404 gives `{"message":"404 Not Found"}` and `glab: 404 Not Found (HTTP 404)`.
++- `a_hanging_glab_times_out`: with `with_timeout(300 ms)`, a post that sleeps 5 s gives `TimedOut` in under 5 s.
++- `glab_runs_in_the_repository_with_no_color_and_stdin_closed`: the exact log is `cwd` = the canonical repo root, `NO_COLOR=1 GIT_TERMINAL_PROMPT=0`, and `stdin: ` empty; the run doesn't hang even though the fake reads stdin.
++- `a_body_glab_left_unread_fails_only_a_run_that_exited_0`: a 1 MiB body that glab never reads is a `GlabIo` error after exit 0, but stays `Failed` after exit 1.
++- `a_glab_that_cannot_start_is_an_i_o_error_naming_it`: `GlabIo { program }` names the missing path.
++- `branch_names_from_heads_and_remote_tracking_and_none_for_a_commit_id`:
++  - `refs/heads/remote`, `refs/remotes/origin/feature`, and `HEAD` → `refs/heads/local`;
++  - a full commit id and `remote~1` give `None`;
++  - `main...remote` is `GitFailed`;
++  - a detached `HEAD` gives `HEAD`.
++- `remote_names_lists_every_remote`: no remotes gives `[]`; after adding `upstream`, `origin`, `fork` the list is `fork`, `origin`, `upstream`.
++- `a_name_that_is_not_a_commit_is_git_s_failure_with_its_message` (in `diff.rs`): pins the survivor at `repo.rs:202`.
++- `only_the_program_named_is_found` (unit test in `repo.rs`). The existing `git_in` unit tests now go through `program_in(…, "git")`.
++
++**smoke_evidence**
++- `cargo test -p yamt-gitio --test glab --test diff`:
++  - `tests/glab.rs`: `test result: ok. 10 passed; 0 failed; 2 ignored` (the two ignored ones are the child halves, run by their parents);
++  - `tests/diff.rs`: `test a_name_that_is_not_a_commit_is_git_s_failure_with_its_message ... ok`, `test result: ok. 12 passed`.
++- `cargo test -p yamt-gitio`: every binary ok (unit 36, abort_continue 5, diff 12, edit_stop 6, glab 10, merge_heads 12, operations 26, repo 19, rerere 4, what_git_wrote 10).
++- `cargo fmt --check` → ok. `cargo clippy --workspace --all-targets -- -D warnings` → `Finished`, no warnings.
++- `sh -n scripts/fake-glab/glab` → ok. `shellcheck`: not installed.
++- `cargo mutants -p yamt-gitio` on the changed functions → `36 mutants tested in 2m: 28 caught, 8 unviable`.
++- **Real glab 1.124.0** (`/tmp/glab-probe/bin/glab`, `env -i HOME=/tmp/glabhome XDG_CONFIG_HOME=/tmp/glabhome/cfg`, no token, network reachable):
++  - `glab api projects/gitlab-org%2Fcli` → exit 0. stdout is 970 bytes of JSON ending `…"web_url":"https://gitlab.com/groups/gitlab-org"}}`, with no final newline. stderr is empty, except that the first run under a fresh config also printed `What's new in glab v1.124.0 / Run: glab whatsnew` there.
++  - `glab api --include projects/gitlab-org%2Fcli` → exit 0. stdout starts `HTTP/2.0 200 OK`, then the headers, each ending `\r\n`, then an empty line and the body. stderr is empty.
++  - `glab api projects/gitlab-org%2Fno-such-project-yamt` → exit 1. stdout is `{"message":"404 Project Not Found"}` (35 bytes, no newline). stderr is `glab: 404 Project Not Found (HTTP 404)\n`.
++  - `glab api --include …no-such-project-yamt` → exit 1. stdout is `HTTP/2.0 404 Not Found\r\n…X-Runtime: 0.040899\r\n\r\n{"message":"404 Project Not Found"}`. stderr is the same `glab: 404 Project Not Found (HTTP 404)\n`.
++  - `glab api --include --method POST projects/34675721/merge_requests/1/draft_notes --input -` → exit 1. stdout is `HTTP/2.0 401 Unauthorized` … `{"message":"401 Unauthorized"}`. stderr is `glab: 401 Unauthorized (HTTP 401)\n`.
++  - `glab auth status` → exit 1 with empty stdout. Everything goes to stderr: `gitlab.com`, `x gitlab.com: API call failed: … 401 …`, `✓ …` lines, `! No token found (checked config file, keyring, and environment variables).`, the ERROR box, and `X could not authenticate …`.
++
++**deviations_from_brief**
++- **Where `program_in` lives:** in `repo.rs`, not `run.rs`. The brief says `run.rs` holds `git_in`, but it was actually in `repo.rs`; keeping it there also keeps `run.rs` under 400 lines (RS6). It appends `std::env::consts::EXE_SUFFIX`, which gives the same `git` / `git.exe` names as before.
++- **Additions to the contract:**
++  - `Glab` carries a `timeout` field, and `Glab::with_timeout(self, Duration)` sets it. The hang test needs a short deadline, and row 16's timeout test will too.
++  - `GlabRun` derives `Debug, PartialEq, Eq`.
++  - New error `Error::GlabIo { program, source }` ("i/o error while running <program>"), so a glab that is gone doesn't read "while running git". No crate matches on gitio's `Error` exhaustively.
++- **Shared runner:**
++  - `run.rs` now has `run_with_deadline` (returns `io::Result<Waited>`), and `run_accepting` sits on top of it. `Waited::Exited` now wraps `Finished`.
++  - The stdin write's own failure now counts only after exit 0. This is the same behaviour as before for every git caller: only `run` passes stdin, and it accepts exactly exit 0.
++  - The panic message changed from "git pipe thread panicked" to "pipe thread panicked".
++- **Additions to the fake's layout:**
++  - `post-<n>.status` gives the HTTP status line (default `201 Created`).
++  - `.err` replaces glab's own error line for a status ≥ 400.
++  - `.exit` means glab failed before any HTTP answer.
++  - The log also records `cwd` and `env` lines.
++  - Everything is documented in `tests/glab/README.md`.
++- **Outside the Owned globs:** `tests/glab/README.md` is outside `tests/glab/runner/**`, but the brief asks for it.
++- **Docs not updated:** the project map, `docs/architecture.md` and `crates/gitio/AGENTS.md` don't mention `glab.rs`, `scripts/fake-glab/glab`, `tests/glab/`, `GlabIo`, or the two new `Repo` reads. They aren't owned, so the orchestrator needs to add these. `map-check` doesn't flag the fake today, but it already fails on unrelated range files.
++- **Scenario text not from real glab:** `runner/auth-status.out` is the measured text with trailing spaces dropped. `post-3.err` is the fake's own wording, not real glab output (the README says so).
++
++**open_risks**
++- `crates/gitio/tests/glab.rs:67-75`: each test writes and immediately runs a wrapper script. In theory a parallel fork elsewhere in the test binary could cause ETXTBSY. Rust opens files close-on-exec, so the window is tiny, and I didn't observe it.
++- glab's update check is on by default, and on first run under a fresh config it printed a one-time "What's new" notice on stderr. Plan #118 fixes the environment, so yamt doesn't add `GLAB_CHECK_UPDATE`. Row 16 should read `Failed` stderr knowing that the notice can be there.
++- `crates/gitio/src/names.rs:47-56`: `--verify` turns a range or option-like name into `GitFailed` rather than `None`. It also turns an empty name into `GitFailed`. Row 16 must treat "" as "current branch" itself, as the design says.
++- `scripts/fake-glab/glab`: the fake only builds `glab: <message> (HTTP n)` from a string `"message"`. GitLab's object-shaped validation messages need a recorded `.err`, and I never measured how real glab prints those.
++- The fake's executable bit must survive the commit, because `glab_on_path_is_found` depends on it.
+\ No newline at end of file
+diff --git a/crates/gitio/src/glab.rs b/crates/gitio/src/glab.rs
+new file mode 100644
+index 0000000..1dfd4fd
+--- /dev/null
++++ b/crates/gitio/src/glab.rs
+@@ -0,0 +1,84 @@
++use std::path::{Path, PathBuf};
++use std::process::Command;
++use std::time::Duration;
++
++use crate::repo::program_in;
++use crate::run::{Waited, argv, run_with_deadline};
++use crate::{Error, Result};
++
++/// One glab call's deadline: glab talks to a GitLab server over the network (plan §2 #118).
++pub const GLAB_TIMEOUT: Duration = Duration::from_secs(20);
++const GLAB: &str = "glab";
++
++/// The glab program yamt runs, and how long each of its calls may take.
++pub struct Glab {
++    program: PathBuf,
++    timeout: Duration,
++}
++
++/// How one glab call ended, with the bytes glab printed.
++#[derive(Debug, PartialEq, Eq)]
++pub enum GlabRun {
++    Printed {
++        stdout: Vec<u8>,
++    },
++    Failed {
++        status: Option<i32>,
++        stdout: Vec<u8>,
++        stderr: Vec<u8>,
++    },
++    TimedOut,
++}
++
++impl Glab {
++    /// The first runnable `glab` on PATH; `None` when it is not installed.
++    #[must_use]
++    pub fn find() -> Option<Glab> {
++        let search_path = std::env::var_os("PATH")?;
++        program_in(&search_path, GLAB).map(Glab::at)
++    }
++
++    #[must_use]
++    pub fn at(program: PathBuf) -> Glab {
++        Glab {
++            program,
++            timeout: GLAB_TIMEOUT,
++        }
++    }
++
++    #[must_use]
++    pub fn with_timeout(self, timeout: Duration) -> Glab {
++        Glab { timeout, ..self }
++    }
++
++    /// `glab <args>` in `cwd` with the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`; stdin is
++    /// closed, or `stdin` written and closed.
++    pub fn run(&self, cwd: &Path, args: &[&str], stdin: Option<Vec<u8>>) -> Result<GlabRun> {
++        let mut command = Command::new(&self.program);
++        command
++            .current_dir(cwd)
++            .args(args)
++            .env("NO_COLOR", "1")
++            .env("GIT_TERMINAL_PROMPT", "0");
++        tracing::debug!(args = ?argv(&command), "running glab");
++        let waited =
++            run_with_deadline(command, stdin, self.timeout).map_err(|source| Error::GlabIo {
++                program: self.program.clone(),
++                source,
++            })?;
++        let finished = match waited {
++            Waited::Exited(finished) => finished,
++            Waited::TimedOut => return Ok(GlabRun::TimedOut),
++        };
++        if finished.status.success() {
++            return Ok(GlabRun::Printed {
++                stdout: finished.stdout,
++            });
++        }
++        Ok(GlabRun::Failed {
++            status: finished.status.code(),
++            stdout: finished.stdout,
++            stderr: finished.stderr,
++        })
++    }
++}
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 0288ffa..e9b854d 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,7 +1,7 @@
+ //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads what git is doing
+ //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
+ //! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
+-//! and lists the files that changed between two commits.
++//! and lists the files that changed between two commits; runs glab, GitLab's command line, the same way.
+ #![forbid(unsafe_code)]
+ 
+ mod abort_continue;
+@@ -9,6 +9,7 @@ mod attributes;
+ mod blob;
+ mod diff;
+ mod entry;
++mod glab;
+ mod merge_config;
+ mod merge_file;
+ mod names;
+@@ -25,6 +26,7 @@ pub use attributes::{AttributeValue, MergeAttributes};
+ pub use blob::BlobReader;
+ pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
+ pub use entry::{Oid, Stage, StageEntry};
++pub use glab::{GLAB_TIMEOUT, Glab, GlabRun};
+ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+ pub use names::CommitSummary;
+@@ -66,6 +68,11 @@ pub enum Error {
+     },
+     #[error("i/o error while running git: {0}")]
+     Io(#[from] std::io::Error),
++    #[error("i/o error while running {}: {source}", program.display())]
++    GlabIo {
++        program: std::path::PathBuf,
++        source: std::io::Error,
++    },
+ }
+ 
+ pub type Result<T, E = Error> = std::result::Result<T, E>;
+diff --git a/crates/gitio/src/names.rs b/crates/gitio/src/names.rs
+index f4dc1b4..28691d9 100644
+--- a/crates/gitio/src/names.rs
++++ b/crates/gitio/src/names.rs
+@@ -5,6 +5,7 @@ use crate::{Error, Result};
+ 
+ const BRANCH: &str = "branch";
+ const LOG: &str = "log";
++const REV_PARSE: &str = "rev-parse";
+ const MERGE_MSG: &str = "MERGE_MSG";
+ const NON_SYMBOLIC_SHORT_NAME: &str =
+     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
+@@ -40,11 +41,23 @@ impl Repo {
+             "refs/remotes",
+         ];
+         let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+-        let names = output.split(|&byte| byte == b'\n');
+-        Ok(names
+-            .filter(|name| !name.is_empty())
+-            .map(<[u8]>::to_vec)
+-            .collect())
++        Ok(non_empty_lines(&output))
++    }
++
++    /// The ref `name` stands for (`refs/heads/x`, `refs/remotes/origin/x`, `HEAD` when detached…); `None` for a
++    /// commit id or an expression such as `HEAD~2`. `--verify` refuses a range or an option: `GitFailed`.
++    pub fn symbolic_full_name(&self, name: &str) -> Result<Option<Vec<u8>>> {
++        let args = [REV_PARSE, "--verify", "--symbolic-full-name", name];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        if output.is_empty() {
++            return Ok(None);
++        }
++        Ok(Some(without_final_newline(REV_PARSE, output)?))
++    }
++
++    pub fn remote_names(&self) -> Result<Vec<Vec<u8>>> {
++        let output = run(self.command(Access::Read, &["remote"]), None, GIT_TIMEOUT)?;
++        Ok(non_empty_lines(&output))
+     }
+ 
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+@@ -77,3 +90,11 @@ impl Repo {
+         })
+     }
+ }
++
++fn non_empty_lines(output: &[u8]) -> Vec<Vec<u8>> {
++    let lines = output.split(|&byte| byte == b'\n');
++    lines
++        .filter(|line| !line.is_empty())
++        .map(<[u8]>::to_vec)
++        .collect()
++}
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index dc49f92..147df44 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -13,6 +13,7 @@ const REV_PARSE: &str = "rev-parse";
+ const HASH_OBJECT: &str = "hash-object";
+ const MERGE_BASE: &str = "merge-base";
+ const SILENT_FAILURE_STATUS: i32 = 1;
++const GIT: &str = "git";
+ 
+ pub struct Repo {
+     root: PathBuf,
+@@ -236,22 +237,18 @@ pub(crate) fn without_final_newline(command: &'static str, mut output: Vec<u8>)
+ 
+ fn find_git_on_path() -> Result<PathBuf> {
+     let search_path = std::env::var_os("PATH").ok_or(Error::GitNotFound)?;
+-    git_in(&search_path).ok_or(Error::GitNotFound)
++    program_in(&search_path, GIT).ok_or(Error::GitNotFound)
+ }
+ 
+-fn git_in(search_path: &OsStr) -> Option<PathBuf> {
++/// The first absolute folder of `search_path` holding a runnable `name` (`name.exe` on Windows).
++pub(crate) fn program_in(search_path: &OsStr, name: &str) -> Option<PathBuf> {
++    let file_name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+     std::env::split_paths(search_path)
+         .filter(|dir| dir.is_absolute())
+-        .map(|dir| dir.join(GIT_FILE_NAME))
++        .map(|dir| dir.join(&file_name))
+         .find(|candidate| is_runnable(candidate))
+ }
+ 
+-#[cfg(unix)]
+-const GIT_FILE_NAME: &str = "git";
+-
+-#[cfg(not(unix))]
+-const GIT_FILE_NAME: &str = "git.exe";
+-
+ #[cfg(unix)]
+ fn is_runnable(path: &Path) -> bool {
+     use std::os::unix::fs::PermissionsExt;
+@@ -277,31 +274,46 @@ mod tests {
+         std::env::join_paths(dirs).unwrap()
+     }
+ 
++    fn program_file(dir: &Path, name: &str) -> PathBuf {
++        dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
++    }
++
+     #[cfg(unix)]
+-    fn runnable_git_in(dir: &Path) -> PathBuf {
++    fn runnable_program_in(dir: &Path, name: &str) -> PathBuf {
+         use std::os::unix::fs::PermissionsExt;
+-        let git = dir.join(GIT_FILE_NAME);
+-        fs::write(&git, "").unwrap();
+-        fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+-        git
++        let program = program_file(dir, name);
++        fs::write(&program, "").unwrap();
++        fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
++        program
+     }
+ 
+     #[cfg(not(unix))]
+-    fn runnable_git_in(dir: &Path) -> PathBuf {
+-        let git = dir.join(GIT_FILE_NAME);
+-        fs::write(&git, "").unwrap();
+-        git
++    fn runnable_program_in(dir: &Path, name: &str) -> PathBuf {
++        let program = program_file(dir, name);
++        fs::write(&program, "").unwrap();
++        program
+     }
+ 
+     #[test]
+     fn a_relative_path_entry_is_skipped_and_the_same_folder_found_by_its_absolute_path() {
+         let dir = tempfile::tempdir_in(".").unwrap();
+-        runnable_git_in(dir.path());
++        runnable_program_in(dir.path(), GIT);
+         let name = dir.path().file_name().unwrap();
+         let (relative, absolute) = (Path::new(name), std::env::current_dir().unwrap().join(name));
+-        assert_eq!(git_in(&search_path(&[relative])), None);
+-        let found = git_in(&search_path(&[relative, &absolute]));
+-        assert_eq!(found, Some(absolute.join(GIT_FILE_NAME)));
++        assert_eq!(program_in(&search_path(&[relative]), GIT), None);
++        let found = program_in(&search_path(&[relative, &absolute]), GIT);
++        assert_eq!(found, Some(program_file(&absolute, GIT)));
++    }
++
++    #[test]
++    fn only_the_program_named_is_found() {
++        let (with_git, with_glab) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++        runnable_program_in(with_git.path(), GIT);
++        let glab = runnable_program_in(with_glab.path(), "glab");
++        let both = search_path(&[with_git.path(), with_glab.path()]);
++
++        assert_eq!(program_in(&both, "glab"), Some(glab));
++        assert_eq!(program_in(&search_path(&[with_git.path()]), "glab"), None);
+     }
+ 
+     #[cfg(unix)]
+@@ -312,9 +324,9 @@ mod tests {
+         let not_executable = plain.path().join("git");
+         fs::write(&not_executable, "").unwrap();
+         fs::set_permissions(&not_executable, fs::Permissions::from_mode(0o644)).unwrap();
+-        let git = runnable_git_in(runnable.path());
++        let git = runnable_program_in(runnable.path(), GIT);
+         assert_eq!(
+-            git_in(&search_path(&[plain.path(), runnable.path()])),
++            program_in(&search_path(&[plain.path(), runnable.path()]), GIT),
+             Some(git)
+         );
+     }
+@@ -324,9 +336,9 @@ mod tests {
+     fn a_git_without_the_exe_name_is_skipped_and_the_next_git_exe_found() {
+         let (plain, runnable) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+         fs::write(plain.path().join("git"), "").unwrap();
+-        let git = runnable_git_in(runnable.path());
++        let git = runnable_program_in(runnable.path(), GIT);
+         assert_eq!(
+-            git_in(&search_path(&[plain.path(), runnable.path()])),
++            program_in(&search_path(&[plain.path(), runnable.path()]), GIT),
+             Some(git)
+         );
+     }
+diff --git a/crates/gitio/src/run.rs b/crates/gitio/src/run.rs
+index 25c4ead..2215eb7 100644
+--- a/crates/gitio/src/run.rs
++++ b/crates/gitio/src/run.rs
+@@ -18,16 +18,13 @@ pub(crate) enum Access {
+     Write,
+ }
+ 
+-enum Waited {
+-    Exited {
+-        status: ExitStatus,
+-        stdout: Vec<u8>,
+-        stderr: Vec<u8>,
+-    },
++/// How a run with a deadline ended.
++pub(crate) enum Waited {
++    Exited(Finished),
+     TimedOut,
+ }
+ 
+-/// What a git run printed on each stream, and how it exited.
++/// What a run printed on each stream, and how it exited.
+ pub(crate) struct Finished {
+     pub(crate) status: ExitStatus,
+     pub(crate) stdout: Vec<u8>,
+@@ -118,19 +115,8 @@ pub(crate) fn run_accepting(
+ ) -> Result<Vec<u8>> {
+     let args = argv(&command);
+     tracing::debug!(?args, "running git");
+-    let deadline = Instant::now() + timeout;
+-    let mut child = spawn_piped(command, stdin.is_some())?;
+-    let writer = if let (Some(mut pipe), Some(bytes)) = (child.stdin.take(), stdin) {
+-        Some(thread::spawn(move || pipe.write_all(&bytes)))
+-    } else {
+-        None
+-    };
+-    let (status, stdout, stderr) = match wait_with_deadline(&mut child, deadline)? {
+-        Waited::Exited {
+-            status,
+-            stdout,
+-            stderr,
+-        } => (status, stdout, stderr),
++    let finished = match run_with_deadline(command, stdin, timeout)? {
++        Waited::Exited(finished) => finished,
+         Waited::TimedOut => {
+             return Err(Error::Timeout {
+                 args,
+@@ -138,18 +124,40 @@ pub(crate) fn run_accepting(
+             });
+         }
+     };
+-    if !accepts(status) {
++    if !accepts(finished.status) {
+         return Err(Error::GitFailed {
+             args,
+-            status: status.code(),
+-            stderr: String::from_utf8_lossy(&stderr).trim_end().to_owned(),
++            status: finished.status.code(),
++            stderr: String::from_utf8_lossy(&finished.stderr)
++                .trim_end()
++                .to_owned(),
+         });
+     }
+-    if let Some(writer) = writer {
++    Ok(finished.stdout)
++}
++
++/// Runs `command` with stdin closed, or given `stdin` written and closed, and kills it at `timeout`. A failed
++/// write counts only after an exit 0: a program that failed may well have stopped reading.
++pub(crate) fn run_with_deadline(
++    command: Command,
++    stdin: Option<Vec<u8>>,
++    timeout: Duration,
++) -> io::Result<Waited> {
++    let deadline = Instant::now() + timeout;
++    let mut child = spawn_piped(command, stdin.is_some())?;
++    let writer = if let (Some(mut pipe), Some(bytes)) = (child.stdin.take(), stdin) {
++        Some(thread::spawn(move || pipe.write_all(&bytes)))
++    } else {
++        None
++    };
++    let waited = wait_with_deadline(&mut child, deadline)?;
++    if let (Waited::Exited(finished), Some(writer)) = (&waited, writer)
++        && finished.status.success()
++    {
+         let written = writer.join().map_err(|_| thread_panicked())?;
+         written?;
+     }
+-    Ok(stdout)
++    Ok(waited)
+ }
+ 
+ fn spawn_piped(mut command: Command, with_stdin: bool) -> io::Result<Child> {
+@@ -226,11 +234,11 @@ fn receive_output(
+     let Collected::Whole(stderr) = collected(stderr, deadline)? else {
+         return Ok(Waited::TimedOut);
+     };
+-    Ok(Waited::Exited {
++    Ok(Waited::Exited(Finished {
+         status,
+         stdout,
+         stderr,
+-    })
++    }))
+ }
+ 
+ fn closed_pipe() -> io::Error {
+@@ -238,7 +246,7 @@ fn closed_pipe() -> io::Error {
+ }
+ 
+ fn thread_panicked() -> io::Error {
+-    io::Error::other("git pipe thread panicked")
++    io::Error::other("pipe thread panicked")
+ }
+ 
+ #[cfg(test)]
+diff --git a/crates/gitio/tests/diff.rs b/crates/gitio/tests/diff.rs
+index c2795ab..41c6ce2 100644
+--- a/crates/gitio/tests/diff.rs
++++ b/crates/gitio/tests/diff.rs
+@@ -388,6 +388,22 @@ fn merge_base_is_the_fork_point_and_none_for_unrelated_histories() {
+     assert!(matches!(error, Error::GitFailed { .. }), "{error:?}");
+ }
+ 
++#[test]
++fn a_name_that_is_not_a_commit_is_git_s_failure_with_its_message() {
++    let dir = diverged_repo(&[regular("a.txt", Some(b"base\n"), Some(b"local\n"))]).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    git_ok(root, &["tag", "treetag", "HEAD^{tree}"]).unwrap();
++
++    let named = repo.commit_named("treetag");
++
++    assert!(
++        matches!(&named, Err(Error::GitFailed { status: Some(1), stderr, .. })
++            if stderr.contains("expected commit type")),
++        "{named:?}"
++    );
++}
++
+ #[test]
+ fn blob_sizes_answer_in_order_and_missing_as_none() {
+     let dir = diverged_repo(&[regular("a.txt", Some(b"abc"), Some(b""))]).unwrap();
+diff --git a/crates/gitio/tests/glab.rs b/crates/gitio/tests/glab.rs
+new file mode 100644
+index 0000000..781cea9
+--- /dev/null
++++ b/crates/gitio/tests/glab.rs
+@@ -0,0 +1,316 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++use std::fs;
++use std::os::unix::fs::PermissionsExt;
++use std::path::{Path, PathBuf};
++use std::time::{Duration, Instant};
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, diverged_repo, git_ok, run_ignored_in_child,
++};
++use yamt_gitio::{Error, Glab, GlabRun, Oid, Repo};
++
++const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
++const HANG_SECONDS: u64 = 5;
++const EXECUTABLE: u32 = 0o755;
++const PLAIN: u32 = 0o644;
++const BODY_PAST_ANY_PIPE_BUFFER: usize = 1 << 20;
++const POST: [&str; 6] = [
++    "api",
++    "--method",
++    "POST",
++    "projects/7/merge_requests/12/draft_notes",
++    "--input",
++    "-",
++];
++const NOT_FOUND_TEST: &str = "glab_is_none_on_a_path_without_a_runnable_glab";
++const FOUND_TEST: &str = "glab_found_on_path_is_the_one_run";
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "a.txt",
++    kind: FileKind::Regular,
++    base: Some(b"base\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++
++fn in_this_repository(relative: &str) -> PathBuf {
++    Path::new(env!("CARGO_MANIFEST_DIR"))
++        .join("../..")
++        .join(relative)
++}
++
++fn fake_glab_folder() -> PathBuf {
++    in_this_repository("scripts/fake-glab")
++}
++
++fn runner_scenario() -> PathBuf {
++    in_this_repository("tests/glab/runner")
++}
++
++fn runner_file(name: &str) -> Vec<u8> {
++    fs::read(runner_scenario().join(name)).unwrap()
++}
++
++/// The fake glab on the `runner` scenario behind a wrapper script that sets the fake's variables (a test cannot
++/// change its own environment, which glab inherits); the wrapper, post count and log live in `dir`.
++struct Fake {
++    dir: TempDir,
++    glab: Glab,
++}
++
++impl Fake {
++    fn new(posts_before: u32) -> Fake {
++        let dir = tempfile::tempdir().unwrap();
++        let state = dir.path().join("state");
++        fs::write(&state, format!("{posts_before}\n")).unwrap();
++        let wrapper = dir.path().join("glab");
++        let script = format!(
++            "#!/bin/sh\nexport YAMT_FAKE_GLAB='{}' YAMT_FAKE_GLAB_STATE='{}' YAMT_FAKE_GLAB_LOG='{}'\nexec '{}' \"$@\"\n",
++            runner_scenario().display(),
++            state.display(),
++            dir.path().join("log").display(),
++            fake_glab_folder().join("glab").display(),
++        );
++        fs::write(&wrapper, script).unwrap();
++        fs::set_permissions(&wrapper, fs::Permissions::from_mode(EXECUTABLE)).unwrap();
++        Fake {
++            glab: Glab::at(wrapper),
++            dir,
++        }
++    }
++
++    fn log(&self) -> String {
++        fs::read_to_string(self.dir.path().join("log")).unwrap()
++    }
++
++    fn run(&self, args: &[&str], stdin: Option<Vec<u8>>) -> GlabRun {
++        self.glab.run(self.dir.path(), args, stdin).unwrap()
++    }
++}
++
++fn without_final_newline(mut bytes: Vec<u8>) -> Vec<u8> {
++    assert_eq!(bytes.pop(), Some(b'\n'));
++    bytes
++}
++
++#[test]
++fn stdin_reaches_glab_and_stdout_comes_back() {
++    let fake = Fake::new(0);
++    let body = br#"{"note":"Why 300?","position":{"new_line":12}}"#;
++
++    let ran = fake.run(&POST, Some(body.to_vec()));
++
++    let answer = without_final_newline(runner_file("post-1.json"));
++    assert_eq!(ran, GlabRun::Printed { stdout: answer });
++    let logged = format!("stdin: {}\n", String::from_utf8_lossy(body));
++    assert!(fake.log().ends_with(&logged), "{}", fake.log());
++}
++
++#[test]
++fn a_failing_glab_keeps_its_exit_stdout_and_stderr() {
++    let fake = Fake::new(1);
++    let mut with_headers = vec!["api", "--include"];
++    with_headers.extend_from_slice(&POST[1..]);
++
++    let refused = fake.run(&with_headers, Some(b"{}".to_vec()));
++    let failed = fake.run(&POST, Some(b"{}".to_vec()));
++    let not_found = fake.run(&["api", "projects/7/unknown"], None);
++
++    let refusal_body = without_final_newline(runner_file("post-2.json"));
++    let mut refusal =
++        b"HTTP/2.0 400 Bad Request\r\nContent-Type: application/json\r\n\r\n".to_vec();
++    refusal.extend_from_slice(&refusal_body);
++    let refusal_line = b"glab: 400 Bad request - note is missing (HTTP 400)\n".to_vec();
++    let expected = [
++        (Some(1), refusal, refusal_line),
++        (Some(1), Vec::new(), runner_file("post-3.err")),
++        (
++            Some(1),
++            br#"{"message":"404 Not Found"}"#.to_vec(),
++            b"glab: 404 Not Found (HTTP 404)\n".to_vec(),
++        ),
++    ];
++    let failures = expected.map(|(status, stdout, stderr)| GlabRun::Failed {
++        status,
++        stdout,
++        stderr,
++    });
++    assert_eq!([refused, failed, not_found], failures);
++}
++
++#[test]
++fn a_hanging_glab_times_out() {
++    let fake = Fake::new(3);
++    let glab = fake.glab.with_timeout(SHORT_TIMEOUT);
++    let started = Instant::now();
++
++    let ran = glab
++        .run(fake.dir.path(), &POST, Some(b"{}".to_vec()))
++        .unwrap();
++
++    assert_eq!(ran, GlabRun::TimedOut);
++    assert!(
++        started.elapsed() < Duration::from_secs(HANG_SECONDS),
++        "{:?}",
++        started.elapsed()
++    );
++}
++
++#[test]
++fn glab_runs_in_the_repository_with_no_color_and_stdin_closed() {
++    let fake = Fake::new(0);
++    let repo = diverged_repo(&FILES).unwrap();
++
++    let ran = fake.glab.run(repo.path(), &POST, None).unwrap();
++
++    assert!(matches!(ran, GlabRun::Printed { .. }), "{ran:?}");
++    let root = fs::canonicalize(repo.path()).unwrap();
++    let expected = format!(
++        "argv: {}\ncwd: {}\nenv: NO_COLOR=1 GIT_TERMINAL_PROMPT=0\nstdin: \n",
++        POST.join(" "),
++        root.display()
++    );
++    assert_eq!(fake.log(), expected);
++}
++
++#[test]
++fn a_body_glab_left_unread_fails_only_a_run_that_exited_0() {
++    let fake = Fake::new(0);
++    let body = vec![b'x'; BODY_PAST_ANY_PIPE_BUFFER];
++    let merge_request = ["api", "projects/7/merge_requests/12"];
++
++    let printed = fake
++        .glab
++        .run(fake.dir.path(), &merge_request, Some(body.clone()));
++    let failed = fake.run(&["api", "projects/7/unknown"], Some(body));
++
++    assert!(matches!(printed, Err(Error::GlabIo { .. })), "{printed:?}");
++    assert!(
++        matches!(
++            failed,
++            GlabRun::Failed {
++                status: Some(1),
++                ..
++            }
++        ),
++        "{failed:?}"
++    );
++}
++
++#[test]
++fn a_glab_that_cannot_start_is_an_i_o_error_naming_it() {
++    let dir = tempfile::tempdir().unwrap();
++    let missing = dir.path().join("glab");
++
++    let error = Glab::at(missing.clone()).run(dir.path(), &["--version"], None);
++
++    assert!(
++        matches!(&error, Err(Error::GlabIo { program, .. }) if *program == missing),
++        "{error:?}"
++    );
++}
++
++#[test]
++fn glab_missing_on_path_is_none() {
++    let (empty, plain) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
++    let not_runnable = plain.path().join("glab");
++    fs::write(&not_runnable, "#!/bin/sh\n").unwrap();
++    fs::set_permissions(&not_runnable, fs::Permissions::from_mode(PLAIN)).unwrap();
++    let path = std::env::join_paths([empty.path(), plain.path()]).unwrap();
++
++    let ran = run_ignored_in_child(&[NOT_FOUND_TEST], |child| {
++        child.env("PATH", path);
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++#[test]
++#[ignore = "run by glab_missing_on_path_is_none"]
++fn glab_is_none_on_a_path_without_a_runnable_glab() {
++    assert!(Glab::find().is_none());
++}
++
++#[test]
++fn glab_on_path_is_found() {
++    let inherited = std::env::var_os("PATH").unwrap_or_default();
++    let mut folders = vec![fake_glab_folder()];
++    folders.extend(std::env::split_paths(&inherited));
++    let path = std::env::join_paths(folders).unwrap();
++
++    let ran = run_ignored_in_child(&[FOUND_TEST], |child| {
++        child
++            .env("PATH", path)
++            .env("YAMT_FAKE_GLAB", runner_scenario());
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++#[test]
++#[ignore = "run by glab_on_path_is_found"]
++fn glab_found_on_path_is_the_one_run() {
++    let dir = tempfile::tempdir().unwrap();
++    let glab = Glab::find().unwrap();
++
++    let ran = glab.run(dir.path(), &["auth", "status"], None).unwrap();
++
++    let stderr = runner_file("auth-status.out");
++    let expected = GlabRun::Failed {
++        status: Some(1),
++        stdout: Vec::new(),
++        stderr,
++    };
++    assert_eq!(ran, expected);
++}
++
++fn oid_of(root: &Path, revision: &str) -> Oid {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
++}
++
++#[test]
++fn branch_names_from_heads_and_remote_tracking_and_none_for_a_commit_id() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    git_ok(
++        root,
++        &["update-ref", "refs/remotes/origin/feature", "remote"],
++    )
++    .unwrap();
++    let remote_commit = oid_of(root, "remote");
++    let name = |name: &str| repo.symbolic_full_name(name).unwrap();
++
++    let named: [(&str, Option<&[u8]>); 5] = [
++        ("remote", Some(b"refs/heads/remote")),
++        ("origin/feature", Some(b"refs/remotes/origin/feature")),
++        ("HEAD", Some(b"refs/heads/local")),
++        (remote_commit.as_str(), None),
++        ("remote~1", None),
++    ];
++    for (typed, expected) in named {
++        assert_eq!(name(typed), expected.map(<[u8]>::to_vec), "{typed}");
++    }
++    let range = repo.symbolic_full_name("main...remote");
++    assert!(matches!(range, Err(Error::GitFailed { .. })), "{range:?}");
++    git_ok(root, &["checkout", "--quiet", "--detach"]).unwrap();
++    assert_eq!(name("HEAD"), Some(b"HEAD".to_vec()));
++}
++
++#[test]
++fn remote_names_lists_every_remote() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    assert_eq!(repo.remote_names().unwrap(), Vec::<Vec<u8>>::new());
++
++    for remote in ["upstream", "origin", "fork"] {
++        let url = format!("https://gitlab.example/{remote}.git");
++        git_ok(root, &["remote", "add", remote, &url]).unwrap();
++    }
++
++    let expected: [&[u8]; 3] = [b"fork", b"origin", b"upstream"];
++    assert_eq!(repo.remote_names().unwrap(), expected);
++}
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+new file mode 100755
+index 0000000..cedc087
+--- /dev/null
++++ b/scripts/fake-glab/glab
+@@ -0,0 +1,145 @@
++#!/bin/sh
++# A stand-in for glab 1.124.0 in yamt's tests and app sessions: answers `glab auth status` and `glab api` from
++# the scenario folder $YAMT_FAKE_GLAB, counts posts in $YAMT_FAKE_GLAB_STATE and logs every call to
++# $YAMT_FAKE_GLAB_LOG; the folder layout and the log format are in tests/glab/README.md.
++# What it imitates, as glab 1.124.0 printed it: `auth status` writes everything on stderr; `api` prints the body
++# as GitLab sent it (no final newline), after the status line, the headers and an empty line, each ending in
++# CRLF, with `--include`; on an HTTP error it also prints "glab: <message> (HTTP <code>)" on stderr and exits 1.
++set -u
++
++fail() {
++	printf 'fake glab: %s\n' "$1" >&2
++	exit 2
++}
++
++log() {
++	if [ -n "${YAMT_FAKE_GLAB_LOG:-}" ]; then
++		printf '%s\n' "$1" >>"$YAMT_FAKE_GLAB_LOG"
++	fi
++}
++
++# $1 file, $2 default: the file's text, or the default when there is no file.
++text_or() {
++	if [ -f "$1" ]; then
++		cat "$1"
++	else
++		printf '%s' "$2"
++	fi
++}
++
++scenario=${YAMT_FAKE_GLAB:-}
++[ -n "$scenario" ] || fail 'YAMT_FAKE_GLAB names no scenario folder'
++[ -d "$scenario" ] || fail "no scenario folder $scenario"
++
++log "argv: $*"
++log "cwd: $(pwd -P)"
++log "env: NO_COLOR=${NO_COLOR-unset} GIT_TERMINAL_PROMPT=${GIT_TERMINAL_PROMPT-unset}"
++
++auth_status() {
++	if [ -f "$scenario/auth-status.out" ]; then
++		cat "$scenario/auth-status.out" >&2
++	fi
++	exit "$(text_or "$scenario/auth-status.exit" 0)"
++}
++
++include=no
++method=
++input=
++endpoint=
++
++# $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
++# error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
++answer() {
++	if [ "$include" = yes ]; then
++		printf 'HTTP/2.0 %s\r\nContent-Type: application/json\r\n\r\n' "$1"
++	fi
++	printf '%s' "$2"
++	code=${1%% *}
++	if [ "$code" -lt 400 ]; then
++		exit 0
++	fi
++	if [ -f "${3-}" ]; then
++		cat "$3" >&2
++		exit 1
++	fi
++	message=$(printf '%s' "$2" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
++	printf 'glab: %s (HTTP %s)\n' "${message:-${1#* }}" "$code" >&2
++	exit 1
++}
++
++answer_file() {
++	if [ -f "$scenario/$1" ]; then
++		answer '200 OK' "$(cat "$scenario/$1")"
++	fi
++	answer '404 Not Found' '{"message":"404 Not Found"}'
++}
++
++post() {
++	state=${YAMT_FAKE_GLAB_STATE:-}
++	[ -n "$state" ] || fail 'YAMT_FAKE_GLAB_STATE names no file'
++	count=$(text_or "$state" 0)
++	number=$((count + 1))
++	printf '%s\n' "$number" >"$state"
++	answer_at="$scenario/post-$number"
++	if [ -f "$answer_at.sleep" ]; then
++		sleep "$(cat "$answer_at.sleep")"
++	fi
++	if [ -f "$answer_at.exit" ]; then
++		if [ -f "$answer_at.err" ]; then
++			cat "$answer_at.err" >&2
++		fi
++		exit "$(cat "$answer_at.exit")"
++	fi
++	[ -f "$answer_at.json" ] || fail "the scenario has no answer for post $number"
++	answer "$(text_or "$answer_at.status" '201 Created')" "$(cat "$answer_at.json")" "$answer_at.err"
++}
++
++api() {
++	while [ $# -gt 0 ]; do
++		case $1 in
++		-i | --include) include=yes ;;
++		-X | --method)
++			method=${2-}
++			shift
++			;;
++		--input)
++			input=${2-}
++			shift
++			;;
++		-f | --field | -F | --raw-field | -H | --header | --hostname) shift ;;
++		--paginate) ;;
++		-*) fail "unknown api option $1" ;;
++		*) [ -n "$endpoint" ] || endpoint=$1 ;;
++		esac
++		shift
++	done
++	if [ "$input" = - ]; then
++		body=$(
++			cat
++			printf x
++		)
++		log "stdin: ${body%x}"
++	fi
++	if [ -z "$method" ]; then
++		if [ -n "$input" ]; then method=POST; else method=GET; fi
++	fi
++	case "$method $endpoint" in
++	"POST "*/draft_notes) post ;;
++	"GET "*/draft_notes) answer_file draft-notes.json ;;
++	"GET "*/merge_requests) answer_file merge-requests.json ;;
++	"GET "*/merge_requests/*) answer_file merge-request.json ;;
++	*) answer '404 Not Found' '{"message":"404 Not Found"}' ;;
++	esac
++}
++
++case ${1-} in
++auth)
++	[ "${2-}" = status ] || fail "unknown command: $*"
++	auth_status
++	;;
++api)
++	shift
++	api "$@"
++	;;
++*) fail "unknown command: $*" ;;
++esac
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+new file mode 100644
+index 0000000..79d4c92
+--- /dev/null
++++ b/tests/glab/README.md
+@@ -0,0 +1,64 @@
++# Fake glab scenarios
++
++`scripts/fake-glab/glab` (POSIX sh) stands in for glab 1.124.0 in the Rust tests and in app sessions. Each folder
++here is one scenario; the fake reads it from `$YAMT_FAKE_GLAB`.
++
++## Environment
++
++| variable | what |
++|---|---|
++| `YAMT_FAKE_GLAB` | the scenario folder (required; without it every call exits 2) |
++| `YAMT_FAKE_GLAB_STATE` | a file holding how many posts were answered so far (missing = 0); each post adds one. Required for posts |
++| `YAMT_FAKE_GLAB_LOG` | a file every call is appended to (optional) |
++
++## Scenario folder
++
++| file | answers |
++|---|---|
++| `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
++| `auth-status.exit` | its exit status (missing = 0) |
++| `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
++| `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` |
++| `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
++| `post-<n>.json` | the body of the n-th POST `…/draft_notes` (n from 1, counted in the state file) |
++| `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
++| `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)` |
++| `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
++| `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
++
++A GET whose file is missing, or any other endpoint, answers `404 Not Found` with the body
++`{"message":"404 Not Found"}`. Any other glab command exits 2 with "fake glab: unknown command".
++
++## What the fake prints, as glab 1.124.0 does
++
++Measured with `HOME` and `XDG_CONFIG_HOME` in a temporary folder (no token), against gitlab.com:
++
++- `glab api <endpoint>` prints the body as GitLab sent it, without a final newline, on stdout; stderr is empty;
++  exit 0.
++- With `--include`, stdout starts with the status line (`HTTP/2.0 200 OK`), then the headers and an empty line,
++  each ending in CRLF, then the body. The fake prints only `Content-Type: application/json` among the headers.
++- An HTTP error (`glab api projects/gitlab-org%2Fno-such-project-yamt`): stdout holds the error body
++  (`{"message":"404 Project Not Found"}`, headers first with `--include`), stderr
++  `glab: 404 Project Not Found (HTTP 404)` and a newline, exit 1. The fake takes the message from the body's
++  `"message"` string, or else the status line's words.
++- `glab auth status` with no token: everything on stderr — the instance (`gitlab.com`), the failed API call,
++  "No token found …", the ERROR box — and exit 1. `auth-status.out` in `runner/` is that text (trailing spaces
++  dropped).
++- The first glab run under a fresh config folder may add a one-time "What's new in glab v1.124.0" notice to stderr.
++  The fake never does.
++
++## Log
++
++Each call appends:
++
++```
++argv: <the arguments, joined by spaces>
++cwd: <the working folder, symlinks resolved>
++env: NO_COLOR=<value or unset> GIT_TERMINAL_PROMPT=<value or unset>
++stdin: <stdin as read, then a newline>     (only with `--input -`)
++```
++
++## Scenarios
++
++- `runner/` — `yamt-gitio`'s own tests (`crates/gitio/tests/glab.rs`): post 1 is accepted, post 2 refused with
++  400, post 3 fails before any answer (its stderr is the fake's own words, not glab's), post 4 hangs for 5 s.
+diff --git a/tests/glab/runner/auth-status.exit b/tests/glab/runner/auth-status.exit
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/glab/runner/auth-status.exit
+@@ -0,0 +1 @@
++1
+diff --git a/tests/glab/runner/auth-status.out b/tests/glab/runner/auth-status.out
+new file mode 100644
+index 0000000..de30a11
+--- /dev/null
++++ b/tests/glab/runner/auth-status.out
+@@ -0,0 +1,11 @@
++gitlab.com
++  x gitlab.com: API call failed: GET https://gitlab.com/api/v4/user: 401 {message: 401 Unauthorized}
++  ✓ Git operations for gitlab.com configured to use ssh protocol.
++  ✓ API calls for gitlab.com are made over https protocol.
++  ✓ REST API Endpoint: https://gitlab.com/api/v4/
++  ✓ GraphQL Endpoint: https://gitlab.com/api/graphql/
++  ! No token found (checked config file, keyring, and environment variables).
++
++   ERROR
++
++  X could not authenticate to one or more of the configured GitLab instances.
+diff --git a/tests/glab/runner/merge-request.json b/tests/glab/runner/merge-request.json
+new file mode 100644
+index 0000000..f78758f
+--- /dev/null
++++ b/tests/glab/runner/merge-request.json
+@@ -0,0 +1 @@
++{"id":201,"iid":12,"project_id":7,"title":"Runner","web_url":"https://gitlab.example/group/project/-/merge_requests/12"}
+diff --git a/tests/glab/runner/post-1.json b/tests/glab/runner/post-1.json
+new file mode 100644
+index 0000000..7cd8867
+--- /dev/null
++++ b/tests/glab/runner/post-1.json
+@@ -0,0 +1 @@
++{"id":301,"note":"Why 300?"}
+diff --git a/tests/glab/runner/post-2.json b/tests/glab/runner/post-2.json
+new file mode 100644
+index 0000000..d8d4e48
+--- /dev/null
++++ b/tests/glab/runner/post-2.json
+@@ -0,0 +1 @@
++{"message":"400 Bad request - note is missing"}
+diff --git a/tests/glab/runner/post-2.status b/tests/glab/runner/post-2.status
+new file mode 100644
+index 0000000..59db10c
+--- /dev/null
++++ b/tests/glab/runner/post-2.status
+@@ -0,0 +1 @@
++400 Bad Request
+diff --git a/tests/glab/runner/post-3.err b/tests/glab/runner/post-3.err
+new file mode 100644
+index 0000000..f694684
+--- /dev/null
++++ b/tests/glab/runner/post-3.err
+@@ -0,0 +1 @@
++glab: the fake's failure before any HTTP answer
+diff --git a/tests/glab/runner/post-3.exit b/tests/glab/runner/post-3.exit
+new file mode 100644
+index 0000000..d00491f
+--- /dev/null
++++ b/tests/glab/runner/post-3.exit
+@@ -0,0 +1 @@
++1
+diff --git a/tests/glab/runner/post-4.json b/tests/glab/runner/post-4.json
+new file mode 100644
+index 0000000..4e24e3a
+--- /dev/null
++++ b/tests/glab/runner/post-4.json
+@@ -0,0 +1 @@
++{"id":304,"note":"Too late"}
+diff --git a/tests/glab/runner/post-4.sleep b/tests/glab/runner/post-4.sleep
+new file mode 100644
+index 0000000..7ed6ff8
+--- /dev/null
++++ b/tests/glab/runner/post-4.sleep
+@@ -0,0 +1 @@
++5
+-- 
+2.56.0
+

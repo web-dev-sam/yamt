@@ -1,0 +1,1100 @@
+From db154c91aba3def8513766e7dc1a62f6490909ad Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:00:57 +0200
+Subject: [PATCH] feat(gitio): read a commit range: changed files, merge base,
+ common dir, blob sizes
+
+---
+ .omp/run/notes/RVGitio.md  |  94 +++++++++
+ crates/gitio/src/blob.rs   |  41 +++-
+ crates/gitio/src/diff.rs   | 391 ++++++++++++++++++++++++++++++++++
+ crates/gitio/src/lib.rs    |   5 +-
+ crates/gitio/src/repo.rs   |  33 ++-
+ crates/gitio/tests/diff.rs | 419 +++++++++++++++++++++++++++++++++++++
+ 6 files changed, 975 insertions(+), 8 deletions(-)
+ create mode 100644 .omp/run/notes/RVGitio.md
+ create mode 100644 crates/gitio/src/diff.rs
+ create mode 100644 crates/gitio/tests/diff.rs
+
+diff --git a/.omp/run/notes/RVGitio.md b/.omp/run/notes/RVGitio.md
+new file mode 100644
+index 0000000..901cb2e
+--- /dev/null
++++ b/.omp/run/notes/RVGitio.md
+@@ -0,0 +1,94 @@
++I added `yamt-gitio`'s commit-range reads: `Repo::changed_files`, `Repo::merge_base`, `Repo::common_dir` and `Repo::blob_sizes`. All four match the brief's Contract exactly. All four commands named in the brief passed, and every test in the brief's list passes.
++
++```
++summary
++  - `Repo::changed_files(old, new)` runs the brief's single `git diff-tree` command (raw records plus counts, `-z`).
++    A pure parser turns its output into `ChangedFile { change, numstat }`.
++  - Counts are matched to records by destination path, never by position. A record with no count is `Numstat::Missing`.
++    Raw `C`, `U`, `X` or any other status gives `Error::UnexpectedOutput`.
++  - `Repo::merge_base`: exit 1 with no message gives `None`; any other failure is an error.
++  - `Repo::common_dir`: the absolute common git dir, the same from every worktree.
++  - `Repo::blob_sizes`: one `cat-file --batch-check --buffer` run; answers in input order, `<oid> missing` gives `None`.
++  - The four new types are re-exported from `lib.rs`.
++
++files_changed
++  crates/gitio/src/diff.rs   (new)
++  crates/gitio/src/repo.rs
++  crates/gitio/src/blob.rs
++  crates/gitio/src/lib.rs
++  crates/gitio/tests/diff.rs (new)
++
++tests_added
++  Unit tests in crates/gitio/src/diff.rs (on byte strings):
++  - numstat_records_out_of_raw_order_are_matched_by_destination_path: catches counts matched by position; covers M,
++    R087 (with the `\0old\0new\0` count form), D and A.
++  - a_binary_pair_is_binary_and_a_pair_without_a_numstat_record_is_missing: `-\t-\t` gives Binary; a `T` record with
++    no count gives Missing.
++  - a_half_binary_count_is_unexpected_output: `-\t3` is refused.
++  - two_numstat_records_for_one_path_are_unexpected_output: one count must not silently overwrite another.
++  - a_path_with_a_tab_a_newline_a_space_and_non_utf8_bytes_is_kept_as_bytes (unix): the path's bytes round-trip.
++  - no_output_is_no_changed_file: empty output gives an empty list.
++  - copied_unmerged_and_unknown_statuses_are_unexpected_output: C075, U, X, a bare R, Rx, MM.
++  - output_cut_inside_a_record_is_unexpected_output: a rename with no new path, a rename-form count with no new path,
++    output with no final NUL.
++
++  Integration tests in crates/gitio/tests/diff.rs (real temp repositories):
++  - added_modified_deleted_files_are_listed_with_git_s_counts: the exact list, with modes, blob ids and counts
++    2/0, 2/1, 0/3.
++  - a_renamed_file_lists_both_paths_and_counts_only_its_edits: Renamed old/name.txt → new/name.txt, counts 1/1.
++  - a_binary_file_is_listed_without_counts: an added and a modified binary file are both Binary.
++  - a_mode_only_change_lists_both_modes_and_one_blob_id: 100644 → 100755 with the same blob id, counts 0/0.
++  - a_submodule_commit_change_is_listed_as_a_gitlink: 160000 on both sides with the two commit ids, counts 1/1.
++  - a_file_replaced_by_a_link_is_one_modified_entry_with_both_modes (unix): one Modified entry, 100644 → 120000,
++    counts 1/1.
++  - the_users_diff_config_does_not_change_the_list: runs the ignored test `listing_under_the_users_diff_config` in a
++    child process with GIT_EXTERNAL_DIFF=false and GIT_DIFF_OPTS=--unified=0. That test sets repository config
++    diff.relative, diff.orderFile (order would be z/* first), diff.renames=false, diff.algorithm=minimal,
++    diff.external=false, diff.ignoreSubmodules=all and diff.noprefix, then asserts the exact list: the gitlink is
++    kept, the rename is found, and the order is not the order file's.
++  - paths_with_spaces_newlines_and_non_utf8_bytes_round_trip: a rename "old name.txt" → "renamed\tname.txt", an
++    added "new\nline.txt", and on unix an added "bytes \xff\xfe.txt".
++  - merge_base_is_the_fork_point_and_none_for_unrelated_histories: also checks that an unknown commit is
++    `GitFailed`, not `None`.
++  - blob_sizes_answer_in_order_and_missing_as_none: asking [3 bytes, missing, empty] gives
++    [Some(3), None, Some(0)]; an empty ask gives an empty list.
++  - common_dir_is_the_same_from_a_linked_worktree: the main worktree and a linked one give the same path, which is
++    the main `.git` and is absolute.
++
++smoke_evidence
++  cargo fmt --check → FMT_OK (no diff)
++  cargo clippy --workspace --all-targets -- -D warnings → no errors or warnings
++  cargo test -p yamt-gitio →
++    unittests src/lib.rs   test result: ok. 33 passed; 0 failed
++    tests/diff.rs          test result: ok. 11 passed; 0 failed; 1 ignored
++                           (the ignored one runs in a child process and passed there)
++    every other gitio test binary passed (5+12+6+26+19+4+10 passed, 0 failed)
++  just arch-check → "arch-check: ok"
++  Smoke shapes (added, modified, deleted, renamed with an edit, binary, chmod only, gitlink, file → link): each gives
++  exactly one entry with the right variant, modes and counts, asserted with `assert_eq!` on the whole list in the
++  integration tests above.
++
++deviations_from_brief
++  - repo.rs: renamed the private `is_unresolved_name` / `UNRESOLVED_NAME_STATUS` to `is_silent_failure` /
++    `SILENT_FAILURE_STATUS`. `merge_base` now shares the rule "exit 1 with an empty stderr" with `commit_named` and
++    `submodule_head`, and the comment cites both git sources. No behaviour change.
++  - blob_sizes adds `--buffer` (one process, output flushed at the end) and accepts only answers of type `blob`.
++    Another type, or an answer whose id differs from the asked id, is `UnexpectedOutput`.
++  - git's own entry order is kept: a renamed pair sits at its destination path's place (observed:
++    vendor/lib, z/counted.txt, then the rename a/moved.txt → z/moved.txt). Sorting by display path is left to
++    yamt-range, as the design's §1 [INFERENCE] says.
++  - The parser refuses two count records for one destination path with `UnexpectedOutput`; the brief left this
++    case open.
++  - Docs not owned by this slice: crates/gitio/AGENTS.md and the project map's gitio line should name `diff.rs` and
++    the three new Repo reads (the D0 docs slice).
++
++open_risks
++  - crates/gitio/src/diff.rs:72-81: no test fails if `--ignore-submodules=none` or `--diff-algorithm=histogram` is
++    dropped. diff-tree reads neither diff.ignoreSubmodules nor diff.algorithm, and the test content (a b c x d e →
++    x a b c d e) counts 1/1 under both minimal and histogram. A file whose counts differ between histogram and Myers
++    would pin the histogram flag; `just mutants` may report these lines.
++  - crates/gitio/src/blob.rs:40-41: the `named == oid` guards are never false in a real run (git echoes the asked
++    id), so their mutants may survive.
++  - The repository's own `.gitattributes` still decides "binary" (intended, design §1); no test covers a `-diff`
++    attribute.
++```
+\ No newline at end of file
+diff --git a/crates/gitio/src/blob.rs b/crates/gitio/src/blob.rs
+index 4a42ca7..4129b33 100644
+--- a/crates/gitio/src/blob.rs
++++ b/crates/gitio/src/blob.rs
+@@ -1,10 +1,49 @@
+ use std::io::{self, BufRead, BufReader, Read, Write};
+ use std::process::{Child, ChildStdout, Command, Stdio};
+ 
+-use crate::run::argv;
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, argv, run};
+ use crate::{Error, Oid, Result};
+ 
+ pub(crate) const CAT_FILE: &str = "cat-file";
++const BLOB: &str = "blob";
++
++impl Repo {
++    /// one `git cat-file --batch-check` run over all ids; answers in input order; None = missing; a gitlink id is never asked
++    pub fn blob_sizes(&self, oids: &[Oid]) -> Result<Vec<Option<u64>>> {
++        if oids.is_empty() {
++            return Ok(Vec::new());
++        }
++        let mut input = String::new();
++        for oid in oids {
++            input.push_str(oid.as_str());
++            input.push('\n');
++        }
++        let command = self.command(Access::Read, &[CAT_FILE, "--batch-check", "--buffer"]);
++        let output = run(command, Some(input.into_bytes()), GIT_TIMEOUT)?;
++        let text = String::from_utf8_lossy(&output);
++        let answers: Vec<&str> = text.lines().collect();
++        if answers.len() != oids.len() {
++            return Err(unexpected(&text));
++        }
++        oids.iter()
++            .zip(answers)
++            .map(|(oid, answer)| blob_size(oid, answer))
++            .collect()
++    }
++}
++
++// git-cat-file(1) BATCH OUTPUT: `<oid> SP <type> SP <size> LF`, or `<object> SP missing LF`.
++fn blob_size(oid: &Oid, answer: &str) -> Result<Option<u64>> {
++    let fields: Vec<&str> = answer.split(' ').collect();
++    match fields.as_slice() {
++        [named, "missing"] if *named == oid.as_str() => Ok(None),
++        [named, BLOB, size] if *named == oid.as_str() => {
++            size.parse().map(Some).map_err(|_| unexpected(answer))
++        }
++        _ => Err(unexpected(answer)),
++    }
++}
+ 
+ pub struct BlobReader {
+     child: Child,
+diff --git a/crates/gitio/src/diff.rs b/crates/gitio/src/diff.rs
+new file mode 100644
+index 0000000..0e5c47d
+--- /dev/null
++++ b/crates/gitio/src/diff.rs
+@@ -0,0 +1,391 @@
++use std::collections::HashMap;
++use std::path::{Path, PathBuf};
++
++use crate::entry::{Oid, path_from_git};
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run};
++use crate::{Error, Result};
++
++const DIFF_TREE: &str = "diff-tree";
++const OCTAL: u32 = 8;
++const NUMSTAT_FIELDS: usize = 3;
++const BINARY_COUNT: &str = "-";
++
++/// One side of a changed pair as a tree holds it.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct TreeSide {
++    pub path: PathBuf,
++    pub mode: u32,
++    pub oid: Oid,
++}
++
++/// A pair `git diff-tree --raw` lists, by its status letter.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub enum Changed {
++    Added {
++        new: TreeSide,
++    },
++    Deleted {
++        old: TreeSide,
++    },
++    /// Raw `M`, and `T`: a kind change, which the modes tell apart.
++    Modified {
++        old: TreeSide,
++        new: TreeSide,
++    },
++    /// Raw `R<score>`.
++    Renamed {
++        old: TreeSide,
++        new: TreeSide,
++    },
++}
++
++/// The line counts `--numstat` gives a pair.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Numstat {
++    Lines { added: u32, removed: u32 },
++    Binary,
++    Missing,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ChangedFile {
++    pub change: Changed,
++    pub numstat: Numstat,
++}
++
++impl Changed {
++    fn destination(&self) -> &Path {
++        match self {
++            Changed::Added { new }
++            | Changed::Modified { new, .. }
++            | Changed::Renamed { new, .. } => &new.path,
++            Changed::Deleted { old } => &old.path,
++        }
++    }
++}
++
++impl Repo {
++    /// `git diff-tree -r -z --raw --numstat --no-abbrev -M --diff-algorithm=histogram --ignore-submodules=none <old> <new>`
++    pub fn changed_files(&self, old: &Oid, new: &Oid) -> Result<Vec<ChangedFile>> {
++        let args = [
++            DIFF_TREE,
++            "-r",
++            "-z",
++            "--raw",
++            "--numstat",
++            "--no-abbrev",
++            "-M",
++            "--diff-algorithm=histogram",
++            "--ignore-submodules=none",
++            old.as_str(),
++            new.as_str(),
++        ];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        parse_changed_files(&output)
++    }
++}
++
++// git diff.c `diff_flush`: every raw record comes first, then every numstat record, nothing between them.
++// `-z` raw: `:<mode> <mode> <oid> <oid> <status>\0<path>\0` (a rename: `\0<old>\0<new>\0`);
++// `-z` numstat: `<added>\t<removed>\t<path>\0` (a rename: `<added>\t<removed>\t\0<old>\0<new>\0`), `-` for binary.
++fn parse_changed_files(output: &[u8]) -> Result<Vec<ChangedFile>> {
++    let mut fields = output.split(|&byte| byte == b'\0').peekable();
++    let mut changes = Vec::new();
++    while let Some(header) = fields.next_if(|field| field.starts_with(b":")) {
++        changes.push(raw_change(header, &mut fields)?);
++    }
++    let mut counts = HashMap::new();
++    while let Some(record) = fields.next_if(|field| !field.is_empty()) {
++        let (path, numstat) = numstat_record(record, &mut fields)?;
++        if counts.insert(path, numstat).is_some() {
++            return Err(unexpected(record));
++        }
++    }
++    match (fields.next(), fields.next()) {
++        (Some([]), None) => {}
++        (Some(field), _) => return Err(unexpected(field)),
++        (None, _) => return Err(unexpected(output)),
++    }
++    Ok(changes
++        .into_iter()
++        .map(|change| {
++            let numstat = counts
++                .remove(change.destination())
++                .unwrap_or(Numstat::Missing);
++            ChangedFile { change, numstat }
++        })
++        .collect())
++}
++
++fn raw_change<'a>(header: &[u8], fields: &mut impl Iterator<Item = &'a [u8]>) -> Result<Changed> {
++    let text = header
++        .strip_prefix(b":")
++        .and_then(|fields| std::str::from_utf8(fields).ok())
++        .ok_or_else(|| unexpected(header))?;
++    let parts: Vec<&str> = text.split(' ').collect();
++    let [old_mode, new_mode, old_oid, new_oid, status] = parts.as_slice() else {
++        return Err(unexpected(header));
++    };
++    let old_mode = mode_of(old_mode, header)?;
++    let new_mode = mode_of(new_mode, header)?;
++    let (old_oid, new_oid) = (Oid::parse(old_oid)?, Oid::parse(new_oid)?);
++    let path = next_path(fields, header)?;
++    let side = |path: PathBuf, mode: u32, oid: Oid| TreeSide { path, mode, oid };
++    match *status {
++        "A" => Ok(Changed::Added {
++            new: side(path, new_mode, new_oid),
++        }),
++        "D" => Ok(Changed::Deleted {
++            old: side(path, old_mode, old_oid),
++        }),
++        "M" | "T" => Ok(Changed::Modified {
++            old: side(path.clone(), old_mode, old_oid),
++            new: side(path, new_mode, new_oid),
++        }),
++        rename if is_rename(rename) => Ok(Changed::Renamed {
++            old: side(path, old_mode, old_oid),
++            new: side(next_path(fields, header)?, new_mode, new_oid),
++        }),
++        _ => Err(unexpected(header)),
++    }
++}
++
++fn is_rename(status: &str) -> bool {
++    status
++        .strip_prefix('R')
++        .is_some_and(|score| !score.is_empty() && score.bytes().all(|byte| byte.is_ascii_digit()))
++}
++
++fn numstat_record<'a>(
++    record: &[u8],
++    fields: &mut impl Iterator<Item = &'a [u8]>,
++) -> Result<(PathBuf, Numstat)> {
++    let parts: Vec<&[u8]> = record
++        .splitn(NUMSTAT_FIELDS, |&byte| byte == b'\t')
++        .collect();
++    let [added, removed, path] = parts.as_slice() else {
++        return Err(unexpected(record));
++    };
++    let numstat = counts_of(added, removed).ok_or_else(|| unexpected(record))?;
++    if !path.is_empty() {
++        return Ok((path_from_git(path), numstat));
++    }
++    let _old_path = next_path(fields, record)?;
++    Ok((next_path(fields, record)?, numstat))
++}
++
++fn counts_of(added: &[u8], removed: &[u8]) -> Option<Numstat> {
++    let (added, removed) = (
++        std::str::from_utf8(added).ok()?,
++        std::str::from_utf8(removed).ok()?,
++    );
++    if added == BINARY_COUNT && removed == BINARY_COUNT {
++        return Some(Numstat::Binary);
++    }
++    Some(Numstat::Lines {
++        added: added.parse().ok()?,
++        removed: removed.parse().ok()?,
++    })
++}
++
++fn mode_of(octal: &str, header: &[u8]) -> Result<u32> {
++    u32::from_str_radix(octal, OCTAL).map_err(|_| unexpected(header))
++}
++
++fn next_path<'a>(fields: &mut impl Iterator<Item = &'a [u8]>, record: &[u8]) -> Result<PathBuf> {
++    match fields.next() {
++        Some(path) if !path.is_empty() => Ok(path_from_git(path)),
++        Some(_) | None => Err(unexpected(record)),
++    }
++}
++
++fn unexpected(output: &[u8]) -> Error {
++    Error::UnexpectedOutput {
++        command: DIFF_TREE,
++        output: String::from_utf8_lossy(output).into_owned(),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const REGULAR: u32 = 0o100_644;
++
++    fn oid(digit: char) -> Oid {
++        Oid::parse(&digit.to_string().repeat(40)).unwrap()
++    }
++
++    fn hex(digit: char) -> String {
++        digit.to_string().repeat(40)
++    }
++
++    fn raw(old_mode: &str, new_mode: &str, old: char, new: char, status: &str) -> Vec<u8> {
++        format!(
++            ":{old_mode} {new_mode} {} {} {status}\0",
++            hex(old),
++            hex(new)
++        )
++        .into_bytes()
++    }
++
++    fn side(path: &str, mode: u32, digit: char) -> TreeSide {
++        TreeSide {
++            path: PathBuf::from(path),
++            mode,
++            oid: oid(digit),
++        }
++    }
++
++    fn counted(change: Changed, added: u32, removed: u32) -> ChangedFile {
++        let numstat = Numstat::Lines { added, removed };
++        ChangedFile { change, numstat }
++    }
++
++    #[test]
++    fn numstat_records_out_of_raw_order_are_matched_by_destination_path() {
++        let mut output = raw("100644", "100644", '1', '2', "M");
++        output.extend_from_slice(b"b.txt\0");
++        output.extend(raw("100644", "100644", '3', '4', "R087"));
++        output.extend_from_slice(b"old.txt\0new.txt\0");
++        output.extend(raw("100644", "000000", '5', '0', "D"));
++        output.extend_from_slice(b"gone.txt\0");
++        output.extend(raw("000000", "100755", '0', '6', "A"));
++        output.extend_from_slice(b"a.txt\0");
++        output.extend_from_slice(b"3\t0\ta.txt\0");
++        output.extend_from_slice(b"0\t4\tgone.txt\0");
++        output.extend_from_slice(b"1\t2\t\0old.txt\0new.txt\0");
++        output.extend_from_slice(b"7\t5\tb.txt\0");
++
++        let files = parse_changed_files(&output).unwrap();
++
++        let (old, new) = (side("b.txt", REGULAR, '1'), side("b.txt", REGULAR, '2'));
++        let modified = counted(Changed::Modified { old, new }, 7, 5);
++        let (old, new) = (side("old.txt", REGULAR, '3'), side("new.txt", REGULAR, '4'));
++        let renamed = counted(Changed::Renamed { old, new }, 1, 2);
++        let old = side("gone.txt", REGULAR, '5');
++        let deleted = counted(Changed::Deleted { old }, 0, 4);
++        let new = side("a.txt", 0o100_755, '6');
++        let added = counted(Changed::Added { new }, 3, 0);
++        assert_eq!(files, [modified, renamed, deleted, added]);
++    }
++
++    #[test]
++    fn a_binary_pair_is_binary_and_a_pair_without_a_numstat_record_is_missing() {
++        let mut output = raw("100644", "100644", '1', '2', "M");
++        output.extend_from_slice(b"logo.png\0");
++        output.extend(raw("100644", "100644", '3', '4', "T"));
++        output.extend_from_slice(b"uncounted\0");
++        output.extend_from_slice(b"-\t-\tlogo.png\0");
++
++        let numstats: Vec<Numstat> = parse_changed_files(&output)
++            .unwrap()
++            .into_iter()
++            .map(|file| file.numstat)
++            .collect();
++
++        assert_eq!(numstats, [Numstat::Binary, Numstat::Missing]);
++    }
++
++    #[test]
++    fn a_half_binary_count_is_unexpected_output() {
++        let mut output = raw("100644", "100644", '1', '2', "M");
++        output.extend_from_slice(b"a\0-\t3\ta\0");
++
++        let error = parse_changed_files(&output).unwrap_err();
++
++        assert!(
++            matches!(
++                error,
++                Error::UnexpectedOutput {
++                    command: DIFF_TREE,
++                    ..
++                }
++            ),
++            "{error:?}"
++        );
++    }
++
++    #[test]
++    fn two_numstat_records_for_one_path_are_unexpected_output() {
++        let mut output = raw("100644", "100644", '1', '2', "M");
++        output.extend_from_slice(b"a\0");
++        output.extend_from_slice(b"1\t1\ta\0");
++        output.extend_from_slice(b"2\t2\ta\0");
++
++        let error = parse_changed_files(&output).unwrap_err();
++
++        assert!(matches!(error, Error::UnexpectedOutput { .. }), "{error:?}");
++    }
++
++    #[cfg(unix)]
++    #[test]
++    fn a_path_with_a_tab_a_newline_a_space_and_non_utf8_bytes_is_kept_as_bytes() {
++        use std::os::unix::ffi::OsStrExt;
++        let name: &[u8] = b"odd\tname\nwith space \xff.txt";
++        let mut output = raw("000000", "100644", '0', '1', "A");
++        output.extend_from_slice(name);
++        output.push(b'\0');
++        output.extend_from_slice(b"2\t0\t");
++        output.extend_from_slice(name);
++        output.push(b'\0');
++
++        let files = parse_changed_files(&output).unwrap();
++
++        let [
++            ChangedFile {
++                change: Changed::Added { new },
++                numstat,
++            },
++        ] = files.as_slice()
++        else {
++            panic!("{files:?}");
++        };
++        assert_eq!(new.path.as_os_str().as_bytes(), name);
++        assert_eq!(
++            *numstat,
++            Numstat::Lines {
++                added: 2,
++                removed: 0
++            }
++        );
++    }
++
++    #[test]
++    fn no_output_is_no_changed_file() {
++        assert_eq!(parse_changed_files(b"").unwrap(), []);
++    }
++
++    #[test]
++    fn copied_unmerged_and_unknown_statuses_are_unexpected_output() {
++        for status in ["C075", "U", "X", "R", "Rx", "MM"] {
++            let mut output = raw("100644", "100644", '1', '2', status);
++            output.extend_from_slice(b"a\0b\0");
++
++            let error = parse_changed_files(&output).unwrap_err();
++
++            assert!(
++                matches!(error, Error::UnexpectedOutput { .. }),
++                "{status}: {error:?}"
++            );
++        }
++    }
++
++    #[test]
++    fn output_cut_inside_a_record_is_unexpected_output() {
++        let mut renamed = raw("100644", "100644", '1', '2', "R100");
++        renamed.extend_from_slice(b"old\0");
++        let mut uncounted = raw("100644", "100644", '1', '2', "M");
++        uncounted.extend_from_slice(b"a\0");
++        uncounted.extend_from_slice(b"1\t1\t\0a\0");
++        let mut unterminated = raw("100644", "100644", '1', '2', "M");
++        unterminated.extend_from_slice(b"a");
++
++        for output in [renamed, uncounted, unterminated] {
++            let error = parse_changed_files(&output).unwrap_err();
++
++            assert!(matches!(error, Error::UnexpectedOutput { .. }), "{error:?}");
++        }
++    }
++}
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 7047bcd..0288ffa 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -1,11 +1,13 @@
+ //! Git subprocess layer: reads and writes index stages and blobs as bytes, reads what git is doing
+ //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
+-//! tracks and the merge driver config, re-runs git's merge of one file, and aborts or continues the operation.
++//! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
++//! and lists the files that changed between two commits.
+ #![forbid(unsafe_code)]
+ 
+ mod abort_continue;
+ mod attributes;
+ mod blob;
++mod diff;
+ mod entry;
+ mod merge_config;
+ mod merge_file;
+@@ -21,6 +23,7 @@ mod version;
+ pub use abort_continue::GitRun;
+ pub use attributes::{AttributeValue, MergeAttributes};
+ pub use blob::BlobReader;
++pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
+ pub use entry::{Oid, Stage, StageEntry};
+ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index 76943e7..bfd403b 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -11,7 +11,8 @@ use crate::{Error, Result, StageEntry};
+ 
+ const REV_PARSE: &str = "rev-parse";
+ const HASH_OBJECT: &str = "hash-object";
+-const UNRESOLVED_NAME_STATUS: i32 = 1;
++const MERGE_BASE: &str = "merge-base";
++const SILENT_FAILURE_STATUS: i32 = 1;
+ 
+ pub struct Repo {
+     root: PathBuf,
+@@ -42,7 +43,7 @@ impl Repo {
+         let command = self.command(Access::Read, &[REV_PARSE, "--verify", "--quiet", &revision]);
+         let output = match run(command, None, GIT_TIMEOUT) {
+             Ok(output) => output,
+-            Err(error) if is_unresolved_name(&error) => return Ok(None),
++            Err(error) if is_silent_failure(&error) => return Ok(None),
+             Err(error) => return Err(error),
+         };
+         let line = without_final_newline(REV_PARSE, output)?;
+@@ -50,6 +51,25 @@ impl Repo {
+         Ok(Some(Oid::parse(&hex)?))
+     }
+ 
++    /// `git merge-base <a> <b>`: the first base when there are several (as `git diff a...b`); exit 1 → None
++    pub fn merge_base(&self, a: &Oid, b: &Oid) -> Result<Option<Oid>> {
++        let command = self.command(Access::Read, &[MERGE_BASE, a.as_str(), b.as_str()]);
++        let output = match run(command, None, GIT_TIMEOUT) {
++            Ok(output) => output,
++            Err(error) if is_silent_failure(&error) => return Ok(None),
++            Err(error) => return Err(error),
++        };
++        let line = without_final_newline(MERGE_BASE, output)?;
++        Ok(Some(Oid::parse(&String::from_utf8_lossy(&line))?))
++    }
++
++    /// `git rev-parse --path-format=absolute --git-common-dir`: one identity for every worktree of a repository
++    pub fn common_dir(&self) -> Result<PathBuf> {
++        let args = [REV_PARSE, "--path-format=absolute", "--git-common-dir"];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        Ok(path_from_git(&without_final_newline(REV_PARSE, output)?))
++    }
++
+     pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
+         let [path] = self.git_paths([name])?;
+         Ok(path)
+@@ -165,7 +185,7 @@ impl Repo {
+         let command = git_command(&self.git, &submodule, Access::Read, &args);
+         let output = match run(command, None, GIT_TIMEOUT) {
+             Ok(output) => output,
+-            Err(error) if is_unresolved_name(&error) => return Ok(None),
++            Err(error) if is_silent_failure(&error) => return Ok(None),
+             Err(error) => return Err(error),
+         };
+         let line = without_final_newline(REV_PARSE, output)?;
+@@ -189,11 +209,12 @@ impl Repo {
+     }
+ }
+ 
+-// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits non-zero without a message.
+-fn is_unresolved_name(error: &Error) -> bool {
++// git-rev-parse(1) `--verify --quiet`: a name that does not resolve exits 1 without a message; git-merge-base(1)
++// exits 1 without a message when the commits share no ancestor (builtin/merge-base.c `show_merge_base`).
++fn is_silent_failure(error: &Error) -> bool {
+     matches!(
+         error,
+-        Error::GitFailed { status: Some(UNRESOLVED_NAME_STATUS), stderr, .. } if stderr.is_empty()
++        Error::GitFailed { status: Some(SILENT_FAILURE_STATUS), stderr, .. } if stderr.is_empty()
+     )
+ }
+ 
+diff --git a/crates/gitio/tests/diff.rs b/crates/gitio/tests/diff.rs
+new file mode 100644
+index 0000000..28a1472
+--- /dev/null
++++ b/crates/gitio/tests/diff.rs
+@@ -0,0 +1,419 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, diverged_repo, git_ok, hash_object, run_ignored_in_child,
++};
++use yamt_gitio::{Changed, ChangedFile, Error, Numstat, Oid, Repo, TreeSide};
++
++const REGULAR: u32 = 0o100_644;
++const EXECUTABLE: u32 = 0o100_755;
++const LINK: u32 = 0o120_000;
++const GITLINK: u32 = 0o160_000;
++const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
++const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
++const USERS_DIFF_CONFIG_TEST: &str = "listing_under_the_users_diff_config";
++
++fn oid_of(root: &Path, revision: &str) -> Oid {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
++}
++
++fn blob(root: &Path, content: &[u8]) -> Oid {
++    Oid::parse(&hash_object(root, content).unwrap()).unwrap()
++}
++
++fn side(path: &str, mode: u32, oid: Oid) -> TreeSide {
++    TreeSide {
++        path: PathBuf::from(path),
++        mode,
++        oid,
++    }
++}
++
++fn lines(added: u32, removed: u32) -> Numstat {
++    Numstat::Lines { added, removed }
++}
++
++fn counted(change: Changed, added: u32, removed: u32) -> ChangedFile {
++    let numstat = lines(added, removed);
++    ChangedFile { change, numstat }
++}
++
++/// A file of the scripted repository: `base` on `main`, `local` on the checked-out branch `local`.
++fn regular<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote: base,
++    }
++}
++
++/// What changed from `main` to HEAD.
++fn listed(root: &Path) -> Vec<ChangedFile> {
++    let repo = Repo::discover(root).unwrap();
++    repo.changed_files(&oid_of(root, "main"), &oid_of(root, "HEAD"))
++        .unwrap()
++}
++
++fn commit(root: &Path, message: &str) {
++    git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
++}
++
++fn stage_blob(root: &Path, mode: &str, oid: &Oid, path: &str) {
++    let cacheinfo = format!("{mode},{},{path}", oid.as_str());
++    git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo]).unwrap();
++}
++
++#[test]
++fn added_modified_deleted_files_are_listed_with_git_s_counts() {
++    let added: &[u8] = b"a\nb\n";
++    let (edited_before, edited_after): (&[u8], &[u8]) =
++        (b"one\ntwo\nthree\n", b"one\n2\nthree\nfour\n");
++    let removed: &[u8] = b"x\ny\nz\n";
++    let dir = diverged_repo(&[
++        regular("added.txt", None, Some(added)),
++        regular("edited.txt", Some(edited_before), Some(edited_after)),
++        regular("removed.txt", Some(removed), None),
++    ])
++    .unwrap();
++    let root = dir.path();
++
++    let files = listed(root);
++
++    let expected = vec![
++        ChangedFile {
++            change: Changed::Added {
++                new: side("added.txt", REGULAR, blob(root, added)),
++            },
++            numstat: lines(2, 0),
++        },
++        ChangedFile {
++            change: Changed::Modified {
++                old: side("edited.txt", REGULAR, blob(root, edited_before)),
++                new: side("edited.txt", REGULAR, blob(root, edited_after)),
++            },
++            numstat: lines(2, 1),
++        },
++        ChangedFile {
++            change: Changed::Deleted {
++                old: side("removed.txt", REGULAR, blob(root, removed)),
++            },
++            numstat: lines(0, 3),
++        },
++    ];
++    assert_eq!(files, expected);
++}
++
++#[test]
++fn a_renamed_file_lists_both_paths_and_counts_only_its_edits() {
++    let before: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
++    let after: &[u8] = b"1\n2\n3\n4\nfive\n6\n7\n8\n9\n10\n";
++    let dir = diverged_repo(&[
++        regular("old/name.txt", Some(before), None),
++        regular("new/name.txt", None, Some(after)),
++    ])
++    .unwrap();
++    let root = dir.path();
++
++    let files = listed(root);
++
++    let expected = vec![ChangedFile {
++        change: Changed::Renamed {
++            old: side("old/name.txt", REGULAR, blob(root, before)),
++            new: side("new/name.txt", REGULAR, blob(root, after)),
++        },
++        numstat: lines(1, 1),
++    }];
++    assert_eq!(files, expected);
++}
++
++#[test]
++fn a_binary_file_is_listed_without_counts() {
++    let (before, after): (&[u8], &[u8]) = (b"\x89PNG\0\x01\n", b"\x89PNG\0\x02\n");
++    let dir = diverged_repo(&[
++        regular("logo.png", Some(before), Some(after)),
++        regular("added.bin", None, Some(b"\0\0\0")),
++    ])
++    .unwrap();
++    let root = dir.path();
++
++    let files = listed(root);
++
++    let expected = vec![
++        ChangedFile {
++            change: Changed::Added {
++                new: side("added.bin", REGULAR, blob(root, b"\0\0\0")),
++            },
++            numstat: Numstat::Binary,
++        },
++        ChangedFile {
++            change: Changed::Modified {
++                old: side("logo.png", REGULAR, blob(root, before)),
++                new: side("logo.png", REGULAR, blob(root, after)),
++            },
++            numstat: Numstat::Binary,
++        },
++    ];
++    assert_eq!(files, expected);
++}
++
++#[test]
++fn a_mode_only_change_lists_both_modes_and_one_blob_id() {
++    let script: &[u8] = b"echo hi\n";
++    let dir = diverged_repo(&[regular("run.sh", Some(script), Some(script))]).unwrap();
++    let root = dir.path();
++    git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
++    commit(root, "executable");
++
++    let files = listed(root);
++
++    let expected = vec![ChangedFile {
++        change: Changed::Modified {
++            old: side("run.sh", REGULAR, blob(root, script)),
++            new: side("run.sh", EXECUTABLE, blob(root, script)),
++        },
++        numstat: lines(0, 0),
++    }];
++    assert_eq!(files, expected);
++}
++
++#[test]
++fn a_submodule_commit_change_is_listed_as_a_gitlink() {
++    let dir = diverged_repo(&[ConflictFile {
++        path: "vendor/lib",
++        kind: FileKind::Submodule,
++        base: Some(FIRST_COMMIT.as_bytes()),
++        local: Some(SECOND_COMMIT.as_bytes()),
++        remote: Some(FIRST_COMMIT.as_bytes()),
++    }])
++    .unwrap();
++
++    let files = listed(dir.path());
++
++    let expected = vec![ChangedFile {
++        change: Changed::Modified {
++            old: side("vendor/lib", GITLINK, Oid::parse(FIRST_COMMIT).unwrap()),
++            new: side("vendor/lib", GITLINK, Oid::parse(SECOND_COMMIT).unwrap()),
++        },
++        numstat: lines(1, 1),
++    }];
++    assert_eq!(files, expected);
++}
++
++#[cfg(unix)]
++#[test]
++fn a_file_replaced_by_a_link_is_one_modified_entry_with_both_modes() {
++    let text: &[u8] = b"text\n";
++    let dir = diverged_repo(&[
++        regular("entry", Some(text), Some(text)),
++        regular("target.txt", Some(b"hello\n"), Some(b"hello\n")),
++    ])
++    .unwrap();
++    let root = dir.path();
++    fs::remove_file(root.join("entry")).unwrap();
++    std::os::unix::fs::symlink("target.txt", root.join("entry")).unwrap();
++    git_ok(root, &["add", "--", "entry"]).unwrap();
++    commit(root, "link");
++
++    let files = listed(root);
++
++    let expected = vec![ChangedFile {
++        change: Changed::Modified {
++            old: side("entry", REGULAR, blob(root, text)),
++            new: side("entry", LINK, blob(root, b"target.txt")),
++        },
++        numstat: lines(1, 1),
++    }];
++    assert_eq!(files, expected);
++}
++
++#[test]
++fn the_users_diff_config_does_not_change_the_list() {
++    let ran = run_ignored_in_child(&[USERS_DIFF_CONFIG_TEST], |child| {
++        child
++            .env("GIT_EXTERNAL_DIFF", "false")
++            .env("GIT_DIFF_OPTS", "--unified=0");
++    });
++
++    ran.unwrap_or_else(|error| panic!("{error}"));
++}
++
++#[test]
++#[ignore = "run by the_users_diff_config_does_not_change_the_list"]
++fn listing_under_the_users_diff_config() {
++    let moved: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
++    let moved_and_edited: &[u8] = b"1\n2\n3\n4\n5\n6\n7\n8\n9\nten\n";
++    let (counted_before, counted_after): (&[u8], &[u8]) =
++        (b"a\nb\nc\nx\nd\ne\n", b"x\na\nb\nc\nd\ne\n");
++    let dir = diverged_repo(&[
++        regular("a/moved.txt", Some(moved), None),
++        regular("z/moved.txt", None, Some(moved_and_edited)),
++        regular("z/counted.txt", Some(counted_before), Some(counted_after)),
++        ConflictFile {
++            path: "vendor/lib",
++            kind: FileKind::Submodule,
++            base: Some(FIRST_COMMIT.as_bytes()),
++            local: Some(SECOND_COMMIT.as_bytes()),
++            remote: Some(FIRST_COMMIT.as_bytes()),
++        },
++    ])
++    .unwrap();
++    let root = dir.path();
++    fs::write(root.join("order"), "z/*\nvendor/*\n").unwrap();
++    for (key, value) in [
++        ("diff.relative", "true"),
++        ("diff.orderFile", "order"),
++        ("diff.renames", "false"),
++        ("diff.algorithm", "minimal"),
++        ("diff.external", "false"),
++        ("diff.ignoreSubmodules", "all"),
++        ("diff.noprefix", "true"),
++    ] {
++        git_ok(root, &["config", key, value]).unwrap();
++    }
++
++    let files = listed(root);
++
++    let expected = vec![
++        ChangedFile {
++            change: Changed::Modified {
++                old: side("vendor/lib", GITLINK, Oid::parse(FIRST_COMMIT).unwrap()),
++                new: side("vendor/lib", GITLINK, Oid::parse(SECOND_COMMIT).unwrap()),
++            },
++            numstat: lines(1, 1),
++        },
++        ChangedFile {
++            change: Changed::Modified {
++                old: side("z/counted.txt", REGULAR, blob(root, counted_before)),
++                new: side("z/counted.txt", REGULAR, blob(root, counted_after)),
++            },
++            numstat: lines(1, 1),
++        },
++        ChangedFile {
++            change: Changed::Renamed {
++                old: side("a/moved.txt", REGULAR, blob(root, moved)),
++                new: side("z/moved.txt", REGULAR, blob(root, moved_and_edited)),
++            },
++            numstat: lines(1, 1),
++        },
++    ];
++    assert_eq!(files, expected);
++}
++
++#[test]
++fn paths_with_spaces_newlines_and_non_utf8_bytes_round_trip() {
++    let text: &[u8] = b"same\ntext\n";
++    let dir = diverged_repo(&[regular("old name.txt", Some(text), Some(text))]).unwrap();
++    let root = dir.path();
++    let oid = blob(root, text);
++    let added = blob(root, b"new\n");
++    git_ok(root, &["update-index", "--force-remove", "old name.txt"]).unwrap();
++    stage_blob(root, "100644", &oid, "renamed\tname.txt");
++    stage_blob(root, "100644", &added, "new\nline.txt");
++    #[cfg(unix)]
++    let non_utf8 = stage_non_utf8_name(root, b"new\n");
++    commit(root, "odd names");
++
++    let files = listed(root);
++
++    let new = side("new\nline.txt", REGULAR, added.clone());
++    let (old, renamed) = (
++        side("old name.txt", REGULAR, oid.clone()),
++        side("renamed\tname.txt", REGULAR, oid),
++    );
++    let mut expected = vec![
++        counted(Changed::Added { new }, 1, 0),
++        counted(Changed::Renamed { old, new: renamed }, 0, 0),
++    ];
++    #[cfg(unix)]
++    expected.push(counted(
++        Changed::Added {
++            new: TreeSide {
++                path: non_utf8,
++                mode: REGULAR,
++                oid: added,
++            },
++        },
++        1,
++        0,
++    ));
++    assert_eq!(files.len(), expected.len(), "{files:?}");
++    for file in &expected {
++        assert!(files.contains(file), "{file:?} not in {files:?}");
++    }
++}
++
++#[cfg(unix)]
++fn stage_non_utf8_name(root: &Path, content: &[u8]) -> PathBuf {
++    use std::os::unix::ffi::OsStrExt;
++    let name = PathBuf::from(std::ffi::OsStr::from_bytes(b"bytes \xff\xfe.txt"));
++    fs::write(root.join(&name), content).unwrap();
++    git_ok(root, &["add", "--", "bytes *"]).unwrap();
++    name
++}
++
++#[test]
++fn merge_base_is_the_fork_point_and_none_for_unrelated_histories() {
++    let dir = diverged_repo(&[regular("a.txt", Some(b"base\n"), Some(b"local\n"))]).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    git_ok(root, &["checkout", "--quiet", "--orphan", "unrelated"]).unwrap();
++    commit(root, "unrelated");
++    let (local, remote) = (oid_of(root, "local"), oid_of(root, "remote"));
++
++    assert_eq!(
++        repo.merge_base(&local, &remote).unwrap(),
++        Some(oid_of(root, "main"))
++    );
++    assert_eq!(
++        repo.merge_base(&local, &oid_of(root, "unrelated")).unwrap(),
++        None
++    );
++    let unknown = Oid::parse(SECOND_COMMIT).unwrap();
++    let error = repo.merge_base(&local, &unknown).unwrap_err();
++    assert!(matches!(error, Error::GitFailed { .. }), "{error:?}");
++}
++
++#[test]
++fn blob_sizes_answer_in_order_and_missing_as_none() {
++    let dir = diverged_repo(&[regular("a.txt", Some(b"abc"), Some(b""))]).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    let (three, empty) = (blob(root, b"abc"), blob(root, b""));
++    let missing = Oid::parse(SECOND_COMMIT).unwrap();
++
++    let sizes = repo.blob_sizes(&[three, missing, empty]).unwrap();
++
++    assert_eq!(sizes, [Some(3), None, Some(0)]);
++    assert_eq!(repo.blob_sizes(&[]).unwrap(), []);
++}
++
++#[test]
++fn common_dir_is_the_same_from_a_linked_worktree() {
++    let dir: TempDir = diverged_repo(&[regular("a.txt", Some(b"a\n"), Some(b"b\n"))]).unwrap();
++    let root = dir.path();
++    let linked = root.join("linked");
++    let linked_arg = linked.to_str().unwrap();
++    git_ok(
++        root,
++        &[
++            "worktree", "add", "--quiet", "--detach", linked_arg, "local",
++        ],
++    )
++    .unwrap();
++
++    let from_main = Repo::discover(root).unwrap().common_dir().unwrap();
++    let from_linked = Repo::discover(&linked).unwrap().common_dir().unwrap();
++
++    assert_eq!(from_linked, from_main);
++    assert_eq!(
++        fs::canonicalize(&from_main).unwrap(),
++        fs::canonicalize(root.join(".git")).unwrap()
++    );
++    assert!(from_main.is_absolute(), "{from_main:?}");
++}
+-- 
+2.56.0
+

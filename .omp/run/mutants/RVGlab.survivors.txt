@@ -1,0 +1,5 @@
+just mutants e0cbf94~1 (covers e0cbf94 RVGlab + 41dc675 RVGlabR1): clean baseline
+MISSED   crates/gitio/src/program.rs:25:5: replace is_runnable -> bool with true in 1s build + 4s test
+MISSED   crates/gitio/src/program.rs:25:5: replace is_runnable -> bool with false in 0s build + 4s test
+51 mutants tested in 2m: 2 missed, 38 caught, 11 unviable
+program.rs:25 is the #[cfg(not(unix))] is_runnable: not compiled on Linux, so its mutants cannot be caught here — dropped (platform-equivalent); the Windows CI build covers its compile only.

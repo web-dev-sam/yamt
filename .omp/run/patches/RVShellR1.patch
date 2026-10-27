@@ -1,0 +1,713 @@
+From e092ff40e30a6e476789cc372f2e66af2d9a30dd Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Sat, 24 Oct 2026 12:49:39 +0200
+Subject: [PATCH] fix(app): help wins over range errors; one data-folder
+ opener, worker helper and command builder
+
+---
+ .omp/run/findings.jsonl                 |  3 ++
+ .omp/run/notes/RVIpcCorrect.md          | 48 +++++++++++++++++
+ .omp/run/notes/RVShellR1.md             | 70 ++++++++++++++++++++++++
+ docs/slices/briefs/3.RV-ipc-rework-1.md | 45 ++++++++++++++++
+ src-tauri/src/args.rs                   | 20 +++++--
+ src-tauri/src/commands.rs               |  9 +---
+ src-tauri/src/compare.rs                | 38 ++++++-------
+ src-tauri/src/ipc_error.rs              | 35 ++++++++++++
+ src-tauri/src/mock_window.rs            |  7 +--
+ src-tauri/src/range.rs                  | 72 ++++++++++++-------------
+ src-tauri/src/window.rs                 | 30 ++++++++---
+ 11 files changed, 296 insertions(+), 81 deletions(-)
+ create mode 100644 .omp/run/notes/RVIpcCorrect.md
+ create mode 100644 .omp/run/notes/RVShellR1.md
+ create mode 100644 docs/slices/briefs/3.RV-ipc-rework-1.md
+
+diff --git a/.omp/run/findings.jsonl b/.omp/run/findings.jsonl
+index 2436653..c6a0ca6 100644
+--- a/.omp/run/findings.jsonl
++++ b/.omp/run/findings.jsonl
+@@ -1549,3 +1549,6 @@
+ {"ts": "2026-10-24T13:58:00+00:00", "slice": "RVShell", "source": "correctness", "severity": "block", "rule_id": "plan §2 #101", "file": "src-tauri/src/args.rs", "line": 72, "problem": "the new usage errors return inside the loop, so --diff --diff=a..b --help and --diff=main --version exit 2 instead of Help/Version (DIFF_WITH_REPO keeps the promise)", "fix": "carry Result<Window, String> through the loop, apply after it; test help_wins_over_a_range_error", "triage": "n/a"}
+ {"ts": "2026-10-24T14:10:00+00:00", "slice": "RVIpc", "source": "boundary", "severity": "should", "rule_id": "promote", "file": "frontend/src/ipc/fixtureRange.ts", "line": 55, "problem": "the DIFFERENCE valibot schema and parseCases (incl. the path → case-name rule) are copied from fixtureCompare.ts", "fix": "export DIFFERENCE and one parsedCases(schema, label, files, convert) from fixture.ts; both fixture sources use them", "triage": "promoted: a copied rule"}
+ {"ts": "2026-10-24T14:10:00+00:00", "slice": "RVIpc", "source": "boundary", "severity": "should", "rule_id": "TS17", "file": "frontend/src/ipc/fixtureRange.ts", "line": 29, "problem": "v.picklist for entry kinds and sides: a second way to write a closed list, unchecked against the generated unions (fixture.ts uses memberOf over Record<Generated.X, true>)", "fix": "export memberOf; ENTRY_KINDS / RANGE_SIDES tables typed by the generated unions", "triage": "promoted: an unchecked copy of a closed list; a new Rust member would type-check"}
++{"ts": "2026-10-24T14:25:00+00:00", "slice": "RVIpc", "source": "correctness", "severity": "block", "rule_id": "SP5", "file": "frontend/src/ipc/fixtureRange.ts", "line": 69, "problem": "no test parses deleted/renamed entries, a changed mode, or the tooLarge/notUtf8/modeOnly/kindChanged/submodule replies; the committed review.json is never read by a test", "fix": "a test over the committed cases (13 entries, kinds per id in order; ?range=empty none)", "triage": "n/a"}
++{"ts": "2026-10-24T14:25:00+00:00", "slice": "RVIpc", "source": "correctness", "severity": "block", "rule_id": "SP5", "file": "frontend/src/ipc/tauriRange.ts", "line": 6, "problem": "all 8 mutants NoCoverage: camelCasing, the UnknownRangeFile failure and the differences' line checks are untested on the only path real data takes", "fix": "tauriRange.test.ts in tauriCompare.test.ts's pattern", "triage": "n/a"}
++{"ts": "2026-10-24T14:25:00+00:00", "slice": "RVIpc", "source": "correctness", "severity": "should", "rule_id": "VF7", "file": "frontend/src/ipc/fixtureRange.ts", "line": 117, "problem": "the asked === null half (no range parameter) is untested; store tests build the source with ''", "fix": "add '' to the test.each of searches without a case", "triage": "promoted: an unpinned default row 9's store tests rely on"}
+diff --git a/.omp/run/notes/RVIpcCorrect.md b/.omp/run/notes/RVIpcCorrect.md
+new file mode 100644
+index 0000000..e428068
+--- /dev/null
++++ b/.omp/run/notes/RVIpcCorrect.md
+@@ -0,0 +1,48 @@
++```json
++{
++  "verdict": "fail",
++  "findings": [
++    {
++      "severity": "block",
++      "file": "frontend/src/ipc/fixtureRange.ts",
++      "line": 69,
++      "rule_id": "SP5",
++      "problem": "No test parses a fixture that has a `deleted` or `renamed` entry (:46-47), a texts reply whose mode is `changed` (:69), or a `tooLarge`, `notUtf8`, `modeOnly`, `kindChanged` or `submodule` reply (:73-78), and none uses the entry kinds (:29). So these survivors would live on even if Stryker re-evaluated module scope. A wrong literal in any of these arms makes `createFixtureRangeSource` throw at load and blanks the `?range` fixture page that row 9 and app-session build on, and every test stays green. That is because fixtureRange.test.ts feeds only inline JSON (`modified`/`added`, `same`, `binary`), while the committed review.json, which holds every arm, is never read by a test.",
++      "fix": "In fixtureRange.test.ts, add a test over the committed cases with the default `files`, as fixtureCompare.test.ts's `COMMITTED` does. `?range` should list 13 entries, including the renamed `docs/keys.md` and the deleted `src/api/mockBoards.ts`. Each id's `loadRangeFile` should give the kinds in order (kindChanged, tooLarge, texts, texts, notUtf8, binary, texts, texts, texts, modeOnly, texts with mode changed, texts, submodule). `?range=empty` should list none. Neither fixture uses the `submodule` entry kind, so after the promoted `memberOf` tables that member remains a type-level proof only."
++    },
++    {
++      "severity": "block",
++      "file": "frontend/src/ipc/tauriRange.ts",
++      "line": 6,
++      "rule_id": "SP5",
++      "problem": "All 8 mutants in tauriRange.ts are NoCoverage (the implementer's open risk 1). Real app data reaches the range window only through this file. Three bugs here would pass every test and reach row 9's headers and list: `openRange` returning the raw reply (`short_id` and `old_path` instead of `shortId`/`oldPath`); `loadRangeFile` turning `{ ok: false, failure: UnknownRangeFile }` into a value or emptying it; texts differences skipping `toDifferences`'s line checks.",
++      "fix": "Add tauriRange.test.ts in tauriCompare.test.ts's pattern (`vi.mock(\"./bindings\", () => ({ commands }))`). It should show that openRange and loadRangeFile return camelCased domain data, that an `UnknownRangeFile` error comes back unchanged as `{ ok: false, failure }`, and that a texts reply with a negative difference line rejects naming `differences[0]…`. The orchestrator widens Owned to that file."
++    },
++    {
++      "severity": "should",
++      "file": "frontend/src/ipc/fixtureRange.ts",
++      "line": 117,
++      "rule_id": "VF7",
++      "problem": "The survivor on :117 is the `asked === null` half. `?range` and `?range=` both give `\"\"` and kill the other half, but no test builds the source from a search with no `range` parameter at all. The compare window's store and text tests use exactly that form (`createFixtureCompareSource(log, \"\", {})`). If this stays, row 9's store tests rely on an unpinned default: a regression would show an empty `null` range instead of review.",
++      "fix": "Add `\"\"` to the `test.each([\"?range\", \"?range=\"])` in fixtureRange.test.ts (\"%s without a case loads review\")."
++    }
++  ],
++  "checked": [
++    "Read the brief 3.RV-ipc.md, the patch (516810c), the report RVIpc.md, the survivors file and RVIpcBoundary.md; I did not repeat its two promoted findings (one shared DIFFERENCE/parsedCases, memberOf tables).",
++    "The committed fixtures (a766541) parse through the real module. I ran a throwaway vitest file in /tmp (deleted afterwards; nothing written in the repo) importing fixtureRange.ts with its default glob. `?range` gave `main...feature` with 13 files and every `loadRangeFile` answered (kindChanged, tooLarge, texts, texts, notUtf8, binary, texts, texts, texts, modeOnly, texts, texts, submodule). `?range=empty` gave `feature..feature` with 0 files. No `range.fixture_miss` was logged. So block 1 is a test gap, not a broken page today.",
++    "Survivors dropped as #732-class static mutants (module-level schema constants that the vitest runner never re-evaluates, so they come back as Survived despite `--ignoreStatic`; logged as #1609). Each is killed by an existing assertion once evaluated: :25 DEFAULT_CASE by the `?range` → REVIEW_START equality; :27 NULL_SHORT_ID by the unknown-case `shortId: \"0000000\"`; :31-34 RANGE_SIDE by the inline mergeBase and named labels; :40, :43-45, :49-51 by the inline modified/added entries with counted/notCounted lines; :61-63, :67-68 by the inline texts reply with mode same; :72 by the inline binary reply; :84-85 by the 'missing start' parse test and the start equality.",
++    "fixtureRange.ts:55, :58 (DIFFERENCE): static, and the inline difference in REVIEW.files[0] kills them; they move into fixture.ts with the promoted shared schema.",
++    "fixtureRange.ts:97 ×2: I inferred these are the regex anchor removals (`^` in `/^.*\\//u`, `$` in `/\\.json$/u`); Stryker kept no per-mutant report for this run. They are equivalent (VF7 a) for glob keys of the form `../../fixtures/range/<case>.json`, where `.*\\/` is greedy and `.json` appears once at the end. A `.*`→`.` change would be killed by the FILES keys. The line moves into the promoted `parsedCases`.",
++    "Survivors outside the patch's hunks (pre-existing, line-shifted): domain.ts:176-177 are `nextColumnVersion` (+5 lines from the added guard) and :259 is `toListing`; index.ts:104 (`IN_APP`) and :108 (`onWindowClose`); problemText.ts:63/86/111 are older `default` arms, :95-96 `AT_POSITION` `.trim()` (#735), and :129 the WriteFailed `.trim()` (was :125).",
++    "rangeDomain.ts killed 26 of 26. The `raw.kind !== \"texts\"` → true mutant (a texts reply passed raw) passes every toEqual, because domain Differences are structurally identical; it dies only on 'a bad line in a texts reply's differences is refused' (rangeDomain.test.ts). The test is kept and this is noted, not a finding.",
++    "Conversions traced by hand. Only `renamed` changes shape (`old_path` → `oldPath`); added, modified and deleted pass through. `short_id` → `shortId`. Ids are checked by `isRangeFileId` with the field `files[i].id` (map passes the index). Texts differences go through compareDomain `toDifferences`, so left lines become LeftLine and right lines RightLine, matching `compare(left, right)`; non-texts arms are returned as given. Fixture ids equal their index in review.json (0–12), so `shown.files[file]` loads the listed file.",
++    "Brand: `isRangeFileId` = `isNonNegativeInteger`; -1 and 0.5 are refused and 0 accepted (rangeDomain.test.ts 'a file id of %s is refused by the brand').",
++    "Acceptance lines map to tests. Every RangeChange arm and the merge-base label: rangeDomain.test.ts first test. Every RangeFile arm: the texts tests plus the `$kind` table. `?range=review` lists the case; bare `?range`/`?range=` loads review; an unknown case logs `range.fixture_miss` with `known: \"empty, review\"` and an exact empty start; unknown id → `UnknownRangeFile` (both for a missing case and for an id past the list): fixtureRange.test.ts. The new reason: problemText.test.ts:183.",
++    "problemText.ts: `UnknownRangeFile` is in FIXED_REASONS and the fall-through case group. Removing `default: never` is accepted: the `string` return type makes a missing kind a TS2366 error, and switch-exhaustiveness-check covers it.",
++    "tauriRange `openRange` is infallible, matching bindings.ts:41 (`__TAURI_INVOKE<RangeStart>`, no typedError); `loadRangeFile` goes through `toResult` as tauriCompare does. The deviation is accepted.",
++    "map-check.sh: the sed `^  \\([a-zA-Z]*\\)(` picks up both RangeSource methods.",
++    "No risk-register row (RK1–RK27) owns ipc/range or problemText; merge-core §3.1 and CM1–CM9 do not apply because the patch has no merge-core or editor changes.",
++    "I ran no workspace toolchain. Besides the throwaway committed-fixture parse described above, I ran no test."
++  ]
++}
++```
+\ No newline at end of file
+diff --git a/.omp/run/notes/RVShellR1.md b/.omp/run/notes/RVShellR1.md
+new file mode 100644
+index 0000000..ba54037
+--- /dev/null
++++ b/.omp/run/notes/RVShellR1.md
+@@ -0,0 +1,70 @@
++All five fix-round items are in place and every acceptance line was checked: fmt, clippy, the `yamt-app` tests and arch-check pass. Both windows opened and closed with exit 0 in a real run. Nothing is committed.
++
++```
++summary
++  1. `--help` and `--version` now win over the range usage errors: args.rs keeps any range error until after the argument loop, as `DIFF_WITH_REPO` already was.
++  2. One worker helper, `ipc_error::blocking_reply`: a panicked worker is logged and answers `WorkerStopped`. Compare's `on_worker` and range's `load_range_file` both use it.
++  3. One opener for the compare and range windows, `window::open_with_data_folder(title, kind, manage)`, with the only `APP_FOLDER` and `app_folder()`. Compare and range each join only their own sub-folder; `context`/`open_and_wait` are private again.
++  4. `commands::with_commands` replaces `with_compare` and `with_range`.
++  5. A test checks the range lock's folder, `<data>/yamt/range`, using the literal folder names.
++
++files_changed
++  src-tauri/src/args.rs
++  src-tauri/src/range.rs
++  src-tauri/src/window.rs
++  src-tauri/src/compare.rs
++  src-tauri/src/commands.rs
++  src-tauri/src/ipc_error.rs
++  src-tauri/src/mock_window.rs
++
++tests_added
++  args::tests::help_wins_over_a_range_error — `--diff --diff=a..b --help` gives Help; `--diff=main --version` gives Version.
++  range::tests::the_pair_lock_lives_under_the_data_folder_s_yamt_range — `<data>/yamt/range` (literal names) holds exactly one repo folder, which holds exactly one pair folder with a `lock` file.
++  ipc_error::tests::a_worker_that_panics_answers_worker_stopped — the panic test moved onto `blocking_reply`.
++  ipc_error::tests::a_worker_s_own_answer_is_the_reply — `blocking_reply` passes back the worker's own Ok and Err.
++  compare::tests::a_worker_that_panics_under_the_lock_leaves_the_store_answering — renamed from the old panic test; it now checks only that the store still answers after a panic inside its lock. The WorkerStopped check moved to ipc_error.
++
++smoke_evidence
++  cargo fmt --check → no output, exit 0
++  cargo clippy --workspace --all-targets -- -D warnings → "Finished `dev` profile", no warnings
++  cargo test -p yamt-app → "test result: ok. 105 passed; 0 failed" (lib), "ok. 5 passed" (integration)
++    including: help_wins_over_a_range_error ok, the_pair_lock_lives_under_the_data_folder_s_yamt_range ok,
++    a_worker_that_panics_answers_worker_stopped ok, a_worker_s_own_answer_is_the_reply ok
++  just arch-check → "arch-check: ok"
++  Folder join removed by hand, two separate runs:
++    range_folder body → `app_folder.to_path_buf()`:
++      "test range::tests::the_pair_lock_lives_under_the_data_folder_s_yamt_range ... FAILED" (4 passed; 1 failed)
++    app_folder body → `data_dir.to_path_buf()`:
++      "compare::tests::set_column_stores_the_text_and_load_tab_gives_it_with_the_differences ... FAILED"
++      "range::tests::the_pair_lock_lives_under_the_data_folder_s_yamt_range ... FAILED"
++    Both bodies restored; the final run above is green.
++  cargo tauri build --debug --no-bundle → "Built application at: …/target/debug/yamt"
++  Real run on private Xvfb :87 (GDK_BACKEND=x11, WAYLAND_DISPLAY unset, temp HOME/XDG_*):
++    yamt --diff → X window "Compare — yamt"
++      second `yamt --diff` → "yamt: another yamt --diff window is open (/tmp/rvshellr1/data/yamt/compare)", exit 2
++      WM_DELETE_WINDOW → "compare window closed: exit 0"
++    scripts/range-repo.sh /tmp/rvshellr1/proj; yamt --diff=main...feature --repo /tmp/rvshellr1/proj
++      → X window "main...feature — proj — yamt"
++      lock at data/yamt/range/proj-88c5417a4ea3299e/531ea52…-9c1ba3f…/lock
++      same pair again → "yamt: another yamt window shows 531ea52..9c1ba3f of /tmp/rvshellr1/proj", exit 2
++      WM_DELETE_WINDOW → "range window closed: exit 0"
++      the page still logs "state not managed … list_stop" / "… servers_context", the same as in round 1 (the window's main.ts is row 9)
++    Built binary: `yamt --diff --diff=a..b --help` → usage, exit 0; `yamt --diff=main --version` → "yamt 0.5.1", exit 0
++  Cleanup: the app, Xvfb and /tmp/rvshellr1 (including the throwaway ctypes close/list scripts) are gone.
++
++deviations_from_brief
++  - mock_window.rs edited although Owned lists it "only if a range test helper belongs there": the rename to `with_commands` and the new `app_folder` meaning of `manage_store_in`'s path made it necessary. `compare_app` uses `with_commands`; `open_compare_window` passes `app_folder(data.path())`.
++  - `open_with_data_folder` builds the app itself (`with_commands` + `context()`), so its signature is (title, kind, manage) without `app`. Otherwise both callers would repeat the build line. `context` and `open_and_wait` are private again.
++  - `app_folder(data_dir)` is `pub(crate)` so the compare and range tests go through the same join as the real opener; that is how a changed constant fails the tests.
++  - The range folder test reads the lock file on disk rather than `_lock.folder()`. Reading `_lock` trips clippy `used_underscore_binding`, and renaming the field would leave it unread outside tests.
++  - Compare's panic test: the WorkerStopped check moved to ipc_error. The compare test stays, renamed, because it pins the compare store's own rule that its lock still answers after a panic.
++  - The log line is now "yamt's worker stopped"; it used to be per window ("compare worker" / "range worker").
++  - Docs outside Owned still name the old functions, for the docs pass:
++    src-tauri/AGENTS.md: "builds the app with `with_range`" → "opens through `window::open_with_data_folder`"; "(`pub(crate)` with `context()` and `window_title`, for `range.rs`)" → "(`window_title` pub(crate) for `range.rs`; `open_with_data_folder`: `<data_dir>/yamt` (`APP_FOLDER`) handed to the window's manage step)"; "`with_compare` and `with_range` set only the invoke handler" → "`with_commands` sets only the invoke handler".
++    project-map SKILL.md line 60: "commands `with_compare`" → "commands `with_commands`"; the compare entry's `<data_dir>/yamt/compare/` stays correct.
++  - First smoke attempt: WAYLAND_DISPLAY was inherited, so the compare window briefly opened on the owner's Wayland session, not on Xvfb. I killed it within about a minute; its data was in a temp XDG_DATA_HOME, so no owner files were touched. All later runs were X11 only on :87.
++
++open_risks
++  - src-tauri/src/range.rs:150 (`only_entry`): the folder test expects exactly one repo folder with one pair folder. If yamt-range ever writes a second entry under `range/`, it needs a rule there, not here.
++  - Line counts after this round: commands.rs is 387 lines and window.rs and ipc_error.rs are 384 each, close to RS6's 400-line limit; the next additions there may need a split.
++```
+\ No newline at end of file
+diff --git a/docs/slices/briefs/3.RV-ipc-rework-1.md b/docs/slices/briefs/3.RV-ipc-rework-1.md
+new file mode 100644
+index 0000000..bb71a2f
+--- /dev/null
++++ b/docs/slices/briefs/3.RV-ipc-rework-1.md
+@@ -0,0 +1,45 @@
++# Slice 3.RV-ipc — fix round 1
++
++Board "Review a commit range" row 8. Original brief: `briefs/3.RV-ipc.md` (its Contract stands). Your round-1 patch is
++committed (`516810c`); the reviews are `.omp/run/notes/RVIpcBoundary.md` and `.omp/run/notes/RVIpcCorrect.md`. The real
++fixtures are committed (`a766541`: `frontend/fixtures/range/{review,empty}.json`). Owned is widened to the shared homes
++the reviews name.
++
++## Target
++
++Owned: `frontend/src/ipc/{fixtureRange,fixtureRange.test,fixture,fixture.test,fixtureCompare,fixtureCompare.test,
++tauriRange.test}.ts` (`tauriRange.test.ts` new).
++
++Read-only: everything else.
++
++## Blocks to fix (verbatim from the reviews; the first two are blocks, the rest promoted)
++
++1. **Test the committed cases** (`fixtureRange.ts:69`, SP5): in `fixtureRange.test.ts` add a test over the committed
++   cases with the default `files` (as `fixtureCompare.test.ts`'s `COMMITTED` does): `?range` lists 13 entries
++   including the renamed `docs/keys.md` and the deleted `src/api/mockBoards.ts`; each id's `loadRangeFile` gives, in
++   order: kindChanged, tooLarge, texts, texts, notUtf8, binary, texts, texts, texts, modeOnly, texts with mode changed,
++   texts, submodule; `?range=empty` lists none.
++2. **Test the Tauri source** (`tauriRange.ts:6`, all NoCoverage): `tauriRange.test.ts` in `tauriCompare.test.ts`'s
++   pattern (`vi.mock("./bindings", () => ({ commands }))`): `openRange` and `loadRangeFile` return camelCased domain
++   data; an `UnknownRangeFile` error comes back unchanged as `{ ok: false, failure }`; a texts reply with a negative
++   difference line rejects naming `differences[0]…`.
++3. **One shared Difference schema and one case parser** (`fixtureRange.ts:55`, `:93–104`): export `DIFFERENCE` from
++   `fixture.ts` next to `LINE_RANGE`/`SIDE_WORD_CHANGES`, plus one `parsedCases(schema, label, files, convert): Map<string,
++   T>` that owns the path → case-name rule; `fixtureCompare.ts` and `fixtureRange.ts` both use them.
++4. **Closed lists typed by the generated unions** (`fixtureRange.ts:29`, `:74`, TS17): export `memberOf` from
++   `fixture.ts`; `ENTRY_KINDS: Readonly<Record<Generated.RangeEntryKind, true>>` and `RANGE_SIDES:
++   Readonly<Record<Generated.RangeSides, true>>` passed to it, replacing the two `v.picklist`s.
++5. **Pin the no-parameter default** (`fixtureRange.ts:117`): add `""` to the `test.each(["?range", "?range="])` of
++   "%s without a case loads review".
++
++## Acceptance
++
++All of the above; every earlier test passes (the compare fixtures unchanged in behaviour); typecheck proves a missing
++member in `ENTRY_KINDS` fails. Your tests kill the mutants on your lines (Stryker, SP5).
++
++Commands: `pnpm -C frontend typecheck`, `pnpm -C frontend lint`, `pnpm -C frontend test`, `pnpm -C frontend fmt:check`,
++`pnpm -C frontend unused`.
++
++## Skills
++
++`skill://ts-conventions`, `skill://ipc-contract` (plus your autoloaded ones).
+diff --git a/src-tauri/src/args.rs b/src-tauri/src/args.rs
+index ad686d1..542da85 100644
+--- a/src-tauri/src/args.rs
++++ b/src-tauri/src/args.rs
+@@ -64,12 +64,12 @@ impl Window {
+ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
+     let mut args = args.into_iter();
+     let mut repo = None;
+-    let mut window = Window::Merge;
++    let mut window = Ok(Window::Merge);
+     while let Some(arg) = args.next() {
+         match arg.to_str() {
+             Some("--help") => return Ok(Invocation::Help),
+             Some("--version") => return Ok(Invocation::Version),
+-            Some("--diff") => window = window.with_compare()?,
++            Some("--diff") => window = window.and_then(Window::with_compare),
+             Some("--repo") => {
+                 repo = Some(
+                     args.next()
+@@ -78,12 +78,12 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
+                 );
+             }
+             Some(text) if let Some(range) = text.strip_prefix(RANGE_FLAG) => {
+-                window = window.with_range(range)?;
++                window = window.and_then(|window| window.with_range(range));
+             }
+             _ => return Err(format!("unknown argument {}", arg.to_string_lossy())),
+         }
+     }
+-    match (window, repo) {
++    match (window?, repo) {
+         (Window::Compare, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
+         (Window::Compare, None) => Ok(Invocation::Compare),
+         (Window::Range(spec), repo) => Ok(Invocation::Range {
+@@ -164,6 +164,18 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn help_wins_over_a_range_error() {
++        assert_eq!(
++            parsed(&["--diff", "--diff=a..b", "--help"]),
++            Ok(Invocation::Help)
++        );
++        assert_eq!(
++            parsed(&["--diff=main", "--version"]),
++            Ok(Invocation::Version)
++        );
++    }
++
+     #[test]
+     fn the_usage_names_diff() {
+         assert!(USAGE.contains("       yamt --diff\n"), "{USAGE}");
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index e2fa583..b894dcd 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -62,13 +62,8 @@ pub(crate) fn with_session<R: Runtime>(
+         })
+ }
+ 
+-/// The compare window's commands; its `CompareState` is managed once the data folder is known.
+-pub(crate) fn with_compare<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+-    builder.invoke_handler(specta_builder().invoke_handler())
+-}
+-
+-/// The range window's commands; its `RangeState` is managed once the data folder is known.
+-pub(crate) fn with_range<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
++/// A window whose state is managed once the data folder is known: the compare and range windows.
++pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+     builder.invoke_handler(specta_builder().invoke_handler())
+ }
+ 
+diff --git a/src-tauri/src/compare.rs b/src-tauri/src/compare.rs
+index 7ee9862..ce20978 100644
+--- a/src-tauri/src/compare.rs
++++ b/src-tauri/src/compare.rs
+@@ -7,9 +7,8 @@ use yamt_compare::{
+     TabStore, TabTexts, comparison, tab_texts,
+ };
+ 
+-use crate::ipc_error::IpcError;
++use crate::ipc_error::{IpcError, blocking_reply};
+ 
+-const APP_FOLDER: &str = "yamt";
+ const COMPARE_FOLDER: &str = "compare";
+ 
+ /// The stored compare tabs (plan §2 #97); never locked together with another `Mutex`.
+@@ -19,16 +18,17 @@ fn lock(state: &CompareState) -> MutexGuard<'_, TabStore> {
+     state.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
+-/// Opens the store in `<data_dir>/yamt/compare/` and hands it to the app as its `CompareState`,
++/// Opens the store in `<app_folder>/compare/` and hands it to the app as its `CompareState`,
+ /// or answers the line `yamt --diff` ends with.
+-pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, data_dir: &Path) -> Result<(), String> {
+-    let store = TabStore::open(&compare_folder(data_dir)).map_err(|error| start_failure(&error))?;
++pub(crate) fn manage_store_in<R: Runtime>(app: &App<R>, app_folder: &Path) -> Result<(), String> {
++    let store =
++        TabStore::open(&compare_folder(app_folder)).map_err(|error| start_failure(&error))?;
+     app.manage(Mutex::new(store));
+     Ok(())
+ }
+ 
+-fn compare_folder(data_dir: &Path) -> PathBuf {
+-    data_dir.join(APP_FOLDER).join(COMPARE_FOLDER)
++fn compare_folder(app_folder: &Path) -> PathBuf {
++    app_folder.join(COMPARE_FOLDER)
+ }
+ 
+ fn start_failure(error: &yamt_compare::Error) -> String {
+@@ -57,14 +57,11 @@ where
+     R: Runtime,
+     T: Send + 'static,
+ {
+-    let worker = tauri::async_runtime::spawn_blocking(move || {
++    blocking_reply(move || {
+         let loaded = with_store(&window, work)?;
+         Ok(reply(&loaded))
+-    });
+-    worker.await.unwrap_or_else(|error| {
+-        tracing::error!(%error, "yamt's compare worker stopped");
+-        Err(IpcError::WorkerStopped)
+     })
++    .await
+ }
+ 
+ fn with_store<R: Runtime>(
+@@ -165,6 +162,7 @@ mod tests {
+ 
+     use super::*;
+     use crate::mock_window::{compare_app, open_compare_window};
++    use crate::window::app_folder;
+ 
+     fn tab(id: u32, name: &str, language: &Value, holds_text: bool) -> Value {
+         json!({ "id": id, "name": name, "language": language, "holds_text": holds_text })
+@@ -273,28 +271,24 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn a_worker_that_panics_answers_worker_stopped_and_the_store_still_answers() {
++    fn a_worker_that_panics_under_the_lock_leaves_the_store_answering() {
+         let window = open_compare_window();
+         let panicking =
+             |_: &mut TabStore| -> yamt_compare::Result<LoadedTab> { panic!("worker panic") };
+ 
+         let answered =
+-            tauri::async_runtime::block_on(on_worker(window.webview.clone(), panicking, tab_texts))
+-                .err();
++            tauri::async_runtime::block_on(on_worker(window.webview.clone(), panicking, tab_texts));
+ 
+-        assert!(
+-            matches!(answered, Some(IpcError::WorkerStopped)),
+-            "{answered:?}"
+-        );
++        assert!(answered.is_err());
+         assert!(window.invoke("load_tab", json!({ "tab": 1 })).is_ok());
+     }
+ 
+     fn store_opened_in(data_dir: &Path) -> Result<(), String> {
+-        manage_store_in(&compare_app(), data_dir)
++        manage_store_in(&compare_app(), &app_folder(data_dir))
+     }
+ 
+     fn tabs_file(data: &TempDir, text: &str) -> PathBuf {
+-        let folder = compare_folder(data.path());
++        let folder = compare_folder(&app_folder(data.path()));
+         fs::create_dir_all(&folder).unwrap();
+         let path = folder.join("tabs.json");
+         fs::write(&path, text).unwrap();
+@@ -304,7 +298,7 @@ mod tests {
+     #[test]
+     fn a_second_open_of_the_same_data_folder_says_another_window_is_open() {
+         let held = open_compare_window();
+-        let folder = compare_folder(held.data.path());
++        let folder = compare_folder(&app_folder(held.data.path()));
+         assert_eq!(
+             store_opened_in(held.data.path()).unwrap_err(),
+             format!("another yamt --diff window is open ({})", folder.display())
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index b5ac2c4..53eb8e2 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -51,6 +51,18 @@ pub enum IpcError {
+     WorkerStopped,
+ }
+ 
++/// Runs `work` on a blocking worker; a worker that panicked is logged and answers `WorkerStopped`.
++pub(crate) async fn blocking_reply<T: Send + 'static>(
++    work: impl FnOnce() -> Result<T, IpcError> + Send + 'static,
++) -> Result<T, IpcError> {
++    tauri::async_runtime::spawn_blocking(work)
++        .await
++        .unwrap_or_else(|error| {
++            tracing::error!(%error, "yamt's worker stopped");
++            Err(IpcError::WorkerStopped)
++        })
++}
++
+ impl From<yamt_session::Error> for IpcError {
+     fn from(error: yamt_session::Error) -> IpcError {
+         match error {
+@@ -346,4 +358,27 @@ mod tests {
+             json!({ "kind": "Git", "message": "main and other have no merge base" })
+         );
+     }
++
++    #[test]
++    fn a_worker_that_panics_answers_worker_stopped() {
++        let answered =
++            tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
++                panic!("worker panic")
++            }))
++            .err();
++        assert!(
++            matches!(answered, Some(IpcError::WorkerStopped)),
++            "{answered:?}"
++        );
++    }
++
++    #[test]
++    fn a_worker_s_own_answer_is_the_reply() {
++        let answered = tauri::async_runtime::block_on(blocking_reply(|| Ok(7)));
++        assert!(matches!(answered, Ok(7)), "{answered:?}");
++        let refused = tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
++            Err(IpcError::NoOperation)
++        }));
++        assert!(matches!(refused, Err(IpcError::NoOperation)), "{refused:?}");
++    }
+ }
+diff --git a/src-tauri/src/mock_window.rs b/src-tauri/src/mock_window.rs
+index 0d7822a..65b6d7c 100644
+--- a/src-tauri/src/mock_window.rs
++++ b/src-tauri/src/mock_window.rs
+@@ -8,10 +8,11 @@ use tauri::{App, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, conflict_repo};
+ use yamt_session::MergeSession;
+ 
+-use crate::commands::{with_compare, with_session};
++use crate::commands::{with_commands, with_session};
+ use crate::compare::manage_store_in;
+ use crate::merge::MergeState;
+ use crate::outcome::{Ending, ending_when_git_is_done};
++use crate::window::app_folder;
+ 
+ pub(crate) const CRLF_PATH: &str = "crlf.ts";
+ 
+@@ -82,7 +83,7 @@ pub(crate) struct CompareWindow {
+ }
+ 
+ pub(crate) fn compare_app() -> App<MockRuntime> {
+-    with_compare(mock_builder())
++    with_commands(mock_builder())
+         .build(mock_context(noop_assets()))
+         .unwrap()
+ }
+@@ -90,7 +91,7 @@ pub(crate) fn compare_app() -> App<MockRuntime> {
+ pub(crate) fn open_compare_window() -> CompareWindow {
+     let data = TempDir::new().unwrap();
+     let app = compare_app();
+-    manage_store_in(&app, data.path()).unwrap();
++    manage_store_in(&app, &app_folder(data.path())).unwrap();
+     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+         .build()
+         .unwrap();
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+index 2865cfc..e4040f5 100644
+--- a/src-tauri/src/range.rs
++++ b/src-tauri/src/range.rs
+@@ -3,12 +3,10 @@ use std::path::{Path, PathBuf};
+ use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
+ 
+-use crate::commands::with_range;
+-use crate::ipc_error::IpcError;
+-use crate::outcome::{Ending, Exit};
+-use crate::window::{WindowKind, context, open_and_wait, window_title};
++use crate::ipc_error::{IpcError, blocking_reply};
++use crate::outcome::Ending;
++use crate::window::{WindowKind, open_with_data_folder, window_title};
+ 
+-const APP_FOLDER: &str = "yamt";
+ const RANGE_FOLDER: &str = "range";
+ 
+ /// The range the window shows and the lock on its commit pair, both held for the run (plan §2 #104, #107).
+@@ -24,44 +22,28 @@ pub(crate) fn run_range(repo: &Path, spec: &RangeSpec) -> Ending {
+         Err(error) => return Ending::failure(error.to_string()),
+     };
+     let title = range_title(spec, resolved.root());
+-    match open_window(resolved, &title) {
++    let manage = |app: &App, app_folder: &Path| manage_range_in(app, app_folder, resolved);
++    match open_with_data_folder(&title, WindowKind::Range, manage) {
+         Ok(ending) => ending,
+         Err(error) => Ending::failure(error.to_string()),
+     }
+ }
+ 
+-fn open_window(resolved: Resolved, title: &str) -> tauri::Result<Ending> {
+-    let app = with_range(tauri::Builder::default()).build(context())?;
+-    let managed = app
+-        .path()
+-        .data_dir()
+-        .map_err(|error| format!("no data folder: {error}"))
+-        .and_then(|data_dir| manage_range_in(&app, &data_dir, resolved));
+-    if let Err(problem) = managed {
+-        return Ok(Ending::failure(problem));
+-    }
+-    open_and_wait(app, title, WindowKind::Range)?;
+-    Ok(Ending {
+-        exit: Exit::Success,
+-        message: None,
+-    })
+-}
+-
+-/// Takes the pair's lock in `<data_dir>/yamt/range/` before listing, then hands the range to the app.
++/// Takes the pair's lock in `<app_folder>/range/` before listing, then hands the range to the app.
+ fn manage_range_in<R: Runtime>(
+     app: &App<R>,
+-    data_dir: &Path,
++    app_folder: &Path,
+     resolved: Resolved,
+ ) -> Result<(), String> {
+     let lock =
+-        PairLock::take(&range_folder(data_dir), &resolved).map_err(|error| error.to_string())?;
++        PairLock::take(&range_folder(app_folder), &resolved).map_err(|error| error.to_string())?;
+     let range = resolved.list().map_err(|error| error.to_string())?;
+     app.manage(RangeState { range, _lock: lock });
+     Ok(())
+ }
+ 
+-fn range_folder(data_dir: &Path) -> PathBuf {
+-    data_dir.join(APP_FOLDER).join(RANGE_FOLDER)
++fn range_folder(app_folder: &Path) -> PathBuf {
++    app_folder.join(RANGE_FOLDER)
+ }
+ 
+ fn range_title(spec: &RangeSpec, root: &Path) -> String {
+@@ -83,13 +65,7 @@ pub(crate) async fn load_range_file<R: Runtime>(
+     window: WebviewWindow<R>,
+     file: RangeFileId,
+ ) -> Result<RangeFile, IpcError> {
+-    let worker = tauri::async_runtime::spawn_blocking(move || {
+-        Ok(window.state::<RangeState>().range.load(file)?)
+-    });
+-    worker.await.unwrap_or_else(|error| {
+-        tracing::error!(%error, "yamt's range worker stopped");
+-        Err(IpcError::WorkerStopped)
+-    })
++    blocking_reply(move || Ok(window.state::<RangeState>().range.load(file)?)).await
+ }
+ 
+ #[cfg(test)]
+@@ -100,7 +76,9 @@ mod tests {
+     use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
+ 
+     use super::*;
++    use crate::commands::with_commands;
+     use crate::mock_window::invoke_on;
++    use crate::window::app_folder;
+ 
+     const RANGE: &str = "main...remote";
+ 
+@@ -127,7 +105,7 @@ mod tests {
+     }
+ 
+     fn range_app() -> App<MockRuntime> {
+-        with_range(mock_builder())
++        with_commands(mock_builder())
+             .build(mock_context(noop_assets()))
+             .unwrap()
+     }
+@@ -136,7 +114,7 @@ mod tests {
+         let repo = repo();
+         let data = TempDir::new().unwrap();
+         let app = range_app();
+-        manage_range_in(&app, data.path(), resolved(repo.path())).unwrap();
++        manage_range_in(&app, &app_folder(data.path()), resolved(repo.path())).unwrap();
+         let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+             .build()
+             .unwrap();
+@@ -158,6 +136,24 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn the_pair_lock_lives_under_the_data_folder_s_yamt_range() {
++        let window = open_range_window();
++        let range_dir = window.data.path().join("yamt").join("range");
++        let repo_dir = only_entry(&range_dir);
++        let pair_dir = only_entry(&repo_dir);
++        assert!(pair_dir.join("lock").is_file(), "{}", pair_dir.display());
++    }
++
++    fn only_entry(dir: &Path) -> PathBuf {
++        let entries: Vec<PathBuf> = std::fs::read_dir(dir)
++            .unwrap()
++            .map(|entry| entry.unwrap().path())
++            .collect();
++        assert_eq!(entries.len(), 1, "{entries:?}");
++        entries[0].clone()
++    }
++
+     #[test]
+     fn a_listed_file_loads_and_an_unknown_id_answers_unknown_range_file() {
+         let window = open_range_window();
+@@ -175,7 +171,7 @@ mod tests {
+         let window = open_range_window();
+         let refused = manage_range_in(
+             &range_app(),
+-            window.data.path(),
++            &app_folder(window.data.path()),
+             resolved(window.repo.path()),
+         );
+         let start = resolved(window.repo.path()).list().unwrap().start();
+diff --git a/src-tauri/src/window.rs b/src-tauri/src/window.rs
+index 7fae206..89f2484 100644
+--- a/src-tauri/src/window.rs
++++ b/src-tauri/src/window.rs
+@@ -1,4 +1,4 @@
+-use std::path::Path;
++use std::path::{Path, PathBuf};
+ use std::sync::mpsc::{self, Receiver, Sender};
+ use std::time::{Duration, Instant};
+ 
+@@ -11,7 +11,7 @@ use tauri::{
+ use yamt_session::MergeSession;
+ use yamt_settings::{StoredSettings, Theme};
+ 
+-use crate::commands::{with_compare, with_session};
++use crate::commands::{with_commands, with_session};
+ use crate::compare;
+ use crate::merge::MergeState;
+ use crate::outcome::{Ending, Exit, ending_when_git_is_done};
+@@ -20,6 +20,7 @@ use crate::settings;
+ 
+ const WINDOW_LABEL: &str = "main";
+ const COMPARE_TITLE: &str = "Compare — yamt";
++const APP_FOLDER: &str = "yamt";
+ const WIDTH: f64 = 1600.0;
+ const HEIGHT: f64 = 1000.0;
+ const MIN_WIDTH: f64 = 900.0;
+@@ -74,7 +75,7 @@ pub(crate) fn run_compare() -> Ending {
+     }
+ }
+ 
+-pub(crate) fn context() -> tauri::Context<tauri::Wry> {
++fn context() -> tauri::Context<tauri::Wry> {
+     tauri::generate_context!()
+ }
+ 
+@@ -86,23 +87,38 @@ fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending>
+ }
+ 
+ fn open_compare() -> tauri::Result<Ending> {
+-    let app = with_compare(tauri::Builder::default()).build(context())?;
++    open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, compare::manage_store_in)
++}
++
++/// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens;
++/// its refusal is the one line the run ends with, a closed window is exit 0.
++pub(crate) fn open_with_data_folder(
++    title: &str,
++    kind: WindowKind,
++    manage: impl FnOnce(&App, &Path) -> Result<(), String>,
++) -> tauri::Result<Ending> {
++    let app = with_commands(tauri::Builder::default()).build(context())?;
+     let managed = app
+         .path()
+         .data_dir()
+         .map_err(|error| format!("no data folder: {error}"))
+-        .and_then(|data_dir| compare::manage_store_in(&app, &data_dir));
++        .and_then(|data_dir| manage(&app, &app_folder(&data_dir)));
+     if let Err(problem) = managed {
+         return Ok(Ending::failure(problem));
+     }
+-    open_and_wait(app, COMPARE_TITLE, WindowKind::Compare)?;
++    open_and_wait(app, title, kind)?;
+     Ok(Ending {
+         exit: Exit::Success,
+         message: None,
+     })
+ }
+ 
+-pub(crate) fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
++/// yamt's own folder in the user's data folder: the compare tabs and the range locks live under it.
++pub(crate) fn app_folder(data_dir: &Path) -> PathBuf {
++    data_dir.join(APP_FOLDER)
++}
++
++fn open_and_wait(app: App, title: &str, kind: WindowKind) -> tauri::Result<AppHandle> {
+     let stored = start_settings(app.path());
+     // WebKitGTK fixes its surfaces' subpixel layout when the webview is built (plan §2 #60).
+     #[cfg(target_os = "linux")]
+-- 
+2.56.0
+

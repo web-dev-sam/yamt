@@ -11,7 +11,7 @@ import {
   type RightLine,
   type TabId,
 } from "./domain";
-import { invalid, isNonNegativeInteger } from "./validate";
+import { branded, invalid, isNonNegativeInteger } from "./validate";
 import { toSideWords, type SideWords } from "./words";
 
 export type Column = Generated.Column;
@@ -46,29 +46,15 @@ export type ColumnWrite = {
   readonly version: ColumnVersion;
 };
 
-function toTabId(n: number, field: string): TabId {
-  if (!isTabId(n)) {
-    throw invalid(field, n);
-  }
-  return n;
-}
-
-function toColumnVersion(n: number, field: string): ColumnVersion {
-  if (!isColumnVersion(n)) {
-    throw invalid(field, n);
-  }
-  return n;
-}
-
 export function toTabList(dto: Generated.TabList): TabList {
   return {
     tabs: dto.tabs.map(({ id, name, language, holds_text: holdsText }, index) => ({
-      id: toTabId(id, `tabs[${index}].id`),
+      id: branded(id, isTabId, `tabs[${index}].id`),
       name,
       language,
       holdsText,
     })),
-    shown: toTabId(dto.shown, "shown"),
+    shown: branded(dto.shown, isTabId, "shown"),
   };
 }
 
@@ -82,8 +68,8 @@ export function toCompareStart(dto: Generated.CompareStart): CompareStart {
 
 export function toColumnVersions(dto: Generated.ColumnVersions): ColumnVersions {
   return {
-    left: toColumnVersion(dto.left, "versions.left"),
-    right: toColumnVersion(dto.right, "versions.right"),
+    left: branded(dto.left, isColumnVersion, "versions.left"),
+    right: branded(dto.right, isColumnVersion, "versions.right"),
   };
 }
 

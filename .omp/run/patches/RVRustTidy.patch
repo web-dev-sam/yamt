@@ -1,0 +1,1257 @@
+From ed09b5313ea49ab6c1777f84936b076af088bbdd Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:47:19 +0100
+Subject: [PATCH] fix(settings,app): agent entry through serde, no empty
+ command on disk, tests in their own files, the sweep test sees the lock free
+
+---
+ crates/settings/src/file.rs    |  44 ++---
+ crates/settings/tests/agent.rs |  14 ++
+ src-tauri/AGENTS.md            |   2 +-
+ src-tauri/src/ai.rs            | 246 +++------------------------
+ src-tauri/src/ai/tests.rs      | 215 +++++++++++++++++++++++
+ src-tauri/src/review.rs        | 301 +--------------------------------
+ src-tauri/src/review/tests.rs  | 298 ++++++++++++++++++++++++++++++++
+ 7 files changed, 573 insertions(+), 547 deletions(-)
+ create mode 100644 src-tauri/src/ai/tests.rs
+ create mode 100644 src-tauri/src/review/tests.rs
+
+diff --git a/crates/settings/src/file.rs b/crates/settings/src/file.rs
+index d83aaae..58dfa39 100644
+--- a/crates/settings/src/file.rs
++++ b/crates/settings/src/file.rs
+@@ -3,6 +3,7 @@ use std::io::{self, ErrorKind};
+ use std::path::{Path, PathBuf};
+ use std::process;
+ 
++use serde::Serialize;
+ use serde::de::DeserializeOwned;
+ use serde_json::{Map, Value};
+ 
+@@ -13,8 +14,6 @@ const ANTIALIASING: &str = "antialiasing";
+ const KEYS: &str = "keys";
+ const LANGUAGE_SERVERS: &str = "languageServers";
+ const AGENT: &str = "agent";
+-const AGENT_COMMAND: &str = "command";
+-const AGENT_FIRST_MESSAGE: &str = "firstMessage";
+ 
+ /// Linux's MAXSYMLINKS (`include/linux/namei.h`): more links in a row than this is a cycle.
+ const MAX_LINK_HOPS: usize = 40;
+@@ -27,9 +26,11 @@ pub(crate) struct Loaded {
+ 
+ impl Loaded {
+     pub(crate) fn from_settings(settings: &StoredSettings) -> Loaded {
++        let mut stored = settings.clone();
++        stored.agent = stored.agent.without_empty_command();
+         Loaded {
+             others: Map::new(),
+-            stored: settings.clone(),
++            stored,
+         }
+     }
+ 
+@@ -48,30 +49,29 @@ impl Loaded {
+             entries.insert(KEYS.to_owned(), Value::Object(keys));
+         }
+         if self.stored.language_servers != LanguageServerSettings::default() {
+-            let servers = serde_json::to_value(self.stored.language_servers).map_err(|error| {
+-                Error::WriteFailed {
+-                    path: path.to_owned(),
+-                    message: error.to_string(),
+-                }
+-            })?;
++            let servers = written(path, self.stored.language_servers)?;
+             entries.insert(LANGUAGE_SERVERS.to_owned(), servers);
+         }
+-        if let Some(agent) = agent_entry(self.stored.agent) {
++        if let Some(agent) = agent_entry(path, self.stored.agent)? {
+             entries.insert(AGENT.to_owned(), agent);
+         }
+         Ok(entries)
+     }
+ }
+ 
+-fn agent_entry(agent: AgentSettings) -> Option<Value> {
+-    let mut fields = Map::new();
+-    if let Some(command) = agent.command {
+-        fields.insert(AGENT_COMMAND.to_owned(), Value::from(command));
+-    }
+-    if let Some(first_message) = agent.first_message {
+-        fields.insert(AGENT_FIRST_MESSAGE.to_owned(), Value::from(first_message));
+-    }
+-    (!fields.is_empty()).then_some(Value::Object(fields))
++fn agent_entry(path: &Path, agent: AgentSettings) -> Result<Option<Value>, Error> {
++    let Value::Object(mut fields) = written(path, agent)? else {
++        return Ok(None);
++    };
++    fields.retain(|_, value| !value.is_null());
++    Ok((!fields.is_empty()).then_some(Value::Object(fields)))
++}
++
++fn written<T: Serialize>(path: &Path, value: T) -> Result<Value, Error> {
++    serde_json::to_value(value).map_err(|error| Error::WriteFailed {
++        path: path.to_owned(),
++        message: error.to_string(),
++    })
+ }
+ 
+ /// `None` when there is no file at `path`.
+@@ -93,8 +93,10 @@ pub(crate) fn read_or_create(
+     if let Some(loaded) = load(path)? {
+         return Ok(loaded.stored);
+     }
+-    write_entries(path, Loaded::from_settings(current))?;
+-    Ok(current.clone())
++    let loaded = Loaded::from_settings(current);
++    let stored = loaded.stored.clone();
++    write_entries(path, loaded)?;
++    Ok(stored)
+ }
+ 
+ fn parsed(path: &Path, text: &str) -> Result<Loaded, Error> {
+diff --git a/crates/settings/tests/agent.rs b/crates/settings/tests/agent.rs
+index a973451..39b0785 100644
+--- a/crates/settings/tests/agent.rs
++++ b/crates/settings/tests/agent.rs
+@@ -139,6 +139,20 @@ fn an_empty_command_list_is_written_as_the_default() {
+     let emptied = set_agent(&config.places, &current, agent(Some(&[]), None)).unwrap();
+     assert_eq!(emptied.stored.agent, AgentSettings::default());
+     assert_eq!(json_at(&config.default_file()).get("agent"), None);
++
++    let other = Config::new();
++    let holding_empty = StoredSettings {
++        agent: agent(Some(&[]), None),
++        ..StoredSettings::default()
++    };
++    let themed = set_theme(&other.places, &holding_empty, Theme::Light).unwrap();
++    assert_eq!(themed.stored.agent, AgentSettings::default());
++    assert_eq!(json_at(&other.default_file()).get("agent"), None);
++
++    let created = Config::new();
++    let read_back = read(&created.places, &holding_empty).unwrap();
++    assert_eq!(read_back.stored.agent, AgentSettings::default());
++    assert_eq!(json_at(&created.default_file()).get("agent"), None);
+ }
+ 
+ #[test]
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index d1b0f33..ff0c715 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it, so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`)), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114): `lib.rs` (`run`, `export_bindings`) shared by both bins; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative `--repo` is resolved against `OWD`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called for `Merge` and `Range`, never for `Compare`), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage` and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (`pub(crate)` with `context()` and `window_title`, for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; the compare window, titled `Compare — yamt`, never opens a `MergeSession`, runs git or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` builds its own mock window over a `diverged_repo` and calls `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread). Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review` and `agent` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/ai.rs b/src-tauri/src/ai.rs
+index cef3fc0..1543ced 100644
+--- a/src-tauri/src/ai.rs
++++ b/src-tauri/src/ai.rs
+@@ -1,5 +1,5 @@
+ use std::path::{Path, PathBuf};
+-use std::sync::mpsc;
++use std::sync::mpsc::{self, Sender};
+ use std::sync::{Mutex, MutexGuard, PoisonError, TryLockError};
+ use std::thread;
+ 
+@@ -38,7 +38,8 @@ fn lock(state: &Mutex<AiState>) -> MutexGuard<'_, AiState> {
+ 
+ /// Manages the range window's `Mutex<AiState>`. With `--ai`, the workspace on its pair, and a background
+ /// thread that removes this pair's leftovers while it holds the state, so no command makes or removes the
+-/// checkout meanwhile, then sweeps the other pairs in `range_dir` with the state released.
++/// checkout meanwhile, then sweeps the other pairs in `range_dir` with the state released. Returns once
++/// that thread holds the state.
+ pub(crate) fn manage<R: Runtime>(
+     app: &App<R>,
+     ai: Ai,
+@@ -57,25 +58,27 @@ pub(crate) fn manage<R: Runtime>(
+     app.manage(Mutex::new(state));
+     match ai {
+         Ai::Off => {}
+-        Ai::On => sweep_while_held(app.handle().clone(), range_dir, pair_folder.to_owned()),
++        Ai::On => {
++            let (app, pair_folder) = (app.handle().clone(), pair_folder.to_owned());
++            let (held, wait) = mpsc::channel();
++            thread::spawn(move || {
++                let others = || yamt_agent::sweep_other_pairs(&range_dir, &pair_folder);
++                sweep_own_then_others(app.state::<Mutex<AiState>>().inner(), &held, others);
++            });
++            wait.recv().ok();
++        }
+     }
+ }
+ 
+-/// Returns once the sweep's thread holds the state.
+-fn sweep_while_held<R: Runtime>(app: AppHandle<R>, range_dir: PathBuf, pair_folder: PathBuf) {
+-    let (held, wait) = mpsc::channel();
+-    thread::spawn(move || {
+-        {
+-            let state = app.state();
+-            let mut ai = lock(&state);
+-            held.send(()).ok();
+-            if let AiState::On(workspace) = &mut *ai {
+-                workspace.remove_own_leftovers();
+-            }
++fn sweep_own_then_others(state: &Mutex<AiState>, held: &Sender<()>, others: impl FnOnce()) {
++    {
++        let mut ai = lock(state);
++        held.send(()).ok();
++        if let AiState::On(workspace) = &mut *ai {
++            workspace.remove_own_leftovers();
+         }
+-        yamt_agent::sweep_other_pairs(&range_dir, &pair_folder);
+-    });
+-    wait.recv().ok();
++    }
++    others();
+ }
+ 
+ /// A page that starts loading stops the agent of the page before. While a command holds the state (a
+@@ -189,211 +192,4 @@ pub(crate) async fn diff_texts(old: String, next: String) -> Result<Vec<Differen
+ }
+ 
+ #[cfg(test)]
+-mod tests {
+-    use std::fs;
+-    use std::time::{Duration, Instant};
+-
+-    use serde_json::{Value, json};
+-    use yamt_compare::MAX_COLUMN_BYTES;
+-    use yamt_conflict_repo::TempDir;
+-    use yamt_range::{PairLock, RangeSpec, Resolved};
+-
+-    use super::*;
+-    use crate::mock_window::invoke_on;
+-    use crate::range::tests::{RangeWindow, open_range_window_in, open_range_window_with, repo};
+-
+-    const WAIT: Duration = Duration::from_secs(10);
+-    const POLL: Duration = Duration::from_millis(50);
+-
+-    fn ai_state(window: &RangeWindow) -> State<'_, Mutex<AiState>> {
+-        window.webview.state()
+-    }
+-
+-    fn started(
+-        window: &RangeWindow,
+-        command: AgentCommand,
+-        events: Channel<HostEvent>,
+-    ) -> Result<AgentStartReply, IpcError> {
+-        tauri::async_runtime::block_on(start_agent(window.webview.clone(), command, events))
+-    }
+-
+-    fn command(program: &str, args: &[&str]) -> AgentCommand {
+-        AgentCommand {
+-            program: program.to_owned(),
+-            args: args.iter().map(|&arg| arg.to_owned()).collect(),
+-            home_folders: Vec::new(),
+-        }
+-    }
+-
+-    #[test]
+-    fn every_agent_command_answers_ai_off_without_the_flag() {
+-        let window = open_range_window_with(Ai::Off);
+-        let off = Err(json!({ "kind": "AiOff" }));
+-        for cmd in ["prepare_checkout", "checkout_changes", "discard_checkout"] {
+-            assert_eq!(invoke_on(&window.webview, cmd, json!({})), off, "{cmd}");
+-        }
+-        let run = json!({ "run": 0 });
+-        assert_eq!(invoke_on(&window.webview, "stop_agent", run), off);
+-        let message = json!({ "run": 0, "message": "hello" });
+-        assert_eq!(invoke_on(&window.webview, "send_to_agent", message), off);
+-        let started = started(&window, command("sh", &[]), Channel::new(|_| Ok(())));
+-        assert!(matches!(started, Err(IpcError::AiOff)), "{started:?}");
+-    }
+-
+-    #[test]
+-    fn diff_texts_refuses_a_side_over_the_limit() {
+-        let over = "x".repeat(usize::try_from(MAX_COLUMN_BYTES).unwrap() + 1);
+-        let block = |old: &str, next: &str| {
+-            tauri::async_runtime::block_on(diff_texts(old.to_owned(), next.to_owned()))
+-        };
+-        let limit = MAX_COLUMN_BYTES;
+-        assert!(
+-            matches!(block(&over, ""), Err(IpcError::ColumnTooLarge { limit: l }) if l == limit)
+-        );
+-        assert!(
+-            matches!(block("", &over), Err(IpcError::ColumnTooLarge { limit: l }) if l == limit)
+-        );
+-        let differences = block("one\n", "two\n").unwrap();
+-        assert_eq!(differences.len(), 1, "{differences:?}");
+-    }
+-
+-    fn prepared_checkout(window: &RangeWindow) -> PathBuf {
+-        let ready = invoke_on(&window.webview, "prepare_checkout", json!({})).unwrap();
+-        assert_eq!(ready["kind"], "Ready", "{ready}");
+-        let checkout = PathBuf::from(ready["folder"].as_str().unwrap());
+-        let right_text = fs::read_to_string(checkout.join("a.txt")).unwrap();
+-        assert_eq!(right_text, "two\n", "the right commit's text");
+-        let pair_lock = checkout.parent().unwrap().join("lock");
+-        assert!(pair_lock.is_file(), "{}", pair_lock.display());
+-        checkout
+-    }
+-
+-    fn look(window: &RangeWindow) -> Result<Value, Value> {
+-        invoke_on(&window.webview, "checkout_changes", json!({}))
+-    }
+-
+-    #[test]
+-    fn the_exit_removes_a_clean_checkout_and_leaves_the_ai_off() {
+-        let window = open_range_window_with(Ai::On);
+-        let checkout = prepared_checkout(&window);
+-        assert_eq!(look(&window), Ok(json!({ "kind": "Clean" })));
+-        end_at_exit(&ai_state(&window));
+-        assert!(!checkout.exists(), "{}", checkout.display());
+-        assert_eq!(look(&window), Err(json!({ "kind": "AiOff" })));
+-    }
+-
+-    #[test]
+-    fn the_exit_keeps_a_changed_checkout_and_leaves_the_ai_off() {
+-        let window = open_range_window_with(Ai::On);
+-        let checkout = prepared_checkout(&window);
+-        fs::write(checkout.join("new.txt"), "new\n").unwrap();
+-        end_at_exit(&ai_state(&window));
+-        assert!(checkout.join("new.txt").is_file(), "{}", checkout.display());
+-        assert_eq!(look(&window), Err(json!({ "kind": "AiOff" })));
+-    }
+-
+-    #[test]
+-    fn discard_removes_a_changed_checkout() {
+-        let window = open_range_window_with(Ai::On);
+-        let checkout = prepared_checkout(&window);
+-        fs::write(checkout.join("new.txt"), "new\n").unwrap();
+-        let changed = look(&window).unwrap();
+-        assert_eq!(changed["files"], json!(["new.txt"]), "{changed}");
+-        assert_eq!(
+-            invoke_on(&window.webview, "discard_checkout", json!({})),
+-            Ok(json!(null))
+-        );
+-        assert!(!checkout.exists(), "{}", checkout.display());
+-    }
+-
+-    /// The pair folder a window on `main...remote` will hold; its lock is let go again.
+-    fn own_pair_folder(repo: &Path, range_dir: &Path) -> PathBuf {
+-        let spec = RangeSpec::parse("main...remote").unwrap();
+-        let resolved = Resolved::resolve(repo, &spec).unwrap();
+-        PairLock::take(range_dir, &resolved)
+-            .unwrap()
+-            .folder()
+-            .to_owned()
+-    }
+-
+-    fn gone_within_wait(folder: &Path) -> bool {
+-        let deadline = Instant::now() + WAIT;
+-        while folder.exists() && Instant::now() < deadline {
+-            thread::sleep(POLL);
+-        }
+-        !folder.exists()
+-    }
+-
+-    // The own pair's partial must be gone before any command holds the state; the other pair's must go while
+-    // the state stays held, or the sweep of every kept checkout would stall Ask AI and the close question.
+-    #[test]
+-    fn an_ai_start_sweeps_its_own_pair_under_the_state_and_other_pairs_without_it() {
+-        let (repo, data) = (repo(), TempDir::new().unwrap());
+-        let range_dir = data.path().join("yamt").join("range");
+-        let own_partial = own_pair_folder(repo.path(), &range_dir).join("checkout.partial");
+-        let other_partial = range_dir
+-            .join("x-0123456789abcdef")
+-            .join("a-b")
+-            .join("checkout.partial");
+-        for partial in [&own_partial, &other_partial] {
+-            fs::create_dir_all(partial.join("inside")).unwrap();
+-        }
+-
+-        let window = open_range_window_in(repo, data, Ai::On);
+-
+-        let state = ai_state(&window);
+-        let _held = lock(&state);
+-        assert!(!own_partial.exists(), "{}", own_partial.display());
+-        assert!(
+-            gone_within_wait(&other_partial),
+-            "{}",
+-            other_partial.display()
+-        );
+-    }
+-
+-    #[cfg(unix)]
+-    mod page_load {
+-        use std::sync::mpsc::Receiver;
+-
+-        use super::*;
+-        use crate::servers::run_tests::{channel_into, is_alive};
+-
+-        /// `sh` writes its pid to stderr and becomes `cat`; answers its run, its pid and its events.
+-        fn started_cat(window: &RangeWindow) -> (AgentRun, u32, Receiver<Value>) {
+-            let (sender, events) = mpsc::channel();
+-            let cat = command("sh", &["-c", "echo $$ >&2; exec cat"]);
+-            let reply = started(window, cat, channel_into(sender, true)).unwrap();
+-            let AgentStartReply::Started { run } = reply else {
+-                panic!("{reply:?}");
+-            };
+-            let first = events.recv_timeout(WAIT).unwrap();
+-            let pid = first["line"].as_str().unwrap().parse().unwrap();
+-            (run, pid, events)
+-        }
+-
+-        // A reload while a start, prepare or discard holds the state must still stop the old page's agent.
+-        #[test]
+-        fn a_page_load_stops_the_agent_at_once_or_once_the_state_is_free_and_keeps_the_checkout() {
+-            let window = open_range_window_with(Ai::On);
+-            let checkout = prepared_checkout(&window);
+-            let app = window.webview.app_handle();
+-            let (run, pid, events) = started_cat(&window);
+-            stop_agent_on_page_start(app, PageLoadEvent::Finished);
+-            send_to_agent(ai_state(&window), run, "still here".to_owned()).unwrap();
+-            assert_eq!(events.recv_timeout(WAIT).unwrap()["text"], "still here");
+-            stop_agent_on_page_start(app, PageLoadEvent::Started);
+-            assert_eq!(events.recv_timeout(WAIT).unwrap()["kind"], "Exited");
+-            assert!(!is_alive(pid));
+-
+-            let (_, pid, events) = started_cat(&window);
+-            let state = ai_state(&window);
+-            let held = lock(&state);
+-            stop_agent_on_page_start(app, PageLoadEvent::Started);
+-            assert!(is_alive(pid));
+-            drop(held);
+-            assert_eq!(events.recv_timeout(WAIT).unwrap()["kind"], "Exited");
+-            assert!(!is_alive(pid));
+-            assert!(checkout.is_dir(), "{}", checkout.display());
+-        }
+-    }
+-}
++mod tests;
+diff --git a/src-tauri/src/ai/tests.rs b/src-tauri/src/ai/tests.rs
+new file mode 100644
+index 0000000..27a83f0
+--- /dev/null
++++ b/src-tauri/src/ai/tests.rs
+@@ -0,0 +1,215 @@
++use std::fs;
++use std::time::{Duration, Instant};
++
++use serde_json::{Value, json};
++use yamt_compare::MAX_COLUMN_BYTES;
++use yamt_conflict_repo::TempDir;
++use yamt_range::{PairLock, RangeSpec, Resolved};
++
++use super::*;
++use crate::mock_window::invoke_on;
++use crate::range::tests::{RangeWindow, open_range_window_in, open_range_window_with, repo};
++
++const WAIT: Duration = Duration::from_secs(10);
++const POLL: Duration = Duration::from_millis(50);
++
++fn ai_state(window: &RangeWindow) -> State<'_, Mutex<AiState>> {
++    window.webview.state()
++}
++
++fn started(
++    window: &RangeWindow,
++    command: AgentCommand,
++    events: Channel<HostEvent>,
++) -> Result<AgentStartReply, IpcError> {
++    tauri::async_runtime::block_on(start_agent(window.webview.clone(), command, events))
++}
++
++fn command(program: &str, args: &[&str]) -> AgentCommand {
++    AgentCommand {
++        program: program.to_owned(),
++        args: args.iter().map(|&arg| arg.to_owned()).collect(),
++        home_folders: Vec::new(),
++    }
++}
++
++#[test]
++fn every_agent_command_answers_ai_off_without_the_flag() {
++    let window = open_range_window_with(Ai::Off);
++    let off = Err(json!({ "kind": "AiOff" }));
++    for cmd in ["prepare_checkout", "checkout_changes", "discard_checkout"] {
++        assert_eq!(invoke_on(&window.webview, cmd, json!({})), off, "{cmd}");
++    }
++    let run = json!({ "run": 0 });
++    assert_eq!(invoke_on(&window.webview, "stop_agent", run), off);
++    let message = json!({ "run": 0, "message": "hello" });
++    assert_eq!(invoke_on(&window.webview, "send_to_agent", message), off);
++    let started = started(&window, command("sh", &[]), Channel::new(|_| Ok(())));
++    assert!(matches!(started, Err(IpcError::AiOff)), "{started:?}");
++}
++
++#[test]
++fn diff_texts_refuses_a_side_over_the_limit() {
++    let over = "x".repeat(usize::try_from(MAX_COLUMN_BYTES).unwrap() + 1);
++    let block = |old: &str, next: &str| {
++        tauri::async_runtime::block_on(diff_texts(old.to_owned(), next.to_owned()))
++    };
++    let limit = MAX_COLUMN_BYTES;
++    assert!(matches!(block(&over, ""), Err(IpcError::ColumnTooLarge { limit: l }) if l == limit));
++    assert!(matches!(block("", &over), Err(IpcError::ColumnTooLarge { limit: l }) if l == limit));
++    let differences = block("one\n", "two\n").unwrap();
++    assert_eq!(differences.len(), 1, "{differences:?}");
++}
++
++fn prepared_checkout(window: &RangeWindow) -> PathBuf {
++    let ready = invoke_on(&window.webview, "prepare_checkout", json!({})).unwrap();
++    assert_eq!(ready["kind"], "Ready", "{ready}");
++    let checkout = PathBuf::from(ready["folder"].as_str().unwrap());
++    let right_text = fs::read_to_string(checkout.join("a.txt")).unwrap();
++    assert_eq!(right_text, "two\n", "the right commit's text");
++    let pair_lock = checkout.parent().unwrap().join("lock");
++    assert!(pair_lock.is_file(), "{}", pair_lock.display());
++    checkout
++}
++
++fn look(window: &RangeWindow) -> Result<Value, Value> {
++    invoke_on(&window.webview, "checkout_changes", json!({}))
++}
++
++#[test]
++fn the_exit_removes_a_clean_checkout_and_leaves_the_ai_off() {
++    let window = open_range_window_with(Ai::On);
++    let checkout = prepared_checkout(&window);
++    assert_eq!(look(&window), Ok(json!({ "kind": "Clean" })));
++    end_at_exit(&ai_state(&window));
++    assert!(!checkout.exists(), "{}", checkout.display());
++    assert_eq!(look(&window), Err(json!({ "kind": "AiOff" })));
++}
++
++#[test]
++fn the_exit_keeps_a_changed_checkout_and_leaves_the_ai_off() {
++    let window = open_range_window_with(Ai::On);
++    let checkout = prepared_checkout(&window);
++    fs::write(checkout.join("new.txt"), "new\n").unwrap();
++    end_at_exit(&ai_state(&window));
++    assert!(checkout.join("new.txt").is_file(), "{}", checkout.display());
++    assert_eq!(look(&window), Err(json!({ "kind": "AiOff" })));
++}
++
++#[test]
++fn discard_removes_a_changed_checkout() {
++    let window = open_range_window_with(Ai::On);
++    let checkout = prepared_checkout(&window);
++    fs::write(checkout.join("new.txt"), "new\n").unwrap();
++    let changed = look(&window).unwrap();
++    assert_eq!(changed["files"], json!(["new.txt"]), "{changed}");
++    assert_eq!(
++        invoke_on(&window.webview, "discard_checkout", json!({})),
++        Ok(json!(null))
++    );
++    assert!(!checkout.exists(), "{}", checkout.display());
++}
++
++/// The pair folder a window on `main...remote` will hold; its lock is let go again.
++fn own_pair_folder(repo: &Path, range_dir: &Path) -> PathBuf {
++    let spec = RangeSpec::parse("main...remote").unwrap();
++    let resolved = Resolved::resolve(repo, &spec).unwrap();
++    PairLock::take(range_dir, &resolved)
++        .unwrap()
++        .folder()
++        .to_owned()
++}
++
++fn gone_within_wait(folder: &Path) -> bool {
++    let deadline = Instant::now() + WAIT;
++    while folder.exists() && Instant::now() < deadline {
++        thread::sleep(POLL);
++    }
++    !folder.exists()
++}
++
++// The own pair's partial must be gone before any command holds the state; the other pair's must go while
++// the state stays held, or the sweep of every kept checkout would stall Ask AI and the close question.
++#[test]
++fn an_ai_start_sweeps_its_own_pair_under_the_state_and_other_pairs_without_it() {
++    let (repo, data) = (repo(), TempDir::new().unwrap());
++    let range_dir = data.path().join("yamt").join("range");
++    let own_partial = own_pair_folder(repo.path(), &range_dir).join("checkout.partial");
++    let other_partial = range_dir
++        .join("x-0123456789abcdef")
++        .join("a-b")
++        .join("checkout.partial");
++    for partial in [&own_partial, &other_partial] {
++        fs::create_dir_all(partial.join("inside")).unwrap();
++    }
++
++    let window = open_range_window_in(repo, data, Ai::On);
++
++    let state = ai_state(&window);
++    let _held = lock(&state);
++    assert!(!own_partial.exists(), "{}", own_partial.display());
++    assert!(
++        gone_within_wait(&other_partial),
++        "{}",
++        other_partial.display()
++    );
++}
++
++#[test]
++fn the_other_pairs_are_swept_with_the_state_released() {
++    let state = Mutex::new(AiState::Off);
++    let (held, wait) = mpsc::channel();
++    let mut swept = false;
++    sweep_own_then_others(&state, &held, || {
++        assert_eq!(wait.try_recv(), Ok(()), "held before the other pairs");
++        assert!(state.try_lock().is_ok(), "the state is still held");
++        swept = true;
++    });
++    assert!(swept);
++}
++
++#[cfg(unix)]
++mod page_load {
++    use std::sync::mpsc::Receiver;
++
++    use super::*;
++    use crate::servers::run_tests::{channel_into, is_alive};
++
++    /// `sh` writes its pid to stderr and becomes `cat`; answers its run, its pid and its events.
++    fn started_cat(window: &RangeWindow) -> (AgentRun, u32, Receiver<Value>) {
++        let (sender, events) = mpsc::channel();
++        let cat = command("sh", &["-c", "echo $$ >&2; exec cat"]);
++        let reply = started(window, cat, channel_into(sender, true)).unwrap();
++        let AgentStartReply::Started { run } = reply else {
++            panic!("{reply:?}");
++        };
++        let first = events.recv_timeout(WAIT).unwrap();
++        let pid = first["line"].as_str().unwrap().parse().unwrap();
++        (run, pid, events)
++    }
++
++    // A reload while a start, prepare or discard holds the state must still stop the old page's agent.
++    #[test]
++    fn a_page_load_stops_the_agent_at_once_or_once_the_state_is_free_and_keeps_the_checkout() {
++        let window = open_range_window_with(Ai::On);
++        let checkout = prepared_checkout(&window);
++        let app = window.webview.app_handle();
++        let (run, pid, events) = started_cat(&window);
++        stop_agent_on_page_start(app, PageLoadEvent::Finished);
++        send_to_agent(ai_state(&window), run, "still here".to_owned()).unwrap();
++        assert_eq!(events.recv_timeout(WAIT).unwrap()["text"], "still here");
++        stop_agent_on_page_start(app, PageLoadEvent::Started);
++        assert_eq!(events.recv_timeout(WAIT).unwrap()["kind"], "Exited");
++        assert!(!is_alive(pid));
++
++        let (_, pid, events) = started_cat(&window);
++        let state = ai_state(&window);
++        let held = lock(&state);
++        stop_agent_on_page_start(app, PageLoadEvent::Started);
++        assert!(is_alive(pid));
++        drop(held);
++        assert_eq!(events.recv_timeout(WAIT).unwrap()["kind"], "Exited");
++        assert!(!is_alive(pid));
++        assert!(checkout.is_dir(), "{}", checkout.display());
++    }
++}
+diff --git a/src-tauri/src/review.rs b/src-tauri/src/review.rs
+index 30965dd..1521cfc 100644
+--- a/src-tauri/src/review.rs
++++ b/src-tauri/src/review.rs
+@@ -146,303 +146,4 @@ pub(crate) async fn send_queue<R: Runtime>(
+ }
+ 
+ #[cfg(test)]
+-mod tests {
+-    use std::sync::mpsc;
+-    use std::thread;
+-
+-    use serde_json::{Value, json};
+-    use tauri::async_runtime::block_on;
+-    use tauri::ipc::InvokeResponseBody;
+-
+-    use super::*;
+-    use crate::mock_window::invoke_on;
+-    use crate::range::tests::{RangeWindow, open_range_window};
+-
+-    const FILE: u32 = 0;
+-    const ADDED_LINE: u32 = 0;
+-    const UNKNOWN_ID: u32 = 9;
+-
+-    fn invoke(window: &RangeWindow, cmd: &str, args: Value) -> Result<Value, Value> {
+-        invoke_on(&window.webview, cmd, args)
+-    }
+-
+-    fn add_first_thread(window: &RangeWindow) -> Value {
+-        let line = json!({ "kind": "added", "right": ADDED_LINE });
+-        let args = json!({ "file": FILE, "line": line, "text": "Why two?" });
+-        invoke(window, "add_thread", args).unwrap()
+-    }
+-
+-    #[test]
+-    fn a_thread_added_through_add_thread_comes_back_from_list_threads() {
+-        let window = open_range_window();
+-
+-        let added = add_first_thread(&window);
+-
+-        let listed = invoke(&window, "list_threads", json!({})).unwrap();
+-        assert_eq!(listed, added["list"]);
+-        let thread = &listed["threads"][0];
+-        assert_eq!(thread["id"], added["thread"]);
+-        assert_eq!(thread["file"], FILE);
+-        assert_eq!(
+-            thread["line"],
+-            json!({ "kind": "added", "right": ADDED_LINE })
+-        );
+-        let note = json!({ "kind": "note", "text": "Why two?" });
+-        assert_eq!(thread["messages"][0]["body"], note);
+-    }
+-
+-    #[test]
+-    fn a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back() {
+-        let window = open_range_window();
+-        let added = add_first_thread(&window);
+-        let thread = &added["thread"];
+-
+-        let noted = invoke(
+-            &window,
+-            "add_note",
+-            json!({ "thread": thread, "text": "Ok." }),
+-        );
+-        let message = noted.unwrap()["threads"][0]["messages"][1]["id"].clone();
+-        let queued = invoke(
+-            &window,
+-            "queue_message",
+-            json!({ "message": message, "text": "Ok!" }),
+-        );
+-        let posting = |list: &Value| list["threads"][0]["messages"][1]["posting"].clone();
+-        assert_eq!(
+-            posting(&queued.unwrap()),
+-            json!({ "kind": "queued", "text": "Ok!" })
+-        );
+-        let unqueued = invoke(&window, "unqueue_message", json!({ "message": message }));
+-        assert_eq!(posting(&unqueued.unwrap()), json!({ "kind": "notQueued" }));
+-    }
+-
+-    #[test]
+-    fn thread_commands_answer_the_store_s_refusals_as_their_kinds() {
+-        let window = open_range_window();
+-        let blank = json!({ "file": FILE, "line": { "kind": "added", "right": 0 }, "text": " " });
+-        assert_eq!(
+-            invoke(&window, "add_thread", blank),
+-            Err(json!({ "kind": "EmptyMessage" }))
+-        );
+-        let note = json!({ "thread": UNKNOWN_ID, "text": "Ok." });
+-        assert_eq!(
+-            invoke(&window, "add_note", note),
+-            Err(json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID }))
+-        );
+-        assert_eq!(
+-            invoke(&window, "unqueue_message", json!({ "message": UNKNOWN_ID })),
+-            Err(json!({ "kind": "UnknownMessage", "message": UNKNOWN_ID }))
+-        );
+-    }
+-
+-    #[test]
+-    fn set_thread_session_and_add_ai_answer_reach_the_thread_store() {
+-        let window = open_range_window();
+-        let thread = add_first_thread(&window)["thread"].clone();
+-
+-        let set = invoke(
+-            &window,
+-            "set_thread_session",
+-            json!({ "thread": thread, "session": "omp-1" }),
+-        );
+-        assert_eq!(set.unwrap()["threads"][0]["session"], "omp-1");
+-        let answered = invoke(
+-            &window,
+-            "add_ai_answer",
+-            json!({ "thread": thread, "session": "omp-2" }),
+-        )
+-        .unwrap();
+-
+-        let answer = json!({ "kind": "aiAnswer", "session": "omp-2", "turn": 0 });
+-        assert_eq!(answered["threads"][0]["messages"][1]["body"], answer);
+-        assert_eq!(answered["threads"][0]["session"], "omp-2");
+-        assert_eq!(invoke(&window, "list_threads", json!({})), Ok(answered));
+-        let unknown = json!({ "thread": UNKNOWN_ID, "session": "omp-1" });
+-        let refusal = json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID });
+-        for cmd in ["set_thread_session", "add_ai_answer"] {
+-            assert_eq!(invoke(&window, cmd, unknown.clone()), Err(refusal.clone()));
+-        }
+-    }
+-
+-    // Two sends at once would post the same queued messages twice.
+-    #[test]
+-    fn a_second_send_while_one_runs_answers_send_running() {
+-        let window = open_range_window();
+-        let state = window.webview.state::<RangeState>();
+-        let _running = send_guard(&state.sending).unwrap();
+-
+-        let progress = Channel::new(|_| Ok(()));
+-        let second = block_on(send_queue(window.webview.clone(), progress));
+-
+-        assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
+-    }
+-
+-    #[test]
+-    fn a_send_guard_whose_holder_panicked_is_taken_again() {
+-        let sending = Mutex::new(());
+-        thread::scope(|scope| {
+-            let holder = scope.spawn(|| {
+-                let _held = send_guard(&sending);
+-                panic!("a send's worker panics");
+-            });
+-            assert!(holder.join().is_err());
+-        });
+-        assert!(sending.is_poisoned());
+-        assert!(send_guard(&sending).is_ok());
+-    }
+-
+-    /// A channel whose every progress arrives on the receiver as its JSON text.
+-    fn collecting_channel() -> (Channel<SendProgress>, mpsc::Receiver<String>) {
+-        let (sender, received) = mpsc::channel();
+-        let channel = Channel::new(move |body| {
+-            let InvokeResponseBody::Json(json) = body else {
+-                panic!("progress that is not JSON");
+-            };
+-            sender.send(json).unwrap();
+-            Ok(())
+-        });
+-        (channel, received)
+-    }
+-
+-    #[test]
+-    fn each_progress_reaches_the_window_s_channel() {
+-        let (channel, received) = collecting_channel();
+-
+-        forward_progress(&channel, SendProgress { done: 2, of: 3 });
+-
+-        let sent: Value = serde_json::from_str(&received.recv().unwrap()).unwrap();
+-        assert_eq!(sent, json!({ "done": 2, "of": 3 }));
+-    }
+-
+-    #[cfg(unix)]
+-    mod through_glab {
+-        use std::path::PathBuf;
+-        use std::process::Command;
+-        use std::time::{Duration, Instant};
+-
+-        use yamt_conflict_repo::{TempDir, run_ignored_in_child};
+-
+-        use super::*;
+-        use crate::range::tests::open_range_window_on;
+-
+-        const FAKE_GLAB_LOG: &str = "YAMT_FAKE_GLAB_LOG";
+-        const SEND_TEST: &str = "review::tests::through_glab::a_send_on_path_s_glab";
+-        const CHECK_TEST: &str = "review::tests::through_glab::check_gitlab_on_path_s_glab";
+-        const POST_ARGV: &str =
+-            "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
+-        const ADDED_FILE: &str = "src/board/reminders.ts";
+-        const ADDED_FILE_LINE: u32 = 2;
+-        const POST_WAIT: Duration = Duration::from_secs(10);
+-        const POLL: Duration = Duration::from_millis(10);
+-
+-        fn in_this_repository(relative: &str) -> PathBuf {
+-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+-                .join("..")
+-                .join(relative)
+-        }
+-
+-        /// Runs `test` in a child whose PATH starts with the committed fake glab (`tests/glab/README.md`) on
+-        /// `scenario`, its post count and log in a folder of this test's.
+-        fn run_with_fake_glab(test: &str, scenario: &str) {
+-            let fake = TempDir::new().unwrap();
+-            let inherited = std::env::var_os("PATH").unwrap_or_default();
+-            let mut folders = vec![in_this_repository("scripts/fake-glab")];
+-            folders.extend(std::env::split_paths(&inherited));
+-            let path = std::env::join_paths(folders).unwrap();
+-            let scenario = in_this_repository(&format!("tests/glab/{scenario}"));
+-
+-            let ran = run_ignored_in_child(&[test], |child| {
+-                child
+-                    .env("PATH", path)
+-                    .env("YAMT_FAKE_GLAB", scenario)
+-                    .env("YAMT_FAKE_GLAB_STATE", fake.path().join("state"))
+-                    .env(FAKE_GLAB_LOG, fake.path().join("log"));
+-            });
+-
+-            ran.unwrap_or_else(|error| panic!("{error}"));
+-        }
+-
+-        /// A window on `scripts/range-repo.sh`'s `main...feature`, the range `tests/glab` pins.
+-        fn range_repo_window() -> RangeWindow {
+-            let repo = TempDir::new().unwrap();
+-            let built = Command::new(in_this_repository("scripts/range-repo.sh"))
+-                .arg(repo.path())
+-                .output()
+-                .unwrap();
+-            assert!(built.status.success(), "{built:?}");
+-            open_range_window_on(repo, "main...feature")
+-        }
+-
+-        fn queue_one_message(window: &RangeWindow) {
+-            let state = window.webview.state::<RangeState>();
+-            let entries = state.range.entries();
+-            let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
+-            let line = json!({ "kind": "added", "right": ADDED_FILE_LINE });
+-            let args = json!({ "file": file.unwrap().id, "line": line, "text": "Why?" });
+-            let added = invoke(window, "add_thread", args).unwrap();
+-            let message = &added["list"]["threads"][0]["messages"][0]["id"];
+-            let queued = json!({ "message": message, "text": "Why not a Duration?" });
+-            invoke(window, "queue_message", queued).unwrap();
+-        }
+-
+-        fn send(window: &RangeWindow) -> Result<SendReply, IpcError> {
+-            block_on(send_queue(window.webview.clone(), Channel::new(|_| Ok(()))))
+-        }
+-
+-        fn wait_for_the_post() {
+-            let log = std::env::var_os(FAKE_GLAB_LOG).unwrap();
+-            let deadline = Instant::now() + POST_WAIT;
+-            loop {
+-                let logged = std::fs::read_to_string(&log).unwrap_or_default();
+-                if logged.lines().any(|line| line == POST_ARGV) {
+-                    return;
+-                }
+-                assert!(Instant::now() < deadline, "no POST: {logged}");
+-                thread::sleep(POLL);
+-            }
+-        }
+-
+-        #[test]
+-        fn a_send_holds_off_a_second_send_until_its_post_ends() {
+-            run_with_fake_glab(SEND_TEST, "slow-post");
+-        }
+-
+-        #[test]
+-        #[ignore = "run by a_send_holds_off_a_second_send_until_its_post_ends"]
+-        fn a_send_on_path_s_glab() {
+-            let window = range_repo_window();
+-            queue_one_message(&window);
+-            let (progress, received) = collecting_channel();
+-            let webview = window.webview.clone();
+-            let first = thread::spawn(move || block_on(send_queue(webview, progress)));
+-
+-            wait_for_the_post();
+-            let second = send(&window);
+-            let first = first.join().unwrap();
+-            let third = send(&window);
+-
+-            assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
+-            let Ok(SendReply::Sent { sent, refused, .. }) = first else {
+-                panic!("not sent: {first:?}");
+-            };
+-            assert_eq!((sent, refused), (1, 0));
+-            let steps: Vec<String> = received.try_iter().collect();
+-            assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
+-            assert!(matches!(third, Ok(SendReply::Sent { .. })), "{third:?}");
+-        }
+-
+-        #[test]
+-        fn check_gitlab_answers_lined_up_on_the_lined_up_merge_request() {
+-            run_with_fake_glab(CHECK_TEST, "lined-up");
+-        }
+-
+-        #[test]
+-        #[ignore = "run by check_gitlab_answers_lined_up_on_the_lined_up_merge_request"]
+-        fn check_gitlab_on_path_s_glab() {
+-            let window = range_repo_window();
+-            let checked = block_on(check_gitlab(window.webview.clone())).unwrap();
+-            assert_eq!(serde_json::to_value(checked).unwrap()["kind"], "linedUp");
+-        }
+-    }
+-}
++mod tests;
+diff --git a/src-tauri/src/review/tests.rs b/src-tauri/src/review/tests.rs
+new file mode 100644
+index 0000000..9f4b7d5
+--- /dev/null
++++ b/src-tauri/src/review/tests.rs
+@@ -0,0 +1,298 @@
++use std::sync::mpsc;
++use std::thread;
++
++use serde_json::{Value, json};
++use tauri::async_runtime::block_on;
++use tauri::ipc::InvokeResponseBody;
++
++use super::*;
++use crate::mock_window::invoke_on;
++use crate::range::tests::{RangeWindow, open_range_window};
++
++const FILE: u32 = 0;
++const ADDED_LINE: u32 = 0;
++const UNKNOWN_ID: u32 = 9;
++
++fn invoke(window: &RangeWindow, cmd: &str, args: Value) -> Result<Value, Value> {
++    invoke_on(&window.webview, cmd, args)
++}
++
++fn add_first_thread(window: &RangeWindow) -> Value {
++    let line = json!({ "kind": "added", "right": ADDED_LINE });
++    let args = json!({ "file": FILE, "line": line, "text": "Why two?" });
++    invoke(window, "add_thread", args).unwrap()
++}
++
++#[test]
++fn a_thread_added_through_add_thread_comes_back_from_list_threads() {
++    let window = open_range_window();
++
++    let added = add_first_thread(&window);
++
++    let listed = invoke(&window, "list_threads", json!({})).unwrap();
++    assert_eq!(listed, added["list"]);
++    let thread = &listed["threads"][0];
++    assert_eq!(thread["id"], added["thread"]);
++    assert_eq!(thread["file"], FILE);
++    assert_eq!(
++        thread["line"],
++        json!({ "kind": "added", "right": ADDED_LINE })
++    );
++    let note = json!({ "kind": "note", "text": "Why two?" });
++    assert_eq!(thread["messages"][0]["body"], note);
++}
++
++#[test]
++fn a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back() {
++    let window = open_range_window();
++    let added = add_first_thread(&window);
++    let thread = &added["thread"];
++
++    let noted = invoke(
++        &window,
++        "add_note",
++        json!({ "thread": thread, "text": "Ok." }),
++    );
++    let message = noted.unwrap()["threads"][0]["messages"][1]["id"].clone();
++    let queued = invoke(
++        &window,
++        "queue_message",
++        json!({ "message": message, "text": "Ok!" }),
++    );
++    let posting = |list: &Value| list["threads"][0]["messages"][1]["posting"].clone();
++    assert_eq!(
++        posting(&queued.unwrap()),
++        json!({ "kind": "queued", "text": "Ok!" })
++    );
++    let unqueued = invoke(&window, "unqueue_message", json!({ "message": message }));
++    assert_eq!(posting(&unqueued.unwrap()), json!({ "kind": "notQueued" }));
++}
++
++#[test]
++fn thread_commands_answer_the_store_s_refusals_as_their_kinds() {
++    let window = open_range_window();
++    let blank = json!({ "file": FILE, "line": { "kind": "added", "right": 0 }, "text": " " });
++    assert_eq!(
++        invoke(&window, "add_thread", blank),
++        Err(json!({ "kind": "EmptyMessage" }))
++    );
++    let note = json!({ "thread": UNKNOWN_ID, "text": "Ok." });
++    assert_eq!(
++        invoke(&window, "add_note", note),
++        Err(json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID }))
++    );
++    assert_eq!(
++        invoke(&window, "unqueue_message", json!({ "message": UNKNOWN_ID })),
++        Err(json!({ "kind": "UnknownMessage", "message": UNKNOWN_ID }))
++    );
++}
++
++#[test]
++fn set_thread_session_and_add_ai_answer_reach_the_thread_store() {
++    let window = open_range_window();
++    let thread = add_first_thread(&window)["thread"].clone();
++
++    let set = invoke(
++        &window,
++        "set_thread_session",
++        json!({ "thread": thread, "session": "omp-1" }),
++    );
++    assert_eq!(set.unwrap()["threads"][0]["session"], "omp-1");
++    let answered = invoke(
++        &window,
++        "add_ai_answer",
++        json!({ "thread": thread, "session": "omp-2" }),
++    )
++    .unwrap();
++
++    let answer = json!({ "kind": "aiAnswer", "session": "omp-2", "turn": 0 });
++    assert_eq!(answered["threads"][0]["messages"][1]["body"], answer);
++    assert_eq!(answered["threads"][0]["session"], "omp-2");
++    assert_eq!(invoke(&window, "list_threads", json!({})), Ok(answered));
++    let unknown = json!({ "thread": UNKNOWN_ID, "session": "omp-1" });
++    let refusal = json!({ "kind": "UnknownThread", "thread": UNKNOWN_ID });
++    for cmd in ["set_thread_session", "add_ai_answer"] {
++        assert_eq!(invoke(&window, cmd, unknown.clone()), Err(refusal.clone()));
++    }
++}
++
++// Two sends at once would post the same queued messages twice.
++#[test]
++fn a_second_send_while_one_runs_answers_send_running() {
++    let window = open_range_window();
++    let state = window.webview.state::<RangeState>();
++    let _running = send_guard(&state.sending).unwrap();
++
++    let progress = Channel::new(|_| Ok(()));
++    let second = block_on(send_queue(window.webview.clone(), progress));
++
++    assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
++}
++
++#[test]
++fn a_send_guard_whose_holder_panicked_is_taken_again() {
++    let sending = Mutex::new(());
++    thread::scope(|scope| {
++        let holder = scope.spawn(|| {
++            let _held = send_guard(&sending);
++            panic!("a send's worker panics");
++        });
++        assert!(holder.join().is_err());
++    });
++    assert!(sending.is_poisoned());
++    assert!(send_guard(&sending).is_ok());
++}
++
++/// A channel whose every progress arrives on the receiver as its JSON text.
++fn collecting_channel() -> (Channel<SendProgress>, mpsc::Receiver<String>) {
++    let (sender, received) = mpsc::channel();
++    let channel = Channel::new(move |body| {
++        let InvokeResponseBody::Json(json) = body else {
++            panic!("progress that is not JSON");
++        };
++        sender.send(json).unwrap();
++        Ok(())
++    });
++    (channel, received)
++}
++
++#[test]
++fn each_progress_reaches_the_window_s_channel() {
++    let (channel, received) = collecting_channel();
++
++    forward_progress(&channel, SendProgress { done: 2, of: 3 });
++
++    let sent: Value = serde_json::from_str(&received.recv().unwrap()).unwrap();
++    assert_eq!(sent, json!({ "done": 2, "of": 3 }));
++}
++
++#[cfg(unix)]
++mod through_glab {
++    use std::path::PathBuf;
++    use std::process::Command;
++    use std::time::{Duration, Instant};
++
++    use yamt_conflict_repo::{TempDir, run_ignored_in_child};
++
++    use super::*;
++    use crate::range::tests::open_range_window_on;
++
++    const FAKE_GLAB_LOG: &str = "YAMT_FAKE_GLAB_LOG";
++    const SEND_TEST: &str = "review::tests::through_glab::a_send_on_path_s_glab";
++    const CHECK_TEST: &str = "review::tests::through_glab::check_gitlab_on_path_s_glab";
++    const POST_ARGV: &str =
++        "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
++    const ADDED_FILE: &str = "src/board/reminders.ts";
++    const ADDED_FILE_LINE: u32 = 2;
++    const POST_WAIT: Duration = Duration::from_secs(10);
++    const POLL: Duration = Duration::from_millis(10);
++
++    fn in_this_repository(relative: &str) -> PathBuf {
++        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
++            .join("..")
++            .join(relative)
++    }
++
++    /// Runs `test` in a child whose PATH starts with the committed fake glab (`tests/glab/README.md`) on
++    /// `scenario`, its post count and log in a folder of this test's.
++    fn run_with_fake_glab(test: &str, scenario: &str) {
++        let fake = TempDir::new().unwrap();
++        let inherited = std::env::var_os("PATH").unwrap_or_default();
++        let mut folders = vec![in_this_repository("scripts/fake-glab")];
++        folders.extend(std::env::split_paths(&inherited));
++        let path = std::env::join_paths(folders).unwrap();
++        let scenario = in_this_repository(&format!("tests/glab/{scenario}"));
++
++        let ran = run_ignored_in_child(&[test], |child| {
++            child
++                .env("PATH", path)
++                .env("YAMT_FAKE_GLAB", scenario)
++                .env("YAMT_FAKE_GLAB_STATE", fake.path().join("state"))
++                .env(FAKE_GLAB_LOG, fake.path().join("log"));
++        });
++
++        ran.unwrap_or_else(|error| panic!("{error}"));
++    }
++
++    /// A window on `scripts/range-repo.sh`'s `main...feature`, the range `tests/glab` pins.
++    fn range_repo_window() -> RangeWindow {
++        let repo = TempDir::new().unwrap();
++        let built = Command::new(in_this_repository("scripts/range-repo.sh"))
++            .arg(repo.path())
++            .output()
++            .unwrap();
++        assert!(built.status.success(), "{built:?}");
++        open_range_window_on(repo, "main...feature")
++    }
++
++    fn queue_one_message(window: &RangeWindow) {
++        let state = window.webview.state::<RangeState>();
++        let entries = state.range.entries();
++        let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
++        let line = json!({ "kind": "added", "right": ADDED_FILE_LINE });
++        let args = json!({ "file": file.unwrap().id, "line": line, "text": "Why?" });
++        let added = invoke(window, "add_thread", args).unwrap();
++        let message = &added["list"]["threads"][0]["messages"][0]["id"];
++        let queued = json!({ "message": message, "text": "Why not a Duration?" });
++        invoke(window, "queue_message", queued).unwrap();
++    }
++
++    fn send(window: &RangeWindow) -> Result<SendReply, IpcError> {
++        block_on(send_queue(window.webview.clone(), Channel::new(|_| Ok(()))))
++    }
++
++    fn wait_for_the_post() {
++        let log = std::env::var_os(FAKE_GLAB_LOG).unwrap();
++        let deadline = Instant::now() + POST_WAIT;
++        loop {
++            let logged = std::fs::read_to_string(&log).unwrap_or_default();
++            if logged.lines().any(|line| line == POST_ARGV) {
++                return;
++            }
++            assert!(Instant::now() < deadline, "no POST: {logged}");
++            thread::sleep(POLL);
++        }
++    }
++
++    #[test]
++    fn a_send_holds_off_a_second_send_until_its_post_ends() {
++        run_with_fake_glab(SEND_TEST, "slow-post");
++    }
++
++    #[test]
++    #[ignore = "run by a_send_holds_off_a_second_send_until_its_post_ends"]
++    fn a_send_on_path_s_glab() {
++        let window = range_repo_window();
++        queue_one_message(&window);
++        let (progress, received) = collecting_channel();
++        let webview = window.webview.clone();
++        let first = thread::spawn(move || block_on(send_queue(webview, progress)));
++
++        wait_for_the_post();
++        let second = send(&window);
++        let first = first.join().unwrap();
++        let third = send(&window);
++
++        assert!(matches!(second, Err(IpcError::SendRunning)), "{second:?}");
++        let Ok(SendReply::Sent { sent, refused, .. }) = first else {
++            panic!("not sent: {first:?}");
++        };
++        assert_eq!((sent, refused), (1, 0));
++        let steps: Vec<String> = received.try_iter().collect();
++        assert_eq!(steps, [json!({ "done": 1, "of": 1 }).to_string()]);
++        assert!(matches!(third, Ok(SendReply::Sent { .. })), "{third:?}");
++    }
++
++    #[test]
++    fn check_gitlab_answers_lined_up_on_the_lined_up_merge_request() {
++        run_with_fake_glab(CHECK_TEST, "lined-up");
++    }
++
++    #[test]
++    #[ignore = "run by check_gitlab_answers_lined_up_on_the_lined_up_merge_request"]
++    fn check_gitlab_on_path_s_glab() {
++        let window = range_repo_window();
++        let checked = block_on(check_gitlab(window.webview.clone())).unwrap();
++        assert_eq!(serde_json::to_value(checked).unwrap()["kind"], "linedUp");
++    }
++}
+-- 
+2.56.0
+

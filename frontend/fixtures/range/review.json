@@ -1,0 +1,638 @@
+{
+  "files": [
+    {
+      "kind": "kindChanged",
+      "new": "link",
+      "old": "file"
+    },
+    {
+      "kind": "tooLarge",
+      "limit": 8388608
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 1,
+            "start": 0
+          },
+          "right": {
+            "len": 1,
+            "start": 0
+          },
+          "words": {
+            "left": {
+              "changed": [
+                {
+                  "len": 9,
+                  "line": 0,
+                  "start": 0
+                }
+              ],
+              "removals": []
+            },
+            "right": {
+              "changed": [
+                {
+                  "len": 4,
+                  "line": 0,
+                  "start": 0
+                }
+              ],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "shortcuts.md",
+      "mode": {
+        "kind": "same"
+      },
+      "right": "keys.md"
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 0,
+            "start": 13
+          },
+          "right": {
+            "len": 2,
+            "start": 13
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "# Keyboard shortcuts\n\nShortcuts work anywhere on the board except while typing in a text field.\n\n## Cards\n\n| Key     | Action                              |\n| ------- | ----------------------------------- |\n| `N`     | New card in the focused column      |\n| `E`     | Edit the focused card               |\n| `A`     | Archive the focused card            |\n| `L`     | Add a label to the focused card     |\n| `M`     | Assign the focused card to yourself |\n| `Enter` | Open the focused card               |\n\n## Moving around\n\n| Key        | Action                                  |\n| ---------- | --------------------------------------- |\n| `←` `→`    | Focus the previous or next column       |\n| `↑` `↓`    | Focus the previous or next card         |\n| `Shift+←→` | Move the focused card to another column |\n| `/`        | Search cards                            |\n| `?`        | Show this list                          |\n",
+      "mode": {
+        "kind": "same"
+      },
+      "right": "# Keyboard shortcuts\n\nShortcuts work anywhere on the board except while typing in a text field.\n\n## Cards\n\n| Key     | Action                              |\n| ------- | ----------------------------------- |\n| `N`     | New card in the focused column      |\n| `E`     | Edit the focused card               |\n| `A`     | Archive the focused card            |\n| `L`     | Add a label to the focused card     |\n| `M`     | Assign the focused card to yourself |\n| `D`     | Set the due date and time           |\n| `R`     | Set a reminder for the focused card |\n| `Enter` | Open the focused card               |\n\n## Moving around\n\n| Key        | Action                                  |\n| ---------- | --------------------------------------- |\n| `←` `→`    | Focus the previous or next column       |\n| `↑` `↓`    | Focus the previous or next card         |\n| `Shift+←→` | Move the focused card to another column |\n| `/`        | Search cards                            |\n| `?`        | Show this list                          |\n"
+    },
+    {
+      "kind": "notUtf8",
+      "sides": "both"
+    },
+    {
+      "kind": "binary"
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 43,
+            "start": 0
+          },
+          "right": {
+            "len": 0,
+            "start": 0
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "import { addCard, createBoard, setLimit } from \"../board/board\";\nimport type { Board } from \"../board/types\";\n\nexport function mockBoard(id: string): Board {\n  const board = createBoard(id === \"default\" ? \"Website relaunch\" : id);\n  const [todo, doing, review, done] = board.columns;\n  if (\n    todo === undefined ||\n    doing === undefined ||\n    review === undefined ||\n    done === undefined\n  ) {\n    return board;\n  }\n  setLimit(board, doing.id, 3);\n\n  addCard(board, todo.id, {\n    title: \"Write the pricing page copy\",\n    dueDate: \"2026-10-24\",\n  });\n  addCard(board, todo.id, {\n    title: \"Pick photos for the team page\",\n    labels: [{ name: \"design\", color: \"purple\" }],\n  });\n  addCard(board, doing.id, {\n    title: \"Move the blog to the new templates\",\n    labels: [{ name: \"frontend\", color: \"blue\" }],\n  });\n  addCard(board, doing.id, {\n    title: \"Redirects for the old URLs\",\n    dueDate: \"2026-10-20\",\n  });\n  addCard(board, review.id, {\n    title: \"Cookie banner\",\n    labels: [{ name: \"legal\", color: \"orange\" }],\n    dueDate: \"2026-10-19\",\n  });\n  addCard(board, done.id, {\n    title: \"New logo\",\n    labels: [{ name: \"design\", color: \"purple\" }],\n  });\n  return board;\n}\n",
+      "mode": {
+        "kind": "same"
+      },
+      "right": ""
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 1,
+            "start": 19
+          },
+          "right": {
+            "len": 2,
+            "start": 19
+          },
+          "words": {
+            "left": {
+              "changed": [
+                {
+                  "len": 1,
+                  "line": 19,
+                  "start": 52
+                }
+              ],
+              "removals": [
+                {
+                  "at": {
+                    "column": 53,
+                    "line": 19
+                  },
+                  "text": "\n  | { kind: \"reminded\"; cardId: CardId; at: string };"
+                }
+              ]
+            },
+            "right": {
+              "changed": [
+                {
+                  "len": 53,
+                  "line": 20,
+                  "start": 0
+                }
+              ],
+              "removals": [
+                {
+                  "at": {
+                    "column": 52,
+                    "line": 19
+                  },
+                  "text": ";"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "left": {
+            "len": 0,
+            "start": 179
+          },
+          "right": {
+            "len": 3,
+            "start": 180
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        },
+        {
+          "left": {
+            "len": 1,
+            "start": 199
+          },
+          "right": {
+            "len": 1,
+            "start": 203
+          },
+          "words": {
+            "left": {
+              "changed": [
+                {
+                  "len": 12,
+                  "line": 199,
+                  "start": 31
+                }
+              ],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": [
+                {
+                  "at": {
+                    "column": 31,
+                    "line": 203
+                  },
+                  "text": ", new Date()"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "left": {
+            "len": 1,
+            "start": 254
+          },
+          "right": {
+            "len": 3,
+            "start": 258
+          },
+          "words": {
+            "left": {
+              "changed": [
+                {
+                  "len": 16,
+                  "line": 254,
+                  "start": 25
+                }
+              ],
+              "removals": [
+                {
+                  "at": {
+                    "column": 2,
+                    "line": 254
+                  },
+                  "text": "const card = "
+                },
+                {
+                  "at": {
+                    "column": 42,
+                    "line": 254
+                  },
+                  "text": "\n  card.archived = true;\n  clearReminder(card);"
+                }
+              ]
+            },
+            "right": {
+              "changed": [
+                {
+                  "len": 13,
+                  "line": 258,
+                  "start": 2
+                },
+                {
+                  "len": 23,
+                  "line": 259,
+                  "start": 0
+                },
+                {
+                  "len": 22,
+                  "line": 260,
+                  "start": 0
+                }
+              ],
+              "removals": [
+                {
+                  "at": {
+                    "column": 38,
+                    "line": 258
+                  },
+                  "text": ".archived = true"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "left": {
+            "len": 18,
+            "start": 308
+          },
+          "right": {
+            "len": 0,
+            "start": 314
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        },
+        {
+          "left": {
+            "len": 0,
+            "start": 415
+          },
+          "right": {
+            "len": 33,
+            "start": 403
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        },
+        {
+          "left": {
+            "len": 0,
+            "start": 461
+          },
+          "right": {
+            "len": 2,
+            "start": 482
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "import { createCard, hasLabel, type NewCard } from \"./card\";\nimport type { Board, Card, CardId, Column, ColumnId, Label } from \"./types\";\n\nexport const DONE_COLUMN = \"Done\";\n\nconst DEFAULT_COLUMNS = [\"To do\", \"In progress\", \"Review\", DONE_COLUMN];\nconst MAX_ACTIVITY = 200;\n\nexport class BoardError extends Error {\n  constructor(message: string) {\n    super(message);\n    this.name = \"BoardError\";\n  }\n}\n\nexport type Activity =\n  | { kind: \"added\"; cardId: CardId; columnId: ColumnId; at: string }\n  | { kind: \"moved\"; cardId: CardId; from: ColumnId; to: ColumnId; at: string }\n  | { kind: \"archived\"; cardId: CardId; at: string }\n  | { kind: \"restored\"; cardId: CardId; at: string };\n\nconst activity = new WeakMap<Board, Activity[]>();\nlet nextColumnId = 1;\n\nfunction newColumnId(): ColumnId {\n  const id = `col-${nextColumnId}`;\n  nextColumnId += 1;\n  return id;\n}\n\nexport function createBoard(\n  name: string,\n  columnNames: string[] = DEFAULT_COLUMNS,\n): Board {\n  const trimmed = name.trim();\n  if (trimmed === \"\") {\n    throw new BoardError(\"A board needs a name\");\n  }\n  return {\n    id: crypto.randomUUID(),\n    name: trimmed,\n    columns: columnNames.map((columnName) => ({\n      id: newColumnId(),\n      name: columnName,\n      cardIds: [],\n    })),\n    cards: {},\n  };\n}\n\n// Columns\n\nexport function addColumn(\n  board: Board,\n  name: string,\n  position = board.columns.length,\n): Column {\n  const trimmed = name.trim();\n  if (trimmed === \"\") {\n    throw new BoardError(\"A column needs a name\");\n  }\n  if (board.columns.some((column) => column.name === trimmed)) {\n    throw new BoardError(`There is already a column called \"${trimmed}\"`);\n  }\n  const column: Column = { id: newColumnId(), name: trimmed, cardIds: [] };\n  board.columns.splice(position, 0, column);\n  return column;\n}\n\nexport function renameColumn(\n  board: Board,\n  columnId: ColumnId,\n  name: string,\n): void {\n  const column = findColumn(board, columnId);\n  const trimmed = name.trim();\n  if (trimmed === \"\") {\n    throw new BoardError(\"A column needs a name\");\n  }\n  if (\n    board.columns.some(\n      (other) => other.id !== columnId && other.name === trimmed,\n    )\n  ) {\n    throw new BoardError(`There is already a column called \"${trimmed}\"`);\n  }\n  column.name = trimmed;\n}\n\nexport function removeColumn(board: Board, columnId: ColumnId): Card[] {\n  const column = findColumn(board, columnId);\n  if (board.columns.length === 1) {\n    throw new BoardError(\"A board needs at least one column\");\n  }\n  const removed = column.cardIds.map((id) => findCard(board, id));\n  for (const card of removed) {\n    delete board.cards[card.id];\n  }\n  board.columns = board.columns.filter((other) => other.id !== columnId);\n  return removed;\n}\n\nexport function setLimit(\n  board: Board,\n  columnId: ColumnId,\n  limit: number | undefined,\n): void {\n  const column = findColumn(board, columnId);\n  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {\n    throw new BoardError(\"A limit is a whole number of cards, at least 1\");\n  }\n  column.limit = limit;\n}\n\nexport function isFull(column: Column): boolean {\n  return column.limit !== undefined && column.cardIds.length >= column.limit;\n}\n\nfunction fullError(column: Column): BoardError {\n  return new BoardError(`\"${column.name}\" already holds ${column.limit} cards`);\n}\n\nfunction remove(ids: CardId[], cardId: CardId): void {\n  const index = ids.indexOf(cardId);\n  if (index !== -1) {\n    ids.splice(index, 1);\n  }\n}\n\n// Lookups\n\nexport function findColumn(board: Board, columnId: ColumnId): Column {\n  const column = board.columns.find((candidate) => candidate.id === columnId);\n  if (column === undefined) {\n    throw new BoardError(`No column with id ${columnId}`);\n  }\n  return column;\n}\n\nexport function findCard(board: Board, cardId: CardId): Card {\n  const card = board.cards[cardId];\n  if (card === undefined) {\n    throw new BoardError(`No card with id ${cardId}`);\n  }\n  return card;\n}\n\nexport function columnOf(board: Board, cardId: CardId): Column {\n  const column = board.columns.find((candidate) =>\n    candidate.cardIds.includes(cardId),\n  );\n  if (column === undefined) {\n    throw new BoardError(`Card ${cardId} is in no column`);\n  }\n  return column;\n}\n\nexport function cardsIn(board: Board, columnId: ColumnId): Card[] {\n  return findColumn(board, columnId)\n    .cardIds.map((id) => findCard(board, id))\n    .filter((card) => !card.archived);\n}\n\n// Cards\n\nexport function moveCard(\n  board: Board,\n  cardId: CardId,\n  toColumnId: ColumnId,\n  index?: number,\n): void {\n  const from = columnOf(board, cardId);\n  const to = findColumn(board, toColumnId);\n  if (from.id !== to.id && isFull(to)) {\n    throw fullError(to);\n  }\n  remove(from.cardIds, cardId);\n  const at = index ?? to.cardIds.length;\n  to.cardIds.splice(at, 0, cardId);\n  if (from.id !== to.id) {\n    record(board, {\n      kind: \"moved\",\n      cardId,\n      from: from.id,\n      to: to.id,\n      at: now(),\n    });\n  }\n}\n\nexport function addCard(\n  board: Board,\n  columnId: ColumnId,\n  input: NewCard,\n): Card {\n  const column = findColumn(board, columnId);\n  if (isFull(column)) {\n    throw fullError(column);\n  }\n  const card = createCard(input, new Date());\n  board.cards[card.id] = card;\n  record(board, {\n    kind: \"added\",\n    cardId: card.id,\n    columnId,\n    at: card.createdAt,\n  });\n  column.cardIds.push(card.id);\n  return card;\n}\n\nexport function reorderCard(\n  board: Board,\n  cardId: CardId,\n  position: number,\n): void {\n  const column = columnOf(board, cardId);\n  moveCard(board, cardId, column.id, position);\n}\n\nexport function sortColumn(\n  board: Board,\n  columnId: ColumnId,\n  by: \"title\" | \"created\",\n): void {\n  const column = findColumn(board, columnId);\n  const cards = column.cardIds.map((id) => findCard(board, id));\n  cards.sort((a, b) =>\n    by === \"title\"\n      ? a.title.localeCompare(b.title)\n      : a.createdAt.localeCompare(b.createdAt),\n  );\n  column.cardIds = cards.map((card) => card.id);\n}\n\nexport function editCard(\n  board: Board,\n  cardId: CardId,\n  changes: Partial<Pick<Card, \"title\" | \"description\">>,\n): void {\n  const card = findCard(board, cardId);\n  if (changes.title !== undefined) {\n    const title = changes.title.trim();\n    if (title === \"\") {\n      throw new BoardError(\"A card needs a title\");\n    }\n    card.title = title;\n  }\n  if (changes.description !== undefined) {\n    card.description = changes.description.trim();\n  }\n}\n\nexport function archiveCard(board: Board, cardId: CardId): void {\n  findCard(board, cardId).archived = true;\n  record(board, { kind: \"archived\", cardId, at: now() });\n}\n\nexport function restoreCard(board: Board, cardId: CardId): void {\n  const card = findCard(board, cardId);\n  if (!card.archived) {\n    return;\n  }\n  card.archived = false;\n  record(board, { kind: \"restored\", cardId, at: now() });\n}\n\nexport function archivedCards(board: Board): Card[] {\n  return Object.values(board.cards).filter((card) => card.archived);\n}\n\nexport function emptyArchive(board: Board): number {\n  const archived = archivedCards(board);\n  for (const card of archived) {\n    const column = columnOf(board, card.id);\n    column.cardIds = column.cardIds.filter((id) => id !== card.id);\n    delete board.cards[card.id];\n  }\n  return archived.length;\n}\n\nexport function moveAll(\n  board: Board,\n  fromColumnId: ColumnId,\n  toColumnId: ColumnId,\n): number {\n  const from = findColumn(board, fromColumnId);\n  const to = findColumn(board, toColumnId);\n  const moving = from.cardIds.filter((id) => !findCard(board, id).archived);\n  if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {\n    throw new BoardError(\n      `\"${to.name}\" has room for ${to.limit - to.cardIds.length} more cards`,\n    );\n  }\n  for (const cardId of moving) {\n    moveCard(board, cardId, toColumnId);\n  }\n  return moving.length;\n}\n\nexport function archiveColumn(board: Board, columnId: ColumnId): number {\n  const cards = cardsIn(board, columnId);\n  for (const card of cards) {\n    archiveCard(board, card.id);\n  }\n  return cards.length;\n}\n\nexport function duplicateBoard(board: Board, name: string): Board {\n  const copy = createBoard(\n    name,\n    board.columns.map((column) => column.name),\n  );\n  for (const [index, column] of board.columns.entries()) {\n    const target = copy.columns[index];\n    if (target === undefined) {\n      continue;\n    }\n    target.limit = column.limit;\n    for (const card of cardsIn(board, column.id)) {\n      addCard(copy, target.id, { ...card, labels: [...card.labels] });\n    }\n  }\n  return copy;\n}\n\n// Labels and people\n\nexport function addLabel(board: Board, cardId: CardId, label: Label): void {\n  const card = findCard(board, cardId);\n  if (!hasLabel(card, label.name)) {\n    card.labels.push(label);\n  }\n}\n\nexport function removeLabel(board: Board, cardId: CardId, name: string): void {\n  const card = findCard(board, cardId);\n  card.labels = card.labels.filter((label) => label.name !== name);\n}\n\nexport function labelsInUse(board: Board): Label[] {\n  const byName = new Map<string, Label>();\n  for (const card of Object.values(board.cards)) {\n    for (const label of card.labels) {\n      byName.set(label.name, label);\n    }\n  }\n  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));\n}\n\nexport function assign(\n  board: Board,\n  cardId: CardId,\n  person: string | undefined,\n): void {\n  const card = findCard(board, cardId);\n  const name = person?.trim();\n  card.assignee = name === \"\" ? undefined : name;\n}\n\nexport function people(board: Board): string[] {\n  const names = new Set<string>();\n  for (const card of Object.values(board.cards)) {\n    if (card.assignee !== undefined && !card.archived) {\n      names.add(card.assignee);\n    }\n  }\n  return [...names].sort((a, b) => a.localeCompare(b));\n}\n\nexport function workload(board: Board): Map<string, number> {\n  const counts = new Map<string, number>();\n  for (const column of board.columns) {\n    if (column.name === DONE_COLUMN) {\n      continue;\n    }\n    for (const card of cardsIn(board, column.id)) {\n      if (card.assignee !== undefined) {\n        counts.set(card.assignee, (counts.get(card.assignee) ?? 0) + 1);\n      }\n    }\n  }\n  return counts;\n}\n\n// Statistics\n\nexport type ColumnCount = { column: string; cards: number; limit?: number };\n\nexport function columnCounts(board: Board): ColumnCount[] {\n  return board.columns.map((column) => ({\n    column: column.name,\n    cards: cardsIn(board, column.id).length,\n    limit: column.limit,\n  }));\n}\n\nexport function overLimit(board: Board): Column[] {\n  return board.columns.filter(\n    (column) =>\n      column.limit !== undefined &&\n      cardsIn(board, column.id).length > column.limit,\n  );\n}\n\nexport function progress(board: Board): number {\n  const cards = Object.values(board.cards).filter((card) => !card.archived);\n  if (cards.length === 0) {\n    return 0;\n  }\n  const done = board.columns.find((column) => column.name === DONE_COLUMN);\n  const finished = done === undefined ? 0 : cardsIn(board, done.id).length;\n  return Math.round((finished / cards.length) * 100);\n}\n\n// Search\n\nexport function searchCards(board: Board, query: string): Card[] {\n  const needle = query.trim().toLowerCase();\n  if (needle === \"\") {\n    return [];\n  }\n  return Object.values(board.cards).filter(\n    (card) =>\n      !card.archived &&\n      (card.title.toLowerCase().includes(needle) ||\n        card.description.toLowerCase().includes(needle) ||\n        card.labels.some((label) => label.name.toLowerCase() === needle)),\n  );\n}\n\n// Activity\n\nfunction now(): string {\n  return new Date().toISOString();\n}\n\nfunction record(board: Board, entry: Activity): void {\n  const entries = activity.get(board) ?? [];\n  entries.push(entry);\n  if (entries.length > MAX_ACTIVITY) {\n    entries.splice(0, entries.length - MAX_ACTIVITY);\n  }\n  activity.set(board, entries);\n}\n\nexport function recentActivity(board: Board, count = 20): Activity[] {\n  return (activity.get(board) ?? []).slice(-count).reverse();\n}\n\nexport function describeActivity(board: Board, entry: Activity): string {\n  const title = board.cards[entry.cardId]?.title ?? \"A deleted card\";\n  switch (entry.kind) {\n    case \"added\":\n      return `${title} was added to ${columnName(board, entry.columnId)}`;\n    case \"moved\":\n      return `${title} moved from ${columnName(board, entry.from)} to ${columnName(board, entry.to)}`;\n    case \"archived\":\n      return `${title} was archived`;\n    case \"restored\":\n      return `${title} was restored`;\n  }\n}\n\nfunction columnName(board: Board, columnId: ColumnId): string {\n  return (\n    board.columns.find((column) => column.id === columnId)?.name ??\n    \"a removed column\"\n  );\n}\n",
+      "mode": {
+        "kind": "same"
+      },
+      "right": "import { createCard, hasLabel, type NewCard } from \"./card\";\nimport type { Board, Card, CardId, Column, ColumnId, Label } from \"./types\";\n\nexport const DONE_COLUMN = \"Done\";\n\nconst DEFAULT_COLUMNS = [\"To do\", \"In progress\", \"Review\", DONE_COLUMN];\nconst MAX_ACTIVITY = 200;\n\nexport class BoardError extends Error {\n  constructor(message: string) {\n    super(message);\n    this.name = \"BoardError\";\n  }\n}\n\nexport type Activity =\n  | { kind: \"added\"; cardId: CardId; columnId: ColumnId; at: string }\n  | { kind: \"moved\"; cardId: CardId; from: ColumnId; to: ColumnId; at: string }\n  | { kind: \"archived\"; cardId: CardId; at: string }\n  | { kind: \"restored\"; cardId: CardId; at: string }\n  | { kind: \"reminded\"; cardId: CardId; at: string };\n\nconst activity = new WeakMap<Board, Activity[]>();\nlet nextColumnId = 1;\n\nfunction newColumnId(): ColumnId {\n  const id = `col-${nextColumnId}`;\n  nextColumnId += 1;\n  return id;\n}\n\nexport function createBoard(\n  name: string,\n  columnNames: string[] = DEFAULT_COLUMNS,\n): Board {\n  const trimmed = name.trim();\n  if (trimmed === \"\") {\n    throw new BoardError(\"A board needs a name\");\n  }\n  return {\n    id: crypto.randomUUID(),\n    name: trimmed,\n    columns: columnNames.map((columnName) => ({\n      id: newColumnId(),\n      name: columnName,\n      cardIds: [],\n    })),\n    cards: {},\n  };\n}\n\n// Columns\n\nexport function addColumn(\n  board: Board,\n  name: string,\n  position = board.columns.length,\n): Column {\n  const trimmed = name.trim();\n  if (trimmed === \"\") {\n    throw new BoardError(\"A column needs a name\");\n  }\n  if (board.columns.some((column) => column.name === trimmed)) {\n    throw new BoardError(`There is already a column called \"${trimmed}\"`);\n  }\n  const column: Column = { id: newColumnId(), name: trimmed, cardIds: [] };\n  board.columns.splice(position, 0, column);\n  return column;\n}\n\nexport function renameColumn(\n  board: Board,\n  columnId: ColumnId,\n  name: string,\n): void {\n  const column = findColumn(board, columnId);\n  const trimmed = name.trim();\n  if (trimmed === \"\") {\n    throw new BoardError(\"A column needs a name\");\n  }\n  if (\n    board.columns.some(\n      (other) => other.id !== columnId && other.name === trimmed,\n    )\n  ) {\n    throw new BoardError(`There is already a column called \"${trimmed}\"`);\n  }\n  column.name = trimmed;\n}\n\nexport function removeColumn(board: Board, columnId: ColumnId): Card[] {\n  const column = findColumn(board, columnId);\n  if (board.columns.length === 1) {\n    throw new BoardError(\"A board needs at least one column\");\n  }\n  const removed = column.cardIds.map((id) => findCard(board, id));\n  for (const card of removed) {\n    delete board.cards[card.id];\n  }\n  board.columns = board.columns.filter((other) => other.id !== columnId);\n  return removed;\n}\n\nexport function setLimit(\n  board: Board,\n  columnId: ColumnId,\n  limit: number | undefined,\n): void {\n  const column = findColumn(board, columnId);\n  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {\n    throw new BoardError(\"A limit is a whole number of cards, at least 1\");\n  }\n  column.limit = limit;\n}\n\nexport function isFull(column: Column): boolean {\n  return column.limit !== undefined && column.cardIds.length >= column.limit;\n}\n\nfunction fullError(column: Column): BoardError {\n  return new BoardError(`\"${column.name}\" already holds ${column.limit} cards`);\n}\n\nfunction remove(ids: CardId[], cardId: CardId): void {\n  const index = ids.indexOf(cardId);\n  if (index !== -1) {\n    ids.splice(index, 1);\n  }\n}\n\n// Lookups\n\nexport function findColumn(board: Board, columnId: ColumnId): Column {\n  const column = board.columns.find((candidate) => candidate.id === columnId);\n  if (column === undefined) {\n    throw new BoardError(`No column with id ${columnId}`);\n  }\n  return column;\n}\n\nexport function findCard(board: Board, cardId: CardId): Card {\n  const card = board.cards[cardId];\n  if (card === undefined) {\n    throw new BoardError(`No card with id ${cardId}`);\n  }\n  return card;\n}\n\nexport function columnOf(board: Board, cardId: CardId): Column {\n  const column = board.columns.find((candidate) =>\n    candidate.cardIds.includes(cardId),\n  );\n  if (column === undefined) {\n    throw new BoardError(`Card ${cardId} is in no column`);\n  }\n  return column;\n}\n\nexport function cardsIn(board: Board, columnId: ColumnId): Card[] {\n  return findColumn(board, columnId)\n    .cardIds.map((id) => findCard(board, id))\n    .filter((card) => !card.archived);\n}\n\n// Cards\n\nexport function moveCard(\n  board: Board,\n  cardId: CardId,\n  toColumnId: ColumnId,\n  index?: number,\n): void {\n  const from = columnOf(board, cardId);\n  const to = findColumn(board, toColumnId);\n  if (from.id !== to.id && isFull(to)) {\n    throw fullError(to);\n  }\n  remove(from.cardIds, cardId);\n  const at = index ?? to.cardIds.length;\n  to.cardIds.splice(at, 0, cardId);\n  if (to.name === DONE_COLUMN) {\n    clearReminder(findCard(board, cardId));\n  }\n  if (from.id !== to.id) {\n    record(board, {\n      kind: \"moved\",\n      cardId,\n      from: from.id,\n      to: to.id,\n      at: now(),\n    });\n  }\n}\n\nexport function addCard(\n  board: Board,\n  columnId: ColumnId,\n  input: NewCard,\n): Card {\n  const column = findColumn(board, columnId);\n  if (isFull(column)) {\n    throw fullError(column);\n  }\n  const card = createCard(input);\n  board.cards[card.id] = card;\n  record(board, {\n    kind: \"added\",\n    cardId: card.id,\n    columnId,\n    at: card.createdAt,\n  });\n  column.cardIds.push(card.id);\n  return card;\n}\n\nexport function reorderCard(\n  board: Board,\n  cardId: CardId,\n  position: number,\n): void {\n  const column = columnOf(board, cardId);\n  moveCard(board, cardId, column.id, position);\n}\n\nexport function sortColumn(\n  board: Board,\n  columnId: ColumnId,\n  by: \"title\" | \"created\",\n): void {\n  const column = findColumn(board, columnId);\n  const cards = column.cardIds.map((id) => findCard(board, id));\n  cards.sort((a, b) =>\n    by === \"title\"\n      ? a.title.localeCompare(b.title)\n      : a.createdAt.localeCompare(b.createdAt),\n  );\n  column.cardIds = cards.map((card) => card.id);\n}\n\nexport function editCard(\n  board: Board,\n  cardId: CardId,\n  changes: Partial<Pick<Card, \"title\" | \"description\">>,\n): void {\n  const card = findCard(board, cardId);\n  if (changes.title !== undefined) {\n    const title = changes.title.trim();\n    if (title === \"\") {\n      throw new BoardError(\"A card needs a title\");\n    }\n    card.title = title;\n  }\n  if (changes.description !== undefined) {\n    card.description = changes.description.trim();\n  }\n}\n\nexport function archiveCard(board: Board, cardId: CardId): void {\n  const card = findCard(board, cardId);\n  card.archived = true;\n  clearReminder(card);\n  record(board, { kind: \"archived\", cardId, at: now() });\n}\n\nexport function restoreCard(board: Board, cardId: CardId): void {\n  const card = findCard(board, cardId);\n  if (!card.archived) {\n    return;\n  }\n  card.archived = false;\n  record(board, { kind: \"restored\", cardId, at: now() });\n}\n\nexport function archivedCards(board: Board): Card[] {\n  return Object.values(board.cards).filter((card) => card.archived);\n}\n\nexport function emptyArchive(board: Board): number {\n  const archived = archivedCards(board);\n  for (const card of archived) {\n    const column = columnOf(board, card.id);\n    column.cardIds = column.cardIds.filter((id) => id !== card.id);\n    delete board.cards[card.id];\n  }\n  return archived.length;\n}\n\nexport function moveAll(\n  board: Board,\n  fromColumnId: ColumnId,\n  toColumnId: ColumnId,\n): number {\n  const from = findColumn(board, fromColumnId);\n  const to = findColumn(board, toColumnId);\n  const moving = from.cardIds.filter((id) => !findCard(board, id).archived);\n  if (to.limit !== undefined && to.cardIds.length + moving.length > to.limit) {\n    throw new BoardError(\n      `\"${to.name}\" has room for ${to.limit - to.cardIds.length} more cards`,\n    );\n  }\n  for (const cardId of moving) {\n    moveCard(board, cardId, toColumnId);\n  }\n  return moving.length;\n}\n\nexport function archiveColumn(board: Board, columnId: ColumnId): number {\n  const cards = cardsIn(board, columnId);\n  for (const card of cards) {\n    archiveCard(board, card.id);\n  }\n  return cards.length;\n}\n\n// Labels and people\n\nexport function addLabel(board: Board, cardId: CardId, label: Label): void {\n  const card = findCard(board, cardId);\n  if (!hasLabel(card, label.name)) {\n    card.labels.push(label);\n  }\n}\n\nexport function removeLabel(board: Board, cardId: CardId, name: string): void {\n  const card = findCard(board, cardId);\n  card.labels = card.labels.filter((label) => label.name !== name);\n}\n\nexport function labelsInUse(board: Board): Label[] {\n  const byName = new Map<string, Label>();\n  for (const card of Object.values(board.cards)) {\n    for (const label of card.labels) {\n      byName.set(label.name, label);\n    }\n  }\n  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));\n}\n\nexport function assign(\n  board: Board,\n  cardId: CardId,\n  person: string | undefined,\n): void {\n  const card = findCard(board, cardId);\n  const name = person?.trim();\n  card.assignee = name === \"\" ? undefined : name;\n}\n\nexport function people(board: Board): string[] {\n  const names = new Set<string>();\n  for (const card of Object.values(board.cards)) {\n    if (card.assignee !== undefined && !card.archived) {\n      names.add(card.assignee);\n    }\n  }\n  return [...names].sort((a, b) => a.localeCompare(b));\n}\n\nexport function workload(board: Board): Map<string, number> {\n  const counts = new Map<string, number>();\n  for (const column of board.columns) {\n    if (column.name === DONE_COLUMN) {\n      continue;\n    }\n    for (const card of cardsIn(board, column.id)) {\n      if (card.assignee !== undefined) {\n        counts.set(card.assignee, (counts.get(card.assignee) ?? 0) + 1);\n      }\n    }\n  }\n  return counts;\n}\n\n// Statistics\n\nexport type ColumnCount = { column: string; cards: number; limit?: number };\n\nexport function columnCounts(board: Board): ColumnCount[] {\n  return board.columns.map((column) => ({\n    column: column.name,\n    cards: cardsIn(board, column.id).length,\n    limit: column.limit,\n  }));\n}\n\nexport function overLimit(board: Board): Column[] {\n  return board.columns.filter(\n    (column) =>\n      column.limit !== undefined &&\n      cardsIn(board, column.id).length > column.limit,\n  );\n}\n\nexport function progress(board: Board): number {\n  const cards = Object.values(board.cards).filter((card) => !card.archived);\n  if (cards.length === 0) {\n    return 0;\n  }\n  const done = board.columns.find((column) => column.name === DONE_COLUMN);\n  const finished = done === undefined ? 0 : cardsIn(board, done.id).length;\n  return Math.round((finished / cards.length) * 100);\n}\n\n// Reminders\n\nconst MINUTE_MS = 60_000;\n\nexport type Reminder = { cardId: CardId; title: string; at: Date };\n\nexport function reminderTime(card: Card): Date | undefined {\n  if (card.dueAt === undefined || card.remindBefore === undefined) {\n    return undefined;\n  }\n  return new Date(Date.parse(card.dueAt) - card.remindBefore * MINUTE_MS);\n}\n\nexport function remindersDue(board: Board, at: Date): Reminder[] {\n  const due: Reminder[] = [];\n  for (const card of Object.values(board.cards)) {\n    const time = reminderTime(card);\n    if (!card.archived && time !== undefined && time <= at) {\n      due.push({ cardId: card.id, title: card.title, at: time });\n    }\n  }\n  return due.sort((a, b) => a.at.getTime() - b.at.getTime());\n}\n\nexport function remind(board: Board, reminder: Reminder): void {\n  clearReminder(findCard(board, reminder.cardId));\n  record(board, { kind: \"reminded\", cardId: reminder.cardId, at: now() });\n}\n\nexport function clearReminder(card: Card): void {\n  delete card.remindBefore;\n}\n\n// Search\n\nexport function searchCards(board: Board, query: string): Card[] {\n  const needle = query.trim().toLowerCase();\n  if (needle === \"\") {\n    return [];\n  }\n  return Object.values(board.cards).filter(\n    (card) =>\n      !card.archived &&\n      (card.title.toLowerCase().includes(needle) ||\n        card.description.toLowerCase().includes(needle) ||\n        card.labels.some((label) => label.name.toLowerCase() === needle)),\n  );\n}\n\n// Activity\n\nfunction now(): string {\n  return new Date().toISOString();\n}\n\nfunction record(board: Board, entry: Activity): void {\n  const entries = activity.get(board) ?? [];\n  entries.push(entry);\n  if (entries.length > MAX_ACTIVITY) {\n    entries.splice(0, entries.length - MAX_ACTIVITY);\n  }\n  activity.set(board, entries);\n}\n\nexport function recentActivity(board: Board, count = 20): Activity[] {\n  return (activity.get(board) ?? []).slice(-count).reverse();\n}\n\nexport function describeActivity(board: Board, entry: Activity): string {\n  const title = board.cards[entry.cardId]?.title ?? \"A deleted card\";\n  switch (entry.kind) {\n    case \"added\":\n      return `${title} was added to ${columnName(board, entry.columnId)}`;\n    case \"moved\":\n      return `${title} moved from ${columnName(board, entry.from)} to ${columnName(board, entry.to)}`;\n    case \"archived\":\n      return `${title} was archived`;\n    case \"restored\":\n      return `${title} was restored`;\n    case \"reminded\":\n      return `${title} is due soon`;\n  }\n}\n\nfunction columnName(board: Board, columnId: ColumnId): string {\n  return (\n    board.columns.find((column) => column.id === columnId)?.name ??\n    \"a removed column\"\n  );\n}\n"
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 0,
+            "start": 0
+          },
+          "right": {
+            "len": 11,
+            "start": 0
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "",
+      "mode": {
+        "kind": "same"
+      },
+      "right": "import type { Card } from \"./types\";\n\nconst MINUTE_MS = 60_000;\n\n/** When to remind the assignee of a card, or null when it has no due time or reminder. */\nexport function reminderAt(card: Card): Date | null {\n  if (card.dueAt === undefined || card.remindBefore === undefined) {\n    return null;\n  }\n  return new Date(Date.parse(card.dueAt) - card.remindBefore * MINUTE_MS);\n}\n"
+    },
+    {
+      "kind": "modeOnly",
+      "new": "executable",
+      "old": "file"
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 0,
+            "start": 1
+          },
+          "right": {
+            "len": 1,
+            "start": 1
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "#!/bin/sh\nrsync -a dist/ staging:/srv/taskboard/\n",
+      "mode": {
+        "kind": "changed",
+        "new": "executable",
+        "old": "file"
+      },
+      "right": "#!/bin/sh\nset -e\nrsync -a dist/ staging:/srv/taskboard/\n"
+    },
+    {
+      "differences": [
+        {
+          "left": {
+            "len": 0,
+            "start": 2
+          },
+          "right": {
+            "len": 1,
+            "start": 2
+          },
+          "words": {
+            "left": {
+              "changed": [],
+              "removals": []
+            },
+            "right": {
+              "changed": [],
+              "removals": []
+            }
+          }
+        }
+      ],
+      "kind": "texts",
+      "left": "@echo off\r\npnpm install\r\n",
+      "mode": {
+        "kind": "same"
+      },
+      "right": "@echo off\r\npnpm install\r\npnpm build\r\n"
+    },
+    {
+      "kind": "submodule",
+      "new": "2222222222222222222222222222222222222222",
+      "old": "1111111111111111111111111111111111111111"
+    }
+  ],
+  "start": {
+    "files": [
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 0,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 1
+        },
+        "path": "config"
+      },
+      {
+        "change": {
+          "kind": "added"
+        },
+        "id": 1,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "data/big.txt"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 2,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 1
+        },
+        "path": "docs/current.md"
+      },
+      {
+        "change": {
+          "kind": "renamed",
+          "old_path": "docs/shortcuts.md"
+        },
+        "id": 3,
+        "lines": {
+          "added": 2,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "docs/keys.md"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 4,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "docs/legacy.txt"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 5,
+        "lines": {
+          "kind": "notCounted"
+        },
+        "path": "public/logo.png"
+      },
+      {
+        "change": {
+          "kind": "deleted"
+        },
+        "id": 6,
+        "lines": {
+          "added": 0,
+          "kind": "counted",
+          "removed": 43
+        },
+        "path": "src/api/mockBoards.ts"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 7,
+        "lines": {
+          "added": 44,
+          "kind": "counted",
+          "removed": 21
+        },
+        "path": "src/board/board.ts"
+      },
+      {
+        "change": {
+          "kind": "added"
+        },
+        "id": 8,
+        "lines": {
+          "added": 11,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "src/board/reminders.ts"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 9,
+        "lines": {
+          "added": 0,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "tools/build.sh"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 10,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "tools/deploy.sh"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 11,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 0
+        },
+        "path": "tools/setup.cmd"
+      },
+      {
+        "change": {
+          "kind": "modified"
+        },
+        "id": 12,
+        "lines": {
+          "added": 1,
+          "kind": "counted",
+          "removed": 1
+        },
+        "path": "vendor/ui"
+      }
+    ],
+    "left": {
+      "label": {
+        "kind": "mergeBase",
+        "left": "main",
+        "right": "feature"
+      },
+      "short_id": "531ea52",
+      "subject": "Build tools, the old notes and the vendored UI kit"
+    },
+    "range": "main...feature",
+    "right": {
+      "label": {
+        "kind": "named",
+        "name": "feature"
+      },
+      "short_id": "9c1ba3f",
+      "subject": "New logo, staging config and release tools"
+    }
+  }
+}

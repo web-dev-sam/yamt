@@ -54,7 +54,7 @@ pub(crate) fn start_server(
 }
 
 /// Returning drops `receiver`, which stops the run once the page cannot take its events.
-fn forward(receiver: &Receiver<HostEvent>, events: &Channel<HostEvent>) {
+pub(crate) fn forward(receiver: &Receiver<HostEvent>, events: &Channel<HostEvent>) {
     for event in receiver {
         if events.send(event).is_err() {
             return;
@@ -166,7 +166,7 @@ mod tests {
 
 #[cfg(test)]
 #[cfg(unix)]
-mod run_tests {
+pub(crate) mod run_tests {
     use std::process::Command;
     use std::sync::mpsc::{RecvTimeoutError, Sender};
     use std::time::{Duration, Instant};
@@ -197,7 +197,7 @@ mod run_tests {
     }
 
     /// A channel that hands each event to `events` and answers like a page that takes it or not.
-    fn channel_into(events: Sender<Value>, takes_events: bool) -> Channel<HostEvent> {
+    pub(crate) fn channel_into(events: Sender<Value>, takes_events: bool) -> Channel<HostEvent> {
         Channel::new(move |body| {
             let InvokeResponseBody::Json(json) = body else {
                 panic!("an event that is not JSON");
@@ -219,7 +219,7 @@ mod run_tests {
         first_event["line"].as_str().unwrap().parse().unwrap()
     }
 
-    fn is_alive(pid: u32) -> bool {
+    pub(crate) fn is_alive(pid: u32) -> bool {
         let status = Command::new("kill")
             .args(["-0", &pid.to_string()])
             .status()

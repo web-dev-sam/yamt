@@ -6,15 +6,17 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import type { Command } from "./args";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
 import { freePort, launchTracked, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
+import { appArgs, glabFolder } from "./startArgs";
 import {
   readState,
   saveState,
@@ -28,12 +30,14 @@ import { finishRecording, recordingLaunch, waitForRecording } from "./video";
 import { inSession, isReady, newSession } from "./webdriver";
 
 type StartApp = Extract<Command, { kind: "start-app" }>;
+type FakeGlab = { readonly scenario: string; readonly posts: string; readonly log: string };
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
   readonly repoDir: string | null;
   readonly binary: string;
   readonly args: readonly string[];
+  readonly glab: FakeGlab | null;
 };
 
 const DISPLAY_READY_MS = 10_000;
@@ -64,6 +68,7 @@ function privateConfig(home: string): string {
 }
 
 function prepareApp(command: StartApp, folder: string): Prepared {
+  const scenarioFolder = command.glab === null ? null : glabFolder(command.glab, existsSync);
   const binary = fromRoot(command.binary);
   if (!existsSync(binary)) {
     throw new Error(`no app at ${binary}; build it with cargo tauri build --debug --no-bundle`);
@@ -74,21 +79,56 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     mkdirSync(join(configDir, "yamt"), { recursive: true });
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
-  if (command.opens.kind === "diff") {
-    return { home, configDir, repoDir: null, binary, args: ["--diff"] };
+  const repoDir = repoFolder(command.opens, folder);
+  const glab = fakeGlab(scenarioFolder, folder);
+  const args = appArgs(command.opens, repoDir, command.ai);
+  return { home, configDir, repoDir, binary, args, glab };
+}
+
+function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
+  if (scenarioFolder === null) {
+    return null;
   }
-  const repoDir = command.opens.kind === "dir" ? fromRoot(command.opens.dir) : join(folder, "repo");
-  if (command.opens.kind === "fresh") {
-    execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+  const dir = join(folder, "glab");
+  mkdirSync(dir);
+  const link = join(dir, "scenario");
+  symlinkSync(scenarioFolder, link);
+  return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
+}
+
+function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
+  if (glab === null) {
+    return {};
   }
-  return { home, configDir, repoDir, binary, args: ["--repo", repoDir] };
+  return {
+    PATH: [fromRoot("scripts/fake-glab"), process.env["PATH"] ?? ""].join(delimiter),
+    YAMT_FAKE_GLAB: glab.scenario,
+    YAMT_FAKE_GLAB_STATE: glab.posts,
+    YAMT_FAKE_GLAB_LOG: glab.log,
+  };
+}
+
+function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+  switch (opens.kind) {
+    case "diff":
+      return null;
+    case "dir":
+    case "range":
+      return fromRoot(opens.dir);
+    case "fresh": {
+      const repoDir = join(folder, "repo");
+      execFileSync(fromRoot("scripts/conflict-repo.sh"), [repoDir], {
+        stdio: ["ignore", "ignore", "pipe"],
+      });
+      return repoDir;
+    }
+  }
 }
 
 function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...displayEnv(display),
+    ...glabEnv(prepared.glab),
     HOME: prepared.home,
     XDG_CONFIG_HOME: prepared.configDir,
   };
@@ -206,7 +246,7 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     rmSync(folder, { recursive: true, force: true });
     throw error;
   }
-  const { home, configDir, repoDir } = prepared;
+  const { home, configDir, repoDir, glab } = prepared;
   const empty: AppState = {
     kind: "app",
     name: command.name,
@@ -231,5 +271,6 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     configDir,
     repoDir,
     record: command.record,
+    glab,
   };
 }

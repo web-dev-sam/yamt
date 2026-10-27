@@ -1,6 +1,8 @@
 //! Desktop shell: one window over a `MergeSession`, whose exit status says whether the merge is resolved, or
-//! with `--diff` one compare window over the stored tabs.
+//! with `--diff` one compare window over the stored tabs, or with `--diff=<range>` one read-only commit range
+//! (with `--ai`, an AI agent in its own checkout).
 
+mod ai;
 #[cfg(target_os = "linux")]
 mod appimage;
 mod args;
@@ -17,8 +19,11 @@ mod merge;
 #[cfg(test)]
 mod mock_window;
 mod outcome;
+mod range;
+mod review;
 mod servers;
 mod settings;
+mod start_script;
 mod window;
 
 use std::path::Path;
@@ -52,6 +57,11 @@ pub fn run() -> ExitCode {
             #[cfg(target_os = "linux")]
             let repo = appimage::repo_from_start_dir(repo);
             merge(&repo).report()
+        }
+        Ok(Invocation::Range { spec, repo, ai }) => {
+            #[cfg(target_os = "linux")]
+            let repo = appimage::repo_from_start_dir(repo);
+            range::run_range(&repo, &spec, ai).report()
         }
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }

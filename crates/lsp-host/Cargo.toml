@@ -6,9 +6,9 @@ publish.workspace = true
 license.workspace = true
 
 [dependencies]
+yamt-pipe.workspace = true
 serde.workspace = true
 specta.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

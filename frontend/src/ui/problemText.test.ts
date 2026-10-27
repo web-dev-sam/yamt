@@ -180,6 +180,12 @@ test("an unknown compare tab says the tab was closed", () => {
   );
 });
 
+test("a range file Rust does not list says it is not part of this range", () => {
+  expect(text({ action: "open", path: PATH, cause: { kind: "UnknownRangeFile", file: 3 } })).toBe(
+    `Could not open ${PATH}: that file is not part of this range.`,
+  );
+});
+
 test("a column over the limit names the limit from the reply in MiB", () => {
   const limit = 8 * 1024 * 1024;
 
@@ -197,6 +203,30 @@ test("a stopped worker says to try again", () => {
   );
 });
 
+test.each<[ProblemCause, string]>([
+  [{ kind: "UnknownThread", thread: 4 }, "that thread is not on a file of this range."],
+  [{ kind: "UnknownMessage", message: 9 }, "that message is not on a file of this range."],
+  [{ kind: "EmptyMessage" }, "the message is empty."],
+  [{ kind: "MessagePending", message: 9 }, "that message is already pending on GitLab."],
+  [
+    { kind: "NotANote", message: 9 },
+    "that message is an AI answer; only your own comments can be changed.",
+  ],
+  [{ kind: "SendRunning" }, "a send to GitLab is still running; try again when it is done."],
+  [{ kind: "AiOff" }, "the AI is off; start yamt with --ai to use it."],
+])("the review failure %o has its fixed reason", (cause, reason) => {
+  expect(text({ action: "openRange", cause })).toBe(`Could not open the range: ${reason}`);
+});
+
+test("a failed removal names the folder and the system's message", () => {
+  expect(
+    text({
+      action: "openRange",
+      cause: { kind: "RemoveFailed", folder: "/d/pair/checkout", message: "busy\n" },
+    }),
+  ).toBe("Could not open the range: removing /d/pair/checkout failed: busy");
+});
+
 test.each([
   [{ action: "tabs" }, "Could not update the tabs: boom"],
   [{ action: "loadTab", name: "Compare 2" }, "Could not load Compare 2: boom"],
@@ -206,6 +236,51 @@ test.each([
   ],
 ] as const)("a failed compare call %o says what failed, naming the tab", (failed, words) => {
   expect(text({ ...failed, cause: { kind: "Unexpected", message: "boom" } })).toBe(words);
+});
+
+test("a failed openRange says the range could not be opened, with git's words", () => {
+  expect(text({ action: "openRange", cause: { kind: "Git", message: "bad revision\n" } })).toBe(
+    "Could not open the range: bad revision",
+  );
+});
+
+test.each([
+  ["list", "Could not load the threads: boom"],
+  ["add", "Could not add the thread: boom"],
+  ["note", "Could not add the note: boom"],
+  ["queue", "Could not queue the message: boom"],
+  ["unqueue", "Could not unqueue the message: boom"],
+  ["edit", "Could not edit the comment: boom"],
+  ["delete", "Could not delete the comment: boom"],
+  ["check", "Could not check GitLab: boom"],
+  ["send", "Could not send to GitLab: boom"],
+  ["session", "Could not store the AI's conversation: boom"],
+  ["answer", "Could not store the AI's answer: boom"],
+] as const)("a failed thread call at %s says what failed", (step, words) => {
+  expect(text({ action: "threads", step, cause: { kind: "Unexpected", message: "boom" } })).toBe(
+    words,
+  );
+});
+
+test.each([
+  ["ask", "The AI could not answer: the AI is off; start yamt with --ai to use it."],
+  ["diff", "Could not show the diff: the AI is off; start yamt with --ai to use it."],
+  [
+    "discard",
+    "The AI's checkout could not be removed: the AI is off; start yamt with --ai to use it.",
+  ],
+] as const)("a failed AI call at %s says what failed", (step, words) => {
+  expect(text({ action: "ai", step, cause: { kind: "AiOff" } })).toBe(words);
+});
+
+test("a failed discard names the checkout and the system's message", () => {
+  expect(
+    text({
+      action: "ai",
+      step: "discard",
+      cause: { kind: "RemoveFailed", folder: "/d/pair/checkout", message: "busy\n" },
+    }),
+  ).toBe("The AI's checkout could not be removed: removing /d/pair/checkout failed: busy");
 });
 
 test("a save to a tab another call closed says the tab was closed", () => {

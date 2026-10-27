@@ -263,6 +263,146 @@ test("lsp importing ipc's index and its own internal/ violates nothing", () => {
   expect(violationsOf(files)).toEqual([]);
 });
 
+test("jsonrpc importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/jsonrpc/index.ts", text: `import { ref } from "vue";` },
+    {
+      path: "src/jsonrpc/internal/connection.ts",
+      text: `import { useTimeoutFn } from "@vueuse/core";`,
+    },
+    {
+      path: "src/jsonrpc/internal/timers.ts",
+      text: `import { Channel } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/jsonrpc/internal/messages.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/jsonrpc/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/jsonrpc/internal/connection.ts", specifier: "@vueuse/core" },
+    { rule: "PM3", file: "src/jsonrpc/internal/timers.ts", specifier: "@tauri-apps/api/core" },
+    { rule: "PM3", file: "src/jsonrpc/internal/messages.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("jsonrpc importing any other src/ module violates PM2", () => {
+  const files = [
+    { path: "src/jsonrpc/index.ts", text: `import type { ServerHost } from "../ipc";` },
+    { path: "src/jsonrpc/internal/connection.ts", text: `import "../../lsp/index.ts";` },
+    { path: "src/jsonrpc/internal/messages.ts", text: `import { log } from "../../ipc/log";` },
+    { path: "src/jsonrpc/internal/timers.ts", text: `import "../../main";` },
+    { path: "src/jsonrpc/a.ts", text: `import "../jsonrpcx/b";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "jsonrpc/ imports no other src/ module",
+    })),
+  );
+});
+
+test("jsonrpc importing itself and valibot, and lsp importing jsonrpc, violate nothing", () => {
+  const files = [
+    { path: "src/jsonrpc/index.ts", text: `export { Connection } from "./internal/connection";` },
+    {
+      path: "src/jsonrpc/internal/connection.ts",
+      text: `import { parseIncoming } from "./messages";\nimport type { Timers } from "./timers.ts";`,
+    },
+    {
+      path: "src/jsonrpc/internal/connection.test.ts",
+      text: `import { Connection } from "../index";`,
+    },
+    { path: "src/jsonrpc/internal/messages.ts", text: `import * as v from "valibot";` },
+    { path: "src/jsonrpc/sample.ts", text: `import "../../fixtures/sample/base.ts.txt?raw";` },
+    { path: "src/lsp/internal/attempt.ts", text: `import { Connection } from "../../jsonrpc";` },
+    { path: "src/lsp/index.ts", text: `import type { Timers } from "../jsonrpc/index.ts";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("lsp importing jsonrpc's internal/ violates PM5", () => {
+  const files = [
+    {
+      path: "src/lsp/internal/a.ts",
+      text: `import { Connection } from "../../jsonrpc/internal/connection";`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM5", file: "src/lsp/internal/a.ts", specifier: "../../jsonrpc/internal/connection" },
+  ]);
+});
+
+test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/agent/index.ts", text: `import { ref } from "vue";` },
+    { path: "src/agent/internal/turn.ts", text: `import { useTimeoutFn } from "@vueuse/core";` },
+    {
+      path: "src/agent/internal/process.ts",
+      text: `import { Channel } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/agent/internal/answers.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/agent/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/agent/internal/turn.ts", specifier: "@vueuse/core" },
+    { rule: "PM3", file: "src/agent/internal/process.ts", specifier: "@tauri-apps/api/core" },
+    { rule: "PM3", file: "src/agent/internal/answers.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("agent importing anything but ipc's and jsonrpc's index violates PM2", () => {
+  const files = [
+    { path: "src/agent/index.ts", text: `import { MergeController } from "../editor";` },
+    { path: "src/agent/internal/a.ts", text: `import type { Store } from "../../ui/store";` },
+    { path: "src/agent/internal/b.ts", text: `import { LanguageServers } from "../../lsp";` },
+    { path: "src/agent/internal/c.ts", text: `import { log } from "../../ipc/log";` },
+    {
+      path: "src/agent/internal/d.ts",
+      text: `import { Connection } from "../../jsonrpc/internal/connection";`,
+    },
+    { path: "src/agent/e.ts", text: `import "../agentx/f";` },
+    { path: "src/agent/g.ts", text: `import "../main";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "agent/ imports only ipc/index.ts and jsonrpc/index.ts",
+    })),
+  );
+});
+
+test("agent importing ipc's and jsonrpc's index, itself and fixtures violates nothing", () => {
+  const files = [
+    { path: "src/agent/index.ts", text: `import type { AgentSource } from "../ipc";` },
+    { path: "src/agent/a.ts", text: `import { SYSTEM_TIMERS } from "../jsonrpc/index.ts";` },
+    { path: "src/agent/internal/b.ts", text: `import { log } from "../../ipc/index";` },
+    { path: "src/agent/internal/c.ts", text: `import { Connection } from "../../jsonrpc";` },
+    {
+      path: "src/agent/internal/d.ts",
+      text: `import { e } from "./e";\nimport * as v from "valibot";`,
+    },
+    { path: "src/agent/internal/e.ts", text: `export const e = 1;` },
+    { path: "src/agent/index.test.ts", text: `import { f } from "./internal/f";` },
+    {
+      path: "src/agent/internal/f.test.ts",
+      text: `import x from "../../../fixtures/agent/load.jsonl?raw";`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("a compare file importing the merge store, App.vue or lsp/ violates PM7", () => {
   const files = [
     { path: "src/ui/compareStore.ts", text: `import { useAppStore } from "./store";` },
@@ -304,6 +444,292 @@ test("merge files importing the store and compare files importing their own neig
       path: "src/ui/CompareView.vue",
       text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
     },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("a range file importing the merge root, the compare root or lsp/ violates PM9", () => {
+  const files = [
+    { path: "src/ui/rangeStore.ts", text: `import { useAppStore } from "./store";` },
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport App from "./App.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeView.vue",
+      text: `<script setup lang="ts">\nimport { useCompareStore } from "./compareStore";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeFileRow.vue",
+      text: `<script setup lang="ts">\nimport "./CompareApp.vue";\n</script>`,
+    },
+    { path: "src/ui/rangeText.ts", text: `import "./compareStore.ts";` },
+    { path: "src/ui/useRangeController.ts", text: `import type { X } from "../lsp";` },
+    { path: "src/ui/useRangeLoad.test.ts", text: `import "./store.ts";` },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM9",
+      file: "src/ui/rangeStore.ts",
+      specifier: "./store",
+      reason: "the range window never imports the merge window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeApp.vue",
+      specifier: "./App.vue",
+      reason: "the range window never imports the merge window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeView.vue",
+      specifier: "./compareStore",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeFileRow.vue",
+      specifier: "./CompareApp.vue",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/rangeText.ts",
+      specifier: "./compareStore.ts",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/useRangeController.ts",
+      specifier: "../lsp",
+      reason: "the range window never imports lsp/",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/useRangeLoad.test.ts",
+      specifier: "./store.ts",
+      reason: "the range window never imports the merge window's root",
+    },
+  ]);
+});
+
+test("a compare file importing the range root violates PM7", () => {
+  const files = [
+    { path: "src/ui/compareStore.ts", text: `import { useRangeStore } from "./rangeStore";` },
+    {
+      path: "src/ui/CompareApp.vue",
+      text: `<script setup lang="ts">\nimport RangeApp from "./RangeApp.vue";\n</script>`,
+    },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM7",
+      file: "src/ui/compareStore.ts",
+      specifier: "./rangeStore",
+      reason: "the compare window never imports the range window's root",
+    },
+    {
+      rule: "PM7",
+      file: "src/ui/CompareApp.vue",
+      specifier: "./RangeApp.vue",
+      reason: "the compare window never imports the range window's root",
+    },
+  ]);
+});
+
+test("range files importing shared ui files and their own neighbours violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport FileList from "./FileList.vue";\nimport "./rangeStore";\n</script>`,
+    },
+    { path: "src/ui/rangeStore.ts", text: `import "./settingsStore";\nimport "./fileListKey";` },
+    {
+      path: "src/ui/RangeView.vue",
+      text: `<script setup lang="ts">\nimport "./paneSplit";\n</script>`,
+    },
+    { path: "src/ui/useRangeController.ts", text: `import "../editor";` },
+    { path: "src/ui/storeRange.ts", text: `import "./compareStore";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("the merge root, the compare root or a shared ui file importing an AI view violates PM9", () => {
+  const files = [
+    {
+      path: "src/ui/App.vue",
+      text: `<script setup lang="ts">\nimport AgentSettings from "./AgentSettings.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/CompareView.vue",
+      text: `<script setup lang="ts">\nimport AiTurn from "./AiTurn.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/SettingsView.vue",
+      text: `<script setup lang="ts">\nimport "./AgentSettings";\n</script>`,
+    },
+    { path: "src/ui/store.ts", text: `import "./EditDiff.vue";\nimport "./AiStep.vue";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM9", file: "src/ui/App.vue", specifier: "./AgentSettings.vue" },
+    { rule: "PM9", file: "src/ui/CompareView.vue", specifier: "./AiTurn.vue" },
+    { rule: "PM9", file: "src/ui/SettingsView.vue", specifier: "./AgentSettings" },
+    { rule: "PM9", file: "src/ui/store.ts", specifier: "./EditDiff.vue" },
+    { rule: "PM9", file: "src/ui/store.ts", specifier: "./AiStep.vue" },
+  ]);
+});
+
+test("range files and the AI views importing the AI views, and an AI view importing shared files, violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport AgentSettings from "./AgentSettings.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeThreadBox.vue",
+      text: `<script setup lang="ts">\nimport AiTurn from "./AiTurn.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport AiStep from "./AiStep.vue";\nimport "./aiText";\n</script>`,
+    },
+    {
+      path: "src/ui/AiStep.vue",
+      text: `<script setup lang="ts">\nimport EditDiff from "./EditDiff.vue";\n</script>`,
+    },
+    { path: "src/ui/rangeStore.ts", text: `import { aiMayClose } from "./aiClose";` },
+    { path: "src/ui/aiClose.ts", text: `import "./question";\nimport "./problem";` },
+    { path: "src/ui/aiClose.test.ts", text: `import { aiMayClose } from "./aiClose";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("an AI view or the close question importing the merge root, the compare root or lsp/ violates PM9; the merge root importing aiClose too", () => {
+  const files = [
+    { path: "src/ui/aiClose.ts", text: `import { useAppStore } from "./store";` },
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport "./compareStore";\n</script>`,
+    },
+    {
+      path: "src/ui/AgentSettings.vue",
+      text: `<script setup lang="ts">\nimport "../lsp";\nimport "./settingsStore";\n</script>`,
+    },
+    { path: "src/ui/App.vue", text: `<script setup lang="ts">\nimport "./aiClose";\n</script>` },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM9",
+      file: "src/ui/aiClose.ts",
+      specifier: "./store",
+      reason: "the range window never imports the merge window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/AiTurn.vue",
+      specifier: "./compareStore",
+      reason: "the range window never imports the compare window's root",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/AgentSettings.vue",
+      specifier: "../lsp",
+      reason: "the range window never imports lsp/",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/App.vue",
+      specifier: "./aiClose",
+      reason: "the AI's views and close question are the range window's only",
+    },
+  ]);
+});
+
+test("building the agent source or client outside main.ts violates PM9; main.ts and tests may", () => {
+  const files = [
+    { path: "src/ui/rangeStore.ts", text: `const client = new AgentClient({ source, command });` },
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nconst source = ipc.createTauriAgentSource(log);\n</script>`,
+    },
+    {
+      path: "src/agent/index.ts",
+      text: `export const made = createFixtureAgentSource(log, "?ai");`,
+    },
+    {
+      path: "src/main.ts",
+      text: `const agent = new AgentClient({ source: createTauriAgentSource(log), command });`,
+    },
+    { path: "src/agent/index.test.ts", text: `client = new AgentClient({ source, command });` },
+    {
+      path: "src/ipc/fixtureAgent.ts",
+      text: `export function createFixtureAgentSource(log: Log, search: string) {}\nconst c = AgentClient;`,
+    },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM9",
+      file: "src/ui/rangeStore.ts",
+      specifier: "AgentClient",
+      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
+    },
+    {
+      rule: "PM9",
+      file: "src/ui/RangeApp.vue",
+      specifier: "createTauriAgentSource",
+      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
+    },
+    {
+      rule: "PM9",
+      file: "src/agent/index.ts",
+      specifier: "createFixtureAgentSource",
+      reason: "the agent source and client are built only in main.ts (plan §2 #108)",
+    },
+  ]);
+});
+
+test("a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2", () => {
+  const files = [
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport { MarkdownView as View } from "../editor/index.ts";\n</script>`,
+    },
+    { path: "src/ui/answer.ts", text: `export { MarkdownView } from "../editor";` },
+    { path: "src/ui/whole.ts", text: `import * as editor from "../editor";` },
+    { path: "src/ui/direct.ts", text: `import type { X } from "../editor/markdown";` },
+    { path: "src/ui/star.ts", text: `export * from "../editor";` },
+    { path: "src/ui/direct2.ts", text: `import { X } from "../editor/markdown.ts";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM2", file: "src/ui/AiTurn.vue", specifier: "../editor/index.ts" },
+    { rule: "PM2", file: "src/ui/answer.ts", specifier: "../editor" },
+    { rule: "PM2", file: "src/ui/whole.ts", specifier: "../editor" },
+    { rule: "PM2", file: "src/ui/direct.ts", specifier: "../editor/markdown" },
+    { rule: "PM2", file: "src/ui/star.ts", specifier: "../editor" },
+    { rule: "PM2", file: "src/ui/direct2.ts", specifier: "../editor/markdown.ts" },
+  ]);
+});
+
+test("useMarkdown.ts importing MarkdownView and other ui files importing the editor's other names violate nothing", () => {
+  const files = [
+    { path: "src/ui/useMarkdown.ts", text: `import { MarkdownView } from "../editor";` },
+    { path: "src/ui/useMergeController.ts", text: `import { MergeController } from "../editor";` },
+    {
+      path: "src/ui/AiTurn.vue",
+      text: `<script setup lang="ts">\nimport { useMarkdown } from "./useMarkdown";\n</script>`,
+    },
+    { path: "src/editor/index.ts", text: `export { MarkdownView } from "./markdown";` },
+    { path: "src/ui/ns.ts", text: `import * as sides from "./sides";` },
+    { path: "src/ui/re.ts", text: `export { MergeController } from "../editor";` },
   ];
 
   expect(violationsOf(files)).toEqual([]);

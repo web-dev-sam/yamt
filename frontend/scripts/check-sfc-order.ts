@@ -20,6 +20,7 @@ const CALLEE_SECTIONS: Record<string, Section> = {
   defineProps: "macro",
   defineEmits: "macro",
   defineModel: "macro",
+  defineSlots: "macro",
   withDefaults: "macro",
   ref: "state",
   reactive: "state",

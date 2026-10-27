@@ -5,17 +5,20 @@ import { createFixtureSettings } from "./fixtureSettings";
 
 const DEFAULT_PATH = "/fixture/settings.json";
 const NO_SERVERS = { repositories: {}, off: {}, added: [] };
+const NO_AGENT = { command: null, firstMessage: null };
 const IN_USE: StoredSettings = {
   theme: "dark",
   antialiasing: "subpixel",
   keys: { apply: ["a"] },
   languageServers: NO_SERVERS,
+  agent: NO_AGENT,
 };
 const LIGHT: StoredSettings = {
   theme: "light",
   antialiasing: "subpixel",
   keys: {},
   languageServers: NO_SERVERS,
+  agent: NO_AGENT,
 };
 const REPOSITORY = "/fixture/repository";
 const OXLINT = { command: ["oxlint", "--lsp"], fileTypes: ["ts", "vue"] };
@@ -41,10 +44,17 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
     antialiasing: "greyscale",
     keys: { "later-action": ["Mod-q"] },
     languageServers: NO_SERVERS,
+    agent: NO_AGENT,
   });
 
   const read = await settings.setTheme(
-    { theme: "dark", antialiasing: "greyscale", keys: {}, languageServers: NO_SERVERS },
+    {
+      theme: "dark",
+      antialiasing: "greyscale",
+      keys: {},
+      languageServers: NO_SERVERS,
+      agent: NO_AGENT,
+    },
     "light",
   );
 
@@ -58,6 +68,7 @@ test("setTheme replaces the theme and keeps the keys and unknown actions", async
         antialiasing: "greyscale",
         keys: { "later-action": ["Mod-q"] },
         languageServers: NO_SERVERS,
+        agent: NO_AGENT,
       },
     },
   });
@@ -75,6 +86,7 @@ test("setAntialiasing replaces the antialiasing, keeps the rest, and the next lo
     antialiasing: "greyscale",
     keys: { "later-action": ["Mod-q"] },
     languageServers: NO_SERVERS,
+    agent: NO_AGENT,
   };
   expect(read).toEqual({
     ok: true,
@@ -90,6 +102,7 @@ test("setKeys sets an entry with a list, removes it with null, and leaves the ot
     antialiasing: "subpixel",
     keys: { apply: ["a"], undo: ["Alt-Backspace"] },
     languageServers: NO_SERVERS,
+    agent: NO_AGENT,
   });
 
   const read = await settings.setKeys(IN_USE, [
@@ -115,6 +128,7 @@ test("a change before any load creates the file from the settings in use", async
     antialiasing: "subpixel",
     keys: { apply: ["a"] },
     languageServers: NO_SERVERS,
+    agent: NO_AGENT,
   });
 });
 
@@ -128,6 +142,40 @@ test("a reply is a copy: changing it changes nothing stored", async () => {
   const again = await settings.loadSettings(IN_USE);
 
   expect(again.ok && again.value.stored.keys).toEqual({ apply: ["a"] });
+});
+
+test("setAgent replaces the agent entry, keeps the rest, and the next load reads it", async () => {
+  const settings = createFixtureSettings();
+  await settings.loadSettings(IN_USE);
+  const agent = { command: ["omp", "acp", "--trace"], firstMessage: null };
+
+  const read = await settings.setAgent(LIGHT, agent);
+  const load = await settings.loadSettings(LIGHT);
+  const back = await settings.setAgent(IN_USE, NO_AGENT);
+
+  expect(read).toEqual({
+    ok: true,
+    value: { path: DEFAULT_PATH, defaultPath: DEFAULT_PATH, stored: { ...IN_USE, agent } },
+  });
+  expect(load).toEqual(read);
+  expect(back.ok && back.value.stored).toEqual(IN_USE);
+});
+
+test("an agent command in a reply and the sent one are copies: changing them changes nothing stored", async () => {
+  const settings = createFixtureSettings();
+  const sent = { command: ["omp", "acp"], firstMessage: "Hi {{ MESSAGE }}" };
+  const first = await settings.setAgent(IN_USE, sent);
+  sent.command.push("--sent");
+  if (first.ok) {
+    first.value.stored.agent.command?.push("--reply");
+  }
+
+  const again = await settings.loadSettings(IN_USE);
+
+  expect(again.ok && again.value.stored.agent).toEqual({
+    command: ["omp", "acp"],
+    firstMessage: "Hi {{ MESSAGE }}",
+  });
 });
 
 test("moving to an unknown path creates it from the settings in use, a known one is used", async () => {

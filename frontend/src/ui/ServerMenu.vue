@@ -2,6 +2,7 @@
 import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 
+import { copyOrSelect } from "./copyOrSelect";
 import { failureHelp, installText } from "./installText";
 import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
 import type { OpenMenu } from "./serverMenuToggle";
@@ -124,14 +125,8 @@ function showLog(): void {
 
 async function copy(command: string, event: MouseEvent): Promise<void> {
   const box = event.currentTarget instanceof HTMLElement ? event.currentTarget.parentElement : null;
-  try {
-    await navigator.clipboard.writeText(command);
+  if (await copyOrSelect(command, box?.querySelector("code") ?? null)) {
     copied.value = command;
-  } catch {
-    const code = box?.querySelector("code");
-    if (code !== null && code !== undefined) {
-      window.getSelection()?.selectAllChildren(code);
-    }
   }
 }
 </script>

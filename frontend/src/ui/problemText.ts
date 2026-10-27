@@ -2,11 +2,27 @@ import { keyLabel, type KeyProblem } from "../ipc";
 import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, operationName } from "./operationText";
-import type { Problem, ProblemCause } from "./problem";
+import type { AiAttempt, Problem, ProblemCause, ThreadStep } from "./problem";
 
 type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 
 type UnsupportedReason = Extract<ProblemCause, { kind: "Unsupported" }>["reason"];
+
+type Cause = CausedProblem["cause"];
+
+type FixedKind =
+  | "NoConfigFolder"
+  | "MergeAborted"
+  | "UnknownTab"
+  | "UnknownRangeFile"
+  | "WorkerStopped"
+  | "UnknownThread"
+  | "UnknownMessage"
+  | "EmptyMessage"
+  | "NotANote"
+  | "MessagePending"
+  | "SendRunning"
+  | "AiOff";
 
 const AT_POSITION = /^(.*) at line (\d+) column (\d+)$/s;
 
@@ -19,13 +35,39 @@ const OPERATION_STATE_WORDS: Readonly<
   NoOperation: "Git has no operation to continue or abort.",
 };
 
-const FIXED_REASONS: Readonly<
-  Record<"NoConfigFolder" | "MergeAborted" | "UnknownTab" | "WorkerStopped", string>
-> = {
+const FIXED_REASONS: Readonly<Record<FixedKind, string>> = {
   NoConfigFolder: "this system has no config folder to keep it in.",
   MergeAborted: "the merge was aborted.",
   UnknownTab: "that tab was closed.",
+  UnknownRangeFile: "that file is not part of this range.",
   WorkerStopped: "yamt's worker stopped; try again.",
+  UnknownThread: "that thread is not on a file of this range.",
+  UnknownMessage: "that message is not on a file of this range.",
+  EmptyMessage: "the message is empty.",
+  MessagePending: "that message is already pending on GitLab.",
+  NotANote: "that message is an AI answer; only your own comments can be changed.",
+  SendRunning: "a send to GitLab is still running; try again when it is done.",
+  AiOff: "the AI is off; start yamt with --ai to use it.",
+};
+
+const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
+  list: "Could not load the threads",
+  add: "Could not add the thread",
+  note: "Could not add the note",
+  queue: "Could not queue the message",
+  unqueue: "Could not unqueue the message",
+  edit: "Could not edit the comment",
+  delete: "Could not delete the comment",
+  check: "Could not check GitLab",
+  send: "Could not send to GitLab",
+  session: "Could not store the AI's conversation",
+  answer: "Could not store the AI's answer",
+};
+
+const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {
+  ask: "The AI could not answer",
+  diff: "Could not show the diff",
+  discard: "The AI's checkout could not be removed",
 };
 
 function attempted(problem: CausedProblem): string {
@@ -52,10 +94,16 @@ function attempted(problem: CausedProblem): string {
     }
     case "tabs":
       return "Could not update the tabs";
+    case "openRange":
+      return "Could not open the range";
     case "loadTab":
       return `Could not load ${problem.name}`;
     case "saveTab":
       return `Could not save ${problem.name}`;
+    case "threads":
+      return THREAD_STEP_WORDS[problem.step];
+    case "ai":
+      return AI_ATTEMPT_WORDS[problem.step];
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;
@@ -111,8 +159,15 @@ function keyProblemText(path: string, problem: KeyProblem, platform: string): st
   }
 }
 
+function hasFixedReason(cause: Cause): cause is Extract<Cause, { kind: FixedKind }> {
+  return Object.hasOwn(FIXED_REASONS, cause.kind);
+}
+
 function causedText(problem: CausedProblem, platform: string): string {
   const { cause } = problem;
+  if (hasFixedReason(cause)) {
+    return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
+  }
   switch (cause.kind) {
     case "Git":
     case "Unexpected":
@@ -131,11 +186,8 @@ function causedText(problem: CausedProblem, platform: string): string {
       return brokenText(cause.path, cause.message);
     case "NotAbsolute":
       return `${attempted(problem)}: ${cause.path} is not an absolute path; start it with / or ~/.`;
-    case "NoConfigFolder":
-    case "MergeAborted":
-    case "UnknownTab":
-    case "WorkerStopped":
-      return `${attempted(problem)}: ${FIXED_REASONS[cause.kind]}`;
+    case "RemoveFailed":
+      return `${attempted(problem)}: removing ${cause.folder} failed: ${cause.message.trim()}`;
     case "StopMovedOn":
     case "GitRunning":
     case "MergeFinished":
@@ -145,10 +197,6 @@ function causedText(problem: CausedProblem, platform: string): string {
       return cause.problems.map((each) => keyProblemText(cause.path, each, platform)).join(" ");
     case "ColumnTooLarge":
       return `${attempted(problem)}: ${columnLimitText(cause.limit)}.`;
-    default: {
-      const _exhaustive: never = cause;
-      return _exhaustive;
-    }
   }
 }
 

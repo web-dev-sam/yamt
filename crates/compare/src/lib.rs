@@ -11,9 +11,10 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use yamt_merge_core::{Difference, compare};
+use yamt_merge_core::compare;
 
 pub use crate::store::TabStore;
+pub use yamt_merge_core::Difference;
 
 /// A tab's identity; ids never repeat within a data folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
@@ -106,7 +107,7 @@ pub struct TabTexts {
     pub comparison: Comparison,
 }
 
-/// The most bytes a column holds: the merge window's per-file limit (`session`'s `MAX_TEXT_BYTES`).
+/// The most bytes a column holds: the merge window's per-file limit (`yamt_merge_core::MAX_TEXT_BYTES`).
 pub const MAX_COLUMN_BYTES: u32 = 8 * 1024 * 1024;
 
 /// Why a store operation failed.
@@ -235,5 +236,51 @@ pub fn tab_texts(loaded: &LoadedTab) -> TabTexts {
         left: loaded.left.to_string(),
         right: loaded.right.to_string(),
         comparison: comparison(loaded),
+    }
+}
+
+/// The differences between two texts (`yamt_merge_core::compare`); `Error::TooLarge` when either is over
+/// `MAX_COLUMN_BYTES`.
+pub fn text_differences(left: &str, right: &str) -> Result<Vec<Difference>> {
+    files::require_within_limit(left.len())?;
+    files::require_within_limit(right.len())?;
+    Ok(compare(left, right))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_column_limit_is_merge_core_s_text_limit() {
+        assert_eq!(
+            usize::try_from(MAX_COLUMN_BYTES),
+            Ok(yamt_merge_core::MAX_TEXT_BYTES)
+        );
+    }
+
+    #[test]
+    fn text_differences_refuses_a_side_over_the_column_limit() {
+        let at_limit = "a".repeat(MAX_COLUMN_BYTES as usize);
+        let over = "a".repeat(MAX_COLUMN_BYTES as usize + 1);
+        let over_bytes = over.len();
+        assert!(matches!(
+            text_differences(&over, "b"),
+            Err(Error::TooLarge { bytes }) if bytes == over_bytes
+        ));
+        assert!(matches!(
+            text_differences("b", &over),
+            Err(Error::TooLarge { bytes }) if bytes == over_bytes
+        ));
+        assert!(text_differences(&at_limit, &at_limit).is_ok());
+    }
+
+    #[test]
+    fn text_differences_equals_merge_core_compare() {
+        let left = "one\ntwo words here\nthree\n";
+        let right = "one\ntwo other words here\nfour\n";
+        let differences = text_differences(left, right).unwrap();
+        assert_ne!(differences, Vec::new());
+        assert_eq!(differences, compare(left, right));
     }
 }

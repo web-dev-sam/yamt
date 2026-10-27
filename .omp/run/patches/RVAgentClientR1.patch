@@ -1,0 +1,2210 @@
+From 3adf0b395c3c7f80ffe15e31a6b0be59e3357c96 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 22:55:24 +0100
+Subject: [PATCH] fix(agent): stop before the prompt, one load per session,
+ failures as the app's words, split modules
+
+---
+ frontend/scripts/record-agent.ts              |  25 +-
+ frontend/src/agent/AGENTS.md                  |   8 +-
+ frontend/src/agent/index.test.ts              | 287 +++++++++++++++++-
+ frontend/src/agent/index.ts                   | 237 ++++++---------
+ frontend/src/agent/internal/answers.test.ts   |  42 +++
+ frontend/src/agent/internal/answers.ts        |   3 +-
+ frontend/src/agent/internal/failure.ts        |   9 +-
+ frontend/src/agent/internal/process.ts        |  61 ++--
+ frontend/src/agent/internal/protocol.test.ts  |  93 ++++++
+ frontend/src/agent/internal/protocol.ts       |  41 ++-
+ frontend/src/agent/internal/session.ts        |  97 +-----
+ frontend/src/agent/internal/starter.ts        | 114 +++++++
+ frontend/src/agent/internal/turn.test.ts      |  59 ++--
+ frontend/src/agent/internal/turnRun.test.ts   |  17 ++
+ .../agent/internal/{session.ts => turnRun.ts} |  11 +-
+ frontend/src/ipc/AgentSource.ts               |  74 +----
+ frontend/src/ipc/agentDomain.test.ts          |  52 ++++
+ frontend/src/ipc/agentDomain.ts               |  78 +++++
+ frontend/src/ipc/fixture.ts                   |   3 +
+ frontend/src/ipc/fixtureAgent.test.ts         |  53 +++-
+ frontend/src/ipc/fixtureAgent.ts              |  23 +-
+ frontend/src/ipc/fixtureCompare.ts            |   4 +-
+ frontend/src/ipc/fixtureReview.test.ts        |   2 +-
+ frontend/src/ipc/fixtureReview.ts             |   7 +-
+ frontend/src/ipc/index.ts                     |   9 +-
+ frontend/src/ipc/reviewDomain.test.ts         |   2 +-
+ frontend/src/ipc/tauri.ts                     |   7 +-
+ frontend/src/ipc/tauriAgent.test.ts           |  41 ++-
+ frontend/src/ipc/tauriAgent.ts                |  19 +-
+ frontend/src/ipc/tauriReview.ts               |   7 +-
+ 30 files changed, 1021 insertions(+), 464 deletions(-)
+ create mode 100644 frontend/src/agent/internal/protocol.test.ts
+ create mode 100644 frontend/src/agent/internal/starter.ts
+ create mode 100644 frontend/src/agent/internal/turnRun.test.ts
+ copy frontend/src/agent/internal/{session.ts => turnRun.ts} (89%)
+ create mode 100644 frontend/src/ipc/agentDomain.test.ts
+ create mode 100644 frontend/src/ipc/agentDomain.ts
+
+diff --git a/frontend/scripts/record-agent.ts b/frontend/scripts/record-agent.ts
+index 3039dbc..86a1d23 100644
+--- a/frontend/scripts/record-agent.ts
++++ b/frontend/scripts/record-agent.ts
+@@ -7,7 +7,6 @@
+ // {{CHECKOUT}} and the session id as {{SESSION}}.
+ import { spawn } from "node:child_process";
+ import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+-import { isAbsolute, relative, resolve } from "node:path";
+ import { createInterface } from "node:readline";
+ import type { Writable } from "node:stream";
+ 
+@@ -49,14 +48,34 @@ const COMMAND_STEP = v.object({
+ });
+ const CREATED = v.looseObject({ sessionId: v.string() });
+ 
++const SEPARATOR = /[\\/]/u;
++const ROOTED = /^(?:[\\/]|[A-Za-z]:)/u;
++const DRIVE = /^[A-Za-z]:$/u;
++
+ function fail(message: string): never {
+   process.stderr.write(`record-agent: ${message}\n`);
+   process.exit(1);
+ }
+ 
++function lexical(path: string): string[] {
++  const kept: string[] = [];
++  for (const segment of path.split(SEPARATOR)) {
++    if (segment === "..") {
++      kept.pop();
++    } else if (segment !== "" && segment !== ".") {
++      kept.push(segment);
++    }
++  }
++  return kept;
++}
++
++/** inside.ts's rule: `.`/`..` resolved without the disk, case folded under a drive letter. */
+ function inside(path: string, folder: string): boolean {
+-  const rest = relative(folder, resolve(folder, path));
+-  return rest !== "" && !rest.startsWith("..") && !isAbsolute(rest);
++  const foldsCase = DRIVE.test(lexical(folder)[0] ?? "");
++  const base = lexical(foldsCase ? folder.toLowerCase() : folder);
++  const rooted = ROOTED.test(path) ? path : `${folder}/${path}`;
++  const target = lexical(foldsCase ? rooted.toLowerCase() : rooted);
++  return target.length > base.length && base.every((segment, at) => segment === target[at]);
+ }
+ 
+ function permissionAnswer(params: unknown, folder: string): unknown {
+diff --git a/frontend/src/agent/AGENTS.md b/frontend/src/agent/AGENTS.md
+index 65bc08b..4a2a507 100644
+--- a/frontend/src/agent/AGENTS.md
++++ b/frontend/src/agent/AGENTS.md
+@@ -1,9 +1,9 @@
+-Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. The window's agent client (plan §2 #108, #109, #113, #114): speaks the Agent Client Protocol (ACP) to `omp acp` over `jsonrpc/` through an `ipc/AgentSource` (the app's `tauriAgent.ts`, fixture mode's `fixtureAgent.ts`); Rust only pipes lines. Framework-free (PM3) and imports only `ipc/index.ts` and `jsonrpc/index.ts` (PM2, `scripts/fences.ts`). Public surface is `index.ts`: `AgentClient { ask, loadConversation, editDiff, isRunning, destroy }`, the turn model's types, `AgentFailure`, `TurnEnd`, `agentSessionId`, `firstMessage`/`unknownPlaceholders`/`PLACEHOLDERS`/`DEFAULT_FIRST_MESSAGE`, `DEFAULT_AGENT_COMMAND`; everything else in `internal/`. `AgentClient` is built only in `main.ts` (C8 adds that fence).
++Owner skills: `skill://ts-conventions`, `skill://ipc-contract`. The window's agent client (plan §2 #108, #109, #113, #114): speaks the Agent Client Protocol (ACP) to `omp acp` over `jsonrpc/` through an `ipc/AgentSource` (the app's `tauriAgent.ts`, fixture mode's `fixtureAgent.ts`; shapes and conversions in `ipc/agentDomain.ts`); Rust only pipes lines. Framework-free (PM3) and imports only `ipc/index.ts` and `jsonrpc/index.ts` (PM2, `scripts/fences.ts`). Public surface is `index.ts`: `AgentClient { ask, loadConversation, editDiff, isRunning, destroy }`, the turn model's types, `AgentFailure`, `TurnEnd`, `agentSessionId`, `firstMessage`/`unknownPlaceholders`/`PLACEHOLDERS`/`DEFAULT_FIRST_MESSAGE`, `DEFAULT_AGENT_COMMAND`; everything else in `internal/`. `AgentClient` is built only in `main.ts` (C8 adds that fence). Failure words live only in `ui/problemText.ts`: an app failure travels as its `SourceFailure` (`AgentFailure` `app`, `EditDiff` `appFailed`).
+ 
+-`AgentClient` (`index.ts`) owns the checkout's folder (`prepareCheckout` once; a failure or a `NoCheckout` start is not kept, so Retry makes it again) and one process at a time (`internal/process.ts` `AgentProcess`: `initialize` once, protocol version 1 or `refused`; the command words read from `AgentSetup.command` at each start, `internal/command.ts`, nothing appended; a process that exits is dropped and the next ask starts another). A turn (`ask`): a new thread sends `session/new` and reports its id at once (`TurnEvents.session`); a thread with an id is loaded once per process (`AgentProcess.load`, its replay dropped); then `session/prompt` without a deadline. A second ask on a running thread ends `busy` at once. `stop()` sends `session/cancel` once the prompt is out, else the turn ends `stopped` without prompting. `isRunning()` is "any turn is running". `destroy()` stops the process; running and later turns end `stopped`.
++`internal/starter.ts` (`Starter.ready`) owns the checkout's folder (`prepareCheckout` once; a failure or a `NoCheckout` start is not kept, so Retry makes it again) and one process at a time (`internal/process.ts` `AgentProcess`: `initialize` once, protocol version 1 or `refused`; the command words read from `AgentSetup.command` at each start, `internal/command.ts`, nothing appended; a process that exits is dropped and the next ask starts another). After `destroy` nothing starts: `ready` answers `dropped`, also to an ask stopped while the checkout is made, and a start still running is stopped when it lands. `AgentClient` (`index.ts`) keeps the turns. A turn (`ask`): a new thread sends `session/new` and reports its id at once (`TurnEvents.session`); a thread with an id is loaded once per process (`AgentProcess.load`, its replay dropped; a `loadConversation` load in flight is joined, never sent twice); then `session/prompt` without a deadline. A second ask on a running thread ends `busy` at once. `stop()` sends `session/cancel` while the prompt is out; before that it ends the turn `stopped` at once and nothing more is sent for it; after the answer it does nothing. A run is forgotten before its `ended` settles, so `isRunning()` ("any turn is running") is already false in an `ended` handler. `destroy()` stops the process; running and later turns end `stopped`, a later `loadConversation` answers `stopped`.
+ 
+-Updates are routed by `sessionId` to the one listener of that session (`AgentProcess.listen`): a running `TurnRun` (`internal/session.ts`: the fold, `changed` at most once per 50 ms and always at the end, one end) or `loadConversation`'s collector. `internal/protocol.ts` parses with valibot only what yamt reads (`agent_thought_chunk`, `agent_message_chunk`, `user_message_chunk`, `tool_call`, `tool_call_update`; anything else is ignored) into `TurnUpdate`s; an edit's absolute `diff` path becomes checkout-relative there. `internal/turn.ts` is the one pure fold: thoughts concatenated until a step, message text accumulates as `answer` and moves into a `said` entry when a step follows, a step's update changes only the fields it names and its `content` replaces the outputs (a refusal kept), and `endTurn` turns pending and running steps into `noResult`. `internal/conversation.ts` splits a `session/load` replay into turns at each user message. The `stopReason` table is `session.ts` `stopEnding`.
++Updates are routed by `sessionId` (branded once in `internal/protocol.ts`, an empty id a parse failure) to the one listener of that session (`AgentProcess.listen`): a running `TurnRun` (`internal/turnRun.ts`: the fold, `changed` at most once per 50 ms and always at the end, one end; the `stopReason` table `stopEnding`) or `loadConversation`'s collector. `internal/protocol.ts` parses with valibot only what yamt reads (one tuple per update arm: `agent_thought_chunk`, `agent_message_chunk`, `user_message_chunk`; `tool_call`, `tool_call_update`; anything else is ignored) into `TurnUpdate`s; an edit's absolute `diff` path becomes checkout-relative there. `internal/turn.ts` is the one pure fold: thoughts concatenated until a step, message text accumulates as `answer` and moves into a `said` entry when a step follows, a step's update changes only the fields it names and its `content` replaces the outputs (a refusal kept), and `endTurn` turns pending and running steps into `noResult`. `internal/conversation.ts` splits a `session/load` replay into turns at each user message. `internal/session.ts` is the `AgentSessionId` brand.
+ 
+ The agent's requests are answered by the fixed table in `internal/answers.ts` (sync, through `jsonrpc`'s handler): `session/request_permission` with `toolCall.kind == "execute"` → `allow_once`; any other kind → `allow_once` only when it has locations and every one lies inside the checkout (`internal/inside.ts`: lexical, `/` and `\`, case-folded under a drive letter, the checkout itself not inside, symlinks not followed), else `reject_once` and a `refused` output on that step (created if its `tool_call` has not arrived yet); no wanted option → `cancelled`; never an `*_always` option; any other method → −32601. Failures are `internal/failure.ts`: omp's words come from `error.data.details`; a load error naming "session not found" is `sessionGone`, any other `refused`; a request closed by the process's exit is `crashed` with its code and last stderr line.
+ 
+-Fixtures (`frontend/fixtures/agent/*.jsonl`) are real `omp acp` 18.12.6 conversations recorded by `scripts/record-agent.ts` in a clone of `scripts/range-repo.sh` (`edit-and-command`, `cancelled`, `load` = the first one's session loaded in a fresh process, `permission-outside`), with `{{CHECKOUT}}` and `{{SESSION}}` substituted; the node tests fold them, and `ipc/fixtureAgent.ts` plays them back (`?ai`, `?ai=<case>`, `?ai=crash`, `?ai=checkout-fails`, `?ai-changes`), its `diffTexts` answering from `fixtures/agent/diffs/*.json` (`yamt-cli compare` of `tests/agent/<case>/edit-<n>/`).
++Fixtures (`frontend/fixtures/agent/*.jsonl`) are real `omp acp` 18.12.6 conversations recorded by `scripts/record-agent.ts` in a clone of `scripts/range-repo.sh` (`edit-and-command`, `cancelled`, `load` = the first one's session loaded in a fresh process, `permission-outside`), with `{{CHECKOUT}}` and `{{SESSION}}` substituted; the script keeps its own copy of the permission table, and `answers.test.ts` checks every recorded answer against `answers.ts`. The node tests fold them, and `ipc/fixtureAgent.ts` plays them back (`?ai`, `?ai=<case>` — `load` is only the replay, not a case —, `?ai=crash`, `?ai=checkout-fails`, `?ai-changes`), its `diffTexts` answering from `fixtures/agent/diffs/*.json` (`yamt-cli compare` of `tests/agent/<case>/edit-<n>/`) only when both texts match.
+diff --git a/frontend/src/agent/index.test.ts b/frontend/src/agent/index.test.ts
+index 847d690..062d208 100644
+--- a/frontend/src/agent/index.test.ts
++++ b/frontend/src/agent/index.test.ts
+@@ -446,11 +446,11 @@ test("a failed prepare is not kept, a ready checkout is", async () => {
+   expect(agent.prepareCalls).toBe(2);
+ });
+ 
+-test("an app failure or a throw from prepare is checkoutFailed too, and not kept", async () => {
++test("an app failure from prepare carries the app's failure, a throw is checkoutFailed; neither is kept", async () => {
+   agent.prepares = [{ ok: false, failure: { kind: "AiOff" } }];
+   const off = ask(null);
+   await flush();
+-  expect(off.end).toMatchObject({ failure: { kind: "checkoutFailed", message: "AiOff" } });
++  expect(off.end).toMatchObject({ failure: { kind: "app", failure: { kind: "AiOff" } } });
+   agent.prepareCheckout = async () => {
+     throw new Error("ipc down");
+   };
+@@ -503,7 +503,7 @@ test.each<[string, SourceResult<AgentStartReply>, object]>([
+   [
+     "an app failure",
+     { ok: false, failure: { kind: "AiOff" } },
+-    { kind: "spawnFailed", program: "omp", message: "AiOff" },
++    { kind: "app", failure: { kind: "AiOff" } },
+   ],
+ ])(
+   "a start answered %s fails the turn and is retried at the next ask",
+@@ -669,7 +669,7 @@ test.each<[string, () => Promise<never> | Promise<SourceResult<readonly Differen
+   [
+     "stopped",
+     async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
+-    { kind: "failed", message: "WorkerStopped" },
++    { kind: "appFailed", failure: { kind: "WorkerStopped" } },
+   ],
+   [
+     "thrown",
+@@ -770,3 +770,282 @@ test("over the fixture agent loadConversation gives back the recorded conversati
+   const load = await loading;
+   expect(load.kind === "loaded" && load.turns.map((turn) => stepsOf(turn).length)).toEqual([3]);
+ });
++
++function heldPrepare(): (ready: SourceResult<CheckoutReady>) => void {
++  let release: ((ready: SourceResult<CheckoutReady>) => void) | null = null;
++  agent.prepareCheckout = () =>
++    new Promise((resolve) => {
++      release = resolve;
++    });
++  return (prepared) => release?.(prepared);
++}
++
++test("Stop while the checkout is made ends the turn at once; the late checkout starts nothing", async () => {
++  const release = heldPrepare();
++  const turn = ask(null);
++  await flush();
++  turn.stop();
++  await flush();
++  expect(turn.end).toEqual({ kind: "stopped", turn: { entries: [], answer: "" } });
++  expect(client.isRunning()).toBe(false);
++  release(ready());
++  await flush();
++  expect(agent.commands).toEqual([]);
++  expect(agent.sent).toEqual([]);
++  expect(turn.sessions).toEqual([]);
++  expect(turn.changes).toHaveLength(1);
++});
++
++test("Stop while omp starts ends the turn at once and sends no session/new", async () => {
++  agent.sendToAgent = (_run, message) => {
++    agent.sent.push(JSON.parse(message));
++  };
++  const turn = ask(null);
++  await flush();
++  turn.stop();
++  await flush();
++  expect(turn.end?.kind).toBe("stopped");
++  const [initialize] = agent.sent;
++  agent.reply(initialize?.id ?? -1, { protocolVersion: 1 });
++  await flush();
++  expect(agent.methods()).toEqual(["initialize"]);
++  expect(turn.sessions).toEqual([]);
++});
++
++test("a load and an ask on one thread send one session/load; the replay turns once, the answer is new", async () => {
++  agent.loadAnswer = (id, sessionId) => {
++    agent.update(sessionId, {
++      sessionUpdate: "user_message_chunk",
++      content: { type: "text", text: "Why?" },
++    });
++    agent.said(sessionId, "old answer");
++    agent.reply(id, {});
++  };
++  const loading = client.loadConversation(session("s5"));
++  const turn = ask(session("s5"), "And now?");
++  await flush();
++  expect(agent.methods()).toEqual(["initialize", "session/load", "session/prompt"]);
++  const load = await loading;
++  expect(load.kind === "loaded" && load.turns.map((each) => each.answer)).toEqual(["old answer"]);
++  agent.said("s5", "new");
++  finish("s5");
++  await flush();
++  expect(turn.end).toMatchObject({ kind: "finished", turn: { answer: "new" } });
++});
++
++test("inside an ended handler the turn is no longer running and its thread takes a new ask", async () => {
++  const first = ask(session("s6"));
++  await flush();
++  const seen = first.ended.then(() => ({ running: client.isRunning(), again: ask(session("s6")) }));
++  finish("s6");
++  const { running, again } = await seen;
++  expect(running).toBe(false);
++  await flush();
++  expect(again.end).toBeNull();
++  expect(agent.prompts()).toHaveLength(2);
++});
++
++test("destroy while the checkout is made starts nothing and ends the turn stopped", async () => {
++  const release = heldPrepare();
++  const turn = ask(null);
++  await flush();
++  client.destroy();
++  release(ready());
++  await flush();
++  expect(turn.end?.kind).toBe("stopped");
++  expect(agent.commands).toEqual([]);
++});
++
++test("loadConversation after destroy starts nothing and answers stopped", async () => {
++  client.destroy();
++  expect(await client.loadConversation(session("s8"))).toEqual({ kind: "stopped" });
++  expect(agent.prepareCalls).toBe(0);
++});
++
++test("a load cut off by destroy answers stopped", async () => {
++  agent.loadAnswer = () => undefined;
++  const loading = client.loadConversation(session("s8"));
++  await flush();
++  client.destroy();
++  await flush();
++  expect(await loading).toEqual({ kind: "stopped" });
++});
++
++test("a start that resolves after destroy is stopped", async () => {
++  const start = agent.startAgent.bind(agent);
++  const held = { release: (): void => undefined };
++  agent.startAgent = (command, onEvent) =>
++    new Promise((resolve) => {
++      held.release = () => resolve(start(command, onEvent));
++    });
++  const turn = ask(null);
++  await flush();
++  client.destroy();
++  held.release();
++  await flush();
++  expect(agent.stopped).toEqual([1]);
++  expect(turn.end?.kind).toBe("stopped");
++  expect(agent.methods()).toEqual(["initialize"]);
++});
++
++test("a stale stop after its turn ended cancels nothing", async () => {
++  const first = ask(null);
++  await flush();
++  finish("s1");
++  await flush();
++  ask(session("s1"));
++  await flush();
++  first.stop();
++  expect(agent.methods()).not.toContain("session/cancel");
++});
++
++test("a new thread's session counts as loaded: its next ask prompts without a load", async () => {
++  ask(null);
++  await flush();
++  finish("s1");
++  await flush();
++  ask(session("s1"));
++  await flush();
++  expect(agent.methods()).toEqual([
++    "initialize",
++    "session/new",
++    "session/prompt",
++    "session/prompt",
++  ]);
++});
++
++test("an ask on a new thread's session while its first turn runs is busy", async () => {
++  const first = ask(null);
++  await flush();
++  const second = ask(session("s1"));
++  await flush();
++  expect(second.end).toMatchObject({ kind: "failed", failure: { kind: "busy" } });
++  expect(first.end).toBeNull();
++});
++
++test("ending one thread's turn leaves another thread busy", async () => {
++  ask(session("a"));
++  ask(session("b"));
++  await flush();
++  finish("a");
++  await flush();
++  const again = ask(session("b"));
++  await flush();
++  expect(again.end).toMatchObject({ kind: "failed", failure: { kind: "busy" } });
++});
++
++test("a session/prompt error is refused with omp's details", async () => {
++  const turn = ask(null);
++  await flush();
++  agent.emit({
++    id: promptId("s1"),
++    error: { code: -32603, message: "Internal error", data: { details: "model overloaded" } },
++  });
++  await flush();
++  expect(turn.end).toMatchObject({
++    kind: "failed",
++    failure: { kind: "refused", method: "session/prompt", message: "model overloaded" },
++  });
++});
++
++test("loadConversation when the checkout fails answers checkoutFailed", async () => {
++  agent.prepares = [{ ok: true, value: { kind: "Failed", message: "no git" } }];
++  expect(await client.loadConversation(session("s2"))).toEqual({
++    kind: "failed",
++    failure: { kind: "checkoutFailed", message: "no git" },
++  });
++});
++
++test("a session/new answering an empty id is refused and reports no session", async () => {
++  agent.sendToAgent = (_run, message) => {
++    const sent: Sent = JSON.parse(message);
++    agent.sent.push(sent);
++    queueMicrotask(() => {
++      const result = sent.method === "initialize" ? { protocolVersion: 1 } : { sessionId: "" };
++      agent.reply(sent.id ?? -1, result);
++    });
++  };
++  const turn = ask(null);
++  await flush();
++  expect(turn.end).toMatchObject({
++    kind: "failed",
++    failure: { kind: "refused", method: "session/new" },
++  });
++  expect(turn.sessions).toEqual([]);
++});
++
++test("destroy on a client that never asked stops nothing", () => {
++  expect(() => client.destroy()).not.toThrow();
++  expect(agent.stopped).toEqual([]);
++});
++
++test("a start that throws is spawnFailed and retried at the next ask", async () => {
++  const start = agent.startAgent.bind(agent);
++  agent.startAgent = async () => {
++    throw new Error("ipc down");
++  };
++  const turn = ask(null);
++  await flush();
++  expect(turn.end).toMatchObject({
++    kind: "failed",
++    failure: { kind: "spawnFailed", program: "omp", message: "Error: ipc down" },
++  });
++  agent.startAgent = start;
++  const again = ask(null);
++  await flush();
++  expect(again.sessions).toEqual(["s1"]);
++});
++
++test("a malformed update is logged and dropped, another notification ignored; the stream goes on", async () => {
++  const warn = vi.spyOn(log, "warn");
++  const turn = ask(null);
++  await flush();
++  agent.emit({
++    method: "session/other",
++    params: { sessionId: "s1", update: { sessionUpdate: "tool_call" } },
++  });
++  agent.update("s1", { sessionUpdate: "plan", entries: [] });
++  expect(warn).not.toHaveBeenCalled();
++  agent.update("s1", { sessionUpdate: "tool_call", title: "no id" });
++  expect(warn).toHaveBeenCalledWith("agent.update_dropped", { reason: expect.any(String) });
++  agent.said("s1", "still here");
++  finish("s1");
++  await flush();
++  expect(turn.end).toMatchObject({ kind: "finished", turn: { entries: [], answer: "still here" } });
++  warn.mockRestore();
++});
++
++test("a refusal for a session no turn listens to is answered and changes no turn", async () => {
++  const turn = ask(null);
++  await flush();
++  agent.emit({
++    id: 0,
++    method: "session/request_permission",
++    params: {
++      sessionId: "elsewhere",
++      toolCall: { toolCallId: "t1", title: "Delete /tmp/x", locations: [{ path: "/tmp/x" }] },
++      options: [{ optionId: "no", kind: "reject_once" }],
++    },
++  });
++  await flush();
++  expect(agent.sent.at(-1)).toMatchObject({ id: 0, result: { outcome: { optionId: "no" } } });
++  finish("s1");
++  await flush();
++  expect(turn.end?.turn.entries).toEqual([]);
++});
++
++test("omp exiting before it answers initialize is crashed with its last line", async () => {
++  agent.sendToAgent = (_run, message) => {
++    agent.sent.push(JSON.parse(message));
++    queueMicrotask(() => {
++      agent.log("unknown flag --acp");
++      agent.exit(2);
++    });
++  };
++  const turn = ask(null);
++  await flush();
++  expect(turn.end).toMatchObject({
++    kind: "failed",
++    failure: { kind: "crashed", code: 2, lastLog: "unknown flag --acp" },
++  });
++});
+diff --git a/frontend/src/agent/index.ts b/frontend/src/agent/index.ts
+index 4025fa2..cef8321 100644
+--- a/frontend/src/agent/index.ts
++++ b/frontend/src/agent/index.ts
+@@ -1,23 +1,23 @@
+-import type { AgentSource, CheckoutFolder, Difference } from "../ipc";
++import type { AgentSource, Difference, SourceFailure } from "../ipc";
+ import { parseWith, SYSTEM_TIMERS, type Reply, type Timers } from "../jsonrpc";
+-import { agentCommand } from "./internal/command";
+ import { replayTurns } from "./internal/conversation";
+-import { requestFailure, sourceText, type AgentFailure } from "./internal/failure";
+-import { AgentProcess, type Outcome } from "./internal/process";
++import { requestFailure, type AgentFailure } from "./internal/failure";
++import type { AgentProcess, Outcome } from "./internal/process";
+ import { NEW_SESSION_RESULT, PROMPT_RESULT } from "./internal/protocol";
++import type { AgentSessionId } from "./internal/session";
++import { Starter } from "./internal/starter";
++import type { FileEdit, TurnView } from "./internal/turn";
+ import {
+-  agentSessionId,
+   stopEnding,
+   TurnRun,
+-  type AgentSessionId,
+   type Ending,
+   type TurnEnd,
+   type TurnEvents,
+-} from "./internal/session";
+-import type { FileEdit, TurnView } from "./internal/turn";
++} from "./internal/turnRun";
+ 
+ export type { AgentFailure } from "./internal/failure";
+-export type { AgentSessionId, TurnEnd, TurnEvents } from "./internal/session";
++export type { AgentSessionId } from "./internal/session";
++export type { TurnEnd, TurnEvents } from "./internal/turnRun";
+ export type {
+   FileEdit,
+   Step,
+@@ -41,17 +41,19 @@ export type AskRequest = { readonly session: AgentSessionId | null; readonly tex
+ 
+ export interface RunningTurn {
+   readonly ended: Promise<TurnEnd>;
+-  /** Sends `session/cancel` once the prompt is out; before that, the turn ends without prompting. */
++  /** Sends `session/cancel` once the prompt is out; before that, the turn ends stopped at once. */
+   stop(): void;
+ }
+ 
+ export type ConversationLoad =
+   | { readonly kind: "loaded"; readonly turns: readonly TurnView[] }
+-  | { readonly kind: "failed"; readonly failure: AgentFailure };
++  | { readonly kind: "failed"; readonly failure: AgentFailure }
++  | { readonly kind: "stopped" };
+ 
+ export type EditDiff =
+   | { readonly kind: "differences"; readonly differences: readonly Difference[] }
+   | { readonly kind: "tooLarge"; readonly limit: number }
++  | { readonly kind: "appFailed"; readonly failure: SourceFailure }
+   | { readonly kind: "failed"; readonly message: string };
+ 
+ export type AgentSetup = {
+@@ -60,26 +62,32 @@ export type AgentSetup = {
+   readonly timers?: Timers;
+ };
+ 
+-type Asking = {
+-  stopped: boolean;
+-  prompted: { readonly agent: AgentProcess; readonly session: AgentSessionId } | null;
+-};
++type Asking =
++  | { readonly kind: "preparing" }
++  | { readonly kind: "stopped" }
++  | { readonly kind: "prompted"; readonly agent: AgentProcess; readonly session: AgentSessionId }
++  | { readonly kind: "answered" };
++
++type AskingNow = { now: Asking };
++
++const STOPPED: Ending = { kind: "stopped" };
++
++function isStopped(asking: AskingNow): boolean {
++  return asking.now.kind === "stopped";
++}
+ 
+ /** The window's one agent: the checkout made and the process started at the first ask. */
+ export class AgentClient {
+   readonly #source: AgentSource;
+-  readonly #command: () => readonly string[];
+   readonly #timers: Timers;
++  readonly #starter: Starter;
+   readonly #running = new Set<TurnRun>();
+   readonly #bySession = new Map<AgentSessionId, TurnRun>();
+-  #checkout: Promise<Outcome<CheckoutFolder>> | null = null;
+-  #agent: Promise<Outcome<AgentProcess>> | null = null;
+-  #destroyed = false;
+ 
+   constructor(setup: AgentSetup) {
+     this.#source = setup.source;
+-    this.#command = setup.command;
+     this.#timers = setup.timers ?? SYSTEM_TIMERS;
++    this.#starter = new Starter({ ...setup, timers: this.#timers });
+   }
+ 
+   ask(request: AskRequest, events: TurnEvents): RunningTurn {
+@@ -89,36 +97,33 @@ export class AgentClient {
+       run.end({ kind: "failed", failure: { kind: "busy" } });
+       return { ended: run.ended, stop: () => undefined };
+     }
+-    if (this.#destroyed) {
+-      run.end({ kind: "stopped" });
++    if (this.#starter.isDestroyed()) {
++      run.end(STOPPED);
+       return { ended: run.ended, stop: () => undefined };
+     }
+-    const asking: Asking = { stopped: false, prompted: null };
++    const asking: AskingNow = { now: { kind: "preparing" } };
+     this.#running.add(run);
+     if (session !== null) {
+       this.#bySession.set(session, run);
+     }
+-    void this.#turn(run, request, asking).finally(() => this.#forget(run));
+-    return {
+-      ended: run.ended,
+-      stop: () => {
+-        asking.stopped = true;
+-        asking.prompted?.agent.cancel(asking.prompted.session);
+-      },
+-    };
++    void this.#turn(run, request, asking);
++    return { ended: run.ended, stop: () => this.#stop(run, asking) };
+   }
+ 
+   async loadConversation(session: AgentSessionId): Promise<ConversationLoad> {
+     if (this.#bySession.has(session)) {
+       return { kind: "failed", failure: { kind: "busy" } };
+     }
+-    const agent = await this.#ready();
+-    if (!agent.ok) {
+-      return { kind: "failed", failure: agent.failure };
++    const started = await this.#starter.ready(() => true);
++    if (started.kind !== "started") {
++      return started.kind === "failed" ? started : { kind: "stopped" };
+     }
+-    const replay = await agent.value.replay(session);
+-    return replay.ok
+-      ? { kind: "loaded", turns: replayTurns(replay.value) }
++    const replay = await started.agent.replay(session);
++    if (replay.ok) {
++      return { kind: "loaded", turns: replayTurns(replay.value) };
++    }
++    return this.#starter.isDestroyed()
++      ? { kind: "stopped" }
+       : { kind: "failed", failure: replay.failure };
+   }
+ 
+@@ -131,51 +136,76 @@ export class AgentClient {
+       const { failure } = result;
+       return failure.kind === "ColumnTooLarge"
+         ? { kind: "tooLarge", limit: failure.limit }
+-        : { kind: "failed", message: sourceText(failure) };
++        : { kind: "appFailed", failure };
+     } catch (error) {
+       return { kind: "failed", message: String(error) };
+     }
+   }
+ 
+-  /** Whether any turn is running. */
++  /** Whether any turn is running; false already inside an `ended` handler. */
+   isRunning(): boolean {
+     return this.#running.size > 0;
+   }
+ 
+-  /** Stops the process; running turns end stopped. */
++  /** Stops the process; running turns end stopped, and nothing starts afterwards. */
+   destroy(): void {
+-    this.#destroyed = true;
+-    void this.#agent?.then((agent) => (agent.ok ? agent.value.stop() : undefined));
++    this.#starter.destroy();
+   }
+ 
+-  async #turn(run: TurnRun, request: AskRequest, asking: Asking): Promise<void> {
+-    const agent = await this.#ready();
+-    if (!agent.ok) {
+-      run.end(this.#failed(agent.failure));
++  #stop(run: TurnRun, asking: AskingNow): void {
++    const { now } = asking;
++    switch (now.kind) {
++      case "preparing":
++        asking.now = { kind: "stopped" };
++        this.#end(run, STOPPED);
++        return;
++      case "prompted":
++        now.agent.cancel(now.session);
++        return;
++      case "stopped":
++      case "answered":
++        return;
++      default: {
++        const _exhaustive: never = now;
++        return _exhaustive;
++      }
++    }
++  }
++
++  async #turn(run: TurnRun, request: AskRequest, asking: AskingNow): Promise<void> {
++    const started = await this.#starter.ready(() => !isStopped(asking));
++    if (isStopped(asking)) {
++      return;
++    }
++    if (started.kind !== "started") {
++      this.#end(run, started.kind === "failed" ? this.#failed(started.failure) : STOPPED);
++      return;
++    }
++    const { agent } = started;
++    const session = await this.#session(agent, request.session);
++    if (isStopped(asking)) {
+       return;
+     }
+-    const session = await this.#session(agent.value, request.session, run);
+     if (!session.ok) {
+-      run.end(this.#failed(session.failure));
++      this.#end(run, this.#failed(session.failure));
+       return;
+     }
+-    const unlisten = agent.value.listen(session.value, run);
+-    if (asking.stopped || this.#destroyed) {
+-      unlisten();
+-      run.end({ kind: "stopped" });
+-      return;
++    if (request.session === null) {
++      this.#bySession.set(session.value, run);
++      run.session(session.value);
+     }
+-    asking.prompted = { agent: agent.value, session: session.value };
++    const unlisten = agent.listen(session.value, run);
++    asking.now = { kind: "prompted", agent, session: session.value };
+     const prompt = [{ type: "text", text: request.text }];
+-    const reply = await agent.value.request("session/prompt", { sessionId: session.value, prompt });
++    const reply = await agent.request("session/prompt", { sessionId: session.value, prompt });
++    asking.now = { kind: "answered" };
+     unlisten();
+-    run.end(this.#promptEnding(agent.value, reply));
++    this.#end(run, this.#promptEnding(agent, reply));
+   }
+ 
+   async #session(
+     agent: AgentProcess,
+     session: AgentSessionId | null,
+-    run: TurnRun,
+   ): Promise<Outcome<AgentSessionId>> {
+     if (session !== null) {
+       const failure = await agent.load(session);
+@@ -186,104 +216,37 @@ export class AgentClient {
+       return { ok: false, failure: requestFailure("session/new", reply, agent.exit) };
+     }
+     const parsed = parseWith(NEW_SESSION_RESULT, reply.value);
+-    const created = parsed.ok ? agentSessionId(parsed.value.sessionId) : null;
+-    if (created === null) {
+-      const message = parsed.ok ? "an empty session id" : parsed.reason;
++    if (!parsed.ok) {
++      const message = parsed.reason;
+       return { ok: false, failure: { kind: "refused", method: "session/new", message } };
+     }
++    const created = parsed.value.sessionId;
+     agent.created(created);
+-    this.#bySession.set(created, run);
+-    run.session(created);
+     return { ok: true, value: created };
+   }
+ 
+   #promptEnding(agent: AgentProcess, reply: Reply): Ending {
+-    if (reply.kind === "result") {
+-      const parsed = parseWith(PROMPT_RESULT, reply.value);
+-      return parsed.ok
+-        ? stopEnding(parsed.value.stopReason)
+-        : this.#failed({ kind: "refused", method: "session/prompt", message: parsed.reason });
++    if (reply.kind !== "result") {
++      return this.#failed(requestFailure("session/prompt", reply, agent.exit));
+     }
+-    if (reply.kind === "closed" && agent.isStopping) {
+-      return { kind: "stopped" };
+-    }
+-    return this.#failed(requestFailure("session/prompt", reply, agent.exit));
++    const parsed = parseWith(PROMPT_RESULT, reply.value);
++    return parsed.ok
++      ? stopEnding(parsed.value.stopReason)
++      : this.#failed({ kind: "refused", method: "session/prompt", message: parsed.reason });
+   }
+ 
+   #failed(failure: AgentFailure): Ending {
+-    return this.#destroyed ? { kind: "stopped" } : { kind: "failed", failure };
++    return this.#starter.isDestroyed() ? STOPPED : { kind: "failed", failure };
+   }
+ 
+-  #forget(run: TurnRun): void {
++  /** Forgets the run before it settles, so code awaiting `ended` sees it gone. */
++  #end(run: TurnRun, ending: Ending): void {
+     this.#running.delete(run);
+     for (const [session, each] of this.#bySession) {
+       if (each === run) {
+         this.#bySession.delete(session);
+       }
+     }
+-  }
+-
+-  async #ready(): Promise<Outcome<AgentProcess>> {
+-    const folder = await this.#folder();
+-    if (!folder.ok) {
+-      return folder;
+-    }
+-    const starting = this.#agent ?? this.#start(folder.value);
+-    this.#agent = starting;
+-    const started = await starting;
+-    if (!started.ok && this.#agent === starting) {
+-      this.#agent = null;
+-      if (started.failure.kind === "checkoutFailed") {
+-        this.#checkout = null;
+-      }
+-    }
+-    return started;
+-  }
+-
+-  async #folder(): Promise<Outcome<CheckoutFolder>> {
+-    const preparing = this.#checkout ?? this.#prepare();
+-    this.#checkout = preparing;
+-    const prepared = await preparing;
+-    if (!prepared.ok && this.#checkout === preparing) {
+-      this.#checkout = null;
+-    }
+-    return prepared;
+-  }
+-
+-  async #prepare(): Promise<Outcome<CheckoutFolder>> {
+-    try {
+-      const result = await this.#source.prepareCheckout();
+-      if (!result.ok) {
+-        return {
+-          ok: false,
+-          failure: { kind: "checkoutFailed", message: sourceText(result.failure) },
+-        };
+-      }
+-      const ready = result.value;
+-      return ready.kind === "Ready"
+-        ? { ok: true, value: ready.folder }
+-        : { ok: false, failure: { kind: "checkoutFailed", message: ready.message } };
+-    } catch (error) {
+-      return { ok: false, failure: { kind: "checkoutFailed", message: String(error) } };
+-    }
+-  }
+-
+-  #start(folder: CheckoutFolder): Promise<Outcome<AgentProcess>> {
+-    const command = agentCommand(this.#command());
+-    if (command === null) {
+-      return Promise.resolve({ ok: false, failure: { kind: "noCommand" } });
+-    }
+-    const starting = AgentProcess.start({
+-      source: this.#source,
+-      command,
+-      folder,
+-      timers: this.#timers,
+-      exited: () => {
+-        if (this.#agent === starting) {
+-          this.#agent = null;
+-        }
+-      },
+-    });
+-    return starting;
++    run.end(ending);
+   }
+ }
+diff --git a/frontend/src/agent/internal/answers.test.ts b/frontend/src/agent/internal/answers.test.ts
+index 8e07a72..285172a 100644
+--- a/frontend/src/agent/internal/answers.test.ts
++++ b/frontend/src/agent/internal/answers.test.ts
+@@ -146,3 +146,45 @@ test("a malformed permission request is an invalid-params error", () => {
+     answer.kind === "error" && answer.message.startsWith("Malformed session/request_permission: "),
+   ).toBe(true);
+ });
++
++type Recorded = {
++  readonly from: "agent" | "yamt";
++  readonly id?: number;
++  readonly method?: string;
++  readonly params?: unknown;
++  readonly result?: unknown;
++};
++
++const PERMISSION = "session/request_permission";
++
++const RECORDINGS: Readonly<Record<string, string>> = import.meta.glob(
++  "../../../fixtures/agent/*.jsonl",
++  { eager: true, query: "?raw", import: "default" },
++);
++
++function recordedLine(json: string): Recorded {
++  const { from, line } = JSON.parse(json);
++  const message: Omit<Recorded, "from"> = JSON.parse(line.replaceAll("{{CHECKOUT}}", CHECKOUT));
++  return { ...message, from };
++}
++
++function recordedPermissions(text: string): [Recorded, Recorded | undefined][] {
++  const messages = text.trim().split("\n").map(recordedLine);
++  return messages
++    .filter((each) => each.from === "agent" && each.method === PERMISSION)
++    .map((request) => [
++      request,
++      messages.find(
++        (each) => each.from === "yamt" && each.method === undefined && each.id === request.id,
++      ),
++    ]);
++}
++
++test("every recorded permission is answered as the table answers it", () => {
++  const recorded = Object.values(RECORDINGS).flatMap(recordedPermissions);
++  expect(recorded).toHaveLength(3);
++  for (const [request, reply] of recorded) {
++    const { answer } = answerRequest(PERMISSION, request.params, CHECKOUT);
++    expect(answer.kind === "result" ? answer.value : answer).toEqual(reply?.result);
++  }
++});
+diff --git a/frontend/src/agent/internal/answers.ts b/frontend/src/agent/internal/answers.ts
+index abb633b..c3d5d51 100644
+--- a/frontend/src/agent/internal/answers.ts
++++ b/frontend/src/agent/internal/answers.ts
+@@ -2,11 +2,12 @@ import type { CheckoutFolder } from "../../ipc";
+ import { INVALID_PARAMS, METHOD_NOT_FOUND, parseWith, type Answer } from "../../jsonrpc";
+ import { relativeInside } from "./inside";
+ import { PERMISSION_REQUEST, type PermissionRequest } from "./protocol";
++import type { AgentSessionId } from "./session";
+ import type { Refusal } from "./turn";
+ 
+ export type Answered = {
+   readonly answer: Answer;
+-  readonly refused: { readonly session: string; readonly refusal: Refusal } | null;
++  readonly refused: { readonly session: AgentSessionId; readonly refusal: Refusal } | null;
+ };
+ 
+ type Choice = "allow_once" | "reject_once";
+diff --git a/frontend/src/agent/internal/failure.ts b/frontend/src/agent/internal/failure.ts
+index 36cc939..e1ea7ed 100644
+--- a/frontend/src/agent/internal/failure.ts
++++ b/frontend/src/agent/internal/failure.ts
+@@ -12,7 +12,8 @@ export type AgentFailure =
+   | { readonly kind: "refused"; readonly method: string; readonly message: string }
+   | { readonly kind: "sessionGone" }
+   | { readonly kind: "ended"; readonly reason: string }
+-  | { readonly kind: "busy" };
++  | { readonly kind: "busy" }
++  | { readonly kind: "app"; readonly failure: SourceFailure };
+ 
+ export type Exit = { readonly code: number | null; readonly lastLog: string | null };
+ 
+@@ -26,12 +27,6 @@ function errorWords(reply: Extract<Reply, { kind: "error" }>): string {
+   return details.ok ? details.value.details : reply.message;
+ }
+ 
+-export function sourceText(failure: SourceFailure): string {
+-  return "message" in failure && typeof failure.message === "string"
+-    ? failure.message
+-    : failure.kind;
+-}
+-
+ export function startFailure(reply: Exclude<AgentStartReply, { kind: "Started" }>): AgentFailure {
+   switch (reply.kind) {
+     case "NotFound":
+diff --git a/frontend/src/agent/internal/process.ts b/frontend/src/agent/internal/process.ts
+index eb7dd84..c7c9b49 100644
+--- a/frontend/src/agent/internal/process.ts
++++ b/frontend/src/agent/internal/process.ts
+@@ -8,14 +8,7 @@ import {
+ } from "../../ipc";
+ import { Connection, parseWith, type Answer, type Reply, type Timers } from "../../jsonrpc";
+ import { answerRequest } from "./answers";
+-import {
+-  loadFailure,
+-  requestFailure,
+-  sourceText,
+-  startFailure,
+-  type AgentFailure,
+-  type Exit,
+-} from "./failure";
++import { loadFailure, requestFailure, startFailure, type AgentFailure, type Exit } from "./failure";
+ import { INITIALIZE_RESULT, parseUpdate, PROTOCOL_VERSION } from "./protocol";
+ import type { AgentSessionId } from "./session";
+ import type { Refusal, TurnUpdate } from "./turn";
+@@ -49,7 +42,7 @@ export class AgentProcess {
+   readonly #source: AgentSource;
+   readonly #connection: Connection;
+   readonly #exited: () => void;
+-  readonly #listeners = new Map<string, Listener>();
++  readonly #listeners = new Map<AgentSessionId, Listener>();
+   readonly #loads = new Map<AgentSessionId, Promise<AgentFailure | null>>();
+   #run: AgentRun | null = null;
+   #lastLog: string | null = null;
+@@ -83,10 +76,6 @@ export class AgentProcess {
+     return failure === null ? { ok: true, value: agent } : { ok: false, failure };
+   }
+ 
+-  get isStopping(): boolean {
+-    return this.#stopping;
+-  }
+-
+   get exit(): Exit | null {
+     return this.#exit;
+   }
+@@ -112,39 +101,21 @@ export class AgentProcess {
+     this.#loads.set(session, Promise.resolve(null));
+   }
+ 
+-  /** Loads the session once per process before a prompt; its replay goes to no one. */
++  /** Loads the session once per process before a prompt (joining a load in flight); no one hears its replay. */
+   load(session: AgentSessionId): Promise<AgentFailure | null> {
+-    const known = this.#loads.get(session);
+-    if (known !== undefined) {
+-      return known;
+-    }
+-    const loading = this.#loadReply(session).then((reply) => {
+-      if (reply.kind === "result") {
+-        return null;
+-      }
+-      if (this.#loads.get(session) === loading) {
+-        this.#loads.delete(session);
+-      }
+-      return loadFailure(reply, this.#exit);
+-    });
+-    this.#loads.set(session, loading);
+-    return loading;
++    return this.#loads.get(session) ?? this.#sendLoad(session);
+   }
+ 
+-  /** Loads the session and hands back its replay. */
++  /** Loads the session and hands back its replay; a `load` meanwhile joins this one. */
+   async replay(session: AgentSessionId): Promise<Outcome<TurnUpdate[]>> {
+     const updates: TurnUpdate[] = [];
+     const unlisten = this.listen(session, {
+       update: (update) => updates.push(update),
+       refuse: () => undefined,
+     });
+-    const reply = await this.#loadReply(session);
++    const failure = await this.#sendLoad(session);
+     unlisten();
+-    if (reply.kind !== "result") {
+-      return { ok: false, failure: loadFailure(reply, this.#exit) };
+-    }
+-    this.created(session);
+-    return { ok: true, value: updates };
++    return failure === null ? { ok: true, value: updates } : { ok: false, failure };
+   }
+ 
+   async stop(): Promise<void> {
+@@ -159,8 +130,7 @@ export class AgentProcess {
+     try {
+       const reply = await this.#source.startAgent(command, (event) => this.#onEvent(event));
+       if (!reply.ok) {
+-        const message = sourceText(reply.failure);
+-        return { ok: false, failure: { kind: "spawnFailed", program, message } };
++        return { ok: false, failure: { kind: "app", failure: reply.failure } };
+       }
+       const started = reply.value;
+       return started.kind === "Started"
+@@ -171,8 +141,19 @@ export class AgentProcess {
+     }
+   }
+ 
+-  #loadReply(session: AgentSessionId): Promise<Reply> {
+-    return this.request("session/load", { sessionId: session, cwd: this.folder, mcpServers: [] });
++  #sendLoad(session: AgentSessionId): Promise<AgentFailure | null> {
++    const params = { sessionId: session, cwd: this.folder, mcpServers: [] };
++    const loading = this.request("session/load", params).then((reply) => {
++      if (reply.kind === "result") {
++        return null;
++      }
++      if (this.#loads.get(session) === loading) {
++        this.#loads.delete(session);
++      }
++      return loadFailure(reply, this.#exit);
++    });
++    this.#loads.set(session, loading);
++    return loading;
+   }
+ 
+   async #initialize(): Promise<AgentFailure | null> {
+diff --git a/frontend/src/agent/internal/protocol.test.ts b/frontend/src/agent/internal/protocol.test.ts
+new file mode 100644
+index 0000000..56f475b
+--- /dev/null
++++ b/frontend/src/agent/internal/protocol.test.ts
+@@ -0,0 +1,93 @@
++import { expect, test } from "vitest";
++
++import type { CheckoutFolder } from "../../ipc";
++import { parseUpdate } from "./protocol";
++
++const CHECKOUT_TEXT = "/fixture/checkout";
++
++function isFolder(path: string): path is CheckoutFolder {
++  return path === CHECKOUT_TEXT;
++}
++
++function folder(): CheckoutFolder {
++  if (!isFolder(CHECKOUT_TEXT)) {
++    throw new Error(CHECKOUT_TEXT);
++  }
++  return CHECKOUT_TEXT;
++}
++
++function parsed(update: object, sessionId: unknown = "s1"): unknown {
++  return parseUpdate({ sessionId, update }, folder());
++}
++
++const STEP = { sessionUpdate: "tool_call_update", toolCallId: "t1" };
++
++test("a step keeps only the content items yamt reads: text and diffs", () => {
++  expect(
++    parsed({
++      ...STEP,
++      content: [
++        { type: "terminal", terminalId: "x" },
++        { type: "content", content: { type: "image", data: "", mimeType: "image/png" } },
++        { type: "content", content: { type: "text", text: "out" } },
++        { type: "diff", path: `${CHECKOUT_TEXT}/a.ts`, oldText: null, newText: "x" },
++        { type: "diff", path: "/elsewhere/b.ts", newText: "y" },
++      ],
++    }),
++  ).toEqual({
++    ok: true,
++    value: {
++      session: "s1",
++      update: {
++        kind: "step",
++        step: {
++          id: "t1",
++          title: null,
++          kind: null,
++          status: null,
++          outputs: [
++            { kind: "text", text: "out" },
++            { kind: "edit", edit: { path: "a.ts", oldText: null, newText: "x" } },
++            { kind: "edit", edit: { path: "/elsewhere/b.ts", oldText: null, newText: "y" } },
++          ],
++        },
++      },
++    },
++  });
++});
++
++test("null content, kind and status leave the step's own", () => {
++  expect(parsed({ ...STEP, content: null, kind: null, status: null, title: null })).toMatchObject({
++    ok: true,
++    value: { update: { step: { kind: null, status: null, outputs: null } } },
++  });
++});
++
++test("an unknown kind is other, an unknown status none", () => {
++  expect(parsed({ ...STEP, kind: "dance", status: "dreaming" })).toMatchObject({
++    value: { update: { step: { kind: "other", status: null } } },
++  });
++  expect(parsed({ ...STEP, kind: "execute", status: "in_progress" })).toMatchObject({
++    value: { update: { step: { kind: "execute", status: "running" } } },
++  });
++});
++
++test("a chunk that is not text says nothing", () => {
++  expect(
++    parsed({ sessionUpdate: "agent_message_chunk", content: { type: "image", data: "" } }),
++  ).toEqual({ ok: true, value: { session: "s1", update: { kind: "said", text: "" } } });
++});
++
++test("a missing or empty sessionId is a parse failure", () => {
++  expect(parseUpdate({ update: { sessionUpdate: "plan" } }, folder()).ok).toBe(false);
++  expect(parsed({ sessionUpdate: "plan" }, "")).toMatchObject({ ok: false });
++});
++
++test("a malformed update yamt reads fails; one yamt does not read is ignored", () => {
++  expect(parsed({ sessionUpdate: "tool_call", title: "no id" })).toMatchObject({ ok: false });
++  expect(parsed({ sessionUpdate: "plan", entries: "anything" })).toEqual({
++    ok: true,
++    value: { session: "s1", update: null },
++  });
++  expect(parsed({ nothing: true })).toEqual({ ok: true, value: { session: "s1", update: null } });
++});
+diff --git a/frontend/src/agent/internal/protocol.ts b/frontend/src/agent/internal/protocol.ts
+index fba6634..c3d4637 100644
+--- a/frontend/src/agent/internal/protocol.ts
++++ b/frontend/src/agent/internal/protocol.ts
+@@ -3,11 +3,15 @@ import * as v from "valibot";
+ import type { CheckoutFolder } from "../../ipc";
+ import { parseWith, type Parsed } from "../../jsonrpc";
+ import { relativeInside } from "./inside";
++import { isAgentSessionId, type AgentSessionId } from "./session";
+ import type { StepKind, StepOutput, StepStatus, StepUpdate, TurnUpdate } from "./turn";
+ 
+ export const PROTOCOL_VERSION = 1;
+ 
+-export type SessionUpdate = { readonly session: string; readonly update: TurnUpdate | null };
++export type SessionUpdate = {
++  readonly session: AgentSessionId;
++  readonly update: TurnUpdate | null;
++};
+ 
+ const STEP_KINDS: Readonly<Record<string, StepKind>> = {
+   read: "read",
+@@ -27,23 +31,28 @@ const STEP_STATUSES: Readonly<Record<string, StepStatus>> = {
+   failed: "failed",
+ };
+ 
+-const CHUNK_KINDS = {
++const CHUNK_UPDATES = ["agent_thought_chunk", "agent_message_chunk", "user_message_chunk"] as const;
++
++const STEP_UPDATES = ["tool_call", "tool_call_update"] as const;
++
++const READ_UPDATES: readonly string[] = [...CHUNK_UPDATES, ...STEP_UPDATES];
++
++const CHUNK_KINDS: Readonly<
++  Record<(typeof CHUNK_UPDATES)[number], Exclude<TurnUpdate["kind"], "step">>
++> = {
+   agent_thought_chunk: "thought",
+   agent_message_chunk: "said",
+   user_message_chunk: "asked",
+-} as const;
+-
+-const READ_KINDS: Readonly<Record<string, true>> = {
+-  agent_thought_chunk: true,
+-  agent_message_chunk: true,
+-  user_message_chunk: true,
+-  tool_call: true,
+-  tool_call_update: true,
+ };
+ 
++const SESSION_ID = v.custom<AgentSessionId>(
++  (input) => typeof input === "string" && isAgentSessionId(input),
++  "sessionId must be a non-empty string",
++);
++
+ export const INITIALIZE_RESULT = v.object({ protocolVersion: v.number() });
+ 
+-export const NEW_SESSION_RESULT = v.object({ sessionId: v.string() });
++export const NEW_SESSION_RESULT = v.object({ sessionId: SESSION_ID });
+ 
+ export const PROMPT_RESULT = v.object({ stopReason: v.string() });
+ 
+@@ -63,11 +72,11 @@ const MAYBE_TEXT = v.nullish(v.string());
+ 
+ const UPDATE = v.variant("sessionUpdate", [
+   v.object({
+-    sessionUpdate: v.picklist(["agent_thought_chunk", "agent_message_chunk", "user_message_chunk"]),
++    sessionUpdate: v.picklist(CHUNK_UPDATES),
+     content: v.unknown(),
+   }),
+   v.object({
+-    sessionUpdate: v.picklist(["tool_call", "tool_call_update"]),
++    sessionUpdate: v.picklist(STEP_UPDATES),
+     toolCallId: v.string(),
+     title: MAYBE_TEXT,
+     kind: MAYBE_TEXT,
+@@ -76,12 +85,12 @@ const UPDATE = v.variant("sessionUpdate", [
+   }),
+ ]);
+ 
+-const UPDATE_PARAMS = v.object({ sessionId: v.string(), update: v.unknown() });
++const UPDATE_PARAMS = v.object({ sessionId: SESSION_ID, update: v.unknown() });
+ 
+ const UPDATE_KIND = v.object({ sessionUpdate: v.string() });
+ 
+ export const PERMISSION_REQUEST = v.object({
+-  sessionId: v.string(),
++  sessionId: SESSION_ID,
+   toolCall: v.object({
+     toolCallId: v.string(),
+     title: MAYBE_TEXT,
+@@ -143,6 +152,6 @@ export function parseUpdate(params: unknown, folder: CheckoutFolder): Parsed<Ses
+     return { ok: true, value: { session, update: toUpdate(parsed.value, folder) } };
+   }
+   const read = parseWith(UPDATE_KIND, update);
+-  const isRead = read.ok && Object.hasOwn(READ_KINDS, read.value.sessionUpdate);
++  const isRead = read.ok && READ_UPDATES.includes(read.value.sessionUpdate);
+   return isRead ? parsed : { ok: true, value: { session, update: null } };
+ }
+diff --git a/frontend/src/agent/internal/session.ts b/frontend/src/agent/internal/session.ts
+index 3aec213..b718faa 100644
+--- a/frontend/src/agent/internal/session.ts
++++ b/frontend/src/agent/internal/session.ts
+@@ -1,104 +1,9 @@
+-import type { Timers } from "../../jsonrpc";
+-import type { AgentFailure } from "./failure";
+-import {
+-  EMPTY_TURN,
+-  endTurn,
+-  foldUpdate,
+-  refuseStep,
+-  type Refusal,
+-  type TurnUpdate,
+-  type TurnView,
+-} from "./turn";
+-
+ export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
+ 
+-export type TurnEnd =
+-  | { readonly kind: "finished"; readonly turn: TurnView }
+-  | { readonly kind: "stopped"; readonly turn: TurnView }
+-  | { readonly kind: "failed"; readonly turn: TurnView; readonly failure: AgentFailure };
+-
+-export type TurnEvents = {
+-  readonly session: (session: AgentSessionId) => void;
+-  readonly changed: (turn: TurnView) => void;
+-};
+-
+-export type Ending =
+-  | { readonly kind: "finished" | "stopped" }
+-  | { readonly kind: "failed"; readonly failure: AgentFailure };
+-
+-const TURN_FLUSH_MS = 50;
+-
+-function isAgentSessionId(text: string): text is AgentSessionId {
++export function isAgentSessionId(text: string): text is AgentSessionId {
+   return text !== "";
+ }
+ 
+ export function agentSessionId(text: string): AgentSessionId | null {
+   return isAgentSessionId(text) ? text : null;
+ }
+-
+-/** The `stopReason` of a `session/prompt` result as a turn's end (ACP prompt turn). */
+-export function stopEnding(stopReason: string): Ending {
+-  switch (stopReason) {
+-    case "end_turn":
+-      return { kind: "finished" };
+-    case "cancelled":
+-      return { kind: "stopped" };
+-    default:
+-      return { kind: "failed", failure: { kind: "ended", reason: stopReason } };
+-  }
+-}
+-
+-/** One running turn: its fold, `changed` at most once per 50 ms and always at the end, and one end. */
+-export class TurnRun {
+-  readonly ended: Promise<TurnEnd>;
+-  #turn: TurnView = EMPTY_TURN;
+-  #flush: number | null = null;
+-  #done = false;
+-  readonly #events: TurnEvents;
+-  readonly #timers: Timers;
+-  #settle: (end: TurnEnd) => void = () => undefined;
+-
+-  constructor(events: TurnEvents, timers: Timers) {
+-    this.#events = events;
+-    this.#timers = timers;
+-    this.ended = new Promise((settle) => {
+-      this.#settle = settle;
+-    });
+-  }
+-
+-  session(session: AgentSessionId): void {
+-    this.#events.session(session);
+-  }
+-
+-  update(update: TurnUpdate): void {
+-    this.#changed(foldUpdate(this.#turn, update));
+-  }
+-
+-  refuse(refusal: Refusal): void {
+-    this.#changed(refuseStep(this.#turn, refusal));
+-  }
+-
+-  end(ending: Ending): void {
+-    if (this.#done) {
+-      return;
+-    }
+-    this.#done = true;
+-    if (this.#flush !== null) {
+-      this.#timers.clearTimeout(this.#flush);
+-    }
+-    const turn = endTurn(this.#turn);
+-    this.#events.changed(turn);
+-    this.#settle(ending.kind === "failed" ? { ...ending, turn } : { kind: ending.kind, turn });
+-  }
+-
+-  #changed(turn: TurnView): void {
+-    if (this.#done) {
+-      return;
+-    }
+-    this.#turn = turn;
+-    this.#flush ??= this.#timers.setTimeout(() => {
+-      this.#flush = null;
+-      this.#events.changed(this.#turn);
+-    }, TURN_FLUSH_MS);
+-  }
+-}
+diff --git a/frontend/src/agent/internal/starter.ts b/frontend/src/agent/internal/starter.ts
+new file mode 100644
+index 0000000..97c0ced
+--- /dev/null
++++ b/frontend/src/agent/internal/starter.ts
+@@ -0,0 +1,114 @@
++import type { AgentSource, CheckoutFolder } from "../../ipc";
++import type { Timers } from "../../jsonrpc";
++import { agentCommand } from "./command";
++import type { AgentFailure } from "./failure";
++import { AgentProcess, type Outcome } from "./process";
++
++export type StarterSetup = {
++  readonly source: AgentSource;
++  readonly command: () => readonly string[];
++  readonly timers: Timers;
++};
++
++export type Started =
++  | { readonly kind: "started"; readonly agent: AgentProcess }
++  | { readonly kind: "failed"; readonly failure: AgentFailure }
++  | { readonly kind: "dropped" };
++
++const DROPPED: Started = { kind: "dropped" };
++
++/** The checkout's folder (made once) and one process at a time; a failure is not kept. */
++export class Starter {
++  readonly #setup: StarterSetup;
++  #checkout: Promise<Outcome<CheckoutFolder>> | null = null;
++  #agent: Promise<Outcome<AgentProcess>> | null = null;
++  #destroyed = false;
++
++  constructor(setup: StarterSetup) {
++    this.#setup = setup;
++  }
++
++  isDestroyed(): boolean {
++    return this.#destroyed;
++  }
++
++  /** The process; `dropped` after `destroy`, or when `wanted` turns false while the checkout is made. */
++  async ready(wanted: () => boolean): Promise<Started> {
++    if (this.isDestroyed()) {
++      return DROPPED;
++    }
++    const folder = await this.#folder();
++    if (this.isDestroyed() || !wanted()) {
++      return DROPPED;
++    }
++    if (!folder.ok) {
++      return { kind: "failed", failure: folder.failure };
++    }
++    const starting = this.#agent ?? this.#start(folder.value);
++    this.#agent = starting;
++    const started = await starting;
++    if (this.isDestroyed()) {
++      return DROPPED;
++    }
++    if (started.ok) {
++      return { kind: "started", agent: started.value };
++    }
++    if (this.#agent === starting) {
++      this.#agent = null;
++      if (started.failure.kind === "checkoutFailed") {
++        this.#checkout = null;
++      }
++    }
++    return { kind: "failed", failure: started.failure };
++  }
++
++  /** Stops the process, also one still starting; nothing starts afterwards. */
++  destroy(): void {
++    this.#destroyed = true;
++    void this.#agent?.then((agent) => (agent.ok ? agent.value.stop() : undefined));
++  }
++
++  async #folder(): Promise<Outcome<CheckoutFolder>> {
++    const preparing = this.#checkout ?? this.#prepare();
++    this.#checkout = preparing;
++    const prepared = await preparing;
++    if (!prepared.ok && this.#checkout === preparing) {
++      this.#checkout = null;
++    }
++    return prepared;
++  }
++
++  async #prepare(): Promise<Outcome<CheckoutFolder>> {
++    try {
++      const result = await this.#setup.source.prepareCheckout();
++      if (!result.ok) {
++        return { ok: false, failure: { kind: "app", failure: result.failure } };
++      }
++      const ready = result.value;
++      return ready.kind === "Ready"
++        ? { ok: true, value: ready.folder }
++        : { ok: false, failure: { kind: "checkoutFailed", message: ready.message } };
++    } catch (error) {
++      return { ok: false, failure: { kind: "checkoutFailed", message: String(error) } };
++    }
++  }
++
++  #start(folder: CheckoutFolder): Promise<Outcome<AgentProcess>> {
++    const command = agentCommand(this.#setup.command());
++    if (command === null) {
++      return Promise.resolve({ ok: false, failure: { kind: "noCommand" } });
++    }
++    const starting = AgentProcess.start({
++      source: this.#setup.source,
++      command,
++      folder,
++      timers: this.#setup.timers,
++      exited: () => {
++        if (this.#agent === starting) {
++          this.#agent = null;
++        }
++      },
++    });
++    return starting;
++  }
++}
+diff --git a/frontend/src/agent/internal/turn.test.ts b/frontend/src/agent/internal/turn.test.ts
+index 942b284..3c835fc 100644
+--- a/frontend/src/agent/internal/turn.test.ts
++++ b/frontend/src/agent/internal/turn.test.ts
+@@ -6,7 +6,6 @@ import permissionOutside from "../../../fixtures/agent/permission-outside.jsonl?
+ import type { CheckoutFolder } from "../../ipc";
+ import { answerRequest } from "./answers";
+ import { parseUpdate } from "./protocol";
+-import { stopEnding } from "./session";
+ import {
+   EMPTY_TURN,
+   endTurn,
+@@ -108,10 +107,9 @@ test("the recorded command moves pending → running → done and shows its outp
+   });
+ });
+ 
+-test("the recorded cancel ends stopped and its unfinished command as noResult", () => {
++test("the recorded cancel leaves its unfinished command as noResult", () => {
+   const turn = endTurn(folded(updatesOf(cancelled)));
+   expect(steps(turn).map((step) => [step.kind, step.status])).toEqual([["execute", "noResult"]]);
+-  expect(stopEnding("cancelled")).toEqual({ kind: "stopped" });
+ });
+ 
+ test("the recorded refusal of a delete outside shows on its step, which fails", () => {
+@@ -143,20 +141,6 @@ test("the recorded refusal of a delete outside shows on its step, which fails",
+   expect(turn.answer).toMatch(/^I couldn't delete/u);
+ });
+ 
+-test.each([
+-  ["end_turn", { kind: "finished" }],
+-  ["cancelled", { kind: "stopped" }],
+-  ["max_tokens", { kind: "failed", failure: { kind: "ended", reason: "max_tokens" } }],
+-  [
+-    "max_turn_requests",
+-    { kind: "failed", failure: { kind: "ended", reason: "max_turn_requests" } },
+-  ],
+-  ["refusal", { kind: "failed", failure: { kind: "ended", reason: "refusal" } }],
+-  ["something new", { kind: "failed", failure: { kind: "ended", reason: "something new" } }],
+-])("stopReason %s ends the turn as %j", (stopReason, ending) => {
+-  expect(stopEnding(stopReason)).toEqual(ending);
+-});
+-
+ const READ: TurnUpdate = {
+   kind: "step",
+   step: { id: "a", title: "Read a", kind: "read", status: "pending", outputs: null },
+@@ -260,3 +244,44 @@ test("ending a turn turns only pending and running steps into noResult", () => {
+ test("a user chunk leaves a live turn unchanged", () => {
+   expect(foldUpdate(EMPTY_TURN, { kind: "asked", text: "hi" })).toBe(EMPTY_TURN);
+ });
++
++test("a refusal of a known step keeps the step's own title", () => {
++  const refused = refuseStep(folded([READ]), { step: "a", title: "Delete /x", paths: ["/x"] });
++  expect(steps(refused)[0]).toEqual({
++    id: "a",
++    kind: "read",
++    title: "Read a",
++    status: "pending",
++    outputs: [{ kind: "refused", title: "Delete /x", paths: ["/x"] }],
++  });
++});
++
++test("a refusal of an unknown step in a turn with steps is titled by the refusal", () => {
++  const refused = refuseStep(folded([READ]), { step: "b", title: "Delete /x", paths: ["/x"] });
++  expect(steps(refused)).toEqual([
++    expect.objectContaining({ id: "a", title: "Read a" }),
++    {
++      id: "b",
++      kind: "other",
++      title: "Delete /x",
++      status: "pending",
++      outputs: [{ kind: "refused", title: "Delete /x", paths: ["/x"] }],
++    },
++  ]);
++});
++
++test("a first tool_call with content carries exactly that content", () => {
++  const turn = folded([
++    {
++      kind: "step",
++      step: {
++        id: "a",
++        title: "Read a",
++        kind: "read",
++        status: "pending",
++        outputs: [{ kind: "text", text: "line 1" }],
++      },
++    },
++  ]);
++  expect(steps(turn)[0]?.outputs).toEqual([{ kind: "text", text: "line 1" }]);
++});
+diff --git a/frontend/src/agent/internal/turnRun.test.ts b/frontend/src/agent/internal/turnRun.test.ts
+new file mode 100644
+index 0000000..bcb0c2c
+--- /dev/null
++++ b/frontend/src/agent/internal/turnRun.test.ts
+@@ -0,0 +1,17 @@
++import { expect, test } from "vitest";
++
++import { stopEnding } from "./turnRun";
++
++test.each([
++  ["end_turn", { kind: "finished" }],
++  ["cancelled", { kind: "stopped" }],
++  ["max_tokens", { kind: "failed", failure: { kind: "ended", reason: "max_tokens" } }],
++  [
++    "max_turn_requests",
++    { kind: "failed", failure: { kind: "ended", reason: "max_turn_requests" } },
++  ],
++  ["refusal", { kind: "failed", failure: { kind: "ended", reason: "refusal" } }],
++  ["something new", { kind: "failed", failure: { kind: "ended", reason: "something new" } }],
++])("stopReason %s ends the turn as %j", (stopReason, ending) => {
++  expect(stopEnding(stopReason)).toEqual(ending);
++});
+diff --git a/frontend/src/agent/internal/session.ts b/frontend/src/agent/internal/turnRun.ts
+similarity index 89%
+copy from frontend/src/agent/internal/session.ts
+copy to frontend/src/agent/internal/turnRun.ts
+index 3aec213..a1997a1 100644
+--- a/frontend/src/agent/internal/session.ts
++++ b/frontend/src/agent/internal/turnRun.ts
+@@ -1,5 +1,6 @@
+ import type { Timers } from "../../jsonrpc";
+ import type { AgentFailure } from "./failure";
++import type { AgentSessionId } from "./session";
+ import {
+   EMPTY_TURN,
+   endTurn,
+@@ -10,8 +11,6 @@ import {
+   type TurnView,
+ } from "./turn";
+ 
+-export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
+-
+ export type TurnEnd =
+   | { readonly kind: "finished"; readonly turn: TurnView }
+   | { readonly kind: "stopped"; readonly turn: TurnView }
+@@ -28,14 +27,6 @@ export type Ending =
+ 
+ const TURN_FLUSH_MS = 50;
+ 
+-function isAgentSessionId(text: string): text is AgentSessionId {
+-  return text !== "";
+-}
+-
+-export function agentSessionId(text: string): AgentSessionId | null {
+-  return isAgentSessionId(text) ? text : null;
+-}
+-
+ /** The `stopReason` of a `session/prompt` result as a turn's end (ACP prompt turn). */
+ export function stopEnding(stopReason: string): Ending {
+   switch (stopReason) {
+diff --git a/frontend/src/ipc/AgentSource.ts b/frontend/src/ipc/AgentSource.ts
+index c73e9f8..ce00c7c 100644
+--- a/frontend/src/ipc/AgentSource.ts
++++ b/frontend/src/ipc/AgentSource.ts
+@@ -1,38 +1,6 @@
+-import type * as Generated from "./bindings";
++import type { AgentCommand, AgentStartReply, CheckoutChanges, CheckoutReady } from "./agentDomain";
+ import type { Difference } from "./compareDomain";
+-import {
+-  isAgentRun,
+-  isCheckoutFolder,
+-  type AgentRun,
+-  type CheckoutFolder,
+-  type HostEvent,
+-  type SourceResult,
+-} from "./domain";
+-
+-export type AgentCommand = {
+-  readonly program: string;
+-  readonly args: readonly string[];
+-  readonly homeFolders: readonly string[];
+-};
+-
+-export type AgentStartReply =
+-  | Exclude<Generated.AgentStartReply, { kind: "Started" }>
+-  | { readonly kind: "Started"; readonly run: AgentRun };
+-
+-export type CheckoutReady =
+-  | { readonly kind: "Ready"; readonly folder: CheckoutFolder }
+-  | { readonly kind: "Failed"; readonly message: string };
+-
+-type Look = Generated.CheckoutLook;
+-
+-type InFolder<K extends Look["kind"]> = Readonly<Omit<Extract<Look, { kind: K }>, "folder">> & {
+-  readonly folder: CheckoutFolder;
+-};
+-
+-export type CheckoutChanges =
+-  | Exclude<Look, { kind: "Changed" | "Unreadable" }>
+-  | InFolder<"Changed">
+-  | InFolder<"Unreadable">;
++import type { AgentRun, HostEvent, SourceResult } from "./domain";
+ 
+ export interface AgentSource {
+   prepareCheckout(): Promise<SourceResult<CheckoutReady>>;
+@@ -48,41 +16,3 @@ export interface AgentSource {
+   discardCheckout(): Promise<SourceResult<null>>;
+   diffTexts(old: string, next: string): Promise<SourceResult<readonly Difference[]>>;
+ }
+-
+-function toFolder(path: string): CheckoutFolder {
+-  if (!isCheckoutFolder(path)) {
+-    throw new Error(`folder must be an absolute path, got ${path}`);
+-  }
+-  return path;
+-}
+-
+-export function toAgentStartReply(dto: Generated.AgentStartReply): AgentStartReply {
+-  if (dto.kind !== "Started") {
+-    return dto;
+-  }
+-  const { run } = dto;
+-  if (!isAgentRun(run)) {
+-    throw new Error(`run must be a non-negative safe integer, got ${run}`);
+-  }
+-  return { kind: "Started", run };
+-}
+-
+-export function toCheckoutReady(dto: Generated.CheckoutReply): CheckoutReady {
+-  return dto.kind === "Ready" ? { kind: "Ready", folder: toFolder(dto.folder) } : dto;
+-}
+-
+-export function toCheckoutChanges(dto: Look): CheckoutChanges {
+-  switch (dto.kind) {
+-    case "Missing":
+-    case "Clean":
+-      return dto;
+-    case "Changed":
+-      return { ...dto, folder: toFolder(dto.folder) };
+-    case "Unreadable":
+-      return { ...dto, folder: toFolder(dto.folder) };
+-    default: {
+-      const _exhaustive: never = dto;
+-      return _exhaustive;
+-    }
+-  }
+-}
+diff --git a/frontend/src/ipc/agentDomain.test.ts b/frontend/src/ipc/agentDomain.test.ts
+new file mode 100644
+index 0000000..f6efd4d
+--- /dev/null
++++ b/frontend/src/ipc/agentDomain.test.ts
+@@ -0,0 +1,52 @@
++import { expect, test } from "vitest";
++
++import {
++  fromAgentCommand,
++  toAgentStartReply,
++  toCheckoutChanges,
++  toCheckoutReady,
++} from "./agentDomain";
++import type * as Generated from "./bindings";
++
++test("the command goes out in the app's shape", () => {
++  expect(fromAgentCommand({ program: "omp", args: ["acp"], homeFolders: [".bun/bin"] })).toEqual({
++    program: "omp",
++    args: ["acp"],
++    home_folders: [".bun/bin"],
++  });
++});
++
++test("a start brands its run; the other replies come back as they are", () => {
++  expect(toAgentStartReply({ kind: "Started", run: 0 })).toEqual({ kind: "Started", run: 0 });
++  expect(toAgentStartReply({ kind: "NoCheckout" })).toEqual({ kind: "NoCheckout" });
++  expect(() => toAgentStartReply({ kind: "Started", run: 1.5 })).toThrow(
++    "run must be a non-negative safe integer, got 1.5",
++  );
++});
++
++test("a ready checkout brands its folder", () => {
++  expect(toCheckoutReady({ kind: "Ready", folder: "/c" })).toEqual({ kind: "Ready", folder: "/c" });
++  expect(toCheckoutReady({ kind: "Failed", message: "no git" })).toEqual({
++    kind: "Failed",
++    message: "no git",
++  });
++});
++
++test("a changed checkout comes out camelCased with its refs", () => {
++  expect(
++    toCheckoutChanges({
++      kind: "Changed",
++      folder: "/c",
++      files: [],
++      refs: ["refs/stash"],
++      head_moved: false,
++    }),
++  ).toEqual({ kind: "Changed", folder: "/c", files: [], refs: ["refs/stash"], headMoved: false });
++});
++
++test.each<Generated.CheckoutLook>([
++  { kind: "Changed", folder: "c", files: ["a"], refs: [], head_moved: false },
++  { kind: "Unreadable", folder: "c", message: "m" },
++])("a $kind look with a relative folder is refused", (look) => {
++  expect(() => toCheckoutChanges(look)).toThrow("folder must be an absolute path, got c");
++});
+diff --git a/frontend/src/ipc/agentDomain.ts b/frontend/src/ipc/agentDomain.ts
+new file mode 100644
+index 0000000..b58904f
+--- /dev/null
++++ b/frontend/src/ipc/agentDomain.ts
+@@ -0,0 +1,78 @@
++import type * as Generated from "./bindings";
++import { isAgentRun, isCheckoutFolder, type AgentRun, type CheckoutFolder } from "./domain";
++
++export type AgentCommand = {
++  readonly program: string;
++  readonly args: readonly string[];
++  readonly homeFolders: readonly string[];
++};
++
++export type AgentStartReply =
++  | { readonly kind: "Started"; readonly run: AgentRun }
++  | { readonly kind: "NotFound"; readonly program: string; readonly searched: readonly string[] }
++  | { readonly kind: "SpawnFailed"; readonly program: string; readonly message: string }
++  | { readonly kind: "NoCheckout" };
++
++export type CheckoutReady =
++  | { readonly kind: "Ready"; readonly folder: CheckoutFolder }
++  | { readonly kind: "Failed"; readonly message: string };
++
++export type CheckoutChanges =
++  | { readonly kind: "Missing" }
++  | { readonly kind: "Clean" }
++  | {
++      readonly kind: "Changed";
++      readonly folder: CheckoutFolder;
++      readonly files: readonly string[];
++      readonly refs: readonly string[];
++      readonly headMoved: boolean;
++    }
++  | { readonly kind: "Unreadable"; readonly folder: CheckoutFolder; readonly message: string };
++
++function toFolder(path: string): CheckoutFolder {
++  if (!isCheckoutFolder(path)) {
++    throw new Error(`folder must be an absolute path, got ${path}`);
++  }
++  return path;
++}
++
++export function fromAgentCommand(command: AgentCommand): Generated.AgentCommand {
++  return {
++    program: command.program,
++    args: [...command.args],
++    home_folders: [...command.homeFolders],
++  };
++}
++
++export function toAgentStartReply(dto: Generated.AgentStartReply): AgentStartReply {
++  if (dto.kind !== "Started") {
++    return dto;
++  }
++  const { run } = dto;
++  if (!isAgentRun(run)) {
++    throw new Error(`run must be a non-negative safe integer, got ${run}`);
++  }
++  return { kind: "Started", run };
++}
++
++export function toCheckoutReady(dto: Generated.CheckoutReply): CheckoutReady {
++  return dto.kind === "Ready" ? { kind: "Ready", folder: toFolder(dto.folder) } : dto;
++}
++
++export function toCheckoutChanges(dto: Generated.CheckoutLook): CheckoutChanges {
++  switch (dto.kind) {
++    case "Missing":
++    case "Clean":
++      return { kind: dto.kind };
++    case "Changed": {
++      const { files, refs, head_moved: headMoved } = dto;
++      return { kind: "Changed", folder: toFolder(dto.folder), files, refs, headMoved };
++    }
++    case "Unreadable":
++      return { kind: "Unreadable", folder: toFolder(dto.folder), message: dto.message };
++    default: {
++      const _exhaustive: never = dto;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 1d3caca..f3dfab2 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -95,6 +95,9 @@ export const DIFFERENCE = v.object({
+   words: v.object({ left: SIDE_WORD_CHANGES, right: SIDE_WORD_CHANGES }),
+ } satisfies SchemaOf<Generated.Difference>);
+ 
++/** yamt-compare's `MAX_COLUMN_BYTES`: the UTF-8 bytes a column or a diffed text may hold. */
++export const COLUMN_LIMIT_BYTES = 8_388_608;
++
+ const WORD_CHANGES = v.object({
+   chunk: v.number(),
+   local: SIDE_WORD_CHANGES,
+diff --git a/frontend/src/ipc/fixtureAgent.test.ts b/frontend/src/ipc/fixtureAgent.test.ts
+index d6d71fc..24d3572 100644
+--- a/frontend/src/ipc/fixtureAgent.test.ts
++++ b/frontend/src/ipc/fixtureAgent.test.ts
+@@ -214,7 +214,13 @@ test("?ai-changes reports README.md changed in the checkout", async () => {
+   const source = createFixtureAgentSource(LOG, "?ai&ai-changes");
+   expect(await source.checkoutChanges()).toEqual({
+     ok: true,
+-    value: { kind: "Changed", folder: FIXTURE_CHECKOUT, files: ["README.md"], head_moved: false },
++    value: {
++      kind: "Changed",
++      folder: FIXTURE_CHECKOUT,
++      files: ["README.md"],
++      refs: [],
++      headMoved: false,
++    },
+   });
+ });
+ 
+@@ -240,6 +246,14 @@ test("diffTexts answers the recorded edit's differences and nothing for other te
+     ],
+   ]);
+   expect(await source.diffTexts("a", "b")).toEqual({ ok: true, value: [] });
++  expect(await source.diffTexts(diff.oldText, `${diff.newText}more\n`)).toEqual({
++    ok: true,
++    value: [],
++  });
++  expect(await source.diffTexts(`${diff.oldText}more\n`, diff.newText)).toEqual({
++    ok: true,
++    value: [],
++  });
+   expect(LOG.info).toHaveBeenCalledWith("agent.fixture_miss", { old: 1, next: 1 });
+ });
+ 
+@@ -252,10 +266,43 @@ test("diffTexts refuses a side over 8 MiB as the app does", async () => {
+   expect((await source.diffTexts("x".repeat(8_388_608), "")).ok).toBe(true);
+ });
+ 
+-test("an unknown case names the known ones", () => {
++test("an unknown case names the known ones; the load recording is not one to play", () => {
+   expect(() => createFixtureAgentSource(LOG, "?ai=nope")).toThrow(
+-    /^no agent fixture nope; known: .*cancelled.*edit-and-command.*load.*permission-outside/u,
++    "no agent fixture nope; known: cancelled, edit-and-command, permission-outside",
+   );
++  expect(() => createFixtureAgentSource(LOG, "?ai=load")).toThrow(/^no agent fixture load;/u);
++});
++
++test("stopAgent of an old run leaves the new run playing", async () => {
++  const source = createFixtureAgentSource(LOG, "?ai");
++  const first = await started(source);
++  const second = await started(source);
++  await vi.runAllTimersAsync();
++  events = [];
++  await source.stopAgent(first);
++  send(source, second, { id: 1, method: "initialize", params: {} });
++  await vi.runAllTimersAsync();
++  expect(events).toEqual([expect.objectContaining({ kind: "Message" })]);
++  expect(messages()[0]).toMatchObject({ id: 1, result: { protocolVersion: 1 } });
++});
++
++test("a discard during playback ends the run with Exited and no code", async () => {
++  const source = createFixtureAgentSource(LOG, "?ai");
++  const run = await started(source);
++  const session = await newSession(source, run);
++  events = [];
++  send(source, run, {
++    id: 3,
++    method: "session/prompt",
++    params: { sessionId: session, prompt: [] },
++  });
++  await vi.advanceTimersByTimeAsync(31);
++  await source.discardCheckout();
++  await vi.runAllTimersAsync();
++  expect(events.filter((event) => event.kind !== "Message")).toEqual([
++    { kind: "Exited", code: null },
++  ]);
++  expect(events.at(-1)).toEqual({ kind: "Exited", code: null });
+ });
+ 
+ test("a recording line that is not a message is refused", () => {
+diff --git a/frontend/src/ipc/fixtureAgent.ts b/frontend/src/ipc/fixtureAgent.ts
+index f25dc60..fef4470 100644
+--- a/frontend/src/ipc/fixtureAgent.ts
++++ b/frontend/src/ipc/fixtureAgent.ts
+@@ -1,15 +1,11 @@
+ import * as v from "valibot";
+ 
+-import {
+-  toAgentStartReply,
+-  toCheckoutChanges,
+-  toCheckoutReady,
+-  type AgentSource,
+-} from "./AgentSource";
++import { toAgentStartReply, toCheckoutChanges, toCheckoutReady } from "./agentDomain";
++import type { AgentSource } from "./AgentSource";
+ import type * as Generated from "./bindings";
+ import { toDifferences, type Difference } from "./compareDomain";
+ import type { HostEvent, SourceResult } from "./domain";
+-import { DIFFERENCE, parsedCases } from "./fixture";
++import { COLUMN_LIMIT_BYTES, DIFFERENCE, parsedCases } from "./fixture";
+ import type { Log } from "./log";
+ 
+ type Id = number | string;
+@@ -71,8 +67,8 @@ export const FIXTURE_CHECKOUT = "/fixture/data/yamt/range/repository/main...feat
+ const PLAY_MS = 30;
+ const CRASH_CODE = 1;
+ const CRASH_PARTS = 2;
+-const COLUMN_LIMIT_BYTES = 8_388_608;
+ const SCRIPTED: Readonly<Record<string, true>> = { "": true, crash: true, "checkout-fails": true };
++const LOAD_CASE = "load";
+ 
+ const LINE = v.object({ from: v.picklist(["agent", "yamt"]), line: v.string() });
+ const MESSAGE = v.looseObject({
+@@ -226,7 +222,13 @@ function checkoutActions(
+     },
+     async checkoutChanges() {
+       const look: Generated.CheckoutLook = fixture.changes
+-        ? { kind: "Changed", folder: FIXTURE_CHECKOUT, files: ["README.md"], head_moved: false }
++        ? {
++            kind: "Changed",
++            folder: FIXTURE_CHECKOUT,
++            files: ["README.md"],
++            refs: [],
++            head_moved: false,
++          }
+         : { kind: state.prepared ? "Clean" : "Missing" };
+       return { ok: true, value: toCheckoutChanges(look) };
+     },
+@@ -248,8 +250,9 @@ function fixtureOf(log: Log, search: string, files: AgentFixtureFiles): Fixture
+       return [each, recorded(each, typeof text === "string" ? text : "")];
+     }),
+   );
++  const load = cases.get(LOAD_CASE);
++  cases.delete(LOAD_CASE);
+   const prompts = cases.get(name);
+-  const load = cases.get("load");
+   if (prompts === undefined || load === undefined) {
+     throw new Error(`no agent fixture ${name}; known: ${[...cases.keys()].join(", ")}`);
+   }
+diff --git a/frontend/src/ipc/fixtureCompare.ts b/frontend/src/ipc/fixtureCompare.ts
+index af0d67a..98bde78 100644
+--- a/frontend/src/ipc/fixtureCompare.ts
++++ b/frontend/src/ipc/fixtureCompare.ts
+@@ -16,7 +16,7 @@ import {
+ } from "./compareDomain";
+ import type { CompareSource } from "./CompareSource";
+ import type { SourceResult } from "./domain";
+-import { DIFFERENCE, parsedCases } from "./fixture";
++import { COLUMN_LIMIT_BYTES, DIFFERENCE, parsedCases } from "./fixture";
+ import { createFixtureSettings } from "./fixtureSettings";
+ import type { Log } from "./log";
+ 
+@@ -50,8 +50,6 @@ const CASE_FILES: Readonly<Record<string, unknown>> = import.meta.glob(
+ );
+ // Stryker restore all
+ 
+-const COLUMN_LIMIT_BYTES = 8_388_608;
+-
+ const FIRST_TAB_ID = 1;
+ 
+ const CASE = v.object({
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+index 3daff6d..0fcfd7d 100644
+--- a/frontend/src/ipc/fixtureReview.test.ts
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -147,7 +147,7 @@ test("?threads=seeded puts one thread of each line kind on board.ts with every p
+   ]);
+   expect(threads[3]?.messages.map((message) => message.body)).toEqual([
+     { kind: "note", text: "Is this still used?" },
+-    { kind: "aiAnswer", turn: 0 },
++    { kind: "aiAnswer", session: "fixture-session", turn: 0 },
+   ]);
+   expect(threads[0]?.messages[0]?.written).toBe(1_767_225_600);
+ });
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+index 2240365..c968ac0 100644
+--- a/frontend/src/ipc/fixtureReview.ts
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -47,6 +47,11 @@ const SEEDED_PATH = "src/board/board.ts";
+ const SEEDED_WRITTEN = 1_767_225_600;
+ const SEEDED_DRAFT_NOTE = 101;
+ const SEEDED_SESSION = "fixture-session";
++const SEEDED_AI_ANSWER: Generated.MessageBody = {
++  kind: "aiAnswer",
++  session: SEEDED_SESSION,
++  turn: 0,
++};
+ 
+ function pause(ms: number): Promise<void> {
+   return new Promise((resolve) => {
+@@ -82,7 +87,7 @@ function seededThreads(file: number): Generated.Thread[] {
+       line: { kind: "unchangedOnRight", left: 100, right: 101 },
+       messages: [
+         note("Is this still used?", { kind: "notQueued" }),
+-        { body: { kind: "aiAnswer", turn: 0 }, posting: { kind: "notQueued" } },
++        { body: SEEDED_AI_ANSWER, posting: { kind: "notQueued" } },
+       ],
+       session: SEEDED_SESSION,
+     },
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 8cb64d7..2d0c7c3 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -2,13 +2,8 @@ import { createLog } from "./log";
+ import { forwardLog } from "./tauri";
+ import { guardWindowClose } from "./window";
+ 
+-export type {
+-  AgentCommand,
+-  AgentSource,
+-  AgentStartReply,
+-  CheckoutChanges,
+-  CheckoutReady,
+-} from "./AgentSource";
++export type { AgentCommand, AgentStartReply, CheckoutReady } from "./agentDomain";
++export type { AgentSource } from "./AgentSource";
+ export type { ChunkSource, SettingsSource, WriteRequest } from "./ChunkSource";
+ export { createFixtureAgentSource } from "./fixtureAgent";
+ export { createTauriAgentSource } from "./tauriAgent";
+diff --git a/frontend/src/ipc/reviewDomain.test.ts b/frontend/src/ipc/reviewDomain.test.ts
+index 0c9d983..2169217 100644
+--- a/frontend/src/ipc/reviewDomain.test.ts
++++ b/frontend/src/ipc/reviewDomain.test.ts
+@@ -72,7 +72,7 @@ test.each<[Generated.Posting, unknown]>([
+ 
+ test.each<Generated.MessageBody>([
+   { kind: "note", text: "Why?" },
+-  { kind: "aiAnswer", turn: 2 },
++  { kind: "aiAnswer", session: "s1", turn: 2 },
+ ])("message body %j is kept as it came", (body) => {
+   const [converted] = toThreadList({ threads: [thread({ kind: "notQueued" }, body)] }).threads;
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index a755fa4..fc22f1b 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -40,9 +40,12 @@ export function toResult<T>(result: CommandResult<T>): SourceResult<T> {
+   return { ok: false, failure: result.error };
+ }
+ 
++export function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
++  return result.ok ? { ok: true, value: to(result.value) } : result;
++}
++
+ function toSettingsResult(result: CommandResult<SettingsReadDto>): SourceResult<SettingsRead> {
+-  const settings = toResult(result);
+-  return settings.ok ? { ok: true, value: toSettingsRead(settings.value) } : settings;
++  return converted(toResult(result), toSettingsRead);
+ }
+ 
+ export function createTauriSettings(): SettingsSource {
+diff --git a/frontend/src/ipc/tauriAgent.test.ts b/frontend/src/ipc/tauriAgent.test.ts
+index 4d4640d..9853247 100644
+--- a/frontend/src/ipc/tauriAgent.test.ts
++++ b/frontend/src/ipc/tauriAgent.test.ts
+@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+ import { isAgentRun, type AgentRun, type HostEvent } from "./domain";
+-import { createTauriAgentSource, type CheckoutChanges } from "./index";
++import { createTauriAgentSource } from "./index";
+ import type { Log } from "./log";
+ 
+ const commands = vi.hoisted(() => ({
+@@ -108,18 +108,35 @@ test("prepareCheckout brands an absolute folder and refuses a relative one", asy
+   );
+ });
+ 
+-test.each<Generated.CheckoutLook>([
+-  { kind: "Missing" },
+-  { kind: "Clean" },
+-  { kind: "Changed", folder: "/data/checkout", files: ["a.ts"], head_moved: true },
+-  { kind: "Unreadable", folder: "/data/checkout", message: "bad object" },
+-])("checkoutChanges passes %j through with its folder branded", async (look) => {
++test.each<[Generated.CheckoutLook, object]>([
++  [{ kind: "Missing" }, { kind: "Missing" }],
++  [{ kind: "Clean" }, { kind: "Clean" }],
++  [
++    {
++      kind: "Changed",
++      folder: "/data/checkout",
++      files: ["a.ts"],
++      refs: ["refs/heads/ai"],
++      head_moved: true,
++    },
++    {
++      kind: "Changed",
++      folder: "/data/checkout",
++      files: ["a.ts"],
++      refs: ["refs/heads/ai"],
++      headMoved: true,
++    },
++  ],
++  [
++    { kind: "Unreadable", folder: "/data/checkout", message: "bad object" },
++    { kind: "Unreadable", folder: "/data/checkout", message: "bad object" },
++  ],
++])("checkoutChanges converts %j", async (look, expected) => {
+   commands.checkoutChanges.mockResolvedValue(ok(look));
+-  const reply = await createTauriAgentSource(LOG).checkoutChanges();
+-  const expected: { ok: true; value: CheckoutChanges } | null = reply.ok
+-    ? { ok: true, value: reply.value }
+-    : null;
+-  expect(expected).toEqual({ ok: true, value: look });
++  expect(await createTauriAgentSource(LOG).checkoutChanges()).toEqual({
++    ok: true,
++    value: expected,
++  });
+ });
+ 
+ test("checkoutChanges refuses a relative folder", async () => {
+diff --git a/frontend/src/ipc/tauriAgent.ts b/frontend/src/ipc/tauriAgent.ts
+index 2eb0c5d..e91f255 100644
+--- a/frontend/src/ipc/tauriAgent.ts
++++ b/frontend/src/ipc/tauriAgent.ts
+@@ -1,20 +1,17 @@
+ import { Channel } from "@tauri-apps/api/core";
+ 
+ import {
++  fromAgentCommand,
+   toAgentStartReply,
+   toCheckoutChanges,
+   toCheckoutReady,
+-  type AgentSource,
+-} from "./AgentSource";
++} from "./agentDomain";
++import type { AgentSource } from "./AgentSource";
+ import { commands, type HostEvent } from "./bindings";
+ import { toDifferences } from "./compareDomain";
+-import type { AgentRun, SourceResult } from "./domain";
++import type { AgentRun } from "./domain";
+ import type { Log } from "./log";
+-import { toResult } from "./tauri";
+-
+-function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
+-  return result.ok ? { ok: true, value: to(result.value) } : result;
+-}
++import { converted, toResult } from "./tauri";
+ 
+ type Replied = { readonly status: "ok" } | { readonly status: "error"; readonly error: unknown };
+ 
+@@ -39,10 +36,10 @@ export function createTauriAgentSource(log: Log): AgentSource {
+     async prepareCheckout() {
+       return converted(toResult(await commands.prepareCheckout()), toCheckoutReady);
+     },
+-    async startAgent({ program, args, homeFolders }, onEvent) {
++    async startAgent(command, onEvent) {
+       const events = new Channel<HostEvent>(onEvent);
+-      const command = { program, args: [...args], home_folders: [...homeFolders] };
+-      return converted(toResult(await commands.startAgent(command, events)), toAgentStartReply);
++      const reply = await commands.startAgent(fromAgentCommand(command), events);
++      return converted(toResult(reply), toAgentStartReply);
+     },
+     sendToAgent(run, message) {
+       void logged(log, "agent.send_failed", run, commands.sendToAgent(run, message));
+diff --git a/frontend/src/ipc/tauriReview.ts b/frontend/src/ipc/tauriReview.ts
+index 314626c..d7c47ed 100644
+--- a/frontend/src/ipc/tauriReview.ts
++++ b/frontend/src/ipc/tauriReview.ts
+@@ -1,16 +1,11 @@
+ import { Channel } from "@tauri-apps/api/core";
+ 
+ import { commands, type SendProgress } from "./bindings";
+-import type { SourceResult } from "./domain";
+ import { toGitLabCheck, toSendReply, toThreadAdded, toThreadList } from "./reviewDomain";
+ import type { ReviewSource } from "./ReviewSource";
+-import { toResult } from "./tauri";
++import { converted, toResult } from "./tauri";
+ import { fromThreadLine } from "./threadLine";
+ 
+-function converted<T, U>(result: SourceResult<T>, to: (raw: T) => U): SourceResult<U> {
+-  return result.ok ? { ok: true, value: to(result.value) } : result;
+-}
+-
+ export function createTauriReview(): ReviewSource {
+   return {
+     async listThreads() {
+-- 
+2.56.0
+

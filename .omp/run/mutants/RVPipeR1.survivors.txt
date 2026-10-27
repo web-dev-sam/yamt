@@ -1,0 +1,3 @@
+just mutants 59f91f7 (covers ed82e72 RVPipeR1): 31 mutants tested in 75s: 1 missed, 28 caught, 2 unviable
+MISSED   crates/lsp-host/src/bin/lsp-echo.rs:12:54: replace == with != in main
+  (the `--ignore-stop` flag check: no remaining lsp-host test may use the mode — for the re-check)

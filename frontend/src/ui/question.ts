@@ -22,7 +22,16 @@ export type Question =
       readonly found: readonly ServerSpec[];
       readonly added: readonly ServerSpec[];
     }
-  | { readonly kind: "closeTab"; readonly name: string };
+  | { readonly kind: "closeTab"; readonly name: string }
+  | {
+      readonly kind: "keepAiChanges";
+      readonly folder: string;
+      readonly files: readonly string[];
+      readonly headMoved: boolean;
+      readonly refs: { readonly branches: readonly string[]; readonly stash: boolean };
+    }
+  | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string }
+  | { readonly kind: "deleteNote" };
 
 type QuestionList =
   | { readonly kind: "none" }
@@ -75,6 +84,9 @@ export function endsWithStop(question: Question): boolean {
     case "clash":
     case "servers":
     case "closeTab":
+    case "keepAiChanges":
+    case "keepUnreadableCheckout":
+    case "deleteNote":
       return false;
     default: {
       const _exhaustive: never = question;
@@ -133,6 +145,15 @@ const REWORDS_TEXT: QuestionText = {
   cancel: "Cancel",
 };
 
+const DELETE_NOTE_TEXT: QuestionText = {
+  title: "Delete Comment",
+  message: "Delete this comment?",
+  list: { kind: "none" },
+  note: null,
+  confirm: "Delete",
+  cancel: "Cancel",
+};
+
 function closeTabText(name: string): QuestionText {
   return {
     title: "Close Tab",
@@ -144,19 +165,69 @@ function closeTabText(name: string): QuestionText {
   };
 }
 
+const KEEP_TITLE = "Keep the AI's changes?";
+const KEEP = "Keep Changes";
+const DISCARD = "Discard Changes";
+
+function leftRefs({
+  branches,
+  stash,
+}: Extract<Question, { readonly kind: "keepAiChanges" }>["refs"]): string[] {
+  const left = [
+    ...(branches.length === 0
+      ? []
+      : [`the branch${branches.length === 1 ? "" : "es"} ${branches.join(", ")}`]),
+    ...(stash ? ["a stash"] : []),
+  ];
+  return left.length === 0 ? [] : [`left ${left.join(" and ")}`];
+}
+
+function keepAiChangesText(
+  question: Extract<Question, { readonly kind: "keepAiChanges" }>,
+): QuestionText {
+  const { folder, files, headMoved, refs } = question;
+  const changed = files.length > 0;
+  const done = [...(headMoved ? ["made commits"] : []), ...leftRefs(refs)];
+  return {
+    title: KEEP_TITLE,
+    message: changed
+      ? `The AI changed these files in its checkout at ${folder}:`
+      : `The AI left work in its checkout at ${folder}.`,
+    list: { kind: "files", files },
+    note: done.length === 0 ? null : `It ${changed ? "also " : ""}${done.join(" and ")} there.`,
+    confirm: KEEP,
+    cancel: DISCARD,
+  };
+}
+
+function keepUnreadableText(folder: string, message: string): QuestionText {
+  return {
+    title: KEEP_TITLE,
+    message: `Git cannot read the AI's checkout at ${folder}, so yamt cannot tell what the AI changed there: ${message.trim()}`,
+    list: { kind: "none" },
+    note: `${DISCARD} removes the checkout.`,
+    confirm: KEEP,
+    cancel: DISCARD,
+  };
+}
+
+function exitText(files: readonly string[]): QuestionText {
+  return {
+    title: "Unsaved Changes",
+    message: "These files have changes that are not saved to disk. Exit without saving them?",
+    list: { kind: "files", files },
+    note: null,
+    confirm: "Exit Without Saving",
+    cancel: "Cancel",
+  };
+}
+
 export function questionText(question: Question, platform: string): QuestionText {
   switch (question.kind) {
     case "unprocessed":
       return unprocessedText(question.summary);
     case "exit":
-      return {
-        title: "Unsaved Changes",
-        message: "These files have changes that are not saved to disk. Exit without saving them?",
-        list: { kind: "files", files: question.files },
-        note: null,
-        confirm: "Exit Without Saving",
-        cancel: "Cancel",
-      };
+      return exitText(question.files);
     case "clash":
       return {
         title: "Key Already in Use",
@@ -176,6 +247,12 @@ export function questionText(question: Question, platform: string): QuestionText
       return REWORDS_TEXT;
     case "closeTab":
       return closeTabText(question.name);
+    case "keepAiChanges":
+      return keepAiChangesText(question);
+    case "keepUnreadableCheckout":
+      return keepUnreadableText(question.folder, question.message);
+    case "deleteNote":
+      return DELETE_NOTE_TEXT;
     default: {
       const _exhaustive: never = question;
       return _exhaustive;

@@ -1,0 +1,50 @@
+just mutants 083d946~1 (covers 083d946 RVWindowR1) — Stryker (whole changed files; start.ts/video.ts have no test files, pre-existing tooling)
+All files                |  70.70 |   92.65 |      892 |         3 |         71 |      300 |        1 |
+   args.ts               |  92.80 |   92.80 |      116 |         0 |          9 |        0 |        0 |
+   start.ts              |   0.00 |    0.00 |        0 |         0 |          0 |      147 |        0 |
+   startArgs.ts          |  94.87 |   94.87 |      148 |         0 |          8 |        0 |        0 |
+   video.ts              |   0.00 |    0.00 |        0 |         0 |          0 |      136 |        0 |
+  fences.ts              |  84.19 |   85.37 |      242 |         3 |         42 |        4 |        0 |
+   problem.ts            |  92.21 |   93.42 |       71 |         0 |          5 |        1 |        0 |
+   problemText.ts        |  93.63 |   97.35 |      147 |         0 |          4 |        6 |        0 |
+   rangeStore.ts         |  99.13 |   99.13 |      114 |         0 |          1 |        0 |        0 |
+   useRangeController.ts |  87.10 |   96.43 |       54 |         0 |          2 |        6 |        1 |
+Survived/NoCoverage on the round's hunks:
+frontend/src/ui/rangeStore.ts @@ -6 +6 @@ import { fileListKey, type KeyPress } from "./fileListKey";
+frontend/src/ui/rangeStore.ts @@ -27 +27 @@ export type RangeStore = SettingsStore & {
+frontend/src/ui/rangeStore.ts @@ -53,2 +52,0 @@ export const MOUNTED_FILES = 16;
+frontend/src/ui/rangeStore.ts @@ -86 +84 @@ export function createRangeStore(source: RangeSource, startTheme: Theme): RangeS
+frontend/src/ui/rangeStore.ts @@ -151 +149 @@ async function startUp(state: State, settings: SettingsActions): Promise<void> {
+frontend/src/ui/rangeStore.ts @@ -161,3 +159,3 @@ async function startUp(state: State, settings: SettingsActions): Promise<void> {
+frontend/src/ui/rangeStore.ts @@ -165 +163 @@ async function loadFile(state: State, file: RangeFileId): Promise<RangeFile | nu
+frontend/src/ui/rangeStore.ts @@ -169,4 +167 @@ async function loadFile(state: State, file: RangeFileId): Promise<RangeFile | nu
+frontend/src/ui/useRangeController.ts @@ -11,7 +11 @@ import {
+frontend/src/ui/useRangeController.ts @@ -24,4 +18,4 @@ type Host<T> = Readonly<ShallowRef<T | null>>;
+frontend/src/ui/useRangeController.ts @@ -30 +24 @@ type RangeHostRefs = {
+frontend/src/ui/useRangeController.ts @@ -38 +32 @@ export type RangeHandle = {
+frontend/src/ui/useRangeController.ts @@ -51 +45 @@ type Live = {
+frontend/src/ui/useRangeController.ts @@ -62 +56 @@ function land(live: Live, path: string, file: RangeFile | null): void {
+frontend/src/ui/useRangeController.ts @@ -67 +61 @@ function land(live: Live, path: string, file: RangeFile | null): void {
+frontend/src/ui/useRangeController.ts @@ -72 +66 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+frontend/src/ui/useRangeController.ts @@ -79 +73 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+frontend/src/ui/useRangeController.ts @@ -105 +99 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+frontend/src/ui/useRangeController.ts @@ -112 +106,5 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+frontend/src/ui/useRangeController.ts @@ -120 +118 @@ export function useRangeController(
+frontend/src/ui/useRangeController.ts @@ -126 +124 @@ export function useRangeController(
+frontend/scripts/app-session/startArgs.ts @@ -104,0 +105,13 @@ function settingsText(parsed: Parsed): string | null {
+      1 scripts/app-session/startArgs.ts:119:3
+      1 scripts/app-session/startArgs.ts:38:48
+      1 scripts/app-session/startArgs.ts:39:30
+      2 scripts/app-session/startArgs.ts:39:7
+      1 scripts/app-session/startArgs.ts:84:48
+      1 scripts/app-session/startArgs.ts:97:58
+      1 scripts/app-session/startArgs.ts:99:7
+      1 src/ui/rangeStore.ts:117:10
+      1 src/ui/useRangeController.ts:120:16
+      1 src/ui/useRangeController.ts:122:22
+      1 src/ui/useRangeController.ts:124:11
+      1 src/ui/useRangeController.ts:125:12
+      1 src/ui/useRangeController.ts:127:12
+      1 src/ui/useRangeController.ts:127:77
+      1 src/ui/useRangeController.ts:82:14
+      1 src/ui/useRangeController.ts:82:5

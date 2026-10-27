@@ -1,0 +1,18 @@
+just mutants bd0de7a (covers 88a5e09 RVAiThreadsR1): Stryker 10 files, 1013 mutants; 924 killed, 49 survived, 15 no coverage.
+16 of 64 on changed lines
+NoCoverage BlockStatement frontend/src/ui/rangeAi.ts:253 | -     if (aiOf(state, id).loadedSession !== session) { => -       return;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:88 | -       ai.loadedSession === session && => +       true &&
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:125 | -     const loading = session !== null && (ai.loadedSession !== session || ai.loaded === n => +     const loading = session !== null && (false || ai.loade
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:158 | -     if (loadedSession !== session || loaded?.kind !== "loaded") { => +     if (false || loaded?.kind !== "loaded") {
+Survived OptionalChaining frontend/src/ui/rangeAi.ts:158 | -     if (loadedSession !== session || loaded?.kind !== "loaded") { => +     if (loadedSession !== session || loaded.kind !== "load
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:160 | -     } else if (turn <= loaded.turns.length) { => +     } else if (true) {
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:184 | -     if (session !== null && turn !== null) { => +     if (true && turn !== null) {
+Survived OptionalChaining frontend/src/ui/rangeAi.ts:242 | -     const session = thread?.session ?? null; => +     const session = thread.session ?? null;
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:253 | -     if (aiOf(state, id).loadedSession !== session) { => +     if (false) {
+NoCoverage ConditionalExpression frontend/src/ui/rangeAiView.ts:71 | -       default: { => -         const _exhaustive: never = view;
+NoCoverage BlockStatement frontend/src/ui/rangeAiView.ts:71 | -       default: { => -         const _exhaustive: never = view;
+Survived OptionalChaining frontend/src/ui/rangeThreads.ts:212 | -     const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body; => +     const body = list.threads.find(thread => thread.id ===
+Survived ConditionalExpression frontend/src/ui/rangeThreads.ts:213 | -     return body?.kind === "aiAnswer" ? body.turn : null; => +     return true ? body.turn : null;
+Survived OptionalChaining frontend/src/ui/rangeThreads.ts:212 | -     const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body; => +     const body = list.threads.find(thread => thread.id ===
+Survived OptionalChaining frontend/src/ui/rangeThreads.ts:213 | -     return body?.kind === "aiAnswer" ? body.turn : null; => +     return body.kind === "aiAnswer" ? body.turn : null;
+Survived EqualityOperator frontend/src/ui/rangeThreads.ts:220 | -         (await changed(state, "session", () => source.setThreadSession(thread, session)) => +         (await changed(state, "session", () => source.setT

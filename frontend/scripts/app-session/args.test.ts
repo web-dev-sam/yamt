@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import { parseCommand, type Command } from "./args";
 import { parseChord } from "./keys";
+import { appArgs } from "./startArgs";
 
 test("start-app takes the brief's defaults: debug binary, 1600x1000, no recording, no settings", () => {
   expect(parseCommand(["start-app", "--name", "smoke", "--fresh-repo"])).toEqual({
@@ -13,6 +14,8 @@ test("start-app takes the brief's defaults: debug binary, 1600x1000, no recordin
     size: { width: 1600, height: 1000 },
     record: null,
     home: null,
+    glab: null,
+    ai: false,
   });
 });
 
@@ -45,6 +48,8 @@ test("start-app reads every option of the acceptance run", () => {
     size: { width: 800, height: 600 },
     record: { file: "/tmp/s.mkv", seconds: 5 },
     home: "/tmp/h-home",
+    glab: null,
+    ai: false,
   });
 });
 
@@ -66,6 +71,69 @@ test("start-app --diff opens the compare window and no repository", () => {
   expect(
     parseCommand(["start-app", "--name", "c", "--diff", "--home", "/tmp/c-home"]),
   ).toMatchObject({ kind: "start-app", opens: { kind: "diff" }, home: "/tmp/c-home" });
+});
+
+test("start-app --range opens the range window on the --repo folder", () => {
+  expect(
+    parseCommand(["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"]),
+  ).toMatchObject({
+    kind: "start-app",
+    opens: { kind: "range", range: "main...feature", dir: "/tmp/rr" },
+  });
+});
+
+test("start-app --range needs --repo and takes neither --fresh-repo nor --diff", () => {
+  const needsRepo = /--range needs --repo <dir>, and neither --fresh-repo nor --diff/;
+  const range = ["start-app", "--name", "r", "--range", "a..b"];
+  expect(() => parseCommand(range)).toThrow(needsRepo);
+  expect(() => parseCommand([...range, "--fresh-repo"])).toThrow(needsRepo);
+  expect(() => parseCommand([...range, "--repo", "/r", "--diff"])).toThrow(needsRepo);
+  expect(() => parseCommand([...range, "--repo", "/r", "--fresh-repo"])).toThrow(needsRepo);
+});
+
+test("the app opens the range window with --diff=<range> and --repo, the compare window with --diff alone, a folder with --repo", () => {
+  expect(appArgs({ kind: "range", range: "main...feature", dir: "rr" }, "/tmp/rr", false)).toEqual([
+    "--diff=main...feature",
+    "--repo",
+    "/tmp/rr",
+  ]);
+  expect(appArgs({ kind: "diff" }, null, false)).toEqual(["--diff"]);
+  expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", false)).toEqual(["--repo", "/tmp/r"]);
+  expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", false)).toEqual(["--repo", "/tmp/s/repo"]);
+});
+
+test("start-app --ai reaches the app as its own --ai after the repository", () => {
+  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+  expect(parseCommand([...range, "--ai"])).toMatchObject({ ai: true });
+  expect(parseCommand(range)).toMatchObject({ ai: false });
+  expect(appArgs({ kind: "range", range: "a...b", dir: "rr" }, "/tmp/rr", true)).toEqual([
+    "--diff=a...b",
+    "--repo",
+    "/tmp/rr",
+    "--ai",
+  ]);
+  expect(appArgs({ kind: "diff" }, null, true)).toEqual(["--diff", "--ai"]);
+  expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+});
+
+test("start-app --glab names a tests/glab scenario by its form, only with --range", () => {
+  const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+  expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
+  expect(parseCommand(range)).toMatchObject({ glab: null });
+  const needsRange = /--glab <scenario> needs --range/;
+  expect(() =>
+    parseCommand(["start-app", "--name", "r", "--repo", "/r", "--glab", "moved"]),
+  ).toThrow(needsRange);
+  expect(() => parseCommand(["start-app", "--name", "r", "--diff", "--glab", "moved"])).toThrow(
+    needsRange,
+  );
+  const folderName = /--glab .*: expected a folder name under tests\/glab\//;
+  expect(() => parseCommand([...range, "--glab", "../moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "Moved"])).toThrow(folderName);
+  expect(() => parseCommand([...range, "--glab", "lined-up/../moved"])).toThrow(folderName);
+  expect(parseCommand([...range, "--glab", "nosuch"])).toMatchObject({ glab: "nosuch" });
+  expect(() => parseCommand([...range, "--glab"])).toThrow(/--glab needs a value/);
 });
 
 test("--record and --record-seconds come together, with whole seconds of at least 1", () => {
@@ -112,6 +180,58 @@ test("start-fixture takes a name and a size, and opens the merge page", () => {
     size: { width: 1280, height: 800 },
     search: "",
   });
+});
+
+test("start-fixture --range-case opens one range fixture, never with a compare option", () => {
+  expect(parseCommand(["start-fixture", "--name", "fx", "--range-case", "review"])).toMatchObject({
+    search: "?range=review",
+  });
+  expect(parseCommand(["start-fixture", "--name", "fx", "--range-case", "a b"])).toMatchObject({
+    search: "?range=a%20b",
+  });
+  const alone = /--range-case without --diff or --diff-case/;
+  const ranged = ["start-fixture", "--name", "fx", "--range-case", "empty"];
+  expect(() => parseCommand([...ranged, "--diff"])).toThrow(alone);
+  expect(() => parseCommand([...ranged, "--diff-case", "words"])).toThrow(alone);
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--range-case"])).toThrow(
+    /--range-case needs a value/,
+  );
+});
+
+test("start-fixture --threads and --gitlab pick the review scripts of a range fixture, and only of one", () => {
+  const ranged = ["start-fixture", "--name", "fx", "--range-case", "review"];
+  expect(parseCommand([...ranged, "--threads", "seeded", "--gitlab", "refusal"])).toMatchObject({
+    search: "?range=review&threads=seeded&gitlab=refusal",
+  });
+  expect(parseCommand([...ranged, "--gitlab", "a b"])).toMatchObject({
+    search: "?range=review&gitlab=a+b",
+  });
+  expect(parseCommand([...ranged, "--threads", "seeded"])).toMatchObject({
+    search: "?range=review&threads=seeded",
+  });
+  const onlyRange = /--threads, --gitlab and --ai only with --range-case/;
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--gitlab", "moved"])).toThrow(
+    onlyRange,
+  );
+  expect(() =>
+    parseCommand(["start-fixture", "--name", "fx", "--diff", "--threads", "seeded"]),
+  ).toThrow(onlyRange);
+});
+
+test("start-fixture --ai turns the range fixture's AI on, --ai-case picks its agent fixture, --ai-changes a changed checkout", () => {
+  const ranged = ["start-fixture", "--name", "fx", "--range-case", "review", "--threads", "seeded"];
+  expect(parseCommand([...ranged, "--ai"])).toMatchObject({
+    search: "?range=review&threads=seeded&ai=",
+  });
+  expect(parseCommand([...ranged, "--ai", "--ai-case", "crash", "--ai-changes"])).toMatchObject({
+    search: "?range=review&threads=seeded&ai=crash&ai-changes=",
+  });
+  const needsAi = /--ai-case and --ai-changes only with --ai/;
+  expect(() => parseCommand([...ranged, "--ai-case", "crash"])).toThrow(needsAi);
+  expect(() => parseCommand([...ranged, "--ai-changes"])).toThrow(needsAi);
+  expect(() => parseCommand(["start-fixture", "--name", "fx", "--ai"])).toThrow(
+    /--threads, --gitlab and --ai only with --range-case/,
+  );
 });
 
 test("start-fixture --diff opens the compare page, --diff-case one compare fixture in its first tab", () => {

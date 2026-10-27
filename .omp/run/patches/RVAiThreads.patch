@@ -1,0 +1,2691 @@
+From 7292c02cb424466bc0dc35358fe9bf56110fb506 Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Mon, 26 Oct 2026 23:46:50 +0100
+Subject: [PATCH] feat(range): Ask AI in the threads, Stop, the AI's turns,
+ Keep at close, the AI settings section
+
+---
+ frontend/src/ipc/ReviewSource.ts       |   2 +
+ frontend/src/ipc/domain.test.ts        | 122 +++++++
+ frontend/src/ipc/domain.ts             |  36 +-
+ frontend/src/ipc/fixtureReview.test.ts |  51 +++
+ frontend/src/ipc/fixtureReview.ts      | 138 +++-----
+ frontend/src/ipc/fixtureThreads.ts     |  68 ++++
+ frontend/src/ipc/rangeDomain.ts        |  12 +-
+ frontend/src/ipc/reviewDomain.test.ts  |   8 +
+ frontend/src/ipc/reviewDomain.ts       |  11 +-
+ frontend/src/ipc/tauriReview.test.ts   |  15 +
+ frontend/src/ipc/tauriReview.ts        |   6 +
+ frontend/src/main.ts                   |  25 +-
+ frontend/src/ui/RangeApp.vue           |  25 +-
+ frontend/src/ui/RangeMessage.vue       |  71 +++-
+ frontend/src/ui/RangeThreadBox.vue     |  81 ++++-
+ frontend/src/ui/problem.ts             |  11 +-
+ frontend/src/ui/problemText.test.ts    |   2 +
+ frontend/src/ui/problemText.ts         |   2 +
+ frontend/src/ui/rangeAi.test.ts        | 473 +++++++++++++++++++++++++
+ frontend/src/ui/rangeAi.ts             | 289 +++++++++++++++
+ frontend/src/ui/rangeAiView.test.ts    | 126 +++++++
+ frontend/src/ui/rangeAiView.ts         |  81 +++++
+ frontend/src/ui/rangeGitLab.test.ts    |  33 +-
+ frontend/src/ui/rangeGitLab.ts         |  18 +-
+ frontend/src/ui/rangeStore.test.ts     |  53 ++-
+ frontend/src/ui/rangeStore.ts          |  87 ++++-
+ frontend/src/ui/rangeThreadText.ts     |   9 +
+ frontend/src/ui/rangeThreads.test.ts   |   2 +-
+ frontend/src/ui/rangeThreads.ts        |  13 +
+ 29 files changed, 1694 insertions(+), 176 deletions(-)
+ create mode 100644 frontend/src/ipc/domain.test.ts
+ create mode 100644 frontend/src/ipc/fixtureThreads.ts
+ create mode 100644 frontend/src/ui/rangeAi.test.ts
+ create mode 100644 frontend/src/ui/rangeAi.ts
+ create mode 100644 frontend/src/ui/rangeAiView.test.ts
+ create mode 100644 frontend/src/ui/rangeAiView.ts
+
+diff --git a/frontend/src/ipc/ReviewSource.ts b/frontend/src/ipc/ReviewSource.ts
+index b6601b4..7e03513 100644
+--- a/frontend/src/ipc/ReviewSource.ts
++++ b/frontend/src/ipc/ReviewSource.ts
+@@ -8,6 +8,8 @@ export interface ReviewSource {
+   addNote(thread: ThreadId, text: string): Promise<SourceResult<ThreadList>>;
+   queueMessage(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
+   unqueueMessage(message: MessageId): Promise<SourceResult<ThreadList>>;
++  setThreadSession(thread: ThreadId, session: string): Promise<SourceResult<ThreadList>>;
++  addAiAnswer(thread: ThreadId, session: string): Promise<SourceResult<ThreadList>>;
+   checkGitLab(): Promise<SourceResult<GitLabCheck>>;
+   sendQueue(onProgress: (progress: SendProgress) => void): Promise<SourceResult<SendReply>>;
+ }
+diff --git a/frontend/src/ipc/domain.test.ts b/frontend/src/ipc/domain.test.ts
+new file mode 100644
+index 0000000..4fe48c3
+--- /dev/null
++++ b/frontend/src/ipc/domain.test.ts
+@@ -0,0 +1,122 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import {
++  isColumnVersion,
++  isLeftLine,
++  nextColumnVersion,
++  toDomain,
++  toRange,
++  toSides,
++  toStartReply,
++  type ColumnVersion,
++} from "./domain";
++
++const MERGE_CHUNK: Generated.MergeChunk = {
++  chunk: {
++    id: 3,
++    kind: "Conflict",
++    base: { start: 0, len: 1 },
++    local: { start: 1, len: 1 },
++    remote: { start: 2, len: 1 },
++  },
++  middle: { start: 4, len: 1 },
++  words: {
++    chunk: 3,
++    local: { changed: [], removals: [] },
++    remote: { changed: [], removals: [] },
++  },
++  waiting: { kind: "SideLines" },
++};
++
++function mergeData(chunk: Generated.MergeChunk, diskVersion: number): Generated.FileMergeData {
++  return {
++    path: "a.ts",
++    middle: { kind: "Stages", text: "" },
++    local: "",
++    remote: "",
++    deleted: null,
++    eol: "Lf",
++    chunks: [chunk],
++    disk_version: diskVersion,
++  };
++}
++
++function columnVersion(n: number): ColumnVersion {
++  if (!isColumnVersion(n)) {
++    throw new Error(`${n} is no column version`);
++  }
++  return n;
++}
++
++test("toDomain brands the chunk id, its ranges and the disk version", () => {
++  const data = toDomain(mergeData(MERGE_CHUNK, 2));
++
++  expect(data.diskVersion).toBe(2);
++  expect(data.chunks[0]).toMatchObject({
++    id: 3,
++    middle: { start: 4, len: 1 },
++    local: { start: 1, len: 1 },
++    remote: { start: 2, len: 1 },
++  });
++});
++
++test.each<[string, Generated.FileMergeData, string]>([
++  [
++    "a bad chunk id",
++    mergeData({ ...MERGE_CHUNK, chunk: { ...MERGE_CHUNK.chunk, id: -1 } }, 0),
++    "chunks[0].chunk.id must be a non-negative safe integer, got -1",
++  ],
++  [
++    "a bad middle start",
++    mergeData({ ...MERGE_CHUNK, middle: { start: 0.5, len: 1 } }, 0),
++    "chunks[0].middle.start must be a non-negative safe integer, got 0.5",
++  ],
++  [
++    "a bad disk version",
++    mergeData(MERGE_CHUNK, -2),
++    "disk_version must be a non-negative safe integer, got -2",
++  ],
++])("toDomain refuses %s, naming the field", (_case, dto, message) => {
++  expect(() => toDomain(dto)).toThrow(message);
++});
++
++test("toRange checks the start before the length", () => {
++  expect(() =>
++    toRange({ range: { start: -1, len: -1 }, isLine: isLeftLine, field: "left" }),
++  ).toThrow("left.start must be a non-negative safe integer, got -1");
++  expect(() =>
++    toRange({ range: { start: 0, len: -1 }, isLine: isLeftLine, field: "left" }),
++  ).toThrow("left.len must be a non-negative safe integer, got -1");
++});
++
++test("toSides brands the disk version and refuses a bad one", () => {
++  const sides: Generated.FileSides = {
++    path: "a.png",
++    reason: "Binary",
++    local: { kind: "Binary", bytes: 1 },
++    remote: { kind: "Binary", bytes: 2 },
++    disk_version: 5,
++  };
++
++  expect(toSides(sides).diskVersion).toBe(5);
++  expect(() => toSides({ ...sides, disk_version: -5 })).toThrow(
++    "disk_version must be a non-negative safe integer, got -5",
++  );
++});
++
++test("toStartReply brands the run and refuses a bad one; other replies pass through", () => {
++  expect(toStartReply({ kind: "Started", run: 7 })).toEqual({ kind: "Started", run: 7 });
++  expect(() => toStartReply({ kind: "Started", run: -7 })).toThrow(
++    "run must be a non-negative safe integer, got -7",
++  );
++  const notFound: Generated.StartReply = { kind: "NotFound", program: "x", searched: [] };
++  expect(toStartReply(notFound)).toBe(notFound);
++});
++
++test("nextColumnVersion refuses to pass the largest safe integer", () => {
++  expect(nextColumnVersion(columnVersion(41))).toBe(42);
++  expect(() => nextColumnVersion(columnVersion(Number.MAX_SAFE_INTEGER))).toThrow(
++    `version must be a non-negative safe integer, got ${Number.MAX_SAFE_INTEGER + 1}`,
++  );
++});
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index ac93832..4400652 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -1,5 +1,5 @@
+ import type * as Generated from "./bindings";
+-import { invalid, isNonNegativeInteger } from "./validate";
++import { branded, invalid, isNonNegativeInteger } from "./validate";
+ import { toSideWords, type SideWords } from "./words";
+ 
+ export type TabId = number & { readonly __brand: "TabId" };
+@@ -183,11 +183,7 @@ export function isMessageId(value: number): value is MessageId {
+ }
+ 
+ export function nextColumnVersion(version: ColumnVersion): ColumnVersion {
+-  const next = version + 1;
+-  if (!isColumnVersion(next)) {
+-    throw invalid("version", next);
+-  }
+-  return next;
++  return branded(version + 1, isColumnVersion, "version");
+ }
+ 
+ function toWords({
+@@ -217,10 +213,8 @@ export function toRange<L extends number>({
+   isLine: (n: number) => n is L;
+   field: string;
+ }): LineRange<L> {
+-  const { start, len } = range;
+-  if (!isLine(start)) {
+-    throw invalid(`${field}.start`, start);
+-  }
++  const start = branded(range.start, isLine, `${field}.start`);
++  const { len } = range;
+   if (!isNonNegativeInteger(len)) {
+     throw invalid(`${field}.len`, len);
+   }
+@@ -230,10 +224,7 @@ export function toRange<L extends number>({
+ function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
+   const field = `chunks[${index}]`;
+   const { chunk } = merged;
+-  const { id } = chunk;
+-  if (!isChunkId(id)) {
+-    throw invalid(`${field}.chunk.id`, id);
+-  }
++  const id = branded(chunk.id, isChunkId, `${field}.chunk.id`);
+   return {
+     id,
+     kind: chunk.kind,
+@@ -245,13 +236,6 @@ function toChunk(merged: Generated.MergeChunk, index: number): Chunk {
+   };
+ }
+ 
+-function toDiskVersion(n: number, field: string): DiskVersion {
+-  if (!isDiskVersion(n)) {
+-    throw invalid(field, n);
+-  }
+-  return n;
+-}
+-
+ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
+   return {
+     path: dto.path,
+@@ -261,13 +245,13 @@ export function toDomain(dto: Generated.FileMergeData): FileMergeData {
+     deleted: dto.deleted,
+     eol: dto.eol,
+     chunks: dto.chunks.map(toChunk),
+-    diskVersion: toDiskVersion(dto.disk_version, "disk_version"),
++    diskVersion: branded(dto.disk_version, isDiskVersion, "disk_version"),
+   };
+ }
+ 
+ export function toSides(dto: Generated.FileSides): FileSides {
+   const { disk_version: diskVersion, ...sides } = dto;
+-  return { ...sides, diskVersion: toDiskVersion(diskVersion, "disk_version") };
++  return { ...sides, diskVersion: branded(diskVersion, isDiskVersion, "disk_version") };
+ }
+ 
+ export function toListing(dto: Generated.Listing): Listing {
+@@ -291,9 +275,5 @@ export function toStartReply(dto: Generated.StartReply): StartReply {
+   if (dto.kind !== "Started") {
+     return dto;
+   }
+-  const { run } = dto;
+-  if (!isRunId(run)) {
+-    throw invalid("run", run);
+-  }
+-  return { kind: "Started", run };
++  return { kind: "Started", run: branded(dto.run, isRunId, "run") };
+ }
+diff --git a/frontend/src/ipc/fixtureReview.test.ts b/frontend/src/ipc/fixtureReview.test.ts
+index 265fd6e..f93bced 100644
+--- a/frontend/src/ipc/fixtureReview.test.ts
++++ b/frontend/src/ipc/fixtureReview.test.ts
+@@ -24,6 +24,7 @@ const MERGE_REQUEST = {
+ };
+ const LINK = `${MERGE_REQUEST.webUrl}/diffs`;
+ const NOW_MS = 1_800_000_000_500;
++const NOT_QUEUED = { kind: "notQueued" };
+ 
+ function fileId(n: number): RangeFileId {
+   if (!isRangeFileId(n)) {
+@@ -228,6 +229,56 @@ test("addNote appends a note; blank text and unknown threads are refused", async
+   expect((await threadsOf(source))[1]?.messages).toHaveLength(2);
+ });
+ 
++test("setThreadSession replaces the thread's session; an unknown thread is refused", async () => {
++  const source = review("?threads=seeded");
++
++  const list = valueOf(await source.setThreadSession(threadId(3), "fixture-session-2"));
++
++  expect(list.threads.map((thread) => thread.session)).toEqual([
++    null,
++    null,
++    null,
++    "fixture-session-2",
++  ]);
++  expect(list.threads[3]?.messages).toHaveLength(2);
++  expect(await source.setThreadSession(threadId(9), "s")).toEqual({
++    ok: false,
++    failure: { kind: "UnknownThread", thread: 9 },
++  });
++});
++
++test("addAiAnswer numbers the turn by the session's answers already in the thread, as Rust does", async () => {
++  const source = review("?threads=seeded");
++
++  await source.addAiAnswer(threadId(3), "fixture-session");
++  await source.addAiAnswer(threadId(3), "other");
++  const list = valueOf(await source.addAiAnswer(threadId(3), "fixture-session"));
++
++  const thread = list.threads[3];
++  expect(thread?.session).toBe("fixture-session");
++  expect(thread?.messages.slice(2).map(({ id, body, posting }) => ({ id, body, posting }))).toEqual(
++    [
++      {
++        id: 5,
++        body: { kind: "aiAnswer", session: "fixture-session", turn: 1 },
++        posting: NOT_QUEUED,
++      },
++      { id: 6, body: { kind: "aiAnswer", session: "other", turn: 0 }, posting: NOT_QUEUED },
++      {
++        id: 7,
++        body: { kind: "aiAnswer", session: "fixture-session", turn: 2 },
++        posting: NOT_QUEUED,
++      },
++    ],
++  );
++  expect(thread?.messages[2]?.written).toBe(1_800_000_000);
++  expect(valueOf(await source.addAiAnswer(threadId(0), "new")).threads[0]?.session).toBe("new");
++  expect(await source.addAiAnswer(threadId(9), "s")).toEqual({
++    ok: false,
++    failure: { kind: "UnknownThread", thread: 9 },
++  });
++});
++
+ test("queueMessage keeps the edited text and unqueueMessage takes it back", async () => {
+   const source = review("?threads=seeded");
+ 
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+index 8271451..1969834 100644
+--- a/frontend/src/ipc/fixtureReview.ts
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -2,14 +2,15 @@ import type * as Generated from "./bindings";
+ import type { SourceResult } from "./domain";
+ import {
+   gitLabCheck,
+-  pendingPosting,
+   postOutcome,
+-  REFUSAL,
+   shownGitLabScript,
+   TIMED_OUT,
+   type GitLabScript,
+   type PostOutcome,
++  pendingPosting,
++  REFUSAL,
+ } from "./fixtureGitLab";
++import { SEEDED_DRAFT_NOTE, startThreads } from "./fixtureThreads";
+ import type { Log } from "./log";
+ import type { RangeStart } from "./rangeDomain";
+ import {
+@@ -35,80 +36,16 @@ type Store = {
+ 
+ type Tally = { sent: number; refused: number };
+ 
+-type Seed = Pick<Generated.Thread, "line" | "session"> & {
+-  readonly messages: readonly Omit<Generated.Message, "id" | "written">[];
+-};
+-
+ const CHECKING_MS = 3000;
+ const POST_PAUSE_MS = 300;
+ const MS_PER_SECOND = 1000;
+ 
+-const SEEDED_PATH = "src/board/board.ts";
+-const SEEDED_WRITTEN = 1_767_225_600;
+-const SEEDED_DRAFT_NOTE = 101;
+-const SEEDED_SESSION = "fixture-session";
+-const SEEDED_AI_ANSWER: Generated.MessageBody = {
+-  kind: "aiAnswer",
+-  session: SEEDED_SESSION,
+-  turn: 0,
+-};
+-
+ function pause(ms: number): Promise<void> {
+   return new Promise((resolve) => {
+     setTimeout(resolve, ms);
+   });
+ }
+ 
+-function note(text: string, posting: Generated.Posting): Seed["messages"][number] {
+-  return { body: { kind: "note", text }, posting };
+-}
+-
+-function seededThreads(file: number): Generated.Thread[] {
+-  const queued = "Why does the overdue check go?";
+-  const refused = "This needs a test.";
+-  const pending = "Rename this to `cardsOf`?";
+-  const seeds: readonly Seed[] = [
+-    {
+-      line: { kind: "removed", left: 19 },
+-      messages: [note(queued, { kind: "queued", text: queued })],
+-      session: null,
+-    },
+-    {
+-      line: { kind: "added", right: 20 },
+-      messages: [note(refused, { kind: "refused", text: refused, reason: REFUSAL })],
+-      session: null,
+-    },
+-    {
+-      line: { kind: "unchangedOnLeft", left: 5, right: 5 },
+-      messages: [note(pending, pendingPosting(pending, SEEDED_DRAFT_NOTE))],
+-      session: null,
+-    },
+-    {
+-      line: { kind: "unchangedOnRight", left: 100, right: 101 },
+-      messages: [
+-        note("Is this still used?", { kind: "notQueued" }),
+-        { body: SEEDED_AI_ANSWER, posting: { kind: "notQueued" } },
+-      ],
+-      session: SEEDED_SESSION,
+-    },
+-  ];
+-  let nextMessage = 0;
+-  return seeds.map((seed, id) => {
+-    const messages = seed.messages.map((each) => {
+-      const message = { ...each, id: nextMessage, written: SEEDED_WRITTEN };
+-      nextMessage += 1;
+-      return message;
+-    });
+-    return { ...seed, id, file, messages };
+-  });
+-}
+-
+-function startThreads(search: string, start: RangeStart): Generated.Thread[] {
+-  const seeded = start.files.find((entry) => entry.path === SEEDED_PATH);
+-  const asked = new URLSearchParams(search).get("threads");
+-  return asked === "seeded" && seeded !== undefined ? seededThreads(seeded.id) : [];
+-}
+-
+ function listed(store: Store): Generated.ThreadList {
+   return { threads: store.threads };
+ }
+@@ -121,15 +58,11 @@ function isBlank(text: string): boolean {
+   return text.trim() === "";
+ }
+ 
+-function newNote(store: Store, text: string): Generated.Message {
++function newMessage(store: Store, body: Generated.MessageBody): Generated.Message {
+   const id = store.next.message;
+   store.next.message += 1;
+-  return {
+-    id,
+-    body: { kind: "note", text },
+-    written: Math.floor(Date.now() / MS_PER_SECOND),
+-    posting: { kind: "notQueued" },
+-  };
++  const written = Math.floor(Date.now() / MS_PER_SECOND);
++  return { id, body, written, posting: { kind: "notQueued" } };
+ }
+ 
+ function addThread(
+@@ -146,23 +79,42 @@ function addThread(
+   }
+   const id = store.next.thread;
+   store.next.thread += 1;
+-  const messages = [newNote(store, text)];
++  const messages = [newMessage(store, { kind: "note", text })];
+   store.threads.push({ id, file, line: fromThreadLine(line), messages, session: null });
+   return { ok: true, value: toThreadAdded({ thread: id, list: listed(store) }) };
+ }
+ 
+-function addNote(store: Store, thread: number, text: string): SourceResult<ThreadList> {
+-  if (isBlank(text)) {
+-    return { ok: false, failure: { kind: "EmptyMessage" } };
+-  }
++function changeThread(
++  store: Store,
++  thread: number,
++  change: (found: Generated.Thread) => void,
++): SourceResult<ThreadList> {
+   const found = store.threads.find((each) => each.id === thread);
+   if (found === undefined) {
+     return { ok: false, failure: { kind: "UnknownThread", thread } };
+   }
+-  found.messages.push(newNote(store, text));
++  change(found);
+   return { ok: true, value: toThreadList(listed(store)) };
+ }
+ 
++function addNote(store: Store, thread: number, text: string): SourceResult<ThreadList> {
++  return isBlank(text)
++    ? { ok: false, failure: { kind: "EmptyMessage" } }
++    : changeThread(store, thread, (found) => {
++        found.messages.push(newMessage(store, { kind: "note", text }));
++      });
++}
++
++function addAiAnswer(store: Store, thread: number, session: string): SourceResult<ThreadList> {
++  return changeThread(store, thread, (found) => {
++    const turn = found.messages.filter(
++      ({ body }) => body.kind === "aiAnswer" && body.session === session,
++    ).length;
++    found.session = session;
++    found.messages.push(newMessage(store, { kind: "aiAnswer", session, turn }));
++  });
++}
++
+ function changePosting(
+   store: Store,
+   message: number,
+@@ -240,6 +192,27 @@ async function sendQueue(
+   }
+ }
+ 
++function threadCalls(
++  store: Store,
++): Pick<ReviewSource, "addThread" | "addNote" | "setThreadSession" | "addAiAnswer"> {
++  return {
++    async addThread(file, line, text) {
++      return addThread(store, file, line, text);
++    },
++    async addNote(thread, text) {
++      return addNote(store, thread, text);
++    },
++    async setThreadSession(thread, session) {
++      return changeThread(store, thread, (found) => {
++        found.session = session;
++      });
++    },
++    async addAiAnswer(thread, session) {
++      return addAiAnswer(store, thread, session);
++    },
++  };
++}
++
+ export function createFixtureReview(log: Log, search: string, start: RangeStart): ReviewSource {
+   const threads = startThreads(search, start);
+   const messages = threads.reduce((count, thread) => count + thread.messages.length, 0);
+@@ -254,12 +227,7 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
+     async listThreads() {
+       return { ok: true, value: toThreadList(listed(store)) };
+     },
+-    async addThread(file, line, text) {
+-      return addThread(store, file, line, text);
+-    },
+-    async addNote(thread, text) {
+-      return addNote(store, thread, text);
+-    },
++    ...threadCalls(store),
+     async queueMessage(message, text) {
+       return isBlank(text)
+         ? { ok: false, failure: { kind: "EmptyMessage" } }
+diff --git a/frontend/src/ipc/fixtureThreads.ts b/frontend/src/ipc/fixtureThreads.ts
+new file mode 100644
+index 0000000..1a809c8
+--- /dev/null
++++ b/frontend/src/ipc/fixtureThreads.ts
+@@ -0,0 +1,68 @@
++import type * as Generated from "./bindings";
++import { pendingPosting, REFUSAL } from "./fixtureGitLab";
++import type { RangeStart } from "./rangeDomain";
++
++type Seed = Pick<Generated.Thread, "line" | "session"> & {
++  readonly messages: readonly Omit<Generated.Message, "id" | "written">[];
++};
++
++export const SEEDED_DRAFT_NOTE = 101;
++
++const SEEDED_PATH = "src/board/board.ts";
++const SEEDED_WRITTEN = 1_767_225_600;
++const SEEDED_SESSION = "fixture-session";
++const NOT_QUEUED: Generated.Posting = { kind: "notQueued" };
++
++function note(text: string, posting: Generated.Posting): Seed["messages"][number] {
++  return { body: { kind: "note", text }, posting };
++}
++
++function seeds(): readonly Seed[] {
++  const queued = "Why does the overdue check go?";
++  const refused = "This needs a test.";
++  const pending = "Rename this to `cardsOf`?";
++  return [
++    {
++      line: { kind: "removed", left: 19 },
++      messages: [note(queued, { kind: "queued", text: queued })],
++      session: null,
++    },
++    {
++      line: { kind: "added", right: 20 },
++      messages: [note(refused, { kind: "refused", text: refused, reason: REFUSAL })],
++      session: null,
++    },
++    {
++      line: { kind: "unchangedOnLeft", left: 5, right: 5 },
++      messages: [note(pending, pendingPosting(pending, SEEDED_DRAFT_NOTE))],
++      session: null,
++    },
++    {
++      line: { kind: "unchangedOnRight", left: 100, right: 101 },
++      messages: [
++        note("Is this still used?", NOT_QUEUED),
++        { body: { kind: "aiAnswer", session: SEEDED_SESSION, turn: 0 }, posting: NOT_QUEUED },
++      ],
++      session: SEEDED_SESSION,
++    },
++  ];
++}
++
++function seededThreads(file: number): Generated.Thread[] {
++  let nextMessage = 0;
++  return seeds().map((seed, id) => {
++    const messages = seed.messages.map((each) => {
++      const message = { ...each, id: nextMessage, written: SEEDED_WRITTEN };
++      nextMessage += 1;
++      return message;
++    });
++    return { ...seed, id, file, messages };
++  });
++}
++
++/** `?threads=seeded`: one thread of each line kind on board.ts, every posting kind and an AI answer. */
++export function startThreads(search: string, start: RangeStart): Generated.Thread[] {
++  const seeded = start.files.find((entry) => entry.path === SEEDED_PATH);
++  const asked = new URLSearchParams(search).get("threads");
++  return asked === "seeded" && seeded !== undefined ? seededThreads(seeded.id) : [];
++}
+diff --git a/frontend/src/ipc/rangeDomain.ts b/frontend/src/ipc/rangeDomain.ts
+index 1f0e576..410aae5 100644
+--- a/frontend/src/ipc/rangeDomain.ts
++++ b/frontend/src/ipc/rangeDomain.ts
+@@ -1,7 +1,7 @@
+ import type * as Generated from "./bindings";
+ import { toDifferences, type Difference } from "./compareDomain";
+ import { isRangeFileId, type RangeFileId } from "./domain";
+-import { invalid } from "./validate";
++import { branded } from "./validate";
+ 
+ type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+ export type RangeSide = {
+@@ -50,10 +50,12 @@ function toRangeEntry(
+   { id, path, change, lines }: Generated.RangeEntry,
+   index: number,
+ ): RangeEntry {
+-  if (!isRangeFileId(id)) {
+-    throw invalid(`files[${index}].id`, id);
+-  }
+-  return { id, path, change: toRangeChange(change), lines };
++  return {
++    id: branded(id, isRangeFileId, `files[${index}].id`),
++    path,
++    change: toRangeChange(change),
++    lines,
++  };
+ }
+ 
+ export function toRangeStart(raw: Generated.RangeStart): RangeStart {
+diff --git a/frontend/src/ipc/reviewDomain.test.ts b/frontend/src/ipc/reviewDomain.test.ts
+index 2169217..e8f39c9 100644
+--- a/frontend/src/ipc/reviewDomain.test.ts
++++ b/frontend/src/ipc/reviewDomain.test.ts
+@@ -79,6 +79,14 @@ test.each<Generated.MessageBody>([
+   expect(converted?.messages[0]?.body).toEqual(body);
+ });
+ 
++test.each([-1, 1.5])("an AI answer whose turn is %d is refused, naming the field", (turn) => {
++  const body: Generated.MessageBody = { kind: "aiAnswer", session: "s1", turn };
++
++  expect(() => toThreadList({ threads: [thread({ kind: "notQueued" }, body)] })).toThrow(
++    `threads[0].messages[0].body.turn must be a non-negative safe integer, got ${turn}`,
++  );
++});
++
+ test("a thread keeps its session and every line kind", () => {
+   const lines: Generated.ThreadLine[] = [
+     { kind: "removed", left: 1 },
+diff --git a/frontend/src/ipc/reviewDomain.ts b/frontend/src/ipc/reviewDomain.ts
+index 45b53b4..071af87 100644
+--- a/frontend/src/ipc/reviewDomain.ts
++++ b/frontend/src/ipc/reviewDomain.ts
+@@ -8,7 +8,7 @@ import {
+   type ThreadId,
+ } from "./domain";
+ import { toThreadLine, type ThreadLine } from "./threadLine";
+-import { branded } from "./validate";
++import { branded, invalid, isNonNegativeInteger } from "./validate";
+ 
+ type MessageBody = Readonly<Generated.MessageBody>;
+ export type Posting =
+@@ -94,10 +94,17 @@ function toPosting(raw: Generated.Posting): Posting {
+   return { kind: "pending", text, draftNote, mergeRequest, link };
+ }
+ 
++function toBody(body: Generated.MessageBody, field: string): MessageBody {
++  if (body.kind === "aiAnswer" && !isNonNegativeInteger(body.turn)) {
++    throw invalid(`${field}.turn`, body.turn);
++  }
++  return body;
++}
++
+ function toMessage({ id, body, written, posting }: Generated.Message, field: string): Message {
+   return {
+     id: branded(id, isMessageId, `${field}.id`),
+-    body,
++    body: toBody(body, `${field}.body`),
+     written,
+     posting: toPosting(posting),
+   };
+diff --git a/frontend/src/ipc/tauriReview.test.ts b/frontend/src/ipc/tauriReview.test.ts
+index ebbf073..dd47f42 100644
+--- a/frontend/src/ipc/tauriReview.test.ts
++++ b/frontend/src/ipc/tauriReview.test.ts
+@@ -18,6 +18,8 @@ const commands = vi.hoisted(() => ({
+   addNote: vi.fn(),
+   queueMessage: vi.fn(),
+   unqueueMessage: vi.fn(),
++  setThreadSession: vi.fn(),
++  addAiAnswer: vi.fn(),
+   checkGitlab: vi.fn(),
+   sendQueue: vi.fn(),
+ }));
+@@ -117,6 +119,8 @@ test("each thread command passes its arguments and camelCases the list", async (
+     commands.addNote,
+     commands.queueMessage,
+     commands.unqueueMessage,
++    commands.setThreadSession,
++    commands.addAiAnswer,
+   ]) {
+     command.mockResolvedValue(ok(PENDING_LIST));
+   }
+@@ -129,9 +133,16 @@ test("each thread command passes its arguments and camelCases the list", async (
+     value: CAMEL_LIST,
+   });
+   expect(await review.unqueueMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
++  expect(await review.setThreadSession(threadId(2), "s2")).toEqual({
++    ok: true,
++    value: CAMEL_LIST,
++  });
++  expect(await review.addAiAnswer(threadId(2), "s3")).toEqual({ ok: true, value: CAMEL_LIST });
+   expect(commands.addNote).toHaveBeenCalledWith(2, "More");
+   expect(commands.queueMessage).toHaveBeenCalledWith(4, "Edited");
+   expect(commands.unqueueMessage).toHaveBeenCalledWith(4);
++  expect(commands.setThreadSession).toHaveBeenCalledWith(2, "s2");
++  expect(commands.addAiAnswer).toHaveBeenCalledWith(2, "s3");
+ });
+ 
+ test("addThread sends the file, the line and the text, and brands the new id", async () => {
+@@ -180,6 +191,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
+   ["addNote", { kind: "UnknownThread", thread: 9 }],
+   ["queueMessage", { kind: "MessagePending", message: 4 }],
+   ["unqueueMessage", { kind: "UnknownMessage", message: 5 }],
++  ["setThreadSession", { kind: "UnknownThread", thread: 6 }],
++  ["addAiAnswer", { kind: "WriteFailed", path: "/p/threads.json", message: "full" }],
+   ["checkGitlab", { kind: "WorkerStopped" }],
+   ["sendQueue", { kind: "SendRunning" }],
+ ])("a %s failure comes back unchanged", async (name, failure) => {
+@@ -191,6 +204,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
+     addNote: () => review.addNote(threadId(9), "x"),
+     queueMessage: () => review.queueMessage(messageId(4), "x"),
+     unqueueMessage: () => review.unqueueMessage(messageId(5)),
++    setThreadSession: () => review.setThreadSession(threadId(6), "s"),
++    addAiAnswer: () => review.addAiAnswer(threadId(6), "s"),
+     checkGitlab: () => review.checkGitLab(),
+     sendQueue: () => review.sendQueue(() => undefined),
+   };
+diff --git a/frontend/src/ipc/tauriReview.ts b/frontend/src/ipc/tauriReview.ts
+index d7c47ed..6f8bc2f 100644
+--- a/frontend/src/ipc/tauriReview.ts
++++ b/frontend/src/ipc/tauriReview.ts
+@@ -24,6 +24,12 @@ export function createTauriReview(): ReviewSource {
+     async unqueueMessage(message) {
+       return converted(toResult(await commands.unqueueMessage(message)), toThreadList);
+     },
++    async setThreadSession(thread, session) {
++      return converted(toResult(await commands.setThreadSession(thread, session)), toThreadList);
++    },
++    async addAiAnswer(thread, session) {
++      return converted(toResult(await commands.addAiAnswer(thread, session)), toThreadList);
++    },
+     async checkGitLab() {
+       return converted(toResult(await commands.checkGitlab()), toGitLabCheck);
+     },
+diff --git a/frontend/src/main.ts b/frontend/src/main.ts
+index 46c3728..8f42d7e 100644
+--- a/frontend/src/main.ts
++++ b/frontend/src/main.ts
+@@ -1,10 +1,13 @@
+ import { createApp } from "vue";
+ 
++import { AgentClient, DEFAULT_AGENT_COMMAND } from "./agent";
+ import {
++  createFixtureAgentSource,
+   createFixtureCompareSource,
+   createFixtureRangeSource,
+   createFixtureServerHost,
+   createFixtureSource,
++  createTauriAgentSource,
+   createTauriCompareSource,
+   createTauriRangeSource,
+   createTauriServerHost,
+@@ -22,7 +25,8 @@ import CompareApp from "./ui/CompareApp.vue";
+ import { createCompareStore } from "./ui/compareStore";
+ import { takeLinuxPastes } from "./ui/linuxPaste";
+ import RangeApp from "./ui/RangeApp.vue";
+-import { createRangeStore } from "./ui/rangeStore";
++import { createRangeStore, type RangeAgent } from "./ui/rangeStore";
++import { useSettingsStore } from "./ui/settingsStore";
+ import { createAppStore } from "./ui/store";
+ 
+ import "./style.css";
+@@ -58,9 +62,22 @@ function startCompare(startTheme: Theme): void {
+   createApp(CompareApp).mount("#app");
+ }
+ 
+-function startRange(startTheme: Theme): void {
++function agentCommand(): readonly string[] {
++  return useSettingsStore().settings.value.agent.command ?? DEFAULT_AGENT_COMMAND;
++}
++
++function rangeAgent(dataset: DOMStringMap): RangeAgent | null {
++  const on = IN_APP ? dataset["ai"] === "on" : new URLSearchParams(SEARCH).has("ai");
++  if (!on) {
++    return null;
++  }
++  const source = IN_APP ? createTauriAgentSource(log) : createFixtureAgentSource(log, SEARCH);
++  return { source, client: new AgentClient({ source, command: agentCommand }) };
++}
++
++function startRange(startTheme: Theme, dataset: DOMStringMap): void {
+   const source = IN_APP ? createTauriRangeSource() : createFixtureRangeSource(log, SEARCH);
+-  const store = createRangeStore(source, startTheme);
++  const store = createRangeStore(source, startTheme, rangeAgent(dataset));
+   void store.startUp();
+   createApp(RangeApp).mount("#app");
+ }
+@@ -88,7 +105,7 @@ switch (kind) {
+     startCompare(startTheme);
+     break;
+   case "range":
+-    startRange(startTheme);
++    startRange(startTheme, dataset);
+     break;
+   default: {
+     const _exhaustive: never = kind;
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index 983898f..068a40b 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -1,10 +1,13 @@
+ <script setup lang="ts">
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+-import { computed, watch } from "vue";
++import { computed, onMounted, watch } from "vue";
+ 
++import { log, onWindowClose } from "../ipc";
++import AgentSettings from "./AgentSettings.vue";
+ import FileList from "./FileList.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import type { NoticeRow } from "./noticeText";
++import { unexpected } from "./problem";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
+ import RangeFileRow from "./RangeFileRow.vue";
+@@ -33,6 +36,8 @@ const {
+   dismissQuestion,
+   gitlab,
+   threads,
++  ai,
++  mayClose,
+ } = useRangeStore();
+ const { counts } = threads;
+ 
+@@ -57,6 +62,20 @@ watch(focused, (now) => {
+     gitlab.checkOnFocus();
+   }
+ });
++
++onMounted(() => {
++  if (ai !== null) {
++    void guardClose();
++  }
++});
++
++async function guardClose(): Promise<void> {
++  try {
++    await onWindowClose(mayClose);
++  } catch (error) {
++    log.error("range.close_guard_failed", { ...unexpected(error) });
++  }
++}
+ </script>
+ 
+ <template>
+@@ -97,7 +116,9 @@ watch(focused, (now) => {
+           </header>
+           <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
+         </div>
+-        <SettingsView v-if="screen.kind === 'settings'" />
++        <SettingsView v-if="screen.kind === 'settings'">
++          <AgentSettings v-if="ai !== null" />
++        </SettingsView>
+       </div>
+     </div>
+     <QuestionDialog
+diff --git a/frontend/src/ui/RangeMessage.vue b/frontend/src/ui/RangeMessage.vue
+index 4fb5fa9..39d086b 100644
+--- a/frontend/src/ui/RangeMessage.vue
++++ b/frontend/src/ui/RangeMessage.vue
+@@ -2,37 +2,61 @@
+ import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
+ import Copy from "~icons/lucide/copy";
+ 
+-import type { Message } from "../ipc";
++import type { Message, ThreadId } from "../ipc";
++import { failureText } from "./aiText";
++import AiTurn from "./AiTurn.vue";
+ import { copyOrSelect } from "./copyOrSelect";
++import { IDLE } from "./rangeAi";
++import { answerView, postBody, type AnswerView } from "./rangeAiView";
+ import RangePostEditor from "./RangePostEditor.vue";
+ import { useRangeStore } from "./rangeStore";
+-import { AI_ANSWER_TEXT, COPY_LINK_TITLE, postingLabel } from "./rangeThreadText";
++import {
++  AI_ANSWER_TEXT,
++  ANSWER_GONE_TEXT,
++  ANSWER_LOADING_TEXT,
++  COPY_LINK_TITLE,
++  postingLabel,
++} from "./rangeThreadText";
+ import { COPIED, COPY } from "./serverText";
+ 
+-const props = defineProps<{ message: Message }>();
++const props = defineProps<{ message: Message; thread: ThreadId }>();
+ 
+ const linkText = useTemplateRef<HTMLSpanElement>("linkText");
+ const postButton = useTemplateRef<HTMLButtonElement>("postButton");
+-const { gitlab, threads } = useRangeStore();
++const { gitlab, threads, ai } = useRangeStore();
+ const copied = shallowRef(false);
+ 
+-const bodyText = computed((): string | null => {
++const threadAi = computed(() =>
++  ai === null ? null : (ai.byThread.value.get(props.thread) ?? IDLE),
++);
++const answer = computed((): AnswerView | null => {
+   const { body } = props.message;
+-  switch (body.kind) {
+-    case "note":
+-      return body.text;
+-    case "aiAnswer":
+-      return null;
++  return body.kind === "aiAnswer" && threadAi.value !== null
++    ? answerView(threadAi.value, body)
++    : null;
++});
++const unshownText = computed((): string => {
++  switch (answer.value?.kind) {
++    case "loading":
++      return ANSWER_LOADING_TEXT;
++    case "gone":
++      return ANSWER_GONE_TEXT;
++    case "failed":
++      return failureText(answer.value.failure, navigator.platform);
++    case "turn":
++    case undefined:
++      return AI_ANSWER_TEXT;
+     default: {
+-      const _exhaustive: never = body;
++      const _exhaustive: never = answer.value;
+       return _exhaustive;
+     }
+   }
+ });
++const body = computed(() => postBody(props.message.body, threadAi.value));
+ const editing = computed(
+-  () => bodyText.value !== null && threads.postDraft(props.message.id) !== null,
++  () => body.value.kind === "text" && threads.postDraft(props.message.id) !== null,
+ );
+-const post = computed(() => gitlab.postButton(props.message));
++const post = computed(() => gitlab.postButton(props.message, body.value));
+ const label = computed(() => postingLabel(props.message.posting));
+ const refused = computed(() => props.message.posting.kind === "refused");
+ const link = computed(() =>
+@@ -43,8 +67,8 @@ function pressPost(): void {
+   const { action } = post.value;
+   switch (action) {
+     case "edit":
+-      if (bodyText.value !== null) {
+-        threads.writePost(props.message.id, bodyText.value);
++      if (body.value.kind === "text") {
++        threads.writePost(props.message.id, body.value.text);
+       }
+       return;
+     case "unqueue":
+@@ -59,6 +83,10 @@ function pressPost(): void {
+   }
+ }
+ 
++function retry(): void {
++  ai?.retry(props.thread);
++}
++
+ async function focusPost(): Promise<void> {
+   await nextTick();
+   postButton.value?.focus({ preventScroll: true });
+@@ -84,10 +112,17 @@ async function copy(text: string): Promise<void> {
+ <template>
+   <li class="flex flex-col gap-1 py-2">
+     <RangePostEditor v-if="editing" :message="message.id" @queue="queue" @cancel="cancel" />
+-    <p v-else-if="bodyText !== null" class="wrap-break-word whitespace-pre-wrap">
+-      {{ bodyText }}
++    <p v-else-if="message.body.kind === 'note'" class="wrap-break-word whitespace-pre-wrap">
++      {{ message.body.text }}
+     </p>
+-    <p v-else class="text-fg-muted italic">{{ AI_ANSWER_TEXT }}</p>
++    <AiTurn
++      v-else-if="answer?.kind === 'turn' && ai !== null"
++      :turn="answer.turn"
++      :end="answer.end"
++      :client="ai.client"
++      @retry="retry"
++    />
++    <p v-else class="text-fg-muted italic">{{ unshownText }}</p>
+     <div class="flex min-w-0 items-center gap-2 text-fg-muted">
+       <span v-if="!editing" :title="post.title" class="shrink-0">
+         <button
+diff --git a/frontend/src/ui/RangeThreadBox.vue b/frontend/src/ui/RangeThreadBox.vue
+index c04ed8b..51231e3 100644
+--- a/frontend/src/ui/RangeThreadBox.vue
++++ b/frontend/src/ui/RangeThreadBox.vue
+@@ -3,16 +3,24 @@ import { computed, onMounted, useTemplateRef, watch } from "vue";
+ import ChevronUp from "~icons/lucide/chevron-up";
+ 
+ import type { RangeEntry } from "../ipc";
++import AiTurn from "./AiTurn.vue";
++import { IDLE } from "./rangeAi";
++import { liveTurn } from "./rangeAiView";
+ import { isBlank } from "./rangeDrafts";
+ import { boxKeydown } from "./rangeKeys";
+ import RangeMessage from "./RangeMessage.vue";
+ import { useRangeStore } from "./rangeStore";
+ import {
++  ASK_AI_LABEL,
++  ASK_AI_TITLE,
++  ASK_AI_WAITING,
+   CANCEL_LABEL,
+   COLLAPSE_THREAD,
+   COMMENT_LABEL,
+   DRAFT_PROMPT,
+   REPLY_PROMPT,
++  STOP_AI_LABEL,
++  STOP_AI_TITLE,
+   threadPlaceText,
+ } from "./rangeThreadText";
+ 
+@@ -24,7 +32,7 @@ const PROMPTS = {
+ };
+ 
+ const field = useTemplateRef<HTMLTextAreaElement>("field");
+-const { threads } = useRangeStore();
++const { threads, ai } = useRangeStore();
+ 
+ const box = computed(() => threads.boxOf(props.threadKey));
+ const draft = computed(() => (box.value?.kind === "draft" ? box.value.draft : null));
+@@ -43,6 +51,14 @@ const text = computed(() => {
+ });
+ const blank = computed(() => isBlank(text.value));
+ const prompt = computed(() => (draft.value !== null ? PROMPTS.draft : PROMPTS.reply));
++const threadAi = computed(() =>
++  ai === null || thread.value === null ? null : (ai.byThread.value.get(thread.value.id) ?? IDLE),
++);
++const live = computed(() => (threadAi.value === null ? null : liveTurn(threadAi.value)));
++const answering = computed(
++  () => threadAi.value !== null && threadAi.value.running !== null && threadAi.value.end === null,
++);
++const askable = computed(() => ai !== null && thread.value !== null && ai.canAsk(thread.value.id));
+ 
+ watch(
+   () => draft.value?.focus,
+@@ -50,6 +66,7 @@ watch(
+     focusField();
+   },
+ );
++watch(() => [thread.value?.id, thread.value?.session], loadConversation, { immediate: true });
+ 
+ onMounted(() => {
+   if (draft.value !== null) {
+@@ -61,6 +78,30 @@ function focusField(): void {
+   field.value?.focus({ preventScroll: true });
+ }
+ 
++function loadConversation(): void {
++  if (thread.value !== null) {
++    ai?.load(thread.value.id);
++  }
++}
++
++function askAi(): void {
++  if (thread.value !== null) {
++    ai?.ask(thread.value.id);
++  }
++}
++
++function stopAi(): void {
++  if (thread.value !== null) {
++    ai?.stop(thread.value.id);
++  }
++}
++
++function retryAi(): void {
++  if (thread.value !== null) {
++    ai?.retry(thread.value.id);
++  }
++}
++
+ function write(next: string): void {
+   if (draft.value !== null) {
+     threads.writeDraft(props.threadKey, next);
+@@ -111,6 +152,29 @@ function collapse(): void {
+   >
+     <header class="flex min-w-0 items-center gap-2 text-fg-muted">
+       <span class="min-w-0 flex-1 truncate font-mono">{{ place }}</span>
++      <button
++        v-if="answering"
++        type="button"
++        :title="STOP_AI_TITLE"
++        class="shrink-0 rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover"
++        @click="stopAi"
++      >
++        {{ STOP_AI_LABEL }}
++      </button>
++      <span
++        v-else-if="ai !== null && thread !== null"
++        :title="askable ? ASK_AI_TITLE : ASK_AI_WAITING"
++        class="shrink-0"
++      >
++        <button
++          type="button"
++          :disabled="!askable"
++          class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
++          @click="askAi"
++        >
++          {{ ASK_AI_LABEL }}
++        </button>
++      </span>
+       <button
+         v-if="thread !== null"
+         type="button"
+@@ -123,8 +187,21 @@ function collapse(): void {
+       </button>
+     </header>
+     <ul v-if="thread !== null" class="flex flex-col divide-y divide-separator">
+-      <RangeMessage v-for="message in thread.messages" :key="message.id" :message="message" />
++      <RangeMessage
++        v-for="message in thread.messages"
++        :key="message.id"
++        :message="message"
++        :thread="thread.id"
++      />
+     </ul>
++    <AiTurn
++      v-if="live !== null && ai !== null"
++      class="border-t border-separator pt-2"
++      :turn="live.turn"
++      :end="live.end"
++      :client="ai.client"
++      @retry="retryAi"
++    />
+     <textarea
+       ref="field"
+       :value="text"
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index a2891a7..22d1bf7 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -20,7 +20,16 @@ type KeysUnread = {
+ 
+ export type ProblemCause = SourceFailure | Unexpected;
+ 
+-export type ThreadStep = "list" | "add" | "note" | "queue" | "unqueue" | "check" | "send";
++export type ThreadStep =
++  | "list"
++  | "add"
++  | "note"
++  | "queue"
++  | "unqueue"
++  | "check"
++  | "send"
++  | "session"
++  | "answer";
+ 
+ export type AiAttempt = "ask" | "diff" | "discard";
+ 
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index 3df70c8..36247f2 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -248,6 +248,8 @@ test.each([
+   ["unqueue", "Could not unqueue the message: boom"],
+   ["check", "Could not check GitLab: boom"],
+   ["send", "Could not send to GitLab: boom"],
++  ["session", "Could not store the AI's conversation: boom"],
++  ["answer", "Could not store the AI's answer: boom"],
+ ] as const)("a failed thread call at %s says what failed", (step, words) => {
+   expect(text({ action: "threads", step, cause: { kind: "Unexpected", message: "boom" } })).toBe(
+     words,
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 0b4feb5..1ae94d9 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -56,6 +56,8 @@ const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
+   unqueue: "Could not unqueue the message",
+   check: "Could not check GitLab",
+   send: "Could not send to GitLab",
++  session: "Could not store the AI's conversation",
++  answer: "Could not store the AI's answer",
+ };
+ 
+ const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {
+diff --git a/frontend/src/ui/rangeAi.test.ts b/frontend/src/ui/rangeAi.test.ts
+new file mode 100644
+index 0000000..c6fe1e1
+--- /dev/null
++++ b/frontend/src/ui/rangeAi.test.ts
+@@ -0,0 +1,473 @@
++import { expect, test } from "vitest";
++
++import {
++  agentSessionId,
++  type AgentClient,
++  type AgentFailure,
++  type AgentSessionId,
++  type AskRequest,
++  type ConversationLoad,
++  type TurnEnd,
++  type TurnEvents,
++  type TurnView,
++} from "../agent";
++import { createFixtureRangeSource, log, type Thread, type ThreadId } from "../ipc";
++import type { Problem } from "./problem";
++import { createRangeAi, IDLE, type AskContext, type RangeAi, type ThreadAi } from "./rangeAi";
++import { createRangeThreads, type RangeThreads } from "./rangeThreads";
++
++type Asked = {
++  readonly request: AskRequest;
++  readonly events: TurnEvents;
++  readonly end: (end: TurnEnd) => void;
++  readonly stops: number;
++};
++
++type Loading = {
++  readonly session: AgentSessionId;
++  readonly answer: (load: ConversationLoad) => void;
++};
++
++/** A scripted agent client: each ask and load waits until the test answers it. */
++class FakeClient implements Pick<AgentClient, "ask" | "loadConversation"> {
++  readonly asks: Asked[] = [];
++  readonly loads: Loading[] = [];
++
++  ask(request: AskRequest, events: TurnEvents): { ended: Promise<TurnEnd>; stop: () => void } {
++    let stops = 0;
++    const ended = new Promise<TurnEnd>((end) => {
++      this.asks.push({
++        request,
++        events,
++        end,
++        get stops() {
++          return stops;
++        },
++      });
++    });
++    return {
++      ended,
++      stop: () => {
++        stops += 1;
++      },
++    };
++  }
++
++  loadConversation(session: AgentSessionId): Promise<ConversationLoad> {
++    return new Promise((answer) => {
++      this.loads.push({ session, answer });
++    });
++  }
++}
++
++type Rig = {
++  readonly client: FakeClient;
++  readonly threads: RangeThreads;
++  readonly ai: RangeAi;
++  readonly problems: Problem[];
++  readonly fresh: ThreadId;
++  readonly seeded: ThreadId;
++};
++
++const SEEDED_SESSION = "fixture-session";
++const TEMPLATE =
++  "{{ RELATIVE_FILE_PATH_WITH_LINE }} {{ RANGE }} {{ OLD_COMMIT }}..{{ NEW_COMMIT }}\n{{ MESSAGE }}";
++const CONTEXT: AskContext = {
++  template: TEMPLATE,
++  values: {
++    RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:20",
++    RANGE: "main...feature",
++    OLD_COMMIT: "531ea52",
++    NEW_COMMIT: "9c1ba3f",
++  },
++};
++const WRAP = "src/board/board.ts:20 main...feature 531ea52..9c1ba3f\n";
++const CRASHED: AgentFailure = { kind: "crashed", code: 1, lastLog: null };
++
++function session(text: string): AgentSessionId {
++  const id = agentSessionId(text);
++  if (id === null) {
++    throw new Error(`${text} is no session`);
++  }
++  return id;
++}
++
++function view(answer: string): TurnView {
++  return { entries: [], answer };
++}
++
++async function settle(): Promise<void> {
++  await new Promise((resolve) => {
++    setTimeout(resolve, 0);
++  });
++}
++
++async function rig(): Promise<Rig> {
++  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
++  const problems: Problem[] = [];
++  const threads = createRangeThreads(fixture, (problem) => {
++    problems.push(problem);
++  });
++  await threads.load();
++  const [fresh, , , seeded] = threads.list.value.threads.map(({ id }) => id);
++  if (fresh === undefined || seeded === undefined) {
++    throw new Error("no seeded threads");
++  }
++  const client = new FakeClient();
++  const ai = createRangeAi(client, threads, () => CONTEXT);
++  return { client, threads, ai, problems, fresh, seeded };
++}
++
++function threadOf(live: Rig, id: ThreadId): Thread {
++  const found = live.threads.list.value.threads.find((thread) => thread.id === id);
++  if (found === undefined) {
++    throw new Error(`no thread ${id}`);
++  }
++  return found;
++}
++
++function aiOf(live: Rig, id: ThreadId): ThreadAi {
++  return live.ai.byThread.value.get(id) ?? IDLE;
++}
++
++function askedAt(live: Rig, index: number): Asked {
++  const asked = live.client.asks[index];
++  if (asked === undefined) {
++    throw new Error(`no ask ${index}`);
++  }
++  return asked;
++}
++
++function loadAt(live: Rig, index: number): Loading {
++  const loading = live.client.loads[index];
++  if (loading === undefined) {
++    throw new Error(`no load ${index}`);
++  }
++  return loading;
++}
++
++function bodies(live: Rig, id: ThreadId): unknown[] {
++  return threadOf(live, id).messages.map(({ body }) => body);
++}
++
++async function loadedSeeded(live: Rig, turns: readonly TurnView[]): Promise<void> {
++  live.ai.load(live.seeded);
++  loadAt(live, live.client.loads.length - 1).answer({ kind: "loaded", turns });
++  await settle();
++}
++
++test("a new thread's first turn sends every note, wrapped in First message", async () => {
++  const live = await rig();
++  await live.threads.addNote(live.fresh, "And the reminder?");
++
++  live.ai.ask(live.fresh);
++
++  expect(askedAt(live, 0).request).toEqual({
++    session: null,
++    text: `${WRAP}Why does the overdue check go?\n\nAnd the reminder?`,
++  });
++  expect(aiOf(live, live.fresh).running).toEqual(view(""));
++});
++
++test("the session is stored on omp's event, before the turn ends", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++
++  askedAt(live, 0).events.session(session("s1"));
++  await settle();
++
++  expect(threadOf(live, live.fresh).session).toBe("s1");
++  expect(aiOf(live, live.fresh)).toMatchObject({
++    session: "s1",
++    loaded: { kind: "loaded", turns: [] },
++    end: null,
++  });
++  expect(bodies(live, live.fresh)).toHaveLength(1);
++});
++
++test("a finished turn adds one answer; the next ask sends only the notes since it, unwrapped", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  const first = askedAt(live, 0);
++  first.events.session(session("s1"));
++  first.events.changed(view("Part"));
++  expect(aiOf(live, live.fresh).running).toEqual(view("Part"));
++  const answer = view("It moved to the reminders.");
++
++  first.end({ kind: "finished", turn: answer });
++  await settle();
++
++  expect(bodies(live, live.fresh).slice(1)).toEqual([{ kind: "aiAnswer", session: "s1", turn: 0 }]);
++  expect(aiOf(live, live.fresh)).toMatchObject({
++    running: null,
++    loaded: { kind: "loaded", turns: [answer] },
++  });
++  expect(live.client.loads).toEqual([]);
++  expect(live.ai.canAsk(live.fresh)).toBe(false);
++
++  await live.threads.addNote(live.fresh, "Where?");
++  await live.threads.addNote(live.fresh, "And why?");
++  live.ai.ask(live.fresh);
++
++  expect(askedAt(live, 1).request).toEqual({ session: "s1", text: "Where?\n\nAnd why?" });
++});
++
++test("Ask does nothing while the thread's turn runs or with nothing new; Stop stops that turn", async () => {
++  const live = await rig();
++  expect(live.ai.canAsk(live.fresh)).toBe(true);
++  live.ai.ask(live.fresh);
++  expect(live.ai.canAsk(live.fresh)).toBe(false);
++
++  live.ai.ask(live.fresh);
++  live.ai.stop(live.fresh);
++
++  expect(live.client.asks).toHaveLength(1);
++  expect(askedAt(live, 0).stops).toBe(1);
++  live.ai.stop(live.seeded);
++  expect(askedAt(live, 0).stops).toBe(1);
++});
++
++test("a turn stopped before the prompt reached omp adds no answer; its stopped end stays shown", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  const asked = askedAt(live, 0);
++  asked.events.session(session("s1"));
++  const stopped: TurnEnd = { kind: "stopped", turn: view("") };
++
++  asked.end(stopped);
++  await settle();
++  expect(loadAt(live, 0).session).toBe("s1");
++  loadAt(live, 0).answer({ kind: "loaded", turns: [] });
++  await settle();
++
++  expect(bodies(live, live.fresh)).toHaveLength(1);
++  expect(aiOf(live, live.fresh)).toMatchObject({ running: null, end: stopped });
++  expect(live.ai.canAsk(live.fresh)).toBe(true);
++});
++
++test("a turn stopped after omp holds its prompt adds one answer, shown with its own end", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  const asked = askedAt(live, 0);
++  asked.events.session(session("s1"));
++  const partial = view("So far");
++  const stopped: TurnEnd = { kind: "stopped", turn: partial };
++
++  asked.events.changed(partial);
++  asked.end(stopped);
++  await settle();
++  expect(aiOf(live, live.fresh)).toMatchObject({ running: partial, end: stopped });
++  expect(live.ai.canAsk(live.fresh)).toBe(false);
++  loadAt(live, 0).answer({ kind: "loaded", turns: [view("")] });
++  await settle();
++
++  expect(bodies(live, live.fresh).slice(1)).toEqual([{ kind: "aiAnswer", session: "s1", turn: 0 }]);
++  expect(aiOf(live, live.fresh)).toMatchObject({
++    running: null,
++    loaded: { kind: "loaded", turns: [partial] },
++  });
++});
++
++test.each<[string, AgentFailure]>([
++  ["checkout", { kind: "checkoutFailed", message: "no git" }],
++  ["missing program", { kind: "notFound", program: "omp", searched: [] }],
++  ["app", { kind: "app", failure: { kind: "AiOff" } }],
++])(
++  "a %s failure before the prompt adds no answer and asks omp nothing more",
++  async (_case, failure) => {
++    const live = await rig();
++    live.ai.ask(live.fresh);
++    const failed: TurnEnd = { kind: "failed", turn: view(""), failure };
++
++    askedAt(live, 0).end(failed);
++    await settle();
++
++    expect(bodies(live, live.fresh)).toHaveLength(1);
++    expect(live.client.loads).toEqual([]);
++    expect(aiOf(live, live.fresh)).toMatchObject({ running: null, end: failed });
++
++    live.ai.retry(live.fresh);
++    expect(askedAt(live, 1).request).toEqual(askedAt(live, 0).request);
++  },
++);
++
++test("a turn omp ended itself (max tokens) is an answer without asking the replay", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  askedAt(live, 0).events.session(session("s1"));
++
++  askedAt(live, 0).end({
++    kind: "failed",
++    turn: view("Cut"),
++    failure: { kind: "ended", reason: "max_tokens" },
++  });
++  await settle();
++
++  expect(live.client.loads).toEqual([]);
++  expect(bodies(live, live.fresh).slice(1)).toEqual([{ kind: "aiAnswer", session: "s1", turn: 0 }]);
++});
++
++test("a crash after omp held the prompt adds the answer; Retry sends that prompt again in the session", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  const first = askedAt(live, 0);
++  first.events.session(session("s1"));
++  first.end({ kind: "failed", turn: view(""), failure: CRASHED });
++  await settle();
++  loadAt(live, 0).answer({ kind: "loaded", turns: [view("")] });
++  await settle();
++  expect(bodies(live, live.fresh).slice(1)).toEqual([{ kind: "aiAnswer", session: "s1", turn: 0 }]);
++  expect(live.ai.canAsk(live.fresh)).toBe(false);
++
++  live.ai.retry(live.fresh);
++
++  expect(askedAt(live, 1).request).toEqual({ session: "s1", text: first.request.text });
++});
++
++test("a crash before omp held the prompt adds nothing; a failed replay adds nothing either", async () => {
++  const live = await rig();
++  live.ai.ask(live.fresh);
++  askedAt(live, 0).events.session(session("s1"));
++  askedAt(live, 0).end({ kind: "failed", turn: view(""), failure: CRASHED });
++  await settle();
++  loadAt(live, 0).answer({ kind: "loaded", turns: [] });
++  await settle();
++  live.ai.retry(live.fresh);
++  askedAt(live, 1).end({ kind: "failed", turn: view(""), failure: CRASHED });
++  await settle();
++  loadAt(live, 1).answer({ kind: "failed", failure: CRASHED });
++  await settle();
++
++  expect(bodies(live, live.fresh)).toHaveLength(1);
++  expect(askedAt(live, 1).request).toEqual({ session: "s1", text: askedAt(live, 0).request.text });
++});
++
++test("a stored session is loaded once when shown, and Ask waits for it", async () => {
++  const live = await rig();
++  expect(live.ai.canAsk(live.seeded)).toBe(false);
++
++  live.ai.load(live.seeded);
++  live.ai.load(live.seeded);
++  live.ai.load(live.fresh);
++
++  expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION]);
++  expect(aiOf(live, live.seeded)).toMatchObject({ session: SEEDED_SESSION, loaded: null });
++  loadAt(live, 0).answer({ kind: "loaded", turns: [view("Yes")] });
++  await settle();
++  live.ai.load(live.seeded);
++  expect(live.client.loads).toHaveLength(1);
++  expect(live.ai.canAsk(live.seeded)).toBe(false);
++
++  await live.threads.addNote(live.seeded, "Who calls it?");
++  expect(live.ai.canAsk(live.seeded)).toBe(true);
++  live.ai.ask(live.seeded);
++  expect(askedAt(live, 0).request).toEqual({ session: SEEDED_SESSION, text: "Who calls it?" });
++});
++
++test("a load that failed for another reason than a lost session is tried again", async () => {
++  const live = await rig();
++  live.ai.load(live.seeded);
++  loadAt(live, 0).answer({ kind: "failed", failure: CRASHED });
++  await settle();
++
++  live.ai.load(live.seeded);
++
++  expect(live.client.loads).toHaveLength(2);
++});
++
++test("a session omp lost at load: the next ask starts a new one with every note wrapped", async () => {
++  const live = await rig();
++  live.ai.load(live.seeded);
++  loadAt(live, 0).answer({ kind: "failed", failure: { kind: "sessionGone" } });
++  await settle();
++  live.ai.load(live.seeded);
++  expect(live.client.loads).toHaveLength(1);
++
++  live.ai.ask(live.seeded);
++
++  expect(askedAt(live, 0).request).toEqual({ session: null, text: `${WRAP}Is this still used?` });
++});
++
++test("a session omp lost at the ask: a new one starts at once with every note wrapped", async () => {
++  const live = await rig();
++  await loadedSeeded(live, [view("Yes")]);
++  await live.threads.addNote(live.seeded, "Who calls it?");
++  live.ai.ask(live.seeded);
++  expect(askedAt(live, 0).request.text).toBe("Who calls it?");
++
++  askedAt(live, 0).end({ kind: "failed", turn: view(""), failure: { kind: "sessionGone" } });
++  await settle();
++
++  expect(askedAt(live, 1).request).toEqual({
++    session: null,
++    text: `${WRAP}Is this still used?\n\nWho calls it?`,
++  });
++  askedAt(live, 1).events.session(session("s2"));
++  await settle();
++  expect(threadOf(live, live.seeded).session).toBe("s2");
++});
++
++test("two threads run at once; one ending leaves the other running", async () => {
++  const live = await rig();
++  await loadedSeeded(live, [view("Yes")]);
++  await live.threads.addNote(live.seeded, "Who calls it?");
++
++  live.ai.ask(live.fresh);
++  live.ai.ask(live.seeded);
++  expect(live.client.asks).toHaveLength(2);
++  askedAt(live, 1).end({ kind: "finished", turn: view("board.ts") });
++  await settle();
++
++  expect(aiOf(live, live.fresh).running).not.toBeNull();
++  expect(aiOf(live, live.seeded).running).toBeNull();
++  expect(bodies(live, live.seeded).slice(-1)).toEqual([
++    { kind: "aiAnswer", session: SEEDED_SESSION, turn: 1 },
++  ]);
++});
++
++test("a failed write of the session or the answer is reported as such", async () => {
++  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
++  const problems: Problem[] = [];
++  const failure = { kind: "WriteFailed", path: "/t/threads.json", message: "full" } as const;
++  const threads = createRangeThreads(
++    {
++      ...fixture,
++      setThreadSession: async () => ({ ok: false, failure }),
++      addAiAnswer: async () => ({ ok: false, failure }),
++    },
++    (problem) => {
++      problems.push(problem);
++    },
++  );
++  await threads.load();
++  const client = new FakeClient();
++  const ai = createRangeAi(client, threads, () => CONTEXT);
++  const [fresh] = threads.list.value.threads;
++  if (fresh === undefined) {
++    throw new Error("no thread");
++  }
++  const answer = view("A");
++
++  ai.ask(fresh.id);
++  client.asks[0]?.events.session(session("s1"));
++  client.asks[0]?.end({ kind: "finished", turn: answer });
++  await settle();
++
++  expect(problems.map((problem) => problem.action === "threads" && problem.step)).toEqual([
++    "session",
++    "answer",
++  ]);
++  expect(ai.byThread.value.get(fresh.id)).toMatchObject({
++    running: null,
++    loaded: { kind: "loaded", turns: [] },
++  });
++});
++
++test("no First message context (the range not open) means nothing to ask", async () => {
++  const live = await rig();
++  const ai = createRangeAi(live.client, live.threads, () => null);
++
++  expect(ai.canAsk(live.fresh)).toBe(false);
++  ai.ask(live.fresh);
++  expect(live.client.asks).toEqual([]);
++});
+diff --git a/frontend/src/ui/rangeAi.ts b/frontend/src/ui/rangeAi.ts
+new file mode 100644
+index 0000000..6c4e1dd
+--- /dev/null
++++ b/frontend/src/ui/rangeAi.ts
+@@ -0,0 +1,289 @@
++import { shallowRef, type ShallowRef } from "vue";
++
++import {
++  agentSessionId,
++  firstMessage,
++  type AgentClient,
++  type AgentFailure,
++  type AgentSessionId,
++  type ConversationLoad,
++  type Placeholder,
++  type RunningTurn,
++  type TurnEnd,
++  type TurnView,
++} from "../agent";
++import { log, type Message, type Thread, type ThreadId } from "../ipc";
++import type { RangeThreads } from "./rangeThreads";
++
++/** `session` is the conversation `loaded` holds; `running` stays until the turn's answer is recorded. */
++export type ThreadAi = {
++  readonly running: TurnView | null;
++  readonly end: TurnEnd | null;
++  readonly loaded: ConversationLoad | null;
++  readonly session: AgentSessionId | null;
++};
++
++export type AskContext = {
++  readonly template: string;
++  readonly values: Readonly<Record<Exclude<Placeholder, "MESSAGE">, string>>;
++};
++
++export type RangeAi = {
++  readonly byThread: Readonly<ShallowRef<ReadonlyMap<ThreadId, ThreadAi>>>;
++  ask(thread: ThreadId): void;
++  retry(thread: ThreadId): void;
++  stop(thread: ThreadId): void;
++  load(thread: ThreadId): void;
++  canAsk(thread: ThreadId): boolean;
++};
++
++type AiClient = Pick<AgentClient, "ask" | "loadConversation">;
++type Held = "held" | "notHeld" | "replay";
++
++type State = {
++  readonly client: AiClient;
++  readonly threads: Pick<RangeThreads, "list" | "setSession" | "addAiAnswer">;
++  readonly place: (thread: Thread) => AskContext | null;
++  readonly byThread: ShallowRef<ReadonlyMap<ThreadId, ThreadAi>>;
++  readonly turns: Map<ThreadId, RunningTurn>;
++  readonly asked: Map<ThreadId, string>;
++};
++
++export const IDLE: ThreadAi = { running: null, end: null, loaded: null, session: null };
++const NOTE_JOIN = "\n\n";
++const STARTING: TurnView = { entries: [], answer: "" };
++/** Whether omp holds a turn's prompt; a stop or crash right after sending it may leave none (measured). */
++const HELD_AT_END: Readonly<Record<Exclude<TurnEnd["kind"], "failed">, Held>> = {
++  finished: "held",
++  stopped: "replay",
++};
++const HELD_AFTER: Readonly<Record<AgentFailure["kind"], Held>> = {
++  ended: "held",
++  crashed: "replay",
++  refused: "replay",
++  checkoutFailed: "notHeld",
++  notFound: "notHeld",
++  spawnFailed: "notHeld",
++  noCommand: "notHeld",
++  sessionGone: "notHeld",
++  busy: "notHeld",
++  app: "notHeld",
++};
++
++function aiOf(state: State, thread: ThreadId): ThreadAi {
++  return state.byThread.value.get(thread) ?? IDLE;
++}
++
++function put(state: State, thread: ThreadId, change: Partial<ThreadAi>): void {
++  const next = new Map(state.byThread.value);
++  next.set(thread, { ...aiOf(state, thread), ...change });
++  state.byThread.value = next;
++}
++
++function threadOf(state: State, id: ThreadId): Thread | undefined {
++  return state.threads.list.value.threads.find((thread) => thread.id === id);
++}
++
++function isGone(ai: ThreadAi, session: AgentSessionId): boolean {
++  return (
++    ai.session === session &&
++    ai.loaded?.kind === "failed" &&
++    ai.loaded.failure.kind === "sessionGone"
++  );
++}
++
++function storedSession(thread: Thread): AgentSessionId | null {
++  return thread.session === null ? null : agentSessionId(thread.session);
++}
++
++/** The conversation the next ask continues: none when omp no longer has the stored one (plan row 115). */
++function askedSession(state: State, thread: Thread): AgentSessionId | null {
++  const stored = storedSession(thread);
++  return stored !== null && isGone(aiOf(state, thread.id), stored) ? null : stored;
++}
++
++function isAnswerIn(message: Message, session: AgentSessionId | null): boolean {
++  return message.body.kind === "aiAnswer" && message.body.session === session;
++}
++
++function answersIn(thread: Thread | undefined, session: AgentSessionId): number {
++  return thread?.messages.filter((message) => isAnswerIn(message, session)).length ?? 0;
++}
++
++/** The prompt rule (request C2): the notes since the session's last answer; a session's first turn wrapped. */
++function promptText(state: State, thread: Thread, session: AgentSessionId | null): string | null {
++  const last = thread.messages.findLastIndex((message) => isAnswerIn(message, session));
++  const notes = thread.messages
++    .slice(last + 1)
++    .flatMap(({ body }) => (body.kind === "note" ? [body.text] : []));
++  const context = state.place(thread);
++  if (notes.length === 0 || context === null) {
++    return null;
++  }
++  const text = notes.join(NOTE_JOIN);
++  return last === -1 ? firstMessage(context.template, { ...context.values, MESSAGE: text }) : text;
++}
++
++function canAsk(state: State, thread: Thread): boolean {
++  const ai = aiOf(state, thread.id);
++  const session = askedSession(state, thread);
++  const loading = session !== null && (ai.session !== session || ai.loaded === null);
++  return ai.running === null && !loading && promptText(state, thread, session) !== null;
++}
++
++async function replayHolds(
++  state: State,
++  thread: ThreadId,
++  session: AgentSessionId,
++): Promise<boolean> {
++  const load = await state.client.loadConversation(session);
++  if (load.kind !== "loaded") {
++    log.warn("ai.replay_failed", { thread, load: load.kind });
++    return false;
++  }
++  const known = answersIn(threadOf(state, thread), session);
++  const held = load.turns.length > known;
++  const turns = held ? load.turns.slice(0, known) : load.turns;
++  put(state, thread, { session, loaded: { kind: "loaded", turns } });
++  return held;
++}
++
++async function isHeld(
++  state: State,
++  { thread, session, end }: { thread: ThreadId; session: AgentSessionId; end: TurnEnd },
++): Promise<boolean> {
++  const held = end.kind === "failed" ? HELD_AFTER[end.failure.kind] : HELD_AT_END[end.kind];
++  return held === "replay" ? replayHolds(state, thread, session) : held === "held";
++}
++
++async function ended(
++  state: State,
++  thread: ThreadId,
++  { end, session }: { end: TurnEnd; session: AgentSessionId | null },
++): Promise<void> {
++  state.turns.delete(thread);
++  if (end.kind === "failed" && end.failure.kind === "sessionGone" && session !== null) {
++    put(state, thread, {
++      running: null,
++      session,
++      loaded: { kind: "failed", failure: end.failure },
++    });
++    ask(state, thread);
++    return;
++  }
++  put(state, thread, { end });
++  const recorded =
++    session !== null &&
++    (await isHeld(state, { thread, session, end })) &&
++    (await state.threads.addAiAnswer(thread, session));
++  const ai = aiOf(state, thread);
++  const { loaded } = ai;
++  const appended =
++    recorded && ai.session === session && loaded?.kind === "loaded"
++      ? { loaded: { kind: "loaded" as const, turns: [...loaded.turns, end.turn] } }
++      : {};
++  put(state, thread, { running: null, ...appended });
++}
++
++function run(
++  state: State,
++  thread: ThreadId,
++  request: { session: AgentSessionId | null; text: string },
++): void {
++  put(state, thread, { running: STARTING, end: null });
++  state.asked.set(thread, request.text);
++  const asked = { session: request.session };
++  const turn = state.client.ask(request, {
++    session: (created) => {
++      asked.session = created;
++      put(state, thread, { session: created, loaded: { kind: "loaded", turns: [] } });
++      void state.threads.setSession(thread, created);
++    },
++    changed: (view) => {
++      if (aiOf(state, thread).end === null) {
++        put(state, thread, { running: view });
++      }
++    },
++  });
++  state.turns.set(thread, turn);
++  void turn.ended.then((end) => ended(state, thread, { end, session: asked.session }));
++}
++
++function ask(state: State, id: ThreadId): void {
++  const thread = threadOf(state, id);
++  if (thread === undefined || !canAsk(state, thread)) {
++    return;
++  }
++  const session = askedSession(state, thread);
++  const text = promptText(state, thread, session);
++  if (text !== null) {
++    run(state, id, { session, text });
++  }
++}
++
++/** Retry sends a failed turn's prompt again when omp holds it (its answer is recorded); else it asks. */
++function retry(state: State, id: ThreadId): void {
++  const ai = aiOf(state, id);
++  const text = state.asked.get(id);
++  if (ai.running !== null || ai.end?.kind !== "failed") {
++    return;
++  }
++  const recorded = ai.loaded?.kind === "loaded" && ai.loaded.turns.includes(ai.end.turn);
++  if (text !== undefined && recorded) {
++    run(state, id, { session: ai.session, text });
++  } else {
++    ask(state, id);
++  }
++}
++
++async function load(state: State, id: ThreadId): Promise<void> {
++  const thread = threadOf(state, id);
++  const session = thread === undefined ? null : storedSession(thread);
++  const ai = aiOf(state, id);
++  if (session === null || ai.running !== null) {
++    return;
++  }
++  const kept = ai.loaded === null || ai.loaded.kind === "loaded" || isGone(ai, session);
++  if (ai.session === session && kept) {
++    return;
++  }
++  put(state, id, { session, loaded: null });
++  const loaded = await state.client.loadConversation(session);
++  if (aiOf(state, id).session === session) {
++    put(state, id, { loaded });
++  }
++}
++
++export function createRangeAi(
++  client: AiClient,
++  threads: State["threads"],
++  place: (thread: Thread) => AskContext | null,
++): RangeAi {
++  const state: State = {
++    client,
++    threads,
++    place,
++    byThread: shallowRef<ReadonlyMap<ThreadId, ThreadAi>>(new Map()),
++    turns: new Map(),
++    asked: new Map(),
++  };
++  return {
++    byThread: state.byThread,
++    ask: (thread) => {
++      ask(state, thread);
++    },
++    retry: (thread) => {
++      retry(state, thread);
++    },
++    stop: (thread) => {
++      state.turns.get(thread)?.stop();
++    },
++    load: (thread) => {
++      void load(state, thread);
++    },
++    canAsk: (id) => {
++      const thread = threadOf(state, id);
++      return thread !== undefined && canAsk(state, thread);
++    },
++  };
++}
+diff --git a/frontend/src/ui/rangeAiView.test.ts b/frontend/src/ui/rangeAiView.test.ts
+new file mode 100644
+index 0000000..7bd7bba
+--- /dev/null
++++ b/frontend/src/ui/rangeAiView.test.ts
+@@ -0,0 +1,126 @@
++import { expect, test } from "vitest";
++
++import { agentSessionId, type AgentSessionId, type TurnEnd, type TurnView } from "../agent";
++import type { Message } from "../ipc";
++import { IDLE, type ThreadAi } from "./rangeAi";
++import { answerView, liveTurn, postBody } from "./rangeAiView";
++
++function session(text: string): AgentSessionId {
++  const id = agentSessionId(text);
++  if (id === null) {
++    throw new Error(`${text} is no session`);
++  }
++  return id;
++}
++
++function view(answer: string): TurnView {
++  return { entries: [], answer };
++}
++
++function message(body: Message["body"]): Message["body"] {
++  return body;
++}
++
++const S1 = session("s1");
++const FIRST = view("first");
++const SECOND = view("second");
++const LOADED: ThreadAi = {
++  ...IDLE,
++  session: S1,
++  loaded: { kind: "loaded", turns: [FIRST, SECOND] },
++};
++
++test("an answer of the loaded session shows its turn, finished unless this window saw it end", () => {
++  const stopped: TurnEnd = { kind: "stopped", turn: SECOND };
++
++  expect(answerView(LOADED, { kind: "aiAnswer", session: "s1", turn: 0 })).toEqual({
++    kind: "turn",
++    turn: FIRST,
++    end: { kind: "finished", turn: FIRST },
++  });
++  expect(
++    answerView({ ...LOADED, end: stopped }, { kind: "aiAnswer", session: "s1", turn: 1 }),
++  ).toEqual({
++    kind: "turn",
++    turn: SECOND,
++    end: stopped,
++  });
++  expect(
++    answerView({ ...LOADED, end: stopped }, { kind: "aiAnswer", session: "s1", turn: 0 }),
++  ).toEqual({
++    kind: "turn",
++    turn: FIRST,
++    end: { kind: "finished", turn: FIRST },
++  });
++});
++
++test.each<[string, ThreadAi, string, number, unknown]>([
++  ["nothing loaded yet", IDLE, "s1", 0, { kind: "loading" }],
++  ["a load in flight", { ...IDLE, session: S1 }, "s1", 0, { kind: "loading" }],
++  [
++    "a load the closing window stopped",
++    { ...IDLE, session: S1, loaded: { kind: "stopped" } },
++    "s1",
++    0,
++    { kind: "loading" },
++  ],
++  ["an older session", LOADED, "s0", 0, { kind: "gone" }],
++  ["a turn the replay lacks", LOADED, "s1", 2, { kind: "gone" }],
++  [
++    "a lost session",
++    { ...IDLE, session: S1, loaded: { kind: "failed", failure: { kind: "sessionGone" } } },
++    "s1",
++    0,
++    { kind: "gone" },
++  ],
++  [
++    "a failed load",
++    { ...IDLE, session: S1, loaded: { kind: "failed", failure: { kind: "noCommand" } } },
++    "s1",
++    0,
++    { kind: "failed", failure: { kind: "noCommand" } },
++  ],
++])("an answer with %s", (_case, ai, answerSession, turn, expected) => {
++  expect(answerView(ai, { kind: "aiAnswer", session: answerSession, turn })).toEqual(expected);
++});
++
++test("the live turn: the running view, then its end until a message shows it", () => {
++  const ended: TurnEnd = { kind: "finished", turn: SECOND };
++  const failed: TurnEnd = { kind: "failed", turn: view("x"), failure: { kind: "busy" } };
++
++  expect(liveTurn(IDLE)).toBeNull();
++  expect(liveTurn({ ...IDLE, running: FIRST })).toEqual({ turn: FIRST, end: null });
++  expect(liveTurn({ ...LOADED, running: SECOND, end: ended })).toEqual({
++    turn: SECOND,
++    end: ended,
++  });
++  expect(liveTurn({ ...LOADED, end: ended })).toBeNull();
++  expect(liveTurn({ ...LOADED, end: failed })).toEqual({ turn: failed.turn, end: failed });
++  expect(liveTurn({ ...IDLE, end: ended })).toEqual({ turn: SECOND, end: ended });
++});
++
++test("Post offers a note's text, a loaded answer's final text, or why it cannot", () => {
++  const answer = message({ kind: "aiAnswer", session: "s1", turn: 1 });
++
++  expect(postBody(message({ kind: "note", text: "Why?" }), null)).toEqual({
++    kind: "text",
++    text: "Why?",
++  });
++  expect(postBody(answer, LOADED)).toEqual({ kind: "text", text: "second" });
++  expect(postBody(answer, null)).toEqual({
++    kind: "none",
++    why: "An AI answer — start yamt with --ai to see it",
++  });
++  expect(postBody(answer, IDLE)).toEqual({ kind: "none", why: "Loading the AI's answer…" });
++  expect(postBody(message({ kind: "aiAnswer", session: "s0", turn: 0 }), LOADED)).toEqual({
++    kind: "none",
++    why: "omp no longer has this answer",
++  });
++  expect(
++    postBody(answer, {
++      ...IDLE,
++      session: S1,
++      loaded: { kind: "failed", failure: { kind: "noCommand" } },
++    }),
++  ).toEqual({ kind: "none", why: "The AI's conversation could not be loaded" });
++});
+diff --git a/frontend/src/ui/rangeAiView.ts b/frontend/src/ui/rangeAiView.ts
+new file mode 100644
+index 0000000..f064e34
+--- /dev/null
++++ b/frontend/src/ui/rangeAiView.ts
+@@ -0,0 +1,81 @@
++import type { AgentFailure, TurnEnd, TurnView } from "../agent";
++import type { Message } from "../ipc";
++import type { ThreadAi } from "./rangeAi";
++import type { PostBody } from "./rangeGitLab";
++import {
++  AI_ANSWER_TEXT,
++  ANSWER_GONE_TEXT,
++  ANSWER_LOADING_TEXT,
++  ANSWER_UNLOADED_TEXT,
++} from "./rangeThreadText";
++
++export type AnswerView =
++  | { readonly kind: "turn"; readonly turn: TurnView; readonly end: TurnEnd }
++  | { readonly kind: "loading" }
++  | { readonly kind: "gone" }
++  | { readonly kind: "failed"; readonly failure: AgentFailure };
++
++export type ShownTurn = { readonly turn: TurnView; readonly end: TurnEnd | null };
++
++type AnswerBody = Extract<Message["body"], { readonly kind: "aiAnswer" }>;
++
++/** An AI answer's message: turn i of the loaded conversation when it is the answer's session (plan row 121). */
++export function answerView(ai: ThreadAi, { session, turn }: AnswerBody): AnswerView {
++  const { loaded } = ai;
++  if (ai.session !== session) {
++    return ai.session === null ? { kind: "loading" } : { kind: "gone" };
++  }
++  if (loaded === null || loaded.kind === "stopped") {
++    return { kind: "loading" };
++  }
++  if (loaded.kind === "failed") {
++    return loaded.failure.kind === "sessionGone" ? { kind: "gone" } : loaded;
++  }
++  const shown = loaded.turns[turn];
++  if (shown === undefined) {
++    return { kind: "gone" };
++  }
++  const end: TurnEnd = ai.end?.turn === shown ? ai.end : { kind: "finished", turn: shown };
++  return { kind: "turn", turn: shown, end };
++}
++
++/** The turn under the messages: the running one, or an ended one no message shows. */
++export function liveTurn(ai: ThreadAi): ShownTurn | null {
++  const { end, running, loaded } = ai;
++  const recorded = end !== null && loaded?.kind === "loaded" && loaded.turns.includes(end.turn);
++  if (end !== null && (running !== null || !recorded)) {
++    return { turn: end.turn, end };
++  }
++  return running === null ? null : { turn: running, end: null };
++}
++
++function answerBody(view: AnswerView): PostBody {
++  switch (view.kind) {
++    case "turn":
++      return { kind: "text", text: view.turn.answer };
++    case "loading":
++      return { kind: "none", why: ANSWER_LOADING_TEXT };
++    case "gone":
++      return { kind: "none", why: ANSWER_GONE_TEXT };
++    case "failed":
++      return { kind: "none", why: ANSWER_UNLOADED_TEXT };
++    default: {
++      const _exhaustive: never = view;
++      return _exhaustive;
++    }
++  }
++}
++
++/** What Post offers: a note's text, a loaded AI answer's final text (`TurnView.answer`), or why not. */
++export function postBody(body: Message["body"], ai: ThreadAi | null): PostBody {
++  switch (body.kind) {
++    case "note":
++      return { kind: "text", text: body.text };
++    case "aiAnswer":
++      return ai === null ? { kind: "none", why: AI_ANSWER_TEXT } : answerBody(answerView(ai, body));
++    default: {
++      const _exhaustive: never = body;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/rangeGitLab.test.ts b/frontend/src/ui/rangeGitLab.test.ts
+index 9a79de4..b7976c0 100644
+--- a/frontend/src/ui/rangeGitLab.test.ts
++++ b/frontend/src/ui/rangeGitLab.test.ts
+@@ -13,9 +13,17 @@ import {
+   type SourceResult,
+ } from "../ipc";
+ import type { Problem } from "./problem";
+-import { createGitLabCheck, RECHECK_PAUSE_MS, type GitLabState } from "./rangeGitLab";
++import {
++  createGitLabCheck,
++  RECHECK_PAUSE_MS,
++  type GitLabState,
++  type PostBody,
++} from "./rangeGitLab";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+ 
++const TEXT: PostBody = { kind: "text", text: "Is this still used?" };
++const UNSHOWN: PostBody = { kind: "none", why: "Loading the AI's answer…" };
++
+ type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+ 
+ type Rig = {
+@@ -164,7 +172,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
+     title: "Checking GitLab…",
+     disabled: true,
+   });
+-  expect(live.gitlab.postButton(note)).toEqual({
++  expect(live.gitlab.postButton(note, TEXT)).toEqual({
+     label: "Post",
+     title: "Checking GitLab…",
+     action: null,
+@@ -177,7 +185,7 @@ test("Send and Post are disabled with Checking GitLab… until the first answer"
+     title: "Send the 2 queued comments to your pending review on !12",
+     disabled: false,
+   });
+-  expect(live.gitlab.postButton(note)).toEqual({
++  expect(live.gitlab.postButton(note, TEXT)).toEqual({
+     label: "Post",
+     title: "Queue this message as its own comment on !12",
+     action: "edit",
+@@ -206,36 +214,41 @@ test("a not lined-up answer disables both with its sentence; Unqueue stays enabl
+     title: sentence,
+     disabled: true,
+   });
+-  expect(live.gitlab.postButton(messageAt(live, 3))).toEqual({
++  expect(live.gitlab.postButton(messageAt(live, 3), TEXT)).toEqual({
+     label: "Post",
+     title: sentence,
+     action: null,
+   });
+-  expect(live.gitlab.postButton(messageAt(live, 0))).toEqual({
++  expect(live.gitlab.postButton(messageAt(live, 0), UNSHOWN)).toEqual({
+     label: "Unqueue",
+     title: "Take this message out of the queue",
+     action: "unqueue",
+   });
+-  expect(live.gitlab.postButton(messageAt(live, 1))).toMatchObject({
++  expect(live.gitlab.postButton(messageAt(live, 1), TEXT)).toMatchObject({
+     label: "Unqueue",
+     action: "unqueue",
+   });
+ });
+ 
+-test("a pending message and an AI answer cannot be posted", async () => {
++test("a pending message cannot be posted; a message without shown text says why", async () => {
+   const live = await rig();
+   await checked(live);
+ 
+-  expect(live.gitlab.postButton(messageAt(live, 2))).toEqual({
++  expect(live.gitlab.postButton(messageAt(live, 2), TEXT)).toEqual({
+     label: "Post",
+     title: "Pending on GitLab",
+     action: null,
+   });
+-  expect(live.gitlab.postButton(messageAt(live, 3, 1))).toEqual({
++  expect(live.gitlab.postButton(messageAt(live, 3, 1), UNSHOWN)).toEqual({
+     label: "Post",
+-    title: "An AI answer — start yamt with --ai to see it",
++    title: "Loading the AI's answer…",
+     action: null,
+   });
++  expect(live.gitlab.postButton(messageAt(live, 3, 1), TEXT)).toEqual({
++    label: "Post",
++    title: "Queue this message as its own comment on !12",
++    action: "edit",
++  });
+ });
+ 
+ test("Send is disabled with Nothing queued when no message waits", async () => {
+diff --git a/frontend/src/ui/rangeGitLab.ts b/frontend/src/ui/rangeGitLab.ts
+index 8b27087..6941ea5 100644
+--- a/frontend/src/ui/rangeGitLab.ts
++++ b/frontend/src/ui/rangeGitLab.ts
+@@ -12,7 +12,6 @@ import type {
+ import { attempt, type Problem } from "./problem";
+ import { isQueued, type RangeThreads } from "./rangeThreads";
+ import {
+-  AI_ANSWER_TEXT,
+   CHECKING_TEXT,
+   NOTHING_QUEUED,
+   notLinedUpText,
+@@ -41,13 +40,18 @@ type PostView = {
+   readonly action: PostAction | null;
+ };
+ 
++/** What a message offers to post: its text, or why it has none shown. */
++export type PostBody =
++  | { readonly kind: "text"; readonly text: string }
++  | { readonly kind: "none"; readonly why: string };
++
+ export type GitLabState = {
+   readonly check: Readonly<ShallowRef<GitLabCheck | null>>;
+   readonly checking: Readonly<ShallowRef<boolean>>;
+   readonly sending: Readonly<ShallowRef<SendProgress | null>>;
+   readonly result: Readonly<ShallowRef<SentReply | null>>;
+   readonly sendButton: ComputedRef<ButtonView>;
+-  postButton(message: Message): PostView;
++  postButton(message: Message, body: PostBody): PostView;
+   checkNow(): Promise<void>;
+   checkOnFocus(): void;
+   send(): Promise<void>;
+@@ -97,16 +101,16 @@ function sendButton(state: State): ButtonView {
+   return { label, title, disabled: state.sending.value !== null };
+ }
+ 
+-function postButton(state: State, { body, posting }: Message): PostView {
+-  if (body.kind === "aiAnswer") {
+-    return { label: POST_LABEL, title: AI_ANSWER_TEXT, action: null };
+-  }
++function postButton(state: State, { posting }: Message, body: PostBody): PostView {
+   if (posting.kind === "pending") {
+     return { label: POST_LABEL, title: PENDING_TEXT, action: null };
+   }
+   if (isQueued(posting)) {
+     return { label: UNQUEUE_LABEL, title: UNQUEUE_TITLE, action: "unqueue" };
+   }
++  if (body.kind === "none") {
++    return { label: POST_LABEL, title: body.why, action: null };
++  }
+   const shown = gate(state);
+   return shown.kind === "blocked"
+     ? { label: POST_LABEL, title: shown.title, action: null }
+@@ -190,7 +194,7 @@ export function createGitLabCheck(
+     sending: state.sending,
+     result: state.result,
+     sendButton: computed(() => sendButton(state)),
+-    postButton: (message) => postButton(state, message),
++    postButton: (message, body) => postButton(state, message, body),
+     checkNow: () => checkNow(state),
+     checkOnFocus: () => {
+       checkOnFocus(state);
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index 9b35bc2..d504472 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -1,5 +1,6 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
++import { DEFAULT_FIRST_MESSAGE } from "../agent";
+ import {
+   changedThreadLine,
+   createFixtureRangeSource,
+@@ -13,7 +14,13 @@ import {
+ } from "../ipc";
+ import type { KeyPress } from "./fileListKey";
+ import { problemText } from "./problemText";
+-import { createRangeStore, MOUNTED_FILES, useRangeStore, type RangeStore } from "./rangeStore";
++import {
++  askContext,
++  createRangeStore,
++  MOUNTED_FILES,
++  useRangeStore,
++  type RangeStore,
++} from "./rangeStore";
+ import { useSettingsStore } from "./settingsStore";
+ 
+ type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+@@ -71,7 +78,7 @@ function source(count: number): RangeSource {
+ 
+ async function started(count: number, edit: Edit = () => ({})): Promise<RangeStore> {
+   const fixture = source(count);
+-  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark");
++  const store = createRangeStore({ ...fixture, ...edit(fixture) }, "dark", null);
+   await store.startUp();
+   return store;
+ }
+@@ -124,7 +131,7 @@ test("an empty range shows no file and mounts none", async () => {
+ test("before openRange answers: the files screen, the start theme's preferences, no file to show", async () => {
+   quiet();
+   const other = await started(4);
+-  const store = createRangeStore(source(4), "light");
++  const store = createRangeStore(source(4), "light", null);
+ 
+   expect(store.screen.value).toEqual({ kind: "files" });
+   expect(store.preferences.value.theme).toBe("light");
+@@ -401,3 +408,43 @@ test("answer settles the waiting question", async () => {
+ 
+   expect(store.question.value).toBeNull();
+ });
++
++test("without --ai the store has no AI and the window closes without asking", async () => {
++  const store = await started(2);
++
++  expect(store.ai).toBeNull();
++  expect(await store.mayClose()).toBe(true);
++  expect(store.question.value).toBeNull();
++});
++
++test("First message's values: the thread's place, the range as typed, both short ids", async () => {
++  quiet();
++  const store = createRangeStore(
++    createFixtureRangeSource(log, "?range=review&threads=seeded"),
++    "dark",
++    null,
++  );
++  await store.startUp();
++  const start = store.start.value;
++  const [removed, added] = store.threads.list.value.threads;
++  if (start === null || removed === undefined || added === undefined) {
++    throw new Error("the seeded review did not open");
++  }
++  const custom = { command: null, firstMessage: "Hi {{ MESSAGE }}" };
++
++  expect(askContext(start, { command: null, firstMessage: null }, added)).toEqual({
++    template: DEFAULT_FIRST_MESSAGE,
++    values: {
++      RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:21",
++      RANGE: start.range,
++      OLD_COMMIT: start.left.shortId,
++      NEW_COMMIT: start.right.shortId,
++    },
++  });
++  expect(askContext(start, custom, removed)).toMatchObject({
++    template: "Hi {{ MESSAGE }}",
++    values: { RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:20" },
++  });
++  expect(askContext(null, custom, added)).toBeNull();
++  expect(askContext({ ...start, files: [] }, custom, added)).toBeNull();
++});
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 17b402e..0985654 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -1,18 +1,37 @@
+ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
+ 
+-import type { RangeEntry, RangeFile, RangeFileId, RangeSource, RangeStart, Theme } from "../ipc";
++import { DEFAULT_FIRST_MESSAGE, type AgentClient } from "../agent";
++import type {
++  AgentSettings,
++  AgentSource,
++  RangeEntry,
++  RangeFile,
++  RangeFileId,
++  RangeSource,
++  RangeStart,
++  Theme,
++  Thread,
++} from "../ipc";
++import { aiMayClose } from "./aiClose";
+ import { createAsking, type Asking } from "./asking";
+ import { fileListKey, type KeyPress } from "./fileListKey";
+ import { attempt, clearProblemAbout, report, type Problem } from "./problem";
+ import type { Question } from "./question";
++import { createRangeAi, type AskContext, type RangeAi } from "./rangeAi";
+ import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
++import { threadPlaceText } from "./rangeThreadText";
+ import type { Screen } from "./screen";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+ import type { SettingsActions, SettingsInUse } from "./settings";
+ import { registerSettingsStore, type SettingsStore } from "./settingsStore";
+ import type { Preferences } from "./useMergeController";
+ 
++/** What `main.ts` builds only under `data-ai` / `?ai` (plan row 108). */
++export type RangeAgent = { readonly source: AgentSource; readonly client: AgentClient };
++
++type RangeStoreAi = RangeAi & { readonly client: AgentClient };
++
+ export type RangeStore = SettingsStore & {
+   readonly start: Readonly<ShallowRef<RangeStart | null>>;
+   readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
+@@ -25,6 +44,7 @@ export type RangeStore = SettingsStore & {
+   readonly preferences: ComputedRef<Preferences>;
+   readonly threads: RangeThreads;
+   readonly gitlab: GitLabState;
++  readonly ai: RangeStoreAi | null;
+   startUp(): Promise<void>;
+   loadSettings(): Promise<void>;
+   showFile(path: string): void;
+@@ -33,6 +53,7 @@ export type RangeStore = SettingsStore & {
+   dismissProblem(): void;
+   answer(yes: boolean): void;
+   dismissQuestion(): void;
++  mayClose(): Promise<boolean>;
+ };
+ 
+ type Refs = {
+@@ -50,6 +71,7 @@ type State = Refs & {
+   readonly asking: Asking;
+   readonly threads: RangeThreads;
+   readonly gitlab: GitLabState;
++  readonly agent: RangeAgent | null;
+   recent: readonly RangeFileId[];
+   latestSettings: number;
+ };
+@@ -70,30 +92,78 @@ function createRefs(startTheme: Theme): Refs {
+   };
+ }
+ 
+-export function createRangeStore(source: RangeSource, startTheme: Theme): RangeStore {
+-  const refs = createRefs(startTheme);
++/** First message's values for a thread (plan row 113): its place, the range as typed, the compared ids. */
++export function askContext(
++  start: RangeStart | null,
++  agent: AgentSettings,
++  thread: Thread,
++): AskContext | null {
++  const entry = start?.files.find((file) => file.id === thread.file);
++  if (start === null || entry === undefined) {
++    return null;
++  }
++  return {
++    template: agent.firstMessage ?? DEFAULT_FIRST_MESSAGE,
++    values: {
++      RELATIVE_FILE_PATH_WITH_LINE: threadPlaceText(entry, thread.line),
++      RANGE: start.range,
++      OLD_COMMIT: start.left.shortId,
++      NEW_COMMIT: start.right.shortId,
++    },
++  };
++}
++
++function storeAi(state: State): RangeStoreAi | null {
++  const { agent } = state;
++  if (agent === null) {
++    return null;
++  }
++  const ai = createRangeAi(agent.client, state.threads, (thread) =>
++    askContext(state.start.value, state.settings.value.agent, thread),
++  );
++  return { ...ai, client: agent.client };
++}
++
++function mayClose(state: State): Promise<boolean> {
++  const { agent } = state;
++  return agent === null
++    ? Promise.resolve(true)
++    : aiMayClose({ source: agent.source, asking: state.asking, report: (p) => report(state, p) });
++}
++
++function createState(refs: Refs, source: RangeSource, agent: RangeAgent | null): State {
+   function problems(problem: Problem): void {
+     report(refs, problem);
+   }
+   const threads = createRangeThreads(source, problems);
+-  const gitlab = createGitLabCheck(source, threads, problems, refs.start);
+-  const state: State = {
++  return {
+     ...refs,
+     source,
+     asking: createAsking(),
+     threads,
+-    gitlab,
++    gitlab: createGitLabCheck(source, threads, problems, refs.start),
++    agent,
+     recent: [],
+     latestSettings: 0,
+   };
++}
++
++export function createRangeStore(
++  source: RangeSource,
++  startTheme: Theme,
++  agent: RangeAgent | null,
++): RangeStore {
++  const refs = createRefs(startTheme);
++  const state = createState(refs, source, agent);
+   const settings = settingsActions(state);
+   const created: RangeStore = {
+     ...refs,
+     shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
+     question: state.asking.question,
+     preferences: computed(() => preferencesOf(refs.settings.value)),
+-    threads,
+-    gitlab,
++    threads: state.threads,
++    gitlab: state.gitlab,
++    ai: storeAi(state),
+     ...settings,
+     startUp: () => startUp(state, settings),
+     showFile: (path) => {
+@@ -103,6 +173,7 @@ export function createRangeStore(source: RangeSource, startTheme: Theme): RangeS
+       }
+     },
+     loadFile: (entry) => loadFile(state, entry),
++    mayClose: () => mayClose(state),
+     ...chromeActions(state),
+   };
+   store = created;
+diff --git a/frontend/src/ui/rangeThreadText.ts b/frontend/src/ui/rangeThreadText.ts
+index be3bf9c..08088b0 100644
+--- a/frontend/src/ui/rangeThreadText.ts
++++ b/frontend/src/ui/rangeThreadText.ts
+@@ -15,6 +15,15 @@ export const CHECKING_TEXT = "Checking GitLab…";
+ export const NOTHING_QUEUED = "Nothing queued";
+ export const PENDING_TEXT = "Pending on GitLab";
+ export const AI_ANSWER_TEXT = "An AI answer — start yamt with --ai to see it";
++export const ANSWER_LOADING_TEXT = "Loading the AI's answer…";
++export const ANSWER_GONE_TEXT = "omp no longer has this answer";
++export const ANSWER_UNLOADED_TEXT = "The AI's conversation could not be loaded";
++export const ASK_AI_LABEL = "Ask AI";
++export const ASK_AI_TITLE = "Send your messages since the AI's last answer to the AI";
++export const ASK_AI_WAITING =
++  "Nothing to ask yet: write a message after the AI's last answer, or wait for its conversation to load";
++export const STOP_AI_LABEL = "Stop";
++export const STOP_AI_TITLE = "Stop the AI's turn; what it wrote so far stays";
+ export const POST_LABEL = "Post";
+ export const UNQUEUE_LABEL = "Unqueue";
+ export const UNQUEUE_TITLE = "Take this message out of the queue";
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index 3a524b7..210f006 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -441,7 +441,7 @@ test("a Post text outlives its file's view: 16 other files evict file 0 and the
+   const fixture = createFixtureRangeSource(log, "?range=review", {
+     "../../fixtures/range/review.json": manyFiles(MOUNTED_FILES + 1),
+   });
+-  const store = createRangeStore(fixture, "dark");
++  const store = createRangeStore(fixture, "dark", null);
+   await store.startUp();
+   const [first, ...others] = store.start.value?.files ?? [];
+   if (first === undefined) {
+diff --git a/frontend/src/ui/rangeThreads.ts b/frontend/src/ui/rangeThreads.ts
+index 274eaaa..af03aa1 100644
+--- a/frontend/src/ui/rangeThreads.ts
++++ b/frontend/src/ui/rangeThreads.ts
+@@ -48,6 +48,8 @@ export type RangeThreads = {
+   queue(message: MessageId, text: string): Promise<void>;
+   unqueue(message: MessageId): Promise<void>;
+   replace(list: ThreadList): void;
++  setSession(thread: ThreadId, session: string): Promise<boolean>;
++  addAiAnswer(thread: ThreadId, session: string): Promise<boolean>;
+ };
+ 
+ type State = {
+@@ -204,6 +206,16 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue"
+   };
+ }
+ 
++function aiRecords(state: State): Pick<RangeThreads, "setSession" | "addAiAnswer"> {
++  const { source } = state;
++  return {
++    setSession: (thread, session) =>
++      changed(state, "session", () => source.setThreadSession(thread, session)),
++    addAiAnswer: (thread, session) =>
++      changed(state, "answer", () => source.addAiAnswer(thread, session)),
++  };
++}
++
+ export function createRangeThreads(
+   source: ReviewSource,
+   report: (problem: Problem) => void,
+@@ -224,6 +236,7 @@ export function createRangeThreads(
+     ...drafts,
+     ...counted(state),
+     ...replies(state),
++    ...aiRecords(state),
+     shownFor: (file) => shownFor(state, file),
+     boxOf: (key) => boxOf(state, key),
+     toggle: (keys) => {
+-- 
+2.56.0
+

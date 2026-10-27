@@ -1,0 +1,45 @@
+just mutants 189fb06~1 (covers 189fb06 RVMarkdownR1) — Stryker; editor/ not mutated
+All files         |  84.38 |   85.56 |      305 |         3 |         52 |        5 |        0 |
+ fences.ts        |  84.19 |   85.37 |      242 |         3 |         42 |        4 |        0 |
+ markdownFence.ts |  85.14 |   86.30 |       63 |         0 |         10 |        1 |        0 |
+Survived/NoCoverage by line:
+      1 scripts/fences.ts:101
+      1 scripts/fences.ts:113
+      1 scripts/fences.ts:119
+      1 scripts/fences.ts:120
+      1 scripts/fences.ts:137
+      1 scripts/fences.ts:146
+      1 scripts/fences.ts:163
+      2 scripts/fences.ts:175
+     10 scripts/fences.ts:176
+      1 scripts/fences.ts:181
+      1 scripts/fences.ts:186
+      1 scripts/fences.ts:188
+      5 scripts/fences.ts:189
+      1 scripts/fences.ts:190
+      2 scripts/fences.ts:197
+      1 scripts/fences.ts:209
+      1 scripts/fences.ts:212
+      1 scripts/fences.ts:225
+      1 scripts/fences.ts:228
+      2 scripts/fences.ts:50
+      1 scripts/fences.ts:53
+      1 scripts/fences.ts:55
+      1 scripts/fences.ts:67
+      1 scripts/fences.ts:71
+      1 scripts/fences.ts:73
+      1 scripts/fences.ts:76
+      1 scripts/fences.ts:78
+      1 scripts/fences.ts:82
+      1 scripts/fences.ts:87
+      1 scripts/fences.ts:97
+      1 scripts/markdownFence.ts:24
+      2 scripts/markdownFence.ts:34
+      4 scripts/markdownFence.ts:38
+      1 scripts/markdownFence.ts:39
+      2 scripts/markdownFence.ts:40
+      1 scripts/markdownFence.ts:61
+changed hunks in fences.ts:
+@@ -7,0 +8 @@ import { clipboardViolations } from "./clipboardFence";
+@@ -47,3 +47,0 @@ const WINDOW_RULES: Readonly<Record<string, "PM7" | "PM9">> = { compare: "PM7",
+@@ -136,46 +133,0 @@ function rootFinding(file: string, target: string): Finding | undefined {
