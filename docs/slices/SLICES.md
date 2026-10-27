@@ -1061,6 +1061,21 @@ Feature built on 2026-10-27 (rows 1–14a); edit and delete of unsent comments a
 
 Process note (orchestrator, this run): each fix round is re-checked by one reviewer verifying both lenses' items, to keep within three live agents; a fourth agent was started once by mistake (`RVGlabCorrect`) and stopped at once.
 
+## Release 0.6.0-beta.1 (session 31, owner request #1637: "the next minor PRE-release")
+
+Contents: the `[Unreleased]` changelog section — the commit-range review window with its comment threads sent to
+GitLab, editing and deleting unsent comments, and the AI behind `--ai` (plan §2 #103–#123). `feat/review-range` merged
+into `main` as `a39907b` (merge commit, tree equal to `2ed089a`). Product code as checked by the feature's final runs
+(`RVVerify2`–`RVVerify4`); the release commit changes version and docs only. Version `0.6.0-beta.1` (orchestrator's
+choice of label, OR13); the README keeps naming the 0.5.1 files (a pre-release is not the default download). Nothing
+pushed.
+
+| row | slice | owner | status | evidence |
+| --- | ----- | ----- | ------ | -------- |
+| 1   | version 0.6.0-beta.1: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.6.0-beta.1] - 2026-10-27` | orchestrator | done | this commit; no product file changes |
+| 2   | final run before tagging (`briefs/release-0.6.0-beta.1-verify.md`): `just check`, licences, `.deb` name and version, `--version`, the release binary on the conflict project, the range window with edits and a send, one real AI turn, the compare window | verifier | running | |
+| 3   | release build and publishing as a pre-release (`docs/slices/handoff-release-0.6.0-beta.1.md`) | human | waiting for 2 | |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
