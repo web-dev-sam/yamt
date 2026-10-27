@@ -1,10 +1,1 @@
-{
-  "RVAiThreadsR2": {
-    "owned": [
-      "frontend/src/ui/rangeAi.ts",
-      "frontend/src/ui/rangeAi.test.ts",
-      "frontend/src/ui/rangeAiView.ts",
-      "frontend/src/ui/rangeAiView.test.ts"
-    ]
-  }
-}
+{}
