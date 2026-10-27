@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import {
   agentSessionId,
@@ -14,7 +14,7 @@ import {
 import { createFixtureRangeSource, log, type Message, type Thread, type ThreadId } from "../ipc";
 import type { Problem } from "./problem";
 import { createRangeAi, type AskContext, type RangeAi, type ThreadAi } from "./rangeAi";
-import { answerView, postBody } from "./rangeAiView";
+import { answerView, liveTurn, postBody } from "./rangeAiView";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 
 type Asked = {
@@ -84,6 +84,8 @@ const CONTEXT: AskContext = {
 };
 const WRAP = "src/board/board.ts:20 main...feature 531ea52..9c1ba3f\n";
 const CRASHED: AgentFailure = { kind: "crashed", code: 1, lastLog: null };
+const WRITE_FAILED = { kind: "WriteFailed", path: "/t/threads.json", message: "full" } as const;
+const MAX_TOKENS: AgentFailure = { kind: "ended", reason: "max_tokens" };
 
 function session(text: string): AgentSessionId {
   const id = agentSessionId(text);
@@ -103,10 +105,21 @@ async function settle(): Promise<void> {
   });
 }
 
-async function rig(): Promise<Rig> {
+/** `failsWrite(n)`: whether the n-th `addAiAnswer` write fails. */
+async function rig(failsWrite: (write: number) => boolean = () => false): Promise<Rig> {
   const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
   const problems: Problem[] = [];
-  const threads = createRangeThreads(fixture, (problem) => {
+  let writes = 0;
+  const source = {
+    ...fixture,
+    addAiAnswer: async (thread: ThreadId, asked: AgentSessionId) => {
+      writes += 1;
+      return failsWrite(writes)
+        ? { ok: false as const, failure: WRITE_FAILED }
+        : fixture.addAiAnswer(thread, asked);
+    },
+  };
+  const threads = createRangeThreads(source, (problem) => {
     problems.push(problem);
   });
   await threads.load();
@@ -473,6 +486,29 @@ test("a session omp lost at the ask: a new one starts at once with every note wr
   expect(threadOf(live, live.seeded).session).toBe("s2");
 });
 
+test("a turn of a new session omp never held shows no answer of the lost session", async () => {
+  const live = await rig();
+  live.ai.ask(live.fresh);
+  askedAt(live, 0).events.session(session("s1"));
+  askedAt(live, 0).end({ kind: "finished", turn: view("A") });
+  await settle();
+  await live.threads.addNote(live.fresh, "More?");
+  live.ai.ask(live.fresh);
+  askedAt(live, 1).end({ kind: "failed", turn: view(""), failure: { kind: "sessionGone" } });
+  await settle();
+  askedAt(live, 2).events.session(session("s2"));
+
+  askedAt(live, 2).end({ kind: "stopped", turn: view("") });
+  await settle();
+  loadAt(live, 0).answer({ kind: "loaded", turns: [] });
+  await settle();
+
+  expect(aiOf(live, live.fresh)).toMatchObject({
+    loadedSession: "s2",
+    loaded: { kind: "loaded", turns: [] },
+  });
+});
+
 test("two threads run at once; one ending leaves the other running", async () => {
   const live = await rig();
   await loadedSeeded(live, [view("Yes")]);
@@ -523,10 +559,10 @@ test("a failed write of the session or the answer is reported as such", async ()
     "session",
     "answer",
   ]);
-  expect(ai.of(fresh.id)).toMatchObject({
-    running: null,
-    loaded: { kind: "loaded", turns: [] },
-  });
+  expect(ai.of(fresh.id)).toMatchObject({ running: null, loadedSession: "s1", loaded: null });
+  expect(client.loads.map((each) => each.session)).toEqual(["s1"]);
+  ai.load(fresh.id);
+  expect(client.loads).toHaveLength(1);
 });
 
 test("no First message context (the range not open) means nothing to ask", async () => {
@@ -551,6 +587,13 @@ function lastAnswer(live: Rig, id: ThreadId): Extract<Message["body"], { kind: "
     throw new Error("the last message is no AI answer");
   }
   return body;
+}
+
+function aiAnswer(
+  id: AgentSessionId,
+  turn: number,
+): Extract<Message["body"], { kind: "aiAnswer" }> {
+  return { kind: "aiAnswer", session: id, turn };
 }
 
 async function failedSeededLoad(live: Rig): Promise<void> {
@@ -640,25 +683,96 @@ test("a crash after a failed load replaces the failed load with the replay", asy
   expect(bodies(live, live.seeded)).toHaveLength(3);
 });
 
-test("an answer recorded after a failed load loads the conversation again and shows as its turn", async () => {
+test.each<[string, TurnEnd]>([
+  ["finished", { kind: "finished", turn: view("board.ts") }],
+  ["ended at max tokens", { kind: "failed", turn: view("board.ts"), failure: MAX_TOKENS }],
+])(
+  "an answer %s after a failed load loads the conversation again and shows once, as its turn",
+  async (_case, end) => {
+    const live = await rig();
+    await failedSeededLoad(live);
+    live.ai.ask(live.seeded);
+
+    askedAt(live, 0).end(end);
+    await settle();
+    expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION, SEEDED_SESSION]);
+    loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes"), view("board.ts")] });
+    await settle();
+
+    const answer = lastAnswer(live, live.seeded);
+    const ai = aiOf(live, live.seeded);
+    expect(answer.turn).toBe(1);
+    expect(answerView(ai, answer)).toEqual({ kind: "turn", turn: end.turn, end });
+    expect(ai.loaded?.kind === "loaded" && ai.loaded.turns[1]).toBe(end.turn);
+    expect(liveTurn(ai)).toBeNull();
+    expect(postBody(answer, ai)).toEqual({ kind: "text", text: "board.ts" });
+  },
+);
+
+test("a failed replay check leaves the conversation unloaded; the next finished turn reloads it", async () => {
+  const live = await rig();
+  const warn = vi.spyOn(log, "warn").mockReturnValue();
+  live.ai.ask(live.fresh);
+  askedAt(live, 0).events.session(session("s1"));
+  askedAt(live, 0).end({ kind: "failed", turn: view(""), failure: CRASHED });
+  await settle();
+  loadAt(live, 0).answer({ kind: "failed", failure: CRASHED });
+  await settle();
+  expect(bodies(live, live.fresh)).toHaveLength(1);
+  expect(warn).toHaveBeenCalledWith("ai.replay_failed", { thread: live.fresh, load: "failed" });
+  warn.mockRestore();
+  live.ai.retry(live.fresh);
+  const now: TurnEnd = { kind: "finished", turn: view("Now") };
+
+  askedAt(live, 1).end(now);
+  await settle();
+  expect(live.client.loads).toHaveLength(2);
+  const crashed = view("Crashed");
+  loadAt(live, 1).answer({ kind: "loaded", turns: [crashed, view("Now")] });
+  await settle();
+
+  const s1 = session("s1");
+  const ai = aiOf(live, live.fresh);
+  expect(bodies(live, live.fresh).slice(1)).toEqual([aiAnswer(s1, 0), aiAnswer(s1, 1)]);
+  expect(answerView(ai, aiAnswer(s1, 0))).toEqual({
+    kind: "turn",
+    turn: crashed,
+    end: { kind: "finished", turn: crashed },
+  });
+  expect(answerView(ai, aiAnswer(s1, 1))).toEqual({ kind: "turn", turn: now.turn, end: now });
+  expect(liveTurn(ai)).toBeNull();
+});
+
+test("a stop after a failed load records every turn the replay holds past the answers, each shown as omp's", async () => {
   const live = await rig();
   await failedSeededLoad(live);
   live.ai.ask(live.seeded);
+  const stopped: TurnEnd = { kind: "stopped", turn: view("Part") };
 
-  askedAt(live, 0).end({ kind: "finished", turn: view("board.ts") });
+  askedAt(live, 0).end(stopped);
   await settle();
-  expect(live.client.loads.map((each) => each.session)).toEqual([SEEDED_SESSION, SEEDED_SESSION]);
-  loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes"), view("board.ts")] });
+  const held = view("Held");
+  loadAt(live, 1).answer({ kind: "loaded", turns: [view("Yes"), held, view("Part")] });
   await settle();
 
-  const answer = lastAnswer(live, live.seeded);
-  expect(answer.turn).toBe(1);
-  expect(answerView(aiOf(live, live.seeded), answer)).toEqual({
+  const seeded = session(SEEDED_SESSION);
+  const ai = aiOf(live, live.seeded);
+  expect(bodies(live, live.seeded).slice(-3)).toEqual([
+    { kind: "note", text: "Who calls it?" },
+    aiAnswer(seeded, 1),
+    aiAnswer(seeded, 2),
+  ]);
+  expect(answerView(ai, aiAnswer(seeded, 1))).toEqual({
     kind: "turn",
-    turn: view("board.ts"),
-    end: { kind: "finished", turn: view("board.ts") },
+    turn: held,
+    end: { kind: "finished", turn: held },
   });
-  expect(postBody(answer, aiOf(live, live.seeded))).toEqual({ kind: "text", text: "board.ts" });
+  expect(answerView(ai, aiAnswer(seeded, 2))).toEqual({
+    kind: "turn",
+    turn: stopped.turn,
+    end: stopped,
+  });
+  expect(liveTurn(ai)).toBeNull();
 });
 
 test("showing the box again while a turn runs after a failed load loads nothing", async () => {
@@ -671,44 +785,66 @@ test("showing the box again while a turn runs after a failed load loads nothing"
   expect(live.client.loads).toHaveLength(1);
 });
 
-test("an answer shows as the turn the store numbered, not after a replayed turn no answer records", async () => {
-  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
-  let writes = 0;
-  const threads = createRangeThreads(
-    {
-      ...fixture,
-      addAiAnswer: async (thread, session) => {
-        writes += 1;
-        return writes === 1
-          ? {
-              ok: false,
-              failure: { kind: "WriteFailed", path: "/t/threads.json", message: "full" },
-            }
-          : fixture.addAiAnswer(thread, session);
-      },
-    },
-    () => undefined,
-  );
-  await threads.load();
-  const client = new FakeClient();
-  const ai = createRangeAi(client, threads, () => CONTEXT);
-  const seeded = threads.list.value.threads[3]?.id;
-  if (seeded === undefined) {
-    throw new Error("no seeded thread");
-  }
-  ai.load(seeded);
-  client.loads[0]?.answer({ kind: "loaded", turns: [view("Yes"), view("Half")] });
+test("a failed record of a replayed turn keeps Ask off until a load records it; answer i stays omp's turn i", async () => {
+  const live = await rig((write) => write === 1);
+  await live.threads.addNote(live.seeded, "And now?");
+  live.ai.load(live.seeded);
+  const turns = [view("Yes"), view("Half")];
+  loadAt(live, 0).answer({ kind: "loaded", turns });
   await settle();
-  await threads.addNote(seeded, "And now?");
-  ai.ask(seeded);
+
+  const seeded = session(SEEDED_SESSION);
+  expect(bodies(live, live.seeded)).toHaveLength(3);
+  expect(live.ai.canAsk(live.seeded)).toBe(false);
+  live.ai.ask(live.seeded);
+  expect(live.client.asks).toEqual([]);
+  expect(answerView(aiOf(live, live.seeded), aiAnswer(seeded, 0))).toMatchObject({
+    turn: view("Yes"),
+  });
+
+  live.ai.load(live.seeded);
+  loadAt(live, 1).answer({ kind: "loaded", turns });
+  await settle();
+  expect(lastAnswer(live, live.seeded)).toEqual(aiAnswer(seeded, 1));
+  await live.threads.addNote(live.seeded, "Then?");
+  live.ai.ask(live.seeded);
+  expect(askedAt(live, 0).request.text).toBe("Then?");
   const now = view("Now");
-
-  client.asks[0]?.end({ kind: "finished", turn: now });
+  askedAt(live, 0).end({ kind: "finished", turn: now });
   await settle();
 
-  const last = threads.list.value.threads[3]?.messages.at(-1)?.body;
-  expect(last).toEqual({ kind: "aiAnswer", session: SEEDED_SESSION, turn: 1 });
-  expect(ai.of(seeded).loaded).toEqual({ kind: "loaded", turns: [view("Yes"), now] });
+  expect(lastAnswer(live, live.seeded)).toEqual(aiAnswer(seeded, 2));
+  expect(aiOf(live, live.seeded).loaded).toEqual({ kind: "loaded", turns: [...turns, now] });
+  expect(live.client.loads).toHaveLength(2);
+});
+
+test("a finished turn whose record failed keeps Ask off and shows once after a load records it", async () => {
+  const live = await rig((write) => write <= 2);
+  live.ai.ask(live.fresh);
+  askedAt(live, 0).events.session(session("s1"));
+  const finished: TurnEnd = { kind: "finished", turn: view("A") };
+  askedAt(live, 0).end(finished);
+  await settle();
+  expect(loadAt(live, 0).session).toBe("s1");
+  loadAt(live, 0).answer({ kind: "loaded", turns: [view("A")] });
+  await settle();
+
+  expect(bodies(live, live.fresh)).toHaveLength(1);
+  expect(live.ai.canAsk(live.fresh)).toBe(false);
+  expect(liveTurn(aiOf(live, live.fresh))).toEqual({ turn: finished.turn, end: finished });
+
+  live.ai.load(live.fresh);
+  loadAt(live, 1).answer({ kind: "loaded", turns: [view("A")] });
+  await settle();
+
+  const s1 = session("s1");
+  expect(bodies(live, live.fresh).slice(1)).toEqual([aiAnswer(s1, 0)]);
+  expect(answerView(aiOf(live, live.fresh), aiAnswer(s1, 0))).toEqual({
+    kind: "turn",
+    turn: finished.turn,
+    end: finished,
+  });
+  expect(liveTurn(aiOf(live, live.fresh))).toBeNull();
 });
 
 test("Retry after a crash omp never held asks again with the notes added since", async () => {
