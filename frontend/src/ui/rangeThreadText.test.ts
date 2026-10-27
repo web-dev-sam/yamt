@@ -8,6 +8,7 @@ import {
   type RangeStart,
 } from "../ipc";
 import {
+  noteChangeTitle,
   notLinedUpText,
   postingLabel,
   postTitle,
@@ -168,4 +169,15 @@ test.each([
 test("a removed line of a file that was not renamed names its own path", () => {
   const entry = { path: "src/board.ts", change: { kind: "deleted" } } as const;
   expect(threadPlaceText(entry, changedThreadLine("left", 0))).toBe("src/board.ts:1");
+});
+
+test.each([
+  ["edit", null, "Change this comment's text"],
+  ["edit", "sending", "Comments cannot be edited while a send to GitLab runs"],
+  ["edit", "aiWorking", "Comments cannot be edited while the AI works in this thread"],
+  ["delete", null, "Delete this comment"],
+  ["delete", "sending", "Comments cannot be deleted while a send to GitLab runs"],
+  ["delete", "aiWorking", "Comments cannot be deleted while the AI works in this thread"],
+] as const)("the %s button's hover text while %s", (change, block, title) => {
+  expect(noteChangeTitle(change, block)).toBe(title);
 });

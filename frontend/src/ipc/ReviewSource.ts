@@ -8,6 +8,8 @@ export interface ReviewSource {
   addNote(thread: ThreadId, text: string): Promise<SourceResult<ThreadList>>;
   queueMessage(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
   unqueueMessage(message: MessageId): Promise<SourceResult<ThreadList>>;
+  editNote(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
+  deleteMessage(message: MessageId): Promise<SourceResult<ThreadList>>;
   setThreadSession(thread: ThreadId, session: AgentSessionId): Promise<SourceResult<ThreadList>>;
   addAiAnswer(thread: ThreadId, session: AgentSessionId): Promise<SourceResult<ThreadList>>;
   checkGitLab(): Promise<SourceResult<GitLabCheck>>;

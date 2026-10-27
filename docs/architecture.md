@@ -561,7 +561,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `checkout_changes`, `discard_checkout`, `diff_texts` (`merge_core::compare` on a worker, #114); a page load stops
   the agent (deferred while the lock is held), the exit ends the workspace. `settings.rs` gains `set_agent`.
   `IpcError` gains `AiOff`, `RemoveFailed`, `UnknownThread`, `UnknownMessage`, `EmptyMessage`, `MessagePending`,
-  `SendRunning`.
+  `NotANote`, `SendRunning`.
 - **Window.** `RangeSource` extends `SettingsSource, ReviewSource` with `openRange(): RangeStart` and
   `loadRangeFile(file)`; `ReviewSource`: `listThreads`, `addThread(file, line, text)`, `addNote(thread, text)`,
   `queueMessage(message, text)`, `unqueueMessage(message)`, `editNote(message, text)`, `deleteMessage(message)`,

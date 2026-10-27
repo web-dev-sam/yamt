@@ -13,7 +13,7 @@ import {
 } from "../ipc";
 import type { Problem } from "./problem";
 import { createRangeStore, MOUNTED_FILES } from "./rangeStore";
-import { createRangeThreads, isQueued, type RangeThreads } from "./rangeThreads";
+import { createRangeThreads, isChangeable, isQueued, type RangeThreads } from "./rangeThreads";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
 
@@ -509,4 +509,139 @@ test("queued and refused postings sit in the queue; not queued and pending do no
   expect(isQueued({ kind: "refused", text: "a", reason: "gone" })).toBe(true);
   expect(isQueued({ kind: "notQueued" })).toBe(false);
   expect(isQueued({ kind: "pending", ...pending })).toBe(false);
+});
+
+test("your notes not yet on GitLab can change; a pending note and an AI answer cannot", async () => {
+  const { threads } = await opened(SEEDED);
+
+  expect(threads.list.value.threads.flatMap(({ messages }) => messages.map(isChangeable))).toEqual([
+    true,
+    true,
+    false,
+    true,
+    false,
+  ]);
+});
+
+test("an edit stores the new text, closes its box and keeps a queued note queued with that text", async () => {
+  const { threads, problems } = await opened(SEEDED);
+  const queued = messageOf(threadAt(threads, 0));
+  const open = messageOf(threadAt(threads, 3));
+  threads.writeEdit(queued.id, "Why is the check gone?");
+
+  expect(await threads.editNote(queued.id, "Why is the check gone?")).toBe(true);
+  expect(await threads.editNote(open.id, "Still used?")).toBe(true);
+
+  expect(messageOf(threadAt(threads, 0))).toMatchObject({
+    body: { kind: "note", text: "Why is the check gone?" },
+    posting: { kind: "queued", text: "Why is the check gone?" },
+  });
+  expect(messageOf(threadAt(threads, 3))).toMatchObject({
+    body: { kind: "note", text: "Still used?" },
+    posting: { kind: "notQueued" },
+  });
+  expect(threads.editDraft(queued.id)).toBeNull();
+  expect(threads.queued.value).toBe(2);
+  expect(problems).toEqual([]);
+});
+
+test("a blank edit makes no call and keeps its box open", async () => {
+  const calls: string[] = [];
+  const { threads } = await opened(SEEDED, (fixture) => ({
+    editNote: async (message, text) => {
+      calls.push(text);
+      return fixture.editNote(message, text);
+    },
+  }));
+  const { id } = messageOf(threadAt(threads, 3));
+  threads.writeEdit(id, " \n");
+
+  expect(await threads.editNote(id, " \n")).toBe(false);
+
+  expect(calls).toEqual([]);
+  expect(threads.editDraft(id)).toBe(" \n");
+});
+
+test("a refused edit or delete is reported, changes nothing and keeps the edit box", async () => {
+  const { threads, problems } = await opened(SEEDED);
+  const before = threads.list.value;
+  const pending = messageOf(threadAt(threads, 2));
+  const answer = threadAt(threads, 3).messages[1];
+  if (answer === undefined) {
+    throw new Error("no answer");
+  }
+  threads.writeEdit(pending.id, "again");
+
+  expect(await threads.editNote(pending.id, "again")).toBe(false);
+  await threads.deleteMessage(answer.id);
+
+  expect(threads.list.value).toBe(before);
+  expect(threads.editDraft(pending.id)).toBe("again");
+  expect(problems).toEqual([
+    { action: "threads", step: "edit", cause: { kind: "MessagePending", message: pending.id } },
+    { action: "threads", step: "delete", cause: { kind: "NotANote", message: answer.id } },
+  ]);
+});
+
+test("a message's Edit and Post boxes are never open at once", async () => {
+  const { threads } = await opened(SEEDED);
+  const { id } = messageOf(threadAt(threads, 3));
+
+  threads.writePost(id, "post");
+  threads.writeEdit(id, "edit");
+  expect([threads.postDraft(id), threads.editDraft(id)]).toEqual([null, "edit"]);
+
+  threads.writePost(id, "post");
+  expect([threads.postDraft(id), threads.editDraft(id)]).toEqual(["post", null]);
+
+  threads.dropPost(id);
+  threads.writeEdit(id, "edit");
+  threads.dropEdit(id);
+  expect([threads.postDraft(id), threads.editDraft(id)]).toEqual([null, null]);
+});
+
+test("deleting a note keeps a thread that still has a message", async () => {
+  const { threads, board } = await opened(SEEDED);
+  const thread = threadAt(threads, 3);
+  const { id } = messageOf(thread);
+  threads.toggle([`thread-${thread.id}`]);
+
+  await threads.deleteMessage(id);
+
+  expect(texts(threadAt(threads, 3))).toEqual(["ai"]);
+  expect(threads.open.value).toEqual(new Set([thread.id]));
+  expect(threads.counts.value.get(board)).toBe(4);
+});
+
+test("deleting a thread's last note removes the thread, its line, its count, its open state and its drafts", async () => {
+  const { threads, board, problems } = await opened(SEEDED);
+  const gone = threadAt(threads, 0);
+  const kept = threadAt(threads, 1);
+  const note = messageOf(gone);
+  const other = messageOf(kept);
+  threads.toggle([`thread-${gone.id}`, `thread-${kept.id}`]);
+  threads.writeNote(gone.id, "reply");
+  threads.writeNote(kept.id, "kept reply");
+  threads.writeEdit(note.id, "half");
+  threads.writePost(other.id, "kept post");
+  threads.startThread(board, changedThreadLine("right", 1));
+
+  await threads.deleteMessage(note.id);
+
+  expect(threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3]);
+  expect(threads.shownFor(board).map(({ key }) => key)).toEqual([
+    "thread-1",
+    "thread-2",
+    "thread-3",
+    "draft-0",
+  ]);
+  expect(threads.counts.value.get(board)).toBe(3);
+  expect(threads.open.value).toEqual(new Set([kept.id]));
+  expect(threads.boxOf(`thread-${gone.id}`)).toBeNull();
+  expect([...threads.drafts.value.keys()].toSorted()).toEqual([
+    "draft-0",
+    `note-${kept.id}`,
+    `post-${other.id}`,
+  ]);
+  expect(problems).toEqual([]);
 });

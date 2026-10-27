@@ -494,3 +494,41 @@ test("with --ai a changed checkout asks first: Keep closes, Discard discards the
   store.dismissQuestion();
   expect([await dismissed.closing, discards]).toEqual([false, ["discard"]]);
 });
+
+test("deleteNote asks first: Cancel and Escape keep the note, Delete removes it and its emptied thread", async () => {
+  quiet();
+  const store = createRangeStore(
+    createFixtureRangeSource(log, "?range=review&threads=seeded"),
+    "dark",
+    null,
+  );
+  await store.startUp();
+  const [first] = store.threads.list.value.threads;
+  const note = first?.messages[0];
+  if (first === undefined || note === undefined) {
+    throw new Error("no seeded note");
+  }
+  const { id } = note;
+  async function asked(): Promise<{ readonly deleting: Promise<void> }> {
+    const deleting = store.deleteNote(id);
+    await vi.waitFor(() => {
+      expect(store.question.value).toEqual({ kind: "deleteNote" });
+    });
+    return { deleting };
+  }
+
+  const cancelled = await asked();
+  store.answer(false);
+  await cancelled.deleting;
+  const dismissed = await asked();
+  store.dismissQuestion();
+  await dismissed.deleting;
+  expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([0, 1, 2, 3]);
+
+  const deleted = await asked();
+  store.answer(true);
+  await deleted.deleting;
+  expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3]);
+  expect(store.threads.counts.value.get(first.file)).toBe(3);
+  expect(store.question.value).toBeNull();
+});

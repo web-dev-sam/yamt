@@ -20,6 +20,8 @@ const commands = vi.hoisted(() => ({
   addNote: vi.fn(),
   queueMessage: vi.fn(),
   unqueueMessage: vi.fn(),
+  editNote: vi.fn(),
+  deleteMessage: vi.fn(),
   setThreadSession: vi.fn(),
   addAiAnswer: vi.fn(),
   checkGitlab: vi.fn(),
@@ -129,6 +131,8 @@ test("each thread command passes its arguments and camelCases the list", async (
     commands.addNote,
     commands.queueMessage,
     commands.unqueueMessage,
+    commands.editNote,
+    commands.deleteMessage,
     commands.setThreadSession,
     commands.addAiAnswer,
   ]) {
@@ -143,6 +147,8 @@ test("each thread command passes its arguments and camelCases the list", async (
     value: CAMEL_LIST,
   });
   expect(await review.unqueueMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
+  expect(await review.editNote(messageId(4), "Better")).toEqual({ ok: true, value: CAMEL_LIST });
+  expect(await review.deleteMessage(messageId(4))).toEqual({ ok: true, value: CAMEL_LIST });
   expect(await review.setThreadSession(threadId(2), session("s2"))).toEqual({
     ok: true,
     value: CAMEL_LIST,
@@ -154,6 +160,8 @@ test("each thread command passes its arguments and camelCases the list", async (
   expect(commands.addNote).toHaveBeenCalledWith(2, "More");
   expect(commands.queueMessage).toHaveBeenCalledWith(4, "Edited");
   expect(commands.unqueueMessage).toHaveBeenCalledWith(4);
+  expect(commands.editNote).toHaveBeenCalledWith(4, "Better");
+  expect(commands.deleteMessage).toHaveBeenCalledWith(4);
   expect(commands.setThreadSession).toHaveBeenCalledWith(2, "s2");
   expect(commands.addAiAnswer).toHaveBeenCalledWith(2, "s3");
 });
@@ -203,6 +211,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
   ["addThread", { kind: "EmptyMessage" }],
   ["addNote", { kind: "UnknownThread", thread: 9 }],
   ["queueMessage", { kind: "MessagePending", message: 4 }],
+  ["editNote", { kind: "NotANote", message: 4 }],
+  ["deleteMessage", { kind: "SendRunning" }],
   ["unqueueMessage", { kind: "UnknownMessage", message: 5 }],
   ["setThreadSession", { kind: "UnknownThread", thread: 6 }],
   ["addAiAnswer", { kind: "WriteFailed", path: "/p/threads.json", message: "full" }],
@@ -213,6 +223,8 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
   const review = createTauriReview();
   const calls = {
     listThreads: () => review.listThreads(),
+    editNote: () => review.editNote(messageId(4), "x"),
+    deleteMessage: () => review.deleteMessage(messageId(4)),
     addThread: () => review.addThread(fileId(0), changedThreadLine("left", 0), "x"),
     addNote: () => review.addNote(threadId(9), "x"),
     queueMessage: () => review.queueMessage(messageId(4), "x"),

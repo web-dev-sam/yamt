@@ -6,16 +6,31 @@ import type { Message, ThreadId } from "../ipc";
 import AiTurn from "./AiTurn.vue";
 import { copyOrSelect } from "./copyOrSelect";
 import { answerText, answerView, postBody, type AnswerView } from "./rangeAiView";
+import { isBlank } from "./rangeDrafts";
+import { boxKeydown } from "./rangeKeys";
 import RangePostEditor from "./RangePostEditor.vue";
 import { useRangeStore } from "./rangeStore";
-import { COPY_LINK_TITLE, postingLabel } from "./rangeThreadText";
+import { isChangeable } from "./rangeThreads";
+import {
+  CANCEL_LABEL,
+  COPY_LINK_TITLE,
+  DELETE_LABEL,
+  EDIT_FIELD_LABEL,
+  EDIT_LABEL,
+  noteChangeTitle,
+  postingLabel,
+  SAVE_LABEL,
+  type NoteChangeBlock,
+} from "./rangeThreadText";
 import { COPIED, COPY } from "./serverText";
 
 const props = defineProps<{ message: Message; thread: ThreadId }>();
 
 const linkText = useTemplateRef<HTMLSpanElement>("linkText");
 const postButton = useTemplateRef<HTMLButtonElement>("postButton");
-const { gitlab, threads, ai } = useRangeStore();
+const editButton = useTemplateRef<HTMLButtonElement>("editButton");
+const editField = useTemplateRef<HTMLTextAreaElement>("editField");
+const { gitlab, threads, ai, deleteNote } = useRangeStore();
 const copied = shallowRef(false);
 
 const threadAi = computed(() => (ai === null ? null : ai.of(props.thread)));
@@ -31,6 +46,20 @@ const unshownText = computed(() =>
 const body = computed(() => postBody(props.message.body, threadAi.value));
 const editing = computed(
   () => body.value.kind === "text" && threads.postDraft(props.message.id) !== null,
+);
+const editText = computed(() => threads.editDraft(props.message.id));
+const changeable = computed(() => isChangeable(props.message));
+const block = computed((): NoteChangeBlock | null => {
+  if (gitlab.sending.value !== null) {
+    return "sending";
+  }
+  const running = threadAi.value === null ? null : threadAi.value.running;
+  return running === null ? null : "aiWorking";
+});
+const editTitle = computed(() => noteChangeTitle("edit", block.value));
+const deleteTitle = computed(() => noteChangeTitle("delete", block.value));
+const saveOff = computed(
+  () => block.value !== null || editText.value === null || isBlank(editText.value),
 );
 const post = computed(() => gitlab.postButton(props.message, body.value));
 const label = computed(() => postingLabel(props.message.posting));
@@ -63,21 +92,63 @@ function retry(): void {
   ai?.retry(props.thread);
 }
 
-async function focusPost(): Promise<void> {
+async function focusLater(target: () => HTMLElement | null): Promise<void> {
   await nextTick();
-  postButton.value?.focus({ preventScroll: true });
+  target()?.focus({ preventScroll: true });
 }
 
 async function queue(text: string): Promise<void> {
   await threads.queue(props.message.id, text);
   if (!editing.value) {
-    await focusPost();
+    await focusLater(() => postButton.value);
   }
 }
 
 function cancel(): void {
   threads.dropPost(props.message.id);
-  void focusPost();
+  void focusLater(() => postButton.value);
+}
+
+async function startEdit(): Promise<void> {
+  const { body: shown } = props.message;
+  if (shown.kind !== "note") {
+    return;
+  }
+  threads.writeEdit(props.message.id, shown.text);
+  await focusLater(() => editField.value);
+}
+
+function typedEdit(event: Event): void {
+  if (event.target instanceof HTMLTextAreaElement) {
+    threads.writeEdit(props.message.id, event.target.value);
+  }
+}
+
+async function saveEdit(): Promise<void> {
+  if (saveOff.value || editText.value === null) {
+    return;
+  }
+  if (await threads.editNote(props.message.id, editText.value)) {
+    await focusLater(() => editButton.value);
+  }
+}
+
+function cancelEdit(): void {
+  threads.dropEdit(props.message.id);
+  void focusLater(() => editButton.value);
+}
+
+function editKeydown(event: KeyboardEvent): void {
+  boxKeydown(event, navigator.platform, {
+    submit: () => {
+      void saveEdit();
+    },
+    cancel: cancelEdit,
+  });
+}
+
+function pressDelete(): void {
+  void deleteNote(props.message.id);
 }
 
 async function copy(text: string): Promise<void> {
@@ -88,6 +159,37 @@ async function copy(text: string): Promise<void> {
 <template>
   <li class="flex flex-col gap-1 py-2">
     <RangePostEditor v-if="editing" :message="message.id" @queue="queue" @cancel="cancel" />
+    <div v-else-if="editText !== null" class="flex flex-col gap-2">
+      <textarea
+        ref="editField"
+        :value="editText"
+        :aria-label="EDIT_FIELD_LABEL"
+        rows="3"
+        class="w-full resize-y rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
+        @input="typedEdit"
+        @keydown="editKeydown"
+      />
+      <div class="flex gap-2">
+        <span :title="block === null ? undefined : editTitle">
+          <button
+            type="button"
+            :disabled="saveOff"
+            class="rounded border border-primary bg-primary px-3 py-0.5 text-on-primary hover:brightness-110 disabled:pointer-events-none disabled:border-control-border disabled:bg-transparent disabled:text-fg-muted"
+            @mousedown.prevent
+            @click="saveEdit"
+          >
+            {{ SAVE_LABEL }}
+          </button>
+        </span>
+        <button
+          type="button"
+          class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
+          @click="cancelEdit"
+        >
+          {{ CANCEL_LABEL }}
+        </button>
+      </div>
+    </div>
     <p v-else-if="message.body.kind === 'note'" class="wrap-break-word whitespace-pre-wrap">
       {{ message.body.text }}
     </p>
@@ -100,17 +202,42 @@ async function copy(text: string): Promise<void> {
     />
     <p v-else class="text-fg-muted italic">{{ unshownText }}</p>
     <div class="flex min-w-0 items-center gap-2 text-fg-muted">
-      <span v-if="!editing" :title="post.title" class="shrink-0">
-        <button
-          ref="postButton"
-          type="button"
-          :disabled="post.action === null"
-          class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
-          @click="pressPost"
-        >
-          {{ post.label }}
-        </button>
-      </span>
+      <template v-if="!editing && editText === null">
+        <span :title="post.title" class="shrink-0">
+          <button
+            ref="postButton"
+            type="button"
+            :disabled="post.action === null"
+            class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+            @click="pressPost"
+          >
+            {{ post.label }}
+          </button>
+        </span>
+        <template v-if="changeable">
+          <span :title="editTitle" class="shrink-0">
+            <button
+              ref="editButton"
+              type="button"
+              :disabled="block !== null"
+              class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+              @click="startEdit"
+            >
+              {{ EDIT_LABEL }}
+            </button>
+          </span>
+          <span :title="deleteTitle" class="shrink-0">
+            <button
+              type="button"
+              :disabled="block !== null"
+              class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+              @click="pressDelete"
+            >
+              {{ DELETE_LABEL }}
+            </button>
+          </span>
+        </template>
+      </template>
       <span
         v-if="label !== null"
         class="min-w-0 wrap-break-word"

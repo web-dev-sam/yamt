@@ -2,6 +2,7 @@ import { computed, shallowRef, type ComputedRef, type ShallowRef } from "vue";
 
 import type {
   AgentSessionId,
+  Message,
   MessageId,
   Posting,
   RangeFileId,
@@ -43,11 +44,17 @@ export type RangeThreads = {
   postDraft(message: MessageId): string | null;
   writePost(message: MessageId, text: string): void;
   dropPost(message: MessageId): void;
+  editDraft(message: MessageId): string | null;
+  writeEdit(message: MessageId, text: string): void;
+  dropEdit(message: MessageId): void;
   toggle(keys: readonly string[]): void;
   addThread(draftKey: string, text: string): Promise<void>;
   addNote(thread: ThreadId, text: string): Promise<void>;
   queue(message: MessageId, text: string): Promise<void>;
   unqueue(message: MessageId): Promise<void>;
+  /** Whether the edit was stored; a blank text is not sent. */
+  editNote(message: MessageId, text: string): Promise<boolean>;
+  deleteMessage(message: MessageId): Promise<void>;
   replace(list: ThreadList): void;
   setSession(thread: ThreadId, session: AgentSessionId): Promise<boolean>;
   /** The turn the store numbered the appended answer (plan row 121); null when the write failed. */
@@ -77,6 +84,20 @@ export function isQueued(posting: Posting): boolean {
       return _exhaustive;
     }
   }
+}
+
+/** Edit and Delete (plan row 123): your own note, until it is on GitLab. */
+export function isChangeable({ body, posting }: Message): boolean {
+  return body.kind === "note" && posting.kind !== "pending";
+}
+
+function setList(state: State, list: ThreadList): void {
+  const open = [...state.open.value].filter((id) => list.threads.some((each) => each.id === id));
+  state.list.value = list;
+  if (open.length < state.open.value.size) {
+    state.open.value = new Set(open);
+  }
+  state.drafts.keepStored(list);
 }
 
 function keyOf(state: State, thread: ThreadId): string {
@@ -135,7 +156,7 @@ async function changed(
     state.report({ action: "threads", step, cause: outcome.cause });
     return null;
   }
-  state.list.value = outcome.value;
+  setList(state, outcome.value);
   return outcome.value;
 }
 
@@ -156,7 +177,7 @@ async function addThread(state: State, key: string, text: string): Promise<void>
   state.keys.set(thread, key);
   state.open.value = new Set([...state.open.value, thread]);
   state.drafts.dropDraft(key);
-  state.list.value = list;
+  setList(state, list);
 }
 
 async function addNote(state: State, thread: ThreadId, text: string): Promise<void> {
@@ -203,7 +224,26 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
       await changed(state, "unqueue", () => source.unqueueMessage(message));
     },
     replace: (list) => {
-      state.list.value = list;
+      setList(state, list);
+    },
+  };
+}
+
+function noteChanges(state: State): Pick<RangeThreads, "editNote" | "deleteMessage"> {
+  const { source } = state;
+  return {
+    editNote: async (message, text) => {
+      if (isBlank(text)) {
+        return false;
+      }
+      const edited = await changed(state, "edit", () => source.editNote(message, text));
+      if (edited !== null) {
+        state.drafts.dropEdit(message);
+      }
+      return edited !== null;
+    },
+    deleteMessage: async (message) => {
+      await changed(state, "delete", () => source.deleteMessage(message));
     },
   };
 }
@@ -238,13 +278,14 @@ export function createRangeThreads(
     keys: new Map(),
     adding: new Set(),
   };
-  const { threadDraft: _threadDraft, ...drafts } = state.drafts;
+  const { threadDraft: _threadDraft, keepStored: _keepStored, ...drafts } = state.drafts;
   return {
     list: state.list,
     open: state.open,
     ...drafts,
     ...counted(state),
     ...replies(state),
+    ...noteChanges(state),
     ...aiRecords(state),
     shownFor: (file) => shownFor(state, file),
     boxOf: (key) => boxOf(state, key),

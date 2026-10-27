@@ -135,6 +135,51 @@ function waitingText(posting: Generated.Posting): string | null {
   return posting.kind === "queued" || posting.kind === "refused" ? posting.text : null;
 }
 
+function unsentNote(store: Store, message: number): SourceResult<Generated.Message> {
+  const found = messagesOf(store).find((each) => each.id === message);
+  if (store.sending) {
+    return { ok: false, failure: { kind: "SendRunning" } };
+  }
+  if (found === undefined) {
+    return { ok: false, failure: { kind: "UnknownMessage", message } };
+  }
+  if (found.body.kind === "aiAnswer") {
+    return { ok: false, failure: { kind: "NotANote", message } };
+  }
+  if (found.posting.kind === "pending") {
+    return { ok: false, failure: { kind: "MessagePending", message } };
+  }
+  return { ok: true, value: found };
+}
+
+function editNote(store: Store, message: number, text: string): SourceResult<ThreadList> {
+  const found = unsentNote(store, message);
+  if (!found.ok) {
+    return found;
+  }
+  if (isBlank(text)) {
+    return { ok: false, failure: { kind: "EmptyMessage" } };
+  }
+  found.value.body = { kind: "note", text };
+  if (waitingText(found.value.posting) !== null) {
+    found.value.posting = { kind: "queued", text };
+  }
+  return { ok: true, value: toThreadList(listed(store)) };
+}
+
+function deleteMessage(store: Store, message: number): SourceResult<ThreadList> {
+  const found = unsentNote(store, message);
+  if (!found.ok) {
+    return found;
+  }
+  for (const thread of store.threads) {
+    thread.messages = thread.messages.filter((each) => each.id !== message);
+  }
+  const kept = store.threads.filter((thread) => thread.messages.length > 0);
+  store.threads.splice(0, store.threads.length, ...kept);
+  return { ok: true, value: toThreadList(listed(store)) };
+}
+
 function record(
   store: Store,
   message: Generated.Message,
@@ -235,6 +280,12 @@ export function createFixtureReview(log: Log, search: string, start: RangeStart)
     },
     async unqueueMessage(message) {
       return changePosting(store, message, { kind: "notQueued" });
+    },
+    async editNote(message, text) {
+      return editNote(store, message, text);
+    },
+    async deleteMessage(message) {
+      return deleteMessage(store, message);
     },
     async checkGitLab() {
       if (store.script === "checking") {

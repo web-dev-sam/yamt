@@ -26,6 +26,8 @@ export type ThreadStep =
   | "note"
   | "queue"
   | "unqueue"
+  | "edit"
+  | "delete"
   | "check"
   | "send"
   | "session"

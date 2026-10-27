@@ -19,6 +19,7 @@ type FixedKind =
   | "UnknownThread"
   | "UnknownMessage"
   | "EmptyMessage"
+  | "NotANote"
   | "MessagePending"
   | "SendRunning"
   | "AiOff";
@@ -44,6 +45,7 @@ const FIXED_REASONS: Readonly<Record<FixedKind, string>> = {
   UnknownMessage: "that message is not on a file of this range.",
   EmptyMessage: "the message is empty.",
   MessagePending: "that message is already pending on GitLab.",
+  NotANote: "that message is an AI answer; only your own comments can be changed.",
   SendRunning: "a send to GitLab is still running; try again when it is done.",
   AiOff: "the AI is off; start yamt with --ai to use it.",
 };
@@ -54,6 +56,8 @@ const THREAD_STEP_WORDS: Readonly<Record<ThreadStep, string>> = {
   note: "Could not add the note",
   queue: "Could not queue the message",
   unqueue: "Could not unqueue the message",
+  edit: "Could not edit the comment",
+  delete: "Could not delete the comment",
   check: "Could not check GitLab",
   send: "Could not send to GitLab",
   session: "Could not store the AI's conversation",

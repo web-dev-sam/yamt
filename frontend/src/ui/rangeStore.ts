@@ -4,6 +4,7 @@ import type { AgentClient } from "../agent";
 import type {
   AgentSettings,
   AgentSource,
+  MessageId,
   RangeEntry,
   RangeFile,
   RangeFileId,
@@ -55,6 +56,8 @@ export type RangeStore = SettingsStore & {
   answer(yes: boolean): void;
   dismissQuestion(): void;
   mayClose(): Promise<boolean>;
+  /** Asks "Delete this comment?" first (plan row 123). */
+  deleteNote(message: MessageId): Promise<void>;
 };
 
 type Refs = {
@@ -125,6 +128,12 @@ function storeAi(state: State): RangeStoreAi | null {
   return { ...ai, client: agent.client };
 }
 
+async function deleteNote(state: State, message: MessageId): Promise<void> {
+  if ((await state.asking.ask({ kind: "deleteNote" })) === "yes") {
+    await state.threads.deleteMessage(message);
+  }
+}
+
 function mayClose(state: State): Promise<boolean> {
   const { agent } = state;
   return agent === null
@@ -175,6 +184,7 @@ export function createRangeStore(
     },
     loadFile: (entry) => loadFile(state, entry),
     mayClose: () => mayClose(state),
+    deleteNote: (message) => deleteNote(state, message),
     ...chromeActions(state),
   };
   store = created;

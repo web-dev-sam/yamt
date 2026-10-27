@@ -35,6 +35,32 @@ export const REPLY_PROMPT = "Reply…";
 export const QUEUE_LABEL = "Queue";
 export const POST_FIELD_LABEL = "Text to post";
 export const COPY_LINK_TITLE = "Copy the link to the merge request's changes";
+export const EDIT_LABEL = "Edit";
+export const EDIT_FIELD_LABEL = "Comment text";
+export const SAVE_LABEL = "Save";
+export const DELETE_LABEL = "Delete";
+
+/** Why Edit and Delete are off (plan row 123). */
+export type NoteChangeBlock = "sending" | "aiWorking";
+
+const NOTE_CHANGE_TITLES: Readonly<
+  Record<"edit" | "delete", Readonly<Record<NoteChangeBlock | "on", string>>>
+> = {
+  edit: {
+    on: "Change this comment's text",
+    sending: "Comments cannot be edited while a send to GitLab runs",
+    aiWorking: "Comments cannot be edited while the AI works in this thread",
+  },
+  delete: {
+    on: "Delete this comment",
+    sending: "Comments cannot be deleted while a send to GitLab runs",
+    aiWorking: "Comments cannot be deleted while the AI works in this thread",
+  },
+};
+
+export function noteChangeTitle(change: "edit" | "delete", block: NoteChangeBlock | null): string {
+  return NOTE_CHANGE_TITLES[change][block ?? "on"];
+}
 
 const SEND_RESULT_CLOSE = "Close the notice about the send to GitLab";
 

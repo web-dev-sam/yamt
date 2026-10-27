@@ -208,6 +208,10 @@ test.each<[ProblemCause, string]>([
   [{ kind: "UnknownMessage", message: 9 }, "that message is not on a file of this range."],
   [{ kind: "EmptyMessage" }, "the message is empty."],
   [{ kind: "MessagePending", message: 9 }, "that message is already pending on GitLab."],
+  [
+    { kind: "NotANote", message: 9 },
+    "that message is an AI answer; only your own comments can be changed.",
+  ],
   [{ kind: "SendRunning" }, "a send to GitLab is still running; try again when it is done."],
   [{ kind: "AiOff" }, "the AI is off; start yamt with --ai to use it."],
 ])("the review failure %o has its fixed reason", (cause, reason) => {
@@ -246,6 +250,8 @@ test.each([
   ["note", "Could not add the note: boom"],
   ["queue", "Could not queue the message: boom"],
   ["unqueue", "Could not unqueue the message: boom"],
+  ["edit", "Could not edit the comment: boom"],
+  ["delete", "Could not delete the comment: boom"],
   ["check", "Could not check GitLab: boom"],
   ["send", "Could not send to GitLab: boom"],
   ["session", "Could not store the AI's conversation: boom"],

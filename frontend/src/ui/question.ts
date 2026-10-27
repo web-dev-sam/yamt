@@ -30,7 +30,8 @@ export type Question =
       readonly headMoved: boolean;
       readonly refs: { readonly branches: readonly string[]; readonly stash: boolean };
     }
-  | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string };
+  | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string }
+  | { readonly kind: "deleteNote" };
 
 type QuestionList =
   | { readonly kind: "none" }
@@ -85,6 +86,7 @@ export function endsWithStop(question: Question): boolean {
     case "closeTab":
     case "keepAiChanges":
     case "keepUnreadableCheckout":
+    case "deleteNote":
       return false;
     default: {
       const _exhaustive: never = question;
@@ -140,6 +142,15 @@ const REWORDS_TEXT: QuestionText = {
   list: { kind: "none" },
   note: null,
   confirm: "Continue rebase",
+  cancel: "Cancel",
+};
+
+const DELETE_NOTE_TEXT: QuestionText = {
+  title: "Delete Comment",
+  message: "Delete this comment?",
+  list: { kind: "none" },
+  note: null,
+  confirm: "Delete",
   cancel: "Cancel",
 };
 
@@ -240,6 +251,8 @@ export function questionText(question: Question, platform: string): QuestionText
       return keepAiChangesText(question);
     case "keepUnreadableCheckout":
       return keepUnreadableText(question.folder, question.message);
+    case "deleteNote":
+      return DELETE_NOTE_TEXT;
     default: {
       const _exhaustive: never = question;
       return _exhaustive;

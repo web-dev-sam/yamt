@@ -24,6 +24,12 @@ export function createTauriReview(): ReviewSource {
     async unqueueMessage(message) {
       return converted(toResult(await commands.unqueueMessage(message)), toThreadList);
     },
+    async editNote(message, text) {
+      return converted(toResult(await commands.editNote(message, text)), toThreadList);
+    },
+    async deleteMessage(message) {
+      return converted(toResult(await commands.deleteMessage(message)), toThreadList);
+    },
     async setThreadSession(thread, session) {
       return converted(toResult(await commands.setThreadSession(thread, session)), toThreadList);
     },

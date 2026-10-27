@@ -245,6 +245,20 @@ test("closing a tab that holds text asks with its name, Yes or No, and never end
   expect(endsWithStop(question)).toBe(false);
 });
 
+test("deleting a note asks GitLab's question, Delete or Cancel, and never ends with a stop", () => {
+  const question = { kind: "deleteNote" } as const;
+
+  expect(questionText(question, LINUX)).toEqual({
+    title: "Delete Comment",
+    message: "Delete this comment?",
+    list: { kind: "none" },
+    note: null,
+    confirm: "Delete",
+    cancel: "Cancel",
+  });
+  expect(endsWithStop(question)).toBe(false);
+});
+
 const CHECKOUT = "/home/me/.local/share/yamt/range/repo/pair/checkout";
 const NO_REFS = { branches: [], stash: false } as const;
 

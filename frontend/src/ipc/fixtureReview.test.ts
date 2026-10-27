@@ -326,6 +326,110 @@ test("queue and unqueue refuse a pending, an unknown or a blank message and chan
   expect(await threadsOf(source)).toEqual(before);
 });
 
+test("editNote replaces a note's text and leaves a note that waits for nothing unqueued", async () => {
+  const source = review("?threads=seeded");
+
+  const list = valueOf(await source.editNote(messageId(3), "Still used?"));
+
+  expect(list.threads[3]?.messages[0]).toMatchObject({
+    id: 3,
+    body: { kind: "note", text: "Still used?" },
+    posting: NOT_QUEUED,
+  });
+  expect(await threadsOf(source)).toEqual(list.threads);
+});
+
+test("editNote keeps a queued or refused note waiting with the new text, the refusal's reason dropped", async () => {
+  const source = review("?threads=seeded");
+
+  await source.editNote(messageId(0), "Why is the check gone?");
+  const list = valueOf(await source.editNote(messageId(1), "Please add a test."));
+
+  expect(list.threads.slice(0, 2).map((thread) => thread.messages[0])).toMatchObject([
+    {
+      body: { kind: "note", text: "Why is the check gone?" },
+      posting: { kind: "queued", text: "Why is the check gone?" },
+    },
+    {
+      body: { kind: "note", text: "Please add a test." },
+      posting: { kind: "queued", text: "Please add a test." },
+    },
+  ]);
+});
+
+test("an edited queued note is sent with its new text", async () => {
+  const source = review("?threads=seeded");
+  await source.editNote(messageId(0), "Edited before sending");
+
+  await settled(source.sendQueue(() => undefined));
+
+  expect(postings(await threadsOf(source))[0]).toMatchObject({
+    kind: "pending",
+    text: "Edited before sending",
+  });
+});
+
+test.each<[string, number, string, unknown]>([
+  ["an AI answer", 4, "", { kind: "NotANote", message: 4 }],
+  ["a pending note", 2, "", { kind: "MessagePending", message: 2 }],
+  ["an unknown message", 40, "", { kind: "UnknownMessage", message: 40 }],
+  ["a blank text", 3, " \n", { kind: "EmptyMessage" }],
+])("editNote refuses %s in Rust's order and changes nothing", async (_, message, text, failure) => {
+  const source = review("?threads=seeded");
+  const before = await threadsOf(source);
+
+  expect(await source.editNote(messageId(message), text)).toEqual({ ok: false, failure });
+  expect(await threadsOf(source)).toEqual(before);
+});
+
+test("deleteMessage removes a note and keeps its thread while a message is left", async () => {
+  const source = review("?threads=seeded");
+
+  const list = valueOf(await source.deleteMessage(messageId(3)));
+
+  expect(list.threads.map((thread) => thread.id)).toEqual([0, 1, 2, 3]);
+  expect(list.threads[3]?.messages.map((message) => message.id)).toEqual([4]);
+  expect(await threadsOf(source)).toEqual(list.threads);
+});
+
+test("deleting a thread's only note removes the thread, and ids are not reused", async () => {
+  const source = review("?threads=seeded");
+
+  const list = valueOf(await source.deleteMessage(messageId(0)));
+  const added = valueOf(await source.addThread(fileId(7), changedThreadLine("right", 1), "New"));
+
+  expect(list.threads.map((thread) => thread.id)).toEqual([1, 2, 3]);
+  expect(added.thread).toBe(4);
+  expect(added.list.threads.at(-1)?.messages[0]?.id).toBe(5);
+});
+
+test.each<[string, number, unknown]>([
+  ["an AI answer", 4, { kind: "NotANote", message: 4 }],
+  ["a pending note", 2, { kind: "MessagePending", message: 2 }],
+  ["an unknown message", 40, { kind: "UnknownMessage", message: 40 }],
+])("deleteMessage refuses %s and changes nothing", async (_, message, failure) => {
+  const source = review("?threads=seeded");
+  const before = await threadsOf(source);
+
+  expect(await source.deleteMessage(messageId(message))).toEqual({ ok: false, failure });
+  expect(await threadsOf(source)).toEqual(before);
+});
+
+test("editNote and deleteMessage answer SendRunning while a send runs, before any other check", async () => {
+  const source = review("?threads=seeded");
+  const sending = source.sendQueue(() => undefined);
+  const before = await threadsOf(source);
+  const running = { ok: false, failure: { kind: "SendRunning" } };
+
+  expect(await source.editNote(messageId(3), "x")).toEqual(running);
+  expect(await source.editNote(messageId(40), "")).toEqual(running);
+  expect(await source.deleteMessage(messageId(3))).toEqual(running);
+  expect(await source.deleteMessage(messageId(4))).toEqual(running);
+  expect(await threadsOf(source)).toEqual(before);
+  await settled(sending);
+  expect(valueOf(await source.deleteMessage(messageId(3))).threads[3]?.messages).toHaveLength(1);
+});
+
 test.each<[string, unknown]>([
   ["", { kind: "linedUp", mergeRequest: MERGE_REQUEST }],
   ["?gitlab=linedUp", { kind: "linedUp", mergeRequest: MERGE_REQUEST }],
