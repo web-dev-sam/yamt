@@ -1,0 +1,432 @@
+mutants: no Rust changes since d7e6f5b
+[32m20:20:22 (512463) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m20:20:22 (512463) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m20:20:22 (512463) INFO ProjectReader[39m Found 3 of 744 file(s) to be mutated.
+[32m20:20:23 (512463) INFO Instrumenter[39m Instrumented 3 source file(s) with 264 mutant(s)
+[32m20:20:23 (512463) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m20:20:24 (512463) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m20:20:28 (512463) INFO DryRunExecutor[39m Initial test run succeeded. Ran 212 tests in 4 seconds (net 1613.2855960000047 ms, overhead 2668.7144039999953 ms).
+
+All tests
+  collapsing.test.ts
+    ~ a missing key collapses and writes nothing until a toggle (covered 7)
+    ~ a stored "false" does not collapse (covered 11)
+    ~ a stored value that is true collapses (covered 11)
+    ~ a stored value that is empty collapses (covered 11)
+    ~ a stored value that is another word collapses (covered 11)
+    ~ a stored value that is JSON collapses (covered 11)
+    ~ a stored value that is upper case collapses (covered 11)
+    ~ toggling writes "false", then "true", and a second start reads the choice (covered 13)
+    ✓ a storage that throws collapses, still toggles in memory and logs warnings (killed 1)
+  rangeStore.test.ts
+    ✓ the window's components get no store before the root creates one (killed 5)
+    ✓ the first file is shown at start and is the one file mounted (catches an empty main area at start) (killed 36)
+    ✓ an empty range shows no file and mounts none (killed 2)
+    ✓ before openRange answers: the files screen, the start theme's preferences, no file to show (killed 11)
+    ✓ a failed openRange reports the range and shows nothing (killed 4)
+    ✓ at start the list shows first, then the threads load and GitLab is checked once (killed 1)
+    ~ a failed openRange loads no threads and checks nothing (covered 41)
+    ✓ a failed thread list is the window's problem (killed 2)
+    ✓ showFile from the settings screen shows the file and returns the screen to files (killed 14)
+    ✓ closeSettings returns to the files; a path not in the range changes nothing (killed 3)
+    ✓ showing a visited file again keeps the mounted order (catches a moved view losing its scroll) (killed 4)
+    ✓ the 17th file drops the least recently shown and keeps the others' order (killed 14)
+    ~ a draft outlives its file's view: 16 other files evict file 0 and the draft is still there (covered 83)
+    ✓ a failed load reports open with its path and leaves visited; a later success clears the problem (killed 12)
+    ✓ a failed file leaves the eviction order too: the next eviction drops the least recent mounted file (killed 5)
+    ✓ dismissProblem clears the shown problem (killed 1)
+    ✓ the bound key toggles the file list, never while a question waits (killed 3)
+    ~ answer settles the waiting question (covered 60)
+    ✓ without --ai the store has no AI and the window closes without asking (killed 6)
+    ✓ First message's values: the thread's place, the range as typed, both short ids (killed 15)
+    ✓ with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays (killed 2)
+    ✓ deleteNote asks first: Cancel and Escape keep the note, Delete removes it and its emptied thread (killed 9)
+    ~ the collapse choice missing in the window's storage starts the range store as the merge window reads it (covered 32)
+    ✓ the collapse choice "true" in the window's storage starts the range store as the merge window reads it (killed 1)
+    ~ the collapse choice garbage in the window's storage starts the range store as the merge window reads it (covered 36)
+    ~ the collapse choice "false" in the window's storage starts the range store as the merge window reads it (covered 36)
+    ~ toggling in the range store writes the merge window's stored choice (catches a second key) (covered 38)
+    ✓ the range toggle's words are the merge toolbar's collapse entry (killed 11)
+  rangeThreads.test.ts
+    ✘ a draft's Comment adds the thread and its key becomes the stored id with the text kept (covered 0)
+    ✘ a refused Comment keeps the draft with its text and reports the add (covered 0)
+    ✘ a second Comment while the first is in flight sends nothing more (covered 0)
+    ✘ after a refused Comment the next Comment on that draft is sent and stored once (covered 0)
+    ✘ a Comment on a key with no draft makes no call and reports nothing (covered 0)
+    ✘ a refused Comment whose draft was dropped while it ran brings no draft back (covered 0)
+    ✘ a second press on a line with an open draft focuses it, with no second draft (covered 0)
+    ✘ a dropped draft leaves the line; writing a missing draft creates nothing (covered 0)
+    ✘ stored threads come back collapsed; open and collapse per thread and per line (covered 0)
+    ✘ counts per file ignore drafts (covered 0)
+    ✘ blank text is never sent (covered 0)
+    ✘ a note is added to its thread and its draft text cleared; a refused note keeps it (covered 0)
+    ✘ each thread keeps its own reply text (covered 0)
+    ✘ a press on the same line number in the other column opens a second draft (covered 0)
+    ✘ writing a blank note drops its draft (covered 0)
+    ✘ queue and unqueue change the posting and the queued count; a pending one reports (covered 0)
+    ✘ a half-edited Post text outlives a collapse and a reopen of its thread (covered 0)
+    ✘ an emptied Post text keeps its editor open; Cancel drops it (covered 0)
+    ✘ a queued Post closes its editor; a refused or blank Queue keeps the text (covered 0)
+    ✓ a Post text outlives its file's view: 16 other files evict file 0 and the text is still there (killed 4)
+    ✘ a failed list reports it and keeps the empty list (covered 0)
+    ✘ a Cancel while Comment is in flight still adds and opens the thread (covered 0)
+    ✘ replace mirrors a send's list and drops the Post box of a message it no longer holds (covered 0)
+    ✘ queued and refused postings sit in the queue; not queued and pending do not (covered 0)
+    ✘ your notes not yet on GitLab can change; a pending note and an AI answer cannot (covered 0)
+    ✘ an edit stores the new text, closes its box and keeps a queued note queued with that text (covered 0)
+    ✘ a blank edit makes no call and keeps its box open (covered 0)
+    ✘ a refused edit or delete is reported, changes nothing and keeps the edit box (covered 0)
+    ✘ a message's Edit and Post boxes are never open at once (covered 0)
+    ✘ each message keeps its own Edit text; a Post on one leaves the other's Edit alone (covered 0)
+    ✘ an Edit box on a note a send made pending closes; one on a note still unsent stays (covered 0)
+    ✘ deleting a note keeps a thread that still has a message (covered 0)
+    ✘ deleting a thread's last note removes the thread, its line, its count, its open state and its drafts (covered 0)
+    ✘ addingThread holds a draft's add only while it runs (refused: false) (covered 0)
+    ✘ addingThread holds a draft's add only while it runs (refused: true) (covered 0)
+    ✘ addingNote holds a thread's note add only while it runs (refused: false) (covered 0)
+    ✘ addingNote holds a thread's note add only while it runs (refused: true) (covered 0)
+    ✘ a second Comment while a note's add runs still sends; the thread is adding until both land (covered 0)
+  store.test.ts
+    ✓ useAppStore throws before createAppStore, then returns the created store (killed 1)
+    ~ loading the list opens the first file the editor can show and logs file.loaded (covered 13)
+    ~ an empty list opens nothing (covered 13)
+    ~ a rejected list opens nothing, resolves, and shows an Unexpected list problem (covered 13)
+    ~ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (covered 13)
+    ~ re-clicking the shown file keeps the problem and lets a pending load win (covered 13)
+    ~ switching to an opened file wins over a load that resolves later and clears the problem (covered 13)
+    ~ a later open wins when the earlier load resolves last (covered 13)
+    ~ a stale failed open is logged but shows no problem (covered 13)
+    ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 13)
+    ~ a rejected load is an Unexpected problem and keeps the previous file (covered 13)
+    ~ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (covered 13)
+    ~ a finish of a file no longer shown does not switch files (covered 13)
+    ~ settings open and close; picking a file while they show closes them and shows it, the shown file too (covered 13)
+    ~ screen: a server's log opens from the files or from settings, and Back returns to the files (covered 13)
+    ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 13)
+    ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 13)
+    ~ a file the user opens while a finish runs wins over the next file, though still loading (covered 13)
+    ~ a file the user opens while a take runs wins over the next file, though still loading (covered 13)
+    ~ a finish with work left asks; Back writes nothing and stays, Save writes the text (covered 13)
+    ~ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (covered 13)
+    ~ a rejected finish is an Unexpected problem (covered 13)
+    ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 13)
+    ~ closing asks only with unsaved work and answers with the choice (covered 13)
+    ~ everything is resolved only when every listed file is (covered 13)
+    ~ reset of A replaces only A in place with a new object and keeps B opened (covered 13)
+    ~ a failed reset keeps the current file and names the path (covered 13)
+    ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 13)
+    ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 13)
+    ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 13)
+    ~ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (covered 13)
+    ~ a list of files the editor cannot show opens the first one's choice and loads nothing (covered 13)
+    ~ opening a file the editor cannot show describes it once and never loads it (covered 13)
+    ~ a failed describe is a failed open of that file and shows no choice (covered 13)
+    ~ taking a side updates the list, marks only that file taken, and clears a problem about it (covered 13)
+    ~ a take keeps a problem about another file (covered 13)
+    ~ a failed take keeps the list and the choice and names the file (covered 13)
+    ~ reset of a taken choice forgets only its side at once and describes the file again (covered 13)
+    ~ a failed describe after a reset is a failed open; opening the file again describes it (covered 13)
+    ~ choices count toward everything resolved (covered 13)
+    ~ a take on the shown file opens the next unresolved file, wrapping to the top (covered 13)
+    ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 13)
+    ~ a list refresh changes the marks only: same file shown, same views, another file's problem kept (covered 13)
+    ~ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 13)
+    ~ a running change to an opened file rebuilds it and drops its side taken (edits: true) (covered 13)
+    ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 13)
+    ~ a change to a file that is not shown gives only its notice and its mark (covered 13)
+    ~ changes reported by the first list are start notices; the file then opens from the disk (covered 13)
+    ~ a newer change replaces the notice for its path; dismissNotice removes just one (covered 13)
+    ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 13)
+    ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 13)
+    ~ a change git could not stage is a warning notice, not a problem (covered 13)
+    ~ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (covered 13)
+    ~ a take refused because the file changed on disk shows the change and the disk view (covered 13)
+    ~ a reset refused because the file changed on disk shows the change and the disk view (covered 13)
+    ~ finish, take and reset forward the disk version they are given (covered 13)
+    ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 13)
+    ~ settings start with the start theme and the default keys, before any file is read (covered 13)
+    ~ a load on focus applies a file changed by hand since the last load (covered 13)
+    ~ start-up loads the file list and the settings; focus loads both again (covered 13)
+    ~ a loaded file sets the theme and keys every opened file follows (covered 13)
+    ~ a failed load or change keeps the settings in use and shows a settings problem (covered 13)
+    ~ key problems in the file show one settings problem, which a clean read clears (covered 13)
+    ~ setTheme sends the settings in use and applies the reply (covered 13)
+    ~ setAntialiasing sends the settings in use with the new value and applies the reply (covered 13)
+    ~ a load whose only difference is the antialiasing is adopted (covered 13)
+    ~ a key another action holds asks; Move writes both changes in one call (covered 13)
+    ~ Cancel on the clash question writes nothing (covered 13)
+    ~ each key edit sends only the changed actions, as key texts (covered 13)
+    ~ an identical load keeps the settings object and does not show the same key problems again (covered 13)
+    ~ a key problem shown again replaces a settings failure the file no longer has (covered 13)
+    ~ a move to a file with the same broken keys names the new path in the Keys problem (covered 13)
+    ~ a load that started before a change and answers after it does not put the old file back (covered 13)
+    ~ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 13)
+    ~ moveSettings sends the path with the settings in use and uses the file found there (covered 13)
+    ~ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (covered 13)
+    ~ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (covered 13)
+    ~ a key press another handler already took does not toggle the list (covered 13)
+    ~ while a question waits the key does nothing; once answered it toggles again (covered 13)
+    ~ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 13)
+    ~ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 13)
+    ~ with two toggle-file-list keys, each one toggles the list (covered 13)
+    ✓ toggleCollapsing flips collapsing and keeps the choice in the window's storage (killed 11)
+    ~ a save while a reset of the same file runs is ignored (covered 13)
+    ~ a save while a finish of the same file runs is ignored (covered 13)
+    ~ a save whose formatting still runs when a reset of the same file lands writes nothing (covered 13)
+    ~ a save whose formatting still runs when a finish of the same file lands writes nothing (covered 13)
+    ~ the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save (covered 13)
+    ~ a focus list that finds git moved on outside drops the old stop, names the dropped edits, and opens the new stop's first file (covered 13)
+    ~ a save git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once (covered 13)
+    ~ a take git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once (covered 13)
+    ~ Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened (covered 13)
+    ~ a take git refuses stays on the file: no move to the next unresolved one (covered 13)
+    ~ an Abort git has not answered yet makes Continue running and refuses the close (covered 13)
+    ~ a Continue git has not answered yet makes Abort running and refuses the close (covered 13)
+    ~ a stop without files shows git's message in the stop view, not the bar; settings hide it and later problems keep it (covered 13)
+  toolbarButtons.test.ts
+    ✓ Abort merge, Undo and Redo start hidden; toggling stores each decided button (killed 10)
+    ✓ a second start over the same storage keeps the choice, Abort merge shown included (killed 12)
+    ✓ a hidden list stored before Abort merge existed ([]) keeps the seven decisions and hides Abort merge (killed 7)
+    ✓ a hidden list stored before Abort merge existed (["undo"]) keeps the seven decisions and hides Abort merge (killed 4)
+    ~ a hidden list stored before Abort merge existed (["undo","redo"]) keeps the seven decisions and hides Abort merge (covered 24)
+    ~ a hidden list stored before Abort merge existed (["next","collapse"]) keeps the seven decisions and hides Abort merge (covered 24)
+    ~ a hidden list stored before Abort merge existed is rewritten as decisions at the first toggle (covered 42)
+    ~ a hidden list stored before Abort merge existed decides exactly its seven ids, no later button (covered 27)
+    ~ a hidden list from before drops ids yamt does not know and collapses duplicates (covered 24)
+    ✓ stored decisions drop ids yamt does not know and values that are not true or false (killed 1)
+    ✘ the toolbar order puts Continue and Abort merge first and the collapse toggle after Next change (covered 0)
+    ✓ the menu lists Continue and Abort only while git records an operation, labelled by it (killed 14)
+    ✓ the toolbar shows Continue and Abort only while git records an operation and the user shows them (killed 4)
+    ~ Continue starts shown, its toggle is stored like the others, and the Abort merge decision stays (covered 30)
+    ✓ a stored value that is not JSON hides Abort merge, Undo and Redo, as at first (killed 3)
+    ✓ a stored value that is a number hides Abort merge, Undo and Redo, as at first (killed 1)
+    ~ a stored value that is a string hides Abort merge, Undo and Redo, as at first (covered 18)
+    ~ a stored value that is null hides Abort merge, Undo and Redo, as at first (covered 20)
+    ✓ a stored value that is an array holding a non-string hides Abort merge, Undo and Redo, as at first (killed 3)
+    ~ a missing key hides Abort merge, Undo and Redo and writes nothing until a toggle (covered 9)
+    ✓ a storage that throws hides Abort merge, Undo and Redo, still toggles in memory and logs warnings (killed 1)
+    ~ a storage that throws only on write keeps the toggle and logs the write's message (covered 27)
+  useRangeController.test.ts
+    ✘ a texts reply builds one controller on the hosts with the path, both texts and the preferences (covered 0)
+    ✘ the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view (covered 0)
+    ✘ the built controller shows the file's threads at once and each later change of them (covered 0)
+    ✘ a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again) (covered 0)
+    ✘ the controller gets the line events and its hosts reach threadHosts (covered 0)
+    ✘ a binary reply builds no controller and shows its sentence (covered 0)
+    ✘ a tooLarge reply builds no controller and shows its sentence (covered 0)
+    ✘ a notUtf8 reply builds no controller and shows its sentence (covered 0)
+    ✘ a modeOnly reply builds no controller and shows its sentence (covered 0)
+    ✘ a kindChanged reply builds no controller and shows its sentence (covered 0)
+    ✘ a submodule reply builds no controller and shows its sentence (covered 0)
+    ✘ the binary sentence is the one rangeText words (covered 0)
+    ✘ a reply arriving after unmount is dropped: nothing built, nothing shown (covered 0)
+    ✘ a failed load builds nothing and stays loading (covered 0)
+    ✘ preferences changed before the controller exists reach it at build, not through a missing controller (covered 0)
+    ✘ no hosts while the left ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ no hosts while the right ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ no hosts while the strip ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ a press on a line number starts a draft in that file only; toggle opens and closes (covered 0)
+
+[Survived] StringLiteral
+src/ui/collapsing.ts:11:31
+-   export const COLLAPSE_LABEL = "Collapse unchanged fragments";
++   export const COLLAPSE_LABEL = "";
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/collapsing.ts:13:21
+-   const STORAGE_KEY = "yamt.collapse.unchanged";
++   const STORAGE_KEY = "";
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ui/rangeStore.ts:109:7
+-     if (start === null || entry === undefined) {
++     if (false || entry === undefined) {
+Tests ran:
+    First message's values: the thread's place, the range as typed, both short ids
+
+
+[Survived] ArrowFunction
+src/ui/rangeStore.ts:128:57
+-     const ai = createRangeAi(agent.client, state.threads, (thread) =>
+-       askContext(state.start.value, state.settings.value.agent, thread),
++     const ai = createRangeAi(agent.client, state.threads, () => undefined,
+Tests ran:
+    with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays
+
+
+[Survived] ObjectLiteral
+src/ui/rangeStore.ts:131:10
+-     return { ...ai, client: agent.client };
++     return {};
+Tests ran:
+    with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays
+
+
+[Survived] ConditionalExpression
+src/ui/rangeStore.ts:125:7
+-     if (agent === null) {
++     if (true) {
+Tests ran:
+    the first file is shown at start and is the one file mounted (catches an empty main area at start)
+    an empty range shows no file and mounts none
+    before openRange answers: the files screen, the start theme's preferences, no file to show
+  and 24 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/rangeStore.ts:144:72
+-       : aiMayClose({ source: agent.source, asking: state.asking, report: (p) => report(state, p) });
++       : aiMayClose({ source: agent.source, asking: state.asking, report: () => undefined });
+Tests ran:
+    with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays
+
+
+[Survived] OptionalChaining
+src/ui/rangeStore.ts:224:10
+-     return state.start.value?.files.find((entry) => entry.id === file);
++     return state.start.value.files.find((entry) => entry.id === file);
+Tests ran:
+    the first file is shown at start and is the one file mounted (catches an empty main area at start)
+    an empty range shows no file and mounts none
+    showFile from the settings screen shows the file and returns the screen to files
+
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:52:14
+-     applyLeft: "Apply non-conflicting changes from the left",
++     applyLeft: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:53:15
+-     applyRight: "Apply non-conflicting changes from the right",
++     applyRight: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/toolbarButtons.ts:48:87
+-   const LABELS: Readonly<Record<Exclude<ToolbarButtonId, OperationButtonId>, string>> = {
+-     previous: "Previous change",
+-     next: "Next change",
+-     collapse: COLLAPSE_LABEL,
+-     applyLeft: "Apply non-conflicting changes from the left",
+-     applyRight: "Apply non-conflicting changes from the right",
+-     undo: "Undo",
+-     redo: "Redo",
+-   };
++   const LABELS: Readonly<Record<Exclude<ToolbarButtonId, OperationButtonId>, string>> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:55:9
+-     redo: "Redo",
++     redo: "",
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ui/toolbarButtons.ts:60:69
+-   const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {
+-     continue: false,
+-     abortMerge: true,
+-     previous: false,
+-     next: false,
+-     collapse: false,
+-     applyLeft: false,
+-     applyRight: false,
+-     undo: true,
+-     redo: true,
+-   };
++   const HIDDEN_AT_FIRST: Readonly<Record<ToolbarButtonId, boolean>> = {};
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:62:15
+-     abortMerge: true,
++     abortMerge: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:50:9
+-     next: "Next change",
++     next: "",
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:49:13
+-     previous: "Previous change",
++     previous: "",
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:61:13
+-     continue: false,
++     continue: true,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:54:9
+-     undo: "Undo",
++     undo: "",
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:68:9
+-     undo: true,
++     undo: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/toolbarButtons.ts:36:21
+-   const STORAGE_KEY = "yamt.toolbar.hidden";
++   const STORAGE_KEY = "";
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:64:9
+-     next: false,
++     next: true,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:69:9
+-     redo: true,
++     redo: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:65:13
+-     collapse: false,
++     collapse: true,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:67:15
+-     applyRight: false,
++     applyRight: true,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:63:13
+-     previous: false,
++     previous: true,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ui/toolbarButtons.ts:66:14
+-     applyLeft: false,
++     applyLeft: true,
+Ran all tests for this mutant.
+
+Ran 5.45 tests per mutant on average.
+-------------------|------------------|----------|-----------|------------|----------|----------|
+                   | % Mutation score |          |           |            |          |          |
+File               |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-------------------|--------|---------|----------|-----------|------------|----------|----------|
+All files          |  90.15 |   90.15 |      238 |         0 |         26 |        0 |        0 |
+ collapsing.ts     |  86.67 |   86.67 |       13 |         0 |          2 |        0 |        0 |
+ rangeStore.ts     |  96.23 |   96.23 |      153 |         0 |          6 |        0 |        0 |
+ toolbarButtons.ts |  80.00 |   80.00 |       72 |         0 |         18 |        0 |        0 |
+-------------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m20:20:39 (512463) INFO MutationTestExecutor[39m Done in 16 seconds.
