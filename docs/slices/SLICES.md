@@ -1091,12 +1091,12 @@ request file, §2 slice map from its "Slice graph (proposal)", build, review, th
 the final run; it ends with its row done and stays on this branch for the next one. Plan §2 rows are written by each
 session for its own feature.
 
-| row | feature (request file)                                                                                                            | sessions' slices (proposal)                                      | status                           | evidence                                                                                     |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------- |
-| 1   | AI thread: thinking list capped at 20rem and following its end; Ask AI/Stop at the bottom, one-step send (`request-ai-thread.md`) | 2 web slices side by side, final run with a real omp turn        | done (session 33, section below) | final run at `19be32c`: gate pass, real omp turn; notes `AiThreadVerify.md`                  |
-| 2   | range window: folder rows show the sum of their files' `+a −r` (`request-folder-sums.md`)                                         | 1 web slice, final run                                           | done (session 34, section below) | final run at `7d9cdcf`: gate pass, real app with a joined chain; notes `FolderSumsVerify.md` |
-| 3   | range window: collapse unchanged lines behind the wave, the merge window's toggle (`request-range-collapse.md`)                   | design, editor slice ∥ window slice, final run                   | planned                          |                                                                                              |
-| 4   | merge and range windows: search every file, Ctrl/Cmd+Shift+S, one row per place, pane filters (`request-search.md`)               | design, Rust, editor go-to, search core, window panel, final run | planned                          |                                                                                              |
+| row | feature (request file)                                                                                                            | sessions' slices (proposal)                                      | status                              | evidence                                                                                     |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| 1   | AI thread: thinking list capped at 20rem and following its end; Ask AI/Stop at the bottom, one-step send (`request-ai-thread.md`) | 2 web slices side by side, final run with a real omp turn        | done (session 33, section below)    | final run at `19be32c`: gate pass, real omp turn; notes `AiThreadVerify.md`                  |
+| 2   | range window: folder rows show the sum of their files' `+a −r` (`request-folder-sums.md`)                                         | 1 web slice, final run                                           | done (session 34, section below)    | final run at `7d9cdcf`: gate pass, real app with a joined chain; notes `FolderSumsVerify.md` |
+| 3   | range window: collapse unchanged lines behind the wave, the merge window's toggle (`request-range-collapse.md`)                   | design, editor slice ∥ window slice, final run                   | running (session 35, section below) |                                                                                              |
+| 4   | merge and range windows: search every file, Ctrl/Cmd+Shift+S, one row per place, pane filters (`request-search.md`)               | design, Rust, editor go-to, search core, window panel, final run | planned                             |                                                                                              |
 
 ## AI thread — the thinking list capped and following its end; Ask AI at the bottom of a thread (session 33, branch `feat/beta-feedback` at `2fbb31e`)
 
@@ -1131,6 +1131,23 @@ question. The fixture and `scripts/range-repo.sh` have no joined chain: the fina
 
 Feature built and verified on 2026-10-28 (rows 1–2; findings #1665–#1666). The owner's check: the folder numbers in
 his own range reviews. Next on this branch: "After 0.6.0-beta.1" row 3 (range collapse), its own session.
+
+## Range collapse — unchanged lines behind the wave in the range window, the merge window's toggle (session 35, branch `feat/beta-feedback` at `a6fe62a`)
+
+Owner request #1656 (2026-10-28), every question answered: `docs/slices/request-range-collapse.md` (rules 1–8,
+acceptance, non-goals); decision `docs/plan.md` §2 **#126** (design option A by `RangeCollapseDesign`: one fold core —
+`runLevels`, `foldSteps.ts`, `paneFoldView` — for the merge panes and the range columns; the left column's field holds
+the steps, the right copies it; thread lines on unchanged lines are run edges; columns wait for the thread list once;
+opt-in waves and `realign` in the shared compare frame and strip). No product question. The designer's three builds
+re-cut for two implementers: rows 2 ∥ 3, then row 4 on both (it reads `store.collapsing` and the core's contract).
+
+| row | slice                                                                                                                                                            | owner    | status  | evidence                                              |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------------- |
+| 1   | design: one fold core for two columns, thread lines as run edges, frame and strip with hidden ranges (`briefs/range-collapse-design.md`) (`RangeCollapseDesign`) | designer | done    | option A chosen, #126; notes `RangeCollapseDesign.md` |
+| 2   | editor core: generic runs and steps, `paneFoldView`, the range columns' fold state (`briefs/range-collapse-core.md`) (`RangeFoldCore`)                           | web-impl | running |                                                       |
+| 3   | window: the header toggle, `COLLAPSE_LABEL`, the range store's `collapsing` (`briefs/range-collapse-toggle.md`) (`RangeCollapseToggle`)                          | web-impl | running |                                                       |
+| 4   | editor columns: wave phase chain, strip waves, frame `realign`, `RangeController.setCollapsed`, the controller wiring and thread-list wait (`RangeFoldColumns`)  | web-impl | todo    |                                                       |
+| 5   | final run: `just check`, WebKit fixture, real app on `scripts/range-repo.sh`, dark and light                                                                     | verifier | todo    |                                                       |
 
 ## Open product questions
 

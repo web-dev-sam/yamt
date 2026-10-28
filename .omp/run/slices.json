@@ -1,1 +1,22 @@
-{}
+{
+  "RangeFoldCore": {
+    "owned": [
+      "frontend/src/editor/internal/foldRuns.ts",
+      "frontend/src/editor/internal/foldSteps.ts",
+      "frontend/src/editor/internal/folds.ts",
+      "frontend/src/editor/internal/foldView.ts",
+      "frontend/src/editor/internal/columnFolds.ts",
+      "frontend/src/editor/internal/columnFolds.test.ts"
+    ]
+  },
+  "RangeCollapseToggle": {
+    "owned": [
+      "frontend/src/ui/collapsing.ts",
+      "frontend/src/ui/toolbarButtons.ts",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/AGENTS.md"
+    ]
+  }
+}
