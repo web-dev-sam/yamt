@@ -1,0 +1,1887 @@
+commit d6ab2b7258525ddba4cee25e1fe73f33990f6a20
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-28 20:57:42 +0100
+
+    feat(range): columns collapse behind one wave across both columns and the strip; toggle, threads as run edges
+
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 6637ce7..bd31bd0 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -17,3 +17,5 @@ Themes (plan §2 #102): `internal/syntax.ts` holds the code colours — one row
+ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only through `ui/useMarkdown.ts`, fence PM2 in `scripts/fences.ts`) renders yamt's own subset of the AI's answers. `internal/markdownBlocks.ts` (pure: lines → `Block`s, each top-level block with its source lines) and `internal/markdownInline.ts` (pure: a block's text → `Inline`s; code spans and escapes are skipped while an emphasis looks for its closer, so backticks win) never build markup; anything outside the subset, raw HTML included, stays literal text; images become `alt (url)` text and links their text plus the address in `.markdown-address`, never navigable. `internal/markdownDom.ts` builds nodes with `createElement`, `createTextNode`, `textContent` and `className` only, from a fixed tag set, `class` the only attribute — never `innerHTML` or a URL attribute, since the page reaches the IPC. `show(text)` keeps every leading block whose source is unchanged and rebuilds from the first that differs (streaming). `internal/codeBlock.ts` colours a fenced block by its info string through `languageNamed` and `highlightCode` with the panes' own `paletteHighlight` + `fontHighlight` (their rules in one `<style class="markdown-highlight-styles">`, mounted once per document; style-mod's `StyleModule.mount` is not reachable from yamt's own packages), after `load()` only while the block is still in a live view; an unknown language stays plain. The answer's look (spacing, code block, table, quote, list numbers, muted address) is the `.markdown-*` rules in `theme.css`, palette tokens only.
+ 
+ Range threads (plan §2 #116): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. `internal/threadAnchor.ts` (`anchorAt`, `linePlace`) is the one rule from a column line to a `ThreadLine` and to its partner line; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `threadRows.ts` (pure) groups the shown threads by aligned place (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), and gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field; `threadNumbers.ts` merges a `mousedown` into the number gutter (a number starts a thread, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`.
++
++Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `wavePhase.ts` (`chainEnds`/`ChainPhases` over a chain of panes and strips; `WavePhases` is the merge's three-pane chain), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). Unchanged-line threads are run edges; runs are computed at build and at each `setCollapsed(true)`, never on a thread change.
+diff --git a/frontend/src/editor/internal/compareFrame.test.ts b/frontend/src/editor/internal/compareFrame.test.ts
+index fa23a82..f409f9d 100644
+--- a/frontend/src/editor/internal/compareFrame.test.ts
++++ b/frontend/src/editor/internal/compareFrame.test.ts
+@@ -1,14 +1,19 @@
+-import { EditorState, type TransactionSpec } from "@codemirror/state";
++import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
+ import { BlockType, Decoration } from "@codemirror/view";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import type { Column } from "../../ipc";
++import { columnFoldExtension, mirrorSpec, mirrorSteps, ownerSteps } from "./columnFolds";
++import { renewSpec, stepSpec } from "./columnFolds";
+ import { differenceField, showDifferences } from "./compareFields";
+ import { CompareFrame, type LineBlock } from "./compareFrame";
+ import type { DiffSpan } from "./compareMarks";
+ import type { CompareRow } from "./compareStrip";
+ import { toDocPos } from "./docPos";
+ import { find } from "./find";
++import { columnRuns } from "./foldRuns";
++import type { WaveRow } from "./geometry";
++import { columnWaves } from "./rangeFolds";
+ import { showThreadRows, threadAnchors, threadField } from "./threadField";
+ import type { ThreadRow } from "./threadRows";
+ import type { ChangeTone } from "./tone";
+@@ -396,3 +401,151 @@ test("an unchanged row on the line before a pure insertion keeps the scroll insi
+   expect(threadAnchors(views)).toEqual(ROW_AFTER_LINE_20);
+   expect(scrollTopsAfterScrolling(views, "right", 470)).toEqual({ left: 450, right: 470 });
+ });
++
++const FOLD_WIRING = {
++  views: (): never => {
++    throw new Error("a frame test has no views");
++  },
++  hovered: () => null,
++};
++
++function foldColumn(
++  column: Column,
++  changed: (startState: EditorState, state: EditorState) => void,
++): FakeColumn {
++  const extensions = [differenceField, find, columnFoldExtension(column, FOLD_WIRING)];
++  return fakeColumn(
++    EditorState.create({ doc: TEXT, extensions }),
++    (fake, pos) => {
++      const number = fake.state.doc.lineAt(pos).number;
++      return { top: (number - 1) * LINE_PX, bottom: number * LINE_PX, type: BlockType.Text };
++    },
++    changed,
++  );
++}
++
++function onLeft(views: Readonly<Record<Column, FakeColumn>>, spec: TransactionSpec): void {
++  views.left.dispatch(spec);
++  const mirrored = mirrorSpec(views.right.state, views.left.state.field(ownerSteps));
++  if (mirrored !== null) {
++    views.right.dispatch(mirrored);
++  }
++}
++
++test("waves reach the strip with the rows, and a step shown by a click measures them again", () => {
++  const runFrames = stubFrames();
++  const painted: (readonly WaveRow<Column>[])[] = [];
++  const holder: { frame: CompareFrame | null } = { frame: null };
++  function changed(startState: EditorState, state: EditorState): void {
++    holder.frame?.changed({ startState, state, geometryChanged: false });
++  }
++  const views = { left: foldColumn("left", changed), right: foldColumn("right", changed) };
++  holder.frame = new CompareFrame({
++    views,
++    strip: {
++      paint: (_panes, _rows, waves) => {
++        painted.push(waves);
++      },
++    },
++    fields: [differenceField, ownerSteps, mirrorSteps],
++    anchors: () => [],
++    waves: columnWaves,
++  });
++  const doc = Text.of(TEXT.split("\n"));
++  const change = { start: 4, len: 1 };
++  const runs = columnRuns([{ left: change, right: change }], { left: doc, right: doc });
++
++  onLeft(views, renewSpec(views.left.state, runs, true));
++  runFrames();
++  onLeft(views, stepSpec(views.left.state, 1));
++  runFrames();
++
++  expect(painted).toEqual([
++    [
++      { left: null, right: null },
++      { left: 9 * LINE_PX, right: 9 * LINE_PX },
++    ],
++    [
++      { left: null, right: null },
++      { left: 13 * LINE_PX, right: 13 * LINE_PX },
++    ],
++  ]);
++});
++
++test("realign writes the other column on the next frame though the source did not scroll", () => {
++  const runFrames = stubFrames();
++  const measured = { count: 0 };
++  const views = {
++    left: plainColumn(measured, () => {}),
++    right: plainColumn(measured, () => {}),
++  };
++  const frame = new CompareFrame({
++    views,
++    strip: { paint: () => {} },
++    fields: [differenceField],
++    anchors: () => [],
++  });
++  views.left.scrollDOM.scrollTop = 300;
++  views.left.scrollDOM.dispatchEvent(new Event("scroll"));
++  runFrames();
++  views.right.scrollDOM.scrollTop = 40;
++
++  frame.realign("left");
++  runFrames();
++  frame.destroy();
++
++  expect(views.right.scrollDOM.scrollTop).toBe(300);
++});
++
++test("after realign, a scroll event of the other column before the frame does not lead the sync", () => {
++  const runFrames = stubFrames();
++  const measured = { count: 0 };
++  const views = {
++    left: plainColumn(measured, () => {}),
++    right: plainColumn(measured, () => {}),
++  };
++  const frame = new CompareFrame({
++    views,
++    strip: { paint: () => {} },
++    fields: [differenceField],
++    anchors: () => [],
++  });
++  views.left.scrollDOM.scrollTop = 300;
++  views.left.scrollDOM.dispatchEvent(new Event("scroll"));
++  runFrames();
++  runFrames();
++
++  frame.realign("left");
++  views.right.scrollDOM.scrollTop = 40;
++  views.right.scrollDOM.dispatchEvent(new Event("scroll"));
++  runFrames();
++  frame.destroy();
++
++  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([300, 300]);
++});
++
++test("a frame without waves paints none (the compare window's strip)", () => {
++  const runFrames = stubFrames();
++  const measured = { count: 0 };
++  const painted: (readonly WaveRow<Column>[])[] = [];
++  const views = {
++    left: plainColumn(measured, () => {}),
++    right: plainColumn(measured, () => {}),
++  };
++  const frame = new CompareFrame({
++    views,
++    strip: {
++      paint: (_panes, _rows, waves) => {
++        painted.push(waves);
++      },
++    },
++    fields: [differenceField],
++    anchors: () => [],
++  });
++
++  frame.request();
++  runFrames();
++  frame.destroy();
++
++  expect(painted).toEqual([[]]);
++});
+diff --git a/frontend/src/editor/internal/compareFrame.ts b/frontend/src/editor/internal/compareFrame.ts
+index a1ed18e..766c213 100644
+--- a/frontend/src/editor/internal/compareFrame.ts
++++ b/frontend/src/editor/internal/compareFrame.ts
+@@ -8,7 +8,7 @@ import { differenceField } from "./compareFields";
+ import type { CompareRow, CompareStrip } from "./compareStrip";
+ import { COLUMNS } from "./compareViews";
+ import { syncFindSpace, type FindSpaceView } from "./find";
+-import { rangeSpan, rowsChanged } from "./geometry";
++import { rangeSpan, rowsChanged, type WaveRow } from "./geometry";
+ import { contentEnd, ScrollSync, type Anchor, type ScrollPane } from "./scrollSync";
+ 
+ export type LineBlock = Span & { readonly type: BlockType | readonly LineBlock[] };
+@@ -19,10 +19,12 @@ type FrameView = ScrollPane &
+   };
+ type FrameViews = Readonly<Record<Column, FrameView>>;
+ type ExtraAnchors = (views: FrameViews) => readonly Anchor<Column>[];
++type Waves = (views: FrameViews) => readonly WaveRow<Column>[];
+ 
+ type CompareLayout = {
+   readonly rows: readonly CompareRow[];
+   readonly anchors: readonly Anchor<Column>[];
++  readonly waves: readonly WaveRow<Column>[];
+ };
+ 
+ export function textBlock(block: LineBlock): Span {
+@@ -44,7 +46,7 @@ function columnSpan(view: FrameView, range: { readonly from: number; readonly to
+     : { top: text.bottom, bottom: block.bottom };
+ }
+ 
+-function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {
++function measure(views: FrameViews, extra: ExtraAnchors, waves: Waves): CompareLayout {
+   const { left, right } = views;
+   const rightSpans = right.state.field(differenceField).spans;
+   const rows = left.state.field(differenceField).spans.flatMap((span, index) => {
+@@ -61,7 +63,7 @@ function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {
+   const anchors = [{ left: 0, right: 0 }, ...edges, ...extra(views), ends].sort((a, b) =>
+     a.left === b.left ? a.right - b.right : a.left - b.left,
+   );
+-  return { rows, anchors };
++  return { rows, anchors, waves: waves(views) };
+ }
+ 
+ export class CompareFrame {
+@@ -69,25 +71,30 @@ export class CompareFrame {
+   readonly #strip: Pick<CompareStrip, "paint">;
+   readonly #fields: readonly StateField<unknown>[];
+   readonly #anchors: ExtraAnchors;
++  readonly #waves: Waves;
+   readonly #scroll: ScrollSync<Column>;
+   #frameId: number | null = null;
+   #layoutCache: CompareLayout | null = null;
++  #realignFrom: Column | null = null;
+ 
+   constructor({
+     views,
+     strip,
+     fields,
+     anchors,
++    waves = () => [],
+   }: {
+     readonly views: FrameViews;
+     readonly strip: Pick<CompareStrip, "paint">;
+     readonly fields: readonly StateField<unknown>[];
+     readonly anchors: ExtraAnchors;
++    readonly waves?: Waves;
+   }) {
+     this.#views = views;
+     this.#strip = strip;
+     this.#fields = fields;
+     this.#anchors = anchors;
++    this.#waves = waves;
+     this.#scroll = new ScrollSync(views, COLUMNS, () => {
+       this.request();
+     });
+@@ -105,16 +112,27 @@ export class CompareFrame {
+ 
+   request(): void {
+     this.#frameId ??= requestAnimationFrame(() => {
++      if (this.#realignFrom !== null) {
++        // A column the change shrank fires its clamped scroll event before this callback (HTML
++        // "update the rendering": scroll steps run before animation frame callbacks); it must not lead.
++        this.#scroll.follow(this.#realignFrom);
++        this.#realignFrom = null;
++      }
+       this.#frameId = null;
+       const views = this.#views;
+       syncFindSpace([views.left, views.right]);
+-      this.#layoutCache ??= measure(views, this.#anchors);
++      this.#layoutCache ??= measure(views, this.#anchors, this.#waves);
+       const layout = this.#layoutCache;
+       this.#scroll.sync(layout.anchors);
+-      this.#strip.paint(views, layout.rows);
++      this.#strip.paint(views, layout.rows, layout.waves);
+     });
+   }
+ 
++  realign(source: Column): void {
++    this.#realignFrom = source;
++    this.request();
++  }
++
+   destroy(): void {
+     if (this.#frameId !== null) {
+       cancelAnimationFrame(this.#frameId);
+diff --git a/frontend/src/editor/internal/compareStrip.ts b/frontend/src/editor/internal/compareStrip.ts
+index be416c0..0e50082 100644
+--- a/frontend/src/editor/internal/compareStrip.ts
++++ b/frontend/src/editor/internal/compareStrip.ts
+@@ -1,8 +1,10 @@
+ import "../theme.css";
+ import type { Span } from "../../connectors";
+ import type { Column } from "../../ipc";
+-import { placedBand } from "./gap";
+-import { dropMissing, keepEditorFocus } from "./strips";
++import { joinPaints, placedBand } from "./gap";
++import type { WaveRow } from "./geometry";
++import { LINE_HEIGHT_PX } from "./pane";
++import { dropMissing, keepEditorFocus, WaveLayer } from "./strips";
+ import type { ChangeTone } from "./tone";
+ 
+ export type CompareRow = Readonly<Record<Column, Span>> & { readonly tone: ChangeTone };
+@@ -14,14 +16,20 @@ export class CompareStrip {
+   readonly #strip: SVGSVGElement;
+   readonly #layer = document.createElementNS(SVG_NS, "g");
+   readonly #bands = new Map<string, SVGPathElement>();
++  readonly #waves: WaveLayer | null;
+ 
+-  constructor(strip: SVGSVGElement) {
++  constructor(strip: SVGSVGElement, hovered?: () => number | null) {
+     this.#strip = strip;
+-    strip.replaceChildren(this.#layer);
++    this.#waves = hovered === undefined ? null : new WaveLayer(hovered);
++    if (this.#waves === null) {
++      strip.replaceChildren(this.#layer);
++    } else {
++      strip.replaceChildren(this.#layer, this.#waves.node);
++    }
+     strip.addEventListener("mousedown", keepEditorFocus);
+   }
+ 
+-  paint(panes: StripPanes, rows: readonly CompareRow[]): void {
++  paint(panes: StripPanes, rows: readonly CompareRow[], waves: readonly WaveRow<Column>[]): void {
+     const strip = this.#strip;
+     const stripTop = strip.getBoundingClientRect().top;
+     const shifts = {
+@@ -49,6 +57,7 @@ export class CompareStrip {
+     dropMissing(this.#bands, kept, (path) => {
+       path.remove();
+     });
++    this.#waves?.paint(joinPaints(waves, shifts, { ...size, lineHeight: LINE_HEIGHT_PX }));
+   }
+ 
+   destroy(): void {
+diff --git a/frontend/src/editor/internal/compareViews.test.ts b/frontend/src/editor/internal/compareViews.test.ts
+index ec45025..41b3474 100644
+--- a/frontend/src/editor/internal/compareViews.test.ts
++++ b/frontend/src/editor/internal/compareViews.test.ts
+@@ -1,5 +1,5 @@
+ import { insertNewlineAndIndent } from "@codemirror/commands";
+-import type { EditorState } from "@codemirror/state";
++import { Facet, type EditorState } from "@codemirror/state";
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ 
+ import { DEFAULT_KEYS, loadCompareFixture, type Column } from "../../ipc";
+@@ -40,7 +40,7 @@ afterEach(() => {
+ function readOnly(text: string): EditorState {
+   return readOnlyColumnState(
+     { column: "left", text },
+-    { settings: SETTINGS, updated: () => {}, extensions: [] },
++    { settings: SETTINGS, updated: () => {}, extensions: () => [] },
+   );
+ }
+ 
+@@ -89,3 +89,15 @@ test("an editable column still refuses an insert over its byte limit", () => {
+   expect(after.sliceDoc()).toBe(RIGHT);
+   expect(refused.mock.calls).toEqual([["right"]]);
+ });
++
++test("each read-only column gets its own column's extensions", () => {
++  const owner = Facet.define<Column>();
++  const states = (["left", "right"] as const).map((column) =>
++    readOnlyColumnState(
++      { column, text: LEFT },
++      { settings: SETTINGS, updated: () => {}, extensions: (asked) => owner.of(asked) },
++    ),
++  );
++
++  expect(states.map((state) => state.facet(owner))).toEqual([["left"], ["right"]]);
++});
+diff --git a/frontend/src/editor/internal/compareViews.ts b/frontend/src/editor/internal/compareViews.ts
+index 5b02f43..027f4a9 100644
+--- a/frontend/src/editor/internal/compareViews.ts
++++ b/frontend/src/editor/internal/compareViews.ts
+@@ -24,7 +24,7 @@ export type ColumnWiring = {
+ export type ReadOnlyWiring = {
+   readonly settings: PaneSettings;
+   readonly updated: (column: Column, update: ViewUpdate) => void;
+-  readonly extensions: Extension;
++  readonly extensions: (column: Column) => Extension;
+ };
+ 
+ type ColumnSource = { readonly column: Column; readonly text: string };
+@@ -96,7 +96,7 @@ export function readOnlyColumnState(
+       removalTooltip(),
+       everyPane(),
+       updatedListener(column, wiring.updated),
+-      wiring.extensions,
++      wiring.extensions(column),
+     ],
+   });
+ }
+diff --git a/frontend/src/editor/internal/gap.ts b/frontend/src/editor/internal/gap.ts
+index 09f7614..fa72810 100644
+--- a/frontend/src/editor/internal/gap.ts
++++ b/frontend/src/editor/internal/gap.ts
+@@ -1,5 +1,5 @@
+ import { bandPath, waveCenterY, waveJoinPath, type Span } from "../../connectors";
+-import type { Chunk } from "../../ipc";
++import type { Chunk, Column } from "../../ipc";
+ import type { ChunkAction } from "./apply";
+ import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry";
+ import { modKeyName } from "./modClick";
+@@ -101,20 +101,17 @@ export function bandPaints(
+   return paints;
+ }
+ 
+-export function wavePaints(
+-  { waves, side }: { readonly waves: readonly WaveRow[]; readonly side: Side },
++export function joinPaints(
++  waves: readonly WaveRow<Column>[],
+   shifts: { readonly left: number; readonly right: number },
+   size: { readonly width: number; readonly height: number; readonly lineHeight: number },
+ ): WavePaint[] {
+   const center = waveCenterY(size.lineHeight);
+-  const panes = STRIP_PANES[side];
+   const paints = [];
+   for (const [run, wave] of waves.entries()) {
+-    const left = wave[panes.left];
+-    const right = wave[panes.right];
+-    if (left !== null && right !== null) {
+-      const onLeft = left + shifts.left;
+-      const onRight = right + shifts.right;
++    if (wave.left !== null && wave.right !== null) {
++      const onLeft = wave.left + shifts.left;
++      const onRight = wave.right + shifts.right;
+       const top = Math.min(onLeft, onRight);
+       if (crossesStrip(top, Math.max(onLeft, onRight) + size.lineHeight, size.height)) {
+         const join = { left: onLeft + center, right: onRight + center };
+@@ -124,3 +121,13 @@ export function wavePaints(
+   }
+   return paints;
+ }
++
++export function wavePaints(
++  { waves, side }: { readonly waves: readonly WaveRow[]; readonly side: Side },
++  shifts: { readonly left: number; readonly right: number },
++  size: { readonly width: number; readonly height: number; readonly lineHeight: number },
++): WavePaint[] {
++  const panes = STRIP_PANES[side];
++  const joins = waves.map((wave) => ({ left: wave[panes.left], right: wave[panes.right] }));
++  return joinPaints(joins, shifts, size);
++}
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index 51b76eb..abeef6e 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -12,7 +12,7 @@ export type Pane = "left" | "center" | "right";
+ export const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
+ export type PaneViews = Readonly<Record<Pane, EditorView>>;
+ export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
+-export type WaveRow = Readonly<Record<Pane, number | null>>;
++export type WaveRow<P extends string = Pane> = Readonly<Record<P, number | null>>;
+ 
+ export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
+   local: "left",
+diff --git a/frontend/src/editor/internal/rangeFolds.test.ts b/frontend/src/editor/internal/rangeFolds.test.ts
+new file mode 100644
+index 0000000..73b9d7b
+--- /dev/null
++++ b/frontend/src/editor/internal/rangeFolds.test.ts
+@@ -0,0 +1,257 @@
++import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
++import { afterEach, expect, test, vi } from "vitest";
++
++import { waveCenterY, waveJoinPath, wavePhase } from "../../connectors";
++import { loadCompareFixture, type Column } from "../../ipc";
++import {
++  columnFoldExtension,
++  mirrorSpec,
++  ownerSteps,
++  rangeRuns,
++  renewSpec,
++  stepSpec,
++} from "./columnFolds";
++import { joinPaints } from "./gap";
++import type { WaveRow } from "./geometry";
++import { columnWaves } from "./rangeFolds";
++import { chainEnds, ChainPhases, paneEnds, phaseStyle, type WaveLayout } from "./wavePhase";
++
++type Rect = { readonly left: number; readonly right: number };
++type FakeStyle = Pick<CSSStyleDeclaration, "getPropertyValue" | "setProperty" | "removeProperty">;
++type FakeDom = { readonly resizes: (() => void)[]; readonly disconnected: boolean[] };
++
++const STRIP: Rect = { left: 700.4, right: 738.4 };
++const MERGE_STRIPS: WaveLayout["strips"] = {
++  local: { left: 700.4, right: 738.4 },
++  remote: { left: 1179.4, right: 1217.4 },
++};
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++test("two columns and one strip: the left leaves at the strip's left edge, the right enters at its right edge", () => {
++  expect(chainEnds<Column>("left", [{ strip: STRIP, pane: "right" }])).toEqual(
++    new Map([
++      ["left", { kind: "leaves", at: 700.4 }],
++      ["right", { kind: "enters", at: 738.4 }],
++    ]),
++  );
++});
++
++test("the merge chain through chainEnds gives paneEnds' ends: the middle enters and leaves", () => {
++  const ends = chainEnds("left", [
++    { strip: MERGE_STRIPS.local, pane: "center" },
++    { strip: MERGE_STRIPS.remote, pane: "right" },
++  ]);
++
++  expect(Object.fromEntries(ends)).toEqual(paneEnds(MERGE_STRIPS));
++  expect(Object.fromEntries(ends)).toEqual({
++    left: { kind: "leaves", at: 700.4 },
++    center: { kind: "through", enters: 738.4, leaves: 1179.4 },
++    right: { kind: "enters", at: 1217.4 },
++  });
++});
++
++function fakeStyle(): FakeStyle {
++  const values = new Map<string, string>();
++  return {
++    getPropertyValue: (name) => values.get(name) ?? "",
++    setProperty: (name, value) => {
++      values.set(name, value ?? "");
++    },
++    removeProperty: (name) => {
++      values.delete(name);
++      return "";
++    },
++  };
++}
++
++function fakeDom(): FakeDom {
++  const dom: FakeDom = { resizes: [], disconnected: [] };
++  vi.stubGlobal("devicePixelRatio", 1);
++  vi.stubGlobal(
++    "ResizeObserver",
++    class {
++      readonly #index: number;
++      constructor(callback: () => void) {
++        this.#index = dom.resizes.push(callback) - 1;
++      }
++      observe(): void {}
++      disconnect(): void {
++        dom.disconnected[this.#index] = true;
++      }
++    },
++  );
++  vi.stubGlobal("matchMedia", () => ({
++    addEventListener: () => {},
++    removeEventListener: () => {},
++  }));
++  vi.stubGlobal(
++    "HTMLElement",
++    class {
++      readonly style = fakeStyle();
++    },
++  );
++  vi.stubGlobal("Element", class {});
++  return dom;
++}
++
++function measured(rect: Rect): { getBoundingClientRect: () => Rect } {
++  return { getBoundingClientRect: () => rect };
++}
++
++function phaseOf(host: HTMLElement): string[] {
++  return ["--fold-wave-x", "--fold-wave-period"].map((name) => host.style.getPropertyValue(name));
++}
++
++test("ChainPhases writes both columns' phase on a resize and removes both on destroy", () => {
++  const dom = fakeDom();
++  const hosts = { left: new HTMLElement(), right: new HTMLElement() };
++  const strip = Object.assign(new Element(), measured(STRIP));
++  const views = {
++    left: { scrollDOM: measured({ left: 260, right: 699 }) },
++    right: { scrollDOM: measured({ left: 741, right: 1180 }) },
++  };
++  const phases = new ChainPhases<Column>(
++    { first: "left", next: [{ strip, pane: "right" }] },
++    hosts,
++    () => views,
++  );
++
++  for (const resize of dom.resizes) {
++    resize();
++  }
++  const written = [phaseOf(hosts.left), phaseOf(hosts.right)];
++  phases.destroy();
++
++  expect(written).toEqual([
++    Object.values(phaseStyle(wavePhase(260, { kind: "leaves", at: 700 }))),
++    Object.values(phaseStyle(wavePhase(741, { kind: "enters", at: 738 }))),
++  ]);
++  expect(written[0]).not.toEqual(written[1]);
++  expect([phaseOf(hosts.left), phaseOf(hosts.right)]).toEqual([
++    ["", ""],
++    ["", ""],
++  ]);
++  expect(dom.disconnected).toEqual([true]);
++});
++
++function numbered(from: number, to: number): string[] {
++  return Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
++}
++
++const LEFT_LINES = numbered(1, 100);
++const RIGHT_LINES = [
++  ...numbered(1, 30),
++  "new a",
++  "new b",
++  ...numbered(32, 70),
++  "added",
++  ...numbered(71, 100),
++];
++const DOCS: Readonly<Record<Column, Text>> = {
++  left: Text.of(LEFT_LINES),
++  right: Text.of(RIGHT_LINES),
++};
++const NO_WORDS = { changed: [], removals: [] };
++const { comparison } = await loadCompareFixture("pair", {
++  "pair.json": {
++    left: LEFT_LINES.join("\n"),
++    right: RIGHT_LINES.join("\n"),
++    differences: [
++      {
++        left: { start: 30, len: 1 },
++        right: { start: 30, len: 2 },
++        words: { left: NO_WORDS, right: NO_WORDS },
++      },
++      {
++        left: { start: 70, len: 0 },
++        right: { start: 71, len: 1 },
++        words: { left: NO_WORDS, right: NO_WORDS },
++      },
++    ],
++  },
++});
++const RIGHT_OFFSET = 1000;
++const LINE_PX = 10;
++const WIRING = {
++  views: (): never => {
++    throw new Error("a state test has no views");
++  },
++  hovered: () => null,
++};
++
++type Pair = Record<Column, EditorState>;
++
++function onLeft(pair: Pair, spec: TransactionSpec): Pair {
++  const left = pair.left.update(spec).state;
++  const mirrored = mirrorSpec(pair.right, left.field(ownerSteps));
++  return { left, right: mirrored === null ? pair.right : pair.right.update(mirrored).state };
++}
++
++function opened(collapsed: boolean): Pair {
++  const pair = {
++    left: EditorState.create({ doc: DOCS.left, extensions: columnFoldExtension("left", WIRING) }),
++    right: EditorState.create({
++      doc: DOCS.right,
++      extensions: columnFoldExtension("right", WIRING),
++    }),
++  };
++  const runs = rangeRuns(comparison.differences, [], DOCS);
++  return onLeft(pair, renewSpec(pair.left, runs, collapsed));
++}
++
++type WaveView = {
++  readonly state: EditorState;
++  lineBlockAt(pos: number): { readonly top: number };
++};
++
++function waves(pair: Pair): WaveRow<Column>[] {
++  function view(state: EditorState, offset: number): WaveView {
++    return {
++      state,
++      lineBlockAt: (pos) => ({ top: state.doc.lineAt(pos).number * LINE_PX + offset }),
++    };
++  }
++  return columnWaves({ left: view(pair.left, 0), right: view(pair.right, RIGHT_OFFSET) });
++}
++
++test("columnWaves gives each run's wave top in each column from that column's own lines", () => {
++  const pair = opened(true);
++  const clicked = onLeft(pair, stepSpec(pair.left, 1));
++
++  expect(waves(pair)).toEqual([
++    { left: 10, right: 1010 },
++    { left: 360, right: 1370 },
++    { left: 750, right: 1770 },
++  ]);
++  expect(waves(clicked)[1]).toEqual({ left: 400, right: 1410 });
++});
++
++test("columnWaves gives null in both columns where nothing hides", () => {
++  expect(waves(opened(false))).toEqual([
++    { left: null, right: null },
++    { left: null, right: null },
++    { left: null, right: null },
++  ]);
++});
++
++test("joinPaints joins the two tops level across the strip, each shifted by its own column", () => {
++  const size = { width: 40, height: 500, lineHeight: 20 };
++  const center = waveCenterY(size.lineHeight);
++
++  const paints = joinPaints(
++    [
++      { left: 100, right: 80 },
++      { left: null, right: 5 },
++      { left: 2000, right: 1980 },
++    ],
++    { left: -50, right: -30 },
++    size,
++  );
++
++  expect(paints).toEqual([
++    { run: 0, d: waveJoinPath({ left: 50 + center, right: 50 + center }, size.width) },
++  ]);
++});
+diff --git a/frontend/src/editor/internal/rangeFolds.ts b/frontend/src/editor/internal/rangeFolds.ts
+new file mode 100644
+index 0000000..fa2416f
+--- /dev/null
++++ b/frontend/src/editor/internal/rangeFolds.ts
+@@ -0,0 +1,63 @@
++import type { EditorState, Extension } from "@codemirror/state";
++
++import type { Column } from "../../ipc";
++import { columnFoldExtension, columnSteps, renewSpec, stepSpec } from "./columnFolds";
++import type { ColumnViews } from "./compareViews";
++import { Folding } from "./folding";
++import { displayed, type Fold } from "./foldRuns";
++import { hiddenLevels } from "./foldSteps";
++import type { WaveRow } from "./geometry";
++import { ChainPhases, type WaveChain } from "./wavePhase";
++
++type RangeHosts = Readonly<Record<Column, HTMLElement>> & { readonly strip: Element };
++type WaveView = {
++  readonly state: EditorState;
++  lineBlockAt(pos: number): { readonly top: number };
++};
++
++function waveTops(view: WaveView, column: Column): (number | null)[] {
++  const { runs, hiding } = columnSteps(view.state, column);
++  return hiddenLevels(runs, hiding).map((fold) => {
++    const hidden = displayed(fold, column);
++    return hidden === null ? null : view.lineBlockAt(hidden.from).top;
++  });
++}
++
++export function columnWaves(views: Readonly<Record<Column, WaveView>>): WaveRow<Column>[] {
++  const right = waveTops(views.right, "right");
++  return waveTops(views.left, "left").map((left, run) => ({ left, right: right[run] ?? null }));
++}
++
++export class RangeFolds {
++  readonly hovered = (): number | null => this.#folding.hovered();
++  readonly #views: () => ColumnViews;
++  readonly #folding: Folding;
++  readonly #phases: ChainPhases<Column>;
++
++  constructor(hosts: RangeHosts, views: () => ColumnViews) {
++    this.#views = views;
++    this.#folding = new Folding([hosts.left, hosts.right, hosts.strip], (run) => {
++      const { left } = views();
++      left.dispatch(stepSpec(left.state, run));
++    });
++    const chain: WaveChain<Column> = {
++      first: "left",
++      next: [{ strip: hosts.strip, pane: "right" }],
++    };
++    this.#phases = new ChainPhases(chain, hosts, views);
++  }
++
++  column(column: Column): Extension {
++    return columnFoldExtension(column, { views: this.#views, hovered: this.hovered });
++  }
++
++  renew(runs: readonly Fold<Column>[], collapsed: boolean): void {
++    const { left } = this.#views();
++    left.dispatch(renewSpec(left.state, runs, collapsed), { effects: left.scrollSnapshot() });
++  }
++
++  destroy(): void {
++    this.#folding.destroy();
++    this.#phases.destroy();
++  }
++}
+diff --git a/frontend/src/editor/internal/strips.ts b/frontend/src/editor/internal/strips.ts
+index 8830304..3ce044e 100644
+--- a/frontend/src/editor/internal/strips.ts
++++ b/frontend/src/editor/internal/strips.ts
+@@ -75,16 +75,44 @@ function waveNode(run: number, hovered: number | null): SVGGElement {
+   return group;
+ }
+ 
++export class WaveLayer {
++  readonly node = document.createElementNS(SVG_NS, "g");
++  readonly #hovered: () => number | null;
++  readonly #waves = new Map<number, SVGGElement>();
++
++  constructor(hovered: () => number | null) {
++    this.#hovered = hovered;
++    this.node.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
++    this.node.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
++    this.node.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
++  }
++
++  paint(paints: readonly WavePaint[]): void {
++    dropMissing(this.#waves, new Set(paints.map(({ run }) => run)), (group) => {
++      group.remove();
++    });
++    for (const { run, d } of paints) {
++      let group = this.#waves.get(run);
++      if (group === undefined) {
++        group = waveNode(run, this.#hovered());
++        this.#waves.set(run, group);
++        this.node.append(group);
++      }
++      for (const path of group.children) {
++        path.setAttribute("d", d);
++      }
++    }
++  }
++}
++
+ class GapStrip {
+   readonly #strip: SVGSVGElement;
+   readonly #side: Side;
+   readonly #onPress: OnPress | null;
+-  readonly #hovered: () => number | null;
+   readonly #bandLayer = document.createElementNS(SVG_NS, "g");
+-  readonly #waveLayer = document.createElementNS(SVG_NS, "g");
++  readonly #waveLayer: WaveLayer;
+   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
+   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
+-  readonly #waves = new Map<number, SVGGElement>();
+   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
+   readonly #platform = navigator.platform;
+ 
+@@ -97,11 +125,8 @@ class GapStrip {
+     this.#strip = strip;
+     this.#side = side;
+     this.#onPress = onPress;
+-    this.#hovered = hovered;
+-    this.#waveLayer.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
+-    this.#waveLayer.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
+-    this.#waveLayer.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
+-    strip.replaceChildren(this.#bandLayer, this.#waveLayer, this.#arrowLayer);
++    this.#waveLayer = new WaveLayer(hovered);
++    strip.replaceChildren(this.#bandLayer, this.#waveLayer.node, this.#arrowLayer);
+     strip.addEventListener("mousedown", keepEditorFocus);
+   }
+ 
+@@ -134,7 +159,7 @@ class GapStrip {
+ 
+   paint({ bands, waves, arrows }: GapPaint, covered: ChunkAction | null): void {
+     this.#paintBands(bands);
+-    this.#paintWaves(waves);
++    this.#waveLayer.paint(waves);
+     if (arrows !== null) {
+       this.#paintArrows(arrows, covered);
+     }
+@@ -157,23 +182,6 @@ class GapStrip {
+     placeInOrder(this.#bandLayer, nodes);
+   }
+ 
+-  #paintWaves(paints: readonly WavePaint[]): void {
+-    dropMissing(this.#waves, new Set(paints.map(({ run }) => run)), (group) => {
+-      group.remove();
+-    });
+-    for (const { run, d } of paints) {
+-      let group = this.#waves.get(run);
+-      if (group === undefined) {
+-        group = waveNode(run, this.#hovered());
+-        this.#waves.set(run, group);
+-        this.#waveLayer.append(group);
+-      }
+-      for (const path of group.children) {
+-        path.setAttribute("d", d);
+-      }
+-    }
+-  }
+-
+   #paintArrows({ placed, layout, onPress }: ArrowPaint, covered: ChunkAction | null): void {
+     dropMissing(this.#arrows, new Set(placed.map(({ arrow }) => arrow.chunk.id)), (row) => {
+       row.node.remove();
+diff --git a/frontend/src/editor/internal/threadNumbers.ts b/frontend/src/editor/internal/threadNumbers.ts
+index 2c9dbfb..f7bcbc0 100644
+--- a/frontend/src/editor/internal/threadNumbers.ts
++++ b/frontend/src/editor/internal/threadNumbers.ts
+@@ -9,6 +9,7 @@ import { EditorView, GutterMarker, lineNumberMarkers, lineNumbers } from "@codem
+ import messageSquarePlusIcon from "~icons/lucide/message-square-plus?raw";
+ 
+ import { shownLine, type Column, type Difference, type ThreadLine } from "../../ipc";
++import { foldRunAt } from "./folding";
+ import { anchorAt } from "./threadAnchor";
+ import { threadField, type LineCount } from "./threadField";
+ import type { ShownThread } from "./threadRows";
+@@ -114,7 +115,7 @@ export function threadNumbers(
+           ) {
+             return false;
+           }
+-          if (target.closest(".cm-gutterElement") === null) {
++          if (target.closest(".cm-gutterElement") === null || foldRunAt(target) !== null) {
+             return false;
+           }
+           const line = pressedLine(view.state.doc, block.from);
+diff --git a/frontend/src/editor/internal/wavePhase.ts b/frontend/src/editor/internal/wavePhase.ts
+index 06ce343..04b626f 100644
+--- a/frontend/src/editor/internal/wavePhase.ts
++++ b/frontend/src/editor/internal/wavePhase.ts
+@@ -1,5 +1,5 @@
+ import { wavePhase, type WaveEnds, type WavePhase } from "../../connectors";
+-import { PANES, STRIP_PANES, type Pane } from "./geometry";
++import { STRIP_PANES, type Pane } from "./geometry";
+ import { SIDES, type Side } from "./side";
+ 
+ export const WAVE_PHASE_VARS = { offset: "--fold-wave-x", period: "--fold-wave-period" } as const;
+@@ -10,7 +10,13 @@ export type WaveHosts = Readonly<Record<Pane, HTMLElement>> & {
+ 
+ type Edges = { readonly left: number; readonly right: number };
+ type Measured = { getBoundingClientRect(): Edges };
+-type MeasuredPanes = Readonly<Record<Pane, { readonly scrollDOM: Measured }>>;
++type MeasuredViews<P extends string> = Readonly<Record<P, { readonly scrollDOM: Measured }>>;
++type MeasuredPanes = MeasuredViews<Pane>;
++type Link<S, P extends string> = { readonly strip: S; readonly pane: P };
++export type WaveChain<P extends string> = {
++  readonly first: P;
++  readonly next: readonly Link<Element, P>[];
++};
+ export type WaveLayout = {
+   readonly scrollers: Readonly<Record<Pane, Edges>>;
+   readonly strips: Readonly<Record<Side, Edges>>;
+@@ -19,21 +25,45 @@ type PhaseStyle = Pick<CSSStyleDeclaration, "getPropertyValue" | "setProperty" |
+ 
+ const PHASE_KEYS = ["offset", "period"] as const satisfies readonly (keyof WavePhase)[];
+ 
+-function stripEdge(pane: Pane, strips: WaveLayout["strips"], edge: keyof Edges): number | null {
+-  const side = SIDES.find((each) => STRIP_PANES[each][edge] === pane);
+-  return side === undefined ? null : strips[side][edge];
++function mergeChain<S>(strips: Readonly<Record<Side, S>>): {
++  readonly first: Pane;
++  readonly next: readonly Link<S, Pane>[];
++} {
++  return {
++    first: STRIP_PANES.local.left,
++    next: SIDES.map((side) => ({ strip: strips[side], pane: STRIP_PANES[side].right })),
++  };
++}
++
++function paneEnd(enters: number | null, leaves: number | null): WaveEnds | null {
++  if (enters === null) {
++    return leaves === null ? null : { kind: "leaves", at: leaves };
++  }
++  return leaves === null ? { kind: "enters", at: enters } : { kind: "through", enters, leaves };
++}
++
++export function chainEnds<P extends string>(
++  first: P,
++  next: readonly Link<Edges, P>[],
++): ReadonlyMap<P, WaveEnds> {
++  const ends = new Map<P, WaveEnds>();
++  [first, ...next.map(({ pane }) => pane)].forEach((pane, index) => {
++    const end = paneEnd(next[index - 1]?.strip.right ?? null, next[index]?.strip.left ?? null);
++    if (end !== null) {
++      ends.set(pane, end);
++    }
++  });
++  return ends;
+ }
+ 
+ export function paneEnds(strips: WaveLayout["strips"]): Readonly<Record<Pane, WaveEnds | null>> {
+-  function ends(pane: Pane): WaveEnds | null {
+-    const leaves = stripEdge(pane, strips, "left");
+-    const enters = stripEdge(pane, strips, "right");
+-    if (enters === null) {
+-      return leaves === null ? null : { kind: "leaves", at: leaves };
+-    }
+-    return leaves === null ? { kind: "enters", at: enters } : { kind: "through", enters, leaves };
+-  }
+-  return { left: ends("left"), center: ends("center"), right: ends("right") };
++  const { first, next } = mergeChain(strips);
++  const ends = chainEnds(first, next);
++  return {
++    left: ends.get("left") ?? null,
++    center: ends.get("center") ?? null,
++    right: ends.get("right") ?? null,
++  };
+ }
+ 
+ export function panePhases(layout: WaveLayout): Readonly<Record<Pane, WavePhase | null>> {
+@@ -45,23 +75,24 @@ export function panePhases(layout: WaveLayout): Readonly<Record<Pane, WavePhase
+   return { left: phase("left"), center: phase("center"), right: phase("right") };
+ }
+ 
++// WebKit paints each box, and the mask's origin in it, at whole device pixels (plan §2 #64).
++function snapped(element: Measured, ratio: number): Edges {
++  const { left, right } = element.getBoundingClientRect();
++  return { left: Math.round(left * ratio) / ratio, right: Math.round(right * ratio) / ratio };
++}
++
+ export function layoutOf(
+   views: MeasuredPanes,
+   [local, remote]: readonly [Measured, Measured],
+   ratio: number,
+ ): WaveLayout {
+-  // WebKit paints each box, and the mask's origin in it, at whole device pixels (plan §2 #64).
+-  function snapped(element: Measured): Edges {
+-    const { left, right } = element.getBoundingClientRect();
+-    return { left: Math.round(left * ratio) / ratio, right: Math.round(right * ratio) / ratio };
+-  }
+   return {
+     scrollers: {
+-      left: snapped(views.left.scrollDOM),
+-      center: snapped(views.center.scrollDOM),
+-      right: snapped(views.right.scrollDOM),
++      left: snapped(views.left.scrollDOM, ratio),
++      center: snapped(views.center.scrollDOM, ratio),
++      right: snapped(views.right.scrollDOM, ratio),
+     },
+-    strips: { local: snapped(local), remote: snapped(remote) },
++    strips: { local: snapped(local, ratio), remote: snapped(remote, ratio) },
+   };
+ }
+ 
+@@ -81,19 +112,27 @@ export function writePhase(style: PhaseStyle, phase: WavePhase | null): void {
+   }
+ }
+ 
+-export class WavePhases {
+-  readonly #hosts: WaveHosts;
+-  readonly #views: () => MeasuredPanes;
++export class ChainPhases<P extends string> {
++  readonly #chain: WaveChain<P>;
++  readonly #panes: readonly P[];
++  readonly #hosts: Readonly<Record<P, HTMLElement>>;
++  readonly #views: () => MeasuredViews<P>;
+   readonly #observer: ResizeObserver;
+   #resolution: MediaQueryList;
+ 
+-  constructor(hosts: WaveHosts, views: () => MeasuredPanes) {
++  constructor(
++    chain: WaveChain<P>,
++    hosts: Readonly<Record<P, HTMLElement>>,
++    views: () => MeasuredViews<P>,
++  ) {
++    this.#chain = chain;
++    this.#panes = [chain.first, ...chain.next.map(({ pane }) => pane)];
+     this.#hosts = hosts;
+     this.#views = views;
+     this.#observer = new ResizeObserver(() => {
+       this.#measure();
+     });
+-    for (const pane of PANES) {
++    for (const pane of this.#panes) {
+       this.#observer.observe(hosts[pane]);
+     }
+     this.#resolution = this.#watchResolution();
+@@ -112,18 +151,32 @@ export class WavePhases {
+   }
+ 
+   #measure(): void {
+-    const layout = layoutOf(this.#views(), this.#hosts.strips, devicePixelRatio);
+-    const phases = panePhases(layout);
+-    for (const pane of PANES) {
+-      writePhase(this.#hosts[pane].style, phases[pane]);
++    const ratio = devicePixelRatio;
++    const views = this.#views();
++    const next = this.#chain.next.map(({ strip, pane }) => ({
++      strip: snapped(strip, ratio),
++      pane,
++    }));
++    const ends = chainEnds(this.#chain.first, next);
++    for (const pane of this.#panes) {
++      const end = ends.get(pane);
++      const left = snapped(views[pane].scrollDOM, ratio).left;
++      writePhase(this.#hosts[pane].style, end === undefined ? null : wavePhase(left, end));
+     }
+   }
+ 
+   destroy(): void {
+     this.#observer.disconnect();
+     this.#resolution.removeEventListener("change", this.#resolutionChanged);
+-    for (const pane of PANES) {
++    for (const pane of this.#panes) {
+       writePhase(this.#hosts[pane].style, null);
+     }
+   }
+ }
++
++export class WavePhases extends ChainPhases<Pane> {
++  constructor(hosts: WaveHosts, views: () => MeasuredPanes) {
++    const [local, remote] = hosts.strips;
++    super(mergeChain({ local, remote }), hosts, views);
++  }
++}
+diff --git a/frontend/src/editor/range.browser.test.ts b/frontend/src/editor/range.browser.test.ts
+index 3172403..cf46186 100644
+--- a/frontend/src/editor/range.browser.test.ts
++++ b/frontend/src/editor/range.browser.test.ts
+@@ -21,7 +21,11 @@ const WAIT_MS = 3000;
+ const SCREENSHOTS = "/tmp/yamt-range";
+ const MOUNTED = "data-range-probe";
+ const PATH = "src/probe.ts";
+-const OPTIONS: RangeOptions = { preferences: { theme: "dark", keys: DEFAULT_KEYS } };
++const OPTIONS: RangeOptions = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  collapsed: false,
++  threads: [],
++};
+ const EVENTS: RangeEvents = { startThread: () => {}, toggleThreads: () => {}, hosts: () => {} };
+ const LEFT = [
+   "const first = 1;",
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+index 2f7e3f9..cf3669e 100644
+--- a/frontend/src/editor/range.ts
++++ b/frontend/src/editor/range.ts
+@@ -1,7 +1,8 @@
+ import type { EditorView } from "@codemirror/view";
+ 
+-import type { Difference, ShownThread, ThreadLine } from "../ipc";
++import type { Column, Difference, ShownThread, ThreadLine } from "../ipc";
+ import type { CompareHosts } from "./compare";
++import { mirrorSteps, ownerSteps, rangeRuns } from "./internal/columnFolds";
+ import { differenceField } from "./internal/compareFields";
+ import { moveToDifference } from "./internal/compareFocus";
+ import { CompareFrame } from "./internal/compareFrame";
+@@ -13,9 +14,11 @@ import {
+   showColumnDifferences,
+   type ColumnViews,
+ } from "./internal/compareViews";
++import type { Fold } from "./internal/foldRuns";
+ import { languageOf, loadLanguage } from "./internal/language";
+ import type { Direction } from "./internal/navigation";
+ import type { PaneSettings, Preferences } from "./internal/pane";
++import { columnWaves, RangeFolds } from "./internal/rangeFolds";
+ import { showThreadRows, threadAnchors, threadField } from "./internal/threadField";
+ import { ThreadHosts } from "./internal/threadHosts";
+ import { lineCounts, numberPress, threadNumbers } from "./internal/threadNumbers";
+@@ -30,7 +33,11 @@ export type RangeTexts = {
+   readonly differences: readonly Difference[];
+ };
+ 
+-export type RangeOptions = { readonly preferences: Preferences };
++export type RangeOptions = {
++  readonly preferences: Preferences;
++  readonly collapsed: boolean;
++  readonly threads: readonly ShownThread[];
++};
+ 
+ export type RangeEvents = {
+   readonly startThread: (line: ThreadLine) => void;
+@@ -42,38 +49,46 @@ export class RangeController {
+   readonly #differences: readonly Difference[];
+   readonly #events: RangeEvents;
+   readonly #threadHosts: ThreadHosts;
++  readonly #folds: RangeFolds;
+   readonly #views: ColumnViews;
+   readonly #strip: CompareStrip;
+   readonly #frame: CompareFrame;
++  #threads: readonly ShownThread[];
+   #settings: PaneSettings;
+   #destroyed = false;
+ 
+   constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions, events: RangeEvents) {
+     this.#differences = texts.differences;
+     this.#events = events;
++    this.#threads = options.threads;
+     this.#settings = { preferences: options.preferences, platform: navigator.platform };
++    this.#folds = new RangeFolds(hosts, () => this.#views);
+     this.#views = createReadOnlyColumnViews(texts, hosts, {
+       settings: this.#settings,
+       updated: (_column, update) => {
+         this.#threadHosts.restoreFocus();
+         this.#frame.changed(update);
+       },
+-      extensions: [
++      extensions: (column) => [
+         threadField,
+         threadNumbers((view, line, onBadge) => {
+           this.#pressed(view, line, onBadge);
+         }),
++        this.#folds.column(column),
+       ],
+     });
+     this.#threadHosts = new ThreadHosts({ views: this.#views, columns: hosts });
+-    this.#strip = new CompareStrip(hosts.strip);
++    this.#strip = new CompareStrip(hosts.strip, this.#folds.hovered);
+     this.#frame = new CompareFrame({
+       views: this.#views,
+       strip: this.#strip,
+-      fields: [differenceField, threadField],
++      fields: [differenceField, threadField, ownerSteps, mirrorSteps],
+       anchors: threadAnchors,
++      waves: columnWaves,
+     });
+     showColumnDifferences(this.#views, texts.differences);
++    this.#folds.renew(this.#runs(), options.collapsed);
++    this.showThreads(options.threads);
+     const description = languageOf(texts.path);
+     if (description !== null) {
+       const { left, right } = this.#views;
+@@ -82,6 +97,11 @@ export class RangeController {
+     this.#frame.request();
+   }
+ 
++  #runs(): Fold<Column>[] {
++    const docs = { left: this.#views.left.state.doc, right: this.#views.right.state.doc };
++    return rangeRuns(this.#differences, this.#threads, docs);
++  }
++
+   #pressed(view: EditorView, line: number, onBadge: boolean): void {
+     const column = view === this.#views.left ? "left" : "right";
+     const counts = view.state.field(threadField)?.counts ?? [];
+@@ -98,11 +118,17 @@ export class RangeController {
+     setColumnPreferences(this.#views, this.#settings);
+   }
+ 
++  setCollapsed(collapsed: boolean): void {
++    this.#folds.renew(this.#runs(), collapsed);
++    this.#frame.realign("left");
++  }
++
+   moveToChange(direction: Direction): void {
+     moveToDifference(this.#views, direction);
+   }
+ 
+   showThreads(threads: readonly ShownThread[]): void {
++    this.#threads = threads;
+     const rows = threadRows(this.#differences, threads);
+     const hostsChanged = this.#threadHosts.show(rows);
+     for (const column of COLUMNS) {
+@@ -123,6 +149,7 @@ export class RangeController {
+       this.#events.hosts(new Map());
+     }
+     this.#frame.destroy();
++    this.#folds.destroy();
+     for (const column of COLUMNS) {
+       this.#views[column].destroy();
+     }
+diff --git a/frontend/src/editor/rangeThreads.browser.test.ts b/frontend/src/editor/rangeThreads.browser.test.ts
+index b382e6b..7559c1b 100644
+--- a/frontend/src/editor/rangeThreads.browser.test.ts
++++ b/frontend/src/editor/rangeThreads.browser.test.ts
+@@ -164,7 +164,7 @@ async function opened(probe: ProbeCase = MODIFIED): Promise<Opened> {
+       differences: comparison.differences,
+     },
+     hosts,
+-    { preferences: { theme: "dark", keys: DEFAULT_KEYS } },
++    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed: false, threads: [] },
+     events,
+   );
+   controllers.push(controller);
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 27fa87b..3662e0e 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -508,7 +508,7 @@ ul.markdown-list {
+ 
+ .cm-editor.cm-thread-lines
+   .cm-lineNumbers
+-  .cm-gutterElement:hover:not(:has(.cm-thread-count))::before {
++  .cm-gutterElement:hover:not(:has(.cm-thread-count), .fold-wave-cell)::before {
+   position: absolute;
+   top: 0;
+   bottom: 0;
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index e3011c7..cb622e5 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -266,6 +266,19 @@ test("stored threads come back collapsed; open and collapse per thread and per l
+   expect(threads.boxOf("nothing")).toBeNull();
+ });
+ 
++test("a toggle changes only its own threads: other open threads stay open either way", async () => {
++  const { threads } = await opened(SEEDED);
++  const ids = [0, 1, 2, 3].map((index) => threadAt(threads, index).id);
++
++  threads.toggle(["thread-2"]);
++  threads.toggle(["thread-0", "thread-1"]);
++  const afterOpening = new Set(threads.open.value);
++  threads.toggle(["thread-0"]);
++
++  expect(afterOpening).toEqual(new Set(ids.slice(0, 3)));
++  expect(threads.open.value).toEqual(new Set([ids[1], ids[2]]));
++});
++
+ test("counts per file ignore drafts", async () => {
+   const { threads, board, other } = await opened(SEEDED);
+   threads.startThread(other, changedThreadLine("left", 0));
+@@ -477,6 +490,24 @@ test("a failed list reports it and keeps the empty list", async () => {
+   expect(problems).toEqual([{ action: "threads", step: "list", cause: { kind: "WorkerStopped" } }]);
+ });
+ 
++test.each<[string, Edit]>([
++  ["read", () => ({})],
++  [
++    "refused",
++    () => ({ listThreads: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }) }),
++  ],
++])("listed turns true once the first list settles, %s or not", async (_name, edit) => {
++  const fixture = createFixtureRangeSource(log, SEEDED);
++  await fixture.openRange();
++  const threads = createRangeThreads({ ...fixture, ...edit(fixture) }, () => undefined);
++
++  const loading = threads.load();
++  const whileLoading = threads.listed.value;
++  await loading;
++
++  expect([whileLoading, threads.listed.value]).toEqual([false, true]);
++});
++
+ test("a Cancel while Comment is in flight still adds and opens the thread", async () => {
+   const openers: (() => void)[] = [];
+   const gate = new Promise<void>((resolve) => {
+diff --git a/frontend/src/ui/rangeThreads.ts b/frontend/src/ui/rangeThreads.ts
+index b1b45bd..e6f12db 100644
+--- a/frontend/src/ui/rangeThreads.ts
++++ b/frontend/src/ui/rangeThreads.ts
+@@ -29,6 +29,7 @@ type ThreadBox =
+ 
+ export type RangeThreads = AddsInFlight & {
+   readonly list: Readonly<ShallowRef<ThreadList>>;
++  readonly listed: Readonly<ShallowRef<boolean>>;
+   readonly open: Readonly<ShallowRef<ReadonlySet<ThreadId>>>;
+   readonly drafts: Readonly<ShallowRef<ReadonlyMap<string, Draft>>>;
+   readonly counts: ComputedRef<ReadonlyMap<RangeFileId, number>>;
+@@ -67,6 +68,7 @@ type State = {
+   readonly source: ReviewSource;
+   readonly report: (problem: Problem) => void;
+   readonly list: ShallowRef<ThreadList>;
++  readonly listed: ShallowRef<boolean>;
+   readonly open: ShallowRef<ReadonlySet<ThreadId>>;
+   readonly drafts: RangeDrafts;
+   readonly keys: Map<ThreadId, string>;
+@@ -132,15 +134,8 @@ function toggle(state: State, keys: readonly string[]): void {
+     .map(({ id }) => id)
+     .filter((id) => keys.includes(keyOf(state, id)));
+   const opening = ids.some((id) => !state.open.value.has(id));
+-  const open = new Set(state.open.value);
+-  for (const id of ids) {
+-    if (opening) {
+-      open.add(id);
+-    } else {
+-      open.delete(id);
+-    }
+-  }
+-  state.open.value = open;
++  const kept = [...state.open.value].filter((id) => opening || !ids.includes(id));
++  state.open.value = new Set(opening ? [...kept, ...ids] : kept);
+ }
+ 
+ async function changed(
+@@ -212,6 +207,7 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue"
+   return {
+     load: async () => {
+       await changed(state, "list", () => source.listThreads());
++      state.listed.value = true;
+     },
+     queue: async (message, text) => {
+       if (
+@@ -274,6 +270,7 @@ export function createRangeThreads(
+     source,
+     report,
+     list: shallowRef<ThreadList>({ threads: [] }),
++    listed: shallowRef(false),
+     open: shallowRef<ReadonlySet<ThreadId>>(new Set()),
+     drafts: createRangeDrafts(),
+     keys: new Map(),
+@@ -282,6 +279,7 @@ export function createRangeThreads(
+   const { threadDraft: _threadDraft, keepStored: _keepStored, ...drafts } = state.drafts;
+   return {
+     list: state.list,
++    listed: state.listed,
+     open: state.open,
+     ...drafts,
+     ...counted(state),
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+index 5218944..3cbf50a 100644
+--- a/frontend/src/ui/useRangeController.test.ts
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -2,7 +2,13 @@ import { expect, test } from "vitest";
+ import { effectScope, nextTick, shallowRef, type ShallowRef } from "vue";
+ 
+ import type { Preferences, RangeEvents, RangeTexts, ShownThread } from "../editor";
+-import { changedThreadLine, createFixtureRangeSource, log, type RangeFile } from "../ipc";
++import {
++  changedThreadLine,
++  createFixtureRangeSource,
++  log,
++  type RangeFile,
++  type RangeSource,
++} from "../ipc";
+ import { createRangeThreads } from "./rangeThreads";
+ import { preferencesOf, startSettings } from "./settings";
+ import {
+@@ -13,7 +19,13 @@ import {
+   type ShownRange,
+ } from "./useRangeController";
+ 
+-type Built = { readonly texts: RangeTexts; readonly hosts: string; readonly theme: string };
++type Built = {
++  readonly texts: RangeTexts;
++  readonly hosts: string;
++  readonly theme: string;
++  readonly collapsed: boolean;
++  readonly threads: readonly string[];
++};
+ 
+ type Run = {
+   readonly handle: RangeHandle;
+@@ -21,12 +33,20 @@ type Run = {
+   readonly calls: string[];
+   readonly hosts: ShallowRef<string | null>;
+   readonly preferences: ShallowRef<Preferences>;
++  readonly collapsed: ShallowRef<boolean>;
+   readonly threads: ShallowRef<readonly ShownThread[]>;
++  readonly listed: ShallowRef<boolean>;
+   readonly events: () => RangeEvents;
+   readonly answer: (file: RangeFile | null) => Promise<void>;
+   readonly stop: () => void;
+ };
+ 
++type RunFrom = {
++  readonly hosts?: string | null;
++  readonly listed?: boolean;
++  readonly collapsed?: ShallowRef<boolean>;
++};
++
+ const DARK = preferencesOf(startSettings("dark"));
+ const LIGHT = preferencesOf(startSettings("light"));
+ const TEXTS: RangeFile = {
+@@ -37,13 +57,26 @@ const TEXTS: RangeFile = {
+   mode: { kind: "changed", old: "file", new: "executable" },
+ };
+ const THREAD: ShownThread = { key: "thread-1", line: changedThreadLine("left", 2), shown: "open" };
++const IDLE: ShownRange = {
++  setPreferences: () => {},
++  setCollapsed: () => {},
++  moveToChange: () => {},
++  showThreads: () => {},
++  destroy: () => {},
++};
+ 
+-function run(firstHosts: string | null): Run {
++function keysOf(threads: readonly ShownThread[]): string[] {
++  return threads.map(({ key }) => key);
++}
++
++function run(from: RunFrom = {}): Run {
+   const built: Built[] = [];
+   const calls: string[] = [];
+-  const hosts = shallowRef<string | null>(firstHosts);
++  const hosts = shallowRef<string | null>(from.hosts === undefined ? "hosts" : from.hosts);
+   const preferences = shallowRef(DARK);
++  const collapsed = from.collapsed ?? shallowRef(true);
+   const threads = shallowRef<readonly ShownThread[]>([]);
++  const listed = shallowRef(from.listed ?? true);
+   const given: RangeEvents[] = [];
+   const answers: ((file: RangeFile | null) => void)[] = [];
+   const loaded = new Promise<RangeFile | null>((resolve) => {
+@@ -52,8 +85,9 @@ function run(firstHosts: string | null): Run {
+   const scope = effectScope();
+   const shown: ShownRange = {
+     setPreferences: (next) => calls.push(`preferences ${next.theme}`),
++    setCollapsed: (on) => calls.push(`collapsed ${on}`),
+     moveToChange: (direction) => calls.push(`move ${direction}`),
+-    showThreads: (next) => calls.push(`threads ${next.map(({ key }) => key).join(",")}`),
++    showThreads: (next) => calls.push(`threads ${keysOf(next).join(",")}`),
+     destroy: () => calls.push("destroy"),
+   };
+   const handle = scope.run(() =>
+@@ -62,13 +96,17 @@ function run(firstHosts: string | null): Run {
+       load: () => loaded,
+       hosts: () => hosts.value,
+       preferences,
++      collapsed,
+       threads: () => threads.value,
++      listed: () => listed.value,
+       events: {
+         startThread: (line) => calls.push(`start ${line.kind}`),
+         toggleThreads: (keys) => calls.push(`toggle ${keys.join(",")}`),
+       },
+-      build: (texts, at, chosen, events) => {
+-        built.push({ texts, hosts: at, theme: chosen.theme });
++      build: (texts, at, options, events) => {
++        const { preferences: chosen, collapsed: on } = options;
++        const threadKeys = keysOf(options.threads);
++        built.push({ texts, hosts: at, theme: chosen.theme, collapsed: on, threads: threadKeys });
+         given.push(events);
+         return shown;
+       },
+@@ -83,7 +121,9 @@ function run(firstHosts: string | null): Run {
+     calls,
+     hosts,
+     preferences,
++    collapsed,
+     threads,
++    listed,
+     events: () => {
+       const [events] = given;
+       if (events === undefined) {
+@@ -105,7 +145,7 @@ function run(firstHosts: string | null): Run {
+ }
+ 
+ test("a texts reply builds one controller on the hosts with the path, both texts and the preferences", async () => {
+-  const live = run("hosts");
++  const live = run();
+   expect(live.handle.content.value).toEqual({ kind: "loading" });
+ 
+   await live.answer(TEXTS);
+@@ -119,12 +159,14 @@ test("a texts reply builds one controller on the hosts with the path, both texts
+       texts: { path: "src/board.ts", left: "a\n", right: "b\n", differences: [] },
+       hosts: "hosts",
+       theme: "dark",
++      collapsed: true,
++      threads: [],
+     },
+   ]);
+ });
+ 
+ test("the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view", async () => {
+-  const live = run(null);
++  const live = run({ hosts: null });
+   live.handle.moveToChange("down");
+   await live.answer(TEXTS);
+   expect(live.built).toEqual([]);
+@@ -143,11 +185,11 @@ test("the controller waits for its hosts, then follows preferences and arrows, a
+   live.stop();
+   live.handle.moveToChange("down");
+ 
+-  expect(live.calls).toEqual(["threads ", "preferences light", "move up", "destroy"]);
++  expect(live.calls).toEqual(["preferences light", "move up", "destroy"]);
+ });
+ 
+-test("the built controller shows the file's threads at once and each later change of them", async () => {
+-  const live = run(null);
++test("the controller is built with the file's threads at that moment, and shown each later change of them", async () => {
++  const live = run({ hosts: null });
+   live.threads.value = [THREAD];
+   await nextTick();
+   expect(live.calls).toEqual([]);
+@@ -155,26 +197,89 @@ test("the built controller shows the file's threads at once and each later chang
+   await live.answer(TEXTS);
+   live.hosts.value = "mounted";
+   await nextTick();
+-  expect(live.calls).toEqual(["threads thread-1"]);
++  expect(live.built.map(({ threads }) => threads)).toEqual([["thread-1"]]);
++  expect(live.calls).toEqual([]);
+ 
+   live.threads.value = [THREAD, { ...THREAD, key: "draft-0", shown: "draft" }];
+   await nextTick();
+-  expect(live.calls).toEqual(["threads thread-1", "threads thread-1,draft-0"]);
++  expect(live.calls).toEqual(["threads thread-1,draft-0"]);
++});
++
++test("a thread change calls showThreads and never setCollapsed (catches runs recomputed on an add)", async () => {
++  const live = run();
++  await live.answer(TEXTS);
++
++  live.threads.value = [THREAD];
++  await nextTick();
++  live.threads.value = [];
++  await nextTick();
++
++  expect(live.calls).toEqual(["threads thread-1", "threads "]);
++});
++
++test("the controller is built with the store's collapsing at that moment", async () => {
++  const live = run({ hosts: null });
++  live.collapsed.value = false;
++  await nextTick();
++
++  await live.answer(TEXTS);
++  live.hosts.value = "mounted";
++  await nextTick();
++
++  expect(live.built.map(({ collapsed }) => collapsed)).toEqual([false]);
++  expect(live.calls).toEqual([]);
++});
++
++test("a toggle reaches every live controller through setCollapsed with no rebuild; a file opened after it builds with the new state", async () => {
++  const collapsed = shallowRef(true);
++  const first = run({ collapsed });
++  const second = run({ collapsed });
++  await first.answer(TEXTS);
++  await second.answer(TEXTS);
++
++  collapsed.value = false;
++  await nextTick();
++  const later = run({ collapsed });
++  await later.answer(TEXTS);
++  collapsed.value = true;
++  await nextTick();
++
++  expect([first, second].map(({ built, calls }) => [built.length, calls])).toEqual([
++    [1, ["collapsed false", "collapsed true"]],
++    [1, ["collapsed false", "collapsed true"]],
++  ]);
++  expect(later.built.map(({ collapsed: on }) => on)).toEqual([false]);
++  expect(later.calls).toEqual(["collapsed true"]);
++});
++
++test("nothing builds before the thread list was read once; then it builds with the threads read", async () => {
++  const live = run({ listed: false });
++  await live.answer(TEXTS);
++  live.threads.value = [THREAD];
++  await nextTick();
++  expect(live.built).toEqual([]);
++
++  live.listed.value = true;
++  await nextTick();
++
++  expect(live.built.map(({ threads }) => threads)).toEqual([["thread-1"]]);
++  expect(live.calls).toEqual([]);
+ });
+ 
+ test("a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again)", async () => {
+-  const live = run("hosts");
++  const live = run();
+   await live.answer(TEXTS);
+   live.stop();
+ 
+   live.threads.value = [THREAD];
++  live.collapsed.value = false;
+   await nextTick();
+ 
+-  expect(live.calls).toEqual(["threads ", "destroy"]);
++  expect(live.calls).toEqual(["destroy"]);
+ });
+ 
+ test("the controller gets the line events and its hosts reach threadHosts", async () => {
+-  const live = run("hosts");
++  const live = run();
+   await live.answer(TEXTS);
+   const events = live.events();
+   const hosts = new Map<string, HTMLElement>();
+@@ -183,7 +288,7 @@ test("the controller gets the line events and its hosts reach threadHosts", asyn
+   events.toggleThreads(["thread-1", "thread-2"]);
+   events.hosts(hosts);
+ 
+-  expect(live.calls).toEqual(["threads ", "start added", "toggle thread-1,thread-2"]);
++  expect(live.calls).toEqual(["start added", "toggle thread-1,thread-2"]);
+   expect(live.handle.threadHosts.value).toBe(hosts);
+ });
+ 
+@@ -195,7 +300,7 @@ test.each<RangeFile>([
+   { kind: "kindChanged", old: "file", new: "link" },
+   { kind: "submodule", old: null, new: "abc" },
+ ])("a $kind reply builds no controller and shows its sentence", async (file) => {
+-  const live = run("hosts");
++  const live = run();
+ 
+   await live.answer(file);
+ 
+@@ -204,7 +309,7 @@ test.each<RangeFile>([
+ });
+ 
+ test("the binary sentence is the one rangeText words", async () => {
+-  const live = run("hosts");
++  const live = run();
+ 
+   await live.answer({ kind: "binary" });
+ 
+@@ -212,7 +317,7 @@ test("the binary sentence is the one rangeText words", async () => {
+ });
+ 
+ test("a reply arriving after unmount is dropped: nothing built, nothing shown", async () => {
+-  const live = run("hosts");
++  const live = run();
+   live.stop();
+ 
+   await live.answer(TEXTS);
+@@ -223,7 +328,7 @@ test("a reply arriving after unmount is dropped: nothing built, nothing shown",
+ });
+ 
+ test("a failed load builds nothing and stays loading", async () => {
+-  const live = run("hosts");
++  const live = run();
+ 
+   await live.answer(null);
+ 
+@@ -232,7 +337,7 @@ test("a failed load builds nothing and stays loading", async () => {
+ });
+ 
+ test("preferences changed before the controller exists reach it at build, not through a missing controller", async () => {
+-  const live = run(null);
++  const live = run({ hosts: null });
+   live.preferences.value = LIGHT;
+   await nextTick();
+ 
+@@ -241,7 +346,7 @@ test("preferences changed before the controller exists reach it at build, not th
+   await nextTick();
+ 
+   expect(live.built.map(({ theme }) => theme)).toEqual(["light"]);
+-  expect(live.calls).toEqual(["threads "]);
++  expect(live.calls).toEqual([]);
+ });
+ 
+ test.each(["left", "right", "strip"] as const)(
+@@ -295,3 +400,53 @@ test("a press on a line number starts a draft in that file only; toggle opens an
+   parts.events.toggleThreads([key]);
+   expect(threads.open.value.has(stored.id)).toBe(false);
+ });
++
++test.each([
++  ["read", (fixture: RangeSource): RangeSource => fixture, [4]],
++  [
++    "failed",
++    (fixture: RangeSource): RangeSource => ({
++      ...fixture,
++      listThreads: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }),
++    }),
++    [0],
++  ],
++] as const)(
++  "a file waits for the thread list, then builds once it was %s (catches columns stuck empty)",
++  async (_name, source, expected) => {
++    const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
++    const start = await fixture.openRange();
++    const board = start.ok
++      ? start.value.files.find(({ path }) => path === "src/board/board.ts")
++      : undefined;
++    if (board === undefined) {
++      throw new Error("the fixture lost board.ts");
++    }
++    const threads = createRangeThreads(source(fixture), () => undefined);
++    const built: number[] = [];
++    const scope = effectScope();
++    scope.run(() =>
++      followRange({
++        path: board.path,
++        load: async () => TEXTS,
++        hosts: () => "hosts",
++        preferences: DARK,
++        collapsed: true,
++        ...rangeThreadParts(threads, board),
++        build: (_texts, _hosts, options) => {
++          built.push(options.threads.length);
++          return IDLE;
++        },
++      }),
++    );
++    await nextTick();
++    const beforeList = [...built];
++
++    await threads.load();
++    await nextTick();
++    scope.stop();
++
++    expect(beforeList).toEqual([]);
++    expect(built).toEqual(expected);
++  },
++);
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+index c27076a..41a807e 100644
+--- a/frontend/src/ui/useRangeController.ts
++++ b/frontend/src/ui/useRangeController.ts
+@@ -13,6 +13,7 @@ import {
+   type Direction,
+   type Preferences,
+   type RangeEvents,
++  type RangeOptions,
+   type RangeTexts,
+   type ShownThread,
+ } from "../editor";
+@@ -36,7 +37,7 @@ type RangeContent =
+ 
+ export type ShownRange = Pick<
+   RangeController,
+-  "setPreferences" | "moveToChange" | "showThreads" | "destroy"
++  "setPreferences" | "setCollapsed" | "moveToChange" | "showThreads" | "destroy"
+ >;
+ 
+ type ThreadHosts = ReadonlyMap<string, HTMLElement>;
+@@ -52,12 +53,14 @@ export type RangeParts<H> = {
+   readonly load: () => Promise<RangeFile | null>;
+   readonly hosts: () => H | null;
+   readonly preferences: MaybeRefOrGetter<Preferences>;
++  readonly collapsed: MaybeRefOrGetter<boolean>;
+   readonly threads: () => readonly ShownThread[];
++  readonly listed: () => boolean;
+   readonly events: Pick<RangeEvents, "startThread" | "toggleThreads">;
+   readonly build: (
+     texts: RangeTexts,
+     hosts: H,
+-    preferences: Preferences,
++    options: RangeOptions,
+     events: RangeEvents,
+   ) => ShownRange;
+ };
+@@ -85,7 +88,7 @@ function land(live: Live, path: string, file: RangeFile | null): void {
+ 
+ function build<H>(live: Live, parts: RangeParts<H>): void {
+   const hosts = parts.hosts();
+-  if (live.waiting === null || hosts === null) {
++  if (live.waiting === null || hosts === null || !parts.listed()) {
+     return;
+   }
+   const events: RangeEvents = {
+@@ -94,10 +97,25 @@ function build<H>(live: Live, parts: RangeParts<H>): void {
+       live.threadHosts.value = next;
+     },
+   };
+-  const controller = parts.build(live.waiting, hosts, toValue(parts.preferences), events);
++  const options: RangeOptions = {
++    preferences: toValue(parts.preferences),
++    collapsed: toValue(parts.collapsed),
++    threads: parts.threads(),
++  };
++  live.controller = parts.build(live.waiting, hosts, options, events);
+   live.waiting = null;
+-  live.controller = controller;
+-  controller.showThreads(parts.threads());
++}
++
++function followLive<H>(live: Live, parts: RangeParts<H>): void {
++  watch(toRef(parts.preferences), (next) => {
++    live.controller?.setPreferences(next);
++  });
++  watch(toRef(parts.collapsed), (on) => {
++    live.controller?.setCollapsed(on);
++  });
++  watch(parts.threads, (next) => {
++    live.controller?.showThreads(next);
++  });
+ }
+ 
+ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+@@ -110,18 +128,13 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+   };
+ 
+   watch(
+-    [live.content, parts.hosts],
++    [live.content, parts.hosts, parts.listed],
+     () => {
+       build(live, parts);
+     },
+     { flush: "post" },
+   );
+-  watch(toRef(parts.preferences), (next) => {
+-    live.controller?.setPreferences(next);
+-  });
+-  watch(parts.threads, (next) => {
+-    live.controller?.showThreads(next);
+-  });
++  followLive(live, parts);
+   void parts.load().then((file) => {
+     land(live, parts.path, file);
+   });
+@@ -155,9 +168,10 @@ export function shownHosts<D, S>({
+ export function rangeThreadParts(
+   threads: RangeThreads,
+   file: Pick<RangeEntry, "id">,
+-): Pick<RangeParts<unknown>, "threads" | "events"> {
++): Pick<RangeParts<unknown>, "threads" | "listed" | "events"> {
+   return {
+     threads: () => threads.shownFor(file.id),
++    listed: () => threads.listed.value,
+     events: {
+       startThread: (line) => {
+         threads.startThread(file.id, line);
+@@ -180,8 +194,8 @@ export function useRangeController(
+     load: () => store.loadFile(file),
+     hosts: () => shownHosts(hosts),
+     preferences: options.preferences,
++    collapsed: store.collapsing,
+     ...rangeThreadParts(store.threads, file),
+-    build: (texts, shown, preferences, events) =>
+-      new RangeController(texts, shown, { preferences }, events),
++    build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
+   });
+ }

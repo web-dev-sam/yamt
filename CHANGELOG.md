@@ -11,6 +11,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Review a commit range: in the tree view every folder shows the sum of its files' `+n −m`, subfolders included; a
   binary file adds nothing, and a folder holding only such files shows none.
+- Review a commit range: unchanged lines collapse behind the merge window's wavy line, across both columns and the
+  strip between them; each click on the wave shows more of them (4 more lines next to the changes, then 8 more, then
+  the rest). A "Collapse unchanged fragments" button after Previous/Next turns it off and on; it is the same remembered
+  choice as the merge window's. A line with a comment thread is never hidden, and a search match in hidden lines
+  shows them.
 
 ### Changed
 
