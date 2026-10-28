@@ -40,3 +40,11 @@ at its end and following; no scroller → nothing. Stryker on `useFollowEnd.ts`:
   different shade in both themes, as `EditDiff`'s box already is (request rule 1 named `opaque-scroller`).
 - A height change not through `content` (an edit diff loading inside the list) does not scroll the list.
 - Bands: a measure far below the viewport once read 20 px apart; on screen equal. Not compared with a run before.
+
+## Reviews
+
+- Mutants `just mutants c72b022`: 31 killed, 0 survived (`.omp/run/mutants/AiThinkingFollow.txt`).
+- `AiThinkingFollowBoundary`: pass, no findings (contract word for word; one rule, no copy; `following` one writer).
+- `AiThinkingFollowCorrect`: pass; one nit (#1658, an inert assertion in the null-scroller test) dropped at triage.
+  Server log behaviour judged unchanged by reading; the reappearing-scroller reset never happens in practice (a
+  shown log only appends and trims).

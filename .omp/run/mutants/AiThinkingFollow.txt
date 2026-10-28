@@ -1,0 +1,4 @@
+just mutants c72b022 (patch 1c1568c, AiThinkingFollow), 2026-10-28
+Rust: no changes since c72b022
+Stryker: 1 file (src/ui/useFollowEnd.ts), 31 mutants: 31 killed, 0 timeout, 0 survived, 0 no coverage. Score 100.00.
+Survivors: none.
