@@ -1,12 +1,14 @@
 import type { Text } from "@codemirror/state";
 
-import type { Chunk } from "../../ipc";
+import type { Chunk, Column } from "../../ipc";
 import { toDocPos, type DocPos } from "./docPos";
 import { PANES, type Pane } from "./geometry";
 
 export type Hidden = { readonly from: DocPos; readonly to: DocPos };
-export type FoldLevel = Readonly<Record<Pane, Hidden | null>>;
-export type Fold = { readonly hidden: readonly FoldLevel[] };
+export type FoldLevel<P extends string = Pane> = Readonly<Record<P, Hidden | null>>;
+export type Fold<P extends string = Pane> = { readonly hidden: readonly FoldLevel<P>[] };
+export type LineSpan = { readonly start: number; readonly len: number };
+export type ColumnChange = Readonly<Record<Column, LineSpan>>;
 
 type RunEdge = { readonly start: number; readonly end: number };
 
@@ -20,12 +22,16 @@ const CHUNK_RANGE = {
   right: "remote",
 } as const satisfies Readonly<Record<Pane, "local" | "middle" | "remote">>;
 
-function runEdge(before: Chunk | undefined, after: Chunk | undefined, pane: Pane): RunEdge {
-  const key = CHUNK_RANGE[pane];
+function runEdge(before: LineSpan | undefined, after: LineSpan | undefined): RunEdge {
   return {
-    start: before === undefined ? -Infinity : before[key].start + before[key].len,
-    end: after === undefined ? Infinity : after[key].start,
+    start: before === undefined ? -Infinity : before.start + before.len,
+    end: after === undefined ? Infinity : after.start,
   };
+}
+
+function paneEdge(before: Chunk | undefined, after: Chunk | undefined, pane: Pane): RunEdge {
+  const key = CHUNK_RANGE[pane];
+  return runEdge(before?.[key], after?.[key]);
 }
 
 function hiddenLines(doc: Text, edge: RunEdge, shift: number): Hidden | null {
@@ -41,22 +47,17 @@ export function sameHidden(a: Hidden | null, b: Hidden | null): boolean {
   return a === null || b === null ? a === b : a.from === b.from && a.to === b.to;
 }
 
-function runLevels(
-  edges: Readonly<Record<Pane, RunEdge>>,
-  docs: Readonly<Record<Pane, Text>>,
-): FoldLevel[] {
-  const levels: FoldLevel[] = [];
+function runLevels<P extends string>(
+  panes: readonly P[],
+  levelAt: (shift: number) => FoldLevel<P>,
+): FoldLevel<P>[] {
+  const levels: FoldLevel<P>[] = [];
   for (let depth = 0; depth < LEVELS; depth += 1) {
-    const shift = CONTEXT_LINES * LEVEL_GROWTH ** depth;
-    const level: FoldLevel = {
-      left: hiddenLines(docs.left, edges.left, shift),
-      center: hiddenLines(docs.center, edges.center, shift),
-      right: hiddenLines(docs.right, edges.right, shift),
-    };
+    const level = levelAt(CONTEXT_LINES * LEVEL_GROWTH ** depth);
     const outer = levels.at(-1);
-    const hides = PANES.some((pane) => level[pane] !== null);
+    const hides = panes.some((pane) => level[pane] !== null);
     const differs =
-      outer === undefined || PANES.some((pane) => !sameHidden(level[pane], outer[pane]));
+      outer === undefined || panes.some((pane) => !sameHidden(level[pane], outer[pane]));
     if (hides && differs) {
       levels.push(level);
     }
@@ -69,14 +70,36 @@ export function foldRuns(chunks: readonly Chunk[], docs: Readonly<Record<Pane, T
     const before = chunks[run - 1];
     const after = chunks[run];
     const edges = {
-      left: runEdge(before, after, "left"),
-      center: runEdge(before, after, "center"),
-      right: runEdge(before, after, "right"),
+      left: paneEdge(before, after, "left"),
+      center: paneEdge(before, after, "center"),
+      right: paneEdge(before, after, "right"),
     };
-    return { hidden: runLevels(edges, docs) };
+    const hidden = runLevels(PANES, (shift) => ({
+      left: hiddenLines(docs.left, edges.left, shift),
+      center: hiddenLines(docs.center, edges.center, shift),
+      right: hiddenLines(docs.right, edges.right, shift),
+    }));
+    return { hidden };
   });
 }
 
-export function displayed(fold: Fold, pane: Pane): Hidden | null {
+export function columnRuns(
+  changes: readonly ColumnChange[],
+  docs: Readonly<Record<Column, Text>>,
+): Fold<Column>[] {
+  return Array.from({ length: changes.length + 1 }, (_, run) => {
+    const before = changes[run - 1];
+    const after = changes[run];
+    const left = runEdge(before?.left, after?.left);
+    const right = runEdge(before?.right, after?.right);
+    const hidden = runLevels(["left", "right"] satisfies readonly Column[], (shift) => ({
+      left: hiddenLines(docs.left, left, shift),
+      right: hiddenLines(docs.right, right, shift),
+    }));
+    return { hidden };
+  });
+}
+
+export function displayed<P extends string>(fold: Fold<P>, pane: P): Hidden | null {
   return fold.hidden.find((level) => level[pane] !== null)?.[pane] ?? null;
 }

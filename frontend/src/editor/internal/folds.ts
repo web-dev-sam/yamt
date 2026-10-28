@@ -5,7 +5,6 @@ import {
   Transaction,
   type ChangeDesc,
   type Extension,
-  type SelectionRange,
   type Text,
   type TransactionSpec,
 } from "@codemirror/state";
@@ -14,15 +13,11 @@ import { EditorView } from "@codemirror/view";
 import { toDocPos, type DocPos } from "./docPos";
 import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
 import type { Fold, FoldLevel, Hidden } from "./foldRuns";
-import { leaveAllHidden, revealKeep } from "./foldSelection";
+import { hiddenLevels, hidingAll, leaveCollapsed, nextStep, reveals } from "./foldSteps";
+import { sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
 import type { Pane, PaneViews } from "./geometry";
 
-type ShowFolds = { readonly run: number; readonly keep: number };
-
-export type FoldState = {
-  readonly runs: readonly Fold[];
-  readonly hiding: readonly number[];
-};
+export type FoldState = FoldSteps<Pane>;
 
 export type FoldFields = {
   readonly runs: readonly Fold[];
@@ -69,33 +64,6 @@ function mapFolds(folds: readonly Fold[], changes: ChangeDesc, doc: Text): reado
   return mapped.every((fold, index) => fold === folds[index]) ? folds : mapped;
 }
 
-function hidingAll(runs: readonly Fold[], collapsed: boolean): readonly number[] {
-  return runs.map((fold) => (collapsed ? fold.hidden.length : 0));
-}
-
-function sameCounts(a: readonly number[], b: readonly number[]): boolean {
-  return a.length === b.length && a.every((count, run) => count === b[run]);
-}
-
-function hiddenLevels(runs: readonly Fold[], counts: readonly number[]): readonly Fold[] {
-  return runs.map(({ hidden }, run) => ({
-    hidden: hidden.slice(Math.max(0, hidden.length - (counts[run] ?? 0))),
-  }));
-}
-
-function displayedIn(folds: readonly Fold[], pane: Pane): Hidden[] {
-  return folds.flatMap((fold) => displayed(fold, pane) ?? []);
-}
-
-function shown(folds: FoldState, { run, keep }: ShowFolds): FoldState {
-  const count = folds.hiding[run];
-  if (count === undefined || Math.max(0, keep) >= count) {
-    return folds;
-  }
-  const hiding = folds.hiding.map((other, index) => (index === run ? Math.max(0, keep) : other));
-  return { ...folds, hiding };
-}
-
 export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): readonly Fold[] {
   if (pane === "center") {
     const { runs, hiding } = state.field(fields.center);
@@ -117,16 +85,6 @@ export function waveStarts(
     center: startsIn(fields, "center", views.center.state),
     right: startsIn(fields, "right", views.right.state),
   };
-}
-
-function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange): ShowFolds[] {
-  return folds.flatMap((fold, run) => {
-    const keep = revealKeep(
-      fold.hidden.map((level) => level[pane]),
-      selection,
-    );
-    return keep === null ? [] : [{ run, keep }];
-  });
 }
 
 export function foldField(runs: readonly Fold[], collapsed: boolean): StateField<FoldState> {
@@ -179,8 +137,7 @@ export function collapseSpec(
     effects: setHiding.of(hiding),
     annotations: Transaction.addToHistory.of(false),
   };
-  const hidden = displayedIn(hiddenLevels(runs, hiding), "center");
-  const selection = leaveAllHidden(state.selection, hidden);
+  const selection = leaveCollapsed(state.selection, { runs, hiding }, "center");
   return selection === null ? spec : { ...spec, selection };
 }
 
@@ -189,10 +146,6 @@ function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
     effects: shows.map((show) => showFolds.of(show)),
     annotations: Transaction.addToHistory.of(false),
   };
-}
-
-function nextStep(folds: FoldState, run: number): ShowFolds {
-  return { run, keep: (folds.hiding[run] ?? 0) - 1 };
 }
 
 export function showNextStep(folds: FoldState, run: number): TransactionSpec {
@@ -239,8 +192,7 @@ export function sideFoldPush(
   if (counts.every((count, run) => count <= (before[run] ?? 0))) {
     return { effects };
   }
-  const hidden = displayedIn(hiddenLevels(fields.runs, counts), pane);
-  const selection = leaveAllHidden(side.selection, hidden);
+  const selection = leaveCollapsed(side.selection, { runs: fields.runs, hiding: counts }, pane);
   return selection === null ? { effects } : { effects, selection };
 }
 

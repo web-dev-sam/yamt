@@ -1,4 +1,10 @@
-import { RangeSet, RangeSetBuilder, type Extension } from "@codemirror/state";
+import {
+  RangeSet,
+  RangeSetBuilder,
+  type EditorState,
+  type Extension,
+  type StateField,
+} from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -72,7 +78,10 @@ class WaveMarker extends GutterMarker {
   }
 }
 
-export function foldDecorations(folds: readonly Fold[], pane: Pane): DecorationSet {
+export function foldDecorations<P extends string>(
+  folds: readonly Fold<P>[],
+  pane: P,
+): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   folds.forEach((fold, run) => {
     const hidden = displayed(fold, pane);
@@ -85,9 +94,9 @@ export function foldDecorations(folds: readonly Fold[], pane: Pane): DecorationS
   return builder.finish();
 }
 
-function waveMarkers(
-  folds: readonly Fold[],
-  pane: Pane,
+function waveMarkers<P extends string>(
+  folds: readonly Fold<P>[],
+  pane: P,
   hovered: () => number | null,
 ): RangeSet<GutterMarker> {
   const builder = new RangeSetBuilder<GutterMarker>();
@@ -146,18 +155,29 @@ const waveTheme = EditorView.theme({
   [`.fold-wave.${HOVER_CLASS}`]: maskStyle(WAVE_HOVER_STROKE_PX),
 });
 
-function foldView({ folds, hovered }: FoldWiring, pane: Pane): Extension {
-  const field = pane === "center" ? folds.center : folds.sides;
+export function paneFoldView<P extends string>(
+  shown: {
+    readonly field: StateField<unknown>;
+    readonly folds: (state: EditorState) => readonly Fold<P>[];
+  },
+  pane: P,
+  hovered: () => number | null,
+): Extension {
   return [
-    EditorView.decorations.compute([field], (state) =>
-      foldDecorations(paneFolds(folds, pane, state), pane),
+    EditorView.decorations.compute([shown.field], (state) =>
+      foldDecorations(shown.folds(state), pane),
     ),
-    EditorView.atomicRanges.of((view) => foldDecorations(paneFolds(folds, pane, view.state), pane)),
-    lineNumberMarkers.compute([field], (state) =>
-      waveMarkers(paneFolds(folds, pane, state), pane, hovered),
+    EditorView.atomicRanges.of((view) => foldDecorations(shown.folds(view.state), pane)),
+    lineNumberMarkers.compute([shown.field], (state) =>
+      waveMarkers(shown.folds(state), pane, hovered),
     ),
     waveTheme,
   ];
+}
+
+function foldView({ folds, hovered }: FoldWiring, pane: Pane): Extension {
+  const field = pane === "center" ? folds.center : folds.sides;
+  return paneFoldView({ field, folds: (state) => paneFolds(folds, pane, state) }, pane, hovered);
 }
 
 export function centerFolds(wiring: FoldWiring): Extension {
