@@ -20,9 +20,10 @@ export const ANSWER_LOADING_TEXT = "Loading the AI's answer…";
 export const ANSWER_GONE_TEXT = "omp no longer has this answer";
 export const ANSWER_UNLOADED_TEXT = "The AI's conversation could not be loaded";
 export const ASK_AI_LABEL = "Ask AI";
-export const ASK_AI_TITLE = "Send your messages since the AI's last answer to the AI";
+export const ASK_AI_TITLE =
+  "Send to the AI what you typed (added as your message first) and your messages since its last answer";
 export const ASK_AI_WAITING =
-  "Nothing to ask yet: write a message after the AI's last answer, or wait for its conversation to load";
+  "Nothing to ask yet: type a message, or write one after the AI's last answer; Ask AI also waits for your message to be added and for the AI's conversation to load";
 export const STOP_AI_LABEL = "Stop";
 export const STOP_AI_TITLE = "Stop the AI's turn; what it wrote so far stays";
 export const POST_LABEL = "Post";

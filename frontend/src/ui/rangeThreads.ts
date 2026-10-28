@@ -47,8 +47,10 @@ export type RangeThreads = {
   writeEdit(message: MessageId, text: string): void;
   dropEdit(message: MessageId): void;
   toggle(keys: readonly string[]): void;
-  addThread(draftKey: string, text: string): Promise<void>;
-  addNote(thread: ThreadId, text: string): Promise<void>;
+  /** The added thread; null when nothing was added (no such draft, blank text, an add of it running, a refusal). */
+  addThread(draftKey: string, text: string): Promise<ThreadId | null>;
+  /** Whether the note was stored; a blank text is not sent. */
+  addNote(thread: ThreadId, text: string): Promise<boolean>;
   queue(message: MessageId, text: string): Promise<void>;
   unqueue(message: MessageId): Promise<void>;
   /** Whether the edit was stored; a blank text is not sent. */
@@ -154,10 +156,10 @@ async function changed(
   return outcome.value;
 }
 
-async function addThread(state: State, key: string, text: string): Promise<void> {
+async function addThread(state: State, key: string, text: string): Promise<ThreadId | null> {
   const draft = state.drafts.threadDraft(key);
   if (draft === null || isBlank(text) || state.adding.has(key)) {
-    return;
+    return null;
   }
   state.adding.add(key);
   const outcome = await attempt(() => state.source.addThread(draft.file, draft.line, text));
@@ -165,21 +167,23 @@ async function addThread(state: State, key: string, text: string): Promise<void>
   if (!outcome.ok) {
     state.drafts.writeDraft(key, text);
     state.report({ action: "threads", step: "add", cause: outcome.cause });
-    return;
+    return null;
   }
   const { thread, list } = outcome.value;
   state.keys.set(thread, key);
   state.open.value = new Set([...state.open.value, thread]);
   state.drafts.dropDraft(key);
   setList(state, list);
+  return thread;
 }
 
-async function addNote(state: State, thread: ThreadId, text: string): Promise<void> {
+async function addNote(state: State, thread: ThreadId, text: string): Promise<boolean> {
   if (isBlank(text)) {
-    return;
+    return false;
   }
   const added = await changed(state, "note", () => state.source.addNote(thread, text));
   state.drafts.writeNote(thread, added === null ? text : "");
+  return added !== null;
 }
 
 function counted(state: State): Pick<RangeThreads, "counts" | "queued"> {

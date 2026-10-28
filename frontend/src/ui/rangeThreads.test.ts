@@ -107,9 +107,10 @@ test("a draft's Comment adds the thread and its key becomes the stored id with t
   });
 
   threads.writeDraft("draft-0", "Why 300?");
-  await threads.addThread("draft-0", "Why 300?");
+  const added = await threads.addThread("draft-0", "Why 300?");
 
   const thread = threadAt(threads, 0);
+  expect(added).toBe(thread.id);
   expect(texts(thread)).toEqual(["Why 300?"]);
   expect(thread.line).toEqual(line);
   expect(threads.drafts.value.size).toBe(0);
@@ -124,7 +125,7 @@ test("a refused Comment keeps the draft with its text and reports the add", asyn
   }));
   threads.startThread(board, changedThreadLine("left", 1));
 
-  await threads.addThread("draft-0", "Why 300?");
+  expect(await threads.addThread("draft-0", "Why 300?")).toBeNull();
 
   expect(threads.list.value.threads).toEqual([]);
   expect(threads.drafts.value.get("draft-0")).toMatchObject({ kind: "thread", text: "Why 300?" });
@@ -141,7 +142,12 @@ test("a second Comment while the first is in flight sends nothing more", async (
   }));
   threads.startThread(board, changedThreadLine("left", 1));
 
-  await Promise.all([threads.addThread("draft-0", "a"), threads.addThread("draft-0", "a")]);
+  const both = await Promise.all([
+    threads.addThread("draft-0", "a"),
+    threads.addThread("draft-0", "a"),
+  ]);
+
+  expect(both).toEqual([threadAt(threads, 0).id, null]);
 
   expect(calls).toBe(1);
   expect(threads.list.value.threads).toHaveLength(1);
@@ -178,7 +184,7 @@ test("a Comment on a key with no draft makes no call and reports nothing", async
     },
   }));
 
-  await threads.addThread("draft-9", "x");
+  expect(await threads.addThread("draft-9", "x")).toBeNull();
 
   expect(calls).toBe(0);
   expect(problems).toEqual([]);
@@ -306,8 +312,8 @@ test("blank text is never sent", async () => {
   }
   threads.startThread(board, changedThreadLine("left", 0));
 
-  await threads.addThread("draft-0", "  \n");
-  await threads.addNote(thread.id, "\t");
+  expect(await threads.addThread("draft-0", "  \n")).toBeNull();
+  expect(await threads.addNote(thread.id, "\t")).toBe(false);
   await threads.queue(message.id, "");
 
   expect(sent).toEqual([]);
@@ -320,7 +326,7 @@ test("a note is added to its thread and its draft text cleared; a refused note k
   threads.writeNote(id, "More?");
   expect(threads.noteText(id)).toBe("More?");
 
-  await threads.addNote(id, "More?");
+  expect(await threads.addNote(id, "More?")).toBe(true);
 
   expect(texts(threadAt(threads, 0))).toEqual(["Why does the overdue check go?", "More?"]);
   expect(threads.noteText(id)).toBe("");
@@ -328,7 +334,7 @@ test("a note is added to its thread and its draft text cleared; a refused note k
   const refused = await opened(SEEDED, () => ({
     addNote: async (thread) => ({ ok: false, failure: { kind: "UnknownThread", thread } }),
   }));
-  await refused.threads.addNote(id, "Lost?");
+  expect(await refused.threads.addNote(id, "Lost?")).toBe(false);
   expect(refused.threads.noteText(id)).toBe("Lost?");
   expect(refused.problems).toEqual([
     { action: "threads", step: "note", cause: { kind: "UnknownThread", thread: id } },

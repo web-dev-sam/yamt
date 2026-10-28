@@ -3,8 +3,15 @@ import { expect, test } from "vitest";
 import type { TurnEnd, TurnView } from "../agent";
 import { agentSessionId, type AgentSessionId, type Message } from "../ipc";
 import { failureText } from "./aiText";
-import { IDLE, type ThreadAi } from "./rangeAi";
-import { answering, answerText, answerView, liveTurn, postBody } from "./rangeAiView";
+import {
+  answering,
+  answerText,
+  answerView,
+  IDLE,
+  liveTurn,
+  postBody,
+  type ThreadAi,
+} from "./rangeAiView";
 
 function session(text: string): AgentSessionId {
   const id = agentSessionId(text);

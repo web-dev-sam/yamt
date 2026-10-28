@@ -4,6 +4,7 @@ import ChevronUp from "~icons/lucide/chevron-up";
 
 import type { RangeEntry } from "../ipc";
 import AiTurn from "./AiTurn.vue";
+import type { AskFrom } from "./rangeAi";
 import { answering, liveTurn } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
 import { boxKeydown } from "./rangeKeys";
@@ -55,7 +56,16 @@ const threadAi = computed(() =>
 );
 const live = computed(() => (threadAi.value === null ? null : liveTurn(threadAi.value)));
 const stoppable = computed(() => threadAi.value !== null && answering(threadAi.value));
-const askable = computed(() => ai !== null && thread.value !== null && ai.canAsk(thread.value.id));
+const askFrom = computed((): AskFrom | null => {
+  if (draft.value !== null) {
+    return { kind: "draft", key: props.threadKey };
+  }
+  return thread.value === null ? null : { kind: "thread", thread: thread.value.id };
+});
+const askable = computed(
+  () => ai !== null && askFrom.value !== null && ai.canAsk(askFrom.value, text.value),
+);
+const showsActions = computed(() => ai !== null || draft.value !== null || !blank.value);
 
 watch(
   () => draft.value?.focus,
@@ -82,8 +92,8 @@ function loadConversation(): void {
 }
 
 function askAi(): void {
-  if (thread.value !== null) {
-    ai?.ask(thread.value.id);
+  if (askFrom.value !== null) {
+    void ai?.ask(askFrom.value, text.value);
   }
 }
 
@@ -150,29 +160,6 @@ function collapse(): void {
     <header class="flex min-w-0 items-center gap-2 text-fg-muted">
       <span class="min-w-0 flex-1 truncate font-mono">{{ place }}</span>
       <button
-        v-if="stoppable"
-        type="button"
-        :title="STOP_AI_TITLE"
-        class="shrink-0 rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover"
-        @click="stopAi"
-      >
-        {{ STOP_AI_LABEL }}
-      </button>
-      <span
-        v-else-if="ai !== null && thread !== null"
-        :title="askable ? ASK_AI_TITLE : ASK_AI_WAITING"
-        class="shrink-0"
-      >
-        <button
-          type="button"
-          :disabled="!askable"
-          class="rounded border border-control-border px-2 py-0.5 text-fg hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
-          @click="askAi"
-        >
-          {{ ASK_AI_LABEL }}
-        </button>
-      </span>
-      <button
         v-if="thread !== null"
         type="button"
         :title="COLLAPSE_THREAD"
@@ -209,7 +196,7 @@ function collapse(): void {
       @input="typed"
       @keydown="keydown"
     />
-    <div v-if="draft !== null || !blank" class="flex gap-2">
+    <div v-if="showsActions" class="flex gap-2">
       <button
         type="button"
         :disabled="blank"
@@ -219,6 +206,27 @@ function collapse(): void {
       >
         {{ COMMENT_LABEL }}
       </button>
+      <button
+        v-if="stoppable"
+        type="button"
+        :title="STOP_AI_TITLE"
+        class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
+        @mousedown.prevent
+        @click="stopAi"
+      >
+        {{ STOP_AI_LABEL }}
+      </button>
+      <span v-else-if="ai !== null" :title="askable ? ASK_AI_TITLE : ASK_AI_WAITING">
+        <button
+          type="button"
+          :disabled="!askable"
+          class="rounded border border-control-border px-3 py-0.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+          @mousedown.prevent
+          @click="askAi"
+        >
+          {{ ASK_AI_LABEL }}
+        </button>
+      </span>
       <button
         type="button"
         class="rounded border border-control-border px-3 py-0.5 hover:bg-hover"
