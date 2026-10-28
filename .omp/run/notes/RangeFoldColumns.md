@@ -90,3 +90,17 @@ Boundary pass (#1680–#1684 resolved), correctness pass (#1686–#1688 resolved
 minimap's `follow` callers; the merge deep-toggle defect predates the feature and is now fixed). Mutation run
 `just mutants 4ce52c4`: `rangeOpen.ts` 57/57; `rangeThreads.ts` survivors :98 (equivalent) and pre-existing lines.
 Open: #1689 → fix round 2 (`briefs/range-collapse-columns-rework-2.md`).
+
+## Fix round 2 (`RangeFoldColumnsR2`, 14m24s, patch `c95743a`, `.omp/run/patches/RangeFoldColumnsR2.patch`; 2 files +94 −3)
+
+#1689 cause (logged, then logging removed): the sync wrote the left 2807.5 (clamped 2655) after Ctrl+End in the
+right; inside CodeMirror's gap IntersectionObserver measure, WebKit pulled the left to 0 (no script wrote it; 145 px of
+rendered lines were in view, so `farTop` returned null and nothing pinned); the left's trusted scroll event at 0 was an
+echo and was ignored. Fix (`scrollSync.ts`): when the echo window closes, a follower no longer at its written top makes
+the same source lead the next sync (unless a `follow` was asked meanwhile); the second write is far, so exactScroll's
+pin lands it. Tests (additions only): moved follower written again (fails without the fix: `expected 2 to be 3`),
+landed followers ask nothing, a follow during the echo window keeps its own source. WebKit: range Ctrl+End after a
+find [2655, 3114] lined up (was [0, 3114]); Ctrl+Home [0, 0]; collapsing off [8555, 9014] (base [8555, 9015]); merge
+find + Ctrl+End [1961, 2081, 2353] equal to `f08c5b9`. 204 files / 2798 tests; typecheck, lint, fmt, knip clean.
+Open risks (implementer): a follower pulled back every frame would re-sync every frame (logs: one retry landed); a user
+scroll on a follower inside the one-frame echo window now snaps to the source; merge checked in one scenario.
