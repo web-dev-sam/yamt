@@ -9,14 +9,9 @@
       "frontend/src/editor/internal/columnFolds.test.ts"
     ]
   },
-  "RangeCollapseToggle": {
+  "RangeCollapseToggleR1": {
     "owned": [
-      "frontend/src/ui/collapsing.ts",
-      "frontend/src/ui/toolbarButtons.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/RangeView.vue",
-      "frontend/src/ui/AGENTS.md"
+      "frontend/src/ui/RangeView.vue"
     ]
   }
 }
