@@ -55,18 +55,25 @@ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]): 
   }));
 }
 
+export function waveTops(
+  starts: readonly (DocPos | null)[],
+  blockTop: (pos: DocPos) => number,
+): (number | null)[] {
+  return starts.map((start) => (start === null ? null : blockTop(start)));
+}
+
 export function waveRows(
   starts: Readonly<Record<Pane, readonly (DocPos | null)[]>>,
   blockTop: (pane: Pane, pos: DocPos) => number,
 ): WaveRow[] {
-  function top(pane: Pane, run: number): number | null {
-    const start = starts[pane][run] ?? null;
-    return start === null ? null : blockTop(pane, start);
+  function tops(pane: Pane): (number | null)[] {
+    return waveTops(starts[pane], (pos) => blockTop(pane, pos));
   }
-  return starts.center.map((_, run) => ({
-    left: top("left", run),
-    center: top("center", run),
-    right: top("right", run),
+  const [left, right] = [tops("left"), tops("right")];
+  return tops("center").map((center, run) => ({
+    left: left[run] ?? null,
+    center,
+    right: right[run] ?? null,
   }));
 }
 

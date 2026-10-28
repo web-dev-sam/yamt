@@ -2,7 +2,7 @@ import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
 import { BlockType, Decoration } from "@codemirror/view";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { Column } from "../../ipc";
+import { loadCompareFixture, type Column } from "../../ipc";
 import { columnFoldExtension, mirrorSpec, mirrorSteps, ownerSteps } from "./columnFolds";
 import { renewSpec, stepSpec } from "./columnFolds";
 import { differenceField, showDifferences } from "./compareFields";
@@ -28,6 +28,21 @@ const CELLS = {
   addCell: () => {},
   dropCell: () => {},
 };
+const NO_WORDS = { changed: [], removals: [] };
+const { comparison: ONE_DIFFERENCE } = await loadCompareFixture("single", {
+  "single.json": {
+    left: TEXT,
+    right: TEXT,
+    differences: [
+      {
+        left: { start: 4, len: 1 },
+        right: { start: 4, len: 1 },
+        words: { left: NO_WORDS, right: NO_WORDS },
+      },
+    ],
+  },
+});
+const SINGLE_CHANGE = ONE_DIFFERENCE.differences;
 
 type FakeColumn = {
   state: EditorState;
@@ -452,8 +467,7 @@ test("waves reach the strip with the rows, and a step shown by a click measures 
     waves: columnWaves,
   });
   const doc = Text.of(TEXT.split("\n"));
-  const change = { start: 4, len: 1 };
-  const runs = columnRuns([{ left: change, right: change }], { left: doc, right: doc });
+  const runs = columnRuns(SINGLE_CHANGE, { left: doc, right: doc });
 
   onLeft(views, renewSpec(views.left.state, runs, true));
   runFrames();

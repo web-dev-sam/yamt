@@ -185,6 +185,27 @@ test("follow('center') makes the next sync write both sides though the middle di
   expect(tops(views)).toEqual([500, 300, 300]);
 });
 
+test("after follow, another pane's scroll event before the sync does not lead: the followed pane does", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), center: fakePane(300), right: fakePane(0) };
+  const sync = new ScrollSync(views, PANES, () => {});
+  const anchors = anchorsOf([], ends(100, 100, 100));
+
+  sync.follow("center");
+  scrolled(views.left, 40);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([300, 300, 300]);
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+
+  scrolled(views.left, 500);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([500, 500, 500]);
+});
+
 test("two columns follow each other through their difference's anchors, the source left where it was", () => {
   const frames: (() => void)[] = [];
   vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));

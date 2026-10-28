@@ -75,7 +75,6 @@ export class CompareFrame {
   readonly #scroll: ScrollSync<Column>;
   #frameId: number | null = null;
   #layoutCache: CompareLayout | null = null;
-  #realignFrom: Column | null = null;
 
   constructor({
     views,
@@ -112,12 +111,6 @@ export class CompareFrame {
 
   request(): void {
     this.#frameId ??= requestAnimationFrame(() => {
-      if (this.#realignFrom !== null) {
-        // A column the change shrank fires its clamped scroll event before this callback (HTML
-        // "update the rendering": scroll steps run before animation frame callbacks); it must not lead.
-        this.#scroll.follow(this.#realignFrom);
-        this.#realignFrom = null;
-      }
       this.#frameId = null;
       const views = this.#views;
       syncFindSpace([views.left, views.right]);
@@ -129,8 +122,7 @@ export class CompareFrame {
   }
 
   realign(source: Column): void {
-    this.#realignFrom = source;
-    this.request();
+    this.#scroll.follow(source);
   }
 
   destroy(): void {

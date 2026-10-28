@@ -71,6 +71,7 @@ export class ScrollSync<P extends string> {
   readonly #requestFrame: () => void;
   readonly #listeners = new AbortController();
   #source: P | null = null;
+  #followed = false;
   #echoes: readonly P[] = [];
   #clearEchoes: number | null = null;
   #syncedTops: ReadonlyMap<P, number> | null = null;
@@ -87,7 +88,7 @@ export class ScrollSync<P extends string> {
       views[pane].scrollDOM.addEventListener(
         "scroll",
         () => {
-          if (!this.#echoes.includes(pane)) {
+          if (!this.#followed && !this.#echoes.includes(pane)) {
             this.#source = pane;
           }
           requestFrame();
@@ -99,6 +100,7 @@ export class ScrollSync<P extends string> {
 
   follow(source: P): void {
     this.#source = source;
+    this.#followed = true;
     this.#syncedTops = null;
     this.#requestFrame();
   }
@@ -106,6 +108,7 @@ export class ScrollSync<P extends string> {
   sync(anchors: readonly Anchor<P>[]): void {
     const source = this.#source;
     this.#source = null;
+    this.#followed = false;
     const views = this.#views;
     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.get(source)) {
       return;

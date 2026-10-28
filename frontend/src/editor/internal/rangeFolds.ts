@@ -1,12 +1,11 @@
 import type { EditorState, Extension } from "@codemirror/state";
 
 import type { Column } from "../../ipc";
-import { columnFoldExtension, columnSteps, renewSpec, stepSpec } from "./columnFolds";
+import { columnFoldExtension, hiddenIn, renewSpec, stepSpec } from "./columnFolds";
 import type { ColumnViews } from "./compareViews";
 import { Folding } from "./folding";
-import { displayed, type Fold } from "./foldRuns";
-import { hiddenLevels } from "./foldSteps";
-import type { WaveRow } from "./geometry";
+import { waveStartsIn, type Fold } from "./foldRuns";
+import { waveTops, type WaveRow } from "./geometry";
 import { ChainPhases, type WaveChain } from "./wavePhase";
 
 type RangeHosts = Readonly<Record<Column, HTMLElement>> & { readonly strip: Element };
@@ -15,17 +14,14 @@ type WaveView = {
   lineBlockAt(pos: number): { readonly top: number };
 };
 
-function waveTops(view: WaveView, column: Column): (number | null)[] {
-  const { runs, hiding } = columnSteps(view.state, column);
-  return hiddenLevels(runs, hiding).map((fold) => {
-    const hidden = displayed(fold, column);
-    return hidden === null ? null : view.lineBlockAt(hidden.from).top;
-  });
+function columnTops(view: WaveView, column: Column): (number | null)[] {
+  const starts = waveStartsIn(hiddenIn(view.state, column), column);
+  return waveTops(starts, (pos) => view.lineBlockAt(pos).top);
 }
 
 export function columnWaves(views: Readonly<Record<Column, WaveView>>): WaveRow<Column>[] {
-  const right = waveTops(views.right, "right");
-  return waveTops(views.left, "left").map((left, run) => ({ left, right: right[run] ?? null }));
+  const right = columnTops(views.right, "right");
+  return columnTops(views.left, "left").map((left, run) => ({ left, right: right[run] ?? null }));
 }
 
 export class RangeFolds {

@@ -66,13 +66,24 @@ export function paneEnds(strips: WaveLayout["strips"]): Readonly<Record<Pane, Wa
   };
 }
 
+function chainPhases<P extends string>(
+  first: P,
+  next: readonly Link<Edges, P>[],
+  scroller: (pane: P) => Edges,
+): ReadonlyMap<P, WavePhase> {
+  return new Map(
+    [...chainEnds(first, next)].map(([pane, end]) => [pane, wavePhase(scroller(pane).left, end)]),
+  );
+}
+
 export function panePhases(layout: WaveLayout): Readonly<Record<Pane, WavePhase | null>> {
-  const ends = paneEnds(layout.strips);
-  function phase(pane: Pane): WavePhase | null {
-    const paneEnd = ends[pane];
-    return paneEnd === null ? null : wavePhase(layout.scrollers[pane].left, paneEnd);
-  }
-  return { left: phase("left"), center: phase("center"), right: phase("right") };
+  const { first, next } = mergeChain(layout.strips);
+  const phases = chainPhases(first, next, (pane) => layout.scrollers[pane]);
+  return {
+    left: phases.get("left") ?? null,
+    center: phases.get("center") ?? null,
+    right: phases.get("right") ?? null,
+  };
 }
 
 // WebKit paints each box, and the mask's origin in it, at whole device pixels (plan §2 #64).
@@ -157,11 +168,11 @@ export class ChainPhases<P extends string> {
       strip: snapped(strip, ratio),
       pane,
     }));
-    const ends = chainEnds(this.#chain.first, next);
+    const phases = chainPhases(this.#chain.first, next, (pane) =>
+      snapped(views[pane].scrollDOM, ratio),
+    );
     for (const pane of this.#panes) {
-      const end = ends.get(pane);
-      const left = snapped(views[pane].scrollDOM, ratio).left;
-      writePhase(this.#hosts[pane].style, end === undefined ? null : wavePhase(left, end));
+      writePhase(this.#hosts[pane].style, phases.get(pane) ?? null);
     }
   }
 

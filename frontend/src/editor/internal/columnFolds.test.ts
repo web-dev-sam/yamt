@@ -18,6 +18,7 @@ import {
   columnChanges,
   columnFoldExtension,
   columnSteps,
+  hiddenIn,
   mirrorSpec,
   ownerSteps,
   rangeRuns,
@@ -28,7 +29,7 @@ import {
 } from "./columnFolds";
 import { selectMatch } from "./findMatch";
 import { displayed, type Fold, type Hidden, type LineSpan } from "./foldRuns";
-import { displayedIn, hiddenLevels } from "./foldSteps";
+import { displayedIn } from "./foldSteps";
 
 function numbered(from: number, to: number): string[] {
   return Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
@@ -117,17 +118,12 @@ function lineRange(doc: Text, hidden: Hidden | null): string {
     : `${doc.lineAt(hidden.from).number}-${doc.lineAt(hidden.to).number}`;
 }
 
-function hiddenNow(state: EditorState, column: Column): readonly Fold<Column>[] {
-  const { runs, hiding } = columnSteps(state, column);
-  return hiddenLevels(runs, hiding);
-}
-
 function waves(state: EditorState, column: Column): string[] {
-  return hiddenNow(state, column).map((fold) => lineRange(state.doc, displayed(fold, column)));
+  return hiddenIn(state, column).map((fold) => lineRange(state.doc, displayed(fold, column)));
 }
 
 function levels(state: EditorState, column: Column, run: number): string[] {
-  const fold = hiddenNow(state, column)[run];
+  const fold = hiddenIn(state, column)[run];
   return fold === undefined ? [] : fold.hidden.map((level) => lineRange(state.doc, level[column]));
 }
 
@@ -150,7 +146,7 @@ function thread(
 }
 
 function outerLevel(state: EditorState, column: Column, run: number): Hidden {
-  const hidden = hiddenNow(state, column)[run]?.hidden[0]?.[column];
+  const hidden = hiddenIn(state, column)[run]?.hidden[0]?.[column];
   if (hidden === undefined || hidden === null) {
     throw new Error(`run ${run} hides nothing in the ${column} column`);
   }
@@ -303,11 +299,11 @@ test("on hides every run back to its start whatever steps were shown, off shows 
   expect(waves(off.left, "left")).toEqual(["-", "-", "-"]);
   expect(waves(off.right, "right")).toEqual(["-", "-", "-"]);
   expect(columnSteps(off.right, "right").hiding).toEqual([0, 0, 0]);
-  expect(displayedIn(hiddenNow(off.left, "left"), "left")).toEqual([]);
-  expect(displayedIn(hiddenNow(off.right, "right"), "right")).toEqual([]);
+  expect(displayedIn(hiddenIn(off.left, "left"), "left")).toEqual([]);
+  expect(displayedIn(hiddenIn(off.right, "right"), "right")).toEqual([]);
   for (const pair of [on, offOn]) {
-    expect(allLevels(hiddenNow(pair.left, "left"), "left")).toEqual(
-      allLevels(hiddenNow(fresh.left, "left"), "left"),
+    expect(allLevels(hiddenIn(pair.left, "left"), "left")).toEqual(
+      allLevels(hiddenIn(fresh.left, "left"), "left"),
     );
     expect(columnSteps(pair.right, "right").hiding).toEqual([3, 3, 3]);
     expect(waves(pair.right, "right")).toEqual(waves(fresh.right, "right"));

@@ -8,7 +8,6 @@ import type {
   ReviewSource,
   ShownThread,
   SourceResult,
-  Thread,
   ThreadId,
   ThreadLine,
   ThreadList,
@@ -22,10 +21,9 @@ import {
   type RangeDrafts,
   type ThreadDraft,
 } from "./rangeDrafts";
+import { createRangeOpen, type RangeOpen, type StoredBox } from "./rangeOpen";
 
-type ThreadBox =
-  | { readonly kind: "draft"; readonly draft: ThreadDraft }
-  | { readonly kind: "thread"; readonly thread: Thread; readonly open: boolean };
+type ThreadBox = { readonly kind: "draft"; readonly draft: ThreadDraft } | StoredBox;
 
 export type RangeThreads = AddsInFlight & {
   readonly list: Readonly<ShallowRef<ThreadList>>;
@@ -69,9 +67,8 @@ type State = {
   readonly report: (problem: Problem) => void;
   readonly list: ShallowRef<ThreadList>;
   readonly listed: ShallowRef<boolean>;
-  readonly open: ShallowRef<ReadonlySet<ThreadId>>;
+  readonly open: RangeOpen;
   readonly drafts: RangeDrafts;
-  readonly keys: Map<ThreadId, string>;
   readonly adds: RangeAdds;
 };
 
@@ -91,51 +88,23 @@ export function isQueued(posting: Posting): boolean {
 }
 
 function setList(state: State, list: ThreadList): void {
-  const open = [...state.open.value].filter((id) => list.threads.some((each) => each.id === id));
   state.list.value = list;
-  if (open.length < state.open.value.size) {
-    state.open.value = new Set(open);
-  }
+  state.open.keepListed(list);
   state.drafts.keepStored(list);
 }
 
-function keyOf(state: State, thread: ThreadId): string {
-  return state.keys.get(thread) ?? `thread-${thread}`;
-}
-
 function shownFor(state: State, file: RangeFileId): ShownThread[] {
-  const stored = state.list.value.threads
-    .filter((thread) => thread.file === file)
-    .map(({ id, line }): ShownThread => {
-      const shown = state.open.value.has(id) ? "open" : "collapsed";
-      return { key: keyOf(state, id), line, shown };
-    });
   const drafts = [...state.drafts.drafts.value].flatMap(([key, draft]): ShownThread[] =>
     draft.kind === "thread" && draft.file === file
       ? [{ key, line: draft.line, shown: "draft" }]
       : [],
   );
-  return [...stored, ...drafts];
+  return [...state.open.shownFor(state.list.value, file), ...drafts];
 }
 
 function boxOf(state: State, key: string): ThreadBox | null {
   const draft = state.drafts.threadDraft(key);
-  if (draft !== null) {
-    return { kind: "draft", draft };
-  }
-  const thread = state.list.value.threads.find(({ id }) => keyOf(state, id) === key);
-  return thread === undefined
-    ? null
-    : { kind: "thread", thread, open: state.open.value.has(thread.id) };
-}
-
-function toggle(state: State, keys: readonly string[]): void {
-  const ids = state.list.value.threads
-    .map(({ id }) => id)
-    .filter((id) => keys.includes(keyOf(state, id)));
-  const opening = ids.some((id) => !state.open.value.has(id));
-  const kept = [...state.open.value].filter((id) => opening || !ids.includes(id));
-  state.open.value = new Set(opening ? [...kept, ...ids] : kept);
+  return draft === null ? state.open.boxOf(state.list.value, key) : { kind: "draft", draft };
 }
 
 async function changed(
@@ -166,8 +135,7 @@ async function addThread(state: State, key: string, text: string): Promise<Threa
     return null;
   }
   const { thread, list } = outcome.value;
-  state.keys.set(thread, key);
-  state.open.value = new Set([...state.open.value, thread]);
+  state.open.added(thread, key);
   state.drafts.dropDraft(key);
   setList(state, list);
   return thread;
@@ -271,16 +239,15 @@ export function createRangeThreads(
     report,
     list: shallowRef<ThreadList>({ threads: [] }),
     listed: shallowRef(false),
-    open: shallowRef<ReadonlySet<ThreadId>>(new Set()),
+    open: createRangeOpen(),
     drafts: createRangeDrafts(),
-    keys: new Map(),
     adds: createRangeAdds(),
   };
   const { threadDraft: _threadDraft, keepStored: _keepStored, ...drafts } = state.drafts;
   return {
     list: state.list,
     listed: state.listed,
-    open: state.open,
+    open: state.open.open,
     ...drafts,
     ...counted(state),
     ...replies(state),
@@ -289,7 +256,7 @@ export function createRangeThreads(
     shownFor: (file) => shownFor(state, file),
     boxOf: (key) => boxOf(state, key),
     toggle: (keys) => {
-      toggle(state, keys);
+      state.open.toggle(state.list.value, keys);
     },
     addThread: (key, text) => addThread(state, key, text),
     addNote: (thread, text) => addNote(state, thread, text),

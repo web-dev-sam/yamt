@@ -11,7 +11,7 @@ import {
 import { EditorView } from "@codemirror/view";
 
 import { toDocPos, type DocPos } from "./docPos";
-import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
+import { displayed, MIN_HIDDEN_LINES, sameHidden, waveStartsIn } from "./foldRuns";
 import type { Fold, FoldLevel, Hidden } from "./foldRuns";
 import {
   hiddenLevels,
@@ -79,7 +79,7 @@ export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): r
 }
 
 function startsIn(fields: FoldFields, pane: Pane, state: EditorState): (DocPos | null)[] {
-  return paneFolds(fields, pane, state).map((fold) => displayed(fold, pane)?.from ?? null);
+  return waveStartsIn(paneFolds(fields, pane, state), pane);
 }
 
 export function waveStarts(

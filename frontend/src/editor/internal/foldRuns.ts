@@ -103,3 +103,10 @@ export function columnRuns(
 export function displayed<P extends string>(fold: Fold<P>, pane: P): Hidden | null {
   return fold.hidden.find((level) => level[pane] !== null)?.[pane] ?? null;
 }
+
+export function waveStartsIn<P extends string>(
+  folds: readonly Fold<P>[],
+  pane: P,
+): (DocPos | null)[] {
+  return folds.map((fold) => displayed(fold, pane)?.from ?? null);
+}

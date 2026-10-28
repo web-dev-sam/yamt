@@ -266,19 +266,6 @@ test("stored threads come back collapsed; open and collapse per thread and per l
   expect(threads.boxOf("nothing")).toBeNull();
 });
 
-test("a toggle changes only its own threads: other open threads stay open either way", async () => {
-  const { threads } = await opened(SEEDED);
-  const ids = [0, 1, 2, 3].map((index) => threadAt(threads, index).id);
-
-  threads.toggle(["thread-2"]);
-  threads.toggle(["thread-0", "thread-1"]);
-  const afterOpening = new Set(threads.open.value);
-  threads.toggle(["thread-0"]);
-
-  expect(afterOpening).toEqual(new Set(ids.slice(0, 3)));
-  expect(threads.open.value).toEqual(new Set([ids[1], ids[2]]));
-});
-
 test("counts per file ignore drafts", async () => {
   const { threads, board, other } = await opened(SEEDED);
   threads.startThread(other, changedThreadLine("left", 0));

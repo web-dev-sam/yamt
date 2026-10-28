@@ -110,7 +110,7 @@ export function columnSteps(state: EditorState, column: Column): ColumnSteps {
   return state.field(column === "left" ? ownerSteps : mirrorSteps);
 }
 
-function hiddenIn(state: EditorState, column: Column): readonly Fold<Column>[] {
+export function hiddenIn(state: EditorState, column: Column): readonly Fold<Column>[] {
   const { runs, hiding } = columnSteps(state, column);
   return hiddenLevels(runs, hiding);
 }
