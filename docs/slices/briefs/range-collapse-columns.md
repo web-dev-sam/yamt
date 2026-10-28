@@ -6,8 +6,11 @@ those rows). Design: `.omp/run/notes/RangeCollapseDesign.md` option A (read it w
 given). You build the designer's "E2" plus the controller wiring. Already committed and yours to build on (read-only):
 `RangeFoldCore` (the fold core: `foldRuns.ts` `columnRuns`, `foldSteps.ts`, `foldView.ts` `paneFoldView`,
 `columnFolds.ts` — `ownerSteps`, `mirrorSteps`, `rangeRuns`, `renewSpec`, `stepSpec`, `mirrorSpec`, `rightReveal`,
-`columnFoldExtension`; brief `briefs/range-collapse-core.md`) and `RangeCollapseToggle` (`useRangeStore().collapsing`
-and `toggleCollapsing`, the header button; brief `briefs/range-collapse-toggle.md`). Read their committed code first.
+`columnFoldExtension`; commit `f08c5b9`, brief `briefs/range-collapse-core.md`, notes
+`.omp/run/notes/RangeFoldCore.md`) and `RangeCollapseToggle` (`useRangeStore().collapsing` and `toggleCollapsing`, the
+header button; commit `fce7a2a`, brief `briefs/range-collapse-toggle.md`; a one-class fix round on `RangeView.vue` may
+land beside you). Read their committed code first. The core's two listeners (`columnFolds.ts:158-190`) have no
+DOM test yet: your fixture-page steps b, d and f are their proof.
 
 Facts (given, at `a6fe62a`, files you own unchanged since):
 
@@ -39,10 +42,14 @@ Owned: `frontend/src/editor/internal/wavePhase.ts`, `frontend/src/editor/interna
 `frontend/src/editor/internal/compareViews.test.ts`, `frontend/src/editor/internal/threadNumbers.ts`,
 `frontend/src/editor/internal/threadNumbers.test.ts`, `frontend/src/editor/internal/rangeFolds.ts` (new),
 `frontend/src/editor/internal/rangeFolds.test.ts` (new), `frontend/src/editor/range.ts`, `frontend/src/editor/theme.css`,
-`frontend/src/editor/rangeFolds.browser.test.ts` (new), `frontend/src/editor/range.browser.test.ts`,
-`frontend/src/editor/rangeThreads.browser.test.ts`, `frontend/src/editor/AGENTS.md`,
-`frontend/src/ui/useRangeController.ts`, `frontend/src/ui/useRangeController.test.ts`, `frontend/src/ui/rangeThreads.ts`,
-`frontend/src/ui/rangeThreads.test.ts`.
+`frontend/src/editor/range.browser.test.ts`, `frontend/src/editor/rangeThreads.browser.test.ts` (call sites only),
+`frontend/src/editor/AGENTS.md`, `frontend/src/ui/useRangeController.ts`, `frontend/src/ui/useRangeController.test.ts`,
+`frontend/src/ui/rangeThreads.ts`, `frontend/src/ui/rangeThreads.test.ts`.
+
+No new `*.browser.test.ts`: Playwright's WebKit cannot launch on this host (`libicudata.so.74`, known since #1242)
+and CI does not run the browser project, so a new probe would never run. The engine of record is MiniBrowser through
+`just webdriver` (VF8): your WebKit evidence is the fixture page below, driven by a throwaway WebDriver script outside
+the repository.
 
 Read-only: everything else — the core's files, `editor/compare.ts`, `editor/index.ts`, `ui/RangeView.vue`,
 `ui/rangeStore.ts`. The merge window's tests stay **byte-unchanged and passing**: `wavePhase.test.ts`,
@@ -110,8 +117,8 @@ wiring), with these settled points:
 
 ## Acceptance
 
-- Merge and compare unchanged: `git diff --stat` over the Read-only merge tests is empty; `pnpm -C frontend test` and
-  `pnpm -C frontend test:browser` pass them.
+- Merge and compare unchanged: `git diff --stat` over the Read-only merge tests is empty; `pnpm -C frontend test`
+  passes them.
 - Node (design tests 18–32): two columns and one strip — the left leaves at the strip's left edge, the right enters at
   its right edge; the merge chain through `chainEnds` equals `paneEnds`/`panePhases`; `ChainPhases` writes both
   columns' phase on resize and removes it on destroy; `columnWaves` gives each run's wave top per column (null where
@@ -124,23 +131,30 @@ wiring), with these settled points:
   `listed` turns true after the first load settles, success or failure. `ui/` tests kill the mutants on your `ui/`
   lines (Stryker, SP5); for three editor tests (realign, own-column extensions, wave join level) paste the failing
   output after a one-line sabotage, then revert.
-- WebKit, `editor/rangeFolds.browser.test.ts` (a 200-line pair, changes at lines 20 and 150, a thread at line 100,
-  dark and light, screenshots in `/tmp/yamt-range-folds`): at open `.fold-wave` in both gutters and one strip wave per
-  run, the join's ends at both waves' centres within 1 device px; clicks on the left wave, the strip's wave, the
-  right wave show +4, +8, then the rest in both columns, focus unchanged; hover on one part thickens the run's wave in
-  both columns and the strip; `setCollapsed(false)` → no wave, `(true)` after clicks → the start state, the left's top
-  line unchanged on screen and the right aligned next frame, a cursor inside moved to the wave line's start; the
-  thread line and 4 lines around it shown at open and after off → on; a thread added through `showThreads` changes
-  no wave; a press on the wave gutter fires no `startThread`; a search match in a hidden line of the right column
-  shows it in both columns; `moveToChange` lands on a difference and changes no wave.
 - WebKit, fixture page (`just app-session start-fixture --range-case review --threads seeded`, MiniBrowser 1600×1000),
-  dark **and** light, on `src/board/board.ts`: the 20–178 stretch behind one wave across both columns and the strip,
-  the seeded thread shown with its context; clicks show 4, 8, the rest; the header toggle off shows every line, on
-  resets; Ctrl/Cmd+F to a word in a hidden line shows it; Previous/Next unaffected. Merge fixture page
-  (`just app-session start-fixture`): waves, clicks and toggle as before. Screenshots pasted.
+  dark **and** light, on `src/board/board.ts` (left 20–178 one unchanged stretch; the seeded thread at left 100 /
+  right 101), measured from the page (`.fold-wave` cells, the strip's wave nodes, `.cm-line` text, scroll tops):
+  a. At open: one wave per run in both gutters and one strip wave per run; the join's ends sit at both columns' wave
+  centres within 1 device px; the thread line and 4 lines on each side of it shown.
+  b. Clicks on the left wave, then the strip's wave, then the right wave show +4, +8, then the rest, in both columns;
+  the focused column keeps the keyboard; a press on a wave's gutter cell opens no thread draft.
+  c. Hover on one part thickens the run's wave in both columns and the strip (stroke 1 → 2 px), hand pointer.
+  d. The header toggle off: no wave, every line shown; on after clicks: the start state; the left column's top line
+  unchanged on screen and the right lined up in the same frame; a cursor inside lines that get hidden lands on the
+  wave line's start.
+  e. Add a thread on a hidden-adjacent shown line, then toggle off → on: it is shown with its 4 lines; adding it
+  changed no wave until the toggle.
+  f. Ctrl/Cmd+F to a word only in a hidden line of the right column shows it in both columns; select-all and
+  Ctrl/Cmd+End reveal nothing.
+  g. Previous/Next step through the 7 differences and change no wave.
+  h. Reload with the stored choice off: the file opens with every line shown (files opened later follow it).
+- Merge fixture page (`just app-session start-fixture`), dark: waves across three panes and both strips, a click shows
+  the next step, the toolbar toggle off/on, a hover thickens the whole wave — as before (screenshots before your
+  change from `f08c5b9`'s tree if you can build it in a scratch worktree under `/tmp`, else describe).
+- Screenshots for a–h pasted (paths).
 
 Commands: `pnpm -C frontend typecheck`, `pnpm -C frontend lint`, `pnpm -C frontend test`,
-`pnpm -C frontend test:browser`, `pnpm -C frontend fmt:check`.
+`pnpm -C frontend fmt:check`, `pnpm -C frontend unused`.
 
 ## Skills
 

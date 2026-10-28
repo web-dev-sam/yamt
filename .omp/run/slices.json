@@ -1,17 +1,33 @@
 {
-  "RangeFoldCore": {
-    "owned": [
-      "frontend/src/editor/internal/foldRuns.ts",
-      "frontend/src/editor/internal/foldSteps.ts",
-      "frontend/src/editor/internal/folds.ts",
-      "frontend/src/editor/internal/foldView.ts",
-      "frontend/src/editor/internal/columnFolds.ts",
-      "frontend/src/editor/internal/columnFolds.test.ts"
-    ]
-  },
   "RangeCollapseToggleR1": {
     "owned": [
       "frontend/src/ui/RangeView.vue"
+    ]
+  },
+  "RangeFoldColumns": {
+    "owned": [
+      "frontend/src/editor/internal/wavePhase.ts",
+      "frontend/src/editor/internal/gap.ts",
+      "frontend/src/editor/internal/geometry.ts",
+      "frontend/src/editor/internal/strips.ts",
+      "frontend/src/editor/internal/compareStrip.ts",
+      "frontend/src/editor/internal/compareFrame.ts",
+      "frontend/src/editor/internal/compareFrame.test.ts",
+      "frontend/src/editor/internal/compareViews.ts",
+      "frontend/src/editor/internal/compareViews.test.ts",
+      "frontend/src/editor/internal/threadNumbers.ts",
+      "frontend/src/editor/internal/threadNumbers.test.ts",
+      "frontend/src/editor/internal/rangeFolds.ts",
+      "frontend/src/editor/internal/rangeFolds.test.ts",
+      "frontend/src/editor/range.ts",
+      "frontend/src/editor/theme.css",
+      "frontend/src/editor/range.browser.test.ts",
+      "frontend/src/editor/rangeThreads.browser.test.ts",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/rangeThreads.ts",
+      "frontend/src/ui/rangeThreads.test.ts"
     ]
   }
 }
