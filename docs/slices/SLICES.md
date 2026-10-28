@@ -1091,12 +1091,26 @@ request file, §2 slice map from its "Slice graph (proposal)", build, review, th
 the final run; it ends with its row done and stays on this branch for the next one. Plan §2 rows are written by each
 session for its own feature.
 
-| row | feature (request file)                                                                                                            | sessions' slices (proposal)                                      | status  | evidence |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ------- | -------- |
-| 1   | AI thread: thinking list capped at 20rem and following its end; Ask AI/Stop at the bottom, one-step send (`request-ai-thread.md`) | 2 web slices side by side, final run with a real omp turn        | planned |          |
-| 2   | range window: folder rows show the sum of their files' `+a −r` (`request-folder-sums.md`)                                         | 1 web slice, final run                                           | planned |          |
-| 3   | range window: collapse unchanged lines behind the wave, the merge window's toggle (`request-range-collapse.md`)                   | design, editor slice ∥ window slice, final run                   | planned |          |
-| 4   | merge and range windows: search every file, Ctrl/Cmd+Shift+S, one row per place, pane filters (`request-search.md`)               | design, Rust, editor go-to, search core, window panel, final run | planned |          |
+| row | feature (request file)                                                                                                            | sessions' slices (proposal)                                      | status                                  | evidence |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------- | -------- |
+| 1   | AI thread: thinking list capped at 20rem and following its end; Ask AI/Stop at the bottom, one-step send (`request-ai-thread.md`) | 2 web slices side by side, final run with a real omp turn        | in progress (session 33, section below) |          |
+| 2   | range window: folder rows show the sum of their files' `+a −r` (`request-folder-sums.md`)                                         | 1 web slice, final run                                           | planned                                 |          |
+| 3   | range window: collapse unchanged lines behind the wave, the merge window's toggle (`request-range-collapse.md`)                   | design, editor slice ∥ window slice, final run                   | planned                                 |          |
+| 4   | merge and range windows: search every file, Ctrl/Cmd+Shift+S, one row per place, pane filters (`request-search.md`)               | design, Rust, editor go-to, search core, window panel, final run | planned                                 |          |
+
+## AI thread — the thinking list capped and following its end; Ask AI at the bottom of a thread (session 33, branch `feat/beta-feedback` at `2fbb31e`)
+
+Owner request #1655 (2026-10-28), every question answered: `docs/slices/request-ai-thread.md` (rules 1–6, acceptance,
+non-goals); decisions in `docs/plan.md` §2 **#124** (orchestrator's details: the follow rule is one composable shared
+with the server log; an opened list starts at its end; the edit diff box 16rem so it fits the 20rem list; Ask AI off
+while its own add runs). The "one omp session per thread" ask is already the case (#121), no work. Rows 1 and 2 own
+disjoint files and run side by side; `frontend/src/ui/AGENTS.md` is row 2's (row 1's line for it goes there).
+
+| row | slice                                                                                                                                                                               | owner    | status      | evidence |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------- | -------- |
+| 1   | thinking list capped at 20rem, follows its end; one follow rule with the server log (`briefs/ai-thread-follow.md`) (`AiThinkingFollow`)                                             | web-impl | in progress |          |
+| 2   | Ask AI and Stop in the bottom row, shown on every thread with `--ai`; typed text added then asked; a line's new thread added then asked (`briefs/ai-thread-ask.md`) (`AiAskBottom`) | web-impl | in progress |          |
+| 3   | final run (`briefs/ai-thread-verify.md`): `just check`, WebKit fixture, real app with a real `omp acp` turn, dark and light                                                         | verifier | waiting     |          |
 
 ## Open product questions
 
