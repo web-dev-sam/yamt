@@ -703,3 +703,87 @@ test("deleting a thread's last note removes the thread, its line, its count, its
   );
   expect(problems).toEqual([]);
 });
+
+type Held = { readonly passed: Promise<void>; readonly open: () => void };
+
+function held(): Held {
+  const opens: (() => void)[] = [];
+  const passed = new Promise<void>((resolve) => {
+    opens.push(resolve);
+  });
+  return { passed, open: () => opens.forEach((open) => open()) };
+}
+
+/** The n-th add (thread or note) waits for `holds[n]`, then lands or, with `refuses`, is refused. */
+function heldAdds(holds: readonly Held[], refuses = false): Edit {
+  let calls = 0;
+  async function waited(): Promise<void> {
+    calls += 1;
+    await holds[calls - 1]?.passed;
+  }
+  const refusal = { ok: false as const, failure: UNKNOWN };
+  return (fixture) => ({
+    addThread: async (file, line, text) => {
+      await waited();
+      return refuses ? refusal : fixture.addThread(file, line, text);
+    },
+    addNote: async (thread, text) => {
+      await waited();
+      return refuses ? refusal : fixture.addNote(thread, text);
+    },
+  });
+}
+
+test.each([false, true])(
+  "addingThread holds a draft's add only while it runs (refused: %s)",
+  async (refuses) => {
+    const hold = held();
+    const { threads, board } = await opened("?range=review", heldAdds([hold], refuses));
+    threads.startThread(board, changedThreadLine("left", 1));
+    threads.startThread(board, changedThreadLine("left", 2));
+    expect(threads.addingThread("draft-0")).toBe(false);
+
+    const adding = threads.addThread("draft-0", "a");
+    expect([threads.addingThread("draft-0"), threads.addingThread("draft-1")]).toEqual([
+      true,
+      false,
+    ]);
+    hold.open();
+    await adding;
+
+    expect(threads.addingThread("draft-0")).toBe(false);
+  },
+);
+
+test.each([false, true])(
+  "addingNote holds a thread's note add only while it runs (refused: %s)",
+  async (refuses) => {
+    const hold = held();
+    const { threads } = await opened(SEEDED, heldAdds([hold], refuses));
+    const [first, second] = [threadAt(threads, 0).id, threadAt(threads, 1).id];
+
+    const adding = threads.addNote(first, "More?");
+    expect([threads.addingNote(first), threads.addingNote(second)]).toEqual([true, false]);
+    hold.open();
+    expect(await adding).toBe(!refuses);
+
+    expect(threads.addingNote(first)).toBe(false);
+  },
+);
+
+test("a second Comment while a note's add runs still sends; the thread is adding until both land", async () => {
+  const holds = [held(), held()];
+  const { threads } = await opened(SEEDED, heldAdds(holds));
+  const { id } = threadAt(threads, 0);
+
+  const first = threads.addNote(id, "One?");
+  const second = threads.addNote(id, "Two?");
+  holds[0]?.open();
+  expect(await first).toBe(true);
+  expect(threads.addingNote(id)).toBe(true);
+  holds[1]?.open();
+  expect(await second).toBe(true);
+
+  expect(threads.addingNote(id)).toBe(false);
+  expect(texts(threadAt(threads, 0)).slice(-2)).toEqual(["One?", "Two?"]);
+});

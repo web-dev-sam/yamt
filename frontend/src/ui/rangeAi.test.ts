@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { shallowRef } from "vue";
+import { computed, shallowRef } from "vue";
 
 import {
   agentSessionId,
@@ -24,7 +24,8 @@ import {
 } from "../ipc";
 import type { Problem } from "./problem";
 import { createRangeAi, type AskFrom, type RangeAi } from "./rangeAi";
-import { answerView, liveTurn, postBody, type AskContext, type ThreadAi } from "./rangeAiView";
+import type { AskContext } from "./rangeAiRules";
+import { answerView, liveTurn, postBody, type ThreadAi } from "./rangeAiView";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 
 type Asked = {
@@ -1093,4 +1094,70 @@ test("Ask AI on a thread no longer listed adds and asks nothing", async () => {
 
   expect(bodies(live, live.fresh)).toHaveLength(1);
   expect(live.client.asks).toEqual([]);
+});
+
+/** A rig whose note and thread adds wait for `adds`, then land or are refused. */
+async function gatedRig(refuses: boolean): Promise<{ readonly live: Rig; readonly adds: Gate }> {
+  const adds = gate();
+  const live = await rig(undefined, (fixture) => ({
+    addNote: async (thread, text) => {
+      await adds.passed;
+      return refuses ? { ok: false, failure: WRITE_FAILED } : fixture.addNote(thread, text);
+    },
+    addThread: async (file, line, text) => {
+      await adds.passed;
+      return refuses ? { ok: false, failure: WRITE_FAILED } : fixture.addThread(file, line, text);
+    },
+  }));
+  return { live, adds };
+}
+
+test.each([false, true])(
+  "Ask AI is off while Comment adds that thread's note, and on again once it lands (refused: %s)",
+  async (refuses) => {
+    const { live, adds } = await gatedRig(refuses);
+    const askable = computed(() => live.ai.canAsk(on(live.fresh), "Q?"));
+    expect(askable.value).toBe(true);
+
+    const comment = live.threads.addNote(live.fresh, "Q?");
+    expect(askable.value).toBe(false);
+    expect(live.ai.canAsk(on(threadAt(live, 1)), "Q?")).toBe(true);
+    adds.open();
+    await comment;
+
+    expect(askable.value).toBe(true);
+    expect(live.client.asks).toEqual([]);
+  },
+);
+
+test("Ask AI is off while Comment adds that line's new thread; the added thread is askable", async () => {
+  const { live, adds } = await gatedRig(false);
+  const { file } = threadOf(live, live.fresh);
+  live.threads.startThread(file, changedThreadLine("right", 3));
+  live.threads.startThread(file, changedThreadLine("right", 4));
+  const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
+  expect(askable.value).toBe(true);
+
+  const comment = live.threads.addThread("draft-0", "New?");
+  expect(askable.value).toBe(false);
+  expect(live.ai.canAsk(draftOf("draft-1"), "New?")).toBe(true);
+  adds.open();
+  const added = await comment;
+
+  expect(added === null ? false : live.ai.canAsk(on(added), "")).toBe(true);
+  expect(live.client.asks).toEqual([]);
+});
+
+test("a refused Comment of a line's new thread turns its Ask AI on again", async () => {
+  const { live, adds } = await gatedRig(true);
+  live.threads.startThread(threadOf(live, live.fresh).file, changedThreadLine("right", 3));
+  const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
+
+  const comment = live.threads.addThread("draft-0", "New?");
+  expect(askable.value).toBe(false);
+  adds.open();
+  await comment;
+
+  expect(askable.value).toBe(true);
+  expect(live.problems).toEqual([{ action: "threads", step: "add", cause: WRITE_FAILED }]);
 });

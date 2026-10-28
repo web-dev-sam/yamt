@@ -14,6 +14,7 @@ import type {
   ThreadList,
 } from "../ipc";
 import { attempt, type Problem, type ThreadStep } from "./problem";
+import { createRangeAdds, type AddsInFlight, type RangeAdds } from "./rangeAdds";
 import {
   createRangeDrafts,
   isBlank,
@@ -26,7 +27,7 @@ type ThreadBox =
   | { readonly kind: "draft"; readonly draft: ThreadDraft }
   | { readonly kind: "thread"; readonly thread: Thread; readonly open: boolean };
 
-export type RangeThreads = {
+export type RangeThreads = AddsInFlight & {
   readonly list: Readonly<ShallowRef<ThreadList>>;
   readonly open: Readonly<ShallowRef<ReadonlySet<ThreadId>>>;
   readonly drafts: Readonly<ShallowRef<ReadonlyMap<string, Draft>>>;
@@ -69,7 +70,7 @@ type State = {
   readonly open: ShallowRef<ReadonlySet<ThreadId>>;
   readonly drafts: RangeDrafts;
   readonly keys: Map<ThreadId, string>;
-  readonly adding: Set<string>;
+  readonly adds: RangeAdds;
 };
 
 export function isQueued(posting: Posting): boolean {
@@ -158,12 +159,12 @@ async function changed(
 
 async function addThread(state: State, key: string, text: string): Promise<ThreadId | null> {
   const draft = state.drafts.threadDraft(key);
-  if (draft === null || isBlank(text) || state.adding.has(key)) {
+  if (draft === null || isBlank(text) || state.adds.inFlight.addingThread(key)) {
     return null;
   }
-  state.adding.add(key);
-  const outcome = await attempt(() => state.source.addThread(draft.file, draft.line, text));
-  state.adding.delete(key);
+  const outcome = await state.adds.whileAdding({ kind: "thread", draftKey: key }, () =>
+    attempt(() => state.source.addThread(draft.file, draft.line, text)),
+  );
   if (!outcome.ok) {
     state.drafts.writeDraft(key, text);
     state.report({ action: "threads", step: "add", cause: outcome.cause });
@@ -181,7 +182,9 @@ async function addNote(state: State, thread: ThreadId, text: string): Promise<bo
   if (isBlank(text)) {
     return false;
   }
-  const added = await changed(state, "note", () => state.source.addNote(thread, text));
+  const added = await state.adds.whileAdding({ kind: "note", thread }, () =>
+    changed(state, "note", () => state.source.addNote(thread, text)),
+  );
   state.drafts.writeNote(thread, added === null ? text : "");
   return added !== null;
 }
@@ -274,7 +277,7 @@ export function createRangeThreads(
     open: shallowRef<ReadonlySet<ThreadId>>(new Set()),
     drafts: createRangeDrafts(),
     keys: new Map(),
-    adding: new Set(),
+    adds: createRangeAdds(),
   };
   const { threadDraft: _threadDraft, keepStored: _keepStored, ...drafts } = state.drafts;
   return {
@@ -292,5 +295,6 @@ export function createRangeThreads(
     },
     addThread: (key, text) => addThread(state, key, text),
     addNote: (thread, text) => addNote(state, thread, text),
+    ...state.adds.inFlight,
   };
 }

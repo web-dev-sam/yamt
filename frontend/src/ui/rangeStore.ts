@@ -20,7 +20,7 @@ import { fileListKey, type KeyPress } from "./fileListKey";
 import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
 import { createRangeAi, type RangeAi } from "./rangeAi";
-import type { AskContext } from "./rangeAiView";
+import type { AskContext } from "./rangeAiRules";
 import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import { threadPlaceText } from "./rangeThreadText";

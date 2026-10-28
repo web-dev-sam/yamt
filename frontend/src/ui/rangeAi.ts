@@ -2,16 +2,8 @@ import { shallowRef, type ShallowRef } from "vue";
 
 import type { AgentClient, ConversationLoad, RunningTurn, TurnEnd, TurnView } from "../agent";
 import { log, type AgentSessionId, type Thread, type ThreadId } from "../ipc";
-import {
-  answersIn,
-  heldAfter,
-  IDLE,
-  isGone,
-  isKept,
-  promptText,
-  type AskContext,
-  type ThreadAi,
-} from "./rangeAiView";
+import { answersIn, heldAfter, isGone, isKept, promptText, type AskContext } from "./rangeAiRules";
+import { IDLE, type ThreadAi } from "./rangeAiView";
 import { isBlank } from "./rangeDrafts";
 import type { RangeThreads } from "./rangeThreads";
 
@@ -25,7 +17,7 @@ export type RangeAi = {
   /** Ask AI (plan row 124): a non-blank `typed` is added first (the note, or the new thread) and the AI is asked once
    *  it is stored; a failed add asks nothing; nothing typed asks with the notes since the last answer. */
   ask(from: AskFrom, typed: string): Promise<void>;
-  /** Plan row 124: no turn runs, the conversation has loaded, no add of its own ask runs, and something to send. */
+  /** Plan row 124: no turn runs, the conversation has loaded, no add in that box still runs, and something to send. */
   canAsk(from: AskFrom, typed: string): boolean;
   retry(thread: ThreadId): void;
   stop(thread: ThreadId): void;
@@ -33,13 +25,16 @@ export type RangeAi = {
 };
 
 type AiClient = Pick<AgentClient, "ask" | "loadConversation">;
+type AiThreads = Pick<
+  RangeThreads,
+  "list" | "setSession" | "addAiAnswer" | "addThread" | "addNote" | "addingThread" | "addingNote"
+>;
 type Kept = Readonly<{ thread: ThreadId; session: AgentSessionId }>;
 type State = {
   readonly client: AiClient;
-  readonly threads: RangeThreads;
+  readonly threads: AiThreads;
   readonly place: (thread: Thread) => AskContext | null;
   readonly byThread: ShallowRef<ReadonlyMap<ThreadId, ThreadAi>>;
-  readonly adding: ShallowRef<ReadonlySet<string>>;
   readonly turns: Map<ThreadId, RunningTurn>;
   readonly asked: Map<ThreadId, string>;
   /** The thread's last ended turn while omp holds it, so the replay's last; dropped at the next ask. */
@@ -68,7 +63,8 @@ function askedSession(state: State, thread: Thread): AgentSessionId | null {
   return stored !== null && isGone(aiOf(state, thread.id), stored) ? null : stored;
 }
 
-/** No turn runs and the conversation has loaded: what Ask needs besides something to send. */
+/** No turn runs, the conversation has loaded and the First message has its context (`place`): what Ask needs
+ *  besides something to send. */
 function isReady(state: State, thread: Thread): boolean {
   const { loaded, loadedSession, running } = aiOf(state, thread.id);
   const session = askedSession(state, thread);
@@ -82,19 +78,12 @@ function canAsk(state: State, thread: Thread): boolean {
   return isReady(state, thread) && prompt !== null;
 }
 
-function addingKey(from: AskFrom): string {
-  return from.kind === "thread" ? `thread ${from.thread}` : `draft ${from.key}`;
-}
-
 function canAskFrom(state: State, from: AskFrom, typed: string): boolean {
-  if (state.adding.value.has(addingKey(from))) {
-    return false;
-  }
   if (from.kind === "draft") {
-    return !isBlank(typed);
+    return !isBlank(typed) && !state.threads.addingThread(from.key);
   }
   const thread = threadOf(state, from.thread);
-  if (thread === undefined) {
+  if (thread === undefined || state.threads.addingNote(from.thread)) {
     return false;
   }
   return isBlank(typed) ? canAsk(state, thread) : isReady(state, thread);
@@ -217,10 +206,7 @@ async function askFrom(state: State, from: AskFrom, typed: string): Promise<void
     ask(state, from.thread);
     return;
   }
-  const key = addingKey(from);
-  state.adding.value = new Set([...state.adding.value, key]);
   const thread = await addTyped(state, from, typed);
-  state.adding.value = new Set([...state.adding.value].filter((each) => each !== key));
   if (thread !== null) {
     ask(state, thread);
   }
@@ -260,7 +246,6 @@ export function createRangeAi(
     threads,
     place,
     byThread: shallowRef<ReadonlyMap<ThreadId, ThreadAi>>(new Map()),
-    adding: shallowRef<ReadonlySet<string>>(new Set()),
     turns: new Map(),
     asked: new Map(),
     answered: new Map(),
