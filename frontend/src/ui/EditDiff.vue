@@ -100,7 +100,7 @@ function toggle(): void {
       <p v-else-if="shown.kind === 'note'" class="pl-5 text-fg-muted">{{ shown.text }}</p>
       <div
         v-else
-        class="max-h-96 overflow-auto rounded border border-control-border opaque-scroller font-mono"
+        class="max-h-64 overflow-auto rounded border border-control-border opaque-scroller font-mono"
       >
         <div
           v-for="({ tone, cells }, index) in shown.rows"

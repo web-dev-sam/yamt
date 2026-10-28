@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { useEventListener } from "@vueuse/core";
-import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
 
 import { droppedAbove } from "./logFollow";
 import { BACK, EMPTY_LOG, logTime, logTitle, YAMT_MARK } from "./serverText";
 import { useAppStore } from "./store";
+import { useFollowEnd } from "./useFollowEnd";
 
 type Anchor = { readonly key: number; readonly offset: number; readonly scrollTop: number };
 
@@ -14,7 +15,7 @@ defineProps<{ name: string }>();
 const { shownLog, closeServerLog, question } = useAppStore();
 const back = useTemplateRef<HTMLButtonElement>("back");
 const scroller = useTemplateRef<HTMLDivElement>("scroller");
-const following = shallowRef(true);
+const { following, scrolled } = useFollowEnd(scroller, shownLog);
 const firstKey = shallowRef(0);
 let anchor: Anchor | null = null;
 useEventListener(window, "keydown", escapePressed);
@@ -44,17 +45,9 @@ watch(
 );
 watch(shownLog, keepPlace, { flush: "post" });
 
-onMounted(async () => {
+onMounted(() => {
   back.value?.focus();
-  await nextTick();
-  scrollToEnd();
 });
-
-function scrollToEnd(): void {
-  if (scroller.value !== null) {
-    scroller.value.scrollTop = scroller.value.scrollHeight;
-  }
-}
 
 function topRow(): Anchor | null {
   const element = scroller.value;
@@ -77,9 +70,7 @@ function topRow(): Anchor | null {
 
 function keepPlace(): void {
   const element = scroller.value;
-  if (following.value) {
-    scrollToEnd();
-  } else if (element !== null && anchor !== null) {
+  if (!following.value && element !== null && anchor !== null) {
     const row = element.querySelector(`[data-key="${anchor.key}"]`);
     if (row === null) {
       anchor = null;
@@ -88,13 +79,6 @@ function keepPlace(): void {
       element.scrollTop += moved - anchor.offset;
       anchor = { ...anchor, scrollTop: element.scrollTop };
     }
-  }
-}
-
-function scrolled(): void {
-  const element = scroller.value;
-  if (element !== null) {
-    following.value = element.scrollTop + element.clientHeight >= element.scrollHeight - 1;
   }
 }
 

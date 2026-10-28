@@ -5,14 +5,17 @@ import ChevronRight from "~icons/lucide/chevron-right";
 import type { AgentClient, TurnEnd, TurnView } from "../agent";
 import AiStep from "./AiStep.vue";
 import { failureText, RETRY, RUNNING_TEXT, STOPPED_TEXT, THINKING_AND_STEPS } from "./aiText";
+import { useFollowEnd } from "./useFollowEnd";
 import { useMarkdown } from "./useMarkdown";
 
 const props = defineProps<{ turn: TurnView; end: TurnEnd | null; client: AgentClient }>();
 const emit = defineEmits<{ retry: [] }>();
 
 const answer = useTemplateRef<HTMLDivElement>("answer");
+const steps = useTemplateRef<HTMLOListElement>("steps");
 const opened = shallowRef(false);
 useMarkdown(answer, () => props.turn.answer);
+const { scrolled } = useFollowEnd(steps, () => props.turn.entries);
 
 const running = computed(() => props.end === null);
 const failure = computed(() =>
@@ -38,7 +41,12 @@ const hasSteps = computed(() => running.value || props.turn.entries.length > 0);
         {{ THINKING_AND_STEPS }}
         <span v-if="running" class="text-primary">{{ RUNNING_TEXT }}</span>
       </button>
-      <ol v-if="opened" class="flex min-w-0 flex-col gap-2 border-l border-control-border pl-3">
+      <ol
+        v-if="opened"
+        ref="steps"
+        class="flex max-h-80 min-w-0 flex-col gap-2 overflow-y-auto border-l border-control-border opaque-scroller pl-3"
+        @scroll="scrolled"
+      >
         <template v-for="(entry, index) in turn.entries" :key="index">
           <li
             v-if="entry.kind === 'thought'"
