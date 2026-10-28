@@ -13,8 +13,14 @@ import { EditorView } from "@codemirror/view";
 import { toDocPos, type DocPos } from "./docPos";
 import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
 import type { Fold, FoldLevel, Hidden } from "./foldRuns";
-import { hiddenLevels, hidingAll, leaveCollapsed, nextStep, reveals } from "./foldSteps";
-import { sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
+import {
+  hiddenLevels,
+  hidingAll,
+  leaveCollapsed,
+  leaveCollapsedAfter,
+  nextStep,
+} from "./foldSteps";
+import { revealed, reveals, sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
 import type { Pane, PaneViews } from "./geometry";
 
 export type FoldState = FoldSteps<Pane>;
@@ -100,13 +106,7 @@ export function foldField(runs: readonly Fold[], collapsed: boolean): StateField
           next = { ...next, hiding: effect.value };
         }
       }
-      if (tr.selection !== undefined) {
-        const hidden = hiddenLevels(next.runs, next.hiding);
-        for (const reveal of reveals(hidden, "center", tr.selection.main)) {
-          next = shown(next, reveal);
-        }
-      }
-      return next;
+      return tr.selection === undefined ? next : revealed(next, "center", tr.selection.main);
     },
   });
 }
@@ -189,10 +189,8 @@ export function sideFoldPush(
     return null;
   }
   const effects = setHiding.of(counts);
-  if (counts.every((count, run) => count <= (before[run] ?? 0))) {
-    return { effects };
-  }
-  const selection = leaveCollapsed(side.selection, { runs: fields.runs, hiding: counts }, pane);
+  const steps = { runs: fields.runs, hiding: counts };
+  const selection = leaveCollapsedAfter(side.selection, before, steps, pane);
   return selection === null ? { effects } : { effects, selection };
 }
 
@@ -221,22 +219,29 @@ export function sideReveal(
   return found.length === 0 ? null : showSpec(found);
 }
 
-export function sideReveals(
-  fields: FoldFields,
-  pane: "left" | "right",
-  center: () => EditorView,
+export function revealOnOwner(
+  reveal: (state: EditorState) => TransactionSpec | null,
+  owner: () => EditorView,
 ): Extension {
   return EditorView.updateListener.of((update) => {
     if (!update.selectionSet) {
       return;
     }
-    const spec = sideReveal(fields, pane, update.state);
+    const spec = reveal(update.state);
     if (spec === null) {
       return;
     }
-    center().dispatch(spec);
+    owner().dispatch(spec);
     update.view.dispatch({
       effects: EditorView.scrollIntoView(update.state.selection.main, { y: "center" }),
     });
   });
+}
+
+export function sideReveals(
+  fields: FoldFields,
+  pane: "left" | "right",
+  center: () => EditorView,
+): Extension {
+  return revealOnOwner((state) => sideReveal(fields, pane, state), center);
 }

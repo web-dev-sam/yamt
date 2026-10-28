@@ -12,8 +12,15 @@ import { EditorView } from "@codemirror/view";
 import type { Column, Difference, ShownThread, ThreadLine } from "../../ipc";
 import type { ColumnViews } from "./compareViews";
 import { columnRuns, type ColumnChange, type Fold } from "./foldRuns";
-import { hiddenLevels, hidingAll, leaveCollapsed, nextStep, reveals } from "./foldSteps";
-import { sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
+import { revealOnOwner } from "./folds";
+import {
+  hiddenLevels,
+  hidingAll,
+  leaveCollapsed,
+  leaveCollapsedAfter,
+  nextStep,
+} from "./foldSteps";
+import { revealed, reveals, sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
 import { paneFoldView } from "./foldView";
 
 export type ColumnSteps = FoldSteps<Column>;
@@ -39,13 +46,7 @@ export const ownerSteps = StateField.define<ColumnSteps>({
         next = effect.value;
       }
     }
-    if (tr.selection !== undefined) {
-      const hidden = hiddenLevels(next.runs, next.hiding);
-      for (const reveal of reveals(hidden, "left", tr.selection.main)) {
-        next = shown(next, reveal);
-      }
-    }
-    return next;
+    return tr.selection === undefined ? next : revealed(next, "left", tr.selection.main);
   },
 });
 
@@ -142,11 +143,9 @@ export function mirrorSpec(right: EditorState, steps: ColumnSteps): TransactionS
     return null;
   }
   const spec = { effects: setSteps.of(steps), annotations: OUT_OF_HISTORY };
-  const grew = steps.hiding.some((count, run) => count > (before.hiding[run] ?? 0));
-  if (!replaced && !grew) {
-    return spec;
-  }
-  const selection = leaveCollapsed(right.selection, steps, "right");
+  const selection = replaced
+    ? leaveCollapsed(right.selection, steps, "right")
+    : leaveCollapsedAfter(right.selection, before.hiding, steps, "right");
   return selection === null ? spec : { ...spec, selection };
 }
 
@@ -169,22 +168,6 @@ function pushToRight(views: () => ColumnViews): Extension {
   });
 }
 
-function revealFromRight(views: () => ColumnViews): Extension {
-  return EditorView.updateListener.of((update) => {
-    if (!update.selectionSet) {
-      return;
-    }
-    const spec = rightReveal(update.state);
-    if (spec === null) {
-      return;
-    }
-    views().left.dispatch(spec);
-    update.view.dispatch({
-      effects: EditorView.scrollIntoView(update.state.selection.main, { y: "center" }),
-    });
-  });
-}
-
 export function columnFoldExtension(column: Column, wiring: ColumnFoldWiring): Extension {
   const field = column === "left" ? ownerSteps : mirrorSteps;
   const view = paneFoldView(
@@ -194,5 +177,5 @@ export function columnFoldExtension(column: Column, wiring: ColumnFoldWiring): E
   );
   return column === "left"
     ? [ownerSteps, view, pushToRight(wiring.views)]
-    : [mirrorSteps, view, revealFromRight(wiring.views)];
+    : [mirrorSteps, view, revealOnOwner(rightReveal, () => wiring.views().left)];
 }

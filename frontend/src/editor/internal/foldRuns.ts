@@ -1,6 +1,6 @@
 import type { Text } from "@codemirror/state";
 
-import type { Chunk, Column } from "../../ipc";
+import type { Chunk, Column, Difference } from "../../ipc";
 import { toDocPos, type DocPos } from "./docPos";
 import { PANES, type Pane } from "./geometry";
 
@@ -8,7 +8,7 @@ export type Hidden = { readonly from: DocPos; readonly to: DocPos };
 export type FoldLevel<P extends string = Pane> = Readonly<Record<P, Hidden | null>>;
 export type Fold<P extends string = Pane> = { readonly hidden: readonly FoldLevel<P>[] };
 export type LineSpan = { readonly start: number; readonly len: number };
-export type ColumnChange = Readonly<Record<Column, LineSpan>>;
+export type ColumnChange = Pick<Difference, "left" | "right">;
 
 type RunEdge = { readonly start: number; readonly end: number };
 

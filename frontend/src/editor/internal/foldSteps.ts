@@ -64,10 +64,28 @@ export function reveals<P extends string>(
   });
 }
 
+export function revealed<P extends string>(
+  steps: FoldSteps<P>,
+  pane: NoInfer<P>,
+  selection: SelectionRange,
+): FoldSteps<P> {
+  return reveals(hiddenLevels(steps.runs, steps.hiding), pane, selection).reduce(shown, steps);
+}
+
 export function leaveCollapsed<P extends string>(
   selection: EditorSelection,
   steps: FoldSteps<P>,
   pane: P,
 ): EditorSelection | null {
   return leaveAllHidden(selection, displayedIn(hiddenLevels(steps.runs, steps.hiding), pane));
+}
+
+export function leaveCollapsedAfter<P extends string>(
+  selection: EditorSelection,
+  before: readonly number[],
+  steps: FoldSteps<P>,
+  pane: P,
+): EditorSelection | null {
+  const grew = steps.hiding.some((count, run) => count > (before[run] ?? 0));
+  return grew ? leaveCollapsed(selection, steps, pane) : null;
 }

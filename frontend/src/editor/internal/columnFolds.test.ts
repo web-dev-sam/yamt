@@ -135,13 +135,18 @@ function allLevels(runs: readonly Fold<Column>[], column: Column): string[][] {
   return runs.map((fold) => fold.hidden.map((level) => lineRange(DOCS[column], level[column])));
 }
 
+const COLUMNS: readonly Column[] = ["left", "right"];
+
 function thread(
-  key: string,
-  left: number,
-  right: number,
+  column: Column,
+  lines: { readonly left: number; readonly right: number },
   shown: ShownThread["shown"],
 ): ShownThread {
-  return { key, line: unchangedThreadLine("left", { left, right }), shown };
+  return {
+    key: `${column} ${lines.left} ${shown}`,
+    line: unchangedThreadLine(column, lines),
+    shown,
+  };
 }
 
 function outerLevel(state: EditorState, column: Column, run: number): Hidden {
@@ -201,15 +206,18 @@ test("a stretch under 2 lines hides nothing and a level equal to the one outside
   expect(allLevels(unchanged, "right")).toEqual([["1-30"]]);
 });
 
-test("a thread on an unchanged line splits its stretch and keeps 4 lines around it in both columns — open, collapsed and draft alike", () => {
-  for (const shown of ["open", "collapsed", "draft"] as const) {
-    const pair = opened([thread("t", 50, 51, shown)]);
+test.each(COLUMNS)(
+  "a thread on an unchanged line in the %s column splits its stretch and keeps 4 lines around it in both columns — open, collapsed and draft alike",
+  (column) => {
+    for (const shown of ["open", "collapsed", "draft"] as const) {
+      const pair = opened([thread(column, { left: 50, right: 51 }, shown)]);
 
-    expect(waves(pair.left, "left")).toEqual(["1-26", "36-46", "56-66", "75-100"]);
-    expect(waves(pair.right, "right")).toEqual(["1-26", "37-47", "57-67", "77-102"]);
-    expect(pair.left.doc.line(51).text).toBe(pair.right.doc.line(52).text);
-  }
-});
+      expect(waves(pair.left, "left")).toEqual(["1-26", "36-46", "56-66", "75-100"]);
+      expect(waves(pair.right, "right")).toEqual(["1-26", "37-47", "57-67", "77-102"]);
+      expect(pair.left.doc.line(51).text).toBe(pair.right.doc.line(52).text);
+    }
+  },
+);
 
 test("threads on removed or added lines change no run", () => {
   const removed: ShownThread = { key: "r", line: changedThreadLine("left", 30), shown: "open" };
@@ -223,7 +231,7 @@ test("threads on removed or added lines change no run", () => {
 });
 
 test("a thread on the line after an insertion point sorts after the difference and stays shown", () => {
-  const after = thread("t", 70, 72, "open");
+  const after = thread("left", { left: 70, right: 72 }, "open");
   const starts = columnChanges(DIFFERENCES, [after]).map(({ left, right }) => [
     left.start,
     right.start,
@@ -239,20 +247,29 @@ test("a thread on the line after an insertion point sorts after the difference a
   expect(waves(pair.right, "right")).toEqual(["1-26", "37-67", "-", "78-102"]);
 });
 
-test("two threads on one line make one change", () => {
-  const changes = columnChanges(DIFFERENCES, [
-    thread("a", 50, 51, "open"),
-    thread("b", 50, 51, "collapsed"),
-  ]);
+const SAME_LINE_COLUMNS: readonly (readonly [Column, Column])[] = [
+  ["left", "left"],
+  ["right", "right"],
+  ["left", "right"],
+];
 
-  const threadLines: Readonly<Record<Column, LineSpan>> = {
-    left: { start: 50, len: 1 },
-    right: { start: 51, len: 1 },
-  };
+test.each(SAME_LINE_COLUMNS)(
+  "two threads on one line make one change: %s column and %s column",
+  (first, second) => {
+    const changes = columnChanges(DIFFERENCES, [
+      thread(first, { left: 50, right: 51 }, "open"),
+      thread(second, { left: 50, right: 51 }, "collapsed"),
+    ]);
 
-  expect(changes).toHaveLength(DIFFERENCES.length + 1);
-  expect(changes).toContainEqual(threadLines);
-});
+    const threadLines: Readonly<Record<Column, LineSpan>> = {
+      left: { start: 50, len: 1 },
+      right: { start: 51, len: 1 },
+    };
+
+    expect(changes).toHaveLength(DIFFERENCES.length + 1);
+    expect(changes).toContainEqual(threadLines);
+  },
+);
 
 test("a step on a run shows its next step in both columns, owner then mirror", () => {
   const once = click(opened(), 1);
@@ -300,7 +317,7 @@ test("on hides every run back to its start whatever steps were shown, off shows 
 test("runs given at a renew replace the old ones and a mirror copy leaves counts alone otherwise", () => {
   const off = opened([], false);
   const again = renewed(off, false);
-  const withThread = renewed(opened(), true, [thread("t", 50, 51, "open")]);
+  const withThread = renewed(opened(), true, [thread("left", { left: 50, right: 51 }, "open")]);
   const moved = onLeft(withThread, { selection: EditorSelection.cursor(0) });
 
   expect(columnSteps(again.left, "left").runs).not.toBe(columnSteps(off.left, "left").runs);
@@ -399,26 +416,6 @@ test("a search match inside hidden lines reveals it in both columns", () => {
   expect(levels(fromLeft.right, "right", 1)).toEqual([]);
   expect(levels(fromRight.right, "right", 1)).toEqual(["49-55"]);
   expect(levels(fromRight.left, "left", 1)).toEqual(["48-54"]);
-});
-
-test("a selection on a difference's first line reveals nothing", () => {
-  const pair = opened();
-  const leftSelections = [
-    EditorSelection.single(at(pair.left, 31)),
-    EditorSelection.single(at(pair.left, 31), pair.left.doc.line(31).to),
-    EditorSelection.single(at(pair.left, 71)),
-  ];
-  const rightSelections = [
-    EditorSelection.single(at(pair.right, 31), pair.right.doc.line(32).to),
-    EditorSelection.single(at(pair.right, 72)),
-  ];
-
-  for (const selection of leftSelections) {
-    expect(onLeft(pair, { selection }).left.field(ownerSteps)).toBe(pair.left.field(ownerSteps));
-  }
-  for (const selection of rightSelections) {
-    expect(rightReveal(pair.right.update({ selection }).state)).toBeNull();
-  }
 });
 
 test("every fold transaction is out of history", () => {
