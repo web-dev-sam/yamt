@@ -8,6 +8,8 @@
       "frontend/src/ui/rangeAiView.test.ts",
       "frontend/src/ui/rangeAiRules.ts",
       "frontend/src/ui/rangeAiRules.test.ts",
+      "frontend/src/ui/rangeAdds.ts",
+      "frontend/src/ui/rangeAdds.test.ts",
       "frontend/src/ui/rangeThreads.ts",
       "frontend/src/ui/rangeThreads.test.ts",
       "frontend/src/ui/rangeStore.ts",

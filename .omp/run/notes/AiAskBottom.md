@@ -59,3 +59,15 @@ nothing; Retry after an unrecorded crash asks nothing until a load records it. `
   (`10-light.png`); the builder believes `fixtureAgent` opens a new session per ask; not compared with the old code.
 - Ctrl/Cmd+Enter during Ask AI's own add can add the same text again (Comment's behaviour today, unchanged).
 - A line's new thread: Ask AI is on without checking the First message context; missing context → added, not asked.
+
+## Reviews (round 1)
+
+- Mutants `just mutants a484eb6`: 947 killed, 2 timeout, 36 survived, 15 no coverage
+  (`.omp/run/mutants/AiAskBottom.survivors.txt`); the 4 on added lines judged equivalent by the correctness reviewer.
+- `AiAskBottomCorrect`: pass. The fixture's "omp no longer has this answer" after a second ask is not new: the session
+  and record paths are unchanged, and `fixtures/agent/load.jsonl` replays one turn, so turn 1+ shows as gone (the
+  builder's guess of a new session per ask was wrong). One nit (#1663, `finally`) dropped.
+- `AiAskBottomBoundary`: fail. Block #1659: `rangeAiView.ts` got a second job (the AI's pure rules beside the view).
+  Promoted: #1660 (`State.threads` widened to all of `RangeThreads`), #1661 (two in-flight records of a draft's add
+  that disagree while Comment's add runs), #1662 (`isReady`'s doc comment). → `AiAskBottomR1`
+  (`briefs/ai-thread-ask-rework-1.md`); plan #124 amended: one record of adds in flight in `rangeThreads.ts`.
