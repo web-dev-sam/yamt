@@ -573,7 +573,8 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   shows two read-only columns with the threads' block rows and collapses unchanged lines behind the merge window's
   wave (`options { preferences, collapsed, threads }`, `setCollapsed`; a thread line is never hidden, #126);
   `editor/markdown.ts` renders Markdown as DOM nodes only
-  (#112). The range root (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeDrafts.ts`;
+  (#112). The range root (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeOpen.ts` — each
+  stored thread's box key and open state —, `rangeDrafts.ts`;
   `rangeAdds.ts` the one reactive record of adds in flight, which Ask AI reads, #124), GitLab (`rangeGitLab.ts`) and the
   AI (`rangeAi.ts`: `ask(from: AskFrom, typed)` is Ask AI's one step — a non-blank typed text added first as the note
   or the new thread, then asked — and `canAsk(from, typed)` its one enabled rule, #124; `rangeAiRules.ts` the pure
@@ -960,12 +961,15 @@ Internals (`editor/internal/`, not importable from `ui/`):
   of the viewport. Swapping to chunk-anchored hold later = replacing this one function (plan
   decision #12). Re-entrancy: the follower panes written by a sync ignore their echo for one
   frame; a source whose `scrollTop` did not change does not re-sync, unless `follow(pane)` asked the
-  next sync to write the others anyway (`Frame.realign`, after the collapse toggle, plan §2 #68).
+  next sync to write the others anyway; a followed pane stays the source until that sync, so another pane's scroll
+  event in between (a column the toggle shrank fires a clamped one) never leads (`Frame.realign`,
+  `CompareFrame.realign`, after the collapse toggle, plan §2 #68, #126).
 - `foldRuns.ts`, `foldSteps.ts`, `folds.ts`, `foldSelection.ts`, `foldView.ts`, `folding.ts`, `wavePhase.ts`,
   `columnFolds.ts`, `rangeFolds.ts` — collapsed unchanged lines (plan §2 #63, #64, #68), one core for the merge
   window's three panes and the range window's two columns (#126). `foldRuns.ts` is WebStorm's
   `FoldingBuilderBase`: every run outside the changes, per pane, with up to three nested levels keeping 4, 8, 16
-  lines next to each change (`Fold<P>`, `FoldLevel<P>` = one range or none per pane key, `displayed`), one private
+  lines next to each change (`Fold<P>`, `FoldLevel<P>` = one range or none per pane key, `displayed`, `waveStartsIn`
+  — where a pane draws each run's wave, for both windows), one private
   `runLevels` behind `foldRuns` (`Chunk`s) and `columnRuns` (`ColumnChange`s, branded line spaces kept).
   `foldSteps.ts` is the pure step state generic over the pane key (`FoldSteps` {runs, hiding}: `shown` only ever
   shows, `revealed` applies a selection's reveals in the same transaction, `leaveCollapsed`/`leaveCollapsedAfter`
@@ -985,19 +989,20 @@ Internals (`editor/internal/`, not importable from `ui/`):
   middle). `columnFolds.ts` is the range's state: the left column's `ownerSteps` owns runs and counts (no column
   is the "middle"; the left is the base), the right's `mirrorSteps` copies the whole value through the left's
   update listener; `rangeRuns` makes every `unchangedOnLeft`/`unchangedOnRight` thread line a one-line change in
-  both columns, so a thread is never hidden. `rangeFolds.ts` `RangeFolds` wires one `Folding` over both columns and
-  the strip, the left → strip → right `ChainPhases`, and `renew` (open, on, off: one transaction on the left with
-  its `scrollSnapshot`); `columnWaves` gives the strip's joins. `folding.ts` is the one pointer owner over a
-  window's wave hosts (hover, a click shows the next step, presses on a wave keep the keyboard where it was; a press
-  on a range wave's gutter cell starts no thread). `wavePhase.ts` pins each pane's wave at the strips' `<svg>` edges
-  (WebStorm's start phase: out of a pane on the centre line heading down, into one heading up; the merge's middle
-  stretched to k+½ waves): `layoutOf` reads the scrollers' and strips' edges rounded to device pixels, `chainEnds`
-  turns a `WaveChain` (a pane, then strip–pane links) into each pane's ends (`paneEnds`/`panePhases` the merge's
-  `STRIP_PANES` case), `ChainPhases` is one `ResizeObserver` on the pane hosts plus a `matchMedia` resolution
-  listener writing two custom properties, `WavePhases` its three-pane case. The strips' wave joins are one
-  `WaveLayer` (`strips.ts`, from `gap.ts` `joinPaints`) in the merge's `GapStrip` and, given `hovered`, in
-  `CompareStrip`; `CompareFrame` takes an optional `waves` part and `realign(source)`, applied at the start of the
-  next frame (a column the toggle shrinks fires a clamped scroll before it); the compare window passes neither.
+  both columns, so a thread is never hidden; `hiddenIn` gives a column's shown folds. `rangeFolds.ts` `RangeFolds`
+  wires one `Folding` over both columns and the strip, the left → strip → right `ChainPhases`, and `renew` (open,
+  on, off: one transaction on the left with its `scrollSnapshot`); `columnWaves` gives the strip's joins through
+  `waveStartsIn` and `geometry.ts` `waveTops` (the merge's `waveRows` uses the same). `folding.ts` is the one pointer
+  owner over a window's wave hosts (hover, a click shows the next step, presses on a wave keep the keyboard where it
+  was; a press on a range wave's gutter cell starts no thread). `wavePhase.ts` pins each pane's wave at the strips'
+  `<svg>` edges (WebStorm's start phase: out of a pane on the centre line heading down, into one heading up; the
+  merge's middle stretched to k+½ waves): `layoutOf` reads the scrollers' and strips' edges rounded to device
+  pixels, `chainEnds` turns a `WaveChain` (a pane, then strip–pane links) into each pane's ends, the private
+  `chainPhases` turns ends and scroller edges into phases (`paneEnds`/`panePhases` the merge's `STRIP_PANES` case),
+  `ChainPhases` is one `ResizeObserver` on the pane hosts plus a `matchMedia` resolution listener writing two custom
+  properties, `WavePhases` its three-pane case. The strips' wave joins are one `WaveLayer` (`strips.ts`, from
+  `gap.ts` `joinPaints`) in the merge's `GapStrip` and, given `hovered`, in `CompareStrip`; `CompareFrame` takes an
+  optional `waves` part and `realign(source)`; the compare window passes neither.
 - `frame.ts` — the once-per-frame paint (`Frame`): find space, the layout cache, scroll sync, the
   covered highlight, the strips and the minimap (`Minimap`, `showMinimap`); moved out of
   `index.ts`. `paneDocs.ts` builds the three `Text`s once with the file's line separator (the views,
