@@ -51,3 +51,8 @@ tests). Evidence: swapped lines → TS2322 ×2; `unchangedOnRight` one-sided →
 202 files / 2770 tests, typecheck, lint, fmt, knip clean. Deviations (accepted): `revealed`'s pane `NoInfer<P>`;
 `.reduce(shown, steps)`; one `test.each` for both duplicates asks. Risk: new edge `columnFolds.ts` → `folds.ts`
 (`revealOnOwner`); row 4 sees it only on merge.
+
+## Re-check after fix round 1
+
+Boundary pass (#1672–#1675 resolved, no new copy), correctness pass (#1677, #1678 resolved; merge behaviour read
+equal through the shared helpers); accepted.
