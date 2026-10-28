@@ -1,0 +1,747 @@
+commit a23dcbada632fefc6c83dda36e252a729cb7508f
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-28 21:24:18 +0100
+
+    fix(editor): a followed pane leads the next sync in both windows; one phase, wave-start and wave-top rule; range open set in rangeOpen.ts
+
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index bd31bd0..35c0413 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -18,4 +18,4 @@ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only
+ 
+ Range threads (plan §2 #116): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. `internal/threadAnchor.ts` (`anchorAt`, `linePlace`) is the one rule from a column line to a `ThreadLine` and to its partner line; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `threadRows.ts` (pure) groups the shown threads by aligned place (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), and gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field; `threadNumbers.ts` merges a `mousedown` into the number gutter (a number starts a thread, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`.
+ 
+-Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `wavePhase.ts` (`chainEnds`/`ChainPhases` over a chain of panes and strips; `WavePhases` is the merge's three-pane chain), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). Unchanged-line threads are run edges; runs are computed at build and at each `setCollapsed(true)`, never on a thread change.
++Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps; `waveStartsIn`, where each run's wave starts in a pane), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `geometry.ts` `waveTops` (wave starts to block tops, under `waveRows` and `columnWaves`), `wavePhase.ts` (`chainEnds`/`chainPhases`/`ChainPhases` over a chain of panes and strips — the one phase rule; `WavePhases` is the merge's three-pane chain, `panePhases` its mapping), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push, `hiddenIn` each column's shown folds), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). Unchanged-line threads are run edges; runs are computed at build and at each `setCollapsed(true)`, never on a thread change. Realigning after a fold change (both windows) is `ScrollSync.follow(source)`: the followed pane leads the next sync, and no other pane's scroll event (a clamped one from the change) replaces it before then.
+diff --git a/frontend/src/editor/internal/columnFolds.test.ts b/frontend/src/editor/internal/columnFolds.test.ts
+index 39ca9f3..4d5185b 100644
+--- a/frontend/src/editor/internal/columnFolds.test.ts
++++ b/frontend/src/editor/internal/columnFolds.test.ts
+@@ -18,6 +18,7 @@ import {
+   columnChanges,
+   columnFoldExtension,
+   columnSteps,
++  hiddenIn,
+   mirrorSpec,
+   ownerSteps,
+   rangeRuns,
+@@ -28,7 +29,7 @@ import {
+ } from "./columnFolds";
+ import { selectMatch } from "./findMatch";
+ import { displayed, type Fold, type Hidden, type LineSpan } from "./foldRuns";
+-import { displayedIn, hiddenLevels } from "./foldSteps";
++import { displayedIn } from "./foldSteps";
+ 
+ function numbered(from: number, to: number): string[] {
+   return Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
+@@ -117,17 +118,12 @@ function lineRange(doc: Text, hidden: Hidden | null): string {
+     : `${doc.lineAt(hidden.from).number}-${doc.lineAt(hidden.to).number}`;
+ }
+ 
+-function hiddenNow(state: EditorState, column: Column): readonly Fold<Column>[] {
+-  const { runs, hiding } = columnSteps(state, column);
+-  return hiddenLevels(runs, hiding);
+-}
+-
+ function waves(state: EditorState, column: Column): string[] {
+-  return hiddenNow(state, column).map((fold) => lineRange(state.doc, displayed(fold, column)));
++  return hiddenIn(state, column).map((fold) => lineRange(state.doc, displayed(fold, column)));
+ }
+ 
+ function levels(state: EditorState, column: Column, run: number): string[] {
+-  const fold = hiddenNow(state, column)[run];
++  const fold = hiddenIn(state, column)[run];
+   return fold === undefined ? [] : fold.hidden.map((level) => lineRange(state.doc, level[column]));
+ }
+ 
+@@ -150,7 +146,7 @@ function thread(
+ }
+ 
+ function outerLevel(state: EditorState, column: Column, run: number): Hidden {
+-  const hidden = hiddenNow(state, column)[run]?.hidden[0]?.[column];
++  const hidden = hiddenIn(state, column)[run]?.hidden[0]?.[column];
+   if (hidden === undefined || hidden === null) {
+     throw new Error(`run ${run} hides nothing in the ${column} column`);
+   }
+@@ -303,11 +299,11 @@ test("on hides every run back to its start whatever steps were shown, off shows
+   expect(waves(off.left, "left")).toEqual(["-", "-", "-"]);
+   expect(waves(off.right, "right")).toEqual(["-", "-", "-"]);
+   expect(columnSteps(off.right, "right").hiding).toEqual([0, 0, 0]);
+-  expect(displayedIn(hiddenNow(off.left, "left"), "left")).toEqual([]);
+-  expect(displayedIn(hiddenNow(off.right, "right"), "right")).toEqual([]);
++  expect(displayedIn(hiddenIn(off.left, "left"), "left")).toEqual([]);
++  expect(displayedIn(hiddenIn(off.right, "right"), "right")).toEqual([]);
+   for (const pair of [on, offOn]) {
+-    expect(allLevels(hiddenNow(pair.left, "left"), "left")).toEqual(
+-      allLevels(hiddenNow(fresh.left, "left"), "left"),
++    expect(allLevels(hiddenIn(pair.left, "left"), "left")).toEqual(
++      allLevels(hiddenIn(fresh.left, "left"), "left"),
+     );
+     expect(columnSteps(pair.right, "right").hiding).toEqual([3, 3, 3]);
+     expect(waves(pair.right, "right")).toEqual(waves(fresh.right, "right"));
+diff --git a/frontend/src/editor/internal/columnFolds.ts b/frontend/src/editor/internal/columnFolds.ts
+index 8c7f5ee..d9e26e7 100644
+--- a/frontend/src/editor/internal/columnFolds.ts
++++ b/frontend/src/editor/internal/columnFolds.ts
+@@ -110,7 +110,7 @@ export function columnSteps(state: EditorState, column: Column): ColumnSteps {
+   return state.field(column === "left" ? ownerSteps : mirrorSteps);
+ }
+ 
+-function hiddenIn(state: EditorState, column: Column): readonly Fold<Column>[] {
++export function hiddenIn(state: EditorState, column: Column): readonly Fold<Column>[] {
+   const { runs, hiding } = columnSteps(state, column);
+   return hiddenLevels(runs, hiding);
+ }
+diff --git a/frontend/src/editor/internal/compareFrame.test.ts b/frontend/src/editor/internal/compareFrame.test.ts
+index f409f9d..7760db3 100644
+--- a/frontend/src/editor/internal/compareFrame.test.ts
++++ b/frontend/src/editor/internal/compareFrame.test.ts
+@@ -2,7 +2,7 @@ import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
+ import { BlockType, Decoration } from "@codemirror/view";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import type { Column } from "../../ipc";
++import { loadCompareFixture, type Column } from "../../ipc";
+ import { columnFoldExtension, mirrorSpec, mirrorSteps, ownerSteps } from "./columnFolds";
+ import { renewSpec, stepSpec } from "./columnFolds";
+ import { differenceField, showDifferences } from "./compareFields";
+@@ -28,6 +28,21 @@ const CELLS = {
+   addCell: () => {},
+   dropCell: () => {},
+ };
++const NO_WORDS = { changed: [], removals: [] };
++const { comparison: ONE_DIFFERENCE } = await loadCompareFixture("single", {
++  "single.json": {
++    left: TEXT,
++    right: TEXT,
++    differences: [
++      {
++        left: { start: 4, len: 1 },
++        right: { start: 4, len: 1 },
++        words: { left: NO_WORDS, right: NO_WORDS },
++      },
++    ],
++  },
++});
++const SINGLE_CHANGE = ONE_DIFFERENCE.differences;
+ 
+ type FakeColumn = {
+   state: EditorState;
+@@ -452,8 +467,7 @@ test("waves reach the strip with the rows, and a step shown by a click measures
+     waves: columnWaves,
+   });
+   const doc = Text.of(TEXT.split("\n"));
+-  const change = { start: 4, len: 1 };
+-  const runs = columnRuns([{ left: change, right: change }], { left: doc, right: doc });
++  const runs = columnRuns(SINGLE_CHANGE, { left: doc, right: doc });
+ 
+   onLeft(views, renewSpec(views.left.state, runs, true));
+   runFrames();
+diff --git a/frontend/src/editor/internal/compareFrame.ts b/frontend/src/editor/internal/compareFrame.ts
+index 766c213..0ca62b0 100644
+--- a/frontend/src/editor/internal/compareFrame.ts
++++ b/frontend/src/editor/internal/compareFrame.ts
+@@ -75,7 +75,6 @@ export class CompareFrame {
+   readonly #scroll: ScrollSync<Column>;
+   #frameId: number | null = null;
+   #layoutCache: CompareLayout | null = null;
+-  #realignFrom: Column | null = null;
+ 
+   constructor({
+     views,
+@@ -112,12 +111,6 @@ export class CompareFrame {
+ 
+   request(): void {
+     this.#frameId ??= requestAnimationFrame(() => {
+-      if (this.#realignFrom !== null) {
+-        // A column the change shrank fires its clamped scroll event before this callback (HTML
+-        // "update the rendering": scroll steps run before animation frame callbacks); it must not lead.
+-        this.#scroll.follow(this.#realignFrom);
+-        this.#realignFrom = null;
+-      }
+       this.#frameId = null;
+       const views = this.#views;
+       syncFindSpace([views.left, views.right]);
+@@ -129,8 +122,7 @@ export class CompareFrame {
+   }
+ 
+   realign(source: Column): void {
+-    this.#realignFrom = source;
+-    this.request();
++    this.#scroll.follow(source);
+   }
+ 
+   destroy(): void {
+diff --git a/frontend/src/editor/internal/foldRuns.ts b/frontend/src/editor/internal/foldRuns.ts
+index 80c0b5f..0b114e8 100644
+--- a/frontend/src/editor/internal/foldRuns.ts
++++ b/frontend/src/editor/internal/foldRuns.ts
+@@ -103,3 +103,10 @@ export function columnRuns(
+ export function displayed<P extends string>(fold: Fold<P>, pane: P): Hidden | null {
+   return fold.hidden.find((level) => level[pane] !== null)?.[pane] ?? null;
+ }
++
++export function waveStartsIn<P extends string>(
++  folds: readonly Fold<P>[],
++  pane: P,
++): (DocPos | null)[] {
++  return folds.map((fold) => displayed(fold, pane)?.from ?? null);
++}
+diff --git a/frontend/src/editor/internal/folds.ts b/frontend/src/editor/internal/folds.ts
+index f4c9939..adda43b 100644
+--- a/frontend/src/editor/internal/folds.ts
++++ b/frontend/src/editor/internal/folds.ts
+@@ -11,7 +11,7 @@ import {
+ import { EditorView } from "@codemirror/view";
+ 
+ import { toDocPos, type DocPos } from "./docPos";
+-import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
++import { displayed, MIN_HIDDEN_LINES, sameHidden, waveStartsIn } from "./foldRuns";
+ import type { Fold, FoldLevel, Hidden } from "./foldRuns";
+ import {
+   hiddenLevels,
+@@ -79,7 +79,7 @@ export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): r
+ }
+ 
+ function startsIn(fields: FoldFields, pane: Pane, state: EditorState): (DocPos | null)[] {
+-  return paneFolds(fields, pane, state).map((fold) => displayed(fold, pane)?.from ?? null);
++  return waveStartsIn(paneFolds(fields, pane, state), pane);
+ }
+ 
+ export function waveStarts(
+diff --git a/frontend/src/editor/internal/geometry.ts b/frontend/src/editor/internal/geometry.ts
+index abeef6e..707705d 100644
+--- a/frontend/src/editor/internal/geometry.ts
++++ b/frontend/src/editor/internal/geometry.ts
+@@ -55,18 +55,25 @@ export function chunkRows(views: PaneViews, centerSpans: readonly ChunkSpan[]):
+   }));
+ }
+ 
++export function waveTops(
++  starts: readonly (DocPos | null)[],
++  blockTop: (pos: DocPos) => number,
++): (number | null)[] {
++  return starts.map((start) => (start === null ? null : blockTop(start)));
++}
++
+ export function waveRows(
+   starts: Readonly<Record<Pane, readonly (DocPos | null)[]>>,
+   blockTop: (pane: Pane, pos: DocPos) => number,
+ ): WaveRow[] {
+-  function top(pane: Pane, run: number): number | null {
+-    const start = starts[pane][run] ?? null;
+-    return start === null ? null : blockTop(pane, start);
++  function tops(pane: Pane): (number | null)[] {
++    return waveTops(starts[pane], (pos) => blockTop(pane, pos));
+   }
+-  return starts.center.map((_, run) => ({
+-    left: top("left", run),
+-    center: top("center", run),
+-    right: top("right", run),
++  const [left, right] = [tops("left"), tops("right")];
++  return tops("center").map((center, run) => ({
++    left: left[run] ?? null,
++    center,
++    right: right[run] ?? null,
+   }));
+ }
+ 
+diff --git a/frontend/src/editor/internal/rangeFolds.ts b/frontend/src/editor/internal/rangeFolds.ts
+index fa2416f..cd7af9f 100644
+--- a/frontend/src/editor/internal/rangeFolds.ts
++++ b/frontend/src/editor/internal/rangeFolds.ts
+@@ -1,12 +1,11 @@
+ import type { EditorState, Extension } from "@codemirror/state";
+ 
+ import type { Column } from "../../ipc";
+-import { columnFoldExtension, columnSteps, renewSpec, stepSpec } from "./columnFolds";
++import { columnFoldExtension, hiddenIn, renewSpec, stepSpec } from "./columnFolds";
+ import type { ColumnViews } from "./compareViews";
+ import { Folding } from "./folding";
+-import { displayed, type Fold } from "./foldRuns";
+-import { hiddenLevels } from "./foldSteps";
+-import type { WaveRow } from "./geometry";
++import { waveStartsIn, type Fold } from "./foldRuns";
++import { waveTops, type WaveRow } from "./geometry";
+ import { ChainPhases, type WaveChain } from "./wavePhase";
+ 
+ type RangeHosts = Readonly<Record<Column, HTMLElement>> & { readonly strip: Element };
+@@ -15,17 +14,14 @@ type WaveView = {
+   lineBlockAt(pos: number): { readonly top: number };
+ };
+ 
+-function waveTops(view: WaveView, column: Column): (number | null)[] {
+-  const { runs, hiding } = columnSteps(view.state, column);
+-  return hiddenLevels(runs, hiding).map((fold) => {
+-    const hidden = displayed(fold, column);
+-    return hidden === null ? null : view.lineBlockAt(hidden.from).top;
+-  });
++function columnTops(view: WaveView, column: Column): (number | null)[] {
++  const starts = waveStartsIn(hiddenIn(view.state, column), column);
++  return waveTops(starts, (pos) => view.lineBlockAt(pos).top);
+ }
+ 
+ export function columnWaves(views: Readonly<Record<Column, WaveView>>): WaveRow<Column>[] {
+-  const right = waveTops(views.right, "right");
+-  return waveTops(views.left, "left").map((left, run) => ({ left, right: right[run] ?? null }));
++  const right = columnTops(views.right, "right");
++  return columnTops(views.left, "left").map((left, run) => ({ left, right: right[run] ?? null }));
+ }
+ 
+ export class RangeFolds {
+diff --git a/frontend/src/editor/internal/scrollSync.test.ts b/frontend/src/editor/internal/scrollSync.test.ts
+index f6b98d3..14321f5 100644
+--- a/frontend/src/editor/internal/scrollSync.test.ts
++++ b/frontend/src/editor/internal/scrollSync.test.ts
+@@ -185,6 +185,27 @@ test("follow('center') makes the next sync write both sides though the middle di
+   expect(tops(views)).toEqual([500, 300, 300]);
+ });
+ 
++test("after follow, another pane's scroll event before the sync does not lead: the followed pane does", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), center: fakePane(300), right: fakePane(0) };
++  const sync = new ScrollSync(views, PANES, () => {});
++  const anchors = anchorsOf([], ends(100, 100, 100));
++
++  sync.follow("center");
++  scrolled(views.left, 40);
++  sync.sync(anchors);
++  expect(tops(views)).toEqual([300, 300, 300]);
++  for (const frame of frames.splice(0)) {
++    frame();
++  }
++
++  scrolled(views.left, 500);
++  sync.sync(anchors);
++  expect(tops(views)).toEqual([500, 500, 500]);
++});
++
+ test("two columns follow each other through their difference's anchors, the source left where it was", () => {
+   const frames: (() => void)[] = [];
+   vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index 51a2dbe..5565be7 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -71,6 +71,7 @@ export class ScrollSync<P extends string> {
+   readonly #requestFrame: () => void;
+   readonly #listeners = new AbortController();
+   #source: P | null = null;
++  #followed = false;
+   #echoes: readonly P[] = [];
+   #clearEchoes: number | null = null;
+   #syncedTops: ReadonlyMap<P, number> | null = null;
+@@ -87,7 +88,7 @@ export class ScrollSync<P extends string> {
+       views[pane].scrollDOM.addEventListener(
+         "scroll",
+         () => {
+-          if (!this.#echoes.includes(pane)) {
++          if (!this.#followed && !this.#echoes.includes(pane)) {
+             this.#source = pane;
+           }
+           requestFrame();
+@@ -99,6 +100,7 @@ export class ScrollSync<P extends string> {
+ 
+   follow(source: P): void {
+     this.#source = source;
++    this.#followed = true;
+     this.#syncedTops = null;
+     this.#requestFrame();
+   }
+@@ -106,6 +108,7 @@ export class ScrollSync<P extends string> {
+   sync(anchors: readonly Anchor<P>[]): void {
+     const source = this.#source;
+     this.#source = null;
++    this.#followed = false;
+     const views = this.#views;
+     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.get(source)) {
+       return;
+diff --git a/frontend/src/editor/internal/wavePhase.ts b/frontend/src/editor/internal/wavePhase.ts
+index 04b626f..13202ac 100644
+--- a/frontend/src/editor/internal/wavePhase.ts
++++ b/frontend/src/editor/internal/wavePhase.ts
+@@ -66,13 +66,24 @@ export function paneEnds(strips: WaveLayout["strips"]): Readonly<Record<Pane, Wa
+   };
+ }
+ 
++function chainPhases<P extends string>(
++  first: P,
++  next: readonly Link<Edges, P>[],
++  scroller: (pane: P) => Edges,
++): ReadonlyMap<P, WavePhase> {
++  return new Map(
++    [...chainEnds(first, next)].map(([pane, end]) => [pane, wavePhase(scroller(pane).left, end)]),
++  );
++}
++
+ export function panePhases(layout: WaveLayout): Readonly<Record<Pane, WavePhase | null>> {
+-  const ends = paneEnds(layout.strips);
+-  function phase(pane: Pane): WavePhase | null {
+-    const paneEnd = ends[pane];
+-    return paneEnd === null ? null : wavePhase(layout.scrollers[pane].left, paneEnd);
+-  }
+-  return { left: phase("left"), center: phase("center"), right: phase("right") };
++  const { first, next } = mergeChain(layout.strips);
++  const phases = chainPhases(first, next, (pane) => layout.scrollers[pane]);
++  return {
++    left: phases.get("left") ?? null,
++    center: phases.get("center") ?? null,
++    right: phases.get("right") ?? null,
++  };
+ }
+ 
+ // WebKit paints each box, and the mask's origin in it, at whole device pixels (plan §2 #64).
+@@ -157,11 +168,11 @@ export class ChainPhases<P extends string> {
+       strip: snapped(strip, ratio),
+       pane,
+     }));
+-    const ends = chainEnds(this.#chain.first, next);
++    const phases = chainPhases(this.#chain.first, next, (pane) =>
++      snapped(views[pane].scrollDOM, ratio),
++    );
+     for (const pane of this.#panes) {
+-      const end = ends.get(pane);
+-      const left = snapped(views[pane].scrollDOM, ratio).left;
+-      writePhase(this.#hosts[pane].style, end === undefined ? null : wavePhase(left, end));
++      writePhase(this.#hosts[pane].style, phases.get(pane) ?? null);
+     }
+   }
+ 
+diff --git a/frontend/src/ui/rangeOpen.test.ts b/frontend/src/ui/rangeOpen.test.ts
+new file mode 100644
+index 0000000..7047b6b
+--- /dev/null
++++ b/frontend/src/ui/rangeOpen.test.ts
+@@ -0,0 +1,98 @@
++import { expect, test } from "vitest";
++
++import { createFixtureRangeSource, log, type Thread, type ThreadList } from "../ipc";
++import { createRangeOpen, type RangeOpen } from "./rangeOpen";
++
++async function seededList(): Promise<ThreadList> {
++  const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
++  await fixture.openRange();
++  const listed = await fixture.listThreads();
++  if (!listed.ok) {
++    throw new Error("the fixture listed no threads");
++  }
++  return listed.value;
++}
++
++const LIST = await seededList();
++
++function threadAt(index: number): Thread {
++  const thread = LIST.threads[index];
++  if (thread === undefined) {
++    throw new Error(`no thread at ${index}`);
++  }
++  return thread;
++}
++
++function keyAt(index: number): string {
++  return `thread-${threadAt(index).id}`;
++}
++
++function openKeys(open: RangeOpen): string[] {
++  return LIST.threads.flatMap(({ id }) => (open.open.value.has(id) ? [`thread-${id}`] : []));
++}
++
++test("a toggle opens all its threads when one is closed, closes all when all are open", () => {
++  const open = createRangeOpen();
++
++  open.toggle(LIST, [keyAt(0)]);
++  expect(openKeys(open)).toEqual([keyAt(0)]);
++  open.toggle(LIST, [keyAt(0), keyAt(1)]);
++  expect(openKeys(open)).toEqual([keyAt(0), keyAt(1)]);
++  open.toggle(LIST, [keyAt(0), keyAt(1)]);
++  expect(openKeys(open)).toEqual([]);
++  open.toggle(LIST, ["draft-7", "nothing"]);
++
++  expect(openKeys(open)).toEqual([]);
++});
++
++test("a toggle changes only its own threads: other open threads stay open either way", () => {
++  const open = createRangeOpen();
++
++  open.toggle(LIST, [keyAt(2)]);
++  open.toggle(LIST, [keyAt(0), keyAt(1)]);
++  const afterOpening = openKeys(open);
++  open.toggle(LIST, [keyAt(0)]);
++
++  expect(afterOpening).toEqual([keyAt(0), keyAt(1), keyAt(2)]);
++  expect(openKeys(open)).toEqual([keyAt(1), keyAt(2)]);
++});
++
++test("a thread added from a draft opens under the draft's key, other threads under their id", () => {
++  const open = createRangeOpen();
++  const added = threadAt(1);
++
++  open.added(added.id, "draft-4");
++
++  expect(open.boxOf(LIST, "draft-4")).toEqual({ kind: "thread", thread: added, open: true });
++  expect(open.boxOf(LIST, keyAt(1))).toBeNull();
++  expect(open.boxOf(LIST, keyAt(0))).toEqual({ kind: "thread", thread: threadAt(0), open: false });
++  open.toggle(LIST, ["draft-4"]);
++  expect(open.boxOf(LIST, "draft-4")).toMatchObject({ open: false });
++});
++
++test("shownFor lists a file's stored threads by key, open or collapsed", () => {
++  const open = createRangeOpen();
++  const { file } = threadAt(0);
++  open.added(threadAt(2).id, "draft-0");
++
++  expect(open.shownFor(LIST, file)).toEqual(
++    LIST.threads.map(({ id, line }, index) => ({
++      key: index === 2 ? "draft-0" : `thread-${id}`,
++      line,
++      shown: index === 2 ? "open" : "collapsed",
++    })),
++  );
++  expect(open.shownFor({ threads: [] }, file)).toEqual([]);
++});
++
++test("keepListed drops threads the list no longer holds and keeps the set when it holds them all", () => {
++  const open = createRangeOpen();
++  open.toggle(LIST, [keyAt(0), keyAt(1)]);
++  const before = open.open.value;
++
++  open.keepListed(LIST);
++  expect(open.open.value).toBe(before);
++
++  open.keepListed({ threads: LIST.threads.slice(1) });
++  expect(openKeys(open)).toEqual([keyAt(1)]);
++});
+diff --git a/frontend/src/ui/rangeOpen.ts b/frontend/src/ui/rangeOpen.ts
+new file mode 100644
+index 0000000..187e53b
+--- /dev/null
++++ b/frontend/src/ui/rangeOpen.ts
+@@ -0,0 +1,72 @@
++import { shallowRef, type ShallowRef } from "vue";
++
++import type { RangeFileId, ShownThread, Thread, ThreadId, ThreadList } from "../ipc";
++
++export type StoredBox = {
++  readonly kind: "thread";
++  readonly thread: Thread;
++  readonly open: boolean;
++};
++
++/** Each stored thread's box: its key (a thread added from a draft keeps the draft's) and whether it is open. */
++export type RangeOpen = {
++  readonly open: Readonly<ShallowRef<ReadonlySet<ThreadId>>>;
++  shownFor(list: ThreadList, file: RangeFileId): ShownThread[];
++  boxOf(list: ThreadList, key: string): StoredBox | null;
++  /** Opens the keys' threads when any of them is closed, else closes them; other threads keep theirs. */
++  toggle(list: ThreadList, keys: readonly string[]): void;
++  added(thread: ThreadId, draftKey: string): void;
++  keepListed(list: ThreadList): void;
++};
++
++function toggled(open: ReadonlySet<ThreadId>, threads: readonly ThreadId[]): ReadonlySet<ThreadId> {
++  const opening = threads.some((id) => !open.has(id));
++  const next = new Set(open);
++  for (const id of threads) {
++    if (opening) {
++      next.add(id);
++    } else {
++      next.delete(id);
++    }
++  }
++  return next;
++}
++
++export function createRangeOpen(): RangeOpen {
++  const open = shallowRef<ReadonlySet<ThreadId>>(new Set());
++  const keys = new Map<ThreadId, string>();
++  function keyOf(thread: ThreadId): string {
++    return keys.get(thread) ?? `thread-${thread}`;
++  }
++  return {
++    open,
++    shownFor: (list, file) =>
++      list.threads
++        .filter((thread) => thread.file === file)
++        .map(({ id, line }) => ({
++          key: keyOf(id),
++          line,
++          shown: open.value.has(id) ? "open" : "collapsed",
++        })),
++    boxOf: (list, key) => {
++      const thread = list.threads.find(({ id }) => keyOf(id) === key);
++      return thread === undefined
++        ? null
++        : { kind: "thread", thread, open: open.value.has(thread.id) };
++    },
++    toggle: (list, toggledKeys) => {
++      const ids = list.threads.map(({ id }) => id).filter((id) => toggledKeys.includes(keyOf(id)));
++      open.value = toggled(open.value, ids);
++    },
++    added: (thread, draftKey) => {
++      keys.set(thread, draftKey);
++      open.value = new Set([...open.value, thread]);
++    },
++    keepListed: (list) => {
++      const kept = [...open.value].filter((id) => list.threads.some((each) => each.id === id));
++      if (kept.length < open.value.size) {
++        open.value = new Set(kept);
++      }
++    },
++  };
++}
+diff --git a/frontend/src/ui/rangeThreads.test.ts b/frontend/src/ui/rangeThreads.test.ts
+index cb622e5..310ee23 100644
+--- a/frontend/src/ui/rangeThreads.test.ts
++++ b/frontend/src/ui/rangeThreads.test.ts
+@@ -266,19 +266,6 @@ test("stored threads come back collapsed; open and collapse per thread and per l
+   expect(threads.boxOf("nothing")).toBeNull();
+ });
+ 
+-test("a toggle changes only its own threads: other open threads stay open either way", async () => {
+-  const { threads } = await opened(SEEDED);
+-  const ids = [0, 1, 2, 3].map((index) => threadAt(threads, index).id);
+-
+-  threads.toggle(["thread-2"]);
+-  threads.toggle(["thread-0", "thread-1"]);
+-  const afterOpening = new Set(threads.open.value);
+-  threads.toggle(["thread-0"]);
+-
+-  expect(afterOpening).toEqual(new Set(ids.slice(0, 3)));
+-  expect(threads.open.value).toEqual(new Set([ids[1], ids[2]]));
+-});
+-
+ test("counts per file ignore drafts", async () => {
+   const { threads, board, other } = await opened(SEEDED);
+   threads.startThread(other, changedThreadLine("left", 0));
+diff --git a/frontend/src/ui/rangeThreads.ts b/frontend/src/ui/rangeThreads.ts
+index e6f12db..1e4581a 100644
+--- a/frontend/src/ui/rangeThreads.ts
++++ b/frontend/src/ui/rangeThreads.ts
+@@ -8,7 +8,6 @@ import type {
+   ReviewSource,
+   ShownThread,
+   SourceResult,
+-  Thread,
+   ThreadId,
+   ThreadLine,
+   ThreadList,
+@@ -22,10 +21,9 @@ import {
+   type RangeDrafts,
+   type ThreadDraft,
+ } from "./rangeDrafts";
++import { createRangeOpen, type RangeOpen, type StoredBox } from "./rangeOpen";
+ 
+-type ThreadBox =
+-  | { readonly kind: "draft"; readonly draft: ThreadDraft }
+-  | { readonly kind: "thread"; readonly thread: Thread; readonly open: boolean };
++type ThreadBox = { readonly kind: "draft"; readonly draft: ThreadDraft } | StoredBox;
+ 
+ export type RangeThreads = AddsInFlight & {
+   readonly list: Readonly<ShallowRef<ThreadList>>;
+@@ -69,9 +67,8 @@ type State = {
+   readonly report: (problem: Problem) => void;
+   readonly list: ShallowRef<ThreadList>;
+   readonly listed: ShallowRef<boolean>;
+-  readonly open: ShallowRef<ReadonlySet<ThreadId>>;
++  readonly open: RangeOpen;
+   readonly drafts: RangeDrafts;
+-  readonly keys: Map<ThreadId, string>;
+   readonly adds: RangeAdds;
+ };
+ 
+@@ -91,51 +88,23 @@ export function isQueued(posting: Posting): boolean {
+ }
+ 
+ function setList(state: State, list: ThreadList): void {
+-  const open = [...state.open.value].filter((id) => list.threads.some((each) => each.id === id));
+   state.list.value = list;
+-  if (open.length < state.open.value.size) {
+-    state.open.value = new Set(open);
+-  }
++  state.open.keepListed(list);
+   state.drafts.keepStored(list);
+ }
+ 
+-function keyOf(state: State, thread: ThreadId): string {
+-  return state.keys.get(thread) ?? `thread-${thread}`;
+-}
+-
+ function shownFor(state: State, file: RangeFileId): ShownThread[] {
+-  const stored = state.list.value.threads
+-    .filter((thread) => thread.file === file)
+-    .map(({ id, line }): ShownThread => {
+-      const shown = state.open.value.has(id) ? "open" : "collapsed";
+-      return { key: keyOf(state, id), line, shown };
+-    });
+   const drafts = [...state.drafts.drafts.value].flatMap(([key, draft]): ShownThread[] =>
+     draft.kind === "thread" && draft.file === file
+       ? [{ key, line: draft.line, shown: "draft" }]
+       : [],
+   );
+-  return [...stored, ...drafts];
++  return [...state.open.shownFor(state.list.value, file), ...drafts];
+ }
+ 
+ function boxOf(state: State, key: string): ThreadBox | null {
+   const draft = state.drafts.threadDraft(key);
+-  if (draft !== null) {
+-    return { kind: "draft", draft };
+-  }
+-  const thread = state.list.value.threads.find(({ id }) => keyOf(state, id) === key);
+-  return thread === undefined
+-    ? null
+-    : { kind: "thread", thread, open: state.open.value.has(thread.id) };
+-}
+-
+-function toggle(state: State, keys: readonly string[]): void {
+-  const ids = state.list.value.threads
+-    .map(({ id }) => id)
+-    .filter((id) => keys.includes(keyOf(state, id)));
+-  const opening = ids.some((id) => !state.open.value.has(id));
+-  const kept = [...state.open.value].filter((id) => opening || !ids.includes(id));
+-  state.open.value = new Set(opening ? [...kept, ...ids] : kept);
++  return draft === null ? state.open.boxOf(state.list.value, key) : { kind: "draft", draft };
+ }
+ 
+ async function changed(
+@@ -166,8 +135,7 @@ async function addThread(state: State, key: string, text: string): Promise<Threa
+     return null;
+   }
+   const { thread, list } = outcome.value;
+-  state.keys.set(thread, key);
+-  state.open.value = new Set([...state.open.value, thread]);
++  state.open.added(thread, key);
+   state.drafts.dropDraft(key);
+   setList(state, list);
+   return thread;
+@@ -271,16 +239,15 @@ export function createRangeThreads(
+     report,
+     list: shallowRef<ThreadList>({ threads: [] }),
+     listed: shallowRef(false),
+-    open: shallowRef<ReadonlySet<ThreadId>>(new Set()),
++    open: createRangeOpen(),
+     drafts: createRangeDrafts(),
+-    keys: new Map(),
+     adds: createRangeAdds(),
+   };
+   const { threadDraft: _threadDraft, keepStored: _keepStored, ...drafts } = state.drafts;
+   return {
+     list: state.list,
+     listed: state.listed,
+-    open: state.open,
++    open: state.open.open,
+     ...drafts,
+     ...counted(state),
+     ...replies(state),
+@@ -289,7 +256,7 @@ export function createRangeThreads(
+     shownFor: (file) => shownFor(state, file),
+     boxOf: (key) => boxOf(state, key),
+     toggle: (keys) => {
+-      toggle(state, keys);
++      state.open.toggle(state.list.value, keys);
+     },
+     addThread: (key, text) => addThread(state, key, text),
+     addNote: (thread, text) => addNote(state, thread, text),

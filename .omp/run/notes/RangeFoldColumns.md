@@ -56,3 +56,30 @@ used. Node tests 203 / 2790 pass; lint clean. Finding #1679.
   the merge window on `f08c5b9` too [#82 / `scrollSnapshot` interplay?].
 - `range.ts:89`: the first renew runs before the language loads.
 - `mirrorSpec` not exercised from a right-column cursor.
+
+## Fix round 1 (`RangeFoldColumnsR1`, 17m19s, patch `a23dcba`, `.omp/run/patches/RangeFoldColumnsR1.patch`)
+
+Blocks #1679–#1688. `ScrollSync.follow(source)` keeps the source until the next sync (a clamped scroll of another pane
+no longer leads); `CompareFrame.realign` and the merge `Frame.realign` one-line `follow` calls, `#realignFrom` gone.
+One phase rule (private `chainPhases` in `wavePhase.ts` for `ChainPhases.#measure` and `panePhases`; `layoutOf` only
+snaps), one wave-start rule (`foldRuns.waveStartsIn`), one starts→tops rule (`geometry.waveTops`, used by `waveRows`
+and `columnWaves`); `columnFolds.hiddenIn` exported. `ui/rangeOpen.ts` (`createRangeOpen`, `RangeOpen`, `StoredBox`):
+each stored thread's box key and open state, the plain toggle loop; `rangeThreads.ts` 298 → 265 lines.
+`compareFrame.test.ts:456` takes its change from a fixture reply (typecheck green).
+
+Evidence: 204 files / 2795 tests; typecheck, lint, fmt, knip clean; merge tests byte-unchanged; `scrollSync.test.ts`
+additions only. Sabotage: old echo-only rule → 2 tests fail (merge sync and range realign); `chainPhases`,
+`waveStartsIn`, `waveTops` each fail merge and range tests. Stryker `rangeOpen.ts` 57/57, `rangeThreads.ts` 168 killed,
+survivor :98 equivalent, others untouched lines. WebKit (MiniBrowser 1600×1000, focused): h off → reload all shown,
+on → reload collapsed; f light: find reveals right 71/left 70, select-all and Ctrl+End reveal nothing; merge dark
+on this tree and `f08c5b9` identical (waves [4,4,3], hover in 3 panes + 2 strips 1 → 2 px, a click +4 lines, toggle
+off/on); merge toggle from a deep scroll: now Result clamped at top line 92 with sides lined up, base `f08c5b9` lost
+its place (the reviewed m-on-after.png defect predates this feature, fixed now); range toggle keeps left top 101.
+Screenshots `/tmp/yamt-r1/`.
+
+Deviations (accepted): `rangeOpen.ts` also holds stored box keys and `shownFor`'s stored part (to get well under 300);
+the toggle test moved there; `chainPhases` private (knip); `layoutOf` unchanged (no phase rule in it); `hiddenIn`
+exported. Names for docs: `waveTops`, `waveStartsIn`, `chainPhases`, `hiddenIn`, `rangeOpen.ts`.
+
+Open: a range desync on Ctrl+End after a find (#1689) — reproduced by the orchestrator: present on `d6ab2b7` and
+`a23dcba`, absent on `f08c5b9` (no range folds): a regression of this feature.
