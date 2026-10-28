@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The AI in a range thread (`--ai`):
+  - "Thinking and steps" is at most 20rem tall and scrolls inside, so a long turn no longer pushes the thread down;
+    while open it follows the newest text, keeps your place once you scroll up and follows again at the end. An
+    edit's diff inside it is at most 16rem, so it shows whole.
+  - Ask AI and Stop moved from the thread's header to its bottom row: Comment, Ask AI (Stop while the AI works),
+    Cancel, shown on every thread, so asking again needs no scrolling up.
+  - Ask AI sends what you typed in one step: the text is added as your comment, then the AI is asked. With nothing
+    typed it sends your comments since its last answer, as before. On a line's new thread it adds the thread and asks.
+
 ## [0.6.0-beta.1] - 2026-10-27
 
 ### Added
