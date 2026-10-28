@@ -39,3 +39,15 @@ replaced by two and one inserted.
 - `columnFoldExtension`'s two listeners are covered only through their specs (node has no DOM); the WebKit check is
   row 4's (`columnFolds.ts:158-190`).
 - The fields start with no runs; nothing hides until `RangeController` dispatches `renewSpec` at build.
+
+## Fix round 1 (`RangeFoldCoreR1`, 2m57s, patch `9ccae0f`, `.omp/run/patches/RangeFoldCoreR1.patch`; 5 files +101 −98)
+
+Blocks #1672–#1675, #1677, #1678. `foldSteps.ts`: `leaveCollapsedAfter` (cursor moves only when a count grew) and
+`revealed` (same-transaction reveal), used by `foldField`/`sideFoldPush` and `ownerSteps`/`mirrorSpec`; `folds.ts`
+`revealOnOwner(reveal, owner)` used by `sideReveals` and the right column (`revealFromRight` deleted);
+`ColumnChange = Pick<Difference, "left" | "right">` (brands kept); `thread(column, lines, shown)`; per-column split
+test and a `test.each` duplicates test (left+left, right+right, left+right); the weak first-line test deleted (20
+tests). Evidence: swapped lines → TS2322 ×2; `unchangedOnRight` one-sided → 2 tests fail; merge fold tests no diff;
+202 files / 2770 tests, typecheck, lint, fmt, knip clean. Deviations (accepted): `revealed`'s pane `NoInfer<P>`;
+`.reduce(shown, steps)`; one `test.each` for both duplicates asks. Risk: new edge `columnFolds.ts` → `folds.ts`
+(`revealOnOwner`); row 4 sees it only on merge.
