@@ -12,7 +12,11 @@ import { usePanelWidth } from "./usePanelWidth";
 
 const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
 const emit = defineEmits<{ select: [path: string] }>();
-defineSlots<{ file(props: { file: F; label: string }): unknown; footer(): unknown }>();
+defineSlots<{
+  file(props: { file: F; label: string }): unknown;
+  folder?(props: { path: string }): unknown;
+  footer(): unknown;
+}>();
 
 const list = useTemplateRef<HTMLElement>("list");
 const { mode, toggle } = createFileListMode();
@@ -74,6 +78,9 @@ function toggleFolder(path: string): void {
     >
       <template #file="row">
         <slot name="file" :file="row.file" :label="row.label" />
+      </template>
+      <template v-if="$slots.folder" #folder="{ path }">
+        <slot name="folder" :path="path" />
       </template>
     </FileTree>
     <ul

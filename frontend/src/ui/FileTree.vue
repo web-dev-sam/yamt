@@ -9,7 +9,10 @@ import { folderIcon } from "./folderIcon";
 
 defineProps<{ rows: readonly TreeRow<F>[]; active: string | null; label: string }>();
 const emit = defineEmits<{ select: [path: string]; toggle: [path: string] }>();
-defineSlots<{ file(props: { file: F; label: string }): unknown }>();
+defineSlots<{
+  file(props: { file: F; label: string }): unknown;
+  folder?(props: { path: string }): unknown;
+}>();
 
 const ROW_PADDING_PX = 8;
 const INDENT_PX = 8;
@@ -80,7 +83,10 @@ function pressed(row: TreeRow<F>): void {
       </span>
       <component :is="rowIcon(row)" class="size-4 shrink-0" aria-hidden="true" />
       <slot v-if="row.kind === 'file'" name="file" :file="row.file" :label="row.label" />
-      <span v-else class="truncate">{{ row.label }}</span>
+      <template v-else>
+        <span class="truncate">{{ row.label }}</span>
+        <slot name="folder" :path="row.path" />
+      </template>
     </li>
   </ul>
 </template>

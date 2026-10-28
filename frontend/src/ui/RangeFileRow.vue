@@ -3,7 +3,8 @@ import { computed } from "vue";
 import MessageSquare from "~icons/lucide/message-square";
 
 import type { RangeChange, RangeEntry } from "../ipc";
-import { changeMark, lineCounts } from "./rangeText";
+import RangeCounts from "./RangeCounts.vue";
+import { changeMark } from "./rangeText";
 import { threadCountText } from "./rangeThreadText";
 
 const props = defineProps<{ file: RangeEntry; label: string; threads: number }>();
@@ -20,7 +21,6 @@ const letterColour = computed(() => LETTER_COLOURS[props.file.change.kind]);
 const oldPath = computed(() =>
   props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
 );
-const counts = computed(() => lineCounts(props.file.lines));
 const threadsTitle = computed(() => threadCountText(props.threads));
 </script>
 
@@ -46,12 +46,5 @@ const threadsTitle = computed(() => threadCountText(props.threads));
     <MessageSquare class="size-3.5" aria-hidden="true" />
     {{ threads }}
   </span>
-  <span
-    v-if="counts !== null"
-    class="flex shrink-0 gap-1.5 tabular-nums"
-    :class="{ 'ml-auto': threads === 0 }"
-  >
-    <span class="text-success-signal">{{ counts.added }}</span>
-    <span class="text-problem-error">{{ counts.removed }}</span>
-  </span>
+  <RangeCounts :lines="file.lines" :class="{ 'ml-auto': threads === 0 }" />
 </template>

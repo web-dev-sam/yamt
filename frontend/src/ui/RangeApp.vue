@@ -2,7 +2,7 @@
 import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, onMounted, watch } from "vue";
 
-import { log, onWindowClose } from "../ipc";
+import { log, onWindowClose, type RangeLineCounts } from "../ipc";
 import AgentSettings from "./AgentSettings.vue";
 import FileList from "./FileList.vue";
 import NoticeBar from "./NoticeBar.vue";
@@ -10,7 +10,9 @@ import type { NoticeRow } from "./noticeText";
 import { unexpected } from "./problem";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
+import RangeCounts from "./RangeCounts.vue";
 import RangeFileRow from "./RangeFileRow.vue";
+import { folderSums } from "./rangeFolderSums";
 import { useRangeStore } from "./rangeStore";
 import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
 import { sendNoticeRow } from "./rangeThreadText";
@@ -48,6 +50,7 @@ useEventListener(window, "keydown", (event) => {
 });
 
 const files = computed(() => start.value?.files ?? []);
+const sums = computed(() => folderSums(files.value));
 const emptyText = computed(() =>
   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
 );
@@ -76,6 +79,10 @@ async function guardClose(): Promise<void> {
     log.error("range.close_guard_failed", { ...unexpected(error) });
   }
 }
+
+function folderLines(path: string): RangeLineCounts {
+  return sums.value.get(path) ?? { kind: "notCounted" };
+}
 </script>
 
 <template>
@@ -89,6 +96,9 @@ async function guardClose(): Promise<void> {
     >
       <template #file="{ file, label }">
         <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+      </template>
+      <template #folder="{ path }">
+        <RangeCounts :lines="folderLines(path)" class="ml-auto" />
       </template>
     </FileList>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
