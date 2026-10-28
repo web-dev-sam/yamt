@@ -82,7 +82,7 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
           :aria-label="COLLAPSE_LABEL"
           :aria-pressed="collapsing"
           :disabled="!columns"
-          class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+          class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
           @mousedown.prevent
           @click="toggleCollapsing"
         >
