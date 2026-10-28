@@ -1091,12 +1091,12 @@ request file, §2 slice map from its "Slice graph (proposal)", build, review, th
 the final run; it ends with its row done and stays on this branch for the next one. Plan §2 rows are written by each
 session for its own feature.
 
-| row | feature (request file)                                                                                                            | sessions' slices (proposal)                                      | status                           | evidence                                                                    |
-| --- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------- |
-| 1   | AI thread: thinking list capped at 20rem and following its end; Ask AI/Stop at the bottom, one-step send (`request-ai-thread.md`) | 2 web slices side by side, final run with a real omp turn        | done (session 33, section below) | final run at `19be32c`: gate pass, real omp turn; notes `AiThreadVerify.md` |
-| 2   | range window: folder rows show the sum of their files' `+a −r` (`request-folder-sums.md`)                                         | 1 web slice, final run                                           | planned                          |                                                                             |
-| 3   | range window: collapse unchanged lines behind the wave, the merge window's toggle (`request-range-collapse.md`)                   | design, editor slice ∥ window slice, final run                   | planned                          |                                                                             |
-| 4   | merge and range windows: search every file, Ctrl/Cmd+Shift+S, one row per place, pane filters (`request-search.md`)               | design, Rust, editor go-to, search core, window panel, final run | planned                          |                                                                             |
+| row | feature (request file)                                                                                                            | sessions' slices (proposal)                                      | status                                  | evidence                                                                    |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------- |
+| 1   | AI thread: thinking list capped at 20rem and following its end; Ask AI/Stop at the bottom, one-step send (`request-ai-thread.md`) | 2 web slices side by side, final run with a real omp turn        | done (session 33, section below)        | final run at `19be32c`: gate pass, real omp turn; notes `AiThreadVerify.md` |
+| 2   | range window: folder rows show the sum of their files' `+a −r` (`request-folder-sums.md`)                                         | 1 web slice, final run                                           | in progress (session 34, section below) |                                                                             |
+| 3   | range window: collapse unchanged lines behind the wave, the merge window's toggle (`request-range-collapse.md`)                   | design, editor slice ∥ window slice, final run                   | planned                                 |                                                                             |
+| 4   | merge and range windows: search every file, Ctrl/Cmd+Shift+S, one row per place, pane filters (`request-search.md`)               | design, Rust, editor go-to, search core, window panel, final run | planned                                 |                                                                             |
 
 ## AI thread — the thinking list capped and following its end; Ask AI at the bottom of a thread (session 33, branch `feat/beta-feedback` at `2fbb31e`)
 
@@ -1115,6 +1115,19 @@ disjoint files and run side by side; `frontend/src/ui/AGENTS.md` is row 2's (row
 Feature built and verified on 2026-10-28 (rows 1–3; findings #1658–#1664). The owner's check: the look of the capped
 list inside the thread box (its background is the panes' scroller shade, a little different from the box around it).
 Next on this branch: "After 0.6.0-beta.1" row 2 (folder sums), its own session.
+
+## Folder sums — a folder row in the range window's tree shows the sum of its files' `+a −r` (session 34, branch `feat/beta-feedback` at `aa463ae`)
+
+Owner request #1656 (2026-10-28), every question answered: `docs/slices/request-folder-sums.md` (rules 1–6, acceptance,
+non-goals); decision `docs/plan.md` §2 **#125** (orchestrator's details: sums built once per list by `folderSums` over
+`folderPaths`, an optional `folder` slot after the tree's folder label that the merge window does not pass, one
+`RangeCounts.vue` for the file and folder rows' pair, a counted `+0 −0` file gives its folders counts). No product
+question. The fixture and `scripts/range-repo.sh` have no joined chain: the final run checks one on a scratch repo.
+
+| row | slice                                                                                                                      | owner    | status  | evidence |
+| --- | -------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | folder sums, the tree's `folder` slot, `RangeCounts.vue`, the range folder counts (`briefs/folder-sums.md`) (`FolderSums`) | web-impl | running |          |
+| 2   | final run: `just check`, WebKit fixture, real app on `scripts/range-repo.sh` and a scratch repo with a joined chain        | verifier | planned |          |
 
 ## Open product questions
 
