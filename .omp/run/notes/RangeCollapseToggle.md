@@ -46,3 +46,8 @@ Evidence: `public/logo.png` disabled+pressed, dark and light, computed backgroun
 the DOM; `board.ts` enabled toggle still brightens (`brightness(1.1)`) and flips on click. typecheck, lint, fmt:check
 clean. Deviations: ran `pnpm install --frozen-lockfile --offline` in the worktree; merge toggle disabled via the DOM
 (brief allowed).
+
+## Re-check after fix round 1
+
+Boundary pass (#1667 resolved), correctness pass (#1671 resolved); accepted. Side effect accepted by both: a disabled
+toggle shows no title on hover, as the merge toggle.
