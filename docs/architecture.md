@@ -571,11 +571,13 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   `jsonrpc/` is the one JSON-RPC connection; `agent/` is the ACP client (`AgentClient { ask, loadConversation,
   editDiff, isRunning, destroy }`, the permission table, the fold of a turn); `editor/range.ts` `RangeController`
   shows two read-only columns with the threads' block rows; `editor/markdown.ts` renders Markdown as DOM nodes only
-  (#112). The range root (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeDrafts.ts`), GitLab
-  (`rangeGitLab.ts`) and the AI (`rangeAi.ts`: `ask(from: AskFrom, typed)` is Ask AI's one step — a non-blank typed
-  text added first as the note or the new thread, then asked — and `canAsk(from, typed)` its one enabled rule, #124;
-  `rangeAiView.ts` the pure parts: `ThreadAi`, the prompt rule, the replay checks, an answer's view); every thread word
-  is in `rangeThreadText.ts`, every AI word in `aiText.ts`; closing asks `aiMayClose` (Keep Changes preferred, #111).
+  (#112). The range root (`RangeApp`, `rangeStore.ts`) owns the threads (`rangeThreads.ts`, `rangeDrafts.ts`;
+  `rangeAdds.ts` the one reactive record of adds in flight, which Ask AI reads, #124), GitLab (`rangeGitLab.ts`) and the
+  AI (`rangeAi.ts`: `ask(from: AskFrom, typed)` is Ask AI's one step — a non-blank typed text added first as the note
+  or the new thread, then asked — and `canAsk(from, typed)` its one enabled rule, #124; `rangeAiRules.ts` the pure
+  rules it reads: the prompt rule, the held tables, the replay checks; `rangeAiView.ts` the answer's view); every
+  thread word is in `rangeThreadText.ts`, every AI word in `aiText.ts`; closing asks `aiMayClose` (Keep Changes
+  preferred, #111).
   `AiTurn`'s "Thinking and steps" list is capped at 20rem and follows its end through `ui/useFollowEnd.ts`, the server
   log's one follow rule (#124).
 

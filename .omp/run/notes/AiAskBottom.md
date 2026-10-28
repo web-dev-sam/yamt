@@ -71,3 +71,19 @@ nothing; Retry after an unrecorded crash asks nothing until a load records it. `
   Promoted: #1660 (`State.threads` widened to all of `RangeThreads`), #1661 (two in-flight records of a draft's add
   that disagree while Comment's add runs), #1662 (`isReady`'s doc comment). → `AiAskBottomR1`
   (`briefs/ai-thread-ask-rework-1.md`); plan #124 amended: one record of adds in flight in `rangeThreads.ts`.
+
+## Fix round 1 (`AiAskBottomR1`, commit `0a7dcfe`)
+
+- `rangeAiRules.ts` (new): `heldAfter` + HELD tables, `isGone`, `isAnswerIn`, `answersIn`, `isKept`, `promptText`,
+  `AskContext`, `NOTE_JOIN`; `rangeAiView.ts` keeps `ThreadAi`, `IDLE` and the view only (#1659).
+- `rangeAdds.ts` (new, granted mid-round when the record took `rangeThreads.ts` to 323 lines): the one reactive record
+  of adds in flight (`shallowRef<ReadonlySet<Add>>`, `whileAdding`), held by `rangeThreads.ts`, read as
+  `addingThread(draftKey)`/`addingNote(thread)`; `addThread` refuses a second add of a draft, `addNote` refuses
+  nothing; `rangeAi.ts` keeps no record (#1661). `rangeThreads.ts` at exactly 300 lines, `toggle` untouched.
+- `rangeAi.ts`'s threads: a `Pick` of its seven members (#1660); `isReady`'s comment names the context (#1662).
+- Tests: Ask AI off while Comment's add of that box runs (note and new thread, landed and refused); `addingThread`
+  /`addingNote` during and after; a second Comment during a note's add still sends; two pure rule tests. 200 files,
+  2738 web tests. WebKit fixture (dark): typed + Ask AI, Stop (by script, 60 ms), nothing typed, new thread → 4 → 5.
+- Mutants `just mutants be9efaf`: 865 killed, 36 survived (3 on new lines, equivalent; the rest round 1's), 9 no cov
+  (`.omp/run/mutants/AiAskBottomR1.survivors.txt`).
+- Re-check `AiAskBottomR1Check` (boundary): pass, no findings.

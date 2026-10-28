@@ -1,12 +1,18 @@
 # Final run — the AI's thinking list capped and following; Ask AI at the bottom of a thread
 
-Board "AI thread" row 3 (session 33). Rows 1 (`AiThinkingFollow`: the "Thinking and steps" list at most 20rem, scrolling
-inside, following its end; one follow rule with the server log, `ui/useFollowEnd.ts`; an edit diff box 16rem) and 2
-(`AiAskBottom`: Ask AI/Stop in the bottom row Comment, Ask AI, Cancel, on every thread with `--ai`; typed text added
-as your note then asked; a line's new thread added then asked) are committed. Rules: `docs/slices/request-ai-thread.md`
-and `docs/plan.md` §2 **#124** (read both whole). Read-only (VF6); you fix nothing (VF1); alone. **No mutation run**
-(VF7, owner #1630): each patch had its own. Real-app sessions `v-ait-…`; scratch under `/tmp/yamt-ait/verify/`. The
-owner's own yamt may be running: leave it alone; never `pkill`/`killall`.
+Board "AI thread" row 3 (session 33). Rows 1 (`AiThinkingFollow`, `1c1568c`: the "Thinking and steps" list at most
+20rem, scrolling inside, following its end; one follow rule with the server log, `ui/useFollowEnd.ts`; an edit diff
+box 16rem) and 2 (`AiAskBottom` `05c8fa5` + fix round `0a7dcfe`: Ask AI/Stop in the bottom row Comment, Ask AI,
+Cancel, on every thread with `--ai`; typed text added as your note then asked; a line's new thread added then asked;
+Ask AI off while any add of that box runs — `rangeAdds.ts` — node-tested, too short to see in the fixture) are
+committed and accepted (notes `.omp/run/notes/AiThinkingFollow.md`, `AiAskBottom.md`). Rules:
+`docs/slices/request-ai-thread.md` and `docs/plan.md` §2 **#124** (read both whole). Read-only (VF6); you fix nothing
+(VF1); alone. **No mutation run** (VF7, owner #1630): each patch had its own. Real-app sessions `v-ait-…`; scratch
+under `/tmp/yamt-ait/verify/`. The owner's own yamt may be running: leave it alone; never `pkill`/`killall`.
+
+Known, not a failure: in the fixture page a thread asked twice may show its later recorded answer as "omp no longer has
+this answer" — the fixture's `load.jsonl` replays one turn (unchanged by this feature, checked in review). The real omp
+run (recipe 5b) is the proof that a second answer shows as its own turn.
 
 ## Recipes
 
