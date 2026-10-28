@@ -119,15 +119,28 @@ export class ScrollSync<P extends string> {
       const { scrollDOM, documentPadding } = views[pane];
       scrollDOM.scrollTop = at(pane) + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
     }
-    this.#syncedTops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
+    const tops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
+    this.#syncedTops = tops;
     this.#echoes = followers;
     if (this.#clearEchoes !== null) {
       cancelAnimationFrame(this.#clearEchoes);
     }
     this.#clearEchoes = requestAnimationFrame(() => {
-      this.#clearEchoes = null;
-      this.#echoes = [];
+      this.#endEchoes(source, tops);
     });
+  }
+
+  // WebKitGTK 2.54 can pull a follower back while CodeMirror swaps its viewport, and the moved follower's
+  // scroll event is an echo (docs/plan.md §2 #82, docs/slices/briefs/range-collapse-columns-rework-2.md):
+  // its source leads once more.
+  #endEchoes(source: P, tops: ReadonlyMap<P, number>): void {
+    this.#clearEchoes = null;
+    const views = this.#views;
+    const moved = this.#echoes.some((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
+    this.#echoes = [];
+    if (moved && !this.#followed) {
+      this.follow(source);
+    }
   }
 
   destroy(): void {
