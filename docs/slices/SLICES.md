@@ -1112,6 +1112,10 @@ disjoint files and run side by side; `frontend/src/ui/AGENTS.md` is row 2's (row
 | 2   | Ask AI and Stop in the bottom row, shown on every thread with `--ai`; typed text added then asked; a line's new thread added then asked (`briefs/ai-thread-ask.md`, `-rework-1.md`) (`AiAskBottom`, `AiAskBottomR1`) | web-impl | accepted            | `05c8fa5` + R1 `0a7dcfe`: `RangeAi.ask(from, typed)`/`canAsk`; AI rules in `rangeAiRules.ts`, view only in `rangeAiView.ts`; one reactive record of adds in flight (`rangeAdds.ts`, held by `rangeThreads`); 2738 web tests; WebKit walkthrough. Round 1: correctness pass, boundary fail (#1659–#1662) → R1 → re-check pass. Notes `AiAskBottom.md` |
 | 3   | final run (`briefs/ai-thread-verify.md`): `just check`, WebKit fixture, real app with a real `omp acp` turn, dark and light (`AiThreadVerify`)                                                                       | verifier | **done, gate pass** | `19be32c`: `just check` exit 0; fixture 2a–2f dark and light; without `--ai` 0 pixels differ from `c72b022`; server log unchanged; real omp: list 320px following and held, follow-up sent as only the new note in the same session (turns 0, 1), Stop, exit 0. One unreproduced observation #1664. Notes `AiThreadVerify.md`                        |
 
+Feature built and verified on 2026-10-28 (rows 1–3; findings #1658–#1664). The owner's check: the look of the capped
+list inside the thread box (its background is the panes' scroller shade, a little different from the box around it).
+Next on this branch: "After 0.6.0-beta.1" row 2 (folder sums), its own session.
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
