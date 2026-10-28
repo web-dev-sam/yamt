@@ -2,8 +2,10 @@
 import { computed, useTemplateRef } from "vue";
 import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
+import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
 
 import type { RangeEntry, RangeSide } from "../ipc";
+import { COLLAPSE_LABEL } from "./collapsing";
 import { fileIcon } from "./fileIcon";
 import { ACTION_NAMES } from "./keyText";
 import PaneFrame from "./PaneFrame.vue";
@@ -29,7 +31,7 @@ const NEXT = ACTION_NAMES["next-change"];
 const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
-const { preferences, question } = useRangeStore();
+const { preferences, question, collapsing, toggleCollapsing } = useRangeStore();
 const { content, threadHosts, moveToChange } = useRangeController(
   props.file,
   { left, right, strip },
@@ -73,6 +75,18 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
           @click="moveToChange('down')"
         >
           <ArrowDown class="size-4" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          :title="COLLAPSE_LABEL"
+          :aria-label="COLLAPSE_LABEL"
+          :aria-pressed="collapsing"
+          :disabled="!columns"
+          class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+          @mousedown.prevent
+          @click="toggleCollapsing"
+        >
+          <ChevronsDownUp class="size-4" aria-hidden="true" />
         </button>
         <RangeSendButton class="ml-auto" />
         <SettingsButton />

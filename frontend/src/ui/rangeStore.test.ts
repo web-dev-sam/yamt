@@ -1,3 +1,4 @@
+import { setSSRHandler } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { AgentClient, DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
@@ -14,6 +15,7 @@ import {
   type SourceFailure,
   type SourceResult,
 } from "../ipc";
+import { COLLAPSE_LABEL, createCollapsing } from "./collapsing";
 import type { KeyPress } from "./fileListKey";
 import { problemText } from "./problemText";
 import {
@@ -24,6 +26,7 @@ import {
   type RangeStore,
 } from "./rangeStore";
 import { useSettingsStore } from "./settingsStore";
+import { listedButtons } from "./toolbarButtons";
 
 type Edit = (fixture: RangeSource) => Partial<RangeSource>;
 
@@ -531,4 +534,61 @@ test("deleteNote asks first: Cancel and Escape keep the note, Delete removes it 
   expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3]);
   expect(store.threads.counts.value.get(first.file)).toBe(3);
   expect(store.question.value).toBeNull();
+});
+
+function withWindowStorage(
+  initial: Record<string, string>,
+  run: (items: Map<string, string>) => void,
+): void {
+  const items = new Map(Object.entries(initial));
+  setSSRHandler("getDefaultStorage", () => ({
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => {
+      items.set(key, value);
+    },
+    removeItem: (key) => {
+      items.delete(key);
+    },
+  }));
+  try {
+    run(items);
+  } finally {
+    setSSRHandler("getDefaultStorage", () => undefined);
+  }
+}
+
+test.each([
+  ["missing", {}, true],
+  ['"true"', { "yamt.collapse.unchanged": "true" }, true],
+  ["garbage", { "yamt.collapse.unchanged": "no" }, true],
+  ['"false"', { "yamt.collapse.unchanged": "false" }, false],
+])(
+  "the collapse choice %s in the window's storage starts the range store as the merge window reads it",
+  (_name, initial, on) => {
+    withWindowStorage(initial, () => {
+      expect(createRangeStore(source(1), "dark", null).collapsing.value).toBe(on);
+    });
+  },
+);
+
+test("toggling in the range store writes the merge window's stored choice (catches a second key)", () => {
+  withWindowStorage({}, (items) => {
+    const store = createRangeStore(source(1), "dark", null);
+
+    store.toggleCollapsing();
+
+    expect(store.collapsing.value).toBe(false);
+    expect([...items]).toEqual([["yamt.collapse.unchanged", "false"]]);
+    expect(createCollapsing().collapsing.value).toBe(false);
+
+    store.toggleCollapsing();
+
+    expect(items.get("yamt.collapse.unchanged")).toBe("true");
+    expect(createCollapsing().collapsing.value).toBe(true);
+  });
+});
+
+test("the range toggle's words are the merge toolbar's collapse entry", () => {
+  expect(COLLAPSE_LABEL).toBe("Collapse unchanged fragments");
+  expect(listedButtons(null).find(({ id }) => id === "collapse")?.label).toBe(COLLAPSE_LABEL);
 });

@@ -16,6 +16,7 @@ import type {
 import { firstMessageInUse } from "./agentSettingsFields";
 import { aiMayClose } from "./aiClose";
 import { createAsking, type Asking } from "./asking";
+import { createCollapsing, type Collapsing } from "./collapsing";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
@@ -35,31 +36,32 @@ export type RangeAgent = { readonly source: AgentSource; readonly client: AgentC
 
 type RangeStoreAi = RangeAi & { readonly client: AgentClient };
 
-export type RangeStore = SettingsStore & {
-  readonly start: Readonly<ShallowRef<RangeStart | null>>;
-  readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
-  readonly shownPath: ComputedRef<string | null>;
-  readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
-  readonly problem: Readonly<ShallowRef<Problem | null>>;
-  readonly question: ComputedRef<Question | null>;
-  readonly screen: Readonly<ShallowRef<Screen>>;
-  readonly fileListShown: ShallowRef<boolean>;
-  readonly preferences: ComputedRef<Preferences>;
-  readonly threads: RangeThreads;
-  readonly gitlab: GitLabState;
-  readonly ai: RangeStoreAi | null;
-  startUp(): Promise<void>;
-  loadSettings(): Promise<void>;
-  showFile(path: string): void;
-  loadFile(entry: RangeEntry): Promise<RangeFile | null>;
-  fileListKey(event: KeyPress, platform: string): void;
-  dismissProblem(): void;
-  answer(yes: boolean): void;
-  dismissQuestion(): void;
-  mayClose(): Promise<boolean>;
-  /** Asks "Delete this comment?" first (plan row 123). */
-  deleteNote(message: MessageId): Promise<void>;
-};
+export type RangeStore = SettingsStore &
+  Collapsing & {
+    readonly start: Readonly<ShallowRef<RangeStart | null>>;
+    readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
+    readonly shownPath: ComputedRef<string | null>;
+    readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
+    readonly problem: Readonly<ShallowRef<Problem | null>>;
+    readonly question: ComputedRef<Question | null>;
+    readonly screen: Readonly<ShallowRef<Screen>>;
+    readonly fileListShown: ShallowRef<boolean>;
+    readonly preferences: ComputedRef<Preferences>;
+    readonly threads: RangeThreads;
+    readonly gitlab: GitLabState;
+    readonly ai: RangeStoreAi | null;
+    startUp(): Promise<void>;
+    loadSettings(): Promise<void>;
+    showFile(path: string): void;
+    loadFile(entry: RangeEntry): Promise<RangeFile | null>;
+    fileListKey(event: KeyPress, platform: string): void;
+    dismissProblem(): void;
+    answer(yes: boolean): void;
+    dismissQuestion(): void;
+    mayClose(): Promise<boolean>;
+    /** Asks "Delete this comment?" first (plan row 123). */
+    deleteNote(message: MessageId): Promise<void>;
+  };
 
 type Refs = {
   readonly start: ShallowRef<RangeStart | null>;
@@ -169,6 +171,7 @@ export function createRangeStore(
   const settings = settingsActions(state);
   const created: RangeStore = {
     ...refs,
+    ...createCollapsing(),
     shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),

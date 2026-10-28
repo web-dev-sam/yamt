@@ -8,6 +8,8 @@ export type Collapsing = {
   toggleCollapsing(): void;
 };
 
+export const COLLAPSE_LABEL = "Collapse unchanged fragments";
+
 const STORAGE_KEY = "yamt.collapse.unchanged";
 
 export function createCollapsing(storage?: StorageLike): Collapsing {
