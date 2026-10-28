@@ -1,14 +1,1 @@
-{
-  "FolderSums": {
-    "owned": [
-      "frontend/src/ui/FileTree.vue",
-      "frontend/src/ui/FileList.vue",
-      "frontend/src/ui/RangeApp.vue",
-      "frontend/src/ui/RangeFileRow.vue",
-      "frontend/src/ui/RangeCounts.vue",
-      "frontend/src/ui/rangeFolderSums.ts",
-      "frontend/src/ui/rangeFolderSums.test.ts",
-      "frontend/src/ui/AGENTS.md"
-    ]
-  }
-}
+{}

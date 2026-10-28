@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Review a commit range: in the tree view every folder shows the sum of its files' `+n −m`, subfolders included; a
+  binary file adds nothing, and a folder holding only such files shows none.
+
 ### Changed
 
 - The AI in a range thread (`--ai`):

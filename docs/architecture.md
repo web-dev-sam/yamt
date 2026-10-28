@@ -524,7 +524,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
 
 ---
 
-### 3.8 The range window, its threads and the AI (plan §2 #103–#124)
+### 3.8 The range window, its threads and the AI (plan §2 #103–#125)
 
 - **`range` (yamt-range).** `spec` keeps `a..b` / `a...b` as typed; `open` resolves both sides (the merge base on the
   left for three dots) into `Compared` with git's `%h` short ids; `entries` reads one `diff-tree -r -z --raw --numstat
@@ -580,6 +580,10 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   preferred, #111).
   `AiTurn`'s "Thinking and steps" list is capped at 20rem and follows its end through `ui/useFollowEnd.ts`, the server
   log's one follow rule (#124).
+  The tree's folder rows show the sum of their files' `+a −r` (#125): `rangeFolderSums.ts` `folderSums` keys git's
+  counts by the folder path a row carries (through `fileTree.ts` `folderPaths`, so a joined chain finds its deepest
+  folder's sum), built once per list by `RangeApp`, which fills the tree's optional `folder` slot (after the label;
+  the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows.
 
 ## 4. IPC contract (generated, the single source of truth)
 
