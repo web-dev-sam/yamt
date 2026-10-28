@@ -1,0 +1,273 @@
+mutants: no Rust changes since 4ce52c4
+[32m21:25:50 (838580) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m21:25:50 (838580) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m21:25:50 (838580) INFO ProjectReader[39m Found 2 of 751 file(s) to be mutated.
+[32m21:25:50 (838580) INFO Instrumenter[39m Instrumented 2 source file(s) with 233 mutant(s)
+[32m21:25:50 (838580) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m21:25:51 (838580) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m21:25:54 (838580) INFO DryRunExecutor[39m Initial test run succeeded. Ran 164 tests in 3 seconds (net 386.06904600000144 ms, overhead 2685.9309539999986 ms).
+
+All tests
+  rangeAi.test.ts
+    ~ a new thread's first turn sends every note, wrapped in First message (covered 58)
+    ✓ the session is stored on omp's event, before the turn ends (killed 6)
+    ✓ a finished turn adds one answer; the next ask sends only the notes since it, unwrapped (killed 11)
+    ~ Ask does nothing while the thread's turn runs or with nothing new; Stop stops that turn (covered 43)
+    ~ a turn stopped before the prompt reached omp adds no answer; its stopped end stays shown (covered 48)
+    ~ a turn stopped after omp holds its prompt adds one answer, shown with its own end (covered 67)
+    ~ a checkout failure before the prompt adds no answer and asks omp nothing more (covered 43)
+    ~ a missing program failure before the prompt adds no answer and asks omp nothing more (covered 43)
+    ~ a app failure before the prompt adds no answer and asks omp nothing more (covered 43)
+    ~ a turn omp ended itself (max tokens) is an answer without asking the replay (covered 67)
+    ~ a crash after omp held the prompt adds the answer; Retry sends that prompt again in the session (covered 67)
+    ~ a crash before omp held the prompt adds nothing; a failed replay adds nothing either (covered 48)
+    ~ a stored session is loaded once when shown, and Ask waits for it (covered 58)
+    ✓ turns omp holds without an answer in the thread (a reload mid-turn) become answers before Ask is offered (killed 2)
+    ✓ a failed write of an unseen turn's answer stops there and still shows the conversation (killed 1)
+    ~ a load that failed for another reason than a lost session is tried again (covered 43)
+    ~ a session omp lost at load: the next ask starts a new one with every note wrapped (covered 43)
+    ~ a session omp lost at the ask: a new one starts at once with every note wrapped (covered 63)
+    ~ a turn of a new session omp never held shows no answer of the lost session (covered 82)
+    ~ two threads run at once; one ending leaves the other running (covered 77)
+    ✓ a failed write of the session or the answer is reported as such (killed 2)
+    ~ no First message context (the range not open) means nothing to ask (covered 43)
+    ~ a session's second turn stopped before omp held it (replay of one turn) adds no answer (covered 58)
+    ~ a session's second turn stopped after omp held it is answer 1, shown with its own end (covered 77)
+    ~ a checkout failure on the stored session adds no answer and asks for no replay (covered 58)
+    ~ a new thread's turn stopped before omp named the session asks for no replay (covered 43)
+    ~ a new thread's turn crashed before omp named the session asks for no replay (covered 43)
+    ~ a crash after a failed load replaces the failed load with the replay (covered 58)
+    ~ an answer finished after a failed load loads the conversation again and shows once, as its turn (covered 77)
+    ~ an answer ended at max tokens after a failed load loads the conversation again and shows once, as its turn (covered 77)
+    ~ a failed replay check leaves the conversation unloaded; the next finished turn reloads it (covered 67)
+    ~ a stop after a failed load records every turn the replay holds past the answers, each shown as omp's (covered 77)
+    ~ showing the box again while a turn runs after a failed load loads nothing (covered 58)
+    ~ a failed record of a replayed turn keeps Ask off until a load records it; answer i stays omp's turn i (covered 80)
+    ~ a finished turn whose record failed keeps Ask off and shows once after a load records it (covered 70)
+    ~ Retry after a crash omp never held asks again with the notes added since (covered 63)
+    ~ Ask AI with typed text on a thread with an answer stores it as a note, then asks with the notes since the answer (covered 58)
+    ~ Ask AI with typed text on a thread's first turn wraps every note in First message (covered 58)
+    ~ Ask AI with only blank text typed adds nothing and asks with the notes since the answer (covered 58)
+    ✓ a refused add reports its problem, keeps the text in the field and asks nothing (killed 1)
+    ✓ Ask AI on a line's new thread adds the thread with the text, then asks its first turn (killed 2)
+    ~ a refused new thread asks nothing (covered 63)
+    ~ a second Ask AI while the first one's note is added adds it once and asks once; other threads stay askable (covered 58)
+    ~ Retry after a crash whose answer could not be recorded asks nothing until a load records it (covered 57)
+    ~ a new thread's add blocks only its own Ask AI, and a second press adds one thread (covered 69)
+    ~ canAsk: off while the turn runs or the conversation loads, even with text typed; typed text alone is enough (covered 43)
+    ~ Ask AI on a thread no longer listed adds and asks nothing (covered 43)
+    ~ Ask AI is off while Comment adds that thread's note, and on again once it lands (refused: false) (covered 58)
+    ~ Ask AI is off while Comment adds that thread's note, and on again once it lands (refused: true) (covered 60)
+    ~ Ask AI is off while Comment adds that line's new thread; the added thread is askable (covered 69)
+    ~ a refused Comment of a line's new thread turns its Ask AI on again (covered 63)
+  rangeGitLab.test.ts
+    ~ checked once: the answer is kept and checking ends (covered 43)
+    ~ focus within 30 s of the last check does not re-check; at 30 s it does (covered 43)
+    ~ no overlapping checks: a second check while one runs asks nothing (covered 43)
+    ~ Send and Post are disabled with Checking GitLab… until the first answer (covered 55)
+    ~ the last answer stays in force during a re-check (covered 55)
+    ~ a not lined-up answer disables both with its sentence; Unqueue stays enabled (covered 55)
+    ~ a pending message cannot be posted; a message without shown text says why (covered 49)
+    ~ Send is disabled with Nothing queued when no message waits (covered 46)
+    ~ Send's notLinedUp replaces the check and records no result (covered 55)
+    ~ the progress label counts the message being sent, one send at a time (covered 57)
+    ~ a progress message arriving after the reply leaves Send usable (covered 57)
+    ~ the result notice counts sent and refused and replaces the list (covered 57)
+    ~ a stopped send keeps its reason in the result (covered 57)
+    ~ a send that ends not lined up clears the previous send's result (covered 57)
+    ~ a failed check and a failed send report their step and keep the last answer (covered 55)
+  rangeOpen.test.ts
+    ~ a toggle opens all its threads when one is closed, closes all when all are open (covered 21)
+    ~ a toggle changes only its own threads: other open threads stay open either way (covered 21)
+    ~ a thread added from a draft opens under the draft's key, other threads under their id (covered 32)
+    ~ shownFor lists a file's stored threads by key, open or collapsed (covered 18)
+    ✓ keepListed drops threads the list no longer holds and keeps the set when it holds them all (killed 2)
+  rangeStore.test.ts
+    ✘ the window's components get no store before the root creates one (covered 0)
+    ✓ the first file is shown at start and is the one file mounted (catches an empty main area at start) (killed 1)
+    ~ an empty range shows no file and mounts none (covered 43)
+    ~ before openRange answers: the files screen, the start theme's preferences, no file to show (covered 43)
+    ~ a failed openRange reports the range and shows nothing (covered 23)
+    ~ at start the list shows first, then the threads load and GitLab is checked once (covered 43)
+    ~ a failed openRange loads no threads and checks nothing (covered 23)
+    ~ a failed thread list is the window's problem (covered 34)
+    ~ showFile from the settings screen shows the file and returns the screen to files (covered 43)
+    ~ closeSettings returns to the files; a path not in the range changes nothing (covered 43)
+    ~ showing a visited file again keeps the mounted order (catches a moved view losing its scroll) (covered 43)
+    ~ the 17th file drops the least recently shown and keeps the others' order (covered 43)
+    ~ a draft outlives its file's view: 16 other files evict file 0 and the draft is still there (covered 67)
+    ~ a failed load reports open with its path and leaves visited; a later success clears the problem (covered 43)
+    ~ a failed file leaves the eviction order too: the next eviction drops the least recent mounted file (covered 43)
+    ~ dismissProblem clears the shown problem (covered 43)
+    ~ the bound key toggles the file list, never while a question waits (covered 43)
+    ~ answer settles the waiting question (covered 43)
+    ~ without --ai the store has no AI and the window closes without asking (covered 43)
+    ~ First message's values: the thread's place, the range as typed, both short ids (covered 43)
+    ~ with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays (covered 43)
+    ~ deleteNote asks first: Cancel and Escape keep the note, Delete removes it and its emptied thread (covered 50)
+    ~ the collapse choice missing in the window's storage starts the range store as the merge window reads it (covered 23)
+    ~ the collapse choice "true" in the window's storage starts the range store as the merge window reads it (covered 23)
+    ~ the collapse choice garbage in the window's storage starts the range store as the merge window reads it (covered 23)
+    ~ the collapse choice "false" in the window's storage starts the range store as the merge window reads it (covered 23)
+    ~ toggling in the range store writes the merge window's stored choice (catches a second key) (covered 23)
+    ✘ the range toggle's words are the merge toolbar's collapse entry (covered 0)
+  rangeThreads.test.ts
+    ✓ a draft's Comment adds the thread and its key becomes the stored id with the text kept (killed 60)
+    ✓ a refused Comment keeps the draft with its text and reports the add (killed 9)
+    ✓ a second Comment while the first is in flight sends nothing more (killed 5)
+    ~ after a refused Comment the next Comment on that draft is sent and stored once (covered 74)
+    ✓ a Comment on a key with no draft makes no call and reports nothing (killed 3)
+    ~ a refused Comment whose draft was dropped while it ran brings no draft back (covered 63)
+    ~ a second press on a line with an open draft focuses it, with no second draft (covered 43)
+    ~ a dropped draft leaves the line; writing a missing draft creates nothing (covered 50)
+    ✓ stored threads come back collapsed; open and collapse per thread and per line (killed 24)
+    ✓ counts per file ignore drafts (killed 13)
+    ✓ blank text is never sent (killed 7)
+    ✓ a note is added to its thread and its draft text cleared; a refused note keeps it (killed 14)
+    ~ each thread keeps its own reply text (covered 43)
+    ~ a press on the same line number in the other column opens a second draft (covered 43)
+    ~ writing a blank note drops its draft (covered 43)
+    ✓ queue and unqueue change the posting and the queued count; a pending one reports (killed 20)
+    ~ a half-edited Post text outlives a collapse and a reopen of its thread (covered 77)
+    ~ an emptied Post text keeps its editor open; Cancel drops it (covered 43)
+    ✓ a queued Post closes its editor; a refused or blank Queue keeps the text (killed 3)
+    ~ a Post text outlives its file's view: 16 other files evict file 0 and the text is still there (covered 69)
+    ✓ a failed list reports it and keeps the empty list (killed 3)
+    ✓ listed turns true once the first list settles, read or not (killed 2)
+    ~ listed turns true once the first list settles, refused or not (covered 34)
+    ~ a Cancel while Comment is in flight still adds and opens the thread (covered 83)
+    ✓ replace mirrors a send's list and drops the Post box of a message it no longer holds (killed 3)
+    ✓ queued and refused postings sit in the queue; not queued and pending do not (killed 2)
+    ~ your notes not yet on GitLab can change; a pending note and an AI answer cannot (covered 43)
+    ✓ an edit stores the new text, closes its box and keeps a queued note queued with that text (killed 11)
+    ✓ a blank edit makes no call and keeps its box open (killed 3)
+    ✓ a refused edit or delete is reported, changes nothing and keeps the edit box (killed 6)
+    ~ a message's Edit and Post boxes are never open at once (covered 43)
+    ~ each message keeps its own Edit text; a Post on one leaves the other's Edit alone (covered 43)
+    ~ an Edit box on a note a send made pending closes; one on a note still unsent stays (covered 45)
+    ~ deleting a note keeps a thread that still has a message (covered 73)
+    ✓ deleting a thread's last note removes the thread, its line, its count, its open state and its drafts (killed 7)
+    ~ addingThread holds a draft's add only while it runs (refused: false) (covered 69)
+    ~ addingThread holds a draft's add only while it runs (refused: true) (covered 63)
+    ✓ addingNote holds a thread's note add only while it runs (refused: false) (killed 2)
+    ~ addingNote holds a thread's note add only while it runs (refused: true) (covered 60)
+    ~ a second Comment while a note's add runs still sends; the thread is adding until both land (covered 58)
+  useRangeController.test.ts
+    ✘ a texts reply builds one controller on the hosts with the path, both texts and the preferences (covered 0)
+    ✘ the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view (covered 0)
+    ✘ the controller is built with the file's threads at that moment, and shown each later change of them (covered 0)
+    ✘ a thread change calls showThreads and never setCollapsed (catches runs recomputed on an add) (covered 0)
+    ✘ the controller is built with the store's collapsing at that moment (covered 0)
+    ✘ a toggle reaches every live controller through setCollapsed with no rebuild; a file opened after it builds with the new state (covered 0)
+    ✘ nothing builds before the thread list was read once; then it builds with the threads read (covered 0)
+    ✘ a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again) (covered 0)
+    ✘ the controller gets the line events and its hosts reach threadHosts (covered 0)
+    ✘ a binary reply builds no controller and shows its sentence (covered 0)
+    ✘ a tooLarge reply builds no controller and shows its sentence (covered 0)
+    ✘ a notUtf8 reply builds no controller and shows its sentence (covered 0)
+    ✘ a modeOnly reply builds no controller and shows its sentence (covered 0)
+    ✘ a kindChanged reply builds no controller and shows its sentence (covered 0)
+    ✘ a submodule reply builds no controller and shows its sentence (covered 0)
+    ✘ the binary sentence is the one rangeText words (covered 0)
+    ✘ a reply arriving after unmount is dropped: nothing built, nothing shown (covered 0)
+    ✘ a failed load builds nothing and stays loading (covered 0)
+    ✘ preferences changed before the controller exists reach it at build, not through a missing controller (covered 0)
+    ✘ no hosts while the left ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ no hosts while the right ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ no hosts while the strip ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ~ a press on a line number starts a draft in that file only; toggle opens and closes (covered 87)
+    ~ a file waits for the thread list, then builds once it was read (catches columns stuck empty) (covered 58)
+    ~ a file waits for the thread list, then builds once it was failed (catches columns stuck empty) (covered 41)
+
+[NoCoverage] ConditionalExpression
+src/ui/rangeThreads.ts:83:5
+-       default: {
+-         const _exhaustive: never = posting;
+-         return _exhaustive;
+-       }
++       default:
+
+[NoCoverage] BlockStatement
+src/ui/rangeThreads.ts:83:14
+-       default: {
+-         const _exhaustive: never = posting;
+-         return _exhaustive;
+-       }
++       default: {}
+
+[Survived] ConditionalExpression
+src/ui/rangeThreads.ts:98:5
+-       draft.kind === "thread" && draft.file === file
++       true && draft.file === file
+Tests ran:
+    a draft's Comment adds the thread and its key becomes the stored id with the text kept
+    counts per file ignore drafts
+    deleting a thread's last note removes the thread, its line, its count, its open state and its drafts
+  and 2 more tests!
+
+
+[Survived] OptionalChaining
+src/ui/rangeThreads.ts:217:16
+-     const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body;
++     const body = list.threads.find(thread => thread.id === id)?.messages.at(-1).body;
+Tests ran:
+    a finished turn adds one answer; the next ask sends only the notes since it, unwrapped
+    a turn stopped after omp holds its prompt adds one answer, shown with its own end
+    a turn omp ended itself (max tokens) is an answer without asking the replay
+  and 11 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/rangeThreads.ts:218:10
+-     return body?.kind === "aiAnswer" ? body.turn : null;
++     return true ? body.turn : null;
+Tests ran:
+    a finished turn adds one answer; the next ask sends only the notes since it, unwrapped
+    a turn stopped after omp holds its prompt adds one answer, shown with its own end
+    a turn omp ended itself (max tokens) is an answer without asking the replay
+  and 11 more tests!
+
+
+[Survived] OptionalChaining
+src/ui/rangeThreads.ts:217:16
+-     const body = list.threads.find((thread) => thread.id === id)?.messages.at(-1)?.body;
++     const body = list.threads.find(thread => thread.id === id).messages.at(-1)?.body;
+Tests ran:
+    a finished turn adds one answer; the next ask sends only the notes since it, unwrapped
+    a turn stopped after omp holds its prompt adds one answer, shown with its own end
+    a turn omp ended itself (max tokens) is an answer without asking the replay
+  and 11 more tests!
+
+
+[Survived] EqualityOperator
+src/ui/rangeThreads.ts:225:7
+-         (await changed(state, "session", () => source.setThreadSession(thread, session))) !== null,
++         (await changed(state, "session", () => source.setThreadSession(thread, session))) === null,
+Tests ran:
+    the session is stored on omp's event, before the turn ends
+    a finished turn adds one answer; the next ask sends only the notes since it, unwrapped
+    a turn stopped before the prompt reached omp adds no answer; its stopped end stays shown
+  and 11 more tests!
+
+
+[Survived] OptionalChaining
+src/ui/rangeThreads.ts:218:10
+-     return body?.kind === "aiAnswer" ? body.turn : null;
++     return body.kind === "aiAnswer" ? body.turn : null;
+Tests ran:
+    a finished turn adds one answer; the next ask sends only the notes since it, unwrapped
+    a turn stopped after omp holds its prompt adds one answer, shown with its own end
+    a turn omp ended itself (max tokens) is an answer without asking the replay
+  and 11 more tests!
+
+
+Ran 7.20 tests per mutant on average.
+-----------------|------------------|----------|-----------|------------|----------|----------|
+                 | % Mutation score |          |           |            |          |          |
+File             |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+All files        |  96.57 |   97.40 |      225 |         0 |          6 |        2 |        0 |
+ rangeOpen.ts    | 100.00 |  100.00 |       57 |         0 |          0 |        0 |        0 |
+ rangeThreads.ts |  95.45 |   96.55 |      168 |         0 |          6 |        2 |        0 |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m21:26:06 (838580) INFO MutationTestExecutor[39m Done in 16 seconds.

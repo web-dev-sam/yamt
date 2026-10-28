@@ -83,3 +83,10 @@ exported. Names for docs: `waveTops`, `waveStartsIn`, `chainPhases`, `hiddenIn`,
 
 Open: a range desync on Ctrl+End after a find (#1689) — reproduced by the orchestrator: present on `d6ab2b7` and
 `a23dcba`, absent on `f08c5b9` (no range folds): a regression of this feature.
+
+## Re-check after fix round 1
+
+Boundary pass (#1680–#1684 resolved), correctness pass (#1686–#1688 resolved; the new follow rule sound for the
+minimap's `follow` callers; the merge deep-toggle defect predates the feature and is now fixed). Mutation run
+`just mutants 4ce52c4`: `rangeOpen.ts` 57/57; `rangeThreads.ts` survivors :98 (equivalent) and pre-existing lines.
+Open: #1689 → fix round 2 (`briefs/range-collapse-columns-rework-2.md`).
