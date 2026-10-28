@@ -8,7 +8,7 @@ import { differenceField } from "./compareFields";
 import type { CompareRow, CompareStrip } from "./compareStrip";
 import { COLUMNS } from "./compareViews";
 import { syncFindSpace, type FindSpaceView } from "./find";
-import { rangeSpan, rowsChanged } from "./geometry";
+import { rangeSpan, rowsChanged, type WaveRow } from "./geometry";
 import { contentEnd, ScrollSync, type Anchor, type ScrollPane } from "./scrollSync";
 
 export type LineBlock = Span & { readonly type: BlockType | readonly LineBlock[] };
@@ -19,10 +19,12 @@ type FrameView = ScrollPane &
   };
 type FrameViews = Readonly<Record<Column, FrameView>>;
 type ExtraAnchors = (views: FrameViews) => readonly Anchor<Column>[];
+type Waves = (views: FrameViews) => readonly WaveRow<Column>[];
 
 type CompareLayout = {
   readonly rows: readonly CompareRow[];
   readonly anchors: readonly Anchor<Column>[];
+  readonly waves: readonly WaveRow<Column>[];
 };
 
 export function textBlock(block: LineBlock): Span {
@@ -44,7 +46,7 @@ function columnSpan(view: FrameView, range: { readonly from: number; readonly to
     : { top: text.bottom, bottom: block.bottom };
 }
 
-function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {
+function measure(views: FrameViews, extra: ExtraAnchors, waves: Waves): CompareLayout {
   const { left, right } = views;
   const rightSpans = right.state.field(differenceField).spans;
   const rows = left.state.field(differenceField).spans.flatMap((span, index) => {
@@ -61,7 +63,7 @@ function measure(views: FrameViews, extra: ExtraAnchors): CompareLayout {
   const anchors = [{ left: 0, right: 0 }, ...edges, ...extra(views), ends].sort((a, b) =>
     a.left === b.left ? a.right - b.right : a.left - b.left,
   );
-  return { rows, anchors };
+  return { rows, anchors, waves: waves(views) };
 }
 
 export class CompareFrame {
@@ -69,25 +71,30 @@ export class CompareFrame {
   readonly #strip: Pick<CompareStrip, "paint">;
   readonly #fields: readonly StateField<unknown>[];
   readonly #anchors: ExtraAnchors;
+  readonly #waves: Waves;
   readonly #scroll: ScrollSync<Column>;
   #frameId: number | null = null;
   #layoutCache: CompareLayout | null = null;
+  #realignFrom: Column | null = null;
 
   constructor({
     views,
     strip,
     fields,
     anchors,
+    waves = () => [],
   }: {
     readonly views: FrameViews;
     readonly strip: Pick<CompareStrip, "paint">;
     readonly fields: readonly StateField<unknown>[];
     readonly anchors: ExtraAnchors;
+    readonly waves?: Waves;
   }) {
     this.#views = views;
     this.#strip = strip;
     this.#fields = fields;
     this.#anchors = anchors;
+    this.#waves = waves;
     this.#scroll = new ScrollSync(views, COLUMNS, () => {
       this.request();
     });
@@ -105,14 +112,25 @@ export class CompareFrame {
 
   request(): void {
     this.#frameId ??= requestAnimationFrame(() => {
+      if (this.#realignFrom !== null) {
+        // A column the change shrank fires its clamped scroll event before this callback (HTML
+        // "update the rendering": scroll steps run before animation frame callbacks); it must not lead.
+        this.#scroll.follow(this.#realignFrom);
+        this.#realignFrom = null;
+      }
       this.#frameId = null;
       const views = this.#views;
       syncFindSpace([views.left, views.right]);
-      this.#layoutCache ??= measure(views, this.#anchors);
+      this.#layoutCache ??= measure(views, this.#anchors, this.#waves);
       const layout = this.#layoutCache;
       this.#scroll.sync(layout.anchors);
-      this.#strip.paint(views, layout.rows);
+      this.#strip.paint(views, layout.rows, layout.waves);
     });
+  }
+
+  realign(source: Column): void {
+    this.#realignFrom = source;
+    this.request();
   }
 
   destroy(): void {

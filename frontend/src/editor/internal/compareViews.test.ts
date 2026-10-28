@@ -1,5 +1,5 @@
 import { insertNewlineAndIndent } from "@codemirror/commands";
-import type { EditorState } from "@codemirror/state";
+import { Facet, type EditorState } from "@codemirror/state";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { DEFAULT_KEYS, loadCompareFixture, type Column } from "../../ipc";
@@ -40,7 +40,7 @@ afterEach(() => {
 function readOnly(text: string): EditorState {
   return readOnlyColumnState(
     { column: "left", text },
-    { settings: SETTINGS, updated: () => {}, extensions: [] },
+    { settings: SETTINGS, updated: () => {}, extensions: () => [] },
   );
 }
 
@@ -88,4 +88,16 @@ test("an editable column still refuses an insert over its byte limit", () => {
 
   expect(after.sliceDoc()).toBe(RIGHT);
   expect(refused.mock.calls).toEqual([["right"]]);
+});
+
+test("each read-only column gets its own column's extensions", () => {
+  const owner = Facet.define<Column>();
+  const states = (["left", "right"] as const).map((column) =>
+    readOnlyColumnState(
+      { column, text: LEFT },
+      { settings: SETTINGS, updated: () => {}, extensions: (asked) => owner.of(asked) },
+    ),
+  );
+
+  expect(states.map((state) => state.facet(owner))).toEqual([["left"], ["right"]]);
 });

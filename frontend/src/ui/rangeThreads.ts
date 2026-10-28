@@ -29,6 +29,7 @@ type ThreadBox =
 
 export type RangeThreads = AddsInFlight & {
   readonly list: Readonly<ShallowRef<ThreadList>>;
+  readonly listed: Readonly<ShallowRef<boolean>>;
   readonly open: Readonly<ShallowRef<ReadonlySet<ThreadId>>>;
   readonly drafts: Readonly<ShallowRef<ReadonlyMap<string, Draft>>>;
   readonly counts: ComputedRef<ReadonlyMap<RangeFileId, number>>;
@@ -67,6 +68,7 @@ type State = {
   readonly source: ReviewSource;
   readonly report: (problem: Problem) => void;
   readonly list: ShallowRef<ThreadList>;
+  readonly listed: ShallowRef<boolean>;
   readonly open: ShallowRef<ReadonlySet<ThreadId>>;
   readonly drafts: RangeDrafts;
   readonly keys: Map<ThreadId, string>;
@@ -132,15 +134,8 @@ function toggle(state: State, keys: readonly string[]): void {
     .map(({ id }) => id)
     .filter((id) => keys.includes(keyOf(state, id)));
   const opening = ids.some((id) => !state.open.value.has(id));
-  const open = new Set(state.open.value);
-  for (const id of ids) {
-    if (opening) {
-      open.add(id);
-    } else {
-      open.delete(id);
-    }
-  }
-  state.open.value = open;
+  const kept = [...state.open.value].filter((id) => opening || !ids.includes(id));
+  state.open.value = new Set(opening ? [...kept, ...ids] : kept);
 }
 
 async function changed(
@@ -212,6 +207,7 @@ function replies(state: State): Pick<RangeThreads, "load" | "queue" | "unqueue" 
   return {
     load: async () => {
       await changed(state, "list", () => source.listThreads());
+      state.listed.value = true;
     },
     queue: async (message, text) => {
       if (
@@ -274,6 +270,7 @@ export function createRangeThreads(
     source,
     report,
     list: shallowRef<ThreadList>({ threads: [] }),
+    listed: shallowRef(false),
     open: shallowRef<ReadonlySet<ThreadId>>(new Set()),
     drafts: createRangeDrafts(),
     keys: new Map(),
@@ -282,6 +279,7 @@ export function createRangeThreads(
   const { threadDraft: _threadDraft, keepStored: _keepStored, ...drafts } = state.drafts;
   return {
     list: state.list,
+    listed: state.listed,
     open: state.open,
     ...drafts,
     ...counted(state),

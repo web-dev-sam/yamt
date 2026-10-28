@@ -266,6 +266,19 @@ test("stored threads come back collapsed; open and collapse per thread and per l
   expect(threads.boxOf("nothing")).toBeNull();
 });
 
+test("a toggle changes only its own threads: other open threads stay open either way", async () => {
+  const { threads } = await opened(SEEDED);
+  const ids = [0, 1, 2, 3].map((index) => threadAt(threads, index).id);
+
+  threads.toggle(["thread-2"]);
+  threads.toggle(["thread-0", "thread-1"]);
+  const afterOpening = new Set(threads.open.value);
+  threads.toggle(["thread-0"]);
+
+  expect(afterOpening).toEqual(new Set(ids.slice(0, 3)));
+  expect(threads.open.value).toEqual(new Set([ids[1], ids[2]]));
+});
+
 test("counts per file ignore drafts", async () => {
   const { threads, board, other } = await opened(SEEDED);
   threads.startThread(other, changedThreadLine("left", 0));
@@ -475,6 +488,24 @@ test("a failed list reports it and keeps the empty list", async () => {
 
   expect(threads.list.value.threads).toEqual([]);
   expect(problems).toEqual([{ action: "threads", step: "list", cause: { kind: "WorkerStopped" } }]);
+});
+
+test.each<[string, Edit]>([
+  ["read", () => ({})],
+  [
+    "refused",
+    () => ({ listThreads: async () => ({ ok: false, failure: { kind: "WorkerStopped" } }) }),
+  ],
+])("listed turns true once the first list settles, %s or not", async (_name, edit) => {
+  const fixture = createFixtureRangeSource(log, SEEDED);
+  await fixture.openRange();
+  const threads = createRangeThreads({ ...fixture, ...edit(fixture) }, () => undefined);
+
+  const loading = threads.load();
+  const whileLoading = threads.listed.value;
+  await loading;
+
+  expect([whileLoading, threads.listed.value]).toEqual([false, true]);
 });
 
 test("a Cancel while Comment is in flight still adds and opens the thread", async () => {

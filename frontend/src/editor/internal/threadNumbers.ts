@@ -9,6 +9,7 @@ import { EditorView, GutterMarker, lineNumberMarkers, lineNumbers } from "@codem
 import messageSquarePlusIcon from "~icons/lucide/message-square-plus?raw";
 
 import { shownLine, type Column, type Difference, type ThreadLine } from "../../ipc";
+import { foldRunAt } from "./folding";
 import { anchorAt } from "./threadAnchor";
 import { threadField, type LineCount } from "./threadField";
 import type { ShownThread } from "./threadRows";
@@ -114,7 +115,7 @@ export function threadNumbers(
           ) {
             return false;
           }
-          if (target.closest(".cm-gutterElement") === null) {
+          if (target.closest(".cm-gutterElement") === null || foldRunAt(target) !== null) {
             return false;
           }
           const line = pressedLine(view.state.doc, block.from);

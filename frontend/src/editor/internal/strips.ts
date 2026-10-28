@@ -75,16 +75,44 @@ function waveNode(run: number, hovered: number | null): SVGGElement {
   return group;
 }
 
+export class WaveLayer {
+  readonly node = document.createElementNS(SVG_NS, "g");
+  readonly #hovered: () => number | null;
+  readonly #waves = new Map<number, SVGGElement>();
+
+  constructor(hovered: () => number | null) {
+    this.#hovered = hovered;
+    this.node.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
+    this.node.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
+    this.node.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
+  }
+
+  paint(paints: readonly WavePaint[]): void {
+    dropMissing(this.#waves, new Set(paints.map(({ run }) => run)), (group) => {
+      group.remove();
+    });
+    for (const { run, d } of paints) {
+      let group = this.#waves.get(run);
+      if (group === undefined) {
+        group = waveNode(run, this.#hovered());
+        this.#waves.set(run, group);
+        this.node.append(group);
+      }
+      for (const path of group.children) {
+        path.setAttribute("d", d);
+      }
+    }
+  }
+}
+
 class GapStrip {
   readonly #strip: SVGSVGElement;
   readonly #side: Side;
   readonly #onPress: OnPress | null;
-  readonly #hovered: () => number | null;
   readonly #bandLayer = document.createElementNS(SVG_NS, "g");
-  readonly #waveLayer = document.createElementNS(SVG_NS, "g");
+  readonly #waveLayer: WaveLayer;
   readonly #arrowLayer = document.createElementNS(SVG_NS, "g");
   readonly #bands = new Map<Chunk["id"], SVGPathElement>();
-  readonly #waves = new Map<number, SVGGElement>();
   readonly #arrows = new Map<Chunk["id"], ArrowRow>();
   readonly #platform = navigator.platform;
 
@@ -97,11 +125,8 @@ class GapStrip {
     this.#strip = strip;
     this.#side = side;
     this.#onPress = onPress;
-    this.#hovered = hovered;
-    this.#waveLayer.style.setProperty("--strip-wave-hit", `${LINE_HEIGHT_PX}px`);
-    this.#waveLayer.style.setProperty("--strip-wave-stroke", `${WAVE_STROKE_PX}px`);
-    this.#waveLayer.style.setProperty("--strip-wave-hover-stroke", `${WAVE_HOVER_STROKE_PX}px`);
-    strip.replaceChildren(this.#bandLayer, this.#waveLayer, this.#arrowLayer);
+    this.#waveLayer = new WaveLayer(hovered);
+    strip.replaceChildren(this.#bandLayer, this.#waveLayer.node, this.#arrowLayer);
     strip.addEventListener("mousedown", keepEditorFocus);
   }
 
@@ -134,7 +159,7 @@ class GapStrip {
 
   paint({ bands, waves, arrows }: GapPaint, covered: ChunkAction | null): void {
     this.#paintBands(bands);
-    this.#paintWaves(waves);
+    this.#waveLayer.paint(waves);
     if (arrows !== null) {
       this.#paintArrows(arrows, covered);
     }
@@ -155,23 +180,6 @@ class GapStrip {
       return path;
     });
     placeInOrder(this.#bandLayer, nodes);
-  }
-
-  #paintWaves(paints: readonly WavePaint[]): void {
-    dropMissing(this.#waves, new Set(paints.map(({ run }) => run)), (group) => {
-      group.remove();
-    });
-    for (const { run, d } of paints) {
-      let group = this.#waves.get(run);
-      if (group === undefined) {
-        group = waveNode(run, this.#hovered());
-        this.#waves.set(run, group);
-        this.#waveLayer.append(group);
-      }
-      for (const path of group.children) {
-        path.setAttribute("d", d);
-      }
-    }
   }
 
   #paintArrows({ placed, layout, onPress }: ArrowPaint, covered: ChunkAction | null): void {

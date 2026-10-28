@@ -1,7 +1,8 @@
 import type { EditorView } from "@codemirror/view";
 
-import type { Difference, ShownThread, ThreadLine } from "../ipc";
+import type { Column, Difference, ShownThread, ThreadLine } from "../ipc";
 import type { CompareHosts } from "./compare";
+import { mirrorSteps, ownerSteps, rangeRuns } from "./internal/columnFolds";
 import { differenceField } from "./internal/compareFields";
 import { moveToDifference } from "./internal/compareFocus";
 import { CompareFrame } from "./internal/compareFrame";
@@ -13,9 +14,11 @@ import {
   showColumnDifferences,
   type ColumnViews,
 } from "./internal/compareViews";
+import type { Fold } from "./internal/foldRuns";
 import { languageOf, loadLanguage } from "./internal/language";
 import type { Direction } from "./internal/navigation";
 import type { PaneSettings, Preferences } from "./internal/pane";
+import { columnWaves, RangeFolds } from "./internal/rangeFolds";
 import { showThreadRows, threadAnchors, threadField } from "./internal/threadField";
 import { ThreadHosts } from "./internal/threadHosts";
 import { lineCounts, numberPress, threadNumbers } from "./internal/threadNumbers";
@@ -30,7 +33,11 @@ export type RangeTexts = {
   readonly differences: readonly Difference[];
 };
 
-export type RangeOptions = { readonly preferences: Preferences };
+export type RangeOptions = {
+  readonly preferences: Preferences;
+  readonly collapsed: boolean;
+  readonly threads: readonly ShownThread[];
+};
 
 export type RangeEvents = {
   readonly startThread: (line: ThreadLine) => void;
@@ -42,44 +49,57 @@ export class RangeController {
   readonly #differences: readonly Difference[];
   readonly #events: RangeEvents;
   readonly #threadHosts: ThreadHosts;
+  readonly #folds: RangeFolds;
   readonly #views: ColumnViews;
   readonly #strip: CompareStrip;
   readonly #frame: CompareFrame;
+  #threads: readonly ShownThread[];
   #settings: PaneSettings;
   #destroyed = false;
 
   constructor(texts: RangeTexts, hosts: CompareHosts, options: RangeOptions, events: RangeEvents) {
     this.#differences = texts.differences;
     this.#events = events;
+    this.#threads = options.threads;
     this.#settings = { preferences: options.preferences, platform: navigator.platform };
+    this.#folds = new RangeFolds(hosts, () => this.#views);
     this.#views = createReadOnlyColumnViews(texts, hosts, {
       settings: this.#settings,
       updated: (_column, update) => {
         this.#threadHosts.restoreFocus();
         this.#frame.changed(update);
       },
-      extensions: [
+      extensions: (column) => [
         threadField,
         threadNumbers((view, line, onBadge) => {
           this.#pressed(view, line, onBadge);
         }),
+        this.#folds.column(column),
       ],
     });
     this.#threadHosts = new ThreadHosts({ views: this.#views, columns: hosts });
-    this.#strip = new CompareStrip(hosts.strip);
+    this.#strip = new CompareStrip(hosts.strip, this.#folds.hovered);
     this.#frame = new CompareFrame({
       views: this.#views,
       strip: this.#strip,
-      fields: [differenceField, threadField],
+      fields: [differenceField, threadField, ownerSteps, mirrorSteps],
       anchors: threadAnchors,
+      waves: columnWaves,
     });
     showColumnDifferences(this.#views, texts.differences);
+    this.#folds.renew(this.#runs(), options.collapsed);
+    this.showThreads(options.threads);
     const description = languageOf(texts.path);
     if (description !== null) {
       const { left, right } = this.#views;
       void loadLanguage(description, texts.path, [left, right], () => this.#destroyed);
     }
     this.#frame.request();
+  }
+
+  #runs(): Fold<Column>[] {
+    const docs = { left: this.#views.left.state.doc, right: this.#views.right.state.doc };
+    return rangeRuns(this.#differences, this.#threads, docs);
   }
 
   #pressed(view: EditorView, line: number, onBadge: boolean): void {
@@ -98,11 +118,17 @@ export class RangeController {
     setColumnPreferences(this.#views, this.#settings);
   }
 
+  setCollapsed(collapsed: boolean): void {
+    this.#folds.renew(this.#runs(), collapsed);
+    this.#frame.realign("left");
+  }
+
   moveToChange(direction: Direction): void {
     moveToDifference(this.#views, direction);
   }
 
   showThreads(threads: readonly ShownThread[]): void {
+    this.#threads = threads;
     const rows = threadRows(this.#differences, threads);
     const hostsChanged = this.#threadHosts.show(rows);
     for (const column of COLUMNS) {
@@ -123,6 +149,7 @@ export class RangeController {
       this.#events.hosts(new Map());
     }
     this.#frame.destroy();
+    this.#folds.destroy();
     for (const column of COLUMNS) {
       this.#views[column].destroy();
     }

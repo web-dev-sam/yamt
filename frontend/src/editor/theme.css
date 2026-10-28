@@ -508,7 +508,7 @@ ul.markdown-list {
 
 .cm-editor.cm-thread-lines
   .cm-lineNumbers
-  .cm-gutterElement:hover:not(:has(.cm-thread-count))::before {
+  .cm-gutterElement:hover:not(:has(.cm-thread-count), .fold-wave-cell)::before {
   position: absolute;
   top: 0;
   bottom: 0;

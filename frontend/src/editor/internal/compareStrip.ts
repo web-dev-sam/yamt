@@ -1,8 +1,10 @@
 import "../theme.css";
 import type { Span } from "../../connectors";
 import type { Column } from "../../ipc";
-import { placedBand } from "./gap";
-import { dropMissing, keepEditorFocus } from "./strips";
+import { joinPaints, placedBand } from "./gap";
+import type { WaveRow } from "./geometry";
+import { LINE_HEIGHT_PX } from "./pane";
+import { dropMissing, keepEditorFocus, WaveLayer } from "./strips";
 import type { ChangeTone } from "./tone";
 
 export type CompareRow = Readonly<Record<Column, Span>> & { readonly tone: ChangeTone };
@@ -14,14 +16,20 @@ export class CompareStrip {
   readonly #strip: SVGSVGElement;
   readonly #layer = document.createElementNS(SVG_NS, "g");
   readonly #bands = new Map<string, SVGPathElement>();
+  readonly #waves: WaveLayer | null;
 
-  constructor(strip: SVGSVGElement) {
+  constructor(strip: SVGSVGElement, hovered?: () => number | null) {
     this.#strip = strip;
-    strip.replaceChildren(this.#layer);
+    this.#waves = hovered === undefined ? null : new WaveLayer(hovered);
+    if (this.#waves === null) {
+      strip.replaceChildren(this.#layer);
+    } else {
+      strip.replaceChildren(this.#layer, this.#waves.node);
+    }
     strip.addEventListener("mousedown", keepEditorFocus);
   }
 
-  paint(panes: StripPanes, rows: readonly CompareRow[]): void {
+  paint(panes: StripPanes, rows: readonly CompareRow[], waves: readonly WaveRow<Column>[]): void {
     const strip = this.#strip;
     const stripTop = strip.getBoundingClientRect().top;
     const shifts = {
@@ -49,6 +57,7 @@ export class CompareStrip {
     dropMissing(this.#bands, kept, (path) => {
       path.remove();
     });
+    this.#waves?.paint(joinPaints(waves, shifts, { ...size, lineHeight: LINE_HEIGHT_PX }));
   }
 
   destroy(): void {

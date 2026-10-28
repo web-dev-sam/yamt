@@ -24,7 +24,7 @@ export type ColumnWiring = {
 export type ReadOnlyWiring = {
   readonly settings: PaneSettings;
   readonly updated: (column: Column, update: ViewUpdate) => void;
-  readonly extensions: Extension;
+  readonly extensions: (column: Column) => Extension;
 };
 
 type ColumnSource = { readonly column: Column; readonly text: string };
@@ -96,7 +96,7 @@ export function readOnlyColumnState(
       removalTooltip(),
       everyPane(),
       updatedListener(column, wiring.updated),
-      wiring.extensions,
+      wiring.extensions(column),
     ],
   });
 }

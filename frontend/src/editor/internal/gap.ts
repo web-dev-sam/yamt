@@ -1,5 +1,5 @@
 import { bandPath, waveCenterY, waveJoinPath, type Span } from "../../connectors";
-import type { Chunk } from "../../ipc";
+import type { Chunk, Column } from "../../ipc";
 import type { ChunkAction } from "./apply";
 import { SIDE_PANE, STRIP_PANES, type ChunkRow, type WaveRow } from "./geometry";
 import { modKeyName } from "./modClick";
@@ -101,20 +101,17 @@ export function bandPaints(
   return paints;
 }
 
-export function wavePaints(
-  { waves, side }: { readonly waves: readonly WaveRow[]; readonly side: Side },
+export function joinPaints(
+  waves: readonly WaveRow<Column>[],
   shifts: { readonly left: number; readonly right: number },
   size: { readonly width: number; readonly height: number; readonly lineHeight: number },
 ): WavePaint[] {
   const center = waveCenterY(size.lineHeight);
-  const panes = STRIP_PANES[side];
   const paints = [];
   for (const [run, wave] of waves.entries()) {
-    const left = wave[panes.left];
-    const right = wave[panes.right];
-    if (left !== null && right !== null) {
-      const onLeft = left + shifts.left;
-      const onRight = right + shifts.right;
+    if (wave.left !== null && wave.right !== null) {
+      const onLeft = wave.left + shifts.left;
+      const onRight = wave.right + shifts.right;
       const top = Math.min(onLeft, onRight);
       if (crossesStrip(top, Math.max(onLeft, onRight) + size.lineHeight, size.height)) {
         const join = { left: onLeft + center, right: onRight + center };
@@ -123,4 +120,14 @@ export function wavePaints(
     }
   }
   return paints;
+}
+
+export function wavePaints(
+  { waves, side }: { readonly waves: readonly WaveRow[]; readonly side: Side },
+  shifts: { readonly left: number; readonly right: number },
+  size: { readonly width: number; readonly height: number; readonly lineHeight: number },
+): WavePaint[] {
+  const panes = STRIP_PANES[side];
+  const joins = waves.map((wave) => ({ left: wave[panes.left], right: wave[panes.right] }));
+  return joinPaints(joins, shifts, size);
 }

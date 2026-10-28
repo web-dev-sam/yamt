@@ -12,7 +12,7 @@ export type Pane = "left" | "center" | "right";
 export const PANES = ["left", "center", "right"] as const satisfies readonly Pane[];
 export type PaneViews = Readonly<Record<Pane, EditorView>>;
 export type ChunkRow = Readonly<Record<Pane, Span>> & ChunkState;
-export type WaveRow = Readonly<Record<Pane, number | null>>;
+export type WaveRow<P extends string = Pane> = Readonly<Record<P, number | null>>;
 
 export const SIDE_PANE: Readonly<Record<Side, "left" | "right">> = {
   local: "left",
