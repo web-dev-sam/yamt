@@ -1,0 +1,19 @@
+commit 72bba1b460c8c2272c0edc6b508b5a94446c7eb0
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-28 20:28:23 +0100
+
+    fix(range): disabled collapse toggle keeps the merge toggle's look on hover
+
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 8528eeb..6cff912 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -82,7 +82,7 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
+           :aria-label="COLLAPSE_LABEL"
+           :aria-pressed="collapsing"
+           :disabled="!columns"
+-          class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
++          class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+           @mousedown.prevent
+           @click="toggleCollapsing"
+         >

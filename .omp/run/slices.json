@@ -1,9 +1,4 @@
 {
-  "RangeCollapseToggleR1": {
-    "owned": [
-      "frontend/src/ui/RangeView.vue"
-    ]
-  },
   "RangeFoldColumns": {
     "owned": [
       "frontend/src/editor/internal/wavePhase.ts",
@@ -28,6 +23,15 @@
       "frontend/src/ui/useRangeController.test.ts",
       "frontend/src/ui/rangeThreads.ts",
       "frontend/src/ui/rangeThreads.test.ts"
+    ]
+  },
+  "RangeFoldCoreR1": {
+    "owned": [
+      "frontend/src/editor/internal/foldRuns.ts",
+      "frontend/src/editor/internal/foldSteps.ts",
+      "frontend/src/editor/internal/folds.ts",
+      "frontend/src/editor/internal/columnFolds.ts",
+      "frontend/src/editor/internal/columnFolds.test.ts"
     ]
   }
 }

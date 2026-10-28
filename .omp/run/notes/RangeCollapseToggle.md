@@ -37,3 +37,12 @@ toolbar's collapse entry.
 
 - A disabled toggle keeps its pressed background (as the merge button does; the brief's classes).
 - `rangeStore.test.ts:580` expects no other key written at store creation.
+
+## Fix round 1 (`RangeCollapseToggleR1`, 3m29s, patch `72bba1b`, `.omp/run/patches/RangeCollapseToggleR1.patch`)
+
+Blocks #1667/#1671: the toggle's class is now exactly `MergeToolbar.vue:198`'s (adds `disabled:pointer-events-none`).
+Evidence: `public/logo.png` disabled+pressed, dark and light, computed background/filter equal away and over
+(`rgba(119,76,213,0.35)`/`none`, light `rgb(208,223,254)`/`none`), equal to the merge fixture toggle disabled through
+the DOM; `board.ts` enabled toggle still brightens (`brightness(1.1)`) and flips on click. typecheck, lint, fmt:check
+clean. Deviations: ran `pnpm install --frozen-lockfile --offline` in the worktree; merge toggle disabled via the DOM
+(brief allowed).
