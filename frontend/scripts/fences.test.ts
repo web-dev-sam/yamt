@@ -338,6 +338,66 @@ test("lsp importing jsonrpc's internal/ violates PM5", () => {
   ]);
 });
 
+test("search importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/search/index.ts", text: `import { ref } from "vue";` },
+    { path: "src/search/internal/match.ts", text: `import { useDebounceFn } from "@vueuse/core";` },
+    {
+      path: "src/search/internal/places.ts",
+      text: `import { invoke } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/search/internal/list.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/search/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/search/internal/match.ts", specifier: "@vueuse/core" },
+    { rule: "PM3", file: "src/search/internal/places.ts", specifier: "@tauri-apps/api/core" },
+    { rule: "PM3", file: "src/search/internal/list.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("search importing any other src/ module violates PM2", () => {
+  const files = [
+    { path: "src/search/index.ts", text: `import type { Column } from "../ipc";` },
+    { path: "src/search/internal/match.ts", text: `import { log } from "../../ipc/log";` },
+    { path: "src/search/internal/places.ts", text: `import "../../editor/index.ts";` },
+    { path: "src/search/internal/list.ts", text: `import { Connection } from "../../jsonrpc";` },
+    { path: "src/search/a.ts", text: `import "../searchx/b";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "search/ imports no other src/ module",
+    })),
+  );
+});
+
+test("search importing itself, and ui importing search's index, violate nothing", () => {
+  const files = [
+    { path: "src/search/index.ts", text: `export { matcherOf } from "./internal/match";` },
+    { path: "src/search/internal/places.ts", text: `import { paneHits } from "./match";` },
+    { path: "src/search/internal/list.test.ts", text: `import { listRows } from "../index";` },
+    { path: "src/ui/searching.ts", text: `import { withFile } from "../search";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("ui importing search's internal/ violates PM5", () => {
+  const files = [
+    { path: "src/ui/searching.ts", text: `import { paneHits } from "../search/internal/match";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM5", file: "src/ui/searching.ts", specifier: "../search/internal/match" },
+  ]);
+});
+
 test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
   const files = [
     { path: "src/agent/index.ts", text: `import { ref } from "vue";` },
