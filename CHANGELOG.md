@@ -24,8 +24,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     brings them back.
   - A click opens the file at the finding, selected, a collapsed stretch around it shown; a pane icon goes to that pane.
   - The results follow edits, disk changes and the next stop of an operation; at most 20,000 rows.
-- Scrolling: after a find or a jump to the end, both columns of the range window (and every pane of the merge window)
-  stay lined up, including when one is far from the lines already drawn.
 
 ### Changed
 
@@ -37,6 +35,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     Cancel, shown on every thread, so asking again needs no scrolling up.
   - Ask AI sends what you typed in one step: the text is added as your comment, then the AI is asked. With nothing
     typed it sends your comments since its last answer, as before. On a line's new thread it adds the thread and asks.
+
+### Fixed
+
+- The merge window: turning collapsing on from far down the Result now keeps the Result's place with the other panes
+  lined up; before, the Result could jump and a side pane stay where it was.
+- Both windows: after a find or a jump to the end, every pane stays lined up, including when one lands far from the
+  lines already drawn.
 
 ## [0.6.0-beta.1] - 2026-10-27
 
