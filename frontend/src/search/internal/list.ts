@@ -35,12 +35,16 @@ type ShownGroup<P extends string> = {
   readonly places: readonly ShownPlace<P>[];
 };
 
+function shownHits<P extends string>(place: Place<P>, on: ReadonlySet<P>): PaneEntry<P>[] {
+  return place.hits.filter((entry) => on.has(entry.pane));
+}
+
 function shownPlaces<P extends string>(group: FileGroup<P>, on: ReadonlySet<P>): ShownPlace<P>[] {
   return group.places.flatMap((place) => {
     if (group.dismissed.has(place.key)) {
       return [];
     }
-    const [first, ...rest] = place.hits.filter((entry) => on.has(entry.pane));
+    const [first, ...rest] = shownHits(place, on);
     return first === undefined ? [] : [{ place, shown: [first, ...rest] }];
   });
 }
@@ -103,6 +107,6 @@ export function goToPane<P extends string>(
   on: ReadonlySet<P>,
   layout: Layout<P>,
 ): PaneEntry<P> | null {
-  const shown = place.hits.filter((entry) => on.has(entry.pane));
+  const shown = shownHits(place, on);
   return shown.find((entry) => entry.pane === layout.lead) ?? shown[0] ?? null;
 }

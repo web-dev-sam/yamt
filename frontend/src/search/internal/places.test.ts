@@ -8,6 +8,7 @@ import {
   type Place,
   type SearchedFile,
 } from "../index";
+import { digestOf } from "./digest";
 
 type Merge = "left" | "center" | "right";
 type Column = "left" | "right";
@@ -197,7 +198,7 @@ test("a place's preview comes from the lead hit, else the first hit", () => {
   expect(sides.places.map((place) => place.preview.before)).toEqual(["y "]);
 });
 
-test("keys differ by panes, column, line text and ordinal, never by line number (line-number keys)", () => {
+test("keys differ by panes, column, line digest and ordinal, never by line number (line-number keys)", () => {
   function keysOf(left: string): readonly string[] {
     return placesOf({ texts: { left, right: null }, changes: [] }, RANGE).places.map(
       (place) => place.key,
@@ -206,14 +207,14 @@ test("keys differ by panes, column, line text and ordinal, never by line number 
   const [first, second, third] = keysOf("foo\nfoo\n foo");
 
   expect([first, second, third]).toEqual([
-    JSON.stringify([["left"], 0, "foo", 0]),
-    JSON.stringify([["left"], 0, "foo", 1]),
-    JSON.stringify([["left"], 1, " foo", 0]),
+    JSON.stringify([["left"], 0, digestOf("foo"), 0]),
+    JSON.stringify([["left"], 0, digestOf("foo"), 1]),
+    JSON.stringify([["left"], 1, digestOf(" foo"), 0]),
   ]);
   expect(keysOf("x\nfoo\nfoo\n foo")).toEqual([first, second, third]);
   expect(
     placesOf({ texts: { left: "foo", right: "foo" }, changes: [] }, RANGE).places[0]?.key,
-  ).toBe(JSON.stringify([["left", "right"], 0, "foo", 0]));
+  ).toBe(JSON.stringify([["left", "right"], 0, digestOf("foo"), 0]));
 });
 
 test("the line right after a change is outside it, a line before it too (a change's edges)", () => {
@@ -251,4 +252,54 @@ test("a pane stops at the limit and the file says it was cut", () => {
     "left:1:0",
   ]);
   expect(placesOf({ texts, changes: [] }, RANGE, "foo", 3)).toMatchObject({ cut: false });
+});
+
+test("two side hits outside changes aligned to one lead line stay apart (a place with two hits of one pane)", () => {
+  const changes = [
+    { left: range(0, 1), center: range(0, 1), right: range(0, 1) },
+    { left: range(4, 1), center: range(2, 1), right: range(4, 1) },
+  ];
+  const texts = { left: "a\nb\nc\nfoo\nd\nfoo", center: "a\nb\nc\nfoo", right: "a\nb\nc\nd\ne\nf" };
+  const { places } = placesOf({ texts, changes }, MERGE);
+
+  expect(rows(places)).toEqual(["left:3:0 center:3:0", "left:5:0"]);
+  for (const place of places) {
+    const panes = place.hits.map((entry) => entry.pane);
+
+    expect(new Set(panes).size).toBe(panes.length);
+  }
+});
+
+const MIB = 1024 * 1024;
+const TIME_BUDGET_MS = 2000;
+const MAX_KEY_CHARS = 100;
+
+function timed<T>(run: () => T): { readonly value: T; readonly ms: number } {
+  const start = performance.now();
+  const value = run();
+  return { value, ms: performance.now() - start };
+}
+
+test("a 1 MiB line with many hits in a change takes little time and short keys (keys copying the line)", () => {
+  const hitsPerLine = 1024;
+  const line = `${"x".repeat(MIB / hitsPerLine - "foo".length)}foo`.repeat(hitsPerLine);
+  const changes = [{ left: range(0, 1), right: range(0, 1) }];
+  const texts = { left: line, right: `${line}y` };
+  const { value, ms } = timed(() => placesOf({ texts, changes }, RANGE).places);
+
+  expect(value).toHaveLength(2 * hitsPerLine);
+  expect(Math.max(...value.map((place) => place.key.length))).toBeLessThan(MAX_KEY_CHARS);
+  expect(ms).toBeLessThan(TIME_BUDGET_MS);
+});
+
+test("a 1 MiB text where every line matches takes little time (per-line work growing with the text)", () => {
+  const lineLength = 64;
+  const lines = MIB / lineLength;
+  const text = `foo ${"x".repeat(lineLength - "foo \n".length)}\n`.repeat(lines);
+  const { value, ms } = timed(
+    () => placesOf({ texts: { left: text, right: text }, changes: [] }, RANGE).places,
+  );
+
+  expect(value).toHaveLength(lines);
+  expect(ms).toBeLessThan(TIME_BUDGET_MS);
 });

@@ -1,4 +1,4 @@
-import { type LineHit, type Matcher, paneHits } from "./match";
+import type { LineHit, Matcher } from "./match";
 import { type Preview, previewOf } from "./preview";
 
 export type LineRange = { readonly start: number; readonly len: number };
@@ -54,7 +54,7 @@ function endOf(range: LineRange): number {
 function spotsOf<P extends string>(
   file: SearchedFile<P>,
   pane: P,
-  lead: P,
+  { lead }: Layout<P>,
 ): (line: number) => Spot {
   let passed = 0;
   return (line) => {
@@ -86,13 +86,13 @@ function groupsOf<P extends string>(
     if (text === null) {
       continue;
     }
-    const found = paneHits(text, matcher, limit);
+    const found = matcher.hits(text, limit);
     cut ||= found.cut;
-    const spotOf = spotsOf(file, pane, layout.lead);
+    const spotOf = spotsOf(file, pane, layout);
     for (const hit of found.hits) {
       const spot = spotOf(hit.line);
       const where =
-        spot.kind === "in" ? [spot.change, hit.lineText, hit.from] : [spot.aligned, hit.from];
+        spot.kind === "in" ? [spot.change, hit.lineDigest, hit.from] : [spot.aligned, hit.from];
       const counted = JSON.stringify([pane, where]);
       const ordinal = ordinals.get(counted) ?? 0;
       ordinals.set(counted, ordinal + 1);
@@ -142,13 +142,13 @@ function placesOf<P extends string>(sorted: readonly Group<P>[], layout: Layout<
     const [head, ...tail] = group;
     const { hit } = group.find((found) => found.pane === layout.lead) ?? head;
     const panes = group.map((found) => found.pane);
-    const counted = JSON.stringify([panes, hit.from, hit.lineText]);
+    const counted = JSON.stringify([panes, hit.from, hit.lineDigest]);
     const ordinal = ordinals.get(counted) ?? 0;
     ordinals.set(counted, ordinal + 1);
     return {
-      key: placeKey([panes, hit.from, hit.lineText, ordinal]),
+      key: placeKey([panes, hit.from, hit.lineDigest, ordinal]),
       hits: [entryOf(head), ...tail.map(entryOf)],
-      preview: previewOf(hit.lineText, hit.from, hit.to),
+      preview: previewOf(hit),
     };
   });
 }

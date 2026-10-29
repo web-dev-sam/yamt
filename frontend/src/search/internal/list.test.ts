@@ -154,6 +154,13 @@ test("goToPane takes the lead pane when on, else the leftmost on pane (the rule-
   expect(goToPane(both, ALL, MERGE)?.pane).toBe("center");
   expect(goToPane(both, new Set<Merge>(["left", "right"]), MERGE)?.pane).toBe("left");
   expect(goToPane(both, new Set<Merge>(["right"]), MERGE)).toBeNull();
+  const three = placeAt(
+    searchedFile(emptyResults(QUERY), "b.ts", { left: "foo", center: "foo", right: "foo" }),
+    0,
+  );
+
+  expect(three.hits.map((entry) => entry.pane)).toEqual(["left", "center", "right"]);
+  expect(goToPane(three, new Set<Merge>(["left", "right"]), MERGE)?.pane).toBe("left");
   const hit: PaneHit = { line: 1, from: 0, to: 3 };
   const entry: PaneEntry<Merge> = { pane: "right", hit };
 

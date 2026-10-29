@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 
 import { matcherOf, type Matcher, type Query } from "../index";
-import { paneHits } from "./match";
+import { digestOf } from "./digest";
+import type { LineHit } from "./match";
 
 function matcher(text: string, matchCase = false): Matcher {
   const query: Query = { text, matchCase };
@@ -13,10 +14,22 @@ function matcher(text: string, matchCase = false): Matcher {
 }
 
 function spots(text: string, query: string, matchCase = false): string[] {
-  return paneHits(text, matcher(query, matchCase), Infinity).hits.map(
-    ({ line, from, to }) => `${line}:${from}-${to}`,
-  );
+  return matcher(query, matchCase)
+    .hits(text, Infinity)
+    .hits.map(({ line, from, to }) => `${line}:${from}-${to}`);
 }
+
+function lineHit(line: number, from: number, to: number, lineText: string): LineHit {
+  return { line, from, to, lineText, lineDigest: digestOf(lineText) };
+}
+
+test("a Matcher comes only from matcherOf (a forged or read pattern)", () => {
+  // @ts-expect-error -- the pattern is an ES private field: no object literal is a Matcher
+  const forged: Matcher = { pattern: /x/gu };
+
+  expect(Object.keys(matcher("x"))).toEqual([]);
+  expect(Object.keys(forged)).not.toEqual(Object.keys(matcher("x")));
+});
 
 test("a.b does not match axb (an unescaped RegExp)", () => {
   expect(spots("axb a.b", "a.b")).toEqual(["0:4-7"]);
@@ -44,21 +57,18 @@ test("😀foo puts foo at column 2 (code-point columns instead of UTF-16)", () =
 });
 
 test("CRLF: the line text has no \\r and the line count is right (\\r\\n counted as two breaks)", () => {
-  const { hits } = paneHits("one\r\ntwo foo\r\nfoo\r\n", matcher("foo"), Infinity);
+  const { hits } = matcher("foo").hits("one\r\ntwo foo\r\nfoo\r\n", Infinity);
 
-  expect(hits).toEqual([
-    { line: 1, from: 4, to: 7, lineText: "two foo" },
-    { line: 2, from: 0, to: 3, lineText: "foo" },
-  ]);
+  expect(hits).toEqual([lineHit(1, 4, 7, "two foo"), lineHit(2, 0, 3, "foo")]);
 });
 
 test("lines are counted across gaps without matches and kept for hits on one line", () => {
-  const { hits } = paneHits("foo\n\nx\ny foo foo\nz", matcher("foo"), Infinity);
+  const { hits } = matcher("foo").hits("foo\n\nx\ny foo foo\nz", Infinity);
 
   expect(hits).toEqual([
-    { line: 0, from: 0, to: 3, lineText: "foo" },
-    { line: 3, from: 2, to: 5, lineText: "y foo foo" },
-    { line: 3, from: 6, to: 9, lineText: "y foo foo" },
+    lineHit(0, 0, 3, "foo"),
+    lineHit(3, 2, 5, "y foo foo"),
+    lineHit(3, 6, 9, "y foo foo"),
   ]);
 });
 
@@ -80,18 +90,15 @@ test("a match never crosses a line or covers its \\r (a cross-line hit)", () => 
 test("a pane stops scanning at the limit (an unbounded array)", () => {
   const text = "x x\nx";
 
-  expect(paneHits(text, matcher("x"), 2)).toEqual({
-    hits: [
-      { line: 0, from: 0, to: 1, lineText: "x x" },
-      { line: 0, from: 2, to: 3, lineText: "x x" },
-    ],
+  expect(matcher("x").hits(text, 2)).toEqual({
+    hits: [lineHit(0, 0, 1, "x x"), lineHit(0, 2, 3, "x x")],
     cut: true,
   });
-  expect(paneHits(text, matcher("x"), 3)).toMatchObject({ cut: false });
+  expect(matcher("x").hits(text, 3)).toMatchObject({ cut: false });
 });
 
 test("a dropped cross-line match does not count toward the limit", () => {
-  expect(paneHits("o\r\no x", matcher("o\r"), 0).cut).toBe(false);
+  expect(matcher("o\r").hits("o\r\no x", 0).cut).toBe(false);
 });
 
 test("a match starting on a line break stays on its line and is dropped (a negative column)", () => {

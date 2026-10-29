@@ -1,10 +1,16 @@
+import type { LineHit } from "./match";
+
 export type Preview = { readonly before: string; readonly match: string; readonly after: string };
 
 const BEFORE_CHARS = 26;
 const CUT_MARK = "…";
 const LOW_SURROGATE = /^[\uDC00-\uDFFF]/;
 
-export function previewOf(lineText: string, from: number, to: number): Preview {
+export function previewOf({
+  lineText,
+  from,
+  to,
+}: Pick<LineHit, "lineText" | "from" | "to">): Preview {
   const before = lineText.slice(0, from).trimStart();
   const match = lineText.slice(from, to);
   const after = lineText.slice(to);
