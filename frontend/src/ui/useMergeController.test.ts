@@ -24,6 +24,7 @@ const editor = vi.hoisted(() => {
     minimap: new Array<string>(),
     servers: new Array<unknown>(),
     goTos: new Array<string>(),
+    actions: new Array<string>(),
     counts: { errors: 0, warnings: 0, other: 0 },
     summary: { conflicts: 0, changes: 0, remembered: 0 },
     countsListener: (_counts: Counts): void => {},
@@ -93,6 +94,20 @@ const editor = vi.hoisted(() => {
     goTo({ pane, match }: { pane: string; match: { line: number } | null }): void {
       state.goTos.push(`${this.#id} ${pane} ${match === null ? "keyboard" : match.line}`);
     }
+    applyAllNonConflicting(side: string): void {
+      state.actions.push(`${this.#id} apply all ${side}`);
+    }
+    moveToChange(direction: string): void {
+      state.actions.push(`${this.#id} move ${direction}`);
+    }
+    undo(): boolean {
+      state.actions.push(`${this.#id} undo`);
+      return true;
+    }
+    redo(): boolean {
+      state.actions.push(`${this.#id} redo`);
+      return true;
+    }
     destroy(): void {
       state.destroyed += 1;
     }
@@ -115,6 +130,7 @@ afterEach(() => {
     minimap: [],
     servers: [],
     goTos: [],
+    actions: [],
     counts: { errors: 0, warnings: 0, other: 0 },
     summary: { conflicts: 0, changes: 0, remembered: 0 },
     countsListener: () => {},
@@ -260,6 +276,28 @@ test("while the file is still loading, toolbar actions and the undo shortcut do 
     handle.redo();
   }).not.toThrow();
   expect(handle.historyKey(ctrlZ)).toBe(false);
+});
+
+test("toolbar actions reach the editor in use, the rebuilt one after a rebuild", async () => {
+  const data = shallowRef<FileMergeData | null>(await fileData("a\n"));
+  const { handle } = mount(data);
+  await nextTick();
+
+  handle.applyAllNonConflicting("local");
+  handle.moveToChange("down");
+  handle.undo();
+  data.value = await fileData("b\n");
+  await nextTick();
+  handle.redo();
+  handle.applyAllNonConflicting("remote");
+
+  expect(editor.state.actions).toEqual([
+    "1 apply all local",
+    "1 move down",
+    "1 undo",
+    "2 redo",
+    "2 apply all remote",
+  ]);
 });
 
 test("flipping collapsing before the file loaded reaches no editor and throws nothing", async () => {

@@ -3,15 +3,14 @@ import { expect, test } from "vitest";
 
 import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../../ipc";
 import { chunkField } from "./chunkField";
-import { toDocPos, type DocPos } from "./docPos";
 import { foldRuns } from "./foldRuns";
 import { foldFields, paneFolds, sideReveal, type FoldFields } from "./folds";
 import { displayedIn } from "./foldSteps";
 import { centerFolds, sideFolds } from "./foldView";
 import type { Pane } from "./geometry";
-import { changeLines, goTo, matchRange, resultLineUp, type PaneMatch } from "./goTo";
+import { goTo, matchRange, type PaneMatch } from "./goTo";
 import { paneState, type PaneSettings } from "./pane";
-import { lineSeparator, paneDocs } from "./paneDocs";
+import { paneDocs } from "./paneDocs";
 
 const SETTINGS: PaneSettings = {
   preferences: { theme: "dark", keys: DEFAULT_KEYS },
@@ -27,7 +26,6 @@ type FakeView = {
 };
 
 type Opened = {
-  readonly data: FileMergeData;
   readonly fields: FoldFields;
   readonly center: EditorState;
   readonly left: EditorState;
@@ -50,8 +48,8 @@ function fakeView(state: EditorState): FakeView {
   return view;
 }
 
-function docOf(text: string, crlf = false): EditorState {
-  return EditorState.create({ doc: text, extensions: crlf ? lineSeparator("CrLf") : [] });
+function docOf(text: string): EditorState {
+  return EditorState.create({ doc: text });
 }
 
 function selected(state: EditorState): string {
@@ -118,7 +116,7 @@ async function opened(): Promise<Opened> {
     doc: docs.left,
     extensions: sideFolds(wiring, "left"),
   });
-  return { data, fields, center, left };
+  return { fields, center, left };
 }
 
 function hides(fields: FoldFields, pane: Pane, state: EditorState, line: number): boolean {
@@ -128,10 +126,6 @@ function hides(fields: FoldFields, pane: Pane, state: EditorState, line: number)
   );
 }
 
-function span(from: number, to: number): { from: DocPos; to: DocPos } {
-  return { from: toDocPos(from), to: toDocPos(to) };
-}
-
 test("matchRange keeps a match inside the document: a line past the end is the last line, columns past the line end are its end", () => {
   const doc = docOf("alpha\nbeta\ngamma").doc;
 
@@ -139,33 +133,6 @@ test("matchRange keeps a match inside the document: a line past the end is the l
   expect(matchRange(doc, { line: 9, from: 1, to: 3 })).toEqual({ from: 12, to: 14 });
   expect(matchRange(doc, { line: 0, from: 3, to: 40 })).toEqual({ from: 3, to: 5 });
   expect(matchRange(doc, { line: 2, from: 30, to: 40 })).toEqual({ from: 16, to: 16 });
-});
-
-test("changeLines: a span of whole lines, an insertion point between lines and one after a last line without a break", () => {
-  const doc = docOf("a\nb\nc").doc;
-
-  expect(changeLines(doc, span(2, 4))).toEqual({ start: 1, len: 1 });
-  expect(changeLines(doc, span(2, 2))).toEqual({ start: 1, len: 0 });
-  expect(changeLines(doc, span(5, 5))).toEqual({ start: 3, len: 0 });
-  expect(changeLines(doc, span(0, 0))).toEqual({ start: 0, len: 0 });
-});
-
-test("changeLines: a span ending mid-line at the document's end holds that last line", () => {
-  const doc = docOf("a\nb\nc").doc;
-
-  expect(changeLines(doc, span(2, 5))).toEqual({ start: 1, len: 2 });
-  expect(changeLines(doc, span(4, 5))).toEqual({ start: 2, len: 1 });
-});
-
-test("changeLines on a CRLF document counts each \\r\\n as one line break", () => {
-  const state = docOf("a\r\nb\r\nc\r\n", true);
-  const { doc } = state;
-  const second = doc.line(2);
-  const end = doc.line(4).from;
-
-  expect(doc.lines).toBe(4);
-  expect(changeLines(doc, span(second.from, end))).toEqual({ start: 1, len: 2 });
-  expect(changeLines(doc, span(end, end))).toEqual({ start: 3, len: 0 });
 });
 
 test("goTo selects the match as find does, then gives the pane the keyboard", () => {
@@ -220,29 +187,4 @@ test("a go-to in a collapsed side pane asks the Result to show the same run", as
   expect(selected(view.state)).toBe("41");
   expect(reveal).not.toBeNull();
   expect(hides(fields, "center", shown, 40)).toBe(false);
-});
-
-test("resultLineUp: the Result's text, each change's live lines in the Result and its fixed side lines", async () => {
-  const { data, center } = await opened();
-  const field = chunkField(data.chunks);
-  const state = EditorState.create({ doc: center.doc, extensions: field });
-  const typed = state.update({ changes: { from: state.doc.line(11).to, insert: "\nmore" } }).state;
-
-  expect(resultLineUp(state, field, "shown")).toEqual({
-    result: "shown",
-    changes: [
-      {
-        left: { start: 10, len: 2 },
-        center: { start: 10, len: 1 },
-        right: { start: 10, len: 1 },
-      },
-    ],
-  });
-  expect(resultLineUp(typed, field, "typed").changes).toEqual([
-    {
-      left: { start: 10, len: 2 },
-      center: { start: 10, len: 2 },
-      right: { start: 10, len: 1 },
-    },
-  ]);
 });

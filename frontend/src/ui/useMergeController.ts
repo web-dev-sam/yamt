@@ -107,6 +107,11 @@ type Shown = {
   readonly resultVersion: ShallowRef<number>;
 };
 
+type Live = {
+  controller: MergeController | null;
+  goTo: MergeGoTo | null;
+};
+
 function emptyShown(): Shown {
   return {
     summary: shallowRef<MergeSummary | null>(null),
@@ -144,47 +149,36 @@ function reloaded(
   return controller;
 }
 
-type GoTos = {
-  readonly ask: (target: MergeGoTo) => void;
-  readonly built: (controller: MergeController | null) => void;
-};
-
-function pendingGoTos(current: () => MergeController | null): GoTos {
-  let pending: MergeGoTo | null = null;
-  return {
-    ask: (target) => {
-      const controller = current();
-      if (controller === null) {
-        pending = target;
-      } else {
-        controller.goTo(target);
-      }
-    },
-    built: (controller) => {
-      if (controller !== null && pending !== null) {
-        controller.goTo(pending);
-        pending = null;
-      }
-    },
-  };
+function rebuild(live: Live, build: () => MergeController | null, shown: Shown): void {
+  live.controller = reloaded(live.controller, build, shown);
+  if (live.controller !== null && live.goTo !== null) {
+    live.controller.goTo(live.goTo);
+    live.goTo = null;
+  }
 }
 
-function handleOf(
-  shown: Shown,
-  current: () => MergeController | null,
-  goTo: GoTos["ask"],
-): MergeHandle {
+function askGoTo(live: Live, target: MergeGoTo): void {
+  if (live.controller === null) {
+    live.goTo = target;
+  } else {
+    live.controller.goTo(target);
+  }
+}
+
+function handleOf(shown: Shown, live: Live): MergeHandle {
   return {
     ...shown,
-    applyAllNonConflicting: (side) => current()?.applyAllNonConflicting(side),
-    moveToChange: (direction) => current()?.moveToChange(direction),
-    undo: () => current()?.undo(),
-    redo: () => current()?.redo(),
-    historyKey: (event) => current()?.historyKey(event) ?? false,
-    snapshot: () => current()?.snapshot() ?? null,
-    format: () => current()?.format() ?? Promise.resolve(null),
-    lineUp: () => current()?.lineUp() ?? null,
-    goTo,
+    applyAllNonConflicting: (side) => live.controller?.applyAllNonConflicting(side),
+    moveToChange: (direction) => live.controller?.moveToChange(direction),
+    undo: () => live.controller?.undo(),
+    redo: () => live.controller?.redo(),
+    historyKey: (event) => live.controller?.historyKey(event) ?? false,
+    snapshot: () => live.controller?.snapshot() ?? null,
+    format: () => live.controller?.format() ?? Promise.resolve(null),
+    lineUp: () => live.controller?.lineUp() ?? null,
+    goTo: (target) => {
+      askGoTo(live, target);
+    },
   };
 }
 
@@ -213,8 +207,7 @@ export function useMergeController(
   { readOnly, preferences, collapsed, minimap, servers }: ControllerOptions,
 ): MergeHandle {
   const shown = emptyShown();
-  let controller: MergeController | null = null;
-  const goTos = pendingGoTos(() => controller);
+  const live: Live = { controller: null, goTo: null };
 
   watch(
     [
@@ -234,17 +227,16 @@ export function useMergeController(
         minimap: toValue(minimap),
         servers: currentServers,
       };
-      controller = reloaded(controller, () => createController(current, options, elements), shown);
-      goTos.built(controller);
+      rebuild(live, () => createController(current, options, elements), shown);
     },
     { immediate: true, flush: "post" },
   );
 
-  followWithoutRebuild(() => controller, { preferences, collapsed, minimap });
+  followWithoutRebuild(() => live.controller, { preferences, collapsed, minimap });
 
   onScopeDispose(() => {
-    controller = reloaded(controller, () => null, shown);
+    rebuild(live, () => null, shown);
   });
 
-  return handleOf(shown, () => controller, goTos.ask);
+  return handleOf(shown, live);
 }
