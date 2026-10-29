@@ -18,3 +18,17 @@ Brief `docs/slices/briefs/range-collapse-verify.md`; verifier, 23m57s, HEAD `c0c
   `conflict-repo.sh` repository with the same home reads the stored choice (pressed, `"true"`).
 - Not fully exercised: deep-toggle cases capped by the collapsed height (kept lines 101, 200, 89 proven); Ctrl+wheel
   as a synthetic WheelEvent. Screenshots `/tmp/yamt-rc/verify/` (2f-*-dark files hold the real-app light shots).
+
+## Second pass (HEAD `39182c2`, after repair round 4)
+
+`just check` exit 0 (hooks 17/17, goldens, arch-check, map-check). Range fixture dark and light: 2a–2h pass as before;
+2i #1689 repro [2809, 3268]; right-column Ctrl+End with no find 20/20 at both ends; Ctrl+Home 0; script steps never
+held; 2j built-while-hidden right at once. Merge fixture dark and light: waves, hover, click, toggle (top 89 kept),
+minimap drag, Ctrl+wheel, find + Ctrl+End, a Result click near the top + Ctrl+End 10/10 + 10/10, two-file switch
+widths right. Compare: bands, no wave or toggle, sync. Real app: 2a, 2b, 2d, 2f pass dark and light; off survives a
+restart; the merge window reads the same stored choice. Exits: range 0, 0; merge 1 ("7 of 7 files still unresolved").
+
+Verifier's gate: fail on two steps, both triaged by the orchestrator as over-strict brief lines, no product defect:
+2i from the left column (#1695: the sync's middle-line pairing, lines paired in the screenshot, same in the merge
+window) and 2j after a resize while hidden (#1696: the wave width follows CodeMirror's own 50 ms resize re-measure,
+~5 frames). Feature closed on that triage; the owner is told both.
