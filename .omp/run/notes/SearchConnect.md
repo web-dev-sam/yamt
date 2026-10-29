@@ -48,3 +48,22 @@ both views) and #1726 (ChoiceView's literal "Result"), both promoted. Correctnes
 never lands stays and fires on a later open), #1728 (a failed new-stop list never searches once the list arrives),
 #1729 (a deleted-side file's hidden pane searched with the base text; `mergeSearch.ts`, a window file). Fix round 1
 waits for `SearchWindowR1` (it owns `searching.ts`, `opening.ts`, `mergeSearch.ts`, the stores).
+
+## Fix round 1 (`SearchConnectR1`, 21m14s, patch `70db23d`, `.omp/run/patches/SearchConnectR1.patch`)
+
+`searching.ts` `go` awaits `deps.open` (the store passes `pick`'s promise) and drops its own request when the file did
+not become shown (#1727); `clearStop` sets `searchWaitsForList`, `stops.ts` `searchOnceListed` reruns once a list lands
+in that stop, from `nextStop` and the store's `refreshFiles` (#1728); a deleted side's pane has no text in all three
+branches (#1729); `ui/useSearchGoTo.ts` the one go-to watch (#1725); ChoiceView's `RESULT_HEADER` (#1726). Range hide
+focus: the fresh page's first file shows a sentence with no editor, so the request waited — a go-to on a sentence now
+focuses the sentence (`RangeHandle.sentenceFocusAsks`, RangeView's `<p tabindex="-1">`). Failing-before outputs for
+#1727–#1729; 219 files / 2987 tests; typecheck, lint, fmt, unused clean; WebKit merge race (no jump; on round 1 the
+stale match was selected), a go-to still lands, range hide focus dark and light. Mutation run `just mutants 725bb7b`:
+95.3 %, survivors on unchanged lines or static (mergeSearch.ts:17-19,130; stops.ts:69,81; store.ts:122,143,145,203;
+useRangeController.ts:160,219+). Open (to `SearchTidy`): sfc-order on SearchResults.vue (#1730), the preview's lost
+space (#1731), ChoiceView not taking a hide go-to (#1732).
+
+## Re-check after fix round 1
+
+Boundary pass (#1725, #1726; deviations accepted: `searchOnceListed`, the flag's one writer, `Promise | void` open,
+`sentenceFocusAsks` read-only in RangeView), correctness pass (#1727–#1729 and the range hide focus). Accepted.
