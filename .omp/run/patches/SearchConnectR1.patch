@@ -1,0 +1,913 @@
+commit 70db23d274531e3aea1e726b91705eb4427c665f
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 13:01:27 +0100
+
+    fix(search): drop a go-to whose open never lands; a failed new-stop list searched once a list lands; deleted sides unsearched; one go-to watch
+
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index 7c375fe..4d9a616 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -8,7 +8,7 @@ import PaneDivider from "./PaneDivider.vue";
+ import { paneColumns, type PaneWidths } from "./paneSplit";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+-import { sideHeader } from "./sideHeaders";
++import { RESULT_HEADER, sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ import { usePaneDividers } from "./usePaneDividers";
+@@ -109,7 +109,7 @@ function paneWidths(): PaneWidths | null {
+       <div
+         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
+       >
+-        <h2 class="text-fg-muted">Result</h2>
++        <h2 class="text-fg-muted">{{ RESULT_HEADER }}</h2>
+         <button
+           type="button"
+           :disabled="sideTaken === null"
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index d7f885f..ae8c87c 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -17,6 +17,7 @@ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ import { useMergeController } from "./useMergeController";
+ import { usePaneDividers } from "./usePaneDividers";
++import { useSearchGoTo } from "./useSearchGoTo";
+ import { isEditable } from "./views";
+ 
+ type Column = {
+@@ -87,6 +88,14 @@ if (props.data.deleted === null) {
+ const live = { lineUp: handle.lineUp };
+ liveResults.track(props.data.path, live);
+ const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
++useSearchGoTo(
++  search,
++  () => props.shown,
++  () => props.data.path,
++  (target) => {
++    handle.goTo(target);
++  },
++);
+ 
+ const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
+ const deletedView = computed(deletedViewNow);
+@@ -119,16 +128,6 @@ watch(
+ watch(handle.resultVersion, () => {
+   search.changed(props.data.path);
+ });
+-watch(
+-  [search.goTo, () => props.shown],
+-  ([request, shown]) => {
+-    if (request !== null && shown && request.path === props.data.path) {
+-      handle.goTo({ pane: request.pane, match: request.match });
+-      search.took(request.id);
+-    }
+-  },
+-  { immediate: true, flush: "post" },
+-);
+ 
+ onUnmounted(() => {
+   untrack(props.data.path, work);
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index fe9ed4f..84b4d7c 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -16,6 +16,7 @@ import { fileHeading, sideHeading } from "./rangeText";
+ import RangeThreadLayer from "./RangeThreadLayer.vue";
+ import SettingsButton from "./SettingsButton.vue";
+ import { useRangeController } from "./useRangeController";
++import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ const props = defineProps<{
+   file: RangeEntry;
+@@ -31,12 +32,19 @@ const NEXT = ACTION_NAMES["next-change"];
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const strip = useTemplateRef<SVGSVGElement>("strip");
++const sentenceBox = useTemplateRef<HTMLParagraphElement>("sentenceBox");
+ const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
+-const { content, threadHosts, moveToChange, goTo } = useRangeController(
++const { content, threadHosts, sentenceFocusAsks, moveToChange, goTo } = useRangeController(
+   props.file,
+   { left, right, strip },
+   { preferences },
+ );
++useSearchGoTo(
++  search,
++  () => props.shown,
++  () => props.file.path,
++  goTo,
++);
+ 
+ const icon = computed(() => fileIcon(props.file.path));
+ const heading = computed(() => fileHeading(props.file));
+@@ -47,14 +55,11 @@ const note = computed(() => (content.value.kind === "columns" ? content.value.no
+ const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
+ 
+ watch(
+-  [search.goTo, () => props.shown],
+-  ([request, shown]) => {
+-    if (request !== null && shown && request.path === props.file.path) {
+-      goTo({ pane: request.pane, match: request.match });
+-      search.took(request.id);
+-    }
++  sentenceFocusAsks,
++  () => {
++    sentenceBox.value?.focus();
+   },
+-  { immediate: true, flush: "post" },
++  { flush: "post" },
+ );
+ </script>
+ 
+@@ -125,7 +130,12 @@ watch(
+         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
+         <RangeThreadLayer :file="file" :hosts="threadHosts" />
+       </template>
+-      <p v-else-if="sentence !== null" class="col-span-3 col-start-1 row-start-2 px-3 py-4">
++      <p
++        v-else-if="sentence !== null"
++        ref="sentenceBox"
++        tabindex="-1"
++        class="col-span-3 col-start-1 row-start-2 px-3 py-4 outline-none"
++      >
+         {{ sentence }}
+       </p>
+     </template>
+diff --git a/frontend/src/ui/mergeSearch.test.ts b/frontend/src/ui/mergeSearch.test.ts
+index 60ad7fe..25c37b4 100644
+--- a/frontend/src/ui/mergeSearch.test.ts
++++ b/frontend/src/ui/mergeSearch.test.ts
+@@ -29,6 +29,7 @@ type FileRecord = {
+     | { kind: "Stages" | "Disk"; text: string }
+     | { kind: "DiskNotText"; found: "Binary" };
+   readonly chunks?: readonly unknown[];
++  readonly deleted?: "local" | "remote";
+ };
+ 
+ const CHUNK_ADDING_A_LEFT_LINE = {
+@@ -212,6 +213,56 @@ test("a Result git left as something other than text has no Result rows, only th
+   expect(previews(search)).toEqual(["a.ts: x [left right]"]);
+ });
+ 
++test.each([
++  ["local", "a.ts: x [center right]"],
++  ["remote", "a.ts: x [left center]"],
++] as const)(
++  "a file deleted on the %s side has no rows in that side's hidden pane, live or from its data",
++  async (deleted, row) => {
++    const removed = await data("a.ts", {
++      local: "x",
++      remote: "x",
++      middle: { kind: "Stages", text: "x" },
++      deleted,
++    });
++    const { target } = harness([entry("a.ts")], [removed], async () => ({
++      ok: true,
++      value: removed,
++    }));
++    const { search, liveResults } = createMergeSearch(target, () => undefined);
++
++    search.type("x");
++    search.enter();
++    await vi.runAllTimersAsync();
++    expect(previews(search)).toEqual([row]);
++
++    liveResults.track("a.ts", { lineUp: () => ({ result: "x", changes: [] }) });
++    search.enter();
++    await vi.runAllTimersAsync();
++    expect(previews(search)).toEqual([row]);
++  },
++);
++
++test("a deleted-side file git left as something other than text is searched in its kept side only", async () => {
++  const notText = await data("a.ts", {
++    local: "x",
++    remote: "x",
++    middle: { kind: "DiskNotText", found: "Binary" },
++    deleted: "remote",
++  });
++  const { target } = harness([entry("a.ts")], [notText], async () => ({
++    ok: true,
++    value: notText,
++  }));
++  const { search } = createMergeSearch(target, () => undefined);
++
++  search.type("x");
++  search.enter();
++  await vi.runAllTimersAsync();
++
++  expect(previews(search)).toEqual(["a.ts: x [left]"]);
++});
++
+ test("a file's data lines its panes up through its chunks", async () => {
+   const shifted = await data("a.ts", {
+     local: "added\nkept\nend\n",
+diff --git a/frontend/src/ui/mergeSearch.ts b/frontend/src/ui/mergeSearch.ts
+index a729499..075c1df 100644
+--- a/frontend/src/ui/mergeSearch.ts
++++ b/frontend/src/ui/mergeSearch.ts
+@@ -43,20 +43,18 @@ export type MergeSearchTarget = WindowKeyTarget &
+   };
+ 
+ function searchedFile(data: FileMergeData, live: ResultLineUp | null): SearchedFile<MergePane> {
+-  const { path, local, remote, middle } = data;
++  const { path, middle, deleted } = data;
++  const left = deleted === "local" ? null : data.local;
++  const right = deleted === "remote" ? null : data.remote;
+   if (middle.kind === "DiskNotText") {
+-    return { path, texts: { left: local, center: null, right: remote }, changes: [] };
++    return { path, texts: { left, center: null, right }, changes: [] };
+   }
+   if (live !== null) {
+-    return {
+-      path,
+-      texts: { left: local, center: live.result, right: remote },
+-      changes: live.changes,
+-    };
++    return { path, texts: { left, center: live.result, right }, changes: live.changes };
+   }
+   return {
+     path,
+-    texts: { left: local, center: middle.text, right: remote },
++    texts: { left, center: middle.text, right },
+     changes: data.chunks.map((chunk) => ({
+       left: chunk.local,
+       center: chunk.middle,
+@@ -139,7 +137,7 @@ function createMergeSource(
+ 
+ export function createMergeSearch(
+   target: MergeSearchTarget,
+-  open: (path: string) => void,
++  open: (path: string) => Promise<void> | void,
+ ): MergeSearch {
+   const live = new Map<string, Live>();
+   return {
+diff --git a/frontend/src/ui/searching.test.ts b/frontend/src/ui/searching.test.ts
+index 60e2b59..e4ebf87 100644
+--- a/frontend/src/ui/searching.test.ts
++++ b/frontend/src/ui/searching.test.ts
+@@ -1,5 +1,5 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+-import { shallowRef, watch } from "vue";
++import { effectScope, nextTick, shallowRef, watch, type ShallowRef } from "vue";
+ 
+ import { MAX_ROWS, type SearchedFile } from "../search";
+ import { createAsking } from "./asking";
+@@ -7,6 +7,7 @@ import type { KeyPress } from "./fileListKey";
+ import { createSearching, type GoToRequest, type Searching, type SearchSource } from "./searching";
+ import { SEARCH_PAUSE_MS } from "./searchRun";
+ import { startSettings } from "./settings";
++import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ type Pane = "left" | "right";
+ 
+@@ -391,6 +392,47 @@ test("go asks for the lead pane when it is on, else the leftmost on pane, then o
+   expect(search.goTo.value).toBeNull();
+ });
+ 
++test("go keeps its request while the open runs and when it shows the file; one that leaves another file shown is dropped", async () => {
++  const shown: { path: string | null } = { path: "b.ts" };
++  const opens: (() => void)[] = [];
++  const fake = fakeSource({ "a.ts": "foo" });
++  const search = createSearching<Pane>({
++    source: fake.source,
++    panes: () => [],
++    open: () =>
++      new Promise<void>((resolve) => {
++        opens.push(resolve);
++      }),
++    shownPath: () => shown.path,
++    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++  });
++  await ran(search, "foo");
++  const place = search.results.value?.groups[0]?.places[0];
++  if (place === undefined) {
++    throw new Error("no place");
++  }
++
++  search.go("a.ts", place, null);
++  await microtasks();
++  expect(search.goTo.value?.id).toBe(1);
++  shown.path = "a.ts";
++  opens[0]?.();
++  await microtasks();
++  expect(search.goTo.value?.id).toBe(1);
++
++  search.go("a.ts", place, null);
++  shown.path = "b.ts";
++  opens[1]?.();
++  await microtasks();
++  expect(search.goTo.value).toBeNull();
++
++  search.go("a.ts", place, null);
++  search.go("a.ts", place, "left");
++  opens[2]?.();
++  await microtasks();
++  expect(search.goTo.value).toMatchObject({ id: 4, pane: "left" });
++});
++
+ test("focusShownFile asks the shown file's lead pane for the keyboard only", () => {
+   const search = searching(fakeSource({}), [], "b.ts");
+   search.focusShownFile();
+@@ -736,3 +778,124 @@ test("1 ms files publish nothing and yield nothing before 8 ms have passed, then
+   await vi.runAllTimersAsync();
+   expect(groups(search)).toHaveLength(QUICK_FILES);
+ });
++
++const HIT = { line: 2, from: 1, to: 4 };
++
++type GoToView = {
++  readonly goTo: ShallowRef<GoToRequest<Pane> | null>;
++  readonly shown: ShallowRef<boolean>;
++  readonly path: ShallowRef<string>;
++  readonly calls: string[];
++  readonly stop: () => void;
++};
++
++function hitRequest(id: number, path: string): GoToRequest<Pane> {
++  return { id, path, pane: "right", match: HIT };
++}
++
++function goToView(start: {
++  request: GoToRequest<Pane> | null;
++  shown: boolean;
++  path: string;
++}): GoToView {
++  const goTo = shallowRef(start.request);
++  const shown = shallowRef(start.shown);
++  const path = shallowRef(start.path);
++  const calls: string[] = [];
++  const scope = effectScope();
++  scope.run(() => {
++    useSearchGoTo<Pane>(
++      {
++        goTo,
++        took: (id) => {
++          calls.push(`took ${id}`);
++          if (goTo.value?.id === id) {
++            goTo.value = null;
++          }
++        },
++      },
++      shown,
++      () => path.value,
++      (target) => {
++        calls.push(`goTo ${target.pane} ${JSON.stringify(target.match)}`);
++      },
++    );
++  });
++  return { goTo, shown, path, calls, stop: () => scope.stop() };
++}
++
++test("useSearchGoTo: a request for the shown view's file at its start goes there and is taken", async () => {
++  const view = goToView({ request: hitRequest(1, "a.ts"), shown: true, path: "a.ts" });
++  await nextTick();
++
++  expect(view.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 1"]);
++  expect(view.goTo.value).toBeNull();
++});
++
++test("useSearchGoTo: a hidden view waits for its show; another file's view and no request do nothing", async () => {
++  const hidden = goToView({ request: hitRequest(1, "a.ts"), shown: false, path: "a.ts" });
++  const other = goToView({ request: hitRequest(1, "a.ts"), shown: true, path: "b.ts" });
++  const none = goToView({ request: null, shown: true, path: "a.ts" });
++  await nextTick();
++  expect([hidden.calls, other.calls, none.calls]).toEqual([[], [], []]);
++
++  hidden.shown.value = true;
++  await nextTick();
++  expect(hidden.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 1"]);
++});
++
++test("useSearchGoTo: a later request, or the view's path becoming the request's, goes there; a keyboard-only one passes no match", async () => {
++  const view = goToView({ request: null, shown: true, path: "a.ts" });
++  view.goTo.value = { id: 2, path: "a.ts", pane: "left", match: null };
++  await nextTick();
++  expect(view.calls).toEqual(["goTo left null", "took 2"]);
++
++  const renamed = goToView({ request: hitRequest(3, "b.ts"), shown: true, path: "a.ts" });
++  renamed.path.value = "b.ts";
++  await nextTick();
++  expect(renamed.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 3"]);
++});
++
++test("useSearchGoTo: a view whose scope ended takes nothing", async () => {
++  const view = goToView({ request: null, shown: true, path: "a.ts" });
++  view.stop();
++  view.goTo.value = hitRequest(4, "a.ts");
++  await nextTick();
++
++  expect(view.calls).toEqual([]);
++});
++
++test("useSearchGoTo acts after the render: a watcher on the page's render that was set up first sees the request before it is taken", async () => {
++  const goTo = shallowRef<GoToRequest<Pane> | null>(null);
++  const calls: string[] = [];
++  const scope = effectScope();
++  scope.run(() => {
++    watch(
++      goTo,
++      (request) => {
++        calls.push(`rendered ${request?.id ?? "none"}`);
++      },
++      { flush: "post" },
++    );
++    useSearchGoTo<Pane>(
++      {
++        goTo,
++        took: () => {
++          goTo.value = null;
++        },
++      },
++      true,
++      "a.ts",
++      (target) => {
++        calls.push(`goTo ${target.pane}`);
++      },
++    );
++  });
++
++  goTo.value = hitRequest(5, "a.ts");
++  await nextTick();
++  await nextTick();
++  scope.stop();
++
++  expect(calls).toEqual(["rendered 5", "goTo right", "rendered none"]);
++});
+diff --git a/frontend/src/ui/searching.ts b/frontend/src/ui/searching.ts
+index 1110939..03fbc8e 100644
+--- a/frontend/src/ui/searching.ts
++++ b/frontend/src/ui/searching.ts
+@@ -62,7 +62,7 @@ export type Searching<P extends string> = {
+ type SearchingDeps<P extends string> = {
+   readonly source: SearchSource<P>;
+   readonly panes: () => readonly SearchPaneInfo<P>[];
+-  readonly open: (path: string) => void;
++  readonly open: (path: string) => Promise<void> | void;
+   readonly shownPath: () => string | null;
+   readonly keys: WindowKeyTarget;
+ };
+@@ -109,25 +109,36 @@ function toggled<T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> {
+ function requestGoTo<P extends string>(
+   { refs, goTos }: Context<P>,
+   target: Omit<GoToRequest<P>, "id">,
+-): void {
++): number {
+   goTos.last += 1;
+   refs.goTo.value = { id: goTos.last, ...target };
++  return goTos.last;
+ }
+ 
+-function go<P extends string>(
++async function go<P extends string>(
+   ctx: Context<P>,
+   path: string,
+   place: Place<P>,
+   pane: P | null,
+-): void {
++): Promise<void> {
+   const { layout } = ctx.deps.source;
+   const entry =
+     pane === null
+       ? goToPane(place, ctx.refs.panesOn.value, layout)
+       : (place.hits.find((hit) => hit.pane === pane) ?? null);
+-  if (entry !== null) {
+-    requestGoTo(ctx, { path, pane: entry.pane, match: entry.hit });
+-    ctx.deps.open(path);
++  if (entry === null) {
++    return;
++  }
++  const id = requestGoTo(ctx, { path, pane: entry.pane, match: entry.hit });
++  await ctx.deps.open(path);
++  if (ctx.deps.shownPath() !== path) {
++    took(ctx.refs, id);
++  }
++}
++
++function took<P extends string>(refs: Refs<P>, id: number): void {
++  if (refs.goTo.value?.id === id) {
++    refs.goTo.value = null;
+   }
+ }
+ 
+@@ -171,12 +182,10 @@ function moving<P extends string>(
+   const { refs, deps } = ctx;
+   return {
+     go: (path, place, pane) => {
+-      go(ctx, path, place, pane);
++      void go(ctx, path, place, pane);
+     },
+     took: (id) => {
+-      if (refs.goTo.value?.id === id) {
+-        refs.goTo.value = null;
+-      }
++      took(refs, id);
+     },
+     focusShownFile: () => {
+       const path = deps.shownPath();
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 1ca02de..2710a5e 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -22,7 +22,7 @@ import { createSearching, type Searching } from "./searching";
+ import { SEARCH_PAUSE_MS } from "./searchRun";
+ import { startSettings } from "./settings";
+ import type { Taken } from "./sides";
+-import { nextStop, type StopTarget } from "./stops";
++import { nextStop, searchOnceListed, type StopTarget } from "./stops";
+ import type { FormatOutcome } from "./useMergeController";
+ 
+ const LINUX = "Linux x86_64";
+@@ -187,6 +187,7 @@ function stopAt(
+     search: searchOver(() => stop),
+     searched: ["a.ts"],
+     latestOpen: 4,
++    searchWaitsForList: false,
+     loadFiles: () => {
+       lists.push(stop.latestOpen);
+       stop.operation.value = next.operation;
+@@ -401,19 +402,22 @@ test("a new stop clears the results, then searches the new stop's files for the
+   const seen: unknown[] = [];
+   const listing = stop.loadFiles.bind(stop);
+   stop.loadFiles = () => {
+-    seen.push(groups(stop.search));
++    seen.push([groups(stop.search), stop.searchWaitsForList]);
+     return listing();
+   };
+ 
+   await nextStop(stop, { kind: "outside" });
+   await microtasks();
+ 
+-  expect(seen).toEqual([null]);
+-  expect(stop.search.query.value).toBe("needle");
+-  expect(groups(stop.search)).toEqual([["c.ts", 2]]);
++  expect(seen).toEqual([[null, true]]);
++  expect([stop.search.query.value, groups(stop.search), stop.searchWaitsForList]).toEqual([
++    "needle",
++    [["c.ts", 2]],
++    false,
++  ]);
+ });
+ 
+-test("a new stop whose list failed searches nothing", async () => {
++test("a new stop whose list failed waits: the next list that lands searches it once", async () => {
+   quiet();
+   vi.useFakeTimers();
+   const stop = stopAt([], { files: null, operation: NEXT_STEP });
+@@ -422,6 +426,43 @@ test("a new stop whose list failed searches nothing", async () => {
+ 
+   await nextStop(stop, { kind: "outside" });
+   await microtasks();
++  expect([stop.search.query.value, groups(stop.search), stop.searchWaitsForList]).toEqual([
++    "needle",
++    null,
++    true,
++  ]);
+ 
+-  expect([stop.search.query.value, groups(stop.search)]).toEqual(["needle", null]);
++  searchOnceListed(stop, null);
++  await microtasks();
++  expect([groups(stop.search), stop.searchWaitsForList]).toEqual([null, true]);
++
++  stop.searched = ["c.ts"];
++  searchOnceListed(stop, [C_TS]);
++  await microtasks();
++  expect([groups(stop.search), stop.searchWaitsForList]).toEqual([[["c.ts", 2]], false]);
++
++  stop.searched = [];
++  searchOnceListed(stop, [C_TS]);
++  await microtasks();
++  expect(groups(stop.search)).toEqual([["c.ts", 2]]);
++});
++
++test("a new stop's list that lands after a later stop began leaves the later stop's search waiting", async () => {
++  quiet();
++  vi.useFakeTimers();
++  const stop = stopAt([]);
++  stop.search.type("needle");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  const listing = stop.loadFiles.bind(stop);
++  stop.loadFiles = async () => {
++    const listed = await listing();
++    stop.stop.dropped = true;
++    stop.stop = { dropped: false };
++    return listed;
++  };
++
++  await nextStop(stop, { kind: "outside" });
++  await microtasks();
++
++  expect([groups(stop.search), stop.searchWaitsForList]).toEqual([null, true]);
+ });
+diff --git a/frontend/src/ui/stops.ts b/frontend/src/ui/stops.ts
+index 86fa95f..5d280ef 100644
+--- a/frontend/src/ui/stops.ts
++++ b/frontend/src/ui/stops.ts
+@@ -29,6 +29,7 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
+     readonly guard: Pick<CloseGuard, "unsavedFiles">;
+     readonly search: Pick<Searching<string>, "clear" | "rerun">;
+     latestOpen: number;
++    searchWaitsForList: boolean;
+     loadFiles(): Promise<readonly FileEntry[] | null>;
+   };
+ 
+@@ -49,6 +50,17 @@ function clearStop(target: StopTarget): void {
+   target.stopMessage.value = null;
+   target.screen.value = { kind: "files" };
+   target.search.clear();
++  target.searchWaitsForList = true;
++}
++
++export function searchOnceListed(
++  target: Pick<StopTarget, "search" | "searchWaitsForList">,
++  listed: readonly FileEntry[] | null,
++): void {
++  if (listed !== null && target.searchWaitsForList) {
++    target.searchWaitsForList = false;
++    target.search.rerun();
++  }
+ }
+ 
+ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> {
+@@ -59,10 +71,9 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void>
+   if (end.kind === "outside" && dropped.length > 0) {
+     target.notices.value = [{ kind: "movedOn", operation: before, files: dropped }];
+   }
++  const { stop } = target;
+   const listed = await target.loadFiles();
+-  if (listed !== null) {
+-    target.search.rerun();
+-  }
++  searchOnceListed(target, stop.dropped ? null : listed);
+   if (end.kind === "continued" && listed !== null && listed.length === 0) {
+     target.stopMessage.value = end.message;
+     report(target, {
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 75bea34..0c236d4 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -2676,6 +2676,86 @@ test("a search row's click opens its file as a list click does", async () => {
+   expect(store.search.goTo.value).toMatchObject({ path: "b.ts", pane: "center" });
+ });
+ 
++type SearchedRow = {
++  readonly path: string;
++  readonly place: Parameters<AppStore["search"]["go"]>[1];
++};
++
++async function searchedRow(store: AppStore, path: string): Promise<SearchedRow> {
++  store.search.type("const");
++  store.search.enter();
++  await vi.waitFor(() => {
++    expect(store.search.running.value).toBe(false);
++  });
++  const row = store.search.rows.value.find((each) => each.kind === "place" && each.path === path);
++  if (row?.kind !== "place") {
++    throw new Error(`no place row in ${path}`);
++  }
++  return row;
++}
++
++test.each(["is overtaken by a pick of another file", "fails"] as const)(
++  "a row's go-to is dropped when its open %s: opening that file later selects nothing",
++  async (how) => {
++    spyConsole();
++    const held: { open: () => void } = { open: () => undefined };
++    let loadsOfB = 0;
++    const { source } = choiceSource(
++      {
++        loadFile: async (path) => {
++          loadsOfB += path === "b.ts" ? 1 : 0;
++          const opening = path === "b.ts" && loadsOfB === 2;
++          if (opening && how === "fails") {
++            return { ok: false, failure: { kind: "UnknownPath", path } };
++          }
++          if (opening) {
++            await new Promise<void>((resolve) => {
++              held.open = resolve;
++            });
++          }
++          return ok(await dataFor(path));
++        },
++      },
++      [entry("a.ts"), entry("b.ts"), entry("c.ts")],
++    );
++    const store = createAppStore(source);
++    await store.loadFiles();
++    const row = await searchedRow(store, "b.ts");
++
++    store.search.go(row.path, row.place, null);
++    expect(store.search.goTo.value).toMatchObject({ path: "b.ts" });
++    if (how === "is overtaken by a pick of another file") {
++      await store.pick("c.ts");
++      held.open();
++    }
++
++    await vi.waitFor(() => {
++      expect(store.search.goTo.value).toBeNull();
++    });
++    await store.pick("b.ts");
++    expect([store.active.value, store.search.goTo.value]).toEqual(["b.ts", null]);
++  },
++);
++
++test("a new stop whose list failed searches the new stop's files for the same query once a later list lands", async () => {
++  spyConsole();
++  let answer: SourceResult<Listing> = listing([entry("a.ts")]);
++  const { source } = choiceSource({ listStop: () => Promise.resolve(answer) });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  await searchedRow(store, "a.ts");
++  answer = { ok: false, failure: { kind: "GitRunning" } };
++
++  await store.nextStop({ kind: "outside" });
++  expect([store.search.query.value, store.search.results.value]).toEqual(["const", null]);
++  answer = listing([entry("c.ts")]);
++  await store.refreshFiles();
++
++  await vi.waitFor(() => {
++    expect(store.search.results.value?.groups.map((group) => group.path)).toEqual(["c.ts"]);
++  });
++});
++
+ test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
+   spyConsole();
+   const rebase: OperationView = {
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index 188b5a1..f08a74c 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -37,7 +37,7 @@ import { preferencesOf, settingsActions, startSettings } from "./settings";
+ import type { SettingsActions, SettingsInUse } from "./settings";
+ import { registerSettingsStore } from "./settingsStore";
+ import type { Taken } from "./sides";
+-import { nextStop, type StopEnd } from "./stops";
++import { nextStop, searchOnceListed, type StopEnd } from "./stops";
+ import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
+ import type { FormatOutcome, Preferences } from "./useMergeController";
+ 
+@@ -66,6 +66,7 @@ type State = Refs &
+     readonly gitRun: GitRun;
+     readonly stopMessage: ShallowRef<string | null>;
+     latestOpen: number;
++    searchWaitsForList: boolean;
+     latestSettings: number;
+     readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
+     readonly refreshFiles: () => Promise<void>;
+@@ -141,10 +142,11 @@ function createState(refs: Refs, source: ChunkSource): State {
+     writing: shallowReactive(new Map()),
+     stop: { dropped: false },
+     latestOpen: 0,
++    searchWaitsForList: false,
+     latestSettings: 0,
+     loadFiles: () => loadFiles(state),
+     refreshFiles: async () => {
+-      await refreshFiles(state, "running");
++      searchOnceListed(state, await refreshFiles(state, "running"));
+     },
+     nextStop: (end) => nextStop(state, end),
+     ...createMergeSearch(
+@@ -155,9 +157,7 @@ function createState(refs: Refs, source: ChunkSource): State {
+         currentStop: () => state.stop,
+         nextStop: (end) => state.nextStop(end),
+       },
+-      (path) => {
+-        void pick(state, path);
+-      },
++      (path) => pick(state, path),
+     ),
+   };
+   return state;
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+index 41bcbe1..efa7237 100644
+--- a/frontend/src/ui/useRangeController.test.ts
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -351,6 +351,38 @@ test("the binary sentence is the one rangeText words", async () => {
+   expect(live.handle.content.value).toEqual({ kind: "sentence", text: "Binary file: not shown." });
+ });
+ 
++test("a go-to on a sentence asks for the sentence's focus each time; one waiting for the load asks once the sentence lands", async () => {
++  const waiting = run();
++  waiting.handle.goTo({ pane: "right", match: null });
++  expect(waiting.handle.sentenceFocusAsks.value).toBe(0);
++
++  await waiting.answer({ kind: "binary" });
++  expect(waiting.handle.sentenceFocusAsks.value).toBe(1);
++  waiting.handle.goTo({ pane: "left", match: { line: 0, from: 0, to: 1 } });
++  waiting.handle.goTo({ pane: "right", match: null });
++  expect([waiting.handle.sentenceFocusAsks.value, waiting.built, waiting.calls]).toEqual([
++    3,
++    [],
++    [],
++  ]);
++
++  const unasked = run();
++  await unasked.answer({ kind: "binary" });
++  expect(unasked.handle.sentenceFocusAsks.value).toBe(0);
++});
++
++test("a go-to on texts never asks for a sentence's focus", async () => {
++  const live = run();
++  live.handle.goTo({ pane: "right", match: null });
++  await live.answer(TEXTS);
++  live.handle.goTo({ pane: "left", match: null });
++
++  expect([live.handle.sentenceFocusAsks.value, live.calls]).toEqual([
++    0,
++    ["goTo right keyboard", "goTo left keyboard"],
++  ]);
++});
++
+ test("a reply arriving after unmount is dropped: nothing built, nothing shown", async () => {
+   const live = run();
+   live.stop();
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+index 1abdfac..51ea0f5 100644
+--- a/frontend/src/ui/useRangeController.ts
++++ b/frontend/src/ui/useRangeController.ts
+@@ -46,6 +46,7 @@ type ThreadHosts = ReadonlyMap<string, HTMLElement>;
+ export type RangeHandle = {
+   readonly content: Readonly<ShallowRef<RangeContent>>;
+   readonly threadHosts: Readonly<ShallowRef<ThreadHosts>>;
++  readonly sentenceFocusAsks: Readonly<ShallowRef<number>>;
+   moveToChange(direction: Direction): void;
+   goTo(target: RangeGoTo): void;
+ };
+@@ -70,6 +71,7 @@ export type RangeParts<H> = {
+ type Live = {
+   readonly content: ShallowRef<RangeContent>;
+   readonly threadHosts: ShallowRef<ThreadHosts>;
++  readonly sentenceFocusAsks: ShallowRef<number>;
+   waiting: RangeTexts | null;
+   controller: ShownRange | null;
+   goTo: RangeGoTo | null;
+@@ -82,6 +84,10 @@ function land(live: Live, path: string, file: RangeFile | null): void {
+   }
+   if (file.kind !== "texts") {
+     live.content.value = { kind: "sentence", text: fileSentence(file) };
++    if (live.goTo !== null) {
++      live.goTo = null;
++      live.sentenceFocusAsks.value += 1;
++    }
+     return;
+   }
+   const { left, right, differences, mode } = file;
+@@ -126,7 +132,9 @@ function followLive<H>(live: Live, parts: RangeParts<H>): void {
+ }
+ 
+ function askGoTo(live: Live, target: RangeGoTo): void {
+-  if (live.controller === null) {
++  if (live.content.value.kind === "sentence") {
++    live.sentenceFocusAsks.value += 1;
++  } else if (live.controller === null) {
+     live.goTo = target;
+   } else {
+     live.controller.goTo(target);
+@@ -137,6 +145,7 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+   const live: Live = {
+     content: shallowRef<RangeContent>({ kind: "loading" }),
+     threadHosts: shallowRef<ThreadHosts>(new Map()),
++    sentenceFocusAsks: shallowRef(0),
+     waiting: null,
+     controller: null,
+     goTo: null,
+@@ -165,6 +174,7 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+   return {
+     content: live.content,
+     threadHosts: live.threadHosts,
++    sentenceFocusAsks: live.sentenceFocusAsks,
+     moveToChange: (direction) => {
+       live.controller?.moveToChange(direction);
+     },
+diff --git a/frontend/src/ui/useSearchGoTo.ts b/frontend/src/ui/useSearchGoTo.ts
+new file mode 100644
+index 0000000..1a9bd03
+--- /dev/null
++++ b/frontend/src/ui/useSearchGoTo.ts
+@@ -0,0 +1,23 @@
++import { toValue, watch, type MaybeRefOrGetter } from "vue";
++
++import type { GoToRequest, Searching } from "./searching";
++
++type SearchGoTo<P extends string> = Pick<GoToRequest<P>, "pane" | "match">;
++
++export function useSearchGoTo<P extends string>(
++  search: Pick<Searching<P>, "goTo" | "took">,
++  shown: MaybeRefOrGetter<boolean>,
++  path: MaybeRefOrGetter<string>,
++  goTo: (target: SearchGoTo<P>) => void,
++): void {
++  watch(
++    [search.goTo, () => toValue(shown), () => toValue(path)],
++    ([request, viewShown, viewPath]) => {
++      if (request !== null && viewShown && request.path === viewPath) {
++        goTo({ pane: request.pane, match: request.match });
++        search.took(request.id);
++      }
++    },
++    { immediate: true, flush: "post" },
++  );
++}
