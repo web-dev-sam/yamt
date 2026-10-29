@@ -1,1 +1,15 @@
-{}
+{
+  "SearchGoToR2": {
+    "owned": [
+      "frontend/src/editor/merge.ts",
+      "frontend/src/editor/internal/goTo.ts",
+      "frontend/src/editor/internal/goTo.test.ts",
+      "frontend/src/editor/internal/folds.ts",
+      "frontend/src/editor/internal/folds.test.ts",
+      "frontend/src/editor/internal/frame.ts",
+      "frontend/src/editor/internal/frame.test.ts",
+      "frontend/src/editor/internal/scrollSync.ts",
+      "frontend/src/editor/internal/scrollSync.test.ts"
+    ]
+  }
+}
