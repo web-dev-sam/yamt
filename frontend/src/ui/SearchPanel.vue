@@ -14,7 +14,7 @@ import {
   summaryText,
 } from "./searchText";
 
-type Remembered = { readonly pane: HTMLElement | null; readonly path: string | null };
+type Remembered = { readonly element: HTMLElement | null; readonly path: string | null };
 
 const props = defineProps<{ search: Searching<P>; shownPath: string | null; whole: boolean }>();
 
@@ -24,7 +24,7 @@ const PANE_CONTENT = '[role="textbox"][aria-multiline="true"]';
 const panel = useTemplateRef<HTMLElement>("panel");
 const box = useTemplateRef<HTMLInputElement>("box");
 const results = useTemplateRef<{ focusList(): void }>("results");
-let remembered: Remembered = { pane: null, path: null };
+let remembered: Remembered = { element: null, path: null };
 
 const summaryLine = computed(() => {
   const summary = props.search.summary.value;
@@ -44,7 +44,7 @@ watch(
     }
     const focused = document.activeElement;
     remembered = {
-      pane: focused instanceof HTMLElement && focused.matches(PANE_CONTENT) ? focused : null,
+      element: focused instanceof HTMLElement && focused !== document.body ? focused : null,
       path: props.shownPath,
     };
     await nextTick();
@@ -64,7 +64,14 @@ function focusBack(): void {
   if (inPanel !== true) {
     return;
   }
-  const { pane, path } = remembered;
+  const { element, path } = remembered;
+  if (props.shownPath === null) {
+    if (element?.isConnected === true) {
+      element.focus();
+    }
+    return;
+  }
+  const pane = element?.matches(PANE_CONTENT) === true ? element : null;
   if (pane?.isConnected === true && path === props.shownPath) {
     pane.focus();
   }

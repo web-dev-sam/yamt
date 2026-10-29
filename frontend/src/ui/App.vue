@@ -71,7 +71,11 @@ onMounted(() => {
   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
     <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
       <template #search>
-        <SearchPanel :search="search" :shown-path="active" :whole="!fileListShown" />
+        <SearchPanel
+          :search="search"
+          :shown-path="screen.kind === 'files' ? active : null"
+          :whole="!fileListShown"
+        />
       </template>
       <FileList
         v-show="fileListShown"

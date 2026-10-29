@@ -42,6 +42,7 @@ const activeIndex = computed(() => {
 watch(
   () => props.fullRuns,
   () => {
+    activeKey.value = null;
     scrollListTo(0);
   },
 );
@@ -203,6 +204,7 @@ defineExpose({ focusList });
         <template v-else>
           <span class="flex min-w-0 flex-1 overflow-hidden whitespace-pre">
             <span class="flex max-w-full shrink-0">
+              <!-- overflow-clip, not -hidden: with hidden WebKitGTK 2.54 left a row's before-text scrolled by 1 px (scrollLeft −1, review finding 1739). -->
               <span class="flex min-w-0 justify-end overflow-clip">
                 <span class="shrink-0">{{ row.place.preview.before }}</span>
               </span>
