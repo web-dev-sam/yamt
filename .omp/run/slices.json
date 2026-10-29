@@ -1,5 +1,16 @@
 {
   "SearchCoreR1": {
     "owned": ["frontend/src/search/**"]
+  },
+  "SearchRangeTextsR1": {
+    "owned": [
+      "crates/range/tests/*.rs",
+      "crates/range/AGENTS.md",
+      "frontend/src/ipc/compareDomain.ts",
+      "frontend/src/ipc/compareDomain.test.ts",
+      "frontend/src/ipc/rangeDomain.ts",
+      "frontend/src/ipc/rangeDomain.test.ts",
+      "frontend/src/ipc/index.ts"
+    ]
   }
 }

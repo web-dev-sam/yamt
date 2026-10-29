@@ -1,0 +1,2102 @@
+Found 31 mutants to test
+ok       Unmutated baseline in 49s build + 16s test
+ INFO Auto-set test timeout to 83s
+MISSED   crates/range/src/search.rs:9:36: replace * with + in 0s build + 7s test
+31 mutants tested in 3m: 1 missed, 19 caught, 11 unviable
+[32m10:52:47 (3046112) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m10:52:47 (3046112) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m10:52:47 (3046112) INFO ProjectReader[39m Found 5 of 765 file(s) to be mutated.
+[32m10:52:47 (3046112) INFO Instrumenter[39m Instrumented 5 source file(s) with 193 mutant(s)
+[32m10:52:48 (3046112) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m10:52:49 (3046112) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m10:53:13 (3046112) INFO DryRunExecutor[39m Initial test run succeeded. Ran 1490 tests in 23 seconds (net 6389.045888000006 ms, overhead 17384.954111999992 ms).
+
+All tests
+  agent
+    internal
+      answers.test.ts
+        ✘ a command is allowed once, whatever its paths (covered 0)
+        ✘ a delete inside the checkout is allowed once (covered 0)
+        ✘ a move whose destination is outside is refused once and shown on its step (covered 0)
+        ✘ no locations and not a command is refused (covered 0)
+        ✘ empty locations and not a command is refused (covered 0)
+        ✘ null locations and no kind and not a command is refused (covered 0)
+        ✘ a refusal without a title names the step id (covered 0)
+        ✘ options without allow_once answer cancelled, logged (covered 0)
+        ✘ options without reject_once answer cancelled and still show the refusal (covered 0)
+        ✘ never an *_always option, even when it comes first (covered 0)
+        ✘ fs/read_text_file is not answered (covered 0)
+        ✘ terminal/create is not answered (covered 0)
+        ✘ session/elicit is not answered (covered 0)
+        ✘ a malformed permission request is an invalid-params error (covered 0)
+        ✘ every recorded permission is answered as the table answers it (covered 0)
+      conversation.test.ts
+        ✘ the recorded replay is one turn per user message, folded like the live one (covered 0)
+        ✘ a turn starts at each user message; consecutive user chunks are one message (covered 0)
+        ✘ a replayed step left unfinished ends as noResult (covered 0)
+        ✘ a replay without user messages has no turns (covered 0)
+      protocol.test.ts
+        ✘ a step keeps only the content items yamt reads: text and diffs (covered 0)
+        ✘ null content, kind and status leave the step's own (covered 0)
+        ✘ an unknown kind is other, an unknown status none (covered 0)
+        ✘ a chunk that is not text says nothing (covered 0)
+        ✘ a missing or empty sessionId is a parse failure (covered 0)
+        ✘ a malformed update yamt reads fails; one yamt does not read is ignored (covered 0)
+      turn.test.ts
+        ✘ the recorded edit and command fold into thinking, three steps and the answer (covered 0)
+        ✘ the recorded edit step carries the whole file before and after, its path relative (covered 0)
+        ✘ the recorded command moves pending → running → done and shows its output (covered 0)
+        ✘ the recorded cancel leaves its unfinished command as noResult (covered 0)
+        ✘ the recorded refusal of a delete outside shows on its step, which fails (covered 0)
+        ✘ text said before a step becomes a said entry, so the answer is the text after the last step (covered 0)
+        ✘ a thought after a step starts a new thought entry (covered 0)
+        ✘ an update changes only what it names; content replaces the outputs but keeps a refusal (covered 0)
+        ✘ a refusal before its step's tool_call creates the step, which the tool_call then names (covered 0)
+        ✘ a step with no kind, title or status starts as other, untitled, pending (covered 0)
+        ✘ ending a turn turns only pending and running steps into noResult (covered 0)
+        ✘ a user chunk leaves a live turn unchanged (covered 0)
+        ✘ a refusal of a known step keeps the step's own title (covered 0)
+        ✘ a refusal of an unknown step in a turn with steps is titled by the refusal (covered 0)
+        ✘ a first tool_call with content carries exactly that content (covered 0)
+    index.test.ts
+      ✘ a new thread makes the checkout, starts omp, names its session, prompts and finishes (covered 0)
+      ✘ changes reach the view at most once per 50 ms and always at the end (covered 0)
+      ✘ two threads share one process and their updates are routed apart (covered 0)
+      ✘ a second ask on a running thread ends busy at once and leaves the first running (covered 0)
+      ✘ a crash ends every running turn once; the next ask restarts, reloads silently, then prompts (covered 0)
+      ✘ a thread is loaded once per process before its prompts (covered 0)
+      ✘ a load omp cannot find is sessionGone; any other load error is refused (covered 0)
+      ✘ an error without details is refused with its message (covered 0)
+      ✘ loadConversation hands back the replay as turns, and the next prompt needs no load (covered 0)
+      ✘ a failed prepare is not kept, a ready checkout is (covered 0)
+      ✘ an app failure from prepare carries the app's failure, a throw is checkoutFailed; neither is kept (covered 0)
+      ✘ the command is read at each process start, not at each ask (covered 0)
+      ✘ an empty command starts nothing and ends noCommand (covered 0)
+      ✘ a start answered NotFound fails the turn and is retried at the next ask (covered 0)
+      ✘ a start answered SpawnFailed fails the turn and is retried at the next ask (covered 0)
+      ✘ a start answered an app failure fails the turn and is retried at the next ask (covered 0)
+      ✘ a start answered NoCheckout makes the checkout again at the next ask (covered 0)
+      ✘ an agent speaking another protocol version is refused and stopped (covered 0)
+      ✘ Stop during the prompt sends session/cancel and the turn ends stopped (covered 0)
+      ✘ Stop before the prompt ends the turn without prompting (covered 0)
+      ✘ a stop reason the client does not know fails the turn (covered 0)
+      ✘ a malformed prompt result fails the turn (covered 0)
+      ✘ a refused session/new fails the turn without a session (covered 0)
+      ✘ a refusal of a delete outside the checkout shows on the asking thread's step (covered 0)
+      ✘ destroy stops the process and ends running turns stopped; later asks stop at once (covered 0)
+      ✘ editDiff asks the app for the differences, a created file against nothing (covered 0)
+      ✘ editDiff too large (covered 0)
+      ✘ editDiff stopped (covered 0)
+      ✘ editDiff thrown (covered 0)
+      ✘ agentSessionId refuses an empty id (covered 0)
+      ✘ the seam fills First message from the five placeholders and names unknown ones (covered 0)
+      ✘ over the fixture agent a turn plays the recorded edit and command, and its edit opens as a diff (covered 0)
+      ✘ over the fixture agent a crash fails the turn once and Retry continues the thread (covered 0)
+      ✘ over the fixture agent Stop on the recorded long command ends the turn stopped (covered 0)
+      ✘ over the fixture agent loadConversation gives back the recorded conversation (covered 0)
+      ✘ Stop while the checkout is made ends the turn at once; the late checkout starts nothing (covered 0)
+      ✘ Stop while omp starts ends the turn at once and sends no session/new (covered 0)
+      ✘ Stop while a thread loads ends the turn stopped; the late load prompts nothing (covered 0)
+      ✘ Stop while session/new runs reports no session and prompts nothing (covered 0)
+      ✘ a failed load is not kept: the thread's next ask loads again and prompts (covered 0)
+      ✘ a load and an ask on one thread send one session/load; the replay turns once, the answer is new (covered 0)
+      ✘ inside an ended handler the turn is no longer running and its thread takes a new ask (covered 0)
+      ✘ destroy while the checkout is made starts nothing and ends the turn stopped (covered 0)
+      ✘ loadConversation after destroy starts nothing and answers stopped (covered 0)
+      ✘ a load cut off by destroy answers stopped (covered 0)
+      ✘ a start that resolves after destroy is stopped (covered 0)
+      ✘ a stale stop after its turn ended cancels nothing (covered 0)
+      ✘ a new thread's session counts as loaded: its next ask prompts without a load (covered 0)
+      ✘ an ask on a new thread's session while its first turn runs is busy (covered 0)
+      ✘ ending one thread's turn leaves another thread busy (covered 0)
+      ✘ a session/prompt error is refused with omp's details (covered 0)
+      ✘ loadConversation when the checkout fails answers checkoutFailed (covered 0)
+      ✘ a session/new answering an empty id is refused and reports no session (covered 0)
+      ✘ destroy on a client that never asked stops nothing (covered 0)
+      ✘ a start that throws is spawnFailed and retried at the next ask (covered 0)
+      ✘ a malformed update is logged and dropped, another notification ignored; the stream goes on (covered 0)
+      ✘ a refusal for a session no turn listens to is answered and changes no turn (covered 0)
+      ✘ omp exiting before it answers initialize is crashed with its last line (covered 0)
+  editor/internal
+    apply.test.ts
+      ✘ apply local: the change gets the left text, resolves, and loses colour and arrow (covered 0)
+      ✘ apply remote inserts the right lines at an empty middle range (covered 0)
+      ✘ a conflict applied from both sides holds local then remote text (covered 0)
+      ✘ ignore keeps the text and resolves a change or a half-applied conflict (covered 0)
+      ✘ applying after an edit inside the change replaces the current range (covered 0)
+      ✘ undo after apply restores text and status; redo re-applies (covered 0)
+      ✘ undo after ignore brings the change back; redo ignores it again (covered 0)
+      ✘ undo and redo after an arrow or × show that change, not the old cursor at line 1 (covered 0)
+      ✘ redo of an insert-only apply puts the cursor on the first inserted line (covered 0)
+      ✘ typing right after an arrow click is an undo step of its own (covered 0)
+      ✘ bulk apply moves a cursor outside the visible lines to the first one; undo returns there (covered 0)
+      ✘ bulk apply from the left resolves every LocalOnly change; one undo restores all (covered 0)
+      ✘ a BothSame change resolves from either arrow and from either bulk apply (covered 0)
+      ✘ bulk apply from the right inserts every RemoteOnly change in place (covered 0)
+      ✘ bulk apply over touching spans whose last deletes an unterminated final line equals clicking each (covered 0)
+      ✘ deleting all of a change's lines in the middle pane ignores it (covered 0)
+      ✘ resultText of a CRLF file keeps CRLF after an apply (covered 0)
+      ✘ a conflict applied from both sides after its separator line is deleted pushes the next change (covered 0)
+      ✘ a change on an unterminated last line keeps the file without a final line break (covered 0)
+      ✘ a side applied where a line break at the change's edge was deleted lands on lines of its own (covered 0)
+      ✘ a side applied after the line break above a waiting conflict was deleted starts on its own line (covered 0)
+      ✘ a read-only middle pane refuses Enter, Tab and undo; bulk apply still changes it (covered 0)
+      ✘ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (Lf) (covered 0)
+      ✘ a disk-seeded block takes ours exactly as the hand resolution, and undo brings the disk text back (CrLf) (covered 0)
+      ✘ a chunk spans its middle range, not where its base range would put it (covered 0)
+      ✘ a middle that is not text on disk is an empty document (covered 0)
+      ✘ an add/add file reopened from the disk: a one-sided apply stays a conflict until the other side is settled (covered 0)
+      ✘ Ctrl/Cmd apply on a waiting conflict takes that side and ignores the other, as one undo step (covered 0)
+      ✘ Ctrl/Cmd ignore on a waiting conflict ignores that side and takes the other, as one undo step (covered 0)
+      ✘ Ctrl/Cmd apply on a conflict whose other side was applied appends, and both sides read applied (covered 0)
+      ✘ Ctrl/Cmd ignore on a conflict whose other side was ignored leaves the middle as it is (covered 0)
+      ✘ Ctrl/Cmd on a change that is not a conflict gives the plain click's outcome (covered 0)
+      ✘ a drag released with Ctrl/Cmd decides each covered conflict whole and each other change plainly, as one undo step (covered 0)
+      ✘ Ctrl/Cmd ignore on a conflict whose other side has no lines removes the block and resolves it (covered 0)
+      ✘ a Ctrl/Cmd drag over an ignored change touching a conflict it fills equals clicking each (covered 0)
+      ✘ a Ctrl/Cmd ignore dragged over a conflict and a touching zero-line conflict equals clicking each (covered 0)
+      ✘ an apply drag over a change and a touching zero-line conflict equals clicking each (covered 0)
+    chunkField.test.ts
+      ✘ a real fixture's chunks start at line starts; an empty middle range is a point (covered 0)
+      ✘ a chunk ending on the last line ends at the document end (covered 0)
+      ✘ typing at the end of an unterminated last line stays inside its chunk (covered 0)
+      ✘ typing at an empty chunk's point in the middle of a line lands after it (covered 0)
+      ✘ an edit before a chunk shifts it (covered 0)
+      ✘ typing inside a chunk, including at its first line's start, grows it (covered 0)
+      ✘ typing at the start of the line after a chunk stays outside it (covered 0)
+      ✘ text typed at an empty chunk's point lands after it (covered 0)
+      ✘ deleting all of a chunk's lines collapses it; undo restores the range (covered 0)
+      ✘ one undo restores a merged history event; redo re-applies it (covered 0)
+    columnFolds.test.ts
+      ✘ runs come from the differences per column: before the first, between two, after the last (covered 0)
+      ✘ each run keeps 4, 8 and 16 lines next to each change and none at the file's edges, in both columns (covered 0)
+      ✘ a stretch under 2 lines hides nothing and a level equal to the one outside it is dropped (covered 0)
+      ✘ a thread on an unchanged line in the left column splits its stretch and keeps 4 lines around it in both columns — open, collapsed and draft alike (covered 0)
+      ✘ a thread on an unchanged line in the right column splits its stretch and keeps 4 lines around it in both columns — open, collapsed and draft alike (covered 0)
+      ✘ threads on removed or added lines change no run (covered 0)
+      ✘ a thread on the line after an insertion point sorts after the difference and stays shown (covered 0)
+      ✘ two threads on one line make one change: left column and left column (covered 0)
+      ✘ two threads on one line make one change: right column and right column (covered 0)
+      ✘ two threads on one line make one change: left column and right column (covered 0)
+      ✘ a step on a run shows its next step in both columns, owner then mirror (covered 0)
+      ✘ the right column numbers runs as the left does (covered 0)
+      ✘ on hides every run back to its start whatever steps were shown, off shows every line, in both columns (covered 0)
+      ✘ runs given at a renew replace the old ones and a mirror copy leaves counts alone otherwise (covered 0)
+      ✘ at a renew a cursor in lines that get hidden moves to the wave line's start and a selection with an end inside is dropped, left and right (covered 0)
+      ✘ counts that only shrink leave the right column's cursor alone (covered 0)
+      ✘ a selection end strictly inside hidden lines shows every range holding it, from the left and from the right (covered 0)
+      ✘ select-all, the document's start and end, and a cursor on a wave line's edges reveal nothing (covered 0)
+      ✘ a search match inside hidden lines reveals it in both columns (covered 0)
+      ✘ every fold transaction is out of history (covered 0)
+    compareFields.test.ts
+      ✘ typing inside a difference grows it; typing at the start of the next line stays outside (covered 0)
+      ✘ bands and word marks follow their text through an edit above them (covered 0)
+      ✘ a new comparison replaces the spans, bands and word marks (covered 0)
+    compareFocus.test.ts
+      ✘ the arrows move in the left column when no column has the keyboard (covered 0)
+      ✘ the arrows move in the column that has the keyboard (covered 0)
+    compareFrame.test.ts
+      ✘ a scroll paints the strip from the cached rows; an edit measures them again (covered 0)
+      ✘ an unchanged-line row adds the lines around it as anchors in both columns (covered 0)
+      ✘ merged anchors stay sorted in both columns (covered 0)
+      ✘ a removed line's row in a pure deletion grows both band edges by the row (covered 0)
+      ✘ an unchanged row on the line before a pure deletion keeps the scroll inside the band continuous (covered 0)
+      ✘ an unchanged row on the line before a pure insertion keeps the scroll inside the band continuous (covered 0)
+      ✘ waves reach the strip with the rows, and a step shown by a click measures them again (covered 0)
+      ✘ realign writes the other column on the next frame though the source did not scroll (covered 0)
+      ✘ after realign, a scroll event of the other column before the frame does not lead the sync (covered 0)
+      ✘ a frame without waves paints none (the compare window's strip) (covered 0)
+    compareLanguage.test.ts
+      ✘ Auto finds JSON at build, fires once for it, colours both columns and offers JSON's Format (covered 0)
+      ✘ plain text is reported once as no language and leaves the columns uncoloured (covered 0)
+      ✘ a picked language never fires detected, and Format follows the pick, not the text (covered 0)
+      ✘ languageNames lists every language-data name once, in alphabetical order (covered 0)
+      ✘ Auto reads each column's opening only, past any leading blank lines (covered 0)
+    compareMarks.test.ts
+      ✘ an empty left side is inserted and an empty right side deleted, in both columns and their bands (covered 0)
+      ✘ each column's spans cover its own lines of every difference (covered 0)
+      ✘ word marks and removal bars sit on their own words in both columns, in the difference's tone (covered 0)
+      ✘ no differences leave a column without spans, bands or marks (covered 0)
+    compareSettle.test.ts
+      ✘ one settle after the pause, with exactly the columns edited since the last one (covered 0)
+      ✘ an edit raises only its own column's version; a reply with an old right version is refused (covered 0)
+      ✘ settleNow hands over the edited columns and cancels the pause (covered 0)
+      ✘ destroy cancels the pause and forgets the edits (covered 0)
+    compareViews.test.ts
+      ✘ a read-only column's state refuses a user insert and keeps its text (covered 0)
+      ✘ a read-only column holds differenceField, so showDifferences lands (covered 0)
+      ✘ an editable column still refuses an insert over its byte limit (covered 0)
+      ✘ each read-only column gets its own column's extensions (covered 0)
+    decorations.test.ts
+      ✘ vueuse-use-magic-keys: each pane colours the chunks its side changed, by tone (covered 0)
+      ✘ a side pane drops a block once its own side is handled, even in an open conflict (covered 0)
+      ✘ center colours follow their text when a line is typed above them (covered 0)
+      ✘ an empty range at the end of an unterminated last line is drawn below that line (covered 0)
+      ✘ a marker on another chunk's band line keeps its own tone class (covered 0)
+      ✘ a line break pasted at the end of a band line stops at the marker that follows it (covered 0)
+      ✘ random edits keep center ranges sorted, disjoint, inside the document, and drawable (covered 0)
+      ✘ a RemoteOnly deletion: center band and right marker are deleted, left is bare (covered 0)
+      ✘ a focused 8-line change is outlined on every line, with its first and last lines marked (covered 0)
+      ✘ a focused zero-line change outlines the line carrying its bar, on the band's own edge (covered 0)
+      ✘ a side alone draws no outline on any change (covered 0)
+    drag.test.ts
+      ✘ dragging down covers the pressed icon and every open icon whose row the pointer reached (covered 0)
+      ✘ dragging up covers every open icon whose row the pointer reached, down to the pressed one (covered 0)
+      ✘ a pointer between icons covers nothing beyond the last icon it passed (covered 0)
+      ✘ closed sides are skipped: a handled change and changes of the other side are never covered (covered 0)
+    fileText.test.ts
+      ✘ a conflict with both sides waiting is git's markers around both sides' lines, every line ending in the file's own break (Lf) (covered 0)
+      ✘ a conflict with both sides waiting is git's markers around both sides' lines, every line ending in the file's own break (CrLf) (covered 0)
+      ✘ a waiting one-sided change is written as its side's lines, and typing inside it is not (covered 0)
+      ✘ decided changes are written as shown, typing included (covered 0)
+      ✘ a half-decided conflict keeps its markers: the decided section holds the Result's lines, the waiting side its own (covered 0)
+      ✘ a conflict whose first section is the remote pane's (git's ours, as in a rebase) writes the remote lines first (covered 0)
+      ✘ a change at the end of a file without a final line break keeps the file without one (covered 0)
+      ✘ an insertion-point conflict writes its block between the lines, also at a file end without a line break (covered 0)
+      ✘ a conflict with an empty side writes that section empty (covered 0)
+      ✘ a region yamt could not place is written as shown, typing included (covered 0)
+      ✘ a conflict git rerere filled in is written as shown: rerere's text, typing, or an applied side (covered 0)
+      ✘ a line break deleted at a waiting change's edge is written back, so no marker shares a line (covered 0)
+      ✘ a side applied after the line break above a waiting conflict was deleted is written as one block with no blank line (covered 0)
+      ✘ the shown text is left out of the file for a waiting one-sided change and a conflict whose sides both wait, nothing else (covered 0)
+    find.test.ts
+      ✘ an empty field shows nothing and a text without matches shows No results (covered 0)
+      ✘ a selection off a match counts every case-insensitive match (covered 0)
+      ✘ a selection on a match shows its place; next from the last wraps to the first (covered 0)
+      ✘ the count is recomputed after a document, selection or query change and only then (covered 0)
+      ✘ the space above the first line stays from show to hide, across edits; the last effect wins (covered 0)
+      ✘ the Close button's title names the first Close find key, or none (covered 0)
+    foldRuns.test.ts
+      ✘ each run keeps 4, then 8, then 16 lines next to each change (covered 0)
+      ✘ nothing is kept at the file's top or bottom (covered 0)
+      ✘ a file without changes has one run with one level hiding each whole pane (covered 0)
+      ✘ a run of 9 lines hides nothing, a run of 10 hides its 2 middle lines once (covered 0)
+      ✘ an empty document hides nothing in its pane (covered 0)
+      ✘ a run long only in the middle still makes its levels, null in the sides (covered 0)
+      ✘ a level that differs from the one outside it in one pane only is kept (covered 0)
+      ✘ a hidden range runs from its first line's start to its last line's end (covered 0)
+      ✘ a pane shows the first level that hides anything in it (covered 0)
+    folds.test.ts
+      ✘ the middle starts with every run's levels: 4, 8 and 16 lines kept next to each change (covered 0)
+      ✘ a line inserted above moves every range below it by one line (covered 0)
+      ✘ typing at a hidden range's first or last character shows that line only (covered 0)
+      ✘ deleting a level down to one line shows it, and undo does not hide it again (covered 0)
+      ✘ deciding a change and bulk apply keep every hidden range's lines and every count (covered 0)
+      ✘ each click shows the outermost hidden level; three clicks empty the run (covered 0)
+      ✘ a step that keeps more levels than are hidden hides nothing again (covered 0)
+      ✘ a click is not an undo step (covered 0)
+      ✘ a find match shows every level holding it, through the innermost one (covered 0)
+      ✘ a match ending exactly at a range's end shows it (covered 0)
+      ✘ a cursor at a range's first or last position shows nothing (covered 0)
+      ✘ a selection with both ends exactly on a range's edges shows it (covered 0)
+      ✘ a side's reveal reads its own ranges and shows what the middle shows for the same line (covered 0)
+      ✘ the sides are told the counts only when they differ, and mirror them (covered 0)
+      ✘ a side cursor inside lines that get hidden moves to the wave line's start when counts grow, not when they shrink (covered 0)
+      ✘ each pane's wave starts are where that pane draws its waves (covered 0)
+      ✘ Delete at a wave's start or Backspace at its end deletes nothing and shows the next step (covered 0)
+      ✘ delete-line or a line cut on a wave line deletes nothing and shows the next step (covered 0)
+      ✘ a delete of only the line break before a wave still joins the lines (covered 0)
+      ✘ a selection deleted across a wave and a delete beside one still delete (covered 0)
+      ✘ off shows every hidden line in all three panes: no wave, and the sides get zero counts (covered 0)
+      ✘ on after clicks hides every run as at a fresh open, whether it was on or off before (covered 0)
+      ✘ lines typed above or inside a run while off move or grow its ranges, which hide when on (covered 0)
+      ✘ a level shrunk below 2 lines while off stays shown when on (covered 0)
+      ✘ a file opened while off has its runs but hides nothing, and on hides every step (covered 0)
+      ✘ a toggle is not an undo step: undo after it undoes the earlier edit and leaves the folds (covered 0)
+      ✘ Undo selection after a toggle moved the cursor does not put it back inside the hidden lines (covered 0)
+      ✘ after a toggle, clicks show 4, 8, then all, and Delete at a wave shows the next step (covered 0)
+      ✘ on moves a middle cursor inside hidden lines to the wave line's start and drops a selection with an end inside, without showing the run (covered 0)
+    foldView.test.ts
+      ✘ each run replaces its outermost hidden lines with one wave line (covered 0)
+      ✘ a pane without a range at the outer level shows the next level that has one (covered 0)
+      ✘ a run with no level left has no wave (covered 0)
+    format.test.ts
+      ✘ rule 5: formatting lines 3 and 400 around an open block is one undo step that keeps the block's statuses and arrows (Lf) (covered 0)
+      ✘ rule 5: formatting lines 3 and 400 around an open block is one undo step that keeps the block's statuses and arrows (CrLf) (covered 0)
+      ✘ rule 5: reindenting lines 198–204 formats 198 and 204 only; the open block, the lines next to it, its arrows and the problems stay (Lf) (covered 0)
+      ✘ rule 5: reindenting lines 198–204 formats 198 and 204 only; the open block, the lines next to it, its arrows and the problems stay (CrLf) (covered 0)
+      ✘ rule 5: (A) a line split before the block, its … is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 0)
+      ✘ rule 5: (B) two lines joined before a one-line … is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 0)
+      ✘ rule 5: (B2) two lines joined before a two-line… is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 0)
+      ✘ rule 5: (C) a blank line added after the block'… is left out; the block stays pending with its own text and arrows, line 3 is formatted, one undo step (covered 0)
+      ✘ rule 5: a formatter reformatting the lines inside an open block leaves them as they were (Lf) (covered 0)
+      ✘ rule 5: a formatter reformatting the lines inside an open block leaves them as they were (CrLf) (covered 0)
+      ✘ rule 5: a half-decided conflict (applied pending) and the lines next to it are not formatted (covered 0)
+      ✘ rule 5: a half-decided conflict (ignored pending) and the lines next to it are not formatted (covered 0)
+      ✘ rule 5: a half-decided conflict (pending applied) and the lines next to it are not formatted (covered 0)
+      ✘ rule 5: a decided change (applied applied) is formatted like any other line (covered 0)
+      ✘ rule 5: a decided change (ignored ignored) is formatted like any other line (covered 0)
+      ✘ rule 5: a decided change (ignored applied) is formatted like any other line (covered 0)
+      ✘ rule 5: an answer that only touches an open change or the lines next to it is unchanged and dispatches nothing (covered 0)
+      ✘ rule 5: random answers around an open block never change it or the lines next to it (covered 0)
+      ✘ rule 5: random answers away from an open block are applied exactly (covered 0)
+      ✘ rule 5: a formatter's LF answer to a CRLF Result is split on every line break, and the Result stays CRLF (covered 0)
+      ✘ rule 5: a CRLF Result keeps CRLF line breaks in every formatted line (covered 0)
+      ✘ rule 5: a Result typed in since it was sent is changedMeanwhile and nothing is applied (covered 0)
+      ✘ rule 5: a closed Result is changedMeanwhile and nothing is applied (covered 0)
+      ✘ rule 5: a result equal line by line is unchanged; the client's unchanged and refusals pass through (covered 0)
+      ✘ rule 5: the options follow the Result's indent unit: a tab with the pane's tab size, or n spaces (covered 0)
+      ✘ rule 5: the formatter is asked with the options of the Result pane as built (covered 0)
+      ✘ rule 5: any formatted result is applied exactly, insertions and deletions at the ends included (Lf) (covered 0)
+      ✘ rule 5: any formatted result is applied exactly, insertions and deletions at the ends included (CrLf) (covered 0)
+      ✘ rule 5: a result differing mostly in whitespace, lines split and joined, is applied exactly (Lf) (covered 0)
+      ✘ rule 5: a result differing mostly in whitespace, lines split and joined, is applied exactly (CrLf) (covered 0)
+    gap.test.ts
+      ✘ a shape is drawn while any part of it touches the strip, edges included (covered 0)
+      ✘ a shape wholly above or below the strip is left out (covered 0)
+      ✘ each strip joins its own pane pair, each edge moved by its own pane's shift (covered 0)
+      ✘ a band is kept while one edge is still in the strip and the other has left it (covered 0)
+      ✘ a band 1 px above or below the strip on both edges is dropped (covered 0)
+      ✘ a chunk whose local side is applied leaves the local strip and stays on the remote one (covered 0)
+      ✘ a chunk whose local side is ignored leaves the local strip and stays on the remote one (covered 0)
+      ✘ each strip paints a chunk in its own side's tone (covered 0)
+      ✘ a conflict's icons name the Ctrl+click while the other side waits, and lose the line once it is decided (covered 0)
+      ✘ on macOS the hint says ⌘+click (covered 0)
+      ✘ a change that is not a conflict never has the hint, even when both sides changed it (covered 0)
+      ✘ an icon row built while the other side waited is rebuilt once that side is ignored (covered 0)
+      ✘ a strip joins a run only where both of its panes show a wave (covered 0)
+      ✘ an empty side gets no joins on its strip while the other strip keeps them (covered 0)
+      ✘ a join runs between the waves' centres, each pane moved by its own shift (covered 0)
+      ✘ a join is kept while either wave line touches the strip and dropped once both have left it (covered 0)
+    geometry.test.ts
+      ✘ each strip sits between its side's pane and the middle, the local pane on its left (covered 0)
+      ✘ lines in the middle span from the first line's top to the next line's top (covered 0)
+      ✘ an empty range at a line start is a point at that line's top (covered 0)
+      ✘ a range to the end of an unterminated last line ends at that line's bottom (covered 0)
+      ✘ an empty range at the end of an unterminated last line is a point at its bottom (covered 0)
+      ✘ a range to the end of a newline-terminated document ends at the empty last line's top (covered 0)
+      ✘ an empty document has one point at the top (covered 0)
+      ✘ chunk rows go stale on a status change, an edit, a fold step, a toggle or new measurements, not on a cursor move (covered 0)
+      ✘ each pane's wave top is the block top at the start its own pane shows, null where it shows none (covered 0)
+      ✘ a pane with fewer runs than the middle shows no wave for the missing runs (covered 0)
+    goTo.test.ts
+      ✘ matchRange keeps a match inside the document: a line past the end is the last line, columns past the line end are its end (covered 0)
+      ✘ changeLines: a span of whole lines, an insertion point between lines and one after a last line without a break (covered 0)
+      ✘ changeLines: a span ending mid-line at the document's end holds that last line (covered 0)
+      ✘ changeLines on a CRLF document counts each \r\n as one line break (covered 0)
+      ✘ goTo selects the match as find does, then gives the pane the keyboard (covered 0)
+      ✘ goTo without a match only gives the pane the keyboard (covered 0)
+      ✘ a stale match past the document's end selects at its last line and throws nothing (covered 0)
+      ✘ a go-to on a collapsed Result shows the run around the match (covered 0)
+      ✘ a go-to in a collapsed side pane asks the Result to show the same run (covered 0)
+      ✘ resultLineUp: the Result's text, each change's live lines in the Result and its fixed side lines (covered 0)
+    historyKey.test.ts
+      ✘ Linux: Ctrl+Z undoes, Ctrl+Shift+Z and Ctrl+Y redo, Meta+Z does nothing (covered 0)
+      ✘ macOS: Cmd+Z undoes, Cmd+Shift+Z and Cmd+Y redo, Ctrl+Z does nothing (covered 0)
+      ✘ Alt, a key someone already handled and a text field never undo here (covered 0)
+      ✘ a non-Latin layout undoes and redoes by the physical key (covered 0)
+      ✘ a layout whose physical Z types a vowel sign undoes by the physical key: Hindi InScript (covered 0)
+      ✘ a Latin key wins over the physical key: QWERTZ Ctrl+Z undoes, Ctrl+Y redoes (covered 0)
+      ✘ a Latin layout's non-letter on the physical Z or Y never undoes: Dvorak Ctrl+; does nothing (covered 0)
+      ✘ a rebound Undo works window-wide by its new key only, also from a side pane, and Ctrl+Shift+Y redoes nothing (covered 0)
+      ✘ a rebound Redo keeps the non-Latin fallback: Ctrl+Shift+я on a Russian layout redoes when Redo is Mod-Shift-z only (covered 0)
+    keys.test.ts
+      ✘ Shift with a letter alone is the upper-case letter, as CodeMirror matches it (covered 0)
+      ✘ Shift with Mod, Alt or a named key keeps the Shift- prefix (covered 0)
+      ✘ named keys and plain characters pass through (covered 0)
+      ✘ a macOS Ctrl key is not bound on Linux and is Ctrl- on macOS (covered 0)
+    language.test.ts
+      ✘ App.vue is coloured as Vue (covered 0)
+      ✘ src/components/Provider.tsx is coloured as TSX (covered 0)
+      ✘ use-magic-keys.ts is coloured as TypeScript (covered 0)
+      ✘ vite.config.mts is coloured as TypeScript (covered 0)
+      ✘ public/index.php is coloured as PHP (covered 0)
+      ✘ src/docker/Dockerfile is coloured as Dockerfile (covered 0)
+      ✘ a file name no language claims stays plain (covered 0)
+    minimapLayout.test.ts
+      ✘ scale doubles at ratio ≥ 2: a row is 2 CSS px at 1 and 2, 1.6 at 1.25 (covered 0)
+      ✘ 120 columns of one scale each, two 6 px edges in device px; 96 + edges CSS at 1.25 (covered 0)
+      ✘ a file that fits: rows from the first, no slider (covered 0)
+      ✘ the canvas is the minimap's height in whole device px (covered 0)
+      ✘ row n covers document px (n − 1) × 20 up to n × 20 (covered 0)
+      ✘ taller than the Result, shorter than the minimap: rows stay, the slider moves by scrollTop × ratio (covered 0)
+      ✘ 7,277 rows, 900 px, scrollTop 72,770: slider 90 high at 408.6, rows 3,435–3,884 (covered 0)
+      ✘ the end: scrollTop 144,648 → rows 6,828–7,277, slider at 810, its bottom at the box's (covered 0)
+      ✘ the end with the top row 0.85 cut off: 618 rows at ratio 2 end at row 618, the slider inside (covered 0)
+      ✘ the end at 868 px: 434 rows fit, the last drawn is row 618, the slider inside (covered 0)
+      ✘ one pixel short of the end, after the end: rows 186–618, as at the end (covered 0)
+      ✘ 40 px short of the end: row 617, partly shown, is drawn (covered 0)
+      ✘ from the end one pixel up: the window moves by at most one row (covered 0)
+      ✘ the last 60 px, one pixel up at a time: the last visible row drawn, steps of one row, the slider on the drawn rows (covered 0)
+      ✘ scrolling up never moves the window down, down never up (covered 0)
+      ✘ find space 33 px in a small file: one padding row, row 1 drawn at 2 px (covered 0)
+      ✘ a press: index + start − padding rows, within [1, rows] (covered 0)
+      ✘ Center: the row's top in the middle, as VS Code's mouse reveal; row 100 → 1,534; row 5 → 0 (covered 0)
+      ✘ drag: start + delta / ratio, from the start layout; no slider, no scroll (covered 0)
+    minimapMarks.test.ts
+      ✘ right edge: each change the Result tints, in its tone; resolved none (covered 0)
+      ✘ left edge: error and warning; info and hint none (covered 0)
+      ✘ errors after warnings, so red is painted over yellow (covered 0)
+      ✘ a problem in collapsed lines on its wave row (covered 0)
+      ✘ minimum 4 CSS px, an insertion point centred, clamped (covered 0)
+      ✘ only marks in the window; through start row and padding (covered 0)
+      ✘ at a fractional ratio the inset, the width and the minimum height are whole device px (covered 0)
+    minimapPixels.test.ts
+      ✘ rgbOf reads #rrggbb and #rrggbbaa, else null (covered 0)
+      ✘ `T` at scale 1 paints VS Code's two intensities ×12/15 in the token's RGB; scale 2 paints 2×4 (covered 0)
+      ✘ light uses 50/60 (covered 0)
+      ✘ a tab advances to the next stop; a space paints nothing (covered 0)
+      ✘ column 121 and on is cut (covered 0)
+      ✘ outside ASCII uses VS Code's getCharIndex: wrapped into the 96 glyphs (covered 0)
+      ✘ a wave row is one device px in the wave colour across the code (covered 0)
+    minimapPointer.test.ts
+      ✘ a wheel scrolls by pixels, by lines of 20 px, or by pages of the Result's height (covered 0)
+      ✘ a wheel over the box scrolls the Result by the wheel's pixels and the sides follow (covered 0)
+      ✘ a primary press puts its row's top in the Result's middle and the sides follow (covered 0)
+      ✘ a secondary mouse button does nothing; a touch press does (covered 0)
+      ✘ a slider drag scrolls from where it started and never reaches the box's press (covered 0)
+      ✘ release mid-drag lets the capture go and ends the drag (covered 0)
+      ✘ a mouse press on the box keeps the focus and the selection where they are (covered 0)
+    minimapRows.test.ts
+      ✘ a row's colours are the palette index of each character's syntax token, from the row's start (covered 0)
+      ✘ inside a Markdown container the token defined last wins, whichever span holds the other (covered 0)
+      ✘ text no grammar colours is drawn in the code colour (covered 0)
+      ✘ the look reads each token once: code first, a missing token in the code colour, edges as given (covered 0)
+      ✘ a collapsed run's row is the row of its wave line's top in the Result (covered 0)
+      ✘ row n paints line n: its text and its end, also where a height falls on a line boundary (covered 0)
+      ✘ a collapsed run's row paints the wave across the row's middle, no text (covered 0)
+    modClick.test.ts
+      ✘ Ctrl/Cmd+click on a block applies its change and Ctrl/Cmd+right-click ignores it; the next line does not (covered 0)
+      ✘ without Ctrl/Cmd, with the middle button, on an unchanged side or a decided side nothing happens (covered 0)
+      ✘ Ctrl/Cmd+click and Ctrl/Cmd+right-click 3 px from a zero-line change's bar act on it; 5 px away they don't (covered 0)
+      ✘ only Cmd counts on macOS and only Ctrl elsewhere, and the hint names that key (covered 0)
+    navigation.test.ts
+      ✘ Down and Up pass over a change already decided on that side and stop at it on the other (covered 0)
+      ✘ Down on the lowest waiting change and Up on the top-most stay put (covered 0)
+      ✘ after deciding the lowest waiting change the pick is the top-most still waiting, not the one above (covered 0)
+      ✘ with nothing left on that side there is no pick, even while the other side waits (covered 0)
+      ✘ Left/Right from a conflict half lands on its other half while it waits, else the remembered change, else alone (covered 0)
+      ✘ a change made the same way on both sides crosses to its other half (covered 0)
+      ✘ from a local-only change, Right uses the right side's remembered change (covered 0)
+      ✘ from the screen, Down takes a change straddling the top and skips one ending exactly at it (covered 0)
+      ✘ from the screen, Up takes a change straddling the bottom and skips one starting exactly at it (covered 0)
+      ✘ from the screen, a zero-line change exactly at the edge counts (covered 0)
+      ✘ a side alone with waiting changes only above the area stays put; with none waiting it falls back (covered 0)
+      ✘ a click hits a band by its px span and a zero-line change near its bar, never a decided side (covered 0)
+      ✘ the keyboard moves to the other side only when the decision emptied the focused side, never to the hidden side (covered 0)
+      ✘ a decision on the other side never moves the keyboard off a side that was already empty (covered 0)
+      ✘ after a decision that moved the focused side's mark on, the view reveals its new change (covered 0)
+      ✘ after a decision on another change the mark stays and the view does not move (covered 0)
+      ✘ after a decision that left the focused side alone the view does not move (covered 0)
+      ✘ a handover wins over revealing on the emptied side (covered 0)
+    pane.test.ts
+      ✘ a Vue file draws template tags in the tag colour and its script setup as TypeScript (covered 0)
+      ✘ a TSX file draws JSX tags in the tag colour (covered 0)
+      ✘ a character literal is drawn in the character colour (covered 0)
+      ✘ recolouring the center pane adds no undo step and keeps the chunks (covered 0)
+      ✘ a selection across a word mark is the innermost mark, drawn over block and word tints (covered 0)
+      ✘ Tab adds the file's four-space unit to each of three selected lines and Shift+Tab removes it (covered 0)
+      ✘ Tab adds a tab to each selected line of a tab-indented file (covered 0)
+      ✘ Shift+Tab on lines with less than one unit removes what is there (covered 0)
+      ✘ one undo takes back a whole Tab on three lines (covered 0)
+      ✘ the middle pane binds Undo, Redo, Indent and Outdent once each, from the defaults (covered 0)
+      ✘ Indent on Mod-i runs before the default keymap's selectParentSyntax (covered 0)
+      ✘ Undo on Alt-Backspace: Mod-z does nothing in the middle, Mod-u still undoes the selection (covered 0)
+      ✘ Indent without keys: Tab indents nothing in the middle (covered 0)
+      ✘ CodeMirror's dark flag and the theme facet follow each of the ten themes (covered 0)
+      ✘ a switch between two dark themes keeps the dark flag and changes the theme facet (covered 0)
+      ✘ the browser's own undo and redo are refused in the middle; other input passes through (covered 0)
+      ✘ a read-only Result pane leaves Tab to the browser: Indent refuses and nothing prevents the key (covered 0)
+      ✘ new preferences turn the middle light, move its Undo and rebind its find keys (covered 0)
+      ✘ new preferences turn a side light, rebind its Apply and its find keys (covered 0)
+    rangeFolds.test.ts
+      ✘ two columns and one strip: the left leaves at the strip's left edge, the right enters at its right edge (covered 0)
+      ✘ the merge chain through chainEnds gives paneEnds' ends: the middle enters and leaves (covered 0)
+      ✘ ChainPhases writes both columns' phase on a resize and removes both on destroy (covered 0)
+      ✘ columnWaves gives each run's wave top in each column from that column's own lines (covered 0)
+      ✘ columnWaves gives null in both columns where nothing hides (covered 0)
+      ✘ joinPaints joins the two tops level across the strip, each shifted by its own column (covered 0)
+    savedPoint.test.ts
+      ✘ typing outside a change lights the dot; undoing it back clears it (covered 0)
+      ✘ ignoring a one-sided change lights the dot though the text stays the same (covered 0)
+      ✘ applying a change and undoing it leaves nothing unsaved (covered 0)
+      ✘ a save clears the dot, then undo past the save lights it again (covered 0)
+      ✘ typing during the write keeps the dot: the saved point is the snapshot that was sent (covered 0)
+      ✘ typing inside a one-sided change whose sides all wait keeps the dot after a save, since the file does not get it (covered 0)
+      ✘ typing inside a conflict whose sides all wait keeps the dot after a save, since the file does not get it (covered 0)
+      ✘ typing inside a one-sided change whose sides all wait is on disk after a write of the Result as shown, so the dot clears (covered 0)
+      ✘ typing inside a conflict whose sides all wait is on disk after a write of the Result as shown, so the dot clears (covered 0)
+      ✘ typing in the decided section of a half-decided conflict is written, so a save clears the dot (covered 0)
+      ✘ a listener taken away hears nothing more (covered 0)
+    serverDoc.test.ts
+      ✘ rule 1: an editable Result is opened under its path, says changed on each edit only, and closes once (covered 0)
+      ✘ rule 1: a read-only Result, or no servers, opens nothing (covered 0)
+      ✘ rule 2: take gives the Result's text with its own line breaks (covered 0)
+      ✘ rule 2: problems show in the middle pane only (covered 0)
+      ✘ rule 4: counts go out when they change, not for an edit that leaves them (covered 0)
+      ✘ rule 4: a closed Result tells no one about later counts (covered 0)
+      ✘ rule 5: a second format while one runs returns the same promise; the next call asks again (covered 0)
+    sideKeys.test.ts
+      ✘ a focused side applies with Enter and Space, ignores with Backspace (macOS Delete), Delete and x, and moves with the arrows (covered 0)
+      ✘ Apply rebound to a: a applies and Enter is bound to nothing (covered 0)
+      ✘ a side action without keys binds nothing, and a macOS-only key is not bound on Linux (covered 0)
+      ✘ a side key is always consumed: it runs the pane's runner, and a pane without one does nothing with it (covered 0)
+    sideMark.test.ts
+      ✘ deciding the marked change moves the mark to the next change waiting below on that side (covered 0)
+      ✘ a push that reopens changes, as undo does, leaves the mark where it is (covered 0)
+      ✘ a remembered change decided while its side is alone moves by the same rule and stays alone (covered 0)
+      ✘ the last change decided on that side leaves the side alone with nothing remembered (covered 0)
+      ✘ setMark wins over a status push in the same transaction (covered 0)
+    sides.test.ts
+      ✘ × on a conflict's left side keeps the middle and the right side; « then replaces the middle (covered 0)
+      ✘ » then « on a conflict appends; the right arrow offers that only while the left side is applied (covered 0)
+      ✘ applying a side of a conflict whose other side deleted the block resolves it whole (covered 0)
+      ✘ × and apply on a block that is not a conflict resolve the whole block (covered 0)
+      ✘ deleting a whole open or half-applied conflict in the middle pane ignores every side (covered 0)
+      ✘ a drag over several icons applies or ignores them as clicking each top to bottom, in one undo step (covered 0)
+      ✘ touching spans whose last deletes an unterminated final line: a drag leaves what clicking leaves (covered 0)
+    status.test.ts
+      ✘ a conflict git rerere filled in counts as remembered, apart from a plain conflict (catches it counted as a conflict) (covered 0)
+      ✘ a side decided on a remembered conflict moves it out of remembered: half-decided it is a conflict, then resolved (catches it staying remembered) (covered 0)
+      ✘ deciding the plain conflict leaves the remembered one counted as remembered (covered 0)
+    syntax.test.ts
+      ✘ each tag gets its token in the minimap classes and in the text, the precedence cases included (covered 0)
+      ✘ a row carries only its own font styles, so a heading's bold survives an emphasis inside it (covered 0)
+      ✘ the table colours 39 distinct tokens; the colour style sets only colour, the font style only fonts (covered 0)
+      ✘ parsed code: a declared function, a member access and a JSX tag take their own rows (covered 0)
+      ✘ in nested Markdown the minimap's colour is the text's: the rule defined last wins (covered 0)
+      ✘ in nested Markdown a link or url keeps its colour and takes its container's font style (covered 0)
+    threadAnchor.test.ts
+      ✘ a left line inside a modified difference is removed (covered 0)
+      ✘ an unchanged right line after two differences pairs with its left line (covered 0)
+      ✘ a line just past a pure insertion is unchanged, the last inserted line added (covered 0)
+      ✘ every line of an added file's right column is added (covered 0)
+    threadField.test.ts
+      ✘ a row widget with the same keys eqs the old one, so its DOM is kept when heights change (covered 0)
+      ✘ each row is a block widget after its place's line, in row order; an empty side's rows sit above the next line (covered 0)
+      ✘ an empty side's rows sit above the next line only in the empty column (covered 0)
+    threadNumbers.test.ts
+      ✘ the count mark counts open and collapsed threads shown in this column, not drafts (covered 0)
+      ✘ a press on the badge reports the line's keys; a press on the number starts a thread (covered 0)
+      ✘ a press on the empty line after a text's last newline is no line of the file (covered 0)
+      ✘ a text without a last newline keeps its last line pressable (covered 0)
+      ✘ an added file's empty left column has no line to press (covered 0)
+    threadRows.test.ts
+      ✘ a removed line's gap sits after the difference's right lines (covered 0)
+      ✘ an unchanged line's threads from both columns share one row (covered 0)
+      ✘ rows at one place keep their order by the other column's place (covered 0)
+      ✘ collapsed threads place no row, drafts do (covered 0)
+      ✘ a removed line in a pure deletion places its row on the right's empty side (covered 0)
+      ✘ a row's height is the larger column's sum (covered 0)
+    tone.test.ts
+      ✘ a side that adds lines where the middle has none is inserted, whatever base held (covered 0)
+      ✘ a side that removes middle lines is deleted (covered 0)
+      ✘ a side that replaces middle lines is modified (covered 0)
+      ✘ BothSame takes its tone from the side's own range on each side (covered 0)
+      ✘ a conflict is conflict on both sides, even where one side is empty (covered 0)
+      ✘ the center takes its tone from remote for RemoteOnly and from local otherwise (covered 0)
+      ✘ paneTone: a side tints a change still waiting there, in its own tone; decided there or unchanged there, none (covered 0)
+      ✘ paneTone: the Result tints a change while any side still waits, in the Result's tone; resolved, none (covered 0)
+      ✘ changeTone: lines only on the changed side are inserted, only on the base side deleted, on both modified (covered 0)
+    words.test.ts
+      ✘ side panes mark exactly the changed words, in a CRLF file and after an emoji (covered 0)
+      ✘ side panes draw one bar per removal point in a CRLF file: line start, mid-line, line end (covered 0)
+      ✘ a bar equals another pane's bar of the same tone and differs from a bar of another tone (covered 0)
+      ✘ a bar differs from a bar of the same tone whose removed text is another (covered 0)
+      ✘ removalAt reads the text of the bar at a position, and nothing once its side is applied (covered 0)
+      ✘ a resolved block loses its word marks and bars on every side pane and undo brings them back (covered 0)
+      ✘ applying one side of a conflict drops that side's tint, word marks and bars; the other keeps them (covered 0)
+      ✘ the middle pane tints its blocks without word marks or bars: open, half-applied, applied, undone (covered 0)
+      ✘ vueuse-use-magic-keys: a mark's colour follows its block's tone on both side panes (covered 0)
+  ipc
+    fixtureRange.test.ts
+      ✓ ?range=review lists the case's sides and files and loads each file by its id (killed 23)
+      ✓ '' without a case loads review (killed 4)
+      ✓ '?range' without a case loads review (killed 3)
+      ~ '?range=' without a case loads review (covered 55)
+      ✓ ?range=empty loads that case, not review (catches a case name ignored) (killed 2)
+      ✓ an unknown case logs range.fixture_miss naming the known ones and lists nothing (killed 20)
+      ~ loadRangeFile of an id past the list answers UnknownRangeFile with that id (covered 60)
+      ✓ searchTexts answers the case's text files from the id on in one page with their changes (killed 27)
+      ✓ the committed cases parse: review lists 13 files of every kind, empty none (killed 1)
+      ~ ?threads=seeded sits on board.ts's lines as their kinds say: inside a difference or paired outside (covered 63)
+      ~ ?range=empty with ?threads=seeded lists no threads (covered 42)
+      ✓ a case file with a missing start fails the parse, naming the file (killed 1)
+      ~ a case file with an unknown entry kind fails the parse, naming the file (covered 3)
+      ~ a case file with an entry kind that is no string fails the parse, naming the file (covered 3)
+      ~ a case file with unknown sides fails the parse, naming the file (covered 3)
+      ~ a case file with an unknown file kind fails the parse, naming the file (covered 3)
+      ✓ a case file with a negative file id fails the parse, naming the file (killed 1)
+    rangeDomain.test.ts
+      ✓ a start converts both sides and every change, camelCased, keeping the merge-base label (killed 3)
+      ~ a file id of -1 is refused by the brand, naming the field (covered 12)
+      ~ a file id of 0.5 is refused by the brand, naming the field (covered 12)
+      ~ a texts reply converts its differences with both columns' words and keeps the mode (covered 7)
+      ✓ a bad line in a texts reply's differences is refused, naming the field (killed 1)
+      ~ a binary reply carries its fields unchanged (covered 6)
+      ~ a tooLarge reply carries its fields unchanged (covered 6)
+      ~ a notUtf8 reply carries its fields unchanged (covered 6)
+      ~ a modeOnly reply carries its fields unchanged (covered 6)
+      ~ a kindChanged reply carries its fields unchanged (covered 6)
+      ~ a submodule reply carries its fields unchanged (covered 6)
+      ✓ a search page converts each file's id, texts and line changes, and its next id (killed 1)
+      ✓ a bad a file id in a search page is refused, naming the field (killed 1)
+      ✓ a bad a left line in a search page is refused, naming the field (killed 1)
+      ~ a bad a right length in a search page is refused, naming the field (covered 14)
+      ✓ a bad the next id in a search page is refused, naming the field (killed 1)
+    tauriAgent.test.ts
+      ✘ startAgent sends the command in the app's shape and hands every channel event on (covered 0)
+      ✘ a start that did not start comes back unchanged (covered 0)
+      ✘ a run that is not a non-negative integer is refused (covered 0)
+      ✘ prepareCheckout brands an absolute folder and refuses a relative one (covered 0)
+      ✘ checkoutChanges converts {"kind":"Missing"} (covered 0)
+      ✘ checkoutChanges converts {"kind":"Clean"} (covered 0)
+      ✘ checkoutChanges converts {"kind":"Changed","folder":"/data/checkout","files":["a.ts"],"refs":["ai","stash"],"head_moved":true} (covered 0)
+      ✘ checkoutChanges converts {"kind":"Unreadable","folder":"/data/checkout","message":"bad object"} (covered 0)
+      ✘ checkoutChanges refuses a relative folder (covered 0)
+      ✘ sendToAgent is fire and forget; a failure is logged (covered 0)
+      ✘ stopAgent waits for the app and logs a failure (covered 0)
+      ✘ diffTexts brands the differences; discard and failures come back unchanged (covered 0)
+    tauriRange.test.ts
+      ✓ openRange and loadRangeFile turn the app's replies into domain data (killed 8)
+      ~ an UnknownRangeFile error comes back unchanged (covered 3)
+      ✓ a texts reply with a negative difference line is refused, naming the field (killed 2)
+      ~ the range source answers listThreads through the app's command (covered 2)
+      ✓ searchTexts asks search_range_texts from the given id and converts the page (killed 12)
+      ~ searchTexts passes an UnknownRangeFile error on unchanged (covered 3)
+      ✓ a search page with a bad change line is refused, naming the field (killed 3)
+  ui
+    aborting.test.ts
+      ✘ without a recorded operation there is no Abort: the state is none and a press asks nothing (covered 0)
+      ✘ the state follows the operation git lists (covered 0)
+      ✘ Abort asks about the operation and calls git only after a yes; No and Escape change nothing (covered 0)
+      ✘ git's refusal names the operation, logs it, and a later press asks again (covered 0)
+      ✘ an abort git answers StopMovedOn goes on to the new stop and shows no problem (covered 0)
+      ✘ an abort answered after its stop was dropped reports nothing and lists nothing (covered 0)
+    agentSettingsFields.test.ts
+      ✘ the settings in use are the stored ones, or the defaults when none is stored (covered 0)
+      ✘ the command field shows the default words until the file names its own (covered 0)
+      ✘ Use stores the typed words split on spaces and keeps the first message (covered 0)
+      ✘ Use of the default's words stores null, so a later default still reaches the user (covered 0)
+      ✘ Use is off for the words in use and for no words (covered 0)
+      ✘ Default stores null and is off while the default is in use (covered 0)
+      ✘ the first message field shows the default text, stores typed text as typed and the default as null (covered 0)
+      ✘ the five placeholders are listed as they are written (covered 0)
+    aiClose.test.ts
+      ✘ a Missing checkout closes without asking or discarding (covered 0)
+      ✘ a Clean checkout closes without asking or discarding (covered 0)
+      ✘ a changed checkout asks with its files, folder, moved HEAD and refs; Keep closes and discards nothing (covered 0)
+      ✘ Discard removes the checkout, then closes (covered 0)
+      ✘ a failed discard stays open and shows the problem (covered 0)
+      ✘ a discard that throws stays open and shows the problem (covered 0)
+      ✘ Escape keeps the window open and discards nothing (covered 0)
+      ✘ an unreadable checkout asks its own question with git's words (covered 0)
+      ✘ a look that fails closes without asking: the shell keeps a changed checkout at exit (covered 0)
+    aiText.test.ts
+      ✘ a { kind: 'checkoutFailed', …(1) } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'notFound', …(2) } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'spawnFailed', …(2) } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'noCommand' } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'crashed', code: 1, …(1) } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'refused', …(2) } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'sessionGone' } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'ended', reason: 'max_tokens' } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'busy' } failure reads as one sentence (covered 0)
+      ✘ a { kind: 'app', failure: [Object] } failure reads as one sentence (covered 0)
+      ✘ a crash without an exit code or a last log line says only that the AI stopped (covered 0)
+      ✘ a program not found with no searched folders names none (covered 0)
+      ✘ an edit is named Edited, a new file Created (covered 0)
+      ✘ a diff the app or the call could not make says so in the window's problem words (covered 0)
+      ✘ the step words, the refusal and the diff's counts (covered 0)
+      ✘ the turn view's fixed words (covered 0)
+      ✘ each unknown placeholder is named once as typed; known ones are not (covered 0)
+      ✘ the AI settings section's words and the yolo note (covered 0)
+    choiceText.test.ts
+      ✘ {"kind":"Missing"} reads "Deleted in this branch." (covered 0)
+      ✘ {"kind":"Text","lines":120} reads "A text file, 120 lines." (covered 0)
+      ✘ {"kind":"Text","lines":1} reads "A text file, 1 line." (covered 0)
+      ✘ {"kind":"Text","lines":0} reads "A text file, 0 lines." (covered 0)
+      ✘ {"kind":"Binary","bytes":12697} reads "A binary file, 12.4 KB." (covered 0)
+      ✘ {"kind":"NonUtf8","bytes":3174} reads "Not UTF-8 text, 3.1 KB." (covered 0)
+      ✘ {"kind":"TooLarge","bytes":9646899} reads "A text file too large to show, 9.2 MB." (covered 0)
+      ✘ {"kind":"Link","target":"../shared/config.json"} reads "A symbolic link to ../shared/config.json." (covered 0)
+      ✘ {"kind":"Commit","id":"1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b"} reads "Submodule at commit 1a2b3c4." (covered 0)
+      ✘ 0 bytes are 0 B (covered 0)
+      ✘ 1023 bytes are 1023 B (covered 0)
+      ✘ 1024 bytes are 1 KB (covered 0)
+      ✘ 1536 bytes are 1.5 KB (covered 0)
+      ✘ 1048524 bytes are 1023.9 KB (covered 0)
+      ✘ 1048575 bytes are 1 MB (covered 0)
+      ✘ 1048576 bytes are 1 MB (covered 0)
+      ✘ 1572864 bytes are 1.5 MB (covered 0)
+      ✘ 2147483648 bytes are 2048 MB (covered 0)
+      ✘ only a submodule side has a tooltip, its full commit id (covered 0)
+      ✘ both sides present: Take left and Take right (covered 0)
+      ✘ deleted on the local side: Delete there, Keep on the other (covered 0)
+      ✘ deleted on the remote side: Delete there, Keep on the other (covered 0)
+      ✘ after a choice the Result column names the side taken, or the deletion (covered 0)
+      ✘ a file the disk resolved says so in the Result column, whatever its sides (covered 0)
+      ✘ before a choice the Result column says what there is to choose (covered 0)
+      ✘ a middle that is Deleted on disk reads "Deleted on disk — staged as deleted." (covered 0)
+      ✘ a middle that is Binary on disk reads "Not shown: the file on disk is binary — staged as it is." (covered 0)
+      ✘ a middle that is NonUtf8 on disk reads "Not shown: the file on disk is not UTF-8 — staged as it is." (covered 0)
+      ✘ a middle that is TooLarge on disk reads "Not shown: the file on disk is too large — staged as it is." (covered 0)
+      ✘ a middle that is Link on disk reads "A link on disk now — staged as it is." (covered 0)
+      ✘ a middle that is Directory on disk reads "A folder on disk now — staged as deleted." (covered 0)
+    closeGuard.test.ts
+      ✘ while git runs a Continue or an Abort the close is refused with the problem, never a question (covered 0)
+      ✘ once git is done the close asks about unsaved edits again, and closes without any (covered 0)
+    collapsing.test.ts
+      ✘ a missing key collapses and writes nothing until a toggle (covered 0)
+      ✘ a stored "false" does not collapse (covered 0)
+      ✘ a stored value that is true collapses (covered 0)
+      ✘ a stored value that is empty collapses (covered 0)
+      ✘ a stored value that is another word collapses (covered 0)
+      ✘ a stored value that is JSON collapses (covered 0)
+      ✘ a stored value that is upper case collapses (covered 0)
+      ✘ toggling writes "false", then "true", and a second start reads the choice (covered 0)
+      ✘ a storage that throws collapses, still toggles in memory and logs warnings (covered 0)
+    compareStore.test.ts
+      ✘ the window's components get no store before the root creates one (catches a store read before main.ts made it) (covered 0)
+      ✘ start-up lists the stored tabs, sets the column limit and loads the settings (catches a limit or list left unset) (covered 0)
+      ✘ a failed start shows the problem and lists nothing (catches a failure read as an empty list) (covered 0)
+      ✘ add, show, rename and language write the mirror from each reply (catches a reply not adopted) (covered 0)
+      ✘ a tab's view is kept once shown, in the list's order, with its latest entry, until it closes (catches views built for unopened tabs or kept after a close) (covered 0)
+      ✘ after a restart only the shown tab gets a view (catches every stored tab mounted at start) (covered 0)
+      ✘ showTab from the settings view shows the tabs again (catches a tab switch hidden behind the settings) (covered 0)
+      ✘ addTab from the settings view shows the tabs again (catches a tab switch hidden behind the settings) (covered 0)
+      ✘ a rename shows only once its reply arrives (catches an optimistic edit of the mirror) (covered 0)
+      ✘ a failed addTab leaves the mirror as it was and shows the problem (catches a failure clearing the list) (covered 0)
+      ✘ a failed showTab leaves the mirror as it was and shows the problem (catches a failure clearing the list) (covered 0)
+      ✘ a failed renameTab leaves the mirror as it was and shows the problem (catches a failure clearing the list) (covered 0)
+      ✘ a failed setLanguage leaves the mirror as it was and shows the problem (catches a failure clearing the list) (covered 0)
+      ✘ a failed closeTab leaves the mirror as it was and shows the problem (catches a failure clearing the list) (covered 0)
+      ✘ a tab closed in another call is shown with its words, nothing listed again (catches a silent UnknownTab) (covered 0)
+      ✘ a tab reply clears a tabs problem but not a column's (catches a stale tabs problem or a lost save problem) (covered 0)
+      ✘ closing a tab with text asks; No and Escape keep it, Yes closes it (catches a close without the question) (covered 0)
+      ✘ an empty tab closes at once, never asking (catches a question for a tab with nothing to lose) (covered 0)
+      ✘ a tab no longer listed is not closed again (catches a second close sent for a gone tab) (covered 0)
+      ✘ the mounted tab's holdsText wins over the stored entry's, both ways (catches the entry read for a mounted tab) (covered 0)
+      ✘ a closed tab is no longer flushed; one that failed to close still is (catches untracking on the wrong outcome) (covered 0)
+      ✘ flushAll sends each unsent column once and resolves only when every reply came (catches a close before the write) (covered 0)
+      ✘ a second close request while the first flush runs waits for that same flush, sending nothing twice (catches a window closed under a running write) (covered 0)
+      ✘ flushAll waits for a save already in flight though nothing is left unsent (catches a close before a settle's write landed) (covered 0)
+      ✘ a failed flush is shown and logged, never thrown (catches a close stopped by one bad column) (covered 0)
+      ✘ untracking removes only the handle it returned (catches a remount's handle dropped by the old one) (covered 0)
+      ✘ loadTab returns the stored texts, or null with the tab's problem (catches a failure passed on as texts) (covered 0)
+      ✘ saveColumn writes the column and returns the comparison, or null naming the tab as it was called (catches a save naming no tab) (covered 0)
+      ✘ a successful save clears that column's save problem only (catches a stale 'Could not save' after the column saved) (covered 0)
+      ✘ a Format on a tab replaces its earlier Format notices, keeping refused edits and other tabs' (catches a stale 'not valid JSON' after a good Format) (covered 0)
+      ✘ a refused edit and a Format failure show their words; a second one for the column replaces the first (catches piled-up notices) (covered 0)
+      ✘ closing a notice removes only that notice (catches every notice closed at once) (covered 0)
+      ✘ Auto's finding is kept per tab (catches one tab's finding wiping another's) (covered 0)
+      ✘ the gear switches the screen, and the settings in use reach the preferences (catches a settings view that never opens) (covered 0)
+      ✘ a shown problem closes on request (catches a problem bar that cannot close) (covered 0)
+      ✘ the bound key toggles the tab panel through the shared rule, never while a question waits (catches a compare window that cannot hide its tabs) (covered 0)
+    compareText.test.ts
+      ✘ a Format failure names the tab, the column, the language, the line and the parser's message (catches a notice without its column) (covered 0)
+      ✘ a refused edit names the column and the limit in MiB (catches the limit written in bytes) (covered 0)
+      ✘ notices about one tab's column share a key whatever they say; other tabs and columns differ (catches a key per kind) (covered 0)
+      ✘ a tab's name comes from the list, a tab not listed is named by its id (catches a missing tab named by another's name) (covered 0)
+    continuing.test.ts
+      ✘ no recorded operation is noOperation, and a press calls nothing (covered 0)
+      ✘ files git lists as not resolved, a remembered one too, make it filesLeft, counted in the hover, and a press calls nothing (covered 0)
+      ✘ a held write claim makes it writing until the write is done (covered 0)
+      ✘ every file resolved, no write and git idle is ready, with no hover; a stop without files is ready too (covered 0)
+      ✘ while git runs, Continue is running with the terminal hover and a second press calls nothing (covered 0)
+      ✘ unsaved edits ask first, naming the files; No calls nothing (covered 0)
+      ✘ unsaved edits ask first, naming the files; Escape calls nothing (covered 0)
+      ✘ the reword question comes only with editor_steps_ahead, after the unsaved one; No calls nothing (covered 0)
+      ✘ without editor steps and without unsaved edits Continue asks nothing (covered 0)
+      ✘ Stopped goes to the next stop with git's message, and only then is Continue ready again (covered 0)
+      ✘ git's refusal is the problem naming the operation, the list is read again and Continue is ready again (covered 0)
+      ✘ another failure is reported through problemText without reading the list again (covered 0)
+      ✘ StopMovedOn is logged and goes on to the stop git is at once, instead of showing a problem (covered 0)
+      ✘ Finished is logged and Continue stays running: the window is closing (covered 0)
+      ✘ a reply after its stop was dropped changes nothing but the running state (covered 0)
+    editDiffLines.test.ts
+      ✘ a change in the middle shows 3 unchanged lines on each side and skips the rest, with both line numbers (covered 0)
+      ✘ after an inserted line the new numbers run one ahead of the old (catches a shift taken from the wrong side) (covered 0)
+      ✘ two changes 6 unchanged lines apart are one hunk; 7 apart are two with the line between skipped (covered 0)
+      ✘ a change at the first and last line shows no skipped rows and nothing beyond the text (covered 0)
+      ✘ a side without a final newline gets git's marker after its last line, wherever that row is (covered 0)
+      ✘ a pair differing only by a carriage return is marked with each side's line ending, the \r never shown (covered 0)
+      ✘ a last line without a line break claims no ending; its pair keeps its own (covered 0)
+      ✘ an unpaired changed line is never paired with the unchanged line after the change (covered 0)
+      ✘ rows stop at 2,000 and a last row counts the changed and unchanged lines not shown (covered 0)
+      ✘ exactly 2,000 rows need no more row (catches a cap one row early) (covered 0)
+      ✘ a created file is every line added, capped like a diff; its marker is not a line (covered 0)
+      ✘ past the cap a skipped run counts none of its lines: only context and changed lines are counted (covered 0)
+      ✘ each row kind fills its own cells; words come from the AI text (covered 0)
+    fileListMode.test.ts
+      ✘ starts as the list, toggles to the tree and back, storing the plain name (covered 0)
+      ✘ a second start over the same storage keeps the tree (covered 0)
+      ✘ a stored value that is upper case starts the list (covered 0)
+      ✘ a stored value that is empty starts the list (covered 0)
+      ✘ a stored value that is JSON starts the list (covered 0)
+      ✘ a stored value that is quoted starts the list (covered 0)
+      ✘ a stored value that is the list starts the list (covered 0)
+      ✘ a storage that throws starts the list, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    fileListWidth.test.ts
+      ✘ a missing key gives the starting width and writes nothing (covered 0)
+      ✘ a stored width that is the minimum is read back (covered 0)
+      ✘ a stored width that is a wide list is read back (covered 0)
+      ✘ a stored width that is empty gives the starting width without a warning (covered 0)
+      ✘ a stored width that is a word gives the starting width without a warning (covered 0)
+      ✘ a stored width that is JSON gives the starting width without a warning (covered 0)
+      ✘ a stored width that is under the minimum gives the starting width without a warning (covered 0)
+      ✘ a stored width that is zero gives the starting width without a warning (covered 0)
+      ✘ a stored width that is negative gives the starting width without a warning (covered 0)
+      ✘ a stored width that is infinite gives the starting width without a warning (covered 0)
+      ✘ a set width is written and a second start reads it (covered 0)
+      ✘ a width is clamped to 160 px at the narrow end and half the window at the wide end (covered 0)
+      ✘ the CSS bounds are the clamp's: 160 px and half the window (covered 0)
+      ✘ in a window narrower than two minimums the width is the minimum (covered 0)
+      ✘ reset goes back to the starting width and removes the key (covered 0)
+      ✘ a storage that throws gives the starting width, still sets it in memory, and warns (covered 0)
+    gitRun.test.ts
+      ✘ a success that ends the app keeps git running after its landing (covered 0)
+      ✘ a success that does not end the app is landed while running, then git is idle (covered 0)
+      ✘ a refusal is landed while running, then git is idle (covered 0)
+      ✘ a reply after its stop was dropped lands nothing, even one that would end the app (covered 0)
+    keyField.test.ts
+      ✘ Tab and Shift+Tab leave the field; with Ctrl or Alt they are recorded (covered 0)
+      ✘ plain Enter confirms the shown key, and is recorded when no key is shown (covered 0)
+      ✘ plain Escape cancels; with Shift or Ctrl it is recorded (covered 0)
+      ✘ a key with its modifiers replaces the shown one; a modifier alone changes nothing (covered 0)
+    keymapEdit.test.ts
+      ✘ adding a key the action already has does nothing (covered 0)
+      ✘ adding a free key sends the action's whole list (covered 0)
+      ✘ adding a key another action holds asks, and Move takes it from the owner in the same changes (covered 0)
+      ✘ an owner left with exactly its defaults is sent back to them as null (covered 0)
+      ✘ changing a key replaces it in place (covered 0)
+      ✘ changing to a key another action holds asks first (covered 0)
+      ✘ changing to a key the action already has drops the old one; to itself or from a missing key does nothing (covered 0)
+      ✘ changing back to the defaults sends null (covered 0)
+      ✘ removing a key sends the rest; removing a key the action lacks does nothing (covered 0)
+      ✘ removing the one added key goes back to the defaults as null (covered 0)
+      ✘ remove all sends an empty list, unless there is nothing left to remove (covered 0)
+      ✘ reset sends null (covered 0)
+      ✘ a list is the defaults when it holds exactly the default keys, in any order (covered 0)
+      ✘ a key's owners are every other action holding it, never the action itself (covered 0)
+    keyText.test.ts
+      ✘ the keymap groups list every action once, in the settings order (covered 0)
+      ✘ each action says where it acts, matching its group (covered 0)
+      ✘ giving Ctrl/⌘B to another action clashes with Toggle file list (covered 0)
+      ✘ Save is named, acts anywhere in the shown file, and Ctrl/⌘S clashes with it (plan §2 #65) (covered 0)
+      ✘ the edit menu changes and removes each key by its label; default keys offer no reset (covered 0)
+      ✘ Remove All shows past two keys, and Reset Shortcuts follows it without a separator (covered 0)
+      ✘ an action left without keys offers Add and Reset with one separator between (covered 0)
+      ✘ the + menu sets Enter, Escape, Tab and Shift+Tab, labelled for the platform (covered 0)
+      ✘ the conflict line names every action already using the key (covered 0)
+    linuxPaste.test.ts
+      ✘ both listeners are on the window in the capture phase (covered 0)
+      ✘ a trusted paste is cancelled and stopped without its data being read, then the clipboard is read (covered 0)
+      ✘ an untrusted paste, the window's own, passes untouched and reads nothing (covered 0)
+      ✘ a paste in the middle button's release task reads the selection; the next task's reads the clipboard (covered 0)
+      ✘ a release of button 0 leaves the clipboard (covered 0)
+      ✘ a release of button 2 leaves the clipboard (covered 0)
+      ✘ the text is pasted again on the still focused target, bubbling and cancelable, as text/plain (covered 0)
+      ✘ an input nobody handled gets the text typed in (covered 0)
+      ✘ a textarea nobody handled gets the text typed in (covered 0)
+      ✘ a field that handled the paste, or an element that is no field, gets nothing typed (covered 0)
+      ✘ an answer of null pastes nothing (covered 0)
+      ✘ an answer of "" pastes nothing (covered 0)
+      ✘ a target that lost the focus to another element before the answer gets nothing (covered 0)
+      ✘ focus moved to the body before the answer pastes nothing (covered 0)
+      ✘ focus moved to nothing before the answer pastes nothing (covered 0)
+      ✘ a paste while the body has the focus pastes nothing (covered 0)
+      ✘ a target removed from the page before the answer has the paste go to the still focused editor (covered 0)
+      ✘ a target removed from the page before the answer has the text typed into the still focused field (covered 0)
+      ✘ a failed read pastes nothing (covered 0)
+    listing.test.ts
+      ✘ a list sets the files, the operation and both names from the one reply (covered 0)
+      ✘ a list that finds git at another stop goes to the next stop and sets nothing itself (covered 0)
+      ✘ a failed list is a list problem and keeps the operation and names it had (covered 0)
+    paneSplit.test.ts
+      ✘ equal thirds are the starting split (covered 0)
+      ✘ a missing key gives thirds and writes nothing (covered 0)
+      ✘ a stored split is read back (covered 0)
+      ✘ a stored value that is empty gives thirds without a warning (covered 0)
+      ✘ a stored value that is not JSON gives thirds without a warning (covered 0)
+      ✘ a stored value that is null gives thirds without a warning (covered 0)
+      ✘ a stored value that is a number gives thirds without a warning (covered 0)
+      ✘ a stored value that is an array gives thirds without a warning (covered 0)
+      ✘ a stored value that is an empty object gives thirds without a warning (covered 0)
+      ✘ a stored value that is string numbers gives thirds without a warning (covered 0)
+      ✘ a stored value that is local a string gives thirds without a warning (covered 0)
+      ✘ a stored value that is remote a string gives thirds without a warning (covered 0)
+      ✘ a stored value that is no remote gives thirds without a warning (covered 0)
+      ✘ a stored value that is no local gives thirds without a warning (covered 0)
+      ✘ a stored value that is a zero Result gives thirds without a warning (covered 0)
+      ✘ a stored value that is a Result under 1 % gives thirds without a warning (covered 0)
+      ✘ a stored value that is a negative local gives thirds without a warning (covered 0)
+      ✘ a stored value that is a negative remote gives thirds without a warning (covered 0)
+      ✘ a stored value that is local under 1 % gives thirds without a warning (covered 0)
+      ✘ a stored value that is remote under 1 % gives thirds without a warning (covered 0)
+      ✘ a stored value that is an infinite share gives thirds without a warning (covered 0)
+      ✘ the edges of the valid range are kept (covered 0)
+      ✘ a set split is written and a second start reads it; reset gives thirds (covered 0)
+      ✘ a storage that throws gives thirds, still sets the split in memory, and warns (covered 0)
+      ✘ a drag of the local divider moves Local and Result and keeps Remote's pixels (covered 0)
+      ✘ the local divider stops at 220 px for Result and for Local (covered 0)
+      ✘ on a narrow row the minimum is a third, so a drag from thirds changes nothing (covered 0)
+      ✘ a pair narrower than two minimums splits evenly and stays total (covered 0)
+      ✘ the remote divider mirrors the local one and keeps Local's pixels (covered 0)
+      ✘ a press without a move gives the measured shares (covered 0)
+      ✘ the strip grid has five tracks with the strips' 2.5rem in each pane's minimum (covered 0)
+      ✘ the choice grid has five tracks with 1px gaps in each pane's minimum (covered 0)
+      ✘ the compare grid has two equal columns around the merge window's 2.5rem strip (covered 0)
+      ✘ every fr factor is at least 1 at the edges of the valid range (covered 0)
+    problem.test.ts
+      ✘ a failed compare call is logged with the tab's name and the cause: { action: 'tabs', cause: [Object] } (catches a log line without its tab) (covered 0)
+      ✘ a failed compare call is logged with the tab's name and the cause: { action: 'loadTab', …(2) } (catches a log line without its tab) (covered 0)
+      ✘ a failed compare call is logged with the tab's name and the cause: { action: 'saveTab', tab: 1, …(3) } (catches a log line without its tab) (covered 0)
+      ✘ a settings failure logs its cause, and only the file's path for key problems (catches a log line without the cause) (covered 0)
+      ✘ a failed openRange logs its cause under its own event (catches a log line without the cause) (covered 0)
+      ✘ a failed thread call logs its step and cause (catches a log line without the step) (covered 0)
+      ✘ a failed AI call logs its step and cause (catches a log line without the step) (covered 0)
+    problemText.test.ts
+      ✘ a failed open names the file and what failed (covered 0)
+      ✘ a failed finish names the file and what failed (covered 0)
+      ✘ a failed save names the file and what failed (covered 0)
+      ✘ a failed take names the file and what failed (covered 0)
+      ✘ a failed reset names the file and what failed (covered 0)
+      ✘ a failed list says the list could not be read, with the cause (covered 0)
+      ✘ Git carries git's own message (covered 0)
+      ✘ UnknownPath names the path (covered 0)
+      ✘ WriteFailed names the path and the system's message (covered 0)
+      ✘ NotAFile says nothing was written because the path is not a regular file (covered 0)
+      ✘ a failed save says the file could not be saved, with the write's own cause (covered 0)
+      ✘ ReadFailed names the path and the system's message (covered 0)
+      ✘ Unsupported Binary says why the file cannot be shown (covered 0)
+      ✘ Unsupported NonUtf8 says why the file cannot be shown (covered 0)
+      ✘ Unsupported TooLarge says why the file cannot be shown (covered 0)
+      ✘ Unsupported LocalDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported RemoteDeleted says why the file cannot be shown (covered 0)
+      ✘ Unsupported Symlink says why the file cannot be shown (covered 0)
+      ✘ Unsupported Submodule says why the file cannot be shown (covered 0)
+      ✘ a broken settings file names its line and column and what to do (covered 0)
+      ✘ a broken settings entry without a position names the error only (covered 0)
+      ✘ the other settings failures say the settings file could not be used and why (covered 0)
+      ✘ an action after an abort says the merge was aborted (covered 0)
+      ✘ an unknown compare tab says the tab was closed (covered 0)
+      ✘ a range file Rust does not list says it is not part of this range (covered 0)
+      ✘ a column over the limit names the limit from the reply in MiB (covered 0)
+      ✘ a stopped worker says to try again (covered 0)
+      ✘ the review failure { kind: 'UnknownThread', thread: 4 } has its fixed reason (covered 0)
+      ✘ the review failure { kind: 'UnknownMessage', message: 9 } has its fixed reason (covered 0)
+      ✘ the review failure { kind: 'EmptyMessage' } has its fixed reason (covered 0)
+      ✘ the review failure { kind: 'MessagePending', message: 9 } has its fixed reason (covered 0)
+      ✘ the review failure { kind: 'NotANote', message: 9 } has its fixed reason (covered 0)
+      ✘ the review failure { kind: 'SendRunning' } has its fixed reason (covered 0)
+      ✘ the review failure { kind: 'AiOff' } has its fixed reason (covered 0)
+      ✘ a failed removal names the folder and the system's message (covered 0)
+      ✘ a failed compare call { action: 'tabs' } says what failed, naming the tab (covered 0)
+      ✘ a failed compare call { action: 'loadTab', name: 'Compare 2' } says what failed, naming the tab (covered 0)
+      ✘ a failed compare call { action: 'saveTab', tab: 1, …(2) } says what failed, naming the tab (covered 0)
+      ✘ a failed openRange says the range could not be opened, with git's words (covered 0)
+      ✘ a failed thread call at list says what failed (covered 0)
+      ✘ a failed thread call at add says what failed (covered 0)
+      ✘ a failed thread call at note says what failed (covered 0)
+      ✘ a failed thread call at queue says what failed (covered 0)
+      ✘ a failed thread call at unqueue says what failed (covered 0)
+      ✘ a failed thread call at edit says what failed (covered 0)
+      ✘ a failed thread call at delete says what failed (covered 0)
+      ✘ a failed thread call at check says what failed (covered 0)
+      ✘ a failed thread call at send says what failed (covered 0)
+      ✘ a failed thread call at session says what failed (covered 0)
+      ✘ a failed thread call at answer says what failed (covered 0)
+      ✘ a failed AI call at ask says what failed (covered 0)
+      ✘ a failed AI call at diff says what failed (covered 0)
+      ✘ a failed AI call at discard says what failed (covered 0)
+      ✘ a failed discard names the checkout and the system's message (covered 0)
+      ✘ a save to a tab another call closed says the tab was closed (covered 0)
+      ✘ StopMovedOn says what git is at, whatever was tried (covered 0)
+      ✘ GitRunning says what git is at, whatever was tried (covered 0)
+      ✘ MergeFinished says what git is at, whatever was tried (covered 0)
+      ✘ NoOperation says what git is at, whatever was tried (covered 0)
+      ✘ an abort git refused names the Merge (covered 0)
+      ✘ an abort git refused names the Rebase (covered 0)
+      ✘ an abort git refused names the Am (covered 0)
+      ✘ a Continue git refused names the Rebase and keeps git's words (covered 0)
+      ✘ a Continue git refused names the CherryPick and keeps git's words (covered 0)
+      ✘ a Continue git refused names the Merge and keeps git's words (covered 0)
+      ✘ a Continue git refused names the SquashMerge and keeps git's words (covered 0)
+      ✘ a close refused while git runs says to wait for git (covered 0)
+      ✘ a stop with nothing to list shows git's message as it came, naming the operation or git (covered 0)
+      ✘ key problems name the action, the key and what yamt does instead (covered 0)
+    question.test.ts
+      ✘ Mark resolved asks exactly when the summary counts a conflict or a change (covered 0)
+      ✘ Mark resolved never asks for conflicts git rerere filled in, but still asks for the others (catches a remembered conflict blocking with Unprocessed Changes) (covered 0)
+      ✘ the unprocessed sentence never mentions remembered conflicts (covered 0)
+      ✘ quitting asks exactly when some file has unsaved work (covered 0)
+      ✘ the unprocessed sentence names only the non-zero counts with singular and plural (covered 0)
+      ✘ the unprocessed question carries WebStorm's title and buttons (covered 0)
+      ✘ the exit question says the listed files are not saved to disk (plan §2 #69) (covered 0)
+      ✘ the clash question names the key in the platform's words, its owner and the asking action (covered 0)
+      ✘ the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67) (covered 0)
+      ✘ aborting a merge asks with plan #74's words, unchanged (covered 0)
+      ✘ aborting a rebase names it and counts the commits already replayed (covered 0)
+      ✘ Continue with unsaved edits names the files and continues or commits by the operation (covered 0)
+      ✘ the reword question says the message stays as git prepares it (plan §2 #91) (covered 0)
+      ✘ both Continue questions are about the stop and end with it; the exit question does not (covered 0)
+      ✘ closing a tab that holds text asks with its name, Yes or No, and never ends with a stop (catches a question that does not name the tab) (covered 0)
+      ✘ deleting a note asks GitLab's question, Delete or Cancel, and never ends with a stop (covered 0)
+      ✘ the AI's changes question lists the files and the folder, Keep Changes the confirm (covered 0)
+      ✘ a moved HEAD (true) and the AI's refs { branches: [], stash: false } are named in the note (covered 0)
+      ✘ a moved HEAD (false) and the AI's refs { branches: [ 'fix' ], stash: false } are named in the note (covered 0)
+      ✘ a moved HEAD (false) and the AI's refs { branches: [Array], stash: false } are named in the note (covered 0)
+      ✘ a moved HEAD (false) and the AI's refs { branches: [], stash: true } are named in the note (covered 0)
+      ✘ a moved HEAD (false) and the AI's refs { branches: [ 'stash' ], stash: false } are named in the note (covered 0)
+      ✘ a moved HEAD (true) and the AI's refs { branches: [ 'fix' ], stash: true } are named in the note (covered 0)
+      ✘ work without changed files says the AI left work there, without 'also' (covered 0)
+      ✘ an unreadable checkout asks the same question with git's words, Keep the confirm (covered 0)
+    rangeAi.test.ts
+      ~ a new thread's first turn sends every note, wrapped in First message (covered 54)
+      ~ the session is stored on omp's event, before the turn ends (covered 54)
+      ~ a finished turn adds one answer; the next ask sends only the notes since it, unwrapped (covered 54)
+      ~ Ask does nothing while the thread's turn runs or with nothing new; Stop stops that turn (covered 54)
+      ~ a turn stopped before the prompt reached omp adds no answer; its stopped end stays shown (covered 54)
+      ~ a turn stopped after omp holds its prompt adds one answer, shown with its own end (covered 54)
+      ~ a checkout failure before the prompt adds no answer and asks omp nothing more (covered 54)
+      ~ a missing program failure before the prompt adds no answer and asks omp nothing more (covered 54)
+      ~ a app failure before the prompt adds no answer and asks omp nothing more (covered 54)
+      ~ a turn omp ended itself (max tokens) is an answer without asking the replay (covered 54)
+      ~ a crash after omp held the prompt adds the answer; Retry sends that prompt again in the session (covered 54)
+      ~ a crash before omp held the prompt adds nothing; a failed replay adds nothing either (covered 54)
+      ~ a stored session is loaded once when shown, and Ask waits for it (covered 54)
+      ~ turns omp holds without an answer in the thread (a reload mid-turn) become answers before Ask is offered (covered 54)
+      ~ a failed write of an unseen turn's answer stops there and still shows the conversation (covered 54)
+      ~ a load that failed for another reason than a lost session is tried again (covered 54)
+      ~ a session omp lost at load: the next ask starts a new one with every note wrapped (covered 54)
+      ~ a session omp lost at the ask: a new one starts at once with every note wrapped (covered 54)
+      ~ a turn of a new session omp never held shows no answer of the lost session (covered 54)
+      ~ two threads run at once; one ending leaves the other running (covered 54)
+      ~ a failed write of the session or the answer is reported as such (covered 54)
+      ~ no First message context (the range not open) means nothing to ask (covered 54)
+      ~ a session's second turn stopped before omp held it (replay of one turn) adds no answer (covered 54)
+      ~ a session's second turn stopped after omp held it is answer 1, shown with its own end (covered 54)
+      ~ a checkout failure on the stored session adds no answer and asks for no replay (covered 54)
+      ~ a new thread's turn stopped before omp named the session asks for no replay (covered 54)
+      ~ a new thread's turn crashed before omp named the session asks for no replay (covered 54)
+      ~ a crash after a failed load replaces the failed load with the replay (covered 54)
+      ~ an answer finished after a failed load loads the conversation again and shows once, as its turn (covered 54)
+      ~ an answer ended at max tokens after a failed load loads the conversation again and shows once, as its turn (covered 54)
+      ~ a failed replay check leaves the conversation unloaded; the next finished turn reloads it (covered 54)
+      ~ a stop after a failed load records every turn the replay holds past the answers, each shown as omp's (covered 54)
+      ~ showing the box again while a turn runs after a failed load loads nothing (covered 54)
+      ~ a failed record of a replayed turn keeps Ask off until a load records it; answer i stays omp's turn i (covered 54)
+      ~ a finished turn whose record failed keeps Ask off and shows once after a load records it (covered 54)
+      ~ Retry after a crash omp never held asks again with the notes added since (covered 54)
+      ~ Ask AI with typed text on a thread with an answer stores it as a note, then asks with the notes since the answer (covered 54)
+      ~ Ask AI with typed text on a thread's first turn wraps every note in First message (covered 54)
+      ~ Ask AI with only blank text typed adds nothing and asks with the notes since the answer (covered 54)
+      ~ a refused add reports its problem, keeps the text in the field and asks nothing (covered 54)
+      ~ Ask AI on a line's new thread adds the thread with the text, then asks its first turn (covered 54)
+      ~ a refused new thread asks nothing (covered 54)
+      ~ a second Ask AI while the first one's note is added adds it once and asks once; other threads stay askable (covered 54)
+      ~ Retry after a crash whose answer could not be recorded asks nothing until a load records it (covered 54)
+      ~ a new thread's add blocks only its own Ask AI, and a second press adds one thread (covered 54)
+      ~ canAsk: off while the turn runs or the conversation loads, even with text typed; typed text alone is enough (covered 54)
+      ~ Ask AI on a thread no longer listed adds and asks nothing (covered 54)
+      ~ Ask AI is off while Comment adds that thread's note, and on again once it lands (refused: false) (covered 54)
+      ~ Ask AI is off while Comment adds that thread's note, and on again once it lands (refused: true) (covered 54)
+      ~ Ask AI is off while Comment adds that line's new thread; the added thread is askable (covered 54)
+      ~ a refused Comment of a line's new thread turns its Ask AI on again (covered 54)
+    rangeAiRules.test.ts
+      ✘ a session is gone only when omp lost that session's load (covered 0)
+      ✘ a thread not listed holds no answers (covered 0)
+    rangeAiView.test.ts
+      ✘ an answer of the loaded session shows its turn, finished unless this window saw it end (covered 0)
+      ✘ an answer with nothing loaded yet (covered 0)
+      ✘ an answer with a load in flight (covered 0)
+      ✘ an answer with a load the closing window stopped (covered 0)
+      ✘ an answer with an older session (covered 0)
+      ✘ an answer with a turn the replay lacks (covered 0)
+      ✘ an answer with a lost session (covered 0)
+      ✘ an answer with a failed load (covered 0)
+      ✘ the live turn: the running view, then its end until a message shows it (covered 0)
+      ✘ a turn is answering while it runs without an end; Stop gives way to Ask AI after it ends (covered 0)
+      ✘ an answer not shown reads why: no AI, loading, gone, or the failure in words (covered 0)
+      ✘ Post offers a note's text, a loaded answer's final text, or why it cannot (covered 0)
+    rangeGitLab.test.ts
+      ~ checked once: the answer is kept and checking ends (covered 57)
+      ~ focus within 30 s of the last check does not re-check; at 30 s it does (covered 57)
+      ~ no overlapping checks: a second check while one runs asks nothing (covered 57)
+      ~ Send and Post are disabled with Checking GitLab… until the first answer (covered 57)
+      ~ the last answer stays in force during a re-check (covered 57)
+      ~ a not lined-up answer disables both with its sentence; Unqueue stays enabled (covered 57)
+      ~ a pending message cannot be posted; a message without shown text says why (covered 57)
+      ~ Send is disabled with Nothing queued when no message waits (covered 57)
+      ~ Send's notLinedUp replaces the check and records no result (covered 57)
+      ~ the progress label counts the message being sent, one send at a time (covered 57)
+      ~ a progress message arriving after the reply leaves Send usable (covered 57)
+      ~ the result notice counts sent and refused and replaces the list (covered 57)
+      ~ a stopped send keeps its reason in the result (covered 57)
+      ~ a send that ends not lined up clears the previous send's result (covered 57)
+      ~ a failed check and a failed send report their step and keep the last answer (covered 57)
+    rangeKeys.test.ts
+      ✘ a text area and the text-like inputs are typing targets (covered 0)
+      ✘ buttons, checkboxes, other elements, the window and nothing are not typing targets (covered 0)
+      ✘ an input whose type is not a string is not a typing target, even one that reads as text (covered 0)
+      ✘ Ctrl+Enter submits on Linux, Cmd+Enter on macOS, each kept from the column and the window (covered 0)
+      ✘ a plain Enter, Shift or Alt with Ctrl+Enter, and other keys with Ctrl type as usual (covered 0)
+      ✘ Escape alone cancels on every platform, kept from the column and the window; with a modifier it does nothing (covered 0)
+      ✘ keys pressed while an input method composes neither submit nor cancel (covered 0)
+    rangeOpen.test.ts
+      ✘ a toggle opens all its threads when one is closed, closes all when all are open (covered 0)
+      ✘ a toggle changes only its own threads: other open threads stay open either way (covered 0)
+      ✘ a thread added from a draft opens under the draft's key, other threads under their id (covered 0)
+      ✘ shownFor lists a file's stored threads by key, open or collapsed (covered 0)
+      ✘ keepListed drops threads the list no longer holds and keeps the set when it holds them all (covered 0)
+    rangeStore.test.ts
+      ✘ the window's components get no store before the root creates one (covered 0)
+      ✓ the first file is shown at start and is the one file mounted (catches an empty main area at start) (killed 1)
+      ~ an empty range shows no file and mounts none (covered 27)
+      ✓ before openRange answers: the files screen, the start theme's preferences, no file to show (killed 5)
+      ~ a failed openRange reports the range and shows nothing (covered 48)
+      ~ at start the list shows first, then the threads load and GitLab is checked once (covered 51)
+      ~ a failed openRange loads no threads and checks nothing (covered 48)
+      ~ a failed thread list is the window's problem (covered 51)
+      ~ showFile from the settings screen shows the file and returns the screen to files (covered 51)
+      ~ closeSettings returns to the files; a path not in the range changes nothing (covered 51)
+      ~ showing a visited file again keeps the mounted order (catches a moved view losing its scroll) (covered 51)
+      ~ the 17th file drops the least recently shown and keeps the others' order (covered 51)
+      ~ a draft outlives its file's view: 16 other files evict file 0 and the draft is still there (covered 51)
+      ~ a failed load reports open with its path and leaves visited; a later success clears the problem (covered 57)
+      ~ a failed file leaves the eviction order too: the next eviction drops the least recent mounted file (covered 51)
+      ~ dismissProblem clears the shown problem (covered 51)
+      ~ the bound key toggles the file list, never while a question waits (covered 51)
+      ~ answer settles the waiting question (covered 51)
+      ~ without --ai the store has no AI and the window closes without asking (covered 51)
+      ✓ First message's values: the thread's place, the range as typed, both short ids (killed 2)
+      ~ with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays (covered 57)
+      ~ deleteNote asks first: Cancel and Escape keep the note, Delete removes it and its emptied thread (covered 57)
+      ~ the collapse choice missing in the window's storage starts the range store as the merge window reads it (covered 48)
+      ~ the collapse choice "true" in the window's storage starts the range store as the merge window reads it (covered 48)
+      ~ the collapse choice garbage in the window's storage starts the range store as the merge window reads it (covered 48)
+      ~ the collapse choice "false" in the window's storage starts the range store as the merge window reads it (covered 48)
+      ~ toggling in the range store writes the merge window's stored choice (catches a second key) (covered 48)
+      ✘ the range toggle's words are the merge toolbar's collapse entry (covered 0)
+    rangeThreads.test.ts
+      ~ a draft's Comment adds the thread and its key becomes the stored id with the text kept (covered 57)
+      ~ a refused Comment keeps the draft with its text and reports the add (covered 57)
+      ~ a second Comment while the first is in flight sends nothing more (covered 57)
+      ~ after a refused Comment the next Comment on that draft is sent and stored once (covered 57)
+      ~ a Comment on a key with no draft makes no call and reports nothing (covered 57)
+      ~ a refused Comment whose draft was dropped while it ran brings no draft back (covered 57)
+      ~ a second press on a line with an open draft focuses it, with no second draft (covered 57)
+      ~ a dropped draft leaves the line; writing a missing draft creates nothing (covered 57)
+      ~ stored threads come back collapsed; open and collapse per thread and per line (covered 57)
+      ~ counts per file ignore drafts (covered 57)
+      ~ blank text is never sent (covered 57)
+      ~ a note is added to its thread and its draft text cleared; a refused note keeps it (covered 57)
+      ~ each thread keeps its own reply text (covered 57)
+      ~ a press on the same line number in the other column opens a second draft (covered 57)
+      ~ writing a blank note drops its draft (covered 57)
+      ~ queue and unqueue change the posting and the queued count; a pending one reports (covered 57)
+      ~ a half-edited Post text outlives a collapse and a reopen of its thread (covered 57)
+      ~ an emptied Post text keeps its editor open; Cancel drops it (covered 57)
+      ~ a queued Post closes its editor; a refused or blank Queue keeps the text (covered 57)
+      ~ a Post text outlives its file's view: 16 other files evict file 0 and the text is still there (covered 51)
+      ~ a failed list reports it and keeps the empty list (covered 57)
+      ~ listed turns true once the first list settles, read or not (covered 57)
+      ~ listed turns true once the first list settles, refused or not (covered 57)
+      ~ a Cancel while Comment is in flight still adds and opens the thread (covered 57)
+      ~ replace mirrors a send's list and drops the Post box of a message it no longer holds (covered 57)
+      ✘ queued and refused postings sit in the queue; not queued and pending do not (covered 0)
+      ~ your notes not yet on GitLab can change; a pending note and an AI answer cannot (covered 57)
+      ~ an edit stores the new text, closes its box and keeps a queued note queued with that text (covered 57)
+      ~ a blank edit makes no call and keeps its box open (covered 57)
+      ~ a refused edit or delete is reported, changes nothing and keeps the edit box (covered 57)
+      ~ a message's Edit and Post boxes are never open at once (covered 57)
+      ~ each message keeps its own Edit text; a Post on one leaves the other's Edit alone (covered 57)
+      ~ an Edit box on a note a send made pending closes; one on a note still unsent stays (covered 57)
+      ~ deleting a note keeps a thread that still has a message (covered 57)
+      ~ deleting a thread's last note removes the thread, its line, its count, its open state and its drafts (covered 57)
+      ~ addingThread holds a draft's add only while it runs (refused: false) (covered 57)
+      ~ addingThread holds a draft's add only while it runs (refused: true) (covered 57)
+      ~ addingNote holds a thread's note add only while it runs (refused: false) (covered 57)
+      ~ addingNote holds a thread's note add only while it runs (refused: true) (covered 57)
+      ~ a second Comment while a note's add runs still sends; the thread is adding until both land (covered 57)
+    rangeThreadText.test.ts
+      ✘ not lined up { kind: 'glabMissing' } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'notLoggedIn', …(1) } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'noMergeRequest', …(1) } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'several', …(2) } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'moved', …(3) } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'otherBase', …(3) } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'preparing', …(1) } reads its sentence (covered 0)
+      ✘ not lined up { kind: 'failed', …(1) } reads its sentence (covered 0)
+      ✘ another base with two dots adds the three-dots hint; with three dots it does not (covered 0)
+      ✘ the posting { kind: 'notQueued' } is labelled null (covered 0)
+      ✘ the posting { kind: 'queued', text: 'Why?' } is labelled Queued for GitLab (covered 0)
+      ✘ the posting { kind: 'refused', text: 'Why?', …(1) } is labelled Refused by GitLab: 400 Bad request (covered 0)
+      ✘ the posting { kind: 'pending', text: 'Why?', …(3) } is labelled Pending on GitLab (covered 0)
+      ✘ the Send label counts the queue, then the message being sent (covered 0)
+      ✘ the Send and Post hovers name the merge request (covered 0)
+      ✘ the result notice counts sent and refused, and a stop says why (covered 0)
+      ✘ the result notice is one closable row with its words (covered 0)
+      ✘ a file row's thread count says thread for one and threads otherwise (covered 0)
+      ✘ the place of { kind: 'removed', left: 11 } in a renamed file (covered 0)
+      ✘ the place of { kind: 'added', right: 11 } in a renamed file (covered 0)
+      ✘ the place of { kind: 'unchangedOnLeft', …(2) } in a renamed file (covered 0)
+      ✘ the place of { kind: 'unchangedOnRight', …(2) } in a renamed file (covered 0)
+      ✘ a removed line of a file that was not renamed names its own path (covered 0)
+      ✘ the edit button's hover text while null (covered 0)
+      ✘ the edit button's hover text while sending (covered 0)
+      ✘ the edit button's hover text while aiWorking (covered 0)
+      ✘ the delete button's hover text while null (covered 0)
+      ✘ the delete button's hover text while sending (covered 0)
+      ✘ the delete button's hover text while aiWorking (covered 0)
+    saving.test.ts
+      ✘ save: Written sends the file text, marks it saved as the file text, takes git's list and records the format outcome (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): git lists only it, as resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): another file is resolved (covered 0)
+      ✘ save writes the Result as shown only for a file git lists as resolved (plan §2 #69): it is resolved and another is not (covered 0)
+      ✘ save without unsaved work formats but sends nothing (covered 0)
+      ✘ save goes on whatever formatting answers, and an editor without an outcome records none (covered 0)
+      ✘ a save while a save of the same file runs is ignored; typing during the write keeps the dot (covered 0)
+      ✘ after dropStop a save's and a finish's late replies change nothing, and a new claim on the path outlives the old one (covered 0)
+      ✘ claimWrite runs nothing while the path is held; whileWriting joins a held path, and the path is free only once every write ended (covered 0)
+      ✘ a finish that ends while a save of the same file runs leaves that save's claim in place (covered 0)
+      ✘ a save whose formatting still runs when another write of the same file starts writes nothing (covered 0)
+      ✘ finish writes the Result as shown and marks it saved as shown (covered 0)
+      ✘ afterWrite takes git's list and says whether the write landed; a disk change gives its notice and reloads the file (covered 0)
+      ✘ a save refused because the file changed on disk marks nothing saved and shows the disk view (covered 0)
+      ✘ a failed save keeps the dot, is reported in words, and the next save clears it (covered 0)
+      ✘ a save answered written after dropStop changes nothing (covered 0)
+      ✘ a save answered changed on disk after dropStop changes nothing (covered 0)
+      ✘ a save answered refused after dropStop changes nothing (covered 0)
+      ✘ a save answered moved on after dropStop changes nothing (covered 0)
+      ✘ a finish answered written after dropStop changes nothing (covered 0)
+      ✘ a finish answered changed on disk after dropStop changes nothing (covered 0)
+      ✘ a finish answered refused after dropStop changes nothing (covered 0)
+      ✘ a finish answered moved on after dropStop changes nothing (covered 0)
+      ✘ a take answered written after dropStop changes nothing (covered 0)
+      ✘ a take answered changed on disk after dropStop changes nothing (covered 0)
+      ✘ a take answered refused after dropStop changes nothing (covered 0)
+      ✘ a take answered moved on after dropStop changes nothing (covered 0)
+      ✘ a reset answered written after dropStop changes nothing (covered 0)
+      ✘ a reset answered changed on disk after dropStop changes nothing (covered 0)
+      ✘ a reset answered refused after dropStop changes nothing (covered 0)
+      ✘ a reset answered moved on after dropStop changes nothing (covered 0)
+      ✘ a format answer after dropStop records no format note and writes nothing (covered 0)
+      ✘ a reload still waiting when the stop is dropped leaves opened and problem as the new stop has them: the fetched view (covered 0)
+      ✘ a reload still waiting when the stop is dropped leaves opened and problem as the new stop has them: a failure (covered 0)
+      ✘ a reset whose reload is still waiting when the stop is dropped keeps the new stop's open problem (covered 0)
+      ✘ a save git answers StopMovedOn goes on to the new stop and shows no problem (covered 0)
+      ✘ a finish git answers StopMovedOn goes on to the new stop and shows no problem (covered 0)
+      ✘ a take git answers StopMovedOn goes on to the new stop and shows no problem (covered 0)
+      ✘ a reset git answers StopMovedOn goes on to the new stop and shows no problem (covered 0)
+    serverPins.test.ts
+      ✘ nothing is pinned at first; a toggle pins, a second one unpins (covered 0)
+      ✘ pins are per repository; the other repositories' entries stay as written (covered 0)
+      ✘ a repository left with no pins is removed (covered 0)
+      ✘ with no repository root nothing is pinned and a toggle does nothing (covered 0)
+      ✘ storage holding not JSON reads as no pins, and a toggle starts afresh (covered 0)
+      ✘ storage holding a list reads as no pins, and a toggle starts afresh (covered 0)
+      ✘ storage holding null reads as no pins, and a toggle starts afresh (covered 0)
+      ✘ storage holding a text reads as no pins, and a toggle starts afresh (covered 0)
+      ✘ storage holding keys that are not a list reads as no pins, and a toggle starts afresh (covered 0)
+      ✘ storage holding a list with a number reads as no pins, and a toggle starts afresh (covered 0)
+    serverSetup.test.ts
+      ✘ start: the file list and the settings are in before detection starts (covered 0)
+      ✘ start: no specs means no question and no servers (covered 0)
+      ✘ start: a stored Start answers without a question and starts the served servers (covered 0)
+      ✘ start: a stored Don't start answers without a question and starts nothing (covered 0)
+      ✘ start: an answer stored for another repository does not count (covered 0)
+      ✘ start: without an answer the question lists each found server with its folder, and the added ones (covered 0)
+      ✘ start: Start in the question is stored and starts the servers (covered 0)
+      ✘ start: Don't start in the question is stored and starts nothing (covered 0)
+      ✘ start: Escape stores nothing, so the question comes back next run; the servers show stopped (covered 0)
+      ✘ start: a Start whose write fails starts nothing (covered 0)
+      ✘ start: another question already open stores nothing and leaves that question open (covered 0)
+      ✘ start: as many added servers as found ones still bring the question (covered 0)
+      ✘ start: servers added by hand alone are asked about too (covered 0)
+      ✘ start: a repository whose path is not UTF-8 has no root, so nothing at all (covered 0)
+      ✘ start: a failing host context is logged and asks nothing (covered 0)
+      ✘ focus after a failed start look finds the servers, applies the stored answer and asks nothing (covered 0)
+      ✘ focus after a failed start look never asks a repository without an answer (covered 0)
+      ✘ fixture mode (no host): the files and settings load; no servers, no question (covered 0)
+      ✘ focus: the file list and the settings are refreshed before detection runs again (covered 0)
+      ✘ focus: detection runs again without asking; running servers keep their run and a newly installed one starts (covered 0)
+      ✘ focus: a repository still without an answer is never asked and keeps its servers stopped (covered 0)
+      ✘ focus: an older detection that answers last is dropped (covered 0)
+      ✘ focus: a look that finds no root applies nothing; the running servers keep their run (covered 0)
+      ✘ focus: a detection that rejects is logged and applies nothing (covered 0)
+      ✘ focus: before the start set-up has finished, focus refreshes but does not detect (covered 0)
+      ✘ settings: answering Start applies at once; Don't start stops the running servers; Start again starts them (covered 0)
+      ✘ settings: a Don't start whose write fails leaves the running servers running (covered 0)
+      ✘ settings: a Start whose write fails leaves the servers stopped (covered 0)
+      ✘ settings: Don't start while Don't start is stored keeps a server started by hand (covered 0)
+      ✘ settings: a server the user stopped stays stopped through Don't start and Start (covered 0)
+      ✘ settings: an added server is stored, appears after the found ones and starts under Start; Remove drops it (covered 0)
+      ✘ settings: Remove drops only the server at its index (covered 0)
+      ✘ switch: off stops a running server at once, clears its problems and logs its exit; it stays found (covered 0)
+      ✘ switch: an off server is never asked about nor started: not by Start, not on focus, not at the next start (covered 0)
+      ✘ start: with every found server off and none added there is no question and no server (covered 0)
+      ✘ switch: on again starts the server only under Start (covered 0)
+      ✘ switch: a failed write changes nothing (covered 0)
+      ✘ switch: a server keeps its switch when a second project brings the suffix (covered 0)
+      ✘ switch: another repository's switches do not count (covered 0)
+      ✘ offServers: the keys switched off under this root; none without a root or an entry (covered 0)
+      ✘ the add form: Command splits on spaces, File types on commas or spaces with leading dots dropped (covered 0)
+      ✘ the add form: a file type with a dot inside can never match a file, so it gives null (covered 0)
+      ✘ the add form: a server's fields are its command joined by spaces, its file types by commas (covered 0)
+      ✘ the add form: oxfmt from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: Biome from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: oxlint from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: TypeScript from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: eslint from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: rust-analyzer from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: gopls from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: ruff from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: ty from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: basedpyright from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: pyright from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: Phpactor from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: Intelephense from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: clangd from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: Deno from the list parses back to its own command and file types (covered 0)
+      ✘ the add form: bash-language-server from the list parses back to its own command and file types (covered 0)
+    settings.test.ts
+      ✘ antialiasing is shown on Linux platforms only (covered 0)
+      ✘ before any read the servers entry is empty, and the first load sends it so (covered 0)
+      ✘ a loaded servers entry is in use and survives a theme change, sent back in current (covered 0)
+      ✘ setServerAnswer and setAddedServers send the settings in use and adopt the reply (covered 0)
+      ✘ setServerSwitch sends the settings in use, the key and on, and adopts the reply (covered 0)
+      ✘ a failed server answer is reported as a settings problem and keeps the settings (covered 0)
+      ✘ a load whose only difference is an answer is adopted (covered 0)
+      ✘ a load whose only difference is another answer is adopted (covered 0)
+      ✘ a load whose only difference is one more answer is adopted (covered 0)
+      ✘ a load whose only difference is an answer for another root is adopted (covered 0)
+      ✘ a load whose only difference is one server fewer is adopted (covered 0)
+      ✘ a load whose only difference is one server more is adopted (covered 0)
+      ✘ a load whose only difference is a shorter command is adopted (covered 0)
+      ✘ a load whose only difference is a command word is adopted (covered 0)
+      ✘ a load whose only difference is a longer command is adopted (covered 0)
+      ✘ a load whose only difference is fewer file types is adopted (covered 0)
+      ✘ a load whose only difference is a file type is adopted (covered 0)
+      ✘ a load that differs only in off (no server switched off) is adopted (covered 0)
+      ✘ a load that differs only in off (another server switched off) is adopted (covered 0)
+      ✘ a load that differs only in off (one more server switched off) is adopted (covered 0)
+      ✘ a load that differs only in off (a server switched off under another root) is adopted (covered 0)
+      ✘ a load that differs only in off (one more root with servers switched off) is adopted (covered 0)
+      ✘ a load whose only difference is the action a key belongs to is adopted (covered 0)
+      ✘ a load of the same servers entry keeps the settings in use (covered 0)
+      ✘ before any read the agent entry is all defaults (null), sent so by the first load (covered 0)
+      ✘ setAgent sends the settings in use and the entry as given, nulls included, and adopts the reply (covered 0)
+      ✘ a failed setAgent is reported as a settings problem and keeps the settings (covered 0)
+      ✘ a load whose only difference is a command given is adopted (covered 0)
+      ✘ a load whose only difference is a command back to the default is adopted (covered 0)
+      ✘ a load whose only difference is a first message given is adopted (covered 0)
+      ✘ a load whose only difference is another first message is adopted (covered 0)
+      ✘ a load of the same agent entry (the defaults) keeps the settings in use (covered 0)
+      ✘ a load of the same agent entry (a command and a first message) keeps the settings in use (covered 0)
+    settingsStore.test.ts
+      ✘ the settings view gets the store its window root registered, and nothing before that (covered 0)
+      ✘ the page's theme attribute and color-scheme follow the theme in use, a light editor theme light (covered 0)
+    stops.test.ts
+      ✘ a new stop drops every opened file, choice, side taken, notice, problem and the shown file, and shows the files (covered 0)
+      ✘ the list runs after the opens are bumped, so a load still running for the old stop lands nowhere (covered 0)
+      ✘ a write still running for the old stop is dropped: its claim is gone, marked overtaken, and its stop dropped (covered 0)
+      ✘ moved on outside with unsaved edits: one notice names the operation and every dropped file (covered 0)
+      ✘ moved on outside without unsaved edits, or continued with them, gives no notice (covered 0)
+      ✘ continued to a stop that lists no file shows git's message, naming the new stop's operation, and keeps it for the stop view (covered 0)
+      ✘ continued to a stop with files, or one whose list failed, shows no message (covered 0)
+      ✘ moved on outside to a stop that lists no file shows no message (covered 0)
+      ✘ moved on outside from a stop that recorded no operation: the notice says Git moved on (covered 0)
+      ✘ a Mark resolved question waiting when the stop ends ends with it: a Yes afterwards sends no finishFile (covered 0)
+      ✘ an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing (covered 0)
+      ✘ a question that is not about the stop stays open across it (covered 0)
+    store.test.ts
+      ~ useAppStore throws before createAppStore, then returns the created store (covered 63)
+      ✘ loading the list opens the first file the editor can show and logs file.loaded (covered 0)
+      ✘ an empty list opens nothing (covered 0)
+      ✘ a rejected list opens nothing, resolves, and shows an Unexpected list problem (covered 0)
+      ✘ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (covered 0)
+      ✘ re-clicking the shown file keeps the problem and lets a pending load win (covered 0)
+      ✘ switching to an opened file wins over a load that resolves later and clears the problem (covered 0)
+      ✘ a later open wins when the earlier load resolves last (covered 0)
+      ✘ a stale failed open is logged but shows no problem (covered 0)
+      ✘ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 0)
+      ✘ a rejected load is an Unexpected problem and keeps the previous file (covered 0)
+      ✘ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (covered 0)
+      ✘ a finish of a file no longer shown does not switch files (covered 0)
+      ✘ settings open and close; picking a file while they show closes them and shows it, the shown file too (covered 0)
+      ✘ screen: a server's log opens from the files or from settings, and Back returns to the files (covered 0)
+      ✘ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 0)
+      ✘ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 0)
+      ✘ a file the user opens while a finish runs wins over the next file, though still loading (covered 0)
+      ✘ a file the user opens while a take runs wins over the next file, though still loading (covered 0)
+      ✘ a finish with work left asks; Back writes nothing and stays, Save writes the text (covered 0)
+      ✘ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (covered 0)
+      ✘ a rejected finish is an Unexpected problem (covered 0)
+      ✘ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 0)
+      ✘ closing asks only with unsaved work and answers with the choice (covered 0)
+      ✘ everything is resolved only when every listed file is (covered 0)
+      ✘ reset of A replaces only A in place with a new object and keeps B opened (covered 0)
+      ✘ a failed reset keeps the current file and names the path (covered 0)
+      ✘ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 0)
+      ✘ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 0)
+      ✘ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 0)
+      ✘ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (covered 0)
+      ✘ a list of files the editor cannot show opens the first one's choice and loads nothing (covered 0)
+      ✘ opening a file the editor cannot show describes it once and never loads it (covered 0)
+      ✘ a failed describe is a failed open of that file and shows no choice (covered 0)
+      ✘ taking a side updates the list, marks only that file taken, and clears a problem about it (covered 0)
+      ✘ a take keeps a problem about another file (covered 0)
+      ✘ a failed take keeps the list and the choice and names the file (covered 0)
+      ✘ reset of a taken choice forgets only its side at once and describes the file again (covered 0)
+      ✘ a failed describe after a reset is a failed open; opening the file again describes it (covered 0)
+      ✘ choices count toward everything resolved (covered 0)
+      ✘ a take on the shown file opens the next unresolved file, wrapping to the top (covered 0)
+      ✘ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 0)
+      ✘ a list refresh changes the marks only: same file shown, same views, another file's problem kept (covered 0)
+      ✘ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 0)
+      ✘ a running change to an opened file rebuilds it and drops its side taken (edits: true) (covered 0)
+      ✘ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 0)
+      ✘ a change to a file that is not shown gives only its notice and its mark (covered 0)
+      ✘ changes reported by the first list are start notices; the file then opens from the disk (covered 0)
+      ✘ a newer change replaces the notice for its path; dismissNotice removes just one (covered 0)
+      ✘ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 0)
+      ✘ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 0)
+      ✘ a change git could not stage is a warning notice, not a problem (covered 0)
+      ✘ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (covered 0)
+      ✘ a take refused because the file changed on disk shows the change and the disk view (covered 0)
+      ✘ a reset refused because the file changed on disk shows the change and the disk view (covered 0)
+      ✘ finish, take and reset forward the disk version they are given (covered 0)
+      ✘ a take on a deleted-side file shown from the disk shows yamt's view again (covered 0)
+      ✘ settings start with the start theme and the default keys, before any file is read (covered 0)
+      ✘ a load on focus applies a file changed by hand since the last load (covered 0)
+      ✘ start-up loads the file list and the settings; focus loads both again (covered 0)
+      ✘ a loaded file sets the theme and keys every opened file follows (covered 0)
+      ✘ a failed load or change keeps the settings in use and shows a settings problem (covered 0)
+      ✘ key problems in the file show one settings problem, which a clean read clears (covered 0)
+      ✘ setTheme sends the settings in use and applies the reply (covered 0)
+      ✘ setAntialiasing sends the settings in use with the new value and applies the reply (covered 0)
+      ✘ a load whose only difference is the antialiasing is adopted (covered 0)
+      ✘ a key another action holds asks; Move writes both changes in one call (covered 0)
+      ✘ Cancel on the clash question writes nothing (covered 0)
+      ✘ each key edit sends only the changed actions, as key texts (covered 0)
+      ✘ an identical load keeps the settings object and does not show the same key problems again (covered 0)
+      ✘ a key problem shown again replaces a settings failure the file no longer has (covered 0)
+      ✘ a move to a file with the same broken keys names the new path in the Keys problem (covered 0)
+      ✘ a load that started before a change and answers after it does not put the old file back (covered 0)
+      ✘ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 0)
+      ✘ moveSettings sends the path with the settings in use and uses the file found there (covered 0)
+      ✘ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (covered 0)
+      ✘ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (covered 0)
+      ✘ a key press another handler already took does not toggle the list (covered 0)
+      ✘ while a question waits the key does nothing; once answered it toggles again (covered 0)
+      ✘ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 0)
+      ✘ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 0)
+      ✘ with two toggle-file-list keys, each one toggles the list (covered 0)
+      ✘ toggleCollapsing flips collapsing and keeps the choice in the window's storage (covered 0)
+      ✘ a save while a reset of the same file runs is ignored (covered 0)
+      ✘ a save while a finish of the same file runs is ignored (covered 0)
+      ✘ a save whose formatting still runs when a reset of the same file lands writes nothing (covered 0)
+      ✘ a save whose formatting still runs when a finish of the same file lands writes nothing (covered 0)
+      ✘ the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save (covered 0)
+      ✘ a focus list that finds git moved on outside drops the old stop, names the dropped edits, and opens the new stop's first file (covered 0)
+      ✘ a save git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once (covered 0)
+      ✘ a take git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once (covered 0)
+      ✘ Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened (covered 0)
+      ✘ a take git refuses stays on the file: no move to the next unresolved one (covered 0)
+      ✘ an Abort git has not answered yet makes Continue running and refuses the close (covered 0)
+      ✘ a Continue git has not answered yet makes Abort running and refuses the close (covered 0)
+      ✘ a stop without files shows git's message in the stop view, not the bar; settings hide it and later problems keep it (covered 0)
+    toolbarButtons.test.ts
+      ✘ Abort merge, Undo and Redo start hidden; toggling stores each decided button (covered 0)
+      ✘ a second start over the same storage keeps the choice, Abort merge shown included (covered 0)
+      ✘ a hidden list stored before Abort merge existed ([]) keeps the seven decisions and hides Abort merge (covered 0)
+      ✘ a hidden list stored before Abort merge existed (["undo"]) keeps the seven decisions and hides Abort merge (covered 0)
+      ✘ a hidden list stored before Abort merge existed (["undo","redo"]) keeps the seven decisions and hides Abort merge (covered 0)
+      ✘ a hidden list stored before Abort merge existed (["next","collapse"]) keeps the seven decisions and hides Abort merge (covered 0)
+      ✘ a hidden list stored before Abort merge existed is rewritten as decisions at the first toggle (covered 0)
+      ✘ a hidden list stored before Abort merge existed decides exactly its seven ids, no later button (covered 0)
+      ✘ a hidden list from before drops ids yamt does not know and collapses duplicates (covered 0)
+      ✘ stored decisions drop ids yamt does not know and values that are not true or false (covered 0)
+      ✘ the toolbar order puts Continue and Abort merge first and the collapse toggle after Next change (covered 0)
+      ✘ the menu lists Continue and Abort only while git records an operation, labelled by it (covered 0)
+      ✘ the toolbar shows Continue and Abort only while git records an operation and the user shows them (covered 0)
+      ✘ Continue starts shown, its toggle is stored like the others, and the Abort merge decision stays (covered 0)
+      ✘ a stored value that is not JSON hides Abort merge, Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a number hides Abort merge, Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is a string hides Abort merge, Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is null hides Abort merge, Undo and Redo, as at first (covered 0)
+      ✘ a stored value that is an array holding a non-string hides Abort merge, Undo and Redo, as at first (covered 0)
+      ✘ a missing key hides Abort merge, Undo and Redo and writes nothing until a toggle (covered 0)
+      ✘ a storage that throws hides Abort merge, Undo and Redo, still toggles in memory and logs warnings (covered 0)
+      ✘ a storage that throws only on write keeps the toggle and logs the write's message (covered 0)
+    useCompareController.test.ts
+      ✘ a failed column becomes one notice entry with its line; formatted and unchanged ones none (covered 0)
+      ✘ both columns failing give left then right; none failing gives an empty list (covered 0)
+      ✘ each settled column is saved, and each reply is shown only once its save answered (covered 0)
+    useMarkdown.test.ts
+      ✘ a null host builds nothing, even when the text changes (covered 0)
+      ✘ a set host shows the text, a text change shows again, and stopping the scope destroys (covered 0)
+      ✘ a host swap destroys the old view and shows the text in a new one; a null host only destroys (covered 0)
+    useMergeController.test.ts
+      ✘ unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change (covered 0)
+      ✘ without data or hosts there is no editor: no snapshot, nothing unsaved (covered 0)
+      ✘ the editor is read-only as the view says, and is rebuilt when that changes (covered 0)
+      ✘ the editor is built with the preferences in use and follows a change without a rebuild (covered 0)
+      ✘ a preferences change before the file loaded reaches the editor built later (covered 0)
+      ✘ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (covered 0)
+      ✘ flipping collapsing before the file loaded reaches no editor and throws nothing (covered 0)
+      ✘ an editor built while collapsing is off is told so, and a file loaded later follows the current choice (covered 0)
+      ✘ flipping collapsing tells every live editor once, and a destroyed one never (covered 0)
+      ✘ a preferences change never resets collapsing (covered 0)
+      ✘ an editor is built showing the minimap as the view says, and follows a change without a rebuild (covered 0)
+      ✘ a minimap shown before the file loaded reaches no editor, and the editor built later shows it (covered 0)
+      ✘ problems: the editor's counts when built, then each change it reports; null once it is gone (covered 0)
+      ✘ summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change (covered 0)
+      ✘ problems and format are null while no editor is built (covered 0)
+      ✘ format answers with the outcome of the editor in use, a rebuilt one after a rebuild (covered 0)
+      ✘ the editor gets the language servers in use and is rebuilt when they change (covered 0)
+      ✘ a go-to asked before the editor exists waits, is applied once right after the build, and never again on a rebuild (covered 0)
+      ✘ resultVersion: 0 with no editor, then bumped at each build and each Result change the editor reports (covered 0)
+      ✘ lineUp is null while no editor exists, else the line-up of the editor in use (covered 0)
+    usePaneDividers.test.ts
+      ✘ a press on the handle itself or on the strip's svg root is a divider press (covered 0)
+      ✘ an icon, its nested svg or a wave join keeps its press for the editor (covered 0)
+      ✘ no handle accepts nothing (covered 0)
+      ✘ a press measures once and each move sets the dragged split of its boundary (covered 0)
+      ✘ a press that cannot measure gives no drag (covered 0)
+      ✘ reset resets the split (covered 0)
+      ✘ each divider's listeners drag its own boundary (covered 0)
+    useRangeController.test.ts
+      ✘ a texts reply builds one controller on the hosts with the path, both texts and the preferences (covered 0)
+      ✘ the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view (covered 0)
+      ✘ the controller is built with the file's threads at that moment, and shown each later change of them (covered 0)
+      ✘ a thread change calls showThreads and never setCollapsed (catches runs recomputed on an add) (covered 0)
+      ✘ the controller is built with the store's collapsing at that moment (covered 0)
+      ✘ a toggle reaches every live controller through setCollapsed with no rebuild; a file opened after it builds with the new state (covered 0)
+      ✘ nothing builds before the thread list was read once; then it builds with the threads read (covered 0)
+      ✘ a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again) (covered 0)
+      ✘ the controller gets the line events and its hosts reach threadHosts (covered 0)
+      ✘ a go-to waits for the load, the hosts and the thread list, is applied once at build, then goes straight to the controller (covered 0)
+      ✘ a go-to after the view unmounted reaches no controller (covered 0)
+      ✘ a binary reply builds no controller and shows its sentence (covered 0)
+      ✘ a tooLarge reply builds no controller and shows its sentence (covered 0)
+      ✘ a notUtf8 reply builds no controller and shows its sentence (covered 0)
+      ✘ a modeOnly reply builds no controller and shows its sentence (covered 0)
+      ✘ a kindChanged reply builds no controller and shows its sentence (covered 0)
+      ✘ a submodule reply builds no controller and shows its sentence (covered 0)
+      ✘ the binary sentence is the one rangeText words (covered 0)
+      ✘ a reply arriving after unmount is dropped: nothing built, nothing shown (covered 0)
+      ✘ a failed load builds nothing and stays loading (covered 0)
+      ✘ preferences changed before the controller exists reach it at build, not through a missing controller (covered 0)
+      ✘ no hosts while the left ref is still null (catches a column built on a half-mounted view) (covered 0)
+      ✘ no hosts while the right ref is still null (catches a column built on a half-mounted view) (covered 0)
+      ✘ no hosts while the strip ref is still null (catches a column built on a half-mounted view) (covered 0)
+      ~ a press on a line number starts a draft in that file only; toggle opens and closes (covered 57)
+      ~ a file waits for the thread list, then builds once it was read (catches columns stuck empty) (covered 57)
+      ~ a file waits for the thread list, then builds once it was failed (catches columns stuck empty) (covered 57)
+    views.test.ts
+      ✘ deleted on side null with a {"kind":"Stages","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"Disk","text":"m\n"} middle is editable: true (covered 0)
+      ✘ deleted on side null with a {"kind":"DiskNotText","found":"Binary"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"Stages","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side local with a {"kind":"Disk","text":"m\n"} middle is editable: false (covered 0)
+      ✘ deleted on side remote with a {"kind":"DiskNotText","found":"Deleted"} middle is editable: false (covered 0)
+    windowStorage.test.ts
+      ✘ a missing key gives the fallback and writes nothing (covered 0)
+      ✘ a stored value is read through the caller's read (covered 0)
+      ✘ a change is written through the caller's write before the assignment returns (covered 0)
+      ✘ a storage that throws gives the fallback and logs under the caller's event name (covered 0)
+      ✘ stored JSON is parsed; text that is not JSON gives null (covered 0)
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:29:23
+-   const NULL_SHORT_ID = "0000000";
++   const NULL_SHORT_ID = "";
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:31:71
+-   const ENTRY_KINDS: Readonly<Record<Generated.RangeEntryKind, true>> = {
+-     file: true,
+-     executable: true,
+-     link: true,
+-     submodule: true,
+-   };
++   const ENTRY_KINDS: Readonly<Record<Generated.RangeEntryKind, true>> = {};
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:34:9
+-     link: true,
++     link: false,
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:60:14
+-       v.object({ kind: v.literal("modified") }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:35:14
+-     submodule: true,
++     submodule: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:33:15
+-     executable: true,
++     executable: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:27:22
+-   const DEFAULT_CASE = "review";
++   const DEFAULT_CASE = "";
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:39:9
+-     left: true,
++     left: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:48:32
+-       v.object({ kind: v.literal("named"), name: v.string() }),
++       v.object({ kind: v.literal(""), name: v.string() }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:38:67
+-   const RANGE_SIDES: Readonly<Record<Generated.RangeSides, true>> = {
+-     left: true,
+-     right: true,
+-     both: true,
+-   };
++   const RANGE_SIDES: Readonly<Record<Generated.RangeSides, true>> = {};
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:46:67
+-   const RANGE_SIDE: v.GenericSchema<Generated.RangeSide> = v.object({
+-     label: v.variant("kind", [
+-       v.object({ kind: v.literal("named"), name: v.string() }),
+-       v.object({ kind: v.literal("mergeBase"), left: v.string(), right: v.string() }),
+-     ]),
+-     short_id: v.string(),
+-     subject: v.string(),
+-   });
++   const RANGE_SIDE: v.GenericSchema<Generated.RangeSide> = v.object({});
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:40:10
+-     right: true,
++     right: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:49:32
+-       v.object({ kind: v.literal("mergeBase"), left: v.string(), right: v.string() }),
++       v.object({ kind: v.literal(""), left: v.string(), right: v.string() }),
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixtureRange.ts:47:28
+-     label: v.variant("kind", [
+-       v.object({ kind: v.literal("named"), name: v.string() }),
+-       v.object({ kind: v.literal("mergeBase"), left: v.string(), right: v.string() }),
+-     ]),
++     label: v.variant("kind", []),
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:32:9
+-     file: true,
++     file: false,
+Ran all tests for this mutant.
+
+[Survived] BooleanLiteral
+src/ipc/fixtureRange.ts:41:9
+-     both: true,
++     both: false,
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:47:20
+-     label: v.variant("kind", [
++     label: v.variant("", [
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:58:21
+-     change: v.variant("kind", [
++     change: v.variant("", [
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:48:14
+-       v.object({ kind: v.literal("named"), name: v.string() }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:55:69
+-   const RANGE_ENTRY: v.GenericSchema<Generated.RangeEntry> = v.object({
+-     id: v.number(),
+-     path: v.string(),
+-     change: v.variant("kind", [
+-       v.object({ kind: v.literal("added") }),
+-       v.object({ kind: v.literal("modified") }),
+-       v.object({ kind: v.literal("deleted") }),
+-       v.object({ kind: v.literal("renamed"), old_path: v.string() }),
+-     ]),
+-     lines: v.variant("kind", [
+-       v.object({ kind: v.literal("counted"), added: v.number(), removed: v.number() }),
+-       v.object({ kind: v.literal("notCounted") }),
+-     ]),
+-   });
++   const RANGE_ENTRY: v.GenericSchema<Generated.RangeEntry> = v.object({});
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:49:14
+-       v.object({ kind: v.literal("mergeBase"), left: v.string(), right: v.string() }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:59:14
+-       v.object({ kind: v.literal("added") }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixtureRange.ts:58:29
+-     change: v.variant("kind", [
+-       v.object({ kind: v.literal("added") }),
+-       v.object({ kind: v.literal("modified") }),
+-       v.object({ kind: v.literal("deleted") }),
+-       v.object({ kind: v.literal("renamed"), old_path: v.string() }),
+-     ]),
++     change: v.variant("kind", []),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:59:32
+-       v.object({ kind: v.literal("added") }),
++       v.object({ kind: v.literal("") }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:62:14
+-       v.object({ kind: v.literal("renamed"), old_path: v.string() }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:62:32
+-       v.object({ kind: v.literal("renamed"), old_path: v.string() }),
++       v.object({ kind: v.literal(""), old_path: v.string() }),
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixtureRange.ts:64:28
+-     lines: v.variant("kind", [
+-       v.object({ kind: v.literal("counted"), added: v.number(), removed: v.number() }),
+-       v.object({ kind: v.literal("notCounted") }),
+-     ]),
++     lines: v.variant("kind", []),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:61:14
+-       v.object({ kind: v.literal("deleted") }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:61:32
+-       v.object({ kind: v.literal("deleted") }),
++       v.object({ kind: v.literal("") }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:64:20
+-     lines: v.variant("kind", [
++     lines: v.variant("", [
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:70:68
+-   const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
++   const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("", [
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:65:14
+-       v.object({ kind: v.literal("counted"), added: v.number(), removed: v.number() }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:65:32
+-       v.object({ kind: v.literal("counted"), added: v.number(), removed: v.number() }),
++       v.object({ kind: v.literal(""), added: v.number(), removed: v.number() }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:60:32
+-       v.object({ kind: v.literal("modified") }),
++       v.object({ kind: v.literal("") }),
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixtureRange.ts:70:76
+-   const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", [
+-     v.object({
+-       kind: v.literal("texts"),
+-       left: v.string(),
+-       right: v.string(),
+-       differences: v.array(DIFFERENCE),
+-       mode: v.variant("kind", [
+-         v.object({ kind: v.literal("same") }),
+-         v.object({ kind: v.literal("changed"), old: ENTRY_KIND, new: ENTRY_KIND }),
+-       ]),
+-     }),
+-     v.object({ kind: v.literal("binary") }),
+-     v.object({ kind: v.literal("tooLarge"), limit: v.number() }),
+-     v.object({ kind: v.literal("notUtf8"), sides: memberOf(RANGE_SIDES) }),
+-     v.object({ kind: v.literal("modeOnly"), old: ENTRY_KIND, new: ENTRY_KIND }),
+-     v.object({ kind: v.literal("kindChanged"), old: ENTRY_KIND, new: ENTRY_KIND }),
+-     v.object({
+-       kind: v.literal("submodule"),
+-       old: v.nullable(v.string()),
+-       new: v.nullable(v.string()),
+-     }),
+-   ]);
++   const RANGE_FILE: v.GenericSchema<Generated.RangeFile> = v.variant("kind", []);
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:66:14
+-       v.object({ kind: v.literal("notCounted") }),
++       v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:66:32
+-       v.object({ kind: v.literal("notCounted") }),
++       v.object({ kind: v.literal("") }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:77:16
+-         v.object({ kind: v.literal("same") }),
++         v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:71:12
+-     v.object({
+-       kind: v.literal("texts"),
+-       left: v.string(),
+-       right: v.string(),
+-       differences: v.array(DIFFERENCE),
+-       mode: v.variant("kind", [
+-         v.object({ kind: v.literal("same") }),
+-         v.object({ kind: v.literal("changed"), old: ENTRY_KIND, new: ENTRY_KIND }),
+-       ]),
+-     }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:76:21
+-       mode: v.variant("kind", [
++       mode: v.variant("", [
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixtureRange.ts:76:29
+-       mode: v.variant("kind", [
+-         v.object({ kind: v.literal("same") }),
+-         v.object({ kind: v.literal("changed"), old: ENTRY_KIND, new: ENTRY_KIND }),
+-       ]),
++       mode: v.variant("kind", []),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:77:34
+-         v.object({ kind: v.literal("same") }),
++         v.object({ kind: v.literal("") }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:78:16
+-         v.object({ kind: v.literal("changed"), old: ENTRY_KIND, new: ENTRY_KIND }),
++         v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:72:21
+-       kind: v.literal("texts"),
++       kind: v.literal(""),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:78:34
+-         v.object({ kind: v.literal("changed"), old: ENTRY_KIND, new: ENTRY_KIND }),
++         v.object({ kind: v.literal(""), old: ENTRY_KIND, new: ENTRY_KIND }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:81:30
+-     v.object({ kind: v.literal("binary") }),
++     v.object({ kind: v.literal("") }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:81:12
+-     v.object({ kind: v.literal("binary") }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:83:12
+-     v.object({ kind: v.literal("notUtf8"), sides: memberOf(RANGE_SIDES) }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:82:30
+-     v.object({ kind: v.literal("tooLarge"), limit: v.number() }),
++     v.object({ kind: v.literal(""), limit: v.number() }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:82:12
+-     v.object({ kind: v.literal("tooLarge"), limit: v.number() }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:84:12
+-     v.object({ kind: v.literal("modeOnly"), old: ENTRY_KIND, new: ENTRY_KIND }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:93:23
+-   const CASE = v.object({
+-     start: v.object({
+-       range: v.string(),
+-       left: RANGE_SIDE,
+-       right: RANGE_SIDE,
+-       files: v.array(RANGE_ENTRY),
+-     }),
+-     files: v.array(RANGE_FILE),
+-   });
++   const CASE = v.object({});
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:86:12
+-     v.object({
+-       kind: v.literal("submodule"),
+-       old: v.nullable(v.string()),
+-       new: v.nullable(v.string()),
+-     }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:83:30
+-     v.object({ kind: v.literal("notUtf8"), sides: memberOf(RANGE_SIDES) }),
++     v.object({ kind: v.literal(""), sides: memberOf(RANGE_SIDES) }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:87:21
+-       kind: v.literal("submodule"),
++       kind: v.literal(""),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:94:19
+-     start: v.object({
+-       range: v.string(),
+-       left: RANGE_SIDE,
+-       right: RANGE_SIDE,
+-       files: v.array(RANGE_ENTRY),
+-     }),
++     start: v.object({}),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:85:30
+-     v.object({ kind: v.literal("kindChanged"), old: ENTRY_KIND, new: ENTRY_KIND }),
++     v.object({ kind: v.literal(""), old: ENTRY_KIND, new: ENTRY_KIND }),
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/fixtureRange.ts:84:30
+-     v.object({ kind: v.literal("modeOnly"), old: ENTRY_KIND, new: ENTRY_KIND }),
++     v.object({ kind: v.literal(""), old: ENTRY_KIND, new: ENTRY_KIND }),
+Ran all tests for this mutant.
+
+[Survived] ObjectLiteral
+src/ipc/fixtureRange.ts:85:12
+-     v.object({ kind: v.literal("kindChanged"), old: ENTRY_KIND, new: ENTRY_KIND }),
++     v.object({}),
+Ran all tests for this mutant.
+
+[Survived] OptionalChaining
+src/ipc/fixtureRange.ts:126:9
+-       if (loaded?.kind !== "texts") {
++       if (loaded.kind !== "texts") {
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ipc/fixtureRange.ts:127:14
+-         return [];
++         return ["Stryker was here"];
+Ran all tests for this mutant.
+
+[NoCoverage] BlockStatement
+src/ipc/index.ts:139:80
+-   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {
+-     return IN_APP ? guardWindowClose(mayClose) : Promise.resolve();
+-   }
++   export function onWindowClose(mayClose: () => Promise<boolean>): Promise<void> {}
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:135:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = true;
+Ran all tests for this mutant.
+
+[Survived] EqualityOperator
+src/ipc/index.ts:135:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE !== "tauri";
+Ran all tests for this mutant.
+
+[Survived] ConditionalExpression
+src/ipc/index.ts:135:16
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = false;
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ipc/index.ts:135:54
+-   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "tauri";
++   const IN_APP = import.meta.env.VITE_CHUNK_SOURCE === "";
+Ran all tests for this mutant.
+
+Ran 4.49 tests per mutant on average.
+-----------------|------------------|----------|-----------|------------|----------|----------|
+                 | % Mutation score |          |           |            |          |          |
+File             |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+All files        |  65.08 |   65.43 |      123 |         0 |         65 |        1 |        0 |
+ fixtureRange.ts |  55.47 |   55.47 |       76 |         0 |         61 |        0 |        0 |
+ index.ts        |   0.00 |    0.00 |        0 |         0 |          4 |        1 |        0 |
+ rangeDomain.ts  | 100.00 |  100.00 |       40 |         0 |          0 |        0 |        0 |
+ tauriRange.ts   | 100.00 |  100.00 |        7 |         0 |          0 |        0 |        0 |
+-----------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m10:53:22 (3046112) INFO MutationTestExecutor[39m Done in 34 seconds.
