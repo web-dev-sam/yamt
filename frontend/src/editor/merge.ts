@@ -112,11 +112,8 @@ export class MergeController {
     }
   });
 
-  readonly #serverSync = EditorView.updateListener.of((update) => {
+  readonly #serverAndSavedSync = EditorView.updateListener.of((update) => {
     this.#server?.updated(update);
-  });
-
-  readonly #savedSync = EditorView.updateListener.of((update) => {
     this.#saved.updated(update);
   });
 
@@ -136,8 +133,7 @@ export class MergeController {
         this.#repaint,
         this.#statusSync,
         problemsField,
-        this.#serverSync,
-        this.#savedSync,
+        this.#serverAndSavedSync,
         this.#resultSync,
       ],
       repaint: this.#repaint,
@@ -207,7 +203,9 @@ export class MergeController {
 
   goTo({ pane, match }: MergeGoTo): void {
     goTo(this.#views[pane], match);
-    this.#frame.realign(pane);
+    if (match !== null) {
+      this.#frame.realign(pane);
+    }
   }
 
   lineUp(): ResultLineUp {
