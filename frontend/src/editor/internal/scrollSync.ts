@@ -5,6 +5,7 @@ import type { Pane, PaneViews } from "./geometry";
 
 export type Anchor<P extends string> = Readonly<Record<P, number>>;
 type SpanRow = Readonly<Record<Pane, Span>>;
+type Pass = "first" | "retry" | "last";
 export type ScrollPane = {
   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
   readonly documentPadding: { readonly top: number };
@@ -71,6 +72,7 @@ export class ScrollSync<P extends string> {
   readonly #requestFrame: () => void;
   readonly #listeners = new AbortController();
   #source: P | null = null;
+  #pass: Pass = "first";
   #followed = false;
   #echoes: readonly P[] = [];
   #clearEchoes: number | null = null;
@@ -90,6 +92,7 @@ export class ScrollSync<P extends string> {
         () => {
           if (!this.#followed && !this.#echoes.includes(pane)) {
             this.#source = pane;
+            this.#pass = "first";
           }
           requestFrame();
         },
@@ -101,14 +104,17 @@ export class ScrollSync<P extends string> {
   follow(source: P): void {
     this.#source = source;
     this.#followed = true;
+    this.#pass = "first";
     this.#syncedTops = null;
     this.#requestFrame();
   }
 
   sync(anchors: readonly Anchor<P>[]): void {
     const source = this.#source;
+    const pass = this.#pass;
     this.#source = null;
     this.#followed = false;
+    this.#pass = "first";
     const views = this.#views;
     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.get(source)) {
       return;
@@ -126,20 +132,35 @@ export class ScrollSync<P extends string> {
       cancelAnimationFrame(this.#clearEchoes);
     }
     this.#clearEchoes = requestAnimationFrame(() => {
-      this.#endEchoes(source, tops);
+      this.#endEchoes(source, tops, pass);
     });
   }
 
   // WebKitGTK 2.54 can pull a follower back while CodeMirror swaps its viewport, and the moved follower's
   // scroll event is an echo (docs/plan.md §2 #82, docs/slices/briefs/range-collapse-columns-rework-2.md):
-  // its source leads once more.
-  #endEchoes(source: P, tops: ReadonlyMap<P, number>): void {
+  // its source leads once more. A follower moved again after that retry is the user's scroll
+  // (briefs/range-collapse-columns-rework-3.md): it leads, and its sync retries nothing.
+  #endEchoes(source: P, tops: ReadonlyMap<P, number>, pass: Pass): void {
     this.#clearEchoes = null;
     const views = this.#views;
-    const moved = this.#echoes.some((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
+    const moved = this.#echoes.find((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
     this.#echoes = [];
-    if (moved && !this.#followed) {
-      this.follow(source);
+    if (moved === undefined || this.#followed) {
+      return;
+    }
+    switch (pass) {
+      case "first":
+        this.follow(source);
+        this.#pass = "retry";
+        return;
+      case "retry":
+        if (this.#source === null) {
+          this.#source = moved;
+          this.#pass = "last";
+        }
+        return;
+      case "last":
+        return;
     }
   }
 
