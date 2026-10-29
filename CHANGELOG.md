@@ -16,6 +16,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the rest). A "Collapse unchanged fragments" button after Previous/Next turns it off and on; it is the same remembered
   choice as the merge window's. A line with a comment thread is never hidden, and a search match in hidden lines
   shows them.
+- Search every file of the merge window and the range window: Ctrl/Cmd+Shift+S (rebindable, "Toggle search") shows a
+  search above the file list, as VS Code's search view; again hides it, and the query and results stay for the run.
+  - It looks in every pane in full; a match on lines that line up shows once, with an icon per pane that holds it.
+  - Match Case, and one toggle per pane under the box to show only some panes' findings.
+  - Results grouped per file, each group closes and opens; a finding or a group can be dismissed, and Enter in the box
+    brings them back.
+  - A click opens the file at the finding, selected, a collapsed stretch around it shown; a pane icon goes to that pane.
+  - The results follow edits, disk changes and the next stop of an operation; at most 20,000 rows.
+- Scrolling: after a find or a jump to the end, both columns of the range window (and every pane of the merge window)
+  stay lined up, including when one is far from the lines already drawn.
 
 ### Changed
 
