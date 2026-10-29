@@ -66,3 +66,24 @@ clean (`unused` still flags the handle types until the window build). New files 
 Boundary pass (#1700–#1702), correctness pass (#1712, #1713; merge listener order unchanged with `#resultSync` last).
 Mutation run `just mutants f7e2498`: survivors only on older host-null lines (88–92, 98, 119) and `flush` (232).
 Accepted.
+
+## Fix round 2 (session 36, after final run pass 2; `SearchGoToR2`, 9m11s, patch `fb11db9`, `.omp/run/patches/SearchGoToR2.patch`)
+
+#1745: a side-pane icon on an open merge file left the match out of view. Cause (WebKit scroll log): the side's
+`scrollIntoView` wrote first, the reveal then made CodeMirror height-keep the Result and the other side, their scroll
+events came last in the next frame and led the sync, dragging the side back. Fix: `goTo` calls
+`this.#frame.realign(pane)`; `Frame.realign(source)` (was `follow("center")`), `setCollapsed` passes `"center"`.
+Before/after dark/light, Local and Remote: `inView` false → true at +0/+500/+1000 ms, stretch shown; Result row,
+unopened file, range side still in view. 2988 tests. `just mutants fcb17df`: nothing mutated (editor/). Reviews: both
+fail on #1748 (the realign also runs for `match: null`: the hide's keyboard-only go-to makes the Result lead and a side
+inside a zero-height Result span jumps); #1750 (editor guide, promoted); #1749 (browser test, dropped: cannot run here);
+#1751 applied in architecture. Round 3 under the standing Gate B answer (#1744, #1752).
+
+## Fix round 3 (`SearchGoToR3`, 6m51s, patch `6c5c96e`, `.omp/run/patches/SearchGoToR3.patch`)
+
+`goTo` realigns only when `match !== null` (#1748); `editor/AGENTS.md` lines 21/23 (#1750). To stay under the 300-line
+lint limit, `#serverSync` and `#savedSync` merged into `#serverAndSavedSync` (same order; accepted by both lenses).
+WebKit dark, `vueuse-use-magic-keys.ts` (a pending RemoteOnly insertion, zero lines in the Result): Remote scrollTop
+481 → 411 on the hide before, unchanged after, Result focused; #1745 still in view (Local, Remote, Result). 2988
+tests. Re-checks: correctness pass, boundary pass. Accepted. Left a private `dbus-daemon` running (killed by the
+orchestrator with R2's).
