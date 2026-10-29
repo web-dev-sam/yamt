@@ -60,3 +60,9 @@ merge fixture: `resultVersion` 1 after build, +0 cursor click, +1 typing, +0 Arr
 status-only ignore. A new test kills the handle pass-through survivors. 212 files / 2892 tests; typecheck, lint, fmt
 clean (`unused` still flags the handle types until the window build). New files for docs: `editor/merge.ts`,
 `editor/internal/lineUp.ts`.
+
+## Re-check after fix round 1
+
+Boundary pass (#1700–#1702), correctness pass (#1712, #1713; merge listener order unchanged with `#resultSync` last).
+Mutation run `just mutants f7e2498`: survivors only on older host-null lines (88–92, 98, 119) and `flush` (232).
+Accepted.
