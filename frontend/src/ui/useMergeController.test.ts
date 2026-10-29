@@ -23,11 +23,13 @@ const editor = vi.hoisted(() => {
     collapsed: new Array<string>(),
     minimap: new Array<string>(),
     servers: new Array<unknown>(),
+    goTos: new Array<string>(),
     counts: { errors: 0, warnings: 0, other: 0 },
     summary: { conflicts: 0, changes: 0, remembered: 0 },
     countsListener: (_counts: Counts): void => {},
     summaryListener: (_summary: Summary): void => {},
     unsavedListener: (_unsaved: boolean): void => {},
+    resultListener: (): void => {},
   };
   class MergeController {
     readonly #id: number;
@@ -82,6 +84,15 @@ const editor = vi.hoisted(() => {
     onUnsavedChange(listener: (unsaved: boolean) => void): void {
       state.unsavedListener = listener;
     }
+    onResultChange(listener: () => void): void {
+      state.resultListener = listener;
+    }
+    lineUp(): { result: string; editor: number } {
+      return { result: state.text, editor: this.#id };
+    }
+    goTo({ pane, match }: { pane: string; match: { line: number } | null }): void {
+      state.goTos.push(`${this.#id} ${pane} ${match === null ? "keyboard" : match.line}`);
+    }
     destroy(): void {
       state.destroyed += 1;
     }
@@ -103,11 +114,13 @@ afterEach(() => {
     collapsed: [],
     minimap: [],
     servers: [],
+    goTos: [],
     counts: { errors: 0, warnings: 0, other: 0 },
     summary: { conflicts: 0, changes: 0, remembered: 0 },
     countsListener: () => {},
     summaryListener: () => {},
     unsavedListener: () => {},
+    resultListener: () => {},
   });
 });
 
@@ -424,4 +437,73 @@ test("the editor gets the language servers in use and is rebuilt when they chang
   expect(editor.state.servers[0]).toBe(first);
   expect(editor.state.servers[1]).toBe(second);
   expect(editor.state.destroyed).toBe(2);
+});
+
+test("a go-to asked before the editor exists waits, is applied once right after the build, and never again on a rebuild", async () => {
+  const data = shallowRef<FileMergeData | null>(null);
+  const readOnly = shallowRef(false);
+  const { handle } = mount(data, { readOnly });
+  await nextTick();
+
+  handle.goTo({ pane: "left", match: { line: 2, from: 0, to: 1 } });
+  handle.goTo({ pane: "center", match: { line: 4, from: 0, to: 1 } });
+  readOnly.value = true;
+  await nextTick();
+  expect(editor.state.goTos).toEqual([]);
+
+  data.value = await fileData("a\n");
+  await nextTick();
+  expect(editor.state.goTos).toEqual(["1 center 4"]);
+
+  data.value = await fileData("b\n");
+  await nextTick();
+  expect(editor.state.built).toBe(2);
+  expect(editor.state.goTos).toEqual(["1 center 4"]);
+
+  handle.goTo({ pane: "right", match: null });
+  expect(editor.state.goTos).toEqual(["1 center 4", "2 right keyboard"]);
+});
+
+test("resultVersion: 0 with no editor, then bumped at each build and each Result change the editor reports", async () => {
+  const data = shallowRef<FileMergeData | null>(null);
+  const { scope, handle } = mount(data);
+  const hostless = mount(shallowRef<FileMergeData | null>(await fileData("a\n")), {
+    present: false,
+  });
+  await nextTick();
+  expect(handle.resultVersion.value).toBe(0);
+  expect(hostless.handle.resultVersion.value).toBe(0);
+
+  data.value = await fileData("a\n");
+  await nextTick();
+  expect(handle.resultVersion.value).toBe(1);
+
+  editor.state.resultListener();
+  editor.state.resultListener();
+  expect(handle.resultVersion.value).toBe(3);
+
+  data.value = await fileData("b\n");
+  await nextTick();
+  expect(handle.resultVersion.value).toBe(4);
+
+  scope.stop();
+  expect(handle.resultVersion.value).toBe(4);
+});
+
+test("lineUp is null while no editor exists, else the line-up of the editor in use", async () => {
+  const data = shallowRef<FileMergeData | null>(null);
+  const { scope, handle } = mount(data);
+  await nextTick();
+  expect(handle.lineUp()).toBeNull();
+
+  data.value = await fileData("a\n");
+  await nextTick();
+  expect(handle.lineUp()).toEqual({ result: "a\n", editor: 1 });
+
+  data.value = await fileData("b\n");
+  await nextTick();
+  expect(handle.lineUp()).toEqual({ result: "b\n", editor: 2 });
+
+  scope.stop();
+  expect(handle.lineUp()).toBeNull();
 });

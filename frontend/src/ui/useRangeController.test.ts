@@ -61,6 +61,7 @@ const IDLE: ShownRange = {
   setPreferences: () => {},
   setCollapsed: () => {},
   moveToChange: () => {},
+  goTo: () => {},
   showThreads: () => {},
   destroy: () => {},
 };
@@ -87,6 +88,8 @@ function run(from: RunFrom = {}): Run {
     setPreferences: (next) => calls.push(`preferences ${next.theme}`),
     setCollapsed: (on) => calls.push(`collapsed ${on}`),
     moveToChange: (direction) => calls.push(`move ${direction}`),
+    goTo: ({ pane, match }) =>
+      calls.push(`goTo ${pane} ${match === null ? "keyboard" : match.line}`),
     showThreads: (next) => calls.push(`threads ${keysOf(next).join(",")}`),
     destroy: () => calls.push("destroy"),
   };
@@ -290,6 +293,38 @@ test("the controller gets the line events and its hosts reach threadHosts", asyn
 
   expect(live.calls).toEqual(["start added", "toggle thread-1,thread-2"]);
   expect(live.handle.threadHosts.value).toBe(hosts);
+});
+
+test("a go-to waits for the load, the hosts and the thread list, is applied once at build, then goes straight to the controller", async () => {
+  const live = run({ hosts: null, listed: false });
+  live.handle.goTo({ pane: "left", match: { line: 1, from: 0, to: 1 } });
+  live.handle.goTo({ pane: "right", match: { line: 3, from: 0, to: 1 } });
+
+  await live.answer(TEXTS);
+  live.hosts.value = "mounted";
+  await nextTick();
+  expect(live.built).toEqual([]);
+  expect(live.calls).toEqual([]);
+
+  live.listed.value = true;
+  await nextTick();
+  expect(live.built).toHaveLength(1);
+  expect(live.calls).toEqual(["goTo right 3"]);
+
+  live.hosts.value = "again";
+  await nextTick();
+  live.handle.goTo({ pane: "left", match: null });
+  expect(live.calls).toEqual(["goTo right 3", "goTo left keyboard"]);
+});
+
+test("a go-to after the view unmounted reaches no controller", async () => {
+  const live = run();
+  await live.answer(TEXTS);
+  live.stop();
+
+  live.handle.goTo({ pane: "right", match: { line: 0, from: 0, to: 1 } });
+
+  expect(live.calls).toEqual(["destroy"]);
 });
 
 test.each<RangeFile>([

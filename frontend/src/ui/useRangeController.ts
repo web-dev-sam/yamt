@@ -13,6 +13,7 @@ import {
   type Direction,
   type Preferences,
   type RangeEvents,
+  type RangeGoTo,
   type RangeOptions,
   type RangeTexts,
   type ShownThread,
@@ -21,6 +22,8 @@ import type { RangeEntry, RangeFile } from "../ipc";
 import { useRangeStore } from "./rangeStore";
 import { fileSentence, modeNote } from "./rangeText";
 import type { RangeThreads } from "./rangeThreads";
+
+export type { RangeGoTo } from "../editor";
 
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
@@ -37,7 +40,7 @@ type RangeContent =
 
 export type ShownRange = Pick<
   RangeController,
-  "setPreferences" | "setCollapsed" | "moveToChange" | "showThreads" | "destroy"
+  "setPreferences" | "setCollapsed" | "moveToChange" | "goTo" | "showThreads" | "destroy"
 >;
 
 type ThreadHosts = ReadonlyMap<string, HTMLElement>;
@@ -46,6 +49,7 @@ export type RangeHandle = {
   readonly content: Readonly<ShallowRef<RangeContent>>;
   readonly threadHosts: Readonly<ShallowRef<ThreadHosts>>;
   moveToChange(direction: Direction): void;
+  goTo(target: RangeGoTo): void;
 };
 
 export type RangeParts<H> = {
@@ -70,6 +74,7 @@ type Live = {
   readonly threadHosts: ShallowRef<ThreadHosts>;
   waiting: RangeTexts | null;
   controller: ShownRange | null;
+  goTo: RangeGoTo | null;
   disposed: boolean;
 };
 
@@ -104,6 +109,10 @@ function build<H>(live: Live, parts: RangeParts<H>): void {
   };
   live.controller = parts.build(live.waiting, hosts, options, events);
   live.waiting = null;
+  if (live.goTo !== null) {
+    live.controller.goTo(live.goTo);
+    live.goTo = null;
+  }
 }
 
 function followLive<H>(live: Live, parts: RangeParts<H>): void {
@@ -118,12 +127,21 @@ function followLive<H>(live: Live, parts: RangeParts<H>): void {
   });
 }
 
+function askGoTo(live: Live, target: RangeGoTo): void {
+  if (live.controller === null) {
+    live.goTo = target;
+  } else {
+    live.controller.goTo(target);
+  }
+}
+
 export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   const live: Live = {
     content: shallowRef<RangeContent>({ kind: "loading" }),
     threadHosts: shallowRef<ThreadHosts>(new Map()),
     waiting: null,
     controller: null,
+    goTo: null,
     disposed: false,
   };
 
@@ -151,6 +169,9 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
     threadHosts: live.threadHosts,
     moveToChange: (direction) => {
       live.controller?.moveToChange(direction);
+    },
+    goTo: (target) => {
+      askGoTo(live, target);
     },
   };
 }

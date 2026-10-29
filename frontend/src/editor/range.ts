@@ -15,6 +15,7 @@ import {
   type ColumnViews,
 } from "./internal/compareViews";
 import type { Fold } from "./internal/foldRuns";
+import { goTo, type PaneMatch } from "./internal/goTo";
 import { languageOf, loadLanguage } from "./internal/language";
 import type { Direction } from "./internal/navigation";
 import type { PaneSettings, Preferences } from "./internal/pane";
@@ -44,6 +45,8 @@ export type RangeEvents = {
   readonly toggleThreads: (keys: readonly string[]) => void;
   readonly hosts: (hosts: ReadonlyMap<string, HTMLElement>) => void;
 };
+
+export type RangeGoTo = { readonly pane: Column; readonly match: PaneMatch | null };
 
 export class RangeController {
   readonly #differences: readonly Difference[];
@@ -125,6 +128,10 @@ export class RangeController {
 
   moveToChange(direction: Direction): void {
     moveToDifference(this.#views, direction);
+  }
+
+  goTo({ pane, match }: RangeGoTo): void {
+    goTo(this.#views[pane], match);
   }
 
   showThreads(threads: readonly ShownThread[]): void {

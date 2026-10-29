@@ -1,6 +1,6 @@
 import { redo, undo } from "@codemirror/commands";
 import type { StateField } from "@codemirror/state";
-import { EditorView, type ViewUpdate } from "@codemirror/view";
+import { EditorView } from "@codemirror/view";
 
 import type { FileMergeData } from "../ipc";
 import type { LanguageServers } from "../lsp";
@@ -13,11 +13,11 @@ import { Folds } from "./internal/foldView";
 import type { FormatOutcome } from "./internal/format";
 import { Frame } from "./internal/frame";
 import type { PaneViews } from "./internal/geometry";
+import { goTo, resultLineUp, type MergeGoTo, type ResultLineUp } from "./internal/goTo";
 import { historyCommand } from "./internal/historyKey";
 import { languageOf, loadLanguage } from "./internal/language";
 import type { Direction } from "./internal/navigation";
-import { preferenceEffects } from "./internal/pane";
-import type { PaneSettings, Preferences } from "./internal/pane";
+import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
 import { paneDocs } from "./internal/paneDocs";
 import { createPaneViews, type ViewSources } from "./internal/paneViews";
 import { problemCounts, problemsField, type ProblemCounts } from "./internal/problems";
@@ -27,7 +27,6 @@ import type { Side } from "./internal/side";
 import { SideFocus } from "./internal/sideFocus";
 import { pushStatuses } from "./internal/sideStatus";
 import { summarize, type MergeSummary } from "./internal/status";
-import type { IconPress } from "./internal/stripIcons";
 import { Strips } from "./internal/strips";
 import { visibleLines } from "./internal/viewport";
 
@@ -35,6 +34,8 @@ export { CompareController, FORMAT_LANGUAGES, languageNames } from "./compare";
 export type { ColumnFormat, ColumnText, CompareEvents, FormatReport } from "./compare";
 export type { CompareHosts, CompareOptions } from "./compare";
 export type { Direction } from "./internal/navigation";
+export type { Pane as MergePane } from "./internal/geometry";
+export type { MergeGoTo, PaneMatch, ResultLineUp } from "./internal/goTo";
 export type { FormatOutcome } from "./internal/format";
 export type { Preferences } from "./internal/pane";
 export type { ProblemCounts } from "./internal/problems";
@@ -43,7 +44,7 @@ export type { Side } from "./internal/side";
 export type { MergeSummary } from "./internal/status";
 export { MarkdownView } from "./markdown";
 export { RangeController } from "./range";
-export type { RangeEvents, RangeOptions, RangeTexts, ShownThread } from "./range";
+export type { RangeEvents, RangeGoTo, RangeOptions, RangeTexts, ShownThread } from "./range";
 
 export type MergeHosts = {
   readonly left: HTMLElement;
@@ -74,6 +75,7 @@ export class MergeController {
   readonly #server: ServerDoc | null;
   readonly #saved: SavedPoint;
   #summaryListener: ((summary: MergeSummary) => void) | null = null;
+  #resultListener: (() => void) | null = null;
   #destroyed = false;
 
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
@@ -90,8 +92,11 @@ export class MergeController {
     this.#sides = { local: docs.left, remote: docs.right };
     const center = () => this.#views.center.state;
     this.#saved = new SavedPoint({ field: this.#field, sides: this.#sides, current: center });
-    const press = this.#readOnly ? null : this.#press;
-    this.#strips = new Strips(hosts.strips, press, this.#folds.hovered);
+    this.#strips = new Strips(
+      hosts.strips,
+      this.#readOnly ? null : (press, event) => this.#drag.start(press, event),
+      this.#folds.hovered,
+    );
     this.#drag = this.#createDrag(hosts.strips);
     this.#frame = new Frame({
       views: this.#views,
@@ -114,16 +119,17 @@ export class MergeController {
     this.#frame.changed(update);
   });
 
-  readonly #statusSync = EditorView.updateListener.of((update) => {
-    this.#statusesChanged(update);
-  });
-
-  readonly #serverSync = EditorView.updateListener.of((update) => {
+  readonly #centerSync = EditorView.updateListener.of((update) => {
+    const after = pushStatuses(update, this.#field, this.#views);
+    if (after !== null) {
+      this.#frame.request();
+      this.#summaryListener?.(summarize(after));
+    }
     this.#server?.updated(update);
-  });
-
-  readonly #savedSync = EditorView.updateListener.of((update) => {
     this.#saved.updated(update);
+    if (update.docChanged) {
+      this.#resultListener?.();
+    }
   });
 
   #createViews(sources: ViewSources): PaneViews {
@@ -132,7 +138,7 @@ export class MergeController {
       folds: this.#folds,
       readOnly: this.#readOnly,
       settings: this.#settings,
-      center: [this.#repaint, this.#statusSync, problemsField, this.#serverSync, this.#savedSync],
+      center: [this.#repaint, problemsField, this.#centerSync],
       repaint: this.#repaint,
       run: (side, command) => {
         this.#focus.run(side, command);
@@ -190,18 +196,6 @@ export class MergeController {
     }
   }
 
-  #statusesChanged(update: ViewUpdate): void {
-    const after = pushStatuses(update, this.#field, this.#views);
-    if (after !== null) {
-      this.#frame.request();
-      this.#summaryListener?.(summarize(after));
-    }
-  }
-
-  readonly #press = (press: IconPress, event: PointerEvent): void => {
-    this.#drag.start(press, event);
-  };
-
   applyAllNonConflicting(side: Side): void {
     this.#dispatch(
       bulkApplySteps({ target: this.#target(), side, visible: visibleLines(this.#views.center) }),
@@ -210,6 +204,18 @@ export class MergeController {
 
   moveToChange(direction: Direction): void {
     this.#focus.moveToChange(direction);
+  }
+
+  goTo({ pane, match }: MergeGoTo): void {
+    goTo(this.#views[pane], match);
+  }
+
+  lineUp(): ResultLineUp {
+    return resultLineUp(this.#views.center.state, this.#field, this.snapshot().asShown());
+  }
+
+  onResultChange(listener: (() => void) | null): void {
+    this.#resultListener = listener;
   }
 
   setPreferences(preferences: Preferences): void {
@@ -278,6 +284,7 @@ export class MergeController {
 
   destroy(): void {
     this.#summaryListener = null;
+    this.#resultListener = null;
     this.#saved.onUnsavedChange(null);
     this.#destroyed = true;
     this.#server?.close();
