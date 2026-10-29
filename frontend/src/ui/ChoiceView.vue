@@ -12,6 +12,7 @@ import { RESULT_HEADER, sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 import { usePaneDividers } from "./usePaneDividers";
+import { useSearchGoTo } from "./useSearchGoTo";
 
 type Column = {
   readonly side: Side;
@@ -30,9 +31,19 @@ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remo
 const section = useTemplateRef<HTMLElement>("section");
 const localGutter = useTemplateRef<HTMLDivElement>("localGutter");
 const remoteGutter = useTemplateRef<HTMLDivElement>("remoteGutter");
-const { takeSide, reset, sideNames, taken, paneSplit, setPaneSplit, resetPaneSplit } =
+const { takeSide, reset, sideNames, taken, paneSplit, setPaneSplit, resetPaneSplit, search } =
   useAppStore();
 const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+useSearchGoTo(
+  search,
+  () => props.shown,
+  () => props.sides.path,
+  (target) => {
+    if (target.match === null) {
+      focusFirstButton();
+    }
+  },
+);
 
 const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "gap"));
 const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
@@ -64,6 +75,10 @@ function paneWidths(): PaneWidths | null {
     center: remoteEdge.left - localEdge.right,
     remote: whole.right - remoteEdge.right,
   };
+}
+
+function focusFirstButton(): void {
+  section.value?.querySelector<HTMLButtonElement>("button:enabled")?.focus();
 }
 </script>
 

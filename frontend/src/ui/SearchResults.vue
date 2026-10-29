@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="P extends string">
 import { useVirtualList } from "@vueuse/core";
-import { computed, shallowRef, type Component } from "vue";
+import { computed, shallowRef, toRef, type Component } from "vue";
 import ChevronDown from "~icons/lucide/chevron-down";
 import ChevronRight from "~icons/lucide/chevron-right";
 import XIcon from "~icons/lucide/x";
@@ -26,10 +26,10 @@ const ROW_HEIGHT_PX = 22;
 
 const activeKey = shallowRef<string | null>(null);
 
-const rows = computed(() => props.rows);
-const { list, containerProps, wrapperProps } = useVirtualList(rows, {
+const { list, containerProps, wrapperProps } = useVirtualList(toRef(props, "rows"), {
   itemHeight: ROW_HEIGHT_PX,
 });
+
 const activeIndex = computed(() => {
   const index = props.rows.findIndex((row) => rowKey(row) === activeKey.value);
   return index === -1 ? null : index;
@@ -174,7 +174,7 @@ defineExpose({ focusList });
             <mark class="shrink-0 rounded-sm bg-search-match text-inherit">{{
               row.place.preview.match
             }}</mark>
-            <span class="truncate">{{ row.place.preview.after }}</span>
+            <span class="overflow-hidden text-ellipsis">{{ row.place.preview.after }}</span>
           </span>
           <button
             v-for="entry in row.shown"
