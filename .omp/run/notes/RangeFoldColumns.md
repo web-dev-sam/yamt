@@ -119,3 +119,18 @@ typecheck, lint, fmt, knip clean. Deviations (accepted): the second pane leads o
 first step cannot be told from WebKit's pull-back; before `c95743a` it also led on the second frame); after the retry
 a moved follower leads instead of nothing. Open: a follower pulled back on both writes leads (the panes line up at the
 pulled place); merge checked in one file with collapsing off; no real touchpad momentum.
+
+## Repair round 4 (#1693/#1694; `RangeFoldColumnsR4`, 42m49s, patch `.omp/run/patches/RangeFoldColumnsR4.patch`)
+
+Two causes, both logged (each fix alone still failed every run): (1) `exactScroll.ts` pinned a column back to 0 on a
+scroll event whose scrollTop had not moved since the last one (CodeMirror had moved the viewport to Ctrl+End's target
+first) — now only a moved scrollTop is placed (`movedFarTop`, pure, tested: fails with the old rule `expected -4 to be
+null`); (2) `foldView.ts`: with the wave's `container-type: inline-size` + `100cqi`, WebKitGTK pulled a follower's far
+scrollTop back to 0 (on: 1000 → 0; off or `containerType: normal`: stays) — the wave's width now comes from a
+CodeMirror measure (`--fold-wave-width`). DOM-only, no node test. WebKit: range light and dark, right column 40/40 end
+[1235, 1694] (1 px short by CodeMirror's 5 px cursor margin with JetBrains Mono, as on HEAD), Ctrl+Home [0, 0]; left
+column 40/40 [1234, 994] (the sync's middle-line pairing, as HEAD); merge collapsing on Ctrl+End 10/10 lined up, equal
+to `f08c5b9` within the font's 1 px. Wave widths equal the old `100cqi` (range 648.5; merge 378.98/379.02/378.98),
+follow a file-list resize. 204 files / 2804 tests; typecheck, lint, fmt, knip clean. Open: a width re-measured only on
+whole-px geometry changes; hidden merge views (`content-visibility: hidden`) measure when built [INFERENCE: 0], again
+when shown — only the shown file checked; merge runs dark only. Docs: `movedFarTop`, `--fold-wave-width`.

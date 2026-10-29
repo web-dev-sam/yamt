@@ -1,0 +1,213 @@
+commit fb3e18bc197c058df6e37a91c0ac431e6adebc4f
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 09:03:39 +0100
+
+    fix(editor): a far-scroll pin needs a moved scrollTop; wave width from a measure, not a size container
+
+diff --git a/frontend/src/editor/internal/exactScroll.test.ts b/frontend/src/editor/internal/exactScroll.test.ts
+index 9cfa7f8..8f2c21f 100644
+--- a/frontend/src/editor/internal/exactScroll.test.ts
++++ b/frontend/src/editor/internal/exactScroll.test.ts
+@@ -1,6 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import { farTop } from "./exactScroll";
++import { movedFarTop } from "./exactScroll";
+ 
+ const PADDING_PX = 4;
+ const HEIGHT_PX = 600;
+@@ -34,3 +35,25 @@ test("a jump fully above or fully below the rendered lines places its visible to
+   expect(at(100)).toBe(96);
+   expect(at(2552)).toBe(2548);
+ });
++
++function movedTo(scrollTop: number, seenTop: number): number | null {
++  return movedFarTop(
++    seenTop,
++    { scrollTop, clientHeight: HEIGHT_PX, paddingTop: PADDING_PX },
++    RENDERED,
++  );
++}
++
++test("a scroll event at the scrollTop seen last places nothing, though the rendered lines moved away", () => {
++  expect(movedTo(0, 0)).toBeNull();
++  expect(movedTo(2552, 2552)).toBeNull();
++});
++
++test("a scrollTop moved away from the rendered lines places its visible top", () => {
++  expect(movedTo(2552, 0)).toBe(2548);
++  expect(movedTo(100, 1200)).toBe(96);
++});
++
++test("a scrollTop moved inside the rendered lines places nothing", () => {
++  expect(movedTo(1200, 0)).toBeNull();
++});
+diff --git a/frontend/src/editor/internal/exactScroll.ts b/frontend/src/editor/internal/exactScroll.ts
+index 145b83b..050e490 100644
+--- a/frontend/src/editor/internal/exactScroll.ts
++++ b/frontend/src/editor/internal/exactScroll.ts
+@@ -1,6 +1,6 @@
+ import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
+ import type { Extension, SelectionRange } from "@codemirror/state";
+-import { EditorView } from "@codemirror/view";
++import { EditorView, ViewPlugin } from "@codemirror/view";
+ 
+ import type { Span } from "../../connectors";
+ 
+@@ -20,6 +20,10 @@ export function farTop(
+   return overlaps ? null : visibleTop;
+ }
+ 
++export function movedFarTop(seenTop: number, box: ScrollBox, rendered: Span): number | null {
++  return box.scrollTop === seenTop ? null : farTop(box, rendered);
++}
++
+ const placeTop = StateEffect.define<Placed>();
+ 
+ const placed = StateField.define<Placed | null>({
+@@ -37,36 +41,51 @@ const placed = StateField.define<Placed | null>({
+ 
+ // WebKitGTK 2.54 pulls back a scrollTop that shows none of the rendered lines while CodeMirror swaps
+ // its viewport in its scroll measure (docs/plan.md §2 #82, docs/slices/briefs/3.M-minimap-window-rework-3.md);
+-// a scroll request places the viewport first.
+-function placeFarScroll(view: EditorView): void {
+-  const top = view.scrollDOM.scrollTop;
+-  const { from, to } = view.viewport;
+-  const visibleTop = farTop(
+-    {
+-      scrollTop: top,
+-      clientHeight: view.scrollDOM.clientHeight,
+-      paddingTop: view.documentPadding.top,
+-    },
+-    { top: view.lineBlockAt(from).top, bottom: view.lineBlockAt(to).bottom },
+-  );
+-  if (visibleTop === null) {
+-    return;
++// a scroll request places the viewport first. A scroll event at an unmoved scrollTop is no jump: CodeMirror
++// may have moved the viewport to a scroll target it has not measured yet
++// (docs/slices/briefs/range-collapse-columns-rework-4.md).
++class FarScrolls {
++  #seenTop: number;
++
++  constructor(view: EditorView) {
++    this.#seenTop = view.scrollDOM.scrollTop;
++  }
++
++  scrolled(view: EditorView): void {
++    const top = view.scrollDOM.scrollTop;
++    const seenTop = this.#seenTop;
++    this.#seenTop = top;
++    const { from, to } = view.viewport;
++    const visibleTop = movedFarTop(
++      seenTop,
++      {
++        scrollTop: top,
++        clientHeight: view.scrollDOM.clientHeight,
++        paddingTop: view.documentPadding.top,
++      },
++      { top: view.lineBlockAt(from).top, bottom: view.lineBlockAt(to).bottom },
++    );
++    if (visibleTop === null) {
++      return;
++    }
++    const line = view.lineBlockAtHeight(visibleTop);
++    const range = EditorSelection.cursor(line.from);
++    view.dispatch({
++      effects: [
++        placeTop.of({ range, top }),
++        EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
++      ],
++    });
+   }
+-  const line = view.lineBlockAtHeight(visibleTop);
+-  const range = EditorSelection.cursor(line.from);
+-  view.dispatch({
+-    effects: [
+-      placeTop.of({ range, top }),
+-      EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
+-    ],
+-  });
+ }
+ 
+ export const exactScroll: Extension = [
+   placed,
+-  EditorView.domEventObservers({
+-    scroll: (_event, view) => {
+-      placeFarScroll(view);
++  ViewPlugin.fromClass(FarScrolls, {
++    eventObservers: {
++      scroll(_event, view) {
++        this.scrolled(view);
++      },
+     },
+   }),
+   EditorView.scrollHandler.of((view, range) => {
+diff --git a/frontend/src/editor/internal/foldView.ts b/frontend/src/editor/internal/foldView.ts
+index f6a3c1f..a73065b 100644
+--- a/frontend/src/editor/internal/foldView.ts
++++ b/frontend/src/editor/internal/foldView.ts
+@@ -10,6 +10,7 @@ import {
+   EditorView,
+   GutterMarker,
+   lineNumberMarkers,
++  ViewPlugin,
+   WidgetType,
+   type DecorationSet,
+ } from "@codemirror/view";
+@@ -32,6 +33,7 @@ type FoldWiring = {
+ 
+ const WAVE_LABEL = "Show unchanged lines";
+ const HALF = 0.5;
++const WAVE_WIDTH_VAR = "--fold-wave-width";
+ 
+ class FoldLine extends WidgetType {
+   readonly run: number;
+@@ -134,15 +136,38 @@ const tile = {
+   maskSize: `calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}) ${WAVE_TILE_HEIGHT_PX}px`,
+ };
+ 
++// WebKitGTK 2.54 pulls a far scrollTop back to the top while CodeMirror swaps the viewport of a scroller
++// that holds size-container units (`container-type`, `cqi`) (docs/slices/briefs/range-collapse-columns-rework-4.md):
++// the wave takes the scroller's width from a measure.
++const waveWidth = ViewPlugin.define((view) => {
++  const measure = {
++    key: WAVE_WIDTH_VAR,
++    read: (): number => {
++      const scroller = view.scrollDOM;
++      return scroller.getBoundingClientRect().width - (scroller.offsetWidth - scroller.clientWidth);
++    },
++    write: (width: number): void => {
++      view.scrollDOM.style.setProperty(WAVE_WIDTH_VAR, `${width}px`);
++    },
++  };
++  view.requestMeasure(measure);
++  return {
++    update(update) {
++      if (update.geometryChanged) {
++        update.view.requestMeasure(measure);
++      }
++    },
++  };
++});
++
+ const waveTheme = EditorView.theme({
+-  ".cm-scroller": { containerType: "inline-size" },
+   ".cm-gutter.cm-lineNumbers": { overflow: "visible" },
+   ".fold-wave-cell": { position: "relative" },
+   ".fold-wave": {
+     position: "absolute",
+     left: "0",
+     top: "0",
+-    width: "100cqi",
++    width: `var(${WAVE_WIDTH_VAR})`,
+     height: "100%",
+     cursor: "pointer",
+     backgroundColor: "var(--color-diff-wave)",
+@@ -172,6 +197,7 @@ export function paneFoldView<P extends string>(
+       waveMarkers(shown.folds(state), pane, hovered),
+     ),
+     waveTheme,
++    waveWidth,
+   ];
+ }
+ 
