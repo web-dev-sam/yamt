@@ -1,7 +1,4 @@
 {
-  "SearchCoreR1": {
-    "owned": ["frontend/src/search/**"]
-  },
   "SearchRangeTextsR1": {
     "owned": [
       "crates/range/tests/*.rs",
@@ -11,6 +8,19 @@
       "frontend/src/ipc/rangeDomain.ts",
       "frontend/src/ipc/rangeDomain.test.ts",
       "frontend/src/ipc/index.ts"
+    ]
+  },
+  "SearchGoToR1": {
+    "owned": [
+      "frontend/src/editor/index.ts",
+      "frontend/src/editor/merge.ts",
+      "frontend/src/editor/internal/goTo.ts",
+      "frontend/src/editor/internal/goTo.test.ts",
+      "frontend/src/editor/internal/lineUp.ts",
+      "frontend/src/editor/internal/lineUp.test.ts",
+      "frontend/src/editor/AGENTS.md",
+      "frontend/src/ui/useMergeController.ts",
+      "frontend/src/ui/useMergeController.test.ts"
     ]
   }
 }

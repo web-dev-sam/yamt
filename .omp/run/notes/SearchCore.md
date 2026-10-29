@@ -37,3 +37,15 @@ unreachable throw, as `lsp/internal/spec.ts`), `:98` (ordinal ±1 distinct eithe
 
 `withFile` O(groups) per call → O(N²) per full run [INFERENCE: tens of ms at 5,000 files]; preview cut is plain, not
 VS Code's word-boundary `lcut`; line slices may pin large strings in V8 [INFERENCE].
+
+## Fix round 1 (`SearchCoreR1`, 9m19s, patch `f08aee6`, `.omp/run/patches/SearchCoreR1.patch`)
+
+Blocks #1697, #1704, #1705; promoted #1698, #1699, #1707. `Matcher` opaque (private `#pattern`, `matcher.hits`); new
+`internal/digest.ts` (cyrb53, 53-bit) computed once per hit line — group keys, ordinals and `PlaceKey` from the digest;
+`previewOf(hit)`, `spotsOf(file, pane, layout)`, one `shownHits`. Tests: forged `{ pattern }` is a type error
+(TS2561 pasted); 1 MiB one-line text with 1,024 hits per pane — on `ec191ff` the worker ran out of heap (4 GB,
+SIGABRT), now 23 ms, keys < 100 chars; a 1 MiB every-line text < 2 s (~80 ms); the per-pane ordinal case fails with the
+ordinal removed; goToPane three-pane case fails with `at(-1)`; cyrb53 vectors. 211 files / 2890 tests; typecheck,
+lint, fmt clean. Deviations (accepted): `digest.ts` with a CP1 source comment; `previewOf` takes a `Pick` of the hit;
+every-line test with 64-char lines (budget margin); `search/AGENTS.md` updated. Open: digest collision negligible;
+wall-clock test budgets (2 s against ~23–80 ms).
