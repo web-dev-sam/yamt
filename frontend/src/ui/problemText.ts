@@ -70,6 +70,12 @@ const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {
   discard: "The AI's checkout could not be removed",
 };
 
+const WINDOW_ATTEMPT_WORDS: Readonly<Record<"tabs" | "openRange" | "search", string>> = {
+  tabs: "Could not update the tabs",
+  openRange: "Could not open the range",
+  search: "Search stopped",
+};
+
 function attempted(problem: CausedProblem): string {
   switch (problem.action) {
     case "list":
@@ -93,9 +99,9 @@ function attempted(problem: CausedProblem): string {
       return `Could not ${verb.toLowerCase()} ${object}`;
     }
     case "tabs":
-      return "Could not update the tabs";
     case "openRange":
-      return "Could not open the range";
+    case "search":
+      return WINDOW_ATTEMPT_WORDS[problem.action];
     case "loadTab":
       return `Could not load ${problem.name}`;
     case "saveTab":

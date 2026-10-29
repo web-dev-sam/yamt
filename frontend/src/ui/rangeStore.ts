@@ -4,6 +4,7 @@ import type { AgentClient } from "../agent";
 import type {
   AgentSettings,
   AgentSource,
+  Column,
   MessageId,
   RangeEntry,
   RangeFile,
@@ -23,9 +24,11 @@ import type { Question } from "./question";
 import { createRangeAi, type RangeAi } from "./rangeAi";
 import type { AskContext } from "./rangeAiRules";
 import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
+import { createRangeSearch } from "./rangeSearch";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import { threadPlaceText } from "./rangeThreadText";
 import type { Screen } from "./screen";
+import type { Searching } from "./searching";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
@@ -50,6 +53,7 @@ export type RangeStore = SettingsStore &
     readonly threads: RangeThreads;
     readonly gitlab: GitLabState;
     readonly ai: RangeStoreAi | null;
+    readonly search: Searching<Column>;
     startUp(): Promise<void>;
     loadSettings(): Promise<void>;
     showFile(path: string): void;
@@ -169,22 +173,26 @@ export function createRangeStore(
   const refs = createRefs(startTheme);
   const state = createState(refs, source, agent);
   const settings = settingsActions(state);
+  const shownPath = computed(() => entryOf(state, refs.shown.value)?.path ?? null);
   const created: RangeStore = {
     ...refs,
     ...createCollapsing(),
-    shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
+    shownPath,
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),
     threads: state.threads,
     gitlab: state.gitlab,
     ai: storeAi(state),
+    search: createRangeSearch(state, {
+      open: (path) => {
+        showPath(state, path);
+      },
+      shownPath: () => shownPath.value,
+    }),
     ...settings,
     startUp: () => startUp(state, settings),
     showFile: (path) => {
-      const entry = state.start.value?.files.find((file) => file.path === path);
-      if (entry !== undefined) {
-        show(state, entry);
-      }
+      showPath(state, path);
     },
     loadFile: (entry) => loadFile(state, entry),
     mayClose: () => mayClose(state),
@@ -222,6 +230,13 @@ function chromeActions(
 
 function entryOf(state: State, file: RangeFileId | null): RangeEntry | undefined {
   return state.start.value?.files.find((entry) => entry.id === file);
+}
+
+function showPath(state: State, path: string): void {
+  const entry = state.start.value?.files.find((file) => file.path === path);
+  if (entry !== undefined) {
+    show(state, entry);
+  }
 }
 
 function show(state: State, entry: RangeEntry): void {

@@ -36,7 +36,10 @@ test("the keymap groups list every action once, in the settings order", () => {
     "Result pane",
     "Window",
   ]);
-  expect(KEYMAP_GROUPS.at(-1)).toEqual({ title: "Window", actions: ["toggle-file-list"] });
+  expect(KEYMAP_GROUPS.at(-1)).toEqual({
+    title: "Window",
+    actions: ["toggle-file-list", "toggle-search"],
+  });
 });
 
 test("each action says where it acts, matching its group", () => {
@@ -46,12 +49,21 @@ test("each action says where it acts, matching its group", () => {
   expect(ACTION_PLACES.indent).toBe("in the Result pane");
   expect(ACTION_PLACES["toggle-file-list"]).toBe("anywhere in the window");
   expect(ACTION_NAMES["toggle-file-list"]).toBe("Toggle file list");
+  expect(ACTION_PLACES["toggle-search"]).toBe("anywhere in the merge and range windows");
+  expect(ACTION_NAMES["toggle-search"]).toBe("Toggle search");
 });
 
 test("giving Ctrl/⌘B to another action clashes with Toggle file list", () => {
   expect(usedByText(keyOwners(DEFAULT_KEYS, "find", key("Mod-b")))).toBe(
     "Already used by: Toggle file list",
   );
+});
+
+test("giving Ctrl/⌘⇧S to another action clashes with Toggle search, and Ctrl/⌘S still with Save only", () => {
+  expect(usedByText(keyOwners(DEFAULT_KEYS, "find", key("Mod-Shift-s")))).toBe(
+    "Already used by: Toggle search",
+  );
+  expect(keyOwners(DEFAULT_KEYS, "find", key("Mod-s"))).toEqual(["save"]);
 });
 
 test("Save is named, acts anywhere in the shown file, and Ctrl/⌘S clashes with it (plan §2 #65)", () => {

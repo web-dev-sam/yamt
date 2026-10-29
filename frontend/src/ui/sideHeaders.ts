@@ -2,6 +2,8 @@ import type { Side, SideNames } from "../ipc";
 
 export type SideHeader = { readonly text: string; readonly tooltip: string };
 
+export const RESULT_HEADER = "Result";
+
 const LABEL: Readonly<Record<Side, string>> = {
   local: "Local (yours)",
   remote: "Remote (theirs)",

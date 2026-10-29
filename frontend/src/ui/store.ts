@@ -22,10 +22,11 @@ import { emptyStop, type EmptyStop } from "./emptyStop";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { createGitRun, type GitRun } from "./gitRun";
 import { refreshFiles } from "./listing";
-import { nextUnresolved } from "./nextFile";
+import { createMergeSearch, type MergeSearch } from "./mergeSearch";
 import { noticeKey, type Notice } from "./noticeText";
+import { open, pick, thenMoveOn } from "./opening";
 import { createPaneSplit, type PaneSplitState } from "./paneSplit";
-import { logProblem, reportFailure, type Problem } from "./problem";
+import type { Problem } from "./problem";
 import type { Question } from "./question";
 import { createSaving, finish, reset, take } from "./saving";
 import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
@@ -39,7 +40,6 @@ import type { Taken } from "./sides";
 import { nextStop, type StopEnd } from "./stops";
 import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
 import type { FormatOutcome, Preferences } from "./useMergeController";
-import { fetchView, isShown } from "./views";
 
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
@@ -58,7 +58,8 @@ type Refs = {
 };
 
 type State = Refs &
-  Writing & {
+  Writing &
+  MergeSearch & {
     readonly source: ChunkSource;
     readonly asking: Asking;
     readonly guard: CloseGuard;
@@ -72,6 +73,7 @@ type State = Refs &
   };
 
 type Actions = CloseGuard &
+  MergeSearch &
   SettingsActions & {
     loadFiles(): Promise<void>;
     refreshFiles(): Promise<void>;
@@ -145,6 +147,12 @@ function createState(refs: Refs, source: ChunkSource): State {
       await refreshFiles(state, "running");
     },
     nextStop: (end) => nextStop(state, end),
+    ...createMergeSearch(
+      { ...refs, source, asking, nextStop: (end) => state.nextStop(end) },
+      (path) => {
+        void pick(state, path);
+      },
+    ),
   };
   return state;
 }
@@ -198,10 +206,7 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
     refreshFiles: state.refreshFiles,
     nextStop: state.nextStop,
     open: (path) => open(state, path),
-    pick: async (path) => {
-      state.screen.value = { kind: "files" };
-      await open(state, path);
-    },
+    pick: (path) => pick(state, path),
     finish: (request) => thenMoveOn(state, request.path, () => finish(state, request)),
     takeSide: (path, side, diskVersion) =>
       thenMoveOn(state, path, () => take(state, path, side, diskVersion)),
@@ -225,6 +230,8 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
       fileListKey(state, event, platform);
     },
     ...state.guard,
+    search: state.search,
+    liveResults: state.liveResults,
     ...settings,
   };
 }
@@ -236,59 +243,6 @@ async function loadFiles(state: State): Promise<readonly FileEntry[] | null> {
     await open(state, first.path);
   }
   return listed;
-}
-
-async function thenMoveOn(
-  state: State,
-  path: string,
-  write: () => Promise<boolean>,
-): Promise<void> {
-  const opensBefore = state.latestOpen;
-  if (await write()) {
-    await moveOn(state, path, opensBefore);
-  }
-}
-
-async function open(state: State, path: string): Promise<void> {
-  if (!isShown(state, path)) {
-    await load(state, path);
-    return;
-  }
-  if (path === state.active.value) {
-    return;
-  }
-  state.latestOpen += 1;
-  state.active.value = path;
-  state.problem.value = null;
-}
-
-async function load(state: State, path: string): Promise<void> {
-  state.latestOpen += 1;
-  const ticket = state.latestOpen;
-  const view = await fetchView(state, path);
-  const current = ticket === state.latestOpen;
-  if (!view.ok) {
-    const failure: Problem = { action: "open", path, cause: view.cause };
-    if (current) {
-      await reportFailure(state, failure);
-    } else {
-      logProblem(failure);
-    }
-    return;
-  }
-  if (current) {
-    view.value();
-    state.active.value = path;
-    state.problem.value = null;
-  }
-}
-
-async function moveOn(state: State, path: string, opensBefore: number): Promise<void> {
-  const untouched = state.active.value === path && state.latestOpen === opensBefore;
-  const next = untouched ? nextUnresolved(state.files.value, path) : null;
-  if (next !== null) {
-    await open(state, next);
-  }
 }
 
 export function useAppStore(): AppStore {

@@ -17,9 +17,11 @@ import { useRangeStore } from "./rangeStore";
 import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
 import { sendNoticeRow } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
+import SearchPanel from "./SearchPanel.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
+import SideColumn from "./SideColumn.vue";
 
 const {
   start,
@@ -40,6 +42,7 @@ const {
   threads,
   ai,
   mayClose,
+  search,
 } = useRangeStore();
 const { counts } = threads;
 
@@ -47,6 +50,7 @@ const focused = useWindowFocus();
 useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
+  search.toggleKey(event, navigator.platform);
 });
 
 const files = computed(() => start.value?.files ?? []);
@@ -87,20 +91,25 @@ function folderLines(path: string): RangeLineCounts {
 
 <template>
   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
-    <FileList
-      v-show="fileListShown"
-      :files="files"
-      :active="shownPath"
-      :label="RANGE_LIST_LABEL"
-      @select="showFile"
-    >
-      <template #file="{ file, label }">
-        <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+    <SideColumn v-show="fileListShown || search.shown.value">
+      <template #search>
+        <SearchPanel :search="search" :shown-path="shownPath" :whole="!fileListShown" />
       </template>
-      <template #folder="{ path }">
-        <RangeCounts :lines="folderLines(path)" class="ml-auto" />
-      </template>
-    </FileList>
+      <FileList
+        v-show="fileListShown"
+        :files="files"
+        :active="shownPath"
+        :label="RANGE_LIST_LABEL"
+        @select="showFile"
+      >
+        <template #file="{ file, label }">
+          <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+        </template>
+        <template #folder="{ path }">
+          <RangeCounts :lines="folderLines(path)" class="ml-auto" />
+        </template>
+      </FileList>
+    </SideColumn>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
         <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />

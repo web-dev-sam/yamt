@@ -14,9 +14,11 @@ import OperationLabel from "./OperationLabel.vue";
 import { allResolvedText } from "./operationText";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
+import SearchPanel from "./SearchPanel.vue";
 import ServerLogView from "./ServerLogView.vue";
 import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
+import SideColumn from "./SideColumn.vue";
 import StopView from "./StopView.vue";
 import { useAppStore } from "./store";
 
@@ -40,6 +42,7 @@ const {
   dismissQuestion,
   watchWindowClose,
   fileListKey,
+  search,
 } = useAppStore();
 
 const focused = useWindowFocus();
@@ -47,6 +50,7 @@ const altHeld = useAltHold();
 useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
+  search.toggleKey(event, navigator.platform);
 });
 
 const resolvedLine = computed(() => allResolvedText(operation.value));
@@ -65,20 +69,25 @@ onMounted(() => {
 
 <template>
   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
-    <FileList
-      v-show="fileListShown"
-      :files="files"
-      :active="active"
-      label="Conflicted files"
-      @select="pick"
-    >
-      <template #file="{ file, label }">
-        <FileMark :status="file.status" :label="label" />
+    <SideColumn v-show="fileListShown || search.shown.value">
+      <template #search>
+        <SearchPanel :search="search" :shown-path="active" :whole="!fileListShown" />
       </template>
-      <template #footer>
-        <OperationLabel v-if="operation !== null" :operation="operation" />
-      </template>
-    </FileList>
+      <FileList
+        v-show="fileListShown"
+        :files="files"
+        :active="active"
+        label="Conflicted files"
+        @select="pick"
+      >
+        <template #file="{ file, label }">
+          <FileMark :status="file.status" :label="label" />
+        </template>
+        <template #footer>
+          <OperationLabel v-if="operation !== null" :operation="operation" />
+        </template>
+      </FileList>
+    </SideColumn>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
         <NoticeBar v-if="noticeRows.length > 0" :rows="noticeRows" @close="dismissNotice" />

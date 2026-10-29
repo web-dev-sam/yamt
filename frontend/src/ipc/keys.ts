@@ -17,6 +17,7 @@ export const KEY_ACTIONS = [
   "indent",
   "outdent",
   "toggle-file-list",
+  "toggle-search",
 ] as const;
 
 export type KeyAction = (typeof KEY_ACTIONS)[number];
@@ -205,6 +206,7 @@ export const DEFAULT_KEYS: KeyBindings = {
   indent: keyList("Tab"),
   outdent: keyList("Shift-Tab"),
   "toggle-file-list": keyList("Mod-b"),
+  "toggle-search": keyList("Mod-Shift-s"),
 };
 
 type Pressed = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;

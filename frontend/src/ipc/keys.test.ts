@@ -86,6 +86,7 @@ test("the actions are listed in the settings order", () => {
     "indent",
     "outdent",
     "toggle-file-list",
+    "toggle-search",
   ]);
 });
 
@@ -117,6 +118,8 @@ test("the defaults are the keys yamt bound before settings existed", () => {
     outdent: ["Shift-Tab"],
     // plan §2 #61
     "toggle-file-list": ["Mod-b"],
+    // plan §2 row 127
+    "toggle-search": ["Mod-Shift-s"],
   });
 });
 
