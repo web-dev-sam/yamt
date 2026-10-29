@@ -49,3 +49,9 @@ ordinal removed; goToPane three-pane case fails with `at(-1)`; cyrb53 vectors. 2
 lint, fmt clean. Deviations (accepted): `digest.ts` with a CP1 source comment; `previewOf` takes a `Pick` of the hit;
 every-line test with 64-char lines (budget margin); `search/AGENTS.md` updated. Open: digest collision negligible;
 wall-clock test budgets (2 s against ~23–80 ms).
+
+## Re-check after fix round 1
+
+Boundary pass (#1697–#1699, #1707), correctness pass (#1704: a 1 MiB line with 16,384 hits per pane in 154 ms, keys
+at most 38 characters; #1705, #1707). Mutation run `just mutants 29ac2aa`: `search/` 97.46 %, survivors the round-1
+equivalents (match.ts:25,28; places.ts:39,44,45,98). Accepted.
