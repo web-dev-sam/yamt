@@ -1,0 +1,951 @@
+commit 4c42cc62361ab0c142f3d9cf80e10230c7b4aa36
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 10:42:37 +0100
+
+    feat(editor): go to a match in a pane on both controllers; the Result's live line-up on the handles
+
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index 35c0413..97d1f3d 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -19,3 +19,5 @@ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only
+ Range threads (plan §2 #116): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. `internal/threadAnchor.ts` (`anchorAt`, `linePlace`) is the one rule from a column line to a `ThreadLine` and to its partner line; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `threadRows.ts` (pure) groups the shown threads by aligned place (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), and gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field; `threadNumbers.ts` merges a `mousedown` into the number gutter (a number starts a thread, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`.
+ 
+ Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps; `waveStartsIn`, where each run's wave starts in a pane), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `geometry.ts` `waveTops` (wave starts to block tops, under `waveRows` and `columnWaves`), `wavePhase.ts` (`chainEnds`/`chainPhases`/`ChainPhases` over a chain of panes and strips — the one phase rule; `WavePhases` is the merge's three-pane chain, `panePhases` its mapping), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push, `hiddenIn` each column's shown folds), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). Unchanged-line threads are run edges; runs are computed at build and at each `setCollapsed(true)`, never on a thread change. Realigning after a fold change (both windows) is `ScrollSync.follow(source)`: the followed pane leads the next sync, and no other pane's scroll event (a clamped one from the change) replaces it before then.
++
++Go to a search match (plan §2 #127): `MergeController.goTo`/`RangeController.goTo` are find's selection (`internal/goTo.ts` over `findMatch.ts` `selectMatch`: a centred `scrollIntoView`, then the pane's focus); a collapsed stretch shows through the fold fields' own reveal on that selection (`folds.ts`, `columnFolds.ts`), never a second reveal path. `MergeController.lineUp` gives the Result's text and each change's live lines (`changeLines`); `onResultChange` fires after each Result transaction that changed the text.
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index d7f5dde..b8fff6a 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -1,6 +1,6 @@
+ import { redo, undo } from "@codemirror/commands";
+ import type { StateField } from "@codemirror/state";
+-import { EditorView, type ViewUpdate } from "@codemirror/view";
++import { EditorView } from "@codemirror/view";
+ 
+ import type { FileMergeData } from "../ipc";
+ import type { LanguageServers } from "../lsp";
+@@ -13,11 +13,11 @@ import { Folds } from "./internal/foldView";
+ import type { FormatOutcome } from "./internal/format";
+ import { Frame } from "./internal/frame";
+ import type { PaneViews } from "./internal/geometry";
++import { goTo, resultLineUp, type MergeGoTo, type ResultLineUp } from "./internal/goTo";
+ import { historyCommand } from "./internal/historyKey";
+ import { languageOf, loadLanguage } from "./internal/language";
+ import type { Direction } from "./internal/navigation";
+-import { preferenceEffects } from "./internal/pane";
+-import type { PaneSettings, Preferences } from "./internal/pane";
++import { preferenceEffects, type PaneSettings, type Preferences } from "./internal/pane";
+ import { paneDocs } from "./internal/paneDocs";
+ import { createPaneViews, type ViewSources } from "./internal/paneViews";
+ import { problemCounts, problemsField, type ProblemCounts } from "./internal/problems";
+@@ -27,7 +27,6 @@ import type { Side } from "./internal/side";
+ import { SideFocus } from "./internal/sideFocus";
+ import { pushStatuses } from "./internal/sideStatus";
+ import { summarize, type MergeSummary } from "./internal/status";
+-import type { IconPress } from "./internal/stripIcons";
+ import { Strips } from "./internal/strips";
+ import { visibleLines } from "./internal/viewport";
+ 
+@@ -35,6 +34,8 @@ export { CompareController, FORMAT_LANGUAGES, languageNames } from "./compare";
+ export type { ColumnFormat, ColumnText, CompareEvents, FormatReport } from "./compare";
+ export type { CompareHosts, CompareOptions } from "./compare";
+ export type { Direction } from "./internal/navigation";
++export type { Pane as MergePane } from "./internal/geometry";
++export type { MergeGoTo, PaneMatch, ResultLineUp } from "./internal/goTo";
+ export type { FormatOutcome } from "./internal/format";
+ export type { Preferences } from "./internal/pane";
+ export type { ProblemCounts } from "./internal/problems";
+@@ -43,7 +44,7 @@ export type { Side } from "./internal/side";
+ export type { MergeSummary } from "./internal/status";
+ export { MarkdownView } from "./markdown";
+ export { RangeController } from "./range";
+-export type { RangeEvents, RangeOptions, RangeTexts, ShownThread } from "./range";
++export type { RangeEvents, RangeGoTo, RangeOptions, RangeTexts, ShownThread } from "./range";
+ 
+ export type MergeHosts = {
+   readonly left: HTMLElement;
+@@ -74,6 +75,7 @@ export class MergeController {
+   readonly #server: ServerDoc | null;
+   readonly #saved: SavedPoint;
+   #summaryListener: ((summary: MergeSummary) => void) | null = null;
++  #resultListener: (() => void) | null = null;
+   #destroyed = false;
+ 
+   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions) {
+@@ -90,8 +92,11 @@ export class MergeController {
+     this.#sides = { local: docs.left, remote: docs.right };
+     const center = () => this.#views.center.state;
+     this.#saved = new SavedPoint({ field: this.#field, sides: this.#sides, current: center });
+-    const press = this.#readOnly ? null : this.#press;
+-    this.#strips = new Strips(hosts.strips, press, this.#folds.hovered);
++    this.#strips = new Strips(
++      hosts.strips,
++      this.#readOnly ? null : (press, event) => this.#drag.start(press, event),
++      this.#folds.hovered,
++    );
+     this.#drag = this.#createDrag(hosts.strips);
+     this.#frame = new Frame({
+       views: this.#views,
+@@ -114,16 +119,17 @@ export class MergeController {
+     this.#frame.changed(update);
+   });
+ 
+-  readonly #statusSync = EditorView.updateListener.of((update) => {
+-    this.#statusesChanged(update);
+-  });
+-
+-  readonly #serverSync = EditorView.updateListener.of((update) => {
++  readonly #centerSync = EditorView.updateListener.of((update) => {
++    const after = pushStatuses(update, this.#field, this.#views);
++    if (after !== null) {
++      this.#frame.request();
++      this.#summaryListener?.(summarize(after));
++    }
+     this.#server?.updated(update);
+-  });
+-
+-  readonly #savedSync = EditorView.updateListener.of((update) => {
+     this.#saved.updated(update);
++    if (update.docChanged) {
++      this.#resultListener?.();
++    }
+   });
+ 
+   #createViews(sources: ViewSources): PaneViews {
+@@ -132,7 +138,7 @@ export class MergeController {
+       folds: this.#folds,
+       readOnly: this.#readOnly,
+       settings: this.#settings,
+-      center: [this.#repaint, this.#statusSync, problemsField, this.#serverSync, this.#savedSync],
++      center: [this.#repaint, problemsField, this.#centerSync],
+       repaint: this.#repaint,
+       run: (side, command) => {
+         this.#focus.run(side, command);
+@@ -190,18 +196,6 @@ export class MergeController {
+     }
+   }
+ 
+-  #statusesChanged(update: ViewUpdate): void {
+-    const after = pushStatuses(update, this.#field, this.#views);
+-    if (after !== null) {
+-      this.#frame.request();
+-      this.#summaryListener?.(summarize(after));
+-    }
+-  }
+-
+-  readonly #press = (press: IconPress, event: PointerEvent): void => {
+-    this.#drag.start(press, event);
+-  };
+-
+   applyAllNonConflicting(side: Side): void {
+     this.#dispatch(
+       bulkApplySteps({ target: this.#target(), side, visible: visibleLines(this.#views.center) }),
+@@ -212,6 +206,18 @@ export class MergeController {
+     this.#focus.moveToChange(direction);
+   }
+ 
++  goTo({ pane, match }: MergeGoTo): void {
++    goTo(this.#views[pane], match);
++  }
++
++  lineUp(): ResultLineUp {
++    return resultLineUp(this.#views.center.state, this.#field, this.snapshot().asShown());
++  }
++
++  onResultChange(listener: (() => void) | null): void {
++    this.#resultListener = listener;
++  }
++
+   setPreferences(preferences: Preferences): void {
+     this.#settings = { ...this.#settings, preferences };
+     const { left, center, right } = this.#views;
+@@ -278,6 +284,7 @@ export class MergeController {
+ 
+   destroy(): void {
+     this.#summaryListener = null;
++    this.#resultListener = null;
+     this.#saved.onUnsavedChange(null);
+     this.#destroyed = true;
+     this.#server?.close();
+diff --git a/frontend/src/editor/internal/goTo.test.ts b/frontend/src/editor/internal/goTo.test.ts
+new file mode 100644
+index 0000000..33ae3d3
+--- /dev/null
++++ b/frontend/src/editor/internal/goTo.test.ts
+@@ -0,0 +1,248 @@
++import { EditorState, type TransactionSpec } from "@codemirror/state";
++import { expect, test } from "vitest";
++
++import { DEFAULT_KEYS, loadFixture, type FileMergeData } from "../../ipc";
++import { chunkField } from "./chunkField";
++import { toDocPos, type DocPos } from "./docPos";
++import { foldRuns } from "./foldRuns";
++import { foldFields, paneFolds, sideReveal, type FoldFields } from "./folds";
++import { displayedIn } from "./foldSteps";
++import { centerFolds, sideFolds } from "./foldView";
++import type { Pane } from "./geometry";
++import { changeLines, goTo, matchRange, resultLineUp, type PaneMatch } from "./goTo";
++import { paneState, type PaneSettings } from "./pane";
++import { lineSeparator, paneDocs } from "./paneDocs";
++
++const SETTINGS: PaneSettings = {
++  preferences: { theme: "dark", keys: DEFAULT_KEYS },
++  platform: "Linux x86_64",
++};
++
++type FakeView = {
++  state: EditorState;
++  readonly calls: string[];
++  readonly specs: TransactionSpec[];
++  dispatch(spec: TransactionSpec): void;
++  focus(): void;
++};
++
++type Opened = {
++  readonly data: FileMergeData;
++  readonly fields: FoldFields;
++  readonly center: EditorState;
++  readonly left: EditorState;
++};
++
++function fakeView(state: EditorState): FakeView {
++  const view: FakeView = {
++    state,
++    calls: [],
++    specs: [],
++    dispatch(spec) {
++      view.specs.push(spec);
++      view.state = view.state.update(spec).state;
++      view.calls.push("dispatch");
++    },
++    focus() {
++      view.calls.push("focus");
++    },
++  };
++  return view;
++}
++
++function docOf(text: string, crlf = false): EditorState {
++  return EditorState.create({ doc: text, extensions: crlf ? lineSeparator("CrLf") : [] });
++}
++
++function selected(state: EditorState): string {
++  const { from, to } = state.selection.main;
++  return state.sliceDoc(from, to);
++}
++
++function numbered(from: number, to: number): string[] {
++  return Array.from({ length: to - from + 1 }, (_, index) => `line ${from + index}`);
++}
++
++function noViews(): never {
++  throw new Error("a state test has no views");
++}
++
++async function oneLocalChange(): Promise<FileMergeData> {
++  const middle = numbered(1, 60);
++  const local = [...numbered(1, 10), "local a", "local b", ...numbered(12, 60)];
++  const record = {
++    path: "synthetic.ts",
++    deleted: null,
++    middle: { kind: "Stages", text: `${middle.join("\n")}\n` },
++    local: `${local.join("\n")}\n`,
++    remote: `${middle.join("\n")}\n`,
++    eol: "Lf",
++    disk_version: 0,
++    chunks: [
++      {
++        chunk: {
++          id: 0,
++          kind: "LocalOnly",
++          base: { start: 10, len: 1 },
++          local: { start: 10, len: 2 },
++          remote: { start: 10, len: 1 },
++        },
++        middle: { start: 10, len: 1 },
++        words: {
++          chunk: 0,
++          local: { changed: [], removals: [] },
++          remote: { changed: [], removals: [] },
++        },
++        waiting: { kind: "SideLines" },
++      },
++    ],
++  };
++  return loadFixture("synthetic.ts", { "synthetic.json": record });
++}
++
++async function opened(): Promise<Opened> {
++  const data = await oneLocalChange();
++  const docs = paneDocs(data);
++  const fields = foldFields(foldRuns(data.chunks, docs), true);
++  const wiring = { folds: fields, hovered: () => null, views: noViews };
++  const common = { eol: data.eol, language: null, settings: SETTINGS };
++  const center = paneState({
++    ...common,
++    kind: "center",
++    doc: docs.center,
++    extensions: [chunkField(data.chunks), centerFolds(wiring)],
++  });
++  const left = paneState({
++    ...common,
++    kind: "side",
++    doc: docs.left,
++    extensions: sideFolds(wiring, "left"),
++  });
++  return { data, fields, center, left };
++}
++
++function hides(fields: FoldFields, pane: Pane, state: EditorState, line: number): boolean {
++  const pos = state.doc.line(line + 1).from;
++  return displayedIn(paneFolds(fields, pane, state), pane).some(
++    (hidden) => hidden.from <= pos && pos <= hidden.to,
++  );
++}
++
++function span(from: number, to: number): { from: DocPos; to: DocPos } {
++  return { from: toDocPos(from), to: toDocPos(to) };
++}
++
++test("matchRange keeps a match inside the document: a line past the end is the last line, columns past the line end are its end", () => {
++  const doc = docOf("alpha\nbeta\ngamma").doc;
++
++  expect(matchRange(doc, { line: 1, from: 1, to: 3 })).toEqual({ from: 7, to: 9 });
++  expect(matchRange(doc, { line: 9, from: 1, to: 3 })).toEqual({ from: 12, to: 14 });
++  expect(matchRange(doc, { line: 0, from: 3, to: 40 })).toEqual({ from: 3, to: 5 });
++  expect(matchRange(doc, { line: 2, from: 30, to: 40 })).toEqual({ from: 16, to: 16 });
++});
++
++test("changeLines: a span of whole lines, an insertion point between lines and one after a last line without a break", () => {
++  const doc = docOf("a\nb\nc").doc;
++
++  expect(changeLines(doc, span(2, 4))).toEqual({ start: 1, len: 1 });
++  expect(changeLines(doc, span(2, 2))).toEqual({ start: 1, len: 0 });
++  expect(changeLines(doc, span(5, 5))).toEqual({ start: 3, len: 0 });
++  expect(changeLines(doc, span(0, 0))).toEqual({ start: 0, len: 0 });
++});
++
++test("changeLines: a span ending mid-line at the document's end holds that last line", () => {
++  const doc = docOf("a\nb\nc").doc;
++
++  expect(changeLines(doc, span(2, 5))).toEqual({ start: 1, len: 2 });
++  expect(changeLines(doc, span(4, 5))).toEqual({ start: 2, len: 1 });
++});
++
++test("changeLines on a CRLF document counts each \\r\\n as one line break", () => {
++  const state = docOf("a\r\nb\r\nc\r\n", true);
++  const { doc } = state;
++  const second = doc.line(2);
++  const end = doc.line(4).from;
++
++  expect(doc.lines).toBe(4);
++  expect(changeLines(doc, span(second.from, end))).toEqual({ start: 1, len: 2 });
++  expect(changeLines(doc, span(end, end))).toEqual({ start: 3, len: 0 });
++});
++
++test("goTo selects the match as find does, then gives the pane the keyboard", () => {
++  const view = fakeView(docOf("one\ntwo words\nthree"));
++
++  goTo(view, { line: 1, from: 4, to: 9 });
++
++  expect(selected(view.state)).toBe("words");
++  expect(view.specs.map((spec) => spec.userEvent)).toEqual(["select.search"]);
++  expect(view.calls).toEqual(["dispatch", "focus"]);
++});
++
++test("goTo without a match only gives the pane the keyboard", () => {
++  const view = fakeView(docOf("one\ntwo"));
++
++  goTo(view, null);
++
++  expect(view.state.selection.main.head).toBe(0);
++  expect(view.calls).toEqual(["focus"]);
++});
++
++test("a stale match past the document's end selects at its last line and throws nothing", () => {
++  const view = fakeView(docOf("one\ntwo"));
++
++  goTo(view, { line: 7, from: 1, to: 9 });
++
++  expect(selected(view.state)).toBe("wo");
++});
++
++test("a go-to on a collapsed Result shows the run around the match", async () => {
++  const { fields, center } = await opened();
++  const match: PaneMatch = { line: 40, from: 5, to: 7 };
++  expect(hides(fields, "center", center, match.line)).toBe(true);
++  const view = fakeView(center);
++
++  goTo(view, match);
++
++  expect(selected(view.state)).toBe("41");
++  expect(hides(fields, "center", view.state, match.line)).toBe(false);
++});
++
++test("a go-to in a collapsed side pane asks the Result to show the same run", async () => {
++  const { fields, center, left } = await opened();
++  const match: PaneMatch = { line: 41, from: 5, to: 7 };
++  expect(hides(fields, "left", left, match.line)).toBe(true);
++  const view = fakeView(left);
++
++  goTo(view, match);
++  const reveal = sideReveal(fields, "left", view.state);
++  const shown = reveal === null ? center : center.update(reveal).state;
++
++  expect(selected(view.state)).toBe("41");
++  expect(reveal).not.toBeNull();
++  expect(hides(fields, "center", shown, 40)).toBe(false);
++});
++
++test("resultLineUp: the Result's text, each change's live lines in the Result and its fixed side lines", async () => {
++  const { data, center } = await opened();
++  const field = chunkField(data.chunks);
++  const state = EditorState.create({ doc: center.doc, extensions: field });
++  const typed = state.update({ changes: { from: state.doc.line(11).to, insert: "\nmore" } }).state;
++
++  expect(resultLineUp(state, field, "shown")).toEqual({
++    result: "shown",
++    changes: [
++      {
++        left: { start: 10, len: 2 },
++        center: { start: 10, len: 1 },
++        right: { start: 10, len: 1 },
++      },
++    ],
++  });
++  expect(resultLineUp(typed, field, "typed").changes).toEqual([
++    {
++      left: { start: 10, len: 2 },
++      center: { start: 10, len: 2 },
++      right: { start: 10, len: 1 },
++    },
++  ]);
++});
+diff --git a/frontend/src/editor/internal/goTo.ts b/frontend/src/editor/internal/goTo.ts
+new file mode 100644
+index 0000000..f03d650
+--- /dev/null
++++ b/frontend/src/editor/internal/goTo.ts
+@@ -0,0 +1,61 @@
++import type { EditorState, StateField, Text, TransactionSpec } from "@codemirror/state";
++
++import type { ChunkSpan } from "./chunkField";
++import { selectMatch } from "./findMatch";
++import type { Pane } from "./geometry";
++
++export type PaneMatch = { readonly line: number; readonly from: number; readonly to: number };
++export type MergeGoTo = { readonly pane: Pane; readonly match: PaneMatch | null };
++
++type Lines = { readonly start: number; readonly len: number };
++
++export type ResultLineUp = {
++  readonly result: string;
++  readonly changes: readonly Readonly<Record<Pane, Lines>>[];
++};
++
++type GoToView = {
++  readonly state: EditorState;
++  dispatch(spec: TransactionSpec): void;
++  focus(): void;
++};
++
++function clamped(value: number, max: number): number {
++  return Math.min(Math.max(value, 0), max);
++}
++
++export function matchRange(doc: Text, match: PaneMatch): { from: number; to: number } {
++  const line = doc.line(clamped(match.line, doc.lines - 1) + 1);
++  const from = line.from + clamped(match.from, line.length);
++  return { from, to: Math.max(from, line.from + clamped(match.to, line.length)) };
++}
++
++export function goTo(view: GoToView, match: PaneMatch | null): void {
++  if (match !== null) {
++    view.dispatch(selectMatch(matchRange(view.state.doc, match)));
++  }
++  view.focus();
++}
++
++export function changeLines(doc: Text, { from, to }: Pick<ChunkSpan, "from" | "to">): Lines {
++  const first = doc.lineAt(from);
++  const start = from === to && first.from !== from ? first.number : first.number - 1;
++  const last = doc.lineAt(to);
++  const end = last.from === to ? last.number - 1 : last.number;
++  return { start, len: end - start };
++}
++
++export function resultLineUp(
++  state: EditorState,
++  field: StateField<readonly ChunkSpan[]>,
++  result: string,
++): ResultLineUp {
++  return {
++    result,
++    changes: state.field(field).map((span) => ({
++      left: span.chunk.local,
++      center: changeLines(state.doc, span),
++      right: span.chunk.remote,
++    })),
++  };
++}
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+index cf3669e..7163d67 100644
+--- a/frontend/src/editor/range.ts
++++ b/frontend/src/editor/range.ts
+@@ -15,6 +15,7 @@ import {
+   type ColumnViews,
+ } from "./internal/compareViews";
+ import type { Fold } from "./internal/foldRuns";
++import { goTo, type PaneMatch } from "./internal/goTo";
+ import { languageOf, loadLanguage } from "./internal/language";
+ import type { Direction } from "./internal/navigation";
+ import type { PaneSettings, Preferences } from "./internal/pane";
+@@ -45,6 +46,8 @@ export type RangeEvents = {
+   readonly hosts: (hosts: ReadonlyMap<string, HTMLElement>) => void;
+ };
+ 
++export type RangeGoTo = { readonly pane: Column; readonly match: PaneMatch | null };
++
+ export class RangeController {
+   readonly #differences: readonly Difference[];
+   readonly #events: RangeEvents;
+@@ -127,6 +130,10 @@ export class RangeController {
+     moveToDifference(this.#views, direction);
+   }
+ 
++  goTo({ pane, match }: RangeGoTo): void {
++    goTo(this.#views[pane], match);
++  }
++
+   showThreads(threads: readonly ShownThread[]): void {
+     this.#threads = threads;
+     const rows = threadRows(this.#differences, threads);
+diff --git a/frontend/src/ui/useMergeController.test.ts b/frontend/src/ui/useMergeController.test.ts
+index 32e9be1..24edad0 100644
+--- a/frontend/src/ui/useMergeController.test.ts
++++ b/frontend/src/ui/useMergeController.test.ts
+@@ -23,11 +23,13 @@ const editor = vi.hoisted(() => {
+     collapsed: new Array<string>(),
+     minimap: new Array<string>(),
+     servers: new Array<unknown>(),
++    goTos: new Array<string>(),
+     counts: { errors: 0, warnings: 0, other: 0 },
+     summary: { conflicts: 0, changes: 0, remembered: 0 },
+     countsListener: (_counts: Counts): void => {},
+     summaryListener: (_summary: Summary): void => {},
+     unsavedListener: (_unsaved: boolean): void => {},
++    resultListener: (): void => {},
+   };
+   class MergeController {
+     readonly #id: number;
+@@ -82,6 +84,15 @@ const editor = vi.hoisted(() => {
+     onUnsavedChange(listener: (unsaved: boolean) => void): void {
+       state.unsavedListener = listener;
+     }
++    onResultChange(listener: () => void): void {
++      state.resultListener = listener;
++    }
++    lineUp(): { result: string; editor: number } {
++      return { result: state.text, editor: this.#id };
++    }
++    goTo({ pane, match }: { pane: string; match: { line: number } | null }): void {
++      state.goTos.push(`${this.#id} ${pane} ${match === null ? "keyboard" : match.line}`);
++    }
+     destroy(): void {
+       state.destroyed += 1;
+     }
+@@ -103,11 +114,13 @@ afterEach(() => {
+     collapsed: [],
+     minimap: [],
+     servers: [],
++    goTos: [],
+     counts: { errors: 0, warnings: 0, other: 0 },
+     summary: { conflicts: 0, changes: 0, remembered: 0 },
+     countsListener: () => {},
+     summaryListener: () => {},
+     unsavedListener: () => {},
++    resultListener: () => {},
+   });
+ });
+ 
+@@ -425,3 +438,72 @@ test("the editor gets the language servers in use and is rebuilt when they chang
+   expect(editor.state.servers[1]).toBe(second);
+   expect(editor.state.destroyed).toBe(2);
+ });
++
++test("a go-to asked before the editor exists waits, is applied once right after the build, and never again on a rebuild", async () => {
++  const data = shallowRef<FileMergeData | null>(null);
++  const readOnly = shallowRef(false);
++  const { handle } = mount(data, { readOnly });
++  await nextTick();
++
++  handle.goTo({ pane: "left", match: { line: 2, from: 0, to: 1 } });
++  handle.goTo({ pane: "center", match: { line: 4, from: 0, to: 1 } });
++  readOnly.value = true;
++  await nextTick();
++  expect(editor.state.goTos).toEqual([]);
++
++  data.value = await fileData("a\n");
++  await nextTick();
++  expect(editor.state.goTos).toEqual(["1 center 4"]);
++
++  data.value = await fileData("b\n");
++  await nextTick();
++  expect(editor.state.built).toBe(2);
++  expect(editor.state.goTos).toEqual(["1 center 4"]);
++
++  handle.goTo({ pane: "right", match: null });
++  expect(editor.state.goTos).toEqual(["1 center 4", "2 right keyboard"]);
++});
++
++test("resultVersion: 0 with no editor, then bumped at each build and each Result change the editor reports", async () => {
++  const data = shallowRef<FileMergeData | null>(null);
++  const { scope, handle } = mount(data);
++  const hostless = mount(shallowRef<FileMergeData | null>(await fileData("a\n")), {
++    present: false,
++  });
++  await nextTick();
++  expect(handle.resultVersion.value).toBe(0);
++  expect(hostless.handle.resultVersion.value).toBe(0);
++
++  data.value = await fileData("a\n");
++  await nextTick();
++  expect(handle.resultVersion.value).toBe(1);
++
++  editor.state.resultListener();
++  editor.state.resultListener();
++  expect(handle.resultVersion.value).toBe(3);
++
++  data.value = await fileData("b\n");
++  await nextTick();
++  expect(handle.resultVersion.value).toBe(4);
++
++  scope.stop();
++  expect(handle.resultVersion.value).toBe(4);
++});
++
++test("lineUp is null while no editor exists, else the line-up of the editor in use", async () => {
++  const data = shallowRef<FileMergeData | null>(null);
++  const { scope, handle } = mount(data);
++  await nextTick();
++  expect(handle.lineUp()).toBeNull();
++
++  data.value = await fileData("a\n");
++  await nextTick();
++  expect(handle.lineUp()).toEqual({ result: "a\n", editor: 1 });
++
++  data.value = await fileData("b\n");
++  await nextTick();
++  expect(handle.lineUp()).toEqual({ result: "b\n", editor: 2 });
++
++  scope.stop();
++  expect(handle.lineUp()).toBeNull();
++});
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index bf0eb04..f6f6282 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -12,10 +12,12 @@ import {
+   MergeController,
+   type Direction,
+   type FormatOutcome,
++  type MergeGoTo,
+   type MergeOptions,
+   type MergeSummary,
+   type Preferences,
+   type ProblemCounts,
++  type ResultLineUp,
+   type ResultSnapshot,
+   type Side,
+ } from "../editor";
+@@ -25,9 +27,13 @@ import type { LanguageServers } from "../lsp";
+ export type {
+   Direction,
+   FormatOutcome,
++  MergeGoTo,
++  MergePane,
+   MergeSummary,
++  PaneMatch,
+   Preferences,
+   ProblemCounts,
++  ResultLineUp,
+   ResultSnapshot,
+ } from "../editor";
+ 
+@@ -52,6 +58,7 @@ export type MergeHandle = {
+   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
+   readonly problems: Readonly<ShallowRef<ProblemCounts | null>>;
+   readonly unsaved: Readonly<ShallowRef<boolean>>;
++  readonly resultVersion: Readonly<ShallowRef<number>>;
+   applyAllNonConflicting(side: Side): void;
+   moveToChange(direction: Direction): void;
+   undo(): void;
+@@ -59,6 +66,8 @@ export type MergeHandle = {
+   historyKey(event: KeyboardEvent): boolean;
+   snapshot(): ResultSnapshot | null;
+   format(): Promise<FormatOutcome | null>;
++  lineUp(): ResultLineUp | null;
++  goTo(target: MergeGoTo): void;
+ };
+ 
+ type HostElements = readonly [
+@@ -95,6 +104,7 @@ type Shown = {
+   readonly summary: ShallowRef<MergeSummary | null>;
+   readonly problems: ShallowRef<ProblemCounts | null>;
+   readonly unsaved: ShallowRef<boolean>;
++  readonly resultVersion: ShallowRef<number>;
+ };
+ 
+ function emptyShown(): Shown {
+@@ -102,19 +112,23 @@ function emptyShown(): Shown {
+     summary: shallowRef<MergeSummary | null>(null),
+     problems: shallowRef<ProblemCounts | null>(null),
+     unsaved: shallowRef(false),
++    resultVersion: shallowRef(0),
+   };
+ }
+ 
+ function reloaded(
+   previous: MergeController | null,
+   build: () => MergeController | null,
+-  { summary, problems, unsaved }: Shown,
++  { summary, problems, unsaved, resultVersion }: Shown,
+ ): MergeController | null {
+   previous?.destroy();
+   const controller = build();
+   summary.value = controller?.summary() ?? null;
+   problems.value = controller?.problems() ?? null;
+   unsaved.value = false;
++  if (controller !== null) {
++    resultVersion.value += 1;
++  }
+   controller?.onSummaryChange((next) => {
+     summary.value = next;
+   });
+@@ -124,10 +138,42 @@ function reloaded(
+   controller?.onUnsavedChange((next) => {
+     unsaved.value = next;
+   });
++  controller?.onResultChange(() => {
++    resultVersion.value += 1;
++  });
+   return controller;
+ }
+ 
+-function handleOf(shown: Shown, current: () => MergeController | null): MergeHandle {
++type GoTos = {
++  readonly ask: (target: MergeGoTo) => void;
++  readonly built: (controller: MergeController | null) => void;
++};
++
++function pendingGoTos(current: () => MergeController | null): GoTos {
++  let pending: MergeGoTo | null = null;
++  return {
++    ask: (target) => {
++      const controller = current();
++      if (controller === null) {
++        pending = target;
++      } else {
++        controller.goTo(target);
++      }
++    },
++    built: (controller) => {
++      if (controller !== null && pending !== null) {
++        controller.goTo(pending);
++        pending = null;
++      }
++    },
++  };
++}
++
++function handleOf(
++  shown: Shown,
++  current: () => MergeController | null,
++  goTo: GoTos["ask"],
++): MergeHandle {
+   return {
+     ...shown,
+     applyAllNonConflicting: (side) => current()?.applyAllNonConflicting(side),
+@@ -137,6 +183,8 @@ function handleOf(shown: Shown, current: () => MergeController | null): MergeHan
+     historyKey: (event) => current()?.historyKey(event) ?? false,
+     snapshot: () => current()?.snapshot() ?? null,
+     format: () => current()?.format() ?? Promise.resolve(null),
++    lineUp: () => current()?.lineUp() ?? null,
++    goTo,
+   };
+ }
+ 
+@@ -166,6 +214,7 @@ export function useMergeController(
+ ): MergeHandle {
+   const shown = emptyShown();
+   let controller: MergeController | null = null;
++  const goTos = pendingGoTos(() => controller);
+ 
+   watch(
+     [
+@@ -186,6 +235,7 @@ export function useMergeController(
+         servers: currentServers,
+       };
+       controller = reloaded(controller, () => createController(current, options, elements), shown);
++      goTos.built(controller);
+     },
+     { immediate: true, flush: "post" },
+   );
+@@ -196,5 +246,5 @@ export function useMergeController(
+     controller = reloaded(controller, () => null, shown);
+   });
+ 
+-  return handleOf(shown, () => controller);
++  return handleOf(shown, () => controller, goTos.ask);
+ }
+diff --git a/frontend/src/ui/useRangeController.test.ts b/frontend/src/ui/useRangeController.test.ts
+index 3cbf50a..41bcbe1 100644
+--- a/frontend/src/ui/useRangeController.test.ts
++++ b/frontend/src/ui/useRangeController.test.ts
+@@ -61,6 +61,7 @@ const IDLE: ShownRange = {
+   setPreferences: () => {},
+   setCollapsed: () => {},
+   moveToChange: () => {},
++  goTo: () => {},
+   showThreads: () => {},
+   destroy: () => {},
+ };
+@@ -87,6 +88,8 @@ function run(from: RunFrom = {}): Run {
+     setPreferences: (next) => calls.push(`preferences ${next.theme}`),
+     setCollapsed: (on) => calls.push(`collapsed ${on}`),
+     moveToChange: (direction) => calls.push(`move ${direction}`),
++    goTo: ({ pane, match }) =>
++      calls.push(`goTo ${pane} ${match === null ? "keyboard" : match.line}`),
+     showThreads: (next) => calls.push(`threads ${keysOf(next).join(",")}`),
+     destroy: () => calls.push("destroy"),
+   };
+@@ -292,6 +295,38 @@ test("the controller gets the line events and its hosts reach threadHosts", asyn
+   expect(live.handle.threadHosts.value).toBe(hosts);
+ });
+ 
++test("a go-to waits for the load, the hosts and the thread list, is applied once at build, then goes straight to the controller", async () => {
++  const live = run({ hosts: null, listed: false });
++  live.handle.goTo({ pane: "left", match: { line: 1, from: 0, to: 1 } });
++  live.handle.goTo({ pane: "right", match: { line: 3, from: 0, to: 1 } });
++
++  await live.answer(TEXTS);
++  live.hosts.value = "mounted";
++  await nextTick();
++  expect(live.built).toEqual([]);
++  expect(live.calls).toEqual([]);
++
++  live.listed.value = true;
++  await nextTick();
++  expect(live.built).toHaveLength(1);
++  expect(live.calls).toEqual(["goTo right 3"]);
++
++  live.hosts.value = "again";
++  await nextTick();
++  live.handle.goTo({ pane: "left", match: null });
++  expect(live.calls).toEqual(["goTo right 3", "goTo left keyboard"]);
++});
++
++test("a go-to after the view unmounted reaches no controller", async () => {
++  const live = run();
++  await live.answer(TEXTS);
++  live.stop();
++
++  live.handle.goTo({ pane: "right", match: { line: 0, from: 0, to: 1 } });
++
++  expect(live.calls).toEqual(["destroy"]);
++});
++
+ test.each<RangeFile>([
+   { kind: "binary" },
+   { kind: "tooLarge", limit: 8_388_608 },
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+index 41a807e..c2bd22f 100644
+--- a/frontend/src/ui/useRangeController.ts
++++ b/frontend/src/ui/useRangeController.ts
+@@ -13,6 +13,7 @@ import {
+   type Direction,
+   type Preferences,
+   type RangeEvents,
++  type RangeGoTo,
+   type RangeOptions,
+   type RangeTexts,
+   type ShownThread,
+@@ -22,6 +23,8 @@ import { useRangeStore } from "./rangeStore";
+ import { fileSentence, modeNote } from "./rangeText";
+ import type { RangeThreads } from "./rangeThreads";
+ 
++export type { RangeGoTo } from "../editor";
++
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+ 
+ type HostRefs<D, S> = {
+@@ -37,7 +40,7 @@ type RangeContent =
+ 
+ export type ShownRange = Pick<
+   RangeController,
+-  "setPreferences" | "setCollapsed" | "moveToChange" | "showThreads" | "destroy"
++  "setPreferences" | "setCollapsed" | "moveToChange" | "goTo" | "showThreads" | "destroy"
+ >;
+ 
+ type ThreadHosts = ReadonlyMap<string, HTMLElement>;
+@@ -46,6 +49,7 @@ export type RangeHandle = {
+   readonly content: Readonly<ShallowRef<RangeContent>>;
+   readonly threadHosts: Readonly<ShallowRef<ThreadHosts>>;
+   moveToChange(direction: Direction): void;
++  goTo(target: RangeGoTo): void;
+ };
+ 
+ export type RangeParts<H> = {
+@@ -70,6 +74,7 @@ type Live = {
+   readonly threadHosts: ShallowRef<ThreadHosts>;
+   waiting: RangeTexts | null;
+   controller: ShownRange | null;
++  goTo: RangeGoTo | null;
+   disposed: boolean;
+ };
+ 
+@@ -104,6 +109,10 @@ function build<H>(live: Live, parts: RangeParts<H>): void {
+   };
+   live.controller = parts.build(live.waiting, hosts, options, events);
+   live.waiting = null;
++  if (live.goTo !== null) {
++    live.controller.goTo(live.goTo);
++    live.goTo = null;
++  }
+ }
+ 
+ function followLive<H>(live: Live, parts: RangeParts<H>): void {
+@@ -118,12 +127,21 @@ function followLive<H>(live: Live, parts: RangeParts<H>): void {
+   });
+ }
+ 
++function askGoTo(live: Live, target: RangeGoTo): void {
++  if (live.controller === null) {
++    live.goTo = target;
++  } else {
++    live.controller.goTo(target);
++  }
++}
++
+ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+   const live: Live = {
+     content: shallowRef<RangeContent>({ kind: "loading" }),
+     threadHosts: shallowRef<ThreadHosts>(new Map()),
+     waiting: null,
+     controller: null,
++    goTo: null,
+     disposed: false,
+   };
+ 
+@@ -152,6 +170,9 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
+     moveToChange: (direction) => {
+       live.controller?.moveToChange(direction);
+     },
++    goTo: (target) => {
++      askGoTo(live, target);
++    },
+   };
+ }
+ 

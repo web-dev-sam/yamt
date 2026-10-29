@@ -35,6 +35,13 @@ Read-only: everything else. Docs are the orchestrator's.
   one already opened both land; Enter on a row in the list does the same. Merge: typing in the Result on a matching
   line updates that file's rows ~300 ms later; Reset brings them back. Ctrl+Shift+S hide returns the keyboard to the
   shown file. Screenshots.
+- The selection holds: `SearchGoToB` saw the go-to's selection shrink to a cursor 1–4 frames later in most WebKit
+  probes (CodeMirror adopting the browser's selection via `DOMObserver.onSelectionChange`; a plain contenteditable on
+  the app page lost its range too; notes `.omp/run/notes/SearchGoTo.md`). Read the pane's selection 500 ms after each
+  go-to, in the fixture page **and** in the real app (`scripts/range-repo.sh`, `scripts/demo-repo.sh`), with the
+  window focused (`document.hasFocus()` true): it must still equal the match. If it shrinks, find the cause (a row
+  click's own mouseup or focus handling, the panel's focus return, WebKit) and fix it inside your files, or name the
+  file, line and change in `deviations_from_brief`.
 - `pnpm -C frontend typecheck`, `lint`, `test`, `fmt:check`, `unused` pass.
 
 ## Skills
