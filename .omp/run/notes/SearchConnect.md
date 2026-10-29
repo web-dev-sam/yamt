@@ -40,3 +40,11 @@ X clicks: the same. **The selection never shrank to a cursor.** Screenshots `/tm
 more after 300 ms (cheap); merge app's first Ctrl+Shift+S after start did not show the panel (second did; passed to
 `SearchWindowR1`); range fixture dark: hiding returned focus to the gear that had it when the panel showed (as
 designed).
+
+## Reviews (round 1)
+
+Mutation run `just mutants d68ff0f`: survivors only on older lines. Boundary pass with #1725 (the go-to watch copied in
+both views) and #1726 (ChoiceView's literal "Result"), both promoted. Correctness fail: #1727 (a go-to whose open
+never lands stays and fires on a later open), #1728 (a failed new-stop list never searches once the list arrives),
+#1729 (a deleted-side file's hidden pane searched with the base text; `mergeSearch.ts`, a window file). Fix round 1
+waits for `SearchWindowR1` (it owns `searching.ts`, `opening.ts`, `mergeSearch.ts`, the stores).
