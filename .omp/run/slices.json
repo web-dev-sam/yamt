@@ -1,9 +1,24 @@
 {
-  "SearchCoreB": {
+  "SearchRangeTexts": {
     "owned": [
-      "frontend/src/search/**",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts"
+      "crates/merge-core/src/compare.rs",
+      "crates/merge-core/src/lib.rs",
+      "crates/range/src/lib.rs",
+      "crates/range/src/load.rs",
+      "crates/range/src/open.rs",
+      "crates/range/src/search.rs",
+      "crates/range/tests/*.rs",
+      "crates/range/AGENTS.md",
+      "src-tauri/src/range.rs",
+      "src-tauri/src/commands.rs",
+      "frontend/src/ipc/rangeDomain.ts",
+      "frontend/src/ipc/rangeDomain.test.ts",
+      "frontend/src/ipc/RangeSource.ts",
+      "frontend/src/ipc/tauriRange.ts",
+      "frontend/src/ipc/tauriRange.test.ts",
+      "frontend/src/ipc/fixtureRange.ts",
+      "frontend/src/ipc/fixtureRange.test.ts",
+      "frontend/src/ipc/index.ts"
     ]
   },
   "SearchGoToB": {
