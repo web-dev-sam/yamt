@@ -1,0 +1,117 @@
+commit 6b8f3fa12a5df97eb2bc89bfa0af34cac2ac5129
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 19:36:25 +0100
+
+    fix(search): new search starts keyboard at top; hide with no file on screen restores prior focus; clip note
+
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 425dc9e..74f5e49 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -42,4 +42,4 @@ Paste on Linux (plan §2 #99): `linuxPaste.ts` `takeLinuxPastes`, installed once
+ 
+ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is the only later writer of `<html data-theme>` and of `documentElement.style.colorScheme` (from `themeKind`; `style.css`'s `color-scheme: dark` covers only the frames before mount). Settings → Theme shows `themeRows()` as five `role="group"` rows named by their editor, one `ChoiceButtons` pair each, `settings.theme` the one pressed button across them.
+ 
+-Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
++Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
+diff --git a/frontend/src/ui/App.vue b/frontend/src/ui/App.vue
+index dd8b00f..2bceaba 100644
+--- a/frontend/src/ui/App.vue
++++ b/frontend/src/ui/App.vue
+@@ -71,7 +71,11 @@ onMounted(() => {
+   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
+     <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
+       <template #search>
+-        <SearchPanel :search="search" :shown-path="active" :whole="!fileListShown" />
++        <SearchPanel
++          :search="search"
++          :shown-path="screen.kind === 'files' ? active : null"
++          :whole="!fileListShown"
++        />
+       </template>
+       <FileList
+         v-show="fileListShown"
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index b4b9fe2..667f27c 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -93,7 +93,11 @@ function folderLines(path: string): RangeLineCounts {
+   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
+     <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
+       <template #search>
+-        <SearchPanel :search="search" :shown-path="shownPath" :whole="!fileListShown" />
++        <SearchPanel
++          :search="search"
++          :shown-path="screen.kind === 'files' ? shownPath : null"
++          :whole="!fileListShown"
++        />
+       </template>
+       <FileList
+         v-show="fileListShown"
+diff --git a/frontend/src/ui/SearchPanel.vue b/frontend/src/ui/SearchPanel.vue
+index 967e6aa..45db03a 100644
+--- a/frontend/src/ui/SearchPanel.vue
++++ b/frontend/src/ui/SearchPanel.vue
+@@ -14,7 +14,7 @@ import {
+   summaryText,
+ } from "./searchText";
+ 
+-type Remembered = { readonly pane: HTMLElement | null; readonly path: string | null };
++type Remembered = { readonly element: HTMLElement | null; readonly path: string | null };
+ 
+ const props = defineProps<{ search: Searching<P>; shownPath: string | null; whole: boolean }>();
+ 
+@@ -24,7 +24,7 @@ const PANE_CONTENT = '[role="textbox"][aria-multiline="true"]';
+ const panel = useTemplateRef<HTMLElement>("panel");
+ const box = useTemplateRef<HTMLInputElement>("box");
+ const results = useTemplateRef<{ focusList(): void }>("results");
+-let remembered: Remembered = { pane: null, path: null };
++let remembered: Remembered = { element: null, path: null };
+ 
+ const summaryLine = computed(() => {
+   const summary = props.search.summary.value;
+@@ -44,7 +44,7 @@ watch(
+     }
+     const focused = document.activeElement;
+     remembered = {
+-      pane: focused instanceof HTMLElement && focused.matches(PANE_CONTENT) ? focused : null,
++      element: focused instanceof HTMLElement && focused !== document.body ? focused : null,
+       path: props.shownPath,
+     };
+     await nextTick();
+@@ -64,7 +64,14 @@ function focusBack(): void {
+   if (inPanel !== true) {
+     return;
+   }
+-  const { pane, path } = remembered;
++  const { element, path } = remembered;
++  if (props.shownPath === null) {
++    if (element?.isConnected === true) {
++      element.focus();
++    }
++    return;
++  }
++  const pane = element?.matches(PANE_CONTENT) === true ? element : null;
+   if (pane?.isConnected === true && path === props.shownPath) {
+     pane.focus();
+   }
+diff --git a/frontend/src/ui/SearchResults.vue b/frontend/src/ui/SearchResults.vue
+index 53e90c4..faab120 100644
+--- a/frontend/src/ui/SearchResults.vue
++++ b/frontend/src/ui/SearchResults.vue
+@@ -42,6 +42,7 @@ const activeIndex = computed(() => {
+ watch(
+   () => props.fullRuns,
+   () => {
++    activeKey.value = null;
+     scrollListTo(0);
+   },
+ );
+@@ -203,6 +204,7 @@ defineExpose({ focusList });
+         <template v-else>
+           <span class="flex min-w-0 flex-1 overflow-hidden whitespace-pre">
+             <span class="flex max-w-full shrink-0">
++              <!-- overflow-clip, not -hidden: with hidden WebKitGTK 2.54 left a row's before-text scrolled by 1 px (scrollLeft −1, review finding 1739). -->
+               <span class="flex min-w-0 justify-end overflow-clip">
+                 <span class="shrink-0">{{ row.place.preview.before }}</span>
+               </span>

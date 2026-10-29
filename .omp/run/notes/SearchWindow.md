@@ -84,3 +84,15 @@ remembered pane (`[role=textbox][aria-multiline=true]`, same path, connected) el
 killed. Reviews: boundary pass (#1739 should promoted: no note for `overflow-clip`; #1740 nit dropped), correctness
 fail: #1741 the keyboard row survives a new search, #1742 a hide with Settings shown drops the keyboard to body and a
 waiting go-to takes it on Back (#1743 should dropped). Gate B (owner #1744): a third round, `SearchWindowR3`.
+
+## Fix round 3 (Gate B; `SearchWindowR3`, 17m41s, patch `6b8f3fa`, `.omp/run/patches/SearchWindowR3.patch`)
+
+A new search clears `activeKey` with the scroll to the top (#1741); both roots pass `shownPath` only while
+`screen.kind === 'files'`, and with no file on screen a hide refocuses the element saved at show, never a go-to
+(#1742; `Remembered.element`, the pane test at hide time); the `overflow-clip` note (#1739); `ui/AGENTS.md` Search
+paragraph updated. WebKit (Xvfb, `hasFocus` true) before/after, both pages, dark/light: Down after a refine or Match
+Case → the first row at the top (before: none active, Enter opened an off-screen place); Settings shown, toggle twice
+→ Back button (before: `BODY`), Back → gear, no jump; files screen kept (lead pane; Local kept). Hidden-panel edit:
+rows show, clamped. `just mutants 1fd6caa`: nothing to mutate. Re-checks: boundary pass, correctness pass (open
+risk: a pane saved on the files screen, then Settings, then hide → `focus()` on an invisible pane does nothing, body;
+same as rounds 1–2, not reachable without clicking back into the panel). Accepted.
