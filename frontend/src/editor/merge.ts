@@ -207,6 +207,7 @@ export class MergeController {
 
   goTo({ pane, match }: MergeGoTo): void {
     goTo(this.#views[pane], match);
+    this.#frame.realign(pane);
   }
 
   lineUp(): ResultLineUp {
@@ -228,7 +229,7 @@ export class MergeController {
 
   setCollapsed(collapsed: boolean): void {
     this.#folds.setCollapsed(collapsed);
-    this.#frame.realign();
+    this.#frame.realign("center");
   }
 
   showMinimap(shown: boolean): void {
