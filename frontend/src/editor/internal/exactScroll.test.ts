@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 
 import { farTop } from "./exactScroll";
+import { movedFarTop } from "./exactScroll";
 
 const PADDING_PX = 4;
 const HEIGHT_PX = 600;
@@ -33,4 +34,26 @@ test("a visible span inside the rendered lines is not far", () => {
 test("a jump fully above or fully below the rendered lines places its visible top", () => {
   expect(at(100)).toBe(96);
   expect(at(2552)).toBe(2548);
+});
+
+function movedTo(scrollTop: number, seenTop: number): number | null {
+  return movedFarTop(
+    seenTop,
+    { scrollTop, clientHeight: HEIGHT_PX, paddingTop: PADDING_PX },
+    RENDERED,
+  );
+}
+
+test("a scroll event at the scrollTop seen last places nothing, though the rendered lines moved away", () => {
+  expect(movedTo(0, 0)).toBeNull();
+  expect(movedTo(2552, 2552)).toBeNull();
+});
+
+test("a scrollTop moved away from the rendered lines places its visible top", () => {
+  expect(movedTo(2552, 0)).toBe(2548);
+  expect(movedTo(100, 1200)).toBe(96);
+});
+
+test("a scrollTop moved inside the rendered lines places nothing", () => {
+  expect(movedTo(1200, 0)).toBeNull();
 });

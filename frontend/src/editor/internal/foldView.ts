@@ -10,6 +10,7 @@ import {
   EditorView,
   GutterMarker,
   lineNumberMarkers,
+  ViewPlugin,
   WidgetType,
   type DecorationSet,
 } from "@codemirror/view";
@@ -32,6 +33,7 @@ type FoldWiring = {
 
 const WAVE_LABEL = "Show unchanged lines";
 const HALF = 0.5;
+const WAVE_WIDTH_VAR = "--fold-wave-width";
 
 class FoldLine extends WidgetType {
   readonly run: number;
@@ -134,15 +136,38 @@ const tile = {
   maskSize: `calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}) ${WAVE_TILE_HEIGHT_PX}px`,
 };
 
+// WebKitGTK 2.54 pulls a far scrollTop back to the top while CodeMirror swaps the viewport of a scroller
+// that holds size-container units (`container-type`, `cqi`) (docs/slices/briefs/range-collapse-columns-rework-4.md):
+// the wave takes the scroller's width from a measure.
+const waveWidth = ViewPlugin.define((view) => {
+  const measure = {
+    key: WAVE_WIDTH_VAR,
+    read: (): number => {
+      const scroller = view.scrollDOM;
+      return scroller.getBoundingClientRect().width - (scroller.offsetWidth - scroller.clientWidth);
+    },
+    write: (width: number): void => {
+      view.scrollDOM.style.setProperty(WAVE_WIDTH_VAR, `${width}px`);
+    },
+  };
+  view.requestMeasure(measure);
+  return {
+    update(update) {
+      if (update.geometryChanged) {
+        update.view.requestMeasure(measure);
+      }
+    },
+  };
+});
+
 const waveTheme = EditorView.theme({
-  ".cm-scroller": { containerType: "inline-size" },
   ".cm-gutter.cm-lineNumbers": { overflow: "visible" },
   ".fold-wave-cell": { position: "relative" },
   ".fold-wave": {
     position: "absolute",
     left: "0",
     top: "0",
-    width: "100cqi",
+    width: `var(${WAVE_WIDTH_VAR})`,
     height: "100%",
     cursor: "pointer",
     backgroundColor: "var(--color-diff-wave)",
@@ -172,6 +197,7 @@ export function paneFoldView<P extends string>(
       waveMarkers(shown.folds(state), pane, hovered),
     ),
     waveTheme,
+    waveWidth,
   ];
 }
 
