@@ -1156,12 +1156,20 @@ feature in this session: section "Search" below.
 ## Search — every file of the merge and range windows, Ctrl/Cmd+Shift+S, one row per place (session 35 continued, branch `feat/beta-feedback` at `39182c2`)
 
 Owner request #1657 (2026-10-28), every question answered: `docs/slices/request-search.md` (rules 1–13, acceptance,
-non-goals). Started in this session on the owner's word (#1685). No product question. Design first; the build graph
-follows the design (at most two implementers at once).
+non-goals). Started in this session on the owner's word (#1685). No product question. Decision `docs/plan.md` §2
+**#127** (design option A by `SearchDesign`: the core in framework-free `frontend/src/search/`, texts from `load_file`
+and the live Result (merge) and one paged `search_range_texts` (range), the go-to through find's selection). Order:
+rows 2 ∥ 3, then 4 (after 3), then 5 (after 2, 3, 4), then 6, then 7.
 
-| row | slice                                                                                                                                               | owner    | status  | evidence |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------- | -------- |
-| 1   | design: one matcher, the place rule, texts and line-up data per window, search state, go-to, the panel (`briefs/search-design.md`) (`SearchDesign`) | designer | running |          |
+| row | slice                                                                                                                                               | owner     | status  | evidence                                |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | --------------------------------------- |
+| 1   | design: one matcher, the place rule, texts and line-up data per window, search state, go-to, the panel (`briefs/search-design.md`) (`SearchDesign`) | designer  | done    | option A, #127; notes `SearchDesign.md` |
+| 2   | search core: matcher, place rule, order, filters, dismissals, cap (`briefs/search-core.md`) (`SearchCore`)                                          | web-impl  | running |                                         |
+| 3   | editor go-to on both controllers, the Result's live line-up, the handles (`briefs/search-goto.md`) (`SearchGoTo`)                                   | web-impl  | running |                                         |
+| 4   | Rust and range IPC: `line_changes`, `search_range_texts` pages, the range source method (`SearchRangeTexts`)                                        | rust-impl | todo    |                                         |
+| 5   | window: key, `SideColumn`, panel and results, `createSearching`, both sources, both stores (`SearchWindow`)                                         | web-impl  | todo    |                                         |
+| 6   | connect: views consume go-to and report Result changes, stops and disk changes re-run (`SearchConnect`)                                             | web-impl  | todo    |                                         |
+| 7   | final run: `just check`, WebKit both windows, real app on `demo-repo.sh` and `range-repo.sh`, dark and light                                        | verifier  | todo    |                                         |
 
 ## Open product questions
 
