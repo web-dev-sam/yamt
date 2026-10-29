@@ -67,13 +67,13 @@ function focusBack(): void {
   const { element, path } = remembered;
   if (props.shownPath === null) {
     if (element?.isConnected === true) {
-      element.focus();
+      element.focus({ preventScroll: true });
     }
     return;
   }
   const pane = element?.matches(PANE_CONTENT) === true ? element : null;
   if (pane?.isConnected === true && path === props.shownPath) {
-    pane.focus();
+    pane.focus({ preventScroll: true });
   }
   if (pane === null || document.activeElement !== pane) {
     props.search.focusShownFile();

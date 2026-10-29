@@ -34,3 +34,22 @@ test("preview: a cut never splits a surrogate pair", () => {
     `…${"a".repeat(25)}`,
   );
 });
+
+test("preview: 250 characters after the match with … when cut (a 2 MiB line laid out whole)", () => {
+  const rest = "x".repeat(250);
+
+  expect(previewOf({ lineText: `foo${rest}`, from: 0, to: 3 }).after).toBe(rest);
+  expect(previewOf({ lineText: `foo${rest}y`, from: 0, to: 3 }).after).toBe(`${rest}…`);
+  expect(previewOf({ lineText: `foo${"z".repeat(2 ** 21)}`, from: 0, to: 3 }).after).toBe(
+    `${"z".repeat(250)}…`,
+  );
+});
+
+test("preview: the cut after the match never splits a surrogate pair", () => {
+  const rest = `${"a".repeat(249)}😀b`;
+
+  expect(previewOf({ lineText: `foo${rest}`, from: 0, to: 3 }).after).toBe(`${"a".repeat(249)}…`);
+  expect(previewOf({ lineText: `foo${"a".repeat(248)}😀b`, from: 0, to: 3 }).after).toBe(
+    `${"a".repeat(248)}😀…`,
+  );
+});
