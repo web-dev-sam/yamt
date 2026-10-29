@@ -1,1 +1,9 @@
-{}
+{
+  "SearchFinalFix": {
+    "owned": [
+      "frontend/src/search/**",
+      "frontend/src/ui/SearchResults.vue",
+      "frontend/src/ui/SearchPanel.vue"
+    ]
+  }
+}
