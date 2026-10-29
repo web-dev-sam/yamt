@@ -1,1 +1,10 @@
-{}
+{
+  "SearchWindowR2": {
+    "owned": [
+      "frontend/src/ui/SearchResults.vue",
+      "frontend/src/ui/SearchPanel.vue",
+      "frontend/src/ui/searching.ts",
+      "frontend/src/ui/searching.test.ts"
+    ]
+  }
+}
