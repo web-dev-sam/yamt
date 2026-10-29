@@ -235,6 +235,20 @@ test("showFile from the settings screen shows the file and returns the screen to
   expect(visitedIndexes(store)).toEqual([0, 2]);
 });
 
+test("the search hands the keyboard back to the shown file's right column", async () => {
+  const store = await started(3);
+  store.showFile("src/f02.ts");
+
+  store.search.focusShownFile();
+
+  expect(store.search.goTo.value).toEqual({
+    id: 1,
+    path: "src/f02.ts",
+    pane: "right",
+    match: null,
+  });
+});
+
 test("closeSettings returns to the files; a path not in the range changes nothing", async () => {
   const store = await started(3);
   store.openSettings();

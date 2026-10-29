@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { shallowRef } from "vue";
+import { shallowRef, watch } from "vue";
 
 import { MAX_ROWS, type SearchedFile } from "../search";
 import { createAsking } from "./asking";
@@ -20,6 +20,7 @@ type Fake = {
   readonly reads: string[];
   readonly forgotten: string[];
   hold: Promise<void> | null;
+  holdAt: number;
   slowMs: number;
   holdFiles: boolean;
   readonly fileGates: (() => void)[];
@@ -33,6 +34,7 @@ function fakeSource(files: Readonly<Record<string, string>>): Fake {
     reads: [],
     forgotten: [],
     hold: null,
+    holdAt: 0,
     slowMs: 0,
     holdFiles: false,
     fileGates: [],
@@ -41,8 +43,9 @@ function fakeSource(files: Readonly<Record<string, string>>): Fake {
       async *files() {
         runs += 1;
         const held = fake.hold;
-        for (const path of fake.texts.keys()) {
-          if (held !== null) {
+        const at = fake.holdAt;
+        for (const [index, path] of [...fake.texts.keys()].entries()) {
+          if (held !== null && index >= at) {
             await held;
           }
           vi.advanceTimersByTime(fake.slowMs);
@@ -422,9 +425,11 @@ test("clear drops results and every text but keeps the query, case, filters and 
   expect(fake.runs()).toBe(2);
 });
 
-test("before any run there are no rows and no summary, and took without a request changes nothing", () => {
+test("before any run there are no rows and no summary, and took or a dismissal changes nothing", () => {
   const search = searching(fakeSource({}));
 
+  search.dismissGroup("a.ts");
+  expect(search.results.value).toBeNull();
   expect(search.rows.value).toEqual([]);
   expect(search.summary.value).toBeNull();
   search.took(1);
@@ -570,4 +575,164 @@ test("clear cancels a file's waiting re-run", async () => {
   await vi.runAllTimersAsync();
 
   expect(fake.reads).toEqual(["a.ts"]);
+});
+
+type Gate = { readonly promise: Promise<void>; readonly open: () => void };
+
+function gate(): Gate {
+  const opener = { open: (): void => undefined };
+  const promise = new Promise<void>((resolve) => {
+    opener.open = resolve;
+  });
+  return {
+    promise,
+    open: () => {
+      opener.open();
+    },
+  };
+}
+
+function matches(search: Searching<Pane>): string[] {
+  return search.rows.value.flatMap((row) =>
+    row.kind === "place" ? [row.place.preview.match] : [],
+  );
+}
+
+test("an older run's file landing while the newer run is held on its second file writes nothing and leaves running on", async () => {
+  const fake = fakeSource({ "a.ts": "old new", "b.ts": "new" });
+  const search = searching(fake);
+  const older = gate();
+  fake.hold = older.promise;
+  search.type("old");
+  search.enter();
+  await vi.advanceTimersByTimeAsync(0);
+  const newer = gate();
+  fake.hold = newer.promise;
+  fake.holdAt = 1;
+  search.type("new");
+  search.enter();
+  await vi.advanceTimersByTimeAsync(0);
+
+  older.open();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(matches(search)).not.toContain("old");
+  expect(search.running.value).toBe(true);
+  expect(fake.reads).toEqual(["a.ts", "a.ts"]);
+
+  newer.open();
+  await vi.runAllTimersAsync();
+  expect(matches(search)).toEqual(["new", "new"]);
+  expect(search.running.value).toBe(false);
+});
+
+test("a one-file read landing while a newer full run is held publishes none of that run's partial results", async () => {
+  const fake = fakeSource({ "a.ts": "foo", "b.ts": "foo" });
+  const search = searching(fake);
+  await ran(search, "foo");
+  fake.holdFiles = true;
+  search.changed("b.ts");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  const held = gate();
+  fake.hold = held.promise;
+  fake.holdAt = 1;
+  search.toggleMatchCase();
+  await vi.advanceTimersByTimeAsync(0);
+  const before = search.results.value;
+
+  fake.fileGates.forEach((open) => {
+    open();
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(search.results.value).toBe(before);
+
+  held.open();
+  await vi.runAllTimersAsync();
+  expect(groups(search)).toEqual([
+    ["a.ts", 1],
+    ["b.ts", 1],
+  ]);
+});
+
+test("changed before any run reads nothing and throws nothing", async () => {
+  const fake = fakeSource({ "a.ts": "foo" });
+  const search = searching(fake);
+
+  search.changed("a.ts");
+  await vi.runAllTimersAsync();
+
+  expect(fake.reads).toEqual([]);
+  expect(search.results.value).toBeNull();
+});
+
+test("changed for a file the previous run read but the held current run has not reached reads it not and adds no group", async () => {
+  const fake = fakeSource({ "a.ts": "foo", "b.ts": "foo" });
+  const search = searching(fake);
+  await ran(search, "foo");
+  const held = gate();
+  fake.hold = held.promise;
+  fake.holdAt = 1;
+  search.toggleMatchCase();
+  await vi.advanceTimersByTimeAsync(0);
+  const before = search.results.value;
+  fake.reads.length = 0;
+
+  search.changed("b.ts");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  expect(fake.reads).toEqual([]);
+  expect(search.results.value).toBe(before);
+
+  held.open();
+  await vi.runAllTimersAsync();
+  expect(fake.reads).toEqual(["b.ts"]);
+  expect(groups(search)).toEqual([
+    ["a.ts", 1],
+    ["b.ts", 1],
+  ]);
+});
+
+test("a re-read of a file without text any more drops its group and leaves the results uncut", async () => {
+  const fake = fakeSource({ "a.ts": "foo", "b.ts": "foo" });
+  const search = searching(fake);
+  await ran(search, "foo");
+
+  fake.texts.delete("a.ts");
+  search.changed("a.ts");
+  await vi.runAllTimersAsync();
+
+  expect(groups(search)).toEqual([["b.ts", 1]]);
+  expect(search.summary.value).toEqual({ kind: "results", rows: 1, files: 1, cut: false });
+});
+
+const QUICK_FILES = 12;
+const FILES_IN_A_SLICE = 8;
+const MANY_MICROTASKS = 400;
+const CLOCK_START_MS = 1000;
+
+test("1 ms files publish nothing and yield nothing before 8 ms have passed, then publish once", async () => {
+  const fake = fakeSource(
+    Object.fromEntries(Array.from({ length: QUICK_FILES }, (_, index) => [`f${index}.ts`, "foo"])),
+  );
+  fake.slowMs = 1;
+  vi.advanceTimersByTime(CLOCK_START_MS);
+  const search = searching(fake);
+  let publishes = 0;
+  watch(
+    search.results,
+    () => {
+      publishes += 1;
+    },
+    { flush: "sync" },
+  );
+
+  search.type("foo");
+  search.enter();
+  for (let tick = 0; tick < MANY_MICROTASKS; tick += 1) {
+    await Promise.resolve();
+  }
+
+  expect(fake.reads).toHaveLength(FILES_IN_A_SLICE);
+  expect(publishes).toBe(1);
+  expect(groups(search)).toHaveLength(FILES_IN_A_SLICE);
+  await vi.runAllTimersAsync();
+  expect(groups(search)).toHaveLength(QUICK_FILES);
 });

@@ -148,7 +148,13 @@ function createState(refs: Refs, source: ChunkSource): State {
     },
     nextStop: (end) => nextStop(state, end),
     ...createMergeSearch(
-      { ...refs, source, asking, nextStop: (end) => state.nextStop(end) },
+      {
+        ...refs,
+        source,
+        asking,
+        currentStop: () => state.stop,
+        nextStop: (end) => state.nextStop(end),
+      },
       (path) => {
         void pick(state, path);
       },

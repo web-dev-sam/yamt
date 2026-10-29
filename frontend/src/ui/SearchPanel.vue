@@ -39,10 +39,18 @@ watch(
       focusBack();
       return;
     }
-    remembered = { element: document.activeElement, path: props.shownPath };
+    const focused = document.activeElement;
+    remembered = {
+      element: focused === document.body ? null : focused,
+      path: props.shownPath,
+    };
     await nextTick();
     box.value?.focus();
     box.value?.select();
+    // WebKitGTK 2.54.2 moves the caret to the end later in the task the panel appears in, about every other show (observed in SearchWindowR1's WebKit pass).
+    requestAnimationFrame(() => {
+      box.value?.select();
+    });
   },
   { flush: "pre" },
 );
@@ -56,7 +64,8 @@ function focusBack(): void {
   const { element, path } = remembered;
   if (element instanceof HTMLElement && element.isConnected && path === props.shownPath) {
     element.focus();
-  } else {
+  }
+  if (document.activeElement !== element) {
     props.search.focusShownFile();
   }
 }
@@ -84,7 +93,7 @@ function boxKey(event: KeyboardEvent): void {
     ref="panel"
     :aria-label="SEARCH_TITLE"
     class="flex min-h-0 shrink-0 flex-col island bg-sidebar pb-1"
-    :class="whole ? 'flex-1' : 'mb-(--island-overlap) max-h-1/2'"
+    :class="whole ? 'flex-1' : 'max-h-1/2'"
   >
     <div class="flex h-10 shrink-0 items-center pr-2 pl-3">
       <h2 class="font-semibold">{{ SEARCH_TITLE }}</h2>

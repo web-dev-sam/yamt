@@ -91,7 +91,7 @@ function folderLines(path: string): RangeLineCounts {
 
 <template>
   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
-    <SideColumn v-show="fileListShown || search.shown.value">
+    <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
       <template #search>
         <SearchPanel :search="search" :shown-path="shownPath" :whole="!fileListShown" />
       </template>

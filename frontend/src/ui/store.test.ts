@@ -2613,6 +2613,69 @@ test.each(["save", "take"] as const)(
   },
 );
 
+test("a search read git answers StopMovedOn for ends the stop it was sent in: the next stop listed and opened", async () => {
+  const lines = spyConsole();
+  const answers: SourceResult<Listing>[] = [
+    listing([entry("a.ts"), entry("b.ts")]),
+    listing([entry("c.ts")]),
+  ];
+  const { source, calls } = choiceSource({
+    listStop: () => {
+      calls.push("listStop");
+      return Promise.resolve(answers.shift() ?? listing([entry("c.ts")]));
+    },
+    loadFile: async (path) => {
+      calls.push(`loadFile ${path}`);
+      return path === "b.ts"
+        ? { ok: false, failure: { kind: "StopMovedOn" } }
+        : ok(await dataFor(path));
+    },
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+
+  store.search.type("const");
+  store.search.enter();
+
+  await vi.waitFor(() => {
+    expect(store.active.value).toBe("c.ts");
+  });
+  expect(calls).toEqual([
+    "listStop",
+    "loadFile a.ts",
+    "loadFile b.ts",
+    "listStop",
+    "loadFile c.ts",
+  ]);
+  expect(store.opened.value.map((file) => file.path)).toEqual(["c.ts"]);
+  expect(store.problem.value).toBeNull();
+  expect(lines.error).toEqual(['[error] store.search_failed {kind: "StopMovedOn"}']);
+});
+
+test("a search row's click opens its file as a list click does", async () => {
+  spyConsole();
+  const { source, calls } = choiceSource({}, [entry("a.ts"), entry("b.ts")]);
+  const store = createAppStore(source);
+  await store.loadFiles();
+  store.search.type("const");
+  store.search.enter();
+  await vi.waitFor(() => {
+    expect(store.search.running.value).toBe(false);
+  });
+  const row = store.search.rows.value.find((each) => each.kind === "place" && each.path === "b.ts");
+  if (row?.kind !== "place") {
+    throw new Error("no place row in b.ts");
+  }
+
+  store.search.go(row.path, row.place, null);
+
+  await vi.waitFor(() => {
+    expect(store.active.value).toBe("b.ts");
+  });
+  expect(calls).toEqual(["loadFile a.ts", "loadFile b.ts", "loadFile b.ts"]);
+  expect(store.search.goTo.value).toMatchObject({ path: "b.ts", pane: "center" });
+});
+
 test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
   spyConsole();
   const rebase: OperationView = {

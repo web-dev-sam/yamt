@@ -194,14 +194,19 @@ function moving<P extends string>(
 
 export function createSearching<P extends string>(deps: SearchingDeps<P>): Searching<P> {
   const refs = createRefs(deps.source.layout);
-  const run = createSearchRun(refs, deps.source);
+  const run = createSearchRun(refs, deps.source, () => {
+    refs.closed.value = new Set();
+  });
   const ctx: Context<P> = { refs, deps, run, goTos: { last: 0 } };
   return {
     ...refs,
     ...views(ctx),
     ...listActions(ctx),
     ...moving(ctx),
-    type: run.type,
+    type: (text) => {
+      refs.query.value = text;
+      run.typed();
+    },
     enter: run.rerun,
     toggleMatchCase: () => {
       refs.matchCase.value = !refs.matchCase.value;

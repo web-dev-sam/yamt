@@ -2,6 +2,7 @@ import type { ShallowRef } from "vue";
 
 import type { ChunkSource, FileEntry, FileMergeData, SideNames } from "../ipc";
 import type { Layout, SearchedFile } from "../search";
+import { landed, type Stop } from "./currentStop";
 import type { WindowKeyTarget } from "./fileListKey";
 import { attempt, reportFailure, type EndsStop, type Outcome, type Problem } from "./problem";
 import {
@@ -38,6 +39,7 @@ export type MergeSearchTarget = WindowKeyTarget &
     readonly sideNames: Readonly<ShallowRef<SideNames>>;
     readonly active: Readonly<ShallowRef<string | null>>;
     readonly problem: ShallowRef<Problem | null>;
+    readonly currentStop: () => Readonly<Stop>;
   };
 
 function searchedFile(data: FileMergeData, live: ResultLineUp | null): SearchedFile<MergePane> {
@@ -77,14 +79,16 @@ async function dataOf(
   target: MergeSearchTarget,
   kept: Kept,
   path: string,
-): Promise<Outcome<FileMergeData>> {
+): Promise<Outcome<FileMergeData> | null> {
   const known = target.opened.value.find((file) => file.path === path) ?? kept.files.get(path);
   if (known !== undefined) {
     return { ok: true, value: known };
   }
   const before = kept.forgets;
-  const loaded = await attempt(() => target.source.loadFile(path));
-  if (loaded.ok && before === kept.forgets) {
+  const loaded = await landed(target.currentStop(), () =>
+    attempt(() => target.source.loadFile(path)),
+  );
+  if (loaded?.ok === true && before === kept.forgets) {
     kept.files.set(path, loaded.value);
   }
   return loaded;
@@ -98,6 +102,9 @@ function createMergeSource(
 
   async function read(path: string): Promise<SearchedFile<MergePane> | null> {
     const data = await dataOf(target, kept, path);
+    if (data === null) {
+      return null;
+    }
     if (!data.ok) {
       await reportFailure(target, { action: "search", cause: data.cause });
       return null;
@@ -126,7 +133,6 @@ function createMergeSource(
     },
     forgetAll: () => {
       kept.files.clear();
-      kept.forgets += 1;
     },
   };
 }

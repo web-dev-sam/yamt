@@ -21,15 +21,14 @@ export type SearchSource<P extends string> = {
 };
 
 export type RunRefs<P extends string> = {
-  readonly query: ShallowRef<string>;
-  readonly matchCase: ShallowRef<boolean>;
-  readonly closed: ShallowRef<ReadonlySet<string>>;
+  readonly query: Readonly<ShallowRef<string>>;
+  readonly matchCase: Readonly<ShallowRef<boolean>>;
   readonly results: ShallowRef<SearchResults<P> | null>;
   readonly running: ShallowRef<boolean>;
 };
 
 export type SearchRun<P extends string> = {
-  readonly type: (text: string) => void;
+  readonly typed: () => void;
   readonly rerun: () => void;
   readonly changed: (path: string) => void;
   readonly edit: (change: (results: SearchResults<P>) => SearchResults<P>) => void;
@@ -39,10 +38,15 @@ export type SearchRun<P extends string> = {
 export const SEARCH_PAUSE_MS = 300;
 const SLICE_MS = 8;
 
+type Working<P extends string> = {
+  readonly matcher: Matcher;
+  readonly ranks: Map<string, number>;
+  results: SearchResults<P>;
+};
+
 type Run<P extends string> = {
   generation: number;
-  working: SearchResults<P> | null;
-  readonly ranks: Map<string, number>;
+  working: Working<P> | null;
   pause: number | undefined;
   readonly waiting: Map<string, number>;
   readonly tickets: Map<string, number>;
@@ -53,6 +57,7 @@ type Context<P extends string> = {
   readonly refs: RunRefs<P>;
   readonly run: Run<P>;
   readonly source: SearchSource<P>;
+  readonly onFullRun: () => void;
 };
 
 function nextTask(): Promise<void> {
@@ -68,49 +73,43 @@ function cancel(run: Run<string>): void {
     clearTimeout(timer);
   }
   run.waiting.clear();
-  run.tickets.clear();
 }
 
 function publish<P extends string>({ refs, run }: Context<P>): void {
-  refs.results.value = run.working;
+  refs.results.value = run.working?.results ?? null;
 }
 
 function showNothing<P extends string>(ctx: Context<P>): void {
   cancel(ctx.run);
   ctx.run.working = null;
-  ctx.run.ranks.clear();
   publish(ctx);
   ctx.refs.running.value = false;
 }
 
 function searched<P extends string>(
-  results: SearchResults<P>,
+  working: Working<P>,
   file: SearchedFile<P> | null,
-  {
-    matcher,
-    layout,
-    rank,
-    path,
-  }: { matcher: Matcher; layout: Layout<P>; rank: number; path: string },
+  { layout, rank, path }: { layout: Layout<P>; rank: number; path: string },
 ): SearchResults<P> {
   const found =
-    file === null ? { places: [], cut: false } : filePlaces(file, matcher, layout, MAX_ROWS);
-  return withFile(results, { path, rank, ...found });
+    file === null
+      ? { places: [], cut: false }
+      : filePlaces(file, working.matcher, layout, MAX_ROWS);
+  return withFile(working.results, { path, rank, ...found });
 }
 
-async function readAll<P extends string>(ctx: Context<P>, matcher: Matcher): Promise<void> {
+async function readAll<P extends string>(ctx: Context<P>, working: Working<P>): Promise<void> {
   const { run, source } = ctx;
   const { generation } = run;
   let sliceStart = performance.now();
   for await (const file of source.files()) {
-    if (generation !== run.generation || run.working === null) {
+    if (generation !== run.generation) {
       return;
     }
-    const rank = run.ranks.size;
-    run.ranks.set(file.path, rank);
-    const { layout } = source;
-    run.working = searched(run.working, file, { matcher, layout, rank, path: file.path });
-    if (run.working.cut) {
+    const rank = working.ranks.size;
+    working.ranks.set(file.path, rank);
+    working.results = searched(working, file, { layout: source.layout, rank, path: file.path });
+    if (working.results.cut) {
       return;
     }
     if (performance.now() - sliceStart >= SLICE_MS) {
@@ -133,11 +132,11 @@ async function fullRun<P extends string>(ctx: Context<P>): Promise<void> {
   }
   cancel(run);
   const { generation } = run;
-  run.working = emptyResults(query);
-  run.ranks.clear();
-  refs.closed.value = new Set();
+  const working: Working<P> = { matcher, ranks: new Map(), results: emptyResults(query) };
+  run.working = working;
+  ctx.onFullRun();
   refs.running.value = true;
-  await readAll(ctx, matcher);
+  await readAll(ctx, working);
   if (generation === run.generation) {
     publish(ctx);
     refs.running.value = false;
@@ -147,21 +146,22 @@ async function fullRun<P extends string>(ctx: Context<P>): Promise<void> {
 async function searchAgain<P extends string>(ctx: Context<P>, path: string): Promise<void> {
   const { run, source } = ctx;
   run.waiting.delete(path);
-  const rank = run.ranks.get(path);
-  const matcher = run.working === null ? null : matcherOf(run.working.query);
-  if (matcher === null || rank === undefined) {
+  const { working, generation } = run;
+  if (working === null) {
     return;
   }
-  const { generation } = run;
+  const rank = working.ranks.get(path);
+  if (rank === undefined) {
+    return;
+  }
   run.ticket += 1;
   const { ticket } = run;
   run.tickets.set(path, ticket);
   const file = await source.file(path);
-  if (generation !== run.generation || run.tickets.get(path) !== ticket || run.working === null) {
+  if (generation !== run.generation || run.tickets.get(path) !== ticket) {
     return;
   }
-  run.tickets.delete(path);
-  run.working = searched(run.working, file, { matcher, layout: source.layout, rank, path });
+  working.results = searched(working, file, { layout: source.layout, rank, path });
   publish(ctx);
 }
 
@@ -177,11 +177,10 @@ function changed<P extends string>(ctx: Context<P>, path: string): void {
   );
 }
 
-function typed<P extends string>(ctx: Context<P>, text: string): void {
+function typed<P extends string>(ctx: Context<P>): void {
   const { refs, run } = ctx;
-  refs.query.value = text;
   clearTimeout(run.pause);
-  if (text === "") {
+  if (refs.query.value === "") {
     showNothing(ctx);
     return;
   }
@@ -194,20 +193,20 @@ function typed<P extends string>(ctx: Context<P>, text: string): void {
 export function createSearchRun<P extends string>(
   refs: RunRefs<P>,
   source: SearchSource<P>,
+  onFullRun: () => void,
 ): SearchRun<P> {
   const run: Run<P> = {
     generation: 0,
     working: null,
-    ranks: new Map(),
     pause: undefined,
     waiting: new Map(),
     tickets: new Map(),
     ticket: 0,
   };
-  const ctx: Context<P> = { refs, run, source };
+  const ctx: Context<P> = { refs, run, source, onFullRun };
   return {
-    type: (text) => {
-      typed(ctx, text);
+    typed: () => {
+      typed(ctx);
     },
     rerun: () => {
       void fullRun(ctx);
@@ -217,7 +216,7 @@ export function createSearchRun<P extends string>(
     },
     edit: (change) => {
       if (run.working !== null) {
-        run.working = change(run.working);
+        run.working.results = change(run.working.results);
         publish(ctx);
       }
     },

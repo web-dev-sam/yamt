@@ -9,6 +9,7 @@ import type { ListRow, PaneEntry, Place, PlaceKey } from "../search";
 import { fileIcon } from "./fileIcon";
 import { PANE_ICONS } from "./searchIcons";
 import type { SearchPaneInfo } from "./searching";
+import { stepSearchList } from "./searchListKeys";
 import { DISMISS_LABEL, paneHitTitle, RESULTS_LABEL } from "./searchText";
 
 type Row = ListRow<P>;
@@ -22,7 +23,6 @@ const emit = defineEmits<{
 }>();
 
 const ROW_HEIGHT_PX = 22;
-const PLACE_INDENT_PX = 28;
 
 const activeKey = shallowRef<string | null>(null);
 
@@ -90,61 +90,37 @@ function keepInView(index: number): void {
 }
 
 function activate(index: number): void {
-  const row = props.rows[Math.min(Math.max(index, 0), props.rows.length - 1)];
+  const row = props.rows[index];
   if (row !== undefined) {
     activeKey.value = rowKey(row);
-    keepInView(props.rows.indexOf(row));
-  }
-}
-
-function groupIndexOf(path: string): number {
-  return props.rows.findIndex((row) => row.kind === "group" && row.path === path);
-}
-
-function sideways(row: Row, opening: boolean): void {
-  if (row.kind === "place") {
-    if (!opening) {
-      activate(groupIndexOf(row.path));
-    }
-    return;
-  }
-  if (row.open !== opening) {
-    emit("toggle", row.path);
-  } else if (opening) {
-    activate(groupIndexOf(row.path) + 1);
+    keepInView(index);
   }
 }
 
 function keydown(event: KeyboardEvent): void {
-  const index = activeIndex.value ?? -1;
-  const row = props.rows[index];
-  const moves: Readonly<Record<string, () => void>> = {
-    ArrowDown: () => {
-      activate(index + 1);
-    },
-    ArrowUp: () => {
-      activate(index - 1);
-    },
-    ArrowLeft: () => {
-      if (row !== undefined) {
-        sideways(row, false);
-      }
-    },
-    ArrowRight: () => {
-      if (row !== undefined) {
-        sideways(row, true);
-      }
-    },
-    Enter: () => {
+  const step = stepSearchList(props.rows, activeIndex.value, event.key);
+  if (step.kind === "ignore") {
+    return;
+  }
+  event.preventDefault();
+  switch (step.kind) {
+    case "activate":
+      activate(step.index);
+      break;
+    case "toggle":
+      emit("toggle", step.path);
+      break;
+    case "press": {
+      const row = props.rows[step.index];
       if (row !== undefined) {
         pressed(row);
       }
-    },
-  };
-  const move = moves[event.key];
-  if (move !== undefined) {
-    event.preventDefault();
-    move();
+      break;
+    }
+    default: {
+      const _exhaustive: never = step;
+      return _exhaustive;
+    }
   }
 }
 
@@ -160,13 +136,15 @@ defineExpose({ focusList });
 
 <template>
   <div
-    v-bind="containerProps"
+    :ref="containerProps.ref"
     role="tree"
     tabindex="0"
     :aria-label="RESULTS_LABEL"
-    class="group/list mr-0.5 min-h-0 flex-1 rounded-b-island opaque-sidebar-scroller outline-none"
+    class="group/list mr-0.5 min-h-0 flex-1 overflow-x-hidden overflow-y-auto rounded-b-island opaque-sidebar-scroller outline-none"
+    @scroll="containerProps.onScroll"
     @keydown="keydown"
   >
+    <!-- WebKitGTK's overlay scrollbar takes every press within 20 px of a scroller's right edge, and its horizontal one the last row's (review finding 1719): the rows end 20 px short and the list never scrolls sideways. -->
     <div v-bind="wrapperProps">
       <div
         v-for="{ data: row } in list"
@@ -175,11 +153,9 @@ defineExpose({ focusList });
         :aria-level="row.kind === 'group' ? 1 : 2"
         :aria-expanded="row.kind === 'group' ? row.open : undefined"
         :aria-selected="rowKey(row) === activeKey"
-        class="group mx-1 flex cursor-default items-center gap-1.5 rounded pr-1 pl-2 hover:bg-row-hover aria-selected:bg-row-selected"
-        :style="{
-          height: `${ROW_HEIGHT_PX}px`,
-          paddingLeft: row.kind === 'place' ? `${PLACE_INDENT_PX}px` : undefined,
-        }"
+        class="group mr-5 ml-1 flex cursor-default items-center gap-1.5 rounded pr-1 hover:bg-row-hover aria-selected:bg-row-selected"
+        :class="row.kind === 'place' ? 'pl-7' : 'pl-2'"
+        :style="{ height: `${ROW_HEIGHT_PX}px` }"
         @click="pressed(row)"
       >
         <template v-if="row.kind === 'group'">
@@ -188,7 +164,7 @@ defineExpose({ focusList });
             <ChevronRight v-else class="size-4" aria-hidden="true" />
           </span>
           <component :is="fileIcon(row.path)" class="size-4 shrink-0" aria-hidden="true" />
-          <span class="shrink-0">{{ fileName(row.path) }}</span>
+          <span class="min-w-0 truncate">{{ fileName(row.path) }}</span>
           <span class="min-w-0 flex-1 truncate text-fg-muted">{{ folderOf(row.path) }}</span>
           <span class="shrink-0 rounded-full bg-hover px-1.5 text-xs">{{ row.count }}</span>
         </template>

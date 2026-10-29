@@ -9,6 +9,7 @@ import {
   type SourceResult,
 } from "../ipc";
 import { createAsking } from "./asking";
+import type { Stop } from "./currentStop";
 import {
   createMergeSearch,
   MERGE_LAYOUT,
@@ -58,6 +59,7 @@ type Harness = {
   readonly stops: number[];
   readonly problem: MergeSearchTarget["problem"];
   readonly files: ShallowRef<readonly FileEntry[]>;
+  readonly endStop: () => void;
 };
 
 function harness(
@@ -69,6 +71,7 @@ function harness(
   const stops: number[] = [];
   const problem = shallowRef<Problem | null>(null);
   const listed = shallowRef(files);
+  let stop: Stop = { dropped: false };
   const target: MergeSearchTarget = {
     source: {
       loadFile: async (path) => {
@@ -83,11 +86,16 @@ function harness(
     problem,
     asking: createAsking(),
     settings: shallowRef(startSettings("dark")),
+    currentStop: () => stop,
     nextStop: async () => {
       stops.push(stops.length);
     },
   };
-  return { target, loads, stops, problem, files: listed };
+  function endStop(): void {
+    stop.dropped = true;
+    stop = { dropped: false };
+  }
+  return { target, loads, stops, problem, files: listed, endStop };
 }
 
 function previews(search: MergeSearch["search"]): string[] {
@@ -250,6 +258,59 @@ test("a read answering that git moved on ends the stop instead of showing a prob
 
   expect(stops).toEqual([0]);
   expect(problem.value).toBeNull();
+});
+
+test.each([
+  ["git moved on", { ok: false, failure: { kind: "StopMovedOn" } }],
+  ["a failure", { ok: false, failure: { kind: "Git", message: "gone" } }],
+] as const)(
+  "a read sent in a stop that ended before %s answered changes nothing in the next stop",
+  async (_, reply) => {
+    const gate = { open: (): void => undefined };
+    const { target, stops, problem, endStop } = harness([entry("a.ts")], [], async () => {
+      await new Promise<void>((resolve) => {
+        gate.open = resolve;
+      });
+      return reply;
+    });
+    const { search } = createMergeSearch(target, () => undefined);
+    search.type("x");
+    search.enter();
+    await vi.advanceTimersByTimeAsync(0);
+
+    endStop();
+    gate.open();
+    await vi.runAllTimersAsync();
+
+    expect(stops).toEqual([]);
+    expect(problem.value).toBeNull();
+  },
+);
+
+test("a text loaded in a stop that ended before it answered is not kept for the next stop", async () => {
+  const file = await data("a.ts", { local: "", remote: "", middle: { kind: "Disk", text: "x" } });
+  const gate = { open: (): void => undefined };
+  const { target, loads, endStop } = harness([entry("a.ts")], [], async () => {
+    await new Promise<void>((resolve) => {
+      gate.open = resolve;
+    });
+    return { ok: true, value: file };
+  });
+  const { search } = createMergeSearch(target, () => undefined);
+  search.type("x");
+  search.enter();
+  await vi.advanceTimersByTimeAsync(0);
+
+  endStop();
+  gate.open();
+  await vi.runAllTimersAsync();
+  search.rerun();
+  await vi.advanceTimersByTimeAsync(0);
+  gate.open();
+  await vi.runAllTimersAsync();
+
+  expect(loads).toEqual(["a.ts", "a.ts"]);
+  expect(previews(search)).toEqual(["a.ts: x [center]"]);
 });
 
 test("the merge window searches its three panes with the Result leading", () => {
