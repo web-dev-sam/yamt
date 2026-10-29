@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useTemplateRef } from "vue";
+import { computed, nextTick, useTemplateRef } from "vue";
 
 import type { FileSides, Side } from "../ipc";
 import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
@@ -40,7 +40,7 @@ useSearchGoTo(
   () => props.sides.path,
   (target) => {
     if (target.match === null) {
-      focusFirstButton();
+      void nextTick(focusFirstButton);
     }
   },
 );
