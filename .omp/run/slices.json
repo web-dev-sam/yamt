@@ -1,1 +1,21 @@
-{}
+{
+  "RangeFoldColumnsR4": {
+    "owned": [
+      "frontend/src/editor/internal/exactScroll.ts",
+      "frontend/src/editor/internal/exactScroll.test.ts",
+      "frontend/src/editor/internal/scrollSync.ts",
+      "frontend/src/editor/internal/scrollSync.test.ts",
+      "frontend/src/editor/internal/foldView.ts",
+      "frontend/src/editor/internal/foldSteps.ts",
+      "frontend/src/editor/internal/folds.ts",
+      "frontend/src/editor/internal/columnFolds.ts",
+      "frontend/src/editor/internal/columnFolds.test.ts",
+      "frontend/src/editor/internal/rangeFolds.ts",
+      "frontend/src/editor/internal/rangeFolds.test.ts",
+      "frontend/src/editor/internal/compareFrame.ts",
+      "frontend/src/editor/internal/compareFrame.test.ts",
+      "frontend/src/editor/internal/compareFocus.ts",
+      "frontend/src/editor/range.ts"
+    ]
+  }
+}
