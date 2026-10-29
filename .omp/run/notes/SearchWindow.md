@@ -40,3 +40,27 @@ test 2949 passed; lint, typecheck, fmt clean. `unused` fails on 5 types from ear
 `useVirtualList` inside the half-height cap, 22 px rows, the flat themes' −1 px overlap, `<mark>` colour, the focus
 watcher on hide, keyboard scrolling via `scrollTop` — all unverified in WebKit; range order assumes Rust's id order
 equals `start.files` order; the cut sentence's words unchecked against VS Code.
+
+## Reviews (round 1)
+
+Mutation run `just mutants 8d2dd7d`: 85.4 % over 15 files (keys/keyText survivors mostly static literals; new-file
+survivors in `searchRun.ts`, `mergeSearch.ts`, stores). Boundary fail: #1715 block (search `loadFile` bypassing
+`landed`), #1716–#1718 promoted. Correctness fail: #1720–#1722 blocks (stale-run guards and one-file re-run guards
+untested; hide could leave focus on body), #1723, #1724 promoted. Connect's WebKit run found #1719 (rows not hittable).
+
+## Fix round 1 (`SearchWindowR1`, 41m53s, patch `fcdce10`, `.omp/run/patches/SearchWindowR1.patch`)
+
+Search `loadFile` replies through `landed` with their stop; `searching.ts` the one writer of query and closed groups,
+one record per full run in the runner; pure `searchListKeys.ts` (`stepSearchList`); hide: a saved body counts as none,
+`focusShownFile()` when focus did not land; `SideColumn` owns the overlap and its `v-show`; `pl-7`. #1719's real cause:
+WebKitGTK overlay scrollbars swallow clicks (a long group name scrolled sideways; the vertical bar took clicks within
+20 px of the edge) — names truncate, `overflow-x-hidden`, rows end 20 px short. The box re-selects its text a frame
+after show (WebKit dropped it every other show). Every item's test failed with its bug (outputs in the agent report).
+WebKit (on a `/tmp` copy with the connect commit): merge page dark and light — all round-1 acceptance steps pass
+(three icons on an unchanged line, filters, Match Case 22 → 10, groups, ×, Enter, Ctrl+B whole column, width 320/320,
+keymap rebind, hit tests at every row for 1/2/5/30 rows, hide from body → Result focused); range page dark and light —
+the same except **hiding from a body-focused fresh page leaves focus on body** (rangeStore asks the right path, so
+likely RangeView's go-to with `match: null`, a connect file); compare dark: no panel, Ctrl+B as before. Not run: range
+keymap rebind and Ctrl+B-then-hide, compare light. First Ctrl+Shift+S failure not reproduced on fixture pages.
+Deviations (accepted): own #1719 fix; next-frame reselect; `SideColumn` props; per-run record; `stepSearchList` finds a
+place's group as the path's first row.
