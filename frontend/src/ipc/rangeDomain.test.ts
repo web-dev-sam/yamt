@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type * as Generated from "./bindings";
 import { isRangeFileId } from "./domain";
-import { toRangeFile, toRangeStart } from "./rangeDomain";
+import { toRangeFile, toRangeStart, toSearchTexts } from "./rangeDomain";
 
 const DIFFERENCE: Generated.Difference = {
   left: { start: 0, len: 1 },
@@ -133,4 +133,71 @@ test.each<Generated.RangeFile>([
   { kind: "submodule", old: null, new: "3c4d5e6f" },
 ])("a $kind reply carries its fields unchanged", (reply) => {
   expect(toRangeFile(reply)).toEqual(reply);
+});
+
+const SEARCH_TEXTS: Generated.SearchTexts = {
+  files: [
+    {
+      file: 2,
+      left: "a\n",
+      right: "b\nc\n",
+      changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 2 } }],
+    },
+    { file: 5, left: "same\n", right: "same\n", changes: [] },
+  ],
+  next: 6,
+};
+
+test("a search page converts each file's id, texts and line changes, and its next id", () => {
+  expect(toSearchTexts(SEARCH_TEXTS)).toEqual(SEARCH_TEXTS);
+  expect(toSearchTexts({ files: [], next: null })).toEqual({ files: [], next: null });
+});
+
+test.each<[string, Generated.SearchTexts, string]>([
+  [
+    "a file id",
+    { ...SEARCH_TEXTS, files: [{ file: -1, left: "", right: "", changes: [] }] },
+    "files[0].file must be a non-negative safe integer, got -1",
+  ],
+  [
+    "a left line",
+    {
+      ...SEARCH_TEXTS,
+      files: [
+        { file: 0, left: "", right: "", changes: [] },
+        {
+          file: 1,
+          left: "",
+          right: "",
+          changes: [
+            { left: { start: 0, len: 0 }, right: { start: 0, len: 1 } },
+            { left: { start: -2, len: 1 }, right: { start: 1, len: 1 } },
+          ],
+        },
+      ],
+    },
+    "files[1].changes[1].left.start must be a non-negative safe integer, got -2",
+  ],
+  [
+    "a right length",
+    {
+      files: [
+        {
+          file: 0,
+          left: "",
+          right: "",
+          changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 0.5 } }],
+        },
+      ],
+      next: null,
+    },
+    "files[0].changes[0].right.len must be a non-negative safe integer, got 0.5",
+  ],
+  [
+    "the next id",
+    { ...SEARCH_TEXTS, next: 1.5 },
+    "next must be a non-negative safe integer, got 1.5",
+  ],
+])("a bad %s in a search page is refused, naming the field", (_what, raw, message) => {
+  expect(() => toSearchTexts(raw)).toThrow(message);
 });

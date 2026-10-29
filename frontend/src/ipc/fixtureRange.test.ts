@@ -161,6 +161,24 @@ test("loadRangeFile of an id past the list answers UnknownRangeFile with that id
   });
 });
 
+test("searchTexts answers the case's text files from the id on in one page with their changes", async () => {
+  const source = createFixtureRangeSource(quietLog().log, "?range=review", FILES);
+  const board = {
+    file: 0,
+    left: "a\n",
+    right: "b\n",
+    changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 1 } }],
+  };
+
+  expect(valueOf(await source.searchTexts(fileId(0)))).toEqual({ files: [board], next: null });
+  expect(valueOf(await source.searchTexts(fileId(1)))).toEqual({ files: [], next: null });
+  expect(valueOf(await source.searchTexts(fileId(2)))).toEqual({ files: [], next: null });
+  expect(await source.searchTexts(fileId(3))).toEqual({
+    ok: false,
+    failure: { kind: "UnknownRangeFile", file: 3 },
+  });
+});
+
 test("the committed cases parse: review lists 13 files of every kind, empty none", async () => {
   const { log, entries } = quietLog();
   const review = createFixtureRangeSource(log, "?range");
@@ -197,9 +215,15 @@ test("the committed cases parse: review lists 13 files of every kind, empty none
   expect(loaded[10]).toMatchObject({
     mode: { kind: "changed", old: "file", new: "executable" },
   });
-  expect(valueOf(await createFixtureRangeSource(log, "?range=empty").openRange()).files).toEqual(
-    [],
-  );
+  const page = valueOf(await review.searchTexts(fileId(0)));
+  expect(page.files.map(({ file }) => file)).toEqual([2, 3, 6, 7, 8, 10, 11]);
+  expect(page.next).toBeNull();
+  for (const { file, left, right } of page.files) {
+    expect(loaded[file]).toMatchObject({ kind: "texts", left, right });
+  }
+  const empty = createFixtureRangeSource(log, "?range=empty");
+  expect(valueOf(await empty.openRange()).files).toEqual([]);
+  expect(valueOf(await empty.searchTexts(fileId(0)))).toEqual({ files: [], next: null });
   expect(entries).toEqual([]);
 });
 

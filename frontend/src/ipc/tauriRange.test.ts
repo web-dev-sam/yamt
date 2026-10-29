@@ -7,6 +7,7 @@ import { createTauriRangeSource } from "./tauriRange";
 const commands = vi.hoisted(() => ({
   openRange: vi.fn(),
   loadRangeFile: vi.fn(),
+  searchRangeTexts: vi.fn(),
   listThreads: vi.fn(),
 }));
 
@@ -115,4 +116,46 @@ test("the range source answers listThreads through the app's command", async () 
     value: { threads: [] },
   });
   expect(commands.listThreads).toHaveBeenCalledOnce();
+});
+
+const PAGE: Generated.SearchTexts = {
+  files: [
+    {
+      file: 3,
+      left: "a\n",
+      right: "b\nc\n",
+      changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 2 } }],
+    },
+  ],
+  next: 4,
+};
+
+test("searchTexts asks search_range_texts from the given id and converts the page", async () => {
+  commands.searchRangeTexts.mockResolvedValue({ status: "ok", data: PAGE });
+
+  expect(await createTauriRangeSource().searchTexts(fileId(3))).toEqual({ ok: true, value: PAGE });
+  expect(commands.searchRangeTexts).toHaveBeenCalledWith(3);
+});
+
+test("searchTexts passes an UnknownRangeFile error on unchanged", async () => {
+  const failure: Generated.IpcError = { kind: "UnknownRangeFile", file: 9 };
+  commands.searchRangeTexts.mockResolvedValue({ status: "error", error: failure });
+
+  expect(await createTauriRangeSource().searchTexts(fileId(9))).toEqual({ ok: false, failure });
+});
+
+test("a search page with a bad change line is refused, naming the field", async () => {
+  const [first] = PAGE.files;
+  if (first === undefined) {
+    throw new Error("the page lost its file");
+  }
+  const bad = { left: { start: 0, len: 1 }, right: { start: -1, len: 1 } };
+  commands.searchRangeTexts.mockResolvedValue({
+    status: "ok",
+    data: { ...PAGE, files: [{ ...first, changes: [bad] }] },
+  });
+
+  await expect(createTauriRangeSource().searchTexts(fileId(0))).rejects.toThrow(
+    "files[0].changes[0].right.start must be a non-negative safe integer, got -1",
+  );
 });

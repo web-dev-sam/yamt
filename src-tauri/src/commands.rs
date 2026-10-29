@@ -49,6 +49,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         compare::show_tab,
         range::open_range,
         range::load_range_file::<tauri::Wry>,
+        range::search_range_texts::<tauri::Wry>,
         review::list_threads,
         review::add_thread,
         review::add_note,

@@ -4,30 +4,49 @@ use yamt_merge_core::{MAX_TEXT_BYTES, compare};
 use crate::entries::{BlobAt, FileAt};
 use crate::{RangeEntryKind, RangeFile, RangeModeChange, RangeSides, Result};
 
+/// A file's two sides as text, or which sides are not UTF-8.
+pub(crate) enum Decoded {
+    Texts { left: String, right: String },
+    NotUtf8 { sides: RangeSides },
+}
+
 /// What `file` shows, read from the repository only when the listing cannot answer.
 pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
     if let Some(answer) = decide(file) {
         return Ok(answer);
     }
     let mut reader = repo.blob_reader()?;
-    let left = read_side(&mut reader, file.old.as_ref())?;
-    let right = read_side(&mut reader, file.new.as_ref())?;
-    match (String::from_utf8(left), String::from_utf8(right)) {
-        (Ok(left), Ok(right)) => Ok(RangeFile::Texts {
+    let (left, right) = read_sides(&mut reader, file)?;
+    match decoded(left, right) {
+        Decoded::Texts { left, right } => Ok(RangeFile::Texts {
             differences: compare(&left, &right),
             left,
             right,
             mode: mode_change(file),
         }),
-        (Err(_), Ok(_)) => Ok(RangeFile::NotUtf8 {
+        Decoded::NotUtf8 { sides } => Ok(RangeFile::NotUtf8 { sides }),
+    }
+}
+
+/// Both sides' bytes; a missing side reads as empty.
+pub(crate) fn read_sides(reader: &mut BlobReader, file: &FileAt) -> Result<(Vec<u8>, Vec<u8>)> {
+    let left = read_side(reader, file.old.as_ref())?;
+    let right = read_side(reader, file.new.as_ref())?;
+    Ok((left, right))
+}
+
+pub(crate) fn decoded(left: Vec<u8>, right: Vec<u8>) -> Decoded {
+    match (String::from_utf8(left), String::from_utf8(right)) {
+        (Ok(left), Ok(right)) => Decoded::Texts { left, right },
+        (Err(_), Ok(_)) => Decoded::NotUtf8 {
             sides: RangeSides::Left,
-        }),
-        (Ok(_), Err(_)) => Ok(RangeFile::NotUtf8 {
+        },
+        (Ok(_), Err(_)) => Decoded::NotUtf8 {
             sides: RangeSides::Right,
-        }),
-        (Err(_), Err(_)) => Ok(RangeFile::NotUtf8 {
+        },
+        (Err(_), Err(_)) => Decoded::NotUtf8 {
             sides: RangeSides::Both,
-        }),
+        },
     }
 }
 
@@ -41,7 +60,7 @@ const TOO_LARGE_LIMIT: u32 = {
 };
 
 /// The answer the listing alone gives (plan §2 #105's order up to the size), or `None`: read the blobs.
-fn decide(file: &FileAt) -> Option<RangeFile> {
+pub(crate) fn decide(file: &FileAt) -> Option<RangeFile> {
     let (old, new) = (file.old.as_ref(), file.new.as_ref());
     if old.is_some_and(BlobAt::is_gitlink) || new.is_some_and(BlobAt::is_gitlink) {
         return Some(RangeFile::Submodule {

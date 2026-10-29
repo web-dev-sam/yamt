@@ -103,6 +103,7 @@ export {
   type KeysRead,
 } from "./keys";
 export type {
+  LineChange,
   RangeChange,
   RangeEntry,
   RangeEntryKind,
@@ -112,6 +113,8 @@ export type {
   RangeSide,
   RangeSides,
   RangeStart,
+  SearchText,
+  SearchTexts,
 } from "./rangeDomain";
 export type { RangeSource } from "./RangeSource";
 export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";

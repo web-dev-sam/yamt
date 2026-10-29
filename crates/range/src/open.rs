@@ -4,10 +4,11 @@ use yamt_gitio::{Oid, Repo};
 
 use crate::entries::{FileAt, blob_ids, entries_at, files_at, sort_by_display_path};
 use crate::load::load_file;
+use crate::search::search_page;
 use crate::spec::Dots;
 use crate::{
     Compared, Error, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel, RangeSpec,
-    RangeStart, Result,
+    RangeStart, Result, SearchTexts,
 };
 
 /// A range whose two commits git has named: built before any window opens.
@@ -97,6 +98,14 @@ impl Range {
             return Err(Error::UnknownFile { file });
         };
         load_file(&self.resolved.repo, found)
+    }
+
+    /// One page of text files from `from` on; `from` may be the list's length, which answers an empty last page.
+    pub fn search_texts(&self, from: RangeFileId) -> Result<SearchTexts> {
+        let Some(files) = list_index(from).and_then(|index| self.files.get(index..)) else {
+            return Err(Error::UnknownFile { file: from });
+        };
+        search_page(&self.resolved.repo, from, files)
     }
 
     #[must_use]
