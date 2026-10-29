@@ -1,0 +1,42 @@
+commit fb11db9bc4db6fea676d68de1554f7f1ed680140
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 20:22:34 +0100
+
+    fix(search): side-pane go-to leads scroll sync so match stays in view
+
+diff --git a/frontend/src/editor/internal/frame.ts b/frontend/src/editor/internal/frame.ts
+index 7f1be77..f894736 100644
+--- a/frontend/src/editor/internal/frame.ts
++++ b/frontend/src/editor/internal/frame.ts
+@@ -93,8 +93,8 @@ export class Frame {
+     });
+   }
+ 
+-  realign(): void {
+-    this.#scroll.follow("center");
++  realign(source: Pane): void {
++    this.#scroll.follow(source);
+   }
+ 
+   showMinimap(shown: boolean): void {
+diff --git a/frontend/src/editor/merge.ts b/frontend/src/editor/merge.ts
+index 287d423..f93378d 100644
+--- a/frontend/src/editor/merge.ts
++++ b/frontend/src/editor/merge.ts
+@@ -207,6 +207,7 @@ export class MergeController {
+ 
+   goTo({ pane, match }: MergeGoTo): void {
+     goTo(this.#views[pane], match);
++    this.#frame.realign(pane);
+   }
+ 
+   lineUp(): ResultLineUp {
+@@ -228,7 +229,7 @@ export class MergeController {
+ 
+   setCollapsed(collapsed: boolean): void {
+     this.#folds.setCollapsed(collapsed);
+-    this.#frame.realign();
++    this.#frame.realign("center");
+   }
+ 
+   showMinimap(shown: boolean): void {

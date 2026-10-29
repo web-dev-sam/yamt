@@ -806,7 +806,7 @@ export class MergeController {
   constructor(data: FileMergeData, hosts: MergeHosts, options: MergeOptions); // left, center, right + strips: [SVGSVGElement, SVGSVGElement]; MergeOptions = { readOnly (plan §2 #47), preferences, collapsed (plan §2 #68), minimap (the Result's minimap shown at build, plan §2 #81), servers: LanguageServers | null (plan §2 #70) }
   setPreferences(preferences: Preferences): void; // Preferences = { theme, keys: KeyBindings }: reconfigures the theme compartment (dark flag from `themeKind`, the `themeName` facet the minimap redraws on) and the side, find and middle keymaps in all three panes (plan §2 #57, #102)
   setCollapsed(on: boolean): void; // the collapse toggle: off shows every hidden line, on hides every run back to its start; keeps the middle's top line, re-aligns the sides at once; not in history (plan §2 #68)
-  goTo(target: MergeGoTo): void; // { pane, match: { line, from, to } | null }: find's selectMatch (a centred scrollIntoView, #82) then focus; a stale match is clamped; the selection's own fold reveal shows a collapsed stretch (plan §2 #127)
+  goTo(target: MergeGoTo): void; // { pane, match: { line, from, to } | null }: find's selectMatch (a centred scrollIntoView, #82) then focus; a stale match is clamped; the selection's own fold reveal shows a collapsed stretch; with a match, the go-to's pane then leads the scroll sync (`Frame.realign(pane)`), so the other panes' height-keeping scrolls after a reveal never pull it back (#1745); `match: null` only focuses (plan §2 #127)
   lineUp(): ResultLineUp; // the Result's text and each change's live Result lines with the sides' fixed lines, sorted and disjoint (internal/lineUp.ts)
   onResultChange(listener: (() => void) | null): void; // after each Result transaction that changed its text (own update listener)
   showMinimap(shown: boolean): void; // the Result's minimap while Alt is held: shown paints in the next frame, hidden takes it out of layout and drops its tiles (plan §2 #81)
@@ -972,7 +972,8 @@ Internals (`editor/internal/`, not importable from `ui/`):
   frame; a source whose `scrollTop` did not change does not re-sync, unless `follow(pane)` asked the
   next sync to write the others anyway; a followed pane stays the source until that sync, so another pane's scroll
   event in between (a column the toggle shrank fires a clamped one) never leads (`Frame.realign`,
-  `CompareFrame.realign`, after the collapse toggle, plan §2 #68, #126).
+  `CompareFrame.realign`, after the collapse toggle, plan §2 #68, #126; `Frame.realign(pane)` also after a merge
+  go-to that selected a match, #1745).
 - `foldRuns.ts`, `foldSteps.ts`, `folds.ts`, `foldSelection.ts`, `foldView.ts`, `folding.ts`, `wavePhase.ts`,
   `columnFolds.ts`, `rangeFolds.ts` — collapsed unchanged lines (plan §2 #63, #64, #68), one core for the merge
   window's three panes and the range window's two columns (#126). `foldRuns.ts` is WebStorm's
