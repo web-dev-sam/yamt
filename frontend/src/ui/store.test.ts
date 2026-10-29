@@ -2676,6 +2676,86 @@ test("a search row's click opens its file as a list click does", async () => {
   expect(store.search.goTo.value).toMatchObject({ path: "b.ts", pane: "center" });
 });
 
+type SearchedRow = {
+  readonly path: string;
+  readonly place: Parameters<AppStore["search"]["go"]>[1];
+};
+
+async function searchedRow(store: AppStore, path: string): Promise<SearchedRow> {
+  store.search.type("const");
+  store.search.enter();
+  await vi.waitFor(() => {
+    expect(store.search.running.value).toBe(false);
+  });
+  const row = store.search.rows.value.find((each) => each.kind === "place" && each.path === path);
+  if (row?.kind !== "place") {
+    throw new Error(`no place row in ${path}`);
+  }
+  return row;
+}
+
+test.each(["is overtaken by a pick of another file", "fails"] as const)(
+  "a row's go-to is dropped when its open %s: opening that file later selects nothing",
+  async (how) => {
+    spyConsole();
+    const held: { open: () => void } = { open: () => undefined };
+    let loadsOfB = 0;
+    const { source } = choiceSource(
+      {
+        loadFile: async (path) => {
+          loadsOfB += path === "b.ts" ? 1 : 0;
+          const opening = path === "b.ts" && loadsOfB === 2;
+          if (opening && how === "fails") {
+            return { ok: false, failure: { kind: "UnknownPath", path } };
+          }
+          if (opening) {
+            await new Promise<void>((resolve) => {
+              held.open = resolve;
+            });
+          }
+          return ok(await dataFor(path));
+        },
+      },
+      [entry("a.ts"), entry("b.ts"), entry("c.ts")],
+    );
+    const store = createAppStore(source);
+    await store.loadFiles();
+    const row = await searchedRow(store, "b.ts");
+
+    store.search.go(row.path, row.place, null);
+    expect(store.search.goTo.value).toMatchObject({ path: "b.ts" });
+    if (how === "is overtaken by a pick of another file") {
+      await store.pick("c.ts");
+      held.open();
+    }
+
+    await vi.waitFor(() => {
+      expect(store.search.goTo.value).toBeNull();
+    });
+    await store.pick("b.ts");
+    expect([store.active.value, store.search.goTo.value]).toEqual(["b.ts", null]);
+  },
+);
+
+test("a new stop whose list failed searches the new stop's files for the same query once a later list lands", async () => {
+  spyConsole();
+  let answer: SourceResult<Listing> = listing([entry("a.ts")]);
+  const { source } = choiceSource({ listStop: () => Promise.resolve(answer) });
+  const store = createAppStore(source);
+  await store.loadFiles();
+  await searchedRow(store, "a.ts");
+  answer = { ok: false, failure: { kind: "GitRunning" } };
+
+  await store.nextStop({ kind: "outside" });
+  expect([store.search.query.value, store.search.results.value]).toEqual(["const", null]);
+  answer = listing([entry("c.ts")]);
+  await store.refreshFiles();
+
+  await vi.waitFor(() => {
+    expect(store.search.results.value?.groups.map((group) => group.path)).toEqual(["c.ts"]);
+  });
+});
+
 test("Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened", async () => {
   spyConsole();
   const rebase: OperationView = {

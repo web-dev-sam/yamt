@@ -29,6 +29,7 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
     readonly guard: Pick<CloseGuard, "unsavedFiles">;
     readonly search: Pick<Searching<string>, "clear" | "rerun">;
     latestOpen: number;
+    searchWaitsForList: boolean;
     loadFiles(): Promise<readonly FileEntry[] | null>;
   };
 
@@ -49,6 +50,17 @@ function clearStop(target: StopTarget): void {
   target.stopMessage.value = null;
   target.screen.value = { kind: "files" };
   target.search.clear();
+  target.searchWaitsForList = true;
+}
+
+export function searchOnceListed(
+  target: Pick<StopTarget, "search" | "searchWaitsForList">,
+  listed: readonly FileEntry[] | null,
+): void {
+  if (listed !== null && target.searchWaitsForList) {
+    target.searchWaitsForList = false;
+    target.search.rerun();
+  }
 }
 
 export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> {
@@ -59,10 +71,9 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> 
   if (end.kind === "outside" && dropped.length > 0) {
     target.notices.value = [{ kind: "movedOn", operation: before, files: dropped }];
   }
+  const { stop } = target;
   const listed = await target.loadFiles();
-  if (listed !== null) {
-    target.search.rerun();
-  }
+  searchOnceListed(target, stop.dropped ? null : listed);
   if (end.kind === "continued" && listed !== null && listed.length === 0) {
     target.stopMessage.value = end.message;
     report(target, {

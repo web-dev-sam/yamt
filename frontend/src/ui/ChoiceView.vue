@@ -8,7 +8,7 @@ import PaneDivider from "./PaneDivider.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
-import { sideHeader } from "./sideHeaders";
+import { RESULT_HEADER, sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 import { usePaneDividers } from "./usePaneDividers";
@@ -109,7 +109,7 @@ function paneWidths(): PaneWidths | null {
       <div
         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator bg-panel px-3 py-1.5"
       >
-        <h2 class="text-fg-muted">Result</h2>
+        <h2 class="text-fg-muted">{{ RESULT_HEADER }}</h2>
         <button
           type="button"
           :disabled="sideTaken === null"

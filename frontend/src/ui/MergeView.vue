@@ -17,6 +17,7 @@ import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 import { useMergeController } from "./useMergeController";
 import { usePaneDividers } from "./usePaneDividers";
+import { useSearchGoTo } from "./useSearchGoTo";
 import { isEditable } from "./views";
 
 type Column = {
@@ -87,6 +88,14 @@ if (props.data.deleted === null) {
 const live = { lineUp: handle.lineUp };
 liveResults.track(props.data.path, live);
 const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+useSearchGoTo(
+  search,
+  () => props.shown,
+  () => props.data.path,
+  (target) => {
+    handle.goTo(target);
+  },
+);
 
 const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
 const deletedView = computed(deletedViewNow);
@@ -119,16 +128,6 @@ watch(
 watch(handle.resultVersion, () => {
   search.changed(props.data.path);
 });
-watch(
-  [search.goTo, () => props.shown],
-  ([request, shown]) => {
-    if (request !== null && shown && request.path === props.data.path) {
-      handle.goTo({ pane: request.pane, match: request.match });
-      search.took(request.id);
-    }
-  },
-  { immediate: true, flush: "post" },
-);
 
 onUnmounted(() => {
   untrack(props.data.path, work);

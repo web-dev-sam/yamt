@@ -37,7 +37,7 @@ import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import { registerSettingsStore } from "./settingsStore";
 import type { Taken } from "./sides";
-import { nextStop, type StopEnd } from "./stops";
+import { nextStop, searchOnceListed, type StopEnd } from "./stops";
 import { createHiddenButtons, type HiddenButtons, type ToolbarButtonId } from "./toolbarButtons";
 import type { FormatOutcome, Preferences } from "./useMergeController";
 
@@ -66,6 +66,7 @@ type State = Refs &
     readonly gitRun: GitRun;
     readonly stopMessage: ShallowRef<string | null>;
     latestOpen: number;
+    searchWaitsForList: boolean;
     latestSettings: number;
     readonly loadFiles: () => Promise<readonly FileEntry[] | null>;
     readonly refreshFiles: () => Promise<void>;
@@ -141,10 +142,11 @@ function createState(refs: Refs, source: ChunkSource): State {
     writing: shallowReactive(new Map()),
     stop: { dropped: false },
     latestOpen: 0,
+    searchWaitsForList: false,
     latestSettings: 0,
     loadFiles: () => loadFiles(state),
     refreshFiles: async () => {
-      await refreshFiles(state, "running");
+      searchOnceListed(state, await refreshFiles(state, "running"));
     },
     nextStop: (end) => nextStop(state, end),
     ...createMergeSearch(
@@ -155,9 +157,7 @@ function createState(refs: Refs, source: ChunkSource): State {
         currentStop: () => state.stop,
         nextStop: (end) => state.nextStop(end),
       },
-      (path) => {
-        void pick(state, path);
-      },
+      (path) => pick(state, path),
     ),
   };
   return state;

@@ -62,7 +62,7 @@ export type Searching<P extends string> = {
 type SearchingDeps<P extends string> = {
   readonly source: SearchSource<P>;
   readonly panes: () => readonly SearchPaneInfo<P>[];
-  readonly open: (path: string) => void;
+  readonly open: (path: string) => Promise<void> | void;
   readonly shownPath: () => string | null;
   readonly keys: WindowKeyTarget;
 };
@@ -109,25 +109,36 @@ function toggled<T>(set: ReadonlySet<T>, item: T): ReadonlySet<T> {
 function requestGoTo<P extends string>(
   { refs, goTos }: Context<P>,
   target: Omit<GoToRequest<P>, "id">,
-): void {
+): number {
   goTos.last += 1;
   refs.goTo.value = { id: goTos.last, ...target };
+  return goTos.last;
 }
 
-function go<P extends string>(
+async function go<P extends string>(
   ctx: Context<P>,
   path: string,
   place: Place<P>,
   pane: P | null,
-): void {
+): Promise<void> {
   const { layout } = ctx.deps.source;
   const entry =
     pane === null
       ? goToPane(place, ctx.refs.panesOn.value, layout)
       : (place.hits.find((hit) => hit.pane === pane) ?? null);
-  if (entry !== null) {
-    requestGoTo(ctx, { path, pane: entry.pane, match: entry.hit });
-    ctx.deps.open(path);
+  if (entry === null) {
+    return;
+  }
+  const id = requestGoTo(ctx, { path, pane: entry.pane, match: entry.hit });
+  await ctx.deps.open(path);
+  if (ctx.deps.shownPath() !== path) {
+    took(ctx.refs, id);
+  }
+}
+
+function took<P extends string>(refs: Refs<P>, id: number): void {
+  if (refs.goTo.value?.id === id) {
+    refs.goTo.value = null;
   }
 }
 
@@ -171,12 +182,10 @@ function moving<P extends string>(
   const { refs, deps } = ctx;
   return {
     go: (path, place, pane) => {
-      go(ctx, path, place, pane);
+      void go(ctx, path, place, pane);
     },
     took: (id) => {
-      if (refs.goTo.value?.id === id) {
-        refs.goTo.value = null;
-      }
+      took(refs, id);
     },
     focusShownFile: () => {
       const path = deps.shownPath();

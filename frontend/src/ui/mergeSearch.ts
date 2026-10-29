@@ -43,20 +43,18 @@ export type MergeSearchTarget = WindowKeyTarget &
   };
 
 function searchedFile(data: FileMergeData, live: ResultLineUp | null): SearchedFile<MergePane> {
-  const { path, local, remote, middle } = data;
+  const { path, middle, deleted } = data;
+  const left = deleted === "local" ? null : data.local;
+  const right = deleted === "remote" ? null : data.remote;
   if (middle.kind === "DiskNotText") {
-    return { path, texts: { left: local, center: null, right: remote }, changes: [] };
+    return { path, texts: { left, center: null, right }, changes: [] };
   }
   if (live !== null) {
-    return {
-      path,
-      texts: { left: local, center: live.result, right: remote },
-      changes: live.changes,
-    };
+    return { path, texts: { left, center: live.result, right }, changes: live.changes };
   }
   return {
     path,
-    texts: { left: local, center: middle.text, right: remote },
+    texts: { left, center: middle.text, right },
     changes: data.chunks.map((chunk) => ({
       left: chunk.local,
       center: chunk.middle,
@@ -139,7 +137,7 @@ function createMergeSource(
 
 export function createMergeSearch(
   target: MergeSearchTarget,
-  open: (path: string) => void,
+  open: (path: string) => Promise<void> | void,
 ): MergeSearch {
   const live = new Map<string, Live>();
   return {

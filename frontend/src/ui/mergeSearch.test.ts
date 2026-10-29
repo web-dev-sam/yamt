@@ -29,6 +29,7 @@ type FileRecord = {
     | { kind: "Stages" | "Disk"; text: string }
     | { kind: "DiskNotText"; found: "Binary" };
   readonly chunks?: readonly unknown[];
+  readonly deleted?: "local" | "remote";
 };
 
 const CHUNK_ADDING_A_LEFT_LINE = {
@@ -210,6 +211,56 @@ test("a Result git left as something other than text has no Result rows, only th
   await vi.runAllTimersAsync();
 
   expect(previews(search)).toEqual(["a.ts: x [left right]"]);
+});
+
+test.each([
+  ["local", "a.ts: x [center right]"],
+  ["remote", "a.ts: x [left center]"],
+] as const)(
+  "a file deleted on the %s side has no rows in that side's hidden pane, live or from its data",
+  async (deleted, row) => {
+    const removed = await data("a.ts", {
+      local: "x",
+      remote: "x",
+      middle: { kind: "Stages", text: "x" },
+      deleted,
+    });
+    const { target } = harness([entry("a.ts")], [removed], async () => ({
+      ok: true,
+      value: removed,
+    }));
+    const { search, liveResults } = createMergeSearch(target, () => undefined);
+
+    search.type("x");
+    search.enter();
+    await vi.runAllTimersAsync();
+    expect(previews(search)).toEqual([row]);
+
+    liveResults.track("a.ts", { lineUp: () => ({ result: "x", changes: [] }) });
+    search.enter();
+    await vi.runAllTimersAsync();
+    expect(previews(search)).toEqual([row]);
+  },
+);
+
+test("a deleted-side file git left as something other than text is searched in its kept side only", async () => {
+  const notText = await data("a.ts", {
+    local: "x",
+    remote: "x",
+    middle: { kind: "DiskNotText", found: "Binary" },
+    deleted: "remote",
+  });
+  const { target } = harness([entry("a.ts")], [notText], async () => ({
+    ok: true,
+    value: notText,
+  }));
+  const { search } = createMergeSearch(target, () => undefined);
+
+  search.type("x");
+  search.enter();
+  await vi.runAllTimersAsync();
+
+  expect(previews(search)).toEqual(["a.ts: x [left]"]);
 });
 
 test("a file's data lines its panes up through its chunks", async () => {

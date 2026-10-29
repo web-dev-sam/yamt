@@ -16,6 +16,7 @@ import { fileHeading, sideHeading } from "./rangeText";
 import RangeThreadLayer from "./RangeThreadLayer.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useRangeController } from "./useRangeController";
+import { useSearchGoTo } from "./useSearchGoTo";
 
 const props = defineProps<{
   file: RangeEntry;
@@ -31,11 +32,18 @@ const NEXT = ACTION_NAMES["next-change"];
 const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
+const sentenceBox = useTemplateRef<HTMLParagraphElement>("sentenceBox");
 const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
-const { content, threadHosts, moveToChange, goTo } = useRangeController(
+const { content, threadHosts, sentenceFocusAsks, moveToChange, goTo } = useRangeController(
   props.file,
   { left, right, strip },
   { preferences },
+);
+useSearchGoTo(
+  search,
+  () => props.shown,
+  () => props.file.path,
+  goTo,
 );
 
 const icon = computed(() => fileIcon(props.file.path));
@@ -47,14 +55,11 @@ const note = computed(() => (content.value.kind === "columns" ? content.value.no
 const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
 
 watch(
-  [search.goTo, () => props.shown],
-  ([request, shown]) => {
-    if (request !== null && shown && request.path === props.file.path) {
-      goTo({ pane: request.pane, match: request.match });
-      search.took(request.id);
-    }
+  sentenceFocusAsks,
+  () => {
+    sentenceBox.value?.focus();
   },
-  { immediate: true, flush: "post" },
+  { flush: "post" },
 );
 </script>
 
@@ -125,7 +130,12 @@ watch(
         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
         <RangeThreadLayer :file="file" :hosts="threadHosts" />
       </template>
-      <p v-else-if="sentence !== null" class="col-span-3 col-start-1 row-start-2 px-3 py-4">
+      <p
+        v-else-if="sentence !== null"
+        ref="sentenceBox"
+        tabindex="-1"
+        class="col-span-3 col-start-1 row-start-2 px-3 py-4 outline-none"
+      >
         {{ sentence }}
       </p>
     </template>

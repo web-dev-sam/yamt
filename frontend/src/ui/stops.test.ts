@@ -22,7 +22,7 @@ import { createSearching, type Searching } from "./searching";
 import { SEARCH_PAUSE_MS } from "./searchRun";
 import { startSettings } from "./settings";
 import type { Taken } from "./sides";
-import { nextStop, type StopTarget } from "./stops";
+import { nextStop, searchOnceListed, type StopTarget } from "./stops";
 import type { FormatOutcome } from "./useMergeController";
 
 const LINUX = "Linux x86_64";
@@ -187,6 +187,7 @@ function stopAt(
     search: searchOver(() => stop),
     searched: ["a.ts"],
     latestOpen: 4,
+    searchWaitsForList: false,
     loadFiles: () => {
       lists.push(stop.latestOpen);
       stop.operation.value = next.operation;
@@ -401,19 +402,22 @@ test("a new stop clears the results, then searches the new stop's files for the 
   const seen: unknown[] = [];
   const listing = stop.loadFiles.bind(stop);
   stop.loadFiles = () => {
-    seen.push(groups(stop.search));
+    seen.push([groups(stop.search), stop.searchWaitsForList]);
     return listing();
   };
 
   await nextStop(stop, { kind: "outside" });
   await microtasks();
 
-  expect(seen).toEqual([null]);
-  expect(stop.search.query.value).toBe("needle");
-  expect(groups(stop.search)).toEqual([["c.ts", 2]]);
+  expect(seen).toEqual([[null, true]]);
+  expect([stop.search.query.value, groups(stop.search), stop.searchWaitsForList]).toEqual([
+    "needle",
+    [["c.ts", 2]],
+    false,
+  ]);
 });
 
-test("a new stop whose list failed searches nothing", async () => {
+test("a new stop whose list failed waits: the next list that lands searches it once", async () => {
   quiet();
   vi.useFakeTimers();
   const stop = stopAt([], { files: null, operation: NEXT_STEP });
@@ -422,6 +426,43 @@ test("a new stop whose list failed searches nothing", async () => {
 
   await nextStop(stop, { kind: "outside" });
   await microtasks();
+  expect([stop.search.query.value, groups(stop.search), stop.searchWaitsForList]).toEqual([
+    "needle",
+    null,
+    true,
+  ]);
 
-  expect([stop.search.query.value, groups(stop.search)]).toEqual(["needle", null]);
+  searchOnceListed(stop, null);
+  await microtasks();
+  expect([groups(stop.search), stop.searchWaitsForList]).toEqual([null, true]);
+
+  stop.searched = ["c.ts"];
+  searchOnceListed(stop, [C_TS]);
+  await microtasks();
+  expect([groups(stop.search), stop.searchWaitsForList]).toEqual([[["c.ts", 2]], false]);
+
+  stop.searched = [];
+  searchOnceListed(stop, [C_TS]);
+  await microtasks();
+  expect(groups(stop.search)).toEqual([["c.ts", 2]]);
+});
+
+test("a new stop's list that lands after a later stop began leaves the later stop's search waiting", async () => {
+  quiet();
+  vi.useFakeTimers();
+  const stop = stopAt([]);
+  stop.search.type("needle");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  const listing = stop.loadFiles.bind(stop);
+  stop.loadFiles = async () => {
+    const listed = await listing();
+    stop.stop.dropped = true;
+    stop.stop = { dropped: false };
+    return listed;
+  };
+
+  await nextStop(stop, { kind: "outside" });
+  await microtasks();
+
+  expect([groups(stop.search), stop.searchWaitsForList]).toEqual([null, true]);
 });

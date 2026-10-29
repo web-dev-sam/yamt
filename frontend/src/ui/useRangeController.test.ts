@@ -351,6 +351,38 @@ test("the binary sentence is the one rangeText words", async () => {
   expect(live.handle.content.value).toEqual({ kind: "sentence", text: "Binary file: not shown." });
 });
 
+test("a go-to on a sentence asks for the sentence's focus each time; one waiting for the load asks once the sentence lands", async () => {
+  const waiting = run();
+  waiting.handle.goTo({ pane: "right", match: null });
+  expect(waiting.handle.sentenceFocusAsks.value).toBe(0);
+
+  await waiting.answer({ kind: "binary" });
+  expect(waiting.handle.sentenceFocusAsks.value).toBe(1);
+  waiting.handle.goTo({ pane: "left", match: { line: 0, from: 0, to: 1 } });
+  waiting.handle.goTo({ pane: "right", match: null });
+  expect([waiting.handle.sentenceFocusAsks.value, waiting.built, waiting.calls]).toEqual([
+    3,
+    [],
+    [],
+  ]);
+
+  const unasked = run();
+  await unasked.answer({ kind: "binary" });
+  expect(unasked.handle.sentenceFocusAsks.value).toBe(0);
+});
+
+test("a go-to on texts never asks for a sentence's focus", async () => {
+  const live = run();
+  live.handle.goTo({ pane: "right", match: null });
+  await live.answer(TEXTS);
+  live.handle.goTo({ pane: "left", match: null });
+
+  expect([live.handle.sentenceFocusAsks.value, live.calls]).toEqual([
+    0,
+    ["goTo right keyboard", "goTo left keyboard"],
+  ]);
+});
+
 test("a reply arriving after unmount is dropped: nothing built, nothing shown", async () => {
   const live = run();
   live.stop();

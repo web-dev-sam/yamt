@@ -46,6 +46,7 @@ type ThreadHosts = ReadonlyMap<string, HTMLElement>;
 export type RangeHandle = {
   readonly content: Readonly<ShallowRef<RangeContent>>;
   readonly threadHosts: Readonly<ShallowRef<ThreadHosts>>;
+  readonly sentenceFocusAsks: Readonly<ShallowRef<number>>;
   moveToChange(direction: Direction): void;
   goTo(target: RangeGoTo): void;
 };
@@ -70,6 +71,7 @@ export type RangeParts<H> = {
 type Live = {
   readonly content: ShallowRef<RangeContent>;
   readonly threadHosts: ShallowRef<ThreadHosts>;
+  readonly sentenceFocusAsks: ShallowRef<number>;
   waiting: RangeTexts | null;
   controller: ShownRange | null;
   goTo: RangeGoTo | null;
@@ -82,6 +84,10 @@ function land(live: Live, path: string, file: RangeFile | null): void {
   }
   if (file.kind !== "texts") {
     live.content.value = { kind: "sentence", text: fileSentence(file) };
+    if (live.goTo !== null) {
+      live.goTo = null;
+      live.sentenceFocusAsks.value += 1;
+    }
     return;
   }
   const { left, right, differences, mode } = file;
@@ -126,7 +132,9 @@ function followLive<H>(live: Live, parts: RangeParts<H>): void {
 }
 
 function askGoTo(live: Live, target: RangeGoTo): void {
-  if (live.controller === null) {
+  if (live.content.value.kind === "sentence") {
+    live.sentenceFocusAsks.value += 1;
+  } else if (live.controller === null) {
     live.goTo = target;
   } else {
     live.controller.goTo(target);
@@ -137,6 +145,7 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   const live: Live = {
     content: shallowRef<RangeContent>({ kind: "loading" }),
     threadHosts: shallowRef<ThreadHosts>(new Map()),
+    sentenceFocusAsks: shallowRef(0),
     waiting: null,
     controller: null,
     goTo: null,
@@ -165,6 +174,7 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   return {
     content: live.content,
     threadHosts: live.threadHosts,
+    sentenceFocusAsks: live.sentenceFocusAsks,
     moveToChange: (direction) => {
       live.controller?.moveToChange(direction);
     },
