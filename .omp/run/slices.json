@@ -1,24 +1,10 @@
 {
-  "SearchConnectR1": {
+  "SearchTidy": {
     "owned": [
-      "frontend/src/ui/MergeView.vue",
-      "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/SearchResults.vue",
       "frontend/src/ui/ChoiceView.vue",
-      "frontend/src/ui/stops.ts",
-      "frontend/src/ui/stops.test.ts",
-      "frontend/src/ui/listing.ts",
-      "frontend/src/ui/listing.test.ts",
-      "frontend/src/ui/searching.ts",
       "frontend/src/ui/searching.test.ts",
-      "frontend/src/ui/opening.ts",
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/mergeSearch.ts",
-      "frontend/src/ui/mergeSearch.test.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/useSearchGoTo.ts",
-      "frontend/src/ui/useRangeController.ts",
-      "frontend/src/ui/useRangeController.test.ts"
+      "frontend/src/ui/useSearchGoTo.test.ts"
     ]
   }
 }
