@@ -18,6 +18,9 @@ import type { Problem } from "./problem";
 import { problemText } from "./problemText";
 import { claimWrite, finish } from "./saving";
 import type { Screen } from "./screen";
+import { createSearching, type Searching } from "./searching";
+import { SEARCH_PAUSE_MS } from "./searchRun";
+import { startSettings } from "./settings";
 import type { Taken } from "./sides";
 import { nextStop, type StopTarget } from "./stops";
 import type { FormatOutcome } from "./useMergeController";
@@ -42,6 +45,13 @@ const REBASE: OperationView = {
 const NEXT_STEP: OperationView = { ...REBASE, progress: { step: 2, total: 3 } };
 const CHERRY_PICK: OperationView = { kind: "CherryPick", picking: null, progress: null };
 const C_TS: FileEntry = { path: "c.ts", status: "Unresolved", unsupported: null };
+const TEXTS: Readonly<Record<string, string>> = {
+  "a.ts": "const needle = 1;\n",
+  "c.ts": "needle();\nneedle();\n",
+};
+const MICROTASKS = 20;
+
+type Pane = "left" | "right";
 
 type Stop = StopTarget &
   Parameters<typeof finish>[0] & {
@@ -50,6 +60,8 @@ type Stop = StopTarget &
     readonly aborts: string[];
     readonly asking: Asking;
     readonly operation: ShallowRef<OperationView | null>;
+    readonly search: Searching<Pane>;
+    searched: readonly string[];
   };
 
 type NextStop = {
@@ -59,6 +71,7 @@ type NextStop = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function notUsed(): Promise<never> {
@@ -92,6 +105,42 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
     setAddedServers: notUsed,
     setAgent: notUsed,
   };
+}
+
+function searchOver(stop: () => Stop): Searching<Pane> {
+  return createSearching<Pane>({
+    source: {
+      layout: { panes: ["left", "right"], lead: "right" },
+      async *files() {
+        for (const path of stop().searched) {
+          const text = TEXTS[path] ?? "";
+          yield await Promise.resolve({ path, texts: { left: text, right: text }, changes: [] });
+        }
+      },
+      file: () => Promise.resolve(null),
+      forget: () => undefined,
+      forgetAll: () => undefined,
+    },
+    panes: () => [],
+    open: () => undefined,
+    shownPath: () => null,
+    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
+  });
+}
+
+async function microtasks(): Promise<void> {
+  for (let tick = 0; tick < MICROTASKS; tick += 1) {
+    await Promise.resolve();
+  }
+}
+
+function groups(search: Searching<Pane>): [string, number][] | null {
+  return (
+    search.results.value?.groups.map(({ path, places }): [string, number] => [
+      path,
+      places.length,
+    ]) ?? null
+  );
 }
 
 function stopAt(
@@ -135,12 +184,15 @@ function stopAt(
     stopMessage: shallowRef<string | null>("the old stop's message"),
     asking: createAsking(),
     guard: { unsavedFiles: () => [...unsaved] },
+    search: searchOver(() => stop),
+    searched: ["a.ts"],
     latestOpen: 4,
     loadFiles: () => {
       lists.push(stop.latestOpen);
       stop.operation.value = next.operation;
       if (next.files !== null) {
         stop.active.value = next.files[0]?.path ?? null;
+        stop.searched = next.files.map((file) => file.path);
       }
       return Promise.resolve(next.files);
     },
@@ -337,4 +389,39 @@ test("a question that is not about the stop stays open across it", async () => {
   expect(stop.asking.question.value).toEqual({ kind: "exit", files: ["a.ts"] });
   stop.asking.answer(false);
   expect(await asked).toBe("no");
+});
+
+test("a new stop clears the results, then searches the new stop's files for the same query once its list arrived", async () => {
+  quiet();
+  vi.useFakeTimers();
+  const stop = stopAt([]);
+  stop.search.type("needle");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+  expect(groups(stop.search)).toEqual([["a.ts", 1]]);
+  const seen: unknown[] = [];
+  const listing = stop.loadFiles.bind(stop);
+  stop.loadFiles = () => {
+    seen.push(groups(stop.search));
+    return listing();
+  };
+
+  await nextStop(stop, { kind: "outside" });
+  await microtasks();
+
+  expect(seen).toEqual([null]);
+  expect(stop.search.query.value).toBe("needle");
+  expect(groups(stop.search)).toEqual([["c.ts", 2]]);
+});
+
+test("a new stop whose list failed searches nothing", async () => {
+  quiet();
+  vi.useFakeTimers();
+  const stop = stopAt([], { files: null, operation: NEXT_STEP });
+  stop.search.type("needle");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
+
+  await nextStop(stop, { kind: "outside" });
+  await microtasks();
+
+  expect([stop.search.query.value, groups(stop.search)]).toEqual(["needle", null]);
 });

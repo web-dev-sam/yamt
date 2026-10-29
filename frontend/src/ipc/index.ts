@@ -13,7 +13,6 @@ export type {
   ColumnVersions,
   Comparison,
   Difference,
-  LineChange,
   TabEntry,
   TabLanguage,
   TabList,

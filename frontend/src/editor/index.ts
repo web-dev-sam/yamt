@@ -3,7 +3,7 @@ export type { ColumnFormat, ColumnText, CompareEvents, FormatReport } from "./co
 export type { CompareHosts, CompareOptions } from "./compare";
 export type { Direction } from "./internal/navigation";
 export type { Pane as MergePane } from "./internal/geometry";
-export type { MergeGoTo, PaneMatch } from "./internal/goTo";
+export type { MergeGoTo } from "./internal/goTo";
 export type { ResultLineUp } from "./internal/lineUp";
 export type { FormatOutcome } from "./internal/format";
 export type { Preferences } from "./internal/pane";

@@ -23,8 +23,6 @@ import { useRangeStore } from "./rangeStore";
 import { fileSentence, modeNote } from "./rangeText";
 import type { RangeThreads } from "./rangeThreads";
 
-export type { RangeGoTo } from "../editor";
-
 type Host<T> = Readonly<ShallowRef<T | null>>;
 
 type HostRefs<D, S> = {

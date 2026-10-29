@@ -27,10 +27,8 @@ import type { LanguageServers } from "../lsp";
 export type {
   Direction,
   FormatOutcome,
-  MergeGoTo,
   MergePane,
   MergeSummary,
-  PaneMatch,
   Preferences,
   ProblemCounts,
   ResultLineUp,

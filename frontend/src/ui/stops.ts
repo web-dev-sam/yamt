@@ -8,6 +8,7 @@ import { report } from "./problem";
 import { endsWithStop } from "./question";
 import { dropStop, type FormatOutcomes, type Writing } from "./saving";
 import type { Screen } from "./screen";
+import type { Searching } from "./searching";
 import type { Taken } from "./sides";
 import type { Shown } from "./views";
 
@@ -26,6 +27,7 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
     readonly stopMessage: ShallowRef<string | null>;
     readonly asking: Pick<Asking, "question" | "dismiss">;
     readonly guard: Pick<CloseGuard, "unsavedFiles">;
+    readonly search: Pick<Searching<string>, "clear" | "rerun">;
     latestOpen: number;
     loadFiles(): Promise<readonly FileEntry[] | null>;
   };
@@ -46,6 +48,7 @@ function clearStop(target: StopTarget): void {
   target.problem.value = null;
   target.stopMessage.value = null;
   target.screen.value = { kind: "files" };
+  target.search.clear();
 }
 
 export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> {
@@ -57,6 +60,9 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> 
     target.notices.value = [{ kind: "movedOn", operation: before, files: dropped }];
   }
   const listed = await target.loadFiles();
+  if (listed !== null) {
+    target.search.rerun();
+  }
   if (end.kind === "continued" && listed !== null && listed.length === 0) {
     target.stopMessage.value = end.message;
     report(target, {

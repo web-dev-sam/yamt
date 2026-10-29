@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useTemplateRef } from "vue";
+import { computed, useTemplateRef, watch } from "vue";
 import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
 import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
@@ -31,8 +31,8 @@ const NEXT = ACTION_NAMES["next-change"];
 const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
-const { preferences, question, collapsing, toggleCollapsing } = useRangeStore();
-const { content, threadHosts, moveToChange } = useRangeController(
+const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
+const { content, threadHosts, moveToChange, goTo } = useRangeController(
   props.file,
   { left, right, strip },
   { preferences },
@@ -45,6 +45,17 @@ const rightHeading = computed(() => sideHeading(props.rightSide));
 const columns = computed(() => content.value.kind === "columns");
 const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
 const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
+
+watch(
+  [search.goTo, () => props.shown],
+  ([request, shown]) => {
+    if (request !== null && shown && request.path === props.file.path) {
+      goTo({ pane: request.pane, match: request.match });
+      search.took(request.id);
+    }
+  },
+  { immediate: true, flush: "post" },
+);
 </script>
 
 <template>
