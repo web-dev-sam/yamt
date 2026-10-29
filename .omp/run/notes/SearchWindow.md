@@ -64,3 +64,10 @@ likely RangeView's go-to with `match: null`, a connect file); compare dark: no p
 keymap rebind and Ctrl+B-then-hide, compare light. First Ctrl+Shift+S failure not reproduced on fixture pages.
 Deviations (accepted): own #1719 fix; next-frame reselect; `SideColumn` props; per-run record; `stepSearchList` finds a
 place's group as the path's first row.
+
+## Re-check after fix round 1
+
+Boundary pass (#1715–#1718), correctness pass (#1719–#1724; no window-side cause for the range hide focus — it hands
+`{ pane: "right", match: null }` to RangeView, so the cause is after: connect R1). Mutation run `just mutants a214c2a`:
+96.9 %, survivors equivalent or static (searchRun.ts:70,75,148,157; mergeSearch.ts:17-19,132) or unchanged lines
+(store.ts:121,142,203). Accepted.
