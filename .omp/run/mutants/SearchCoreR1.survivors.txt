@@ -1,0 +1,155 @@
+mutants: no Rust changes since 29ac2aa
+[32m11:00:25 (3089160) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m11:00:25 (3089160) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m11:00:25 (3089160) INFO ProjectReader[39m Found 5 of 767 file(s) to be mutated.
+[32m11:00:25 (3089160) INFO Instrumenter[39m Instrumented 5 source file(s) with 280 mutant(s)
+[32m11:00:26 (3089160) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m11:00:27 (3089160) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m11:00:31 (3089160) INFO DryRunExecutor[39m Initial test run succeeded. Ran 58 tests in 4 seconds (net 2269.6473620000015 ms, overhead 1958.3526379999985 ms).
+
+All tests
+  digest.test.ts
+    ✓ cyrb53's published values (https://stackoverflow.com/a/52171480): a transcription slip (killed 3)
+    ~ a digest is a safe integer read from every character (a digest of a prefix) (covered 8)
+  list.test.ts
+    ✓ a row shows while one of its panes is on, with only the on panes' icons (filter leaks) (killed 34)
+    ✓ every pane off → filteredOut and no rows (an empty-list wording bug) (killed 10)
+    ✓ the summary: an empty box, searching, no results, counts and the cut (a stale summary) (killed 23)
+    ✓ counts follow dismissals (a stale summary) (killed 1)
+    ✓ a filter change restores nothing dismissed (filters touching dismissals) (killed 1)
+    ✓ goToPane takes the lead pane when on, else the leftmost on pane (the rule-8 choice) (killed 8)
+    ✓ a closed group shows only its header; an all-dismissed group disappears (ghost groups) (killed 3)
+  match.test.ts
+    ✓ a Matcher comes only from matcherOf (a forged or read pattern) (killed 1)
+    ✓ a.b does not match axb (an unescaped RegExp) (killed 10)
+    ~ every RegExp syntax character is matched as itself (an unescaped RegExp) (covered 53)
+    ✓ case-insensitive by default; Match Case narrows Foo/foo (an inverted flag) (killed 2)
+    ~ İx foo puts foo at column 3 (lowercasing the line shifts offsets) (covered 53)
+    ~ 😀foo puts foo at column 2 (code-point columns instead of UTF-16) (covered 53)
+    ✓ CRLF: the line text has no \r and the line count is right (\r\n counted as two breaks) (killed 5)
+    ~ lines are counted across gaps without matches and kept for hits on one line (covered 53)
+    ~ aaa/aa gives one hit; two separate hits on one line give two (overlapping or merged hits) (covered 53)
+    ✓ an empty query gives no matcher (showing everything) (killed 3)
+    ✓ a match never crosses a line or covers its \r (a cross-line hit) (killed 2)
+    ✓ a pane stops scanning at the limit (an unbounded array) (killed 5)
+    ~ a dropped cross-line match does not count toward the limit (covered 52)
+    ✓ a match starting on a line break stays on its line and is dropped (a negative column) (killed 1)
+  places.test.ts
+    ✓ an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane) (killed 30)
+    ✓ the same aligned line at different columns is two places (merging by line only) (killed 5)
+    ✓ after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned) (killed 5)
+    ✓ alignment follows the last change ending at or before the line (a stale change end) (killed 1)
+    ✓ in one conflict the same text and column in two panes is one place; different text is two (rule b ignoring the text) (killed 11)
+    ✓ two identical lines in one change pair first-with-first (cartesian merging) (killed 1)
+    ✓ the same text in two changes is two places (merging across changes) (killed 2)
+    ~ a line only one side has is its own place with only that pane (lost side-only hits) (covered 155)
+    ✓ a null text yields nothing; an insertion range holds no line (DiskNotText and empty ranges counted as inside) (killed 2)
+    ✓ lead order by line, then column (an unsorted list) (killed 18)
+    ✓ a side-only place sorts at its change's lead start, before that line's lead rows, left before right (rule 7's change place) (killed 7)
+    ~ range: a left-only place sorts at its difference's right start (rule 7's change place) (covered 177)
+    ✓ a place's preview comes from the lead hit, else the first hit (killed 13)
+    ✓ keys differ by panes, column, line digest and ordinal, never by line number (line-number keys) (killed 5)
+    ✓ the line right after a change is outside it, a line before it too (a change's edges) (killed 2)
+    ✓ an outside side-only place sorts at its aligned lead line (rule 7's order) (killed 1)
+    ✓ a pane stops at the limit and the file says it was cut (killed 1)
+    ~ two side hits outside changes aligned to one lead line stay apart (a place with two hits of one pane) (covered 172)
+    ~ a 1 MiB line with many hits in a change takes little time and short keys (keys copying the line) (covered 167)
+    ~ a 1 MiB text where every line matches takes little time (per-line work growing with the text) (covered 156)
+  preview.test.ts
+    ~ preview: leading whitespace trimmed, the match and the rest of the line (wrong trimming) (covered 11)
+    ✓ preview: 26 characters before the match with … when cut (wrong trimming) (killed 6)
+    ✓ preview: a cut never splits a surrogate pair (killed 1)
+  results.test.ts
+    ✓ a dismissal survives a one-file re-run with lines inserted above (line-number keys) (killed 31)
+    ✓ a dismissal is dropped once the line text changes (stale keys) (killed 4)
+    ~ two identical places dismiss independently (over-dismissal) (covered 192)
+    ~ a dismissal only holds keys among its file's places (covered 183)
+    ✓ a dismissal stays in its own file when another file holds the same place (over-dismissal) (killed 2)
+    ✓ a group dismissal survives a one-file re-run; a full run clears it (rule 9 vs rule 10) (killed 3)
+    ~ dismissing a file without a group changes nothing (covered 149)
+    ~ groups follow the window's file order; a re-run replaces its group; a file without places has none (covered 156)
+    ~ cut at 20,000 places across files; later files are not added (an off-by-one at the limit) (covered 156)
+    ~ a one-file re-run under a cut result re-applies the cap (uncapped growth) (covered 156)
+    ~ a file cut at its pane limit cuts the results (covered 149)
+    ~ a file without places keeps the results' cut and adds its own (covered 149)
+
+[Survived] StringLiteral
+src/search/internal/match.ts:25:20
+-       let lineText = "";
++       let lineText = "Stryker was here!";
+Tests ran:
+    a dismissal survives a one-file re-run with lines inserted above (line-number keys)
+    a dismissal is dropped once the line text changes (stale keys)
+    two identical places dismiss independently (over-dismissal)
+  and 48 more tests!
+
+
+[Survived] EqualityOperator
+src/search/internal/match.ts:28:11
+-         if (lineEnd < match.index) {
++         if (lineEnd <= match.index) {
+Tests ran:
+    a dismissal survives a one-file re-run with lines inserted above (line-number keys)
+    a dismissal is dropped once the line text changes (stale keys)
+    two identical places dismiss independently (over-dismissal)
+  and 48 more tests!
+
+
+[NoCoverage] BlockStatement
+src/search/internal/places.ts:44:26
+-     if (!isPlaceKey(text)) {
+-       throw new RangeError("a place key is a JSON array");
+-     }
++     if (!isPlaceKey(text)) {}
+
+[NoCoverage] StringLiteral
+src/search/internal/places.ts:45:26
+-       throw new RangeError("a place key is a JSON array");
++       throw new RangeError("");
+
+[Survived] ConditionalExpression
+src/search/internal/places.ts:44:7
+-     if (!isPlaceKey(text)) {
++     if (false) {
+Tests ran:
+    a dismissal survives a one-file re-run with lines inserted above (line-number keys)
+    a dismissal is dropped once the line text changes (stale keys)
+    two identical places dismiss independently (over-dismissal)
+  and 36 more tests!
+
+
+[Survived] StringLiteral
+src/search/internal/places.ts:39:26
+-     return text.startsWith("[");
++     return text.startsWith("");
+Tests ran:
+    a dismissal survives a one-file re-run with lines inserted above (line-number keys)
+    a dismissal is dropped once the line text changes (stale keys)
+    two identical places dismiss independently (over-dismissal)
+  and 36 more tests!
+
+
+[Survived] ArithmeticOperator
+src/search/internal/places.ts:98:29
+-         ordinals.set(counted, ordinal + 1);
++         ordinals.set(counted, ordinal - 1);
+Tests ran:
+    a dismissal survives a one-file re-run with lines inserted above (line-number keys)
+    a dismissal is dropped once the line text changes (stale keys)
+    two identical places dismiss independently (over-dismissal)
+  and 36 more tests!
+
+
+Ran 5.21 tests per mutant on average.
+------------|------------------|----------|-----------|------------|----------|----------|
+            | % Mutation score |          |           |            |          |          |
+File        |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+------------|--------|---------|----------|-----------|------------|----------|----------|
+All files   |  97.46 |   98.18 |      263 |         6 |          5 |        2 |        0 |
+ digest.ts  | 100.00 |  100.00 |        7 |         1 |          0 |        0 |        0 |
+ list.ts    | 100.00 |  100.00 |       81 |         0 |          0 |        0 |        0 |
+ match.ts   |  96.23 |   96.23 |       47 |         4 |          2 |        0 |        0 |
+ places.ts  |  95.76 |   97.41 |      112 |         1 |          3 |        2 |        0 |
+ preview.ts | 100.00 |  100.00 |       16 |         0 |          0 |        0 |        0 |
+------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m11:00:44 (3089160) INFO MutationTestExecutor[39m Done in 19 seconds.
