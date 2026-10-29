@@ -1,0 +1,195 @@
+commit 3569e3b819c5a24e29e57e6516b8c7b78d69d9f8
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 07:44:10 +0100
+
+    fix(editor): one sync retry per scroll-led sync; a pane scrolled after it leads
+
+diff --git a/frontend/src/editor/internal/scrollSync.test.ts b/frontend/src/editor/internal/scrollSync.test.ts
+index 8ab8efd..6b0699a 100644
+--- a/frontend/src/editor/internal/scrollSync.test.ts
++++ b/frontend/src/editor/internal/scrollSync.test.ts
+@@ -309,3 +309,96 @@ test("a follow asked for before the echoes end keeps its own source", () => {
+ 
+   expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([400, 400]);
+ });
++
++test("a follower the user scrolls in each frame after another pane's sync is written back once, then leads", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  const sync = new ScrollSync(views, ["left", "right"], () => {});
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 100 * LINE_PX, right: 100 * LINE_PX },
++  ];
++  function frame(): number[] {
++    scrolled(views.left, views.left.scrollDOM.scrollTop + 100);
++    for (const callback of frames.splice(0)) {
++      callback();
++    }
++    sync.sync(anchors);
++    return [views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop];
++  }
++
++  scrolled(views.right, 1000);
++  sync.sync(anchors);
++
++  expect([frame(), frame()]).toEqual([
++    [1000, 1000],
++    [1100, 1100],
++  ]);
++});
++
++test("a follower pulled back on every write is written again once, then leads and nothing more is asked", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  let requested = 0;
++  const sync = new ScrollSync(views, ["left", "right"], () => {
++    requested += 1;
++  });
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 100 * LINE_PX, right: 100 * LINE_PX },
++  ];
++  function echoesEnd(): number {
++    const before = requested;
++    for (const callback of frames.splice(0)) {
++      callback();
++    }
++    return requested - before;
++  }
++
++  scrolled(views.right, 1000);
++  sync.sync(anchors);
++  scrolled(views.left, 0);
++  const retry = echoesEnd();
++  sync.sync(anchors);
++  scrolled(views.left, 0);
++  const afterRetry = echoesEnd();
++  sync.sync(anchors);
++  views.right.scrollDOM.scrollTop = 1000;
++  const afterLead = echoesEnd();
++
++  expect([retry, afterRetry, afterLead]).toEqual([1, 0, 0]);
++  expect(frames).toEqual([]);
++});
++
++test("after the retry, a source scrolled again keeps the lead over a follower moved meanwhile", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  const sync = new ScrollSync(views, ["left", "right"], () => {});
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 100 * LINE_PX, right: 100 * LINE_PX },
++  ];
++  function echoesEnd(): void {
++    for (const callback of frames.splice(0)) {
++      callback();
++    }
++  }
++
++  scrolled(views.right, 1000);
++  sync.sync(anchors);
++  scrolled(views.left, 0);
++  echoesEnd();
++  sync.sync(anchors);
++  scrolled(views.right, 1200);
++  scrolled(views.left, 0);
++  echoesEnd();
++  sync.sync(anchors);
++
++  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([1200, 1200]);
++});
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index 7e369a0..9f66cda 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -5,6 +5,7 @@ import type { Pane, PaneViews } from "./geometry";
+ 
+ export type Anchor<P extends string> = Readonly<Record<P, number>>;
+ type SpanRow = Readonly<Record<Pane, Span>>;
++type Pass = "first" | "retry" | "last";
+ export type ScrollPane = {
+   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
+   readonly documentPadding: { readonly top: number };
+@@ -71,6 +72,7 @@ export class ScrollSync<P extends string> {
+   readonly #requestFrame: () => void;
+   readonly #listeners = new AbortController();
+   #source: P | null = null;
++  #pass: Pass = "first";
+   #followed = false;
+   #echoes: readonly P[] = [];
+   #clearEchoes: number | null = null;
+@@ -90,6 +92,7 @@ export class ScrollSync<P extends string> {
+         () => {
+           if (!this.#followed && !this.#echoes.includes(pane)) {
+             this.#source = pane;
++            this.#pass = "first";
+           }
+           requestFrame();
+         },
+@@ -101,14 +104,17 @@ export class ScrollSync<P extends string> {
+   follow(source: P): void {
+     this.#source = source;
+     this.#followed = true;
++    this.#pass = "first";
+     this.#syncedTops = null;
+     this.#requestFrame();
+   }
+ 
+   sync(anchors: readonly Anchor<P>[]): void {
+     const source = this.#source;
++    const pass = this.#pass;
+     this.#source = null;
+     this.#followed = false;
++    this.#pass = "first";
+     const views = this.#views;
+     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.get(source)) {
+       return;
+@@ -126,20 +132,35 @@ export class ScrollSync<P extends string> {
+       cancelAnimationFrame(this.#clearEchoes);
+     }
+     this.#clearEchoes = requestAnimationFrame(() => {
+-      this.#endEchoes(source, tops);
++      this.#endEchoes(source, tops, pass);
+     });
+   }
+ 
+   // WebKitGTK 2.54 can pull a follower back while CodeMirror swaps its viewport, and the moved follower's
+   // scroll event is an echo (docs/plan.md §2 #82, docs/slices/briefs/range-collapse-columns-rework-2.md):
+-  // its source leads once more.
+-  #endEchoes(source: P, tops: ReadonlyMap<P, number>): void {
++  // its source leads once more. A follower moved again after that retry is the user's scroll
++  // (briefs/range-collapse-columns-rework-3.md): it leads, and its sync retries nothing.
++  #endEchoes(source: P, tops: ReadonlyMap<P, number>, pass: Pass): void {
+     this.#clearEchoes = null;
+     const views = this.#views;
+-    const moved = this.#echoes.some((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
++    const moved = this.#echoes.find((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
+     this.#echoes = [];
+-    if (moved && !this.#followed) {
+-      this.follow(source);
++    if (moved === undefined || this.#followed) {
++      return;
++    }
++    switch (pass) {
++      case "first":
++        this.follow(source);
++        this.#pass = "retry";
++        return;
++      case "retry":
++        if (this.#source === null) {
++          this.#source = moved;
++          this.#pass = "last";
++        }
++        return;
++      case "last":
++        return;
+     }
+   }
+ 

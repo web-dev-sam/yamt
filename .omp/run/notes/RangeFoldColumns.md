@@ -104,3 +104,18 @@ find [2655, 3114] lined up (was [0, 3114]); Ctrl+Home [0, 0]; collapsing off [85
 find + Ctrl+End [1961, 2081, 2353] equal to `f08c5b9`. 204 files / 2798 tests; typecheck, lint, fmt, knip clean.
 Open risks (implementer): a follower pulled back every frame would re-sync every frame (logs: one retry landed); a user
 scroll on a follower inside the one-frame echo window now snaps to the source; merge checked in one scenario.
+
+## Fix round 3 (owner-approved Gate B #1692; `RangeFoldColumnsR3`, 8m33s, patch `.omp/run/patches/RangeFoldColumnsR3.patch`)
+
+#1691: each pending sync carries a pass (`first` | `retry` | `last`): a scroll- or follow-led sync may retry once when
+its echo window ends; after the retry a follower moved again leads (unless a scroll or follow already chose a source)
+and asks no frame; after `last` nothing. At most two extra syncs per scroll-led sync. Tests (additions only): a
+follower scrolled every frame after another pane's sync is written back once, then leads (fails on `c95743a`:
+`[[1000,1000],[1000,1000]]`); a follower pulled back on every write → frames asked `[1, 0, 0]` (fails on `c95743a`:
+`[1, 1, 0]`); after the retry a source scrolled again keeps the lead. WebKit: #1689 repro still [2655, 3114], Ctrl+Home
+[0, 0]; scripted per-frame steps (WebKitWebDriver's wheel action scrolls +Δ then −Δ): range and merge — the second pane
+written back once, leads from its second step (on `c95743a` frozen for the whole gesture). 204 files / 2801 tests;
+typecheck, lint, fmt, knip clean. Deviations (accepted): the second pane leads on its second step, not its first (the
+first step cannot be told from WebKit's pull-back; before `c95743a` it also led on the second frame); after the retry
+a moved follower leads instead of nothing. Open: a follower pulled back on both writes leads (the panes line up at the
+pulled place); merge checked in one file with collapsing off; no real touchpad momentum.

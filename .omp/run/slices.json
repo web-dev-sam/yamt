@@ -1,8 +1,1 @@
-{
-  "RangeFoldColumnsR3": {
-    "owned": [
-      "frontend/src/editor/internal/scrollSync.ts",
-      "frontend/src/editor/internal/scrollSync.test.ts"
-    ]
-  }
-}
+{}
