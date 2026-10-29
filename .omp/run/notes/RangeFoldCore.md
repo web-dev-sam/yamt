@@ -1,0 +1,58 @@
+# RangeFoldCore — notes (session 35)
+
+Slice brief `docs/slices/briefs/range-collapse-core.md`; web-impl, isolated, 10m14s. Patch `f08c5b9` (base `2fba15d`),
+`.omp/run/patches/RangeFoldCore.patch`; 6 files, +800 −90.
+
+## Summary (implementer)
+
+- `foldSteps.ts` (new): the pure step state moved out of `folds.ts`, generic over the pane key, plus `leaveCollapsed`.
+- `foldRuns.ts`: `Fold<P>`, `FoldLevel<P>`, `displayed`; one private `runLevels(panes, levelAt)` and `hiddenLines`
+  behind `foldRuns` (merge; a private `paneEdge` over `CHUNK_RANGE`) and `columnRuns` (range).
+- `foldView.ts`: generic `foldDecorations`, exported `paneFoldView`; the merge's per-pane view calls it.
+- `columnFolds.ts` (new): `ownerSteps`/`mirrorSteps`, `columnChanges`, `rangeRuns`, `renewSpec`/`stepSpec`/
+  `mirrorSpec`/`rightReveal`, `columnFoldExtension` (listeners: left → `mirrorSpec` on the right; right →
+  `rightReveal` on the left, then `scrollIntoView` on the right).
+
+## Tests (`columnFolds.test.ts`, 18)
+
+Design list 1–17 plus "two threads on one line make one change". Fixture: 100-line left, the right with one line
+replaced by two and one inserted.
+
+## Evidence (implementer)
+
+- Merge fold tests byte-unchanged (`git diff --stat` empty); node 202 files / 2762 tests; typecheck, lint, fmt:check,
+  knip clean.
+- Sabotage: thread edges off → 4 fail; mirror copy without the replaced check → 1 fails; reveal reading the left in
+  `rightReveal` → 2 fail; reverted, 18 pass.
+- `strips.browser.test.ts` not run: Playwright WebKit cannot launch on this host (`libicudata.so.74`, known #1242).
+
+## Deviations (accepted)
+
+1. `columnRuns` passes `["left", "right"] satisfies readonly Column[]`, not `COLUMNS` (importing `compareViews` closes
+   an import cycle the fence test reports, PM5).
+2. Thread lines go before differences in the list to sort, so test 6 catches a left-only sort; output drops `words`.
+3. Private helpers beyond the contract; no extra exports. Tests import `mirrorSteps`, `displayedIn`, `LineSpan` (knip).
+4. One extra test (duplicates dropped).
+
+## Open risks (implementer)
+
+- `columnFoldExtension`'s two listeners are covered only through their specs (node has no DOM); the WebKit check is
+  row 4's (`columnFolds.ts:158-190`).
+- The fields start with no runs; nothing hides until `RangeController` dispatches `renewSpec` at build.
+
+## Fix round 1 (`RangeFoldCoreR1`, 2m57s, patch `9ccae0f`, `.omp/run/patches/RangeFoldCoreR1.patch`; 5 files +101 −98)
+
+Blocks #1672–#1675, #1677, #1678. `foldSteps.ts`: `leaveCollapsedAfter` (cursor moves only when a count grew) and
+`revealed` (same-transaction reveal), used by `foldField`/`sideFoldPush` and `ownerSteps`/`mirrorSpec`; `folds.ts`
+`revealOnOwner(reveal, owner)` used by `sideReveals` and the right column (`revealFromRight` deleted);
+`ColumnChange = Pick<Difference, "left" | "right">` (brands kept); `thread(column, lines, shown)`; per-column split
+test and a `test.each` duplicates test (left+left, right+right, left+right); the weak first-line test deleted (20
+tests). Evidence: swapped lines → TS2322 ×2; `unchangedOnRight` one-sided → 2 tests fail; merge fold tests no diff;
+202 files / 2770 tests, typecheck, lint, fmt, knip clean. Deviations (accepted): `revealed`'s pane `NoInfer<P>`;
+`.reduce(shown, steps)`; one `test.each` for both duplicates asks. Risk: new edge `columnFolds.ts` → `folds.ts`
+(`revealOnOwner`); row 4 sees it only on merge.
+
+## Re-check after fix round 1
+
+Boundary pass (#1672–#1675 resolved, no new copy), correctness pass (#1677, #1678 resolved; merge behaviour read
+equal through the shared helpers); accepted.

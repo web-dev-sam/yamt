@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, useTemplateRef } from "vue";
+import { computed, useTemplateRef, watch } from "vue";
 import ArrowDown from "~icons/lucide/arrow-down";
 import ArrowUp from "~icons/lucide/arrow-up";
+import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
 
 import type { RangeEntry, RangeSide } from "../ipc";
+import { COLLAPSE_LABEL } from "./collapsing";
 import { fileIcon } from "./fileIcon";
 import { ACTION_NAMES } from "./keyText";
 import PaneFrame from "./PaneFrame.vue";
@@ -14,6 +16,7 @@ import { fileHeading, sideHeading } from "./rangeText";
 import RangeThreadLayer from "./RangeThreadLayer.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useRangeController } from "./useRangeController";
+import { useSearchGoTo } from "./useSearchGoTo";
 
 const props = defineProps<{
   file: RangeEntry;
@@ -29,11 +32,18 @@ const NEXT = ACTION_NAMES["next-change"];
 const left = useTemplateRef<HTMLDivElement>("left");
 const right = useTemplateRef<HTMLDivElement>("right");
 const strip = useTemplateRef<SVGSVGElement>("strip");
-const { preferences, question } = useRangeStore();
-const { content, threadHosts, moveToChange } = useRangeController(
+const sentenceBox = useTemplateRef<HTMLParagraphElement>("sentenceBox");
+const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
+const { content, threadHosts, sentenceFocusAsks, moveToChange, goTo } = useRangeController(
   props.file,
   { left, right, strip },
   { preferences },
+);
+useSearchGoTo(
+  search,
+  () => props.shown,
+  () => props.file.path,
+  goTo,
 );
 
 const icon = computed(() => fileIcon(props.file.path));
@@ -43,6 +53,14 @@ const rightHeading = computed(() => sideHeading(props.rightSide));
 const columns = computed(() => content.value.kind === "columns");
 const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
 const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
+
+watch(
+  sentenceFocusAsks,
+  () => {
+    sentenceBox.value?.focus();
+  },
+  { flush: "post" },
+);
 </script>
 
 <template>
@@ -74,6 +92,18 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
         >
           <ArrowDown class="size-4" aria-hidden="true" />
         </button>
+        <button
+          type="button"
+          :title="COLLAPSE_LABEL"
+          :aria-label="COLLAPSE_LABEL"
+          :aria-pressed="collapsing"
+          :disabled="!columns"
+          class="rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
+          @mousedown.prevent
+          @click="toggleCollapsing"
+        >
+          <ChevronsDownUp class="size-4" aria-hidden="true" />
+        </button>
         <RangeSendButton class="ml-auto" />
         <SettingsButton />
       </header>
@@ -100,7 +130,12 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
         <div ref="right" class="col-start-3 row-start-2 min-h-0 min-w-0" />
         <RangeThreadLayer :file="file" :hosts="threadHosts" />
       </template>
-      <p v-else-if="sentence !== null" class="col-span-3 col-start-1 row-start-2 px-3 py-4">
+      <p
+        v-else-if="sentence !== null"
+        ref="sentenceBox"
+        tabindex="-1"
+        class="col-span-3 col-start-1 row-start-2 px-3 py-4 outline-none"
+      >
         {{ sentence }}
       </p>
     </template>

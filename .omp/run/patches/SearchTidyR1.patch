@@ -1,0 +1,26 @@
+commit 836ff00a94a10e14be401be1fa5cfe8db8e4f747
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 18:02:51 +0100
+
+    fix(search): choice view focuses after render when mounted under a waiting go-to
+
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index 74e6205..eb1a970 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -1,5 +1,5 @@
+ <script setup lang="ts">
+-import { computed, useTemplateRef } from "vue";
++import { computed, nextTick, useTemplateRef } from "vue";
+ 
+ import type { FileSides, Side } from "../ipc";
+ import { resultLine, sideButton, sideSentence, sideTooltip } from "./choiceText";
+@@ -40,7 +40,7 @@ useSearchGoTo(
+   () => props.sides.path,
+   (target) => {
+     if (target.match === null) {
+-      focusFirstButton();
++      void nextTick(focusFirstButton);
+     }
+   },
+ );

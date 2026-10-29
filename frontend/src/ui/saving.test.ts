@@ -166,6 +166,7 @@ function writeTarget(
           .filter(([, editor]) => editor.text !== editor.saved)
           .map(([path]) => path),
     },
+    search: { changed: () => undefined },
     writing: new Map(),
     stop: { dropped: false },
     asking: { ask: () => Promise.resolve("yes") },

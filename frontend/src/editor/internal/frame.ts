@@ -93,8 +93,8 @@ export class Frame {
     });
   }
 
-  realign(): void {
-    this.#scroll.follow("center");
+  realign(source: Pane): void {
+    this.#scroll.follow(source);
   }
 
   showMinimap(shown: boolean): void {

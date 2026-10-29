@@ -1,0 +1,130 @@
+commit c95743a2014b203b1e6b91e2e62e14733dbca77f
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-28 21:44:20 +0100
+
+    fix(editor): a follower pulled off its written top during the echo frame is written again from the same source
+
+diff --git a/frontend/src/editor/internal/scrollSync.test.ts b/frontend/src/editor/internal/scrollSync.test.ts
+index 14321f5..8ab8efd 100644
+--- a/frontend/src/editor/internal/scrollSync.test.ts
++++ b/frontend/src/editor/internal/scrollSync.test.ts
+@@ -231,3 +231,81 @@ test("two columns follow each other through their difference's anchors, the sour
+   expect(leftLed).toEqual([50, 120]);
+   expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([160, 300]);
+ });
++
++test("a follower moved off its written top before the echoes end is written again from the same source", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  let requested = 0;
++  const sync = new ScrollSync(views, ["left", "right"], () => {
++    requested += 1;
++  });
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 100 * LINE_PX, right: 100 * LINE_PX },
++  ];
++
++  scrolled(views.right, 1000);
++  sync.sync(anchors);
++  scrolled(views.left, 0);
++  sync.sync(anchors);
++  const pulledBack = [views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop];
++  const before = requested;
++  for (const frame of frames.splice(0)) {
++    frame();
++  }
++  expect(requested).toBe(before + 1);
++  sync.sync(anchors);
++
++  expect(pulledBack).toEqual([0, 1000]);
++  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([1000, 1000]);
++});
++
++test("followers still at their written tops when the echoes end ask for no other sync", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  let requested = 0;
++  const sync = new ScrollSync(views, ["left", "right"], () => {
++    requested += 1;
++  });
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 100 * LINE_PX, right: 100 * LINE_PX },
++  ];
++
++  scrolled(views.right, 1000);
++  sync.sync(anchors);
++  scrolled(views.left, 1000);
++  const before = requested;
++  for (const frame of frames.splice(0)) {
++    frame();
++  }
++
++  expect(requested).toBe(before);
++});
++
++test("a follow asked for before the echoes end keeps its own source", () => {
++  const frames: (() => void)[] = [];
++  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
++  vi.stubGlobal("cancelAnimationFrame", () => {});
++  const views = { left: fakePane(0), right: fakePane(0) };
++  const sync = new ScrollSync(views, ["left", "right"], () => {});
++  const anchors = [
++    { left: 0, right: 0 },
++    { left: 100 * LINE_PX, right: 100 * LINE_PX },
++  ];
++
++  scrolled(views.right, 1000);
++  sync.sync(anchors);
++  views.left.scrollDOM.scrollTop = 400;
++  sync.follow("left");
++  for (const frame of frames.splice(0)) {
++    frame();
++  }
++  sync.sync(anchors);
++
++  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([400, 400]);
++});
+diff --git a/frontend/src/editor/internal/scrollSync.ts b/frontend/src/editor/internal/scrollSync.ts
+index 5565be7..7e369a0 100644
+--- a/frontend/src/editor/internal/scrollSync.ts
++++ b/frontend/src/editor/internal/scrollSync.ts
+@@ -119,17 +119,30 @@ export class ScrollSync<P extends string> {
+       const { scrollDOM, documentPadding } = views[pane];
+       scrollDOM.scrollTop = at(pane) + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
+     }
+-    this.#syncedTops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
++    const tops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
++    this.#syncedTops = tops;
+     this.#echoes = followers;
+     if (this.#clearEchoes !== null) {
+       cancelAnimationFrame(this.#clearEchoes);
+     }
+     this.#clearEchoes = requestAnimationFrame(() => {
+-      this.#clearEchoes = null;
+-      this.#echoes = [];
++      this.#endEchoes(source, tops);
+     });
+   }
+ 
++  // WebKitGTK 2.54 can pull a follower back while CodeMirror swaps its viewport, and the moved follower's
++  // scroll event is an echo (docs/plan.md §2 #82, docs/slices/briefs/range-collapse-columns-rework-2.md):
++  // its source leads once more.
++  #endEchoes(source: P, tops: ReadonlyMap<P, number>): void {
++    this.#clearEchoes = null;
++    const views = this.#views;
++    const moved = this.#echoes.some((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
++    this.#echoes = [];
++    if (moved && !this.#followed) {
++      this.follow(source);
++    }
++  }
++
+   destroy(): void {
+     this.#listeners.abort();
+     if (this.#clearEchoes !== null) {

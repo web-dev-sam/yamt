@@ -136,7 +136,7 @@ mutants base:
     if [ -s target/mutants/rust.diff ]; then
         rust_mutants=$(cargo mutants --in-diff target/mutants/rust.diff --list | wc -l)
     fi
-    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
+    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/src/search/*.ts' 'frontend/src/search/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     web_count=$(printf '%s' "$web_files" | tr ',' '\n' | grep -c . || true)
     if [ "$rust_mutants" -gt "$max_rust_mutants" ] || [ "$web_count" -gt "$max_web_files" ]; then
         echo "mutants: refused: {{ base }} covers $rust_mutants Rust mutants and $web_count TypeScript files," >&2

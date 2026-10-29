@@ -1,14 +1,19 @@
-import { EditorState, type TransactionSpec } from "@codemirror/state";
+import { EditorState, Text, type TransactionSpec } from "@codemirror/state";
 import { BlockType, Decoration } from "@codemirror/view";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { Column } from "../../ipc";
+import { loadCompareFixture, type Column } from "../../ipc";
+import { columnFoldExtension, mirrorSpec, mirrorSteps, ownerSteps } from "./columnFolds";
+import { renewSpec, stepSpec } from "./columnFolds";
 import { differenceField, showDifferences } from "./compareFields";
 import { CompareFrame, type LineBlock } from "./compareFrame";
 import type { DiffSpan } from "./compareMarks";
 import type { CompareRow } from "./compareStrip";
 import { toDocPos } from "./docPos";
 import { find } from "./find";
+import { columnRuns } from "./foldRuns";
+import type { WaveRow } from "./geometry";
+import { columnWaves } from "./rangeFolds";
 import { showThreadRows, threadAnchors, threadField } from "./threadField";
 import type { ThreadRow } from "./threadRows";
 import type { ChangeTone } from "./tone";
@@ -23,6 +28,21 @@ const CELLS = {
   addCell: () => {},
   dropCell: () => {},
 };
+const NO_WORDS = { changed: [], removals: [] };
+const { comparison: ONE_DIFFERENCE } = await loadCompareFixture("single", {
+  "single.json": {
+    left: TEXT,
+    right: TEXT,
+    differences: [
+      {
+        left: { start: 4, len: 1 },
+        right: { start: 4, len: 1 },
+        words: { left: NO_WORDS, right: NO_WORDS },
+      },
+    ],
+  },
+});
+const SINGLE_CHANGE = ONE_DIFFERENCE.differences;
 
 type FakeColumn = {
   state: EditorState;
@@ -395,4 +415,151 @@ test("an unchanged row on the line before a pure insertion keeps the scroll insi
 
   expect(threadAnchors(views)).toEqual(ROW_AFTER_LINE_20);
   expect(scrollTopsAfterScrolling(views, "right", 470)).toEqual({ left: 450, right: 470 });
+});
+
+const FOLD_WIRING = {
+  views: (): never => {
+    throw new Error("a frame test has no views");
+  },
+  hovered: () => null,
+};
+
+function foldColumn(
+  column: Column,
+  changed: (startState: EditorState, state: EditorState) => void,
+): FakeColumn {
+  const extensions = [differenceField, find, columnFoldExtension(column, FOLD_WIRING)];
+  return fakeColumn(
+    EditorState.create({ doc: TEXT, extensions }),
+    (fake, pos) => {
+      const number = fake.state.doc.lineAt(pos).number;
+      return { top: (number - 1) * LINE_PX, bottom: number * LINE_PX, type: BlockType.Text };
+    },
+    changed,
+  );
+}
+
+function onLeft(views: Readonly<Record<Column, FakeColumn>>, spec: TransactionSpec): void {
+  views.left.dispatch(spec);
+  const mirrored = mirrorSpec(views.right.state, views.left.state.field(ownerSteps));
+  if (mirrored !== null) {
+    views.right.dispatch(mirrored);
+  }
+}
+
+test("waves reach the strip with the rows, and a step shown by a click measures them again", () => {
+  const runFrames = stubFrames();
+  const painted: (readonly WaveRow<Column>[])[] = [];
+  const holder: { frame: CompareFrame | null } = { frame: null };
+  function changed(startState: EditorState, state: EditorState): void {
+    holder.frame?.changed({ startState, state, geometryChanged: false });
+  }
+  const views = { left: foldColumn("left", changed), right: foldColumn("right", changed) };
+  holder.frame = new CompareFrame({
+    views,
+    strip: {
+      paint: (_panes, _rows, waves) => {
+        painted.push(waves);
+      },
+    },
+    fields: [differenceField, ownerSteps, mirrorSteps],
+    anchors: () => [],
+    waves: columnWaves,
+  });
+  const doc = Text.of(TEXT.split("\n"));
+  const runs = columnRuns(SINGLE_CHANGE, { left: doc, right: doc });
+
+  onLeft(views, renewSpec(views.left.state, runs, true));
+  runFrames();
+  onLeft(views, stepSpec(views.left.state, 1));
+  runFrames();
+
+  expect(painted).toEqual([
+    [
+      { left: null, right: null },
+      { left: 9 * LINE_PX, right: 9 * LINE_PX },
+    ],
+    [
+      { left: null, right: null },
+      { left: 13 * LINE_PX, right: 13 * LINE_PX },
+    ],
+  ]);
+});
+
+test("realign writes the other column on the next frame though the source did not scroll", () => {
+  const runFrames = stubFrames();
+  const measured = { count: 0 };
+  const views = {
+    left: plainColumn(measured, () => {}),
+    right: plainColumn(measured, () => {}),
+  };
+  const frame = new CompareFrame({
+    views,
+    strip: { paint: () => {} },
+    fields: [differenceField],
+    anchors: () => [],
+  });
+  views.left.scrollDOM.scrollTop = 300;
+  views.left.scrollDOM.dispatchEvent(new Event("scroll"));
+  runFrames();
+  views.right.scrollDOM.scrollTop = 40;
+
+  frame.realign("left");
+  runFrames();
+  frame.destroy();
+
+  expect(views.right.scrollDOM.scrollTop).toBe(300);
+});
+
+test("after realign, a scroll event of the other column before the frame does not lead the sync", () => {
+  const runFrames = stubFrames();
+  const measured = { count: 0 };
+  const views = {
+    left: plainColumn(measured, () => {}),
+    right: plainColumn(measured, () => {}),
+  };
+  const frame = new CompareFrame({
+    views,
+    strip: { paint: () => {} },
+    fields: [differenceField],
+    anchors: () => [],
+  });
+  views.left.scrollDOM.scrollTop = 300;
+  views.left.scrollDOM.dispatchEvent(new Event("scroll"));
+  runFrames();
+  runFrames();
+
+  frame.realign("left");
+  views.right.scrollDOM.scrollTop = 40;
+  views.right.scrollDOM.dispatchEvent(new Event("scroll"));
+  runFrames();
+  frame.destroy();
+
+  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([300, 300]);
+});
+
+test("a frame without waves paints none (the compare window's strip)", () => {
+  const runFrames = stubFrames();
+  const measured = { count: 0 };
+  const painted: (readonly WaveRow<Column>[])[] = [];
+  const views = {
+    left: plainColumn(measured, () => {}),
+    right: plainColumn(measured, () => {}),
+  };
+  const frame = new CompareFrame({
+    views,
+    strip: {
+      paint: (_panes, _rows, waves) => {
+        painted.push(waves);
+      },
+    },
+    fields: [differenceField],
+    anchors: () => [],
+  });
+
+  frame.request();
+  runFrames();
+  frame.destroy();
+
+  expect(painted).toEqual([[]]);
 });

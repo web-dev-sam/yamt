@@ -1,5 +1,5 @@
 <script setup lang="ts" generic="F extends ListedFile">
-import { computed, shallowRef, useTemplateRef, watch } from "vue";
+import { computed, shallowRef, watch } from "vue";
 import ListIcon from "~icons/lucide/list";
 import ListTree from "~icons/lucide/list-tree";
 
@@ -7,16 +7,16 @@ import { fileIcon } from "./fileIcon";
 import { createFileListMode } from "./fileListMode";
 import { revealed, treeRows, type ListedFile } from "./fileTree";
 import FileTree from "./FileTree.vue";
-import PanelWidthHandle from "./PanelWidthHandle.vue";
-import { usePanelWidth } from "./usePanelWidth";
 
 const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
 const emit = defineEmits<{ select: [path: string] }>();
-defineSlots<{ file(props: { file: F; label: string }): unknown; footer(): unknown }>();
+defineSlots<{
+  file(props: { file: F; label: string }): unknown;
+  folder?(props: { path: string }): unknown;
+  footer(): unknown;
+}>();
 
-const list = useTemplateRef<HTMLElement>("list");
 const { mode, toggle } = createFileListMode();
-const { widthStyle, resize } = usePanelWidth(list);
 const closed = shallowRef<ReadonlySet<string>>(new Set());
 
 const rows = computed(() => treeRows(props.files, closed.value));
@@ -46,11 +46,7 @@ function toggleFolder(path: string): void {
 </script>
 
 <template>
-  <aside
-    ref="list"
-    class="relative mr-(--island-overlap) flex w-60 shrink-0 flex-col island bg-sidebar pb-1"
-    :style="widthStyle"
-  >
+  <aside class="flex min-h-0 flex-1 flex-col island bg-sidebar pb-1">
     <div class="flex h-10 shrink-0 items-center justify-between pr-2 pl-3">
       <h2 class="font-semibold">Files</h2>
       <button
@@ -75,6 +71,9 @@ function toggleFolder(path: string): void {
       <template #file="row">
         <slot name="file" :file="row.file" :label="row.label" />
       </template>
+      <template v-if="$slots.folder" #folder="{ path }">
+        <slot name="folder" :path="path" />
+      </template>
     </FileTree>
     <ul
       v-else
@@ -95,6 +94,5 @@ function toggleFolder(path: string): void {
       </li>
     </ul>
     <slot name="footer" />
-    <PanelWidthHandle label="File list width" :handle="resize" />
   </aside>
 </template>

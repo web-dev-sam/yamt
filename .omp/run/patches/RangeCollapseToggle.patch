@@ -1,0 +1,260 @@
+commit fce7a2ab00460907bf0f29cf9a2d5fa454140ccb
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-28 20:20:20 +0100
+
+    feat(range): collapse toggle in range header; one stored choice with merge window
+
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 3fde131..e9de822 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -6,6 +6,8 @@ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeSto
+ 
+ Folder sums (plan §2 #125): `rangeFolderSums.ts` `folderSums` (once per file list in `RangeApp.vue`) keys each folder's `+a −r` by the path its tree row carries; `RangeApp.vue` fills the tree's optional `folder` slot (`FileTree.vue`, forwarded by `FileList.vue`; the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair `RangeFileRow.vue` uses too.
+ 
++Collapse toggle (plan §2 #126): `RangeView.vue`'s header button after Previous/Next reads and writes the merge window's stored choice through `createCollapsing` in the range store; its words are `collapsing.ts` `COLLAPSE_LABEL`, which the merge toolbar's `LABELS` uses too.
++
+ Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), or in its place the message's open `RangeMessageEditor.vue`; the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`write` | `unqueue` | null); `write` opens `RangeMessageEditor.vue` (`box="post"`, label "Text to post", Queue) in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. `RangeMessageEditor.vue` is the one in-place message editor for Post and Edit: it reads and writes the draft its `box` names, focuses its field on mount, keeps its submit off while the text is blank or `offTitle` is set (shown as the title), keeps focus in the field on a submit press (`@mousedown.prevent`) and emits `submit`/`cancel`. A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field go through `rangeKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the reply's Comment keeps focus in the reply field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
+ Edit and Delete (plan §2 #123): `rangeNoteChange.ts` holds both rules — `isChangeable` (a note not pending) decides whether `RangeMessage.vue` shows them, and `noteChangeBlock(sending, aiTurn)` (a send running first, then the thread's AI turn) turns them and Save off, with `noteChangeTitle`'s hover text. Edit writes an `edit` draft (`rangeDrafts.ts` `editDraft`/`writeEdit`/`dropEdit`), shown in the message's place by `RangeMessageEditor.vue` (`box="edit"`, label "Comment text", Save; its `offTitle` is the block's title); writing an `edit` draft drops the message's `post` draft and the reverse, so the two boxes are never open at once. `editNote` sends only a non-blank text and drops the draft when stored; focus returns to Edit after Save or Cancel. Delete goes through `rangeStore`'s `deleteNote`, which asks `{ kind: "deleteNote" }` first. Every list a reply brings (`setList`) drops the open state and the reply, Post and Edit drafts of threads and messages it no longer holds, and the Edit draft of a note no longer changeable (a Send that made it pending closes its box), so a thread removed with its last note leaves nothing behind.
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 6eaa7a6..8528eeb 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -2,8 +2,10 @@
+ import { computed, useTemplateRef } from "vue";
+ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
++import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
+ 
+ import type { RangeEntry, RangeSide } from "../ipc";
++import { COLLAPSE_LABEL } from "./collapsing";
+ import { fileIcon } from "./fileIcon";
+ import { ACTION_NAMES } from "./keyText";
+ import PaneFrame from "./PaneFrame.vue";
+@@ -29,7 +31,7 @@ const NEXT = ACTION_NAMES["next-change"];
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const strip = useTemplateRef<SVGSVGElement>("strip");
+-const { preferences, question } = useRangeStore();
++const { preferences, question, collapsing, toggleCollapsing } = useRangeStore();
+ const { content, threadHosts, moveToChange } = useRangeController(
+   props.file,
+   { left, right, strip },
+@@ -74,6 +76,18 @@ const sentence = computed(() => (content.value.kind === "sentence" ? content.val
+         >
+           <ArrowDown class="size-4" aria-hidden="true" />
+         </button>
++        <button
++          type="button"
++          :title="COLLAPSE_LABEL"
++          :aria-label="COLLAPSE_LABEL"
++          :aria-pressed="collapsing"
++          :disabled="!columns"
++          class="rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent aria-pressed:bg-row-selected aria-pressed:hover:brightness-110"
++          @mousedown.prevent
++          @click="toggleCollapsing"
++        >
++          <ChevronsDownUp class="size-4" aria-hidden="true" />
++        </button>
+         <RangeSendButton class="ml-auto" />
+         <SettingsButton />
+       </header>
+diff --git a/frontend/src/ui/collapsing.ts b/frontend/src/ui/collapsing.ts
+index 13f05c7..dada8ba 100644
+--- a/frontend/src/ui/collapsing.ts
++++ b/frontend/src/ui/collapsing.ts
+@@ -8,6 +8,8 @@ export type Collapsing = {
+   toggleCollapsing(): void;
+ };
+ 
++export const COLLAPSE_LABEL = "Collapse unchanged fragments";
++
+ const STORAGE_KEY = "yamt.collapse.unchanged";
+ 
+ export function createCollapsing(storage?: StorageLike): Collapsing {
+diff --git a/frontend/src/ui/rangeStore.test.ts b/frontend/src/ui/rangeStore.test.ts
+index ec33693..59e5754 100644
+--- a/frontend/src/ui/rangeStore.test.ts
++++ b/frontend/src/ui/rangeStore.test.ts
+@@ -1,3 +1,4 @@
++import { setSSRHandler } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+ import { AgentClient, DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
+@@ -14,6 +15,7 @@ import {
+   type SourceFailure,
+   type SourceResult,
+ } from "../ipc";
++import { COLLAPSE_LABEL, createCollapsing } from "./collapsing";
+ import type { KeyPress } from "./fileListKey";
+ import { problemText } from "./problemText";
+ import {
+@@ -24,6 +26,7 @@ import {
+   type RangeStore,
+ } from "./rangeStore";
+ import { useSettingsStore } from "./settingsStore";
++import { listedButtons } from "./toolbarButtons";
+ 
+ type Edit = (fixture: RangeSource) => Partial<RangeSource>;
+ 
+@@ -532,3 +535,60 @@ test("deleteNote asks first: Cancel and Escape keep the note, Delete removes it
+   expect(store.threads.counts.value.get(first.file)).toBe(3);
+   expect(store.question.value).toBeNull();
+ });
++
++function withWindowStorage(
++  initial: Record<string, string>,
++  run: (items: Map<string, string>) => void,
++): void {
++  const items = new Map(Object.entries(initial));
++  setSSRHandler("getDefaultStorage", () => ({
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  }));
++  try {
++    run(items);
++  } finally {
++    setSSRHandler("getDefaultStorage", () => undefined);
++  }
++}
++
++test.each([
++  ["missing", {}, true],
++  ['"true"', { "yamt.collapse.unchanged": "true" }, true],
++  ["garbage", { "yamt.collapse.unchanged": "no" }, true],
++  ['"false"', { "yamt.collapse.unchanged": "false" }, false],
++])(
++  "the collapse choice %s in the window's storage starts the range store as the merge window reads it",
++  (_name, initial, on) => {
++    withWindowStorage(initial, () => {
++      expect(createRangeStore(source(1), "dark", null).collapsing.value).toBe(on);
++    });
++  },
++);
++
++test("toggling in the range store writes the merge window's stored choice (catches a second key)", () => {
++  withWindowStorage({}, (items) => {
++    const store = createRangeStore(source(1), "dark", null);
++
++    store.toggleCollapsing();
++
++    expect(store.collapsing.value).toBe(false);
++    expect([...items]).toEqual([["yamt.collapse.unchanged", "false"]]);
++    expect(createCollapsing().collapsing.value).toBe(false);
++
++    store.toggleCollapsing();
++
++    expect(items.get("yamt.collapse.unchanged")).toBe("true");
++    expect(createCollapsing().collapsing.value).toBe(true);
++  });
++});
++
++test("the range toggle's words are the merge toolbar's collapse entry", () => {
++  expect(COLLAPSE_LABEL).toBe("Collapse unchanged fragments");
++  expect(listedButtons(null).find(({ id }) => id === "collapse")?.label).toBe(COLLAPSE_LABEL);
++});
+diff --git a/frontend/src/ui/rangeStore.ts b/frontend/src/ui/rangeStore.ts
+index 5868b15..8e0ae54 100644
+--- a/frontend/src/ui/rangeStore.ts
++++ b/frontend/src/ui/rangeStore.ts
+@@ -16,6 +16,7 @@ import type {
+ import { firstMessageInUse } from "./agentSettingsFields";
+ import { aiMayClose } from "./aiClose";
+ import { createAsking, type Asking } from "./asking";
++import { createCollapsing, type Collapsing } from "./collapsing";
+ import { fileListKey, type KeyPress } from "./fileListKey";
+ import { attempt, clearProblemAbout, report, type Problem } from "./problem";
+ import type { Question } from "./question";
+@@ -35,31 +36,32 @@ export type RangeAgent = { readonly source: AgentSource; readonly client: AgentC
+ 
+ type RangeStoreAi = RangeAi & { readonly client: AgentClient };
+ 
+-export type RangeStore = SettingsStore & {
+-  readonly start: Readonly<ShallowRef<RangeStart | null>>;
+-  readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
+-  readonly shownPath: ComputedRef<string | null>;
+-  readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
+-  readonly problem: Readonly<ShallowRef<Problem | null>>;
+-  readonly question: ComputedRef<Question | null>;
+-  readonly screen: Readonly<ShallowRef<Screen>>;
+-  readonly fileListShown: ShallowRef<boolean>;
+-  readonly preferences: ComputedRef<Preferences>;
+-  readonly threads: RangeThreads;
+-  readonly gitlab: GitLabState;
+-  readonly ai: RangeStoreAi | null;
+-  startUp(): Promise<void>;
+-  loadSettings(): Promise<void>;
+-  showFile(path: string): void;
+-  loadFile(entry: RangeEntry): Promise<RangeFile | null>;
+-  fileListKey(event: KeyPress, platform: string): void;
+-  dismissProblem(): void;
+-  answer(yes: boolean): void;
+-  dismissQuestion(): void;
+-  mayClose(): Promise<boolean>;
+-  /** Asks "Delete this comment?" first (plan row 123). */
+-  deleteNote(message: MessageId): Promise<void>;
+-};
++export type RangeStore = SettingsStore &
++  Collapsing & {
++    readonly start: Readonly<ShallowRef<RangeStart | null>>;
++    readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
++    readonly shownPath: ComputedRef<string | null>;
++    readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
++    readonly problem: Readonly<ShallowRef<Problem | null>>;
++    readonly question: ComputedRef<Question | null>;
++    readonly screen: Readonly<ShallowRef<Screen>>;
++    readonly fileListShown: ShallowRef<boolean>;
++    readonly preferences: ComputedRef<Preferences>;
++    readonly threads: RangeThreads;
++    readonly gitlab: GitLabState;
++    readonly ai: RangeStoreAi | null;
++    startUp(): Promise<void>;
++    loadSettings(): Promise<void>;
++    showFile(path: string): void;
++    loadFile(entry: RangeEntry): Promise<RangeFile | null>;
++    fileListKey(event: KeyPress, platform: string): void;
++    dismissProblem(): void;
++    answer(yes: boolean): void;
++    dismissQuestion(): void;
++    mayClose(): Promise<boolean>;
++    /** Asks "Delete this comment?" first (plan row 123). */
++    deleteNote(message: MessageId): Promise<void>;
++  };
+ 
+ type Refs = {
+   readonly start: ShallowRef<RangeStart | null>;
+@@ -169,6 +171,7 @@ export function createRangeStore(
+   const settings = settingsActions(state);
+   const created: RangeStore = {
+     ...refs,
++    ...createCollapsing(),
+     shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
+     question: state.asking.question,
+     preferences: computed(() => preferencesOf(refs.settings.value)),
+diff --git a/frontend/src/ui/toolbarButtons.ts b/frontend/src/ui/toolbarButtons.ts
+index da856d0..71d7709 100644
+--- a/frontend/src/ui/toolbarButtons.ts
++++ b/frontend/src/ui/toolbarButtons.ts
+@@ -2,6 +2,7 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import type { OperationView } from "../ipc";
++import { COLLAPSE_LABEL } from "./collapsing";
+ import { abortLabel, continueLabel } from "./operationText";
+ import { parseStored, storedValue } from "./windowStorage";
+ 
+@@ -47,7 +48,7 @@ const OLD_FORMAT_IDS = [
+ const LABELS: Readonly<Record<Exclude<ToolbarButtonId, OperationButtonId>, string>> = {
+   previous: "Previous change",
+   next: "Next change",
+-  collapse: "Collapse unchanged fragments",
++  collapse: COLLAPSE_LABEL,
+   applyLeft: "Apply non-conflicting changes from the left",
+   applyRight: "Apply non-conflicting changes from the right",
+   undo: "Undo",

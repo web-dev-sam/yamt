@@ -1,0 +1,961 @@
+commit 3570a76c505bbf1bd8cb801f54e0e747f54f8b1d
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 10:49:24 +0100
+
+    feat(range): search_range_texts pages each text file's sides and line changes; line_changes in merge-core
+
+diff --git a/crates/merge-core/src/compare.rs b/crates/merge-core/src/compare.rs
+index 1d63979..6a6757d 100644
+--- a/crates/merge-core/src/compare.rs
++++ b/crates/merge-core/src/compare.rs
+@@ -8,6 +8,15 @@ use crate::word::{SideWordChanges, side_word_changes};
+ /// One fragment per hunk, as `WebStorm`'s 2-way diff shows it (plan §2 #95).
+ const COMPARE_GAP: u32 = 0;
+ 
++/// Where two texts differ, by lines only: the same ranges as a [`Difference`], without its word marks.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct LineChange {
++    /// The lines in the left; empty where the right inserted lines.
++    pub left: LineRange<LeftLine>,
++    /// The lines in the right; empty where the right removed the left's lines.
++    pub right: LineRange<RightLine>,
++}
++
+ /// One place where the right text differs from the left, located in both texts.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct Difference {
+@@ -29,28 +38,40 @@ pub struct DifferenceWords {
+     pub right: SideWordChanges<RightLine>,
+ }
+ 
++/// The lines where two texts differ, sorted and disjoint; none for equal texts.
++#[must_use]
++pub fn line_changes(left: &str, right: &str) -> Vec<LineChange> {
++    let chunks = compute_chunks(left, left, right, &Options { gap: COMPARE_GAP });
++    chunks
++        .iter()
++        .map(|chunk| LineChange {
++            left: LineRange {
++                start: LeftLine(chunk.base.start.0),
++                len: chunk.base.len,
++            },
++            right: LineRange {
++                start: RightLine(chunk.remote.start.0),
++                len: chunk.remote.len,
++            },
++        })
++        .collect()
++}
++
+ /// The differences between two texts, sorted and disjoint; none for equal texts.
+ #[must_use]
+ pub fn compare(left: &str, right: &str) -> Vec<Difference> {
+     let left_lines = split_lines(left);
+     let right_lines = split_lines(right);
+-    let chunks = compute_chunks(left, left, right, &Options { gap: COMPARE_GAP });
+-    chunks
+-        .iter()
+-        .map(|chunk| {
+-            let left_range = chunk.base.start.0..chunk.base.end().0;
+-            let right_range = chunk.remote.start.0..chunk.remote.end().0;
++    line_changes(left, right)
++        .into_iter()
++        .map(|change| {
++            let left_range = change.left.start.0..change.left.end().0;
++            let right_range = change.right.start.0..change.right.end().0;
+             let left_text = lines_in(&left_lines, &left_range);
+             let right_text = lines_in(&right_lines, &right_range);
+             Difference {
+-                left: LineRange {
+-                    start: LeftLine(chunk.base.start.0),
+-                    len: chunk.base.len,
+-                },
+-                right: LineRange {
+-                    start: RightLine(chunk.remote.start.0),
+-                    len: chunk.remote.len,
+-                },
++                left: change.left,
++                right: change.right,
+                 words: DifferenceWords {
+                     left: side_word_changes(right_text, &left_lines, left_range, LeftLine),
+                     right: side_word_changes(left_text, &right_lines, right_range, RightLine),
+@@ -59,3 +80,52 @@ pub fn compare(left: &str, right: &str) -> Vec<Difference> {
+         })
+         .collect()
+ }
++
++#[cfg(test)]
++mod tests {
++    use proptest::prelude::*;
++
++    use super::*;
++
++    const MAX_LINES: usize = 8;
++    const LINES: [&str; 4] = ["alpha\n", "beta\n", "gamma one\n", "gamma two\n"];
++
++    fn text() -> impl Strategy<Value = String> {
++        proptest::collection::vec(proptest::sample::select(&LINES[..]), 0..MAX_LINES)
++            .prop_map(|lines| lines.concat())
++    }
++
++    #[test]
++    fn equal_texts_have_no_line_changes() {
++        let text = "one\ntwo\nthree\n";
++        assert_eq!(line_changes(text, text), Vec::new());
++        assert_eq!(line_changes("", ""), Vec::new());
++    }
++
++    #[test]
++    fn a_replaced_line_and_an_appended_line_are_two_changes() {
++        let changes = line_changes("one\ntwo\nthree\n", "one\n2\nthree\nfour\n");
++        let change = |left: (u32, u32), right: (u32, u32)| LineChange {
++            left: LineRange {
++                start: LeftLine(left.0),
++                len: left.1,
++            },
++            right: LineRange {
++                start: RightLine(right.0),
++                len: right.1,
++            },
++        };
++        assert_eq!(changes, [change((1, 1), (1, 1)), change((3, 0), (3, 1))]);
++    }
++
++    proptest! {
++        #[test]
++        fn line_changes_are_compare_s_ranges(left in text(), right in text()) {
++            let from_compare: Vec<LineChange> = compare(&left, &right)
++                .into_iter()
++                .map(|difference| LineChange { left: difference.left, right: difference.right })
++                .collect();
++            prop_assert_eq!(line_changes(&left, &right), from_compare);
++        }
++    }
++}
+diff --git a/crates/merge-core/src/lib.rs b/crates/merge-core/src/lib.rs
+index 36044ec..dc5cc33 100644
+--- a/crates/merge-core/src/lib.rs
++++ b/crates/merge-core/src/lib.rs
+@@ -14,7 +14,7 @@ mod word;
+ 
+ pub use apply::apply_non_conflicting;
+ pub use chunk::{Chunk, ChunkId, ChunkKind};
+-pub use compare::{Difference, DifferenceWords, compare};
++pub use compare::{Difference, DifferenceWords, LineChange, compare, line_changes};
+ pub use compute::{DEFAULT_GAP, Options, compute_chunks};
+ pub use line::{
+     BaseLine, InlinePoint, InlineRange, LeftLine, LineRange, LocalLine, RemoteLine, RightLine,
+diff --git a/crates/range/AGENTS.md b/crates/range/AGENTS.md
+index 74bf586..e0dcd62 100644
+--- a/crates/range/AGENTS.md
++++ b/crates/range/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then one `BlobReader` for at most two blobs, UTF-8 per side, `Texts` with `yamt_merge_core::compare`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read.
++Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107, #127): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`, `SearchText`, `SearchTexts`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`, `Range::search_texts`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then `read_sides` (both blobs from one `BlobReader`) and `decoded` (UTF-8 per side), `Texts` with `yamt_merge_core::compare`; `decide`, `read_sides` and `decoded` are the one rule `search.rs` shares), `search.rs` (`search_page`, the window-wide search's texts, #127: from an id on, every file `load` answers as `Texts`, with `yamt_merge_core::line_changes` and no word diffs, one `BlobReader` per page, ending once `SEARCH_PAGE_BYTES` (4 MiB) of blobs were read — at least one file —, `next` the id the following page starts at, `None` after the last file; `from` equal to the list's length answers an empty last page, past it `UnknownFile`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read; `tests/search.rs` the search pages (skipped kinds, the 4 MiB page, the end).
+diff --git a/crates/range/src/lib.rs b/crates/range/src/lib.rs
+index ac24a7a..6f2c00e 100644
+--- a/crates/range/src/lib.rs
++++ b/crates/range/src/lib.rs
+@@ -5,6 +5,7 @@ mod entries;
+ mod load;
+ mod lock;
+ mod open;
++mod search;
+ mod spec;
+ 
+ use std::path::PathBuf;
+@@ -12,7 +13,7 @@ use std::path::PathBuf;
+ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ use yamt_gitio::Oid;
+-use yamt_merge_core::Difference;
++use yamt_merge_core::{Difference, LineChange};
+ 
+ pub use crate::lock::{PairLock, pair_folders, pair_right_commit};
+ pub use crate::open::{Range, Resolved};
+@@ -141,6 +142,22 @@ pub enum RangeFile {
+     },
+ }
+ 
++/// One text file's two sides as `RangeFile::Texts` holds them, with the lines that differ.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct SearchText {
++    pub file: RangeFileId,
++    pub left: String,
++    pub right: String,
++    pub changes: Vec<LineChange>,
++}
++
++/// One page of the range's text files; `next` is the id the following page starts at, `None` after the last file.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++pub struct SearchTexts {
++    pub files: Vec<SearchText>,
++    pub next: Option<RangeFileId>,
++}
++
+ #[derive(Debug, thiserror::Error)]
+ pub enum Error {
+     #[error("{} is not inside a git repository: {message}", path.display())]
+diff --git a/crates/range/src/load.rs b/crates/range/src/load.rs
+index 96fea74..d6125b1 100644
+--- a/crates/range/src/load.rs
++++ b/crates/range/src/load.rs
+@@ -4,30 +4,49 @@ use yamt_merge_core::{MAX_TEXT_BYTES, compare};
+ use crate::entries::{BlobAt, FileAt};
+ use crate::{RangeEntryKind, RangeFile, RangeModeChange, RangeSides, Result};
+ 
++/// A file's two sides as text, or which sides are not UTF-8.
++pub(crate) enum Decoded {
++    Texts { left: String, right: String },
++    NotUtf8 { sides: RangeSides },
++}
++
+ /// What `file` shows, read from the repository only when the listing cannot answer.
+ pub(crate) fn load_file(repo: &Repo, file: &FileAt) -> Result<RangeFile> {
+     if let Some(answer) = decide(file) {
+         return Ok(answer);
+     }
+     let mut reader = repo.blob_reader()?;
+-    let left = read_side(&mut reader, file.old.as_ref())?;
+-    let right = read_side(&mut reader, file.new.as_ref())?;
+-    match (String::from_utf8(left), String::from_utf8(right)) {
+-        (Ok(left), Ok(right)) => Ok(RangeFile::Texts {
++    let (left, right) = read_sides(&mut reader, file)?;
++    match decoded(left, right) {
++        Decoded::Texts { left, right } => Ok(RangeFile::Texts {
+             differences: compare(&left, &right),
+             left,
+             right,
+             mode: mode_change(file),
+         }),
+-        (Err(_), Ok(_)) => Ok(RangeFile::NotUtf8 {
++        Decoded::NotUtf8 { sides } => Ok(RangeFile::NotUtf8 { sides }),
++    }
++}
++
++/// Both sides' bytes; a missing side reads as empty.
++pub(crate) fn read_sides(reader: &mut BlobReader, file: &FileAt) -> Result<(Vec<u8>, Vec<u8>)> {
++    let left = read_side(reader, file.old.as_ref())?;
++    let right = read_side(reader, file.new.as_ref())?;
++    Ok((left, right))
++}
++
++pub(crate) fn decoded(left: Vec<u8>, right: Vec<u8>) -> Decoded {
++    match (String::from_utf8(left), String::from_utf8(right)) {
++        (Ok(left), Ok(right)) => Decoded::Texts { left, right },
++        (Err(_), Ok(_)) => Decoded::NotUtf8 {
+             sides: RangeSides::Left,
+-        }),
+-        (Ok(_), Err(_)) => Ok(RangeFile::NotUtf8 {
++        },
++        (Ok(_), Err(_)) => Decoded::NotUtf8 {
+             sides: RangeSides::Right,
+-        }),
+-        (Err(_), Err(_)) => Ok(RangeFile::NotUtf8 {
++        },
++        (Err(_), Err(_)) => Decoded::NotUtf8 {
+             sides: RangeSides::Both,
+-        }),
++        },
+     }
+ }
+ 
+@@ -41,7 +60,7 @@ const TOO_LARGE_LIMIT: u32 = {
+ };
+ 
+ /// The answer the listing alone gives (plan §2 #105's order up to the size), or `None`: read the blobs.
+-fn decide(file: &FileAt) -> Option<RangeFile> {
++pub(crate) fn decide(file: &FileAt) -> Option<RangeFile> {
+     let (old, new) = (file.old.as_ref(), file.new.as_ref());
+     if old.is_some_and(BlobAt::is_gitlink) || new.is_some_and(BlobAt::is_gitlink) {
+         return Some(RangeFile::Submodule {
+diff --git a/crates/range/src/open.rs b/crates/range/src/open.rs
+index ec3a1cf..8f68782 100644
+--- a/crates/range/src/open.rs
++++ b/crates/range/src/open.rs
+@@ -4,10 +4,11 @@ use yamt_gitio::{Oid, Repo};
+ 
+ use crate::entries::{FileAt, blob_ids, entries_at, files_at, sort_by_display_path};
+ use crate::load::load_file;
++use crate::search::search_page;
+ use crate::spec::Dots;
+ use crate::{
+     Compared, Error, RangeEntry, RangeFile, RangeFileId, RangeSide, RangeSideLabel, RangeSpec,
+-    RangeStart, Result,
++    RangeStart, Result, SearchTexts,
+ };
+ 
+ /// A range whose two commits git has named: built before any window opens.
+@@ -99,6 +100,14 @@ impl Range {
+         load_file(&self.resolved.repo, found)
+     }
+ 
++    /// One page of text files from `from` on; `from` may be the list's length, which answers an empty last page.
++    pub fn search_texts(&self, from: RangeFileId) -> Result<SearchTexts> {
++        let Some(files) = list_index(from).and_then(|index| self.files.get(index..)) else {
++            return Err(Error::UnknownFile { file: from });
++        };
++        search_page(&self.resolved.repo, from, files)
++    }
++
+     #[must_use]
+     pub fn entry(&self, file: RangeFileId) -> Option<&RangeEntry> {
+         list_index(file).and_then(|index| self.entries.get(index))
+diff --git a/crates/range/src/search.rs b/crates/range/src/search.rs
+new file mode 100644
+index 0000000..ca387db
+--- /dev/null
++++ b/crates/range/src/search.rs
+@@ -0,0 +1,46 @@
++use yamt_gitio::Repo;
++use yamt_merge_core::line_changes;
++
++use crate::entries::FileAt;
++use crate::load::{Decoded, decide, decoded, read_sides};
++use crate::{RangeFileId, Result, SearchText, SearchTexts};
++
++/// Blob bytes a page reads before it ends; a page reads at least one file.
++const SEARCH_PAGE_BYTES: usize = 4 * 1024 * 1024;
++
++/// The texts of `files`, whose first id is `first`, that `load_file` answers as `Texts`, until about
++/// `SEARCH_PAGE_BYTES` were read.
++pub(crate) fn search_page(
++    repo: &Repo,
++    first: RangeFileId,
++    files: &[FileAt],
++) -> Result<SearchTexts> {
++    let mut reader = repo.blob_reader()?;
++    let mut page = Vec::new();
++    let mut bytes_read = 0;
++    for (id, file) in (first.0..).zip(files) {
++        if bytes_read >= SEARCH_PAGE_BYTES {
++            return Ok(SearchTexts {
++                files: page,
++                next: Some(RangeFileId(id)),
++            });
++        }
++        if decide(file).is_some() {
++            continue;
++        }
++        let (left, right) = read_sides(&mut reader, file)?;
++        bytes_read += left.len() + right.len();
++        if let Decoded::Texts { left, right } = decoded(left, right) {
++            page.push(SearchText {
++                file: RangeFileId(id),
++                changes: line_changes(&left, &right),
++                left,
++                right,
++            });
++        }
++    }
++    Ok(SearchTexts {
++        files: page,
++        next: None,
++    })
++}
+diff --git a/crates/range/tests/search.rs b/crates/range/tests/search.rs
+new file mode 100644
+index 0000000..2655d56
+--- /dev/null
++++ b/crates/range/tests/search.rs
+@@ -0,0 +1,160 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::Path;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_merge_core::{MAX_TEXT_BYTES, line_changes};
++use yamt_range::{Error, Range, RangeFile, RangeFileId, RangeSpec, Resolved, SearchTexts};
++
++const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
++const LINK_MODE: &str = "120000";
++const MIB: usize = 1024 * 1024;
++
++/// A file only `local` changes: `base` on `main`, `local` on the checked-out branch `local`.
++fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
++    ConflictFile {
++        path,
++        kind: FileKind::Regular,
++        base,
++        local,
++        remote: base,
++    }
++}
++
++fn repo_with(files: &[ConflictFile]) -> TempDir {
++    diverged_repo(files).unwrap()
++}
++
++fn range(root: &Path) -> Range {
++    let spec = RangeSpec::parse("main..local").unwrap();
++    Resolved::resolve(root, &spec).unwrap().list().unwrap()
++}
++
++fn id_of(range: &Range, path: &str) -> RangeFileId {
++    let start = range.start();
++    start
++        .files
++        .iter()
++        .find(|entry| entry.path == path)
++        .unwrap()
++        .id
++}
++
++fn paths_of(range: &Range, page: &SearchTexts) -> Vec<String> {
++    page.files
++        .iter()
++        .map(|text| range.entry(text.file).unwrap().path.clone())
++        .collect()
++}
++
++/// Lines `a`, `size` bytes in all for an even `size`.
++fn text_of(size: usize) -> Vec<u8> {
++    "a\n".repeat(size / 2).into_bytes()
++}
++
++fn commit(root: &Path, message: &str) {
++    git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
++}
++
++/// Stages `path` as a symbolic link to `target` without making one on disk (Windows needs a right for that).
++fn stage_link(root: &Path, path: &str, target: &str) {
++    let scratch = root.join(".git").join("link-target");
++    fs::write(&scratch, target).unwrap();
++    let scratch_arg = scratch.to_str().unwrap();
++    let output = git_ok(root, &["hash-object", "-w", "--", scratch_arg]).unwrap();
++    let oid = String::from_utf8(output).unwrap().trim_end().to_owned();
++    let cacheinfo = format!("{LINK_MODE},{oid},{path}");
++    git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo]).unwrap();
++}
++
++#[test]
++fn search_texts_skips_every_file_load_does_not_answer_as_texts() {
++    let too_large = text_of(MAX_TEXT_BYTES + 2);
++    let dir = repo_with(&[
++        changed("added.txt", None, Some(b"new\n")),
++        changed("binary.bin", Some(b"\0one"), Some(b"\0two")),
++        changed("entry", Some(b"text\n"), Some(b"text\n")),
++        changed("gone.txt", Some(b"old\n"), None),
++        changed("large.txt", None, Some(&too_large)),
++        changed("lines.txt", Some(b"one\ntwo\n"), Some(b"one\n2\nthree\n")),
++        changed("not-utf8.txt", Some(b"caf\xe9\n"), Some(b"cafe\n")),
++        changed("run.sh", Some(b"echo hi\n"), Some(b"echo hi\n")),
++        ConflictFile {
++            path: "vendor/lib",
++            kind: FileKind::Submodule,
++            base: None,
++            local: Some(FIRST_COMMIT.as_bytes()),
++            remote: None,
++        },
++    ]);
++    let root = dir.path();
++    git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
++    stage_link(root, "entry", "target.txt");
++    commit(root, "modes");
++    let range = range(root);
++
++    let page = range.search_texts(RangeFileId(0)).unwrap();
++
++    assert_eq!(
++        paths_of(&range, &page),
++        ["added.txt", "gone.txt", "lines.txt"]
++    );
++    assert_eq!(page.next, None);
++    for text in &page.files {
++        let RangeFile::Texts { left, right, .. } = range.load(text.file).unwrap() else {
++            panic!("{text:?} is not loaded as texts");
++        };
++        assert_eq!((&text.left, &text.right), (&left, &right));
++        assert_eq!(text.changes, line_changes(&left, &right));
++    }
++    let lines = &page.files[2];
++    assert_eq!(lines.file, id_of(&range, "lines.txt"));
++    assert_eq!(lines.changes.len(), 1);
++}
++
++#[test]
++fn a_page_reads_at_least_one_file_and_ends_after_about_4_mib() {
++    let (first, second, third) = (text_of(5 * MIB), text_of(MIB), text_of(3 * MIB + MIB / 2));
++    let dir = repo_with(&[
++        changed("a.txt", None, Some(&first)),
++        changed("b.txt", None, Some(&second)),
++        changed("c.txt", None, Some(&third)),
++        changed("d.txt", None, Some(b"d\n")),
++    ]);
++    let range = range(dir.path());
++
++    let alone = range.search_texts(RangeFileId(0)).unwrap();
++    assert_eq!(paths_of(&range, &alone), ["a.txt"]);
++    assert_eq!(alone.next, Some(RangeFileId(1)));
++
++    let two = range.search_texts(RangeFileId(1)).unwrap();
++    assert_eq!(paths_of(&range, &two), ["b.txt", "c.txt"]);
++    assert_eq!(two.next, Some(RangeFileId(3)));
++
++    let last = range.search_texts(RangeFileId(3)).unwrap();
++    assert_eq!(paths_of(&range, &last), ["d.txt"]);
++    assert_eq!(last.next, None);
++}
++
++#[test]
++fn from_the_list_s_end_is_an_empty_last_page_and_past_it_unknown_file() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let range = range(dir.path());
++
++    let end = range.search_texts(RangeFileId(1)).unwrap();
++    assert_eq!(
++        end,
++        SearchTexts {
++            files: Vec::new(),
++            next: None
++        }
++    );
++    let error = range.search_texts(RangeFileId(2)).unwrap_err();
++    assert!(matches!(
++        error,
++        Error::UnknownFile {
++            file: RangeFileId(2)
++        }
++    ));
++}
+diff --git a/frontend/src/ipc/RangeSource.ts b/frontend/src/ipc/RangeSource.ts
+index 0d29de8..57282cf 100644
+--- a/frontend/src/ipc/RangeSource.ts
++++ b/frontend/src/ipc/RangeSource.ts
+@@ -1,9 +1,10 @@
+ import type { SettingsSource } from "./ChunkSource";
+ import type { RangeFileId, SourceResult } from "./domain";
+-import type { RangeFile, RangeStart } from "./rangeDomain";
++import type { RangeFile, RangeStart, SearchTexts } from "./rangeDomain";
+ import type { ReviewSource } from "./ReviewSource";
+ 
+ export interface RangeSource extends SettingsSource, ReviewSource {
+   openRange(): Promise<SourceResult<RangeStart>>;
+   loadRangeFile(file: RangeFileId): Promise<SourceResult<RangeFile>>;
++  searchTexts(from: RangeFileId): Promise<SourceResult<SearchTexts>>;
+ }
+diff --git a/frontend/src/ipc/fixtureRange.test.ts b/frontend/src/ipc/fixtureRange.test.ts
+index 1799ace..a0cbfe2 100644
+--- a/frontend/src/ipc/fixtureRange.test.ts
++++ b/frontend/src/ipc/fixtureRange.test.ts
+@@ -161,6 +161,24 @@ test("loadRangeFile of an id past the list answers UnknownRangeFile with that id
+   });
+ });
+ 
++test("searchTexts answers the case's text files from the id on in one page with their changes", async () => {
++  const source = createFixtureRangeSource(quietLog().log, "?range=review", FILES);
++  const board = {
++    file: 0,
++    left: "a\n",
++    right: "b\n",
++    changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 1 } }],
++  };
++
++  expect(valueOf(await source.searchTexts(fileId(0)))).toEqual({ files: [board], next: null });
++  expect(valueOf(await source.searchTexts(fileId(1)))).toEqual({ files: [], next: null });
++  expect(valueOf(await source.searchTexts(fileId(2)))).toEqual({ files: [], next: null });
++  expect(await source.searchTexts(fileId(3))).toEqual({
++    ok: false,
++    failure: { kind: "UnknownRangeFile", file: 3 },
++  });
++});
++
+ test("the committed cases parse: review lists 13 files of every kind, empty none", async () => {
+   const { log, entries } = quietLog();
+   const review = createFixtureRangeSource(log, "?range");
+@@ -197,9 +215,15 @@ test("the committed cases parse: review lists 13 files of every kind, empty none
+   expect(loaded[10]).toMatchObject({
+     mode: { kind: "changed", old: "file", new: "executable" },
+   });
+-  expect(valueOf(await createFixtureRangeSource(log, "?range=empty").openRange()).files).toEqual(
+-    [],
+-  );
++  const page = valueOf(await review.searchTexts(fileId(0)));
++  expect(page.files.map(({ file }) => file)).toEqual([2, 3, 6, 7, 8, 10, 11]);
++  expect(page.next).toBeNull();
++  for (const { file, left, right } of page.files) {
++    expect(loaded[file]).toMatchObject({ kind: "texts", left, right });
++  }
++  const empty = createFixtureRangeSource(log, "?range=empty");
++  expect(valueOf(await empty.openRange()).files).toEqual([]);
++  expect(valueOf(await empty.searchTexts(fileId(0)))).toEqual({ files: [], next: null });
+   expect(entries).toEqual([]);
+ });
+ 
+diff --git a/frontend/src/ipc/fixtureRange.ts b/frontend/src/ipc/fixtureRange.ts
+index 3fa1ad9..99bd683 100644
+--- a/frontend/src/ipc/fixtureRange.ts
++++ b/frontend/src/ipc/fixtureRange.ts
+@@ -11,6 +11,7 @@ import {
+   type RangeFile,
+   type RangeSide,
+   type RangeStart,
++  type SearchText,
+ } from "./rangeDomain";
+ import type { RangeSource } from "./RangeSource";
+ 
+@@ -119,6 +120,21 @@ function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>):
+   return missingCase(name);
+ }
+ 
++function searchTextsOf({ start, files }: Case): readonly SearchText[] {
++  return start.files.flatMap(({ id }) => {
++    const loaded = files[id];
++    if (loaded?.kind !== "texts") {
++      return [];
++    }
++    const { left, right, differences } = loaded;
++    const changes = differences.map((difference) => ({
++      left: difference.left,
++      right: difference.right,
++    }));
++    return [{ file: id, left, right, changes }];
++  });
++}
++
+ export function createFixtureRangeSource(
+   log: Log,
+   search: string,
+@@ -129,6 +145,7 @@ export function createFixtureRangeSource(
+     files: loaded.map(toRangeFile),
+   }));
+   const shown = shownCase(log, search, cases);
++  const textFiles = searchTextsOf(shown);
+   return {
+     async openRange() {
+       return { ok: true, value: shown.start };
+@@ -139,6 +156,13 @@ export function createFixtureRangeSource(
+         ? { ok: false, failure: { kind: "UnknownRangeFile", file } }
+         : { ok: true, value: found };
+     },
++    async searchTexts(from) {
++      if (from > shown.files.length) {
++        return { ok: false, failure: { kind: "UnknownRangeFile", file: from } };
++      }
++      const files = textFiles.filter(({ file }) => file >= from);
++      return { ok: true, value: { files, next: null } };
++    },
+     ...createFixtureReview(log, search, shown.start),
+     ...createFixtureSettings(),
+   };
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 29e11fc..11dcedc 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -103,6 +103,7 @@ export {
+   type KeysRead,
+ } from "./keys";
+ export type {
++  LineChange,
+   RangeChange,
+   RangeEntry,
+   RangeEntryKind,
+@@ -112,6 +113,8 @@ export type {
+   RangeSide,
+   RangeSides,
+   RangeStart,
++  SearchText,
++  SearchTexts,
+ } from "./rangeDomain";
+ export type { RangeSource } from "./RangeSource";
+ export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";
+diff --git a/frontend/src/ipc/rangeDomain.test.ts b/frontend/src/ipc/rangeDomain.test.ts
+index fb661f5..6acc75a 100644
+--- a/frontend/src/ipc/rangeDomain.test.ts
++++ b/frontend/src/ipc/rangeDomain.test.ts
+@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+ import { isRangeFileId } from "./domain";
+-import { toRangeFile, toRangeStart } from "./rangeDomain";
++import { toRangeFile, toRangeStart, toSearchTexts } from "./rangeDomain";
+ 
+ const DIFFERENCE: Generated.Difference = {
+   left: { start: 0, len: 1 },
+@@ -134,3 +134,70 @@ test.each<Generated.RangeFile>([
+ ])("a $kind reply carries its fields unchanged", (reply) => {
+   expect(toRangeFile(reply)).toEqual(reply);
+ });
++
++const SEARCH_TEXTS: Generated.SearchTexts = {
++  files: [
++    {
++      file: 2,
++      left: "a\n",
++      right: "b\nc\n",
++      changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 2 } }],
++    },
++    { file: 5, left: "same\n", right: "same\n", changes: [] },
++  ],
++  next: 6,
++};
++
++test("a search page converts each file's id, texts and line changes, and its next id", () => {
++  expect(toSearchTexts(SEARCH_TEXTS)).toEqual(SEARCH_TEXTS);
++  expect(toSearchTexts({ files: [], next: null })).toEqual({ files: [], next: null });
++});
++
++test.each<[string, Generated.SearchTexts, string]>([
++  [
++    "a file id",
++    { ...SEARCH_TEXTS, files: [{ file: -1, left: "", right: "", changes: [] }] },
++    "files[0].file must be a non-negative safe integer, got -1",
++  ],
++  [
++    "a left line",
++    {
++      ...SEARCH_TEXTS,
++      files: [
++        { file: 0, left: "", right: "", changes: [] },
++        {
++          file: 1,
++          left: "",
++          right: "",
++          changes: [
++            { left: { start: 0, len: 0 }, right: { start: 0, len: 1 } },
++            { left: { start: -2, len: 1 }, right: { start: 1, len: 1 } },
++          ],
++        },
++      ],
++    },
++    "files[1].changes[1].left.start must be a non-negative safe integer, got -2",
++  ],
++  [
++    "a right length",
++    {
++      files: [
++        {
++          file: 0,
++          left: "",
++          right: "",
++          changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 0.5 } }],
++        },
++      ],
++      next: null,
++    },
++    "files[0].changes[0].right.len must be a non-negative safe integer, got 0.5",
++  ],
++  [
++    "the next id",
++    { ...SEARCH_TEXTS, next: 1.5 },
++    "next must be a non-negative safe integer, got 1.5",
++  ],
++])("a bad %s in a search page is refused, naming the field", (_what, raw, message) => {
++  expect(() => toSearchTexts(raw)).toThrow(message);
++});
+diff --git a/frontend/src/ipc/rangeDomain.ts b/frontend/src/ipc/rangeDomain.ts
+index 410aae5..795b308 100644
+--- a/frontend/src/ipc/rangeDomain.ts
++++ b/frontend/src/ipc/rangeDomain.ts
+@@ -1,6 +1,15 @@
+ import type * as Generated from "./bindings";
+ import { toDifferences, type Difference } from "./compareDomain";
+-import { isRangeFileId, type RangeFileId } from "./domain";
++import {
++  isLeftLine,
++  isRangeFileId,
++  isRightLine,
++  toRange,
++  type LeftLine,
++  type LineRange,
++  type RangeFileId,
++  type RightLine,
++} from "./domain";
+ import { branded } from "./validate";
+ 
+ type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+@@ -37,6 +46,20 @@ export type RangeFile =
+       readonly mode: RangeModeChange;
+     }
+   | Readonly<Exclude<Generated.RangeFile, { kind: "texts" }>>;
++export type LineChange = {
++  readonly left: LineRange<LeftLine>;
++  readonly right: LineRange<RightLine>;
++};
++export type SearchText = {
++  readonly file: RangeFileId;
++  readonly left: string;
++  readonly right: string;
++  readonly changes: readonly LineChange[];
++};
++export type SearchTexts = {
++  readonly files: readonly SearchText[];
++  readonly next: RangeFileId | null;
++};
+ 
+ function toRangeSide({ label, short_id: shortId, subject }: Generated.RangeSide): RangeSide {
+   return { label, shortId, subject };
+@@ -74,3 +97,30 @@ export function toRangeFile(raw: Generated.RangeFile): RangeFile {
+   const { left, right, differences, mode } = raw;
+   return { kind: "texts", left, right, differences: toDifferences(differences), mode };
+ }
++
++function toLineChange({ left, right }: Generated.LineChange, field: string): LineChange {
++  return {
++    left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
++    right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
++  };
++}
++
++function toSearchText(
++  { file, left, right, changes }: Generated.SearchText,
++  index: number,
++): SearchText {
++  const field = `files[${index}]`;
++  return {
++    file: branded(file, isRangeFileId, `${field}.file`),
++    left,
++    right,
++    changes: changes.map((change, at) => toLineChange(change, `${field}.changes[${at}]`)),
++  };
++}
++
++export function toSearchTexts(raw: Generated.SearchTexts): SearchTexts {
++  return {
++    files: raw.files.map(toSearchText),
++    next: raw.next === null ? null : branded(raw.next, isRangeFileId, "next"),
++  };
++}
+diff --git a/frontend/src/ipc/tauriRange.test.ts b/frontend/src/ipc/tauriRange.test.ts
+index f778c13..f400635 100644
+--- a/frontend/src/ipc/tauriRange.test.ts
++++ b/frontend/src/ipc/tauriRange.test.ts
+@@ -7,6 +7,7 @@ import { createTauriRangeSource } from "./tauriRange";
+ const commands = vi.hoisted(() => ({
+   openRange: vi.fn(),
+   loadRangeFile: vi.fn(),
++  searchRangeTexts: vi.fn(),
+   listThreads: vi.fn(),
+ }));
+ 
+@@ -116,3 +117,45 @@ test("the range source answers listThreads through the app's command", async ()
+   });
+   expect(commands.listThreads).toHaveBeenCalledOnce();
+ });
++
++const PAGE: Generated.SearchTexts = {
++  files: [
++    {
++      file: 3,
++      left: "a\n",
++      right: "b\nc\n",
++      changes: [{ left: { start: 0, len: 1 }, right: { start: 0, len: 2 } }],
++    },
++  ],
++  next: 4,
++};
++
++test("searchTexts asks search_range_texts from the given id and converts the page", async () => {
++  commands.searchRangeTexts.mockResolvedValue({ status: "ok", data: PAGE });
++
++  expect(await createTauriRangeSource().searchTexts(fileId(3))).toEqual({ ok: true, value: PAGE });
++  expect(commands.searchRangeTexts).toHaveBeenCalledWith(3);
++});
++
++test("searchTexts passes an UnknownRangeFile error on unchanged", async () => {
++  const failure: Generated.IpcError = { kind: "UnknownRangeFile", file: 9 };
++  commands.searchRangeTexts.mockResolvedValue({ status: "error", error: failure });
++
++  expect(await createTauriRangeSource().searchTexts(fileId(9))).toEqual({ ok: false, failure });
++});
++
++test("a search page with a bad change line is refused, naming the field", async () => {
++  const [first] = PAGE.files;
++  if (first === undefined) {
++    throw new Error("the page lost its file");
++  }
++  const bad = { left: { start: 0, len: 1 }, right: { start: -1, len: 1 } };
++  commands.searchRangeTexts.mockResolvedValue({
++    status: "ok",
++    data: { ...PAGE, files: [{ ...first, changes: [bad] }] },
++  });
++
++  await expect(createTauriRangeSource().searchTexts(fileId(0))).rejects.toThrow(
++    "files[0].changes[0].right.start must be a non-negative safe integer, got -1",
++  );
++});
+diff --git a/frontend/src/ipc/tauriRange.ts b/frontend/src/ipc/tauriRange.ts
+index 2d90e46..4342ae5 100644
+--- a/frontend/src/ipc/tauriRange.ts
++++ b/frontend/src/ipc/tauriRange.ts
+@@ -1,5 +1,5 @@
+ import { commands } from "./bindings";
+-import { toRangeFile, toRangeStart } from "./rangeDomain";
++import { toRangeFile, toRangeStart, toSearchTexts } from "./rangeDomain";
+ import type { RangeSource } from "./RangeSource";
+ import { converted, createTauriSettings, toResult } from "./tauri";
+ import { createTauriReview } from "./tauriReview";
+@@ -12,6 +12,9 @@ export function createTauriRangeSource(): RangeSource {
+     async loadRangeFile(file) {
+       return converted(toResult(await commands.loadRangeFile(file)), toRangeFile);
+     },
++    async searchTexts(from) {
++      return converted(toResult(await commands.searchRangeTexts(from)), toSearchTexts);
++    },
+     ...createTauriReview(),
+     ...createTauriSettings(),
+   };
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index b46d868..1972b9f 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -49,6 +49,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         compare::show_tab,
+         range::open_range,
+         range::load_range_file::<tauri::Wry>,
++        range::search_range_texts::<tauri::Wry>,
+         review::list_threads,
+         review::add_thread,
+         review::add_note,
+diff --git a/src-tauri/src/range.rs b/src-tauri/src/range.rs
+index 548a070..17dd8e1 100644
+--- a/src-tauri/src/range.rs
++++ b/src-tauri/src/range.rs
+@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
+ use std::sync::Mutex;
+ 
+ use tauri::{App, AppHandle, Manager, Runtime, State, WebviewWindow};
+-use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
++use yamt_range::{
++    PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved, SearchTexts,
++};
+ use yamt_review::ThreadStore;
+ 
+ use crate::ai;
+@@ -90,6 +92,15 @@ pub(crate) async fn load_range_file<R: Runtime>(
+     blocking_reply(move || Ok(window.state::<RangeState>().range.load(file)?)).await
+ }
+ 
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn search_range_texts<R: Runtime>(
++    window: WebviewWindow<R>,
++    from: RangeFileId,
++) -> Result<SearchTexts, IpcError> {
++    blocking_reply(move || Ok(window.state::<RangeState>().range.search_texts(from)?)).await
++}
++
+ #[cfg(test)]
+ pub(crate) mod tests {
+     use serde_json::json;
+@@ -272,6 +283,19 @@ pub(crate) mod tests {
+         );
+     }
+ 
++    #[test]
++    fn search_range_texts_pages_the_text_files_and_refuses_an_id_past_the_end() {
++        let window = open_range_window();
++        let page = invoke_on(&window.webview, "search_range_texts", json!({ "from": 0 }));
++        let change = json!({ "left": { "start": 0, "len": 1 }, "right": { "start": 0, "len": 1 } });
++        let text = json!({ "file": 0, "left": "one\n", "right": "two\n", "changes": [change] });
++        assert_eq!(page, Ok(json!({ "files": [text], "next": null })));
++        assert_eq!(
++            invoke_on(&window.webview, "search_range_texts", json!({ "from": 2 })),
++            Err(json!({ "kind": "UnknownRangeFile", "file": 2 }))
++        );
++    }
++
+     #[test]
+     fn a_second_window_on_the_same_pair_is_refused_naming_both_short_ids() {
+         let window = open_range_window();

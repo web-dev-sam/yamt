@@ -5,6 +5,7 @@ import type { CloseGuard } from "./closeGuard";
 import type { Stop } from "./currentStop";
 import type { DiskNotice, Notice } from "./noticeText";
 import type { EndsStop } from "./problem";
+import type { Searching } from "./searching";
 import type { Taken } from "./sides";
 import { isShown, reload, takesASide, type Shown } from "./views";
 
@@ -12,6 +13,7 @@ export type DiskChangeTarget = Shown & {
   readonly notices: ShallowRef<readonly Notice[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
   readonly guard: Pick<CloseGuard, "unsavedFiles">;
+  readonly search: Pick<Searching<string>, "changed">;
 };
 
 function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
@@ -45,6 +47,7 @@ function noteDiskChanges(
   ];
   const taken = new Map(target.taken.value);
   for (const [path, result] of byPath) {
+    target.search.changed(path);
     taken.delete(path);
     if (result.kind === "Staged" && takesASide(target, path)) {
       taken.set(path, { by: "disk" });

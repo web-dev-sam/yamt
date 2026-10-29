@@ -14,7 +14,7 @@ mod word;
 
 pub use apply::apply_non_conflicting;
 pub use chunk::{Chunk, ChunkId, ChunkKind};
-pub use compare::{Difference, DifferenceWords, compare};
+pub use compare::{Difference, DifferenceWords, LineChange, compare, line_changes};
 pub use compute::{DEFAULT_GAP, Options, compute_chunks};
 pub use line::{
     BaseLine, InlinePoint, InlineRange, LeftLine, LineRange, LocalLine, RemoteLine, RightLine,

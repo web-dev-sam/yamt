@@ -164,7 +164,7 @@ async function opened(probe: ProbeCase = MODIFIED): Promise<Opened> {
       differences: comparison.differences,
     },
     hosts,
-    { preferences: { theme: "dark", keys: DEFAULT_KEYS } },
+    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed: false, threads: [] },
     events,
   );
   controllers.push(controller);

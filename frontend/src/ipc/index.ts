@@ -112,6 +112,8 @@ export type {
   RangeSide,
   RangeSides,
   RangeStart,
+  SearchText,
+  SearchTexts,
 } from "./rangeDomain";
 export type { RangeSource } from "./RangeSource";
 export { createTauriServerHost, createTauriSource, readClipboard } from "./tauri";

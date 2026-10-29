@@ -13,6 +13,8 @@ import {
   type Direction,
   type Preferences,
   type RangeEvents,
+  type RangeGoTo,
+  type RangeOptions,
   type RangeTexts,
   type ShownThread,
 } from "../editor";
@@ -36,7 +38,7 @@ type RangeContent =
 
 export type ShownRange = Pick<
   RangeController,
-  "setPreferences" | "moveToChange" | "showThreads" | "destroy"
+  "setPreferences" | "setCollapsed" | "moveToChange" | "goTo" | "showThreads" | "destroy"
 >;
 
 type ThreadHosts = ReadonlyMap<string, HTMLElement>;
@@ -44,7 +46,9 @@ type ThreadHosts = ReadonlyMap<string, HTMLElement>;
 export type RangeHandle = {
   readonly content: Readonly<ShallowRef<RangeContent>>;
   readonly threadHosts: Readonly<ShallowRef<ThreadHosts>>;
+  readonly sentenceFocusAsks: Readonly<ShallowRef<number>>;
   moveToChange(direction: Direction): void;
+  goTo(target: RangeGoTo): void;
 };
 
 export type RangeParts<H> = {
@@ -52,12 +56,14 @@ export type RangeParts<H> = {
   readonly load: () => Promise<RangeFile | null>;
   readonly hosts: () => H | null;
   readonly preferences: MaybeRefOrGetter<Preferences>;
+  readonly collapsed: MaybeRefOrGetter<boolean>;
   readonly threads: () => readonly ShownThread[];
+  readonly listed: () => boolean;
   readonly events: Pick<RangeEvents, "startThread" | "toggleThreads">;
   readonly build: (
     texts: RangeTexts,
     hosts: H,
-    preferences: Preferences,
+    options: RangeOptions,
     events: RangeEvents,
   ) => ShownRange;
 };
@@ -65,8 +71,10 @@ export type RangeParts<H> = {
 type Live = {
   readonly content: ShallowRef<RangeContent>;
   readonly threadHosts: ShallowRef<ThreadHosts>;
+  readonly sentenceFocusAsks: ShallowRef<number>;
   waiting: RangeTexts | null;
   controller: ShownRange | null;
+  goTo: RangeGoTo | null;
   disposed: boolean;
 };
 
@@ -76,6 +84,10 @@ function land(live: Live, path: string, file: RangeFile | null): void {
   }
   if (file.kind !== "texts") {
     live.content.value = { kind: "sentence", text: fileSentence(file) };
+    if (live.goTo !== null) {
+      live.goTo = null;
+      live.sentenceFocusAsks.value += 1;
+    }
     return;
   }
   const { left, right, differences, mode } = file;
@@ -85,7 +97,7 @@ function land(live: Live, path: string, file: RangeFile | null): void {
 
 function build<H>(live: Live, parts: RangeParts<H>): void {
   const hosts = parts.hosts();
-  if (live.waiting === null || hosts === null) {
+  if (live.waiting === null || hosts === null || !parts.listed()) {
     return;
   }
   const events: RangeEvents = {
@@ -94,34 +106,60 @@ function build<H>(live: Live, parts: RangeParts<H>): void {
       live.threadHosts.value = next;
     },
   };
-  const controller = parts.build(live.waiting, hosts, toValue(parts.preferences), events);
+  const options: RangeOptions = {
+    preferences: toValue(parts.preferences),
+    collapsed: toValue(parts.collapsed),
+    threads: parts.threads(),
+  };
+  live.controller = parts.build(live.waiting, hosts, options, events);
   live.waiting = null;
-  live.controller = controller;
-  controller.showThreads(parts.threads());
+  if (live.goTo !== null) {
+    live.controller.goTo(live.goTo);
+    live.goTo = null;
+  }
+}
+
+function followLive<H>(live: Live, parts: RangeParts<H>): void {
+  watch(toRef(parts.preferences), (next) => {
+    live.controller?.setPreferences(next);
+  });
+  watch(toRef(parts.collapsed), (on) => {
+    live.controller?.setCollapsed(on);
+  });
+  watch(parts.threads, (next) => {
+    live.controller?.showThreads(next);
+  });
+}
+
+function askGoTo(live: Live, target: RangeGoTo): void {
+  if (live.content.value.kind === "sentence") {
+    live.sentenceFocusAsks.value += 1;
+  } else if (live.controller === null) {
+    live.goTo = target;
+  } else {
+    live.controller.goTo(target);
+  }
 }
 
 export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   const live: Live = {
     content: shallowRef<RangeContent>({ kind: "loading" }),
     threadHosts: shallowRef<ThreadHosts>(new Map()),
+    sentenceFocusAsks: shallowRef(0),
     waiting: null,
     controller: null,
+    goTo: null,
     disposed: false,
   };
 
   watch(
-    [live.content, parts.hosts],
+    [live.content, parts.hosts, parts.listed],
     () => {
       build(live, parts);
     },
     { flush: "post" },
   );
-  watch(toRef(parts.preferences), (next) => {
-    live.controller?.setPreferences(next);
-  });
-  watch(parts.threads, (next) => {
-    live.controller?.showThreads(next);
-  });
+  followLive(live, parts);
   void parts.load().then((file) => {
     land(live, parts.path, file);
   });
@@ -136,8 +174,12 @@ export function followRange<H>(parts: RangeParts<H>): RangeHandle {
   return {
     content: live.content,
     threadHosts: live.threadHosts,
+    sentenceFocusAsks: live.sentenceFocusAsks,
     moveToChange: (direction) => {
       live.controller?.moveToChange(direction);
+    },
+    goTo: (target) => {
+      askGoTo(live, target);
     },
   };
 }
@@ -155,9 +197,10 @@ export function shownHosts<D, S>({
 export function rangeThreadParts(
   threads: RangeThreads,
   file: Pick<RangeEntry, "id">,
-): Pick<RangeParts<unknown>, "threads" | "events"> {
+): Pick<RangeParts<unknown>, "threads" | "listed" | "events"> {
   return {
     threads: () => threads.shownFor(file.id),
+    listed: () => threads.listed.value,
     events: {
       startThread: (line) => {
         threads.startThread(file.id, line);
@@ -180,8 +223,8 @@ export function useRangeController(
     load: () => store.loadFile(file),
     hosts: () => shownHosts(hosts),
     preferences: options.preferences,
+    collapsed: store.collapsing,
     ...rangeThreadParts(store.threads, file),
-    build: (texts, shown, preferences, events) =>
-      new RangeController(texts, shown, { preferences }, events),
+    build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
   });
 }

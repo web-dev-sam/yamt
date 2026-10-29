@@ -1,46 +1,38 @@
 import { shallowRef, type ShallowRef } from "vue";
 
-import {
-  firstMessage,
-  type AgentClient,
-  type AgentFailure,
-  type ConversationLoad,
-  type Placeholder,
-  type RunningTurn,
-  type TurnEnd,
-  type TurnView,
-} from "../agent";
-import { log, type AgentSessionId, type Message, type Thread, type ThreadId } from "../ipc";
+import type { AgentClient, ConversationLoad, RunningTurn, TurnEnd, TurnView } from "../agent";
+import { log, type AgentSessionId, type Thread, type ThreadId } from "../ipc";
+import { answersIn, heldAfter, isGone, isKept, promptText, type AskContext } from "./rangeAiRules";
+import { IDLE, type ThreadAi } from "./rangeAiView";
+import { isBlank } from "./rangeDrafts";
 import type { RangeThreads } from "./rangeThreads";
 
-/** `running` stays until the turn's answer is recorded. */
-export type ThreadAi = {
-  readonly running: TurnView | null;
-  readonly end: TurnEnd | null;
-  readonly loaded: ConversationLoad | null;
-  readonly loadedSession: AgentSessionId | null;
-};
-
-export type AskContext = {
-  readonly template: string;
-  readonly values: Readonly<Record<Exclude<Placeholder, "MESSAGE">, string>>;
-};
+/** Where Ask AI was pressed: an open thread, or a line's new thread not added yet (its draft key). */
+export type AskFrom =
+  | { readonly kind: "thread"; readonly thread: ThreadId }
+  | { readonly kind: "draft"; readonly key: string };
 
 export type RangeAi = {
   of(thread: ThreadId): ThreadAi;
-  ask(thread: ThreadId): void;
+  /** Ask AI (plan row 124): a non-blank `typed` is added first (the note, or the new thread) and the AI is asked once
+   *  it is stored; a failed add asks nothing; nothing typed asks with the notes since the last answer. */
+  ask(from: AskFrom, typed: string): Promise<void>;
+  /** Plan row 124: no turn runs, the conversation has loaded, no add in that box still runs, and something to send. */
+  canAsk(from: AskFrom, typed: string): boolean;
   retry(thread: ThreadId): void;
   stop(thread: ThreadId): void;
   load(thread: ThreadId): void;
-  canAsk(thread: ThreadId): boolean;
 };
 
 type AiClient = Pick<AgentClient, "ask" | "loadConversation">;
-type Held = "held" | "notHeld" | "replay";
+type AiThreads = Pick<
+  RangeThreads,
+  "list" | "setSession" | "addAiAnswer" | "addThread" | "addNote" | "addingThread" | "addingNote"
+>;
 type Kept = Readonly<{ thread: ThreadId; session: AgentSessionId }>;
 type State = {
   readonly client: AiClient;
-  readonly threads: Pick<RangeThreads, "list" | "setSession" | "addAiAnswer">;
+  readonly threads: AiThreads;
   readonly place: (thread: Thread) => AskContext | null;
   readonly byThread: ShallowRef<ReadonlyMap<ThreadId, ThreadAi>>;
   readonly turns: Map<ThreadId, RunningTurn>;
@@ -49,26 +41,7 @@ type State = {
   readonly answered: Map<ThreadId, TurnEnd>;
 };
 
-export const IDLE: ThreadAi = { running: null, end: null, loaded: null, loadedSession: null };
-const NOTE_JOIN = "\n\n";
 const STARTING: TurnView = { entries: [], answer: "" };
-/** Whether omp holds a turn's prompt; a stop or crash right after sending it may leave none (plan row 121). */
-const HELD_AT_END: Readonly<Record<Exclude<TurnEnd["kind"], "failed">, Held>> = {
-  finished: "held",
-  stopped: "replay",
-};
-const HELD_AFTER: Readonly<Record<AgentFailure["kind"], Held>> = {
-  ended: "held",
-  crashed: "replay",
-  refused: "replay",
-  checkoutFailed: "notHeld",
-  notFound: "notHeld",
-  spawnFailed: "notHeld",
-  noCommand: "notHeld",
-  sessionGone: "notHeld",
-  busy: "notHeld",
-  app: "notHeld",
-};
 
 function aiOf(state: State, thread: ThreadId): ThreadAi {
   return state.byThread.value.get(thread) ?? IDLE;
@@ -84,55 +57,36 @@ function threadOf(state: State, id: ThreadId): Thread | undefined {
   return state.threads.list.value.threads.find((thread) => thread.id === id);
 }
 
-function isGone(ai: ThreadAi, session: AgentSessionId): boolean {
-  return (
-    ai.loadedSession === session &&
-    ai.loaded?.kind === "failed" &&
-    ai.loaded.failure.kind === "sessionGone"
-  );
-}
-
 /** The conversation the next ask continues: none when omp no longer has the stored one (plan row 115). */
 function askedSession(state: State, thread: Thread): AgentSessionId | null {
   const stored = thread.session;
   return stored !== null && isGone(aiOf(state, thread.id), stored) ? null : stored;
 }
 
-function isAnswerIn(message: Message, session: AgentSessionId | null): boolean {
-  return message.body.kind === "aiAnswer" && message.body.session === session;
-}
-
-function answersIn(thread: Thread | undefined, session: AgentSessionId | null): number {
-  return thread?.messages.filter((message) => isAnswerIn(message, session)).length ?? 0;
-}
-
-/** The prompt rule (request C2): the notes since the session's last answer; a session's first turn wrapped. */
-function promptText(state: State, thread: Thread, session: AgentSessionId | null): string | null {
-  const last = thread.messages.findLastIndex((message) => isAnswerIn(message, session));
-  const notes = thread.messages
-    .slice(last + 1)
-    .flatMap(({ body }) => (body.kind === "note" ? [body.text] : []));
-  const context = state.place(thread);
-  if (notes.length === 0 || context === null) {
-    return null;
-  }
-  const text = notes.join(NOTE_JOIN);
-  return last === -1 ? firstMessage(context.template, { ...context.values, MESSAGE: text }) : text;
-}
-
-function canAsk(state: State, thread: Thread): boolean {
+/** No turn runs, the conversation has loaded and the First message has its context (`place`): what Ask needs
+ *  besides something to send. */
+function isReady(state: State, thread: Thread): boolean {
   const { loaded, loadedSession, running } = aiOf(state, thread.id);
   const session = askedSession(state, thread);
   const unrecorded = loaded?.kind === "loaded" && loaded.turns.length > answersIn(thread, session);
   const waiting = session !== null && (loadedSession !== session || loaded === null || unrecorded);
-  return running === null && !waiting && promptText(state, thread, session) !== null;
+  return running === null && !waiting && state.place(thread) !== null;
 }
 
-/** A replay is kept only with exactly the session's stored answers (plan row 121); a failed load unless omp lost it. */
-function isKept(ai: ThreadAi, thread: Thread, session: AgentSessionId): boolean {
-  const exact =
-    ai.loaded?.kind === "loaded" && ai.loaded.turns.length === answersIn(thread, session);
-  return ai.loadedSession === session && (exact || ai.loaded === null || isGone(ai, session));
+function canAsk(state: State, thread: Thread): boolean {
+  const prompt = promptText(thread, askedSession(state, thread), state.place(thread));
+  return isReady(state, thread) && prompt !== null;
+}
+
+function canAskFrom(state: State, from: AskFrom, typed: string): boolean {
+  if (from.kind === "draft") {
+    return !isBlank(typed) && !state.threads.addingThread(from.key);
+  }
+  const thread = threadOf(state, from.thread);
+  if (thread === undefined || state.threads.addingNote(from.thread)) {
+    return false;
+  }
+  return isBlank(typed) ? canAsk(state, thread) : isReady(state, thread);
 }
 
 /** Records every replayed turn no answer holds; the answered turn shows as its own object, the replay's last. */
@@ -159,7 +113,7 @@ async function reload(state: State, kept: Kept): Promise<void> {
 /** A held turn is recorded at once and appended when the store numbers it next; else the replay decides. */
 async function record(state: State, kept: Kept, end: TurnEnd): Promise<void> {
   const { thread, session } = kept;
-  const held = end.kind === "failed" ? HELD_AFTER[end.failure.kind] : HELD_AT_END[end.kind];
+  const held = heldAfter(end);
   if (held === "held") {
     state.answered.set(thread, end);
     const turn = await state.threads.addAiAnswer(thread, session);
@@ -230,9 +184,31 @@ function ask(state: State, id: ThreadId): void {
     return;
   }
   const session = askedSession(state, thread);
-  const text = promptText(state, thread, session);
+  const text = promptText(thread, session, state.place(thread));
   if (text !== null) {
     run(state, id, { session, text });
+  }
+}
+
+/** The thread a non-blank typed text was added to: the open thread's new note, or the draft's new thread. */
+async function addTyped(state: State, from: AskFrom, typed: string): Promise<ThreadId | null> {
+  if (from.kind === "draft") {
+    return state.threads.addThread(from.key, typed);
+  }
+  return (await state.threads.addNote(from.thread, typed)) ? from.thread : null;
+}
+
+async function askFrom(state: State, from: AskFrom, typed: string): Promise<void> {
+  if (!canAskFrom(state, from, typed)) {
+    return;
+  }
+  if (from.kind === "thread" && isBlank(typed)) {
+    ask(state, from.thread);
+    return;
+  }
+  const thread = await addTyped(state, from, typed);
+  if (thread !== null) {
+    ask(state, thread);
   }
 }
 
@@ -276,9 +252,7 @@ export function createRangeAi(
   };
   return {
     of: (thread) => aiOf(state, thread),
-    ask: (thread) => {
-      ask(state, thread);
-    },
+    ask: (from, typed) => askFrom(state, from, typed),
     retry: (thread) => {
       retry(state, thread);
     },
@@ -288,9 +262,6 @@ export function createRangeAi(
     load: (thread) => {
       void load(state, thread);
     },
-    canAsk: (id) => {
-      const thread = threadOf(state, id);
-      return thread !== undefined && canAsk(state, thread);
-    },
+    canAsk: (from, typed) => canAskFrom(state, from, typed),
   };
 }

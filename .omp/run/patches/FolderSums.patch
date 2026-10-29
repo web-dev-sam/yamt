@@ -1,0 +1,316 @@
+From b16885c6d45e9a8470ca537b543c8630f8b2698c Mon Sep 17 00:00:00 2001
+From: Samuel Braun <sam@webry.com>
+Date: Wed, 28 Oct 2026 19:35:29 +0100
+Subject: [PATCH] =?UTF-8?q?feat(range):=20folder=20rows=20show=20the=20sum?=
+ =?UTF-8?q?=20of=20their=20files'=20+a=20=E2=88=92r?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+One walk over the entries keyed by folderPaths, so a joined chain's
+row finds its sum; the tree's optional folder slot keeps the merge
+window's rows as they were; RangeCounts.vue is the one +a −r pair.
+
+Refs plan §2 #125
+---
+ frontend/src/ui/AGENTS.md               |  2 +
+ frontend/src/ui/FileList.vue            |  9 +++-
+ frontend/src/ui/FileTree.vue            | 10 +++-
+ frontend/src/ui/RangeApp.vue            | 12 ++++-
+ frontend/src/ui/RangeCounts.vue         | 17 +++++++
+ frontend/src/ui/RangeFileRow.vue        | 13 ++---
+ frontend/src/ui/rangeFolderSums.test.ts | 67 +++++++++++++++++++++++++
+ frontend/src/ui/rangeFolderSums.ts      | 27 ++++++++++
+ 8 files changed, 143 insertions(+), 14 deletions(-)
+ create mode 100644 frontend/src/ui/RangeCounts.vue
+ create mode 100644 frontend/src/ui/rangeFolderSums.test.ts
+ create mode 100644 frontend/src/ui/rangeFolderSums.ts
+
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index be448b8..3fde131 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -4,6 +4,8 @@ Compare window (plan §2 #93–#97, #101): a second root, `CompareApp.vue` over
+ 
+ Range window (plan §2 #103–#106): a third root, `RangeApp.vue` over `rangeStore.ts`, mounted by `main.ts` when `<html data-window="range">` (app, `yamt --diff=<range>`) or `?range` / `?range=<case>` (fixture mode). Every range-only file carries the prefix — `Range*.vue`, `range*.ts`, `useRange*.ts` — and none imports `store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue` or `lsp/` (fence PM9; PM7 keeps the compare root from `rangeStore.ts`/`RangeApp.vue`). The panel is the shared `FileList.vue` with `RangeFileRow.vue` in its `#file` slot (coloured A/M/D/R with its word as title, the old path of a renamed file muted, `+n −m`). `start` mirrors `openRange`'s reply; `shown` is written only by `showFile` and `startUp` (the first file at start); `visited` keeps first-visit order, at most `MOUNTED_FILES` (16) views mounted, the least recently shown dropped when another file is shown. A failed `loadFile` reports `open` with the path and drops the file from `visited`, so selecting it again retries; that file's later success clears the problem. `RangeView.vue` (one per visited file, `PaneFrame`) shows the header (icon, path or "old → new", the mode note, ↑/↓, gear), the column headers (side and short id, the subject as title) and either the two read-only columns or one sentence. `useRangeController` (`followRange`) keeps a texts reply in a non-reactive slot until the hosts exist, builds `RangeController` once, follows preferences, and drops a reply that lands after unmount; a sentence kind builds nothing. Every range word is in `rangeText.ts`. No close guard: the window closes at once.
+ 
++Folder sums (plan §2 #125): `rangeFolderSums.ts` `folderSums` (once per file list in `RangeApp.vue`) keys each folder's `+a −r` by the path its tree row carries; `RangeApp.vue` fills the tree's optional `folder` slot (`FileTree.vue`, forwarded by `FileList.vue`; the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair `RangeFileRow.vue` uses too.
++
+ Range threads (plan §2 #116–#120): `rangeThreads.ts` (list, open set, drafts through `rangeDrafts.ts`, counts, `boxOf`) and `rangeGitLab.ts` (the check, Send, `postButton`/`sendButton`, the send result) are held by `rangeStore`; every thread word is in `rangeThreadText.ts` (labels, prompts, `threadCountText`, `sendNoticeRow`; Copy/Copied are `serverText.ts`'s). `RangeView` renders `RangeThreadLayer.vue`, which teleports one `RangeThreadBox.vue` per key of `useRangeController`'s `threadHosts` into the host the editor keeps for that thread, so a box keeps its DOM, focus and typed text across CodeMirror redraws. A box is a draft (place, text, Comment/Cancel) or an open thread (place, collapse, one `RangeMessage.vue` per message, the reply field); a collapsed thread has no host and so no box. `RangeMessage` shows a note's text or the one `aiAnswer` line (an exhaustive switch C replaces), or in its place the message's open `RangeMessageEditor.vue`; the `postButton` (disabled ones keep their sentence as title on a wrapper), the posting label, and for a pending message the link as selectable text with Copy (a failed clipboard write selects the link). `postButton` returns the label, the title and the press action (`write` | `unqueue` | null); `write` opens `RangeMessageEditor.vue` (`box="post"`, label "Text to post", Queue) in the message's place by writing a `post` draft (`rangeDrafts.ts`, keyed by `MessageId`: `postDraft`/`writePost`/`dropPost`), so a half-edited Post text survives a collapse and the 16-view eviction; a queue that lands drops it, and focus moves to the message's Post/Unqueue button after a queue or a Cancel. `RangeMessageEditor.vue` is the one in-place message editor for Post and Edit: it reads and writes the draft its `box` names, focuses its field on mount, keeps its submit off while the text is blank or `offTitle` is set (shown as the title), keeps focus in the field on a submit press (`@mousedown.prevent`) and emits `submit`/`cancel`. A failed clipboard write selects the link (`copyOrSelect.ts`, shared with `ServerMenu`). Keys in every box field go through `rangeKeys.ts` `boxKeydown`: `Mod-Enter` submits and `Escape` cancels (built with `keys.ts` `keyList`, matched by `pressesKey`; only the composing check is its own) (a draft is dropped, a reply cleared), both `preventDefault` and `stopPropagation`; every other key stays the field's. `RangeApp` calls `fileListKey(event, navigator.platform)` as the other roots do; the reply's Comment keeps focus in the reply field (`@mousedown.prevent`). `RangeSendButton.vue` sits left of the gear in each `RangeView` header; `RangeApp` shows the last send's result (`sendNoticeRow`) as a closable `NoticeBar` row and passes each file's thread count to `RangeFileRow` (a muted speech bubble, none at 0).
+ 
+ Edit and Delete (plan §2 #123): `rangeNoteChange.ts` holds both rules — `isChangeable` (a note not pending) decides whether `RangeMessage.vue` shows them, and `noteChangeBlock(sending, aiTurn)` (a send running first, then the thread's AI turn) turns them and Save off, with `noteChangeTitle`'s hover text. Edit writes an `edit` draft (`rangeDrafts.ts` `editDraft`/`writeEdit`/`dropEdit`), shown in the message's place by `RangeMessageEditor.vue` (`box="edit"`, label "Comment text", Save; its `offTitle` is the block's title); writing an `edit` draft drops the message's `post` draft and the reverse, so the two boxes are never open at once. `editNote` sends only a non-blank text and drops the draft when stored; focus returns to Edit after Save or Cancel. Delete goes through `rangeStore`'s `deleteNote`, which asks `{ kind: "deleteNote" }` first. Every list a reply brings (`setList`) drops the open state and the reply, Post and Edit drafts of threads and messages it no longer holds, and the Edit draft of a note no longer changeable (a Send that made it pending closes its box), so a thread removed with its last note leaves nothing behind.
+diff --git a/frontend/src/ui/FileList.vue b/frontend/src/ui/FileList.vue
+index 974854a..97128ad 100644
+--- a/frontend/src/ui/FileList.vue
++++ b/frontend/src/ui/FileList.vue
+@@ -12,7 +12,11 @@ import { usePanelWidth } from "./usePanelWidth";
+ 
+ const props = defineProps<{ files: readonly F[]; active: string | null; label: string }>();
+ const emit = defineEmits<{ select: [path: string] }>();
+-defineSlots<{ file(props: { file: F; label: string }): unknown; footer(): unknown }>();
++defineSlots<{
++  file(props: { file: F; label: string }): unknown;
++  folder?(props: { path: string }): unknown;
++  footer(): unknown;
++}>();
+ 
+ const list = useTemplateRef<HTMLElement>("list");
+ const { mode, toggle } = createFileListMode();
+@@ -75,6 +79,9 @@ function toggleFolder(path: string): void {
+       <template #file="row">
+         <slot name="file" :file="row.file" :label="row.label" />
+       </template>
++      <template v-if="$slots.folder" #folder="{ path }">
++        <slot name="folder" :path="path" />
++      </template>
+     </FileTree>
+     <ul
+       v-else
+diff --git a/frontend/src/ui/FileTree.vue b/frontend/src/ui/FileTree.vue
+index 8416218..fb85952 100644
+--- a/frontend/src/ui/FileTree.vue
++++ b/frontend/src/ui/FileTree.vue
+@@ -9,7 +9,10 @@ import { folderIcon } from "./folderIcon";
+ 
+ defineProps<{ rows: readonly TreeRow<F>[]; active: string | null; label: string }>();
+ const emit = defineEmits<{ select: [path: string]; toggle: [path: string] }>();
+-defineSlots<{ file(props: { file: F; label: string }): unknown }>();
++defineSlots<{
++  file(props: { file: F; label: string }): unknown;
++  folder?(props: { path: string }): unknown;
++}>();
+ 
+ const ROW_PADDING_PX = 8;
+ const INDENT_PX = 8;
+@@ -80,7 +83,10 @@ function pressed(row: TreeRow<F>): void {
+       </span>
+       <component :is="rowIcon(row)" class="size-4 shrink-0" aria-hidden="true" />
+       <slot v-if="row.kind === 'file'" name="file" :file="row.file" :label="row.label" />
+-      <span v-else class="truncate">{{ row.label }}</span>
++      <template v-else>
++        <span class="truncate">{{ row.label }}</span>
++        <slot name="folder" :path="row.path" />
++      </template>
+     </li>
+   </ul>
+ </template>
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index 068a40b..16097a9 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -2,7 +2,7 @@
+ import { useEventListener, useWindowFocus } from "@vueuse/core";
+ import { computed, onMounted, watch } from "vue";
+ 
+-import { log, onWindowClose } from "../ipc";
++import { log, onWindowClose, type RangeLineCounts } from "../ipc";
+ import AgentSettings from "./AgentSettings.vue";
+ import FileList from "./FileList.vue";
+ import NoticeBar from "./NoticeBar.vue";
+@@ -10,7 +10,9 @@ import type { NoticeRow } from "./noticeText";
+ import { unexpected } from "./problem";
+ import ProblemBar from "./ProblemBar.vue";
+ import QuestionDialog from "./QuestionDialog.vue";
++import RangeCounts from "./RangeCounts.vue";
+ import RangeFileRow from "./RangeFileRow.vue";
++import { folderSums } from "./rangeFolderSums";
+ import { useRangeStore } from "./rangeStore";
+ import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
+ import { sendNoticeRow } from "./rangeThreadText";
+@@ -48,6 +50,7 @@ useEventListener(window, "keydown", (event) => {
+ });
+ 
+ const files = computed(() => start.value?.files ?? []);
++const sums = computed(() => folderSums(files.value));
+ const emptyText = computed(() =>
+   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
+ );
+@@ -76,6 +79,10 @@ async function guardClose(): Promise<void> {
+     log.error("range.close_guard_failed", { ...unexpected(error) });
+   }
+ }
++
++function folderLines(path: string): RangeLineCounts {
++  return sums.value.get(path) ?? { kind: "notCounted" };
++}
+ </script>
+ 
+ <template>
+@@ -90,6 +97,9 @@ async function guardClose(): Promise<void> {
+       <template #file="{ file, label }">
+         <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+       </template>
++      <template #folder="{ path }">
++        <RangeCounts :lines="folderLines(path)" class="ml-auto" />
++      </template>
+     </FileList>
+     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
+       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
+diff --git a/frontend/src/ui/RangeCounts.vue b/frontend/src/ui/RangeCounts.vue
+new file mode 100644
+index 0000000..ed86c57
+--- /dev/null
++++ b/frontend/src/ui/RangeCounts.vue
+@@ -0,0 +1,17 @@
++<script setup lang="ts">
++import { computed } from "vue";
++
++import type { RangeLineCounts } from "../ipc";
++import { lineCounts } from "./rangeText";
++
++const props = defineProps<{ lines: RangeLineCounts }>();
++
++const counts = computed(() => lineCounts(props.lines));
++</script>
++
++<template>
++  <span v-if="counts !== null" class="flex shrink-0 gap-1.5 tabular-nums">
++    <span class="text-success-signal">{{ counts.added }}</span>
++    <span class="text-problem-error">{{ counts.removed }}</span>
++  </span>
++</template>
+diff --git a/frontend/src/ui/RangeFileRow.vue b/frontend/src/ui/RangeFileRow.vue
+index fdc93c6..bf56d64 100644
+--- a/frontend/src/ui/RangeFileRow.vue
++++ b/frontend/src/ui/RangeFileRow.vue
+@@ -3,7 +3,8 @@ import { computed } from "vue";
+ import MessageSquare from "~icons/lucide/message-square";
+ 
+ import type { RangeChange, RangeEntry } from "../ipc";
+-import { changeMark, lineCounts } from "./rangeText";
++import RangeCounts from "./RangeCounts.vue";
++import { changeMark } from "./rangeText";
+ import { threadCountText } from "./rangeThreadText";
+ 
+ const props = defineProps<{ file: RangeEntry; label: string; threads: number }>();
+@@ -20,7 +21,6 @@ const letterColour = computed(() => LETTER_COLOURS[props.file.change.kind]);
+ const oldPath = computed(() =>
+   props.file.change.kind === "renamed" ? props.file.change.oldPath : null,
+ );
+-const counts = computed(() => lineCounts(props.file.lines));
+ const threadsTitle = computed(() => threadCountText(props.threads));
+ </script>
+ 
+@@ -46,12 +46,5 @@ const threadsTitle = computed(() => threadCountText(props.threads));
+     <MessageSquare class="size-3.5" aria-hidden="true" />
+     {{ threads }}
+   </span>
+-  <span
+-    v-if="counts !== null"
+-    class="flex shrink-0 gap-1.5 tabular-nums"
+-    :class="{ 'ml-auto': threads === 0 }"
+-  >
+-    <span class="text-success-signal">{{ counts.added }}</span>
+-    <span class="text-problem-error">{{ counts.removed }}</span>
+-  </span>
++  <RangeCounts :lines="file.lines" :class="{ 'ml-auto': threads === 0 }" />
+ </template>
+diff --git a/frontend/src/ui/rangeFolderSums.test.ts b/frontend/src/ui/rangeFolderSums.test.ts
+new file mode 100644
+index 0000000..74852ba
+--- /dev/null
++++ b/frontend/src/ui/rangeFolderSums.test.ts
+@@ -0,0 +1,67 @@
++import { expect, test } from "vitest";
++
++import type { RangeLineCounts } from "../ipc";
++import { folderSums } from "./rangeFolderSums";
++
++function counted(path: string, added: number, removed: number) {
++  return { path, lines: { kind: "counted", added, removed } satisfies RangeLineCounts };
++}
++
++function notCounted(path: string) {
++  return { path, lines: { kind: "notCounted" } satisfies RangeLineCounts };
++}
++
++function sums(files: Parameters<typeof folderSums>[0]): Record<string, [number, number]> {
++  return Object.fromEntries(
++    [...folderSums(files)].map(([path, { added, removed }]) => [path, [added, removed]]),
++  );
++}
++
++test("folderSums: a file three folders deep counts in all three, beside the files at each level", () => {
++  expect(
++    sums([
++      counted("src/board/parts/card.ts", 5, 2),
++      counted("src/board/view.ts", 3, 1),
++      counted("src/main.ts", 10, 20),
++      counted("docs/README.md", 4, 1),
++    ]),
++  ).toEqual({
++    src: [18, 23],
++    "src/board": [8, 3],
++    "src/board/parts": [5, 2],
++    docs: [4, 1],
++  });
++});
++
++test("folderSums: a joined chain has the chain's sum at its deepest folder, the key its row carries", () => {
++  expect(sums([counted("a/b/c/x.ts", 7, 3), counted("a/b/c/y.ts", 1, 1)])).toEqual({
++    a: [8, 4],
++    "a/b": [8, 4],
++    "a/b/c": [8, 4],
++  });
++});
++
++test("folderSums: a notCounted file beside counted ones adds nothing", () => {
++  expect(sums([notCounted("public/logo.png"), counted("public/index.html", 2, 1)])).toEqual({
++    public: [2, 1],
++  });
++});
++
++test("folderSums: a folder holding only notCounted files has no entry", () => {
++  const files = [notCounted("public/logo.png"), notCounted("public/icons/a.png")];
++  expect(folderSums(files).size).toBe(0);
++});
++
++test("folderSums: a counted +0 −0 file alone in a folder gives zeros", () => {
++  expect(folderSums([counted("tools/build.sh", 0, 0)]).get("tools")).toEqual({
++    kind: "counted",
++    added: 0,
++    removed: 0,
++  });
++});
++
++test("folderSums: a root-level file adds to no key", () => {
++  expect(sums([counted("config", 3, 3), counted("data/x.json", 1, 0)])).toEqual({
++    data: [1, 0],
++  });
++});
+diff --git a/frontend/src/ui/rangeFolderSums.ts b/frontend/src/ui/rangeFolderSums.ts
+new file mode 100644
+index 0000000..5a80275
+--- /dev/null
++++ b/frontend/src/ui/rangeFolderSums.ts
+@@ -0,0 +1,27 @@
++import type { RangeEntry, RangeLineCounts } from "../ipc";
++import { folderPaths } from "./fileTree";
++
++type Counted = Extract<RangeLineCounts, { kind: "counted" }>;
++
++/** Git's counts summed per folder over every counted file below it, at any depth, keyed by the folder's full path as
++ *  `folderPaths` names it — the path a tree folder row carries, a joined chain's deepest folder included. A
++ *  `notCounted` file adds nothing; a folder with no counted file below it has no entry. */
++export function folderSums(
++  files: readonly Pick<RangeEntry, "path" | "lines">[],
++): ReadonlyMap<string, Counted> {
++  const sums = new Map<string, Counted>();
++  for (const { path, lines } of files) {
++    if (lines.kind === "notCounted") {
++      continue;
++    }
++    for (const folder of folderPaths(path)) {
++      const sum = sums.get(folder);
++      sums.set(folder, {
++        kind: "counted",
++        added: (sum?.added ?? 0) + lines.added,
++        removed: (sum?.removed ?? 0) + lines.removed,
++      });
++    }
++  }
++  return sums;
++}
+-- 
+2.56.0
+

@@ -21,7 +21,11 @@ const WAIT_MS = 3000;
 const SCREENSHOTS = "/tmp/yamt-range";
 const MOUNTED = "data-range-probe";
 const PATH = "src/probe.ts";
-const OPTIONS: RangeOptions = { preferences: { theme: "dark", keys: DEFAULT_KEYS } };
+const OPTIONS: RangeOptions = {
+  preferences: { theme: "dark", keys: DEFAULT_KEYS },
+  collapsed: false,
+  threads: [],
+};
 const EVENTS: RangeEvents = { startThread: () => {}, toggleThreads: () => {}, hosts: () => {} };
 const LEFT = [
   "const first = 1;",

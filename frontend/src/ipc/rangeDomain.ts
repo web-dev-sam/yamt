@@ -1,5 +1,5 @@
 import type * as Generated from "./bindings";
-import { toDifferences, type Difference } from "./compareDomain";
+import { toDifferences, toLineChange, type Difference, type LineChange } from "./compareDomain";
 import { isRangeFileId, type RangeFileId } from "./domain";
 import { branded } from "./validate";
 
@@ -37,6 +37,16 @@ export type RangeFile =
       readonly mode: RangeModeChange;
     }
   | Readonly<Exclude<Generated.RangeFile, { kind: "texts" }>>;
+export type SearchText = {
+  readonly file: RangeFileId;
+  readonly left: string;
+  readonly right: string;
+  readonly changes: readonly LineChange[];
+};
+export type SearchTexts = {
+  readonly files: readonly SearchText[];
+  readonly next: RangeFileId | null;
+};
 
 function toRangeSide({ label, short_id: shortId, subject }: Generated.RangeSide): RangeSide {
   return { label, shortId, subject };
@@ -73,4 +83,24 @@ export function toRangeFile(raw: Generated.RangeFile): RangeFile {
   }
   const { left, right, differences, mode } = raw;
   return { kind: "texts", left, right, differences: toDifferences(differences), mode };
+}
+
+function toSearchText(
+  { file, left, right, changes }: Generated.SearchText,
+  index: number,
+): SearchText {
+  const field = `files[${index}]`;
+  return {
+    file: branded(file, isRangeFileId, `${field}.file`),
+    left,
+    right,
+    changes: changes.map((change, at) => toLineChange(change, `${field}.changes[${at}]`)),
+  };
+}
+
+export function toSearchTexts(raw: Generated.SearchTexts): SearchTexts {
+  return {
+    files: raw.files.map(toSearchText),
+    next: raw.next === null ? null : branded(raw.next, isRangeFileId, "next"),
+  };
 }

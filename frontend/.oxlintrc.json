@@ -135,7 +135,8 @@
         "src/connectors/**",
         "src/lsp/**",
         "src/jsonrpc/**",
-        "src/agent/**"
+        "src/agent/**",
+        "src/search/**"
       ],
       "rules": {
         "no-restricted-imports": [
@@ -144,13 +145,13 @@
             "paths": [
               {
                 "name": "vue",
-                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/ are framework-free (PM3)."
+                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/, search/ are framework-free (PM3)."
               }
             ],
             "patterns": [
               {
                 "group": ["vue/**", "@vue/**", "@vueuse/**", "@tauri-apps/**"],
-                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/ are framework-free (PM3)."
+                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/, search/ are framework-free (PM3)."
               },
               {
                 "group": ["../**/internal", "../**/internal/**"],

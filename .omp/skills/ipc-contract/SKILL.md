@@ -77,6 +77,7 @@ set_agent(current, agent: AgentSettings { command, firstMessage })   -> Settings
 # the range window (`yamt --diff=<a>..<b>`, plan §2 #103–#107; RangeState: the range, its PairLock, Mutex<ThreadStore>, the send guard)
 open_range()                      -> RangeStart { range, sides, entries }
 load_range_file(file: RangeFileId) -> RangeFile   async: both texts, MAX_TEXT_BYTES each
+search_range_texts(from: RangeFileId) -> SearchTexts   async: { files: [SearchText { file, left, right, changes: LineChange[] }], next } — the text files from `from` on, pages of ~4 MiB, next null after the last; files `load` would not answer as texts left out (#127)
 # its threads and GitLab (plan §2 #116–#121, crate yamt-review)
 list_threads() -> ThreadList; add_thread(file, line: ThreadLine, text) -> ThreadAdded; add_note(thread, text) / queue_message(message, text) / unqueue_message(message) -> ThreadList
 edit_note(message, text) / delete_message(message) -> ThreadList   an unsent Note only (#123): AiAnswer → NotANote, Pending → MessagePending; SendRunning while a send runs

@@ -11,6 +11,7 @@ import {
   type RangeFile,
   type RangeSide,
   type RangeStart,
+  type SearchText,
 } from "./rangeDomain";
 import type { RangeSource } from "./RangeSource";
 
@@ -119,6 +120,21 @@ function shownCase(log: Log, search: string, cases: ReadonlyMap<string, Case>): 
   return missingCase(name);
 }
 
+function searchTextsOf({ start, files }: Case): readonly SearchText[] {
+  return start.files.flatMap(({ id }) => {
+    const loaded = files[id];
+    if (loaded?.kind !== "texts") {
+      return [];
+    }
+    const { left, right, differences } = loaded;
+    const changes = differences.map((difference) => ({
+      left: difference.left,
+      right: difference.right,
+    }));
+    return [{ file: id, left, right, changes }];
+  });
+}
+
 export function createFixtureRangeSource(
   log: Log,
   search: string,
@@ -129,6 +145,7 @@ export function createFixtureRangeSource(
     files: loaded.map(toRangeFile),
   }));
   const shown = shownCase(log, search, cases);
+  const textFiles = searchTextsOf(shown);
   return {
     async openRange() {
       return { ok: true, value: shown.start };
@@ -138,6 +155,13 @@ export function createFixtureRangeSource(
       return found === undefined
         ? { ok: false, failure: { kind: "UnknownRangeFile", file } }
         : { ok: true, value: found };
+    },
+    async searchTexts(from) {
+      if (from > shown.files.length) {
+        return { ok: false, failure: { kind: "UnknownRangeFile", file: from } };
+      }
+      const files = textFiles.filter(({ file }) => file >= from);
+      return { ok: true, value: { files, next: null } };
     },
     ...createFixtureReview(log, search, shown.start),
     ...createFixtureSettings(),

@@ -2,7 +2,7 @@
 import { useEventListener, useWindowFocus } from "@vueuse/core";
 import { computed, onMounted, watch } from "vue";
 
-import { log, onWindowClose } from "../ipc";
+import { log, onWindowClose, type RangeLineCounts } from "../ipc";
 import AgentSettings from "./AgentSettings.vue";
 import FileList from "./FileList.vue";
 import NoticeBar from "./NoticeBar.vue";
@@ -10,14 +10,18 @@ import type { NoticeRow } from "./noticeText";
 import { unexpected } from "./problem";
 import ProblemBar from "./ProblemBar.vue";
 import QuestionDialog from "./QuestionDialog.vue";
+import RangeCounts from "./RangeCounts.vue";
 import RangeFileRow from "./RangeFileRow.vue";
+import { folderSums } from "./rangeFolderSums";
 import { useRangeStore } from "./rangeStore";
 import { emptyRangeText, RANGE_LIST_LABEL } from "./rangeText";
 import { sendNoticeRow } from "./rangeThreadText";
 import RangeView from "./RangeView.vue";
+import SearchPanel from "./SearchPanel.vue";
 import SettingsButton from "./SettingsButton.vue";
 import { useThemeAttribute } from "./settingsStore";
 import SettingsView from "./SettingsView.vue";
+import SideColumn from "./SideColumn.vue";
 
 const {
   start,
@@ -38,6 +42,7 @@ const {
   threads,
   ai,
   mayClose,
+  search,
 } = useRangeStore();
 const { counts } = threads;
 
@@ -45,9 +50,11 @@ const focused = useWindowFocus();
 useThemeAttribute();
 useEventListener(window, "keydown", (event) => {
   fileListKey(event, navigator.platform);
+  search.toggleKey(event, navigator.platform);
 });
 
 const files = computed(() => start.value?.files ?? []);
+const sums = computed(() => folderSums(files.value));
 const emptyText = computed(() =>
   start.value !== null && start.value.files.length === 0 ? emptyRangeText(start.value) : null,
 );
@@ -76,21 +83,37 @@ async function guardClose(): Promise<void> {
     log.error("range.close_guard_failed", { ...unexpected(error) });
   }
 }
+
+function folderLines(path: string): RangeLineCounts {
+  return sums.value.get(path) ?? { kind: "notCounted" };
+}
 </script>
 
 <template>
   <div class="past-window-edges flex min-w-0 flex-1 gap-island p-island">
-    <FileList
-      v-show="fileListShown"
-      :files="files"
-      :active="shownPath"
-      :label="RANGE_LIST_LABEL"
-      @select="showFile"
-    >
-      <template #file="{ file, label }">
-        <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+    <SideColumn :search-shown="search.shown.value" :files-shown="fileListShown">
+      <template #search>
+        <SearchPanel
+          :search="search"
+          :shown-path="screen.kind === 'files' ? shownPath : null"
+          :whole="!fileListShown"
+        />
       </template>
-    </FileList>
+      <FileList
+        v-show="fileListShown"
+        :files="files"
+        :active="shownPath"
+        :label="RANGE_LIST_LABEL"
+        @select="showFile"
+      >
+        <template #file="{ file, label }">
+          <RangeFileRow :file="file" :label="label" :threads="counts.get(file.id) ?? 0" />
+        </template>
+        <template #folder="{ path }">
+          <RangeCounts :lines="folderLines(path)" class="ml-auto" />
+        </template>
+      </FileList>
+    </SideColumn>
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-island">
       <div class="inside-window-edges flex shrink-0 flex-col gap-island empty:hidden">
         <ProblemBar v-if="problem !== null" :problem="problem" @close="dismissProblem" />

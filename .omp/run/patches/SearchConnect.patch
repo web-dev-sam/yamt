@@ -1,0 +1,533 @@
+commit c5461d1662ce52c020db5304131678b2acc7586f
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 11:59:47 +0100
+
+    feat(search): views go to a finding and report Result changes; stops and disk changes search again
+
+diff --git a/frontend/src/editor/index.ts b/frontend/src/editor/index.ts
+index a1f07d3..ba5dd05 100644
+--- a/frontend/src/editor/index.ts
++++ b/frontend/src/editor/index.ts
+@@ -3,7 +3,7 @@ export type { ColumnFormat, ColumnText, CompareEvents, FormatReport } from "./co
+ export type { CompareHosts, CompareOptions } from "./compare";
+ export type { Direction } from "./internal/navigation";
+ export type { Pane as MergePane } from "./internal/geometry";
+-export type { MergeGoTo, PaneMatch } from "./internal/goTo";
++export type { MergeGoTo } from "./internal/goTo";
+ export type { ResultLineUp } from "./internal/lineUp";
+ export type { FormatOutcome } from "./internal/format";
+ export type { Preferences } from "./internal/pane";
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index fed0616..733b7f8 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -13,7 +13,6 @@ export type {
+   ColumnVersions,
+   Comparison,
+   Difference,
+-  LineChange,
+   TabEntry,
+   TabLanguage,
+   TabList,
+diff --git a/frontend/src/ui/MergeView.vue b/frontend/src/ui/MergeView.vue
+index caa5818..d7f885f 100644
+--- a/frontend/src/ui/MergeView.vue
++++ b/frontend/src/ui/MergeView.vue
+@@ -12,7 +12,7 @@ import PaneFrame from "./PaneFrame.vue";
+ import { paneColumns, type PaneWidths } from "./paneSplit";
+ import ServerStatus from "./ServerStatus.vue";
+ import SettingsButton from "./SettingsButton.vue";
+-import { sideHeader } from "./sideHeaders";
++import { RESULT_HEADER, sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ import { useMergeController } from "./useMergeController";
+@@ -55,6 +55,8 @@ const {
+   paneSplit,
+   setPaneSplit,
+   resetPaneSplit,
++  search,
++  liveResults,
+ } = useAppStore();
+ const handle = useMergeController(
+   () => props.data,
+@@ -82,6 +84,8 @@ const work: FileWork = { unsaved: () => unsaved.value };
+ if (props.data.deleted === null) {
+   track(props.data.path, work);
+ }
++const live = { lineUp: handle.lineUp };
++liveResults.track(props.data.path, live);
+ const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+ 
+ const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
+@@ -112,9 +116,23 @@ watch(
+   },
+   { immediate: true },
+ );
++watch(handle.resultVersion, () => {
++  search.changed(props.data.path);
++});
++watch(
++  [search.goTo, () => props.shown],
++  ([request, shown]) => {
++    if (request !== null && shown && request.path === props.data.path) {
++      handle.goTo({ pane: request.pane, match: request.match });
++      search.took(request.id);
++    }
++  },
++  { immediate: true, flush: "post" },
++);
+ 
+ onUnmounted(() => {
+   untrack(props.data.path, work);
++  liveResults.untrack(props.data.path, live);
+ });
+ 
+ function deletedViewNow(): DeletedSideView | null {
+@@ -224,7 +242,7 @@ function shownKeydown(event: KeyboardEvent): void {
+       <div
+         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
+       >
+-        <h2 class="text-fg-muted">Result</h2>
++        <h2 class="text-fg-muted">{{ RESULT_HEADER }}</h2>
+         <button
+           type="button"
+           :disabled="!resettable"
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 6cff912..fe9ed4f 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -1,5 +1,5 @@
+ <script setup lang="ts">
+-import { computed, useTemplateRef } from "vue";
++import { computed, useTemplateRef, watch } from "vue";
+ import ArrowDown from "~icons/lucide/arrow-down";
+ import ArrowUp from "~icons/lucide/arrow-up";
+ import ChevronsDownUp from "~icons/lucide/chevrons-down-up";
+@@ -31,8 +31,8 @@ const NEXT = ACTION_NAMES["next-change"];
+ const left = useTemplateRef<HTMLDivElement>("left");
+ const right = useTemplateRef<HTMLDivElement>("right");
+ const strip = useTemplateRef<SVGSVGElement>("strip");
+-const { preferences, question, collapsing, toggleCollapsing } = useRangeStore();
+-const { content, threadHosts, moveToChange } = useRangeController(
++const { preferences, question, collapsing, toggleCollapsing, search } = useRangeStore();
++const { content, threadHosts, moveToChange, goTo } = useRangeController(
+   props.file,
+   { left, right, strip },
+   { preferences },
+@@ -45,6 +45,17 @@ const rightHeading = computed(() => sideHeading(props.rightSide));
+ const columns = computed(() => content.value.kind === "columns");
+ const note = computed(() => (content.value.kind === "columns" ? content.value.note : null));
+ const sentence = computed(() => (content.value.kind === "sentence" ? content.value.text : null));
++
++watch(
++  [search.goTo, () => props.shown],
++  ([request, shown]) => {
++    if (request !== null && shown && request.path === props.file.path) {
++      goTo({ pane: request.pane, match: request.match });
++      search.took(request.id);
++    }
++  },
++  { immediate: true, flush: "post" },
++);
+ </script>
+ 
+ <template>
+diff --git a/frontend/src/ui/diskChanges.test.ts b/frontend/src/ui/diskChanges.test.ts
+new file mode 100644
+index 0000000..41e054d
+--- /dev/null
++++ b/frontend/src/ui/diskChanges.test.ts
+@@ -0,0 +1,123 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef } from "vue";
++
++import type { ChunkSource, FileEntry, FileMergeData, FileSides } from "../ipc";
++import type { SearchedFile } from "../search";
++import { createAsking } from "./asking";
++import { applyDiskChanges } from "./diskChanges";
++import type { Notice } from "./noticeText";
++import type { Problem } from "./problem";
++import { createSearching, type Searching } from "./searching";
++import { SEARCH_PAUSE_MS } from "./searchRun";
++import { startSettings } from "./settings";
++import type { Taken } from "./sides";
++
++type Pane = "left" | "right";
++
++type Files = { readonly texts: Map<string, string>; readonly reads: string[] };
++
++afterEach(() => {
++  vi.restoreAllMocks();
++  vi.useRealTimers();
++});
++
++function notUsed(): Promise<never> {
++  return Promise.reject(new Error("not used"));
++}
++
++const SOURCE: ChunkSource = {
++  loadFile: notUsed,
++  finishFile: notUsed,
++  saveFile: notUsed,
++  resetFile: notUsed,
++  describeFile: notUsed,
++  takeSide: notUsed,
++  listStop: notUsed,
++  continueOperation: notUsed,
++  abortOperation: notUsed,
++  loadSettings: notUsed,
++  setTheme: notUsed,
++  setAntialiasing: notUsed,
++  setKeys: notUsed,
++  moveSettings: notUsed,
++  setServerAnswer: notUsed,
++  setServerSwitch: notUsed,
++  setAddedServers: notUsed,
++  setAgent: notUsed,
++};
++
++function searchOver(files: Files): Searching<Pane> {
++  function searched(path: string): SearchedFile<Pane> {
++    files.reads.push(path);
++    const text = files.texts.get(path) ?? "";
++    return { path, texts: { left: text, right: text }, changes: [] };
++  }
++  return createSearching<Pane>({
++    source: {
++      layout: { panes: ["left", "right"], lead: "right" },
++      async *files() {
++        for (const path of files.texts.keys()) {
++          yield await Promise.resolve(searched(path));
++        }
++      },
++      file: (path) => Promise.resolve(searched(path)),
++      forget: () => undefined,
++      forgetAll: () => undefined,
++    },
++    panes: () => [],
++    open: () => undefined,
++    shownPath: () => null,
++    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++  });
++}
++
++function groups(search: Searching<Pane>): [string, number][] {
++  return (search.results.value?.groups ?? []).map(({ path, places }) => [path, places.length]);
++}
++
++test("a disk change searches that path again after the pause, and no other", async () => {
++  vi.useFakeTimers();
++  vi.spyOn(console, "info").mockImplementation(() => undefined);
++  const files: Files = {
++    texts: new Map([
++      ["a.ts", "needle\n"],
++      ["b.ts", "needle\n"],
++    ]),
++    reads: [],
++  };
++  const search = searchOver(files);
++  search.type("needle");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  files.reads.length = 0;
++  files.texts.set("a.ts", "needle needle\nneedle\n");
++  files.texts.set("b.ts", "needle needle\nneedle\n");
++
++  await applyDiskChanges(
++    {
++      source: SOURCE,
++      files: shallowRef<readonly FileEntry[]>([]),
++      opened: shallowRef<readonly FileMergeData[]>([]),
++      choices: shallowRef<readonly FileSides[]>([]),
++      problem: shallowRef<Problem | null>(null),
++      notices: shallowRef<readonly Notice[]>([]),
++      taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
++      guard: { unsavedFiles: () => [] },
++      search,
++      nextStop: notUsed,
++    },
++    [{ path: "a.ts", result: { kind: "Staged" } }],
++    "running",
++    { dropped: false },
++  );
++  expect(groups(search)).toEqual([
++    ["a.ts", 1],
++    ["b.ts", 1],
++  ]);
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++
++  expect(files.reads).toEqual(["a.ts"]);
++  expect(groups(search)).toEqual([
++    ["a.ts", 3],
++    ["b.ts", 1],
++  ]);
++});
+diff --git a/frontend/src/ui/diskChanges.ts b/frontend/src/ui/diskChanges.ts
+index 1e7b711..bf318a4 100644
+--- a/frontend/src/ui/diskChanges.ts
++++ b/frontend/src/ui/diskChanges.ts
+@@ -5,6 +5,7 @@ import type { CloseGuard } from "./closeGuard";
+ import type { Stop } from "./currentStop";
+ import type { DiskNotice, Notice } from "./noticeText";
+ import type { EndsStop } from "./problem";
++import type { Searching } from "./searching";
+ import type { Taken } from "./sides";
+ import { isShown, reload, takesASide, type Shown } from "./views";
+ 
+@@ -12,6 +13,7 @@ export type DiskChangeTarget = Shown & {
+   readonly notices: ShallowRef<readonly Notice[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+   readonly guard: Pick<CloseGuard, "unsavedFiles">;
++  readonly search: Pick<Searching<string>, "changed">;
+ };
+ 
+ function logNotice({ path, result, editsDropped, when }: DiskNotice): void {
+@@ -45,6 +47,7 @@ function noteDiskChanges(
+   ];
+   const taken = new Map(target.taken.value);
+   for (const [path, result] of byPath) {
++    target.search.changed(path);
+     taken.delete(path);
+     if (result.kind === "Staged" && takesASide(target, path)) {
+       taken.set(path, { by: "disk" });
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index eb3f778..66b6c94 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -29,6 +29,7 @@ type Listed = {
+   readonly notices: ShallowRef<readonly Notice[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+   readonly guard: { unsavedFiles(): string[] };
++  readonly search: { changed(path: string): void };
+   readonly ends: StopEnd[];
+   stop: Stop;
+   nextStop(end: StopEnd): Promise<void>;
+@@ -94,6 +95,7 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
+     notices: shallowRef<readonly Notice[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+     guard: { unsavedFiles: () => [] },
++    search: { changed: () => undefined },
+     ends,
+     stop: { dropped: false },
+     nextStop: (end) => {
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 9589bd7..6cd5b5c 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -166,6 +166,7 @@ function writeTarget(
+           .filter(([, editor]) => editor.text !== editor.saved)
+           .map(([path]) => path),
+     },
++    search: { changed: () => undefined },
+     writing: new Map(),
+     stop: { dropped: false },
+     asking: { ask: () => Promise.resolve("yes") },
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 90c365c..1ca02de 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -18,6 +18,9 @@ import type { Problem } from "./problem";
+ import { problemText } from "./problemText";
+ import { claimWrite, finish } from "./saving";
+ import type { Screen } from "./screen";
++import { createSearching, type Searching } from "./searching";
++import { SEARCH_PAUSE_MS } from "./searchRun";
++import { startSettings } from "./settings";
+ import type { Taken } from "./sides";
+ import { nextStop, type StopTarget } from "./stops";
+ import type { FormatOutcome } from "./useMergeController";
+@@ -42,6 +45,13 @@ const REBASE: OperationView = {
+ const NEXT_STEP: OperationView = { ...REBASE, progress: { step: 2, total: 3 } };
+ const CHERRY_PICK: OperationView = { kind: "CherryPick", picking: null, progress: null };
+ const C_TS: FileEntry = { path: "c.ts", status: "Unresolved", unsupported: null };
++const TEXTS: Readonly<Record<string, string>> = {
++  "a.ts": "const needle = 1;\n",
++  "c.ts": "needle();\nneedle();\n",
++};
++const MICROTASKS = 20;
++
++type Pane = "left" | "right";
+ 
+ type Stop = StopTarget &
+   Parameters<typeof finish>[0] & {
+@@ -50,6 +60,8 @@ type Stop = StopTarget &
+     readonly aborts: string[];
+     readonly asking: Asking;
+     readonly operation: ShallowRef<OperationView | null>;
++    readonly search: Searching<Pane>;
++    searched: readonly string[];
+   };
+ 
+ type NextStop = {
+@@ -59,6 +71,7 @@ type NextStop = {
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
++  vi.useRealTimers();
+ });
+ 
+ function notUsed(): Promise<never> {
+@@ -94,6 +107,42 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
+   };
+ }
+ 
++function searchOver(stop: () => Stop): Searching<Pane> {
++  return createSearching<Pane>({
++    source: {
++      layout: { panes: ["left", "right"], lead: "right" },
++      async *files() {
++        for (const path of stop().searched) {
++          const text = TEXTS[path] ?? "";
++          yield await Promise.resolve({ path, texts: { left: text, right: text }, changes: [] });
++        }
++      },
++      file: () => Promise.resolve(null),
++      forget: () => undefined,
++      forgetAll: () => undefined,
++    },
++    panes: () => [],
++    open: () => undefined,
++    shownPath: () => null,
++    keys: { asking: createAsking(), settings: shallowRef(startSettings("dark")) },
++  });
++}
++
++async function microtasks(): Promise<void> {
++  for (let tick = 0; tick < MICROTASKS; tick += 1) {
++    await Promise.resolve();
++  }
++}
++
++function groups(search: Searching<Pane>): [string, number][] | null {
++  return (
++    search.results.value?.groups.map(({ path, places }): [string, number] => [
++      path,
++      places.length,
++    ]) ?? null
++  );
++}
++
+ function stopAt(
+   unsaved: readonly string[],
+   next: NextStop = { files: [C_TS], operation: NEXT_STEP },
+@@ -135,12 +184,15 @@ function stopAt(
+     stopMessage: shallowRef<string | null>("the old stop's message"),
+     asking: createAsking(),
+     guard: { unsavedFiles: () => [...unsaved] },
++    search: searchOver(() => stop),
++    searched: ["a.ts"],
+     latestOpen: 4,
+     loadFiles: () => {
+       lists.push(stop.latestOpen);
+       stop.operation.value = next.operation;
+       if (next.files !== null) {
+         stop.active.value = next.files[0]?.path ?? null;
++        stop.searched = next.files.map((file) => file.path);
+       }
+       return Promise.resolve(next.files);
+     },
+@@ -338,3 +390,38 @@ test("a question that is not about the stop stays open across it", async () => {
+   stop.asking.answer(false);
+   expect(await asked).toBe("no");
+ });
++
++test("a new stop clears the results, then searches the new stop's files for the same query once its list arrived", async () => {
++  quiet();
++  vi.useFakeTimers();
++  const stop = stopAt([]);
++  stop.search.type("needle");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++  expect(groups(stop.search)).toEqual([["a.ts", 1]]);
++  const seen: unknown[] = [];
++  const listing = stop.loadFiles.bind(stop);
++  stop.loadFiles = () => {
++    seen.push(groups(stop.search));
++    return listing();
++  };
++
++  await nextStop(stop, { kind: "outside" });
++  await microtasks();
++
++  expect(seen).toEqual([null]);
++  expect(stop.search.query.value).toBe("needle");
++  expect(groups(stop.search)).toEqual([["c.ts", 2]]);
++});
++
++test("a new stop whose list failed searches nothing", async () => {
++  quiet();
++  vi.useFakeTimers();
++  const stop = stopAt([], { files: null, operation: NEXT_STEP });
++  stop.search.type("needle");
++  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS);
++
++  await nextStop(stop, { kind: "outside" });
++  await microtasks();
++
++  expect([stop.search.query.value, groups(stop.search)]).toEqual(["needle", null]);
++});
+diff --git a/frontend/src/ui/stops.ts b/frontend/src/ui/stops.ts
+index 1d494fd..86fa95f 100644
+--- a/frontend/src/ui/stops.ts
++++ b/frontend/src/ui/stops.ts
+@@ -8,6 +8,7 @@ import { report } from "./problem";
+ import { endsWithStop } from "./question";
+ import { dropStop, type FormatOutcomes, type Writing } from "./saving";
+ import type { Screen } from "./screen";
++import type { Searching } from "./searching";
+ import type { Taken } from "./sides";
+ import type { Shown } from "./views";
+ 
+@@ -26,6 +27,7 @@ export type StopTarget = Pick<Shown, "opened" | "choices" | "problem"> &
+     readonly stopMessage: ShallowRef<string | null>;
+     readonly asking: Pick<Asking, "question" | "dismiss">;
+     readonly guard: Pick<CloseGuard, "unsavedFiles">;
++    readonly search: Pick<Searching<string>, "clear" | "rerun">;
+     latestOpen: number;
+     loadFiles(): Promise<readonly FileEntry[] | null>;
+   };
+@@ -46,6 +48,7 @@ function clearStop(target: StopTarget): void {
+   target.problem.value = null;
+   target.stopMessage.value = null;
+   target.screen.value = { kind: "files" };
++  target.search.clear();
+ }
+ 
+ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void> {
+@@ -57,6 +60,9 @@ export async function nextStop(target: StopTarget, end: StopEnd): Promise<void>
+     target.notices.value = [{ kind: "movedOn", operation: before, files: dropped }];
+   }
+   const listed = await target.loadFiles();
++  if (listed !== null) {
++    target.search.rerun();
++  }
+   if (end.kind === "continued" && listed !== null && listed.length === 0) {
+     target.stopMessage.value = end.message;
+     report(target, {
+diff --git a/frontend/src/ui/useMergeController.ts b/frontend/src/ui/useMergeController.ts
+index fe06a75..9bf84f0 100644
+--- a/frontend/src/ui/useMergeController.ts
++++ b/frontend/src/ui/useMergeController.ts
+@@ -27,10 +27,8 @@ import type { LanguageServers } from "../lsp";
+ export type {
+   Direction,
+   FormatOutcome,
+-  MergeGoTo,
+   MergePane,
+   MergeSummary,
+-  PaneMatch,
+   Preferences,
+   ProblemCounts,
+   ResultLineUp,
+diff --git a/frontend/src/ui/useRangeController.ts b/frontend/src/ui/useRangeController.ts
+index c2bd22f..1abdfac 100644
+--- a/frontend/src/ui/useRangeController.ts
++++ b/frontend/src/ui/useRangeController.ts
+@@ -23,8 +23,6 @@ import { useRangeStore } from "./rangeStore";
+ import { fileSentence, modeNote } from "./rangeText";
+ import type { RangeThreads } from "./rangeThreads";
+ 
+-export type { RangeGoTo } from "../editor";
+-
+ type Host<T> = Readonly<ShallowRef<T | null>>;
+ 
+ type HostRefs<D, S> = {

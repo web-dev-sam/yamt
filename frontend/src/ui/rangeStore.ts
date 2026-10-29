@@ -4,6 +4,7 @@ import type { AgentClient } from "../agent";
 import type {
   AgentSettings,
   AgentSource,
+  Column,
   MessageId,
   RangeEntry,
   RangeFile,
@@ -16,14 +17,18 @@ import type {
 import { firstMessageInUse } from "./agentSettingsFields";
 import { aiMayClose } from "./aiClose";
 import { createAsking, type Asking } from "./asking";
+import { createCollapsing, type Collapsing } from "./collapsing";
 import { fileListKey, type KeyPress } from "./fileListKey";
 import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
-import { createRangeAi, type AskContext, type RangeAi } from "./rangeAi";
+import { createRangeAi, type RangeAi } from "./rangeAi";
+import type { AskContext } from "./rangeAiRules";
 import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
+import { createRangeSearch } from "./rangeSearch";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import { threadPlaceText } from "./rangeThreadText";
 import type { Screen } from "./screen";
+import type { Searching } from "./searching";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
 import type { SettingsActions, SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
@@ -34,31 +39,33 @@ export type RangeAgent = { readonly source: AgentSource; readonly client: AgentC
 
 type RangeStoreAi = RangeAi & { readonly client: AgentClient };
 
-export type RangeStore = SettingsStore & {
-  readonly start: Readonly<ShallowRef<RangeStart | null>>;
-  readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
-  readonly shownPath: ComputedRef<string | null>;
-  readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
-  readonly problem: Readonly<ShallowRef<Problem | null>>;
-  readonly question: ComputedRef<Question | null>;
-  readonly screen: Readonly<ShallowRef<Screen>>;
-  readonly fileListShown: ShallowRef<boolean>;
-  readonly preferences: ComputedRef<Preferences>;
-  readonly threads: RangeThreads;
-  readonly gitlab: GitLabState;
-  readonly ai: RangeStoreAi | null;
-  startUp(): Promise<void>;
-  loadSettings(): Promise<void>;
-  showFile(path: string): void;
-  loadFile(entry: RangeEntry): Promise<RangeFile | null>;
-  fileListKey(event: KeyPress, platform: string): void;
-  dismissProblem(): void;
-  answer(yes: boolean): void;
-  dismissQuestion(): void;
-  mayClose(): Promise<boolean>;
-  /** Asks "Delete this comment?" first (plan row 123). */
-  deleteNote(message: MessageId): Promise<void>;
-};
+export type RangeStore = SettingsStore &
+  Collapsing & {
+    readonly start: Readonly<ShallowRef<RangeStart | null>>;
+    readonly shown: Readonly<ShallowRef<RangeFileId | null>>;
+    readonly shownPath: ComputedRef<string | null>;
+    readonly visited: Readonly<ShallowRef<readonly RangeEntry[]>>;
+    readonly problem: Readonly<ShallowRef<Problem | null>>;
+    readonly question: ComputedRef<Question | null>;
+    readonly screen: Readonly<ShallowRef<Screen>>;
+    readonly fileListShown: ShallowRef<boolean>;
+    readonly preferences: ComputedRef<Preferences>;
+    readonly threads: RangeThreads;
+    readonly gitlab: GitLabState;
+    readonly ai: RangeStoreAi | null;
+    readonly search: Searching<Column>;
+    startUp(): Promise<void>;
+    loadSettings(): Promise<void>;
+    showFile(path: string): void;
+    loadFile(entry: RangeEntry): Promise<RangeFile | null>;
+    fileListKey(event: KeyPress, platform: string): void;
+    dismissProblem(): void;
+    answer(yes: boolean): void;
+    dismissQuestion(): void;
+    mayClose(): Promise<boolean>;
+    /** Asks "Delete this comment?" first (plan row 123). */
+    deleteNote(message: MessageId): Promise<void>;
+  };
 
 type Refs = {
   readonly start: ShallowRef<RangeStart | null>;
@@ -166,21 +173,26 @@ export function createRangeStore(
   const refs = createRefs(startTheme);
   const state = createState(refs, source, agent);
   const settings = settingsActions(state);
+  const shownPath = computed(() => entryOf(state, refs.shown.value)?.path ?? null);
   const created: RangeStore = {
     ...refs,
-    shownPath: computed(() => entryOf(state, refs.shown.value)?.path ?? null),
+    ...createCollapsing(),
+    shownPath,
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),
     threads: state.threads,
     gitlab: state.gitlab,
     ai: storeAi(state),
+    search: createRangeSearch(state, {
+      open: (path) => {
+        showPath(state, path);
+      },
+      shownPath: () => shownPath.value,
+    }),
     ...settings,
     startUp: () => startUp(state, settings),
     showFile: (path) => {
-      const entry = state.start.value?.files.find((file) => file.path === path);
-      if (entry !== undefined) {
-        show(state, entry);
-      }
+      showPath(state, path);
     },
     loadFile: (entry) => loadFile(state, entry),
     mayClose: () => mayClose(state),
@@ -218,6 +230,13 @@ function chromeActions(
 
 function entryOf(state: State, file: RangeFileId | null): RangeEntry | undefined {
   return state.start.value?.files.find((entry) => entry.id === file);
+}
+
+function showPath(state: State, path: string): void {
+  const entry = state.start.value?.files.find((file) => file.path === path);
+  if (entry !== undefined) {
+    show(state, entry);
+  }
 }
 
 function show(state: State, entry: RangeEntry): void {

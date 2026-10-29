@@ -7,20 +7,32 @@ import type { SettingsInUse } from "./settings";
 export type KeyPress = Parameters<typeof pressesKey>[0] &
   Pick<KeyboardEvent, "defaultPrevented" | "preventDefault">;
 
-type FileListToggle = {
+export type WindowKeyTarget = {
   readonly asking: Asking;
   readonly settings: Readonly<ShallowRef<SettingsInUse>>;
-  readonly fileListShown: ShallowRef<boolean>;
 };
 
-export function fileListKey(target: FileListToggle, event: KeyPress, platform: string): void {
+type FileListToggle = WindowKeyTarget & { readonly fileListShown: ShallowRef<boolean> };
+
+export function windowKey(
+  target: WindowKeyTarget,
+  action: "toggle-file-list" | "toggle-search",
+  event: KeyPress,
+  platform: string,
+): boolean {
   if (
     event.defaultPrevented ||
     target.asking.question.value !== null ||
-    !pressesKey(event, target.settings.value.keys.bindings["toggle-file-list"], platform)
+    !pressesKey(event, target.settings.value.keys.bindings[action], platform)
   ) {
-    return;
+    return false;
   }
   event.preventDefault();
-  target.fileListShown.value = !target.fileListShown.value;
+  return true;
+}
+
+export function fileListKey(target: FileListToggle, event: KeyPress, platform: string): void {
+  if (windowKey(target, "toggle-file-list", event, platform)) {
+    target.fileListShown.value = !target.fileListShown.value;
+  }
 }

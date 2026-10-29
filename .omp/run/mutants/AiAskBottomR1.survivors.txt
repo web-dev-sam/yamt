@@ -1,0 +1,14 @@
+just mutants be9efaf (patch 0a7dcfe, AiAskBottomR1), 2026-10-28.
+Rust: no changes since be9efaf.
+Stryker: 6 files, 931 mutants: 865 killed, 2 timeout, 36 survived, 9 no coverage (exhaustive `default` branches).
+rangeAdds.ts 94.12, rangeAi.ts 93.08, rangeAiRules.ts 98.73, rangeAiView.ts 95.31 (100 covered), rangeStore.ts 96.23,
+rangeThreads.ts 95.52.
+
+Survivors on lines new in this patch (orchestrator: equivalent):
+Survived ConditionalExpression frontend/src/ui/rangeAdds.ts:32 | add.kind === "thread" && add.draftKey === draftKey => true && … (a note entry has no draftKey: undefined !== string)
+Survived ConditionalExpression frontend/src/ui/rangeAdds.ts:34 | add.kind === "note" && add.thread === thread => true && … (a thread entry has no thread: undefined !== id)
+Survived ConditionalExpression frontend/src/ui/rangeAiRules.ts:38 | message.body.kind === "aiAnswer" && … => true && … (moved line; a note body has no session)
+
+All other survivors are round 1's, at shifted lines (rangeAi.ts 63, 72, 121 ×2, 142, 143, 172, 183, 188, 205, 210,
+219 ×5, 223, 232, 233; rangeStore.ts 107–221; rangeThreads.ts 94 ×2, 112, 253 ×2, 254 ×2, 261), triaged with
+AiAskBottom (`AiAskBottom.survivors.txt`).

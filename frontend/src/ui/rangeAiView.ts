@@ -1,7 +1,6 @@
-import type { AgentFailure, TurnEnd, TurnView } from "../agent";
-import type { Message } from "../ipc";
+import type { AgentFailure, ConversationLoad, TurnEnd, TurnView } from "../agent";
+import type { AgentSessionId, Message } from "../ipc";
 import { failureText } from "./aiText";
-import type { ThreadAi } from "./rangeAi";
 import type { PostBody } from "./rangeGitLab";
 import {
   AI_ANSWER_TEXT,
@@ -9,6 +8,16 @@ import {
   ANSWER_LOADING_TEXT,
   ANSWER_UNLOADED_TEXT,
 } from "./rangeThreadText";
+
+/** `running` stays until the turn's answer is recorded. */
+export type ThreadAi = {
+  readonly running: TurnView | null;
+  readonly end: TurnEnd | null;
+  readonly loaded: ConversationLoad | null;
+  readonly loadedSession: AgentSessionId | null;
+};
+
+export const IDLE: ThreadAi = { running: null, end: null, loaded: null, loadedSession: null };
 
 export type AnswerView =
   | { readonly kind: "turn"; readonly turn: TurnView; readonly end: TurnEnd }

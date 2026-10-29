@@ -1,0 +1,452 @@
+commit 5219b32273b2d38e2800d4ea40cc70d266c89ce1
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 11:03:48 +0100
+
+    test(range): pin the 4 MiB page boundary; one set of range test helpers; one TS line-range conversion
+
+diff --git a/crates/range/AGENTS.md b/crates/range/AGENTS.md
+index e0dcd62..11a1cdc 100644
+--- a/crates/range/AGENTS.md
++++ b/crates/range/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107, #127): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`, `SearchText`, `SearchTexts`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`, `Range::search_texts`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then `read_sides` (both blobs from one `BlobReader`) and `decoded` (UTF-8 per side), `Texts` with `yamt_merge_core::compare`; `decide`, `read_sides` and `decoded` are the one rule `search.rs` shares), `search.rs` (`search_page`, the window-wide search's texts, #127: from an id on, every file `load` answers as `Texts`, with `yamt_merge_core::line_changes` and no word diffs, one `BlobReader` per page, ending once `SEARCH_PAGE_BYTES` (4 MiB) of blobs were read — at least one file —, `next` the id the following page starts at, `None` after the last file; `from` equal to the list's length answers an empty last page, past it `UnknownFile`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read; `tests/search.rs` the search pages (skipped kinds, the 4 MiB page, the end).
++Owner skill: `skill://rust-conventions`. A commit range for the `yamt --diff=<range>` window (plan §2 #103–#105, #107, #127): `lib.rs` (the IPC types `RangeFileId`, `RangeSideLabel`, `RangeSide`, `RangeChange`, `RangeLineCounts`, `RangeEntry`, `RangeStart`, `RangeEntryKind`, `RangeModeChange`, `RangeSides`, `RangeFile`, `SearchText`, `SearchTexts`; `Error`), `spec.rs` (`RangeSpec::parse`: split at the first `..`, a third dot means three dots, no further `..`, no side starting with `-`, an empty side is `HEAD`; `SpecError` carries the usage lines), `open.rs` (`Resolved::resolve`: `discover`, two `commit_named`, `merge_base` for `...`, two `commit_summary`; `Resolved::list` → `Range`: one `changed_files`, one `blob_sizes` over every side but a gitlink; `Range::start`, `Range::load`, `Range::search_texts`; `Range` is immutable and `Sync`), `entries.rs` (`FileAt`/`BlobAt`: rows sorted by display path, ids in that order, a deleted row named by its old path, paths lossy UTF-8 for display only), `load.rs` (`decide` from listing data in #105's order — submodule, kind change, mode only, git's numstat binary, over `yamt_merge_core::MAX_TEXT_BYTES` — so such a blob is never read; then `read_sides` (both blobs from one `BlobReader`) and `decoded` (UTF-8 per side), `Texts` with `yamt_merge_core::compare`; `decide`, `read_sides` and `decoded` are the one rule `search.rs` shares), `search.rs` (`search_page`, the window-wide search's texts, #127: from an id on, every file `load` answers as `Texts`, with `yamt_merge_core::line_changes` and no word diffs, one `BlobReader` per page, ending once `SEARCH_PAGE_BYTES` (4 MiB) of blobs were read — at least one file —, `next` the id the following page starts at, `None` after the last file; `from` equal to the list's length answers an empty last page, past it `UnknownFile`), `lock.rs` (`PairLock`: `File::try_lock` on `<range_dir>/<repo key>/<left id>-<right id>/lock` for the process's life; repo key = the repository's folder name (the common git dir's, or its parent's when it is `.git`) + `-` + FNV-1a 64 of the absolute common git dir, so every worktree shares it; the pair folder's name is built only by `take` and read back only by `pair_right_commit`, both on one `PAIR_SEPARATOR`; for `yamt-agent`'s sweep (plan §2 #110): `PairLock::try_hold(folder)` takes an existing pair folder's lock, `None` while a window holds it, and `pair_folders(range_dir)` lists every pair folder). Depends on `yamt-gitio` and `yamt-merge-core` only among `yamt-*`, never on tauri (`scripts/arch-check.sh`). Tests: unit tests in `spec.rs`, `entries.rs`, `lock.rs`; `tests/range.rs` against real temp repositories (`yamt-conflict-repo`), deleting loose objects to prove what the listing answers is never read; `tests/listing_answers.rs` what `load` answers per kind (one every-kind repository) and the search pages (skipped kinds, both sides of the 4 MiB page boundary, the end).
+diff --git a/crates/range/tests/listing_answers.rs b/crates/range/tests/listing_answers.rs
+index 0d3c0f5..f7b6928 100644
+--- a/crates/range/tests/listing_answers.rs
++++ b/crates/range/tests/listing_answers.rs
+@@ -4,12 +4,15 @@ use std::fs;
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+-use yamt_merge_core::MAX_TEXT_BYTES;
+-use yamt_range::{Range, RangeEntryKind, RangeFile, RangeSpec, Resolved};
++use yamt_merge_core::{MAX_TEXT_BYTES, line_changes};
++use yamt_range::{
++    Error, Range, RangeEntryKind, RangeFile, RangeFileId, RangeSpec, Resolved, SearchTexts,
++};
+ 
+ const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
+ const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
+ const LINK_MODE: &str = "120000";
++const MIB: usize = 1024 * 1024;
+ 
+ /// A file of the scripted repository: `base` on `main`, `local` on the checked-out branch `local`, `remote` on `remote`.
+ fn file<'a>(
+@@ -46,10 +49,30 @@ fn range(root: &Path, text: &str) -> Range {
+     resolved.list().unwrap()
+ }
+ 
+-fn load(range: &Range, path: &str) -> RangeFile {
++fn id_of(range: &Range, path: &str) -> RangeFileId {
+     let start = range.start();
+-    let entry = start.files.iter().find(|entry| entry.path == path).unwrap();
+-    range.load(entry.id).unwrap()
++    start
++        .files
++        .iter()
++        .find(|entry| entry.path == path)
++        .unwrap()
++        .id
++}
++
++fn load(range: &Range, path: &str) -> RangeFile {
++    range.load(id_of(range, path)).unwrap()
++}
++
++fn paths_of(range: &Range, page: &SearchTexts) -> Vec<String> {
++    page.files
++        .iter()
++        .map(|text| range.entry(text.file).unwrap().path.clone())
++        .collect()
++}
++
++/// Lines `a`, `size` bytes in all for an even `size`.
++fn text_of(size: usize) -> Vec<u8> {
++    "a\n".repeat(size / 2).into_bytes()
+ }
+ 
+ fn commit(root: &Path, message: &str) {
+@@ -132,10 +155,18 @@ fn submodule_file(old: Option<&str>, new: Option<&str>) -> RangeFile {
+     }
+ }
+ 
+-#[test]
+-fn mode_only_kind_changed_and_submodule_are_sentences() {
++/// A repository whose range `main..local` holds every kind of change: texts, binary, too large, not UTF-8, mode
++/// only, a kind change and submodules.
++fn every_kind_repo() -> TempDir {
++    let too_large = text_of(MAX_TEXT_BYTES + 2);
+     let dir = repo_with(&[
++        changed("added.txt", None, Some(b"new\n")),
++        changed("binary.bin", Some(b"\0one"), Some(b"\0two")),
+         changed("entry", Some(b"text\n"), Some(b"text\n")),
++        changed("gone.txt", Some(b"old\n"), None),
++        changed("large.txt", None, Some(&too_large)),
++        changed("lines.txt", Some(b"one\ntwo\n"), Some(b"one\n2\nthree\n")),
++        changed("not-utf8.txt", Some(b"caf\xe9\n"), Some(b"cafe\n")),
+         changed("run.sh", Some(b"echo hi\n"), Some(b"echo hi\n")),
+         submodule("vendor/lib", Some(FIRST_COMMIT), Some(SECOND_COMMIT)),
+         submodule("vendor/new", None, Some(SECOND_COMMIT)),
+@@ -145,6 +176,13 @@ fn mode_only_kind_changed_and_submodule_are_sentences() {
+     git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
+     stage_link(root, "entry", "target.txt");
+     commit(root, "modes");
++    dir
++}
++
++#[test]
++fn mode_only_kind_changed_and_submodule_are_sentences() {
++    let dir = every_kind_repo();
++    let root = dir.path();
+     let range = range(root, "main..local");
+     drop_object(root, "local:run.sh");
+     drop_object(root, "local:entry");
+@@ -167,3 +205,74 @@ fn mode_only_kind_changed_and_submodule_are_sentences() {
+     let removed_submodule = submodule_file(Some(FIRST_COMMIT), None);
+     assert_eq!(load(&range, "vendor/gone"), removed_submodule);
+ }
++
++#[test]
++fn search_texts_skips_every_file_load_does_not_answer_as_texts() {
++    let dir = every_kind_repo();
++    let range = range(dir.path(), "main..local");
++
++    let page = range.search_texts(RangeFileId(0)).unwrap();
++
++    assert_eq!(
++        paths_of(&range, &page),
++        ["added.txt", "gone.txt", "lines.txt"]
++    );
++    assert_eq!(page.next, None);
++    for text in &page.files {
++        let RangeFile::Texts { left, right, .. } = range.load(text.file).unwrap() else {
++            panic!("{text:?} is not loaded as texts");
++        };
++        assert_eq!((&text.left, &text.right), (&left, &right));
++        assert_eq!(text.changes, line_changes(&left, &right));
++    }
++    let lines = &page.files[2];
++    assert_eq!(lines.file, id_of(&range, "lines.txt"));
++    assert_eq!(lines.changes.len(), 1);
++}
++
++#[test]
++fn a_page_reads_at_least_one_file_and_ends_once_4_mib_were_read() {
++    let first = text_of(5 * MIB);
++    let (left, right) = (text_of(2 * MIB), text_of(2 * MIB - 2));
++    let dir = repo_with(&[
++        changed("a.txt", None, Some(&first)),
++        changed("b.txt", Some(&left), Some(&right)),
++        changed("c.txt", None, Some(b"c\n")),
++        changed("d.txt", None, Some(b"d\n")),
++    ]);
++    let range = range(dir.path(), "main..local");
++
++    let alone = range.search_texts(RangeFileId(0)).unwrap();
++    assert_eq!(paths_of(&range, &alone), ["a.txt"]);
++    assert_eq!(alone.next, Some(RangeFileId(1)));
++
++    let up_to_4_mib = range.search_texts(RangeFileId(1)).unwrap();
++    assert_eq!(paths_of(&range, &up_to_4_mib), ["b.txt", "c.txt"]);
++    assert_eq!(up_to_4_mib.next, Some(RangeFileId(3)));
++
++    let last = range.search_texts(RangeFileId(3)).unwrap();
++    assert_eq!(paths_of(&range, &last), ["d.txt"]);
++    assert_eq!(last.next, None);
++}
++
++#[test]
++fn from_the_list_s_end_is_an_empty_last_page_and_past_it_unknown_file() {
++    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
++    let range = range(dir.path(), "main..local");
++
++    let end = range.search_texts(RangeFileId(1)).unwrap();
++    assert_eq!(
++        end,
++        SearchTexts {
++            files: Vec::new(),
++            next: None
++        }
++    );
++    let error = range.search_texts(RangeFileId(2)).unwrap_err();
++    assert!(matches!(
++        error,
++        Error::UnknownFile {
++            file: RangeFileId(2)
++        }
++    ));
++}
+diff --git a/crates/range/tests/search.rs b/crates/range/tests/search.rs
+deleted file mode 100644
+index 2655d56..0000000
+--- a/crates/range/tests/search.rs
++++ /dev/null
+@@ -1,160 +0,0 @@
+-#![cfg(test)]
+-
+-use std::fs;
+-use std::path::Path;
+-
+-use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+-use yamt_merge_core::{MAX_TEXT_BYTES, line_changes};
+-use yamt_range::{Error, Range, RangeFile, RangeFileId, RangeSpec, Resolved, SearchTexts};
+-
+-const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
+-const LINK_MODE: &str = "120000";
+-const MIB: usize = 1024 * 1024;
+-
+-/// A file only `local` changes: `base` on `main`, `local` on the checked-out branch `local`.
+-fn changed<'a>(path: &'a str, base: Option<&'a [u8]>, local: Option<&'a [u8]>) -> ConflictFile<'a> {
+-    ConflictFile {
+-        path,
+-        kind: FileKind::Regular,
+-        base,
+-        local,
+-        remote: base,
+-    }
+-}
+-
+-fn repo_with(files: &[ConflictFile]) -> TempDir {
+-    diverged_repo(files).unwrap()
+-}
+-
+-fn range(root: &Path) -> Range {
+-    let spec = RangeSpec::parse("main..local").unwrap();
+-    Resolved::resolve(root, &spec).unwrap().list().unwrap()
+-}
+-
+-fn id_of(range: &Range, path: &str) -> RangeFileId {
+-    let start = range.start();
+-    start
+-        .files
+-        .iter()
+-        .find(|entry| entry.path == path)
+-        .unwrap()
+-        .id
+-}
+-
+-fn paths_of(range: &Range, page: &SearchTexts) -> Vec<String> {
+-    page.files
+-        .iter()
+-        .map(|text| range.entry(text.file).unwrap().path.clone())
+-        .collect()
+-}
+-
+-/// Lines `a`, `size` bytes in all for an even `size`.
+-fn text_of(size: usize) -> Vec<u8> {
+-    "a\n".repeat(size / 2).into_bytes()
+-}
+-
+-fn commit(root: &Path, message: &str) {
+-    git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
+-}
+-
+-/// Stages `path` as a symbolic link to `target` without making one on disk (Windows needs a right for that).
+-fn stage_link(root: &Path, path: &str, target: &str) {
+-    let scratch = root.join(".git").join("link-target");
+-    fs::write(&scratch, target).unwrap();
+-    let scratch_arg = scratch.to_str().unwrap();
+-    let output = git_ok(root, &["hash-object", "-w", "--", scratch_arg]).unwrap();
+-    let oid = String::from_utf8(output).unwrap().trim_end().to_owned();
+-    let cacheinfo = format!("{LINK_MODE},{oid},{path}");
+-    git_ok(root, &["update-index", "--add", "--cacheinfo", &cacheinfo]).unwrap();
+-}
+-
+-#[test]
+-fn search_texts_skips_every_file_load_does_not_answer_as_texts() {
+-    let too_large = text_of(MAX_TEXT_BYTES + 2);
+-    let dir = repo_with(&[
+-        changed("added.txt", None, Some(b"new\n")),
+-        changed("binary.bin", Some(b"\0one"), Some(b"\0two")),
+-        changed("entry", Some(b"text\n"), Some(b"text\n")),
+-        changed("gone.txt", Some(b"old\n"), None),
+-        changed("large.txt", None, Some(&too_large)),
+-        changed("lines.txt", Some(b"one\ntwo\n"), Some(b"one\n2\nthree\n")),
+-        changed("not-utf8.txt", Some(b"caf\xe9\n"), Some(b"cafe\n")),
+-        changed("run.sh", Some(b"echo hi\n"), Some(b"echo hi\n")),
+-        ConflictFile {
+-            path: "vendor/lib",
+-            kind: FileKind::Submodule,
+-            base: None,
+-            local: Some(FIRST_COMMIT.as_bytes()),
+-            remote: None,
+-        },
+-    ]);
+-    let root = dir.path();
+-    git_ok(root, &["update-index", "--chmod=+x", "run.sh"]).unwrap();
+-    stage_link(root, "entry", "target.txt");
+-    commit(root, "modes");
+-    let range = range(root);
+-
+-    let page = range.search_texts(RangeFileId(0)).unwrap();
+-
+-    assert_eq!(
+-        paths_of(&range, &page),
+-        ["added.txt", "gone.txt", "lines.txt"]
+-    );
+-    assert_eq!(page.next, None);
+-    for text in &page.files {
+-        let RangeFile::Texts { left, right, .. } = range.load(text.file).unwrap() else {
+-            panic!("{text:?} is not loaded as texts");
+-        };
+-        assert_eq!((&text.left, &text.right), (&left, &right));
+-        assert_eq!(text.changes, line_changes(&left, &right));
+-    }
+-    let lines = &page.files[2];
+-    assert_eq!(lines.file, id_of(&range, "lines.txt"));
+-    assert_eq!(lines.changes.len(), 1);
+-}
+-
+-#[test]
+-fn a_page_reads_at_least_one_file_and_ends_after_about_4_mib() {
+-    let (first, second, third) = (text_of(5 * MIB), text_of(MIB), text_of(3 * MIB + MIB / 2));
+-    let dir = repo_with(&[
+-        changed("a.txt", None, Some(&first)),
+-        changed("b.txt", None, Some(&second)),
+-        changed("c.txt", None, Some(&third)),
+-        changed("d.txt", None, Some(b"d\n")),
+-    ]);
+-    let range = range(dir.path());
+-
+-    let alone = range.search_texts(RangeFileId(0)).unwrap();
+-    assert_eq!(paths_of(&range, &alone), ["a.txt"]);
+-    assert_eq!(alone.next, Some(RangeFileId(1)));
+-
+-    let two = range.search_texts(RangeFileId(1)).unwrap();
+-    assert_eq!(paths_of(&range, &two), ["b.txt", "c.txt"]);
+-    assert_eq!(two.next, Some(RangeFileId(3)));
+-
+-    let last = range.search_texts(RangeFileId(3)).unwrap();
+-    assert_eq!(paths_of(&range, &last), ["d.txt"]);
+-    assert_eq!(last.next, None);
+-}
+-
+-#[test]
+-fn from_the_list_s_end_is_an_empty_last_page_and_past_it_unknown_file() {
+-    let dir = repo_with(&[changed("a.txt", Some(b"a\n"), Some(b"b\n"))]);
+-    let range = range(dir.path());
+-
+-    let end = range.search_texts(RangeFileId(1)).unwrap();
+-    assert_eq!(
+-        end,
+-        SearchTexts {
+-            files: Vec::new(),
+-            next: None
+-        }
+-    );
+-    let error = range.search_texts(RangeFileId(2)).unwrap_err();
+-    assert!(matches!(
+-        error,
+-        Error::UnknownFile {
+-            file: RangeFileId(2)
+-        }
+-    ));
+-}
+diff --git a/frontend/src/ipc/compareDomain.ts b/frontend/src/ipc/compareDomain.ts
+index fe66944..b5dadb1 100644
+--- a/frontend/src/ipc/compareDomain.ts
++++ b/frontend/src/ipc/compareDomain.ts
+@@ -25,9 +25,11 @@ export type TabEntry = {
+ export type TabList = { readonly tabs: readonly TabEntry[]; readonly shown: TabId };
+ export type CompareStart = { readonly list: TabList; readonly columnLimit: number };
+ export type ColumnVersions = Readonly<Record<Column, ColumnVersion>>;
+-export type Difference = {
++export type LineChange = {
+   readonly left: LineRange<LeftLine>;
+   readonly right: LineRange<RightLine>;
++};
++export type Difference = LineChange & {
+   readonly words: { readonly left: SideWords<LeftLine>; readonly right: SideWords<RightLine> };
+ };
+ export type Comparison = {
+@@ -73,12 +75,19 @@ export function toColumnVersions(dto: Generated.ColumnVersions): ColumnVersions
+   };
+ }
+ 
++export function toLineChange({ left, right }: Generated.LineChange, field: string): LineChange {
++  return {
++    left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
++    right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
++  };
++}
++
+ export function toDifferences(dtos: readonly Generated.Difference[]): Difference[] {
+-  return dtos.map(({ left, right, words }, index) => {
++  return dtos.map((dto, index) => {
+     const field = `differences[${index}]`;
++    const { words } = dto;
+     return {
+-      left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
+-      right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
++      ...toLineChange(dto, field),
+       words: {
+         left: toSideWords({ side: words.left, isLine: isLeftLine, field: `${field}.words.left` }),
+         right: toSideWords({
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 11dcedc..fed0616 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -13,6 +13,7 @@ export type {
+   ColumnVersions,
+   Comparison,
+   Difference,
++  LineChange,
+   TabEntry,
+   TabLanguage,
+   TabList,
+@@ -103,7 +104,6 @@ export {
+   type KeysRead,
+ } from "./keys";
+ export type {
+-  LineChange,
+   RangeChange,
+   RangeEntry,
+   RangeEntryKind,
+diff --git a/frontend/src/ipc/rangeDomain.ts b/frontend/src/ipc/rangeDomain.ts
+index 795b308..e1069cf 100644
+--- a/frontend/src/ipc/rangeDomain.ts
++++ b/frontend/src/ipc/rangeDomain.ts
+@@ -1,15 +1,6 @@
+ import type * as Generated from "./bindings";
+-import { toDifferences, type Difference } from "./compareDomain";
+-import {
+-  isLeftLine,
+-  isRangeFileId,
+-  isRightLine,
+-  toRange,
+-  type LeftLine,
+-  type LineRange,
+-  type RangeFileId,
+-  type RightLine,
+-} from "./domain";
++import { toDifferences, toLineChange, type Difference, type LineChange } from "./compareDomain";
++import { isRangeFileId, type RangeFileId } from "./domain";
+ import { branded } from "./validate";
+ 
+ type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
+@@ -46,10 +37,6 @@ export type RangeFile =
+       readonly mode: RangeModeChange;
+     }
+   | Readonly<Exclude<Generated.RangeFile, { kind: "texts" }>>;
+-export type LineChange = {
+-  readonly left: LineRange<LeftLine>;
+-  readonly right: LineRange<RightLine>;
+-};
+ export type SearchText = {
+   readonly file: RangeFileId;
+   readonly left: string;
+@@ -98,13 +85,6 @@ export function toRangeFile(raw: Generated.RangeFile): RangeFile {
+   return { kind: "texts", left, right, differences: toDifferences(differences), mode };
+ }
+ 
+-function toLineChange({ left, right }: Generated.LineChange, field: string): LineChange {
+-  return {
+-    left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
+-    right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
+-  };
+-}
+-
+ function toSearchText(
+   { file, left, right, changes }: Generated.SearchText,
+   index: number,

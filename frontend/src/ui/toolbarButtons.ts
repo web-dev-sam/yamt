@@ -2,6 +2,7 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, type Ref } from "vue";
 
 import type { OperationView } from "../ipc";
+import { COLLAPSE_LABEL } from "./collapsing";
 import { abortLabel, continueLabel } from "./operationText";
 import { parseStored, storedValue } from "./windowStorage";
 
@@ -47,7 +48,7 @@ const OLD_FORMAT_IDS = [
 const LABELS: Readonly<Record<Exclude<ToolbarButtonId, OperationButtonId>, string>> = {
   previous: "Previous change",
   next: "Next change",
-  collapse: "Collapse unchanged fragments",
+  collapse: COLLAPSE_LABEL,
   applyLeft: "Apply non-conflicting changes from the left",
   applyRight: "Apply non-conflicting changes from the right",
   undo: "Undo",

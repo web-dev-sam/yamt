@@ -185,6 +185,27 @@ test("follow('center') makes the next sync write both sides though the middle di
   expect(tops(views)).toEqual([500, 300, 300]);
 });
 
+test("after follow, another pane's scroll event before the sync does not lead: the followed pane does", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), center: fakePane(300), right: fakePane(0) };
+  const sync = new ScrollSync(views, PANES, () => {});
+  const anchors = anchorsOf([], ends(100, 100, 100));
+
+  sync.follow("center");
+  scrolled(views.left, 40);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([300, 300, 300]);
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+
+  scrolled(views.left, 500);
+  sync.sync(anchors);
+  expect(tops(views)).toEqual([500, 500, 500]);
+});
+
 test("two columns follow each other through their difference's anchors, the source left where it was", () => {
   const frames: (() => void)[] = [];
   vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
@@ -209,4 +230,175 @@ test("two columns follow each other through their difference's anchors, the sour
 
   expect(leftLed).toEqual([50, 120]);
   expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([160, 300]);
+});
+
+test("a follower moved off its written top before the echoes end is written again from the same source", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  let requested = 0;
+  const sync = new ScrollSync(views, ["left", "right"], () => {
+    requested += 1;
+  });
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 100 * LINE_PX, right: 100 * LINE_PX },
+  ];
+
+  scrolled(views.right, 1000);
+  sync.sync(anchors);
+  scrolled(views.left, 0);
+  sync.sync(anchors);
+  const pulledBack = [views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop];
+  const before = requested;
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+  expect(requested).toBe(before + 1);
+  sync.sync(anchors);
+
+  expect(pulledBack).toEqual([0, 1000]);
+  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([1000, 1000]);
+});
+
+test("followers still at their written tops when the echoes end ask for no other sync", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  let requested = 0;
+  const sync = new ScrollSync(views, ["left", "right"], () => {
+    requested += 1;
+  });
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 100 * LINE_PX, right: 100 * LINE_PX },
+  ];
+
+  scrolled(views.right, 1000);
+  sync.sync(anchors);
+  scrolled(views.left, 1000);
+  const before = requested;
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+
+  expect(requested).toBe(before);
+});
+
+test("a follow asked for before the echoes end keeps its own source", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  const sync = new ScrollSync(views, ["left", "right"], () => {});
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 100 * LINE_PX, right: 100 * LINE_PX },
+  ];
+
+  scrolled(views.right, 1000);
+  sync.sync(anchors);
+  views.left.scrollDOM.scrollTop = 400;
+  sync.follow("left");
+  for (const frame of frames.splice(0)) {
+    frame();
+  }
+  sync.sync(anchors);
+
+  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([400, 400]);
+});
+
+test("a follower the user scrolls in each frame after another pane's sync is written back once, then leads", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  const sync = new ScrollSync(views, ["left", "right"], () => {});
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 100 * LINE_PX, right: 100 * LINE_PX },
+  ];
+  function frame(): number[] {
+    scrolled(views.left, views.left.scrollDOM.scrollTop + 100);
+    for (const callback of frames.splice(0)) {
+      callback();
+    }
+    sync.sync(anchors);
+    return [views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop];
+  }
+
+  scrolled(views.right, 1000);
+  sync.sync(anchors);
+
+  expect([frame(), frame()]).toEqual([
+    [1000, 1000],
+    [1100, 1100],
+  ]);
+});
+
+test("a follower pulled back on every write is written again once, then leads and nothing more is asked", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  let requested = 0;
+  const sync = new ScrollSync(views, ["left", "right"], () => {
+    requested += 1;
+  });
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 100 * LINE_PX, right: 100 * LINE_PX },
+  ];
+  function echoesEnd(): number {
+    const before = requested;
+    for (const callback of frames.splice(0)) {
+      callback();
+    }
+    return requested - before;
+  }
+
+  scrolled(views.right, 1000);
+  sync.sync(anchors);
+  scrolled(views.left, 0);
+  const retry = echoesEnd();
+  sync.sync(anchors);
+  scrolled(views.left, 0);
+  const afterRetry = echoesEnd();
+  sync.sync(anchors);
+  views.right.scrollDOM.scrollTop = 1000;
+  const afterLead = echoesEnd();
+
+  expect([retry, afterRetry, afterLead]).toEqual([1, 0, 0]);
+  expect(frames).toEqual([]);
+});
+
+test("after the retry, a source scrolled again keeps the lead over a follower moved meanwhile", () => {
+  const frames: (() => void)[] = [];
+  vi.stubGlobal("requestAnimationFrame", (callback: () => void) => frames.push(callback));
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+  const views = { left: fakePane(0), right: fakePane(0) };
+  const sync = new ScrollSync(views, ["left", "right"], () => {});
+  const anchors = [
+    { left: 0, right: 0 },
+    { left: 100 * LINE_PX, right: 100 * LINE_PX },
+  ];
+  function echoesEnd(): void {
+    for (const callback of frames.splice(0)) {
+      callback();
+    }
+  }
+
+  scrolled(views.right, 1000);
+  sync.sync(anchors);
+  scrolled(views.left, 0);
+  echoesEnd();
+  sync.sync(anchors);
+  scrolled(views.right, 1200);
+  scrolled(views.left, 0);
+  echoesEnd();
+  sync.sync(anchors);
+
+  expect([views.left.scrollDOM.scrollTop, views.right.scrollDOM.scrollTop]).toEqual([1200, 1200]);
 });

@@ -7,6 +7,42 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Review a commit range: in the tree view every folder shows the sum of its files' `+n −m`, subfolders included; a
+  binary file adds nothing, and a folder holding only such files shows none.
+- Review a commit range: unchanged lines collapse behind the merge window's wavy line, across both columns and the
+  strip between them; each click on the wave shows more of them (4 more lines next to the changes, then 8 more, then
+  the rest). A "Collapse unchanged fragments" button after Previous/Next turns it off and on; it is the same remembered
+  choice as the merge window's. A line with a comment thread is never hidden, and a search match in hidden lines
+  shows them.
+- Search every file of the merge window and the range window: Ctrl/Cmd+Shift+S (rebindable, "Toggle search") shows a
+  search above the file list, as VS Code's search view; again hides it, and the query and results stay for the run.
+  - It looks in every pane in full; a match on lines that line up shows once, with an icon per pane that holds it.
+  - Match Case, and one toggle per pane under the box to show only some panes' findings.
+  - Results grouped per file, each group closes and opens; a finding or a group can be dismissed, and Enter in the box
+    brings them back.
+  - A click opens the file at the finding, selected, a collapsed stretch around it shown; a pane icon goes to that pane.
+  - The results follow edits, disk changes and the next stop of an operation; at most 20,000 rows.
+
+### Changed
+
+- The AI in a range thread (`--ai`):
+  - "Thinking and steps" is at most 20rem tall and scrolls inside, so a long turn no longer pushes the thread down;
+    while open it follows the newest text, keeps your place once you scroll up and follows again at the end. An
+    edit's diff inside it is at most 16rem, so it shows whole.
+  - Ask AI and Stop moved from the thread's header to its bottom row: Comment, Ask AI (Stop while the AI works),
+    Cancel, shown on every thread, so asking again needs no scrolling up.
+  - Ask AI sends what you typed in one step: the text is added as your comment, then the AI is asked. With nothing
+    typed it sends your comments since its last answer, as before. On a line's new thread it adds the thread and asks.
+
+### Fixed
+
+- The merge window: turning collapsing on from far down the Result now keeps the Result's place with the other panes
+  lined up; before, the Result could jump and a side pane stay where it was.
+- Both windows: after a find or a jump to the end, every pane stays lined up, including when one lands far from the
+  lines already drawn.
+
 ## [0.6.0-beta.1] - 2026-10-27
 
 ### Added

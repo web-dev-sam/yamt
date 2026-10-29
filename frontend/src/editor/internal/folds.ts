@@ -5,24 +5,25 @@ import {
   Transaction,
   type ChangeDesc,
   type Extension,
-  type SelectionRange,
   type Text,
   type TransactionSpec,
 } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
 import { toDocPos, type DocPos } from "./docPos";
-import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
+import { displayed, MIN_HIDDEN_LINES, sameHidden, waveStartsIn } from "./foldRuns";
 import type { Fold, FoldLevel, Hidden } from "./foldRuns";
-import { leaveAllHidden, revealKeep } from "./foldSelection";
+import {
+  hiddenLevels,
+  hidingAll,
+  leaveCollapsed,
+  leaveCollapsedAfter,
+  nextStep,
+} from "./foldSteps";
+import { revealed, reveals, sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
 import type { Pane, PaneViews } from "./geometry";
 
-type ShowFolds = { readonly run: number; readonly keep: number };
-
-export type FoldState = {
-  readonly runs: readonly Fold[];
-  readonly hiding: readonly number[];
-};
+export type FoldState = FoldSteps<Pane>;
 
 export type FoldFields = {
   readonly runs: readonly Fold[];
@@ -69,33 +70,6 @@ function mapFolds(folds: readonly Fold[], changes: ChangeDesc, doc: Text): reado
   return mapped.every((fold, index) => fold === folds[index]) ? folds : mapped;
 }
 
-function hidingAll(runs: readonly Fold[], collapsed: boolean): readonly number[] {
-  return runs.map((fold) => (collapsed ? fold.hidden.length : 0));
-}
-
-function sameCounts(a: readonly number[], b: readonly number[]): boolean {
-  return a.length === b.length && a.every((count, run) => count === b[run]);
-}
-
-function hiddenLevels(runs: readonly Fold[], counts: readonly number[]): readonly Fold[] {
-  return runs.map(({ hidden }, run) => ({
-    hidden: hidden.slice(Math.max(0, hidden.length - (counts[run] ?? 0))),
-  }));
-}
-
-function displayedIn(folds: readonly Fold[], pane: Pane): Hidden[] {
-  return folds.flatMap((fold) => displayed(fold, pane) ?? []);
-}
-
-function shown(folds: FoldState, { run, keep }: ShowFolds): FoldState {
-  const count = folds.hiding[run];
-  if (count === undefined || Math.max(0, keep) >= count) {
-    return folds;
-  }
-  const hiding = folds.hiding.map((other, index) => (index === run ? Math.max(0, keep) : other));
-  return { ...folds, hiding };
-}
-
 export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): readonly Fold[] {
   if (pane === "center") {
     const { runs, hiding } = state.field(fields.center);
@@ -105,7 +79,7 @@ export function paneFolds(fields: FoldFields, pane: Pane, state: EditorState): r
 }
 
 function startsIn(fields: FoldFields, pane: Pane, state: EditorState): (DocPos | null)[] {
-  return paneFolds(fields, pane, state).map((fold) => displayed(fold, pane)?.from ?? null);
+  return waveStartsIn(paneFolds(fields, pane, state), pane);
 }
 
 export function waveStarts(
@@ -117,16 +91,6 @@ export function waveStarts(
     center: startsIn(fields, "center", views.center.state),
     right: startsIn(fields, "right", views.right.state),
   };
-}
-
-function reveals(folds: readonly Fold[], pane: Pane, selection: SelectionRange): ShowFolds[] {
-  return folds.flatMap((fold, run) => {
-    const keep = revealKeep(
-      fold.hidden.map((level) => level[pane]),
-      selection,
-    );
-    return keep === null ? [] : [{ run, keep }];
-  });
 }
 
 export function foldField(runs: readonly Fold[], collapsed: boolean): StateField<FoldState> {
@@ -142,13 +106,7 @@ export function foldField(runs: readonly Fold[], collapsed: boolean): StateField
           next = { ...next, hiding: effect.value };
         }
       }
-      if (tr.selection !== undefined) {
-        const hidden = hiddenLevels(next.runs, next.hiding);
-        for (const reveal of reveals(hidden, "center", tr.selection.main)) {
-          next = shown(next, reveal);
-        }
-      }
-      return next;
+      return tr.selection === undefined ? next : revealed(next, "center", tr.selection.main);
     },
   });
 }
@@ -179,8 +137,7 @@ export function collapseSpec(
     effects: setHiding.of(hiding),
     annotations: Transaction.addToHistory.of(false),
   };
-  const hidden = displayedIn(hiddenLevels(runs, hiding), "center");
-  const selection = leaveAllHidden(state.selection, hidden);
+  const selection = leaveCollapsed(state.selection, { runs, hiding }, "center");
   return selection === null ? spec : { ...spec, selection };
 }
 
@@ -189,10 +146,6 @@ function showSpec(shows: readonly ShowFolds[]): TransactionSpec {
     effects: shows.map((show) => showFolds.of(show)),
     annotations: Transaction.addToHistory.of(false),
   };
-}
-
-function nextStep(folds: FoldState, run: number): ShowFolds {
-  return { run, keep: (folds.hiding[run] ?? 0) - 1 };
 }
 
 export function showNextStep(folds: FoldState, run: number): TransactionSpec {
@@ -236,11 +189,8 @@ export function sideFoldPush(
     return null;
   }
   const effects = setHiding.of(counts);
-  if (counts.every((count, run) => count <= (before[run] ?? 0))) {
-    return { effects };
-  }
-  const hidden = displayedIn(hiddenLevels(fields.runs, counts), pane);
-  const selection = leaveAllHidden(side.selection, hidden);
+  const steps = { runs: fields.runs, hiding: counts };
+  const selection = leaveCollapsedAfter(side.selection, before, steps, pane);
   return selection === null ? { effects } : { effects, selection };
 }
 
@@ -269,22 +219,29 @@ export function sideReveal(
   return found.length === 0 ? null : showSpec(found);
 }
 
-export function sideReveals(
-  fields: FoldFields,
-  pane: "left" | "right",
-  center: () => EditorView,
+export function revealOnOwner(
+  reveal: (state: EditorState) => TransactionSpec | null,
+  owner: () => EditorView,
 ): Extension {
   return EditorView.updateListener.of((update) => {
     if (!update.selectionSet) {
       return;
     }
-    const spec = sideReveal(fields, pane, update.state);
+    const spec = reveal(update.state);
     if (spec === null) {
       return;
     }
-    center().dispatch(spec);
+    owner().dispatch(spec);
     update.view.dispatch({
       effects: EditorView.scrollIntoView(update.state.selection.main, { y: "center" }),
     });
   });
+}
+
+export function sideReveals(
+  fields: FoldFields,
+  pane: "left" | "right",
+  center: () => EditorView,
+): Extension {
+  return revealOnOwner((state) => sideReveal(fields, pane, state), center);
 }

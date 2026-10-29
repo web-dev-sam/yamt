@@ -1,0 +1,368 @@
+commit 9ccae0f4c92799432a62b806eef7209c4dbf5605
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-28 20:37:06 +0100
+
+    refactor(editor): one mirror-cursor and owner-reveal rule for both windows; branded column changes
+
+diff --git a/frontend/src/editor/internal/columnFolds.test.ts b/frontend/src/editor/internal/columnFolds.test.ts
+index e8ab61b..39ca9f3 100644
+--- a/frontend/src/editor/internal/columnFolds.test.ts
++++ b/frontend/src/editor/internal/columnFolds.test.ts
+@@ -135,13 +135,18 @@ function allLevels(runs: readonly Fold<Column>[], column: Column): string[][] {
+   return runs.map((fold) => fold.hidden.map((level) => lineRange(DOCS[column], level[column])));
+ }
+ 
++const COLUMNS: readonly Column[] = ["left", "right"];
++
+ function thread(
+-  key: string,
+-  left: number,
+-  right: number,
++  column: Column,
++  lines: { readonly left: number; readonly right: number },
+   shown: ShownThread["shown"],
+ ): ShownThread {
+-  return { key, line: unchangedThreadLine("left", { left, right }), shown };
++  return {
++    key: `${column} ${lines.left} ${shown}`,
++    line: unchangedThreadLine(column, lines),
++    shown,
++  };
+ }
+ 
+ function outerLevel(state: EditorState, column: Column, run: number): Hidden {
+@@ -201,15 +206,18 @@ test("a stretch under 2 lines hides nothing and a level equal to the one outside
+   expect(allLevels(unchanged, "right")).toEqual([["1-30"]]);
+ });
+ 
+-test("a thread on an unchanged line splits its stretch and keeps 4 lines around it in both columns — open, collapsed and draft alike", () => {
+-  for (const shown of ["open", "collapsed", "draft"] as const) {
+-    const pair = opened([thread("t", 50, 51, shown)]);
++test.each(COLUMNS)(
++  "a thread on an unchanged line in the %s column splits its stretch and keeps 4 lines around it in both columns — open, collapsed and draft alike",
++  (column) => {
++    for (const shown of ["open", "collapsed", "draft"] as const) {
++      const pair = opened([thread(column, { left: 50, right: 51 }, shown)]);
+ 
+-    expect(waves(pair.left, "left")).toEqual(["1-26", "36-46", "56-66", "75-100"]);
+-    expect(waves(pair.right, "right")).toEqual(["1-26", "37-47", "57-67", "77-102"]);
+-    expect(pair.left.doc.line(51).text).toBe(pair.right.doc.line(52).text);
+-  }
+-});
++      expect(waves(pair.left, "left")).toEqual(["1-26", "36-46", "56-66", "75-100"]);
++      expect(waves(pair.right, "right")).toEqual(["1-26", "37-47", "57-67", "77-102"]);
++      expect(pair.left.doc.line(51).text).toBe(pair.right.doc.line(52).text);
++    }
++  },
++);
+ 
+ test("threads on removed or added lines change no run", () => {
+   const removed: ShownThread = { key: "r", line: changedThreadLine("left", 30), shown: "open" };
+@@ -223,7 +231,7 @@ test("threads on removed or added lines change no run", () => {
+ });
+ 
+ test("a thread on the line after an insertion point sorts after the difference and stays shown", () => {
+-  const after = thread("t", 70, 72, "open");
++  const after = thread("left", { left: 70, right: 72 }, "open");
+   const starts = columnChanges(DIFFERENCES, [after]).map(({ left, right }) => [
+     left.start,
+     right.start,
+@@ -239,20 +247,29 @@ test("a thread on the line after an insertion point sorts after the difference a
+   expect(waves(pair.right, "right")).toEqual(["1-26", "37-67", "-", "78-102"]);
+ });
+ 
+-test("two threads on one line make one change", () => {
+-  const changes = columnChanges(DIFFERENCES, [
+-    thread("a", 50, 51, "open"),
+-    thread("b", 50, 51, "collapsed"),
+-  ]);
++const SAME_LINE_COLUMNS: readonly (readonly [Column, Column])[] = [
++  ["left", "left"],
++  ["right", "right"],
++  ["left", "right"],
++];
+ 
+-  const threadLines: Readonly<Record<Column, LineSpan>> = {
+-    left: { start: 50, len: 1 },
+-    right: { start: 51, len: 1 },
+-  };
++test.each(SAME_LINE_COLUMNS)(
++  "two threads on one line make one change: %s column and %s column",
++  (first, second) => {
++    const changes = columnChanges(DIFFERENCES, [
++      thread(first, { left: 50, right: 51 }, "open"),
++      thread(second, { left: 50, right: 51 }, "collapsed"),
++    ]);
+ 
+-  expect(changes).toHaveLength(DIFFERENCES.length + 1);
+-  expect(changes).toContainEqual(threadLines);
+-});
++    const threadLines: Readonly<Record<Column, LineSpan>> = {
++      left: { start: 50, len: 1 },
++      right: { start: 51, len: 1 },
++    };
++
++    expect(changes).toHaveLength(DIFFERENCES.length + 1);
++    expect(changes).toContainEqual(threadLines);
++  },
++);
+ 
+ test("a step on a run shows its next step in both columns, owner then mirror", () => {
+   const once = click(opened(), 1);
+@@ -300,7 +317,7 @@ test("on hides every run back to its start whatever steps were shown, off shows
+ test("runs given at a renew replace the old ones and a mirror copy leaves counts alone otherwise", () => {
+   const off = opened([], false);
+   const again = renewed(off, false);
+-  const withThread = renewed(opened(), true, [thread("t", 50, 51, "open")]);
++  const withThread = renewed(opened(), true, [thread("left", { left: 50, right: 51 }, "open")]);
+   const moved = onLeft(withThread, { selection: EditorSelection.cursor(0) });
+ 
+   expect(columnSteps(again.left, "left").runs).not.toBe(columnSteps(off.left, "left").runs);
+@@ -401,26 +418,6 @@ test("a search match inside hidden lines reveals it in both columns", () => {
+   expect(levels(fromRight.left, "left", 1)).toEqual(["48-54"]);
+ });
+ 
+-test("a selection on a difference's first line reveals nothing", () => {
+-  const pair = opened();
+-  const leftSelections = [
+-    EditorSelection.single(at(pair.left, 31)),
+-    EditorSelection.single(at(pair.left, 31), pair.left.doc.line(31).to),
+-    EditorSelection.single(at(pair.left, 71)),
+-  ];
+-  const rightSelections = [
+-    EditorSelection.single(at(pair.right, 31), pair.right.doc.line(32).to),
+-    EditorSelection.single(at(pair.right, 72)),
+-  ];
+-
+-  for (const selection of leftSelections) {
+-    expect(onLeft(pair, { selection }).left.field(ownerSteps)).toBe(pair.left.field(ownerSteps));
+-  }
+-  for (const selection of rightSelections) {
+-    expect(rightReveal(pair.right.update({ selection }).state)).toBeNull();
+-  }
+-});
+-
+ test("every fold transaction is out of history", () => {
+   const pair = fresh();
+   const runs = rangeRuns(DIFFERENCES, [], DOCS);
+diff --git a/frontend/src/editor/internal/columnFolds.ts b/frontend/src/editor/internal/columnFolds.ts
+index 637556c..8c7f5ee 100644
+--- a/frontend/src/editor/internal/columnFolds.ts
++++ b/frontend/src/editor/internal/columnFolds.ts
+@@ -12,8 +12,15 @@ import { EditorView } from "@codemirror/view";
+ import type { Column, Difference, ShownThread, ThreadLine } from "../../ipc";
+ import type { ColumnViews } from "./compareViews";
+ import { columnRuns, type ColumnChange, type Fold } from "./foldRuns";
+-import { hiddenLevels, hidingAll, leaveCollapsed, nextStep, reveals } from "./foldSteps";
+-import { sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
++import { revealOnOwner } from "./folds";
++import {
++  hiddenLevels,
++  hidingAll,
++  leaveCollapsed,
++  leaveCollapsedAfter,
++  nextStep,
++} from "./foldSteps";
++import { revealed, reveals, sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
+ import { paneFoldView } from "./foldView";
+ 
+ export type ColumnSteps = FoldSteps<Column>;
+@@ -39,13 +46,7 @@ export const ownerSteps = StateField.define<ColumnSteps>({
+         next = effect.value;
+       }
+     }
+-    if (tr.selection !== undefined) {
+-      const hidden = hiddenLevels(next.runs, next.hiding);
+-      for (const reveal of reveals(hidden, "left", tr.selection.main)) {
+-        next = shown(next, reveal);
+-      }
+-    }
+-    return next;
++    return tr.selection === undefined ? next : revealed(next, "left", tr.selection.main);
+   },
+ });
+ 
+@@ -142,11 +143,9 @@ export function mirrorSpec(right: EditorState, steps: ColumnSteps): TransactionS
+     return null;
+   }
+   const spec = { effects: setSteps.of(steps), annotations: OUT_OF_HISTORY };
+-  const grew = steps.hiding.some((count, run) => count > (before.hiding[run] ?? 0));
+-  if (!replaced && !grew) {
+-    return spec;
+-  }
+-  const selection = leaveCollapsed(right.selection, steps, "right");
++  const selection = replaced
++    ? leaveCollapsed(right.selection, steps, "right")
++    : leaveCollapsedAfter(right.selection, before.hiding, steps, "right");
+   return selection === null ? spec : { ...spec, selection };
+ }
+ 
+@@ -169,22 +168,6 @@ function pushToRight(views: () => ColumnViews): Extension {
+   });
+ }
+ 
+-function revealFromRight(views: () => ColumnViews): Extension {
+-  return EditorView.updateListener.of((update) => {
+-    if (!update.selectionSet) {
+-      return;
+-    }
+-    const spec = rightReveal(update.state);
+-    if (spec === null) {
+-      return;
+-    }
+-    views().left.dispatch(spec);
+-    update.view.dispatch({
+-      effects: EditorView.scrollIntoView(update.state.selection.main, { y: "center" }),
+-    });
+-  });
+-}
+-
+ export function columnFoldExtension(column: Column, wiring: ColumnFoldWiring): Extension {
+   const field = column === "left" ? ownerSteps : mirrorSteps;
+   const view = paneFoldView(
+@@ -194,5 +177,5 @@ export function columnFoldExtension(column: Column, wiring: ColumnFoldWiring): E
+   );
+   return column === "left"
+     ? [ownerSteps, view, pushToRight(wiring.views)]
+-    : [mirrorSteps, view, revealFromRight(wiring.views)];
++    : [mirrorSteps, view, revealOnOwner(rightReveal, () => wiring.views().left)];
+ }
+diff --git a/frontend/src/editor/internal/foldRuns.ts b/frontend/src/editor/internal/foldRuns.ts
+index e9303d8..80c0b5f 100644
+--- a/frontend/src/editor/internal/foldRuns.ts
++++ b/frontend/src/editor/internal/foldRuns.ts
+@@ -1,6 +1,6 @@
+ import type { Text } from "@codemirror/state";
+ 
+-import type { Chunk, Column } from "../../ipc";
++import type { Chunk, Column, Difference } from "../../ipc";
+ import { toDocPos, type DocPos } from "./docPos";
+ import { PANES, type Pane } from "./geometry";
+ 
+@@ -8,7 +8,7 @@ export type Hidden = { readonly from: DocPos; readonly to: DocPos };
+ export type FoldLevel<P extends string = Pane> = Readonly<Record<P, Hidden | null>>;
+ export type Fold<P extends string = Pane> = { readonly hidden: readonly FoldLevel<P>[] };
+ export type LineSpan = { readonly start: number; readonly len: number };
+-export type ColumnChange = Readonly<Record<Column, LineSpan>>;
++export type ColumnChange = Pick<Difference, "left" | "right">;
+ 
+ type RunEdge = { readonly start: number; readonly end: number };
+ 
+diff --git a/frontend/src/editor/internal/foldSteps.ts b/frontend/src/editor/internal/foldSteps.ts
+index 91b88fe..05e7010 100644
+--- a/frontend/src/editor/internal/foldSteps.ts
++++ b/frontend/src/editor/internal/foldSteps.ts
+@@ -64,6 +64,14 @@ export function reveals<P extends string>(
+   });
+ }
+ 
++export function revealed<P extends string>(
++  steps: FoldSteps<P>,
++  pane: NoInfer<P>,
++  selection: SelectionRange,
++): FoldSteps<P> {
++  return reveals(hiddenLevels(steps.runs, steps.hiding), pane, selection).reduce(shown, steps);
++}
++
+ export function leaveCollapsed<P extends string>(
+   selection: EditorSelection,
+   steps: FoldSteps<P>,
+@@ -71,3 +79,13 @@ export function leaveCollapsed<P extends string>(
+ ): EditorSelection | null {
+   return leaveAllHidden(selection, displayedIn(hiddenLevels(steps.runs, steps.hiding), pane));
+ }
++
++export function leaveCollapsedAfter<P extends string>(
++  selection: EditorSelection,
++  before: readonly number[],
++  steps: FoldSteps<P>,
++  pane: P,
++): EditorSelection | null {
++  const grew = steps.hiding.some((count, run) => count > (before[run] ?? 0));
++  return grew ? leaveCollapsed(selection, steps, pane) : null;
++}
+diff --git a/frontend/src/editor/internal/folds.ts b/frontend/src/editor/internal/folds.ts
+index 62192d3..f4c9939 100644
+--- a/frontend/src/editor/internal/folds.ts
++++ b/frontend/src/editor/internal/folds.ts
+@@ -13,8 +13,14 @@ import { EditorView } from "@codemirror/view";
+ import { toDocPos, type DocPos } from "./docPos";
+ import { displayed, MIN_HIDDEN_LINES, sameHidden } from "./foldRuns";
+ import type { Fold, FoldLevel, Hidden } from "./foldRuns";
+-import { hiddenLevels, hidingAll, leaveCollapsed, nextStep, reveals } from "./foldSteps";
+-import { sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
++import {
++  hiddenLevels,
++  hidingAll,
++  leaveCollapsed,
++  leaveCollapsedAfter,
++  nextStep,
++} from "./foldSteps";
++import { revealed, reveals, sameCounts, shown, type FoldSteps, type ShowFolds } from "./foldSteps";
+ import type { Pane, PaneViews } from "./geometry";
+ 
+ export type FoldState = FoldSteps<Pane>;
+@@ -100,13 +106,7 @@ export function foldField(runs: readonly Fold[], collapsed: boolean): StateField
+           next = { ...next, hiding: effect.value };
+         }
+       }
+-      if (tr.selection !== undefined) {
+-        const hidden = hiddenLevels(next.runs, next.hiding);
+-        for (const reveal of reveals(hidden, "center", tr.selection.main)) {
+-          next = shown(next, reveal);
+-        }
+-      }
+-      return next;
++      return tr.selection === undefined ? next : revealed(next, "center", tr.selection.main);
+     },
+   });
+ }
+@@ -189,10 +189,8 @@ export function sideFoldPush(
+     return null;
+   }
+   const effects = setHiding.of(counts);
+-  if (counts.every((count, run) => count <= (before[run] ?? 0))) {
+-    return { effects };
+-  }
+-  const selection = leaveCollapsed(side.selection, { runs: fields.runs, hiding: counts }, pane);
++  const steps = { runs: fields.runs, hiding: counts };
++  const selection = leaveCollapsedAfter(side.selection, before, steps, pane);
+   return selection === null ? { effects } : { effects, selection };
+ }
+ 
+@@ -221,22 +219,29 @@ export function sideReveal(
+   return found.length === 0 ? null : showSpec(found);
+ }
+ 
+-export function sideReveals(
+-  fields: FoldFields,
+-  pane: "left" | "right",
+-  center: () => EditorView,
++export function revealOnOwner(
++  reveal: (state: EditorState) => TransactionSpec | null,
++  owner: () => EditorView,
+ ): Extension {
+   return EditorView.updateListener.of((update) => {
+     if (!update.selectionSet) {
+       return;
+     }
+-    const spec = sideReveal(fields, pane, update.state);
++    const spec = reveal(update.state);
+     if (spec === null) {
+       return;
+     }
+-    center().dispatch(spec);
++    owner().dispatch(spec);
+     update.view.dispatch({
+       effects: EditorView.scrollIntoView(update.state.selection.main, { y: "center" }),
+     });
+   });
+ }
++
++export function sideReveals(
++  fields: FoldFields,
++  pane: "left" | "right",
++  center: () => EditorView,
++): Extension {
++  return revealOnOwner((state) => sideReveal(fields, pane, state), center);
++}

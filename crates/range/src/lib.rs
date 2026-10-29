@@ -5,6 +5,7 @@ mod entries;
 mod load;
 mod lock;
 mod open;
+mod search;
 mod spec;
 
 use std::path::PathBuf;
@@ -12,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use yamt_gitio::Oid;
-use yamt_merge_core::Difference;
+use yamt_merge_core::{Difference, LineChange};
 
 pub use crate::lock::{PairLock, pair_folders, pair_right_commit};
 pub use crate::open::{Range, Resolved};
@@ -139,6 +140,22 @@ pub enum RangeFile {
         old: Option<String>,
         new: Option<String>,
     },
+}
+
+/// One text file's two sides as `RangeFile::Texts` holds them, with the lines that differ.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct SearchText {
+    pub file: RangeFileId,
+    pub left: String,
+    pub right: String,
+    pub changes: Vec<LineChange>,
+}
+
+/// One page of the range's text files; `next` is the id the following page starts at, `None` after the last file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+pub struct SearchTexts {
+    pub files: Vec<SearchText>,
+    pub next: Option<RangeFileId>,
 }
 
 #[derive(Debug, thiserror::Error)]

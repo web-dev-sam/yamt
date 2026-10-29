@@ -244,6 +244,15 @@ test("a failed openRange says the range could not be opened, with git's words", 
   );
 });
 
+test("a failed search read says the search stopped, with the cause", () => {
+  expect(text({ action: "search", cause: { kind: "Git", message: "cat-file died\n" } })).toBe(
+    "Search stopped: cat-file died",
+  );
+  expect(text({ action: "search", cause: { kind: "UnknownRangeFile", file: 4 } })).toBe(
+    "Search stopped: that file is not part of this range.",
+  );
+});
+
 test.each([
   ["list", "Could not load the threads: boom"],
   ["add", "Could not add the thread: boom"],

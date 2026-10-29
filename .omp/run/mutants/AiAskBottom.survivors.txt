@@ -1,0 +1,18 @@
+just mutants a484eb6 (patch 05c8fa5, AiAskBottom), 2026-10-28. Full output: artifact (session 33) — summary below.
+Rust: no changes since a484eb6.
+Stryker: 5 files (rangeAi, rangeAiView, rangeStore, rangeThreads, rangeThreadText .ts), 1056 mutants: 947 killed,
+2 timeout, 36 survived, 15 no coverage (exhaustive `default` branches and the retry guard's `return` body).
+
+Survivors on lines this patch added (the builder claims all four equivalent):
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:194 | if (thread === undefined || !canAsk(state, thread)) => if (false || !canAsk(...))
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:199 | if (text !== null) => if (true)
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:216 | if (from.kind === "thread" && isBlank(typed)) => if (true && isBlank(typed))
+Survived ConditionalExpression frontend/src/ui/rangeAi.ts:224 | if (thread !== null) => if (true)
+
+Survivors on lines moved or unchanged by this patch (each also survived in RVAiThreads/RVAiThreadsR1/RVThreadState runs,
+except where marked "moved"):
+rangeAi.ts:68 (askedSession `stored !== null`), :76 (`loadedSession !== session` → false), :132 ×2, :153
+(`turns.delete`), :154 (`session !== null`), :183 (`end === null`), :233 ×5 + NoCoverage (retry guard), :237, :246, :247
+rangeAiView.ts:54 (isKept `loadedSession === session`, moved), :61 (isAnswerIn kind check, moved), :65 (answersIn `?.`, moved)
+rangeStore.ts:107, :123, :126, :129, :142, :221
+rangeThreads.ts:93 ×2, :111, :250 ×2, :251 ×2, :258

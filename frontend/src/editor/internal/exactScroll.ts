@@ -1,6 +1,6 @@
 import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
 import type { Extension, SelectionRange } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 
 import type { Span } from "../../connectors";
 
@@ -20,6 +20,10 @@ export function farTop(
   return overlaps ? null : visibleTop;
 }
 
+export function movedFarTop(seenTop: number, box: ScrollBox, rendered: Span): number | null {
+  return box.scrollTop === seenTop ? null : farTop(box, rendered);
+}
+
 const placeTop = StateEffect.define<Placed>();
 
 const placed = StateField.define<Placed | null>({
@@ -37,36 +41,51 @@ const placed = StateField.define<Placed | null>({
 
 // WebKitGTK 2.54 pulls back a scrollTop that shows none of the rendered lines while CodeMirror swaps
 // its viewport in its scroll measure (docs/plan.md §2 #82, docs/slices/briefs/3.M-minimap-window-rework-3.md);
-// a scroll request places the viewport first.
-function placeFarScroll(view: EditorView): void {
-  const top = view.scrollDOM.scrollTop;
-  const { from, to } = view.viewport;
-  const visibleTop = farTop(
-    {
-      scrollTop: top,
-      clientHeight: view.scrollDOM.clientHeight,
-      paddingTop: view.documentPadding.top,
-    },
-    { top: view.lineBlockAt(from).top, bottom: view.lineBlockAt(to).bottom },
-  );
-  if (visibleTop === null) {
-    return;
+// a scroll request places the viewport first. A scroll event at an unmoved scrollTop is no jump: CodeMirror
+// may have moved the viewport to a scroll target it has not measured yet
+// (docs/slices/briefs/range-collapse-columns-rework-4.md).
+class FarScrolls {
+  #seenTop: number;
+
+  constructor(view: EditorView) {
+    this.#seenTop = view.scrollDOM.scrollTop;
   }
-  const line = view.lineBlockAtHeight(visibleTop);
-  const range = EditorSelection.cursor(line.from);
-  view.dispatch({
-    effects: [
-      placeTop.of({ range, top }),
-      EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
-    ],
-  });
+
+  scrolled(view: EditorView): void {
+    const top = view.scrollDOM.scrollTop;
+    const seenTop = this.#seenTop;
+    this.#seenTop = top;
+    const { from, to } = view.viewport;
+    const visibleTop = movedFarTop(
+      seenTop,
+      {
+        scrollTop: top,
+        clientHeight: view.scrollDOM.clientHeight,
+        paddingTop: view.documentPadding.top,
+      },
+      { top: view.lineBlockAt(from).top, bottom: view.lineBlockAt(to).bottom },
+    );
+    if (visibleTop === null) {
+      return;
+    }
+    const line = view.lineBlockAtHeight(visibleTop);
+    const range = EditorSelection.cursor(line.from);
+    view.dispatch({
+      effects: [
+        placeTop.of({ range, top }),
+        EditorView.scrollIntoView(range, { y: "start", yMargin: line.top - visibleTop }),
+      ],
+    });
+  }
 }
 
 export const exactScroll: Extension = [
   placed,
-  EditorView.domEventObservers({
-    scroll: (_event, view) => {
-      placeFarScroll(view);
+  ViewPlugin.fromClass(FarScrolls, {
+    eventObservers: {
+      scroll(_event, view) {
+        this.scrolled(view);
+      },
     },
   }),
   EditorView.scrollHandler.of((view, range) => {

@@ -29,13 +29,14 @@ const SKIPPED_FILE = "src/ipc/bindings.ts";
 const QUERY_SUFFIX = /\?.*$/;
 const MODULE_OF = /^src\/([^/]+)\//;
 const RESOLVE_SUFFIXES = ["", ".ts", ".vue", "/index.ts"] as const;
-const FRAMEWORK_FREE_MODULES: Record<string, true> = {
-  editor: true,
-  model: true,
-  connectors: true,
-  lsp: true,
-  jsonrpc: true,
-  agent: true,
+const FRAMEWORK_FREE_MODULES: Readonly<Record<string, "framework-free" | "self-contained">> = {
+  editor: "framework-free",
+  model: "framework-free",
+  connectors: "framework-free",
+  lsp: "framework-free",
+  jsonrpc: "self-contained",
+  agent: "framework-free",
+  search: "self-contained",
 };
 const AGENT_IMPORTS: Readonly<Record<string, true>> = {
   "src/ipc": true,
@@ -130,19 +131,17 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
   if (module === "lsp" && forbidden !== undefined) {
     return { rule: "PM2", reason: `lsp/ never imports ${forbidden.slice("src/".length)}/` };
   }
-  if (module === "jsonrpc" && target.startsWith("src/") && !isInside(target, "src/jsonrpc")) {
-    return { rule: "PM2", reason: "jsonrpc/ imports no other src/ module" };
+  const selfContained = module !== undefined && FRAMEWORK_FREE_MODULES[module] === "self-contained";
+  if (selfContained && target.startsWith("src/") && !isInside(target, `src/${module}`)) {
+    return { rule: "PM2", reason: `${module}/ imports no other src/ module` };
   }
   const outsideAgent = target.startsWith("src/") && !isInside(target, "src/agent");
   if (module === "agent" && outsideAgent && !Object.hasOwn(AGENT_IMPORTS, target)) {
     return { rule: "PM2", reason: "agent/ imports only ipc/index.ts and jsonrpc/index.ts" };
   }
   const targetModule = MODULE_OF.exec(target)?.[1];
-  if (
-    targetModule !== undefined &&
-    targetModule !== module &&
-    target.split("/").includes("internal")
-  ) {
+  const crossesInternal = targetModule !== module && target.split("/").includes("internal");
+  if (targetModule !== undefined && crossesInternal) {
     return { rule: "PM5", reason: "no module imports another module's internal/" };
   }
   return undefined;

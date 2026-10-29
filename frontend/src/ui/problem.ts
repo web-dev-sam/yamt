@@ -54,7 +54,7 @@ export type Problem =
       readonly cause: ProblemCause;
     }
   | { readonly action: "settings"; readonly cause: ProblemCause | KeysUnread }
-  | { readonly action: "tabs" | "openRange"; readonly cause: ProblemCause }
+  | { readonly action: "tabs" | "openRange" | "search"; readonly cause: ProblemCause }
   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
   | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
   | { readonly action: "ai"; readonly step: AiAttempt; readonly cause: ProblemCause }
@@ -101,6 +101,7 @@ export function logProblem(problem: Problem): void {
     case "list":
     case "tabs":
     case "openRange":
+    case "search":
       log.error(event, { ...problem.cause });
       return;
     case "abort":

@@ -1,0 +1,430 @@
+mutants: no Rust changes since a214c2a
+[32m12:39:43 (3582322) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m12:39:43 (3582322) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m12:39:44 (3582322) INFO ProjectReader[39m Found 5 of 788 file(s) to be mutated.
+[32m12:39:44 (3582322) INFO Instrumenter[39m Instrumented 5 source file(s) with 459 mutant(s)
+[32m12:39:44 (3582322) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m12:39:45 (3582322) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m12:39:50 (3582322) INFO DryRunExecutor[39m Initial test run succeeded. Ran 269 tests in 5 seconds (net 1998.9105989999998 ms, overhead 3366.089401 ms).
+
+All tests
+  diskChanges.test.ts
+    ~ a disk change searches that path again after the pause, and no other (covered 100)
+  mergeSearch.test.ts
+    ✓ an opened file's Result is its live text when built, else its data; an unopened one is loaded once until forgotten; a choice file is skipped (killed 57)
+    ✓ an untracked live Result falls back to the file's data; untrack by another view keeps it (killed 6)
+    ✓ a Result git left as something other than text has no Result rows, only the sides' (killed 6)
+    ✓ a file's data lines its panes up through its chunks (killed 1)
+    ✓ a read failure is reported once as the search's and stops the run (killed 7)
+    ~ a read answering that git moved on ends the stop instead of showing a problem (covered 103)
+    ~ a read sent in a stop that ended before git moved on answered changes nothing in the next stop (covered 98)
+    ~ a read sent in a stop that ended before a failure answered changes nothing in the next stop (covered 98)
+    ~ a text loaded in a stop that ended before it answered is not kept for the next stop (covered 140)
+    ✘ the merge window searches its three panes with the Result leading (covered 0)
+    ✓ the panes are titled as their headers: both sides' names and Result (killed 13)
+    ✓ a place click opens its file the way the shown path is asked (killed 1)
+    ✓ a cleared stop forgets every loaded text, so the next run loads again (killed 3)
+    ✓ a load that lands after its file was forgotten is not kept (killed 3)
+    ✓ a file that is no longer text is searched as nothing, without a load (killed 8)
+    ✓ the panes follow the side names, and the shown file is the active one (killed 3)
+  rangeSearch.test.ts
+    ~ the first run pages from the first file until next is null; later runs ask Rust nothing (covered 79)
+    ~ a failed page is reported once, stops the run, and the next run asks from the same file (covered 75)
+    ~ two runs at once share one page request (covered 76)
+    ~ a row click shows its file in the window, with the new side asked when it is on (covered 94)
+    ~ the range's panes are the old side then the new one, titled with their commits (covered 22)
+    ~ an empty range asks Rust nothing and finds nothing (covered 57)
+    ~ a search before the range opened reads nothing and remembers no page (covered 75)
+    ~ a page without files moves on to its next id (covered 75)
+    ~ a page's file the range does not list is left out (covered 79)
+    ~ a file searched again reads its kept texts and keeps its rows (covered 104)
+  rangeStore.test.ts
+    ✘ the window's components get no store before the root creates one (covered 0)
+    ~ the first file is shown at start and is the one file mounted (catches an empty main area at start) (covered 22)
+    ~ an empty range shows no file and mounts none (covered 22)
+    ~ before openRange answers: the files screen, the start theme's preferences, no file to show (covered 22)
+    ~ a failed openRange reports the range and shows nothing (covered 22)
+    ~ at start the list shows first, then the threads load and GitLab is checked once (covered 22)
+    ~ a failed openRange loads no threads and checks nothing (covered 22)
+    ~ a failed thread list is the window's problem (covered 22)
+    ~ showFile from the settings screen shows the file and returns the screen to files (covered 22)
+    ~ the search hands the keyboard back to the shown file's right column (covered 31)
+    ~ closeSettings returns to the files; a path not in the range changes nothing (covered 22)
+    ~ showing a visited file again keeps the mounted order (catches a moved view losing its scroll) (covered 22)
+    ~ the 17th file drops the least recently shown and keeps the others' order (covered 22)
+    ~ a draft outlives its file's view: 16 other files evict file 0 and the draft is still there (covered 22)
+    ~ a failed load reports open with its path and leaves visited; a later success clears the problem (covered 22)
+    ~ a failed file leaves the eviction order too: the next eviction drops the least recent mounted file (covered 22)
+    ~ dismissProblem clears the shown problem (covered 22)
+    ~ the bound key toggles the file list, never while a question waits (covered 22)
+    ~ answer settles the waiting question (covered 22)
+    ~ without --ai the store has no AI and the window closes without asking (covered 22)
+    ~ First message's values: the thread's place, the range as typed, both short ids (covered 22)
+    ~ with --ai a changed checkout asks first: Keep closes, Discard discards then closes, dismiss stays (covered 22)
+    ~ deleteNote asks first: Cancel and Escape keep the note, Delete removes it and its emptied thread (covered 22)
+    ~ the collapse choice missing in the window's storage starts the range store as the merge window reads it (covered 22)
+    ~ the collapse choice "true" in the window's storage starts the range store as the merge window reads it (covered 22)
+    ~ the collapse choice garbage in the window's storage starts the range store as the merge window reads it (covered 22)
+    ~ the collapse choice "false" in the window's storage starts the range store as the merge window reads it (covered 22)
+    ~ toggling in the range store writes the merge window's stored choice (catches a second key) (covered 22)
+    ✘ the range toggle's words are the merge toolbar's collapse entry (covered 0)
+  rangeThreads.test.ts
+    ✘ a draft's Comment adds the thread and its key becomes the stored id with the text kept (covered 0)
+    ✘ a refused Comment keeps the draft with its text and reports the add (covered 0)
+    ✘ a second Comment while the first is in flight sends nothing more (covered 0)
+    ✘ after a refused Comment the next Comment on that draft is sent and stored once (covered 0)
+    ✘ a Comment on a key with no draft makes no call and reports nothing (covered 0)
+    ✘ a refused Comment whose draft was dropped while it ran brings no draft back (covered 0)
+    ✘ a second press on a line with an open draft focuses it, with no second draft (covered 0)
+    ✘ a dropped draft leaves the line; writing a missing draft creates nothing (covered 0)
+    ✘ stored threads come back collapsed; open and collapse per thread and per line (covered 0)
+    ✘ counts per file ignore drafts (covered 0)
+    ✘ blank text is never sent (covered 0)
+    ✘ a note is added to its thread and its draft text cleared; a refused note keeps it (covered 0)
+    ✘ each thread keeps its own reply text (covered 0)
+    ✘ a press on the same line number in the other column opens a second draft (covered 0)
+    ✘ writing a blank note drops its draft (covered 0)
+    ✘ queue and unqueue change the posting and the queued count; a pending one reports (covered 0)
+    ✘ a half-edited Post text outlives a collapse and a reopen of its thread (covered 0)
+    ✘ an emptied Post text keeps its editor open; Cancel drops it (covered 0)
+    ✘ a queued Post closes its editor; a refused or blank Queue keeps the text (covered 0)
+    ~ a Post text outlives its file's view: 16 other files evict file 0 and the text is still there (covered 22)
+    ✘ a failed list reports it and keeps the empty list (covered 0)
+    ✘ listed turns true once the first list settles, read or not (covered 0)
+    ✘ listed turns true once the first list settles, refused or not (covered 0)
+    ✘ a Cancel while Comment is in flight still adds and opens the thread (covered 0)
+    ✘ replace mirrors a send's list and drops the Post box of a message it no longer holds (covered 0)
+    ✘ queued and refused postings sit in the queue; not queued and pending do not (covered 0)
+    ✘ your notes not yet on GitLab can change; a pending note and an AI answer cannot (covered 0)
+    ✘ an edit stores the new text, closes its box and keeps a queued note queued with that text (covered 0)
+    ✘ a blank edit makes no call and keeps its box open (covered 0)
+    ✘ a refused edit or delete is reported, changes nothing and keeps the edit box (covered 0)
+    ✘ a message's Edit and Post boxes are never open at once (covered 0)
+    ✘ each message keeps its own Edit text; a Post on one leaves the other's Edit alone (covered 0)
+    ✘ an Edit box on a note a send made pending closes; one on a note still unsent stays (covered 0)
+    ✘ deleting a note keeps a thread that still has a message (covered 0)
+    ✘ deleting a thread's last note removes the thread, its line, its count, its open state and its drafts (covered 0)
+    ✘ addingThread holds a draft's add only while it runs (refused: false) (covered 0)
+    ✘ addingThread holds a draft's add only while it runs (refused: true) (covered 0)
+    ✘ addingNote holds a thread's note add only while it runs (refused: false) (covered 0)
+    ✘ addingNote holds a thread's note add only while it runs (refused: true) (covered 0)
+    ✘ a second Comment while a note's add runs still sends; the thread is adding until both land (covered 0)
+  searching.test.ts
+    ✓ a run starts 300 ms after the last keystroke, not per keystroke; Enter runs at once (killed 21)
+    ✓ an emptied box shows nothing at once and cancels the pending run (killed 9)
+    ✓ a newer run's results win over an older run still reading (killed 3)
+    ✓ Enter with the same query brings back dismissed rows and groups and opens closed groups (killed 19)
+    ✓ Match Case runs again at once; a pane filter runs nothing and brings back nothing dismissed (killed 6)
+    ✓ changed searches only that file again after the pause and keeps its dismissals (killed 15)
+    ~ a one-file reply that a full run overtook is dropped (covered 101)
+    ✓ a long run publishes and yields to the page between 8 ms slices (killed 10)
+    ✓ the query, filters, closed groups and results stay while the panel is hidden and shown again (killed 7)
+    ✓ toggleKey leaves a press another handler took and one made while a question waits (killed 1)
+    ✓ go asks for the lead pane when it is on, else the leftmost on pane, then opens the file (killed 24)
+    ✓ focusShownFile asks the shown file's lead pane for the keyboard only (killed 6)
+    ✓ clear drops results and every text but keeps the query, case, filters and shown; rerun searches again (killed 4)
+    ✓ before any run there are no rows and no summary, and took or a dismissal changes nothing (killed 5)
+    ✓ go to a pane the place does not hold, or with every pane off, asks nothing and opens nothing (killed 1)
+    ✓ the box starts empty, and Enter in an empty box searches nothing (killed 3)
+    ✓ a run cut at 20,000 rows reads no later file (killed 2)
+    ✓ a run cleared while it yields reads no further file (killed 3)
+    ~ an emptied box drops the run still reading (covered 65)
+    ~ a one-file read a full run overtook is dropped (covered 100)
+    ✓ of two one-file reads of a file, the later one wins whichever lands last (killed 4)
+    ✓ clear cancels a file's waiting re-run (killed 2)
+    ✓ an older run's file landing while the newer run is held on its second file writes nothing and leaves running on (killed 3)
+    ✓ a one-file read landing while a newer full run is held publishes none of that run's partial results (killed 1)
+    ~ changed before any run reads nothing and throws nothing (covered 34)
+    ✓ changed for a file the previous run read but the held current run has not reached reads it not and adds no group (killed 2)
+    ✓ a re-read of a file without text any more drops its group and leaves the results uncut (killed 3)
+    ✓ 1 ms files publish nothing and yield nothing before 8 ms have passed, then publish once (killed 3)
+  searchListKeys.test.ts
+    ✓ Down and Up step one row, start at the top without an active row and stop at both ends (killed 17)
+    ✓ an empty list takes no step (killed 6)
+    ✓ Left closes an open group and moves a place row to its group; on a closed group it does nothing (killed 22)
+    ✓ Right opens a closed group, enters an open one's first place and does nothing on a place (killed 4)
+    ✓ Enter presses the active row; without an active row Enter, Left and Right do nothing (killed 5)
+    ✓ another key is left alone (killed 1)
+  stops.test.ts
+    ✓ a new stop drops every opened file, choice, side taken, notice, problem and the shown file, and shows the files (killed 3)
+    ~ the list runs after the opens are bumped, so a load still running for the old stop lands nowhere (covered 45)
+    ~ a write still running for the old stop is dropped: its claim is gone, marked overtaken, and its stop dropped (covered 45)
+    ~ moved on outside with unsaved edits: one notice names the operation and every dropped file (covered 45)
+    ~ moved on outside without unsaved edits, or continued with them, gives no notice (covered 45)
+    ~ continued to a stop that lists no file shows git's message, naming the new stop's operation, and keeps it for the stop view (covered 45)
+    ~ continued to a stop with files, or one whose list failed, shows no message (covered 45)
+    ~ moved on outside to a stop that lists no file shows no message (covered 45)
+    ~ moved on outside from a stop that recorded no operation: the notice says Git moved on (covered 45)
+    ~ a Mark resolved question waiting when the stop ends ends with it: a Yes afterwards sends no finishFile (covered 45)
+    ~ an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing (covered 45)
+    ~ a question that is not about the stop stays open across it (covered 45)
+    ✓ a new stop clears the results, then searches the new stop's files for the same query once its list arrived (killed 6)
+    ~ a new stop whose list failed searches nothing (covered 84)
+  store.test.ts
+    ✓ useAppStore throws before createAppStore, then returns the created store (killed 10)
+    ✓ loading the list opens the first file the editor can show and logs file.loaded (killed 18)
+    ✓ an empty list opens nothing (killed 1)
+    ✓ a rejected list opens nothing, resolves, and shows an Unexpected list problem (killed 3)
+    ✓ opening A, B, then A again loads each once and keeps both; re-clicking the shown file loads nothing (killed 1)
+    ~ re-clicking the shown file keeps the problem and lets a pending load win (covered 66)
+    ~ switching to an opened file wins over a load that resolves later and clears the problem (covered 66)
+    ~ a later open wins when the earlier load resolves last (covered 66)
+    ~ a stale failed open is logged but shows no problem (covered 66)
+    ~ a failed open names the file and cause, keeps the previous file; a later open clears it (covered 66)
+    ~ a rejected load is an Unexpected problem and keeps the previous file (covered 66)
+    ✓ a finish with nothing left sends the text without asking, saves it, and opens the next unresolved file (killed 2)
+    ~ a finish of a file no longer shown does not switch files (covered 67)
+    ✓ settings open and close; picking a file while they show closes them and shows it, the shown file too (killed 9)
+    ~ screen: a server's log opens from the files or from settings, and Back returns to the files (covered 69)
+    ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: true) (covered 83)
+    ~ the app's own opens, the first file and the next one after a finish, keep settings as they were (open: false) (covered 80)
+    ~ a file the user opens while a finish runs wins over the next file, though still loading (covered 67)
+    ✓ a file the user opens while a take runs wins over the next file, though still loading (killed 2)
+    ~ a finish with work left asks; Back writes nothing and stays, Save writes the text (covered 80)
+    ✓ a failed finish keeps the file shown, the list unresolved and the old saved text; dismissProblem clears it (killed 1)
+    ~ a rejected finish is an Unexpected problem (covered 67)
+    ~ the unsaved list names exactly the opened files whose text differs from loaded or finished (covered 67)
+    ~ closing asks only with unsaved work and answers with the choice (covered 66)
+    ✓ everything is resolved only when every listed file is (killed 13)
+    ✓ reset of A replaces only A in place with a new object and keeps B opened (killed 1)
+    ~ a failed reset keeps the current file and names the path (covered 66)
+    ~ a failed reload after a reset keeps A's old view and reports it as a failed open (covered 66)
+    ~ reset A, open B, open A, then the reset resolves: A shows its fresh view (covered 66)
+    ~ a later open wins over a reset that resolves last; the reset file is replaced in place (covered 66)
+    ~ a reset landing in the background keeps another file's problem; a problem about its own file is cleared (covered 67)
+    ✓ a list of files the editor cannot show opens the first one's choice and loads nothing (killed 1)
+    ~ opening a file the editor cannot show describes it once and never loads it (covered 79)
+    ~ a failed describe is a failed open of that file and shows no choice (covered 79)
+    ~ taking a side updates the list, marks only that file taken, and clears a problem about it (covered 81)
+    ~ a take keeps a problem about another file (covered 81)
+    ~ a failed take keeps the list and the choice and names the file (covered 81)
+    ~ reset of a taken choice forgets only its side at once and describes the file again (covered 81)
+    ~ a failed describe after a reset is a failed open; opening the file again describes it (covered 81)
+    ~ choices count toward everything resolved (covered 93)
+    ~ a take on the shown file opens the next unresolved file, wrapping to the top (covered 80)
+    ~ a deleted-side text file keeps the side taken next to the choices' until its reset, and is loaded again after each (covered 80)
+    ✓ a list refresh changes the marks only: same file shown, same views, another file's problem kept (killed 1)
+    ~ a failed refresh is a list problem and keeps the marks; the next good one clears only that (covered 68)
+    ✓ a running change to an opened file rebuilds it and drops its side taken (edits: true) (killed 2)
+    ~ a running change to an opened file rebuilds it and drops its side taken (edits: false) (covered 90)
+    ~ a change to a file that is not shown gives only its notice and its mark (covered 89)
+    ✓ changes reported by the first list are start notices; the file then opens from the disk (killed 1)
+    ✓ a newer change replaces the notice for its path; dismissNotice removes just one (killed 6)
+    ~ a choice staged from the disk is taken by the disk, a deleted-side file is not, and both are shown again (covered 90)
+    ~ a choice file staged from the disk before start opens later taken by the disk, so Reset is enabled (covered 87)
+    ~ a change git could not stage is a warning notice, not a problem (covered 87)
+    ~ a finish refused because the file changed on disk saves nothing, stays, and shows the disk view (covered 88)
+    ~ a take refused because the file changed on disk shows the change and the disk view (covered 88)
+    ~ a reset refused because the file changed on disk shows the change and the disk view (covered 87)
+    ~ finish, take and reset forward the disk version they are given (covered 81)
+    ~ a take on a deleted-side file shown from the disk shows yamt's view again (covered 80)
+    ✓ settings start with the start theme and the default keys, before any file is read (killed 1)
+    ~ a load on focus applies a file changed by hand since the last load (covered 66)
+    ✓ start-up loads the file list and the settings; focus loads both again (killed 1)
+    ~ a loaded file sets the theme and keys every opened file follows (covered 66)
+    ~ a failed load or change keeps the settings in use and shows a settings problem (covered 66)
+    ~ key problems in the file show one settings problem, which a clean read clears (covered 66)
+    ~ setTheme sends the settings in use and applies the reply (covered 66)
+    ~ setAntialiasing sends the settings in use with the new value and applies the reply (covered 66)
+    ~ a load whose only difference is the antialiasing is adopted (covered 66)
+    ~ a key another action holds asks; Move writes both changes in one call (covered 66)
+    ~ Cancel on the clash question writes nothing (covered 66)
+    ~ each key edit sends only the changed actions, as key texts (covered 66)
+    ~ an identical load keeps the settings object and does not show the same key problems again (covered 67)
+    ~ a key problem shown again replaces a settings failure the file no longer has (covered 66)
+    ~ a move to a file with the same broken keys names the new path in the Keys problem (covered 66)
+    ~ a load that started before a change and answers after it does not put the old file back (covered 66)
+    ~ Move after a reload freed the key sends the edit planned on the bindings now in use (covered 66)
+    ~ moveSettings sends the path with the settings in use and uses the file found there (covered 66)
+    ✓ the file list is shown at start, and Ctrl+B on Linux hides and shows it, taking each press (killed 3)
+    ~ ⌘B on macOS toggles the list; ⌃B on macOS and other B keys on Linux leave the press alone (covered 68)
+    ~ a key press another handler already took does not toggle the list (covered 68)
+    ~ while a question waits the key does nothing; once answered it toggles again (covered 68)
+    ~ a re-bound toggle-file-list key toggles the list at once, and Ctrl+B no longer does (covered 68)
+    ~ an empty toggle-file-list binding leaves Ctrl+B and a plain b alone (covered 68)
+    ~ with two toggle-file-list keys, each one toggles the list (covered 68)
+    ~ toggleCollapsing flips collapsing and keeps the choice in the window's storage (covered 66)
+    ~ a save while a reset of the same file runs is ignored (covered 79)
+    ~ a save while a finish of the same file runs is ignored (covered 80)
+    ~ a save whose formatting still runs when a reset of the same file lands writes nothing (covered 79)
+    ~ a save whose formatting still runs when a finish of the same file lands writes nothing (covered 80)
+    ~ the format note: shown after a Save for the four refusals, hidden for the three others, replaced by the next Save (covered 79)
+    ✓ a focus list that finds git moved on outside drops the old stop, names the dropped edits, and opens the new stop's first file (killed 1)
+    ~ a save git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once (covered 104)
+    ~ a take git answers StopMovedOn ends the stop: the old views dropped, the moved-on notice shown, the new stop listed once (covered 105)
+    ✓ a search read git answers StopMovedOn for ends the stop it was sent in: the next stop listed and opened (killed 21)
+    ✓ a search row's click opens its file as a list click does (killed 7)
+    ~ Continue answered Stopped runs the store's own nextStop: the old stop is dropped and the new stop listed and opened (covered 104)
+    ~ a take git refuses stays on the file: no move to the next unresolved one (covered 81)
+    ~ an Abort git has not answered yet makes Continue running and refuses the close (covered 79)
+    ~ a Continue git has not answered yet makes Abort running and refuses the close (covered 88)
+    ✓ a stop without files shows git's message in the stop view, not the bar; settings hide it and later problems keep it (killed 2)
+  useRangeController.test.ts
+    ✘ a texts reply builds one controller on the hosts with the path, both texts and the preferences (covered 0)
+    ✘ the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view (covered 0)
+    ✘ the controller is built with the file's threads at that moment, and shown each later change of them (covered 0)
+    ✘ a thread change calls showThreads and never setCollapsed (catches runs recomputed on an add) (covered 0)
+    ✘ the controller is built with the store's collapsing at that moment (covered 0)
+    ✘ a toggle reaches every live controller through setCollapsed with no rebuild; a file opened after it builds with the new state (covered 0)
+    ✘ nothing builds before the thread list was read once; then it builds with the threads read (covered 0)
+    ✘ a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again) (covered 0)
+    ✘ the controller gets the line events and its hosts reach threadHosts (covered 0)
+    ✘ a go-to waits for the load, the hosts and the thread list, is applied once at build, then goes straight to the controller (covered 0)
+    ✘ a go-to after the view unmounted reaches no controller (covered 0)
+    ✘ a binary reply builds no controller and shows its sentence (covered 0)
+    ✘ a tooLarge reply builds no controller and shows its sentence (covered 0)
+    ✘ a notUtf8 reply builds no controller and shows its sentence (covered 0)
+    ✘ a modeOnly reply builds no controller and shows its sentence (covered 0)
+    ✘ a kindChanged reply builds no controller and shows its sentence (covered 0)
+    ✘ a submodule reply builds no controller and shows its sentence (covered 0)
+    ✘ the binary sentence is the one rangeText words (covered 0)
+    ✘ a reply arriving after unmount is dropped: nothing built, nothing shown (covered 0)
+    ✘ a failed load builds nothing and stays loading (covered 0)
+    ✘ preferences changed before the controller exists reach it at build, not through a missing controller (covered 0)
+    ✘ no hosts while the left ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ no hosts while the right ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ no hosts while the strip ref is still null (catches a column built on a half-mounted view) (covered 0)
+    ✘ a press on a line number starts a draft in that file only; toggle opens and closes (covered 0)
+    ✘ a file waits for the thread list, then builds once it was read (catches columns stuck empty) (covered 0)
+    ✘ a file waits for the thread list, then builds once it was failed (catches columns stuck empty) (covered 0)
+
+[Survived] AssignmentOperator
+src/ui/mergeSearch.ts:132:7
+-         kept.forgets += 1;
++         kept.forgets -= 1;
+Tests ran:
+    a running change to an opened file rebuilds it and drops its side taken (edits: true)
+    a running change to an opened file rebuilds it and drops its side taken (edits: false)
+    a change to a file that is not shown gives only its notice and its mark
+  and 11 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/mergeSearch.ts:17:48
+-   export const MERGE_LAYOUT: Layout<MergePane> = {
+-     panes: ["left", "center", "right"],
+-     lead: "center",
+-   };
++   export const MERGE_LAYOUT: Layout<MergePane> = {};
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/mergeSearch.ts:18:29
+-     panes: ["left", "center", "right"],
++     panes: ["left", "center", ""],
+Ran all tests for this mutant.
+
+[Survived] ArrayDeclaration
+src/ui/mergeSearch.ts:18:10
+-     panes: ["left", "center", "right"],
++     panes: [],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/mergeSearch.ts:18:19
+-     panes: ["left", "center", "right"],
++     panes: ["left", "", "right"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/mergeSearch.ts:18:11
+-     panes: ["left", "center", "right"],
++     panes: ["", "center", "right"],
+Ran all tests for this mutant.
+
+[Survived] StringLiteral
+src/ui/mergeSearch.ts:19:9
+-     lead: "center",
++     lead: "",
+Ran all tests for this mutant.
+
+[Survived] CallExpression
+src/ui/searchRun.ts:75:3
+-     run.waiting.clear();
++     ;
+Tests ran:
+    a new stop drops every opened file, choice, side taken, notice, problem and the shown file, and shows the files
+    the list runs after the opens are bumped, so a load still running for the old stop lands nowhere
+    a write still running for the old stop is dropped: its claim is gone, marked overtaken, and its stop dropped
+  and 64 more tests!
+
+
+[Survived] AssignmentOperator
+src/ui/searchRun.ts:70:3
+-     run.generation += 1;
++     run.generation -= 1;
+Tests ran:
+    a new stop drops every opened file, choice, side taken, notice, problem and the shown file, and shows the files
+    the list runs after the opens are bumped, so a load still running for the old stop lands nowhere
+    a write still running for the old stop is dropped: its claim is gone, marked overtaken, and its stop dropped
+  and 64 more tests!
+
+
+[Survived] AssignmentOperator
+src/ui/searchRun.ts:157:3
+-     run.ticket += 1;
++     run.ticket -= 1;
+Tests ran:
+    changed searches only that file again after the pause and keeps its dismissals
+    a one-file reply that a full run overtook is dropped
+    a one-file read a full run overtook is dropped
+  and 7 more tests!
+
+
+[Survived] CallExpression
+src/ui/searchRun.ts:148:3
+-     run.waiting.delete(path);
++     ;
+Tests ran:
+    changed searches only that file again after the pause and keeps its dismissals
+    a one-file reply that a full run overtook is dropped
+    a one-file read a full run overtook is dropped
+  and 11 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/store.ts:121:38
+-       sideNames: shallowRef<SideNames>({ local: null, remote: null }),
++       sideNames: shallowRef<SideNames>({}),
+Tests ran:
+    useAppStore throws before createAppStore, then returns the created store
+    loading the list opens the first file the editor can show and logs file.loaded
+    an empty list opens nothing
+  and 95 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/store.ts:142:11
+-       stop: { dropped: false },
++       stop: {},
+Tests ran:
+    useAppStore throws before createAppStore, then returns the created store
+    loading the list opens the first file the editor can show and logs file.loaded
+    an empty list opens nothing
+  and 95 more tests!
+
+
+[Survived] CallExpression
+src/ui/store.ts:203:3
+-     registerSettingsStore(store);
++     ;
+Tests ran:
+    useAppStore throws before createAppStore, then returns the created store
+    loading the list opens the first file the editor can show and logs file.loaded
+    an empty list opens nothing
+  and 95 more tests!
+
+
+Ran 5.73 tests per mutant on average.
+-------------------|------------------|----------|-----------|------------|----------|----------|
+                   | % Mutation score |          |           |            |          |          |
+File               |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-------------------|--------|---------|----------|-----------|------------|----------|----------|
+All files          |  96.90 |   96.90 |      437 |         0 |         14 |        0 |        6 |
+ mergeSearch.ts    |  93.91 |   93.91 |      108 |         0 |          7 |        0 |        4 |
+ searching.ts      | 100.00 |  100.00 |       81 |         0 |          0 |        0 |        0 |
+ searchListKeys.ts | 100.00 |  100.00 |       55 |         0 |          0 |        0 |        0 |
+ searchRun.ts      |  96.46 |   96.46 |      109 |         0 |          4 |        0 |        2 |
+ store.ts          |  96.55 |   96.55 |       84 |         0 |          3 |        0 |        0 |
+-------------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m12:40:10 (3582322) INFO MutationTestExecutor[39m Done in 26 seconds.

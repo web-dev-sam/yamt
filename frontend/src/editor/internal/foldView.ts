@@ -1,9 +1,16 @@
-import { RangeSet, RangeSetBuilder, type Extension } from "@codemirror/state";
+import {
+  RangeSet,
+  RangeSetBuilder,
+  type EditorState,
+  type Extension,
+  type StateField,
+} from "@codemirror/state";
 import {
   Decoration,
   EditorView,
   GutterMarker,
   lineNumberMarkers,
+  ViewPlugin,
   WidgetType,
   type DecorationSet,
 } from "@codemirror/view";
@@ -26,6 +33,7 @@ type FoldWiring = {
 
 const WAVE_LABEL = "Show unchanged lines";
 const HALF = 0.5;
+const WAVE_WIDTH_VAR = "--fold-wave-width";
 
 class FoldLine extends WidgetType {
   readonly run: number;
@@ -72,7 +80,10 @@ class WaveMarker extends GutterMarker {
   }
 }
 
-export function foldDecorations(folds: readonly Fold[], pane: Pane): DecorationSet {
+export function foldDecorations<P extends string>(
+  folds: readonly Fold<P>[],
+  pane: P,
+): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   folds.forEach((fold, run) => {
     const hidden = displayed(fold, pane);
@@ -85,9 +96,9 @@ export function foldDecorations(folds: readonly Fold[], pane: Pane): DecorationS
   return builder.finish();
 }
 
-function waveMarkers(
-  folds: readonly Fold[],
-  pane: Pane,
+function waveMarkers<P extends string>(
+  folds: readonly Fold<P>[],
+  pane: P,
   hovered: () => number | null,
 ): RangeSet<GutterMarker> {
   const builder = new RangeSetBuilder<GutterMarker>();
@@ -125,15 +136,38 @@ const tile = {
   maskSize: `calc(var(${WAVE_PHASE_VARS.period}, ${WAVE_TILE_WIDTH_PX}px) * ${MASK_PERIODS}) ${WAVE_TILE_HEIGHT_PX}px`,
 };
 
+// WebKitGTK 2.54 pulls a far scrollTop back to the top while CodeMirror swaps the viewport of a scroller
+// that holds size-container units (`container-type`, `cqi`) (docs/slices/briefs/range-collapse-columns-rework-4.md):
+// the wave takes the scroller's width from a measure.
+const waveWidth = ViewPlugin.define((view) => {
+  const measure = {
+    key: WAVE_WIDTH_VAR,
+    read: (): number => {
+      const scroller = view.scrollDOM;
+      return scroller.getBoundingClientRect().width - (scroller.offsetWidth - scroller.clientWidth);
+    },
+    write: (width: number): void => {
+      view.scrollDOM.style.setProperty(WAVE_WIDTH_VAR, `${width}px`);
+    },
+  };
+  view.requestMeasure(measure);
+  return {
+    update(update) {
+      if (update.geometryChanged) {
+        update.view.requestMeasure(measure);
+      }
+    },
+  };
+});
+
 const waveTheme = EditorView.theme({
-  ".cm-scroller": { containerType: "inline-size" },
   ".cm-gutter.cm-lineNumbers": { overflow: "visible" },
   ".fold-wave-cell": { position: "relative" },
   ".fold-wave": {
     position: "absolute",
     left: "0",
     top: "0",
-    width: "100cqi",
+    width: `var(${WAVE_WIDTH_VAR})`,
     height: "100%",
     cursor: "pointer",
     backgroundColor: "var(--color-diff-wave)",
@@ -146,18 +180,30 @@ const waveTheme = EditorView.theme({
   [`.fold-wave.${HOVER_CLASS}`]: maskStyle(WAVE_HOVER_STROKE_PX),
 });
 
-function foldView({ folds, hovered }: FoldWiring, pane: Pane): Extension {
-  const field = pane === "center" ? folds.center : folds.sides;
+export function paneFoldView<P extends string>(
+  shown: {
+    readonly field: StateField<unknown>;
+    readonly folds: (state: EditorState) => readonly Fold<P>[];
+  },
+  pane: P,
+  hovered: () => number | null,
+): Extension {
   return [
-    EditorView.decorations.compute([field], (state) =>
-      foldDecorations(paneFolds(folds, pane, state), pane),
+    EditorView.decorations.compute([shown.field], (state) =>
+      foldDecorations(shown.folds(state), pane),
     ),
-    EditorView.atomicRanges.of((view) => foldDecorations(paneFolds(folds, pane, view.state), pane)),
-    lineNumberMarkers.compute([field], (state) =>
-      waveMarkers(paneFolds(folds, pane, state), pane, hovered),
+    EditorView.atomicRanges.of((view) => foldDecorations(shown.folds(view.state), pane)),
+    lineNumberMarkers.compute([shown.field], (state) =>
+      waveMarkers(shown.folds(state), pane, hovered),
     ),
     waveTheme,
+    waveWidth,
   ];
+}
+
+function foldView({ folds, hovered }: FoldWiring, pane: Pane): Extension {
+  const field = pane === "center" ? folds.center : folds.sides;
+  return paneFoldView({ field, folds: (state) => paneFolds(folds, pane, state) }, pane, hovered);
 }
 
 export function centerFolds(wiring: FoldWiring): Extension {

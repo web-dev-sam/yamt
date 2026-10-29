@@ -5,6 +5,7 @@ import type { Pane, PaneViews } from "./geometry";
 
 export type Anchor<P extends string> = Readonly<Record<P, number>>;
 type SpanRow = Readonly<Record<Pane, Span>>;
+type Pass = "first" | "retry" | "last";
 export type ScrollPane = {
   readonly scrollDOM: EventTarget & { scrollTop: number; readonly clientHeight: number };
   readonly documentPadding: { readonly top: number };
@@ -71,6 +72,8 @@ export class ScrollSync<P extends string> {
   readonly #requestFrame: () => void;
   readonly #listeners = new AbortController();
   #source: P | null = null;
+  #pass: Pass = "first";
+  #followed = false;
   #echoes: readonly P[] = [];
   #clearEchoes: number | null = null;
   #syncedTops: ReadonlyMap<P, number> | null = null;
@@ -87,8 +90,9 @@ export class ScrollSync<P extends string> {
       views[pane].scrollDOM.addEventListener(
         "scroll",
         () => {
-          if (!this.#echoes.includes(pane)) {
+          if (!this.#followed && !this.#echoes.includes(pane)) {
             this.#source = pane;
+            this.#pass = "first";
           }
           requestFrame();
         },
@@ -99,13 +103,18 @@ export class ScrollSync<P extends string> {
 
   follow(source: P): void {
     this.#source = source;
+    this.#followed = true;
+    this.#pass = "first";
     this.#syncedTops = null;
     this.#requestFrame();
   }
 
   sync(anchors: readonly Anchor<P>[]): void {
     const source = this.#source;
+    const pass = this.#pass;
     this.#source = null;
+    this.#followed = false;
+    this.#pass = "first";
     const views = this.#views;
     if (source === null || views[source].scrollDOM.scrollTop === this.#syncedTops?.get(source)) {
       return;
@@ -116,15 +125,43 @@ export class ScrollSync<P extends string> {
       const { scrollDOM, documentPadding } = views[pane];
       scrollDOM.scrollTop = at(pane) + documentPadding.top - scrollDOM.clientHeight * ANCHOR_AT;
     }
-    this.#syncedTops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
+    const tops = new Map(this.#panes.map((pane) => [pane, views[pane].scrollDOM.scrollTop]));
+    this.#syncedTops = tops;
     this.#echoes = followers;
     if (this.#clearEchoes !== null) {
       cancelAnimationFrame(this.#clearEchoes);
     }
     this.#clearEchoes = requestAnimationFrame(() => {
-      this.#clearEchoes = null;
-      this.#echoes = [];
+      this.#endEchoes(source, tops, pass);
     });
+  }
+
+  // WebKitGTK 2.54 can pull a follower back while CodeMirror swaps its viewport, and the moved follower's
+  // scroll event is an echo (docs/plan.md §2 #82, docs/slices/briefs/range-collapse-columns-rework-2.md):
+  // its source leads once more. A follower moved again after that retry is the user's scroll
+  // (briefs/range-collapse-columns-rework-3.md): it leads, and its sync retries nothing.
+  #endEchoes(source: P, tops: ReadonlyMap<P, number>, pass: Pass): void {
+    this.#clearEchoes = null;
+    const views = this.#views;
+    const moved = this.#echoes.find((pane) => views[pane].scrollDOM.scrollTop !== tops.get(pane));
+    this.#echoes = [];
+    if (moved === undefined || this.#followed) {
+      return;
+    }
+    switch (pass) {
+      case "first":
+        this.follow(source);
+        this.#pass = "retry";
+        return;
+      case "retry":
+        if (this.#source === null) {
+          this.#source = moved;
+          this.#pass = "last";
+        }
+        return;
+      case "last":
+        return;
+    }
   }
 
   destroy(): void {

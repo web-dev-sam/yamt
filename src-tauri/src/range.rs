@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use tauri::{App, AppHandle, Manager, Runtime, State, WebviewWindow};
-use yamt_range::{PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved};
+use yamt_range::{
+    PairLock, Range, RangeFile, RangeFileId, RangeSpec, RangeStart, Resolved, SearchTexts,
+};
 use yamt_review::ThreadStore;
 
 use crate::ai;
@@ -88,6 +90,15 @@ pub(crate) async fn load_range_file<R: Runtime>(
     file: RangeFileId,
 ) -> Result<RangeFile, IpcError> {
     blocking_reply(move || Ok(window.state::<RangeState>().range.load(file)?)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn search_range_texts<R: Runtime>(
+    window: WebviewWindow<R>,
+    from: RangeFileId,
+) -> Result<SearchTexts, IpcError> {
+    blocking_reply(move || Ok(window.state::<RangeState>().range.search_texts(from)?)).await
 }
 
 #[cfg(test)]
@@ -269,6 +280,19 @@ pub(crate) mod tests {
         assert_eq!(
             invoke_on(&window.webview, "load_range_file", json!({ "file": 7 })),
             Err(json!({ "kind": "UnknownRangeFile", "file": 7 }))
+        );
+    }
+
+    #[test]
+    fn search_range_texts_pages_the_text_files_and_refuses_an_id_past_the_end() {
+        let window = open_range_window();
+        let page = invoke_on(&window.webview, "search_range_texts", json!({ "from": 0 }));
+        let change = json!({ "left": { "start": 0, "len": 1 }, "right": { "start": 0, "len": 1 } });
+        let text = json!({ "file": 0, "left": "one\n", "right": "two\n", "changes": [change] });
+        assert_eq!(page, Ok(json!({ "files": [text], "next": null })));
+        assert_eq!(
+            invoke_on(&window.webview, "search_range_texts", json!({ "from": 2 })),
+            Err(json!({ "kind": "UnknownRangeFile", "file": 2 }))
         );
     }
 

@@ -1,0 +1,1439 @@
+commit ec191ffe06b31272b645bd20444c421bb073b832
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 10:39:20 +0100
+
+    feat(search): framework-free search core: matcher, place rule, order, filters, dismissals, cap
+
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index e096744..88d3157 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -338,6 +338,66 @@ test("lsp importing jsonrpc's internal/ violates PM5", () => {
+   ]);
+ });
+ 
++test("search importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
++  const files = [
++    { path: "src/search/index.ts", text: `import { ref } from "vue";` },
++    { path: "src/search/internal/match.ts", text: `import { useDebounceFn } from "@vueuse/core";` },
++    {
++      path: "src/search/internal/places.ts",
++      text: `import { invoke } from "@tauri-apps/api/core";`,
++    },
++    { path: "src/search/internal/list.ts", text: `import x from "~icons/lucide/x";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM3", file: "src/search/index.ts", specifier: "vue" },
++    { rule: "PM3", file: "src/search/internal/match.ts", specifier: "@vueuse/core" },
++    { rule: "PM3", file: "src/search/internal/places.ts", specifier: "@tauri-apps/api/core" },
++    { rule: "PM3", file: "src/search/internal/list.ts", specifier: "~icons/lucide/x" },
++  ]);
++});
++
++test("search importing any other src/ module violates PM2", () => {
++  const files = [
++    { path: "src/search/index.ts", text: `import type { Column } from "../ipc";` },
++    { path: "src/search/internal/match.ts", text: `import { log } from "../../ipc/log";` },
++    { path: "src/search/internal/places.ts", text: `import "../../editor/index.ts";` },
++    { path: "src/search/internal/list.ts", text: `import { Connection } from "../../jsonrpc";` },
++    { path: "src/search/a.ts", text: `import "../searchx/b";` },
++  ];
++
++  expect(
++    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
++  ).toEqual(
++    files.map(({ path }) => ({
++      file: path,
++      rule: "PM2",
++      reason: "search/ imports no other src/ module",
++    })),
++  );
++});
++
++test("search importing itself, and ui importing search's index, violate nothing", () => {
++  const files = [
++    { path: "src/search/index.ts", text: `export { matcherOf } from "./internal/match";` },
++    { path: "src/search/internal/places.ts", text: `import { paneHits } from "./match";` },
++    { path: "src/search/internal/list.test.ts", text: `import { listRows } from "../index";` },
++    { path: "src/ui/searching.ts", text: `import { withFile } from "../search";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
++test("ui importing search's internal/ violates PM5", () => {
++  const files = [
++    { path: "src/ui/searching.ts", text: `import { paneHits } from "../search/internal/match";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM5", file: "src/ui/searching.ts", specifier: "../search/internal/match" },
++  ]);
++});
++
+ test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+   const files = [
+     { path: "src/agent/index.ts", text: `import { ref } from "vue";` },
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index f9ea145..49b8f6d 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -29,13 +29,14 @@ const SKIPPED_FILE = "src/ipc/bindings.ts";
+ const QUERY_SUFFIX = /\?.*$/;
+ const MODULE_OF = /^src\/([^/]+)\//;
+ const RESOLVE_SUFFIXES = ["", ".ts", ".vue", "/index.ts"] as const;
+-const FRAMEWORK_FREE_MODULES: Record<string, true> = {
+-  editor: true,
+-  model: true,
+-  connectors: true,
+-  lsp: true,
+-  jsonrpc: true,
+-  agent: true,
++const FRAMEWORK_FREE_MODULES: Readonly<Record<string, "framework-free" | "self-contained">> = {
++  editor: "framework-free",
++  model: "framework-free",
++  connectors: "framework-free",
++  lsp: "framework-free",
++  jsonrpc: "self-contained",
++  agent: "framework-free",
++  search: "self-contained",
+ };
+ const AGENT_IMPORTS: Readonly<Record<string, true>> = {
+   "src/ipc": true,
+@@ -130,19 +131,17 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
+   if (module === "lsp" && forbidden !== undefined) {
+     return { rule: "PM2", reason: `lsp/ never imports ${forbidden.slice("src/".length)}/` };
+   }
+-  if (module === "jsonrpc" && target.startsWith("src/") && !isInside(target, "src/jsonrpc")) {
+-    return { rule: "PM2", reason: "jsonrpc/ imports no other src/ module" };
++  const selfContained = module !== undefined && FRAMEWORK_FREE_MODULES[module] === "self-contained";
++  if (selfContained && target.startsWith("src/") && !isInside(target, `src/${module}`)) {
++    return { rule: "PM2", reason: `${module}/ imports no other src/ module` };
+   }
+   const outsideAgent = target.startsWith("src/") && !isInside(target, "src/agent");
+   if (module === "agent" && outsideAgent && !Object.hasOwn(AGENT_IMPORTS, target)) {
+     return { rule: "PM2", reason: "agent/ imports only ipc/index.ts and jsonrpc/index.ts" };
+   }
+   const targetModule = MODULE_OF.exec(target)?.[1];
+-  if (
+-    targetModule !== undefined &&
+-    targetModule !== module &&
+-    target.split("/").includes("internal")
+-  ) {
++  const crossesInternal = targetModule !== module && target.split("/").includes("internal");
++  if (targetModule !== undefined && crossesInternal) {
+     return { rule: "PM5", reason: "no module imports another module's internal/" };
+   }
+   return undefined;
+diff --git a/frontend/src/search/AGENTS.md b/frontend/src/search/AGENTS.md
+new file mode 100644
+index 0000000..c8f38c3
+--- /dev/null
++++ b/frontend/src/search/AGENTS.md
+@@ -0,0 +1,5 @@
++Owner skill: `skill://ts-conventions`. The window-wide search's pure core (plan §2 #127, request `docs/slices/request-search.md` rules 5, 7, 9, 10, 12): one matcher per query (`matcherOf`: the text escaped into one `giu` RegExp, `gu` with Match Case; UTF-16 columns; lines split at `\n`, a trailing `\r` left out, never a cross-line match; `limit` hits per pane), the place rule and order (`filePlaces`: a hit inside change `k` groups with the other panes' hits of the same line text and column, identical lines first-with-first; a hit outside every change groups by its aligned lead line and column; rows in the lead pane's order, a side-only row at its change's lead start before that line's lead rows), each place's `PlaceKey` (panes, column, line text, ordinal — never a line number) and `Preview` (26 characters before the match, leading whitespace trimmed, `…` when cut), the results (`emptyResults` for a full run, `withFile` per file: dismissals kept while their place still matches, the `MAX_ROWS` 20,000 cap re-applied by rank), the dismissals (`dismissPlace`, `dismissFile`: a group's kept across one-file re-runs, cleared by a full run) and what the list shows (`listRows`: pane filters and closed groups, nothing dismissed back; `summaryOf`; `goToPane`: the lead pane when on, else the leftmost on pane).
++
++`index.ts` is the only surface. Framework-free (PM3) and self-contained: nothing here imports another `src/` module, as `jsonrpc/` (PM2, `frontend/scripts/fences.ts`). Pure: no DOM, no timers, no state; the window's `ui/` owns running, pausing and the texts.
++
++`internal/`: `match` (the matcher, `paneHits`), `preview`, `places` (the place rule, order and key), `results` (results, dismissals, the cap), `list` (rows, summary, go-to pane). Every file has its `*.test.ts` (node), each test named for the bug it catches.
+diff --git a/frontend/src/search/index.ts b/frontend/src/search/index.ts
+new file mode 100644
+index 0000000..4c00043
+--- /dev/null
++++ b/frontend/src/search/index.ts
+@@ -0,0 +1,22 @@
++export { matcherOf, type Matcher, type Query } from "./internal/match";
++export {
++  filePlaces,
++  type Layout,
++  type LineRange,
++  type PaneEntry,
++  type PaneHit,
++  type Place,
++  type PlaceKey,
++  type SearchedFile,
++} from "./internal/places";
++export type { Preview } from "./internal/preview";
++export {
++  MAX_ROWS,
++  dismissFile,
++  dismissPlace,
++  emptyResults,
++  withFile,
++  type FileGroup,
++  type SearchResults,
++} from "./internal/results";
++export { goToPane, listRows, summaryOf, type ListRow, type Summary } from "./internal/list";
+diff --git a/frontend/src/search/internal/list.test.ts b/frontend/src/search/internal/list.test.ts
+new file mode 100644
+index 0000000..455ac3e
+--- /dev/null
++++ b/frontend/src/search/internal/list.test.ts
+@@ -0,0 +1,175 @@
++import { expect, test } from "vitest";
++
++import {
++  MAX_ROWS,
++  dismissFile,
++  dismissPlace,
++  emptyResults,
++  filePlaces,
++  goToPane,
++  listRows,
++  matcherOf,
++  summaryOf,
++  withFile,
++  type Layout,
++  type ListRow,
++  type PaneEntry,
++  type PaneHit,
++  type Place,
++  type SearchResults,
++  type Summary,
++} from "../index";
++
++type Merge = "left" | "center" | "right";
++
++const MERGE: Layout<Merge> = { panes: ["left", "center", "right"], lead: "center" };
++const QUERY = { text: "foo", matchCase: false };
++const ALL: ReadonlySet<Merge> = new Set(["left", "center", "right"]);
++const NONE: ReadonlySet<Merge> = new Set();
++const OPEN: ReadonlySet<string> = new Set();
++
++function searchedFile(
++  results: SearchResults<Merge>,
++  path: string,
++  texts: Readonly<Record<Merge, string>>,
++): SearchResults<Merge> {
++  const matcher = matcherOf(QUERY);
++  if (matcher === null) {
++    throw new Error("a non-empty query builds a matcher");
++  }
++  const found = filePlaces({ path, texts, changes: [] }, matcher, MERGE, MAX_ROWS);
++  return withFile(results, { path, rank: results.groups.length, ...found });
++}
++
++function twoPlaces(): SearchResults<Merge> {
++  return searchedFile(emptyResults(QUERY), "a.ts", {
++    left: "foo\nx",
++    center: "foo\nx",
++    right: "x\nfoo",
++  });
++}
++
++function placeAt(results: SearchResults<Merge>, index: number): Place<Merge> {
++  const place = results.groups[0]?.places[index];
++  if (place === undefined) {
++    throw new Error(`no place ${index}`);
++  }
++  return place;
++}
++
++function described(rows: readonly ListRow<Merge>[]): string[] {
++  return rows.map((row) =>
++    row.kind === "group"
++      ? `${row.path} ${row.count} ${row.open ? "open" : "closed"}`
++      : `${row.place.hits[0].hit.line}: ${row.shown.map((entry) => entry.pane).join(" ")}`,
++  );
++}
++
++test("a row shows while one of its panes is on, with only the on panes' icons (filter leaks)", () => {
++  const results = twoPlaces();
++
++  expect(described(listRows(results, ALL, OPEN))).toEqual([
++    "a.ts 2 open",
++    "0: left center",
++    "1: right",
++  ]);
++  expect(described(listRows(results, new Set<Merge>(["right"]), OPEN))).toEqual([
++    "a.ts 1 open",
++    "1: right",
++  ]);
++  expect(described(listRows(results, new Set<Merge>(["left"]), OPEN))).toEqual([
++    "a.ts 1 open",
++    "0: left",
++  ]);
++});
++
++test("every pane off → filteredOut and no rows (an empty-list wording bug)", () => {
++  const results = twoPlaces();
++  const summary: Summary | null = summaryOf(results, NONE, false);
++
++  expect(summary).toEqual({ kind: "filteredOut" });
++  expect(summaryOf(results, NONE, true)).toEqual({ kind: "filteredOut" });
++  expect(listRows(results, NONE, OPEN)).toEqual([]);
++});
++
++test("the summary: an empty box, searching, no results, counts and the cut (a stale summary)", () => {
++  const empty = emptyResults<Merge>(QUERY);
++
++  expect(summaryOf(null, ALL, false)).toBeNull();
++  expect(summaryOf(null, ALL, true)).toEqual({ kind: "searching" });
++  expect(summaryOf(empty, ALL, true)).toEqual({ kind: "searching" });
++  expect(summaryOf(empty, ALL, false)).toEqual({ kind: "noResults" });
++  const two = searchedFile(twoPlaces(), "b.ts", { left: "foo", center: "foo", right: "foo" });
++
++  expect(summaryOf(two, ALL, true)).toEqual({ kind: "results", rows: 3, files: 2, cut: false });
++  expect(summaryOf({ ...two, cut: true }, ALL, false)).toEqual({
++    kind: "results",
++    rows: 3,
++    files: 2,
++    cut: true,
++  });
++});
++
++test("counts follow dismissals (a stale summary)", () => {
++  const results = searchedFile(twoPlaces(), "b.ts", { left: "foo", center: "foo", right: "foo" });
++  const placeGone = dismissPlace(results, "a.ts", placeAt(results, 0).key);
++
++  expect(summaryOf(placeGone, ALL, false)).toEqual({
++    kind: "results",
++    rows: 2,
++    files: 2,
++    cut: false,
++  });
++  expect(described(listRows(placeGone, ALL, OPEN))[0]).toBe("a.ts 1 open");
++  const fileGone = dismissFile(placeGone, "b.ts");
++
++  expect(summaryOf(fileGone, ALL, false)).toEqual({
++    kind: "results",
++    rows: 1,
++    files: 1,
++    cut: false,
++  });
++  expect(described(listRows(fileGone, ALL, OPEN))).toEqual(["a.ts 1 open", "1: right"]);
++});
++
++test("a filter change restores nothing dismissed (filters touching dismissals)", () => {
++  expect(listRows(twoPlaces(), ALL, OPEN).map((row) => row.kind)).toEqual([
++    "group",
++    "place",
++    "place",
++  ]);
++  const results = twoPlaces();
++  const dismissed = dismissPlace(results, "a.ts", placeAt(results, 0).key);
++
++  expect(listRows(dismissed, new Set<Merge>(["left"]), OPEN)).toEqual([]);
++  expect(summaryOf(dismissed, new Set<Merge>(["left"]), false)).toEqual({ kind: "noResults" });
++  expect(described(listRows(dismissed, ALL, OPEN))).toEqual(["a.ts 1 open", "1: right"]);
++});
++
++test("goToPane takes the lead pane when on, else the leftmost on pane (the rule-8 choice)", () => {
++  const results = twoPlaces();
++  const both = placeAt(results, 0);
++  const rightOnly = placeAt(results, 1);
++
++  expect(goToPane(both, ALL, MERGE)?.pane).toBe("center");
++  expect(goToPane(both, new Set<Merge>(["left", "right"]), MERGE)?.pane).toBe("left");
++  expect(goToPane(both, new Set<Merge>(["right"]), MERGE)).toBeNull();
++  const hit: PaneHit = { line: 1, from: 0, to: 3 };
++  const entry: PaneEntry<Merge> = { pane: "right", hit };
++
++  expect(goToPane(rightOnly, ALL, MERGE)).toEqual(entry);
++});
++
++test("a closed group shows only its header; an all-dismissed group disappears (ghost groups)", () => {
++  const results = searchedFile(twoPlaces(), "b.ts", { left: "foo", center: "foo", right: "foo" });
++
++  expect(described(listRows(results, ALL, new Set(["a.ts"])))).toEqual([
++    "a.ts 2 closed",
++    "b.ts 1 open",
++    "0: left center right",
++  ]);
++  const first = dismissPlace(results, "a.ts", placeAt(results, 0).key);
++  const both = dismissPlace(first, "a.ts", placeAt(results, 1).key);
++
++  expect(described(listRows(both, ALL, OPEN))).toEqual(["b.ts 1 open", "0: left center right"]);
++});
+diff --git a/frontend/src/search/internal/list.ts b/frontend/src/search/internal/list.ts
+new file mode 100644
+index 0000000..a16fafa
+--- /dev/null
++++ b/frontend/src/search/internal/list.ts
+@@ -0,0 +1,108 @@
++import type { Layout, PaneEntry, Place } from "./places";
++import type { FileGroup, SearchResults } from "./results";
++
++export type ListRow<P extends string> =
++  | {
++      readonly kind: "group";
++      readonly path: string;
++      readonly count: number;
++      readonly open: boolean;
++    }
++  | {
++      readonly kind: "place";
++      readonly path: string;
++      readonly place: Place<P>;
++      readonly shown: readonly [PaneEntry<P>, ...PaneEntry<P>[]];
++    };
++export type Summary =
++  | { readonly kind: "searching" }
++  | { readonly kind: "noResults" }
++  | { readonly kind: "filteredOut" }
++  | {
++      readonly kind: "results";
++      readonly rows: number;
++      readonly files: number;
++      readonly cut: boolean;
++    };
++
++type ShownPlace<P extends string> = {
++  readonly place: Place<P>;
++  readonly shown: readonly [PaneEntry<P>, ...PaneEntry<P>[]];
++};
++
++type ShownGroup<P extends string> = {
++  readonly path: string;
++  readonly places: readonly ShownPlace<P>[];
++};
++
++function shownPlaces<P extends string>(group: FileGroup<P>, on: ReadonlySet<P>): ShownPlace<P>[] {
++  return group.places.flatMap((place) => {
++    if (group.dismissed.has(place.key)) {
++      return [];
++    }
++    const [first, ...rest] = place.hits.filter((entry) => on.has(entry.pane));
++    return first === undefined ? [] : [{ place, shown: [first, ...rest] }];
++  });
++}
++
++function shownGroups<P extends string>(
++  results: SearchResults<P>,
++  on: ReadonlySet<P>,
++): ShownGroup<P>[] {
++  return results.groups.flatMap((group) => {
++    if (results.dismissedFiles.has(group.path)) {
++      return [];
++    }
++    const places = shownPlaces(group, on);
++    return places.length === 0 ? [] : [{ path: group.path, places }];
++  });
++}
++
++export function listRows<P extends string>(
++  results: SearchResults<P>,
++  on: ReadonlySet<P>,
++  closed: ReadonlySet<string>,
++): readonly ListRow<P>[] {
++  return shownGroups(results, on).flatMap(({ path, places }): ListRow<P>[] => {
++    const open = !closed.has(path);
++    const header: ListRow<P> = { kind: "group", path, count: places.length, open };
++    if (!open) {
++      return [header];
++    }
++    return [
++      header,
++      ...places.map(({ place, shown }): ListRow<P> => ({ kind: "place", path, place, shown })),
++    ];
++  });
++}
++
++export function summaryOf<P extends string>(
++  results: SearchResults<P> | null,
++  on: ReadonlySet<P>,
++  running: boolean,
++): Summary | null {
++  if (results === null && !running) {
++    return null;
++  }
++  if (on.size === 0) {
++    return { kind: "filteredOut" };
++  }
++  if (results === null) {
++    return { kind: "searching" };
++  }
++  const groups = shownGroups(results, on);
++  if (groups.length === 0) {
++    return running ? { kind: "searching" } : { kind: "noResults" };
++  }
++  const rows = groups.reduce((sum, group) => sum + group.places.length, 0);
++  return { kind: "results", rows, files: groups.length, cut: results.cut };
++}
++
++export function goToPane<P extends string>(
++  place: Place<P>,
++  on: ReadonlySet<P>,
++  layout: Layout<P>,
++): PaneEntry<P> | null {
++  const shown = place.hits.filter((entry) => on.has(entry.pane));
++  return shown.find((entry) => entry.pane === layout.lead) ?? shown[0] ?? null;
++}
+diff --git a/frontend/src/search/internal/match.test.ts b/frontend/src/search/internal/match.test.ts
+new file mode 100644
+index 0000000..b18fae9
+--- /dev/null
++++ b/frontend/src/search/internal/match.test.ts
+@@ -0,0 +1,100 @@
++import { expect, test } from "vitest";
++
++import { matcherOf, type Matcher, type Query } from "../index";
++import { paneHits } from "./match";
++
++function matcher(text: string, matchCase = false): Matcher {
++  const query: Query = { text, matchCase };
++  const built = matcherOf(query);
++  if (built === null) {
++    throw new Error("a non-empty query builds a matcher");
++  }
++  return built;
++}
++
++function spots(text: string, query: string, matchCase = false): string[] {
++  return paneHits(text, matcher(query, matchCase), Infinity).hits.map(
++    ({ line, from, to }) => `${line}:${from}-${to}`,
++  );
++}
++
++test("a.b does not match axb (an unescaped RegExp)", () => {
++  expect(spots("axb a.b", "a.b")).toEqual(["0:4-7"]);
++});
++
++test("every RegExp syntax character is matched as itself (an unescaped RegExp)", () => {
++  const syntax = String.raw`^$\.*+?()[]{}|/`;
++
++  expect(spots(`x ${syntax} y`, syntax)).toEqual([`0:2-${2 + syntax.length}`]);
++  expect(spots("a-b", "-")).toEqual(["0:1-2"]);
++});
++
++test("case-insensitive by default; Match Case narrows Foo/foo (an inverted flag)", () => {
++  expect(spots("Foo foo", "foo")).toEqual(["0:0-3", "0:4-7"]);
++  expect(spots("Foo foo", "foo", true)).toEqual(["0:4-7"]);
++  expect(spots("Foo foo", "Foo", true)).toEqual(["0:0-3"]);
++});
++
++test("İx foo puts foo at column 3 (lowercasing the line shifts offsets)", () => {
++  expect(spots("İx foo", "FOO")).toEqual(["0:3-6"]);
++});
++
++test("😀foo puts foo at column 2 (code-point columns instead of UTF-16)", () => {
++  expect(spots("😀foo", "foo")).toEqual(["0:2-5"]);
++});
++
++test("CRLF: the line text has no \\r and the line count is right (\\r\\n counted as two breaks)", () => {
++  const { hits } = paneHits("one\r\ntwo foo\r\nfoo\r\n", matcher("foo"), Infinity);
++
++  expect(hits).toEqual([
++    { line: 1, from: 4, to: 7, lineText: "two foo" },
++    { line: 2, from: 0, to: 3, lineText: "foo" },
++  ]);
++});
++
++test("lines are counted across gaps without matches and kept for hits on one line", () => {
++  const { hits } = paneHits("foo\n\nx\ny foo foo\nz", matcher("foo"), Infinity);
++
++  expect(hits).toEqual([
++    { line: 0, from: 0, to: 3, lineText: "foo" },
++    { line: 3, from: 2, to: 5, lineText: "y foo foo" },
++    { line: 3, from: 6, to: 9, lineText: "y foo foo" },
++  ]);
++});
++
++test("aaa/aa gives one hit; two separate hits on one line give two (overlapping or merged hits)", () => {
++  expect(spots("aaa", "aa")).toEqual(["0:0-2"]);
++  expect(spots("aa aa", "aa")).toEqual(["0:0-2", "0:3-5"]);
++});
++
++test("an empty query gives no matcher (showing everything)", () => {
++  expect(matcherOf({ text: "", matchCase: false })).toBeNull();
++  expect(matcherOf({ text: "", matchCase: true })).toBeNull();
++});
++
++test("a match never crosses a line or covers its \\r (a cross-line hit)", () => {
++  expect(spots("xa\nbx", "a\nb")).toEqual([]);
++  expect(spots("fo\r\nfo", "o\r")).toEqual([]);
++});
++
++test("a pane stops scanning at the limit (an unbounded array)", () => {
++  const text = "x x\nx";
++
++  expect(paneHits(text, matcher("x"), 2)).toEqual({
++    hits: [
++      { line: 0, from: 0, to: 1, lineText: "x x" },
++      { line: 0, from: 2, to: 3, lineText: "x x" },
++    ],
++    cut: true,
++  });
++  expect(paneHits(text, matcher("x"), 3)).toMatchObject({ cut: false });
++});
++
++test("a dropped cross-line match does not count toward the limit", () => {
++  expect(paneHits("o\r\no x", matcher("o\r"), 0).cut).toBe(false);
++});
++
++test("a match starting on a line break stays on its line and is dropped (a negative column)", () => {
++  expect(spots("a\nb", "\nb")).toEqual([]);
++  expect(spots("a\nb\nc", "\nc")).toEqual([]);
++});
+diff --git a/frontend/src/search/internal/match.ts b/frontend/src/search/internal/match.ts
+new file mode 100644
+index 0000000..a8d2ac8
+--- /dev/null
++++ b/frontend/src/search/internal/match.ts
+@@ -0,0 +1,60 @@
++export type Query = { readonly text: string; readonly matchCase: boolean };
++
++export class Matcher {
++  readonly pattern: RegExp;
++
++  constructor(pattern: RegExp) {
++    this.pattern = pattern;
++  }
++}
++
++export type LineHit = {
++  readonly line: number;
++  readonly from: number;
++  readonly to: number;
++  readonly lineText: string;
++};
++
++const SYNTAX_CHARACTERS = /[\^$\\.*+?()[\]{}|/]/g;
++
++export function matcherOf(query: Query): Matcher | null {
++  if (query.text === "") {
++    return null;
++  }
++  const escaped = query.text.replace(SYNTAX_CHARACTERS, "\\$&");
++  return new Matcher(new RegExp(escaped, query.matchCase ? "gu" : "giu"));
++}
++
++export function paneHits(
++  text: string,
++  matcher: Matcher,
++  limit: number,
++): { readonly hits: readonly LineHit[]; readonly cut: boolean } {
++  const hits: LineHit[] = [];
++  let line = -1;
++  let lineStart = 0;
++  let lineEnd = -1;
++  let lineText = "";
++  for (const match of text.matchAll(matcher.pattern)) {
++    if (lineEnd < match.index) {
++      do {
++        line += 1;
++        lineStart = lineEnd + 1;
++        const lineBreak = text.indexOf("\n", lineStart);
++        lineEnd = lineBreak === -1 ? text.length : lineBreak;
++      } while (lineEnd < match.index);
++      const whole = text.slice(lineStart, lineEnd);
++      lineText = whole.endsWith("\r") ? whole.slice(0, -1) : whole;
++    }
++    const from = match.index - lineStart;
++    const to = from + match[0].length;
++    if (to > lineText.length) {
++      continue;
++    }
++    if (hits.length === limit) {
++      return { hits, cut: true };
++    }
++    hits.push({ line, from, to, lineText });
++  }
++  return { hits, cut: false };
++}
+diff --git a/frontend/src/search/internal/places.test.ts b/frontend/src/search/internal/places.test.ts
+new file mode 100644
+index 0000000..49e9e26
+--- /dev/null
++++ b/frontend/src/search/internal/places.test.ts
+@@ -0,0 +1,254 @@
++import { expect, test } from "vitest";
++
++import {
++  filePlaces,
++  matcherOf,
++  type Layout,
++  type LineRange,
++  type Place,
++  type SearchedFile,
++} from "../index";
++
++type Merge = "left" | "center" | "right";
++type Column = "left" | "right";
++
++const MERGE: Layout<Merge> = { panes: ["left", "center", "right"], lead: "center" };
++const RANGE: Layout<Column> = { panes: ["left", "right"], lead: "right" };
++
++function range(start: number, len: number): LineRange {
++  return { start, len };
++}
++
++function placesOf<P extends string>(
++  file: Omit<SearchedFile<P>, "path">,
++  layout: Layout<P>,
++  query = "foo",
++  limit = Infinity,
++): { readonly places: readonly Place<P>[]; readonly cut: boolean } {
++  const matcher = matcherOf({ text: query, matchCase: false });
++  if (matcher === null) {
++    throw new Error("a non-empty query builds a matcher");
++  }
++  return filePlaces({ path: "a.ts", ...file }, matcher, layout, limit);
++}
++
++function rows<P extends string>(places: readonly Place<P>[]): string[] {
++  return places.map((place) =>
++    place.hits.map(({ pane, hit }) => `${pane}:${hit.line}:${hit.from}`).join(" "),
++  );
++}
++
++function mergeRows(
++  texts: Readonly<Record<Merge, string | null>>,
++  changes: readonly Readonly<Record<Merge, LineRange>>[] = [],
++): string[] {
++  return rows(placesOf({ texts, changes }, MERGE).places);
++}
++
++test("an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane)", () => {
++  const text = "a\nfoo\nb";
++
++  expect(mergeRows({ left: text, center: text, right: text })).toEqual([
++    "left:1:0 center:1:0 right:1:0",
++  ]);
++  expect(rows(placesOf({ texts: { left: text, right: text }, changes: [] }, RANGE).places)).toEqual(
++    ["left:1:0 right:1:0"],
++  );
++});
++
++test("the same aligned line at different columns is two places (merging by line only)", () => {
++  expect(mergeRows({ left: "foo x", center: "x foo", right: "x foo" })).toEqual([
++    "left:0:0",
++    "center:0:2 right:0:2",
++  ]);
++});
++
++test("after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned)", () => {
++  const changes = [{ left: range(0, 2), center: range(0, 1), right: range(0, 0) }];
++
++  expect(mergeRows({ left: "l\nl\nfoo", center: "c\nfoo", right: "foo" }, changes)).toEqual([
++    "left:2:0 center:1:0 right:0:0",
++  ]);
++});
++
++test("alignment follows the last change ending at or before the line (a stale change end)", () => {
++  const changes = [
++    { left: range(0, 1), right: range(0, 2) },
++    { left: range(2, 2), right: range(3, 1) },
++  ];
++  const texts = { left: "x\nfoo\nx\nx\nfoo", right: "y\ny\nfoo\ny\nfoo" };
++
++  expect(rows(placesOf({ texts, changes }, RANGE).places)).toEqual([
++    "left:1:0 right:2:0",
++    "left:4:0 right:4:0",
++  ]);
++});
++
++test("in one conflict the same text and column in two panes is one place; different text is two (rule b ignoring the text)", () => {
++  const changes = [{ left: range(0, 1), center: range(0, 1), right: range(0, 1) }];
++
++  expect(mergeRows({ left: "foo bar", center: "foo baz", right: "foo bar" }, changes)).toEqual([
++    "left:0:0 right:0:0",
++    "center:0:0",
++  ]);
++  expect(mergeRows({ left: "foo bar", center: "x", right: " foo bar" }, changes)).toEqual([
++    "left:0:0",
++    "right:0:1",
++  ]);
++});
++
++test("two identical lines in one change pair first-with-first (cartesian merging)", () => {
++  const changes = [{ left: range(0, 2), center: range(0, 1), right: range(0, 3) }];
++
++  expect(mergeRows({ left: "foo\nfoo", center: "x", right: "foo\nfoo\nfoo" }, changes)).toEqual([
++    "left:0:0 right:0:0",
++    "left:1:0 right:1:0",
++    "right:2:0",
++  ]);
++});
++
++test("the same text in two changes is two places (merging across changes)", () => {
++  const changes = [
++    { left: range(0, 1), center: range(0, 1), right: range(0, 1) },
++    { left: range(2, 1), center: range(2, 1), right: range(2, 1) },
++  ];
++
++  expect(mergeRows({ left: "foo\nx\nl", center: "c\nx\nc", right: "r\nx\nfoo" }, changes)).toEqual([
++    "left:0:0",
++    "right:2:0",
++  ]);
++});
++
++test("a line only one side has is its own place with only that pane (lost side-only hits)", () => {
++  const changes = [{ left: range(1, 0), center: range(1, 0), right: range(1, 1) }];
++
++  expect(mergeRows({ left: "a\nb", center: "a\nb", right: "a\nfoo\nb" }, changes)).toEqual([
++    "right:1:0",
++  ]);
++});
++
++test("a null text yields nothing; an insertion range holds no line (DiskNotText and empty ranges counted as inside)", () => {
++  expect(mergeRows({ left: "foo", center: null, right: "foo" })).toEqual(["left:0:0 right:0:0"]);
++  const changes = [{ left: range(1, 0), right: range(1, 1) }];
++  const texts = { left: "a\nfoo", right: "a\nnew\nfoo" };
++
++  expect(rows(placesOf({ texts, changes }, RANGE).places)).toEqual(["left:1:0 right:2:0"]);
++});
++
++test("lead order by line, then column (an unsorted list)", () => {
++  expect(mergeRows({ left: "x\n  foo\nfoo", center: "foo\nfoo", right: "y\ny\ny" })).toEqual([
++    "center:0:0",
++    "center:1:0",
++    "left:1:2",
++    "left:2:0",
++  ]);
++});
++
++test("a side-only place sorts at its change's lead start, before that line's lead rows, left before right (rule 7's change place)", () => {
++  const changes = [{ left: range(1, 1), center: range(1, 2), right: range(1, 1) }];
++  const texts = {
++    left: "foo0\nleft foo\nz",
++    center: "foo0\nfoo c\nmid foo\nz",
++    right: "foo0\nfoo right\nz",
++  };
++
++  expect(mergeRows(texts, changes)).toEqual([
++    "left:0:0 center:0:0 right:0:0",
++    "left:1:5",
++    "right:1:0",
++    "center:1:0",
++    "center:2:4",
++  ]);
++});
++
++test("range: a left-only place sorts at its difference's right start (rule 7's change place)", () => {
++  const changes = [{ left: range(2, 1), right: range(1, 2) }];
++  const texts = { left: "a\nb\nold foo\nz foo", right: "a\nfoo new\nfoo\nz foo" };
++
++  expect(rows(placesOf({ texts, changes }, RANGE).places)).toEqual([
++    "left:2:4",
++    "right:1:0",
++    "right:2:0",
++    "left:3:2 right:3:2",
++  ]);
++});
++
++test("a place's preview comes from the lead hit, else the first hit", () => {
++  const changes = [{ left: range(0, 1), center: range(0, 1), right: range(0, 1) }];
++  const { places } = placesOf(
++    { texts: { left: "l foo", center: "c foo", right: "r foo" }, changes },
++    MERGE,
++  );
++
++  expect(places.map((place) => place.preview.before)).toEqual(["l ", "r ", "c "]);
++  const outside = placesOf(
++    { texts: { left: "y foo", center: "x foo", right: null }, changes: [] },
++    MERGE,
++  );
++
++  expect(outside.places.map((place) => place.preview)).toEqual([
++    { before: "x ", match: "foo", after: "" },
++  ]);
++  const sides = placesOf(
++    { texts: { left: "y foo", center: null, right: "z foo" }, changes: [] },
++    MERGE,
++  );
++
++  expect(sides.places.map((place) => place.preview.before)).toEqual(["y "]);
++});
++
++test("keys differ by panes, column, line text and ordinal, never by line number (line-number keys)", () => {
++  function keysOf(left: string): readonly string[] {
++    return placesOf({ texts: { left, right: null }, changes: [] }, RANGE).places.map(
++      (place) => place.key,
++    );
++  }
++  const [first, second, third] = keysOf("foo\nfoo\n foo");
++
++  expect([first, second, third]).toEqual([
++    JSON.stringify([["left"], 0, "foo", 0]),
++    JSON.stringify([["left"], 0, "foo", 1]),
++    JSON.stringify([["left"], 1, " foo", 0]),
++  ]);
++  expect(keysOf("x\nfoo\nfoo\n foo")).toEqual([first, second, third]);
++  expect(
++    placesOf({ texts: { left: "foo", right: "foo" }, changes: [] }, RANGE).places[0]?.key,
++  ).toBe(JSON.stringify([["left", "right"], 0, "foo", 0]));
++});
++
++test("the line right after a change is outside it, a line before it too (a change's edges)", () => {
++  const after = [{ left: range(0, 1), right: range(0, 1) }];
++
++  expect(
++    rows(placesOf({ texts: { left: "foo\nfoo", right: "x\nfoo" }, changes: after }, RANGE).places),
++  ).toEqual(["left:0:0", "left:1:0 right:1:0"]);
++  const before = [{ left: range(1, 1), right: range(1, 1) }];
++
++  expect(
++    rows(
++      placesOf({ texts: { left: "foo a\nx", right: "foo b\ny" }, changes: before }, RANGE).places,
++    ),
++  ).toEqual(["left:0:0 right:0:0"]);
++});
++
++test("an outside side-only place sorts at its aligned lead line (rule 7's order)", () => {
++  const changes = [{ left: range(0, 1), right: range(0, 3) }];
++  const texts = { left: "x\n  foo", right: "a\nb\nc\nfoo\nfoo" };
++
++  expect(rows(placesOf({ texts, changes }, RANGE).places)).toEqual([
++    "right:3:0",
++    "left:1:2",
++    "right:4:0",
++  ]);
++});
++
++test("a pane stops at the limit and the file says it was cut", () => {
++  const texts = { left: "foo\nfoo\nfoo", right: "foo" };
++
++  expect(placesOf({ texts, changes: [] }, RANGE, "foo", 2)).toMatchObject({ cut: true });
++  expect(rows(placesOf({ texts, changes: [] }, RANGE, "foo", 2).places)).toEqual([
++    "left:0:0 right:0:0",
++    "left:1:0",
++  ]);
++  expect(placesOf({ texts, changes: [] }, RANGE, "foo", 3)).toMatchObject({ cut: false });
++});
+diff --git a/frontend/src/search/internal/places.ts b/frontend/src/search/internal/places.ts
+new file mode 100644
+index 0000000..15c2a12
+--- /dev/null
++++ b/frontend/src/search/internal/places.ts
+@@ -0,0 +1,168 @@
++import { type LineHit, type Matcher, paneHits } from "./match";
++import { type Preview, previewOf } from "./preview";
++
++export type LineRange = { readonly start: number; readonly len: number };
++export type Layout<P extends string> = { readonly panes: readonly [P, ...P[]]; readonly lead: P };
++export type SearchedFile<P extends string> = {
++  readonly path: string;
++  readonly texts: Readonly<Record<P, string | null>>;
++  readonly changes: readonly Readonly<Record<P, LineRange>>[];
++};
++export type PaneHit = { readonly line: number; readonly from: number; readonly to: number };
++export type PaneEntry<P extends string> = { readonly pane: P; readonly hit: PaneHit };
++export type PlaceKey = string & { readonly __brand: "PlaceKey" };
++export type Place<P extends string> = {
++  readonly key: PlaceKey;
++  readonly hits: readonly [PaneEntry<P>, ...PaneEntry<P>[]];
++  readonly preview: Preview;
++};
++
++type Spot =
++  | { readonly kind: "in"; readonly change: number; readonly leadStart: number }
++  | { readonly kind: "out"; readonly aligned: number };
++
++type Found<P extends string> = { readonly pane: P; readonly hit: LineHit; readonly spot: Spot };
++
++type Group<P extends string> = [Found<P>, ...Found<P>[]];
++
++type Order = {
++  readonly anchor: number;
++  readonly phase: number;
++  readonly paneRank: number;
++  readonly line: number;
++  readonly from: number;
++};
++
++const ORDER_FIELDS = ["anchor", "phase", "paneRank", "line", "from"] as const;
++
++function isPlaceKey(text: string): text is PlaceKey {
++  return text.startsWith("[");
++}
++
++function placeKey(parts: readonly unknown[]): PlaceKey {
++  const text = JSON.stringify(parts);
++  if (!isPlaceKey(text)) {
++    throw new RangeError("a place key is a JSON array");
++  }
++  return text;
++}
++
++function endOf(range: LineRange): number {
++  return range.start + range.len;
++}
++
++function spotsOf<P extends string>(
++  file: SearchedFile<P>,
++  pane: P,
++  lead: P,
++): (line: number) => Spot {
++  let passed = 0;
++  return (line) => {
++    let next = file.changes[passed];
++    while (next !== undefined && endOf(next[pane]) <= line) {
++      passed += 1;
++      next = file.changes[passed];
++    }
++    if (next !== undefined && next[pane].start <= line) {
++      return { kind: "in", change: passed, leadStart: next[lead].start };
++    }
++    const last = file.changes[passed - 1];
++    const aligned = last === undefined ? line : line - endOf(last[pane]) + endOf(last[lead]);
++    return { kind: "out", aligned };
++  };
++}
++
++function groupsOf<P extends string>(
++  file: SearchedFile<P>,
++  matcher: Matcher,
++  layout: Layout<P>,
++  limit: number,
++): { readonly groups: readonly Group<P>[]; readonly cut: boolean } {
++  const groups = new Map<string, Group<P>>();
++  const ordinals = new Map<string, number>();
++  let cut = false;
++  for (const pane of layout.panes) {
++    const text = file.texts[pane];
++    if (text === null) {
++      continue;
++    }
++    const found = paneHits(text, matcher, limit);
++    cut ||= found.cut;
++    const spotOf = spotsOf(file, pane, layout.lead);
++    for (const hit of found.hits) {
++      const spot = spotOf(hit.line);
++      const where =
++        spot.kind === "in" ? [spot.change, hit.lineText, hit.from] : [spot.aligned, hit.from];
++      const counted = JSON.stringify([pane, where]);
++      const ordinal = ordinals.get(counted) ?? 0;
++      ordinals.set(counted, ordinal + 1);
++      const key = JSON.stringify([where, ordinal]);
++      const entry = { pane, hit, spot };
++      const group = groups.get(key);
++      if (group === undefined) {
++        groups.set(key, [entry]);
++      } else {
++        group.push(entry);
++      }
++    }
++  }
++  return { groups: [...groups.values()], cut };
++}
++
++function orderOf<P extends string>(group: Group<P>, layout: Layout<P>): Order {
++  const lead = group.find((found) => found.pane === layout.lead);
++  if (lead !== undefined) {
++    const { line, from } = lead.hit;
++    return { anchor: line, phase: 1, paneRank: 0, line, from };
++  }
++  const [{ pane, hit, spot }] = group;
++  if (spot.kind === "out") {
++    return { anchor: spot.aligned, phase: 1, paneRank: 0, line: spot.aligned, from: hit.from };
++  }
++  const paneRank = layout.panes.indexOf(pane);
++  return { anchor: spot.leadStart, phase: 0, paneRank, line: hit.line, from: hit.from };
++}
++
++function byOrder(a: Order, b: Order): number {
++  for (const field of ORDER_FIELDS) {
++    if (a[field] !== b[field]) {
++      return a[field] - b[field];
++    }
++  }
++  return 0;
++}
++
++function entryOf<P extends string>({ pane, hit: { line, from, to } }: Found<P>): PaneEntry<P> {
++  return { pane, hit: { line, from, to } };
++}
++
++function placesOf<P extends string>(sorted: readonly Group<P>[], layout: Layout<P>): Place<P>[] {
++  const ordinals = new Map<string, number>();
++  return sorted.map((group) => {
++    const [head, ...tail] = group;
++    const { hit } = group.find((found) => found.pane === layout.lead) ?? head;
++    const panes = group.map((found) => found.pane);
++    const counted = JSON.stringify([panes, hit.from, hit.lineText]);
++    const ordinal = ordinals.get(counted) ?? 0;
++    ordinals.set(counted, ordinal + 1);
++    return {
++      key: placeKey([panes, hit.from, hit.lineText, ordinal]),
++      hits: [entryOf(head), ...tail.map(entryOf)],
++      preview: previewOf(hit.lineText, hit.from, hit.to),
++    };
++  });
++}
++
++export function filePlaces<P extends string>(
++  file: SearchedFile<P>,
++  matcher: Matcher,
++  layout: Layout<P>,
++  limit: number,
++): { readonly places: readonly Place<P>[]; readonly cut: boolean } {
++  const { groups, cut } = groupsOf(file, matcher, layout, limit);
++  const sorted = groups
++    .map((group) => ({ group, order: orderOf(group, layout) }))
++    .sort((a, b) => byOrder(a.order, b.order))
++    .map(({ group }) => group);
++  return { places: placesOf(sorted, layout), cut };
++}
+diff --git a/frontend/src/search/internal/preview.test.ts b/frontend/src/search/internal/preview.test.ts
+new file mode 100644
+index 0000000..00e5222
+--- /dev/null
++++ b/frontend/src/search/internal/preview.test.ts
+@@ -0,0 +1,28 @@
++import { expect, test } from "vitest";
++
++import type { Preview } from "../index";
++import { previewOf } from "./preview";
++
++test("preview: leading whitespace trimmed, the match and the rest of the line (wrong trimming)", () => {
++  const preview: Preview = previewOf("    let x = foo(1);", 12, 15);
++
++  expect(preview).toEqual({ before: "let x = ", match: "foo", after: "(1);" });
++});
++
++test("preview: 26 characters before the match with … when cut (wrong trimming)", () => {
++  const before = "abcdefghijklmnopqrstuvwxyz";
++
++  expect(previewOf(`${before}foo`, 26, 29)).toEqual({ before, match: "foo", after: "" });
++  expect(previewOf(`  0${before}foo`, 29, 32)).toEqual({
++    before: `…${before}`,
++    match: "foo",
++    after: "",
++  });
++});
++
++test("preview: a cut never splits a surrogate pair", () => {
++  const before = `😀${"a".repeat(25)}`;
++
++  expect(previewOf(`${before}foo`, 27, 30).before).toBe(`…${"a".repeat(25)}`);
++  expect(previewOf(`b${before}foo`, 28, 31).before).toBe(`…${"a".repeat(25)}`);
++});
+diff --git a/frontend/src/search/internal/preview.ts b/frontend/src/search/internal/preview.ts
+new file mode 100644
+index 0000000..f929ec6
+--- /dev/null
++++ b/frontend/src/search/internal/preview.ts
+@@ -0,0 +1,16 @@
++export type Preview = { readonly before: string; readonly match: string; readonly after: string };
++
++const BEFORE_CHARS = 26;
++const CUT_MARK = "…";
++const LOW_SURROGATE = /^[\uDC00-\uDFFF]/;
++
++export function previewOf(lineText: string, from: number, to: number): Preview {
++  const before = lineText.slice(0, from).trimStart();
++  const match = lineText.slice(from, to);
++  const after = lineText.slice(to);
++  if (before.length <= BEFORE_CHARS) {
++    return { before, match, after };
++  }
++  const kept = before.slice(-BEFORE_CHARS).replace(LOW_SURROGATE, "");
++  return { before: `${CUT_MARK}${kept}`, match, after };
++}
+diff --git a/frontend/src/search/internal/results.test.ts b/frontend/src/search/internal/results.test.ts
+new file mode 100644
+index 0000000..88b9445
+--- /dev/null
++++ b/frontend/src/search/internal/results.test.ts
+@@ -0,0 +1,200 @@
++import { expect, test } from "vitest";
++
++import {
++  MAX_ROWS,
++  dismissFile,
++  dismissPlace,
++  emptyResults,
++  filePlaces,
++  listRows,
++  matcherOf,
++  withFile,
++  type FileGroup,
++  type Layout,
++  type Place,
++  type PlaceKey,
++  type SearchResults,
++} from "../index";
++
++type Column = "left" | "right";
++type FoundFile = {
++  readonly path: string;
++  readonly rank: number;
++  readonly places: readonly Place<Column>[];
++  readonly cut: boolean;
++};
++
++const RANGE: Layout<Column> = { panes: ["left", "right"], lead: "right" };
++const QUERY = { text: "foo", matchCase: false };
++const ON: ReadonlySet<Column> = new Set(["left", "right"]);
++
++function fileOf(path: string, rank: number, text: string): FoundFile {
++  const matcher = matcherOf(QUERY);
++  if (matcher === null) {
++    throw new Error("a non-empty query builds a matcher");
++  }
++  const file = { path, texts: { left: text, right: text }, changes: [] };
++  return { path, rank, ...filePlaces(file, matcher, RANGE, MAX_ROWS) };
++}
++
++function shown(results: SearchResults<Column>): string[] {
++  return listRows(results, ON, new Set()).map((row) =>
++    row.kind === "group"
++      ? `${row.path} ${row.count}`
++      : `${row.place.preview.before}${row.place.preview.match}`,
++  );
++}
++
++function groupOf(results: SearchResults<Column>, path: string): FileGroup<Column> {
++  const group = results.groups.find((candidate) => candidate.path === path);
++  if (group === undefined) {
++    throw new Error(`no group for ${path}`);
++  }
++  return group;
++}
++
++function keyAt(results: SearchResults<Column>, path: string, index: number): PlaceKey {
++  const place = groupOf(results, path).places.at(index);
++  if (place === undefined) {
++    throw new Error(`no place ${index} in ${path}`);
++  }
++  return place.key;
++}
++
++function foos(count: number): string {
++  return "foo\n".repeat(count);
++}
++
++function searched(...files: FoundFile[]): SearchResults<Column> {
++  return files.reduce(withFile, emptyResults<Column>(QUERY));
++}
++
++test("a dismissal survives a one-file re-run with lines inserted above (line-number keys)", () => {
++  const first = searched(fileOf("a", 0, "foo\nbar foo"));
++  const dismissed = dismissPlace(first, "a", keyAt(first, "a", 1));
++
++  expect(shown(dismissed)).toEqual(["a 1", "foo"]);
++  const rerun = withFile(dismissed, fileOf("a", 0, "new\nfoo\nbar foo"));
++
++  expect(shown(rerun)).toEqual(["a 1", "foo"]);
++  expect(groupOf(rerun, "a").dismissed).toEqual(new Set([keyAt(rerun, "a", 1)]));
++});
++
++test("a dismissal is dropped once the line text changes (stale keys)", () => {
++  const first = searched(fileOf("a", 0, "foo\nbar foo"));
++  const dismissed = dismissPlace(first, "a", keyAt(first, "a", 1));
++  const rerun = withFile(dismissed, fileOf("a", 0, "foo\nbaz foo"));
++
++  expect(shown(rerun)).toEqual(["a 2", "foo", "baz foo"]);
++  expect(groupOf(rerun, "a").dismissed.size).toBe(0);
++});
++
++test("two identical places dismiss independently (over-dismissal)", () => {
++  const first = searched(fileOf("a", 0, "foo\nfoo"));
++  const dismissed = dismissPlace(first, "a", keyAt(first, "a", 0));
++
++  expect(shown(dismissed)).toEqual(["a 1", "foo"]);
++  expect(groupOf(dismissed, "a").dismissed).toEqual(new Set([keyAt(first, "a", 0)]));
++});
++
++test("a dismissal only holds keys among its file's places", () => {
++  const other = searched(fileOf("a", 0, " foo"));
++  const results = searched(fileOf("a", 0, "foo"), fileOf("b", 1, " foo"));
++  const stale = dismissPlace(results, "a", keyAt(other, "a", 0));
++
++  expect(groupOf(stale, "a").dismissed.size).toBe(0);
++  expect(groupOf(stale, "b").dismissed.size).toBe(0);
++  expect(shown(stale)).toEqual(["a 1", "foo", "b 1", "foo"]);
++});
++
++test("a dismissal stays in its own file when another file holds the same place (over-dismissal)", () => {
++  const results = searched(fileOf("a", 0, "foo"), fileOf("b", 1, "foo"));
++  const dismissed = dismissPlace(results, "a", keyAt(results, "a", 0));
++  const rerun = withFile(dismissed, fileOf("b", 1, "foo"));
++
++  expect(shown(rerun)).toEqual(["b 1", "foo"]);
++  expect(groupOf(rerun, "b").dismissed.size).toBe(0);
++});
++
++test("a group dismissal survives a one-file re-run; a full run clears it (rule 9 vs rule 10)", () => {
++  const results = searched(fileOf("a", 0, "foo"), fileOf("b", 1, "foo"));
++  const dismissed = dismissFile(results, "a");
++
++  expect(shown(dismissed)).toEqual(["b 1", "foo"]);
++  expect(shown(withFile(dismissed, fileOf("a", 0, "foo\nfoo")))).toEqual(["b 1", "foo"]);
++  const fullRun = emptyResults<Column>(QUERY);
++
++  expect(fullRun.dismissedFiles.size).toBe(0);
++  expect(shown(withFile(fullRun, fileOf("a", 0, "foo")))).toEqual(["a 1", "foo"]);
++});
++
++test("dismissing a file without a group changes nothing", () => {
++  const results = searched(fileOf("a", 0, "foo"));
++
++  expect(dismissFile(results, "b")).toBe(results);
++});
++
++test("groups follow the window's file order; a re-run replaces its group; a file without places has none", () => {
++  const results = searched(fileOf("b", 2, "foo"), fileOf("a", 0, "foo"), fileOf("c", 1, "foo"));
++
++  expect(results.groups.map((group) => group.path)).toEqual(["a", "c", "b"]);
++  const rerun = withFile(results, fileOf("c", 1, "foo\nfoo"));
++
++  expect(rerun.groups.map((group) => `${group.path} ${group.places.length}`)).toEqual([
++    "a 1",
++    "c 2",
++    "b 1",
++  ]);
++  expect(rerun.found).toBe(4);
++  const emptied = withFile(rerun, fileOf("c", 1, "bar"));
++
++  expect(emptied.groups.map((group) => group.path)).toEqual(["a", "b"]);
++  expect(emptied.found).toBe(2);
++});
++
++test("cut at 20,000 places across files; later files are not added (an off-by-one at the limit)", () => {
++  const full = searched(fileOf("a", 0, foos(15_000)), fileOf("b", 1, foos(5_000)));
++
++  expect(full).toMatchObject({ found: MAX_ROWS, cut: false });
++  const over = withFile(full, fileOf("c", 2, "foo"));
++
++  expect(over).toMatchObject({ found: MAX_ROWS, cut: true });
++  expect(over.groups.map((group) => group.path)).toEqual(["a", "b"]);
++  const split = searched(fileOf("a", 0, foos(15_000)), fileOf("b", 1, foos(6_000)));
++
++  expect(split).toMatchObject({ found: MAX_ROWS, cut: true });
++  expect(groupOf(split, "b").places).toHaveLength(5_000);
++});
++
++test("a one-file re-run under a cut result re-applies the cap (uncapped growth)", () => {
++  const results = searched(
++    fileOf("a", 0, foos(15_000)),
++    fileOf("b", 1, foos(5_000)),
++    fileOf("c", 2, "foo"),
++  );
++  const dismissed = dismissPlace(results, "b", keyAt(results, "b", -1));
++  const grown = withFile(dismissed, fileOf("a", 0, foos(15_001)));
++
++  expect(grown).toMatchObject({ found: MAX_ROWS, cut: true });
++  expect(groupOf(grown, "b").places).toHaveLength(4_999);
++  expect(groupOf(grown, "b").dismissed.size).toBe(0);
++  const shrunk = withFile(grown, fileOf("a", 0, foos(14_000)));
++
++  expect(shrunk).toMatchObject({ found: 18_999, cut: true });
++});
++
++test("a file cut at its pane limit cuts the results", () => {
++  const file = { ...fileOf("a", 0, "foo"), cut: true };
++
++  expect(withFile(emptyResults<Column>(QUERY), file).cut).toBe(true);
++  expect(searched(fileOf("a", 0, "foo")).cut).toBe(false);
++});
++
++test("a file without places keeps the results' cut and adds its own", () => {
++  const cutResults = { ...searched(fileOf("a", 0, "foo")), cut: true };
++  const noPlaces = { path: "a", rank: 0, places: [], cut: false };
++
++  expect(withFile(cutResults, noPlaces).cut).toBe(true);
++  expect(withFile(emptyResults<Column>(QUERY), { ...noPlaces, cut: true }).cut).toBe(true);
++  expect(withFile(emptyResults<Column>(QUERY), noPlaces).cut).toBe(false);
++});
+diff --git a/frontend/src/search/internal/results.ts b/frontend/src/search/internal/results.ts
+new file mode 100644
+index 0000000..3f394dd
+--- /dev/null
++++ b/frontend/src/search/internal/results.ts
+@@ -0,0 +1,103 @@
++import type { Query } from "./match";
++import type { Place, PlaceKey } from "./places";
++
++export type FileGroup<P extends string> = {
++  readonly path: string;
++  readonly rank: number;
++  readonly places: readonly Place<P>[];
++  readonly dismissed: ReadonlySet<PlaceKey>;
++};
++export type SearchResults<P extends string> = {
++  readonly query: Query;
++  readonly groups: readonly FileGroup<P>[];
++  readonly dismissedFiles: ReadonlySet<string>;
++  readonly found: number;
++  readonly cut: boolean;
++};
++
++export const MAX_ROWS = 20_000;
++
++export function emptyResults<P extends string>(query: Query): SearchResults<P> {
++  return { query, groups: [], dismissedFiles: new Set(), found: 0, cut: false };
++}
++
++function stillAmong<P extends string>(
++  dismissed: ReadonlySet<PlaceKey>,
++  places: readonly Place<P>[],
++): ReadonlySet<PlaceKey> {
++  return new Set(places.flatMap(({ key }) => (dismissed.has(key) ? [key] : [])));
++}
++
++function capped<P extends string>(
++  results: SearchResults<P>,
++  groups: readonly FileGroup<P>[],
++  cut: boolean,
++): SearchResults<P> {
++  const kept: FileGroup<P>[] = [];
++  let room = MAX_ROWS;
++  let wasCut = cut;
++  for (const group of groups) {
++    if (group.places.length > room) {
++      const places = group.places.slice(0, room);
++      if (places.length > 0) {
++        kept.push({ ...group, places, dismissed: stillAmong(group.dismissed, places) });
++      }
++      room = 0;
++      wasCut = true;
++      break;
++    }
++    kept.push(group);
++    room -= group.places.length;
++  }
++  return { ...results, groups: kept, found: MAX_ROWS - room, cut: wasCut };
++}
++
++export function withFile<P extends string>(
++  results: SearchResults<P>,
++  file: {
++    readonly path: string;
++    readonly rank: number;
++    readonly places: readonly Place<P>[];
++    readonly cut: boolean;
++  },
++): SearchResults<P> {
++  const others = results.groups.filter((group) => group.path !== file.path);
++  const before = results.groups.find((group) => group.path === file.path);
++  const added: FileGroup<P>[] =
++    file.places.length === 0
++      ? []
++      : [
++          {
++            path: file.path,
++            rank: file.rank,
++            places: file.places,
++            dismissed: before === undefined ? new Set() : stillAmong(before.dismissed, file.places),
++          },
++        ];
++  const after = others.findIndex((other) => other.rank > file.rank);
++  const groups = others.toSpliced(after === -1 ? others.length : after, 0, ...added);
++  return capped(results, groups, results.cut || file.cut);
++}
++
++export function dismissPlace<P extends string>(
++  results: SearchResults<P>,
++  path: string,
++  key: PlaceKey,
++): SearchResults<P> {
++  const groups = results.groups.map((group) =>
++    group.path === path && group.places.some((place) => place.key === key)
++      ? { ...group, dismissed: new Set([...group.dismissed, key]) }
++      : group,
++  );
++  return { ...results, groups };
++}
++
++export function dismissFile<P extends string>(
++  results: SearchResults<P>,
++  path: string,
++): SearchResults<P> {
++  if (!results.groups.some((group) => group.path === path)) {
++    return results;
++  }
++  return { ...results, dismissedFiles: new Set([...results.dismissedFiles, path]) };
++}

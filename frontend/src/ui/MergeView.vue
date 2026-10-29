@@ -12,11 +12,12 @@ import PaneFrame from "./PaneFrame.vue";
 import { paneColumns, type PaneWidths } from "./paneSplit";
 import ServerStatus from "./ServerStatus.vue";
 import SettingsButton from "./SettingsButton.vue";
-import { sideHeader } from "./sideHeaders";
+import { RESULT_HEADER, sideHeader } from "./sideHeaders";
 import { SIDES } from "./sides";
 import { useAppStore } from "./store";
 import { useMergeController } from "./useMergeController";
 import { usePaneDividers } from "./usePaneDividers";
+import { useSearchGoTo } from "./useSearchGoTo";
 import { isEditable } from "./views";
 
 type Column = {
@@ -55,6 +56,8 @@ const {
   paneSplit,
   setPaneSplit,
   resetPaneSplit,
+  search,
+  liveResults,
 } = useAppStore();
 const handle = useMergeController(
   () => props.data,
@@ -82,7 +85,17 @@ const work: FileWork = { unsaved: () => unsaved.value };
 if (props.data.deleted === null) {
   track(props.data.path, work);
 }
+const live = { lineUp: handle.lineUp };
+liveResults.track(props.data.path, live);
 const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
+useSearchGoTo(
+  search,
+  () => props.shown,
+  () => props.data.path,
+  (target) => {
+    handle.goTo(target);
+  },
+);
 
 const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "strip"));
 const deletedView = computed(deletedViewNow);
@@ -112,9 +125,13 @@ watch(
   },
   { immediate: true },
 );
+watch(handle.resultVersion, () => {
+  search.changed(props.data.path);
+});
 
 onUnmounted(() => {
   untrack(props.data.path, work);
+  liveResults.untrack(props.data.path, live);
 });
 
 function deletedViewNow(): DeletedSideView | null {
@@ -224,7 +241,7 @@ function shownKeydown(event: KeyboardEvent): void {
       <div
         class="col-start-3 row-start-1 flex min-w-0 items-center gap-2 border-b border-separator px-3 py-1.5"
       >
-        <h2 class="text-fg-muted">Result</h2>
+        <h2 class="text-fg-muted">{{ RESULT_HEADER }}</h2>
         <button
           type="button"
           :disabled="!resettable"

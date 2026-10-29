@@ -29,6 +29,7 @@ type Listed = {
   readonly notices: ShallowRef<readonly Notice[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
   readonly guard: { unsavedFiles(): string[] };
+  readonly search: { changed(path: string): void };
   readonly ends: StopEnd[];
   stop: Stop;
   nextStop(end: StopEnd): Promise<void>;
@@ -94,6 +95,7 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
     notices: shallowRef<readonly Notice[]>([]),
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
     guard: { unsavedFiles: () => [] },
+    search: { changed: () => undefined },
     ends,
     stop: { dropped: false },
     nextStop: (end) => {

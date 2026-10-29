@@ -1,0 +1,529 @@
+commit f08aee65007a2bbb229daf70924b7a2a766fbfd5
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 11:00:04 +0100
+
+    fix(search): opaque matcher; place keys from a line digest; per-pane ordinal and go-to pane tested
+
+diff --git a/frontend/src/search/AGENTS.md b/frontend/src/search/AGENTS.md
+index c8f38c3..9a1148d 100644
+--- a/frontend/src/search/AGENTS.md
++++ b/frontend/src/search/AGENTS.md
+@@ -1,5 +1,5 @@
+-Owner skill: `skill://ts-conventions`. The window-wide search's pure core (plan §2 #127, request `docs/slices/request-search.md` rules 5, 7, 9, 10, 12): one matcher per query (`matcherOf`: the text escaped into one `giu` RegExp, `gu` with Match Case; UTF-16 columns; lines split at `\n`, a trailing `\r` left out, never a cross-line match; `limit` hits per pane), the place rule and order (`filePlaces`: a hit inside change `k` groups with the other panes' hits of the same line text and column, identical lines first-with-first; a hit outside every change groups by its aligned lead line and column; rows in the lead pane's order, a side-only row at its change's lead start before that line's lead rows), each place's `PlaceKey` (panes, column, line text, ordinal — never a line number) and `Preview` (26 characters before the match, leading whitespace trimmed, `…` when cut), the results (`emptyResults` for a full run, `withFile` per file: dismissals kept while their place still matches, the `MAX_ROWS` 20,000 cap re-applied by rank), the dismissals (`dismissPlace`, `dismissFile`: a group's kept across one-file re-runs, cleared by a full run) and what the list shows (`listRows`: pane filters and closed groups, nothing dismissed back; `summaryOf`; `goToPane`: the lead pane when on, else the leftmost on pane).
++Owner skill: `skill://ts-conventions`. The window-wide search's pure core (plan §2 #127, request `docs/slices/request-search.md` rules 5, 7, 9, 10, 12): one matcher per query (`matcherOf`: the text escaped into one `giu` RegExp, `gu` with Match Case; UTF-16 columns; lines split at `\n`, a trailing `\r` left out, never a cross-line match; `limit` hits per pane), the place rule and order (`filePlaces`: a hit inside change `k` groups with the other panes' hits of the same line text (its digest) and column, identical lines first-with-first; a hit outside every change groups by its aligned lead line and column, one hit per pane (a per-pane ordinal); rows in the lead pane's order, a side-only row at its change's lead start before that line's lead rows), each place's `PlaceKey` (panes, column, line digest, ordinal — never a line number, never the line text) and `Preview` (26 characters before the match, leading whitespace trimmed, `…` when cut), the results (`emptyResults` for a full run, `withFile` per file: dismissals kept while their place still matches, the `MAX_ROWS` 20,000 cap re-applied by rank), the dismissals (`dismissPlace`, `dismissFile`: a group's kept across one-file re-runs, cleared by a full run) and what the list shows (`listRows`: pane filters and closed groups, nothing dismissed back; `summaryOf`; `goToPane`: the lead pane when on, else the leftmost on pane).
+ 
+ `index.ts` is the only surface. Framework-free (PM3) and self-contained: nothing here imports another `src/` module, as `jsonrpc/` (PM2, `frontend/scripts/fences.ts`). Pure: no DOM, no timers, no state; the window's `ui/` owns running, pausing and the texts.
+ 
+-`internal/`: `match` (the matcher, `paneHits`), `preview`, `places` (the place rule, order and key), `results` (results, dismissals, the cap), `list` (rows, summary, go-to pane). Every file has its `*.test.ts` (node), each test named for the bug it catches.
++`internal/`: `match` (`Matcher`: the pattern an ES private field, `hits(text, limit)`; `matcherOf` the only way to build one), `digest` (cyrb53: each hit line's 53-bit digest, computed once per line in the scan — group keys and `PlaceKey`s carry it, never the line text), `preview`, `places` (the place rule, order and key), `results` (results, dismissals, the cap), `list` (rows, summary, go-to pane; `shownHits` the one pane-filter rule). Every file has its `*.test.ts` (node), each test named for the bug it catches.
+diff --git a/frontend/src/search/internal/digest.test.ts b/frontend/src/search/internal/digest.test.ts
+new file mode 100644
+index 0000000..631ddcf
+--- /dev/null
++++ b/frontend/src/search/internal/digest.test.ts
+@@ -0,0 +1,17 @@
++import { expect, test } from "vitest";
++
++import { digestOf } from "./digest";
++
++test("cyrb53's published values (https://stackoverflow.com/a/52171480): a transcription slip", () => {
++  expect(["a", "b", "revenge", "revenue"].map(digestOf)).toEqual([
++    7929297801672961, 8684336938537663, 4051478007546757, 8309097637345594,
++  ]);
++});
++
++test("a digest is a safe integer read from every character (a digest of a prefix)", () => {
++  const long = `${"x".repeat(1000)}y`;
++
++  expect(Number.isSafeInteger(digestOf(long))).toBe(true);
++  expect(digestOf(long)).not.toBe(digestOf(`${"x".repeat(1000)}z`));
++  expect(digestOf("")).not.toBe(digestOf("\0"));
++});
+diff --git a/frontend/src/search/internal/digest.ts b/frontend/src/search/internal/digest.ts
+new file mode 100644
+index 0000000..a309c4f
+--- /dev/null
++++ b/frontend/src/search/internal/digest.ts
+@@ -0,0 +1,26 @@
++// cyrb53 by bryc (public domain): https://github.com/bryc/code/blob/master/jshash/experimental/cyrb53.js
++const SEED_1 = 0xdeadbeef;
++const SEED_2 = 0x41c6ce57;
++const MULTIPLIER_1 = 2654435761;
++const MULTIPLIER_2 = 1597334677;
++const MIX_1 = 2246822507;
++const MIX_2 = 3266489909;
++const SHIFT_1 = 16;
++const SHIFT_2 = 13;
++const LOW_21_BITS = 0x1fffff;
++const UINT32_RANGE = 0x100000000;
++
++export function digestOf(text: string): number {
++  let h1 = SEED_1;
++  let h2 = SEED_2;
++  for (let index = 0; index < text.length; index += 1) {
++    const code = text.charCodeAt(index);
++    h1 = Math.imul(h1 ^ code, MULTIPLIER_1);
++    h2 = Math.imul(h2 ^ code, MULTIPLIER_2);
++  }
++  h1 = Math.imul(h1 ^ (h1 >>> SHIFT_1), MIX_1);
++  h1 ^= Math.imul(h2 ^ (h2 >>> SHIFT_2), MIX_2);
++  h2 = Math.imul(h2 ^ (h2 >>> SHIFT_1), MIX_1);
++  h2 ^= Math.imul(h1 ^ (h1 >>> SHIFT_2), MIX_2);
++  return UINT32_RANGE * (h2 & LOW_21_BITS) + (h1 >>> 0);
++}
+diff --git a/frontend/src/search/internal/list.test.ts b/frontend/src/search/internal/list.test.ts
+index 455ac3e..78f77f9 100644
+--- a/frontend/src/search/internal/list.test.ts
++++ b/frontend/src/search/internal/list.test.ts
+@@ -154,6 +154,13 @@ test("goToPane takes the lead pane when on, else the leftmost on pane (the rule-
+   expect(goToPane(both, ALL, MERGE)?.pane).toBe("center");
+   expect(goToPane(both, new Set<Merge>(["left", "right"]), MERGE)?.pane).toBe("left");
+   expect(goToPane(both, new Set<Merge>(["right"]), MERGE)).toBeNull();
++  const three = placeAt(
++    searchedFile(emptyResults(QUERY), "b.ts", { left: "foo", center: "foo", right: "foo" }),
++    0,
++  );
++
++  expect(three.hits.map((entry) => entry.pane)).toEqual(["left", "center", "right"]);
++  expect(goToPane(three, new Set<Merge>(["left", "right"]), MERGE)?.pane).toBe("left");
+   const hit: PaneHit = { line: 1, from: 0, to: 3 };
+   const entry: PaneEntry<Merge> = { pane: "right", hit };
+ 
+diff --git a/frontend/src/search/internal/list.ts b/frontend/src/search/internal/list.ts
+index a16fafa..2c452f6 100644
+--- a/frontend/src/search/internal/list.ts
++++ b/frontend/src/search/internal/list.ts
+@@ -35,12 +35,16 @@ type ShownGroup<P extends string> = {
+   readonly places: readonly ShownPlace<P>[];
+ };
+ 
++function shownHits<P extends string>(place: Place<P>, on: ReadonlySet<P>): PaneEntry<P>[] {
++  return place.hits.filter((entry) => on.has(entry.pane));
++}
++
+ function shownPlaces<P extends string>(group: FileGroup<P>, on: ReadonlySet<P>): ShownPlace<P>[] {
+   return group.places.flatMap((place) => {
+     if (group.dismissed.has(place.key)) {
+       return [];
+     }
+-    const [first, ...rest] = place.hits.filter((entry) => on.has(entry.pane));
++    const [first, ...rest] = shownHits(place, on);
+     return first === undefined ? [] : [{ place, shown: [first, ...rest] }];
+   });
+ }
+@@ -103,6 +107,6 @@ export function goToPane<P extends string>(
+   on: ReadonlySet<P>,
+   layout: Layout<P>,
+ ): PaneEntry<P> | null {
+-  const shown = place.hits.filter((entry) => on.has(entry.pane));
++  const shown = shownHits(place, on);
+   return shown.find((entry) => entry.pane === layout.lead) ?? shown[0] ?? null;
+ }
+diff --git a/frontend/src/search/internal/match.test.ts b/frontend/src/search/internal/match.test.ts
+index b18fae9..d736bcb 100644
+--- a/frontend/src/search/internal/match.test.ts
++++ b/frontend/src/search/internal/match.test.ts
+@@ -1,7 +1,8 @@
+ import { expect, test } from "vitest";
+ 
+ import { matcherOf, type Matcher, type Query } from "../index";
+-import { paneHits } from "./match";
++import { digestOf } from "./digest";
++import type { LineHit } from "./match";
+ 
+ function matcher(text: string, matchCase = false): Matcher {
+   const query: Query = { text, matchCase };
+@@ -13,11 +14,23 @@ function matcher(text: string, matchCase = false): Matcher {
+ }
+ 
+ function spots(text: string, query: string, matchCase = false): string[] {
+-  return paneHits(text, matcher(query, matchCase), Infinity).hits.map(
+-    ({ line, from, to }) => `${line}:${from}-${to}`,
+-  );
++  return matcher(query, matchCase)
++    .hits(text, Infinity)
++    .hits.map(({ line, from, to }) => `${line}:${from}-${to}`);
+ }
+ 
++function lineHit(line: number, from: number, to: number, lineText: string): LineHit {
++  return { line, from, to, lineText, lineDigest: digestOf(lineText) };
++}
++
++test("a Matcher comes only from matcherOf (a forged or read pattern)", () => {
++  // @ts-expect-error -- the pattern is an ES private field: no object literal is a Matcher
++  const forged: Matcher = { pattern: /x/gu };
++
++  expect(Object.keys(matcher("x"))).toEqual([]);
++  expect(Object.keys(forged)).not.toEqual(Object.keys(matcher("x")));
++});
++
+ test("a.b does not match axb (an unescaped RegExp)", () => {
+   expect(spots("axb a.b", "a.b")).toEqual(["0:4-7"]);
+ });
+@@ -44,21 +57,18 @@ test("😀foo puts foo at column 2 (code-point columns instead of UTF-16)", () =
+ });
+ 
+ test("CRLF: the line text has no \\r and the line count is right (\\r\\n counted as two breaks)", () => {
+-  const { hits } = paneHits("one\r\ntwo foo\r\nfoo\r\n", matcher("foo"), Infinity);
++  const { hits } = matcher("foo").hits("one\r\ntwo foo\r\nfoo\r\n", Infinity);
+ 
+-  expect(hits).toEqual([
+-    { line: 1, from: 4, to: 7, lineText: "two foo" },
+-    { line: 2, from: 0, to: 3, lineText: "foo" },
+-  ]);
++  expect(hits).toEqual([lineHit(1, 4, 7, "two foo"), lineHit(2, 0, 3, "foo")]);
+ });
+ 
+ test("lines are counted across gaps without matches and kept for hits on one line", () => {
+-  const { hits } = paneHits("foo\n\nx\ny foo foo\nz", matcher("foo"), Infinity);
++  const { hits } = matcher("foo").hits("foo\n\nx\ny foo foo\nz", Infinity);
+ 
+   expect(hits).toEqual([
+-    { line: 0, from: 0, to: 3, lineText: "foo" },
+-    { line: 3, from: 2, to: 5, lineText: "y foo foo" },
+-    { line: 3, from: 6, to: 9, lineText: "y foo foo" },
++    lineHit(0, 0, 3, "foo"),
++    lineHit(3, 2, 5, "y foo foo"),
++    lineHit(3, 6, 9, "y foo foo"),
+   ]);
+ });
+ 
+@@ -80,18 +90,15 @@ test("a match never crosses a line or covers its \\r (a cross-line hit)", () =>
+ test("a pane stops scanning at the limit (an unbounded array)", () => {
+   const text = "x x\nx";
+ 
+-  expect(paneHits(text, matcher("x"), 2)).toEqual({
+-    hits: [
+-      { line: 0, from: 0, to: 1, lineText: "x x" },
+-      { line: 0, from: 2, to: 3, lineText: "x x" },
+-    ],
++  expect(matcher("x").hits(text, 2)).toEqual({
++    hits: [lineHit(0, 0, 1, "x x"), lineHit(0, 2, 3, "x x")],
+     cut: true,
+   });
+-  expect(paneHits(text, matcher("x"), 3)).toMatchObject({ cut: false });
++  expect(matcher("x").hits(text, 3)).toMatchObject({ cut: false });
+ });
+ 
+ test("a dropped cross-line match does not count toward the limit", () => {
+-  expect(paneHits("o\r\no x", matcher("o\r"), 0).cut).toBe(false);
++  expect(matcher("o\r").hits("o\r\no x", 0).cut).toBe(false);
+ });
+ 
+ test("a match starting on a line break stays on its line and is dropped (a negative column)", () => {
+diff --git a/frontend/src/search/internal/match.ts b/frontend/src/search/internal/match.ts
+index a8d2ac8..89ea8bb 100644
+--- a/frontend/src/search/internal/match.ts
++++ b/frontend/src/search/internal/match.ts
+@@ -1,20 +1,55 @@
++import { digestOf } from "./digest";
++
+ export type Query = { readonly text: string; readonly matchCase: boolean };
+ 
+-export class Matcher {
+-  readonly pattern: RegExp;
+-
+-  constructor(pattern: RegExp) {
+-    this.pattern = pattern;
+-  }
+-}
+-
+ export type LineHit = {
+   readonly line: number;
+   readonly from: number;
+   readonly to: number;
+   readonly lineText: string;
++  readonly lineDigest: number;
+ };
+ 
++export class Matcher {
++  readonly #pattern: RegExp;
++
++  constructor(pattern: RegExp) {
++    this.#pattern = pattern;
++  }
++
++  hits(text: string, limit: number): { readonly hits: readonly LineHit[]; readonly cut: boolean } {
++    const hits: LineHit[] = [];
++    let line = -1;
++    let lineStart = 0;
++    let lineEnd = -1;
++    let lineText = "";
++    let lineDigest = 0;
++    for (const match of text.matchAll(this.#pattern)) {
++      if (lineEnd < match.index) {
++        do {
++          line += 1;
++          lineStart = lineEnd + 1;
++          const lineBreak = text.indexOf("\n", lineStart);
++          lineEnd = lineBreak === -1 ? text.length : lineBreak;
++        } while (lineEnd < match.index);
++        const whole = text.slice(lineStart, lineEnd);
++        lineText = whole.endsWith("\r") ? whole.slice(0, -1) : whole;
++        lineDigest = digestOf(lineText);
++      }
++      const from = match.index - lineStart;
++      const to = from + match[0].length;
++      if (to > lineText.length) {
++        continue;
++      }
++      if (hits.length === limit) {
++        return { hits, cut: true };
++      }
++      hits.push({ line, from, to, lineText, lineDigest });
++    }
++    return { hits, cut: false };
++  }
++}
++
+ const SYNTAX_CHARACTERS = /[\^$\\.*+?()[\]{}|/]/g;
+ 
+ export function matcherOf(query: Query): Matcher | null {
+@@ -24,37 +59,3 @@ export function matcherOf(query: Query): Matcher | null {
+   const escaped = query.text.replace(SYNTAX_CHARACTERS, "\\$&");
+   return new Matcher(new RegExp(escaped, query.matchCase ? "gu" : "giu"));
+ }
+-
+-export function paneHits(
+-  text: string,
+-  matcher: Matcher,
+-  limit: number,
+-): { readonly hits: readonly LineHit[]; readonly cut: boolean } {
+-  const hits: LineHit[] = [];
+-  let line = -1;
+-  let lineStart = 0;
+-  let lineEnd = -1;
+-  let lineText = "";
+-  for (const match of text.matchAll(matcher.pattern)) {
+-    if (lineEnd < match.index) {
+-      do {
+-        line += 1;
+-        lineStart = lineEnd + 1;
+-        const lineBreak = text.indexOf("\n", lineStart);
+-        lineEnd = lineBreak === -1 ? text.length : lineBreak;
+-      } while (lineEnd < match.index);
+-      const whole = text.slice(lineStart, lineEnd);
+-      lineText = whole.endsWith("\r") ? whole.slice(0, -1) : whole;
+-    }
+-    const from = match.index - lineStart;
+-    const to = from + match[0].length;
+-    if (to > lineText.length) {
+-      continue;
+-    }
+-    if (hits.length === limit) {
+-      return { hits, cut: true };
+-    }
+-    hits.push({ line, from, to, lineText });
+-  }
+-  return { hits, cut: false };
+-}
+diff --git a/frontend/src/search/internal/places.test.ts b/frontend/src/search/internal/places.test.ts
+index 49e9e26..7f5bf05 100644
+--- a/frontend/src/search/internal/places.test.ts
++++ b/frontend/src/search/internal/places.test.ts
+@@ -8,6 +8,7 @@ import {
+   type Place,
+   type SearchedFile,
+ } from "../index";
++import { digestOf } from "./digest";
+ 
+ type Merge = "left" | "center" | "right";
+ type Column = "left" | "right";
+@@ -197,7 +198,7 @@ test("a place's preview comes from the lead hit, else the first hit", () => {
+   expect(sides.places.map((place) => place.preview.before)).toEqual(["y "]);
+ });
+ 
+-test("keys differ by panes, column, line text and ordinal, never by line number (line-number keys)", () => {
++test("keys differ by panes, column, line digest and ordinal, never by line number (line-number keys)", () => {
+   function keysOf(left: string): readonly string[] {
+     return placesOf({ texts: { left, right: null }, changes: [] }, RANGE).places.map(
+       (place) => place.key,
+@@ -206,14 +207,14 @@ test("keys differ by panes, column, line text and ordinal, never by line number
+   const [first, second, third] = keysOf("foo\nfoo\n foo");
+ 
+   expect([first, second, third]).toEqual([
+-    JSON.stringify([["left"], 0, "foo", 0]),
+-    JSON.stringify([["left"], 0, "foo", 1]),
+-    JSON.stringify([["left"], 1, " foo", 0]),
++    JSON.stringify([["left"], 0, digestOf("foo"), 0]),
++    JSON.stringify([["left"], 0, digestOf("foo"), 1]),
++    JSON.stringify([["left"], 1, digestOf(" foo"), 0]),
+   ]);
+   expect(keysOf("x\nfoo\nfoo\n foo")).toEqual([first, second, third]);
+   expect(
+     placesOf({ texts: { left: "foo", right: "foo" }, changes: [] }, RANGE).places[0]?.key,
+-  ).toBe(JSON.stringify([["left", "right"], 0, "foo", 0]));
++  ).toBe(JSON.stringify([["left", "right"], 0, digestOf("foo"), 0]));
+ });
+ 
+ test("the line right after a change is outside it, a line before it too (a change's edges)", () => {
+@@ -252,3 +253,53 @@ test("a pane stops at the limit and the file says it was cut", () => {
+   ]);
+   expect(placesOf({ texts, changes: [] }, RANGE, "foo", 3)).toMatchObject({ cut: false });
+ });
++
++test("two side hits outside changes aligned to one lead line stay apart (a place with two hits of one pane)", () => {
++  const changes = [
++    { left: range(0, 1), center: range(0, 1), right: range(0, 1) },
++    { left: range(4, 1), center: range(2, 1), right: range(4, 1) },
++  ];
++  const texts = { left: "a\nb\nc\nfoo\nd\nfoo", center: "a\nb\nc\nfoo", right: "a\nb\nc\nd\ne\nf" };
++  const { places } = placesOf({ texts, changes }, MERGE);
++
++  expect(rows(places)).toEqual(["left:3:0 center:3:0", "left:5:0"]);
++  for (const place of places) {
++    const panes = place.hits.map((entry) => entry.pane);
++
++    expect(new Set(panes).size).toBe(panes.length);
++  }
++});
++
++const MIB = 1024 * 1024;
++const TIME_BUDGET_MS = 2000;
++const MAX_KEY_CHARS = 100;
++
++function timed<T>(run: () => T): { readonly value: T; readonly ms: number } {
++  const start = performance.now();
++  const value = run();
++  return { value, ms: performance.now() - start };
++}
++
++test("a 1 MiB line with many hits in a change takes little time and short keys (keys copying the line)", () => {
++  const hitsPerLine = 1024;
++  const line = `${"x".repeat(MIB / hitsPerLine - "foo".length)}foo`.repeat(hitsPerLine);
++  const changes = [{ left: range(0, 1), right: range(0, 1) }];
++  const texts = { left: line, right: `${line}y` };
++  const { value, ms } = timed(() => placesOf({ texts, changes }, RANGE).places);
++
++  expect(value).toHaveLength(2 * hitsPerLine);
++  expect(Math.max(...value.map((place) => place.key.length))).toBeLessThan(MAX_KEY_CHARS);
++  expect(ms).toBeLessThan(TIME_BUDGET_MS);
++});
++
++test("a 1 MiB text where every line matches takes little time (per-line work growing with the text)", () => {
++  const lineLength = 64;
++  const lines = MIB / lineLength;
++  const text = `foo ${"x".repeat(lineLength - "foo \n".length)}\n`.repeat(lines);
++  const { value, ms } = timed(
++    () => placesOf({ texts: { left: text, right: text }, changes: [] }, RANGE).places,
++  );
++
++  expect(value).toHaveLength(lines);
++  expect(ms).toBeLessThan(TIME_BUDGET_MS);
++});
+diff --git a/frontend/src/search/internal/places.ts b/frontend/src/search/internal/places.ts
+index 15c2a12..15c11bb 100644
+--- a/frontend/src/search/internal/places.ts
++++ b/frontend/src/search/internal/places.ts
+@@ -1,4 +1,4 @@
+-import { type LineHit, type Matcher, paneHits } from "./match";
++import type { LineHit, Matcher } from "./match";
+ import { type Preview, previewOf } from "./preview";
+ 
+ export type LineRange = { readonly start: number; readonly len: number };
+@@ -54,7 +54,7 @@ function endOf(range: LineRange): number {
+ function spotsOf<P extends string>(
+   file: SearchedFile<P>,
+   pane: P,
+-  lead: P,
++  { lead }: Layout<P>,
+ ): (line: number) => Spot {
+   let passed = 0;
+   return (line) => {
+@@ -86,13 +86,13 @@ function groupsOf<P extends string>(
+     if (text === null) {
+       continue;
+     }
+-    const found = paneHits(text, matcher, limit);
++    const found = matcher.hits(text, limit);
+     cut ||= found.cut;
+-    const spotOf = spotsOf(file, pane, layout.lead);
++    const spotOf = spotsOf(file, pane, layout);
+     for (const hit of found.hits) {
+       const spot = spotOf(hit.line);
+       const where =
+-        spot.kind === "in" ? [spot.change, hit.lineText, hit.from] : [spot.aligned, hit.from];
++        spot.kind === "in" ? [spot.change, hit.lineDigest, hit.from] : [spot.aligned, hit.from];
+       const counted = JSON.stringify([pane, where]);
+       const ordinal = ordinals.get(counted) ?? 0;
+       ordinals.set(counted, ordinal + 1);
+@@ -142,13 +142,13 @@ function placesOf<P extends string>(sorted: readonly Group<P>[], layout: Layout<
+     const [head, ...tail] = group;
+     const { hit } = group.find((found) => found.pane === layout.lead) ?? head;
+     const panes = group.map((found) => found.pane);
+-    const counted = JSON.stringify([panes, hit.from, hit.lineText]);
++    const counted = JSON.stringify([panes, hit.from, hit.lineDigest]);
+     const ordinal = ordinals.get(counted) ?? 0;
+     ordinals.set(counted, ordinal + 1);
+     return {
+-      key: placeKey([panes, hit.from, hit.lineText, ordinal]),
++      key: placeKey([panes, hit.from, hit.lineDigest, ordinal]),
+       hits: [entryOf(head), ...tail.map(entryOf)],
+-      preview: previewOf(hit.lineText, hit.from, hit.to),
++      preview: previewOf(hit),
+     };
+   });
+ }
+diff --git a/frontend/src/search/internal/preview.test.ts b/frontend/src/search/internal/preview.test.ts
+index 00e5222..9b66ebc 100644
+--- a/frontend/src/search/internal/preview.test.ts
++++ b/frontend/src/search/internal/preview.test.ts
+@@ -4,7 +4,7 @@ import type { Preview } from "../index";
+ import { previewOf } from "./preview";
+ 
+ test("preview: leading whitespace trimmed, the match and the rest of the line (wrong trimming)", () => {
+-  const preview: Preview = previewOf("    let x = foo(1);", 12, 15);
++  const preview: Preview = previewOf({ lineText: "    let x = foo(1);", from: 12, to: 15 });
+ 
+   expect(preview).toEqual({ before: "let x = ", match: "foo", after: "(1);" });
+ });
+@@ -12,8 +12,12 @@ test("preview: leading whitespace trimmed, the match and the rest of the line (w
+ test("preview: 26 characters before the match with … when cut (wrong trimming)", () => {
+   const before = "abcdefghijklmnopqrstuvwxyz";
+ 
+-  expect(previewOf(`${before}foo`, 26, 29)).toEqual({ before, match: "foo", after: "" });
+-  expect(previewOf(`  0${before}foo`, 29, 32)).toEqual({
++  expect(previewOf({ lineText: `${before}foo`, from: 26, to: 29 })).toEqual({
++    before,
++    match: "foo",
++    after: "",
++  });
++  expect(previewOf({ lineText: `  0${before}foo`, from: 29, to: 32 })).toEqual({
+     before: `…${before}`,
+     match: "foo",
+     after: "",
+@@ -23,6 +27,10 @@ test("preview: 26 characters before the match with … when cut (wrong trimming)
+ test("preview: a cut never splits a surrogate pair", () => {
+   const before = `😀${"a".repeat(25)}`;
+ 
+-  expect(previewOf(`${before}foo`, 27, 30).before).toBe(`…${"a".repeat(25)}`);
+-  expect(previewOf(`b${before}foo`, 28, 31).before).toBe(`…${"a".repeat(25)}`);
++  expect(previewOf({ lineText: `${before}foo`, from: 27, to: 30 }).before).toBe(
++    `…${"a".repeat(25)}`,
++  );
++  expect(previewOf({ lineText: `b${before}foo`, from: 28, to: 31 }).before).toBe(
++    `…${"a".repeat(25)}`,
++  );
+ });
+diff --git a/frontend/src/search/internal/preview.ts b/frontend/src/search/internal/preview.ts
+index f929ec6..5a42c57 100644
+--- a/frontend/src/search/internal/preview.ts
++++ b/frontend/src/search/internal/preview.ts
+@@ -1,10 +1,16 @@
++import type { LineHit } from "./match";
++
+ export type Preview = { readonly before: string; readonly match: string; readonly after: string };
+ 
+ const BEFORE_CHARS = 26;
+ const CUT_MARK = "…";
+ const LOW_SURROGATE = /^[\uDC00-\uDFFF]/;
+ 
+-export function previewOf(lineText: string, from: number, to: number): Preview {
++export function previewOf({
++  lineText,
++  from,
++  to,
++}: Pick<LineHit, "lineText" | "from" | "to">): Preview {
+   const before = lineText.slice(0, from).trimStart();
+   const match = lineText.slice(from, to);
+   const after = lineText.slice(to);

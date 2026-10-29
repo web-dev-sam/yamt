@@ -1,0 +1,362 @@
+commit da75f8b34c39e65addc103100cd936b12b7bac8e
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 13:08:31 +0100
+
+    fix(search): preview keeps its spaces; choice view takes the keyboard on hide; section order
+
+diff --git a/frontend/src/ui/ChoiceView.vue b/frontend/src/ui/ChoiceView.vue
+index 4d9a616..74e6205 100644
+--- a/frontend/src/ui/ChoiceView.vue
++++ b/frontend/src/ui/ChoiceView.vue
+@@ -12,6 +12,7 @@ import { RESULT_HEADER, sideHeader } from "./sideHeaders";
+ import { SIDES } from "./sides";
+ import { useAppStore } from "./store";
+ import { usePaneDividers } from "./usePaneDividers";
++import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ type Column = {
+   readonly side: Side;
+@@ -30,9 +31,19 @@ const GRID_COLUMN: Readonly<Record<Side, string>> = { local: "col-start-1", remo
+ const section = useTemplateRef<HTMLElement>("section");
+ const localGutter = useTemplateRef<HTMLDivElement>("localGutter");
+ const remoteGutter = useTemplateRef<HTMLDivElement>("remoteGutter");
+-const { takeSide, reset, sideNames, taken, paneSplit, setPaneSplit, resetPaneSplit } =
++const { takeSide, reset, sideNames, taken, paneSplit, setPaneSplit, resetPaneSplit, search } =
+   useAppStore();
+ const dividers = usePaneDividers(paneWidths, { setPaneSplit, resetPaneSplit });
++useSearchGoTo(
++  search,
++  () => props.shown,
++  () => props.sides.path,
++  (target) => {
++    if (target.match === null) {
++      focusFirstButton();
++    }
++  },
++);
+ 
+ const gridTemplateColumns = computed(() => paneColumns(paneSplit.value, "gap"));
+ const sideTaken = computed(() => taken.value.get(props.sides.path) ?? null);
+@@ -65,6 +76,10 @@ function paneWidths(): PaneWidths | null {
+     remote: whole.right - remoteEdge.right,
+   };
+ }
++
++function focusFirstButton(): void {
++  section.value?.querySelector<HTMLButtonElement>("button:enabled")?.focus();
++}
+ </script>
+ 
+ <template>
+diff --git a/frontend/src/ui/SearchResults.vue b/frontend/src/ui/SearchResults.vue
+index 2e909e3..8a3ab41 100644
+--- a/frontend/src/ui/SearchResults.vue
++++ b/frontend/src/ui/SearchResults.vue
+@@ -1,6 +1,6 @@
+ <script setup lang="ts" generic="P extends string">
+ import { useVirtualList } from "@vueuse/core";
+-import { computed, shallowRef, type Component } from "vue";
++import { computed, shallowRef, toRef, type Component } from "vue";
+ import ChevronDown from "~icons/lucide/chevron-down";
+ import ChevronRight from "~icons/lucide/chevron-right";
+ import XIcon from "~icons/lucide/x";
+@@ -26,10 +26,10 @@ const ROW_HEIGHT_PX = 22;
+ 
+ const activeKey = shallowRef<string | null>(null);
+ 
+-const rows = computed(() => props.rows);
+-const { list, containerProps, wrapperProps } = useVirtualList(rows, {
++const { list, containerProps, wrapperProps } = useVirtualList(toRef(props, "rows"), {
+   itemHeight: ROW_HEIGHT_PX,
+ });
++
+ const activeIndex = computed(() => {
+   const index = props.rows.findIndex((row) => rowKey(row) === activeKey.value);
+   return index === -1 ? null : index;
+@@ -174,7 +174,7 @@ defineExpose({ focusList });
+             <mark class="shrink-0 rounded-sm bg-search-match text-inherit">{{
+               row.place.preview.match
+             }}</mark>
+-            <span class="truncate">{{ row.place.preview.after }}</span>
++            <span class="overflow-hidden text-ellipsis">{{ row.place.preview.after }}</span>
+           </span>
+           <button
+             v-for="entry in row.shown"
+diff --git a/frontend/src/ui/searching.test.ts b/frontend/src/ui/searching.test.ts
+index e4ebf87..4266be2 100644
+--- a/frontend/src/ui/searching.test.ts
++++ b/frontend/src/ui/searching.test.ts
+@@ -1,5 +1,5 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+-import { effectScope, nextTick, shallowRef, watch, type ShallowRef } from "vue";
++import { shallowRef, watch } from "vue";
+ 
+ import { MAX_ROWS, type SearchedFile } from "../search";
+ import { createAsking } from "./asking";
+@@ -7,7 +7,6 @@ import type { KeyPress } from "./fileListKey";
+ import { createSearching, type GoToRequest, type Searching, type SearchSource } from "./searching";
+ import { SEARCH_PAUSE_MS } from "./searchRun";
+ import { startSettings } from "./settings";
+-import { useSearchGoTo } from "./useSearchGoTo";
+ 
+ type Pane = "left" | "right";
+ 
+@@ -778,124 +777,3 @@ test("1 ms files publish nothing and yield nothing before 8 ms have passed, then
+   await vi.runAllTimersAsync();
+   expect(groups(search)).toHaveLength(QUICK_FILES);
+ });
+-
+-const HIT = { line: 2, from: 1, to: 4 };
+-
+-type GoToView = {
+-  readonly goTo: ShallowRef<GoToRequest<Pane> | null>;
+-  readonly shown: ShallowRef<boolean>;
+-  readonly path: ShallowRef<string>;
+-  readonly calls: string[];
+-  readonly stop: () => void;
+-};
+-
+-function hitRequest(id: number, path: string): GoToRequest<Pane> {
+-  return { id, path, pane: "right", match: HIT };
+-}
+-
+-function goToView(start: {
+-  request: GoToRequest<Pane> | null;
+-  shown: boolean;
+-  path: string;
+-}): GoToView {
+-  const goTo = shallowRef(start.request);
+-  const shown = shallowRef(start.shown);
+-  const path = shallowRef(start.path);
+-  const calls: string[] = [];
+-  const scope = effectScope();
+-  scope.run(() => {
+-    useSearchGoTo<Pane>(
+-      {
+-        goTo,
+-        took: (id) => {
+-          calls.push(`took ${id}`);
+-          if (goTo.value?.id === id) {
+-            goTo.value = null;
+-          }
+-        },
+-      },
+-      shown,
+-      () => path.value,
+-      (target) => {
+-        calls.push(`goTo ${target.pane} ${JSON.stringify(target.match)}`);
+-      },
+-    );
+-  });
+-  return { goTo, shown, path, calls, stop: () => scope.stop() };
+-}
+-
+-test("useSearchGoTo: a request for the shown view's file at its start goes there and is taken", async () => {
+-  const view = goToView({ request: hitRequest(1, "a.ts"), shown: true, path: "a.ts" });
+-  await nextTick();
+-
+-  expect(view.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 1"]);
+-  expect(view.goTo.value).toBeNull();
+-});
+-
+-test("useSearchGoTo: a hidden view waits for its show; another file's view and no request do nothing", async () => {
+-  const hidden = goToView({ request: hitRequest(1, "a.ts"), shown: false, path: "a.ts" });
+-  const other = goToView({ request: hitRequest(1, "a.ts"), shown: true, path: "b.ts" });
+-  const none = goToView({ request: null, shown: true, path: "a.ts" });
+-  await nextTick();
+-  expect([hidden.calls, other.calls, none.calls]).toEqual([[], [], []]);
+-
+-  hidden.shown.value = true;
+-  await nextTick();
+-  expect(hidden.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 1"]);
+-});
+-
+-test("useSearchGoTo: a later request, or the view's path becoming the request's, goes there; a keyboard-only one passes no match", async () => {
+-  const view = goToView({ request: null, shown: true, path: "a.ts" });
+-  view.goTo.value = { id: 2, path: "a.ts", pane: "left", match: null };
+-  await nextTick();
+-  expect(view.calls).toEqual(["goTo left null", "took 2"]);
+-
+-  const renamed = goToView({ request: hitRequest(3, "b.ts"), shown: true, path: "a.ts" });
+-  renamed.path.value = "b.ts";
+-  await nextTick();
+-  expect(renamed.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 3"]);
+-});
+-
+-test("useSearchGoTo: a view whose scope ended takes nothing", async () => {
+-  const view = goToView({ request: null, shown: true, path: "a.ts" });
+-  view.stop();
+-  view.goTo.value = hitRequest(4, "a.ts");
+-  await nextTick();
+-
+-  expect(view.calls).toEqual([]);
+-});
+-
+-test("useSearchGoTo acts after the render: a watcher on the page's render that was set up first sees the request before it is taken", async () => {
+-  const goTo = shallowRef<GoToRequest<Pane> | null>(null);
+-  const calls: string[] = [];
+-  const scope = effectScope();
+-  scope.run(() => {
+-    watch(
+-      goTo,
+-      (request) => {
+-        calls.push(`rendered ${request?.id ?? "none"}`);
+-      },
+-      { flush: "post" },
+-    );
+-    useSearchGoTo<Pane>(
+-      {
+-        goTo,
+-        took: () => {
+-          goTo.value = null;
+-        },
+-      },
+-      true,
+-      "a.ts",
+-      (target) => {
+-        calls.push(`goTo ${target.pane}`);
+-      },
+-    );
+-  });
+-
+-  goTo.value = hitRequest(5, "a.ts");
+-  await nextTick();
+-  await nextTick();
+-  scope.stop();
+-
+-  expect(calls).toEqual(["rendered 5", "goTo right", "rendered none"]);
+-});
+diff --git a/frontend/src/ui/useSearchGoTo.test.ts b/frontend/src/ui/useSearchGoTo.test.ts
+new file mode 100644
+index 0000000..ff5a006
+--- /dev/null
++++ b/frontend/src/ui/useSearchGoTo.test.ts
+@@ -0,0 +1,128 @@
++import { expect, test } from "vitest";
++import { effectScope, nextTick, shallowRef, watch, type ShallowRef } from "vue";
++
++import type { GoToRequest } from "./searching";
++import { useSearchGoTo } from "./useSearchGoTo";
++
++type Pane = "left" | "right";
++
++const HIT = { line: 2, from: 1, to: 4 };
++
++type GoToView = {
++  readonly goTo: ShallowRef<GoToRequest<Pane> | null>;
++  readonly shown: ShallowRef<boolean>;
++  readonly path: ShallowRef<string>;
++  readonly calls: string[];
++  readonly stop: () => void;
++};
++
++function hitRequest(id: number, path: string): GoToRequest<Pane> {
++  return { id, path, pane: "right", match: HIT };
++}
++
++function goToView(start: {
++  request: GoToRequest<Pane> | null;
++  shown: boolean;
++  path: string;
++}): GoToView {
++  const goTo = shallowRef(start.request);
++  const shown = shallowRef(start.shown);
++  const path = shallowRef(start.path);
++  const calls: string[] = [];
++  const scope = effectScope();
++  scope.run(() => {
++    useSearchGoTo<Pane>(
++      {
++        goTo,
++        took: (id) => {
++          calls.push(`took ${id}`);
++          if (goTo.value?.id === id) {
++            goTo.value = null;
++          }
++        },
++      },
++      shown,
++      () => path.value,
++      (target) => {
++        calls.push(`goTo ${target.pane} ${JSON.stringify(target.match)}`);
++      },
++    );
++  });
++  return { goTo, shown, path, calls, stop: () => scope.stop() };
++}
++
++test("useSearchGoTo: a request for the shown view's file at its start goes there and is taken", async () => {
++  const view = goToView({ request: hitRequest(1, "a.ts"), shown: true, path: "a.ts" });
++  await nextTick();
++
++  expect(view.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 1"]);
++  expect(view.goTo.value).toBeNull();
++});
++
++test("useSearchGoTo: a hidden view waits for its show; another file's view and no request do nothing", async () => {
++  const hidden = goToView({ request: hitRequest(1, "a.ts"), shown: false, path: "a.ts" });
++  const other = goToView({ request: hitRequest(1, "a.ts"), shown: true, path: "b.ts" });
++  const none = goToView({ request: null, shown: true, path: "a.ts" });
++  await nextTick();
++  expect([hidden.calls, other.calls, none.calls]).toEqual([[], [], []]);
++
++  hidden.shown.value = true;
++  await nextTick();
++  expect(hidden.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 1"]);
++});
++
++test("useSearchGoTo: a later request, or the view's path becoming the request's, goes there; a keyboard-only one passes no match", async () => {
++  const view = goToView({ request: null, shown: true, path: "a.ts" });
++  view.goTo.value = { id: 2, path: "a.ts", pane: "left", match: null };
++  await nextTick();
++  expect(view.calls).toEqual(["goTo left null", "took 2"]);
++
++  const renamed = goToView({ request: hitRequest(3, "b.ts"), shown: true, path: "a.ts" });
++  renamed.path.value = "b.ts";
++  await nextTick();
++  expect(renamed.calls).toEqual([`goTo right ${JSON.stringify(HIT)}`, "took 3"]);
++});
++
++test("useSearchGoTo: a view whose scope ended takes nothing", async () => {
++  const view = goToView({ request: null, shown: true, path: "a.ts" });
++  view.stop();
++  view.goTo.value = hitRequest(4, "a.ts");
++  await nextTick();
++
++  expect(view.calls).toEqual([]);
++});
++
++test("useSearchGoTo acts after the render: a watcher on the page's render that was set up first sees the request before it is taken", async () => {
++  const goTo = shallowRef<GoToRequest<Pane> | null>(null);
++  const calls: string[] = [];
++  const scope = effectScope();
++  scope.run(() => {
++    watch(
++      goTo,
++      (request) => {
++        calls.push(`rendered ${request?.id ?? "none"}`);
++      },
++      { flush: "post" },
++    );
++    useSearchGoTo<Pane>(
++      {
++        goTo,
++        took: () => {
++          goTo.value = null;
++        },
++      },
++      true,
++      "a.ts",
++      (target) => {
++        calls.push(`goTo ${target.pane}`);
++      },
++    );
++  });
++
++  goTo.value = hitRequest(5, "a.ts");
++  await nextTick();
++  await nextTick();
++  scope.stop();
++
++  expect(calls).toEqual(["rendered 5", "goTo right", "rendered none"]);
++});

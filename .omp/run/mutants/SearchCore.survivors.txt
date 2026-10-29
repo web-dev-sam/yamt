@@ -1,0 +1,669 @@
+mutants: no Rust changes since d6ccf9c
+[32m10:39:37 (2948987) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m10:39:37 (2948987) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m10:39:37 (2948987) INFO ProjectReader[39m Found 7 of 763 file(s) to be mutated.
+[32m10:39:37 (2948987) INFO Instrumenter[39m Instrumented 7 source file(s) with 757 mutant(s)
+[32m10:39:38 (2948987) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m10:39:39 (2948987) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m10:39:44 (2948987) INFO DryRunExecutor[39m Initial test run succeeded. Ran 117 tests in 5 seconds (net 2737.5539290000065 ms, overhead 2675.4460709999935 ms).
+
+All tests
+  scripts
+    fences.test.ts
+      ✓ the real source tree has no fence violations (killed 150)
+      ✓ readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts (killed 33)
+      ~ ui importing @codemirror/view violates PM2 (covered 95)
+      ✓ ui importing @tauri-apps/api/window violates PM2 (killed 6)
+      ✓ ui importing editor/internal violates PM2 (killed 10)
+      ✓ ui side-effect importing model violates PM2 (killed 5)
+      ✓ editor dynamically importing vue violates PM3 (killed 9)
+      ✓ connectors re-exporting @vueuse/core violates PM3 (killed 3)
+      ✓ editor importing a Lucide icon as a component violates PM3 (killed 4)
+      ~ a ?raw icon in editor and an icon component in ui violate nothing (covered 127)
+      ~ both script blocks of a ui .vue file are checked (covered 125)
+      ✓ editor importing ipc/internal violates PM5 (killed 8)
+      ✓ a two-file cycle violates PM5 once (killed 35)
+      ~ an extensionless two-file cycle violates PM5 once (covered 196)
+      ~ a cycle through a .vue file violates PM5 once (covered 206)
+      ~ a type-only import into model violates PM2 (covered 114)
+      ~ a ?raw import of an allowed file violates nothing (covered 172)
+      ✓ a ?raw import of model from ui violates PM2 (killed 1)
+      ✓ ui importing an internal/ directory outside src/ is allowed (killed 1)
+      ~ a module importing its own internal/ is allowed (covered 183)
+      ~ lsp importing vue or @tauri-apps violates PM3 (covered 114)
+      ✓ lsp importing editor, ui, model or connectors violates PM2 (killed 9)
+      ~ lsp importing ipc's index and its own internal/ violates nothing (covered 187)
+      ~ jsonrpc importing vue, @vueuse, @tauri-apps or an icon component violates PM3 (covered 124)
+      ✓ jsonrpc importing any other src/ module violates PM2 (killed 6)
+      ✓ jsonrpc importing itself and valibot, and lsp importing jsonrpc, violate nothing (killed 1)
+      ~ lsp importing jsonrpc's internal/ violates PM5 (covered 162)
+      ~ search importing vue, @vueuse, @tauri-apps or an icon component violates PM3 (covered 124)
+      ~ search importing any other src/ module violates PM2 (covered 136)
+      ~ search importing itself, and ui importing search's index, violate nothing (covered 191)
+      ~ ui importing search's internal/ violates PM5 (covered 162)
+      ~ agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3 (covered 124)
+      ✓ agent importing anything but ipc's and jsonrpc's index violates PM2 (killed 6)
+      ~ agent importing ipc's and jsonrpc's index, itself and fixtures violates nothing (covered 220)
+      ✓ a compare file importing the merge store, App.vue or lsp/ violates PM7 (killed 9)
+      ~ merge files importing the store and compare files importing their own neighbours violate nothing (covered 204)
+      ✓ a range file importing the merge root, the compare root or lsp/ violates PM9 (killed 2)
+      ~ a compare file importing the range root violates PM7 (covered 188)
+      ~ range files importing shared ui files and their own neighbours violate nothing (covered 206)
+      ✓ the merge root, the compare root or a shared ui file importing an AI view violates PM9 (killed 3)
+      ~ range files and the AI views importing the AI views, and an AI view importing shared files, violate nothing (covered 207)
+      ✓ an AI view or the close question importing the merge root, the compare root or lsp/ violates PM9; the merge root importing aiClose too (killed 1)
+      ✓ building the agent source or client outside main.ts violates PM9; main.ts and tests may (killed 1)
+      ~ a ui file importing MarkdownView from editor/index.ts outside useMarkdown.ts violates PM2 (covered 195)
+      ~ useMarkdown.ts importing MarkdownView and other ui files importing the editor's other names violate nothing (covered 208)
+      ~ reading clipboardData or navigator.clipboard outside ui/linuxPaste.ts violates PM8 (covered 66)
+      ~ ui/linuxPaste.ts reading, and writing the clipboard or a paste's data anywhere, violate nothing (covered 58)
+    palette.test.ts
+      ~ the real source tree has no palette violations (covered 13)
+      ✘ a literal inside a theme block is allowed, outside one it is refused (covered 0)
+      ✘ a theme block outside src/themes/ exempts nothing (covered 0)
+      ~ readPaletteSources reports ts, vue and css literals on disk and skips src/ipc/bindings.ts (covered 13)
+      ✘ rgb() in a ts theme object is a literal (covered 0)
+      ✘ an upper-case OKLCH( is a literal (covered 0)
+      ✘ an 8-digit hex colour is a literal (covered 0)
+      ✘ an upper-case hex colour is a literal (covered 0)
+      ✘ var(--color-nope) in a ts file is an unknown token (covered 0)
+      ✘ a --syntax- variable is known only when @theme defines it, not a theme block (covered 0)
+      ✘ --color-nope in a vue style block is an unknown token (covered 0)
+      ✘ var(--color-nope) inside @theme is an unknown token (covered 0)
+      ✘ a nested block inside @theme does not close it early (covered 0)
+      ✘ a bare --color- mention is exempt inside @theme and unknown outside it (covered 0)
+      ✘ an @theme block outside src/style.css does not exempt literals or define tokens (covered 0)
+      ✘ a token defined in src/style.css outside @theme stays unknown (covered 0)
+      ✘ hex digits of other lengths or followed by a word character are not colours (covered 0)
+      ✘ palette-conforming sources violate nothing (covered 0)
+  src/search/internal
+    list.test.ts
+      ✓ a row shows while one of its panes is on, with only the on panes' icons (filter leaks) (killed 32)
+      ✓ every pane off → filteredOut and no rows (an empty-list wording bug) (killed 10)
+      ✓ the summary: an empty box, searching, no results, counts and the cut (a stale summary) (killed 24)
+      ✓ counts follow dismissals (a stale summary) (killed 2)
+      ✓ a filter change restores nothing dismissed (filters touching dismissals) (killed 1)
+      ✓ goToPane takes the lead pane when on, else the leftmost on pane (the rule-8 choice) (killed 10)
+      ✓ a closed group shows only its header; an all-dismissed group disappears (ghost groups) (killed 3)
+    match.test.ts
+      ✓ a.b does not match axb (an unescaped RegExp) (killed 1)
+      ~ every RegExp syntax character is matched as itself (an unescaped RegExp) (covered 45)
+      ✓ case-insensitive by default; Match Case narrows Foo/foo (an inverted flag) (killed 2)
+      ~ İx foo puts foo at column 3 (lowercasing the line shifts offsets) (covered 45)
+      ~ 😀foo puts foo at column 2 (code-point columns instead of UTF-16) (covered 45)
+      ✓ CRLF: the line text has no \r and the line count is right (\r\n counted as two breaks) (killed 3)
+      ~ lines are counted across gaps without matches and kept for hits on one line (covered 45)
+      ~ aaa/aa gives one hit; two separate hits on one line give two (overlapping or merged hits) (covered 45)
+      ✓ an empty query gives no matcher (showing everything) (killed 3)
+      ✓ a match never crosses a line or covers its \r (a cross-line hit) (killed 2)
+      ✓ a pane stops scanning at the limit (an unbounded array) (killed 3)
+      ~ a dropped cross-line match does not count toward the limit (covered 44)
+      ✓ a match starting on a line break stays on its line and is dropped (a negative column) (killed 1)
+    places.test.ts
+      ✓ an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane) (killed 41)
+      ✓ the same aligned line at different columns is two places (merging by line only) (killed 5)
+      ✓ after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned) (killed 5)
+      ✓ alignment follows the last change ending at or before the line (a stale change end) (killed 1)
+      ✓ in one conflict the same text and column in two panes is one place; different text is two (rule b ignoring the text) (killed 12)
+      ✓ two identical lines in one change pair first-with-first (cartesian merging) (killed 1)
+      ✓ the same text in two changes is two places (merging across changes) (killed 2)
+      ~ a line only one side has is its own place with only that pane (lost side-only hits) (covered 147)
+      ✓ a null text yields nothing; an insertion range holds no line (DiskNotText and empty ranges counted as inside) (killed 2)
+      ✓ lead order by line, then column (an unsorted list) (killed 17)
+      ✓ a side-only place sorts at its change's lead start, before that line's lead rows, left before right (rule 7's change place) (killed 7)
+      ~ range: a left-only place sorts at its difference's right start (rule 7's change place) (covered 169)
+      ✓ a place's preview comes from the lead hit, else the first hit (killed 12)
+      ✓ keys differ by panes, column, line text and ordinal, never by line number (line-number keys) (killed 5)
+      ✓ the line right after a change is outside it, a line before it too (a change's edges) (killed 2)
+      ✓ an outside side-only place sorts at its aligned lead line (rule 7's order) (killed 1)
+      ✓ a pane stops at the limit and the file says it was cut (killed 3)
+    preview.test.ts
+      ~ preview: leading whitespace trimmed, the match and the rest of the line (wrong trimming) (covered 11)
+      ✓ preview: 26 characters before the match with … when cut (wrong trimming) (killed 6)
+      ✓ preview: a cut never splits a surrogate pair (killed 1)
+    results.test.ts
+      ✓ a dismissal survives a one-file re-run with lines inserted above (line-number keys) (killed 70)
+      ~ a dismissal is dropped once the line text changes (stale keys) (covered 240)
+      ~ two identical places dismiss independently (over-dismissal) (covered 233)
+      ✓ a dismissal only holds keys among its file's places (killed 13)
+      ✓ a dismissal stays in its own file when another file holds the same place (over-dismissal) (killed 3)
+      ✓ a group dismissal survives a one-file re-run; a full run clears it (rule 9 vs rule 10) (killed 10)
+      ✓ dismissing a file without a group changes nothing (killed 4)
+      ✓ groups follow the window's file order; a re-run replaces its group; a file without places has none (killed 7)
+      ✓ cut at 20,000 places across files; later files are not added (an off-by-one at the limit) (killed 12)
+      ✓ a one-file re-run under a cut result re-applies the cap (uncapped growth) (killed 2)
+      ~ a file cut at its pane limit cuts the results (covered 176)
+      ~ a file without places keeps the results' cut and adds its own (covered 183)
+
+[NoCoverage] ArrayDeclaration
+scripts/fences.ts:196:43
+-       for (const edge of graph.get(node) ?? []) {
++       for (const edge of graph.get(node) ?? ["Stryker was here"]) {
+
+[NoCoverage] BooleanLiteral
+scripts/fences.ts:226:85
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? true)
+
+[NoCoverage] BlockStatement
+scripts/fences.ts:239:51
+-       if (file === undefined || edge === undefined) {
+-         return [];
+-       }
++       if (file === undefined || edge === undefined) {}
+
+[NoCoverage] ArrayDeclaration
+scripts/fences.ts:240:14
+-         return [];
++         return ["Stryker was here"];
+
+[Survived] ArrayDeclaration
+scripts/fences.ts:82:22
+-       block === null ? [] : [block.content],
++       block === null ? ["Stryker was here"] : [block.content],
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @tauri-apps/api/window violates PM2
+  and 14 more tests!
+
+
+[Survived] MethodExpression
+scripts/fences.ts:77:8
+-     if (!file.path.endsWith(".vue")) {
++     if (!file.path.startsWith(".vue")) {
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] ObjectLiteral
+scripts/fences.ts:80:43
+-     const { descriptor } = parse(file.text, { filename: file.path });
++     const { descriptor } = parse(file.text, {});
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @tauri-apps/api/window violates PM2
+  and 15 more tests!
+
+
+[Survived] StringLiteral
+scripts/fences.ts:100:35
+-       return { rule: "PM2", reason: "ui/ never imports CodeMirror; go through editor/index.ts" };
++       return { rule: "PM2", reason: "" };
+Tests ran:
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+    both script blocks of a ui .vue file are checked
+
+
+[Survived] StringLiteral
+scripts/fences.ts:94:67
+-     return posix.join(posix.dirname(importer), bare).replace(/\/$/, "");
++     return posix.join(posix.dirname(importer), bare).replace(/\/$/, "Stryker was here!");
+Tests ran:
+    the real source tree has no fence violations
+    ui importing editor/internal violates PM2
+    ui side-effect importing model violates PM2
+  and 30 more tests!
+
+
+[Survived] StringLiteral
+scripts/fences.ts:98:48
+-     const bare = specifier.replace(QUERY_SUFFIX, "");
++     const bare = specifier.replace(QUERY_SUFFIX, "Stryker was here!");
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 12 more tests!
+
+
+[Survived] StringLiteral
+scripts/fences.ts:103:35
+-       return { rule: "PM2", reason: "ui/ never imports Tauri; go through ipc/index.ts" };
++       return { rule: "PM2", reason: "" };
+Tests ran:
+    ui importing @tauri-apps/api/window violates PM2
+
+
+[Survived] StringLiteral
+scripts/fences.ts:109:35
+-       return { rule: "PM3", reason: `${module}/ is framework-free` };
++       return { rule: "PM3", reason: `` };
+Tests ran:
+    editor dynamically importing vue violates PM3
+    connectors re-exporting @vueuse/core violates PM3
+    lsp importing vue or @tauri-apps violates PM3
+  and 3 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:105:7
+-     if (module === undefined || !Object.hasOwn(FRAMEWORK_FREE_MODULES, module)) {
++     if (false || !Object.hasOwn(FRAMEWORK_FREE_MODULES, module)) {
+Tests ran:
+    the real source tree has no fence violations
+    editor dynamically importing vue violates PM3
+    connectors re-exporting @vueuse/core violates PM3
+  and 8 more tests!
+
+
+[Survived] StringLiteral
+scripts/fences.ts:114:15
+-         reason: `${module}/ is framework-free; an icon without ${RAW_QUERY} is a Vue component`,
++         reason: ``,
+Tests ran:
+    editor importing a Lucide icon as a component violates PM3
+    jsonrpc importing vue, @vueuse, @tauri-apps or an icon component violates PM3
+    search importing vue, @vueuse, @tauri-apps or an icon component violates PM3
+  and 1 more test!
+
+
+[Survived] StringLiteral
+scripts/fences.ts:124:15
+-         reason: "ui/ never reaches editor/internal/; go through editor/index.ts",
++         reason: "",
+Tests ran:
+    ui importing editor/internal violates PM2
+    both script blocks of a ui .vue file are checked
+
+
+[Survived] StringLiteral
+scripts/fences.ts:128:35
+-       return { rule: "PM2", reason: "ui/ never imports model/" };
++       return { rule: "PM2", reason: "" };
+Tests ran:
+    ui side-effect importing model violates PM2
+    a type-only import into model violates PM2
+    a ?raw import of model from ui violates PM2
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:134:25
+-     const selfContained = module !== undefined && FRAMEWORK_FREE_MODULES[module] === "self-contained";
++     const selfContained = true && FRAMEWORK_FREE_MODULES[module] === "self-contained";
+Tests ran:
+    the real source tree has no fence violations
+    editor importing ipc/internal violates PM5
+    a two-file cycle violates PM5 once
+  and 24 more tests!
+
+
+[Survived] StringLiteral
+scripts/fences.ts:145:35
+-       return { rule: "PM5", reason: "no module imports another module's internal/" };
++       return { rule: "PM5", reason: "" };
+Tests ran:
+    editor importing ipc/internal violates PM5
+    lsp importing jsonrpc's internal/ violates PM5
+    ui importing search's internal/ violates PM5
+
+
+[Survived] StringLiteral
+scripts/fences.ts:158:56
+-     return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
++     return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "Stryker was here!";
+Tests ran:
+    the real source tree has no fence violations
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+  and 14 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:213:9
+-       if (!visits.has(node)) {
++       if (true) {
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:225:5
+-       component.length > 1 ||
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       true
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] EqualityOperator
+scripts/fences.ts:225:5
+-       component.length > 1 ||
++       component.length >= 1 ||
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] MethodExpression
+scripts/fences.ts:226:5
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.every(node => graph.get(node)?.some(edge => edge.file === node) ?? false)
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:236:7
+-         file === undefined
++         false
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] MethodExpression
+scripts/fences.ts:226:30
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node)?.every(edge => edge.file === node) ?? false)
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] LogicalOperator
+scripts/fences.ts:226:30
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node)?.some(edge => edge.file === node) && false)
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] OptionalChaining
+scripts/fences.ts:238:11
+-           : graph.get(file)?.find((candidate) => members.includes(candidate.file));
++           : graph.get(file).find((candidate) => members.includes(candidate.file));
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] LogicalOperator
+scripts/fences.ts:239:9
+-       if (file === undefined || edge === undefined) {
++       if (file === undefined && edge === undefined) {
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:239:9
+-       if (file === undefined || edge === undefined) {
++       if (false) {
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:239:9
+-       if (file === undefined || edge === undefined) {
++       if (false || edge === undefined) {
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] StringLiteral
+scripts/fences.ts:247:17
+-           reason: `import cycle: ${members.join(" ↔ ")}`,
++           reason: ``,
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] ArrowFunction
+scripts/fences.ts:226:20
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some(() => undefined)
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:239:31
+-       if (file === undefined || edge === undefined) {
++       if (file === undefined || false) {
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] StringLiteral
+scripts/fences.ts:247:47
+-           reason: `import cycle: ${members.join(" ↔ ")}`,
++           reason: `import cycle: ${members.join("")}`,
+Tests ran:
+    a two-file cycle violates PM5 once
+    an extensionless two-file cycle violates PM5 once
+    a cycle through a .vue file violates PM5 once
+
+
+[Survived] OptionalChaining
+scripts/fences.ts:226:30
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node).some((edge) => edge.file === node) ?? false)
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:226:62
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node)?.some((edge) => false) ?? false)
+Tests ran:
+    the real source tree has no fence violations
+    a module importing its own internal/ is allowed
+    lsp importing ipc's index and its own internal/ violates nothing
+  and 8 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:226:62
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node)?.some((edge) => true) ?? false)
+Tests ran:
+    the real source tree has no fence violations
+    a module importing its own internal/ is allowed
+    lsp importing ipc's index and its own internal/ violates nothing
+  and 8 more tests!
+
+
+[Survived] EqualityOperator
+scripts/fences.ts:226:62
+-       component.some((node) => graph.get(node)?.some((edge) => edge.file === node) ?? false)
++       component.some((node) => graph.get(node)?.some((edge) => edge.file !== node) ?? false)
+Tests ran:
+    the real source tree has no fence violations
+    a module importing its own internal/ is allowed
+    lsp importing ipc's index and its own internal/ violates nothing
+  and 8 more tests!
+
+
+[Survived] MethodExpression
+scripts/fences.ts:231:18
+-     const cycles = stronglyConnected(graph).filter((component) => isCycle(component, graph));
++     const cycles = stronglyConnected(graph);
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] ArrayDeclaration
+scripts/fences.ts:259:27
+-       const edges: Edge[] = [];
++       const edges: Edge[] = ["Stryker was here"];
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] BooleanLiteral
+scripts/fences.ts:262:37
+-         ts.preProcessFile(text, true, true).importedFiles.map((reference) => reference.fileName),
++         ts.preProcessFile(text, true, false).importedFiles.map((reference) => reference.fileName),
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 44 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:277:9
+-           target === undefined
++           false
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] ConditionalExpression
+scripts/fences.ts:280:11
+-         if (resolved !== undefined) {
++         if (true) {
+Tests ran:
+    the real source tree has no fence violations
+    readSourceTree reports PM2 probes on disk and skips src/ipc/bindings.ts
+    ui importing @codemirror/view violates PM2
+  and 41 more tests!
+
+
+[Survived] StringLiteral
+src/search/internal/match.ts:37:18
+-     let lineText = "";
++     let lineText = "Stryker was here!";
+Tests ran:
+    an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane)
+    the same aligned line at different columns is two places (merging by line only)
+    after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned)
+  and 45 more tests!
+
+
+[Survived] EqualityOperator
+src/search/internal/match.ts:39:9
+-       if (lineEnd < match.index) {
++       if (lineEnd <= match.index) {
+Tests ran:
+    an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane)
+    the same aligned line at different columns is two places (merging by line only)
+    after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned)
+  and 45 more tests!
+
+
+[NoCoverage] BlockStatement
+src/search/internal/places.ts:44:26
+-     if (!isPlaceKey(text)) {
+-       throw new RangeError("a place key is a JSON array");
+-     }
++     if (!isPlaceKey(text)) {}
+
+[NoCoverage] StringLiteral
+src/search/internal/places.ts:45:26
+-       throw new RangeError("a place key is a JSON array");
++       throw new RangeError("");
+
+[Survived] ConditionalExpression
+src/search/internal/places.ts:44:7
+-     if (!isPlaceKey(text)) {
++     if (false) {
+Tests ran:
+    an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane)
+    the same aligned line at different columns is two places (merging by line only)
+    after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned)
+  and 33 more tests!
+
+
+[Survived] StringLiteral
+src/search/internal/places.ts:39:26
+-     return text.startsWith("[");
++     return text.startsWith("");
+Tests ran:
+    an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane)
+    the same aligned line at different columns is two places (merging by line only)
+    after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned)
+  and 33 more tests!
+
+
+[Survived] ArithmeticOperator
+src/search/internal/places.ts:98:29
+-         ordinals.set(counted, ordinal + 1);
++         ordinals.set(counted, ordinal - 1);
+Tests ran:
+    an unchanged line is one place with every pane, 3 panes and 2 panes (rows per pane)
+    the same aligned line at different columns is two places (merging by line only)
+    after changes of unequal length, alignment uses each pane's change end (raw line numbers taken as aligned)
+  and 33 more tests!
+
+
+[Survived] EqualityOperator
+src/search/internal/results.ts:77:45
+-     const after = others.findIndex((other) => other.rank > file.rank);
++     const after = others.findIndex((other) => other.rank >= file.rank);
+Tests ran:
+    a dismissal only holds keys among its file's places
+    a dismissal stays in its own file when another file holds the same place (over-dismissal)
+    a group dismissal survives a one-file re-run; a full run clears it (rule 9 vs rule 10)
+  and 6 more tests!
+
+
+Ran 4.46 tests per mutant on average.
+---------------|------------------|----------|-----------|------------|----------|----------|
+               | % Mutation score |          |           |            |          |          |
+File           |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+---------------|--------|---------|----------|-----------|------------|----------|----------|
+All files      |  92.78 |   93.57 |      644 |        11 |         45 |        6 |        0 |
+ scripts       |  87.75 |   88.76 |      303 |         5 |         39 |        4 |        0 |
+  fences.ts    |  87.75 |   88.76 |      303 |         5 |         39 |        4 |        0 |
+ src           |  97.75 |   98.30 |      341 |         6 |          6 |        2 |        0 |
+  search       |  97.75 |   98.30 |      341 |         6 |          6 |        2 |        0 |
+   internal    |  97.75 |   98.30 |      341 |         6 |          6 |        2 |        0 |
+    list.ts    | 100.00 |  100.00 |       82 |         0 |          0 |        0 |        0 |
+    match.ts   |  96.23 |   96.23 |       46 |         5 |          2 |        0 |        0 |
+    places.ts  |  95.76 |   97.41 |      112 |         1 |          3 |        2 |        0 |
+    preview.ts | 100.00 |  100.00 |       16 |         0 |          0 |        0 |        0 |
+    results.ts |  98.84 |   98.84 |       85 |         0 |          1 |        0 |        0 |
+---------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m10:41:09 (2948987) INFO MutationTestExecutor[39m Done in 1 minute and 32 seconds.

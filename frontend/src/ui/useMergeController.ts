@@ -12,10 +12,12 @@ import {
   MergeController,
   type Direction,
   type FormatOutcome,
+  type MergeGoTo,
   type MergeOptions,
   type MergeSummary,
   type Preferences,
   type ProblemCounts,
+  type ResultLineUp,
   type ResultSnapshot,
   type Side,
 } from "../editor";
@@ -25,9 +27,11 @@ import type { LanguageServers } from "../lsp";
 export type {
   Direction,
   FormatOutcome,
+  MergePane,
   MergeSummary,
   Preferences,
   ProblemCounts,
+  ResultLineUp,
   ResultSnapshot,
 } from "../editor";
 
@@ -52,6 +56,7 @@ export type MergeHandle = {
   readonly summary: Readonly<ShallowRef<MergeSummary | null>>;
   readonly problems: Readonly<ShallowRef<ProblemCounts | null>>;
   readonly unsaved: Readonly<ShallowRef<boolean>>;
+  readonly resultVersion: Readonly<ShallowRef<number>>;
   applyAllNonConflicting(side: Side): void;
   moveToChange(direction: Direction): void;
   undo(): void;
@@ -59,6 +64,8 @@ export type MergeHandle = {
   historyKey(event: KeyboardEvent): boolean;
   snapshot(): ResultSnapshot | null;
   format(): Promise<FormatOutcome | null>;
+  lineUp(): ResultLineUp | null;
+  goTo(target: MergeGoTo): void;
 };
 
 type HostElements = readonly [
@@ -95,6 +102,12 @@ type Shown = {
   readonly summary: ShallowRef<MergeSummary | null>;
   readonly problems: ShallowRef<ProblemCounts | null>;
   readonly unsaved: ShallowRef<boolean>;
+  readonly resultVersion: ShallowRef<number>;
+};
+
+type Live = {
+  controller: MergeController | null;
+  goTo: MergeGoTo | null;
 };
 
 function emptyShown(): Shown {
@@ -102,19 +115,23 @@ function emptyShown(): Shown {
     summary: shallowRef<MergeSummary | null>(null),
     problems: shallowRef<ProblemCounts | null>(null),
     unsaved: shallowRef(false),
+    resultVersion: shallowRef(0),
   };
 }
 
 function reloaded(
   previous: MergeController | null,
   build: () => MergeController | null,
-  { summary, problems, unsaved }: Shown,
+  { summary, problems, unsaved, resultVersion }: Shown,
 ): MergeController | null {
   previous?.destroy();
   const controller = build();
   summary.value = controller?.summary() ?? null;
   problems.value = controller?.problems() ?? null;
   unsaved.value = false;
+  if (controller !== null) {
+    resultVersion.value += 1;
+  }
   controller?.onSummaryChange((next) => {
     summary.value = next;
   });
@@ -124,19 +141,42 @@ function reloaded(
   controller?.onUnsavedChange((next) => {
     unsaved.value = next;
   });
+  controller?.onResultChange(() => {
+    resultVersion.value += 1;
+  });
   return controller;
 }
 
-function handleOf(shown: Shown, current: () => MergeController | null): MergeHandle {
+function rebuild(live: Live, build: () => MergeController | null, shown: Shown): void {
+  live.controller = reloaded(live.controller, build, shown);
+  if (live.controller !== null && live.goTo !== null) {
+    live.controller.goTo(live.goTo);
+    live.goTo = null;
+  }
+}
+
+function askGoTo(live: Live, target: MergeGoTo): void {
+  if (live.controller === null) {
+    live.goTo = target;
+  } else {
+    live.controller.goTo(target);
+  }
+}
+
+function handleOf(shown: Shown, live: Live): MergeHandle {
   return {
     ...shown,
-    applyAllNonConflicting: (side) => current()?.applyAllNonConflicting(side),
-    moveToChange: (direction) => current()?.moveToChange(direction),
-    undo: () => current()?.undo(),
-    redo: () => current()?.redo(),
-    historyKey: (event) => current()?.historyKey(event) ?? false,
-    snapshot: () => current()?.snapshot() ?? null,
-    format: () => current()?.format() ?? Promise.resolve(null),
+    applyAllNonConflicting: (side) => live.controller?.applyAllNonConflicting(side),
+    moveToChange: (direction) => live.controller?.moveToChange(direction),
+    undo: () => live.controller?.undo(),
+    redo: () => live.controller?.redo(),
+    historyKey: (event) => live.controller?.historyKey(event) ?? false,
+    snapshot: () => live.controller?.snapshot() ?? null,
+    format: () => live.controller?.format() ?? Promise.resolve(null),
+    lineUp: () => live.controller?.lineUp() ?? null,
+    goTo: (target) => {
+      askGoTo(live, target);
+    },
   };
 }
 
@@ -165,7 +205,7 @@ export function useMergeController(
   { readOnly, preferences, collapsed, minimap, servers }: ControllerOptions,
 ): MergeHandle {
   const shown = emptyShown();
-  let controller: MergeController | null = null;
+  const live: Live = { controller: null, goTo: null };
 
   watch(
     [
@@ -185,16 +225,16 @@ export function useMergeController(
         minimap: toValue(minimap),
         servers: currentServers,
       };
-      controller = reloaded(controller, () => createController(current, options, elements), shown);
+      rebuild(live, () => createController(current, options, elements), shown);
     },
     { immediate: true, flush: "post" },
   );
 
-  followWithoutRebuild(() => controller, { preferences, collapsed, minimap });
+  followWithoutRebuild(() => live.controller, { preferences, collapsed, minimap });
 
   onScopeDispose(() => {
-    controller = reloaded(controller, () => null, shown);
+    rebuild(live, () => null, shown);
   });
 
-  return handleOf(shown, () => controller);
+  return handleOf(shown, live);
 }
