@@ -1013,9 +1013,12 @@ Internals (`editor/internal/`, not importable from `ui/`):
   needs no `keydown` and separate presses cut again.
 - `exactScroll.ts` — every pane lands a far scroll where it was sent (plan §2 #82): WebKitGTK 2.54 pulls back a
   `scrollTop` that shows none of the rendered lines while CodeMirror swaps its viewport in its scroll handler
-  (#1240). The pure `farTop` decides from the visible span and the rendered lines' span; then a CodeMirror scroll
-  request with a `scrollHandler` writes that exact `scrollTop` after CodeMirror has rendered the target. Callers
-  keep writing `scrollTop`.
+  (#1240). The pure `farTop` decides from the visible span and the rendered lines' span, and `movedFarTop` only for a
+  `scrollTop` that moved since the pane's last scroll event (a viewport CodeMirror already moved to a scroll target
+  is not a far scroll, #1693); then a CodeMirror scroll request with a `scrollHandler` writes that exact `scrollTop`
+  after CodeMirror has rendered the target. Callers keep writing `scrollTop`. The wave's width is a CodeMirror
+  measure (`--fold-wave-width`), never a CSS size container: WebKitGTK pulls a far `scrollTop` back to the top of a
+  scroller holding `cqi` units (#1693).
 
 ### 5.3 `connectors/` — pure geometry
 
