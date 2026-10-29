@@ -13,6 +13,7 @@ export type {
   ColumnVersions,
   Comparison,
   Difference,
+  LineChange,
   TabEntry,
   TabLanguage,
   TabList,
@@ -103,7 +104,6 @@ export {
   type KeysRead,
 } from "./keys";
 export type {
-  LineChange,
   RangeChange,
   RangeEntry,
   RangeEntryKind,

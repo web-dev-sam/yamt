@@ -1,15 +1,6 @@
 import type * as Generated from "./bindings";
-import { toDifferences, type Difference } from "./compareDomain";
-import {
-  isLeftLine,
-  isRangeFileId,
-  isRightLine,
-  toRange,
-  type LeftLine,
-  type LineRange,
-  type RangeFileId,
-  type RightLine,
-} from "./domain";
+import { toDifferences, toLineChange, type Difference, type LineChange } from "./compareDomain";
+import { isRangeFileId, type RangeFileId } from "./domain";
 import { branded } from "./validate";
 
 type RangeSideLabel = Readonly<Generated.RangeSideLabel>;
@@ -46,10 +37,6 @@ export type RangeFile =
       readonly mode: RangeModeChange;
     }
   | Readonly<Exclude<Generated.RangeFile, { kind: "texts" }>>;
-export type LineChange = {
-  readonly left: LineRange<LeftLine>;
-  readonly right: LineRange<RightLine>;
-};
 export type SearchText = {
   readonly file: RangeFileId;
   readonly left: string;
@@ -96,13 +83,6 @@ export function toRangeFile(raw: Generated.RangeFile): RangeFile {
   }
   const { left, right, differences, mode } = raw;
   return { kind: "texts", left, right, differences: toDifferences(differences), mode };
-}
-
-function toLineChange({ left, right }: Generated.LineChange, field: string): LineChange {
-  return {
-    left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
-    right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
-  };
 }
 
 function toSearchText(

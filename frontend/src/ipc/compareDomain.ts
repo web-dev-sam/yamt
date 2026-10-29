@@ -25,9 +25,11 @@ export type TabEntry = {
 export type TabList = { readonly tabs: readonly TabEntry[]; readonly shown: TabId };
 export type CompareStart = { readonly list: TabList; readonly columnLimit: number };
 export type ColumnVersions = Readonly<Record<Column, ColumnVersion>>;
-export type Difference = {
+export type LineChange = {
   readonly left: LineRange<LeftLine>;
   readonly right: LineRange<RightLine>;
+};
+export type Difference = LineChange & {
   readonly words: { readonly left: SideWords<LeftLine>; readonly right: SideWords<RightLine> };
 };
 export type Comparison = {
@@ -73,12 +75,19 @@ export function toColumnVersions(dto: Generated.ColumnVersions): ColumnVersions 
   };
 }
 
+export function toLineChange({ left, right }: Generated.LineChange, field: string): LineChange {
+  return {
+    left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
+    right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
+  };
+}
+
 export function toDifferences(dtos: readonly Generated.Difference[]): Difference[] {
-  return dtos.map(({ left, right, words }, index) => {
+  return dtos.map((dto, index) => {
     const field = `differences[${index}]`;
+    const { words } = dto;
     return {
-      left: toRange({ range: left, isLine: isLeftLine, field: `${field}.left` }),
-      right: toRange({ range: right, isLine: isRightLine, field: `${field}.right` }),
+      ...toLineChange(dto, field),
       words: {
         left: toSideWords({ side: words.left, isLine: isLeftLine, field: `${field}.words.left` }),
         right: toSideWords({
