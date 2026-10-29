@@ -1181,6 +1181,21 @@ question was answered). CM12's text to update at the next retro (#1690). Retro c
 start-fixture` lands on the owner's screen without a private bus), #1756 (`just check` leaves a debug binary without
 pages) and agents leaving private `dbus-daemon`s running (two killed this session).
 
+## Release 0.6.0-beta.2 (session 36, owner request #1753: "create the next beta prerelease of 0.6.0")
+
+Contents: the changelog's section since 0.6.0-beta.1 — the AI thread's capped thinking list and Ask AI at a thread's
+bottom, folder sums in the range window's tree, collapsed unchanged lines in the range window, and the window-wide
+search in both windows (board "After 0.6.0-beta.1" rows 1–4, plan §2 #124–#127). `feat/beta-feedback` merged into
+`main` as `0ca0ed4` (merge commit, tree equal to `f97e028`). The release commit changes version and changelog only.
+The README keeps naming the 0.5.1 files (a pre-release is not the default download). Nothing pushed. Owner #1753: no
+further question; a failing release step is documented as a known issue of this pre-release.
+
+| row | slice                                                                                                                                                                                                                                                           | owner        | status  | evidence                 |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | ------- | ------------------------ |
+| 1   | version 0.6.0-beta.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.6.0-beta.2] - 2026-10-29`                                                                                                                                                                   | orchestrator | done    | release commit on `main` |
+| 2   | final run before tagging (`briefs/release-0.6.0-beta.2-verify.md`): `just check`, licences, `.deb` name and version, `--version`, the release binary on the conflict project, the range window, a real AI turn, the compare window, the search's last two fixes | verifier     | running |                          |
+| 3   | release build and publishing as a pre-release (`docs/slices/handoff-release-0.6.0-beta.2.md`)                                                                                                                                                                   | human        | todo    |                          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
