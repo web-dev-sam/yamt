@@ -1,7 +1,9 @@
 # Final run — the range window collapses unchanged lines behind the wave, with the merge window's toggle
 
-Board "Range collapse" row 5 (session 35). Rows 2–4 are committed and accepted (notes `.omp/run/notes/RangeFoldCore.md`,
-`RangeCollapseToggle.md`, `RangeFoldColumns.md`). Rules: `docs/slices/request-range-collapse.md` (rules 1–8, acceptance)
+Board "Range collapse" row 5 (session 35). Rows 2–4 are committed and accepted, row 4 after three repair rounds (the
+third allowed by the owner) (notes `.omp/run/notes/RangeFoldCore.md`, `RangeCollapseToggle.md`, `RangeFoldColumns.md`;
+the scroll sync changed for both windows: a followed pane leads the next sync, a follower pulled off its written top
+is written again once). Rules: `docs/slices/request-range-collapse.md` (rules 1–8, acceptance)
 and `docs/plan.md` §2 **#126** (read both whole). Read-only (VF6); you fix nothing (VF1); alone. **No mutation run**
 (VF7, owner #1630): each patch had its own. Real-app sessions `v-rc-…`; scratch under `/tmp/yamt-rc/verify/`. The
 owner's own yamt may be running: leave it alone; never `pkill`/`killall`. `pnpm -C frontend test:browser` cannot
@@ -30,9 +32,14 @@ unchanged stretch; `&threads=seeded` puts a thread on left 100 / right 101.
    g. Previous/Next step through the 7 differences and change no wave.
    h. Toggle off, reload: the file opens with every line shown; the merge fixture page (`just app-session
       start-fixture`, same profile) shows its toggle unpressed; on there, reload the range page: collapsed.
+   i. The two columns stay lined up: click a right-column line, Ctrl+F "renameColumn", Enter, Escape, Ctrl+End in the
+   right column → both columns at their ends (the repro of #1689: `/tmp/yamt-r1/ctrlend.sh <root> <session>`,
+   probes in `/tmp/yamt-r1/`); Ctrl+Home → both at the top; scrolling one column by script steps (`scrollTop +=
+      100` per frame), then the other: the second leads from its second step and is never held.
 3. Merge window, fixture page (`just app-session start-fixture`), dark and light, focused: waves across three panes and
    both strips, a click shows the next step, hover thickens the whole wave, the toolbar toggle off/on keeps the
-   Result's top line with the sides lined up at once (shallow and deep scroll) — as before.
+   Result's top line with the sides lined up at once (shallow and deep scroll); the Alt minimap drag and a side pane's
+   Ctrl/Cmd+wheel step keep the panes lined up; a find to a hidden line, then Ctrl/Cmd+End — as before.
 4. Compare window, fixture page (`?diff`): differences, strip bands, scrolling and editing as before; no wave anywhere.
 5. Real app on a private X display (`cargo tauri build --debug --no-bundle`), repository from `scripts/range-repo.sh
    /tmp/yamt-rc/verify/repo`, `just app-session start-app --name v-rc --range main...feature --repo …`: 2a, 2b, 2d, 2f
