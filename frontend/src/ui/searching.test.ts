@@ -278,6 +278,44 @@ test("changed searches only that file again after the pause and keeps its dismis
   expect(search.summary.value).toEqual({ kind: "results", rows: 3, files: 2, cut: false });
 });
 
+test("fullRuns counts new searches only: a typed query, Enter, Match Case, a rerun — never a re-read file, a dismissal, a filter, a closed group or an emptied box", async () => {
+  const fake = fakeSource({ "a.ts": "foo\nfoo bar", "b.ts": "foo" });
+  const search = searching(fake);
+  expect(search.fullRuns.value).toBe(0);
+
+  search.type("fo");
+  search.type("foo");
+  await vi.advanceTimersByTimeAsync(SEARCH_PAUSE_MS - 1);
+  expect(search.fullRuns.value).toBe(0);
+  await vi.runAllTimersAsync();
+  expect(search.fullRuns.value).toBe(1);
+
+  const [place] = search.results.value?.groups[0]?.places ?? [];
+  if (place === undefined) {
+    throw new Error("no place");
+  }
+  search.dismissPlace("a.ts", place.key);
+  search.dismissGroup("b.ts");
+  search.togglePane("left");
+  search.toggleGroup("a.ts");
+  fake.texts.set("a.ts", "foo\nfoo bar\nfoo");
+  search.changed("a.ts");
+  await vi.runAllTimersAsync();
+  expect(fake.reads.at(-1)).toBe("a.ts");
+  expect(search.fullRuns.value).toBe(1);
+
+  search.enter();
+  search.toggleMatchCase();
+  search.clear();
+  search.rerun();
+  await vi.runAllTimersAsync();
+  expect(search.fullRuns.value).toBe(4);
+
+  search.type("");
+  await vi.runAllTimersAsync();
+  expect(search.fullRuns.value).toBe(4);
+});
+
 test("a one-file reply that a full run overtook is dropped", async () => {
   const fake = fakeSource({ "a.ts": "foo" });
   const search = searching(fake);

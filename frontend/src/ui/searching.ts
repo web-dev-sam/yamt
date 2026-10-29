@@ -39,6 +39,7 @@ export type Searching<P extends string> = {
   readonly closed: Readonly<ShallowRef<ReadonlySet<string>>>;
   readonly results: Readonly<ShallowRef<SearchResults<P> | null>>;
   readonly running: Readonly<ShallowRef<boolean>>;
+  readonly fullRuns: Readonly<ShallowRef<number>>;
   readonly goTo: Readonly<ShallowRef<GoToRequest<P> | null>>;
   readonly panes: ComputedRef<readonly SearchPaneInfo<P>[]>;
   readonly rows: ComputedRef<readonly ListRow<P>[]>;
@@ -75,6 +76,7 @@ type Refs<P extends string> = {
   readonly closed: ShallowRef<ReadonlySet<string>>;
   readonly results: ShallowRef<SearchResults<P> | null>;
   readonly running: ShallowRef<boolean>;
+  readonly fullRuns: ShallowRef<number>;
   readonly goTo: ShallowRef<GoToRequest<P> | null>;
 };
 
@@ -94,6 +96,7 @@ function createRefs<P extends string>(layout: Layout<P>): Refs<P> {
     closed: shallowRef<ReadonlySet<string>>(new Set()),
     results: shallowRef<SearchResults<P> | null>(null),
     running: shallowRef(false),
+    fullRuns: shallowRef(0),
     goTo: shallowRef<GoToRequest<P> | null>(null),
   };
 }
@@ -205,6 +208,7 @@ export function createSearching<P extends string>(deps: SearchingDeps<P>): Searc
   const refs = createRefs(deps.source.layout);
   const run = createSearchRun(refs, deps.source, () => {
     refs.closed.value = new Set();
+    refs.fullRuns.value += 1;
   });
   const ctx: Context<P> = { refs, deps, run, goTos: { last: 0 } };
   return {

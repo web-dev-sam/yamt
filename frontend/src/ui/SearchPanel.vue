@@ -14,14 +14,17 @@ import {
   summaryText,
 } from "./searchText";
 
-type Remembered = { readonly element: Element | null; readonly path: string | null };
+type Remembered = { readonly pane: HTMLElement | null; readonly path: string | null };
 
 const props = defineProps<{ search: Searching<P>; shownPath: string | null; whole: boolean }>();
+
+// A pane's focusable element is CodeMirror's content DOM, which always carries these attributes (@codemirror/view `EditorView` contentAttrs); ui/ may not import CodeMirror (PM2).
+const PANE_CONTENT = '[role="textbox"][aria-multiline="true"]';
 
 const panel = useTemplateRef<HTMLElement>("panel");
 const box = useTemplateRef<HTMLInputElement>("box");
 const results = useTemplateRef<{ focusList(): void }>("results");
-let remembered: Remembered = { element: null, path: null };
+let remembered: Remembered = { pane: null, path: null };
 
 const summaryLine = computed(() => {
   const summary = props.search.summary.value;
@@ -41,7 +44,7 @@ watch(
     }
     const focused = document.activeElement;
     remembered = {
-      element: focused === document.body ? null : focused,
+      pane: focused instanceof HTMLElement && focused.matches(PANE_CONTENT) ? focused : null,
       path: props.shownPath,
     };
     await nextTick();
@@ -61,11 +64,11 @@ function focusBack(): void {
   if (inPanel !== true) {
     return;
   }
-  const { element, path } = remembered;
-  if (element instanceof HTMLElement && element.isConnected && path === props.shownPath) {
-    element.focus();
+  const { pane, path } = remembered;
+  if (pane?.isConnected === true && path === props.shownPath) {
+    pane.focus();
   }
-  if (document.activeElement !== element) {
+  if (pane === null || document.activeElement !== pane) {
     props.search.focusShownFile();
   }
 }
@@ -146,6 +149,7 @@ function boxKey(event: KeyboardEvent): void {
       class="mt-1"
       :rows="search.rows.value"
       :panes="search.panes.value"
+      :full-runs="search.fullRuns.value"
       @toggle="search.toggleGroup"
       @dismiss-place="search.dismissPlace"
       @dismiss-group="search.dismissGroup"

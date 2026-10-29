@@ -1,6 +1,6 @@
 <script setup lang="ts" generic="P extends string">
 import { useVirtualList } from "@vueuse/core";
-import { computed, shallowRef, toRef, type Component } from "vue";
+import { computed, shallowRef, toRef, watch, type Component } from "vue";
 import ChevronDown from "~icons/lucide/chevron-down";
 import ChevronRight from "~icons/lucide/chevron-right";
 import XIcon from "~icons/lucide/x";
@@ -14,7 +14,11 @@ import { DISMISS_LABEL, paneHitTitle, RESULTS_LABEL } from "./searchText";
 
 type Row = ListRow<P>;
 
-const props = defineProps<{ rows: readonly Row[]; panes: readonly SearchPaneInfo<P>[] }>();
+const props = defineProps<{
+  rows: readonly Row[];
+  panes: readonly SearchPaneInfo<P>[];
+  fullRuns: number;
+}>();
 const emit = defineEmits<{
   toggle: [path: string];
   dismissPlace: [path: string, key: PlaceKey];
@@ -34,6 +38,26 @@ const activeIndex = computed(() => {
   const index = props.rows.findIndex((row) => rowKey(row) === activeKey.value);
   return index === -1 ? null : index;
 });
+
+watch(
+  () => props.fullRuns,
+  () => {
+    scrollListTo(0);
+  },
+);
+watch(
+  () => props.rows,
+  (rows) => {
+    const element = containerProps.ref.value;
+    if (element === null) {
+      return;
+    }
+    const end = Math.max(rows.length * ROW_HEIGHT_PX - element.clientHeight, 0);
+    if (element.scrollTop > end) {
+      scrollListTo(end);
+    }
+  },
+);
 
 function rowKey(row: Row): string {
   return row.kind === "group"
@@ -73,6 +97,14 @@ function dismiss(row: Row): void {
     emit("dismissGroup", row.path);
   } else {
     emit("dismissPlace", row.path, row.place.key);
+  }
+}
+
+function scrollListTo(top: number): void {
+  const element = containerProps.ref.value;
+  if (element !== null) {
+    element.scrollTop = top;
+    containerProps.onScroll();
   }
 }
 
@@ -170,11 +202,17 @@ defineExpose({ focusList });
         </template>
         <template v-else>
           <span class="flex min-w-0 flex-1 overflow-hidden whitespace-pre">
-            <span class="shrink-0">{{ row.place.preview.before }}</span>
-            <mark class="shrink-0 rounded-sm bg-search-match text-inherit">{{
-              row.place.preview.match
-            }}</mark>
-            <span class="overflow-hidden text-ellipsis">{{ row.place.preview.after }}</span>
+            <span class="flex max-w-full shrink-0">
+              <span class="flex min-w-0 justify-end overflow-clip">
+                <span class="shrink-0">{{ row.place.preview.before }}</span>
+              </span>
+              <mark class="shrink-0 rounded-sm bg-search-match text-inherit">{{
+                row.place.preview.match
+              }}</mark>
+            </span>
+            <span class="min-w-0 flex-1 overflow-hidden text-ellipsis">{{
+              row.place.preview.after
+            }}</span>
           </span>
           <button
             v-for="entry in row.shown"
