@@ -13,3 +13,16 @@ handoff, #1733).
   (the fixture lists no choice file).
 - The five `useSearchGoTo` tests moved unchanged to `useSearchGoTo.test.ts`.
 - sfc-order, typecheck, lint, fmt, unused clean; 220 files / 2987 tests.
+
+## Reviews
+
+`just mutants cdeaaff`: nothing to mutate (only `.vue` files and tests). Boundary pass, no findings (deviations
+accepted). Correctness fail: #1734 (block) — a keyboard-only request already waiting when a ChoiceView mounts runs
+during setup (`useSearchGoTo`'s immediate watch runs synchronously, ignoring `flush: "post"`), so the focus found no
+section and the request was taken; reachable by Reset on a choice file while the search hides in its round trip.
+
+## Fix round 1 (`SearchTidyR1`, 5m11s, patch `836ff00`, `.omp/run/patches/SearchTidyR1.patch`)
+
+`void nextTick(focusFirstButton)`. Real app, mount case (a MutationObserver sends the hide key once the old view's
+section is removed): before `BODY`, after "Take left", dark and light; the plain case still "Take left". Six frontend
+recipes pass, 2987 tests. `just mutants 6b82d6b`: nothing to mutate. Correctness re-check pass. Accepted.
