@@ -1,7 +1,7 @@
 # Final run — one window-wide search in the merge and range windows
 
-Board "Search" row 7 (session 35). Rows 2–6 are committed and accepted (notes `.omp/run/notes/SearchCore.md`,
-`SearchGoTo.md`, `SearchRangeTexts.md`, `SearchWindow.md`, `SearchConnect.md`). Rules: `docs/slices/request-search.md`
+Board "Search" row 7 (session 35). Rows 2–6b are committed and accepted (notes `.omp/run/notes/SearchCore.md`,
+`SearchGoTo.md`, `SearchRangeTexts.md`, `SearchWindow.md`, `SearchConnect.md`, `SearchTidy.md`). Rules: `docs/slices/request-search.md`
 (rules 1–13, acceptance) and `docs/plan.md` §2 **#127** (read both whole). Read-only (VF6); you fix nothing (VF1);
 alone. **No mutation run** (VF7, owner #1630). Real-app sessions `v-se-…`; scratch under `/tmp/yamt-se/verify/`. The
 owner's own yamt may be running: leave it alone; never `pkill`/`killall`. Do not run `pnpm -C frontend test:browser`
@@ -31,9 +31,16 @@ Record every app's exit status with a wrapper.
    i. Settings → Keymap: "Toggle search" in the Window group; rebind it, the new key toggles, Ctrl+Shift+S no longer
    does; reset it.
    j. The compare window (`?diff`): no panel, Ctrl+B and its tab list as before.
+   k. A row's preview keeps every character around the match: for a match followed by a space, one preceded by a
+   space, and one beside a tab, each row's rendered text (innerText of its parts) equals the line's text there; a
+   long line still ends in an ellipsis.
 3. Real app, merge window on `scripts/demo-repo.sh /tmp/yamt-se/verify/demo` (`just app-session start-app --name
    v-se-m --repo …`), dark and light: 2a, 2b, 2e (selection still equal 500 ms later), 2g; Reset on a searched file
-   updates its rows; a file changed on disk (edit it with `printf` from the shell) re-searches.
+   updates its rows; a file changed on disk (edit it with `printf` from the shell) re-searches. The very first
+   Ctrl+Shift+S after the app starts (window focused, nothing clicked yet) shows the panel — once seen not to; record
+   what you see on each fresh start. A file shown as a choice (a binary one: a third session `start-app --name v-se-c
+   --fresh-repo` shows `assets/logo.bin`), focus on the page: Ctrl+Shift+S twice → its first choice button ("Take
+   left") has the keyboard.
 4. Real app, range window on `scripts/range-repo.sh /tmp/yamt-se/verify/range` (`start-app --name v-se-r --range
    main...feature --repo …`), dark and light: 2a, 2b, 2e; binary, too-large, not-UTF-8, mode-only, kind-change and
    submodule files never appear.
