@@ -41,6 +41,7 @@ export const commands = {
 	showTab: (tab: TabId) => typedError<TabList, IpcError>(__TAURI_INVOKE("show_tab", { tab })),
 	openRange: () => __TAURI_INVOKE<RangeStart>("open_range"),
 	loadRangeFile: (file: RangeFileId) => typedError<RangeFile, IpcError>(__TAURI_INVOKE("load_range_file", { file })),
+	searchRangeTexts: (from: RangeFileId) => typedError<SearchTexts, IpcError>(__TAURI_INVOKE("search_range_texts", { from })),
 	listThreads: () => typedError<ThreadList, IpcError>(__TAURI_INVOKE("list_threads")),
 	addThread: (file: RangeFileId, line: ThreadLine, text: string) => typedError<ThreadAdded, IpcError>(__TAURI_INVOKE("add_thread", { file, line, text })),
 	addNote: (thread: ThreadId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_note", { thread, text })),
@@ -306,6 +307,14 @@ export type LanguageServerSettings = {
 /**  0-based line index in the left text of a 2-way compare. */
 export type LeftLine = number;
 
+/**  Where two texts differ, by lines only: the same ranges as a [`Difference`], without its word marks. */
+export type LineChange = {
+	/**  The lines in the left; empty where the right inserted lines. */
+	left: LineRange<LeftLine>,
+	/**  The lines in the right; empty where the right removed the left's lines. */
+	right: LineRange<RightLine>,
+};
+
 /**  The lines `start .. start + len` of one text; built from a length, so it cannot be inverted. */
 export type LineRange<L> = {
 	/**  First line of the range, or the insertion point when the range is empty. */
@@ -555,6 +564,20 @@ export type RepositoryAnswer = "start" | "dontStart";
 export type RightLine = number;
 
 export type RunId = number;
+
+/**  One text file's two sides as `RangeFile::Texts` holds them, with the lines that differ. */
+export type SearchText = {
+	file: RangeFileId,
+	left: string,
+	right: string,
+	changes: LineChange[],
+};
+
+/**  One page of the range's text files; `next` is the id the following page starts at, `None` after the last file. */
+export type SearchTexts = {
+	files: SearchText[],
+	next: RangeFileId | null,
+};
 
 /**  How far a send is: `done` of `of` messages. */
 export type SendProgress = {
