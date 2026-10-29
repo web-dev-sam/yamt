@@ -9,7 +9,9 @@ handles' `goTo`/`lineUp`/`resultVersion` and the types `MergePane`, `PaneMatch`,
 `RangeGoTo` from `ui/useMergeController.ts`/`ui/useRangeController.ts` (brief `search-goto.md`); `SearchRangeTexts` —
 `RangeSource.searchTexts(from)` and the `SearchTexts` domain types (brief `search-range-texts.md`). A later slice
 (`SearchConnect`) wires the views, stops and disk changes to the contract below: do not edit `MergeView.vue`,
-`RangeView.vue`, `stops.ts`, `diskChanges.ts`.
+`RangeView.vue`, `stops.ts`, `diskChanges.ts`. A fix round on the go-to (`SearchGoToR1`) runs beside you: it moves
+`MergeController` into `editor/merge.ts` and changes `useMergeController.ts`'s internals, never an exported name or
+type you use. New `ui/search*.ts` / `ui/Search*.vue` files are yours if you split by concern.
 
 ## Target
 
