@@ -71,3 +71,16 @@ Boundary pass (#1715–#1718), correctness pass (#1719–#1724; no window-side c
 `{ pane: "right", match: null }` to RangeView, so the cause is after: connect R1). Mutation run `just mutants a214c2a`:
 96.9 %, survivors equivalent or static (searchRun.ts:70,75,148,157; mergeSearch.ts:17-19,132) or unchanged lines
 (store.ts:121,142,203). Accepted.
+
+## Fix round 2 (session 36, after the final run; `SearchWindowR2`, 19m43s, patch `632e7be`, `.omp/run/patches/SearchWindowR2.patch`)
+
+From the final run (`SearchVerify`, gate pass): #1735 the match off screen at the default 240 px; #1737 a new query's
+list blank at the old scroll position; #1736 (promoted) hide → the Settings button. Fixed: the before-text box shrinks
+from its left (`justify-end`, `overflow-clip`, the after-text gives way first); `searching.ts` `fullRuns` (fed by
+`onFullRun`) → SearchResults scrolls to the top on a new search, clamps to the end otherwise; hide restores a
+remembered pane (`[role=textbox][aria-multiline=true]`, same path, connected) else `focusShownFile`. WebKit (Xvfb,
+`hasFocus` true) before/after both pages, dark/light; real app dark: 240 px `hidden` 18→0 (merge), 11→0 (range), 11→0
+(app); rendered 0 → 10; Settings → Result pane, Local kept. 2988 tests. `just mutants 79cba9f`: searching.ts 85/85
+killed. Reviews: boundary pass (#1739 should promoted: no note for `overflow-clip`; #1740 nit dropped), correctness
+fail: #1741 the keyboard row survives a new search, #1742 a hide with Settings shown drops the keyboard to body and a
+waiting go-to takes it on Back (#1743 should dropped). Gate B (owner #1744): a third round, `SearchWindowR3`.
