@@ -55,3 +55,8 @@ assertion [INFERENCE]. `tests/search.rs` deleted, its tests in `listing_answers.
 `LineChange`/`toLineChange` in `compareDomain.ts`, `Difference = LineChange & { words }`, `toDifferences` on
 `toLineChange`. 32 range tests; clippy, fmt; web 210 files / 2884 tests; Stryker `compareDomain.ts`/`rangeDomain.ts`
 100 %.
+
+## Re-check after fix round 1
+
+Boundary pass (#1708, #1709 fixed), correctness pass (#1710: the page holds only in (4 MiB − 2, 4 MiB]; `>=` → `>`
+and the 1 MiB mutant both fail the test by reading; the moved skip test covers as much or more). Accepted.
