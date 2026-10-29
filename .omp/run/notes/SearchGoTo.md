@@ -41,3 +41,22 @@ range right line 301 and left 295 selected and centred, focused. Screenshots `/t
   plain contenteditable on the app page also lost its range within a frame, a `data:` page kept it. Not the go-to code
   [INFERENCE]; the window/connect smoke must check the selection stays (focused window).
 - One flaky node run (name not captured).
+
+## Reviews (round 1)
+
+Boundary fail: #1700 block (the merged `#centerSync` listener loses CodeMirror's per-listener error isolation, so a
+throw skips the saved point the close guard reads), #1701/#1702 promoted, #1703 dropped. Correctness fail: #1712
+block (`resultVersion` on edits proven only through a mock), #1713 promoted (touching mid-line spans overlap), #1714
+dropped. Mutation run `just mutants ec191ff`: survivors on older lines and the untested handle pass-throughs.
+
+## Fix round 1 (`SearchGoToR1`, 7m29s, patch `fe204ab`, `.omp/run/patches/SearchGoToR1.patch`)
+
+`editor/merge.ts` (new, 299 lines) holds `MergeController`, `MergeHosts`, `MergeOptions`; `editor/index.ts` 18 lines
+of re-exports. The Result's jobs are separate listeners again (`#statusSync`, `#serverSync`, `#savedSync`, a new
+`#resultSync` firing only on `docChanged`). `editor/internal/lineUp.ts` (new): `ResultLineUp`, `changeLines`,
+`resultLineUp` (each Result range starts at or after the previous end; test fails before: `{10,1}` vs `{11,0}`).
+`useMergeController` waits for a go-to like the range hook (`Live { controller, goTo }`, `askGoTo`). WebKit probe on the
+merge fixture: `resultVersion` 1 after build, +0 cursor click, +1 typing, +0 ArrowDown, +1 apply, +1 undo, +0 a
+status-only ignore. A new test kills the handle pass-through survivors. 212 files / 2892 tests; typecheck, lint, fmt
+clean (`unused` still flags the handle types until the window build). New files for docs: `editor/merge.ts`,
+`editor/internal/lineUp.ts`.
