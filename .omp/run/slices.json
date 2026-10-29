@@ -1,48 +1,24 @@
 {
-  "SearchConnect": {
+  "SearchConnectR1": {
     "owned": [
       "frontend/src/ui/MergeView.vue",
       "frontend/src/ui/RangeView.vue",
+      "frontend/src/ui/ChoiceView.vue",
       "frontend/src/ui/stops.ts",
       "frontend/src/ui/stops.test.ts",
-      "frontend/src/ui/diskChanges.ts",
-      "frontend/src/ui/diskChanges.test.ts",
-      "frontend/src/ui/saving.test.ts",
+      "frontend/src/ui/listing.ts",
       "frontend/src/ui/listing.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/editor/index.ts",
-      "frontend/src/ui/useMergeController.ts",
-      "frontend/src/ui/useRangeController.ts"
-    ]
-  },
-  "SearchWindowR1": {
-    "owned": [
       "frontend/src/ui/searching.ts",
       "frontend/src/ui/searching.test.ts",
-      "frontend/src/ui/searchRun.ts",
-      "frontend/src/ui/searchIcons.ts",
-      "frontend/src/ui/searchText.ts",
-      "frontend/src/ui/searchText.test.ts",
-      "frontend/src/ui/mergeSearch.ts",
-      "frontend/src/ui/mergeSearch.test.ts",
-      "frontend/src/ui/rangeSearch.ts",
-      "frontend/src/ui/rangeSearch.test.ts",
-      "frontend/src/ui/searchListKeys.ts",
-      "frontend/src/ui/searchListKeys.test.ts",
-      "frontend/src/ui/SearchPanel.vue",
-      "frontend/src/ui/SearchResults.vue",
-      "frontend/src/ui/SideColumn.vue",
-      "frontend/src/ui/FileList.vue",
-      "frontend/src/ui/App.vue",
-      "frontend/src/ui/RangeApp.vue",
+      "frontend/src/ui/opening.ts",
       "frontend/src/ui/store.ts",
       "frontend/src/ui/store.test.ts",
-      "frontend/src/ui/opening.ts",
+      "frontend/src/ui/mergeSearch.ts",
+      "frontend/src/ui/mergeSearch.test.ts",
       "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts",
-      "frontend/src/ui/fileListKey.ts",
-      "frontend/src/ui/fileListKey.test.ts",
-      "frontend/src/ui/AGENTS.md"
+      "frontend/src/ui/useSearchGoTo.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts"
     ]
   }
 }

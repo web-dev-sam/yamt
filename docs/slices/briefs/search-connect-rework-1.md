@@ -26,6 +26,11 @@ Board "Search" row 6, fix round 1 (session 35). Round 1: `SearchConnect`, commit
    both views.
 5. **#1726 (boundary, should → promoted)** `ChoiceView.vue:112` — the literal "Result" while MergeView and the search
    use `RESULT_HEADER`. Fix: `{{ RESULT_HEADER }}` from `./sideHeaders`.
+6. **Range hide-from-body focus (found by `SearchWindowR1` in WebKit, block)** — on the range fixture page, hiding the
+   search panel from a fresh body-focused page leaves the keyboard on `<body>` both times (merge page: the Result gets
+   it). `rangeStore`'s `focusShownFile()` asks for the shown path (tested), so the likely cause is `RangeView.vue`'s go-to
+   with `match: null` not taken or not focusing [INFERENCE]. Fix it in your files (the new `useSearchGoTo` or the range
+   handle path, `useRangeController.ts` added to your files); prove it on the range page, dark and light.
 
 ## Target
 
