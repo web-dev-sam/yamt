@@ -1,0 +1,110 @@
+commit 2d56b9d7fc0bc71224fca4f2569e342d1d9075aa
+Author: Samuel Braun <sam@webry.com>
+Date:   2026-10-29 20:59:04 +0100
+
+    fix(search): cap preview after match at 250 chars; hide focuses without scrolling
+
+diff --git a/frontend/src/search/AGENTS.md b/frontend/src/search/AGENTS.md
+index 9a1148d..7568570 100644
+--- a/frontend/src/search/AGENTS.md
++++ b/frontend/src/search/AGENTS.md
+@@ -1,4 +1,4 @@
+-Owner skill: `skill://ts-conventions`. The window-wide search's pure core (plan §2 #127, request `docs/slices/request-search.md` rules 5, 7, 9, 10, 12): one matcher per query (`matcherOf`: the text escaped into one `giu` RegExp, `gu` with Match Case; UTF-16 columns; lines split at `\n`, a trailing `\r` left out, never a cross-line match; `limit` hits per pane), the place rule and order (`filePlaces`: a hit inside change `k` groups with the other panes' hits of the same line text (its digest) and column, identical lines first-with-first; a hit outside every change groups by its aligned lead line and column, one hit per pane (a per-pane ordinal); rows in the lead pane's order, a side-only row at its change's lead start before that line's lead rows), each place's `PlaceKey` (panes, column, line digest, ordinal — never a line number, never the line text) and `Preview` (26 characters before the match, leading whitespace trimmed, `…` when cut), the results (`emptyResults` for a full run, `withFile` per file: dismissals kept while their place still matches, the `MAX_ROWS` 20,000 cap re-applied by rank), the dismissals (`dismissPlace`, `dismissFile`: a group's kept across one-file re-runs, cleared by a full run) and what the list shows (`listRows`: pane filters and closed groups, nothing dismissed back; `summaryOf`; `goToPane`: the lead pane when on, else the leftmost on pane).
++Owner skill: `skill://ts-conventions`. The window-wide search's pure core (plan §2 #127, request `docs/slices/request-search.md` rules 5, 7, 9, 10, 12): one matcher per query (`matcherOf`: the text escaped into one `giu` RegExp, `gu` with Match Case; UTF-16 columns; lines split at `\n`, a trailing `\r` left out, never a cross-line match; `limit` hits per pane), the place rule and order (`filePlaces`: a hit inside change `k` groups with the other panes' hits of the same line text (its digest) and column, identical lines first-with-first; a hit outside every change groups by its aligned lead line and column, one hit per pane (a per-pane ordinal); rows in the lead pane's order, a side-only row at its change's lead start before that line's lead rows), each place's `PlaceKey` (panes, column, line digest, ordinal — never a line number, never the line text) and `Preview` (26 characters before the match, leading whitespace trimmed, 250 after it — a row laying out a 2 MiB line froze the window, #1754 —, `…` where cut, never inside a surrogate pair), the results (`emptyResults` for a full run, `withFile` per file: dismissals kept while their place still matches, the `MAX_ROWS` 20,000 cap re-applied by rank), the dismissals (`dismissPlace`, `dismissFile`: a group's kept across one-file re-runs, cleared by a full run) and what the list shows (`listRows`: pane filters and closed groups, nothing dismissed back; `summaryOf`; `goToPane`: the lead pane when on, else the leftmost on pane).
+ 
+ `index.ts` is the only surface. Framework-free (PM3) and self-contained: nothing here imports another `src/` module, as `jsonrpc/` (PM2, `frontend/scripts/fences.ts`). Pure: no DOM, no timers, no state; the window's `ui/` owns running, pausing and the texts.
+ 
+diff --git a/frontend/src/search/internal/preview.test.ts b/frontend/src/search/internal/preview.test.ts
+index 9b66ebc..827db8f 100644
+--- a/frontend/src/search/internal/preview.test.ts
++++ b/frontend/src/search/internal/preview.test.ts
+@@ -34,3 +34,22 @@ test("preview: a cut never splits a surrogate pair", () => {
+     `…${"a".repeat(25)}`,
+   );
+ });
++
++test("preview: 250 characters after the match with … when cut (a 2 MiB line laid out whole)", () => {
++  const rest = "x".repeat(250);
++
++  expect(previewOf({ lineText: `foo${rest}`, from: 0, to: 3 }).after).toBe(rest);
++  expect(previewOf({ lineText: `foo${rest}y`, from: 0, to: 3 }).after).toBe(`${rest}…`);
++  expect(previewOf({ lineText: `foo${"z".repeat(2 ** 21)}`, from: 0, to: 3 }).after).toBe(
++    `${"z".repeat(250)}…`,
++  );
++});
++
++test("preview: the cut after the match never splits a surrogate pair", () => {
++  const rest = `${"a".repeat(249)}😀b`;
++
++  expect(previewOf({ lineText: `foo${rest}`, from: 0, to: 3 }).after).toBe(`${"a".repeat(249)}…`);
++  expect(previewOf({ lineText: `foo${"a".repeat(248)}😀b`, from: 0, to: 3 }).after).toBe(
++    `${"a".repeat(248)}😀…`,
++  );
++});
+diff --git a/frontend/src/search/internal/preview.ts b/frontend/src/search/internal/preview.ts
+index 5a42c57..ee0e211 100644
+--- a/frontend/src/search/internal/preview.ts
++++ b/frontend/src/search/internal/preview.ts
+@@ -3,20 +3,34 @@ import type { LineHit } from "./match";
+ export type Preview = { readonly before: string; readonly match: string; readonly after: string };
+ 
+ const BEFORE_CHARS = 26;
++const AFTER_CHARS = 250;
+ const CUT_MARK = "…";
+ const LOW_SURROGATE = /^[\uDC00-\uDFFF]/;
++const HIGH_SURROGATE = /[\uD800-\uDBFF]$/;
++
++function beforeOf(lineText: string, from: number): string {
++  const before = lineText.slice(0, from).trimStart();
++  if (before.length <= BEFORE_CHARS) {
++    return before;
++  }
++  return `${CUT_MARK}${before.slice(-BEFORE_CHARS).replace(LOW_SURROGATE, "")}`;
++}
++
++function afterOf(lineText: string, to: number): string {
++  if (lineText.length - to <= AFTER_CHARS) {
++    return lineText.slice(to);
++  }
++  return `${lineText.slice(to, to + AFTER_CHARS).replace(HIGH_SURROGATE, "")}${CUT_MARK}`;
++}
+ 
+ export function previewOf({
+   lineText,
+   from,
+   to,
+ }: Pick<LineHit, "lineText" | "from" | "to">): Preview {
+-  const before = lineText.slice(0, from).trimStart();
+-  const match = lineText.slice(from, to);
+-  const after = lineText.slice(to);
+-  if (before.length <= BEFORE_CHARS) {
+-    return { before, match, after };
+-  }
+-  const kept = before.slice(-BEFORE_CHARS).replace(LOW_SURROGATE, "");
+-  return { before: `${CUT_MARK}${kept}`, match, after };
++  return {
++    before: beforeOf(lineText, from),
++    match: lineText.slice(from, to),
++    after: afterOf(lineText, to),
++  };
+ }
+diff --git a/frontend/src/ui/SearchPanel.vue b/frontend/src/ui/SearchPanel.vue
+index 45db03a..4b438ea 100644
+--- a/frontend/src/ui/SearchPanel.vue
++++ b/frontend/src/ui/SearchPanel.vue
+@@ -67,13 +67,13 @@ function focusBack(): void {
+   const { element, path } = remembered;
+   if (props.shownPath === null) {
+     if (element?.isConnected === true) {
+-      element.focus();
++      element.focus({ preventScroll: true });
+     }
+     return;
+   }
+   const pane = element?.matches(PANE_CONTENT) === true ? element : null;
+   if (pane?.isConnected === true && path === props.shownPath) {
+-    pane.focus();
++    pane.focus({ preventScroll: true });
+   }
+   if (pane === null || document.activeElement !== pane) {
+     props.search.focusShownFile();

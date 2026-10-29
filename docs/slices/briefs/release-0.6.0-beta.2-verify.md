@@ -46,8 +46,22 @@ Record yamt's exit status with a wrapper around the binary, as the earlier final
       left.
    4. **Compare window:** `--diff`: type two JSON texts that differ in one value → the difference shows in both
       columns; no search panel; close with `WM_DELETE_WINDOW` → exit 0.
-   5. **No leftovers:** after `stop`, no yamt, omp, Xvfb, driver or private bus from this run (`pgrep -af` by this
+   5. **The search's last two fixes** (`.omp/run/notes/SearchFinalFix.md`, #1757; the search's own final runs did not
+      re-check them):
+      - **A 2 MiB line stays responsive:** a throwaway repository `/tmp/yamt-rel2-big` (one shell script; plain git with
+        `GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`, every git call as `git -C <dir>`): `main` with one commit,
+        `feature` adding `src/min.js`, one 2 MiB line `var a0=needle(0);var a1=needle(1);…`, and a few ordinary files.
+        `start-app --range main...feature --repo /tmp/yamt-rel2-big`, Ctrl+Shift+S, type `var a5=needle(5);`, with a
+        `requestAnimationFrame` probe running from before the query until the row shows: the longest frame (pass:
+        under 100 ms; it was 844 ms), the row's text after the match ends in "…".
+      - **A hide moves no pane:** in the conflict project (4.1), open a file with changes, click inside the Result,
+        scroll it down (≥ 500 px), Ctrl+Shift+S twice: every pane's `scrollTop` equal before and after (±1 px; before
+        the fix all went to 0), the Result has the keyboard (`document.hasFocus()` true beside the read).
+   6. **No leftovers:** after `stop`, no yamt, omp, Xvfb, driver or private bus from this run (`pgrep -af` by this
       run's paths). Remove `/tmp/yamt-rel2-*` repositories (keep the screenshots folder).
+
+If a step fails, report it with observed vs expected and how to reproduce; the orchestrator documents it as a known
+issue of this pre-release (owner #1753).
 
 ## Report
 
