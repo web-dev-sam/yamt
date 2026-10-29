@@ -23,8 +23,10 @@ in full; a design may refine a detail it names, never reopen a rule. Scout facts
 - `useRangeController.ts` builds a file's columns only once the thread list was read once (`rangeThreads.ts`
   `listed`).
 - Folder sums (#125): `FileTree.vue`/`FileList.vue` gained an optional `folder` slot; `RangeCounts.vue`.
-- Scroll sync: a fix round in progress moves "a `follow(source)` stays the source until the next sync" into
-  `ScrollSync` (`scrollSync.ts`); `CompareFrame.realign(source)` exists.
+- Scroll (HEAD `39182c2`): `ScrollSync.follow(source)` keeps the source until the next sync and a follower pulled
+  off its written top is written again once (`scrollSync.ts`); `exactScroll.ts` pins only a moved scrollTop
+  (`movedFarTop`); `CompareFrame.realign(source)` exists. A go-to's scroll should go through CodeMirror's
+  `scrollIntoView`, as find and the toolbar arrows do (notes `.omp/run/notes/RangeFoldColumns.md` rounds 1–4).
 - Board: `docs/slices/SLICES.md` sections "Range collapse" and "Folder sums"; decisions `docs/plan.md` §2 #124–#126.
 
 ## Fixed constraints
