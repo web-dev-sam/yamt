@@ -9,10 +9,14 @@ Board "Search" row 6 (session 35). Request `docs/slices/request-search.md` (rule
 ## Target
 
 Owned: `frontend/src/ui/MergeView.vue`, `frontend/src/ui/RangeView.vue`, `frontend/src/ui/stops.ts`,
-`frontend/src/ui/stops.test.ts`, `frontend/src/ui/diskChanges.ts`, `frontend/src/ui/diskChanges.test.ts`,
-`frontend/src/ui/saving.test.ts`, `frontend/src/ui/listing.test.ts` (their fakes only).
+`frontend/src/ui/stops.test.ts`, `frontend/src/ui/diskChanges.ts`, `frontend/src/ui/diskChanges.test.ts` (new),
+`frontend/src/ui/saving.test.ts`, `frontend/src/ui/listing.test.ts` (their fakes only); for change 5 only:
+`frontend/src/ipc/index.ts`, `frontend/src/editor/index.ts`, `frontend/src/ui/useMergeController.ts`,
+`frontend/src/ui/useRangeController.ts` (export lines only).
 
-Read-only: everything else. Docs are the orchestrator's.
+Read-only: everything else. Docs are the orchestrator's. The window slice (`SearchWindow`, `53e047b`) is in review; a
+fix round on its files (`ui/search*`, `Search*.vue`, `SideColumn.vue`, `FileList.vue`, the roots, the stores) may land
+beside you — none of yours.
 
 ## Change
 
@@ -24,6 +28,9 @@ Read-only: everything else. Docs are the orchestrator's.
 2. `RangeView.vue`: the same go-to watch with the range handle (`pane: Column`).
 3. `stops.ts`: `search.clear()` where a stop's state is cleared; `search.rerun()` after the new stop's list arrives.
 4. `diskChanges.ts`: `search.changed(path)` for every changed path.
+5. `pnpm -C frontend unused` passes: after your wiring, drop every re-export of a type no file imports (at the window
+   build: `PaneMatch` in `editor/index.ts` and `useMergeController.ts`, `LineChange` in `ipc/index.ts`, `MergeGoTo` in
+   `useMergeController.ts`, `RangeGoTo` in `useRangeController.ts`) — or import it where it names a real value.
 
 ## Acceptance
 
