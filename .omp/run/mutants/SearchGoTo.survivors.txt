@@ -1,0 +1,279 @@
+mutants: no Rust changes since ec191ff
+[32m10:42:54 (2967786) INFO ConfigReader[39m No config file specified. Running with command line arguments.
+[32m10:42:54 (2967786) INFO ConfigReader[39m Use `stryker init` command to generate your config file.
+[32m10:42:54 (2967786) INFO ProjectReader[39m Found 2 of 765 file(s) to be mutated.
+[32m10:42:54 (2967786) INFO Instrumenter[39m Instrumented 2 source file(s) with 215 mutant(s)
+[32m10:42:55 (2967786) INFO ConcurrencyTokenProvider[39m Creating 23 test runner process(es).
+[32m10:42:56 (2967786) INFO DryRunExecutor[39m Starting initial test run (vitest test runner with "perTest" coverage analysis). This may take a while.
+[32m10:42:59 (2967786) INFO DryRunExecutor[39m Initial test run succeeded. Ran 47 tests in 2 seconds (net 96.92793200000142 ms, overhead 2822.0720679999986 ms).
+
+All tests
+  useMergeController.test.ts
+    ✓ unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change (killed 40)
+    ✓ without data or hosts there is no editor: no snapshot, nothing unsaved (killed 13)
+    ~ the editor is read-only as the view says, and is rebuilt when that changes (covered 80)
+    ✓ the editor is built with the preferences in use and follows a change without a rebuild (killed 4)
+    ~ a preferences change before the file loaded reaches the editor built later (covered 83)
+    ✓ while the file is still loading, toolbar actions and the undo shortcut do nothing and throw nothing (killed 8)
+    ✓ flipping collapsing before the file loaded reaches no editor and throws nothing (killed 1)
+    ✓ an editor built while collapsing is off is told so, and a file loaded later follows the current choice (killed 1)
+    ~ flipping collapsing tells every live editor once, and a destroyed one never (covered 82)
+    ~ a preferences change never resets collapsing (covered 82)
+    ✓ an editor is built showing the minimap as the view says, and follows a change without a rebuild (killed 1)
+    ✓ a minimap shown before the file loaded reaches no editor, and the editor built later shows it (killed 1)
+    ✓ problems: the editor's counts when built, then each change it reports; null once it is gone (killed 2)
+    ✓ summary: the editor's summary when built, then each change it reports, also from an editor rebuilt after a disk change (killed 1)
+    ✓ problems and format are null while no editor is built (killed 3)
+    ~ format answers with the outcome of the editor in use, a rebuilt one after a rebuild (covered 82)
+    ✓ the editor gets the language servers in use and is rebuilt when they change (killed 1)
+    ✓ a go-to asked before the editor exists waits, is applied once right after the build, and never again on a rebuild (killed 15)
+    ✓ resultVersion: 0 with no editor, then bumped at each build and each Result change the editor reports (killed 8)
+    ✓ lineUp is null while no editor exists, else the line-up of the editor in use (killed 3)
+  useRangeController.test.ts
+    ✓ a texts reply builds one controller on the hosts with the path, both texts and the preferences (killed 28)
+    ✓ the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view (killed 13)
+    ✓ the controller is built with the file's threads at that moment, and shown each later change of them (killed 2)
+    ~ a thread change calls showThreads and never setCollapsed (catches runs recomputed on an add) (covered 46)
+    ✓ the controller is built with the store's collapsing at that moment (killed 1)
+    ✓ a toggle reaches every live controller through setCollapsed with no rebuild; a file opened after it builds with the new state (killed 1)
+    ~ nothing builds before the thread list was read once; then it builds with the threads read (covered 47)
+    ~ a thread change after the view unmounted reaches no controller (catches a destroyed controller shown again) (covered 47)
+    ✓ the controller gets the line events and its hosts reach threadHosts (killed 2)
+    ✓ a go-to waits for the load, the hosts and the thread list, is applied once at build, then goes straight to the controller (killed 12)
+    ~ a go-to after the view unmounted reaches no controller (covered 54)
+    ✓ a binary reply builds no controller and shows its sentence (killed 4)
+    ~ a tooLarge reply builds no controller and shows its sentence (covered 37)
+    ~ a notUtf8 reply builds no controller and shows its sentence (covered 37)
+    ~ a modeOnly reply builds no controller and shows its sentence (covered 37)
+    ~ a kindChanged reply builds no controller and shows its sentence (covered 37)
+    ~ a submodule reply builds no controller and shows its sentence (covered 37)
+    ~ the binary sentence is the one rangeText words (covered 37)
+    ✓ a reply arriving after unmount is dropped: nothing built, nothing shown (killed 5)
+    ~ a failed load builds nothing and stays loading (covered 20)
+    ✓ preferences changed before the controller exists reach it at build, not through a missing controller (killed 1)
+    ✓ no hosts while the left ref is still null (catches a column built on a half-mounted view) (killed 11)
+    ✓ no hosts while the right ref is still null (catches a column built on a half-mounted view) (killed 1)
+    ✓ no hosts while the strip ref is still null (catches a column built on a half-mounted view) (killed 1)
+    ✓ a press on a line number starts a draft in that file only; toggle opens and closes (killed 8)
+    ✓ a file waits for the thread list, then builds once it was read (catches columns stuck empty) (killed 1)
+    ~ a file waits for the thread list, then builds once it was failed (catches columns stuck empty) (covered 53)
+
+[Survived] ConditionalExpression
+src/ui/useMergeController.ts:88:5
+-       left === null ||
++       false ||
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 14 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/useMergeController.ts:90:5
+-       right === null ||
++       false ||
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    the editor is read-only as the view says, and is rebuilt when that changes
+    the editor is built with the preferences in use and follows a change without a rebuild
+  and 13 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/useMergeController.ts:91:5
+-       leftStrip === null ||
++       false ||
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    the editor is read-only as the view says, and is rebuilt when that changes
+    the editor is built with the preferences in use and follows a change without a rebuild
+  and 13 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/useMergeController.ts:92:5
+-       rightStrip === null
++       false
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    the editor is read-only as the view says, and is rebuilt when that changes
+    the editor is built with the preferences in use and follows a change without a rebuild
+  and 13 more tests!
+
+
+[Survived] ObjectLiteral
+src/ui/useMergeController.ts:98:5
+-       { left, center, right, strips: [leftStrip, rightStrip] },
++       {},
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    the editor is read-only as the view says, and is rebuilt when that changes
+    the editor is built with the preferences in use and follows a change without a rebuild
+  and 13 more tests!
+
+
+[Survived] ArrayDeclaration
+src/ui/useMergeController.ts:98:36
+-       { left, center, right, strips: [leftStrip, rightStrip] },
++       { left, center, right, strips: [] },
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    the editor is read-only as the view says, and is rebuilt when that changes
+    the editor is built with the preferences in use and follows a change without a rebuild
+  and 13 more tests!
+
+
+[Survived] BooleanLiteral
+src/ui/useMergeController.ts:114:25
+-       unsaved: shallowRef(false),
++       unsaved: shallowRef(true),
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 17 more tests!
+
+
+[Survived] ConditionalExpression
+src/ui/useMergeController.ts:89:5
+-       center === null ||
++       false ||
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    the editor is read-only as the view says, and is rebuilt when that changes
+    the editor is built with the preferences in use and follows a change without a rebuild
+  and 13 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/useMergeController.ts:180:19
+-       moveToChange: (direction) => current()?.moveToChange(direction),
++       moveToChange: () => undefined,
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 17 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/useMergeController.ts:182:11
+-       redo: () => current()?.redo(),
++       redo: () => undefined,
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 17 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/useMergeController.ts:181:11
+-       undo: () => current()?.undo(),
++       undo: () => undefined,
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 17 more tests!
+
+
+[Survived] ArrowFunction
+src/ui/useMergeController.ts:179:29
+-       applyAllNonConflicting: (side) => current()?.applyAllNonConflicting(side),
++       applyAllNonConflicting: () => undefined,
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 17 more tests!
+
+
+[Survived] StringLiteral
+src/ui/useMergeController.ts:240:31
+-       { immediate: true, flush: "post" },
++       { immediate: true, flush: "" },
+Tests ran:
+    unsaved: false when built, then what the editor reports; false again for an editor rebuilt after a disk change
+    without data or hosts there is no editor: no snapshot, nothing unsaved
+    the editor is read-only as the view says, and is rebuilt when that changes
+  and 17 more tests!
+
+
+[NoCoverage] BlockStatement
+src/ui/useRangeController.ts:211:16
+-   ): RangeHandle {
+-     const store = useRangeStore();
+-     return followRange({
+-       path: file.path,
+-       load: () => store.loadFile(file),
+-       hosts: () => shownHosts(hosts),
+-       preferences: options.preferences,
+-       collapsed: store.collapsing,
+-       ...rangeThreadParts(store.threads, file),
+-       build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
+-     });
+-   }
++   ): RangeHandle {}
+
+[NoCoverage] ObjectLiteral
+src/ui/useRangeController.ts:213:22
+-     return followRange({
+-       path: file.path,
+-       load: () => store.loadFile(file),
+-       hosts: () => shownHosts(hosts),
+-       preferences: options.preferences,
+-       collapsed: store.collapsing,
+-       ...rangeThreadParts(store.threads, file),
+-       build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
+-     });
++     return followRange({});
+
+[NoCoverage] ArrowFunction
+src/ui/useRangeController.ts:215:11
+-       load: () => store.loadFile(file),
++       load: () => undefined,
+
+[NoCoverage] ArrowFunction
+src/ui/useRangeController.ts:216:12
+-       hosts: () => shownHosts(hosts),
++       hosts: () => undefined,
+
+[NoCoverage] ArrowFunction
+src/ui/useRangeController.ts:220:12
+-       build: (texts, shown, chosen, events) => new RangeController(texts, shown, chosen, events),
++       build: () => undefined,
+
+[Survived] ObjectLiteral
+src/ui/useRangeController.ts:153:5
+-       { flush: "post" },
++       {},
+Tests ran:
+    a texts reply builds one controller on the hosts with the path, both texts and the preferences
+    the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view
+    the controller is built with the file's threads at that moment, and shown each later change of them
+  and 20 more tests!
+
+
+[Survived] StringLiteral
+src/ui/useRangeController.ts:153:14
+-       { flush: "post" },
++       { flush: "" },
+Tests ran:
+    a texts reply builds one controller on the hosts with the path, both texts and the preferences
+    the controller waits for its hosts, then follows preferences and arrows, and is destroyed with the view
+    the controller is built with the file's threads at that moment, and shown each later change of them
+  and 20 more tests!
+
+
+Ran 3.87 tests per mutant on average.
+-----------------------|------------------|----------|-----------|------------|----------|----------|
+                       | % Mutation score |          |           |            |          |          |
+File                   |  total | covered | # killed | # timeout | # survived | # no cov | # errors |
+-----------------------|--------|---------|----------|-----------|------------|----------|----------|
+All files              |  90.61 |   92.79 |      193 |         0 |         15 |        5 |        2 |
+ useMergeController.ts |  88.70 |   88.70 |      102 |         0 |         13 |        0 |        1 |
+ useRangeController.ts |  92.86 |   97.85 |       91 |         0 |          2 |        5 |        1 |
+-----------------------|--------|---------|----------|-----------|------------|----------|----------|
+[32m10:43:12 (2967786) INFO MutationTestExecutor[39m Done in 17 seconds.
