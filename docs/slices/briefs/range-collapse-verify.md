@@ -35,11 +35,18 @@ unchanged stretch; `&threads=seeded` puts a thread on left 100 / right 101.
    i. The two columns stay lined up: click a right-column line, Ctrl+F "renameColumn", Enter, Escape, Ctrl+End in the
    right column → both columns at their ends (the repro of #1689: `/tmp/yamt-r1/ctrlend.sh <root> <session>`,
    probes in `/tmp/yamt-r1/`); Ctrl+Home → both at the top; scrolling one column by script steps (`scrollTop +=
-      100` per frame), then the other: the second leads from its second step and is never held.
+      100` per frame), then the other: the second leads from its second step and is never held. Also, with no find
+   first: click a right-column line near the top, Ctrl+End → both columns at their ends, **20 of 20** runs (light
+   10, dark 10); the same from the left column (#1693).
+   j. A view built while hidden: pick `board.ts`, then at once another text file before `board.ts`'s load lands,
+   then `board.ts` again: `--fold-wave-width` on each scroller and one `.fold-wave`'s width equal the scroller's
+   client width at once and after 100 ms; repeat after resizing the file list while the file is hidden.
 3. Merge window, fixture page (`just app-session start-fixture`), dark and light, focused: waves across three panes and
    both strips, a click shows the next step, hover thickens the whole wave, the toolbar toggle off/on keeps the
    Result's top line with the sides lined up at once (shallow and deep scroll); the Alt minimap drag and a side pane's
-   Ctrl/Cmd+wheel step keep the panes lined up; a find to a hidden line, then Ctrl/Cmd+End — as before.
+   Ctrl/Cmd+wheel step keep the panes lined up; a find to a hidden line, then Ctrl/Cmd+End; a Result click near the
+   top, then Ctrl/Cmd+End (10 of 10) — as before; 2j's hidden-build check with two files (click one, then another at
+   once, then back).
 4. Compare window, fixture page (`?diff`): differences, strip bands, scrolling and editing as before; no wave anywhere.
 5. Real app on a private X display (`cargo tauri build --debug --no-bundle`), repository from `scripts/range-repo.sh
    /tmp/yamt-rc/verify/repo`, `just app-session start-app --name v-rc --range main...feature --repo …`: 2a, 2b, 2d, 2f
