@@ -6,7 +6,7 @@ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, Wr
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
 use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
-use crate::{ai, clipboard, compare, range, review, servers, settings};
+use crate::{ai, clipboard, compare, merge_requests, range, review, servers, settings};
 
 #[expect(
     clippy::too_many_lines,
@@ -69,6 +69,10 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         ai::discard_checkout::<tauri::Wry>,
         ai::diff_texts,
         clipboard::read_clipboard::<tauri::Wry>,
+        merge_requests::find_gitlab_project,
+        merge_requests::list_merge_requests::<tauri::Wry>,
+        merge_requests::open_merge_request::<tauri::Wry>,
+        merge_requests::open_job_page,
     ])
 }
 

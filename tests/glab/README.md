@@ -78,9 +78,20 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
 - `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
   2 s before it is accepted, so a second send can arrive while it runs.
-- `merge-requests/` — the merge-request list (`crates/merge-requests/tests/list.rs`): logged in; project
-  `taskboard/taskboard` on `https://gitlab.example`; user `sam`. Page 1: !13 (failed pipeline, two failed jobs,
-  `lint` allowed to fail), !12 (passed, 2 approvals, 1 open discussion), !11 (a draft, "Draft: …", running), more to
-  come (`page-2`); page 2: !9 (no pipeline), !8 (manual), the last.
+- `merge-requests/` — the merge-request list and opening one (`crates/merge-requests/tests/{list,open}.rs`,
+  `src-tauri/src/merge_requests/tests.rs`): logged in; project `taskboard/taskboard` on `https://gitlab.example`;
+  user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail), !12 (passed, 2 approvals, 1 open
+  discussion), !11 (a draft, "Draft: …", running), more to come (`page-2`); page 2: !9 (no pipeline), !8 (manual),
+  the last. Details over GraphQL, all into `main` from `scripts/range-repo.sh`'s merge base `531ea52`: !12 ends at
+  `feature` (`9c1ba3f`), !13 at `6ea97d8` ("Snooze a reminder", only in range-repo's fake GitLab), !14 has no diff
+  yet (`diffRefs` null), !15 is merged, !16 starts from `deadbee`, a commit no repository has. Over REST, as a window
+  on one of those ranges checks it (#119): `merge-requests.json` lists !13 and !12, `merge-request-12.json` and
+  `merge-request-13.json` hold their diffs.
 - `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's
   deadline.
+
+## Fake browser opener
+
+`scripts/fake-open/xdg-open` stands in for xdg-open, first on PATH: it opens nothing, appends `argv: <arguments>`
+to `$YAMT_FAKE_OPEN_LOG` (when unset, read from an `open.env` beside it, one `YAMT_FAKE_OPEN_LOG=<file>` line) and
+exits 0.

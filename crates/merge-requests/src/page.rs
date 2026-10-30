@@ -1,10 +1,11 @@
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde::de::IgnoredAny;
 
 use crate::{CiStatus, FailedJob, JobPage, MergeRequestIid, MergeRequestRow, Person, Pipeline};
 
 const NO_DATA: &str = "GitLab's answer holds no data";
-const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
+pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
 const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cursor for them";
 
 /// One GraphQL answer of the list query.
@@ -24,8 +25,8 @@ pub(crate) struct Complexity {
 }
 
 #[derive(Deserialize)]
-struct Answer {
-    data: Option<Data>,
+struct Answer<D> {
+    data: Option<D>,
     #[serde(default)]
     errors: Vec<GraphQlError>,
 }
@@ -117,12 +118,7 @@ struct Stage {
 /// The page in a GraphQL answer; `Err` holds GitLab's first error, or what yamt could not read. `origin` is the
 /// project's `https://<host[:port]>`, which job pages are built on.
 pub(crate) fn parsed(json: &[u8], origin: Option<&str>) -> Result<ParsedPage, String> {
-    let answer: Answer = serde_json::from_slice(json)
-        .map_err(|error| format!("GitLab's answer is not what yamt expects: {error}"))?;
-    if let Some(error) = answer.errors.into_iter().next() {
-        return Err(error.message);
-    }
-    let data = answer.data.ok_or(NO_DATA)?;
+    let data: Data = graphql_data(json)?;
     let project = data.project.ok_or(NO_PROJECT)?;
     let merge_requests = project.merge_requests.ok_or(NO_PROJECT)?;
     let mut rows = Vec::new();
@@ -135,6 +131,16 @@ pub(crate) fn parsed(json: &[u8], origin: Option<&str>) -> Result<ParsedPage, St
         next: next_cursor(merge_requests.page_info)?,
         complexity: data.query_complexity,
     })
+}
+
+/// The `data` of a GraphQL answer; `Err` holds GitLab's first error, or what yamt could not read.
+pub(crate) fn graphql_data<D: DeserializeOwned>(json: &[u8]) -> Result<D, String> {
+    let answer: Answer<D> = serde_json::from_slice(json)
+        .map_err(|error| format!("GitLab's answer is not what yamt expects: {error}"))?;
+    if let Some(error) = answer.errors.into_iter().next() {
+        return Err(error.message);
+    }
+    answer.data.ok_or_else(|| NO_DATA.to_owned())
 }
 
 fn next_cursor(page_info: PageInfo) -> Result<Option<String>, String> {

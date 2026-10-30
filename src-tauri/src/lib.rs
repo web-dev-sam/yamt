@@ -1,6 +1,7 @@
 //! Desktop shell: one window over a `MergeSession`, whose exit status says whether the merge is resolved, or
 //! with `--diff` one compare window over the stored tabs, or with `--diff=<range>` one read-only commit range
-//! (with `--ai`, an AI agent in its own checkout).
+//! (with `--ai`, an AI agent in its own checkout); the compare and range windows list the GitLab project's merge
+//! requests and open one's changes in a second yamt.
 
 mod ai;
 #[cfg(target_os = "linux")]
@@ -16,10 +17,12 @@ mod frontend_log;
 mod graphics;
 mod ipc_error;
 mod merge;
+mod merge_requests;
 #[cfg(test)]
 mod mock_window;
 mod outcome;
 mod range;
+mod range_window;
 mod review;
 mod servers;
 mod settings;

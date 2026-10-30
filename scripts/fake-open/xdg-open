@@ -1,0 +1,22 @@
+#!/bin/sh
+# A stand-in for xdg-open (xdg-utils) in yamt's tests and app sessions: opens nothing, appends `argv: <arguments>`
+# to $YAMT_FAKE_OPEN_LOG and exits 0. Left unset, the variable is read from an open.env beside $0 (one
+# `YAMT_FAKE_OPEN_LOG=<file>` line), as the fake glab reads its glab.env (tests/glab/README.md).
+set -u
+
+settings="$(dirname "$0")/open.env"
+if [ -f "$settings" ]; then
+	while IFS= read -r line; do
+		case $line in
+		YAMT_FAKE_OPEN_LOG=*) : "${YAMT_FAKE_OPEN_LOG=${line#*=}}" ;;
+		*)
+			printf 'fake xdg-open: unknown line in %s: %s\n' "$settings" "$line" >&2
+			exit 2
+			;;
+		esac
+	done <"$settings"
+fi
+
+if [ -n "${YAMT_FAKE_OPEN_LOG:-}" ]; then
+	printf 'argv: %s\n' "$*" >>"$YAMT_FAKE_OPEN_LOG"
+fi

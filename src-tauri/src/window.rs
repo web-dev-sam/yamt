@@ -15,6 +15,7 @@ use crate::args::Ai;
 use crate::commands::{with_commands, with_session};
 use crate::compare;
 use crate::merge::MergeState;
+use crate::merge_requests;
 use crate::outcome::{Ending, Exit, ending_when_git_is_done};
 use crate::servers::{self, HostState};
 use crate::settings;
@@ -23,6 +24,7 @@ use crate::start_script::start_script;
 const WINDOW_LABEL: &str = "main";
 const COMPARE_TITLE: &str = "Compare — yamt";
 const APP_FOLDER: &str = "yamt";
+const START_FOLDER: &str = ".";
 const WIDTH: f64 = 1600.0;
 const HEIGHT: f64 = 1000.0;
 const MIN_WIDTH: f64 = 900.0;
@@ -89,8 +91,21 @@ fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> 
 }
 
 fn open_compare() -> tauri::Result<Ending> {
-    let manage = compare::manage_store_in;
+    let manage = |app: &App, app_folder: &Path| {
+        compare::manage_store_in(app, app_folder)?;
+        merge_requests::manage(app, &compare_start_folder(), app_folder);
+        Ok(())
+    };
     open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, Ai::Off, manage, |_| {})
+}
+
+/// The folder the compare window was started in, where its merge-request page looks for a repository
+/// (plan §2 #94 as amended for #128–#135).
+fn compare_start_folder() -> PathBuf {
+    let folder = PathBuf::from(START_FOLDER);
+    #[cfg(target_os = "linux")]
+    let folder = crate::appimage::repo_from_start_dir(folder);
+    folder
 }
 
 /// Builds a window whose state `manage` sets up in `<data_dir>/yamt` before the window opens;
@@ -263,6 +278,11 @@ fn answered(result: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outside_an_appimage_the_compare_window_looks_in_its_working_folder() {
+        assert_eq!(compare_start_folder(), PathBuf::from("."));
+    }
 
     #[test]
     fn title_names_the_repository_folder() {

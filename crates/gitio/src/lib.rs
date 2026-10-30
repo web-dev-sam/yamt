@@ -2,7 +2,8 @@
 //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
 //! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
 //! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
-//! runs glab, GitLab's command line, the same way.
+//! fetches a merge request's commits without writing a ref (`fetch.rs`); runs glab, GitLab's command line, the
+//! same way.
 #![forbid(unsafe_code)]
 
 mod abort_continue;
@@ -11,6 +12,7 @@ mod blob;
 mod checkout;
 mod diff;
 mod entry;
+mod fetch;
 mod glab;
 mod merge_config;
 mod merge_file;
@@ -30,6 +32,7 @@ pub use blob::BlobReader;
 pub use checkout::StatusEntry;
 pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
 pub use entry::{Oid, Stage, StageEntry};
+pub use fetch::FETCH_TIMEOUT;
 pub use glab::{AuthStatus, GLAB_TIMEOUT, Glab, GlabRun, TIMED_OUT, first_line, last_line};
 pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};

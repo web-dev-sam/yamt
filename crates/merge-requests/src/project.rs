@@ -3,7 +3,8 @@ use std::path::Path;
 use serde::Deserialize;
 use yamt_gitio::Glab;
 
-const HTTPS: &str = "https://";
+use crate::job_page::HTTPS;
+
 /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
 const PROJECT_ROUTE: &str = "projects/:fullpath";
 

@@ -10,6 +10,7 @@ use yamt_review::ThreadStore;
 use crate::ai;
 use crate::args::Ai;
 use crate::ipc_error::{IpcError, blocking_reply};
+use crate::merge_requests;
 use crate::outcome::Ending;
 use crate::window::{WindowKind, open_with_data_folder, window_title};
 
@@ -57,6 +58,7 @@ fn manage_range_in<R: Runtime>(
         tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");
     }
     ai::manage(app, ai, range_folder(app_folder), lock.folder(), &range);
+    merge_requests::manage(app, range.root(), app_folder);
     app.manage(RangeState {
         range,
         threads: Mutex::new(threads),
@@ -66,7 +68,7 @@ fn manage_range_in<R: Runtime>(
     Ok(())
 }
 
-fn range_folder(app_folder: &Path) -> PathBuf {
+pub(crate) fn range_folder(app_folder: &Path) -> PathBuf {
     app_folder.join(RANGE_FOLDER)
 }
 

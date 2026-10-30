@@ -1,6 +1,9 @@
-use crate::JobPage;
+use std::process::{Command, Stdio};
+use std::thread;
 
-const HTTPS: &str = "https://";
+use crate::{JobOpened, JobPage};
+
+pub(crate) const HTTPS: &str = "https://";
 const JOBS_SEGMENT: &str = "/-/jobs/";
 const PARENT_SEGMENT: &str = "..";
 
@@ -19,6 +22,53 @@ impl JobPage {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// Asks the system's browser to show `page`; the opener runs on its own, a thread waits for its exit.
+#[must_use]
+pub fn open_job_page(page: &JobPage) -> JobOpened {
+    let mut command = opener(page.as_str());
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    tracing::info!(page = page.as_str(), "opening a job page");
+    match command.spawn() {
+        Ok(mut child) => {
+            thread::spawn(move || {
+                if let Err(error) = child.wait() {
+                    tracing::warn!(%error, "the job page's opener was not waited for");
+                }
+            });
+            JobOpened::Opened
+        }
+        Err(error) => JobOpened::Failed {
+            message: format!("cannot start {}: {error}", command.get_program().display()),
+        },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn opener(url: &str) -> Command {
+    let mut command = Command::new("/usr/bin/open");
+    command.arg(url);
+    command
+}
+
+// Windows passes arguments as one command line; `JobPage::built` lets no space or quote in, so none needs quoting.
+#[cfg(windows)]
+fn opener(url: &str) -> Command {
+    let mut command = Command::new("rundll32.exe");
+    command.args(["url.dll,FileProtocolHandler", url]);
+    command
+}
+
+/// xdg-open (xdg-utils), found on PATH: the desktop's default browser.
+#[cfg(not(any(target_os = "macos", windows)))]
+fn opener(url: &str) -> Command {
+    let mut command = Command::new("xdg-open");
+    command.arg(url);
+    command
 }
 
 fn is_authority(authority: &str) -> bool {

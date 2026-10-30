@@ -1,0 +1,9 @@
+just mutants HEAD → 69 mutants in 6m: 33 caught, 27 unviable, 9 missed (all listed below)
+src-tauri/src/appimage.rs:20 running_appimage → None — gate-covered: equals the real answer outside an AppImage; RK42's manual AppImage check
+src-tauri/src/appimage.rs:24 is_running_appimage → false — gate-covered: same, it can only differ inside an AppImage
+src-tauri/src/range_window.rs:47 running_appimage (Linux wrapper) → None — gate-covered: same as appimage.rs:20
+src-tauri/src/range_window.rs:52 non-Linux running_appimage → Some(default) — wiring: cfg(not linux), not compiled here
+src-tauri/src/range_window.rs:65 Windows detach → () — wiring: cfg(windows), not compiled here
+src-tauri/src/range_window.rs:68 | → & / ^ in the Windows creation flags — wiring: cfg(windows), not compiled here
+crates/merge-requests/src/job_page.rs:53 macOS opener → Default — wiring: cfg(macos), not compiled here
+crates/merge-requests/src/job_page.rs:61 Windows opener → Default — wiring: cfg(windows), not compiled here

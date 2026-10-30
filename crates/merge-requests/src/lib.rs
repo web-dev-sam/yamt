@@ -1,19 +1,27 @@
-//! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab.
+//! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
+//! each one's changes prepared for a window of their own, a failed job's page opened in the browser.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod detect;
 mod job_page;
 mod list;
+mod open;
 mod page;
 mod project;
 mod query;
+mod remote;
+
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub use detect::{GitLabRepository, gitlab_repository};
+pub use job_page::open_job_page;
 pub use list::list_merge_requests;
+pub use open::prepare_open;
+pub use yamt_gitio::Glab;
 
 /// Merge requests asked for in one glab call: GitLab's largest page.
 pub const PAGE_SIZE: u32 = 100;
@@ -159,4 +167,74 @@ pub enum ListEnd {
         /// What went wrong, in glab's, GitLab's or yamt's words.
         message: String,
     },
+}
+
+/// How asking to open a merge request's changes ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum OpenReply {
+    /// A new window shows them.
+    Opened,
+    /// Another yamt window shows the same two commits.
+    AlreadyOpen,
+    /// GitLab still prepares the merge request's diff.
+    Preparing,
+    /// The merge request is no longer open.
+    NotOpen,
+    /// No remote of the repository names the project, so its commits cannot be fetched.
+    NoRemote {
+        /// The project's full path, `group/project`.
+        project: String,
+    },
+    /// Fetching the merge request's commits failed.
+    FetchFailed {
+        /// git's first line: the cause.
+        message: String,
+    },
+    /// A commit of GitLab's diff is not in the repository, even after the fetch.
+    MissingCommit {
+        /// Its short id.
+        short_id: String,
+    },
+    /// The new window's yamt did not start.
+    StartFailed {
+        /// Why, in the system's words.
+        message: String,
+    },
+    /// glab is not found on PATH.
+    GlabMissing,
+    /// `glab auth status` failed.
+    NotLoggedIn {
+        /// glab's first output line, which names the instance.
+        detail: String,
+    },
+    /// glab or git failed, timed out or answered something unexpected.
+    Failed {
+        /// What went wrong, in glab's, GitLab's, git's or yamt's words.
+        message: String,
+    },
+}
+
+/// How asking to open a failed job's page ended.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum JobOpened {
+    /// The browser was asked to show it.
+    Opened,
+    /// This window's list never offered that address, so it is not opened.
+    NotOffered,
+    /// The browser could not be asked.
+    Failed {
+        /// Why, in the system's words.
+        message: String,
+    },
+}
+
+/// A merge request's changes as a range the new window opens: `<base_sha>..<head_sha>` in `root`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RangeToOpen {
+    /// The repository's work tree root, absolute.
+    pub root: PathBuf,
+    /// `<base_sha>..<head_sha>`, both GitLab's full commit ids.
+    pub spec: String,
 }

@@ -1,4 +1,10 @@
-use crate::{MAX_FAILED_JOBS, PAGE_SIZE};
+use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE};
+
+/// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
+/// since the list loaded counts.
+const DETAILS_QUERY: &str = "query MergeRequestDetails($fullPath: ID!, $iid: String!) { \
+     project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
+     state targetBranch diffRefs { baseSha headSha } } } }";
 
 /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
 /// jobs (the latest run of each); about 112 of GitLab's complexity limit of 250 (`.omp/run/notes/MrOverviewDesign.md`
@@ -44,6 +50,20 @@ pub(crate) fn list_args(full_path: &str, after: Option<&str>) -> Vec<String> {
     args
 }
 
+/// `glab api graphql` for merge request `iid`'s details.
+pub(crate) fn details_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
+    vec![
+        "api".to_owned(),
+        "graphql".to_owned(),
+        "-f".to_owned(),
+        format!("query={DETAILS_QUERY}"),
+        "-f".to_owned(),
+        format!("fullPath={full_path}"),
+        "-f".to_owned(),
+        format!("iid={}", iid.0),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +74,17 @@ mod tests {
         assert!(!query.contains('\n'), "{query}");
         assert_eq!(query.matches('{').count(), query.matches('}').count());
         assert!(query.contains("first: 50)"), "{query}");
+    }
+
+    #[test]
+    fn the_details_query_is_one_line_with_balanced_braces() {
+        assert!(!DETAILS_QUERY.contains('\n'), "{DETAILS_QUERY}");
+        let braces = DETAILS_QUERY.matches('{').count();
+        assert_eq!(braces, DETAILS_QUERY.matches('}').count());
+        let args = details_args("taskboard/taskboard", MergeRequestIid(13));
+        assert_eq!(
+            args[4..],
+            ["-f", "fullPath=taskboard/taskboard", "-f", "iid=13"]
+        );
     }
 }
