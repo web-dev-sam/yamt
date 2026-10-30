@@ -520,7 +520,10 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   `GitLabRefused { refusal: ResolveRefusal }`; a window without a project answers `GitLabRefused` `Failed`);
   `continue_merge_request(iid) -> ContinueMergeReply` (`find_live`: none, another iid's record or a read problem →
   `Ended`; `window_is_open` → `AlreadyOpen`; else `start_merge` → `Opened { branch, target }` | `WindowFailed {
-  message }`; nothing in git changes; no project → `Ended`); `find_local_merge() -> LocalMerge` (`free` | `merging {
+  message }`; nothing in git changes; no project → `Ended`). After a window started, both answer only once it holds
+  its claim (`wait_for_window_claim`: `window_is_open` every 50 ms, `CLAIM_PROBE_INTERVAL`, for at most 5 s,
+  `CLAIM_WAIT`; a time-out logs a warning and the reply stays), so the page's next `find_local_merge` never reads the
+  new window as closed. `find_local_merge() -> LocalMerge` (`free` | `merging {
   iid, windowOpen }`; no project → `Free`). GitLab, git and launch problems are values (`ListEnd`, `OpenReply`,
   `PageOpened`, `ResolveReply`, `ContinueMergeReply`), never an `IpcError`; a window without a project answers `Failed`.
 - **A second process** (`second_window.rs`, plan §2 #132, #138; amends "one process, one window": opening a merge
@@ -949,8 +952,8 @@ export interface MergeRequestSource {
   listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>; // every page reaches onPage before the promise settles, and none after
   openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>; // opened = a second yamt shows the changes (#132)
   openPage(page: WebPage): Promise<SourceResult<PageOpened>>; // a merge request's or a failed job's page, only one this window's list handed out (#133, #137)
-  resolveMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ResolveReply>>; // the merge starts in this checkout, then its window (#139)
-  continueMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ContinueMergeReply>>; // the unfinished merge's window again (#143); nothing in git changes
+  resolveMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ResolveReply>>; // the merge starts in this checkout, then its window (#139); started answers once the window holds its claim (≤ 5 s)
+  continueMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ContinueMergeReply>>; // the unfinished merge's window again (#143); nothing in git changes; opened answers once the window holds its claim (≤ 5 s)
   findLocalMerge(): Promise<SourceResult<LocalMerge>>; // a merge yamt started here, and whether its window is open (#143)
 }
 ```

@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `80345da` (resolving a merge request's conflicts in the user's own checkout, plan §2 #138–#143: a row's size, readiness and Resolve/Continue, crate `yamt-local-merge`, the merge window's push and Abort's restore; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `265d168` (resolving a merge request's conflicts in the user's own checkout, plan §2 #138–#143: a row's size, readiness and Resolve/Continue, crate `yamt-local-merge`, the merge window's push and Abort's restore; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
