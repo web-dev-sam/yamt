@@ -105,6 +105,10 @@ pub enum Leftover {
     BranchKept {
         branch: String,
     },
+    /// The branch the start created is still checked out (its return was refused or not done), so it stays.
+    BranchCheckedOut {
+        branch: String,
+    },
     BranchRefused {
         branch: String,
         message: String,

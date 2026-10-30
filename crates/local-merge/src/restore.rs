@@ -57,36 +57,41 @@ fn put_branch_back(repo: &Repo, record: &MergeRecord) -> Option<Leftover> {
         RecordedBranch::Created => delete_created(repo, record),
         RecordedBranch::MovedFrom { commit } => move_back(repo, record, commit),
     };
-    let branch = record.branch.clone();
-    match put_back {
-        Ok(true) => None,
-        Ok(false) => Some(Leftover::BranchKept { branch }),
-        Err(error) => {
-            let message = git_message(&error);
-            Some(Leftover::BranchRefused { branch, message })
-        }
-    }
+    put_back.unwrap_or_else(|error| {
+        let branch = record.branch.clone();
+        let message = git_message(&error);
+        Some(Leftover::BranchRefused { branch, message })
+    })
 }
 
-/// Deletes the branch the start created while it is still at the recorded head and not checked out; true when it
-/// is gone.
-fn delete_created(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<bool> {
+/// Deletes the branch the start created while it is still at the recorded head and not checked out; what stays
+/// is listed.
+fn delete_created(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<Option<Leftover>> {
     let Some(tip) = repo.commit_named(&branch_ref(record))? else {
-        return Ok(true);
+        return Ok(None);
     };
-    if tip.as_str() != record.head || is_checked_out(repo, record)? {
-        return Ok(false);
+    let branch = record.branch.clone();
+    if tip.as_str() != record.head {
+        return Ok(Some(Leftover::BranchKept { branch }));
+    }
+    if is_checked_out(repo, record)? {
+        return Ok(Some(Leftover::BranchCheckedOut { branch }));
     }
     repo.delete_branch(&record.branch)?;
-    Ok(true)
+    Ok(None)
 }
 
-/// Moves the branch the start fast-forwarded back to `from` while it is still at the recorded head; true when it
-/// is back.
-fn move_back(repo: &Repo, record: &MergeRecord, from: &str) -> yamt_gitio::Result<bool> {
+/// Moves the branch the start fast-forwarded back to `from` while it is still at the recorded head; a branch that
+/// moved is listed.
+fn move_back(
+    repo: &Repo,
+    record: &MergeRecord,
+    from: &str,
+) -> yamt_gitio::Result<Option<Leftover>> {
     let tip = repo.commit_named(&branch_ref(record))?;
     if tip.as_ref().map(Oid::as_str) != Some(record.head.as_str()) {
-        return Ok(false);
+        let branch = record.branch.clone();
+        return Ok(Some(Leftover::BranchKept { branch }));
     }
     let from = Oid::parse(from)?;
     if is_checked_out(repo, record)? {
@@ -94,7 +99,7 @@ fn move_back(repo: &Repo, record: &MergeRecord, from: &str) -> yamt_gitio::Resul
     } else {
         repo.move_branch(&record.branch, &from)?;
     }
-    Ok(true)
+    Ok(None)
 }
 
 fn branch_ref(record: &MergeRecord) -> String {

@@ -190,6 +190,9 @@ fn merged(repo: &Repo, record: &MergeRecord) -> Result<Started, String> {
     let stop = repo.stop().map_err(|error| git_message(&error))?;
     let current_branch = repo.current_branch().map_err(|error| git_message(&error))?;
     if !is_live(record, &stop, current_branch.as_deref()) {
+        if let Some(operation) = &stop.operation {
+            repo.abort(operation).map_err(|error| git_message(&error))?;
+        }
         return Err(first_line(&run.output).unwrap_or_else(|| MERGE_FAILED.to_owned()));
     }
     let unmerged = repo.unmerged().map_err(|error| git_message(&error))?;

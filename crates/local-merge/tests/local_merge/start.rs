@@ -1,7 +1,11 @@
+use std::os::unix::fs::PermissionsExt;
+
 use serde_json::json;
 use yamt_local_merge::{BranchBefore, MergeView, Refusal, ReturnTo, Started, find_live, start};
 
 use crate::common::{CLEAN, DEVELOP, DUE_DATES, Fixture, IID, MAIN, branches};
+
+const HOOK_MODE: u32 = 0o755;
 
 #[test]
 fn a_missing_branch_is_created_tracking_gitlab_and_the_merge_stops_with_conflicts() {
@@ -94,6 +98,22 @@ fn a_local_branch_named_like_the_remote_target_does_not_change_what_is_merged() 
         format!("Merge remote-tracking branch 'refs/remotes/origin/main' into {DUE_DATES}");
     assert_eq!(merge_message_subject(&fixture), subject);
 }
+
+#[test]
+fn a_local_branch_named_like_the_remote_target_does_not_change_what_is_merged_without_ambiguity_warnings()
+ {
+    let fixture = Fixture::new();
+    fixture.git(&["config", "core.warnAmbiguousRefs", "false"]);
+    fixture.git(&["branch", "origin/main", DEVELOP]);
+
+    start(fixture.root(), &branches(DUE_DATES)).unwrap();
+
+    assert_eq!(
+        fixture.git(&["rev-parse", "MERGE_HEAD"]),
+        fixture.gitlab_tip(MAIN)
+    );
+}
+
 #[test]
 fn a_branch_only_behind_is_fast_forwarded() {
     let fixture = Fixture::new();
@@ -172,4 +192,25 @@ fn an_untracked_file_the_merge_would_overwrite_puts_everything_back() {
     let mine = std::fs::read_to_string(fixture.root().join("src/board/priority.ts")).unwrap();
     assert_eq!(mine, "mine\n");
     assert_eq!(fixture.config(&format!("branch.{DUE_DATES}.remote")), None);
+}
+
+#[test]
+fn a_target_moved_between_the_fetch_and_the_merge_puts_everything_back() {
+    let fixture = Fixture::new();
+    let hooks = fixture.root().join(".git/hooks");
+    std::fs::create_dir_all(&hooks).unwrap();
+    let hook = hooks.join("post-checkout");
+    let moves_target = "#!/bin/sh\ngit update-ref refs/remotes/origin/main refs/heads/develop\n";
+    std::fs::write(&hook, moves_target).unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(HOOK_MODE)).unwrap();
+    let before = fixture.checkout();
+
+    let started = start(fixture.root(), &branches(DUE_DATES));
+
+    let Err(Refusal::GitRefused { left, .. }) = started else {
+        panic!("{started:?}");
+    };
+    assert_eq!(left, []);
+    assert_eq!(fixture.checkout(), before);
+    assert!(!fixture.root().join(".git/MERGE_HEAD").exists());
 }

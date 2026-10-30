@@ -1,0 +1,2 @@
+just mutants HEAD → 9 mutants tested in 18s: 5 caught, 4 unviable
+

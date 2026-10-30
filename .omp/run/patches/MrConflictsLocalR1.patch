@@ -1,0 +1,191 @@
+diff --git a/crates/local-merge/src/lib.rs b/crates/local-merge/src/lib.rs
+index eaa960e..cda521b 100644
+--- a/crates/local-merge/src/lib.rs
++++ b/crates/local-merge/src/lib.rs
+@@ -105,6 +105,10 @@ pub enum Leftover {
+     BranchKept {
+         branch: String,
+     },
++    /// The branch the start created is still checked out (its return was refused or not done), so it stays.
++    BranchCheckedOut {
++        branch: String,
++    },
+     BranchRefused {
+         branch: String,
+         message: String,
+diff --git a/crates/local-merge/src/restore.rs b/crates/local-merge/src/restore.rs
+index 79ab57a..19088db 100644
+--- a/crates/local-merge/src/restore.rs
++++ b/crates/local-merge/src/restore.rs
+@@ -57,36 +57,41 @@ fn put_branch_back(repo: &Repo, record: &MergeRecord) -> Option<Leftover> {
+         RecordedBranch::Created => delete_created(repo, record),
+         RecordedBranch::MovedFrom { commit } => move_back(repo, record, commit),
+     };
+-    let branch = record.branch.clone();
+-    match put_back {
+-        Ok(true) => None,
+-        Ok(false) => Some(Leftover::BranchKept { branch }),
+-        Err(error) => {
+-            let message = git_message(&error);
+-            Some(Leftover::BranchRefused { branch, message })
+-        }
+-    }
++    put_back.unwrap_or_else(|error| {
++        let branch = record.branch.clone();
++        let message = git_message(&error);
++        Some(Leftover::BranchRefused { branch, message })
++    })
+ }
+ 
+-/// Deletes the branch the start created while it is still at the recorded head and not checked out; true when it
+-/// is gone.
+-fn delete_created(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<bool> {
++/// Deletes the branch the start created while it is still at the recorded head and not checked out; what stays
++/// is listed.
++fn delete_created(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<Option<Leftover>> {
+     let Some(tip) = repo.commit_named(&branch_ref(record))? else {
+-        return Ok(true);
++        return Ok(None);
+     };
+-    if tip.as_str() != record.head || is_checked_out(repo, record)? {
+-        return Ok(false);
++    let branch = record.branch.clone();
++    if tip.as_str() != record.head {
++        return Ok(Some(Leftover::BranchKept { branch }));
++    }
++    if is_checked_out(repo, record)? {
++        return Ok(Some(Leftover::BranchCheckedOut { branch }));
+     }
+     repo.delete_branch(&record.branch)?;
+-    Ok(true)
++    Ok(None)
+ }
+ 
+-/// Moves the branch the start fast-forwarded back to `from` while it is still at the recorded head; true when it
+-/// is back.
+-fn move_back(repo: &Repo, record: &MergeRecord, from: &str) -> yamt_gitio::Result<bool> {
++/// Moves the branch the start fast-forwarded back to `from` while it is still at the recorded head; a branch that
++/// moved is listed.
++fn move_back(
++    repo: &Repo,
++    record: &MergeRecord,
++    from: &str,
++) -> yamt_gitio::Result<Option<Leftover>> {
+     let tip = repo.commit_named(&branch_ref(record))?;
+     if tip.as_ref().map(Oid::as_str) != Some(record.head.as_str()) {
+-        return Ok(false);
++        let branch = record.branch.clone();
++        return Ok(Some(Leftover::BranchKept { branch }));
+     }
+     let from = Oid::parse(from)?;
+     if is_checked_out(repo, record)? {
+@@ -94,7 +99,7 @@ fn move_back(repo: &Repo, record: &MergeRecord, from: &str) -> yamt_gitio::Resul
+     } else {
+         repo.move_branch(&record.branch, &from)?;
+     }
+-    Ok(true)
++    Ok(None)
+ }
+ 
+ fn branch_ref(record: &MergeRecord) -> String {
+diff --git a/crates/local-merge/src/start.rs b/crates/local-merge/src/start.rs
+index 1939d1f..a9166f5 100644
+--- a/crates/local-merge/src/start.rs
++++ b/crates/local-merge/src/start.rs
+@@ -190,6 +190,9 @@ fn merged(repo: &Repo, record: &MergeRecord) -> Result<Started, String> {
+     let stop = repo.stop().map_err(|error| git_message(&error))?;
+     let current_branch = repo.current_branch().map_err(|error| git_message(&error))?;
+     if !is_live(record, &stop, current_branch.as_deref()) {
++        if let Some(operation) = &stop.operation {
++            repo.abort(operation).map_err(|error| git_message(&error))?;
++        }
+         return Err(first_line(&run.output).unwrap_or_else(|| MERGE_FAILED.to_owned()));
+     }
+     let unmerged = repo.unmerged().map_err(|error| git_message(&error))?;
+diff --git a/crates/local-merge/tests/local_merge/abort.rs b/crates/local-merge/tests/local_merge/abort.rs
+index 72d03bb..791897f 100644
+--- a/crates/local-merge/tests/local_merge/abort.rs
++++ b/crates/local-merge/tests/local_merge/abort.rs
+@@ -122,7 +122,7 @@ fn abort_leaves_head_where_the_user_moved_it() {
+ }
+ 
+ #[test]
+-fn a_refused_return_is_listed_and_the_created_branch_kept() {
++fn a_refused_return_is_listed_and_the_created_branch_kept_checked_out() {
+     let fixture = Fixture::new();
+     started(&fixture);
+     let live = find_live(fixture.root()).unwrap().unwrap();
+@@ -133,7 +133,7 @@ fn a_refused_return_is_listed_and_the_created_branch_kept() {
+ 
+     let [
+         Leftover::ReturnRefused { to, message },
+-        Leftover::BranchKept { branch },
++        Leftover::BranchCheckedOut { branch },
+     ] = left.as_slice()
+     else {
+         panic!("{left:?}");
+diff --git a/crates/local-merge/tests/local_merge/start.rs b/crates/local-merge/tests/local_merge/start.rs
+index baa09d3..0d838ef 100644
+--- a/crates/local-merge/tests/local_merge/start.rs
++++ b/crates/local-merge/tests/local_merge/start.rs
+@@ -1,8 +1,12 @@
++use std::os::unix::fs::PermissionsExt;
++
+ use serde_json::json;
+ use yamt_local_merge::{BranchBefore, MergeView, Refusal, ReturnTo, Started, find_live, start};
+ 
+ use crate::common::{CLEAN, DEVELOP, DUE_DATES, Fixture, IID, MAIN, branches};
+ 
++const HOOK_MODE: u32 = 0o755;
++
+ #[test]
+ fn a_missing_branch_is_created_tracking_gitlab_and_the_merge_stops_with_conflicts() {
+     let fixture = Fixture::new();
+@@ -94,6 +98,22 @@ fn a_local_branch_named_like_the_remote_target_does_not_change_what_is_merged()
+         format!("Merge remote-tracking branch 'refs/remotes/origin/main' into {DUE_DATES}");
+     assert_eq!(merge_message_subject(&fixture), subject);
+ }
++
++#[test]
++fn a_local_branch_named_like_the_remote_target_does_not_change_what_is_merged_without_ambiguity_warnings()
++ {
++    let fixture = Fixture::new();
++    fixture.git(&["config", "core.warnAmbiguousRefs", "false"]);
++    fixture.git(&["branch", "origin/main", DEVELOP]);
++
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    assert_eq!(
++        fixture.git(&["rev-parse", "MERGE_HEAD"]),
++        fixture.gitlab_tip(MAIN)
++    );
++}
++
+ #[test]
+ fn a_branch_only_behind_is_fast_forwarded() {
+     let fixture = Fixture::new();
+@@ -173,3 +193,24 @@ fn an_untracked_file_the_merge_would_overwrite_puts_everything_back() {
+     assert_eq!(mine, "mine\n");
+     assert_eq!(fixture.config(&format!("branch.{DUE_DATES}.remote")), None);
+ }
++
++#[test]
++fn a_target_moved_between_the_fetch_and_the_merge_puts_everything_back() {
++    let fixture = Fixture::new();
++    let hooks = fixture.root().join(".git/hooks");
++    std::fs::create_dir_all(&hooks).unwrap();
++    let hook = hooks.join("post-checkout");
++    let moves_target = "#!/bin/sh\ngit update-ref refs/remotes/origin/main refs/heads/develop\n";
++    std::fs::write(&hook, moves_target).unwrap();
++    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(HOOK_MODE)).unwrap();
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    let Err(Refusal::GitRefused { left, .. }) = started else {
++        panic!("{started:?}");
++    };
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++    assert!(!fixture.root().join(".git/MERGE_HEAD").exists());
++}

@@ -122,7 +122,7 @@ fn abort_leaves_head_where_the_user_moved_it() {
 }
 
 #[test]
-fn a_refused_return_is_listed_and_the_created_branch_kept() {
+fn a_refused_return_is_listed_and_the_created_branch_kept_checked_out() {
     let fixture = Fixture::new();
     started(&fixture);
     let live = find_live(fixture.root()).unwrap().unwrap();
@@ -133,7 +133,7 @@ fn a_refused_return_is_listed_and_the_created_branch_kept() {
 
     let [
         Leftover::ReturnRefused { to, message },
-        Leftover::BranchKept { branch },
+        Leftover::BranchCheckedOut { branch },
     ] = left.as_slice()
     else {
         panic!("{left:?}");
