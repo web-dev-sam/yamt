@@ -84,6 +84,18 @@ test("checked values show checked", () => {
   ]);
 });
 
+test("of two people with the same name only the checked one shows checked", () => {
+  const twin: Person = { username: "slee", name: SAM.name };
+  const choices = personChoices([request(1, { assignees: [SAM, twin] })], "assignees", null, [
+    { kind: "person", username: "slee" },
+  ]);
+  expect(choices.map((listed) => [listed.value, listed.checked])).toEqual([
+    [{ kind: "none" }, false],
+    [{ kind: "person", username: "sam" }, false],
+    [{ kind: "person", username: "slee" }, true],
+  ]);
+});
+
 test("a checked person no longer in the list stays checked with 0, among the others by name", () => {
   const choices = personChoices(ROWS, "assignees", "sam", [
     { kind: "person", username: "bob" },

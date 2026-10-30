@@ -135,6 +135,32 @@ test("None and a label titled None are different values", () => {
   ]);
 });
 
+test("two people with the same name stay two values when toggled", () => {
+  const twin: Person = { username: "slee", name: SAM.name };
+  const both = toggled(
+    toggled(NO_FILTERS, "assignee", { kind: "person", username: SAM.username }),
+    "assignee",
+    { kind: "person", username: twin.username },
+  );
+  expect(both.assignee).toEqual([
+    { kind: "person", username: "sam" },
+    { kind: "person", username: "slee" },
+  ]);
+  expect(toggled(both, "assignee", { kind: "person", username: "sam" }).assignee).toEqual([
+    { kind: "person", username: "slee" },
+  ]);
+});
+
+test("two labels stay two values when toggled; a second toggle removes only its own", () => {
+  const both = toggled(toggled(NO_FILTERS, "label", { kind: "label", title: "bug" }), "label", {
+    kind: "label",
+    title: "ui",
+  });
+  expect(toggled(both, "label", { kind: "label", title: "bug" }).label).toEqual([
+    { kind: "label", title: "ui" },
+  ]);
+});
+
 test.each<[ListFilter, PersonValue | LabelValue]>([
   ["label", { kind: "me" }],
   ["label", { kind: "person", username: "sam" }],

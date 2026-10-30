@@ -1,5 +1,5 @@
 import type { StorageLike } from "@vueuse/core";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { shallowRef } from "vue";
 
 import { NO_FILTERS, type Filters } from "../mergeRequests";
@@ -20,6 +20,10 @@ const STORED_FILTERS = {
   label: ["none"],
   draft: "ready",
 };
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
   readonly items: Map<string, string>;
@@ -113,4 +117,24 @@ test.each([
 
   expect(remembered.filters.value).toEqual(FILTERS);
   expect(stored(storage)).toEqual({ [REPOSITORY]: STORED_FILTERS });
+});
+
+test("a storage that throws on write keeps the filters in memory and logs under the filters' event", () => {
+  const warnings: string[] = [];
+  vi.spyOn(console, "warn").mockImplementation((line: string) => {
+    warnings.push(line);
+  });
+  const remembered = createRememberedFilters(shallowRef(REPOSITORY), {
+    ...memoryStorage(),
+    setItem: () => {
+      throw new Error("quota exceeded");
+    },
+  });
+
+  remembered.set(FILTERS);
+
+  expect(remembered.filters.value).toEqual(FILTERS);
+  expect(warnings).toEqual([
+    '[warn] mergeRequests.filters_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
+  ]);
 });

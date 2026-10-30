@@ -33,7 +33,19 @@ const FILTER_NAMES: Readonly<Record<ListFilter, string>> = {
 };
 
 export function sameValue(a: PersonValue | LabelValue, b: PersonValue | LabelValue): boolean {
-  return valueWord(a) === valueWord(b) && a.kind === b.kind;
+  switch (a.kind) {
+    case "me":
+    case "none":
+      return b.kind === a.kind;
+    case "person":
+      return b.kind === "person" && b.username === a.username;
+    case "label":
+      return b.kind === "label" && b.title === a.title;
+    default: {
+      const _exhaustive: never = a;
+      return _exhaustive;
+    }
+  }
 }
 
 function personMatches(people: readonly Person[], value: PersonValue, me: string | null): boolean {

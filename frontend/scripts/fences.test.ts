@@ -398,6 +398,75 @@ test("ui importing search's internal/ violates PM5", () => {
   ]);
 });
 
+test("mergeRequests importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/mergeRequests/index.ts", text: `import { ref } from "vue";` },
+    {
+      path: "src/mergeRequests/internal/filters.ts",
+      text: `import { useDebounceFn } from "@vueuse/core";`,
+    },
+    {
+      path: "src/mergeRequests/internal/choices.ts",
+      text: `import { invoke } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/mergeRequests/internal/ciBox.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/mergeRequests/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/mergeRequests/internal/filters.ts", specifier: "@vueuse/core" },
+    {
+      rule: "PM3",
+      file: "src/mergeRequests/internal/choices.ts",
+      specifier: "@tauri-apps/api/core",
+    },
+    { rule: "PM3", file: "src/mergeRequests/internal/ciBox.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("mergeRequests importing any other src/ module violates PM2", () => {
+  const files = [
+    { path: "src/mergeRequests/index.ts", text: `import type { Column } from "../ipc";` },
+    { path: "src/mergeRequests/internal/filters.ts", text: `import { log } from "../../ipc/log";` },
+    { path: "src/mergeRequests/internal/choices.ts", text: `import "../../editor/index.ts";` },
+    {
+      path: "src/mergeRequests/internal/order.ts",
+      text: `import { matcherOf } from "../../search";`,
+    },
+    { path: "src/mergeRequests/a.ts", text: `import "../mergeRequestsx/b";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "mergeRequests/ imports no other src/ module",
+    })),
+  );
+});
+
+test("mergeRequests importing itself, and ui importing mergeRequests' index, violate nothing", () => {
+  const files = [
+    { path: "src/mergeRequests/index.ts", text: `export { toggled } from "./internal/filters";` },
+    {
+      path: "src/mergeRequests/internal/choices.ts",
+      text: `import { sameValue } from "./filters";`,
+    },
+    {
+      path: "src/mergeRequests/internal/order.test.ts",
+      text: `import { merged } from "../index";`,
+    },
+    {
+      path: "src/ui/mergeRequestFilters.ts",
+      text: `import { NO_FILTERS } from "../mergeRequests";`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
   const files = [
     { path: "src/agent/index.ts", text: `import { ref } from "vue";` },

@@ -1,7 +1,7 @@
 import type { StorageLike } from "@vueuse/core";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { parseStored, storedValue } from "./windowStorage";
+import { parseStored, storedRecord, storedValue } from "./windowStorage";
 
 const KEY = "yamt.test.value";
 const EVENT = "test.storage_failed";
@@ -95,4 +95,44 @@ test("stored JSON is parsed; text that is not JSON gives null", () => {
   expect(parseStored("[1]")).toEqual([1]);
   expect(parseStored("{not json")).toBeNull();
   expect(parseStored("")).toBeNull();
+});
+
+test("a record entry is set under its key; another key's entry stays as written", () => {
+  const storage = memoryStorage({ [KEY]: '{"/other":{"odd":[1,"x"]}}' });
+  const record = storedRecord(KEY, EVENT, storage);
+
+  record.set("/repo", ["a"]);
+
+  expect(record.entryAt("/repo")).toEqual(["a"]);
+  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({
+    "/other": { odd: [1, "x"] },
+    "/repo": ["a"],
+  });
+});
+
+test("a set replaces the key's entry; a remove drops the key and keeps the others", () => {
+  const storage = memoryStorage({ [KEY]: '{"/other":5,"/repo":["a"]}' });
+  const record = storedRecord(KEY, EVENT, storage);
+
+  record.set("/repo", ["b"]);
+  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({ "/other": 5, "/repo": ["b"] });
+
+  record.remove("/repo");
+  expect(record.entryAt("/repo")).toBeUndefined();
+  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({ "/other": 5 });
+});
+
+test.each([
+  ["text that is not JSON", "{not json"],
+  ["an array", '["/repo"]'],
+  ["null", "null"],
+  ["a number", "3"],
+])("a record stored as %s reads as empty, and a set starts afresh", (_kind, raw) => {
+  const storage = memoryStorage({ [KEY]: raw });
+  const record = storedRecord(KEY, EVENT, storage);
+  expect(record.entryAt("0")).toBeUndefined();
+
+  record.set("/repo", true);
+
+  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({ "/repo": true });
 });
