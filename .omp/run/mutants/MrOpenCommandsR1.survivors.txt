@@ -1,0 +1,5 @@
+just mutants HEAD → 21 mutants: 9 caught, 8 unviable, 4 missed (all cfg(windows), not compiled on Linux)
+src-tauri/src/range_window.rs:75 replace | with ^ in DETACH_FLAGS — equivalent: 0x8 and 0x200 share no bit, so ^ == |
+src-tauri/src/range_window.rs:75 replace | with & — gate-covered: platform-only; killed by cfg(windows) the_detach_flags_are_… in CI rust job on windows-2025 (`just test`)
+src-tauri/src/range_window.rs:79 replace detach with () (windows) — wiring: platform-only; std's Command has no getter for creation_flags, so no test can see it; the flags themselves are pinned by the windows-2025 test
+crates/merge-requests/src/job_page.rs:73 windows opener → Default — gate-covered: platform-only; killed by cfg(windows) windows_opens_a_page_with_the_url_protocol_handler in CI rust job on windows-2025

@@ -40,6 +40,7 @@ export default defineConfig({
             "src/jsonrpc/**/*.test.ts",
             "src/agent/**/*.test.ts",
             "src/search/**/*.test.ts",
+            "src/mergeRequests/**/*.test.ts",
             "scripts/**/*.test.ts",
           ],
           exclude: [...configDefaults.exclude, "**/*.browser.test.ts"],

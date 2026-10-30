@@ -9,6 +9,7 @@ import type {
   SendProgress,
   SendReply,
 } from "../ipc";
+import { RECHECK_PAUSE_MS } from "./glab";
 import { attempt, type Problem } from "./problem";
 import { isQueued, type RangeThreads } from "./rangeThreads";
 import {
@@ -73,8 +74,6 @@ type State = {
   readonly result: ShallowRef<SentReply | null>;
   lastEnded: number | null;
 };
-
-export const RECHECK_PAUSE_MS = 30_000;
 
 function gate(state: State): Gate {
   const check = state.check.value;

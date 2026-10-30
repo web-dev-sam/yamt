@@ -15,6 +15,7 @@ use crate::args::Ai;
 use crate::commands::{with_commands, with_session};
 use crate::compare;
 use crate::merge::MergeState;
+use crate::merge_requests;
 use crate::outcome::{Ending, Exit, ending_when_git_is_done};
 use crate::servers::{self, HostState};
 use crate::settings;
@@ -70,8 +71,8 @@ pub(crate) fn run(session: Box<MergeSession>) -> Ending {
     }
 }
 
-pub(crate) fn run_compare() -> Ending {
-    match open_compare() {
+pub(crate) fn run_compare(folder: &Path) -> Ending {
+    match open_compare(folder) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }
@@ -88,8 +89,12 @@ fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> 
     Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
 }
 
-fn open_compare() -> tauri::Result<Ending> {
-    let manage = compare::manage_store_in;
+fn open_compare(folder: &Path) -> tauri::Result<Ending> {
+    let manage = |app: &App, app_folder: &Path| {
+        compare::manage_store_in(app, app_folder)?;
+        merge_requests::manage(app, folder, app_folder);
+        Ok(())
+    };
     open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, Ai::Off, manage, |_| {})
 }
 

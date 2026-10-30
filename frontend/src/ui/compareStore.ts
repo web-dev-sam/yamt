@@ -17,12 +17,14 @@ import { createAsking, type Asking } from "./asking";
 import { createCompareNotices, type CompareNotices, type ShownNotice } from "./compareNotices";
 import { tabName } from "./compareText";
 import { fileListKey, type KeyPress } from "./fileListKey";
+import type { MergeRequests } from "./mergeRequests";
+import { windowMergeRequests } from "./mergeRequestsStore";
 import type { NoticeRow } from "./noticeText";
 import { attempt, report, type Problem } from "./problem";
 import type { Question } from "./question";
-import type { Screen } from "./screen";
+import { settingsScreen, type Screen } from "./screen";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
-import type { SettingsActions, SettingsInUse } from "./settings";
+import type { SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
 import type { Preferences } from "./useMergeController";
 
@@ -52,6 +54,7 @@ export type CompareStore = SettingsStore &
     readonly screen: Readonly<ShallowRef<Screen>>;
     readonly fileListShown: ShallowRef<boolean>;
     readonly preferences: ComputedRef<Preferences>;
+    readonly mergeRequests: MergeRequests;
     startUp(): Promise<void>;
     loadSettings(): Promise<void>;
     addTab(): Promise<void>;
@@ -121,22 +124,19 @@ export function createCompareStore(source: CompareSource, startTheme: Theme): Co
     latestSettings: 0,
   };
   const settings = settingsActions(state);
+  const mergeRequests = windowMergeRequests(source, refs);
   const created: CompareStore = {
     ...refs,
     question: state.asking.question,
     preferences: computed(() => preferencesOf(refs.settings.value)),
+    mergeRequests,
     ...settings,
-    startUp: () => startUp(state, settings),
+    startUp: () => startUp(state, [settings.loadSettings(), mergeRequests.findProject()]),
     ...tabActions(state),
     ...columnActions(state),
     ...createCompareNotices(state),
     ...chromeActions(state),
-    openSettings: () => {
-      refs.screen.value = { kind: "settings" };
-    },
-    closeSettings: () => {
-      refs.screen.value = { kind: "files" };
-    },
+    ...settingsScreen(refs.screen),
   };
   store = created;
   registerSettingsStore(created);
@@ -174,11 +174,8 @@ function adoptList(state: State, { tabs, shown }: TabList): void {
   }
 }
 
-async function startUp(state: State, settings: SettingsActions): Promise<void> {
-  const [outcome] = await Promise.all([
-    attempt(() => state.source.openCompare()),
-    settings.loadSettings(),
-  ]);
+async function startUp(state: State, besides: readonly Promise<void>[]): Promise<void> {
+  const [outcome] = await Promise.all([attempt(() => state.source.openCompare()), ...besides]);
   if (!outcome.ok) {
     report(state, { action: "tabs", cause: outcome.cause });
     return;

@@ -10,6 +10,9 @@ const NON_SYMBOLIC_SHORT_NAME: &str =
     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
 const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
 const COMMIT_SUMMARY_FIELDS: usize = 3;
+const REMOTE_URL_KEYS: &str = r"^remote\..*\.url$";
+const REMOTE_KEY_PREFIX: &[u8] = b"remote.";
+const URL_KEY_SUFFIX: &[u8] = b".url";
 
 /// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,6 +20,13 @@ pub struct CommitSummary {
     pub short_id: Vec<u8>,
     pub subject: Vec<u8>,
     pub message: Vec<u8>,
+}
+
+/// One `remote.<name>.url` entry, bytes as git stores them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteUrl {
+    pub name: Vec<u8>,
+    pub url: Vec<u8>,
 }
 
 impl Repo {
@@ -59,6 +69,12 @@ impl Repo {
         Ok(non_empty_lines(&output))
     }
 
+    /// Every remote's URL in config order; empty when there is none.
+    pub fn remote_urls(&self) -> Result<Vec<RemoteUrl>> {
+        let entries = self.config_entries(REMOTE_URL_KEYS)?;
+        Ok(remote_urls_from(entries))
+    }
+
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
         read_if_present(&self.git_path(MERGE_MSG)?)
     }
@@ -96,4 +112,51 @@ fn non_empty_lines(output: &[u8]) -> Vec<Vec<u8>> {
         .filter(|line| !line.is_empty())
         .map(<[u8]>::to_vec)
         .collect()
+}
+
+fn remote_urls_from(entries: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<RemoteUrl> {
+    let mut urls = Vec::new();
+    for (key, url) in entries {
+        let name = key
+            .strip_prefix(REMOTE_KEY_PREFIX)
+            .and_then(|rest| rest.strip_suffix(URL_KEY_SUFFIX));
+        if let Some(name) = name {
+            urls.push(RemoteUrl {
+                name: name.to_vec(),
+                url,
+            });
+        }
+    }
+    urls
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::merge_config::parse_config_entries;
+
+    fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
+        remote_urls_from(parse_config_entries(output))
+    }
+
+    #[test]
+    fn remote_urls_keep_config_order_and_dotted_names_and_skip_valueless_keys() {
+        let output =
+            b"remote.origin.url\nhttps://gitlab.example/a.git\0remote.my.fork.url\ngit@host:b\0\
+remote.empty.url\0remote.origin.url\nsecond\0";
+
+        let urls = parse_remote_urls(output);
+
+        let url = |name: &[u8], url: &[u8]| RemoteUrl {
+            name: name.to_vec(),
+            url: url.to_vec(),
+        };
+        let expected = [
+            url(b"origin", b"https://gitlab.example/a.git"),
+            url(b"my.fork", b"git@host:b"),
+            url(b"origin", b"second"),
+        ];
+        assert_eq!(urls, expected);
+        assert_eq!(parse_remote_urls(b""), []);
+    }
 }

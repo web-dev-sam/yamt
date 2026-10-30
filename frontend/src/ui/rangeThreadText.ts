@@ -8,6 +8,7 @@ import type {
   SendReply,
   ThreadLine,
 } from "../ipc";
+import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
 import type { NoticeRow } from "./noticeText";
 import type { NoteChangeBlock } from "./rangeNoteChange";
 import { sideLabel } from "./rangeText";
@@ -74,9 +75,9 @@ function twoDotsHint({ left, right }: RangeStart): string {
 export function notLinedUpText(why: NotLinedUp, start: RangeStart): string {
   switch (why.kind) {
     case "glabMissing":
-      return "glab is not installed (not found on PATH)";
+      return GLAB_MISSING_TEXT;
     case "notLoggedIn":
-      return `glab is not logged in: ${why.detail}`;
+      return glabNotLoggedInText(why.detail);
     case "noMergeRequest": {
       const { lookedAt } = why;
       return lookedAt.kind === "branch"
@@ -96,7 +97,7 @@ export function notLinedUpText(why: NotLinedUp, start: RangeStart): string {
     case "preparing":
       return `GitLab is still preparing the changes of ${why.mergeRequest.reference}`;
     case "failed":
-      return `glab failed: ${why.message}`;
+      return glabFailedText(why.message);
     default: {
       const _exhaustive: never = why;
       return _exhaustive;

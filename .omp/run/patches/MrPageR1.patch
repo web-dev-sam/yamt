@@ -1,0 +1,1308 @@
+diff --git a/frontend/scripts/app-session/processes.test.ts b/frontend/scripts/app-session/processes.test.ts
+index 9771e79..0e86230 100644
+--- a/frontend/scripts/app-session/processes.test.ts
++++ b/frontend/scripts/app-session/processes.test.ts
+@@ -1,32 +1,36 @@
+ import { spawn } from "node:child_process";
+ import { once } from "node:events";
+-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ 
+ import { expect, test } from "vitest";
+ 
+-import { holdsEntry, runningAppsWith } from "./processes";
++import { holdsEntry, runningAppsWith, sessionEntry } from "./processes";
++
++const ENTRY = sessionEntry("/tmp/yamt-app-session-a-1");
+ 
+ test("an environment holds an entry only as a whole NUL-separated entry, never as a prefix", () => {
+-  const environ = "HOME=/tmp/s/home\0XDG_CONFIG_HOME=/tmp/s/home/.config\0PATH=/usr/bin\0";
+-  expect(holdsEntry(environ, "XDG_CONFIG_HOME=/tmp/s/home/.config")).toBe(true);
+-  expect(holdsEntry(environ, "XDG_CONFIG_HOME=/tmp/s/home")).toBe(false);
+-  expect(holdsEntry(environ, "XDG_CONFIG_HOME=/tmp/s/home/.config/yamt")).toBe(false);
+-  expect(holdsEntry("", "XDG_CONFIG_HOME=/tmp/s/home/.config")).toBe(false);
++  const environ = "HOME=/tmp/s/home\0YAMT_APP_SESSION=/tmp/yamt-app-session-a-1\0PATH=/usr/bin\0";
++  expect(holdsEntry(environ, ENTRY)).toBe(true);
++  expect(holdsEntry(environ, sessionEntry("/tmp/yamt-app-session-a"))).toBe(false);
++  expect(holdsEntry(environ, sessionEntry("/tmp/yamt-app-session-a-1/home"))).toBe(false);
++  expect(holdsEntry("", ENTRY)).toBe(false);
++});
++
++test("the session key is its own variable naming the session folder, so two sessions sharing a --home differ", () => {
++  expect(ENTRY).toEqual({ name: "YAMT_APP_SESSION", value: "/tmp/yamt-app-session-a-1" });
++  expect(sessionEntry("/tmp/yamt-app-session-b-2")).not.toEqual(ENTRY);
+ });
+ 
+ test("a running process named yamt with the entry is found with its start time; other entries and names are not", async () => {
+   const folder = mkdtempSync(join(tmpdir(), "yamt-sweep-"));
+-  const entry = `YAMT_SWEEP_PROBE=${folder}`;
++  const entry = sessionEntry(folder);
+   symlinkSync("/usr/bin/sleep", join(folder, "yamt"));
+   symlinkSync("/usr/bin/sleep", join(folder, "other"));
+-  const app = spawn(join(folder, "yamt"), ["30"], {
+-    env: { ...process.env, YAMT_SWEEP_PROBE: folder },
+-  });
+-  const other = spawn(join(folder, "other"), ["30"], {
+-    env: { ...process.env, YAMT_SWEEP_PROBE: folder },
+-  });
++  const env = { ...process.env, [entry.name]: entry.value };
++  const app = spawn(join(folder, "yamt"), ["30"], { env });
++  const other = spawn(join(folder, "other"), ["30"], { env });
+   try {
+     await Promise.all([once(app, "spawn"), once(other, "spawn")]);
+     const found = runningAppsWith(entry);
+@@ -34,10 +38,33 @@ test("a running process named yamt with the entry is found with its start time;
+       { role: "yamt child", pid: app.pid },
+     ]);
+     expect(found[0]?.startTicks).toBeGreaterThan(0);
+-    expect(runningAppsWith(`${entry}-not`)).toEqual([]);
++    expect(runningAppsWith(sessionEntry(`${folder}-not`))).toEqual([]);
+   } finally {
+     app.kill();
+     other.kill();
+     rmSync(folder, { recursive: true, force: true });
+   }
+ });
++
++test("a process whose environ, stat or name cannot be read (another user's, or gone) is skipped, as is a /proc entry that is no process id; the others are found", () => {
++  const root = mkdtempSync(join(tmpdir(), "yamt-proc-"));
++  const stat = readFileSync("/proc/self/stat", "utf8");
++  const environ = `${ENTRY.name}=${ENTRY.value}\0`;
++  for (const name of ["4101", "4102", "4103", "4104", "self"]) {
++    mkdirSync(join(root, name));
++  }
++  for (const name of ["4101", "4102", "4103", "self"]) {
++    writeFileSync(join(root, name, "comm"), "yamt\n");
++  }
++  for (const name of ["4101", "4102", "4104", "self"]) {
++    writeFileSync(join(root, name, "stat"), stat);
++  }
++  for (const name of ["4102", "4103", "4104", "self"]) {
++    writeFileSync(join(root, name, "environ"), environ);
++  }
++  try {
++    expect(runningAppsWith(ENTRY, root).map(({ pid }) => pid)).toEqual([4102]);
++  } finally {
++    rmSync(root, { recursive: true, force: true });
++  }
++});
+diff --git a/frontend/scripts/app-session/processes.ts b/frontend/scripts/app-session/processes.ts
+index 1fe2496..bd79dd4 100644
+--- a/frontend/scripts/app-session/processes.ts
++++ b/frontend/scripts/app-session/processes.ts
+@@ -14,6 +14,13 @@ const OWNER_DEV_PORT = 5173;
+ const RUN_TIMEOUT_MS = 30_000;
+ const PROCESS_ID = /^[0-9]+$/;
+ const APP_COMMAND = "yamt";
++const SESSION_VARIABLE = "YAMT_APP_SESSION";
++
++export type EnvEntry = { readonly name: string; readonly value: string };
++
++export function sessionEntry(folder: string): EnvEntry {
++  return { name: SESSION_VARIABLE, value: folder };
++}
+ 
+ export type Launch = {
+   readonly role: string;
+@@ -29,9 +36,9 @@ export function logFile(logDir: string, role: string): string {
+   return join(logDir, `${role}.log`);
+ }
+ 
+-function startTicksOf(pid: number): number | null {
++function startTicksOf(pid: number, procRoot = "/proc"): number | null {
+   try {
+-    return parseStartTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
++    return parseStartTicks(readFileSync(join(procRoot, String(pid), "stat"), "utf8"));
+   } catch {
+     return null;
+   }
+@@ -132,18 +139,19 @@ function readOrNull(path: string): string | null {
+   }
+ }
+ 
+-export function holdsEntry(environ: string, entry: string): boolean {
+-  return environ.split("\0").includes(entry);
++export function holdsEntry(environ: string, { name, value }: EnvEntry): boolean {
++  return environ.split("\0").includes(`${name}=${value}`);
+ }
+ 
+-export function runningAppsWith(entry: string): Proc[] {
+-  return readdirSync("/proc")
++export function runningAppsWith(entry: EnvEntry, procRoot = "/proc"): Proc[] {
++  return readdirSync(procRoot)
+     .filter((name) => PROCESS_ID.test(name))
+     .flatMap((name) => {
+       const pid = Number(name);
+-      const environ = readOrNull(`/proc/${name}/environ`);
+-      const startTicks = startTicksOf(pid);
+-      const isApp = readOrNull(`/proc/${name}/comm`)?.trim() === APP_COMMAND;
++      const folder = join(procRoot, name);
++      const environ = readOrNull(join(folder, "environ"));
++      const startTicks = startTicksOf(pid, procRoot);
++      const isApp = readOrNull(join(folder, "comm"))?.trim() === APP_COMMAND;
+       return isApp && environ !== null && startTicks !== null && holdsEntry(environ, entry)
+         ? [{ role: "yamt child", pid, startTicks }]
+         : [];
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index ce76a78..b388397 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -14,9 +14,9 @@ import { join } from "node:path";
+ import type { Command } from "./args";
+ import { fakeGlab, glabEnv, type FakeGlab } from "./fakeGlab";
+ import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
+-import { freePort, launchTracked, waitUntil } from "./processes";
++import { freePort, launchTracked, sessionEntry, waitUntil } from "./processes";
+ import { displayEnv, fromRoot } from "./session";
+-import { appArgs, glabFolder } from "./startArgs";
++import { appArgs, glabFolder, startFolder } from "./startArgs";
+ import {
+   readState,
+   saveState,
+@@ -80,23 +80,12 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
+   }
+   const repoDir = repoFolder(command.opens, folder);
+-  const driverDir = startFolder(command.opens, folder);
++  const driverDir = startFolder(command.opens, folder, existsSync);
+   const glab = fakeGlab(scenarioFolder, folder);
+   const args = appArgs(command.opens, repoDir, command.ai);
+   return { home, configDir, repoDir, driverDir, binary, args, glab };
+ }
+ 
+-function startFolder(opens: StartApp["opens"], folder: string): string {
+-  if (opens.kind !== "diff" || opens.startDir === null) {
+-    return folder;
+-  }
+-  const dir = fromRoot(opens.startDir);
+-  if (!existsSync(dir)) {
+-    throw new Error(`--dir ${opens.startDir}: no folder ${dir}`);
+-  }
+-  return dir;
+-}
+-
+ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+   switch (opens.kind) {
+     case "diff":
+@@ -114,12 +103,14 @@ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+   }
+ }
+ 
+-function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
++function appEnv(state: AppState, prepared: Prepared): NodeJS.ProcessEnv {
++  const session = sessionEntry(state.folder);
+   const env: NodeJS.ProcessEnv = {
+-    ...displayEnv(display),
++    ...displayEnv(state.display),
+     ...glabEnv(prepared.glab),
+     HOME: prepared.home,
+     XDG_CONFIG_HOME: prepared.configDir,
++    [session.name]: session.value,
+   };
+   for (const derived of ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
+     delete env[derived];
+@@ -187,7 +178,7 @@ async function startDriver(
+       role: "tauri-driver",
+       command: "tauri-driver",
+       args: ["--port", String(driverPort), "--native-port", String(nativePort)],
+-      env: appEnv(state.display, prepared),
++      env: appEnv(state, prepared),
+       cwd: prepared.driverDir,
+       logDir,
+       fd3File: null,
+@@ -245,7 +236,6 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
+     size: command.size,
+     procs: [],
+     display: 0,
+-    configDir,
+     repoDir,
+   };
+   const state = await withCleanup(empty, (save) =>
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index 7225741..6ac0ec3 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import { parseCommand } from "./args";
+-import { appArgs, glabFolder } from "./startArgs";
++import { appArgs, glabFolder, startFolder } from "./startArgs";
+ 
+ test("a scenario whose folder exists is its folder under tests/glab; the lookup is asked about it", () => {
+   const asked: string[] = [];
+@@ -35,6 +35,24 @@ test("start-app --diff --dir starts the compare window in that folder and passes
+   expect(appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, false)).toEqual(["--diff"]);
+ });
+ 
++test("a compare session starts in its --dir folder, asked about once; without --dir or --diff in the session folder", () => {
++  const asked: string[] = [];
++  const dir = startFolder({ kind: "diff", startDir: "/var/tmp/rr" }, "/tmp/s", (path) => {
++    asked.push(path);
++    return true;
++  });
++  expect(dir).toBe("/var/tmp/rr");
++  expect(asked).toEqual(["/var/tmp/rr"]);
++  expect(startFolder({ kind: "diff", startDir: null }, "/tmp/s", () => false)).toBe("/tmp/s");
++  expect(startFolder({ kind: "fresh" }, "/tmp/s", () => false)).toBe("/tmp/s");
++});
++
++test("a --dir folder that does not exist is refused at start, naming it (catches a driver started nowhere)", () => {
++  expect(() =>
++    startFolder({ kind: "diff", startDir: "/var/tmp/nosuch" }, "/tmp/s", () => false),
++  ).toThrow("--dir /var/tmp/nosuch: no folder /var/tmp/nosuch");
++});
++
+ test("start-app --dir goes only with --diff", () => {
+   const onlyDiff = /--dir <folder> goes with --diff/;
+   const range = ["start-app", "--name", "r", "--range", "a...b", "--repo", "/r"];
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index 83ade90..44dd3d9 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -139,6 +139,21 @@ export function glabFolder(scenario: string, isFolder: (path: string) => boolean
+   return folder;
+ }
+ 
++export function startFolder(
++  opens: Opening,
++  folder: string,
++  isFolder: (path: string) => boolean,
++): string {
++  if (opens.kind !== "diff" || opens.startDir === null) {
++    return folder;
++  }
++  const dir = fromRoot(opens.startDir);
++  if (!isFolder(dir)) {
++    throw new Error(`--dir ${opens.startDir}: no folder ${dir}`);
++  }
++  return dir;
++}
++
+ function glabScenario(parsed: Parsed, opens: Opening): string | null {
+   const scenario = parsed.values.get("glab");
+   if (scenario === undefined) {
+diff --git a/frontend/scripts/app-session/state.test.ts b/frontend/scripts/app-session/state.test.ts
+index 8c2e218..ca22252 100644
+--- a/frontend/scripts/app-session/state.test.ts
++++ b/frontend/scripts/app-session/state.test.ts
+@@ -42,7 +42,6 @@ const APP: AppState = {
+     { role: "focus-window", pid: 104, startTicks: 5003 },
+   ],
+   display: 7,
+-  configDir: "/tmp/yamt-app-session-smoke-x/home/.config",
+   repoDir: "/tmp/yamt-app-session-smoke-x/repo",
+ };
+ 
+diff --git a/frontend/scripts/app-session/state.ts b/frontend/scripts/app-session/state.ts
+index 6ad69ec..5441e95 100644
+--- a/frontend/scripts/app-session/state.ts
++++ b/frontend/scripts/app-session/state.ts
+@@ -25,7 +25,6 @@ type Common = {
+ export type AppState = Common & {
+   readonly kind: "app";
+   readonly display: number;
+-  readonly configDir: string;
+   readonly repoDir: string | null;
+ };
+ 
+@@ -80,7 +79,6 @@ export function parseState(text: string): SessionState {
+       ...common,
+       kind,
+       display: numberField(record, "display"),
+-      configDir: stringField(record, "configDir"),
+       repoDir: record["repoDir"] === null ? null : stringField(record, "repoDir"),
+     };
+   }
+diff --git a/frontend/scripts/app-session/stop.ts b/frontend/scripts/app-session/stop.ts
+index ead386c..2877bf1 100644
+--- a/frontend/scripts/app-session/stop.ts
++++ b/frontend/scripts/app-session/stop.ts
+@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ 
+ import { isOwnTempFolder } from "./folders";
+-import { runningAppsWith, stopProc, type StopResult } from "./processes";
++import { runningAppsWith, sessionEntry, stopProc, type StopResult } from "./processes";
+ import { readState, statePath, type Proc, type SessionState } from "./state";
+ import { deleteSession } from "./webdriver";
+ 
+@@ -30,11 +30,9 @@ async function stopEach(procs: readonly Proc[]): Promise<Stopped[]> {
+ 
+ export async function stopSession(state: SessionState): Promise<Readonly<Record<string, unknown>>> {
+   const session = await endSession(state);
+-  const procs = await stopEach(state.procs.toReversed());
+   const children =
+-    state.kind === "app"
+-      ? await stopEach(runningAppsWith(`XDG_CONFIG_HOME=${state.configDir}`))
+-      : [];
++    state.kind === "app" ? await stopEach(runningAppsWith(sessionEntry(state.folder))) : [];
++  const procs = await stopEach(state.procs.toReversed());
+   const ownFolder = isOwnTempFolder(state.folder, tmpdir());
+   if (ownFolder) {
+     rmSync(state.folder, { recursive: true, force: true });
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 5806b0d..a3692b7 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -2,6 +2,7 @@ export {
+   NO_FILTERS,
+   cleared,
+   filterLabel,
++  filterName,
+   filtered,
+   isFiltered,
+   passes,
+@@ -25,5 +26,5 @@ export {
+ export { merged } from "./internal/order";
+ export { summaryText } from "./internal/summary";
+ export { createdAgo } from "./internal/relativeTime";
+-export { ciBox, type CiBoxView, type CiStatusName } from "./internal/ciBox";
++export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
+ export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
+diff --git a/frontend/src/mergeRequests/internal/ciBox.test.ts b/frontend/src/mergeRequests/internal/ciBox.test.ts
+index c00eeed..b88d98d 100644
+--- a/frontend/src/mergeRequests/internal/ciBox.test.ts
++++ b/frontend/src/mergeRequests/internal/ciBox.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { ciBox, type CiBoxView, type CiStatusName } from "../index";
++import { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "../index";
+ 
+ type Job = { readonly name: string; readonly allowFailure: boolean };
+ 
+@@ -34,6 +34,10 @@ test.each<[CiStatusName, string]>([
+   ["canceled", "Pipeline canceled"],
+   ["skipped", "Pipeline skipped"],
+   ["manual", "Pipeline waiting for a manual job"],
+-])("with no failed job a %s pipeline says so in words", (status, text) => {
+-  expect(ciBox<Job>(status, [], false)).toEqual({ kind: "status", text });
+-});
++])(
++  "a %s pipeline's sentence is ciStatusText's, and the box shows it when no job failed",
++  (status, text) => {
++    expect(ciStatusText(status)).toBe(text);
++    expect(ciBox<Job>(status, [], false)).toEqual({ kind: "status", text });
++  },
++);
+diff --git a/frontend/src/mergeRequests/internal/ciBox.ts b/frontend/src/mergeRequests/internal/ciBox.ts
+index 6a375fc..8e4e599 100644
+--- a/frontend/src/mergeRequests/internal/ciBox.ts
++++ b/frontend/src/mergeRequests/internal/ciBox.ts
+@@ -21,13 +21,17 @@ const STATUS_TEXTS: Readonly<Record<CiStatusName, string>> = {
+   manual: "Pipeline waiting for a manual job",
+ };
+ 
++export function ciStatusText(status: CiStatusName): string {
++  return STATUS_TEXTS[status];
++}
++
+ export function ciBox<J extends { readonly allowFailure: boolean }>(
+   status: CiStatusName,
+   jobs: readonly J[],
+   more: boolean,
+ ): CiBoxView<J> {
+   if (jobs.length === 0) {
+-    return { kind: "status", text: STATUS_TEXTS[status] };
++    return { kind: "status", text: ciStatusText(status) };
+   }
+   return {
+     kind: "jobs",
+diff --git a/frontend/src/mergeRequests/internal/filters.ts b/frontend/src/mergeRequests/internal/filters.ts
+index e434fdd..ddea501 100644
+--- a/frontend/src/mergeRequests/internal/filters.ts
++++ b/frontend/src/mergeRequests/internal/filters.ts
+@@ -144,8 +144,12 @@ function valueWord(value: PersonValue | LabelValue): string {
+   }
+ }
+ 
++export function filterName(filter: ListFilter): string {
++  return FILTER_NAMES[filter];
++}
++
+ export function filterLabel(filter: ListFilter, filters: Filters): string {
+   const values: readonly (PersonValue | LabelValue)[] = filters[filter];
+-  const name = FILTER_NAMES[filter];
++  const name = filterName(filter);
+   return values.length === 0 ? name : `${name}: ${values.map(valueWord).join(", ")}`;
+ }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 3c9429f..bfefad0 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -44,4 +44,4 @@ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is
+ 
+ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
+ 
+-Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it and return the keyboard to the element focused before. Its filter row is three `MergeRequestFilter.vue` checklists (`useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons`; the list scrolls inside. `MergeRequestRow.vue` shows one row and its open-changes sentence (`openReplyText`). `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it. Words come only from `mergeRequestsText.ts` and `mergeRequests/`.
++Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (`useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons`; the list scrolls inside. `MergeRequestRow.vue` shows one row and its open-changes sentence (`openReplyText`). `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+diff --git a/frontend/src/ui/CiStatusBox.vue b/frontend/src/ui/CiStatusBox.vue
+index 671779c..2da0923 100644
+--- a/frontend/src/ui/CiStatusBox.vue
++++ b/frontend/src/ui/CiStatusBox.vue
+@@ -10,8 +10,14 @@ import Clock from "~icons/lucide/clock";
+ import Cog from "~icons/lucide/cog";
+ 
+ import type { JobPage, MergeRequestRow } from "../ipc";
+-import { ciBox, type CiStatusName } from "../mergeRequests";
++import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
+ import type { Point } from "./menuPosition";
++import {
++  ALLOWED_TO_FAIL,
++  FAILED_JOBS_TITLE,
++  jobTitle,
++  MORE_FAILED_JOBS,
++} from "./mergeRequestsText";
+ import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
+ 
+ type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
+@@ -31,8 +37,6 @@ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
+   manual: { icon: Cog, tone: "text-fg-muted" },
+ };
+ 
+-const NO_PAGE = "GitLab gave no address for this job's log";
+-
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const icon = useTemplateRef<HTMLButtonElement>("icon");
+ const box = useTemplateRef<HTMLDivElement>("box");
+@@ -47,10 +51,7 @@ const look = computed(() => LOOKS[props.pipeline.status]);
+ const view = computed(() =>
+   ciBox(props.pipeline.status, props.pipeline.failedJobs, props.pipeline.moreFailedJobs),
+ );
+-const statusText = computed(() => {
+-  const words = ciBox(props.pipeline.status, [], false);
+-  return words.kind === "status" ? words.text : props.pipeline.status;
+-});
++const statusText = computed(() => ciStatusText(props.pipeline.status));
+ 
+ function show(): void {
+   if (!open.value && icon.value !== null) {
+@@ -103,6 +104,7 @@ function keyPressed(event: KeyboardEvent): void {
+ 
+ function scrolled(event: Event): void {
+   if (open.value && !isInside(event.target)) {
++    focusInside = document.activeElement === icon.value;
+     open.value = false;
+   }
+ }
+@@ -144,12 +146,12 @@ function openJob({ page }: FailedJob): void {
+     >
+       <p v-if="view.kind === 'status'" class="px-2 py-1">{{ view.text }}</p>
+       <template v-else>
+-        <p class="px-2 pt-1 pb-0.5 text-fg-muted">Failed jobs</p>
++        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ FAILED_JOBS_TITLE }}</p>
+         <ul>
+           <li v-for="(job, index) in view.jobs" :key="index">
+             <button
+               type="button"
+-              :title="job.page === null ? NO_PAGE : `Open the log of ${job.name} on GitLab`"
++              :title="jobTitle(job.name, job.page)"
+               :disabled="job.page === null"
+               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
+               @click="openJob(job)"
+@@ -157,12 +159,12 @@ function openJob({ page }: FailedJob): void {
+               <span>{{ job.name }}</span>
+               <span class="text-fg-muted">{{ job.stage }}</span>
+               <span v-if="job.allowFailure" class="ml-auto pl-2 text-problem-warning">
+-                allowed to fail
++                {{ ALLOWED_TO_FAIL }}
+               </span>
+             </button>
+           </li>
+         </ul>
+-        <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">More failed jobs on GitLab</p>
++        <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">{{ MORE_FAILED_JOBS }}</p>
+       </template>
+     </div>
+   </span>
+diff --git a/frontend/src/ui/MergeRequestFilter.vue b/frontend/src/ui/MergeRequestFilter.vue
+index a7250eb..ecf8143 100644
+--- a/frontend/src/ui/MergeRequestFilter.vue
++++ b/frontend/src/ui/MergeRequestFilter.vue
+@@ -5,6 +5,7 @@ import ChevronDown from "~icons/lucide/chevron-down";
+ import X from "~icons/lucide/x";
+ 
+ import {
++  filterName,
+   NARROW_FROM,
+   narrowed,
+   type Choice,
+@@ -12,13 +13,13 @@ import {
+   type ListFilter,
+   type PersonValue,
+ } from "../mergeRequests";
++import { clearFilterTitle, narrowLabel, narrowPlaceholder } from "./mergeRequestsText";
+ import { useDropdownMenu } from "./useDropdownMenu";
+ 
+ type Value = PersonValue | LabelValue;
+ 
+ const props = defineProps<{
+   filter: ListFilter;
+-  name: string;
+   label: string;
+   set: boolean;
+   choices: readonly Choice<Value>[];
+@@ -34,6 +35,7 @@ const { openFor, above, toggle, menuKey } = useDropdownMenu<ListFilter>({
+   opener: () => opener.value,
+ });
+ 
++const name = computed(() => filterName(props.filter));
+ const narrows = computed(() => props.choices.length > NARROW_FROM);
+ const shown = computed(() =>
+   narrows.value ? narrowed(props.choices, typed.value) : props.choices,
+@@ -79,8 +81,8 @@ async function openerClicked(): Promise<void> {
+     <button
+       v-if="set"
+       type="button"
+-      :title="`Clear the ${name} filter`"
+-      :aria-label="`Clear the ${name} filter`"
++      :title="clearFilterTitle(name)"
++      :aria-label="clearFilterTitle(name)"
+       class="self-stretch rounded-r border border-l-0 border-primary px-1.5 hover:bg-hover"
+       @click="emit('clear')"
+     >
+@@ -98,8 +100,8 @@ async function openerClicked(): Promise<void> {
+         ref="narrowBox"
+         v-model="typed"
+         type="search"
+-        :aria-label="`Narrow the ${name} list`"
+-        :placeholder="`Find ${name.toLowerCase()}…`"
++        :aria-label="narrowLabel(name)"
++        :placeholder="narrowPlaceholder(name)"
+         spellcheck="false"
+         class="mb-1 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
+       />
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index f976a7a..5bdc8fb 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -9,18 +9,25 @@ import type { JobPage, MergeRequestIid, MergeRequestRow } from "../ipc";
+ import { createdAgo } from "../mergeRequests";
+ import CiStatusBox from "./CiStatusBox.vue";
+ import type { Opening } from "./mergeRequests";
+-import { openReplyText } from "./mergeRequestsText";
++import {
++  approvalsText,
++  discussionsText,
++  mergeRequestReference,
++  openChangesTitle,
++  openReplyText,
++} from "./mergeRequestsText";
+ 
+ const props = defineProps<{ row: MergeRequestRow; now: number; opening: Opening | null }>();
+ const emit = defineEmits<{ open: [iid: MergeRequestIid]; openJob: [page: JobPage] }>();
+ 
+ const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+ 
+-const mr = computed(() => `!${props.row.iid}`);
++const mr = computed(() => mergeRequestReference(props.row.iid));
+ const created = computed(() => createdAgo(props.row.createdAt, props.now));
+ const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
+-const discussionsText = computed(() => countText(props.row.openDiscussions, "open discussion"));
+-const approvalsText = computed(() => countText(props.row.approvals, "approval"));
++const discussions = computed(() => discussionsText(props.row.openDiscussions));
++const approvals = computed(() => approvalsText(props.row.approvals));
++const openTitle = computed(() => openChangesTitle(props.row.iid));
+ const fetching = computed(() => props.opening?.kind === "fetching");
+ const sentence = computed(() => {
+   const opening = props.opening;
+@@ -30,10 +37,6 @@ const sentence = computed(() => {
+   const reply = opening.kind === "opened" ? ({ kind: "opened" } as const) : opening.reply;
+   return { text: openReplyText(reply, props.row.iid), refused: opening.kind === "refused" };
+ });
+-
+-function countText(count: number, word: string): string {
+-  return `${count} ${count === 1 ? word : `${word}s`}`;
+-}
+ </script>
+ 
+ <template>
+@@ -47,8 +50,8 @@ function countText(count: number, word: string): string {
+       <span
+         class="flex w-12 shrink-0 items-center gap-1"
+         :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
+-        :title="discussionsText"
+-        :aria-label="discussionsText"
++        :title="discussions"
++        :aria-label="discussions"
+       >
+         <MessageSquare class="size-4" aria-hidden="true" />
+         <span aria-hidden="true">{{ row.openDiscussions }}</span>
+@@ -56,8 +59,8 @@ function countText(count: number, word: string): string {
+       <span
+         class="flex w-12 shrink-0 items-center gap-1"
+         :class="{ 'text-fg-muted': row.approvals === 0 }"
+-        :title="approvalsText"
+-        :aria-label="approvalsText"
++        :title="approvals"
++        :aria-label="approvals"
+       >
+         <ThumbsUp class="size-4" aria-hidden="true" />
+         <span aria-hidden="true">{{ row.approvals }}</span>
+@@ -71,8 +74,8 @@ function countText(count: number, word: string): string {
+       </span>
+       <button
+         type="button"
+-        :title="`Open the changes of ${mr}`"
+-        :aria-label="`Open the changes of ${mr}`"
++        :title="openTitle"
++        :aria-label="openTitle"
+         :aria-busy="fetching"
+         :disabled="fetching"
+         class="shrink-0 rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+diff --git a/frontend/src/ui/MergeRequestsButton.vue b/frontend/src/ui/MergeRequestsButton.vue
+index 4094209..c1bec34 100644
+--- a/frontend/src/ui/MergeRequestsButton.vue
++++ b/frontend/src/ui/MergeRequestsButton.vue
+@@ -2,6 +2,7 @@
+ import GitPullRequest from "~icons/lucide/git-pull-request";
+ 
+ import { useMergeRequests } from "./mergeRequestsStore";
++import { PAGE_TITLE } from "./mergeRequestsText";
+ 
+ const { project, show } = useMergeRequests();
+ </script>
+@@ -10,8 +11,8 @@ const { project, show } = useMergeRequests();
+   <button
+     v-if="project.kind === 'found'"
+     type="button"
+-    title="Merge requests"
+-    aria-label="Merge requests"
++    :title="PAGE_TITLE"
++    :aria-label="PAGE_TITLE"
+     class="rounded p-1.5 hover:bg-hover"
+     @click="show"
+   >
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index d90f089..4f2a8b5 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -1,50 +1,46 @@
+ <script setup lang="ts">
+ import { useEventListener, useIntervalFn, useNow } from "@vueuse/core";
+-import { computed, nextTick, onMounted, useTemplateRef } from "vue";
++import { computed, onMounted, useTemplateRef } from "vue";
+ import ArrowLeft from "~icons/lucide/arrow-left";
+ import RefreshCw from "~icons/lucide/refresh-cw";
+ import X from "~icons/lucide/x";
+ 
+-import { filterLabel, isFiltered, type DraftFilter, type ListFilter } from "../mergeRequests";
++import { filterLabel, isFiltered, type ListFilter } from "../mergeRequests";
++import { RETRY } from "./aiText";
+ import ChoiceButtons from "./ChoiceButtons.vue";
++import { returnFocus } from "./focusReturn";
+ import MergeRequestFilter from "./MergeRequestFilter.vue";
+ import MergeRequestRow from "./MergeRequestRow.vue";
+ import { useMergeRequests } from "./mergeRequestsStore";
+-import { listEndText, LOADING_TEXT, NONE_TEXT } from "./mergeRequestsText";
++import {
++  CLEAR_FILTERS,
++  DRAFT_LABEL,
++  DRAFT_OPTIONS,
++  FILTERS_LABEL,
++  LIST_LABEL,
++  LOADING_TEXT,
++  NONE_TEXT,
++  PAGE_TITLE,
++  REFRESH,
++} from "./mergeRequestsText";
++import { DISMISS_LABEL } from "./searchText";
+ import { BACK } from "./serverText";
+ 
+ const props = defineProps<{ asking: boolean }>();
+ 
+ const MINUTE_MS = 60_000;
+-const LIST_FILTERS: readonly { readonly filter: ListFilter; readonly name: string }[] = [
+-  { filter: "assignee", name: "Assignee" },
+-  { filter: "reviewer", name: "Reviewer" },
+-  { filter: "label", name: "Label" },
+-];
+-const DRAFTS: readonly { readonly value: DraftFilter; readonly label: string }[] = [
+-  { value: "all", label: "All" },
+-  { value: "drafts", label: "Drafts" },
+-  { value: "ready", label: "Ready" },
+-];
++const LIST_FILTERS: readonly ListFilter[] = ["assignee", "reviewer", "label"];
+ 
+ const requests = useMergeRequests();
+-const { rows, listing, filters, shownRows, choices, summary, openings, jobProblem } = requests;
++const { rows, listing, failure, filters, shownRows, choices, summary, openings, jobProblem } =
++  requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const focusedBefore = document.activeElement;
+ const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
+ useEventListener(window, "keydown", escapePressed);
+ 
+ const loading = computed(() => listing.value.kind === "loading");
+-const firstLoad = computed(
+-  () => listing.value.kind === "loading" && listing.value.first && rows.value.length === 0,
+-);
+-const failure = computed(() => {
+-  const load = listing.value;
+-  if (load.kind !== "done" || load.end.kind === "loaded" || load.end.kind === "cut") {
+-    return null;
+-  }
+-  return listEndText(load.end);
+-});
++const waiting = computed(() => loading.value && rows.value.length === 0);
+ const empty = computed(
+   () => listing.value.kind === "done" && failure.value === null && rows.value.length === 0,
+ );
+@@ -57,14 +53,7 @@ onMounted(() => {
+ 
+ async function goBack(): Promise<void> {
+   requests.close();
+-  await nextTick();
+-  if (
+-    focusedBefore instanceof HTMLElement &&
+-    focusedBefore.isConnected &&
+-    getComputedStyle(focusedBefore).visibility === "visible"
+-  ) {
+-    focusedBefore.focus();
+-  }
++  await returnFocus(focusedBefore);
+ }
+ 
+ function escapePressed(event: KeyboardEvent): void {
+@@ -77,7 +66,7 @@ function escapePressed(event: KeyboardEvent): void {
+ 
+ <template>
+   <section
+-    aria-label="Merge requests"
++    :aria-label="PAGE_TITLE"
+     class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col island bg-panel"
+   >
+     <header class="flex shrink-0 items-center gap-3 border-b border-separator px-3 py-2">
+@@ -90,7 +79,7 @@ function escapePressed(event: KeyboardEvent): void {
+         <ArrowLeft class="size-4" aria-hidden="true" />
+         {{ BACK }}
+       </button>
+-      <h2 class="font-semibold">Merge requests</h2>
++      <h2 class="font-semibold">{{ PAGE_TITLE }}</h2>
+       <button
+         type="button"
+         :disabled="loading"
+@@ -98,19 +87,18 @@ function escapePressed(event: KeyboardEvent): void {
+         @click="requests.refresh"
+       >
+         <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" aria-hidden="true" />
+-        Refresh
++        {{ REFRESH }}
+       </button>
+     </header>
+     <div
+       role="group"
+-      aria-label="Filters"
++      :aria-label="FILTERS_LABEL"
+       class="flex shrink-0 flex-wrap items-center gap-2 border-b border-separator px-3 py-2"
+     >
+       <MergeRequestFilter
+-        v-for="{ filter, name } in LIST_FILTERS"
++        v-for="filter in LIST_FILTERS"
+         :key="filter"
+         :filter="filter"
+-        :name="name"
+         :label="filterLabel(filter, filters)"
+         :set="filters[filter].length > 0"
+         :choices="choices[filter]"
+@@ -119,8 +107,8 @@ function escapePressed(event: KeyboardEvent): void {
+       />
+       <ChoiceButtons
+         role="group"
+-        aria-label="Draft"
+-        :options="DRAFTS"
++        :aria-label="DRAFT_LABEL"
++        :options="DRAFT_OPTIONS"
+         :pressed="filters.draft"
+         @pick="requests.setDraft"
+       />
+@@ -130,7 +118,7 @@ function escapePressed(event: KeyboardEvent): void {
+         class="rounded px-2 py-1 text-primary hover:bg-hover"
+         @click="requests.clearAll"
+       >
+-        Clear filters
++        {{ CLEAR_FILTERS }}
+       </button>
+     </div>
+     <p
+@@ -141,7 +129,7 @@ function escapePressed(event: KeyboardEvent): void {
+       {{ jobProblem }}
+       <button
+         type="button"
+-        aria-label="Dismiss"
++        :aria-label="DISMISS_LABEL"
+         class="ml-auto rounded p-1 text-fg hover:bg-hover"
+         @click="requests.dismissJobProblem"
+       >
+@@ -160,15 +148,15 @@ function escapePressed(event: KeyboardEvent): void {
+         class="shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted"
+         @click="requests.refresh"
+       >
+-        Retry
++        {{ RETRY }}
+       </button>
+     </p>
+-    <p v-if="firstLoad" class="px-3 py-2 text-fg-muted">{{ LOADING_TEXT }}</p>
++    <p v-if="waiting" class="px-3 py-2 text-fg-muted">{{ LOADING_TEXT }}</p>
+     <p v-else-if="empty" class="px-3 py-2 text-fg-muted">{{ NONE_TEXT }}</p>
+     <template v-else-if="rows.length > 0">
+       <p class="shrink-0 px-3 pt-2 pb-1 text-fg-muted" aria-live="polite">{{ summary }}</p>
+       <ul
+-        aria-label="Open merge requests"
++        :aria-label="LIST_LABEL"
+         :aria-busy="loading"
+         class="min-h-0 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
+       >
+diff --git a/frontend/src/ui/SettingsView.vue b/frontend/src/ui/SettingsView.vue
+index 9e17cad..4e62971 100644
+--- a/frontend/src/ui/SettingsView.vue
++++ b/frontend/src/ui/SettingsView.vue
+@@ -1,9 +1,10 @@
+ <script setup lang="ts">
+-import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
++import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+ import ArrowLeft from "~icons/lucide/arrow-left";
+ 
+ import { themeRows, type Antialiasing } from "../ipc";
+ import ChoiceButtons from "./ChoiceButtons.vue";
++import { returnFocus } from "./focusReturn";
+ import KeymapList from "./KeymapList.vue";
+ import { showsAntialiasing } from "./settings";
+ import { useSettingsStore } from "./settingsStore";
+@@ -34,14 +35,7 @@ onMounted(() => {
+ 
+ async function goBack(): Promise<void> {
+   closeSettings();
+-  await nextTick();
+-  if (
+-    focusedBefore instanceof HTMLElement &&
+-    focusedBefore.isConnected &&
+-    getComputedStyle(focusedBefore).visibility === "visible"
+-  ) {
+-    focusedBefore.focus();
+-  }
++  await returnFocus(focusedBefore);
+ }
+ 
+ function restorePath(): void {
+diff --git a/frontend/src/ui/focusReturn.test.ts b/frontend/src/ui/focusReturn.test.ts
+new file mode 100644
+index 0000000..8cc9288
+--- /dev/null
++++ b/frontend/src/ui/focusReturn.test.ts
+@@ -0,0 +1,50 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++
++import { returnFocus } from "./focusReturn";
++
++class FakeElement {
++  focused = false;
++  constructor(
++    readonly isConnected: boolean,
++    readonly visibility: string,
++  ) {}
++  focus(): void {
++    this.focused = true;
++  }
++}
++
++beforeEach(() => {
++  vi.stubGlobal("HTMLElement", FakeElement);
++  vi.stubGlobal("getComputedStyle", (element: FakeElement) => ({
++    visibility: element.visibility,
++  }));
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++function asElement(fake: FakeElement): HTMLElement {
++  if (fake instanceof HTMLElement) {
++    return fake;
++  }
++  throw new Error("HTMLElement is not the stub");
++}
++
++test("the keyboard returns to the element focused before when it is still in the page and visible", async () => {
++  const before = new FakeElement(true, "visible");
++  await returnFocus(asElement(before));
++  expect(before.focused).toBe(true);
++});
++
++test.each([
++  ["no longer in the page", new FakeElement(false, "visible")],
++  ["hidden", new FakeElement(true, "hidden")],
++])("the keyboard stays where it is when the element focused before is %s", async (_, before) => {
++  await returnFocus(asElement(before));
++  expect(before.focused).toBe(false);
++});
++
++test("with nothing focused before nothing is focused", async () => {
++  await expect(returnFocus(null)).resolves.toBeUndefined();
++});
+diff --git a/frontend/src/ui/focusReturn.ts b/frontend/src/ui/focusReturn.ts
+new file mode 100644
+index 0000000..01b15bc
+--- /dev/null
++++ b/frontend/src/ui/focusReturn.ts
+@@ -0,0 +1,12 @@
++import { nextTick } from "vue";
++
++export async function returnFocus(before: Element | null): Promise<void> {
++  await nextTick();
++  if (
++    before instanceof HTMLElement &&
++    before.isConnected &&
++    getComputedStyle(before).visibility === "visible"
++  ) {
++    before.focus();
++  }
++}
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 88a4936..d3f904f 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -274,6 +274,65 @@ test("a first load that fails after a page keeps that page (the sent pages stay)
+   expect(live.slice.rows.value).toHaveLength(20);
+ });
+ 
++test.each<ListEnd>([
++  { kind: "notLoggedIn", detail: "no token" },
++  { kind: "failed", message: "glab timed out" },
++])(
++  "Retry after a first load ending %j streams its pages as the first does (catches a buffered retry showing nothing)",
++  async (end) => {
++    const live = rig();
++    live.slice.show();
++    loadAt(live, 0).end({ ok: true, value: end });
++    await settled();
++
++    const retrying = live.slice.refresh();
++    expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
++    loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 20) });
++    expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
++    expect(live.slice.me.value).toBe("sam");
++    loadAt(live, 1).end(LOADED);
++    await retrying;
++    expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
++  },
++);
++
++test("Refresh of a loaded empty list streams its pages (catches the page blank until the end)", async () => {
++  const live = rig();
++  await loaded(live, []);
++
++  const refreshing = live.slice.refresh();
++  expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
++  loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 3) });
++  expect(live.slice.rows.value).toHaveLength(3);
++  loadAt(live, 1).end(LOADED);
++  await refreshing;
++});
++
++test.each<[ListEnd, string | null]>([
++  [{ kind: "loaded" }, null],
++  [{ kind: "cut", limit: 500 }, null],
++  [
++    { kind: "glabMissing" },
++    "glab is not installed (not found on PATH) — install glab, then Refresh.",
++  ],
++  [{ kind: "failed", message: "502" }, "glab failed: 502"],
++])(
++  "a load ending %j shows the failure %j, and none while the next load runs (catches the list end decided twice)",
++  async (end, failure) => {
++    const live = rig();
++    expect(live.slice.failure.value).toBeNull();
++    live.slice.show();
++    loadAt(live, 0).end({ ok: true, value: end });
++    await settled();
++    expect(live.slice.failure.value).toBe(failure);
++
++    const again = live.slice.refresh();
++    expect(live.slice.failure.value).toBeNull();
++    loadAt(live, 1).end(LOADED);
++    await again;
++  },
++);
++
+ test("one load at a time: Refresh and show while loading start nothing (catches two loads racing)", async () => {
+   const live = rig();
+   live.slice.show();
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 8c484ae..387e84e 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -30,7 +30,7 @@ import {
+ } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { createRememberedFilters } from "./mergeRequestFilters";
+-import { jobOpenedText } from "./mergeRequestsText";
++import { jobOpenedText, listFailureText } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+@@ -55,6 +55,7 @@ export type MergeRequests = {
+   readonly me: Readonly<ShallowRef<string | null>>;
+   readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+   readonly listing: Readonly<ShallowRef<ListLoad>>;
++  readonly failure: ComputedRef<string | null>;
+   readonly filters: Readonly<Ref<Filters>>;
+   readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
+   readonly choices: ComputedRef<Choices>;
+@@ -104,7 +105,7 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
+ }
+ 
+ function ended(state: State, load: Load, end: ListEnd): void {
+-  const listed = end.kind === "loaded" || end.kind === "cut";
++  const listed = listFailureText(end) === null;
+   if (listed) {
+     state.cut.value = end.kind === "cut";
+   }
+@@ -120,7 +121,7 @@ async function load(state: State): Promise<void> {
+   if (before.kind === "loading") {
+     return;
+   }
+-  const first = before.kind === "notLoaded";
++  const first = state.rows.value.length === 0;
+   const running: Load = { buffered: !first, buffer: [], me: null };
+   state.listing.value = { kind: "loading", first };
+   const outcome = await attempt(() =>
+@@ -234,6 +235,16 @@ function filterActions(
+   };
+ }
+ 
++function listingOf(state: State): Pick<MergeRequests, "listing" | "failure"> {
++  const { listing } = state;
++  return {
++    listing,
++    failure: computed(() =>
++      listing.value.kind === "done" ? listFailureText(listing.value.end) : null,
++    ),
++  };
++}
++
+ export function createMergeRequests(deps: Deps): MergeRequests {
+   const state = createState(deps);
+   const { project, me, rows } = state;
+@@ -247,7 +258,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     project,
+     me,
+     rows,
+-    listing: state.listing,
++    ...listingOf(state),
+     filters,
+     shownRows,
+     choices: computed(() => choicesOf(rows.value, filters.value, me.value)),
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 909593e..9b26143 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -9,10 +9,17 @@ import {
+   type RangeStart,
+ } from "../ipc";
+ import {
++  approvalsText,
++  clearFilterTitle,
++  discussionsText,
+   jobOpenedText,
+-  listEndText,
++  jobTitle,
++  listFailureText,
++  narrowLabel,
++  narrowPlaceholder,
+   LOADING_TEXT,
+   NONE_TEXT,
++  openChangesTitle,
+   openReplyText,
+ } from "./mergeRequestsText";
+ import { notLinedUpText } from "./rangeThreadText";
+@@ -39,9 +46,9 @@ test("the page's loading and empty words are the request's (rule 3)", () => {
+   expect([LOADING_TEXT, NONE_TEXT]).toEqual(["Loading merge requests…", "No open merge requests."]);
+ });
+ 
+-test.each<[ListEnd, string]>([
+-  [{ kind: "loaded" }, "Loaded the open merge requests."],
+-  [{ kind: "cut", limit: 500 }, "Only the newest 500 merge requests are listed; GitLab has more."],
++test.each<[ListEnd, string | null]>([
++  [{ kind: "loaded" }, null],
++  [{ kind: "cut", limit: 500 }, null],
+   [
+     { kind: "glabMissing" },
+     "glab is not installed (not found on PATH) — install glab, then Refresh.",
+@@ -51,8 +58,31 @@ test.each<[ListEnd, string]>([
+     `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
+   ],
+   [{ kind: "failed", message: "glab timed out" }, "glab failed: glab timed out"],
+-])("the list end %j reads %j", (end, words) => {
+-  expect(listEndText(end)).toBe(words);
++])("the list end %j is a failure reading %j, or none when the list was listed", (end, words) => {
++  expect(listFailureText(end)).toBe(words);
++});
++
++test.each([
++  [0, "0 open discussions", "0 approvals"],
++  [1, "1 open discussion", "1 approval"],
++  [2, "2 open discussions", "2 approvals"],
++])("a row's counts of %i read %j and %j", (count, discussions, approvals) => {
++  expect(discussionsText(count)).toBe(discussions);
++  expect(approvalsText(count)).toBe(approvals);
++});
++
++test("a row's button and a job's title name what they open; a job without a page says why", () => {
++  expect(openChangesTitle(IID)).toBe("Open the changes of !13");
++  expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
++    "Open the log of test on GitLab",
++  );
++  expect(jobTitle("test", null)).toBe("GitLab gave no address for this job's log");
++});
++
++test("a filter's clear button and narrowing box name the filter; the placeholder in lower case", () => {
++  expect(clearFilterTitle("Reviewer")).toBe("Clear the Reviewer filter");
++  expect(narrowLabel("Label")).toBe("Narrow the Label list");
++  expect(narrowPlaceholder("Label")).toBe("Find label…");
+ });
+ 
+ test.each<[OpenReply, string]>([
+@@ -96,11 +126,11 @@ test("glab's words are the Send button's (catches the two drifting apart)", () =
+   const loggedOut = notLinedUpText({ kind: "notLoggedIn", detail: DETAIL }, START);
+   const failed = notLinedUpText({ kind: "failed", message: "boom" }, START);
+ 
+-  expect(listEndText({ kind: "glabMissing" }).startsWith(`${missing} — `)).toBe(true);
+-  expect(listEndText({ kind: "notLoggedIn", detail: DETAIL }).startsWith(`${loggedOut} — `)).toBe(
+-    true,
+-  );
+-  expect(listEndText({ kind: "failed", message: "boom" })).toBe(failed);
++  expect(listFailureText({ kind: "glabMissing" })?.startsWith(`${missing} — `)).toBe(true);
++  expect(
++    listFailureText({ kind: "notLoggedIn", detail: DETAIL })?.startsWith(`${loggedOut} — `),
++  ).toBe(true);
++  expect(listFailureText({ kind: "failed", message: "boom" })).toBe(failed);
+   expect(openReplyText({ kind: "glabMissing" }, IID)).toBe(missing);
+   expect(openReplyText({ kind: "notLoggedIn", detail: DETAIL }, IID)).toBe(loggedOut);
+   expect(openReplyText({ kind: "failed", message: "boom" }, IID)).toBe(failed);
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index 90f7b58..e470be1 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -1,15 +1,30 @@
+ import type { JobOpened, ListEnd, MergeRequestIid, OpenReply } from "../ipc";
++import type { DraftFilter } from "../mergeRequests";
+ import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
++import { counted } from "./serverText";
+ 
++export const PAGE_TITLE = "Merge requests";
++export const LIST_LABEL = "Open merge requests";
++export const REFRESH = "Refresh";
++export const FILTERS_LABEL = "Filters";
++export const CLEAR_FILTERS = "Clear filters";
++export const DRAFT_LABEL = "Draft";
++export const DRAFT_OPTIONS: readonly { readonly value: DraftFilter; readonly label: string }[] = [
++  { value: "all", label: "All" },
++  { value: "drafts", label: "Drafts" },
++  { value: "ready", label: "Ready" },
++];
+ export const LOADING_TEXT = "Loading merge requests…";
+ export const NONE_TEXT = "No open merge requests.";
++export const FAILED_JOBS_TITLE = "Failed jobs";
++export const ALLOWED_TO_FAIL = "allowed to fail";
++export const MORE_FAILED_JOBS = "More failed jobs on GitLab";
+ 
+-export function listEndText(end: ListEnd): string {
++export function listFailureText(end: ListEnd): string | null {
+   switch (end.kind) {
+     case "loaded":
+-      return "Loaded the open merge requests.";
+     case "cut":
+-      return `Only the newest ${end.limit} merge requests are listed; GitLab has more.`;
++      return null;
+     case "glabMissing":
+       return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
+     case "notLoggedIn":
+@@ -23,6 +38,40 @@ export function listEndText(end: ListEnd): string {
+   }
+ }
+ 
++export function mergeRequestReference(iid: MergeRequestIid): string {
++  return `!${iid}`;
++}
++
++export function openChangesTitle(iid: MergeRequestIid): string {
++  return `Open the changes of ${mergeRequestReference(iid)}`;
++}
++
++export function discussionsText(count: number): string {
++  return counted(count, "open discussion", "open discussions");
++}
++
++export function approvalsText(count: number): string {
++  return counted(count, "approval", "approvals");
++}
++
++export function jobTitle(name: string, page: string | null): string {
++  return page === null
++    ? "GitLab gave no address for this job's log"
++    : `Open the log of ${name} on GitLab`;
++}
++
++export function clearFilterTitle(name: string): string {
++  return `Clear the ${name} filter`;
++}
++
++export function narrowLabel(name: string): string {
++  return `Narrow the ${name} list`;
++}
++
++export function narrowPlaceholder(name: string): string {
++  return `Find ${name.toLowerCase()}…`;
++}
++
+ function openRefusedText(reply: Exclude<OpenReply, { kind: "opened" }>, mr: string): string {
+   switch (reply.kind) {
+     case "alreadyOpen":
+@@ -53,7 +102,7 @@ function openRefusedText(reply: Exclude<OpenReply, { kind: "opened" }>, mr: stri
+ }
+ 
+ export function openReplyText(reply: OpenReply, iid: MergeRequestIid): string {
+-  const mr = `!${iid}`;
++  const mr = mergeRequestReference(iid);
+   return reply.kind === "opened" ? `Opened ${mr} in a new window.` : openRefusedText(reply, mr);
+ }
+ 
+diff --git a/frontend/src/ui/searchText.ts b/frontend/src/ui/searchText.ts
+index c5bdadf..048710d 100644
+--- a/frontend/src/ui/searchText.ts
++++ b/frontend/src/ui/searchText.ts
+@@ -1,4 +1,5 @@
+ import type { Summary } from "../search";
++import { counted } from "./serverText";
+ 
+ export const SEARCH_TITLE = "Search";
+ export const SEARCH_PLACEHOLDER = "Search";
+@@ -10,10 +11,6 @@ export const DISMISS_LABEL = "Dismiss";
+ export const CUT_TEXT =
+   "The result set only contains a subset of all matches. Be more specific in your search to narrow down the results.";
+ 
+-function counted(count: number, one: string, many: string): string {
+-  return `${count} ${count === 1 ? one : many}`;
+-}
+-
+ export function summaryText(summary: Summary): string {
+   switch (summary.kind) {
+     case "searching":
+diff --git a/frontend/src/ui/serverText.ts b/frontend/src/ui/serverText.ts
+index 5af76e0..3055edd 100644
+--- a/frontend/src/ui/serverText.ts
++++ b/frontend/src/ui/serverText.ts
+@@ -174,7 +174,7 @@ export function formatNote(outcome: FormatOutcome | undefined): string | null {
+   }
+ }
+ 
+-function counted(count: number, one: string, many: string): string {
++export function counted(count: number, one: string, many: string): string {
+   return `${count} ${count === 1 ? one : many}`;
+ }
+ 

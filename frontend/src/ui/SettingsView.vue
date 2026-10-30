@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, shallowRef, useTemplateRef, watch } from "vue";
+import { computed, onMounted, shallowRef, useTemplateRef, watch } from "vue";
 import ArrowLeft from "~icons/lucide/arrow-left";
 
 import { themeRows, type Antialiasing } from "../ipc";
 import ChoiceButtons from "./ChoiceButtons.vue";
+import { returnFocus } from "./focusReturn";
 import KeymapList from "./KeymapList.vue";
 import { showsAntialiasing } from "./settings";
 import { useSettingsStore } from "./settingsStore";
@@ -34,14 +35,7 @@ onMounted(() => {
 
 async function goBack(): Promise<void> {
   closeSettings();
-  await nextTick();
-  if (
-    focusedBefore instanceof HTMLElement &&
-    focusedBefore.isConnected &&
-    getComputedStyle(focusedBefore).visibility === "visible"
-  ) {
-    focusedBefore.focus();
-  }
+  await returnFocus(focusedBefore);
 }
 
 function restorePath(): void {

@@ -5,6 +5,8 @@ import { computed, onMounted, watch } from "vue";
 import { log, onWindowClose, type RangeLineCounts } from "../ipc";
 import AgentSettings from "./AgentSettings.vue";
 import FileList from "./FileList.vue";
+import MergeRequestsButton from "./MergeRequestsButton.vue";
+import MergeRequestsView from "./MergeRequestsView.vue";
 import NoticeBar from "./NoticeBar.vue";
 import type { NoticeRow } from "./noticeText";
 import { unexpected } from "./problem";
@@ -131,17 +133,22 @@ function folderLines(path: string): RangeLineCounts {
           />
         </template>
         <div
-          v-if="emptyText !== null && screen.kind === 'files'"
+          v-if="emptyText !== null"
+          v-show="screen.kind === 'files'"
           class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
         >
-          <header class="flex h-10 shrink-0 items-center px-2">
-            <SettingsButton class="ml-auto" />
+          <header class="flex h-10 shrink-0 items-center gap-1 px-2">
+            <div class="ml-auto flex items-center gap-1">
+              <MergeRequestsButton />
+              <SettingsButton />
+            </div>
           </header>
           <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
         </div>
         <SettingsView v-if="screen.kind === 'settings'">
           <AgentSettings v-if="ai !== null" />
         </SettingsView>
+        <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />
       </div>
     </div>
     <QuestionDialog

@@ -42,6 +42,11 @@ const DENIED_FOR_SUBAGENTS: Rule[] = [
     reason:
       "golden snapshots change only through the orchestrator or the verifier on request (PM4); `just bindings` is allowed — it regenerates from source",
   },
+  {
+    pattern: /\bjust\s+(?:collect|triage|archive-board)(?![\w-])/,
+    reason:
+      "the board, notes and findings log are the orchestrator's bookkeeping (`just findings <id>` reads findings)",
+  },
 ];
 
 const REVIEWERS: Record<string, true> = { "boundary-reviewer": true, "correctness-reviewer": true };

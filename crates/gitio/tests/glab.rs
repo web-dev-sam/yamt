@@ -6,10 +6,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use yamt_conflict_repo::{
-    ConflictFile, FileKind, TempDir, diverged_repo, git_ok, run_ignored_in_child,
-};
-use yamt_gitio::{Error, Glab, GlabRun, Oid, Repo};
+use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, run_ignored_in_child};
+use yamt_gitio::{AuthStatus, Error, Glab, GlabRun, TIMED_OUT};
 
 const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
 const HANG_SECONDS: u64 = 5;
@@ -63,12 +61,16 @@ struct Fake {
 
 impl Fake {
     fn new(posts_before: u32) -> Fake {
+        Fake::on(&runner_scenario(), posts_before)
+    }
+
+    fn on(scenario: &Path, posts_before: u32) -> Fake {
         let dir = tempfile::tempdir().unwrap();
         let state = dir.path().join("state");
         fs::write(&state, format!("{posts_before}\n")).unwrap();
         let settings = format!(
             "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_STATE={}\nYAMT_FAKE_GLAB_LOG={}\n",
-            runner_scenario().display(),
+            scenario.display(),
             state.display(),
             dir.path().join("log").display(),
         );
@@ -298,52 +300,39 @@ fn glab_found_on_path_is_the_one_run() {
     assert_eq!(ran, expected);
 }
 
-fn oid_of(root: &Path, revision: &str) -> Oid {
-    let output = git_ok(root, &["rev-parse", revision]).unwrap();
-    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
+#[test]
+fn get_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_start() {
+    let fake = Fake::new(3);
+    let cwd = fake.dir.path();
+    let merge_request = ["api", "projects/7/merge_requests/12"];
+    let missing = cwd.join("no-glab");
+
+    let printed = fake.glab.get(cwd, &merge_request);
+    let not_found = fake.glab.get(cwd, &["api", "projects/7/unknown"]);
+    let silent = Glab::at(PathBuf::from("false")).get(cwd, &merge_request);
+    let hanging = fake.glab.with_timeout(SHORT_TIMEOUT).get(cwd, &POST);
+    let not_started = Glab::at(missing.clone()).get(cwd, &merge_request);
+
+    let body = without_final_newline(runner_file("merge-request.json"));
+    assert_eq!(printed, Ok(body));
+    assert_eq!(not_found, Err("glab: 404 Not Found (HTTP 404)".to_owned()));
+    assert_eq!(silent, Err("glab exited with status 1".to_owned()));
+    assert_eq!(hanging, Err(TIMED_OUT.to_owned()));
+    let reason = not_started.unwrap_err();
+    assert!(reason.contains(&missing.display().to_string()), "{reason}");
 }
 
 #[test]
-fn branch_names_from_heads_and_remote_tracking_and_none_for_a_commit_id() {
-    let dir = diverged_repo(&FILES).unwrap();
-    let root = dir.path();
-    let repo = Repo::discover(root).unwrap();
-    git_ok(
-        root,
-        &["update-ref", "refs/remotes/origin/feature", "remote"],
-    )
-    .unwrap();
-    let remote_commit = oid_of(root, "remote");
-    let name = |name: &str| repo.symbolic_full_name(name).unwrap();
+fn auth_status_is_logged_in_or_out_with_glab_s_first_line_or_failed() {
+    let logged_in = Fake::on(&in_this_repository("tests/glab/merge-requests"), 0);
+    let logged_out = Fake::new(0);
+    let missing = Glab::at(logged_in.dir.path().join("no-glab"));
 
-    let named: [(&str, Option<&[u8]>); 5] = [
-        ("remote", Some(b"refs/heads/remote")),
-        ("origin/feature", Some(b"refs/remotes/origin/feature")),
-        ("HEAD", Some(b"refs/heads/local")),
-        (remote_commit.as_str(), None),
-        ("remote~1", None),
-    ];
-    for (typed, expected) in named {
-        assert_eq!(name(typed), expected.map(<[u8]>::to_vec), "{typed}");
-    }
-    let range = repo.symbolic_full_name("main...remote");
-    assert!(matches!(range, Err(Error::GitFailed { .. })), "{range:?}");
-    git_ok(root, &["checkout", "--quiet", "--detach"]).unwrap();
-    assert_eq!(name("HEAD"), Some(b"HEAD".to_vec()));
-}
-
-#[test]
-fn remote_names_lists_every_remote() {
-    let dir = diverged_repo(&FILES).unwrap();
-    let root = dir.path();
-    let repo = Repo::discover(root).unwrap();
-    assert_eq!(repo.remote_names().unwrap(), Vec::<Vec<u8>>::new());
-
-    for remote in ["upstream", "origin", "fork"] {
-        let url = format!("https://gitlab.example/{remote}.git");
-        git_ok(root, &["remote", "add", remote, &url]).unwrap();
-    }
-
-    let expected: [&[u8]; 3] = [b"fork", b"origin", b"upstream"];
-    assert_eq!(repo.remote_names().unwrap(), expected);
+    let status = |fake: &Fake| fake.glab.auth_status(fake.dir.path());
+    assert_eq!(status(&logged_in), AuthStatus::LoggedIn);
+    let detail = "gitlab.com".to_owned();
+    assert_eq!(status(&logged_out), AuthStatus::LoggedOut { detail });
+    let failed = missing.auth_status(logged_in.dir.path());
+    assert!(matches!(failed, AuthStatus::Failed { .. }), "{failed:?}");
+    assert_eq!(logged_in.log().lines().next(), Some("argv: auth status"));
 }

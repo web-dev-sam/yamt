@@ -4626,6 +4626,7 @@ dependencies = [
  "yamt-compare",
  "yamt-conflict-repo",
  "yamt-lsp-host",
+ "yamt-merge-requests",
  "yamt-range",
  "yamt-review",
  "yamt-session",
@@ -4694,6 +4695,21 @@ dependencies = [
  "proptest",
  "serde",
  "specta",
+]
+
+[[package]]
+name = "yamt-merge-requests"
+version = "0.6.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "tracing",
+ "yamt-conflict-repo",
+ "yamt-gitio",
+ "yamt-range",
+ "yamt-review",
 ]
 
 [[package]]

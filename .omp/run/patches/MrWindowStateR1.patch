@@ -1,0 +1,579 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 2ba5b74..f281b73 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -6,6 +6,8 @@ The range window's threads and GitLab (plan §2 #116–#120) come through `Revie
+ 
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
++The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openJobPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`JobPage` brands in `domain.ts`, the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
++
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+ 
+ `themes.ts` (plan §2 #102) is the one table of the ten themes' group, button words and kind (`THEMES`, exhaustive over the generated `Theme`): `themeOf` reads `<html data-theme>` (anything not a name is yamt Dark), `themeKind` gives dark or light to the editor's dark flag and `color-scheme`, `themeRows` the Settings picker's five editors, each its dark then its light. Colours live only in the CSS blocks.
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index d327b5f..d51c356 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -9,6 +9,7 @@ import type {
+ 
+ export interface MergeRequestSource {
+   findGitLabProject(): Promise<SourceResult<GitLabProject>>;
++  /** Every page reaches `onPage` before the returned promise settles, and none after. */
+   listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>;
+   openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>;
+   openJobPage(page: JobPage): Promise<SourceResult<JobOpened>>;
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index f3dfab2..88dff8b 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -182,6 +182,12 @@ function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, Fi
+   return new Map(parsed.map((data) => [data.path, data]));
+ }
+ 
++export function pause(ms: number): Promise<void> {
++  return new Promise((resolve) => {
++    setTimeout(resolve, ms);
++  });
++}
++
+ function unknownPath(path: string): SourceResult<never> {
+   return { ok: false, failure: { kind: "UnknownPath", path } };
+ }
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index 2d6c678..babf736 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -1,4 +1,5 @@
+ import type * as Generated from "./bindings";
++import { pause } from "./fixture";
+ import { TIMED_OUT } from "./fixtureGitLab";
+ import {
+   DROPPED_LABEL,
+@@ -25,7 +26,7 @@ export type MergeRequestScript =
+   | "refused"
+   | "pageFails";
+ 
+-type Listing = {
++type Scripted = {
+   readonly pages: readonly (readonly Generated.MergeRequestRow[])[];
+   readonly end: Generated.ListEnd;
+ };
+@@ -66,12 +67,6 @@ function shownScript(log: Log, search: string): MergeRequestScript | null {
+   return null;
+ }
+ 
+-function pause(ms: number): Promise<void> {
+-  return new Promise((resolve) => {
+-    setTimeout(resolve, ms);
+-  });
+-}
+-
+ function pages(size: number, count: number): Generated.MergeRequestRow[][] {
+   return Array.from({ length: count }, (_, page) => fixtureRows(page * size, size));
+ }
+@@ -85,7 +80,7 @@ function withoutDroppedLabel(
+   }));
+ }
+ 
+-function listing(script: MergeRequestScript, load: number): Listing {
++function scripted(script: MergeRequestScript, load: number): Scripted {
+   switch (script) {
+     case "list": {
+       const first = pages(LIST_PAGE, LIST_PAGES);
+@@ -134,7 +129,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+         return { ok: true, value: LOADED };
+       }
+       loads += 1;
+-      const { pages: sent, end } = listing(script, loads);
++      const { pages: sent, end } = scripted(script, loads);
+       for (const rows of sent) {
+         if (script === "slow") {
+           await pause(SLOW_PAGE_MS);
+diff --git a/frontend/src/ipc/fixtureReview.ts b/frontend/src/ipc/fixtureReview.ts
+index 54c36d3..caba192 100644
+--- a/frontend/src/ipc/fixtureReview.ts
++++ b/frontend/src/ipc/fixtureReview.ts
+@@ -1,5 +1,6 @@
+ import type * as Generated from "./bindings";
+ import type { SourceResult } from "./domain";
++import { pause } from "./fixture";
+ import {
+   gitLabCheck,
+   postOutcome,
+@@ -40,12 +41,6 @@ const CHECKING_MS = 3000;
+ const POST_PAUSE_MS = 300;
+ const MS_PER_SECOND = 1000;
+ 
+-function pause(ms: number): Promise<void> {
+-  return new Promise((resolve) => {
+-    setTimeout(resolve, ms);
+-  });
+-}
+-
+ function listed(store: Store): Generated.ThreadList {
+   return { threads: store.threads };
+ }
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 0aa4825..fa8f40f 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -21,7 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
+   },
+ }));
+ 
+-type PageChannel = { onmessage: (page: Generated.MergeRequestPage) => void };
++type MessageChannel = { onmessage: (message: Generated.ListMessage) => void };
+ 
+ const ROW: Generated.MergeRequestRow = {
+   iid: 12,
+@@ -37,6 +37,39 @@ const ROW: Generated.MergeRequestRow = {
+ };
+ 
+ const STOPPED = { kind: "WorkerStopped" };
++const MICROTASKS = 10;
++
++function page(rows: Generated.MergeRequestRow[]): Generated.ListMessage {
++  return { kind: "page", page: { me: "sam", rows } };
++}
++
++function end(listEnd: Generated.ListEnd): Generated.ListMessage {
++  return { kind: "end", end: listEnd };
++}
++
++async function settled(): Promise<void> {
++  for (let turn = 0; turn < MICROTASKS; turn += 1) {
++    await Promise.resolve();
++  }
++}
++
++function heldChannel(reply: unknown = { status: "ok", data: null }): {
++  readonly channel: () => MessageChannel;
++} {
++  let held: MessageChannel | null = null;
++  commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
++    held = channel;
++    return reply;
++  });
++  return {
++    channel: () => {
++      if (held === null) {
++        throw new Error("the list command was not called");
++      }
++      return held;
++    },
++  };
++}
+ 
+ beforeEach(() => {
+   vi.resetAllMocks();
+@@ -50,36 +83,80 @@ test("the project comes back as GitLab answered it", async () => {
+   });
+ });
+ 
+-test("each page from the channel reaches the callback converted, then the end (catches a time left as text)", async () => {
+-  commands.listMergeRequests.mockImplementation(async (channel: PageChannel) => {
+-    channel.onmessage({ me: "sam", rows: [ROW] });
+-    channel.onmessage({ me: "sam", rows: [] });
+-    return { status: "ok", data: { kind: "cut", limit: 500 } };
++test("each page from the channel reaches the callback converted, then the end message ends the load (catches a time left as text)", async () => {
++  commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
++    channel.onmessage(page([ROW]));
++    channel.onmessage(page([]));
++    channel.onmessage(end({ kind: "cut", limit: 500 }));
++    return { status: "ok", data: null };
+   });
+   const pages: MergeRequestPage[] = [];
+ 
+-  const end = await createTauriMergeRequests().listMergeRequests((page) => pages.push(page));
++  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
+ 
+   expect(pages).toEqual([
+     { me: "sam", rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 29, 8) }] },
+     { me: "sam", rows: [] },
+   ]);
+-  expect(end).toEqual({ ok: true, value: { kind: "cut", limit: 500 } });
++  expect(ended).toEqual({ ok: true, value: { kind: "cut", limit: 500 } });
+ });
+ 
+-test("an unreadable page fails the load after the pages before it arrived (catches it lost in the channel)", async () => {
+-  commands.listMergeRequests.mockImplementation(async (channel: PageChannel) => {
+-    channel.onmessage({ me: null, rows: [ROW] });
+-    channel.onmessage({ me: null, rows: [{ ...ROW, createdAt: "soon" }] });
+-    channel.onmessage({ me: null, rows: [] });
+-    return { status: "ok", data: { kind: "loaded" } };
+-  });
++test("a page that arrives after the command resolved is still in the load, which ends only on the end message (catches the command's answer taken as the end)", async () => {
++  const held = heldChannel();
++  const pages: MergeRequestPage[] = [];
++  let answer: unknown = null;
++  const loading = createTauriMergeRequests()
++    .listMergeRequests((got) => pages.push(got))
++    .then((result) => {
++      answer = result;
++      return result;
++    });
++  await settled();
++  expect(answer).toBeNull();
++
++  held.channel().onmessage(page([ROW]));
++  await settled();
++  expect(pages).toHaveLength(1);
++  expect(answer).toBeNull();
++
++  held.channel().onmessage(end({ kind: "loaded" }));
++  expect(await loading).toEqual({ ok: true, value: { kind: "loaded" } });
++  held.channel().onmessage(page([ROW]));
++  expect(pages).toHaveLength(1);
++});
++
++test("an unreadable page fails the load even after the command resolved, and no page is passed on after it (catches it lost in the channel)", async () => {
++  const held = heldChannel();
++  const pages: MergeRequestPage[] = [];
++  const loading = createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
++  await settled();
++
++  held.channel().onmessage(page([ROW]));
++  held.channel().onmessage(page([{ ...ROW, createdAt: "soon" }]));
++  held.channel().onmessage(page([]));
++  held.channel().onmessage(end({ kind: "loaded" }));
++
++  await expect(loading).rejects.toThrow('rows[0].createdAt must be an ISO 8601 time, got "soon"');
++  expect(pages.map((got) => got.rows.length)).toEqual([1]);
++});
++
++test("an IPC failure of the command ends the load as that failure, and a later page is not passed on", async () => {
++  const held = heldChannel({ status: "error", error: STOPPED });
+   const pages: MergeRequestPage[] = [];
+ 
+-  await expect(
+-    createTauriMergeRequests().listMergeRequests((page) => pages.push(page)),
+-  ).rejects.toThrow('rows[0].createdAt must be an ISO 8601 time, got "soon"');
+-  expect(pages.map((page) => page.rows.length)).toEqual([1, 0]);
++  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
++  held.channel().onmessage(page([ROW]));
++
++  expect(ended).toEqual({ ok: false, failure: STOPPED });
++  expect(pages).toEqual([]);
++});
++
++test("a command that throws fails the load", async () => {
++  commands.listMergeRequests.mockRejectedValue(new Error("no app"));
++
++  await expect(createTauriMergeRequests().listMergeRequests(() => undefined)).rejects.toThrow(
++    "no app",
++  );
+ });
+ 
+ test("opening passes the iid and camelCases a missing commit", async () => {
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index cc05167..a6e819c 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -1,30 +1,56 @@
+ import { Channel } from "@tauri-apps/api/core";
+ 
+-import { commands, type MergeRequestPage as MergeRequestPageDto } from "./bindings";
+-import { toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
++import { commands, type ListMessage } from "./bindings";
++import type { SourceResult } from "./domain";
++import {
++  toMergeRequestPage,
++  toOpenReply,
++  type ListEnd,
++  type MergeRequestPage,
++} from "./mergeRequestDomain";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import { converted, toResult } from "./tauri";
+ 
++function listed(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>> {
++  return new Promise((resolve, reject) => {
++    let settled = false;
++    function end(result: SourceResult<ListEnd>): void {
++      settled = true;
++      resolve(result);
++    }
++    function fail(error: unknown): void {
++      settled = true;
++      reject(error);
++    }
++    const messages = new Channel<ListMessage>((message) => {
++      if (settled) {
++        return;
++      }
++      if (message.kind === "end") {
++        end({ ok: true, value: message.end });
++        return;
++      }
++      try {
++        onPage(toMergeRequestPage(message.page));
++      } catch (error) {
++        fail(error);
++      }
++    });
++    commands.listMergeRequests(messages).then((reply) => {
++      const result = toResult(reply);
++      if (!result.ok) {
++        end(result);
++      }
++    }, fail);
++  });
++}
++
+ export function createTauriMergeRequests(): MergeRequestSource {
+   return {
+     async findGitLabProject() {
+       return { ok: true, value: await commands.findGitlabProject() };
+     },
+-    async listMergeRequests(onPage) {
+-      const unreadable: unknown[] = [];
+-      const pages = new Channel<MergeRequestPageDto>((raw) => {
+-        try {
+-          onPage(toMergeRequestPage(raw));
+-        } catch (error) {
+-          unreadable.push(error);
+-        }
+-      });
+-      const reply = toResult(await commands.listMergeRequests(pages));
+-      if (unreadable.length > 0) {
+-        throw unreadable[0];
+-      }
+-      return reply;
+-    },
++    listMergeRequests: listed,
+     async openMergeRequest(iid) {
+       return converted(toResult(await commands.openMergeRequest(iid)), toOpenReply);
+     },
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 73712cc..88a4936 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -20,7 +20,7 @@ import {
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import {
+   createMergeRequests,
+-  type Listing,
++  type ListLoad,
+   type MergeRequests,
+   type Opening,
+ } from "./mergeRequests";
+@@ -181,7 +181,7 @@ test("show opens the page and starts the first load; close returns to the files"
+   const live = rig();
+   live.slice.show();
+   expect(live.screen.value).toEqual({ kind: "mergeRequests" });
+-  const firstLoad: Listing = { kind: "loading", first: true };
++  const firstLoad: ListLoad = { kind: "loading", first: true };
+   expect(live.slice.listing.value).toEqual(firstLoad);
+   expect(live.loads).toHaveLength(1);
+ 
+@@ -261,9 +261,6 @@ test.each<ListEnd>([
+     await reloading;
+     expect(iids(live.slice.rows.value)).toEqual(iids(ROWS));
+     expect(live.slice.listing.value).toEqual({ kind: "done", end, at: T0 });
+-
+-    reload.send({ me: "sam", rows: [] });
+-    expect(iids(live.slice.rows.value)).toEqual(iids(ROWS));
+   },
+ );
+ 
+@@ -277,36 +274,6 @@ test("a first load that fails after a page keeps that page (the sent pages stay)
+   expect(live.slice.rows.value).toHaveLength(20);
+ });
+ 
+-test("a page from an older load is dropped (catches stale pages applied)", async () => {
+-  const live = rig();
+-  await loaded(live, ROWS.slice(0, 3));
+-  const old = loadAt(live, 0);
+-
+-  const reloading = live.slice.refresh();
+-  old.send({ me: "ben", rows: ROWS.slice(10, 12) });
+-  expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 3)));
+-  loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(1, 2) });
+-  loadAt(live, 1).end(LOADED);
+-  await reloading;
+-  old.send({ me: "ben", rows: ROWS.slice(12, 14) });
+-
+-  expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(1, 2)));
+-  expect(live.slice.me.value).toBe("sam");
+-});
+-
+-test("a page of the latest load that arrives after its end still counts (Tauri may deliver a large page late)", async () => {
+-  const live = rig();
+-  await loaded(live, ROWS.slice(0, 3));
+-
+-  const reloading = live.slice.refresh();
+-  const reload = loadAt(live, 1);
+-  reload.end(LOADED);
+-  await reloading;
+-  reload.send({ me: "sam", rows: ROWS.slice(5, 7) });
+-
+-  expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(5, 7)));
+-});
+-
+ test("one load at a time: Refresh and show while loading start nothing (catches two loads racing)", async () => {
+   const live = rig();
+   live.slice.show();
+@@ -323,7 +290,6 @@ test("a failed first list call is reported and leaves nothing loaded, so the nex
+   loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(0, 2) });
+   loadAt(live, 0).end({ ok: false, failure: STOPPED });
+   await settled();
+-  loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(2, 4) });
+ 
+   expect(live.problems).toEqual([{ action: "mergeRequests", step: "list", cause: STOPPED }]);
+   expect(live.slice.listing.value).toEqual({ kind: "notLoaded" });
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 1e35f8f..8c484ae 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -34,7 +34,7 @@ import { jobOpenedText } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+-export type Listing =
++export type ListLoad =
+   | { readonly kind: "notLoaded" }
+   | { readonly kind: "loading"; readonly first: boolean }
+   | { readonly kind: "done"; readonly end: ListEnd; readonly at: number };
+@@ -54,7 +54,7 @@ export type MergeRequests = {
+   readonly project: Readonly<ShallowRef<GitLabProject>>;
+   readonly me: Readonly<ShallowRef<string | null>>;
+   readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
+-  readonly listing: Readonly<ShallowRef<Listing>>;
++  readonly listing: Readonly<ShallowRef<ListLoad>>;
+   readonly filters: Readonly<Ref<Filters>>;
+   readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
+   readonly choices: ComputedRef<Choices>;
+@@ -81,23 +81,19 @@ type Deps = {
+   readonly storage?: StorageLike;
+ };
+ 
+-type Load = { buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
++type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+ 
+ type State = Deps & {
+   readonly project: ShallowRef<GitLabProject>;
+   readonly me: ShallowRef<string | null>;
+   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
+   readonly cut: ShallowRef<boolean>;
+-  readonly listing: ShallowRef<Listing>;
++  readonly listing: ShallowRef<ListLoad>;
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+   readonly jobProblem: ShallowRef<string | null>;
+-  load: Load | null;
+ };
+ 
+ function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
+-  if (state.load !== load) {
+-    return;
+-  }
+   if (load.buffered) {
+     load.buffer = merged(load.buffer, rows);
+     load.me = me;
+@@ -115,7 +111,6 @@ function ended(state: State, load: Load, end: ListEnd): void {
+   if (load.buffered && listed) {
+     state.rows.value = load.buffer;
+     state.me.value = load.me;
+-    load.buffered = false;
+   }
+   state.listing.value = { kind: "done", end, at: Date.now() };
+ }
+@@ -127,7 +122,6 @@ async function load(state: State): Promise<void> {
+   }
+   const first = before.kind === "notLoaded";
+   const running: Load = { buffered: !first, buffer: [], me: null };
+-  state.load = running;
+   state.listing.value = { kind: "loading", first };
+   const outcome = await attempt(() =>
+     state.source.listMergeRequests((page) => {
+@@ -138,7 +132,6 @@ async function load(state: State): Promise<void> {
+     ended(state, running, outcome.value);
+     return;
+   }
+-  state.load = null;
+   state.listing.value = before;
+   if (first) {
+     state.rows.value = [];
+@@ -205,10 +198,9 @@ function createState(deps: Deps): State {
+     me: shallowRef<string | null>(null),
+     rows: shallowRef<readonly MergeRequestRow[]>([]),
+     cut: shallowRef(false),
+-    listing: shallowRef<Listing>({ kind: "notLoaded" }),
++    listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
+     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
+     jobProblem: shallowRef<string | null>(null),
+-    load: null,
+   };
+ }
+ 
+diff --git a/frontend/src/ui/screen.ts b/frontend/src/ui/screen.ts
+index a0d86ed..22d953b 100644
+--- a/frontend/src/ui/screen.ts
++++ b/frontend/src/ui/screen.ts
+@@ -6,10 +6,12 @@ export type Screen =
+   | { readonly kind: "serverLog"; readonly name: string }
+   | { readonly kind: "mergeRequests" };
+ 
+-export function settingsScreen(screen: ShallowRef<Screen>): {
++export type SettingsScreen = {
+   openSettings(): void;
+   closeSettings(): void;
+-} {
++};
++
++export function settingsScreen(screen: ShallowRef<Screen>): SettingsScreen {
+   return {
+     openSettings: () => {
+       screen.value = { kind: "settings" };
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index f08a74c..c0d8e7e 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -30,7 +30,7 @@ import type { Problem } from "./problem";
+ import type { Question } from "./question";
+ import { createSaving, finish, reset, take } from "./saving";
+ import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
+-import type { Screen } from "./screen";
++import { settingsScreen, type Screen, type SettingsScreen } from "./screen";
+ import { createServers, type Servers } from "./servers";
+ import { createServerSetup, type ServerSetup } from "./serverSetup";
+ import { preferencesOf, settingsActions, startSettings } from "./settings";
+@@ -75,7 +75,8 @@ type State = Refs &
+ 
+ type Actions = CloseGuard &
+   MergeSearch &
+-  SettingsActions & {
++  SettingsActions &
++  SettingsScreen & {
+     loadFiles(): Promise<void>;
+     refreshFiles(): Promise<void>;
+     nextStop(end: StopEnd): Promise<void>;
+@@ -86,8 +87,6 @@ type Actions = CloseGuard &
+     reset(path: string, diskVersion: DiskVersion): Promise<void>;
+     dismissProblem(): void;
+     dismissNotice(key: string): void;
+-    openSettings(): void;
+-    closeSettings(): void;
+     answer(yes: boolean): void;
+     dismissQuestion(): void;
+     toggleButton(id: ToolbarButtonId): void;
+@@ -223,12 +222,6 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
+     dismissNotice: (key) => {
+       state.notices.value = state.notices.value.filter((notice) => noticeKey(notice) !== key);
+     },
+-    openSettings: () => {
+-      state.screen.value = { kind: "settings" };
+-    },
+-    closeSettings: () => {
+-      state.screen.value = { kind: "files" };
+-    },
+     answer: state.asking.answer,
+     dismissQuestion: state.asking.dismiss,
+     toggleButton: buttons.toggle,
+@@ -239,6 +232,7 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
+     search: state.search,
+     liveResults: state.liveResults,
+     ...settings,
++    ...settingsScreen(state.screen),
+   };
+ }
+ 

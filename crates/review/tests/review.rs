@@ -616,11 +616,6 @@ fn a_branch_side_asks_for_the_branch_s_open_merge_requests() {
     let repo = range_repo();
     git_ok(
         &repo_root(&repo),
-        &["remote", "add", "origin", "https://gitlab.example/t.git"],
-    )
-    .unwrap();
-    git_ok(
-        &repo_root(&repo),
         &["update-ref", "refs/remotes/origin/feature", "feature"],
     )
     .unwrap();

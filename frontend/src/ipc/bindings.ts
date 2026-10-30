@@ -67,6 +67,14 @@ export const commands = {
 	 *  which never asks for the format list that `WebKitGTK` 2.54 crashes on (plan §2 #99).
 	 */
 	readClipboard: (selection: ClipboardSelection) => __TAURI_INVOKE<string | null>("read_clipboard", { selection }),
+	findGitlabProject: () => __TAURI_INVOKE<GitLabProject>("find_gitlab_project"),
+	listMergeRequests: (messages: Channel<ListMessage>) => typedError<null, IpcError>(__TAURI_INVOKE("list_merge_requests", { messages })),
+	openMergeRequest: (iid: MergeRequestIid) => typedError<OpenReply, IpcError>(__TAURI_INVOKE("open_merge_request", { iid })),
+	/**
+	 *  Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
+	 *  address to the system.
+	 */
+	openJobPage: (page: JobPage) => __TAURI_INVOKE<JobOpened>("open_job_page", { page }),
 };
 
 /* Types */
@@ -137,6 +145,23 @@ export type ChunkKind =
 "BothSame" | 
 /**  Local and remote changed these base lines differently. */
 "Conflict";
+
+/**  A pipeline's status, GitLab's fifteen folded into the seven the window shows. */
+export type CiStatus = 
+/**  It succeeded. */
+"passed" | 
+/**  It failed. */
+"failed" | 
+/**  It runs. */
+"running" | 
+/**  It waits to run. */
+"pending" | 
+/**  It was canceled. */
+"canceled" | 
+/**  It was skipped. */
+"skipped" | 
+/**  It waits for a manual job. */
+"manual";
 
 export type ClipboardSelection = "clipboard" | "primary";
 
@@ -215,6 +240,18 @@ export type DiskVersion = number;
 
 export type Eol = "Lf" | "CrLf" | "Mixed";
 
+/**  A failed job of a merge request's latest pipeline, the latest run of it. */
+export type FailedJob = {
+	/**  The job's name. */
+	name: string,
+	/**  Its stage's name. */
+	stage: string,
+	/**  Whether the pipeline may pass while it fails. */
+	allowFailure: boolean,
+	/**  Its log page; `None` when GitLab is not on https or sent an odd path. */
+	page: JobPage | null,
+};
+
 export type FileEntry = {
 	path: string,
 	status: FileStatus,
@@ -255,6 +292,15 @@ merge_request: MergeRequestRef } |
 /**  Why. */
 why: NotLinedUp };
 
+/**  Whether the window shows the button: decided once at start, offline. */
+export type GitLabProject = 
+/**  No repository, or no remote on a GitLab server. */
+{ kind: "none" } | 
+/**  A repository with a remote on a GitLab server. */
+{ kind: "found"; 
+/**  The absolute common git dir (lossy UTF-8): the key filters are remembered by. */
+repository: string };
+
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
 
@@ -283,6 +329,20 @@ export type InlineRange<L> = {
 };
 
 export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "NotANote"; message: MessageId } | { kind: "SendRunning" } | { kind: "AiOff" } | { kind: "RemoveFailed"; folder: string; message: string };
+
+/**  How asking to open a failed job's page ended. */
+export type JobOpened = 
+/**  The browser was asked to show it. */
+{ kind: "opened" } | 
+/**  This window's list never offered that address, so it is not opened. */
+{ kind: "notOffered" } | 
+/**  The browser could not be asked. */
+{ kind: "failed"; 
+/**  Why, in the system's words. */
+message: string };
+
+/**  The address of a failed job's log page on the project's GitLab; only `JobPage::built` makes one. */
+export type JobPage = string;
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -323,6 +383,32 @@ export type LineRange<L> = {
 	len: number,
 };
 
+/**  How a load ended; the pages already sent stay. */
+export type ListEnd = 
+/**  Every open merge request was sent. */
+{ kind: "loaded" } | 
+/**  The newest `limit` were sent; GitLab has more. */
+{ kind: "cut"; 
+/**  How many were sent. */
+limit: number } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first output line, which names the instance. */
+detail: string } | 
+/**  glab failed, timed out or answered something unexpected. */
+{ kind: "failed"; 
+/**  What went wrong, in glab's, GitLab's or yamt's words. */
+message: string };
+
+/**
+ *  One message of a load, in order: every page, then its end. The end travels on the channel too: tauri 2.12.1
+ *  delivers a channel message of 8 KiB of JSON or more by a later fetch (ipc/channel.rs
+ *  `MAX_JSON_DIRECT_EXECUTE_THRESHOLD`), so a page could reach the window after the command's own answer.
+ */
+export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd };
+
 /**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
 export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" };
 
@@ -357,6 +443,17 @@ export type MergeChunk = {
 	waiting: Waiting,
 };
 
+/**  A merge request's number within its project, "!12" without the "!". */
+export type MergeRequestIid = number;
+
+/**  One page of the list, sent as soon as it arrives. */
+export type MergeRequestPage = {
+	/**  The logged-in user's username. */
+	me: string | null,
+	/**  The page's merge requests, newest first. */
+	rows: MergeRequestRow[],
+};
+
 /**  A merge request as the window names it. */
 export type MergeRequestRef = {
 	/**  Its short reference, "!12". */
@@ -365,6 +462,30 @@ export type MergeRequestRef = {
 	title: string,
 	/**  Its page on GitLab. */
 	web_url: string,
+};
+
+/**  One open merge request as a row of the list. */
+export type MergeRequestRow = {
+	/**  Its number. */
+	iid: MergeRequestIid,
+	/**  Its title, GitLab's "Draft: " prefix included. */
+	title: string,
+	/**  GitLab's ISO 8601 time, as sent. */
+	createdAt: string,
+	/**  Whether it is a draft. */
+	draft: boolean,
+	/**  Its assignees. */
+	assignees: Person[],
+	/**  Its reviewers. */
+	reviewers: Person[],
+	/**  Its labels' titles. */
+	labels: string[],
+	/**  Resolvable discussions not yet resolved. */
+	openDiscussions: number,
+	/**  Approvals given. */
+	approvals: number,
+	/**  Its latest pipeline; `None` when it has none. */
+	pipeline: Pipeline | null,
 };
 
 /**  One message of a thread. */
@@ -447,8 +568,63 @@ message: string };
 /**  Why the file on disk cannot be shown as the middle text. */
 export type NotText = "Deleted" | "Binary" | "NonUtf8" | "TooLarge" | "Link" | "Directory";
 
+/**  How asking to open a merge request's changes ended. */
+export type OpenReply = 
+/**  A new window shows them. */
+{ kind: "opened" } | 
+/**  Another yamt window shows the same two commits. */
+{ kind: "alreadyOpen" } | 
+/**  GitLab still prepares the merge request's diff. */
+{ kind: "preparing" } | 
+/**  The merge request is no longer open. */
+{ kind: "notOpen" } | 
+/**  No remote of the repository names the project, so its commits cannot be fetched. */
+{ kind: "noRemote"; 
+/**  The project's full path, `group/project`. */
+project: string } | 
+/**  Fetching the merge request's commits failed. */
+{ kind: "fetchFailed"; 
+/**  git's first line: the cause. */
+message: string } | 
+/**  A commit of GitLab's diff is not in the repository, even after the fetch. */
+{ kind: "missingCommit"; 
+/**  Its short id. */
+short_id: string } | 
+/**  The new window's yamt did not start. */
+{ kind: "startFailed"; 
+/**  Why, in the system's words. */
+message: string } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first output line, which names the instance. */
+detail: string } | 
+/**  glab or git failed, timed out or answered something unexpected. */
+{ kind: "failed"; 
+/**  What went wrong, in glab's, GitLab's, git's or yamt's words. */
+message: string };
+
 /**  What git is doing, with the names of what it applies (plan §2 #87). */
 export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
+
+/**  A GitLab user. */
+export type Person = {
+	/**  The login name, without "@". */
+	username: string,
+	/**  The display name. */
+	name: string,
+};
+
+/**  A merge request's latest pipeline. */
+export type Pipeline = {
+	/**  Its status. */
+	status: CiStatus,
+	/**  Its failed jobs, in GitLab's order. */
+	failedJobs: FailedJob[],
+	/**  Whether it has more failed jobs than were asked for. */
+	moreFailedJobs: boolean,
+};
 
 /**  Where a message stands on its way to GitLab. */
 export type Posting = 

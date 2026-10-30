@@ -19,6 +19,8 @@ import { aiMayClose } from "./aiClose";
 import { createAsking, type Asking } from "./asking";
 import { createCollapsing, type Collapsing } from "./collapsing";
 import { fileListKey, type KeyPress } from "./fileListKey";
+import type { MergeRequests } from "./mergeRequests";
+import { windowMergeRequests } from "./mergeRequestsStore";
 import { attempt, clearProblemAbout, report, type Problem } from "./problem";
 import type { Question } from "./question";
 import { createRangeAi, type RangeAi } from "./rangeAi";
@@ -27,10 +29,10 @@ import { createGitLabCheck, type GitLabState } from "./rangeGitLab";
 import { createRangeSearch } from "./rangeSearch";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 import { threadPlaceText } from "./rangeThreadText";
-import type { Screen } from "./screen";
+import { settingsScreen, type Screen } from "./screen";
 import type { Searching } from "./searching";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
-import type { SettingsActions, SettingsInUse } from "./settings";
+import type { SettingsInUse } from "./settings";
 import { registerSettingsStore, type SettingsStore } from "./settingsStore";
 import type { Preferences } from "./useMergeController";
 
@@ -54,6 +56,7 @@ export type RangeStore = SettingsStore &
     readonly gitlab: GitLabState;
     readonly ai: RangeStoreAi | null;
     readonly search: Searching<Column>;
+    readonly mergeRequests: MergeRequests;
     startUp(): Promise<void>;
     loadSettings(): Promise<void>;
     showFile(path: string): void;
@@ -174,6 +177,7 @@ export function createRangeStore(
   const state = createState(refs, source, agent);
   const settings = settingsActions(state);
   const shownPath = computed(() => entryOf(state, refs.shown.value)?.path ?? null);
+  const mergeRequests = windowMergeRequests(source, refs);
   const created: RangeStore = {
     ...refs,
     ...createCollapsing(),
@@ -189,8 +193,9 @@ export function createRangeStore(
       },
       shownPath: () => shownPath.value,
     }),
+    mergeRequests,
     ...settings,
-    startUp: () => startUp(state, settings),
+    startUp: () => startUp(state, [settings.loadSettings(), mergeRequests.findProject()]),
     showFile: (path) => {
       showPath(state, path);
     },
@@ -219,12 +224,7 @@ function chromeActions(
     },
     answer: state.asking.answer,
     dismissQuestion: state.asking.dismiss,
-    openSettings: () => {
-      state.screen.value = { kind: "settings" };
-    },
-    closeSettings: () => {
-      state.screen.value = { kind: "files" };
-    },
+    ...settingsScreen(state.screen),
   };
 }
 
@@ -262,11 +262,8 @@ function forget(state: State, file: RangeFileId): void {
   state.visited.value = state.visited.value.filter((each) => each.id !== file);
 }
 
-async function startUp(state: State, settings: SettingsActions): Promise<void> {
-  const [outcome] = await Promise.all([
-    attempt(() => state.source.openRange()),
-    settings.loadSettings(),
-  ]);
+async function startUp(state: State, besides: readonly Promise<void>[]): Promise<void> {
+  const [outcome] = await Promise.all([attempt(() => state.source.openRange()), ...besides]);
   if (!outcome.ok) {
     report(state, { action: "openRange", cause: outcome.cause });
     return;

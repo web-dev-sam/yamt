@@ -2,6 +2,7 @@ import * as v from "valibot";
 
 import type * as Generated from "./bindings";
 import { DIFFERENCE, memberOf, parsedCases } from "./fixture";
+import { createFixtureMergeRequests } from "./fixtureMergeRequests";
 import { createFixtureReview } from "./fixtureReview";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
@@ -165,5 +166,6 @@ export function createFixtureRangeSource(
     },
     ...createFixtureReview(log, search, shown.start),
     ...createFixtureSettings(),
+    ...createFixtureMergeRequests(log, search),
   };
 }

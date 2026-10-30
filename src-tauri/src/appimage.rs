@@ -11,12 +11,25 @@ const APPDIR_VAR: &str = "APPDIR";
 const START_DIR_VAR: &str = "OWD";
 
 pub(crate) fn repo_from_start_dir(repo: PathBuf) -> PathBuf {
-    let inside_appimage = is_inside_appimage(
+    resolved(repo, is_running_appimage(), std::env::var_os(START_DIR_VAR))
+}
+
+/// The `AppImage` file yamt runs from, `$APPIMAGE`; `None` outside one. A second yamt must start from it: the mount
+/// the running binary lives in goes away when this process ends.
+pub(crate) fn running_appimage() -> Option<PathBuf> {
+    appimage_if_inside(std::env::var_os(APPIMAGE_VAR), is_running_appimage())
+}
+
+fn is_running_appimage() -> bool {
+    is_inside_appimage(
         std::env::var_os(APPIMAGE_VAR).is_some(),
         std::env::var_os(APPDIR_VAR).map(resolved_appdir),
         std::env::current_exe().ok(),
-    );
-    resolved(repo, inside_appimage, std::env::var_os(START_DIR_VAR))
+    )
+}
+
+fn appimage_if_inside(appimage: Option<OsString>, inside_appimage: bool) -> Option<PathBuf> {
+    appimage.filter(|_| inside_appimage).map(PathBuf::from)
 }
 
 // The runtime builds APPDIR from `$TMPDIR` as given (AppImageKit `runtime.c`), while Linux's
@@ -121,5 +134,22 @@ mod tests {
             resolved_appdir(APPDIR.into()),
             PathBuf::from("/tmp/.mount_yamtAbC")
         );
+    }
+
+    #[test]
+    fn the_running_appimage_is_appimage_only_from_inside_it() {
+        const APPIMAGE: &str = "/home/sam/yamt.AppImage";
+        assert_eq!(
+            appimage_if_inside(Some(APPIMAGE.into()), true),
+            Some(PathBuf::from(APPIMAGE))
+        );
+        assert_eq!(appimage_if_inside(Some(APPIMAGE.into()), false), None);
+        assert_eq!(appimage_if_inside(None, true), None);
+    }
+
+    #[test]
+    fn a_test_run_is_not_inside_an_appimage() {
+        assert!(!is_running_appimage());
+        assert_eq!(running_appimage(), None);
     }
 }

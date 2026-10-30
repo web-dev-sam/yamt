@@ -8,6 +8,7 @@ import type { RangeEntry, RangeSide } from "../ipc";
 import { COLLAPSE_LABEL } from "./collapsing";
 import { fileIcon } from "./fileIcon";
 import { ACTION_NAMES } from "./keyText";
+import MergeRequestsButton from "./MergeRequestsButton.vue";
 import PaneFrame from "./PaneFrame.vue";
 import { compareColumns } from "./paneSplit";
 import RangeSendButton from "./RangeSendButton.vue";
@@ -105,6 +106,7 @@ watch(
           <ChevronsDownUp class="size-4" aria-hidden="true" />
         </button>
         <RangeSendButton class="ml-auto" />
+        <MergeRequestsButton />
         <SettingsButton />
       </header>
     </template>

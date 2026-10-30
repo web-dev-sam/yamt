@@ -1,8 +1,18 @@
 modelRoles:
-  orchestrator: anthropic/claude-opus-5-5:high
+  # The main session (the orchestrator) runs on the default role.
+  default: anthropic/claude-opus-5-5:high
   implementer: anthropic/claude-opus-5-5:medium
   reviewer: anthropic/claude-opus-5-5:high
   verifier: anthropic/claude-opus-5-5:low
+
+# Context full ⇒ an omp handoff document replaces the history and the session continues on its own
+# (owner 2026-10-30, #1770). 450k sits above every subagent's peak (404k) and well below the window, so
+# the orchestrator hands off between waves instead of the owner stopping it. Handoff is skipped on an
+# overflow (its request would reuse the overflowing input); the methods after it cover that case.
+compaction:
+  thresholdTokens: 450000
+  methodOrder: [handoff, remote, snapcompact, shake, soft]
+  handoffSaveToDisk: true
 
 task:
   maxRecursionDepth: 1

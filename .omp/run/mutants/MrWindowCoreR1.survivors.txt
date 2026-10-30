@@ -1,0 +1,7 @@
+just mutants HEAD → mutants: no Rust changes; stryker: 245 killed, 5 survived, 6 no coverage; mergeRequestFilters.ts 100%, serverPins.ts 95%, windowStorage.ts 97.22%, filters.ts 95.06%
+frontend/src/mergeRequests/internal/filters.ts:41 `b.kind === "person"` → true — equivalent: a b of another kind has no username, and undefined never equals a string
+frontend/src/mergeRequests/internal/filters.ts:43 `b.kind === "label"` → true — equivalent: a b of another kind has no title, and undefined never equals a string
+frontend/src/mergeRequests/internal/filters.ts:44 default exhaustive arm (NoCoverage) — equivalent: unreachable, `a` is `never` there
+frontend/src/ui/serverPins.ts:29 `root.value === null` → false — equivalent: entryAt(null) reads key "null", which no absolute repository root can be
+frontend/src/ui/windowStorage.ts:42 `stored !== null` → true — equivalent: spreading null gives {}, the same empty record
+frontend/src/ui/serverPins.ts:12 STORAGE_KEY string — not a changed line (only moved up); module-level static under --ignoreStatic

@@ -1,0 +1,5 @@
+just mutants HEAD (final run): 1008+ killed, 39 survived, 324 no coverage; ciBox, focusReturn, searchText 100%; mergeRequests.ts 99.4%; mergeRequestsText.ts no survivors
+scripts/app-session/processes.ts:147 MethodExpression (PROCESS_ID filter removed) — equivalent: a non-numeric /proc entry gives pid NaN, its stat path <root>/NaN/stat never exists, so startTicks is null and the entry is dropped anyway
+scripts/app-session/stop.ts:34 (kind === 'app' branch, no coverage) — gate-covered: the real-app smoke shows children:[{role:'yamt child',result:'stopped'}], while the mutant →false prints []
+scripts/app-session/start.ts:117-125 appEnv session entry (no coverage) — gate-covered by the same smoke: the child was found only through YAMT_APP_SESSION
+Other survivors (startArgs.ts 44-45/182-217, state.ts 49-98, filters.ts 41/43, mergeRequests.ts:146, serverText.ts constants) sit on lines this slice did not change

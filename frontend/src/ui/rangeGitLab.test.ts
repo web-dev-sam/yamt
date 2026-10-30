@@ -12,13 +12,9 @@ import {
   type SendReply,
   type SourceResult,
 } from "../ipc";
+import { RECHECK_PAUSE_MS } from "./glab";
 import type { Problem } from "./problem";
-import {
-  createGitLabCheck,
-  RECHECK_PAUSE_MS,
-  type GitLabState,
-  type PostBody,
-} from "./rangeGitLab";
+import { createGitLabCheck, type GitLabState, type PostBody } from "./rangeGitLab";
 import { createRangeThreads, type RangeThreads } from "./rangeThreads";
 
 const TEXT: PostBody = { kind: "text", text: "Is this still used?" };

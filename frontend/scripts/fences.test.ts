@@ -398,6 +398,75 @@ test("ui importing search's internal/ violates PM5", () => {
   ]);
 });
 
+test("mergeRequests importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+  const files = [
+    { path: "src/mergeRequests/index.ts", text: `import { ref } from "vue";` },
+    {
+      path: "src/mergeRequests/internal/filters.ts",
+      text: `import { useDebounceFn } from "@vueuse/core";`,
+    },
+    {
+      path: "src/mergeRequests/internal/choices.ts",
+      text: `import { invoke } from "@tauri-apps/api/core";`,
+    },
+    { path: "src/mergeRequests/internal/ciBox.ts", text: `import x from "~icons/lucide/x";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([
+    { rule: "PM3", file: "src/mergeRequests/index.ts", specifier: "vue" },
+    { rule: "PM3", file: "src/mergeRequests/internal/filters.ts", specifier: "@vueuse/core" },
+    {
+      rule: "PM3",
+      file: "src/mergeRequests/internal/choices.ts",
+      specifier: "@tauri-apps/api/core",
+    },
+    { rule: "PM3", file: "src/mergeRequests/internal/ciBox.ts", specifier: "~icons/lucide/x" },
+  ]);
+});
+
+test("mergeRequests importing any other src/ module violates PM2", () => {
+  const files = [
+    { path: "src/mergeRequests/index.ts", text: `import type { Column } from "../ipc";` },
+    { path: "src/mergeRequests/internal/filters.ts", text: `import { log } from "../../ipc/log";` },
+    { path: "src/mergeRequests/internal/choices.ts", text: `import "../../editor/index.ts";` },
+    {
+      path: "src/mergeRequests/internal/order.ts",
+      text: `import { matcherOf } from "../../search";`,
+    },
+    { path: "src/mergeRequests/a.ts", text: `import "../mergeRequestsx/b";` },
+  ];
+
+  expect(
+    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
+  ).toEqual(
+    files.map(({ path }) => ({
+      file: path,
+      rule: "PM2",
+      reason: "mergeRequests/ imports no other src/ module",
+    })),
+  );
+});
+
+test("mergeRequests importing itself, and ui importing mergeRequests' index, violate nothing", () => {
+  const files = [
+    { path: "src/mergeRequests/index.ts", text: `export { toggled } from "./internal/filters";` },
+    {
+      path: "src/mergeRequests/internal/choices.ts",
+      text: `import { sameValue } from "./filters";`,
+    },
+    {
+      path: "src/mergeRequests/internal/order.test.ts",
+      text: `import { merged } from "../index";`,
+    },
+    {
+      path: "src/ui/mergeRequestFilters.ts",
+      text: `import { NO_FILTERS } from "../mergeRequests";`,
+    },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
   const files = [
     { path: "src/agent/index.ts", text: `import { ref } from "vue";` },
@@ -613,6 +682,105 @@ test("range files importing shared ui files and their own neighbours violate not
     },
     { path: "src/ui/useRangeController.ts", text: `import "../editor";` },
     { path: "src/ui/storeRange.ts", text: `import "./compareStore";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
+test("a merge-request page file importing any window's root or lsp/ violates PM10", () => {
+  const files = [
+    {
+      path: "src/ui/MergeRequestsView.vue",
+      text: `<script setup lang="ts">\nimport { useCompareStore } from "./compareStore";\n</script>`,
+    },
+    {
+      path: "src/ui/MergeRequestRow.vue",
+      text: `<script setup lang="ts">\nimport "./RangeApp.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/CiStatusBox.vue",
+      text: `<script setup lang="ts">\nimport { useRangeStore } from "./rangeStore.ts";\n</script>`,
+    },
+    { path: "src/ui/mergeRequests.ts", text: `import "./store";\nimport "./App.vue";` },
+    { path: "src/ui/mergeRequestsStore.test.ts", text: `import "./CompareApp.vue";` },
+    { path: "src/ui/mergeRequestsText.ts", text: `import type { X } from "../lsp";` },
+    {
+      path: "src/ui/MergeRequestFilter.vue",
+      text: `<script setup lang="ts">\nimport "../lsp/index.ts";\n</script>`,
+    },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM10",
+      file: "src/ui/MergeRequestsView.vue",
+      specifier: "./compareStore",
+      reason:
+        "the merge-request page serves two windows; it never imports the compare window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/MergeRequestRow.vue",
+      specifier: "./RangeApp.vue",
+      reason: "the merge-request page serves two windows; it never imports the range window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/CiStatusBox.vue",
+      specifier: "./rangeStore.ts",
+      reason: "the merge-request page serves two windows; it never imports the range window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequests.ts",
+      specifier: "./store",
+      reason: "the merge-request page serves two windows; it never imports the merge window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequests.ts",
+      specifier: "./App.vue",
+      reason: "the merge-request page serves two windows; it never imports the merge window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequestsStore.test.ts",
+      specifier: "./CompareApp.vue",
+      reason:
+        "the merge-request page serves two windows; it never imports the compare window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequestsText.ts",
+      specifier: "../lsp",
+      reason: "the merge-request page never imports lsp/",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/MergeRequestFilter.vue",
+      specifier: "../lsp/index.ts",
+      reason: "the merge-request page never imports lsp/",
+    },
+  ]);
+});
+
+test("merge-request page files importing shared ui files, and the roots importing the page, violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/MergeRequestsView.vue",
+      text: `<script setup lang="ts">\nimport "./mergeRequestsStore";\nimport "./ChoiceButtons.vue";\nimport "./storeless";\n</script>`,
+    },
+    { path: "src/ui/mergeRequests.ts", text: `import "../mergeRequests";\nimport "./glab";` },
+    {
+      path: "src/ui/CompareView.vue",
+      text: `<script setup lang="ts">\nimport "./MergeRequestsButton.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport "./MergeRequestsView.vue";\n</script>`,
+    },
+    { path: "src/ui/requestMerge.ts", text: `import "./store";\nimport "../lsp";` },
+    { path: "src/ui/internal/MergeRequestNote.ts", text: `import "../store";` },
   ];
 
   expect(violationsOf(files)).toEqual([]);

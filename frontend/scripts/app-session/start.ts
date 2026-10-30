@@ -6,17 +6,17 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 
 import type { Command } from "./args";
+import { fakeGlab, glabEnv, type FakeGlab } from "./fakeGlab";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
-import { freePort, launchTracked, waitUntil } from "./processes";
+import { freePort, launchTracked, sessionEntry, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
-import { appArgs, glabFolder } from "./startArgs";
+import { appArgs, glabFolder, startFolder } from "./startArgs";
 import {
   readState,
   saveState,
@@ -30,11 +30,11 @@ import { finishRecording, recordingLaunch, waitForRecording } from "./video";
 import { inSession, isReady, newSession } from "./webdriver";
 
 type StartApp = Extract<Command, { kind: "start-app" }>;
-type FakeGlab = { readonly scenario: string; readonly posts: string; readonly log: string };
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
   readonly repoDir: string | null;
+  readonly driverDir: string;
   readonly binary: string;
   readonly args: readonly string[];
   readonly glab: FakeGlab | null;
@@ -80,32 +80,10 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   const repoDir = repoFolder(command.opens, folder);
+  const driverDir = startFolder(command.opens, folder, existsSync);
   const glab = fakeGlab(scenarioFolder, folder);
   const args = appArgs(command.opens, repoDir, command.ai);
-  return { home, configDir, repoDir, binary, args, glab };
-}
-
-function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
-  if (scenarioFolder === null) {
-    return null;
-  }
-  const dir = join(folder, "glab");
-  mkdirSync(dir);
-  const link = join(dir, "scenario");
-  symlinkSync(scenarioFolder, link);
-  return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
-}
-
-function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
-  if (glab === null) {
-    return {};
-  }
-  return {
-    PATH: [fromRoot("scripts/fake-glab"), process.env["PATH"] ?? ""].join(delimiter),
-    YAMT_FAKE_GLAB: glab.scenario,
-    YAMT_FAKE_GLAB_STATE: glab.posts,
-    YAMT_FAKE_GLAB_LOG: glab.log,
-  };
+  return { home, configDir, repoDir, driverDir, binary, args, glab };
 }
 
 function repoFolder(opens: StartApp["opens"], folder: string): string | null {
@@ -125,12 +103,14 @@ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
   }
 }
 
-function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
+function appEnv(state: AppState, prepared: Prepared): NodeJS.ProcessEnv {
+  const session = sessionEntry(state.folder);
   const env: NodeJS.ProcessEnv = {
-    ...displayEnv(display),
+    ...displayEnv(state.display),
     ...glabEnv(prepared.glab),
     HOME: prepared.home,
     XDG_CONFIG_HOME: prepared.configDir,
+    [session.name]: session.value,
   };
   for (const derived of ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
     delete env[derived];
@@ -198,8 +178,8 @@ async function startDriver(
       role: "tauri-driver",
       command: "tauri-driver",
       args: ["--port", String(driverPort), "--native-port", String(nativePort)],
-      env: appEnv(state.display, prepared),
-      cwd: state.folder,
+      env: appEnv(state, prepared),
+      cwd: prepared.driverDir,
       logDir,
       fd3File: null,
     },
@@ -256,7 +236,6 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     size: command.size,
     procs: [],
     display: 0,
-    configDir,
     repoDir,
   };
   const state = await withCleanup(empty, (save) =>

@@ -30,7 +30,7 @@ import type { Problem } from "./problem";
 import type { Question } from "./question";
 import { createSaving, finish, reset, take } from "./saving";
 import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
-import type { Screen } from "./screen";
+import { settingsScreen, type Screen, type SettingsScreen } from "./screen";
 import { createServers, type Servers } from "./servers";
 import { createServerSetup, type ServerSetup } from "./serverSetup";
 import { preferencesOf, settingsActions, startSettings } from "./settings";
@@ -75,7 +75,8 @@ type State = Refs &
 
 type Actions = CloseGuard &
   MergeSearch &
-  SettingsActions & {
+  SettingsActions &
+  SettingsScreen & {
     loadFiles(): Promise<void>;
     refreshFiles(): Promise<void>;
     nextStop(end: StopEnd): Promise<void>;
@@ -86,8 +87,6 @@ type Actions = CloseGuard &
     reset(path: string, diskVersion: DiskVersion): Promise<void>;
     dismissProblem(): void;
     dismissNotice(key: string): void;
-    openSettings(): void;
-    closeSettings(): void;
     answer(yes: boolean): void;
     dismissQuestion(): void;
     toggleButton(id: ToolbarButtonId): void;
@@ -223,12 +222,6 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
     dismissNotice: (key) => {
       state.notices.value = state.notices.value.filter((notice) => noticeKey(notice) !== key);
     },
-    openSettings: () => {
-      state.screen.value = { kind: "settings" };
-    },
-    closeSettings: () => {
-      state.screen.value = { kind: "files" };
-    },
     answer: state.asking.answer,
     dismissQuestion: state.asking.dismiss,
     toggleButton: buttons.toggle,
@@ -239,6 +232,7 @@ function actions(state: State, buttons: HiddenButtons, settings: SettingsActions
     search: state.search,
     liveResults: state.liveResults,
     ...settings,
+    ...settingsScreen(state.screen),
   };
 }
 

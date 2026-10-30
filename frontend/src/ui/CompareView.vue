@@ -7,6 +7,7 @@ import type { TabEntry, TabLanguage } from "../ipc";
 import CompareLanguagePicker from "./CompareLanguagePicker.vue";
 import { useCompareStore } from "./compareStore";
 import { ACTION_NAMES } from "./keyText";
+import MergeRequestsButton from "./MergeRequestsButton.vue";
 import PaneFrame from "./PaneFrame.vue";
 import { compareColumns } from "./paneSplit";
 import SettingsButton from "./SettingsButton.vue";
@@ -86,7 +87,10 @@ function pickLanguage(language: TabLanguage): void {
         >
           <ArrowDown class="size-4" aria-hidden="true" />
         </button>
-        <SettingsButton class="ml-auto" />
+        <div class="ml-auto flex items-center gap-1">
+          <MergeRequestsButton />
+          <SettingsButton />
+        </div>
       </header>
     </template>
     <template #default="{ stripLayer }">

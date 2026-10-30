@@ -17,6 +17,7 @@ import {
 } from "../ipc";
 import { COLLAPSE_LABEL, createCollapsing } from "./collapsing";
 import type { KeyPress } from "./fileListKey";
+import { useMergeRequests } from "./mergeRequestsStore";
 import { problemText } from "./problemText";
 import {
   askContext,
@@ -131,6 +132,41 @@ test("an empty range shows no file and mounts none", async () => {
   expect(store.shown.value).toBeNull();
   expect(store.shownPath.value).toBeNull();
   expect(store.visited.value).toEqual([]);
+});
+
+test("start-up finds the GitLab project for the one slice the window registers (catches a button that never shows)", async () => {
+  const store = createRangeStore(
+    createFixtureRangeSource(log, "?range=review&mr=list", {
+      "../../fixtures/range/review.json": rangeCase(2),
+    }),
+    "dark",
+    null,
+  );
+  expect(useMergeRequests()).toBe(store.mergeRequests);
+
+  await store.startUp();
+
+  expect(store.mergeRequests.project.value).toEqual({
+    kind: "found",
+    repository: "/home/sam/taskboard/.git",
+  });
+  store.mergeRequests.show();
+  expect(store.screen.value).toEqual({ kind: "mergeRequests" });
+  store.showFile("src/f01.ts");
+  expect(store.screen.value).toEqual({ kind: "files" });
+});
+
+test("a failed project lookup at start-up reaches the problem bar and the range still opens", async () => {
+  quiet();
+  const store = await started(2, () => ({
+    findGitLabProject: () => failed({ kind: "WorkerStopped" }),
+  }));
+  expect(store.problem.value).toEqual({
+    action: "mergeRequests",
+    step: "find",
+    cause: { kind: "WorkerStopped" },
+  });
+  expect(store.shownPath.value).toBe("src/f00.ts");
 });
 
 test("before openRange answers: the files screen, the start theme's preferences, no file to show", async () => {

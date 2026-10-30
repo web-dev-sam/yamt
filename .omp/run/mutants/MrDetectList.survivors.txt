@@ -1,0 +1,2 @@
+just mutants HEAD → 110 mutants tested in 3m: 89 caught, 21 unviable (first run: 1 missed, names.rs is_found_or_no_match → true, killed by the broken-config assert)
+

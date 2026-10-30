@@ -9,6 +9,10 @@
 # file into a link, tools/deploy.sh made executable and edited. `main` then moves on (README.md), so main..feature
 # lists README.md and main...feature does not. Names and dates are fixed, so the commit ids never change:
 # tests/glab and crates/review/tests pin them, so any change to this script or to scripts/demo updates both.
+# A fake GitLab serves the project (plan §2 #128–#135): the bare `.git/fake-gitlab.git`, a clone of the repository
+# holding merge request !12's head (`feature`) and !13's (`feature` + "Snooze a reminder", a commit only the fake
+# GitLab has), reached as `origin` https://gitlab.example/taskboard/taskboard.git through `url.<bare>.insteadOf`;
+# nothing is fetched, so there is no `refs/remotes`. crates/merge-requests/tests and tests/glab pin !13's id.
 # Prints the command that opens the review. Uses no user or system git config (risk RK19).
 set -euo pipefail
 # shellcheck source=scripts/git-sandbox.sh
@@ -94,6 +98,29 @@ commit_at 2026-10-06T10:00:00+02:00 "New logo, staging config and release tools"
 repo_git checkout -q main
 put main README.md
 commit_at 2026-10-07T10:00:00+02:00 "README: swimlanes"
+
+gitlab_url=https://gitlab.example/taskboard/taskboard.git
+bare="$(cd "$dir" && pwd)/.git/fake-gitlab.git"
+git clone -q --bare "$dir" "$bare"
+# The commit is built with plumbing inside the bare repository alone, so the repository in $dir never has it.
+snooze_blob=$({
+    repo_git show feature:src/board/reminders.ts
+    printf '\n/** The reminder put off by `minutes`. */\nexport function snoozed(remindAt: Date, minutes: number): Date {\n  return new Date(remindAt.getTime() + minutes * MINUTE_MS);\n}\n'
+} | repo_git --git-dir="$bare" hash-object -w --stdin)
+export GIT_INDEX_FILE="$bare/mr-13.index"
+repo_git --git-dir="$bare" read-tree feature
+repo_git --git-dir="$bare" update-index --cacheinfo "100644,$snooze_blob,src/board/reminders.ts"
+snooze_tree=$(repo_git --git-dir="$bare" write-tree)
+rm "$GIT_INDEX_FILE"
+unset GIT_INDEX_FILE
+snooze_date=2026-10-08T10:00:00+02:00
+mr13_head=$(GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=$snooze_date \
+    GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=$snooze_date \
+    repo_git --git-dir="$bare" commit-tree -p feature -m "Snooze a reminder" "$snooze_tree")
+repo_git --git-dir="$bare" update-ref refs/merge-requests/12/head feature
+repo_git --git-dir="$bare" update-ref refs/merge-requests/13/head "$mr13_head"
+repo_git remote add origin "$gitlab_url"
+repo_git config "url.$bare.insteadOf" "$gitlab_url"
 
 echo "range-repo: $dir holds main and feature; review it with:"
 echo "yamt --diff=main...feature --repo $(cd "$dir" && pwd)"

@@ -69,10 +69,17 @@ if [ -n "$forbidden_in_agent" ]; then
     failed=1
 fi
 
+merge_requests_deps=$(normal_deps yamt-merge-requests)
+forbidden_in_merge_requests=$(grep -E '^(yamt-|tauri(-|$))' <<<"$merge_requests_deps" | grep -vxE 'yamt-(merge-requests|range|gitio|merge-core)' || true)
+if [ -n "$forbidden_in_merge_requests" ]; then
+    echo "arch-check: yamt-merge-requests depends on yamt-range, yamt-gitio and yamt-merge-core only among yamt crates, and never on tauri, not:" $forbidden_in_merge_requests >&2
+    failed=1
+fi
+
 app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent)' || true)
+forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent|merge-requests)' || true)
 if [ -n "$forbidden_in_app" ]; then
-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review and yamt-agent only, not:" $forbidden_in_app >&2
+    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review, yamt-agent and yamt-merge-requests only, not:" $forbidden_in_app >&2
     failed=1
 fi
 

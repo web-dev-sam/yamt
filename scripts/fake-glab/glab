@@ -61,6 +61,7 @@ include=no
 method=
 input=
 endpoint=
+fields=
 
 # $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
 # error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
@@ -90,24 +91,50 @@ answer_file() {
 	answer '404 Not Found' '{"message":"404 Not Found"}'
 }
 
+# $1 a field's name: the value the call gave it (the first, when given twice), empty when not given.
+field() {
+	printf '%s' "$fields" | sed -n "s/^$1=//p" | head -n 1
+}
+
+# $1 the answer's path without its extension, $2 its default status line: waits $1.sleep seconds, then fails before
+# any HTTP answer as $1.exit and $1.err say, or answers $1.json with the status line in $1.status (or $2).
+reply() {
+	if [ -f "$1.sleep" ]; then
+		sleep "$(cat "$1.sleep")"
+	fi
+	if [ -f "$1.exit" ]; then
+		if [ -f "$1.err" ]; then
+			cat "$1.err" >&2
+		fi
+		exit "$(cat "$1.exit")"
+	fi
+	[ -f "$1.json" ] || fail "the scenario has no answer $(basename "$1").json"
+	answer "$(text_or "$1.status" "$2")" "$(cat "$1.json")" "$1.err"
+}
+
 post() {
 	state=${YAMT_FAKE_GLAB_STATE:-}
 	[ -n "$state" ] || fail 'YAMT_FAKE_GLAB_STATE names no file'
 	count=$(text_or "$state" 0)
 	number=$((count + 1))
 	printf '%s\n' "$number" >"$state"
-	answer_at="$scenario/post-$number"
-	if [ -f "$answer_at.sleep" ]; then
-		sleep "$(cat "$answer_at.sleep")"
+	reply "$scenario/post-$number" '201 Created'
+}
+
+# A merge request's details with a field iid=<n>; else a page of the list: the first without a field after, the
+# n-th for after=page-<n>.
+graphql() {
+	iid=$(field iid)
+	if [ -n "$iid" ]; then
+		reply "$scenario/graphql-merge-request-$iid" '200 OK'
 	fi
-	if [ -f "$answer_at.exit" ]; then
-		if [ -f "$answer_at.err" ]; then
-			cat "$answer_at.err" >&2
-		fi
-		exit "$(cat "$answer_at.exit")"
-	fi
-	[ -f "$answer_at.json" ] || fail "the scenario has no answer for post $number"
-	answer "$(text_or "$answer_at.status" '201 Created')" "$(cat "$answer_at.json")" "$answer_at.err"
+	after=$(field after)
+	case $after in
+	'') page=1 ;;
+	page-*) page=${after#page-} ;;
+	*) fail "unknown cursor $after" ;;
+	esac
+	reply "$scenario/graphql-page-$page" '200 OK'
 }
 
 api() {
@@ -122,7 +149,12 @@ api() {
 			input=${2-}
 			shift
 			;;
-		-f | --field | -F | --raw-field | -H | --header | --hostname) shift ;;
+		-f | --field | -F | --raw-field)
+			fields="$fields${2-}
+"
+			shift
+			;;
+		-H | --header | --hostname) shift ;;
 		--paginate) ;;
 		-*) fail "unknown api option $1" ;;
 		*) [ -n "$endpoint" ] || endpoint=$1 ;;
@@ -137,10 +169,12 @@ api() {
 		log "stdin: ${body%x}"
 	fi
 	if [ -z "$method" ]; then
-		if [ -n "$input" ]; then method=POST; else method=GET; fi
+		if [ -n "$input" ] || [ -n "$fields" ]; then method=POST; else method=GET; fi
 	fi
 	case "$method $endpoint" in
 	"POST "*/draft_notes) post ;;
+	"POST graphql") graphql ;;
+	"GET projects/:fullpath") answer_file project.json ;;
 	"GET "*/draft_notes) answer_file draft-notes.json ;;
 	"GET "*/merge_requests) answer_file merge-requests.json ;;
 	"GET "*/merge_requests/*)

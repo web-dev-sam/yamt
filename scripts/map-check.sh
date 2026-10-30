@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Fails when a source file a reader must find is not named in skill://project-map (PM6).
+# Fails when a source file a reader must find is not named in skill://project-map (PM6): SKILL.md, tree.md or state.md.
 set -euo pipefail
 
-readonly MAP=.omp/skills/project-map/SKILL.md
+readonly MAP_FILES=(.omp/skills/project-map/SKILL.md .omp/skills/project-map/tree.md .omp/skills/project-map/state.md)
 
 missing=()
 while IFS= read -r file; do
     name=${file##*/}
     name=${name%.d.ts}
     name=${name%.*}
-    if ! grep -qw -- "$name" "$MAP"; then
-        missing+=("$file (not in $MAP)")
+    if ! grep -qw -- "$name" "${MAP_FILES[@]}"; then
+        missing+=("$file (not in skill://project-map)")
     fi
 done < <(
     git ls-files -- 'frontend/src/*.ts' 'frontend/src/*.vue' 'frontend/scripts/*.ts' 'scripts/*' 'crates/merge-core/src/*.rs' |
@@ -27,8 +27,9 @@ while IFS= read -r command; do
     done
 done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
 
-# Every window data-source method must be named in architecture (the merge, compare and range windows').
-for source in ChunkSource CompareSource RangeSource ReviewSource; do
+# Every window data-source method must be named in architecture (the merge, compare and range windows', and the
+# merge-request page's, which the compare and range sources extend).
+for source in ChunkSource CompareSource RangeSource ReviewSource MergeRequestSource; do
     while IFS= read -r method; do
         grep -qw -- "$method" "$ARCH" || missing+=("$source.$method (not in $ARCH)")
     done < <(sed -n 's/^  \([a-zA-Z]*\)(.*/\1/p' "frontend/src/ipc/$source.ts")

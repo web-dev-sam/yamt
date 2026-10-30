@@ -1,0 +1,1428 @@
+diff --git a/frontend/.oxlintrc.json b/frontend/.oxlintrc.json
+index 0423606..6a94cb9 100644
+--- a/frontend/.oxlintrc.json
++++ b/frontend/.oxlintrc.json
+@@ -136,7 +136,8 @@
+         "src/lsp/**",
+         "src/jsonrpc/**",
+         "src/agent/**",
+-        "src/search/**"
++        "src/search/**",
++        "src/mergeRequests/**"
+       ],
+       "rules": {
+         "no-restricted-imports": [
+@@ -145,13 +146,13 @@
+             "paths": [
+               {
+                 "name": "vue",
+-                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/, search/ are framework-free (PM3)."
++                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/, search/, mergeRequests/ are framework-free (PM3)."
+               }
+             ],
+             "patterns": [
+               {
+                 "group": ["vue/**", "@vue/**", "@vueuse/**", "@tauri-apps/**"],
+-                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/, search/ are framework-free (PM3)."
++                "message": "editor/, model/, connectors/, lsp/, jsonrpc/, agent/, search/, mergeRequests/ are framework-free (PM3)."
+               },
+               {
+                 "group": ["../**/internal", "../**/internal/**"],
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 49b8f6d..29573b1 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -37,6 +37,7 @@ const FRAMEWORK_FREE_MODULES: Readonly<Record<string, "framework-free" | "self-c
+   jsonrpc: "self-contained",
+   agent: "framework-free",
+   search: "self-contained",
++  mergeRequests: "self-contained",
+ };
+ const AGENT_IMPORTS: Readonly<Record<string, true>> = {
+   "src/ipc": true,
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+new file mode 100644
+index 0000000..23b6956
+--- /dev/null
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -0,0 +1,5 @@
++Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan §2 #128–#135, request `docs/slices/request-merge-requests.md` rules 3, 4, 5, 6, 8; design `.omp/run/notes/MrOverviewDesign.md` §2.1, §6 "B2 → B4 and B5"): the filters (any checked value within a filter, every filter across; "Me" is the logged-in user, never a username "me"; "None" an empty list; Draft all / drafts / ready), the checklists' choices (Me first when known, None, the others by name; Label None first; counts over the whole loaded list; a checked value not in the list kept, counted 0), the list's order (`merged`: one row per iid, the later copy wins, newest created first, ties by iid descending), the summary line, "created … ago" (the largest whole unit; a month is 30 days, a year 365), the CI box's contents (failed jobs, allowed-to-fail last; no job: the status in words) and the remembered form (`"me" | "none" | "user:<username>"`, `"none" | "label:<title>"`; junk reads as no filter).
++
++`index.ts` is the only surface. Framework-free (PM3) and self-contained: nothing here imports another `src/` module, as `search/` (PM2, `frontend/scripts/fences.ts`). Pure: no DOM, no timers, no storage, no state; the window's `ui/` owns loading, remembering (`ui/mergeRequestFilters.ts`) and the page's other words.
++
++`internal/`: `filters` (the filter types, `passes`, the edits, `filterLabel`), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`. Every file has its `*.test.ts` (node), each test named for the bug it catches.
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+new file mode 100644
+index 0000000..5806b0d
+--- /dev/null
++++ b/frontend/src/mergeRequests/index.ts
+@@ -0,0 +1,29 @@
++export {
++  NO_FILTERS,
++  cleared,
++  filterLabel,
++  filtered,
++  isFiltered,
++  passes,
++  toggled,
++  withDraft,
++  type DraftFilter,
++  type Filters,
++  type LabelValue,
++  type ListFilter,
++  type ListedRequest,
++  type Person,
++  type PersonValue,
++} from "./internal/filters";
++export {
++  NARROW_FROM,
++  labelChoices,
++  narrowed,
++  personChoices,
++  type Choice,
++} from "./internal/choices";
++export { merged } from "./internal/order";
++export { summaryText } from "./internal/summary";
++export { createdAgo } from "./internal/relativeTime";
++export { ciBox, type CiBoxView, type CiStatusName } from "./internal/ciBox";
++export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
+diff --git a/frontend/src/mergeRequests/internal/choices.test.ts b/frontend/src/mergeRequests/internal/choices.test.ts
+new file mode 100644
+index 0000000..67b768e
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/choices.test.ts
+@@ -0,0 +1,197 @@
++import { expect, test } from "vitest";
++
++import {
++  NARROW_FROM,
++  labelChoices,
++  narrowed,
++  personChoices,
++  type Choice,
++  type ListedRequest,
++  type Person,
++} from "../index";
++
++const SAM: Person = { username: "sam", name: "Sam Lee" };
++const ANNA: Person = { username: "anna", name: "Anna Berg" };
++const ZOE: Person = { username: "aaa", name: "Zoe Quinn" };
++
++function request(iid: number, fields: Partial<Omit<ListedRequest, "iid">> = {}): ListedRequest {
++  return {
++    iid,
++    createdAt: iid,
++    draft: false,
++    assignees: [],
++    reviewers: [],
++    labels: [],
++    ...fields,
++  };
++}
++
++const ROWS: readonly ListedRequest[] = [
++  request(1, { assignees: [ZOE, SAM], reviewers: [ANNA], labels: ["ui", "bug"] }),
++  request(2, { assignees: [ANNA], labels: ["bug"] }),
++  request(3, { assignees: [ANNA], reviewers: [SAM] }),
++  request(4),
++];
++
++function rows<V>(choices: readonly Choice<V>[]): readonly (readonly [string, number, boolean])[] {
++  return choices.map((listed) => [listed.label, listed.count, listed.checked] as const);
++}
++
++test("Assignee lists Me first, then None, then the others by name, counted over every row", () => {
++  expect(rows(personChoices(ROWS, "assignees", "sam", []))).toEqual([
++    ["Me", 1, false],
++    ["None", 1, false],
++    ["Anna Berg", 2, false],
++    ["Zoe Quinn", 1, false],
++  ]);
++});
++
++test("Reviewer counts its own field", () => {
++  expect(rows(personChoices(ROWS, "reviewers", "sam", []))).toEqual([
++    ["Me", 1, false],
++    ["None", 2, false],
++    ["Anna Berg", 1, false],
++  ]);
++});
++
++test("Me is missing while the logged-in user is unknown; that user is then listed by name", () => {
++  expect(rows(personChoices(ROWS, "assignees", null, []))).toEqual([
++    ["None", 1, false],
++    ["Anna Berg", 2, false],
++    ["Sam Lee", 1, false],
++    ["Zoe Quinn", 1, false],
++  ]);
++});
++
++test("a person value carries the username, Me and None their kinds", () => {
++  expect(personChoices(ROWS, "reviewers", "sam", []).map((listed) => listed.value)).toEqual([
++    { kind: "me" },
++    { kind: "none" },
++    { kind: "person", username: "anna" },
++  ]);
++});
++
++test("checked values show checked", () => {
++  const choices = personChoices(ROWS, "assignees", "sam", [
++    { kind: "me" },
++    { kind: "person", username: "aaa" },
++  ]);
++  expect(rows(choices)).toEqual([
++    ["Me", 1, true],
++    ["None", 1, false],
++    ["Anna Berg", 2, false],
++    ["Zoe Quinn", 1, true],
++  ]);
++});
++
++test("a checked person no longer in the list stays checked with 0, among the others by name", () => {
++  const choices = personChoices(ROWS, "assignees", "sam", [
++    { kind: "person", username: "bob" },
++    { kind: "none" },
++  ]);
++  expect(rows(choices)).toEqual([
++    ["Me", 1, false],
++    ["None", 1, true],
++    ["Anna Berg", 2, false],
++    ["bob", 0, true],
++    ["Zoe Quinn", 1, false],
++  ]);
++  expect(choices[3]?.value).toEqual({ kind: "person", username: "bob" });
++});
++
++test("a checked Me while the user is unknown stays first, checked with 0", () => {
++  expect(rows(personChoices(ROWS, "reviewers", null, [{ kind: "me" }]))).toEqual([
++    ["Me", 0, true],
++    ["None", 2, false],
++    ["Anna Berg", 1, false],
++    ["Sam Lee", 1, false],
++  ]);
++});
++
++test("a checked person who is the logged-in user stays listed, with their count", () => {
++  expect(
++    rows(personChoices(ROWS, "reviewers", "sam", [{ kind: "person", username: "sam" }])),
++  ).toEqual([
++    ["Me", 1, false],
++    ["None", 2, false],
++    ["Anna Berg", 1, false],
++    ["sam", 1, true],
++  ]);
++});
++
++test("Label lists None first, then the labels by title, counted over every row", () => {
++  expect(rows(labelChoices(ROWS, []))).toEqual([
++    ["None", 2, false],
++    ["bug", 2, false],
++    ["ui", 1, false],
++  ]);
++  expect(labelChoices(ROWS, []).map((listed) => listed.value)).toEqual([
++    { kind: "none" },
++    { kind: "label", title: "bug" },
++    { kind: "label", title: "ui" },
++  ]);
++});
++
++test("a checked label no longer in the list stays checked with 0", () => {
++  expect(
++    rows(
++      labelChoices(ROWS, [
++        { kind: "label", title: "backend" },
++        { kind: "label", title: "ui" },
++        { kind: "none" },
++      ]),
++    ),
++  ).toEqual([
++    ["None", 2, true],
++    ["backend", 0, true],
++    ["bug", 2, false],
++    ["ui", 1, true],
++  ]);
++});
++
++test("an empty list still offers None, and Me when known", () => {
++  expect(rows(personChoices([], "assignees", "sam", []))).toEqual([
++    ["Me", 0, false],
++    ["None", 0, false],
++  ]);
++  expect(rows(labelChoices([], []))).toEqual([["None", 0, false]]);
++});
++
++test("narrowed keeps the choices whose label holds the typed text, any case, trimmed", () => {
++  const choices = personChoices(ROWS, "assignees", "sam", []);
++  expect(narrowed(choices, " BER ").map((listed) => listed.label)).toEqual(["Anna Berg"]);
++  expect(narrowed(choices, "n").map((listed) => listed.label)).toEqual([
++    "None",
++    "Anna Berg",
++    "Zoe Quinn",
++  ]);
++  expect(narrowed(choices, "")).toEqual(choices);
++  expect(narrowed(choices, "xyz")).toEqual([]);
++});
++
++test("a checked None while the user is unknown does not bring Me back", () => {
++  expect(rows(personChoices(ROWS, "reviewers", null, [{ kind: "none" }]))).toEqual([
++    ["None", 2, true],
++    ["Anna Berg", 1, false],
++    ["Sam Lee", 1, false],
++  ]);
++});
++
++test("Label's None counts only the rows with no label", () => {
++  const labelled = [request(1, { labels: ["a"] }), request(2, { labels: ["b"] }), request(3)];
++  expect(labelChoices(labelled, [])[0]).toEqual({
++    value: { kind: "none" },
++    label: "None",
++    count: 1,
++    checked: false,
++  });
++});
++
++test("a checklist long enough for the narrowing box narrows to one typed label", () => {
++  const titles = Array.from({ length: NARROW_FROM + 1 }, (_unused, index) => `area-${index}`);
++  const choices = labelChoices([request(1, { labels: titles })], []);
++  expect(choices.length).toBeGreaterThan(NARROW_FROM);
++  expect(narrowed(choices, "AREA-3").map((listed) => listed.value)).toEqual([
++    { kind: "label", title: "area-3" },
++  ]);
++});
+diff --git a/frontend/src/mergeRequests/internal/choices.ts b/frontend/src/mergeRequests/internal/choices.ts
+new file mode 100644
+index 0000000..c64fb1b
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/choices.ts
+@@ -0,0 +1,123 @@
++import { sameValue, type LabelValue, type ListedRequest, type PersonValue } from "./filters";
++
++export type Choice<V> = {
++  readonly value: V;
++  readonly label: string;
++  readonly count: number;
++  readonly checked: boolean;
++};
++
++export const NARROW_FROM = 8;
++
++const ME: PersonValue = { kind: "me" };
++const NO_PERSON: PersonValue = { kind: "none" };
++const NO_LABEL: LabelValue = { kind: "none" };
++
++function byLabel<V>(a: Choice<V>, b: Choice<V>): number {
++  return a.label.localeCompare(b.label, "en");
++}
++
++function choice<V extends PersonValue | LabelValue>(
++  value: V,
++  label: string,
++  count: number,
++  checked: readonly V[],
++): Choice<V> {
++  return { value, label, count, checked: checked.some((held) => sameValue(held, value)) };
++}
++
++type Seen = { readonly name: string; count: number };
++
++function peopleOf(
++  rows: readonly ListedRequest[],
++  field: "assignees" | "reviewers",
++): ReadonlyMap<string, Readonly<Seen>> {
++  const people = new Map<string, Seen>();
++  for (const row of rows) {
++    for (const { username, name } of row[field]) {
++      const seen = people.get(username);
++      if (seen === undefined) {
++        people.set(username, { name, count: 1 });
++      } else {
++        seen.count += 1;
++      }
++    }
++  }
++  return people;
++}
++
++function meChoice(
++  people: ReadonlyMap<string, Readonly<Seen>>,
++  me: string | null,
++  checked: readonly PersonValue[],
++): readonly Choice<PersonValue>[] {
++  if (me !== null) {
++    return [choice(ME, "Me", people.get(me)?.count ?? 0, checked)];
++  }
++  return checked.some((held) => held.kind === "me") ? [choice(ME, "Me", 0, checked)] : [];
++}
++
++export function personChoices(
++  rows: readonly ListedRequest[],
++  field: "assignees" | "reviewers",
++  me: string | null,
++  checked: readonly PersonValue[],
++): readonly Choice<PersonValue>[] {
++  const people = peopleOf(rows, field);
++  const none = choice(
++    NO_PERSON,
++    "None",
++    rows.filter((row) => row[field].length === 0).length,
++    checked,
++  );
++  const others = [...people]
++    .filter(([username]) => username !== me)
++    .map(([username, { name, count }]) =>
++      choice<PersonValue>({ kind: "person", username }, name, count, checked),
++    );
++  const missing = checked.flatMap((held) =>
++    held.kind === "person" && (held.username === me || !people.has(held.username))
++      ? [
++          {
++            value: held,
++            label: held.username,
++            count: people.get(held.username)?.count ?? 0,
++            checked: true,
++          },
++        ]
++      : [],
++  );
++  return [...meChoice(people, me, checked), none, ...[...others, ...missing].toSorted(byLabel)];
++}
++
++export function labelChoices(
++  rows: readonly ListedRequest[],
++  checked: readonly LabelValue[],
++): readonly Choice<LabelValue>[] {
++  const titles = new Set(rows.flatMap((row) => row.labels));
++  const none = choice(
++    NO_LABEL,
++    "None",
++    rows.filter((row) => row.labels.length === 0).length,
++    checked,
++  );
++  const found = [...titles].map((title) =>
++    choice<LabelValue>(
++      { kind: "label", title },
++      title,
++      rows.filter((row) => row.labels.includes(title)).length,
++      checked,
++    ),
++  );
++  const missing = checked.flatMap((held) =>
++    held.kind === "label" && !titles.has(held.title)
++      ? [{ value: held, label: held.title, count: 0, checked: true }]
++      : [],
++  );
++  return [none, ...[...found, ...missing].toSorted(byLabel)];
++}
++
++export function narrowed<V>(choices: readonly Choice<V>[], typed: string): readonly Choice<V>[] {
++  const needle = typed.trim().toLowerCase();
++  return choices.filter((listed) => listed.label.toLowerCase().includes(needle));
++}
+diff --git a/frontend/src/mergeRequests/internal/ciBox.test.ts b/frontend/src/mergeRequests/internal/ciBox.test.ts
+new file mode 100644
+index 0000000..c00eeed
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/ciBox.test.ts
+@@ -0,0 +1,39 @@
++import { expect, test } from "vitest";
++
++import { ciBox, type CiBoxView, type CiStatusName } from "../index";
++
++type Job = { readonly name: string; readonly allowFailure: boolean };
++
++function job(name: string, allowFailure = false): Job {
++  return { name, allowFailure };
++}
++
++test("jobs allowed to fail come last, GitLab's order kept otherwise", () => {
++  const jobs = [job("lint", true), job("test"), job("docs", true), job("build")];
++  const view: CiBoxView<Job> = {
++    kind: "jobs",
++    jobs: [job("test"), job("build"), job("lint", true), job("docs", true)],
++    more: false,
++  };
++  expect(ciBox("failed", jobs, false)).toEqual(view);
++});
++
++test("the box says more when GitLab has more failed jobs", () => {
++  expect(ciBox("failed", [job("test")], true)).toEqual({
++    kind: "jobs",
++    jobs: [job("test")],
++    more: true,
++  });
++});
++
++test.each<[CiStatusName, string]>([
++  ["passed", "Pipeline passed"],
++  ["failed", "Pipeline failed"],
++  ["running", "Pipeline running"],
++  ["pending", "Pipeline pending"],
++  ["canceled", "Pipeline canceled"],
++  ["skipped", "Pipeline skipped"],
++  ["manual", "Pipeline waiting for a manual job"],
++])("with no failed job a %s pipeline says so in words", (status, text) => {
++  expect(ciBox<Job>(status, [], false)).toEqual({ kind: "status", text });
++});
+diff --git a/frontend/src/mergeRequests/internal/ciBox.ts b/frontend/src/mergeRequests/internal/ciBox.ts
+new file mode 100644
+index 0000000..6a375fc
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/ciBox.ts
+@@ -0,0 +1,37 @@
++export type CiStatusName =
++  | "passed"
++  | "failed"
++  | "running"
++  | "pending"
++  | "canceled"
++  | "skipped"
++  | "manual";
++
++export type CiBoxView<J> =
++  | { readonly kind: "jobs"; readonly jobs: readonly J[]; readonly more: boolean }
++  | { readonly kind: "status"; readonly text: string };
++
++const STATUS_TEXTS: Readonly<Record<CiStatusName, string>> = {
++  passed: "Pipeline passed",
++  failed: "Pipeline failed",
++  running: "Pipeline running",
++  pending: "Pipeline pending",
++  canceled: "Pipeline canceled",
++  skipped: "Pipeline skipped",
++  manual: "Pipeline waiting for a manual job",
++};
++
++export function ciBox<J extends { readonly allowFailure: boolean }>(
++  status: CiStatusName,
++  jobs: readonly J[],
++  more: boolean,
++): CiBoxView<J> {
++  if (jobs.length === 0) {
++    return { kind: "status", text: STATUS_TEXTS[status] };
++  }
++  return {
++    kind: "jobs",
++    jobs: [...jobs.filter((job) => !job.allowFailure), ...jobs.filter((job) => job.allowFailure)],
++    more,
++  };
++}
+diff --git a/frontend/src/mergeRequests/internal/filters.test.ts b/frontend/src/mergeRequests/internal/filters.test.ts
+new file mode 100644
+index 0000000..db73f55
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/filters.test.ts
+@@ -0,0 +1,196 @@
++import { expect, test } from "vitest";
++
++import {
++  NO_FILTERS,
++  cleared,
++  filterLabel,
++  filtered,
++  isFiltered,
++  passes,
++  toggled,
++  withDraft,
++  type Filters,
++  type ListedRequest,
++  type DraftFilter,
++  type LabelValue,
++  type ListFilter,
++  type Person,
++  type PersonValue,
++} from "../index";
++
++const SAM: Person = { username: "sam", name: "Sam Lee" };
++const ANNA: Person = { username: "anna", name: "Anna Berg" };
++const LITERAL_ME: Person = { username: "me", name: "Mae" };
++
++function request(iid: number, fields: Partial<Omit<ListedRequest, "iid">> = {}): ListedRequest {
++  return {
++    iid,
++    createdAt: iid,
++    draft: false,
++    assignees: [],
++    reviewers: [],
++    labels: [],
++    ...fields,
++  };
++}
++
++const ROWS: readonly ListedRequest[] = [
++  request(1, { assignees: [SAM], reviewers: [ANNA], labels: ["bug"] }),
++  request(2, { assignees: [ANNA], labels: ["bug", "ui"], draft: true }),
++  request(3, { reviewers: [SAM, ANNA] }),
++  request(4, { assignees: [LITERAL_ME], labels: ["ui"], draft: true }),
++];
++
++function iids(filters: Filters, me: string | null): readonly number[] {
++  return filtered(ROWS, filters, me).map((row) => row.iid);
++}
++
++test("no filter lets every row through", () => {
++  expect(iids(NO_FILTERS, "sam")).toEqual([1, 2, 3, 4]);
++});
++
++test("any checked value within one filter matches", () => {
++  const filters: Filters = {
++    ...NO_FILTERS,
++    assignee: [
++      { kind: "person", username: "anna" },
++      { kind: "person", username: "sam" },
++    ],
++  };
++  expect(iids(filters, null)).toEqual([1, 2]);
++});
++
++test("every set filter must match across filters", () => {
++  const filters: Filters = {
++    assignee: [{ kind: "person", username: "anna" }, { kind: "none" }],
++    reviewer: [{ kind: "person", username: "sam" }],
++    label: [],
++    draft: "all",
++  };
++  expect(iids(filters, null)).toEqual([3]);
++  expect(iids({ ...filters, reviewer: [] }, null)).toEqual([2, 3]);
++  expect(iids({ ...filters, reviewer: [], label: [{ kind: "label", title: "ui" }] }, null)).toEqual(
++    [2],
++  );
++  expect(iids({ ...filters, reviewer: [], draft: "ready" }, null)).toEqual([3]);
++});
++
++test("Me resolves to the logged-in user, never a username spelled me", () => {
++  const filters: Filters = { ...NO_FILTERS, assignee: [{ kind: "me" }] };
++  expect(iids(filters, "sam")).toEqual([1]);
++  expect(iids({ ...NO_FILTERS, reviewer: [{ kind: "me" }] }, "sam")).toEqual([3]);
++  expect(iids(filters, "anna")).toEqual([2]);
++});
++
++test("Me matches nothing while the logged-in user is unknown", () => {
++  expect(iids({ ...NO_FILTERS, assignee: [{ kind: "me" }] }, null)).toEqual([]);
++});
++
++test("None matches the rows with nobody or no label", () => {
++  expect(iids({ ...NO_FILTERS, assignee: [{ kind: "none" }] }, null)).toEqual([3]);
++  expect(iids({ ...NO_FILTERS, reviewer: [{ kind: "none" }] }, null)).toEqual([2, 4]);
++  expect(iids({ ...NO_FILTERS, label: [{ kind: "none" }] }, null)).toEqual([3]);
++});
++
++test("a label value matches the rows carrying it", () => {
++  expect(iids({ ...NO_FILTERS, label: [{ kind: "label", title: "bug" }] }, null)).toEqual([1, 2]);
++});
++
++test.each<[DraftFilter, readonly number[]]>([
++  ["all", [1, 2, 3, 4]],
++  ["drafts", [2, 4]],
++  ["ready", [1, 3]],
++])("Draft %s keeps %o", (draft, expected) => {
++  expect(iids(withDraft(NO_FILTERS, draft), null)).toEqual(expected);
++});
++
++test("passes checks one row", () => {
++  expect(passes(request(5, { draft: true }), withDraft(NO_FILTERS, "ready"), null)).toBe(false);
++  expect(passes(request(5), withDraft(NO_FILTERS, "ready"), null)).toBe(true);
++});
++
++test("a toggle adds a value, a second toggle of an equal value removes it", () => {
++  const once = toggled(NO_FILTERS, "reviewer", { kind: "person", username: "anna" });
++  const twice = toggled(once, "reviewer", { kind: "me" });
++  expect(twice.reviewer).toEqual([{ kind: "person", username: "anna" }, { kind: "me" }]);
++  expect(toggled(twice, "reviewer", { kind: "person", username: "anna" }).reviewer).toEqual([
++    { kind: "me" },
++  ]);
++  expect(twice.assignee).toEqual([]);
++});
++
++test("Me and a person named Me are different values", () => {
++  const filters = toggled(NO_FILTERS, "assignee", { kind: "person", username: "Me" });
++  expect(toggled(filters, "assignee", { kind: "me" }).assignee).toEqual([
++    { kind: "person", username: "Me" },
++    { kind: "me" },
++  ]);
++});
++
++test("None and a label titled None are different values", () => {
++  const filters = toggled(NO_FILTERS, "label", { kind: "label", title: "None" });
++  expect(toggled(filters, "label", { kind: "none" }).label).toEqual([
++    { kind: "label", title: "None" },
++    { kind: "none" },
++  ]);
++});
++
++test.each<[ListFilter, PersonValue | LabelValue]>([
++  ["label", { kind: "me" }],
++  ["label", { kind: "person", username: "sam" }],
++  ["assignee", { kind: "label", title: "bug" }],
++  ["reviewer", { kind: "label", title: "bug" }],
++])("%s ignores a toggle of %o, a value of the other family", (filter, value) => {
++  expect(toggled(NO_FILTERS, filter, value)).toBe(NO_FILTERS);
++});
++
++test.each<[ListFilter, PersonValue | LabelValue]>([
++  ["label", { kind: "none" }],
++  ["assignee", { kind: "none" }],
++  ["reviewer", { kind: "none" }],
++])("%s takes None", (filter, value) => {
++  expect(toggled(NO_FILTERS, filter, value)[filter]).toEqual([{ kind: "none" }]);
++});
++
++test("cleared empties one filter and keeps the others", () => {
++  const filters: Filters = {
++    assignee: [{ kind: "me" }],
++    reviewer: [{ kind: "none" }],
++    label: [{ kind: "none" }],
++    draft: "drafts",
++  };
++  expect(cleared(filters, "reviewer")).toEqual({ ...filters, reviewer: [] });
++  expect(cleared(filters, "label")).toEqual({ ...filters, label: [] });
++});
++
++test.each<[string, Filters, boolean]>([
++  ["nothing set", NO_FILTERS, false],
++  ["an assignee", { ...NO_FILTERS, assignee: [{ kind: "none" }] }, true],
++  ["a reviewer", { ...NO_FILTERS, reviewer: [{ kind: "me" }] }, true],
++  ["a label", { ...NO_FILTERS, label: [{ kind: "none" }] }, true],
++  ["drafts only", withDraft(NO_FILTERS, "drafts"), true],
++  ["ready only", withDraft(NO_FILTERS, "ready"), true],
++])("isFiltered with %s", (_set, filters, expected) => {
++  expect(isFiltered(filters)).toBe(expected);
++});
++
++const LABELLED: Filters = {
++  assignee: [],
++  reviewer: [{ kind: "me" }, { kind: "person", username: "anna" }],
++  label: [{ kind: "none" }, { kind: "label", title: "needs review" }],
++  draft: "all",
++};
++
++test.each<[ListFilter, Filters, string]>([
++  ["assignee", LABELLED, "Assignee"],
++  ["reviewer", LABELLED, "Reviewer: Me, anna"],
++  ["label", LABELLED, "Label: None, needs review"],
++  ["assignee", { ...LABELLED, assignee: [{ kind: "none" }] }, "Assignee: None"],
++  ["reviewer", NO_FILTERS, "Reviewer"],
++  ["label", NO_FILTERS, "Label"],
++])(
++  "filterLabel of %s reads its name alone when unset, its values by username when set",
++  (filter, filters, text) => {
++    expect(filterLabel(filter, filters)).toBe(text);
++  },
++);
+diff --git a/frontend/src/mergeRequests/internal/filters.ts b/frontend/src/mergeRequests/internal/filters.ts
+new file mode 100644
+index 0000000..aecd9f1
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/filters.ts
+@@ -0,0 +1,139 @@
++export type DraftFilter = "all" | "drafts" | "ready";
++export type PersonValue =
++  | { readonly kind: "me" }
++  | { readonly kind: "none" }
++  | { readonly kind: "person"; readonly username: string };
++export type LabelValue =
++  | { readonly kind: "none" }
++  | { readonly kind: "label"; readonly title: string };
++export type Filters = {
++  readonly assignee: readonly PersonValue[];
++  readonly reviewer: readonly PersonValue[];
++  readonly label: readonly LabelValue[];
++  readonly draft: DraftFilter;
++};
++export type ListFilter = "assignee" | "reviewer" | "label";
++
++export type Person = { readonly username: string; readonly name: string };
++export type ListedRequest = {
++  readonly iid: number;
++  readonly createdAt: number;
++  readonly draft: boolean;
++  readonly assignees: readonly Person[];
++  readonly reviewers: readonly Person[];
++  readonly labels: readonly string[];
++};
++
++export const NO_FILTERS: Filters = { assignee: [], reviewer: [], label: [], draft: "all" };
++
++const FILTER_NAMES: Readonly<Record<ListFilter, string>> = {
++  assignee: "Assignee",
++  reviewer: "Reviewer",
++  label: "Label",
++};
++
++export function sameValue(a: PersonValue | LabelValue, b: PersonValue | LabelValue): boolean {
++  return valueWord(a) === valueWord(b) && a.kind === b.kind;
++}
++
++function personMatches(people: readonly Person[], value: PersonValue, me: string | null): boolean {
++  switch (value.kind) {
++    case "me":
++      return people.some((person) => person.username === me);
++    case "none":
++      return people.length === 0;
++    case "person":
++      return people.some((person) => person.username === value.username);
++    default: {
++      const _exhaustive: never = value;
++      return _exhaustive;
++    }
++  }
++}
++
++function anyOf<V>(values: readonly V[], matches: (value: V) => boolean): boolean {
++  return values.length === 0 || values.some(matches);
++}
++
++export function passes(row: ListedRequest, filters: Filters, me: string | null): boolean {
++  return (
++    anyOf(filters.assignee, (value) => personMatches(row.assignees, value, me)) &&
++    anyOf(filters.reviewer, (value) => personMatches(row.reviewers, value, me)) &&
++    anyOf(filters.label, (value) =>
++      value.kind === "none" ? row.labels.length === 0 : row.labels.includes(value.title),
++    ) &&
++    (filters.draft === "all" || row.draft === (filters.draft === "drafts"))
++  );
++}
++
++export function filtered<R extends ListedRequest>(
++  rows: readonly R[],
++  filters: Filters,
++  me: string | null,
++): readonly R[] {
++  return rows.filter((row) => passes(row, filters, me));
++}
++
++function toggledIn<V extends PersonValue | LabelValue>(
++  values: readonly V[],
++  value: V,
++): readonly V[] {
++  return values.some((held) => sameValue(held, value))
++    ? values.filter((held) => !sameValue(held, value))
++    : [...values, value];
++}
++
++export function toggled(
++  filters: Filters,
++  filter: ListFilter,
++  value: PersonValue | LabelValue,
++): Filters {
++  if (filter === "label") {
++    return value.kind === "me" || value.kind === "person"
++      ? filters
++      : { ...filters, label: toggledIn(filters.label, value) };
++  }
++  return value.kind === "label"
++    ? filters
++    : { ...filters, [filter]: toggledIn(filters[filter], value) };
++}
++
++export function withDraft(filters: Filters, draft: DraftFilter): Filters {
++  return { ...filters, draft };
++}
++
++export function cleared(filters: Filters, filter: ListFilter): Filters {
++  return { ...filters, [filter]: [] };
++}
++
++export function isFiltered(filters: Filters): boolean {
++  return (
++    filters.assignee.length > 0 ||
++    filters.reviewer.length > 0 ||
++    filters.label.length > 0 ||
++    filters.draft !== "all"
++  );
++}
++
++function valueWord(value: PersonValue | LabelValue): string {
++  switch (value.kind) {
++    case "me":
++      return "Me";
++    case "none":
++      return "None";
++    case "person":
++      return value.username;
++    case "label":
++      return value.title;
++    default: {
++      const _exhaustive: never = value;
++      return _exhaustive;
++    }
++  }
++}
++
++export function filterLabel(filter: ListFilter, filters: Filters): string {
++  const values: readonly (PersonValue | LabelValue)[] = filters[filter];
++  const name = FILTER_NAMES[filter];
++  return values.length === 0 ? name : `${name}: ${values.map(valueWord).join(", ")}`;
++}
+diff --git a/frontend/src/mergeRequests/internal/order.test.ts b/frontend/src/mergeRequests/internal/order.test.ts
+new file mode 100644
+index 0000000..9e71751
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/order.test.ts
+@@ -0,0 +1,28 @@
++import { expect, test } from "vitest";
++
++import { merged, type ListedRequest } from "../index";
++
++type Row = ListedRequest & { readonly title: string };
++
++function row(iid: number, createdAt: number, title = `!${iid}`): Row {
++  return { iid, createdAt, title, draft: false, assignees: [], reviewers: [], labels: [] };
++}
++
++test("rows come newest created first, a tie ordered by the higher iid first", () => {
++  const page = [row(9, 100), row(3, 300), row(4, 200), row(7, 200), row(5, 200)];
++  expect(merged([], page).map((listed) => listed.iid)).toEqual([3, 7, 5, 4, 9]);
++});
++
++test("a page's rows join the current ones in order", () => {
++  const current = [row(9, 300), row(4, 100)];
++  const page = [row(6, 200), row(2, 50)];
++  expect(merged(current, page).map((listed) => listed.iid)).toEqual([9, 6, 4, 2]);
++});
++
++test("a row in both appears once, the page's copy kept", () => {
++  const current = [row(9, 300, "old title"), row(4, 100)];
++  const page = [row(9, 300, "new title"), row(2, 50)];
++  const rows = merged(current, page);
++  expect(rows.map((listed) => listed.iid)).toEqual([9, 4, 2]);
++  expect(rows[0]?.title).toBe("new title");
++});
+diff --git a/frontend/src/mergeRequests/internal/order.ts b/frontend/src/mergeRequests/internal/order.ts
+new file mode 100644
+index 0000000..ea8e84b
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/order.ts
+@@ -0,0 +1,14 @@
++import type { ListedRequest } from "./filters";
++
++export function merged<R extends ListedRequest>(
++  current: readonly R[],
++  page: readonly R[],
++): readonly R[] {
++  const byIid = new Map<number, R>();
++  for (const row of [...current, ...page]) {
++    byIid.set(row.iid, row);
++  }
++  return [...byIid.values()].toSorted((a, b) =>
++    a.createdAt === b.createdAt ? b.iid - a.iid : b.createdAt - a.createdAt,
++  );
++}
+diff --git a/frontend/src/mergeRequests/internal/relativeTime.test.ts b/frontend/src/mergeRequests/internal/relativeTime.test.ts
+new file mode 100644
+index 0000000..0156439
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/relativeTime.test.ts
+@@ -0,0 +1,34 @@
++import { expect, test } from "vitest";
++
++import { createdAgo } from "../index";
++
++const NOW = Date.parse("2026-10-30T12:00:00Z");
++const SECOND = 1000;
++const MINUTE = 60 * SECOND;
++const HOUR = 60 * MINUTE;
++const DAY = 24 * HOUR;
++
++test.each([
++  ["0 s", 0, "created just now"],
++  ["59 s", 59 * SECOND, "created just now"],
++  ["1 min", MINUTE, "created 1 minute ago"],
++  ["119 s", 2 * MINUTE - 1, "created 1 minute ago"],
++  ["2 min", 2 * MINUTE, "created 2 minutes ago"],
++  ["59 min", HOUR - 1, "created 59 minutes ago"],
++  ["1 h", HOUR, "created 1 hour ago"],
++  ["23 h", 23 * HOUR, "created 23 hours ago"],
++  ["1 d", DAY, "created 1 day ago"],
++  ["6 d", 6 * DAY, "created 6 days ago"],
++  ["7 d", 7 * DAY, "created 1 week ago"],
++  ["29 d", 29 * DAY, "created 4 weeks ago"],
++  ["30 d", 30 * DAY, "created 1 month ago"],
++  ["364 d", 364 * DAY, "created 12 months ago"],
++  ["365 d", 365 * DAY, "created 1 year ago"],
++  ["800 d", 800 * DAY, "created 2 years ago"],
++])("%s old reads %s", (_age, age, text) => {
++  expect(createdAgo(NOW - age, NOW)).toBe(text);
++});
++
++test("a time ahead of the clock reads as just now", () => {
++  expect(createdAgo(NOW + HOUR, NOW)).toBe("created just now");
++});
+diff --git a/frontend/src/mergeRequests/internal/relativeTime.ts b/frontend/src/mergeRequests/internal/relativeTime.ts
+new file mode 100644
+index 0000000..c8e6c08
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/relativeTime.ts
+@@ -0,0 +1,23 @@
++const MINUTE_MS = 60_000;
++const HOUR_MS = 3_600_000;
++const DAY_MS = 86_400_000;
++const WEEK_MS = 604_800_000;
++const MONTH_30_DAYS_MS = 2_592_000_000;
++const YEAR_365_DAYS_MS = 31_536_000_000;
++const UNITS: readonly (readonly [Intl.RelativeTimeFormatUnit, number])[] = [
++  ["year", YEAR_365_DAYS_MS],
++  ["month", MONTH_30_DAYS_MS],
++  ["week", WEEK_MS],
++  ["day", DAY_MS],
++  ["hour", HOUR_MS],
++  ["minute", MINUTE_MS],
++];
++const FORMAT = new Intl.RelativeTimeFormat("en", { numeric: "always" });
++
++export function createdAgo(createdAt: number, now: number): string {
++  const age = now - createdAt;
++  const unit = UNITS.find(([, size]) => age >= size);
++  return unit === undefined
++    ? "created just now"
++    : `created ${FORMAT.format(-Math.floor(age / unit[1]), unit[0])}`;
++}
+diff --git a/frontend/src/mergeRequests/internal/stored.test.ts b/frontend/src/mergeRequests/internal/stored.test.ts
+new file mode 100644
+index 0000000..b1188c3
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/stored.test.ts
+@@ -0,0 +1,57 @@
++import { expect, test } from "vitest";
++
++import { NO_FILTERS, filtersFrom, storedFilters, type Filters, type StoredFilters } from "../index";
++
++const FILTERS: Filters = {
++  assignee: [{ kind: "me" }, { kind: "person", username: "anna" }],
++  reviewer: [{ kind: "none" }, { kind: "person", username: "user:odd" }],
++  label: [{ kind: "none" }, { kind: "label", title: "label:x" }, { kind: "label", title: "none" }],
++  draft: "drafts",
++};
++
++test("the remembered form spells values as words", () => {
++  const form: StoredFilters = {
++    assignee: ["me", "user:anna"],
++    reviewer: ["none", "user:user:odd"],
++    label: ["none", "label:label:x", "label:none"],
++    draft: "drafts",
++  };
++  expect(storedFilters(FILTERS)).toEqual(form);
++});
++
++test("filters read back as written", () => {
++  expect(filtersFrom(JSON.parse(JSON.stringify(storedFilters(FILTERS))))).toEqual(FILTERS);
++  expect(filtersFrom(storedFilters(NO_FILTERS))).toEqual(NO_FILTERS);
++});
++
++test.each([
++  ["undefined", undefined],
++  ["null", null],
++  ["a number", 3],
++  ["a string", "me"],
++  ["an array", ["me"]],
++  ["an empty object", {}],
++  ["fields of the wrong type", { assignee: "me", reviewer: { 0: "me" }, label: 4, draft: 1 }],
++])("junk in storage (%s) reads as no filter", (_kind, stored) => {
++  expect(filtersFrom(stored)).toEqual(NO_FILTERS);
++});
++
++test("unreadable words are dropped and readable ones kept", () => {
++  expect(
++    filtersFrom({
++      assignee: ["me", 7, "user:", "anna", "label:bug", "user:sam", null],
++      reviewer: ["ME", "none"],
++      label: ["label:", "bug", "user:sam", "me", "label:ui", "none"],
++      draft: "maybe",
++    }),
++  ).toEqual({
++    assignee: [{ kind: "me" }, { kind: "person", username: "sam" }],
++    reviewer: [{ kind: "none" }],
++    label: [{ kind: "label", title: "ui" }, { kind: "none" }],
++    draft: "all",
++  });
++});
++
++test.each(["all", "drafts", "ready"] as const)("Draft %s reads back", (draft) => {
++  expect(filtersFrom({ draft }).draft).toBe(draft);
++});
+diff --git a/frontend/src/mergeRequests/internal/stored.ts b/frontend/src/mergeRequests/internal/stored.ts
+new file mode 100644
+index 0000000..cba9867
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/stored.ts
+@@ -0,0 +1,72 @@
++import {
++  NO_FILTERS,
++  type DraftFilter,
++  type Filters,
++  type LabelValue,
++  type PersonValue,
++} from "./filters";
++
++export type StoredFilters = {
++  readonly assignee: readonly string[];
++  readonly reviewer: readonly string[];
++  readonly label: readonly string[];
++  readonly draft: DraftFilter;
++};
++
++const USER_PREFIX = "user:";
++const LABEL_PREFIX = "label:";
++
++function storedPerson(value: PersonValue): string {
++  return value.kind === "person" ? `${USER_PREFIX}${value.username}` : value.kind;
++}
++
++function storedLabel(value: LabelValue): string {
++  return value.kind === "label" ? `${LABEL_PREFIX}${value.title}` : value.kind;
++}
++
++function personFrom(word: string): readonly PersonValue[] {
++  if (word === "me" || word === "none") {
++    return [{ kind: word }];
++  }
++  const username = word.startsWith(USER_PREFIX) ? word.slice(USER_PREFIX.length) : "";
++  return username === "" ? [] : [{ kind: "person", username }];
++}
++
++function labelFrom(word: string): readonly LabelValue[] {
++  if (word === "none") {
++    return [{ kind: "none" }];
++  }
++  const title = word.startsWith(LABEL_PREFIX) ? word.slice(LABEL_PREFIX.length) : "";
++  return title === "" ? [] : [{ kind: "label", title }];
++}
++
++function wordsOf(entry: object, field: keyof StoredFilters): readonly string[] {
++  const words: unknown = Reflect.get(entry, field);
++  if (!Array.isArray(words)) {
++    return [];
++  }
++  const items: readonly unknown[] = words;
++  return items.filter((word): word is string => typeof word === "string");
++}
++
++export function filtersFrom(stored: unknown): Filters {
++  if (typeof stored !== "object" || stored === null) {
++    return NO_FILTERS;
++  }
++  const draft: unknown = Reflect.get(stored, "draft");
++  return {
++    assignee: wordsOf(stored, "assignee").flatMap(personFrom),
++    reviewer: wordsOf(stored, "reviewer").flatMap(personFrom),
++    label: wordsOf(stored, "label").flatMap(labelFrom),
++    draft: draft === "drafts" || draft === "ready" ? draft : "all",
++  };
++}
++
++export function storedFilters(filters: Filters): StoredFilters {
++  return {
++    assignee: filters.assignee.map(storedPerson),
++    reviewer: filters.reviewer.map(storedPerson),
++    label: filters.label.map(storedLabel),
++    draft: filters.draft,
++  };
++}
+diff --git a/frontend/src/mergeRequests/internal/summary.test.ts b/frontend/src/mergeRequests/internal/summary.test.ts
+new file mode 100644
+index 0000000..09aa52a
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/summary.test.ts
+@@ -0,0 +1,16 @@
++import { expect, test } from "vitest";
++
++import { summaryText } from "../index";
++
++test("the summary counts the shown rows of the loaded ones", () => {
++  expect(summaryText(12, 40, false)).toBe("12 of 40 merge requests");
++  expect(summaryText(0, 0, false)).toBe("0 of 0 merge requests");
++  expect(summaryText(1, 1, false)).toBe("1 of 1 merge request");
++  expect(summaryText(1, 2, false)).toBe("1 of 2 merge requests");
++});
++
++test("a cut list says only the newest were loaded", () => {
++  expect(summaryText(12, 500, true)).toBe(
++    "12 of 500 merge requests (the newest 500; GitLab has more)",
++  );
++});
+diff --git a/frontend/src/mergeRequests/internal/summary.ts b/frontend/src/mergeRequests/internal/summary.ts
+new file mode 100644
+index 0000000..58a7d7b
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/summary.ts
+@@ -0,0 +1,4 @@
++export function summaryText(shown: number, loaded: number, cut: boolean): string {
++  const counted = `${shown} of ${loaded} ${loaded === 1 ? "merge request" : "merge requests"}`;
++  return cut ? `${counted} (the newest ${loaded}; GitLab has more)` : counted;
++}
+diff --git a/frontend/src/ui/glab.ts b/frontend/src/ui/glab.ts
+new file mode 100644
+index 0000000..37d3a5c
+--- /dev/null
++++ b/frontend/src/ui/glab.ts
+@@ -0,0 +1,11 @@
++export const GLAB_MISSING_TEXT = "glab is not installed (not found on PATH)";
++
++export const RECHECK_PAUSE_MS = 30_000;
++
++export function glabNotLoggedInText(detail: string): string {
++  return `glab is not logged in: ${detail}`;
++}
++
++export function glabFailedText(message: string): string {
++  return `glab failed: ${message}`;
++}
+diff --git a/frontend/src/ui/mergeRequestFilters.test.ts b/frontend/src/ui/mergeRequestFilters.test.ts
+new file mode 100644
+index 0000000..7c62db1
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestFilters.test.ts
+@@ -0,0 +1,116 @@
++import type { StorageLike } from "@vueuse/core";
++import { expect, test } from "vitest";
++import { shallowRef } from "vue";
++
++import { NO_FILTERS, type Filters } from "../mergeRequests";
++import { createRememberedFilters } from "./mergeRequestFilters";
++
++const KEY = "yamt.mergeRequests.filters";
++const REPOSITORY = "/home/sam/taskboard/.git";
++const OTHER_REPOSITORY = "/home/sam/other/.git";
++const FILTERS: Filters = {
++  assignee: [{ kind: "me" }],
++  reviewer: [{ kind: "person", username: "anna" }],
++  label: [{ kind: "none" }],
++  draft: "ready",
++};
++const STORED_FILTERS = {
++  assignee: ["me"],
++  reviewer: ["user:anna"],
++  label: ["none"],
++  draft: "ready",
++};
++
++function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
++  readonly items: Map<string, string>;
++} {
++  const items = new Map(Object.entries(initial));
++  return {
++    items,
++    getItem: (key) => items.get(key) ?? null,
++    setItem: (key, value) => {
++      items.set(key, value);
++    },
++    removeItem: (key) => {
++      items.delete(key);
++    },
++  };
++}
++
++function stored(storage: { readonly items: Map<string, string> }): unknown {
++  const raw = storage.items.get(KEY);
++  return raw === undefined ? undefined : JSON.parse(raw);
++}
++
++test("no filter at first; set filters are remembered under the repository", () => {
++  const storage = memoryStorage();
++  const remembered = createRememberedFilters(shallowRef(REPOSITORY), storage);
++  expect(remembered.filters.value).toEqual(NO_FILTERS);
++  expect(storage.items.get(KEY)).toBeUndefined();
++
++  remembered.set(FILTERS);
++
++  expect(remembered.filters.value).toEqual(FILTERS);
++  expect(stored(storage)).toEqual({ [REPOSITORY]: STORED_FILTERS });
++});
++
++test("filters written before are read back by a new window", () => {
++  const storage = memoryStorage({ [KEY]: JSON.stringify({ [REPOSITORY]: STORED_FILTERS }) });
++  expect(createRememberedFilters(shallowRef(REPOSITORY), storage).filters.value).toEqual(FILTERS);
++});
++
++test("another repository's entry survives a write, as written", () => {
++  const others = { [OTHER_REPOSITORY]: { label: ["label:bug"] }, "/odd": "not filters" };
++  const storage = memoryStorage({ [KEY]: JSON.stringify(others) });
++  const repository = shallowRef<string | null>(REPOSITORY);
++  const remembered = createRememberedFilters(repository, storage);
++  expect(remembered.filters.value).toEqual(NO_FILTERS);
++
++  remembered.set(FILTERS);
++  expect(stored(storage)).toEqual({ ...others, [REPOSITORY]: STORED_FILTERS });
++
++  repository.value = OTHER_REPOSITORY;
++  expect(remembered.filters.value).toEqual({
++    ...NO_FILTERS,
++    label: [{ kind: "label", title: "bug" }],
++  });
++});
++
++test("filters set back to none remove the repository's entry", () => {
++  const storage = memoryStorage({ [KEY]: JSON.stringify({ [OTHER_REPOSITORY]: STORED_FILTERS }) });
++  const remembered = createRememberedFilters(shallowRef(REPOSITORY), storage);
++
++  remembered.set(FILTERS);
++  remembered.set(NO_FILTERS);
++
++  expect(remembered.filters.value).toEqual(NO_FILTERS);
++  expect(stored(storage)).toEqual({ [OTHER_REPOSITORY]: STORED_FILTERS });
++});
++
++test("with no repository there are no filters and a set writes nothing", () => {
++  const entries = { [REPOSITORY]: STORED_FILTERS, null: STORED_FILTERS };
++  const storage = memoryStorage({ [KEY]: JSON.stringify(entries) });
++  const remembered = createRememberedFilters(shallowRef(null), storage);
++
++  remembered.set({ ...NO_FILTERS, draft: "drafts" });
++
++  expect(remembered.filters.value).toEqual(NO_FILTERS);
++  expect(stored(storage)).toEqual(entries);
++});
++
++test.each([
++  ["not JSON", "{"],
++  ["a list", JSON.stringify([STORED_FILTERS])],
++  ["null", "null"],
++  ["a text", JSON.stringify("me")],
++  ["an entry that is not filters", JSON.stringify({ [REPOSITORY]: ["me"] })],
++])("storage holding %s reads as no filter, and a set starts afresh", (_kind, raw) => {
++  const storage = memoryStorage({ [KEY]: raw });
++  const remembered = createRememberedFilters(shallowRef(REPOSITORY), storage);
++  expect(remembered.filters.value).toEqual(NO_FILTERS);
++
++  remembered.set(FILTERS);
++
++  expect(remembered.filters.value).toEqual(FILTERS);
++  expect(stored(storage)).toEqual({ [REPOSITORY]: STORED_FILTERS });
++});
+diff --git a/frontend/src/ui/mergeRequestFilters.ts b/frontend/src/ui/mergeRequestFilters.ts
+new file mode 100644
+index 0000000..2bd7d83
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestFilters.ts
+@@ -0,0 +1,46 @@
++import type { StorageLike } from "@vueuse/core";
++import { computed, type Ref } from "vue";
++
++import { filtersFrom, isFiltered, NO_FILTERS, storedFilters, type Filters } from "../mergeRequests";
++import { parseStored, storedValue } from "./windowStorage";
++
++type FiltersByRepository = Readonly<Record<string, unknown>>;
++
++const STORAGE_KEY = "yamt.mergeRequests.filters";
++
++function readByRepository(raw: string): FiltersByRepository {
++  const stored = parseStored(raw);
++  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++    ? { ...stored }
++    : {};
++}
++
++export function createRememberedFilters(
++  repository: Readonly<Ref<string | null>>,
++  storage?: StorageLike,
++): { readonly filters: Readonly<Ref<Filters>>; set(next: Filters): void } {
++  const byRepository = storedValue<FiltersByRepository>(
++    STORAGE_KEY,
++    {},
++    { read: readByRepository, write: (value) => JSON.stringify(value) },
++    "mergeRequests.filters_storage_failed",
++    storage,
++  );
++  const filters = computed((): Filters => {
++    const at = repository.value;
++    return at === null ? NO_FILTERS : filtersFrom(byRepository.value[at]);
++  });
++  return {
++    filters,
++    set: (next) => {
++      const at = repository.value;
++      if (at === null) {
++        return;
++      }
++      const others = Object.fromEntries(
++        Object.entries(byRepository.value).filter(([other]) => other !== at),
++      );
++      byRepository.value = isFiltered(next) ? { ...others, [at]: storedFilters(next) } : others;
++    },
++  };
++}
+diff --git a/frontend/src/ui/rangeGitLab.test.ts b/frontend/src/ui/rangeGitLab.test.ts
+index e571e57..b1b03a1 100644
+--- a/frontend/src/ui/rangeGitLab.test.ts
++++ b/frontend/src/ui/rangeGitLab.test.ts
+@@ -12,13 +12,9 @@ import {
+   type SendReply,
+   type SourceResult,
+ } from "../ipc";
++import { RECHECK_PAUSE_MS } from "./glab";
+ import type { Problem } from "./problem";
+-import {
+-  createGitLabCheck,
+-  RECHECK_PAUSE_MS,
+-  type GitLabState,
+-  type PostBody,
+-} from "./rangeGitLab";
++import { createGitLabCheck, type GitLabState, type PostBody } from "./rangeGitLab";
+ import { createRangeThreads, type RangeThreads } from "./rangeThreads";
+ 
+ const TEXT: PostBody = { kind: "text", text: "Is this still used?" };
+diff --git a/frontend/src/ui/rangeGitLab.ts b/frontend/src/ui/rangeGitLab.ts
+index ade8a5b..5011fcf 100644
+--- a/frontend/src/ui/rangeGitLab.ts
++++ b/frontend/src/ui/rangeGitLab.ts
+@@ -9,6 +9,7 @@ import type {
+   SendProgress,
+   SendReply,
+ } from "../ipc";
++import { RECHECK_PAUSE_MS } from "./glab";
+ import { attempt, type Problem } from "./problem";
+ import { isQueued, type RangeThreads } from "./rangeThreads";
+ import {
+@@ -74,8 +75,6 @@ type State = {
+   lastEnded: number | null;
+ };
+ 
+-export const RECHECK_PAUSE_MS = 30_000;
+-
+ function gate(state: State): Gate {
+   const check = state.check.value;
+   const start = state.start.value;
+diff --git a/frontend/src/ui/rangeThreadText.ts b/frontend/src/ui/rangeThreadText.ts
+index 7eaa658..4ba30b7 100644
+--- a/frontend/src/ui/rangeThreadText.ts
++++ b/frontend/src/ui/rangeThreadText.ts
+@@ -8,6 +8,7 @@ import type {
+   SendReply,
+   ThreadLine,
+ } from "../ipc";
++import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
+ import type { NoticeRow } from "./noticeText";
+ import type { NoteChangeBlock } from "./rangeNoteChange";
+ import { sideLabel } from "./rangeText";
+@@ -74,9 +75,9 @@ function twoDotsHint({ left, right }: RangeStart): string {
+ export function notLinedUpText(why: NotLinedUp, start: RangeStart): string {
+   switch (why.kind) {
+     case "glabMissing":
+-      return "glab is not installed (not found on PATH)";
++      return GLAB_MISSING_TEXT;
+     case "notLoggedIn":
+-      return `glab is not logged in: ${why.detail}`;
++      return glabNotLoggedInText(why.detail);
+     case "noMergeRequest": {
+       const { lookedAt } = why;
+       return lookedAt.kind === "branch"
+@@ -96,7 +97,7 @@ export function notLinedUpText(why: NotLinedUp, start: RangeStart): string {
+     case "preparing":
+       return `GitLab is still preparing the changes of ${why.mergeRequest.reference}`;
+     case "failed":
+-      return `glab failed: ${why.message}`;
++      return glabFailedText(why.message);
+     default: {
+       const _exhaustive: never = why;
+       return _exhaustive;
+diff --git a/frontend/vite.config.ts b/frontend/vite.config.ts
+index ec83dd2..3dc5093 100644
+--- a/frontend/vite.config.ts
++++ b/frontend/vite.config.ts
+@@ -40,6 +40,7 @@ export default defineConfig({
+             "src/jsonrpc/**/*.test.ts",
+             "src/agent/**/*.test.ts",
+             "src/search/**/*.test.ts",
++            "src/mergeRequests/**/*.test.ts",
+             "scripts/**/*.test.ts",
+           ],
+           exclude: [...configDefaults.exclude, "**/*.browser.test.ts"],

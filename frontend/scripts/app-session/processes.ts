@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -12,6 +12,15 @@ const POLL_MS = 100;
 const STOP_GRACE_MS = 3000;
 const OWNER_DEV_PORT = 5173;
 const RUN_TIMEOUT_MS = 30_000;
+const PROCESS_ID = /^[0-9]+$/;
+const APP_COMMAND = "yamt";
+const SESSION_VARIABLE = "YAMT_APP_SESSION";
+
+export type EnvEntry = { readonly name: string; readonly value: string };
+
+export function sessionEntry(folder: string): EnvEntry {
+  return { name: SESSION_VARIABLE, value: folder };
+}
 
 export type Launch = {
   readonly role: string;
@@ -27,9 +36,9 @@ export function logFile(logDir: string, role: string): string {
   return join(logDir, `${role}.log`);
 }
 
-function startTicksOf(pid: number): number | null {
+function startTicksOf(pid: number, procRoot = "/proc"): number | null {
   try {
-    return parseStartTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    return parseStartTicks(readFileSync(join(procRoot, String(pid), "stat"), "utf8"));
   } catch {
     return null;
   }
@@ -103,7 +112,9 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
   }
 }
 
-export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone" | "not ours"> {
+export type StopResult = "stopped" | "killed" | "gone" | "not ours";
+
+export async function stopProc(proc: Proc): Promise<StopResult> {
   const ticks = startTicksOf(proc.pid);
   if (ticks !== null && ticks !== proc.startTicks) {
     return "not ours";
@@ -118,6 +129,33 @@ export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone
     signalGroup(proc.pid, "SIGKILL");
     return "killed";
   }
+}
+
+function readOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+export function holdsEntry(environ: string, { name, value }: EnvEntry): boolean {
+  return environ.split("\0").includes(`${name}=${value}`);
+}
+
+export function runningAppsWith(entry: EnvEntry, procRoot = "/proc"): Proc[] {
+  return readdirSync(procRoot)
+    .filter((name) => PROCESS_ID.test(name))
+    .flatMap((name) => {
+      const pid = Number(name);
+      const folder = join(procRoot, name);
+      const environ = readOrNull(join(folder, "environ"));
+      const startTicks = startTicksOf(pid, procRoot);
+      const isApp = readOrNull(join(folder, "comm"))?.trim() === APP_COMMAND;
+      return isApp && environ !== null && startTicks !== null && holdsEntry(environ, entry)
+        ? [{ role: "yamt child", pid, startTicks }]
+        : [];
+    });
 }
 
 const execFileText = promisify(execFile);

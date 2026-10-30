@@ -23,7 +23,7 @@ export const SHARED_PATHS = [
   "frontend/pnpm-lock.yaml",
 ];
 
-export const MAX_PARALLEL_AGENTS = 3;
+export const MAX_PARALLEL_AGENTS = 5;
 
 export const IMPLEMENTER_AGENTS: Record<string, true> = { "rust-impl": true, "web-impl": true };
 

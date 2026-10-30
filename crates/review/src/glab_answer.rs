@@ -1,10 +1,9 @@
 use std::path::Path;
 
-use yamt_gitio::{Glab, GlabRun};
+use yamt_gitio::{Glab, GlabRun, TIMED_OUT, last_line};
 
 use crate::gitlab::{draft_id_from, error_message_from};
 
-pub(crate) const TIMED_OUT: &str = "glab timed out";
 const NO_HTTP_ANSWER: &str = "glab printed no HTTP answer";
 
 /// What one message's post came to.
@@ -78,20 +77,7 @@ pub(crate) fn answer(
     root: &Path,
     args: &[String],
 ) -> std::result::Result<Vec<u8>, String> {
-    match run(glab, root, args, None)? {
-        GlabRun::Printed { stdout } => Ok(stdout),
-        GlabRun::Failed { status, stderr, .. } => {
-            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
-        }
-        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
-    }
-}
-
-fn exit_words(status: Option<i32>) -> String {
-    match status {
-        Some(code) => format!("glab exited with status {code}"),
-        None => "glab was stopped by a signal".to_owned(),
-    }
+    glab.get(root, &as_strs(args))
 }
 
 /// `Err` when glab could not run at all, in gitio's words.
@@ -101,22 +87,12 @@ pub(crate) fn run(
     args: &[String],
     stdin: Option<Vec<u8>>,
 ) -> std::result::Result<GlabRun, String> {
-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
-    glab.run(root, &args, stdin)
+    glab.run(root, &as_strs(args), stdin)
         .map_err(|error| error.to_string())
 }
 
-pub(crate) fn first_line(output: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(output);
-    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
-    line.map(str::to_owned)
-}
-
-/// glab prints its error last, after any notice such as a first run's "What's new".
-fn last_line(output: &[u8]) -> Option<String> {
-    let text = String::from_utf8_lossy(output);
-    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty());
-    line.map(str::to_owned)
+fn as_strs(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
 }
 
 #[cfg(test)]
@@ -187,7 +163,5 @@ mod tests {
         assert_eq!(posted(Ok(no_answer(b""))), stop(NO_HTTP_ANSWER));
         assert_eq!(posted(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
         assert_eq!(posted(Err("gone".to_owned())), stop("gone"));
-        assert_eq!(exit_words(Some(2)), "glab exited with status 2");
-        assert_eq!(exit_words(None), "glab was stopped by a signal");
     }
 }

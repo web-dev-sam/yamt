@@ -17,6 +17,7 @@ import {
 import type { CompareSource } from "./CompareSource";
 import type { SourceResult } from "./domain";
 import { COLUMN_LIMIT_BYTES, DIFFERENCE, parsedCases } from "./fixture";
+import { createFixtureMergeRequests } from "./fixtureMergeRequests";
 import { createFixtureSettings } from "./fixtureSettings";
 import type { Log } from "./log";
 
@@ -229,6 +230,7 @@ export function createFixtureCompareSource(
     },
     ...tabActions(tabs),
     ...createFixtureSettings(),
+    ...createFixtureMergeRequests(log, search),
   };
 }
 

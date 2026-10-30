@@ -1,0 +1,494 @@
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 88d3157..793f9e3 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -398,6 +398,75 @@ test("ui importing search's internal/ violates PM5", () => {
+   ]);
+ });
+ 
++test("mergeRequests importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
++  const files = [
++    { path: "src/mergeRequests/index.ts", text: `import { ref } from "vue";` },
++    {
++      path: "src/mergeRequests/internal/filters.ts",
++      text: `import { useDebounceFn } from "@vueuse/core";`,
++    },
++    {
++      path: "src/mergeRequests/internal/choices.ts",
++      text: `import { invoke } from "@tauri-apps/api/core";`,
++    },
++    { path: "src/mergeRequests/internal/ciBox.ts", text: `import x from "~icons/lucide/x";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([
++    { rule: "PM3", file: "src/mergeRequests/index.ts", specifier: "vue" },
++    { rule: "PM3", file: "src/mergeRequests/internal/filters.ts", specifier: "@vueuse/core" },
++    {
++      rule: "PM3",
++      file: "src/mergeRequests/internal/choices.ts",
++      specifier: "@tauri-apps/api/core",
++    },
++    { rule: "PM3", file: "src/mergeRequests/internal/ciBox.ts", specifier: "~icons/lucide/x" },
++  ]);
++});
++
++test("mergeRequests importing any other src/ module violates PM2", () => {
++  const files = [
++    { path: "src/mergeRequests/index.ts", text: `import type { Column } from "../ipc";` },
++    { path: "src/mergeRequests/internal/filters.ts", text: `import { log } from "../../ipc/log";` },
++    { path: "src/mergeRequests/internal/choices.ts", text: `import "../../editor/index.ts";` },
++    {
++      path: "src/mergeRequests/internal/order.ts",
++      text: `import { matcherOf } from "../../search";`,
++    },
++    { path: "src/mergeRequests/a.ts", text: `import "../mergeRequestsx/b";` },
++  ];
++
++  expect(
++    findFenceViolations(files).map(({ file, rule, reason }) => ({ file, rule, reason })),
++  ).toEqual(
++    files.map(({ path }) => ({
++      file: path,
++      rule: "PM2",
++      reason: "mergeRequests/ imports no other src/ module",
++    })),
++  );
++});
++
++test("mergeRequests importing itself, and ui importing mergeRequests' index, violate nothing", () => {
++  const files = [
++    { path: "src/mergeRequests/index.ts", text: `export { toggled } from "./internal/filters";` },
++    {
++      path: "src/mergeRequests/internal/choices.ts",
++      text: `import { sameValue } from "./filters";`,
++    },
++    {
++      path: "src/mergeRequests/internal/order.test.ts",
++      text: `import { merged } from "../index";`,
++    },
++    {
++      path: "src/ui/mergeRequestFilters.ts",
++      text: `import { NO_FILTERS } from "../mergeRequests";`,
++    },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
+ test("agent importing vue, @vueuse, @tauri-apps or an icon component violates PM3", () => {
+   const files = [
+     { path: "src/agent/index.ts", text: `import { ref } from "vue";` },
+diff --git a/frontend/src/mergeRequests/internal/choices.test.ts b/frontend/src/mergeRequests/internal/choices.test.ts
+index 67b768e..fe1a27a 100644
+--- a/frontend/src/mergeRequests/internal/choices.test.ts
++++ b/frontend/src/mergeRequests/internal/choices.test.ts
+@@ -84,6 +84,18 @@ test("checked values show checked", () => {
+   ]);
+ });
+ 
++test("of two people with the same name only the checked one shows checked", () => {
++  const twin: Person = { username: "slee", name: SAM.name };
++  const choices = personChoices([request(1, { assignees: [SAM, twin] })], "assignees", null, [
++    { kind: "person", username: "slee" },
++  ]);
++  expect(choices.map((listed) => [listed.value, listed.checked])).toEqual([
++    [{ kind: "none" }, false],
++    [{ kind: "person", username: "sam" }, false],
++    [{ kind: "person", username: "slee" }, true],
++  ]);
++});
++
+ test("a checked person no longer in the list stays checked with 0, among the others by name", () => {
+   const choices = personChoices(ROWS, "assignees", "sam", [
+     { kind: "person", username: "bob" },
+diff --git a/frontend/src/mergeRequests/internal/filters.test.ts b/frontend/src/mergeRequests/internal/filters.test.ts
+index db73f55..e587634 100644
+--- a/frontend/src/mergeRequests/internal/filters.test.ts
++++ b/frontend/src/mergeRequests/internal/filters.test.ts
+@@ -135,6 +135,32 @@ test("None and a label titled None are different values", () => {
+   ]);
+ });
+ 
++test("two people with the same name stay two values when toggled", () => {
++  const twin: Person = { username: "slee", name: SAM.name };
++  const both = toggled(
++    toggled(NO_FILTERS, "assignee", { kind: "person", username: SAM.username }),
++    "assignee",
++    { kind: "person", username: twin.username },
++  );
++  expect(both.assignee).toEqual([
++    { kind: "person", username: "sam" },
++    { kind: "person", username: "slee" },
++  ]);
++  expect(toggled(both, "assignee", { kind: "person", username: "sam" }).assignee).toEqual([
++    { kind: "person", username: "slee" },
++  ]);
++});
++
++test("two labels stay two values when toggled; a second toggle removes only its own", () => {
++  const both = toggled(toggled(NO_FILTERS, "label", { kind: "label", title: "bug" }), "label", {
++    kind: "label",
++    title: "ui",
++  });
++  expect(toggled(both, "label", { kind: "label", title: "bug" }).label).toEqual([
++    { kind: "label", title: "ui" },
++  ]);
++});
++
+ test.each<[ListFilter, PersonValue | LabelValue]>([
+   ["label", { kind: "me" }],
+   ["label", { kind: "person", username: "sam" }],
+diff --git a/frontend/src/mergeRequests/internal/filters.ts b/frontend/src/mergeRequests/internal/filters.ts
+index aecd9f1..e434fdd 100644
+--- a/frontend/src/mergeRequests/internal/filters.ts
++++ b/frontend/src/mergeRequests/internal/filters.ts
+@@ -33,7 +33,19 @@ const FILTER_NAMES: Readonly<Record<ListFilter, string>> = {
+ };
+ 
+ export function sameValue(a: PersonValue | LabelValue, b: PersonValue | LabelValue): boolean {
+-  return valueWord(a) === valueWord(b) && a.kind === b.kind;
++  switch (a.kind) {
++    case "me":
++    case "none":
++      return b.kind === a.kind;
++    case "person":
++      return b.kind === "person" && b.username === a.username;
++    case "label":
++      return b.kind === "label" && b.title === a.title;
++    default: {
++      const _exhaustive: never = a;
++      return _exhaustive;
++    }
++  }
+ }
+ 
+ function personMatches(people: readonly Person[], value: PersonValue, me: string | null): boolean {
+diff --git a/frontend/src/ui/mergeRequestFilters.test.ts b/frontend/src/ui/mergeRequestFilters.test.ts
+index 7c62db1..854b5f9 100644
+--- a/frontend/src/ui/mergeRequestFilters.test.ts
++++ b/frontend/src/ui/mergeRequestFilters.test.ts
+@@ -1,5 +1,5 @@
+ import type { StorageLike } from "@vueuse/core";
+-import { expect, test } from "vitest";
++import { afterEach, expect, test, vi } from "vitest";
+ import { shallowRef } from "vue";
+ 
+ import { NO_FILTERS, type Filters } from "../mergeRequests";
+@@ -21,6 +21,10 @@ const STORED_FILTERS = {
+   draft: "ready",
+ };
+ 
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
+ function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
+   readonly items: Map<string, string>;
+ } {
+@@ -114,3 +118,23 @@ test.each([
+   expect(remembered.filters.value).toEqual(FILTERS);
+   expect(stored(storage)).toEqual({ [REPOSITORY]: STORED_FILTERS });
+ });
++
++test("a storage that throws on write keeps the filters in memory and logs under the filters' event", () => {
++  const warnings: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    warnings.push(line);
++  });
++  const remembered = createRememberedFilters(shallowRef(REPOSITORY), {
++    ...memoryStorage(),
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++  });
++
++  remembered.set(FILTERS);
++
++  expect(remembered.filters.value).toEqual(FILTERS);
++  expect(warnings).toEqual([
++    '[warn] mergeRequests.filters_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
++  ]);
++});
+diff --git a/frontend/src/ui/mergeRequestFilters.ts b/frontend/src/ui/mergeRequestFilters.ts
+index 2bd7d83..228d398 100644
+--- a/frontend/src/ui/mergeRequestFilters.ts
++++ b/frontend/src/ui/mergeRequestFilters.ts
+@@ -2,33 +2,18 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import { filtersFrom, isFiltered, NO_FILTERS, storedFilters, type Filters } from "../mergeRequests";
+-import { parseStored, storedValue } from "./windowStorage";
+-
+-type FiltersByRepository = Readonly<Record<string, unknown>>;
++import { storedRecord } from "./windowStorage";
+ 
+ const STORAGE_KEY = "yamt.mergeRequests.filters";
+ 
+-function readByRepository(raw: string): FiltersByRepository {
+-  const stored = parseStored(raw);
+-  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
+-    ? { ...stored }
+-    : {};
+-}
+-
+ export function createRememberedFilters(
+   repository: Readonly<Ref<string | null>>,
+   storage?: StorageLike,
+ ): { readonly filters: Readonly<Ref<Filters>>; set(next: Filters): void } {
+-  const byRepository = storedValue<FiltersByRepository>(
+-    STORAGE_KEY,
+-    {},
+-    { read: readByRepository, write: (value) => JSON.stringify(value) },
+-    "mergeRequests.filters_storage_failed",
+-    storage,
+-  );
++  const byRepository = storedRecord(STORAGE_KEY, "mergeRequests.filters_storage_failed", storage);
+   const filters = computed((): Filters => {
+     const at = repository.value;
+-    return at === null ? NO_FILTERS : filtersFrom(byRepository.value[at]);
++    return at === null ? NO_FILTERS : filtersFrom(byRepository.entryAt(at));
+   });
+   return {
+     filters,
+@@ -37,10 +22,11 @@ export function createRememberedFilters(
+       if (at === null) {
+         return;
+       }
+-      const others = Object.fromEntries(
+-        Object.entries(byRepository.value).filter(([other]) => other !== at),
+-      );
+-      byRepository.value = isFiltered(next) ? { ...others, [at]: storedFilters(next) } : others;
++      if (isFiltered(next)) {
++        byRepository.set(at, storedFilters(next));
++      } else {
++        byRepository.remove(at);
++      }
+     },
+   };
+ }
+diff --git a/frontend/src/ui/serverPins.test.ts b/frontend/src/ui/serverPins.test.ts
+index 1fe43b2..206ca77 100644
+--- a/frontend/src/ui/serverPins.test.ts
++++ b/frontend/src/ui/serverPins.test.ts
+@@ -1,5 +1,5 @@
+ import type { StorageLike } from "@vueuse/core";
+-import { expect, test } from "vitest";
++import { afterEach, expect, test, vi } from "vitest";
+ import { shallowRef } from "vue";
+ 
+ import { serverKey } from "../lsp";
+@@ -11,6 +11,10 @@ const OTHER_ROOT = "/elsewhere";
+ const OXLINT = serverKey("oxlint (frontend)");
+ const TYPESCRIPT = serverKey("TypeScript (frontend)");
+ 
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
+ function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
+   readonly items: Map<string, string>;
+ } {
+@@ -102,3 +106,23 @@ test.each([
+ 
+   expect(pinned(pins)).toEqual([OXLINT]);
+ });
++
++test("a storage that throws on write keeps the pin in memory and logs under the pins' event", () => {
++  const warnings: string[] = [];
++  vi.spyOn(console, "warn").mockImplementation((line: string) => {
++    warnings.push(line);
++  });
++  const pins = createServerPins(shallowRef(ROOT), {
++    ...memoryStorage(),
++    setItem: () => {
++      throw new Error("quota exceeded");
++    },
++  });
++
++  pins.togglePin(OXLINT);
++
++  expect(pinned(pins)).toEqual([OXLINT]);
++  expect(warnings).toEqual([
++    '[warn] servers.pins_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
++  ]);
++});
+diff --git a/frontend/src/ui/serverPins.ts b/frontend/src/ui/serverPins.ts
+index d7c7583..b81e469 100644
+--- a/frontend/src/ui/serverPins.ts
++++ b/frontend/src/ui/serverPins.ts
+@@ -2,30 +2,20 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, type Ref } from "vue";
+ 
+ import type { ServerKey } from "../lsp";
+-import { parseStored, storedValue } from "./windowStorage";
++import { storedRecord } from "./windowStorage";
+ 
+ export type ServerPins = {
+   readonly pinnedServers: Readonly<Ref<ReadonlySet<string>>>;
+   togglePin(key: ServerKey): void;
+ };
+ 
+-type PinsByRoot = Readonly<Record<string, unknown>>;
+-
+ const STORAGE_KEY = "yamt.servers.pinned";
+ 
+-function readPins(raw: string): PinsByRoot {
+-  const stored = parseStored(raw);
+-  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
+-    ? { ...stored }
+-    : {};
+-}
+-
+-function pinsOf(byRoot: PinsByRoot, root: string): readonly string[] {
+-  const keys = byRoot[root];
+-  if (!Array.isArray(keys)) {
++function pinsOf(entry: unknown): readonly string[] {
++  if (!Array.isArray(entry)) {
+     return [];
+   }
+-  const items: readonly unknown[] = keys;
++  const items: readonly unknown[] = entry;
+   return items.every((key): key is string => typeof key === "string") ? items : [];
+ }
+ 
+@@ -33,15 +23,10 @@ export function createServerPins(
+   root: Readonly<Ref<string | null>>,
+   storage?: StorageLike,
+ ): ServerPins {
+-  const byRoot = storedValue<PinsByRoot>(
+-    STORAGE_KEY,
+-    {},
+-    { read: readPins, write: (value) => JSON.stringify(value) },
+-    "servers.pins_storage_failed",
+-    storage,
+-  );
++  const byRoot = storedRecord(STORAGE_KEY, "servers.pins_storage_failed", storage);
+   const pinnedServers = computed(
+-    (): ReadonlySet<string> => new Set(root.value === null ? [] : pinsOf(byRoot.value, root.value)),
++    (): ReadonlySet<string> =>
++      new Set(root.value === null ? [] : pinsOf(byRoot.entryAt(root.value))),
+   );
+   return {
+     pinnedServers,
+@@ -50,12 +35,13 @@ export function createServerPins(
+       if (at === null) {
+         return;
+       }
+-      const before = pinsOf(byRoot.value, at);
++      const before = pinsOf(byRoot.entryAt(at));
+       const after = before.includes(key) ? before.filter((pin) => pin !== key) : [...before, key];
+-      const others = Object.fromEntries(
+-        Object.entries(byRoot.value).filter(([other]) => other !== at),
+-      );
+-      byRoot.value = after.length === 0 ? others : { ...others, [at]: after };
++      if (after.length === 0) {
++        byRoot.remove(at);
++      } else {
++        byRoot.set(at, after);
++      }
+     },
+   };
+ }
+diff --git a/frontend/src/ui/windowStorage.test.ts b/frontend/src/ui/windowStorage.test.ts
+index ef70591..5d8280c 100644
+--- a/frontend/src/ui/windowStorage.test.ts
++++ b/frontend/src/ui/windowStorage.test.ts
+@@ -1,7 +1,7 @@
+ import type { StorageLike } from "@vueuse/core";
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { parseStored, storedValue } from "./windowStorage";
++import { parseStored, storedRecord, storedValue } from "./windowStorage";
+ 
+ const KEY = "yamt.test.value";
+ const EVENT = "test.storage_failed";
+@@ -96,3 +96,43 @@ test("stored JSON is parsed; text that is not JSON gives null", () => {
+   expect(parseStored("{not json")).toBeNull();
+   expect(parseStored("")).toBeNull();
+ });
++
++test("a record entry is set under its key; another key's entry stays as written", () => {
++  const storage = memoryStorage({ [KEY]: '{"/other":{"odd":[1,"x"]}}' });
++  const record = storedRecord(KEY, EVENT, storage);
++
++  record.set("/repo", ["a"]);
++
++  expect(record.entryAt("/repo")).toEqual(["a"]);
++  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({
++    "/other": { odd: [1, "x"] },
++    "/repo": ["a"],
++  });
++});
++
++test("a set replaces the key's entry; a remove drops the key and keeps the others", () => {
++  const storage = memoryStorage({ [KEY]: '{"/other":5,"/repo":["a"]}' });
++  const record = storedRecord(KEY, EVENT, storage);
++
++  record.set("/repo", ["b"]);
++  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({ "/other": 5, "/repo": ["b"] });
++
++  record.remove("/repo");
++  expect(record.entryAt("/repo")).toBeUndefined();
++  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({ "/other": 5 });
++});
++
++test.each([
++  ["text that is not JSON", "{not json"],
++  ["an array", '["/repo"]'],
++  ["null", "null"],
++  ["a number", "3"],
++])("a record stored as %s reads as empty, and a set starts afresh", (_kind, raw) => {
++  const storage = memoryStorage({ [KEY]: raw });
++  const record = storedRecord(KEY, EVENT, storage);
++  expect(record.entryAt("0")).toBeUndefined();
++
++  record.set("/repo", true);
++
++  expect(JSON.parse(storage.items.get(KEY) ?? "")).toEqual({ "/repo": true });
++});
+diff --git a/frontend/src/ui/windowStorage.ts b/frontend/src/ui/windowStorage.ts
+index b7f865e..d64f642 100644
+--- a/frontend/src/ui/windowStorage.ts
++++ b/frontend/src/ui/windowStorage.ts
+@@ -28,3 +28,41 @@ export function storedValue<T>(
+     },
+   });
+ }
++
++export type StoredRecord = {
++  entryAt(at: string): unknown;
++  set(at: string, entry: unknown): void;
++  remove(at: string): void;
++};
++
++type Entries = Readonly<Record<string, unknown>>;
++
++function readEntries(raw: string): Entries {
++  const stored = parseStored(raw);
++  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
++    ? { ...stored }
++    : {};
++}
++
++function without(entries: Entries, at: string): Entries {
++  return Object.fromEntries(Object.entries(entries).filter(([other]) => other !== at));
++}
++
++export function storedRecord(key: string, warnEvent: string, storage?: StorageLike): StoredRecord {
++  const entries = storedValue<Entries>(
++    key,
++    {},
++    { read: readEntries, write: (value) => JSON.stringify(value) },
++    warnEvent,
++    storage,
++  );
++  return {
++    entryAt: (at) => entries.value[at],
++    set: (at, entry) => {
++      entries.value = { ...without(entries.value, at), [at]: entry };
++    },
++    remove: (at) => {
++      entries.value = without(entries.value, at);
++    },
++  };
++}

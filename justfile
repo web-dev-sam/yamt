@@ -74,21 +74,13 @@ hooks-test:
 dev-web:
     {{ just_executable() }} frontend vite
 
-# WebKit WebDriver for smoke tests. Its windows open on the owner's Samsung screen, never on the ASUS one
-# (owner, 2026-10-10; KWin rule kept by scripts/test-screen.sh); without a Samsung screen they open on a
-# private virtual display instead.
+# WebKit WebDriver for smoke tests, always on a private virtual display: test windows never open on the owner's
+# screens and always have the keyboard (owner 2026-10-30, plan §2 #136; on the owner's desktop an unfocused fixture
+# page failed focus checks, #1738).
 webdriver port="4445":
     #!/usr/bin/env bash
     set -euo pipefail
-    if scripts/test-screen.sh place; then
-        exec WebKitWebDriver --port={{ port }}
-    fi
-    echo "webdriver: no Samsung screen, using a private virtual display" >&2
     exec xvfb-run -a -s "-screen 0 1700x1000x24" env -u WAYLAND_DISPLAY GDK_BACKEND=x11 WebKitWebDriver --port={{ port }}
-
-# Fails when an open test window is anywhere but the Samsung screen; run it after opening a test session.
-test-window-check:
-    scripts/test-screen.sh check
 
 # Drives the real app on a private display or the fixture page (`just app-session start-app --name s --fresh-repo`,
 # then click/press/type/scroll/read/shot/colours, `stop`); see skill://verification.
@@ -120,8 +112,9 @@ golden-show case:
 golden-repo case dir:
     scripts/golden-repo.sh {{ case }} {{ dir }}
 
-# Mutation testing of the lines ONE patch changed since <base> (not in `check`; the orchestrator runs it after each
-# slice's patch, <base> = the commit before it). A whole feature is refused: 791 Rust mutants ran at ~1.5 min each (#1630).
+# Mutation testing of the lines ONE patch changed since <base> (not in `check`). The implementer runs it in its
+# worktree before finishing, <base> = HEAD there: uncommitted and new files count (VF7). A whole feature is refused:
+# 791 Rust mutants ran at ~1.5 min each (#1630).
 mutants base:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -132,11 +125,16 @@ mutants base:
     # here) and outside any git work tree (tests need a plain directory) (#574, #578).
     mkdir -p target/mutants /var/tmp/yamt-mutants
     git diff --no-color --no-ext-diff --no-renames --src-prefix=a/ --dst-prefix=b/ {{ base }} -- '*.rs' > target/mutants/rust.diff
+    # Files the patch adds and nobody committed yet (an implementer's worktree), diffed against nothing.
+    git ls-files --others --exclude-standard -- '*.rs' | while IFS= read -r file; do
+        git diff --no-color --no-ext-diff --src-prefix=a/ --dst-prefix=b/ --no-index /dev/null "$file" || true
+    done >> target/mutants/rust.diff
     rust_mutants=0
     if [ -s target/mutants/rust.diff ]; then
         rust_mutants=$(cargo mutants --in-diff target/mutants/rust.diff --list | wc -l)
     fi
-    web_files=$(git diff --name-only --no-renames --diff-filter=AM {{ base }} -- 'frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/src/search/*.ts' 'frontend/src/search/internal/*.ts' 'frontend/scripts/*.ts' | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
+    web_globs=('frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/src/search/*.ts' 'frontend/src/search/internal/*.ts' 'frontend/src/mergeRequests/*.ts' 'frontend/src/mergeRequests/internal/*.ts' 'frontend/scripts/*.ts')
+    web_files=$({ git diff --name-only --no-renames --diff-filter=AM {{ base }} -- "${web_globs[@]}"; git ls-files --others --exclude-standard -- "${web_globs[@]}"; } | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     web_count=$(printf '%s' "$web_files" | tr ',' '\n' | grep -c . || true)
     if [ "$rust_mutants" -gt "$max_rust_mutants" ] || [ "$web_count" -gt "$max_web_files" ]; then
         echo "mutants: refused: {{ base }} covers $rust_mutants Rust mutants and $web_count TypeScript files," >&2
@@ -158,6 +156,27 @@ mutants base:
     else
         echo "mutants: no TypeScript changes since {{ base }}"
     fi
+
+# The orchestrator's bookkeeping for one finished agent (skill://orchestrate §4): its note, patch copy, survivor list
+# and findings with ids, then a short summary; `--commit "<message>"` commits the applied patch with them.
+[positional-arguments]
+collect *args:
+    node .omp/tools/collect.ts collect "$@"
+
+# Sets the triage of findings (OR12): `just triage 1725 1726 -- "promoted: <reason>"`.
+[positional-arguments]
+triage *args:
+    node .omp/tools/collect.ts triage "$@"
+
+# Prints findings by id from the main checkout's log, also inside an isolated worktree: `just findings 1725 1726`.
+[positional-arguments]
+findings *args:
+    node .omp/tools/collect.ts findings "$@"
+
+# Moves one closed `## ` section of docs/slices/SLICES.md to docs/slices/archive/board.md: `just archive-board "Search —"`.
+[positional-arguments]
+archive-board *args:
+    node .omp/tools/collect.ts archive-board "$@"
 
 [positional-arguments]
 [private]

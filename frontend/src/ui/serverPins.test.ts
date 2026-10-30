@@ -1,5 +1,5 @@
 import type { StorageLike } from "@vueuse/core";
-import { expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { shallowRef } from "vue";
 
 import { serverKey } from "../lsp";
@@ -10,6 +10,10 @@ const ROOT = "/repo";
 const OTHER_ROOT = "/elsewhere";
 const OXLINT = serverKey("oxlint (frontend)");
 const TYPESCRIPT = serverKey("TypeScript (frontend)");
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function memoryStorage(initial: Record<string, string> = {}): StorageLike & {
   readonly items: Map<string, string>;
@@ -101,4 +105,24 @@ test.each([
   pins.togglePin(OXLINT);
 
   expect(pinned(pins)).toEqual([OXLINT]);
+});
+
+test("a storage that throws on write keeps the pin in memory and logs under the pins' event", () => {
+  const warnings: string[] = [];
+  vi.spyOn(console, "warn").mockImplementation((line: string) => {
+    warnings.push(line);
+  });
+  const pins = createServerPins(shallowRef(ROOT), {
+    ...memoryStorage(),
+    setItem: () => {
+      throw new Error("quota exceeded");
+    },
+  });
+
+  pins.togglePin(OXLINT);
+
+  expect(pinned(pins)).toEqual([OXLINT]);
+  expect(warnings).toEqual([
+    '[warn] servers.pins_storage_failed {kind: "Unexpected", message: "quota exceeded"}',
+  ]);
 });

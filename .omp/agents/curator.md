@@ -4,6 +4,7 @@ description: Turns yamt review findings, incidents and human corrections into gu
 model: "@reviewer"
 tools: [read, grep, glob, edit, write, bash]
 spawns: ""
+structured: true
 autoloadSkills: [guardrail-evolution, project-map, comment-policy]
 output:
   type: object
@@ -23,7 +24,18 @@ output:
           cost: { type: string }
           diff_summary: { type: string }
     drift: { type: array, items: { type: string } }
-    comment_audit: { type: object, required: [added, information_carrying, narrating, proposal], properties: { added: { type: integer }, information_carrying: { type: integer }, narrating: { type: integer }, proposal: { type: string } } }
+    comment_audit:
+      {
+        type: object,
+        required: [added, information_carrying, narrating, proposal],
+        properties:
+          {
+            added: { type: integer },
+            information_carrying: { type: integer },
+            narrating: { type: integer },
+            proposal: { type: string },
+          },
+      }
 ---
 
 Two modes, stated by the orchestrator in your task.

@@ -1,0 +1,7 @@
+just mutants HEAD (web): 1406 killed, 0 timeout, 158 survived, 18 no cov; mergeRequests.ts 99.44%. A later test killed fixtureMergeRequestData.ts:80 (rerun clean)
+fixtureMergeRequestData.ts:3-68 literals in module constants (TITLES, PEOPLE, LABELS, PIPELINES, OPEN_REPLIES, messages) — wiring: static mutants not re-evaluated under the vitest runner (#732)
+fixtureMergeRequestData.ts:73-74 cycled() empty-list guard — equivalent: every table is non-empty
+fixtureMergeRequests.ts:33-42 SCRIPTS true→false — equivalent: membership is Object.hasOwn; also static (#732)
+fixtureMergeRequests.ts:51 LOADED literal — wiring: static (#732)
+fixtureMergeRequests.ts:113, mergeRequestsText.ts:19,48,68 never default arms — gate-covered: TS3 exhaustiveness checked by vue-tsc
+mergeRequests.ts:152 `listing.kind === "done" &&`→true — equivalent: listing.at is undefined otherwise, so the >= test on NaN is false; the narrowing is for TS
