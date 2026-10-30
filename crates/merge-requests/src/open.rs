@@ -120,7 +120,7 @@ fn fetch_unless_local(
     if has_commit(repo, &diff.base)? && has_commit(repo, &diff.head)? {
         return Ok(());
     }
-    let Some(remote) = remote_for(repository.remotes(), full_path) else {
+    let Some(remote) = remote_for(repository.gitlab_remotes(), full_path) else {
         return Err(OpenReply::NoRemote {
             project: full_path.to_owned(),
         });

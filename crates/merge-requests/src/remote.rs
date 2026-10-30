@@ -21,6 +21,7 @@ fn names_project(url: &str, project: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detect::gitlab_remotes;
 
     const PROJECT: &str = "taskboard/taskboard";
 
@@ -84,5 +85,17 @@ mod tests {
             remote("mirror", "git@gitlab.example:taskboard/taskboard.git"),
         ];
         assert_eq!(found(&remotes, PROJECT).as_deref(), Some("upstream"));
+    }
+
+    #[test]
+    fn a_mirror_off_gitlab_first_in_config_order_is_not_the_project_s_remote() {
+        let remotes = vec![
+            remote("github", "https://github.com/taskboard/taskboard.git"),
+            remote("origin", "git@gitlab.example:taskboard/taskboard.git"),
+        ];
+
+        let gitlab_remotes = gitlab_remotes(remotes, None);
+
+        assert_eq!(found(&gitlab_remotes, PROJECT).as_deref(), Some("origin"));
     }
 }

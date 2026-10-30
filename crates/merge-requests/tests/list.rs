@@ -1,8 +1,9 @@
 #![cfg(test)]
 #![cfg(unix)]
 
+mod fake_glab;
+
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,8 @@ use yamt_gitio::{Glab, TIMED_OUT};
 use yamt_merge_requests::{
     GitLabRepository, ListEnd, MergeRequestPage, gitlab_repository, list_merge_requests,
 };
+
+use fake_glab::Fake;
 
 const SHORT_TIMEOUT: Duration = Duration::from_secs(2);
 const TIMEOUT_SCENARIO_SLEEP: Duration = Duration::from_secs(25);
@@ -24,43 +27,6 @@ const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
     local: Some(b"local\n"),
     remote: Some(b"remote\n"),
 }];
-
-fn in_this_repository(relative: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(relative)
-}
-
-/// The fake glab on a scenario through a symlink beside its `glab.env`, never a file written here (ETXTBSY); the
-/// log lives beside it (`tests/glab/README.md`).
-struct Fake {
-    dir: TempDir,
-    glab: Glab,
-}
-
-impl Fake {
-    fn new(scenario: &str) -> Fake {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = format!(
-            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_LOG={}\n",
-            in_this_repository(&format!("tests/glab/{scenario}")).display(),
-            dir.path().join("log").display(),
-        );
-        fs::write(dir.path().join("glab.env"), settings).unwrap();
-        let link = dir.path().join("glab");
-        std::os::unix::fs::symlink(in_this_repository("scripts/fake-glab/glab"), &link).unwrap();
-        Fake {
-            glab: Glab::at(link),
-            dir,
-        }
-    }
-
-    fn logged(&self, prefix: &str) -> Vec<String> {
-        let log = fs::read_to_string(self.dir.path().join("log")).unwrap_or_default();
-        let lines = log.lines().filter(|line| line.starts_with(prefix));
-        lines.map(str::to_owned).collect()
-    }
-}
 
 /// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
 fn gitlab_repo() -> (TempDir, GitLabRepository) {

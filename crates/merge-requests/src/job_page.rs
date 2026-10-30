@@ -6,6 +6,15 @@ use crate::{JobOpened, JobPage};
 pub(crate) const HTTPS: &str = "https://";
 const JOBS_SEGMENT: &str = "/-/jobs/";
 const PARENT_SEGMENT: &str = "..";
+#[cfg(target_os = "macos")]
+const OPENER: &str = "/usr/bin/open";
+#[cfg(windows)]
+const OPENER: &str = "rundll32.exe";
+#[cfg(windows)]
+const URL_HANDLER: &str = "url.dll,FileProtocolHandler";
+/// xdg-open (xdg-utils), found on PATH: the desktop's default browser.
+#[cfg(not(any(target_os = "macos", windows)))]
+const OPENER: &str = "xdg-open";
 
 impl JobPage {
     /// The job log page `web_path` names on the GitLab at `origin` (`https://<host[:port]>`); `None` for any other
@@ -24,7 +33,8 @@ impl JobPage {
     }
 }
 
-/// Asks the system's browser to show `page`; the opener runs on its own, a thread waits for its exit.
+/// Asks the system's browser to show `page`; the opener runs on its own, in a process group of its own on Unix so
+/// it outlives this one and the terminal, and a thread waits for its exit.
 #[must_use]
 pub fn open_job_page(page: &JobPage) -> JobOpened {
     let mut command = opener(page.as_str());
@@ -32,6 +42,8 @@ pub fn open_job_page(page: &JobPage) -> JobOpened {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    #[cfg(unix)]
+    detach(&mut command);
     tracing::info!(page = page.as_str(), "opening a job page");
     match command.spawn() {
         Ok(mut child) => {
@@ -48,9 +60,9 @@ pub fn open_job_page(page: &JobPage) -> JobOpened {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(not(windows))]
 fn opener(url: &str) -> Command {
-    let mut command = Command::new("/usr/bin/open");
+    let mut command = Command::new(OPENER);
     command.arg(url);
     command
 }
@@ -58,17 +70,15 @@ fn opener(url: &str) -> Command {
 // Windows passes arguments as one command line; `JobPage::built` lets no space or quote in, so none needs quoting.
 #[cfg(windows)]
 fn opener(url: &str) -> Command {
-    let mut command = Command::new("rundll32.exe");
-    command.args(["url.dll,FileProtocolHandler", url]);
+    let mut command = Command::new(OPENER);
+    command.args([URL_HANDLER, url]);
     command
 }
 
-/// xdg-open (xdg-utils), found on PATH: the desktop's default browser.
-#[cfg(not(any(target_os = "macos", windows)))]
-fn opener(url: &str) -> Command {
-    let mut command = Command::new("xdg-open");
-    command.arg(url);
-    command
+#[cfg(unix)]
+fn detach(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
 }
 
 fn is_authority(authority: &str) -> bool {
@@ -97,6 +107,7 @@ mod tests {
     use super::*;
 
     const ORIGIN: &str = "https://gitlab.example";
+    const PAGE: &str = "https://gitlab.example/a/b/-/jobs/1";
 
     fn built(origin: &str, web_path: &str) -> Option<String> {
         JobPage::built(origin, web_path).map(|page| page.as_str().to_owned())
@@ -143,5 +154,48 @@ mod tests {
         for path in paths {
             assert_eq!(built(ORIGIN, path), None, "{path}");
         }
+    }
+
+    fn program_and_args(command: &Command) -> Vec<&std::ffi::OsStr> {
+        let mut words = vec![command.get_program()];
+        words.extend(command.get_args());
+        words
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_opens_a_page_with_open() {
+        assert_eq!(program_and_args(&opener(PAGE)), ["/usr/bin/open", PAGE]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_opens_a_page_with_the_url_protocol_handler() {
+        assert_eq!(
+            program_and_args(&opener(PAGE)),
+            ["rundll32.exe", "url.dll,FileProtocolHandler", PAGE]
+        );
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    #[test]
+    fn other_systems_open_a_page_with_xdg_open() {
+        assert_eq!(program_and_args(&opener(PAGE)), ["xdg-open", PAGE]);
+    }
+
+    // A process group of its own: its id is the process's (setpgid(2) with pgid 0).
+    #[cfg(unix)]
+    #[test]
+    fn a_detached_opener_leads_a_process_group_of_its_own() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "ps -o pid= -o pgid= -p $$"]);
+        detach(&mut command);
+
+        let output = command.output().unwrap();
+
+        let text = String::from_utf8(output.stdout).unwrap();
+        let ids: Vec<&str> = text.split_whitespace().collect();
+        assert_eq!(ids.len(), 2, "{text}");
+        assert_eq!(ids[0], ids[1], "{text}");
     }
 }

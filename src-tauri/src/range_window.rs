@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread;
@@ -17,9 +18,7 @@ pub(crate) fn start(range: &RangeToOpen) -> OpenReply {
     };
     let mut command = Command::new(program(running_appimage(), exe));
     command
-        .arg(format!("--diff={}", range.spec))
-        .arg("--repo")
-        .arg(&range.root)
+        .args(arguments(range))
         .current_dir(&range.root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -35,6 +34,14 @@ pub(crate) fn start(range: &RangeToOpen) -> OpenReply {
             message: format!("cannot start {}: {error}", command.get_program().display()),
         },
     }
+}
+
+fn arguments(range: &RangeToOpen) -> Vec<OsString> {
+    vec![
+        format!("--diff={}", range.spec).into(),
+        "--repo".into(),
+        range.root.clone().into(),
+    ]
 }
 
 /// The program a second yamt runs: the `AppImage` file when this one runs from it, else this binary.
@@ -61,11 +68,16 @@ fn detach(command: &mut Command) {
 // Process creation flags (Microsoft Learn, "Process Creation Flags"): no console of the parent's, and a group of
 // its own, so closing the parent's console does not end it.
 #[cfg(windows)]
+const DETACHED_PROCESS: u32 = 0x0000_0008;
+#[cfg(windows)]
+const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+#[cfg(windows)]
+const DETACH_FLAGS: u32 = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+
+#[cfg(windows)]
 fn detach(command: &mut Command) {
     use std::os::windows::process::CommandExt;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    command.creation_flags(DETACH_FLAGS);
 }
 
 fn reap(mut child: Child) {
@@ -77,14 +89,33 @@ fn reap(mut child: Child) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use yamt_range::RangeSpec;
 
     use super::*;
+    use crate::args::{Ai, Invocation};
 
     const EXE: &str = "/tmp/.mount_yamtAbC/usr/bin/yamt";
     const APPIMAGE: &str = "/home/sam/yamt.AppImage";
-    const REAP_WAIT: Duration = Duration::from_secs(10);
-    const POLL: Duration = Duration::from_millis(10);
+    const ROOT: &str = "/home/sam/taskboard";
+    const SPEC: &str =
+        "531ea52dfb892e20206010fb6cd6161d9c88964a..6ea97d8eee3a6a962d0411a0ed0f8d28ac90fc19";
+
+    #[test]
+    fn the_second_yamt_is_asked_for_the_range_in_its_repository_without_ai() {
+        let range = RangeToOpen {
+            root: ROOT.into(),
+            spec: SPEC.to_owned(),
+        };
+
+        let invocation = crate::args::parse(arguments(&range));
+
+        let wanted = Invocation::Range {
+            spec: RangeSpec::parse(SPEC).unwrap(),
+            repo: ROOT.into(),
+            ai: Ai::Off,
+        };
+        assert_eq!(invocation, Ok(wanted));
+    }
 
     #[test]
     fn a_second_yamt_starts_from_the_appimage_when_there_is_one() {
@@ -98,6 +129,42 @@ mod tests {
     #[test]
     fn outside_an_appimage_a_second_yamt_starts_from_this_binary() {
         assert_eq!(running_appimage(), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    mod inside_an_appimage {
+        use yamt_conflict_repo::run_ignored_in_child;
+
+        use super::*;
+
+        const CHOICE_TEST: &str =
+            "range_window::tests::inside_an_appimage::the_program_is_the_appimage_file";
+
+        #[test]
+        fn a_second_yamt_starts_from_the_appimage_file_its_variables_name() {
+            let exe = std::env::current_exe().unwrap();
+            let appdir = exe.parent().unwrap().to_owned();
+
+            let ran = run_ignored_in_child(&[CHOICE_TEST], |child| {
+                child.env("APPIMAGE", APPIMAGE).env("APPDIR", appdir);
+            });
+
+            ran.unwrap_or_else(|error| panic!("{error}"));
+        }
+
+        #[test]
+        #[ignore = "run by a_second_yamt_starts_from_the_appimage_file_its_variables_name"]
+        fn the_program_is_the_appimage_file() {
+            let exe = std::env::current_exe().unwrap();
+
+            assert_eq!(program(running_appimage(), exe), PathBuf::from(APPIMAGE));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_detach_flags_are_detached_process_and_a_new_process_group() {
+        assert_eq!(DETACH_FLAGS, 0x0000_0208);
     }
 
     // A process group of its own: its id is the process's (setpgid(2) with pgid 0).
@@ -120,6 +187,9 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn a_started_child_that_exits_is_waited_for() {
+        use std::time::{Duration, Instant};
+        const REAP_WAIT: Duration = Duration::from_secs(10);
+        const POLL: Duration = Duration::from_millis(10);
         let child = Command::new("true").spawn().unwrap();
         let stat = PathBuf::from(format!("/proc/{}/stat", child.id()));
 

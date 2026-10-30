@@ -14,7 +14,7 @@ const GLAB_HOST_VARIABLES: [&str; 2] = ["GITLAB_HOST", "GL_HOST"];
 pub struct GitLabRepository {
     repo: Repo,
     repository: String,
-    remotes: Vec<Remote>,
+    gitlab_remotes: Vec<Remote>,
 }
 
 /// A remote's name and URL: lossy UTF-8 of git's bytes.
@@ -37,17 +37,23 @@ pub fn gitlab_repository(folder: &Path) -> Option<GitLabRepository> {
         .common_dir()
         .inspect_err(|error| tracing::warn!(%error, "cannot find the common git dir"))
         .ok()?;
-    let found = GitLabRepository {
+    let remotes = urls.into_iter().map(Remote::from).collect();
+    let gitlab_remotes = gitlab_remotes(remotes, glab_host().as_deref());
+    let first = gitlab_remotes.first()?;
+    tracing::info!(remote = %first.name, "a remote on GitLab");
+    Some(GitLabRepository {
         repo,
         repository: common_dir.to_string_lossy().into_owned(),
-        remotes: urls.into_iter().map(Remote::from).collect(),
+        gitlab_remotes,
+    })
+}
+
+/// The remotes on a GitLab server, in config order.
+pub(crate) fn gitlab_remotes(remotes: Vec<Remote>, glab_host: Option<&str>) -> Vec<Remote> {
+    let is_on_gitlab = |remote: &Remote| {
+        remote_host(&remote.url).is_some_and(|host| is_gitlab_host(&host, glab_host))
     };
-    let glab_host = glab_host();
-    let gitlab_remote = found.remotes().iter().find(|remote| {
-        remote_host(&remote.url).is_some_and(|host| is_gitlab_host(&host, glab_host.as_deref()))
-    })?;
-    tracing::info!(remote = %gitlab_remote.name, "a remote on GitLab");
-    Some(found)
+    remotes.into_iter().filter(is_on_gitlab).collect()
 }
 
 impl GitLabRepository {
@@ -65,8 +71,9 @@ impl GitLabRepository {
         self.repo().root()
     }
 
-    pub(crate) fn remotes(&self) -> &[Remote] {
-        &self.remotes
+    /// Its remotes on a GitLab server, in config order.
+    pub(crate) fn gitlab_remotes(&self) -> &[Remote] {
+        &self.gitlab_remotes
     }
 
     pub(crate) fn repo(&self) -> &Repo {

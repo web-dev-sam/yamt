@@ -29,7 +29,7 @@ mod settings;
 mod start_script;
 mod window;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use specta_typescript::Typescript;
@@ -40,6 +40,9 @@ use crate::args::{Invocation, USAGE};
 use crate::outcome::{Ending, Startup, startup};
 
 const LOG_FILTER_VAR: &str = "YAMT_LOG";
+/// The folder the compare window was started in, where its merge-request page looks for a repository (plan §2 #94
+/// as amended for #128–#135).
+const COMPARE_FOLDER: &str = ".";
 
 #[must_use]
 pub fn run() -> ExitCode {
@@ -55,19 +58,22 @@ pub fn run() -> ExitCode {
             println!("yamt {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Invocation::Compare) => window::run_compare().report(),
-        Ok(Invocation::Merge { repo }) => {
-            #[cfg(target_os = "linux")]
-            let repo = appimage::repo_from_start_dir(repo);
-            merge(&repo).report()
+        Ok(Invocation::Compare) => {
+            window::run_compare(&from_start_dir(PathBuf::from(COMPARE_FOLDER))).report()
         }
+        Ok(Invocation::Merge { repo }) => merge(&from_start_dir(repo)).report(),
         Ok(Invocation::Range { spec, repo, ai }) => {
-            #[cfg(target_os = "linux")]
-            let repo = appimage::repo_from_start_dir(repo);
-            range::run_range(&repo, &spec, ai).report()
+            range::run_range(&from_start_dir(repo), &spec, ai).report()
         }
         Err(problem) => Ending::failure(format!("{problem}\n{USAGE}")).report(),
     }
+}
+
+/// A window's folder as given, read from where yamt was started: an `AppImage` runs inside its own mount.
+fn from_start_dir(folder: PathBuf) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    let folder = appimage::repo_from_start_dir(folder);
+    folder
 }
 
 pub fn export_bindings(path: &Path) -> Result<(), specta_typescript::Error> {
@@ -90,4 +96,18 @@ fn init_tracing() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .init();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outside_an_appimage_a_window_s_folder_stays_as_given() {
+        assert_eq!(
+            from_start_dir(PathBuf::from(COMPARE_FOLDER)),
+            PathBuf::from(".")
+        );
+        assert_eq!(from_start_dir(PathBuf::from("sub")), PathBuf::from("sub"));
+    }
 }

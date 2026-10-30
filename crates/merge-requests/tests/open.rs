@@ -1,17 +1,19 @@
 #![cfg(test)]
 #![cfg(unix)]
 
-use std::fs;
+mod fake_glab;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use yamt_conflict_repo::{TempDir, git_ok};
-use yamt_gitio::Glab;
 use yamt_merge_requests::{
     GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen, gitlab_repository, prepare_open,
 };
 use yamt_range::{PairLock, RangeSpec, Resolved};
 use yamt_review::{GitLabCheck, check_gitlab};
+
+use fake_glab::{Fake, in_this_repository};
 
 /// `scripts/range-repo.sh`'s commits, fixed by its names and dates; !13's head is only in its fake GitLab.
 const MERGE_BASE: &str = "531ea52dfb892e20206010fb6cd6161d9c88964a";
@@ -19,43 +21,6 @@ const FEATURE: &str = "9c1ba3fc606a3776061d23006b83e2af2a357112";
 const MR13_HEAD: &str = "6ea97d8eee3a6a962d0411a0ed0f8d28ac90fc19";
 const GITLAB_URL: &str = "https://gitlab.example/taskboard/taskboard.git";
 const DETAILS_START: &str = "argv: api graphql -f query=query MergeRequestDetails(";
-
-fn in_this_repository(relative: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(relative)
-}
-
-/// The fake glab on a scenario through a symlink beside its `glab.env`, never a file written here (ETXTBSY); the
-/// log lives beside it (`tests/glab/README.md`).
-struct Fake {
-    dir: TempDir,
-    glab: Glab,
-}
-
-impl Fake {
-    fn new(scenario: &str) -> Fake {
-        let dir = tempfile::tempdir().unwrap();
-        let settings = format!(
-            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_LOG={}\n",
-            in_this_repository(&format!("tests/glab/{scenario}")).display(),
-            dir.path().join("log").display(),
-        );
-        fs::write(dir.path().join("glab.env"), settings).unwrap();
-        let link = dir.path().join("glab");
-        std::os::unix::fs::symlink(in_this_repository("scripts/fake-glab/glab"), &link).unwrap();
-        Fake {
-            glab: Glab::at(link),
-            dir,
-        }
-    }
-
-    fn logged(&self, prefix: &str) -> Vec<String> {
-        let log = fs::read_to_string(self.dir.path().join("log")).unwrap_or_default();
-        let lines = log.lines().filter(|line| line.starts_with(prefix));
-        lines.map(str::to_owned).collect()
-    }
-}
 
 /// `scripts/range-repo.sh`'s repository with its fake GitLab, a folder for pair locks, and the fake glab.
 struct Setup {
@@ -204,6 +169,42 @@ fn without_a_remote_of_the_project_nothing_is_fetched() {
             project: "taskboard/taskboard".to_owned()
         })
     );
+    assert!(!setup.has_commit(MR13_HEAD));
+}
+
+#[test]
+fn a_mirror_off_gitlab_listed_first_is_not_fetched_from() {
+    let setup = Setup::new();
+    let mirror = "https://github.com/taskboard/taskboard.git";
+    setup.git(&["remote", "remove", "origin"]);
+    setup.git(&["remote", "add", "github", mirror]);
+    setup.git(&["config", "url./nonexistent/github.git.insteadOf", mirror]);
+    setup.git(&["remote", "add", "origin", GITLAB_URL]);
+
+    let opened = setup.open(13);
+
+    assert_eq!(
+        opened.map(|range| range.spec),
+        Ok(format!("{MERGE_BASE}..{MR13_HEAD}"))
+    );
+}
+
+#[test]
+fn a_target_branch_naming_a_ref_to_write_is_refused_before_any_fetch() {
+    let setup = Setup::new();
+    let bare = setup.root().join(".git/fake-gitlab.git");
+    git_ok(
+        &bare,
+        &["update-ref", "refs/merge-requests/17/head", MR13_HEAD],
+    )
+    .unwrap();
+    let before = setup.untouched();
+
+    let opened = setup.open(17);
+
+    let message = r#"GitLab sent "main:refs/heads/x" as a branch name"#.to_owned();
+    assert_eq!(opened, Err(OpenReply::Failed { message }));
+    assert_eq!(setup.untouched(), before);
     assert!(!setup.has_commit(MR13_HEAD));
 }
 

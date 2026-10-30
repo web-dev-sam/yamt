@@ -82,11 +82,12 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   `src-tauri/src/merge_requests/tests.rs`): logged in; project `taskboard/taskboard` on `https://gitlab.example`;
   user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail), !12 (passed, 2 approvals, 1 open
   discussion), !11 (a draft, "Draft: …", running), more to come (`page-2`); page 2: !9 (no pipeline), !8 (manual),
-  the last. Details over GraphQL, all into `main` from `scripts/range-repo.sh`'s merge base `531ea52`: !12 ends at
-  `feature` (`9c1ba3f`), !13 at `6ea97d8` ("Snooze a reminder", only in range-repo's fake GitLab), !14 has no diff
-  yet (`diffRefs` null), !15 is merged, !16 starts from `deadbee`, a commit no repository has. Over REST, as a window
-  on one of those ranges checks it (#119): `merge-requests.json` lists !13 and !12, `merge-request-12.json` and
-  `merge-request-13.json` hold their diffs.
+  the last. Details over GraphQL, all from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into
+  `main`: !12 ends at `feature` (`9c1ba3f`), !13 at `6ea97d8` ("Snooze a reminder", only in range-repo's fake
+  GitLab), !14 has no diff yet (`diffRefs` null), !15 is merged, !16 starts from `deadbee`, a commit no repository
+  has, !17 is !13's diff into a branch named `main:refs/heads/x`, which a fetch refspec would read as a ref to write.
+  Over REST, as a window on one of those ranges checks it (#119): `merge-requests.json` lists !13 and !12,
+  `merge-request-12.json` and `merge-request-13.json` hold their diffs.
 - `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's
   deadline.
 
