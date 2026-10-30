@@ -1,32 +1,4 @@
 {
-  "MrConflictsPage": {
-    "owned": [
-      "frontend/src/ipc/MergeRequestSource.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/tauriResolve.test.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/mergeRequestsText.ts",
-      "frontend/src/ui/mergeRequestsText.test.ts",
-      "frontend/src/ui/MergeRequestRow.vue",
-      "frontend/src/ui/MergeRequestsView.vue",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ui/MergeRequestReadiness.vue",
-      "frontend/src/mergeRequests/index.ts",
-      "frontend/src/mergeRequests/AGENTS.md",
-      "frontend/src/mergeRequests/internal/readiness.ts",
-      "frontend/src/mergeRequests/internal/readiness.test.ts",
-      "frontend/src/mergeRequests/internal/size.ts",
-      "frontend/src/mergeRequests/internal/size.test.ts",
-      "frontend/src/mergeRequests/internal/rowAction.ts",
-      "frontend/src/mergeRequests/internal/rowAction.test.ts",
-      "frontend/src/ui/mergeRequestActions.ts",
-      "frontend/src/ui/mergeRequestActions.test.ts"
-    ]
-  },
   "MrConflictsWindowR2": {
     "owned": [
       "frontend/src/ui/pushing.ts",
