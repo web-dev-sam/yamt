@@ -167,6 +167,7 @@ mod tests {
 #[cfg(test)]
 #[cfg(unix)]
 pub(crate) mod run_tests {
+    use std::cell::OnceCell;
     use std::process::Command;
     use std::sync::mpsc::{RecvTimeoutError, Sender};
     use std::time::{Duration, Instant};
@@ -196,7 +197,14 @@ pub(crate) mod run_tests {
         run
     }
 
+    // A closure's captures drop in an unspecified order (Reference, "Destructors"), so the
+    // forwarder may drop its `Channel` before its `Receiver`; a thread-local drops only after both.
+    thread_local! {
+        static KEPT_UNTIL_THREAD_END: OnceCell<Sender<Value>> = const { OnceCell::new() };
+    }
+
     /// A channel that hands each event to `events` and answers like a page that takes it or not.
+    /// After a refusal, `events` stays open until the thread that sent into the channel has exited.
     pub(crate) fn channel_into(events: Sender<Value>, takes_events: bool) -> Channel<HostEvent> {
         Channel::new(move |body| {
             let InvokeResponseBody::Json(json) = body else {
@@ -206,6 +214,9 @@ pub(crate) mod run_tests {
             if takes_events {
                 Ok(())
             } else {
+                KEPT_UNTIL_THREAD_END
+                    .with(|kept| kept.set(events.clone()))
+                    .unwrap();
                 Err(tauri::Error::WebviewNotFound)
             }
         })
@@ -251,6 +262,10 @@ pub(crate) mod run_tests {
         let (sender, events) = mpsc::channel();
         let run = start_cat(&window, channel_into(sender, false));
         let pid = pid_of(&next(&events));
+        assert_eq!(
+            events.recv_timeout(WAIT),
+            Err(RecvTimeoutError::Disconnected)
+        );
         send_to_server(window.app.state(), run, "anyone there".to_owned());
         let deadline = Instant::now() + WAIT;
         while is_alive(pid) && Instant::now() < deadline {
