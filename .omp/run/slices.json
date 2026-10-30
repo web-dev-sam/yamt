@@ -1,1 +1,5 @@
-{}
+{
+  "CiPortableTests": {
+    "owned": ["crates/agent/tests/process.rs", "crates/gitio/tests/diff.rs"]
+  }
+}
