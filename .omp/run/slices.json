@@ -1,1 +1,34 @@
-{}
+{
+  "MrDetectList": {
+    "owned": [
+      "crates/merge-requests/**",
+      "crates/gitio/src/glab.rs",
+      "crates/gitio/src/names.rs",
+      "crates/gitio/src/lib.rs",
+      "crates/gitio/tests/glab.rs",
+      "crates/review/src/glab_answer.rs",
+      "crates/review/src/send.rs",
+      "crates/review/src/lib.rs",
+      "scripts/arch-check.sh",
+      "scripts/fake-glab/glab",
+      "tests/glab/README.md",
+      "tests/glab/merge-requests/**",
+      "tests/glab/merge-requests-timeout/**"
+    ]
+  },
+  "MrWindowCore": {
+    "owned": [
+      "frontend/src/mergeRequests/**",
+      "frontend/src/ui/glab.ts",
+      "frontend/src/ui/mergeRequestFilters.ts",
+      "frontend/src/ui/mergeRequestFilters.test.ts",
+      "frontend/src/ui/rangeThreadText.ts",
+      "frontend/src/ui/rangeThreadText.test.ts",
+      "frontend/src/ui/rangeGitLab.ts",
+      "frontend/src/ui/rangeGitLab.test.ts",
+      "frontend/scripts/fences.ts",
+      "frontend/.oxlintrc.json",
+      "frontend/vite.config.ts"
+    ]
+  }
+}
