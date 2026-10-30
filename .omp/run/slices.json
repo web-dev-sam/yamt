@@ -19,7 +19,8 @@
       "scripts/fake-open/**",
       "scripts/fake-glab/glab",
       "tests/glab/README.md",
-      "tests/glab/merge-requests/**"
+      "tests/glab/merge-requests/**",
+      "crates/review/tests/review.rs"
     ]
   },
   "MrWindowCoreR1": {
