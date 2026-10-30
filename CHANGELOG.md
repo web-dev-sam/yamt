@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-30
+
+No change to the app since 0.6.1. The merge-request overview's tests now also pass on macOS and Windows, and the
+macOS release is built on macOS 15 (GitHub retires its macOS 14 machines on 2026-11-02).
+
 ## [0.6.1] - 2026-10-30
 
 ### Added
@@ -388,7 +393,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.6.1...HEAD
+[Unreleased]: ../../compare/v0.6.2...HEAD
+[0.6.2]: ../../compare/v0.6.1...v0.6.2
 [0.6.1]: ../../compare/v0.6.0...v0.6.1
 [0.6.0]: ../../compare/v0.6.0-beta.2...v0.6.0
 [0.6.0-beta.2]: ../../compare/v0.6.0-beta.1...v0.6.0-beta.2
