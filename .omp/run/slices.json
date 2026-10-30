@@ -1,1 +1,5 @@
-{}
+{
+  "CiPortableTestsR1": {
+    "owned": ["crates/gitio/tests/diff.rs"]
+  }
+}
