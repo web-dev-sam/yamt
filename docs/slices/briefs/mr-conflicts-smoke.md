@@ -1,8 +1,8 @@
 # Smoke pass MrConflictsSmoke — size, readiness, resolve in your own checkout, abort, push
 
 Board "Merge-request conflicts" row 8. Request `docs/slices/request-mr-conflicts.md`; design
-`docs/slices/briefs/mr-conflicts-design.md` §4.7 ("WebKit fixture steps", "Real app"). Tree at `<commit>` (filled in
-at spawn). Recipes only (VF11 smoke); no `just check`, no mutation run. It also settles the app build's NOT RUN: the
+`docs/slices/briefs/mr-conflicts-design.md` §4.7 ("WebKit fixture steps", "Real app"). Tree at `1bd8483`. Recipes
+only (VF11 smoke); no `just check`, no mutation run. It also settles the app build's NOT RUN: the
 merge window closes after an Abort with nothing left over and after a Push, and stays after Keep Local's question.
 
 ## Steps

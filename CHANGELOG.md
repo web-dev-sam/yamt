@@ -12,6 +12,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A click on a merge request's row in the merge-request page opens it on GitLab in the system browser (anywhere on
   the row except its CI box and its open-changes button); its title is reachable with Tab and opens on Enter or
   Space. A GitLab installed under a sub-path (`https://host/gitlab`) keeps it in the address.
+- Each row of the merge-request page shows the size of its latest version (`+120 −40 · 6 files`) and one icon for
+  GitLab's merge status: ready, has conflicts, needs rebase, blocked (the hover names why: draft, unresolved
+  discussions, approvals, pipeline, …) or checking. A merge request with conflicts shows "has conflicts" even when
+  something else blocks it too; the hover lists the rest.
+- "Resolve conflicts of !12" on a row with conflicts: yamt fetches the merge request's branch and its target, checks
+  the branch out in your own checkout (creating it, or fast-forwarding it when it is only behind), merges the target
+  into it without committing and opens the merge window. It refuses, changing nothing, while tracked files have
+  uncommitted changes, while git is in another operation, when the fetch fails, or when your local branch has
+  commits GitLab's does not. Forks' merge requests are not supported.
+- Committing such a merge asks "Push feature/x to GitLab?" (Push / Keep Local); a push is never forced, and a
+  rejected one keeps the commit local. Abort puts the checkout back as it was before the resolve — the branch you
+  were on, a branch yamt created deleted, a branch it fast-forwarded moved back — even after yamt was closed in
+  between, and lists anything it could not put back.
+- While such a merge is unfinished, its row offers "Continue merging !12" (it reopens the merge window), and every
+  other row's Resolve waits.
 
 ### Changed
 
