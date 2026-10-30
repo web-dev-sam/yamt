@@ -17,18 +17,5 @@
       "scripts/map-check.sh",
       "frontend/scripts/windowFence.ts"
     ]
-  },
-  "MrOpenCommandsR1": {
-    "owned": [
-      "crates/merge-requests/**",
-      "src-tauri/src/range_window.rs",
-      "src-tauri/src/appimage.rs",
-      "src-tauri/src/window.rs",
-      "src-tauri/src/lib.rs",
-      "src-tauri/src/merge_requests.rs",
-      "src-tauri/src/merge_requests/**",
-      "tests/glab/merge-requests/**",
-      "tests/glab/README.md"
-    ]
   }
 }
