@@ -284,3 +284,5 @@ L3 hook. Procedure: `skill://guardrail-evolution`. Changes land only after Gate 
   the feature-end docs; 48 closed board sections moved to `docs/slices/archive/board.md`. Autoload: project-map split
   into `SKILL.md` + `tree.md` + `state.md` (row PM6, `scripts/map-check.sh` reads all three), risk-register read by
   grep instead of autoloaded, budgets in bytes (new GE-budget, `hooks.test.ts` autoload test).
+- 2026-10-30 — owner request #1925 (asked directly, so no separate Gate D): up to five agents live at once
+  (`MAX_PARALLEL_AGENTS` 3 → 5, `.omp/hooks/lib/policy.ts`; row OR10); at most two implementers unchanged.
