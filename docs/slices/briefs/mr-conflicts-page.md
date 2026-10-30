@@ -14,11 +14,19 @@ fixtureMergeRequests.test.ts,AGENTS.md}`, new `frontend/src/ipc/tauriResolve.tes
 `frontend/src/ui/{mergeRequests.ts,mergeRequests.test.ts,mergeRequestsText.ts,mergeRequestsText.test.ts,
 MergeRequestRow.vue,MergeRequestsView.vue,AGENTS.md}`, new `frontend/src/ui/MergeRequestReadiness.vue`;
 `frontend/src/mergeRequests/{index.ts,AGENTS.md}`, new `frontend/src/mergeRequests/internal/{readiness.ts,
-readiness.test.ts,size.ts,size.test.ts,rowAction.ts,rowAction.test.ts}`.
+readiness.test.ts,size.ts,size.test.ts,rowAction.ts,rowAction.test.ts}`. For #2015 (below):
+`frontend/src/ipc/{domain.ts,mergeRequestDomain.ts,index.ts}`, new `frontend/src/ipc/localMergeDomain.ts`, and the
+`import` lines only of any other file that imports the moved names.
 
-Read-only: everything else — `ipc/{domain.ts,mergeRequestDomain.ts,index.ts}` (`MrConflictsApp`),
-`ipc/fixtureMergeRequestData.ts` (`MrConflictsGitlab`: the row cycle), `ui/leftoverText.ts` (`MrConflictsWindow`),
-`ipc/tauriMergeRequests.test.ts` (`MrConflictsGitlab`; your three new methods are tested in `tauriResolve.test.ts`).
+Read-only: everything else — `ipc/fixtureMergeRequestData.ts` (`MrConflictsGitlab`: the row cycle),
+`ui/leftoverText.ts` (`MrConflictsWindow`), `ipc/tauriMergeRequests.test.ts` (`MrConflictsGitlab`; your three new
+methods are tested in `tauriResolve.test.ts`).
+
+**#2015 first** (`just findings 2015`; the app build's finding, moved here because it reaches the merge window's
+imports): the local-merge aliases (`MergeView`, `ReturnTo`, `BranchBefore`, `Leftover`, `AbortReply`, `PushReply`,
+`Started`, `Refusal`, `LocalMerge`) move from `mergeRequestDomain.ts` to new `ipc/localMergeDomain.ts`, which imports
+only `bindings`; `domain.ts`'s `Listing.mergeRequest` uses its `MergeView` (one spelling); `index.ts` exports them from
+there; importers follow (clean cutover, no re-export left behind).
 
 Non-goals: Rust; the merge window.
 

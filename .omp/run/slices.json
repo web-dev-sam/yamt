@@ -28,5 +28,21 @@
       "frontend/src/ui/leftoverText.ts",
       "frontend/src/ui/leftoverText.test.ts"
     ]
+  },
+  "MrConflictsAppR1": {
+    "owned": [
+      "src-tauri/src/merge.rs",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/outcome.rs",
+      "src-tauri/src/ipc_error.rs",
+      "src-tauri/src/second_window.rs",
+      "src-tauri/src/merge/**",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/commands/**",
+      "src-tauri/src/outcome/**",
+      "src-tauri/src/ipc_error/**",
+      "src-tauri/AGENTS.md"
+    ]
   }
 }
