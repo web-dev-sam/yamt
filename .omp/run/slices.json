@@ -1,1 +1,19 @@
-{}
+{
+  "MrConflictsGitlab": {
+    "owned": [
+      "crates/merge-requests/**",
+      "tests/glab/merge-requests/graphql-page-1.json",
+      "tests/glab/merge-requests/graphql-page-2.json",
+      "tests/glab/merge-requests-timeout/graphql-page-1.json",
+      "tests/glab/mr-conflicts/**",
+      "tests/glab/README.md",
+      "frontend/src/ipc/fixtureMergeRequestData.ts",
+      "frontend/src/ipc/fixtureMergeRequestData.test.ts",
+      "frontend/src/ipc/mergeRequestDomain.test.ts",
+      "frontend/src/ipc/tauriMergeRequests.test.ts"
+    ]
+  },
+  "MrConflictsLocal": {
+    "owned": ["crates/local-merge/**", "scripts/mr-conflict-repo.sh", "scripts/arch-check.sh"]
+  }
+}

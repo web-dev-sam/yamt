@@ -14,6 +14,7 @@ members = [
   "crates/review",
   "crates/agent",
   "crates/merge-requests",
+  "crates/local-merge",
   "src-tauri",
 ]
 
@@ -36,6 +37,7 @@ yamt-range = { path = "crates/range" }
 yamt-review = { path = "crates/review" }
 yamt-agent = { path = "crates/agent" }
 yamt-merge-requests = { path = "crates/merge-requests" }
+yamt-local-merge = { path = "crates/local-merge" }
 thiserror = "2.0.21"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"

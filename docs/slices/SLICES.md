@@ -10,21 +10,21 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 
 Request `request-mr-conflicts.md` (rules 1–10). Answers: merge in the user's own checkout (#1995), ask before pushing
 (#1996), Continue from the row (#1997), conflicts first (#1998). Design option A (`briefs/mr-conflicts-design.md`,
-plan §2 #138–#143): new crate `yamt-local-merge`. Owner asked for a plan: builds start on the owner's go. Before
+plan §2 #138–#143): new crate `yamt-local-merge`. Owner's go: session 40 ("Implement request-mr-conflicts.md"). Before
 `local`: root `Cargo.toml` gains the `crates/local-merge` member and workspace dep (orchestrator). After `app`:
 `just bindings`. `page` wires the feature: its commit starts the smoke pass. Risk rows RK43–RK47 (design §4.8) go
 into the register with the builds that prove them.
 
-| row | slice                                                                                                                    | owner                 | status  | evidence                                                                     |
-| --- | ------------------------------------------------------------------------------------------------------------------------ | --------------------- | ------- | ---------------------------------------------------------------------------- |
-| 1   | design (`briefs/mr-conflicts-design-brief.md`) (`MrConflictsDesign`)                                                     | designer              | done    | option A, 6 builds, ~7,400 lines `[INFERENCE]`; notes `MrConflictsDesign.md` |
-| 2   | `git`: gitio branch/fetch/push runs (`briefs/mr-conflicts-git.md`) (`MrConflictsGit`)                                    | rust-impl             | planned |                                                                              |
-| 3   | `gitlab`: size, readiness, fork, `prepare_resolve` (`briefs/mr-conflicts-gitlab.md`) (`MrConflictsGitlab`), beside row 2 | rust-impl             | planned |                                                                              |
-| 4   | `local`: crate `yamt-local-merge` (`briefs/mr-conflicts-local.md`) (`MrConflictsLocal`), after row 2                     | rust-impl             | planned |                                                                              |
-| 5   | `app`: commands, window claim, second window (`briefs/mr-conflicts-app.md`) (`MrConflictsApp`), after rows 3, 4          | rust-impl             | planned |                                                                              |
-| 6   | `window`: merge window Abort restore, push question (`briefs/mr-conflicts-window.md`) (`MrConflictsWindow`), after row 5 | web-impl              | planned |                                                                              |
-| 7   | `page`: size, readiness icon, Resolve/Continue (`briefs/mr-conflicts-page.md`) (`MrConflictsPage`), after row 6          | web-impl              | planned |                                                                              |
-| 8   | docs keeper, final run                                                                                                   | docs-keeper, verifier | todo    |                                                                              |
+| row | slice                                                                                                                    | owner                 | status  | evidence                                                                                                                          |
+| --- | ------------------------------------------------------------------------------------------------------------------------ | --------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | design (`briefs/mr-conflicts-design-brief.md`) (`MrConflictsDesign`)                                                     | designer              | done    | option A, 6 builds, ~7,400 lines `[INFERENCE]`; notes `MrConflictsDesign.md`                                                      |
+| 2   | `git`: gitio branch/fetch/push runs (`briefs/mr-conflicts-git.md`) (`MrConflictsGit`)                                    | rust-impl             | review  | `45b9d94`: 15 tests, mutants 26 caught 0 kept; deviations accepted (extra tests, shared private fetch). Notes `MrConflictsGit.md` |
+| 3   | `gitlab`: size, readiness, fork, `prepare_resolve` (`briefs/mr-conflicts-gitlab.md`) (`MrConflictsGitlab`), beside row 2 | rust-impl             | running |                                                                                                                                   |
+| 4   | `local`: crate `yamt-local-merge` (`briefs/mr-conflicts-local.md`) (`MrConflictsLocal`), after row 2                     | rust-impl             | running |                                                                                                                                   |
+| 5   | `app`: commands, window claim, second window (`briefs/mr-conflicts-app.md`) (`MrConflictsApp`), after rows 3, 4          | rust-impl             | planned |                                                                                                                                   |
+| 6   | `window`: merge window Abort restore, push question (`briefs/mr-conflicts-window.md`) (`MrConflictsWindow`), after row 5 | web-impl              | planned |                                                                                                                                   |
+| 7   | `page`: size, readiness icon, Resolve/Continue (`briefs/mr-conflicts-page.md`) (`MrConflictsPage`), after row 6          | web-impl              | planned |                                                                                                                                   |
+| 8   | docs keeper, final run                                                                                                   | docs-keeper, verifier | todo    |                                                                                                                                   |
 
 ## Release 0.6.2 (session 38, owner request #1975: "merge this branch into main and release 0.6.2 … but fix CI before, windows and mac failed")
 
