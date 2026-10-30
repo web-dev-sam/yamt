@@ -4,7 +4,8 @@ import type { ChunkSource, Leftover, MergeView, OperationView } from "../ipc";
 import type { Asking } from "./asking";
 import type { Stop } from "./currentStop";
 import type { GitRun } from "./gitRun";
-import { report, reportFailure, type EndsStop, type Problem } from "./problem";
+import { reportFailure, type EndsStop, type Problem } from "./problem";
+import { closeEnded } from "./pushing";
 
 type AbortState =
   | { readonly kind: "none" }
@@ -61,15 +62,7 @@ async function closeAborted(
   if (mergeRequest !== null) {
     await target.asking.ask({ kind: "abortLeftovers", mergeRequest, leftovers });
   }
-  await target.gitRun.run(stop, {
-    call: () => target.source.closeEndedMerge(),
-    endsApp: () => true,
-    landing: async (outcome) => {
-      if (!outcome.ok) {
-        report(target, { action: "closeMerge", merge: mergeRequest, cause: outcome.cause });
-      }
-    },
-  });
+  await closeEnded(target, stop, mergeRequest);
 }
 
 export function createAborting(target: AbortTarget): Aborting {

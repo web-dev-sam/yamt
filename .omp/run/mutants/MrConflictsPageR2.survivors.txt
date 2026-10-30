@@ -1,0 +1,2 @@
+just mutants HEAD → aborting.ts 51 killed, pushing.ts 49 killed; 0 timeout, 0 survived, 0 no-cov, 0 errors; score 100.00
+

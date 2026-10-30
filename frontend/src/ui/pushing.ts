@@ -16,11 +16,21 @@ type PushTarget = {
   readonly problem: ShallowRef<Problem | null>;
 };
 
+type CloseTarget = {
+  readonly source: Pick<ChunkSource, "closeEndedMerge">;
+  readonly gitRun: GitRun;
+  readonly problem: ShallowRef<Problem | null>;
+};
+
 export type Pushing = {
   readonly offerPush: (branch: string) => Promise<void>;
 };
 
-async function closed(target: PushTarget, stop: Stop, merge: MergeView | null): Promise<void> {
+export async function closeEnded(
+  target: CloseTarget,
+  stop: Stop,
+  merge: MergeView | null,
+): Promise<void> {
   await target.gitRun.run(stop, {
     call: () => target.source.closeEndedMerge(),
     endsApp: () => true,
@@ -68,7 +78,7 @@ async function offerPush(target: PushTarget, branch: string): Promise<void> {
     }
     question = { kind: "pushFailed", branch, message: outcome.value.message };
   }
-  await closed(target, stop, merge);
+  await closeEnded(target, stop, merge);
 }
 
 export function createPushing(target: PushTarget): Pushing {

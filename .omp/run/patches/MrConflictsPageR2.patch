@@ -1,0 +1,67 @@
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index e44dd74..449f984 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -4,7 +4,8 @@ import type { ChunkSource, Leftover, MergeView, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
+ import type { Stop } from "./currentStop";
+ import type { GitRun } from "./gitRun";
+-import { report, reportFailure, type EndsStop, type Problem } from "./problem";
++import { reportFailure, type EndsStop, type Problem } from "./problem";
++import { closeEnded } from "./pushing";
+ 
+ type AbortState =
+   | { readonly kind: "none" }
+@@ -61,15 +62,7 @@ async function closeAborted(
+   if (mergeRequest !== null) {
+     await target.asking.ask({ kind: "abortLeftovers", mergeRequest, leftovers });
+   }
+-  await target.gitRun.run(stop, {
+-    call: () => target.source.closeEndedMerge(),
+-    endsApp: () => true,
+-    landing: async (outcome) => {
+-      if (!outcome.ok) {
+-        report(target, { action: "closeMerge", merge: mergeRequest, cause: outcome.cause });
+-      }
+-    },
+-  });
++  await closeEnded(target, stop, mergeRequest);
+ }
+ 
+ export function createAborting(target: AbortTarget): Aborting {
+diff --git a/frontend/src/ui/pushing.ts b/frontend/src/ui/pushing.ts
+index a6e851b..76d6ff1 100644
+--- a/frontend/src/ui/pushing.ts
++++ b/frontend/src/ui/pushing.ts
+@@ -16,11 +16,21 @@ type PushTarget = {
+   readonly problem: ShallowRef<Problem | null>;
+ };
+ 
++type CloseTarget = {
++  readonly source: Pick<ChunkSource, "closeEndedMerge">;
++  readonly gitRun: GitRun;
++  readonly problem: ShallowRef<Problem | null>;
++};
++
+ export type Pushing = {
+   readonly offerPush: (branch: string) => Promise<void>;
+ };
+ 
+-async function closed(target: PushTarget, stop: Stop, merge: MergeView | null): Promise<void> {
++export async function closeEnded(
++  target: CloseTarget,
++  stop: Stop,
++  merge: MergeView | null,
++): Promise<void> {
+   await target.gitRun.run(stop, {
+     call: () => target.source.closeEndedMerge(),
+     endsApp: () => true,
+@@ -68,7 +78,7 @@ async function offerPush(target: PushTarget, branch: string): Promise<void> {
+     }
+     question = { kind: "pushFailed", branch, message: outcome.value.message };
+   }
+-  await closed(target, stop, merge);
++  await closeEnded(target, stop, merge);
+ }
+ 
+ export function createPushing(target: PushTarget): Pushing {
