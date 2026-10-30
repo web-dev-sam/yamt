@@ -7,8 +7,12 @@ The owner runs this. Pushing and publishing are the owner's actions (the safety 
 
 - `main` holds the merge of `feat/beta-feedback` (`0ca0ed4`: the AI thread's capped thinking list and Ask AI at a
   thread's bottom, folder sums in the range window's tree, collapsed unchanged lines in the range window, the
-  window-wide search in both windows), the release commit `512a6fe` (version `0.6.0-beta.2`, changelog) and the board
-  updates. Nothing is pushed. The tag goes on the head of `main`.
+  window-wide search in both windows), the release commit `512a6fe` (version `0.6.0-beta.2`, changelog), the test
+  fix `ca1ddd4` (two Rust tests that failed on Windows and macOS since 0.6.0-beta.1) and the board updates. The tag
+  goes on the head of `main`.
+- The first push (`e965fca`) had ci red on macOS and Windows: those two tests, not the product. Because the tests
+  failed first, the app build step has not run on those systems since 0.6.0-beta.1; here Windows type-checks, and
+  macOS everything but the app crate (it needs Apple's compiler).
 - The final runs are on the board ("After 0.6.0-beta.1" rows 1–4, "Search" rows 7–8, "Release 0.6.0-beta.2" row 2;
   notes `.omp/run/notes/SearchVerify.md`, `SearchFinalFix.md`, `Release060Beta2Verify.md`).
 - The README still names the 0.5.1 files: the releases page keeps offering 0.5.1 by default while this is a
