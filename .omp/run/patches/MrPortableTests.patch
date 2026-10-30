@@ -1,0 +1,226 @@
+diff --git a/crates/agent/tests/checkout.rs b/crates/agent/tests/checkout.rs
+index d277cd0..668377f 100644
+--- a/crates/agent/tests/checkout.rs
++++ b/crates/agent/tests/checkout.rs
+@@ -6,7 +6,7 @@ use std::env;
+ use std::fs;
+ use std::path::{Path, PathBuf};
+ 
+-use yamt_agent::{CheckoutLook, CheckoutReply, Error, Workspace, sweep_other_pairs};
++use yamt_agent::{CheckoutLook, CheckoutReply, Workspace, sweep_other_pairs};
+ use yamt_conflict_repo::{git, git_ok, run_ignored_in_child};
+ 
+ use common::{Fixture, commit_of, pair_in};
+@@ -315,7 +315,7 @@ fn discard_that_cannot_rename_the_checkout_answers_remove_and_keeps_it() {
+     set_mode(&fixture.pair.folder, 0o755);
+ 
+     assert!(
+-        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == fixture.checkout()),
++        matches!(&discarded, Err(yamt_agent::Error::Remove { folder, .. }) if *folder == fixture.checkout()),
+         "{discarded:?}"
+     );
+     assert!(fixture.checkout().join("a.txt").exists());
+@@ -337,7 +337,7 @@ fn discard_that_cannot_delete_the_checkout_answers_remove() {
+     let removing = fixture.pair.folder.join("checkout.removing");
+     set_mode(&removing.join("sub"), 0o755);
+     assert!(
+-        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == removing),
++        matches!(&discarded, Err(yamt_agent::Error::Remove { folder, .. }) if *folder == removing),
+         "{discarded:?}"
+     );
+ }
+diff --git a/crates/gitio/tests/fetch.rs b/crates/gitio/tests/fetch.rs
+index 8674a74..bbf1eff 100644
+--- a/crates/gitio/tests/fetch.rs
++++ b/crates/gitio/tests/fetch.rs
+@@ -1,7 +1,7 @@
+ #![cfg(test)]
+ 
+ use std::path::Path;
+-use std::time::{Duration, Instant};
++use std::time::Instant;
+ 
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
+ use yamt_gitio::{FETCH_TIMEOUT, Repo};
+@@ -152,6 +152,8 @@ fn a_ref_the_server_lacks_fails_in_git_s_words() {
+ #[cfg(unix)]
+ #[test]
+ fn a_fetch_that_gets_no_answer_fails_at_its_deadline() {
++    use std::time::Duration;
++
+     const SHORT_TIMEOUT: Duration = Duration::from_secs(1);
+     const HANG: Duration = Duration::from_secs(5);
+     let fixture = fixture();
+diff --git a/crates/merge-requests/tests/detect.rs b/crates/merge-requests/tests/detect.rs
+index d3cb04e..102528d 100644
+--- a/crates/merge-requests/tests/detect.rs
++++ b/crates/merge-requests/tests/detect.rs
+@@ -1,5 +1,6 @@
+ #![cfg(test)]
+ 
++use std::fs;
+ use std::path::Path;
+ 
+ use yamt_conflict_repo::{
+@@ -48,7 +49,10 @@ fn a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder() {
+ 
+     let repository = common_dir(repo.path());
+     assert_eq!(found.project(), GitLabProject::Found { repository });
+-    assert_eq!(found.root(), repo.path());
++    assert_eq!(
++        fs::canonicalize(found.root()).unwrap(),
++        fs::canonicalize(repo.path()).unwrap()
++    );
+ }
+ 
+ #[test]
+diff --git a/crates/merge-requests/tests/list.rs b/crates/merge-requests/tests/list.rs
+index 5518c1b..2daab88 100644
+--- a/crates/merge-requests/tests/list.rs
++++ b/crates/merge-requests/tests/list.rs
+@@ -92,7 +92,7 @@ fn glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt() {
+     assert_eq!(fake.logged("cwd: "), vec![cwd; 4]);
+     let env = "env: NO_COLOR=1 GIT_TERMINAL_PROMPT=0".to_owned();
+     assert_eq!(fake.logged("env: "), vec![env; 4]);
+-    assert_eq!(repository.root(), repo.path());
++    assert_eq!(fs::canonicalize(repository.root()).unwrap(), root);
+ }
+ 
+ #[test]
+diff --git a/crates/merge-requests/tests/open.rs b/crates/merge-requests/tests/open.rs
+index 9793925..2483180 100644
+--- a/crates/merge-requests/tests/open.rs
++++ b/crates/merge-requests/tests/open.rs
+@@ -3,6 +3,7 @@
+ 
+ mod fake_glab;
+ 
++use std::fs;
+ use std::path::{Path, PathBuf};
+ use std::process::Command;
+ 
+@@ -107,7 +108,10 @@ fn a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_u
+     let opened = setup.open(13).unwrap();
+ 
+     assert_eq!(opened.spec, format!("{MERGE_BASE}..{MR13_HEAD}"));
+-    assert_eq!(opened.root, setup.root());
++    assert_eq!(
++        fs::canonicalize(&opened.root).unwrap(),
++        fs::canonicalize(setup.root()).unwrap()
++    );
+     assert!(setup.has_commit(MR13_HEAD));
+     assert_eq!(setup.untouched(), before);
+     assert!(!setup.root().join(".git/FETCH_HEAD").exists());
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 5922943..96502d3 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -1,6 +1,4 @@
+-use std::path::PathBuf;
+-use std::process::Command;
+-
++use std::path::Path;
+ use std::sync::mpsc;
+ 
+ use serde_json::{Value, json};
+@@ -16,11 +14,7 @@ use crate::commands::with_commands;
+ use crate::mock_window::invoke_on;
+ use crate::window::app_folder;
+ 
+-fn in_this_repository(relative: &str) -> PathBuf {
+-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+-        .join("..")
+-        .join(relative)
+-}
++const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
+ 
+ /// A window whose merge-request state is managed for the repository in `repo`, its data folder a temp dir.
+ struct MergeRequestWindow {
+@@ -47,25 +41,29 @@ fn open_window_in(repo: TempDir) -> MergeRequestWindow {
+     }
+ }
+ 
+-/// A window on `scripts/range-repo.sh`'s repository, whose `origin` is the fake GitLab's project.
+-fn range_repo_window() -> MergeRequestWindow {
+-    let repo = TempDir::new().unwrap();
+-    let built = Command::new(in_this_repository("scripts/range-repo.sh"))
+-        .arg(repo.path())
+-        .output()
+-        .unwrap();
+-    assert!(built.status.success(), "{built:?}");
+-    open_window_in(repo)
+-}
+-
+ fn invoke(window: &MergeRequestWindow, cmd: &str, args: Value) -> Result<Value, Value> {
+     invoke_on(&window.webview, cmd, args)
+ }
+ 
++/// A fresh repository whose `origin` is on gitlab.example.
++fn gitlab_repo() -> TempDir {
++    let repo = TempDir::new().unwrap();
++    git_ok(repo.path(), &["init", "-q"]).unwrap();
++    git_ok(repo.path(), &["remote", "add", "origin", GITLAB_REMOTE]).unwrap();
++    repo
++}
++
++/// The absolute common git dir as git prints it.
++fn common_dir(root: &Path) -> String {
++    let args = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
++    let output = git_ok(root, &args).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
+ #[test]
+ fn a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none() {
+-    let found = range_repo_window();
+-    let common_dir = found.repo.path().join(".git").display().to_string();
++    let found = open_window_in(gitlab_repo());
++    let common_dir = common_dir(found.repo.path());
+     assert_eq!(
+         invoke(&found, "find_gitlab_project", json!({})),
+         Ok(json!({ "kind": "found", "repository": common_dir }))
+@@ -109,6 +107,8 @@ fn list(window: &MergeRequestWindow) -> Vec<Value> {
+ 
+ #[cfg(unix)]
+ mod through_glab {
++    use std::path::PathBuf;
++    use std::process::Command;
+     use std::thread;
+     use std::time::{Duration, Instant};
+ 
+@@ -124,6 +124,23 @@ mod through_glab {
+     const OPEN_WAIT: Duration = Duration::from_secs(10);
+     const POLL: Duration = Duration::from_millis(10);
+ 
++    fn in_this_repository(relative: &str) -> PathBuf {
++        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
++            .join("..")
++            .join(relative)
++    }
++
++    /// A window on `scripts/range-repo.sh`'s repository, whose `origin` is the fake GitLab's project.
++    fn range_repo_window() -> MergeRequestWindow {
++        let repo = TempDir::new().unwrap();
++        let built = Command::new(in_this_repository("scripts/range-repo.sh"))
++            .arg(repo.path())
++            .output()
++            .unwrap();
++        assert!(built.status.success(), "{built:?}");
++        open_window_in(repo)
++    }
++
+     /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `merge-requests`
+     /// and the fake xdg-open, their logs in a folder of this test's.
+     fn run_with_fakes(test: &str) {
+@@ -217,6 +234,11 @@ mod through_glab {
+         list(&window);
+         assert_eq!(open_job(&window, UNLISTED_JOB), not_offered);
+         assert_eq!(opened_log(), "");
++        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `job_page.rs`), not PATH's fake: it would
++        // open the real browser.
++        if cfg!(target_os = "macos") {
++            return;
++        }
+         assert_eq!(open_job(&window, LISTED_JOB), json!({ "kind": "opened" }));
+ 
+         assert_eq!(wait_for_the_opener(), format!("argv: {LISTED_JOB}\n"));

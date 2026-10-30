@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-use std::process::Command;
-
+use std::path::Path;
 use std::sync::mpsc;
 
 use serde_json::{Value, json};
@@ -16,11 +14,7 @@ use crate::commands::with_commands;
 use crate::mock_window::invoke_on;
 use crate::window::app_folder;
 
-fn in_this_repository(relative: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join(relative)
-}
+const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
 
 /// A window whose merge-request state is managed for the repository in `repo`, its data folder a temp dir.
 struct MergeRequestWindow {
@@ -47,25 +41,29 @@ fn open_window_in(repo: TempDir) -> MergeRequestWindow {
     }
 }
 
-/// A window on `scripts/range-repo.sh`'s repository, whose `origin` is the fake GitLab's project.
-fn range_repo_window() -> MergeRequestWindow {
-    let repo = TempDir::new().unwrap();
-    let built = Command::new(in_this_repository("scripts/range-repo.sh"))
-        .arg(repo.path())
-        .output()
-        .unwrap();
-    assert!(built.status.success(), "{built:?}");
-    open_window_in(repo)
-}
-
 fn invoke(window: &MergeRequestWindow, cmd: &str, args: Value) -> Result<Value, Value> {
     invoke_on(&window.webview, cmd, args)
 }
 
+/// A fresh repository whose `origin` is on gitlab.example.
+fn gitlab_repo() -> TempDir {
+    let repo = TempDir::new().unwrap();
+    git_ok(repo.path(), &["init", "-q"]).unwrap();
+    git_ok(repo.path(), &["remote", "add", "origin", GITLAB_REMOTE]).unwrap();
+    repo
+}
+
+/// The absolute common git dir as git prints it.
+fn common_dir(root: &Path) -> String {
+    let args = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
+    let output = git_ok(root, &args).unwrap();
+    String::from_utf8(output).unwrap().trim_end().to_owned()
+}
+
 #[test]
 fn a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none() {
-    let found = range_repo_window();
-    let common_dir = found.repo.path().join(".git").display().to_string();
+    let found = open_window_in(gitlab_repo());
+    let common_dir = common_dir(found.repo.path());
     assert_eq!(
         invoke(&found, "find_gitlab_project", json!({})),
         Ok(json!({ "kind": "found", "repository": common_dir }))
@@ -109,6 +107,8 @@ fn list(window: &MergeRequestWindow) -> Vec<Value> {
 
 #[cfg(unix)]
 mod through_glab {
+    use std::path::PathBuf;
+    use std::process::Command;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -123,6 +123,23 @@ mod through_glab {
     const UNLISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/999";
     const OPEN_WAIT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(10);
+
+    fn in_this_repository(relative: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join(relative)
+    }
+
+    /// A window on `scripts/range-repo.sh`'s repository, whose `origin` is the fake GitLab's project.
+    fn range_repo_window() -> MergeRequestWindow {
+        let repo = TempDir::new().unwrap();
+        let built = Command::new(in_this_repository("scripts/range-repo.sh"))
+            .arg(repo.path())
+            .output()
+            .unwrap();
+        assert!(built.status.success(), "{built:?}");
+        open_window_in(repo)
+    }
 
     /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `merge-requests`
     /// and the fake xdg-open, their logs in a folder of this test's.
@@ -217,6 +234,11 @@ mod through_glab {
         list(&window);
         assert_eq!(open_job(&window, UNLISTED_JOB), not_offered);
         assert_eq!(opened_log(), "");
+        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `job_page.rs`), not PATH's fake: it would
+        // open the real browser.
+        if cfg!(target_os = "macos") {
+            return;
+        }
         assert_eq!(open_job(&window, LISTED_JOB), json!({ "kind": "opened" }));
 
         assert_eq!(wait_for_the_opener(), format!("argv: {LISTED_JOB}\n"));

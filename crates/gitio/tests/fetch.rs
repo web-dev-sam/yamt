@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
 use yamt_gitio::{FETCH_TIMEOUT, Repo};
@@ -152,6 +152,8 @@ fn a_ref_the_server_lacks_fails_in_git_s_words() {
 #[cfg(unix)]
 #[test]
 fn a_fetch_that_gets_no_answer_fails_at_its_deadline() {
+    use std::time::Duration;
+
     const SHORT_TIMEOUT: Duration = Duration::from_secs(1);
     const HANG: Duration = Duration::from_secs(5);
     let fixture = fixture();

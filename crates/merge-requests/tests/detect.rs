@@ -1,5 +1,6 @@
 #![cfg(test)]
 
+use std::fs;
 use std::path::Path;
 
 use yamt_conflict_repo::{
@@ -48,7 +49,10 @@ fn a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder() {
 
     let repository = common_dir(repo.path());
     assert_eq!(found.project(), GitLabProject::Found { repository });
-    assert_eq!(found.root(), repo.path());
+    assert_eq!(
+        fs::canonicalize(found.root()).unwrap(),
+        fs::canonicalize(repo.path()).unwrap()
+    );
 }
 
 #[test]

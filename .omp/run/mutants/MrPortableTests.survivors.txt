@@ -1,0 +1,2 @@
+just mutants HEAD → "no Rust changes since HEAD": only test files changed, so there are 0 mutants
+

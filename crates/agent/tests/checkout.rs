@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use yamt_agent::{CheckoutLook, CheckoutReply, Error, Workspace, sweep_other_pairs};
+use yamt_agent::{CheckoutLook, CheckoutReply, Workspace, sweep_other_pairs};
 use yamt_conflict_repo::{git, git_ok, run_ignored_in_child};
 
 use common::{Fixture, commit_of, pair_in};
@@ -315,7 +315,7 @@ fn discard_that_cannot_rename_the_checkout_answers_remove_and_keeps_it() {
     set_mode(&fixture.pair.folder, 0o755);
 
     assert!(
-        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == fixture.checkout()),
+        matches!(&discarded, Err(yamt_agent::Error::Remove { folder, .. }) if *folder == fixture.checkout()),
         "{discarded:?}"
     );
     assert!(fixture.checkout().join("a.txt").exists());
@@ -337,7 +337,7 @@ fn discard_that_cannot_delete_the_checkout_answers_remove() {
     let removing = fixture.pair.folder.join("checkout.removing");
     set_mode(&removing.join("sub"), 0o755);
     assert!(
-        matches!(&discarded, Err(Error::Remove { folder, .. }) if *folder == removing),
+        matches!(&discarded, Err(yamt_agent::Error::Remove { folder, .. }) if *folder == removing),
         "{discarded:?}"
     );
 }

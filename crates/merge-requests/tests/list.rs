@@ -92,7 +92,7 @@ fn glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt() {
     assert_eq!(fake.logged("cwd: "), vec![cwd; 4]);
     let env = "env: NO_COLOR=1 GIT_TERMINAL_PROMPT=0".to_owned();
     assert_eq!(fake.logged("env: "), vec![env; 4]);
-    assert_eq!(repository.root(), repo.path());
+    assert_eq!(fs::canonicalize(repository.root()).unwrap(), root);
 }
 
 #[test]

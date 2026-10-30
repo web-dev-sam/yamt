@@ -3,6 +3,7 @@
 
 mod fake_glab;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -107,7 +108,10 @@ fn a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_u
     let opened = setup.open(13).unwrap();
 
     assert_eq!(opened.spec, format!("{MERGE_BASE}..{MR13_HEAD}"));
-    assert_eq!(opened.root, setup.root());
+    assert_eq!(
+        fs::canonicalize(&opened.root).unwrap(),
+        fs::canonicalize(setup.root()).unwrap()
+    );
     assert!(setup.has_commit(MR13_HEAD));
     assert_eq!(setup.untouched(), before);
     assert!(!setup.root().join(".git/FETCH_HEAD").exists());
