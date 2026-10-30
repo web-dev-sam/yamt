@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- The GitLab project's open merge requests in the compare (`--diff`) and range (`--diff=…`) windows: in a repository
+  with a GitLab remote, a merge-requests button left of the gear opens a page in place of the window's content, as
+  Settings does; Back or Escape returns.
+  - Newest first, up to 500; each row shows the title, `!iid`, "created … ago", the open discussions, the approvals
+    and the CI status. Hovering the CI icon lists only the failed jobs, allowed-to-fail last; a click on a job opens
+    its log on GitLab in the system browser.
+  - Filters on Assignee, Reviewer and Label (checklists with counts, "Me" and "None" first, one click each) and Draft
+    (All · Drafts · Ready); "12 of 40 merge requests"; remembered per repository.
+  - A button on each row fetches the merge request's commits (no branch, checkout or working-tree change) and opens
+    its latest version in a new range window, lined up with the merge request for comments.
+  - glab missing, logged out, or GitLab unreachable: one sentence on the page, with what to do.
+
 ## [0.6.0-beta.2] - 2026-10-29
 
 ### Added
