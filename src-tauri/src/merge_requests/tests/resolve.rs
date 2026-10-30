@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use yamt_local_merge::claim_window;
+use yamt_local_merge::{WindowClaim, claim_window};
 
 use super::through_glab::{in_this_repository, run_with_fakes};
 use super::*;
@@ -10,6 +10,8 @@ const RESOLVE_TEST: &str = "merge_requests::tests::resolve::resolve_replies_on_p
 const CONTINUE_TEST: &str = "merge_requests::tests::resolve::continue_replies_on_path_s_glab";
 const SCENARIO: &str = "mr-conflicts";
 const NO_DISPLAY: &str = "cannot start yamt: no display";
+/// Well inside `CLAIM_WAIT`, and past the first probes.
+const WINDOW_CLAIMS_AFTER: Duration = Duration::from_millis(300);
 
 /// A window on `scripts/mr-conflict-repo.sh`'s repository, on `develop`, whose `origin` is the fake GitLab.
 fn mr_conflict_window() -> MergeRequestWindow {
@@ -70,6 +72,15 @@ fn failing_start(_: &Path) -> Result<(), String> {
     Err(NO_DISPLAY.to_owned())
 }
 
+/// Like a starting merge window: claims `root`'s merge after `WINDOW_CLAIMS_AFTER` and holds the claim in `claims`.
+fn claim_later(root: &Path, claims: mpsc::Sender<WindowClaim>) {
+    let root = root.to_owned();
+    thread::spawn(move || {
+        thread::sleep(WINDOW_CLAIMS_AFTER);
+        claims.send(claim_window(&root).unwrap().unwrap()).unwrap();
+    });
+}
+
 fn started_due_dates() -> Value {
     json!({ "branch": "feature/due-dates", "target": "main", "conflicts": true })
 }
@@ -126,9 +137,11 @@ fn resolve_replies_on_path_s_glab() {
     );
 
     git_ok(&root, &["merge", "--abort"]).unwrap();
+    let (claims, claimed) = mpsc::channel();
     let mut roots = Vec::new();
     let started = resolved_with(&window, 21, |root| {
         roots.push(std::fs::canonicalize(root).unwrap());
+        claim_later(root, claims);
         Ok(())
     });
 
@@ -136,7 +149,9 @@ fn resolve_replies_on_path_s_glab() {
         started,
         json!({ "kind": "started", "started": started_due_dates() })
     );
+    assert_eq!(local(&window), merging(true));
     assert_eq!(roots, [root]);
+    drop(claimed.recv().unwrap());
 }
 
 #[test]
@@ -151,25 +166,38 @@ fn continue_replies_on_path_s_glab() {
     let root = root_of(&window);
     let ended = json!({ "kind": "ended" });
     assert_eq!(continue_merge(&window, 21), ended);
-    let started = resolved_with(&window, 21, |_| Ok(()));
+    let mut claims = Vec::new();
+    let mut claimed_at = None;
+    let started = resolved_with(&window, 21, |root| {
+        claims.push(claim_window(root).unwrap().unwrap());
+        claimed_at = Some(Instant::now());
+        Ok(())
+    });
     assert_eq!(started["kind"], "started", "{started}");
+    assert!(claimed_at.unwrap().elapsed() < CLAIM_WAIT);
     assert_eq!(continue_merge(&window, 23), ended);
-    let claim = claim_window(&root).unwrap().unwrap();
     assert_eq!(
         continue_merge(&window, 21),
         json!({ "kind": "alreadyOpen" })
     );
-    drop(claim);
+    drop(claims);
 
+    let (claims, claimed) = mpsc::channel();
     let mut roots = Vec::new();
     let opened = continued_with(&window, 21, |root| {
         roots.push(std::fs::canonicalize(root).unwrap());
+        claim_later(root, claims);
         Ok(())
     });
 
     let names = json!({ "kind": "opened", "branch": "feature/due-dates", "target": "main" });
     assert_eq!(opened, names);
+    assert_eq!(local(&window)["windowOpen"], true);
     assert_eq!(roots, std::slice::from_ref(&root));
+    drop(claimed.recv().unwrap());
+    let asked = Instant::now();
+    assert_eq!(continued_with(&window, 21, |_| Ok(())), names);
+    assert!(asked.elapsed() >= CLAIM_WAIT);
     assert_eq!(
         continued_with(&window, 21, failing_start),
         json!({ "kind": "windowFailed", "message": NO_DISPLAY })

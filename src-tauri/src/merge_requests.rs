@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use tauri::ipc::Channel;
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
@@ -15,6 +17,9 @@ use crate::range::range_folder;
 use crate::second_window;
 
 const NO_PROJECT: &str = "this window's folder has no remote on a GitLab server";
+const CLAIM_PROBE_INTERVAL: Duration = Duration::from_millis(50);
+/// Long enough for a cold start of the merge window up to its claim.
+const CLAIM_WAIT: Duration = Duration::from_secs(5);
 
 /// One message of a load, in order: every page, then its end. The end travels on the channel too: tauri 2.12.1
 /// delivers a channel message of 8 KiB of JSON or more by a later fetch (ipc/channel.rs
@@ -116,7 +121,7 @@ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) 
     }
 }
 
-/// Starts merge request `iid`'s merge in this checkout, then its window by `start_window`.
+/// Starts merge request `iid`'s merge in this checkout, then its window by `start_window`, and waits for its claim.
 fn resolved(
     state: &MergeRequestState,
     glab: Option<&Glab>,
@@ -142,14 +147,17 @@ fn resolved(
     match yamt_local_merge::start(&target.root, &branches) {
         Err(refusal) => ResolveReply::Refused { refusal },
         Ok(started) => match start_window(&target.root) {
-            Ok(()) => ResolveReply::Started { started },
+            Ok(()) => {
+                wait_for_window_claim(&target.root);
+                ResolveReply::Started { started }
+            }
             Err(message) => ResolveReply::WindowFailed { started, message },
         },
     }
 }
 
-/// Starts the window of merge request `iid`'s unfinished merge again by `start_window`, unless the merge ended
-/// or its window is open.
+/// Starts the window of merge request `iid`'s unfinished merge again by `start_window` and waits for its claim,
+/// unless the merge ended or its window is open.
 fn continued(
     state: &MergeRequestState,
     iid: MergeRequestIid,
@@ -172,11 +180,27 @@ fn continued(
     }
     let view = live.view();
     match start_window(root) {
-        Ok(()) => ContinueMergeReply::Opened {
-            branch: view.branch,
-            target: view.target,
-        },
+        Ok(()) => {
+            wait_for_window_claim(root);
+            ContinueMergeReply::Opened {
+                branch: view.branch,
+                target: view.target,
+            }
+        }
         Err(message) => ContinueMergeReply::WindowFailed { message },
+    }
+}
+
+/// Returns once the merge window just started in `root` holds its claim, so that the reply is never read as a
+/// closed window; after `CLAIM_WAIT` it gives up with a warning.
+fn wait_for_window_claim(root: &Path) {
+    let deadline = Instant::now() + CLAIM_WAIT;
+    while !yamt_local_merge::window_is_open(root) {
+        if Instant::now() >= deadline {
+            tracing::warn!(root = %root.display(), "the merge window did not claim its merge in time");
+            return;
+        }
+        thread::sleep(CLAIM_PROBE_INTERVAL);
     }
 }
 
