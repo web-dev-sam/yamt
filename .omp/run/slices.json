@@ -22,7 +22,11 @@
       "frontend/src/ui/mergeRequests.test.ts",
       "frontend/src/ui/AGENTS.md",
       "frontend/src/mergeRequests/**",
-      "frontend/scripts/app-session/**"
+      "frontend/scripts/app-session/**",
+      "frontend/src/ui/serverText.ts",
+      "frontend/src/ui/serverText.test.ts",
+      "frontend/src/ui/searchText.ts",
+      "frontend/src/ui/searchText.test.ts"
     ]
   }
 }
