@@ -93,6 +93,8 @@ the probe did not run, which is reported, not hidden.
 ```
 scripts/conflict-repo.sh /tmp/yamt-test-merge                          # 7 conflicts: 3 goldens, CRLF, add/add, binary, deleted on one side
 just app-session start-app --name <n> --repo /tmp/yamt-test-merge      # the debug build (`--binary`), on a private display
+just app-session start-app --name <n> --diff --dir <repo> --glab merge-requests  # compare window started in <repo>; fake glab + fake opener (<session>/glab/opened.log)
+just app-session start-fixture --name <n> --diff --mr list             # merge-request page scripts (?mr=): list slow many empty noGlab loggedOut timeout refused pageFails
 ```
 
 `start-app` drives `target/debug/yamt`; after a `just check` that file has no pages built in, so build it first with

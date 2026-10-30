@@ -51,7 +51,7 @@ yamt/
 │  ├─ settings/               the per-user settings file (theme — ten names, plan §2 #102 —, changed keys, its location). NO tauri, NO git
 │  ├─ lsp-host/               starts language servers and frames their messages (plan §2 #70). NO yamt-*, NO tauri
 │  └─ compare/                the `yamt --diff` window's stored tabs (plan §2 #97). Depends on merge-core only; NO tauri, NO git
-├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare
+├─ src-tauri/                 Tauri shell: commands + DTO export + DMABUF guard. Depends on session, settings, lsp-host, compare, range, review, agent, merge-requests
 ├─ frontend/
 │  ├─ package.json            pnpm; Vite + Vue 3 + TS strict
 │  ├─ src/
@@ -69,6 +69,7 @@ yamt/
 ├─ crates/review/             yamt-review: the range window's threads (`threads.json`) and posting to GitLab through glab (§3.8)
 ├─ crates/pipe/               yamt-pipe: the process core language servers and the AI share (§3.8)
 ├─ crates/agent/              yamt-agent: the AI's temporary checkout and its `omp acp` process (§3.8)
+├─ crates/merge-requests/     yamt-merge-requests: the GitLab project's open merge requests through glab, opening one's changes, job pages (§3.9)
 ├─ tests/glab/<scenario>/     the fake glab's answers (scripts/fake-glab/glab), pinned to scripts/range-repo.sh's ids
 └─ tests/agent/<case>/        the fixture agent's diff pairs
 ```
@@ -107,10 +108,14 @@ graph LR
 ```
 
 The range window adds (plan §2 #104, #109, #110, #117): `gitio, merge-core ◄── range ◄── review ◄── src-tauri`;
-`pipe ◄── lsp-host`; `gitio, pipe, range ◄── agent ◄── src-tauri`; `settings` gains the `agent` entry. In the window:
+`pipe ◄── lsp-host`; `gitio, pipe, range ◄── agent ◄── src-tauri`; `settings` gains the `agent` entry. The
+merge-request page adds (plan §2 #129): `gitio, range ◄── merge-requests ◄── src-tauri` (`review` only as its
+dev-dependency). In the window:
 `jsonrpc/` imports no `src/` module; `lsp/` and `agent/` reach it only through `jsonrpc/index.ts`; `agent/` imports only
 the `ipc/` and `jsonrpc/` indexes and is built only in `main.ts`; the range root (`Range*.vue`, `range*.ts`, the AI views)
-never imports the merge or compare roots or `lsp/` (PM9).
+never imports the merge or compare roots or `lsp/` (PM9); `mergeRequests/` (the page's pure core) imports no other `src/`
+module, as `search/`; the shared page files (`ui/MergeRequest*`, `ui/mergeRequest*`, `ui/CiStatus*`) import no window
+root and nothing from `lsp/` (PM10).
 
 Rules (each one is enforced, not advised — §8 says by what):
 
@@ -118,10 +123,11 @@ Rules (each one is enforced, not advised — §8 says by what):
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | `merge-core` has no `std::process`, `std::fs`, `tokio`, `tauri`, `serde_json`                                                                                | clippy `disallowed_methods`/`disallowed_types` + no such deps in `Cargo.toml` (cargo-deny `bans` wildcard check per crate)      |
 | `gitio` contains no diff logic (never depends on `merge-core`)                                                                                               | workspace `Cargo.toml` graph; `cargo tree -e normal -p gitio` must not list merge-core (just recipe)                            |
-| `src-tauri` depends only on `session`, `settings`, `lsp-host`, `compare` + tauri crates; command bodies ≤ 15 lines (thin); `settings` and `lsp-host` depend on no `yamt-*` crate and not on tauri; `compare` depends on `merge-core` only among `yamt-*` and not on tauri | `scripts/arch-check.sh` (yamt-app's, yamt-settings', yamt-lsp-host's and yamt-compare's direct deps); reviewer rule |
+| `src-tauri` depends only on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent`, `merge-requests` + tauri crates; command bodies ≤ 15 lines (thin); `settings` and `lsp-host` depend on no `yamt-*` crate and not on tauri; `compare` depends on `merge-core` only among `yamt-*` and not on tauri; `merge-requests` depends on `range`, `gitio` and `merge-core` only among `yamt-*` and not on tauri | `scripts/arch-check.sh` (yamt-app's, yamt-settings', yamt-lsp-host's, yamt-compare's and yamt-merge-requests' direct deps); reviewer rule |
 | `ui/**` never imports `@codemirror/*`, `@tauri-apps/*`, `editor/internal/**`, `model/**` directly (only `ipc/` talks to the app)                             | oxlint `no-restricted-imports` in a per-directory `overrides` block (`/**` globs); `frontend/scripts/fences.test.ts`            |
 | `model/**` and `connectors/**` import nothing from `vue`, `@vueuse/*`, `editor/`, `ui/`, `@tauri-apps/*`; `editor/**` imports nothing from `vue`/`@vueuse/*` | oxlint `no-restricted-imports` overrides; `import/no-cycle` globally                                                            |
-| The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94) | `frontend/scripts/fences.ts` PM7 + its failing-path test |
+| The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94) | `frontend/scripts/windowFence.ts` PM7 (called by `fences.ts`) + its failing-path test |
+| The merge-request page's shared files (`ui/MergeRequest*`, `ui/mergeRequest*`, `ui/CiStatus*`) never import a window root (`store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue`, `rangeStore.ts`, `RangeApp.vue`) or `lsp/` (plan §2 #128) | `frontend/scripts/windowFence.ts` PM10 (called by `fences.ts`, with PM7 and PM9) + its failing-path test |
 | Only `ui/linuxPaste.ts` reads the clipboard through WebKit: no other file reads a `clipboardData` or calls `navigator.clipboard.read`/`readText` (plan §2 #99) | `frontend/scripts/clipboardFence.ts` PM8 (called by `fences.ts`) + its failing-path test |
 | `ipc/bindings.ts` is generated and byte-identical to `cargo run -p yamt-app --features bindings --bin export-bindings` output                                | `just bindings-check` diff in CI; hook blocks `edit`/`write` on the path                                                        |
 | No `unwrap`/`expect`/`panic!` outside tests in Rust                                                                                                          | clippy `unwrap_used`, `expect_used`, `panic` = deny; `#[cfg(test)]` allowed                                                     |
@@ -284,11 +290,19 @@ impl Repo {
     pub fn abort(&self, operation: &Operation) -> Result<()>;       // merge/rebase/cherry-pick/revert/am --abort, a squash merge reset --merge; a refusal is GitFailed with git's stderr
     pub fn continue_operation(&self, operation: &Operation) -> Result<GitRun>; // GIT_EDITOR=: (git keeps its prepared message); GitRun { succeeded, output } (stdout then stderr)
     pub fn rerere_tracked(&self) -> Result<Option<Vec<PathBuf>>>;  // MERGE_RR's paths (`--git-path`); None while rerere is not enabled (rerere.c `is_rerere_enabled`) or nothing is recorded (plan §2 #90)
+    // the merge-request page (plan §2 #129, #130, #132)
+    pub fn remote_urls(&self) -> Result<Vec<RemoteUrl>>;          // config -z --get-regexp ^remote\..*\.url$ (one reader with merge_config, `config_entries`); RemoteUrl { name, url } bytes, config order
+    pub fn fetch_without_refs(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String>; // fetch --no-tags --no-write-fetch-head --no-recurse-submodules --no-auto-maintenance --refmap= --quiet --end-of-options: no ref, no FETCH_HEAD; GIT_TERMINAL_PROMPT=0, GCM_INTERACTIVE=never, SSH_ASKPASS_REQUIRE=force + SSH_ASKPASS=false (Unix); killed at `timeout` (FETCH_TIMEOUT 120 s); Err = git's first stderr line
 }
 pub enum Operation { Merge { merging }, SquashMerge { merging }, Rebase(Rebase { branch, onto, replaying, redoing_merge, progress, editor_steps_ahead }),
                      CherryPick { picking, progress }, Revert { reverting, progress }, Am { subject, message, progress } }
 impl Stop { pub fn id(&self) -> StopId; }                          // the stop's identity: the operation's kind, its ids and HEAD, never progress or the todo (`rebase --edit-todo` is the same stop)
 impl BlobReader { pub fn read(&mut self, oid: &Oid) -> Result<Vec<u8>>; }
+impl Glab {                                                         // glab.rs: PATH lookup (`find`), GLAB_TIMEOUT 20 s per call, NO_COLOR, GIT_TERMINAL_PROMPT=0
+    pub fn get(&self, cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String>; // stdout; Err = glab's last stderr line, its exit words or TIMED_OUT
+    pub fn auth_status(&self, cwd: &Path) -> AuthStatus;           // `glab auth status`: LoggedIn | LoggedOut { detail: first line } | Failed { message }
+}
+pub fn first_line(output: &[u8]) -> Option<String>; pub fn last_line(output: &[u8]) -> Option<String>; // the one pair of glab-output helpers (TIMED_OUT the one timeout word); yamt-review's and yamt-merge-requests' glab calls go through `get`/`auth_status`
 ```
 
 - Every git call: explicit argv, `-c core.quotepath=false`, `LC_ALL=C`, `GIT_OPTIONAL_LOCKS=0`
@@ -447,8 +461,10 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   `NoConfigFolder`, `MergeAborted`, `StopMovedOn`, `GitRunning`, `MergeFinished`, `NoOperation`, and for the compare
   window `UnknownTab { tab }`, `ColumnTooLarge { limit }`, `WorkerStopped`) mirrored into TS; no stringly errors. A disk
   change is never an error.
-- **The compare window** (`yamt --diff`, plan §2 #93/#94; `args.rs` `Invocation::Compare`, `window.rs` `run_compare`,
-  `compare.rs`): never opens a `MergeSession`, never runs git, never manages `Mutex<Merge>` or the language-server host.
+- **The compare window** (`yamt --diff`, plan §2 #93/#94; `args.rs` `Invocation::Compare`, `window.rs` `run_compare(folder)`,
+  `compare.rs`): never opens a `MergeSession`, never manages `Mutex<Merge>` or the language-server host. It runs git and
+  glab only for the merge-request page (#94 as amended, #130): the remotes once at start, in its start folder
+  (`lib.rs` `COMPARE_FOLDER` through `from_start_dir`, `OWD` under an AppImage), glab and the fetch on use.
   `compare::manage_store_in(app, data_dir)` opens `yamt_compare::TabStore` in `<data_dir>/yamt/compare/` and manages it
   as `CompareState = Mutex<TabStore>` (the third `Mutex`, never held with another, plan §2 #97); a failure ends before
   any window with exit 2 and one line (`another yamt --diff window is open (<folder>)`, the crate's `Broken`/`NewerFormat`
@@ -459,6 +475,24 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   lock is released; a worker panic answers `WorkerStopped` and the lock recovers), `add_tab`, `close_tab(tab)`,
   `rename_tab(tab, name)`, `set_tab_language(tab, language)`, `show_tab(tab)` (each `-> TabList`). The merge commands are
   registered there too and answer Tauri's "state not managed"; the compare page never calls them.
+- **Merge requests** (`merge_requests.rs`, crate `yamt-merge-requests`, plan §2 #128–#135): `manage(app, folder,
+  app_folder)` runs for the compare window (its start folder, `window.rs` `open_compare`) and the range window (its
+  repository, `range.rs`) and manages `MergeRequestState { gitlab: Option<GitLabRepository>, range_dir, job_pages:
+  Mutex<BTreeSet<JobPage>> }` (`gitlab_repository`: offline, once; the `Mutex` never held with another). Commands,
+  registered for every window (the merge window never calls them): `find_gitlab_project() -> GitLabProject`
+  (`none` | `found { repository }`); async `list_merge_requests(messages: Channel<ListMessage>) -> ()` sends every page
+  as `ListMessage::Page { page }` and then exactly one `ListMessage::End { end: ListEnd }` on the channel (tauri 2.12
+  delivers a channel message of 8 KiB or more by a later fetch, so the end cannot be the command's answer), each page's
+  job pages added to `job_pages` before it is sent (`forward_page`); async `open_merge_request(iid) -> OpenReply`
+  (`prepare_open`, then `range_window::start`); `open_job_page(page) -> JobOpened` opens only a page in `job_pages`
+  (else `NotOffered`). GitLab, git and launch problems are values (`ListEnd`, `OpenReply`, `JobOpened`), never an
+  `IpcError`; a window without a project answers `Failed`.
+- **A second process** (`range_window.rs`, plan §2 #132; amends "one process, one window": opening a merge request's
+  changes starts another yamt): `start(range)` runs `yamt --diff=<base_sha>..<head_sha> --repo <root>` (`arguments`, no
+  `--ai`) with cwd `root`, stdin and stdout null, stderr inherited; the program is `$APPIMAGE` when this one runs from
+  an AppImage (`appimage.rs` `running_appimage`: the mount goes away with this process), else `current_exe`; in a
+  process group of its own on Unix (`process_group(0)`), `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` on Windows; a
+  thread waits for its exit. A spawn failure → `OpenReply::StartFailed`.
 - **Pasting on Linux** (`clipboard.rs`, plan §2 #99): `read_clipboard(selection: ClipboardSelection) -> Option<String>`
   (`ClipboardSelection = Clipboard | Primary`), registered for both windows, no managed state. GTK's text request is
   started on the main thread (`run_on_main_thread`) and its answer awaited on a `spawn_blocking` thread, so a hung
@@ -466,7 +500,8 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   `None`. Never asks GTK for the clipboard's format list: WebKitGTK 2.54.0/2.54.1 crash reading a failed one
   (`Clipboard::formats`, upstream bug 324466), which is why the window takes every paste on Linux (§5.4 `linuxPaste.ts`).
 - `run()` (from `main()`): NVIDIA DMABUF guard first (`graphics.rs`, plan §2 #43), before logging and `tauri::Builder`; CLI `yamt [--repo <path>]` / `yamt --diff`
-  (`--diff` with `--repo` is a usage error);
+  (`--diff` with `--repo` is a usage error) / `yamt --diff=<a>..<b> [--repo <path>]`; every window's folder goes through
+  `from_start_dir` (a relative path read from `OWD` under an AppImage);
   nothing to merge → message, exit 0; not a repository → message, exit 2; at close exit 0 iff
   `remaining() == 0`, else 1; after Abort exit 1 with `<operation> aborted`, after a finished Continue exit 0 with
   `<operation> finished` (#88/#89). Window title `<repository folder> — yamt`.
@@ -566,7 +601,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   the agent (deferred while the lock is held), the exit ends the workspace. `settings.rs` gains `set_agent`.
   `IpcError` gains `AiOff`, `RemoveFailed`, `UnknownThread`, `UnknownMessage`, `EmptyMessage`, `MessagePending`,
   `NotANote`, `SendRunning`.
-- **Window.** `RangeSource` extends `SettingsSource, ReviewSource` with `openRange(): RangeStart`,
+- **Window.** `RangeSource` extends `SettingsSource, ReviewSource, MergeRequestSource` (§4) with `openRange(): RangeStart`,
   `loadRangeFile(file)` and `searchTexts(from)` (#127); `ReviewSource`: `listThreads`, `addThread(file, line, text)`, `addNote(thread, text)`,
   `queueMessage(message, text)`, `unqueueMessage(message)`, `editNote(message, text)`, `deleteMessage(message)`,
   `setThreadSession(thread, session)`,
@@ -592,6 +627,48 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   counts by the folder path a row carries (through `fileTree.ts` `folderPaths`, so a joined chain finds its deepest
   folder's sum), built once per list by `RangeApp`, which fills the tree's optional `folder` slot (after the label;
   the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows.
+
+### 3.9 `merge-requests` — the GitLab project's open merge requests (plan §2 #128–#135)
+
+Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (may use `merge-core`), never on tauri
+(`scripts/arch-check.sh`); no `Mutex`, nothing cached. Every glab call goes through `Glab::get`/`Glab::auth_status`
+(§3.2); GitLab, git and launch problems are values, never errors.
+
+- **Types crossing the IPC** (`lib.rs`): `GitLabProject` `none` | `found { repository }` (the absolute common git dir,
+  the key the window remembers filters by), `MergeRequestIid`, `Person { username, name }`, `CiStatus` (GitLab's
+  fifteen folded into seven: `passed`, `failed`, `running`, `pending`, `canceled`, `skipped`, `manual`; an unknown one
+  `pending` with a warning), `JobPage` (a string only `JobPage::built` makes), `FailedJob { name, stage, allowFailure,
+  page }`, `Pipeline { status, failedJobs, moreFailedJobs }`, `MergeRequestRow` (`createdAt` as GitLab sent it,
+  `openDiscussions` = resolvable − resolved saturating, `approvals` = `approvedBy` nodes), `MergeRequestPage { me, rows }`,
+  `ListEnd` `loaded` | `cut { limit }` | `glabMissing` | `notLoggedIn { detail }` | `failed { message }`, `OpenReply`
+  `opened` | `alreadyOpen` | `preparing` | `notOpen` | `noRemote` | `fetchFailed` | `missingCommit` | `startFailed` |
+  `glabMissing` | `notLoggedIn` | `failed`, `JobOpened` `opened` | `notOffered` | `failed`; `RangeToOpen { root, spec }`
+  (not IPC). `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50.
+- **Detection** (`detect.rs`, #130): `gitlab_repository(folder)`: `Repo::discover`, `Repo::remote_urls`,
+  `Repo::common_dir`, no network and no glab; a remote is on GitLab when its URL's host (scp-like or
+  `scheme://[user@]host[:port]`; never a local path, `file://` or a drive letter) is `gitlab.com`, has a dot-label
+  starting with `gitlab`, or is `GITLAB_HOST`/`GL_HOST`. `GitLabRepository` holds the `Repo` and only those remotes, in
+  config order (`gitlab_remotes`).
+- **The list** (`project.rs`, `query.rs`, `page.rs`, `list.rs`, #131): glab missing → `GlabMissing`; `auth_status` →
+  `NotLoggedIn`/`Failed`; `glab api projects/:fullpath` → `Project { full_path, web_origin }` (the origin only on
+  https); then at most 5 pages of the one single-line GraphQL query (`list_args`: `api graphql -f query=… -f
+  fullPath=<path> -F first=100 [-f after=<cursor>]`), each its own glab call handed to `on_page` as it arrives; a 5th
+  page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GraphQL `errors` win
+  over `data`; the first page's `queryComplexity` logged at info.
+- **Opening** (`open.rs`, `remote.rs`, #132): `prepare_open(repository, glab, iid, range_dir)`: glab, logged in, the
+  project, then the details query asked afresh (not `opened` → `NotOpen`, no `diffRefs` → `Preparing`); both commits
+  local → no fetch, else `remote_for` (the first GitLab remote whose URL, without a final `/` and `.git`, ends in
+  `/<full_path>` or `:<full_path>`, any case; none → `NoRemote`) and `Repo::fetch_without_refs` of
+  `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target holding `:` → `Failed`); then
+  `Resolved::resolve` of `<base>..<head>` (`MissingCommit`, 7 characters) and a `PairLock::take` probe let go at once
+  (`AlreadyOpen`); `Ok(RangeToOpen)` for the shell to start (§3.5).
+- **Job pages** (`job_page.rs`, #133): `JobPage::built(origin, web_path)`: `https://<host[:port]>` plus a path
+  `/<segments>/-/jobs/<digits>`, segments of `[A-Za-z0-9._~-]`, none empty or `..`; anything else → no page.
+  `open_job_page(page)`: `xdg-open <url>` from PATH (Linux, BSD), `/usr/bin/open` (macOS), `rundll32.exe
+  url.dll,FileProtocolHandler` (Windows); streams null, a process group of its own on Unix, a thread reaps it.
+- Tests: unit tests per file (`page/tests.rs` over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/`
+  the one fake-glab helper of `tests/list.rs` and `tests/open.rs` (`scripts/range-repo.sh`'s repository and its fake
+  GitLab: !12 local, !13 fetched); `tests/detect.rs` over real repositories.
 
 ## 4. IPC contract (generated, the single source of truth)
 
@@ -623,6 +700,10 @@ export type TabLanguage = { kind: "auto" } | { kind: "picked"; name: string };
 export type TabList = { tabs: { id: TabId; name: string; language: TabLanguage; holds_text: boolean }[]; shown: TabId };
 export type CompareStart = { list: TabList; column_limit: number };
 export type TabTexts = { left: string; right: string; comparison: Comparison };
+// the merge-request page (plan §2 #128-#135; the compare and range windows): MergeRequestIid = number, JobPage = string
+export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd }; // every page, then one end, on the load's Channel
+export type GitLabProject = { kind: "none" } | { kind: "found"; repository: string };
+export type MergeRequestRow = { iid: MergeRequestIid; title: string; createdAt: string; draft: boolean; assignees: Person[]; reviewers: Person[]; labels: string[]; openDiscussions: number; approvals: number; pipeline: Pipeline | null };
 ```
 
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
@@ -715,7 +796,7 @@ commands); a failure reaches the window's problem bar through `ui/problemText.ts
 The compare window (plan §2 #94) talks to its own interface, `frontend/src/ipc/CompareSource.ts`:
 
 ```ts
-export interface CompareSource extends SettingsSource {
+export interface CompareSource extends SettingsSource, MergeRequestSource {
   openCompare(): Promise<SourceResult<CompareStart>>; // the tabs and the column limit (8 MiB, UTF-8 bytes)
   loadTab(tab: TabId): Promise<SourceResult<TabTexts>>; // both texts and their comparison
   setColumn(write: ColumnWrite): Promise<SourceResult<Comparison>>; // ColumnWrite { tab, column, text, version }: stores, then diffs; a stale version stores nothing
@@ -734,6 +815,27 @@ alias the generated unions. `createTauriCompareSource` (`ipc/tauriCompare.ts`) m
 puts `frontend/fixtures/compare/<case>.json` (written by `just fixtures` from `tests/compare/<case>/`) into tab 1, mirrors
 `yamt-compare`'s tab rules, and answers a column with a case's differences only when both texts equal that case's, else
 none and an `info` log `compare.fixture_miss`; both fixture sources parse through one `parsedFixture` (`ipc/fixture.ts`).
+
+The merge-request page (plan §2 #128–#135) talks to `frontend/src/ipc/MergeRequestSource.ts`, which `CompareSource` and
+`RangeSource` extend:
+
+```ts
+export interface MergeRequestSource {
+  findGitLabProject(): Promise<SourceResult<GitLabProject>>; // decided once at start, offline (#130)
+  listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>; // every page reaches onPage before the promise settles, and none after
+  openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>; // opened = a second yamt shows the changes (#132)
+  openJobPage(page: JobPage): Promise<SourceResult<JobOpened>>; // only a page this window's list handed out (#133)
+}
+```
+
+The brands `MergeRequestIid` and `JobPage` (an `https://` address) live in `ipc/domain.ts`; the shapes and conversions in
+`ipc/mergeRequestDomain.ts` (`toMergeRequestPage`: `createdAt` to ms since 1970, job pages branded; `toOpenReply`:
+`short_id` → `shortId`). `createTauriMergeRequests` (`ipc/tauriMergeRequests.ts`) opens one `Channel<ListMessage>` per
+load; the load ends on the channel's `end` message or on the command's IPC failure, never on the command's own answer;
+an unreadable page fails the load. `createFixtureMergeRequests(log, search)` (`ipc/fixtureMergeRequests.ts` over
+`ipc/fixtureMergeRequestData.ts`): `?mr=<script>` (`list`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`,
+`refused`, `pageFails`) scripts GitLab's answers; without `mr`, or with an unknown script (`mergeRequests.fixture_miss`),
+the project is `none`.
 
 ---
 
@@ -764,7 +866,7 @@ none and an `info` log `compare.fixture_miss`; both fixture sources parse throug
 | pinned language servers                                                                                                                      | `ServerPins` (`ui/serverPins.ts`, created by `createServerSetup`, which owns the root): `pinnedServers` for this root, changed only by `togglePin`; localStorage `yamt.servers.pinned` = { root: [server keys] }                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | a window choice like #58; pins never read `off`, so a server switched on again is pinned again (plan §2 #83)                                                                                                      |
 | choice per file the editor cannot show (its sides); the side taken (choice and deleted-side text files)                                      | `choices` shallowRef in `ui/store.ts`: set by describe, dropped and described again by reset; one `taken` map (`Taken`: by a side, or by the disk) set by `takeSide` and by a disk change that staged a choice file; a deleted-side file "resolved on disk" comes from its `middle` kind; deleted by reset                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | the index decides "resolved"; `taken` only picks the view's line and the middle pane's content (plan §2 #36, #47, #52)                                                                                            |
 | summary counts of the open file                                                                                                              | `shallowRef` in `useMergeController`, fed by `MergeController.onSummaryChange`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | per controller                                                                                                                                                                                                    |
-| what the files' grid cell shows                                                                                                              | `screen` shallowRef in `ui/store.ts` (`Screen` = files \| settings \| serverLog{name}): the gear (`openSettings`), "Back" (`closeSettings`, `closeServerLog`), Show log (`showServerLog`), a file picked in the list (`pick`); never by the app's own `open`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56, #70)                                                                                                              |
+| what the files' grid cell shows                                                                                                              | `screen` shallowRef in `ui/store.ts` (`Screen` = files \| settings \| serverLog{name} \| mergeRequests, the last only in the compare and range windows): the gear (`openSettings`), "Back" (`closeSettings`, `closeServerLog`), Show log (`showServerLog`), a file picked in the list (`pick`); `openSettings`/`closeSettings` are `ui/screen.ts` `settingsScreen(screen)`, the one pair all three stores spread; never by the app's own `open`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | the files stay mounted and only hide, so their text, undo history and scroll stay (plan §2 #56, #70)                                                                                                              |
 | the settings in use (theme, key bindings, the file's path)                                                                                   | `settings` shallowRef in `ui/store.ts`, changed only by the replies of the four settings calls (`ui/settings.ts`), re-read on window focus with the file list; `preferences` is computed from it and handed to every opened file's controller                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | the file is the truth (Rust `yamt-settings`); a failed call keeps the settings in use (plan §2 #57)                                                                                                               |
 | the page's theme attribute (`<html data-theme>`) and `color-scheme`                                                                          | set before the first frame by the shell's start script; `main.ts` reads it as the start theme through `themeOf` (an unknown value → `dark`); afterwards written only by `useThemeAttribute()` (`ui/settingsStore.ts`, called by both roots) from the registered store's `settings.theme`, with `documentElement.style.colorScheme` from `themeKind` (plan §2 #102)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | one palette per theme: `style.css` `@theme` (yamt Dark) and `themes/<name>.css` (plan §2 #57, #102)                                                                                                               |
 | each pane's dark flag and key bindings                                                                                                       | CodeMirror compartments in each pane, reconfigured by `MergeController.setPreferences`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | no history; the same preferences reach every opened file, shown or hidden (plan §2 #57)                                                                                                                           |
@@ -783,17 +885,28 @@ none and an `info` log `compare.fixture_miss`; both fixture sources parse throug
 
 The compare window (`yamt --diff`, plan §2 #93–#97) has its own rows:
 
-| state                                                                           | owner                                                                                                                                                                                                     | why                                                  |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| each column's text while its tab is mounted                                     | that column's CodeMirror `EditorState` (`CompareController`); Vue never holds it: a column's text passes once, from `settled`/`settleNow` into `saveColumn` → `setColumn`                                 | as the merge window's documents                      |
-| the stored copy of every tab's texts, the tab list, names, languages, shown tab | Rust `yamt-compare` `TabStore` (`<data_dir>/yamt/compare/`, `CompareState = Mutex<TabStore>`); the window's `tabs`/`shown` in `ui/compareStore.ts` are written only from its replies                      | survives a restart, a crash and a kill (plan §2 #97) |
-| each column's version, the columns edited since their last send                 | `Settle` (`editor/internal/compareSettle.ts`), from the versions `loadTab` returned; Rust stores a column only for a higher version, `showComparison` applies a reply only when both versions are current | a late reply never tints changed text (plan §2 #95)  |
-| the differences shown                                                           | each column's `differenceField` (`editor/internal/compareFields.ts`): set by a reply, mapped through edits until the next                                                                                 | built once per reply, never per key (plan §2 #96)    |
-| Auto's finding per tab                                                          | the controller (`compareLanguage.ts`), reported through `detected` to `compareStore.detected` (names only)                                                                                                | the toolbar's "Auto · JSON"                          |
-| the compare window's notices, problem, question, screen, tab panel shown        | `ui/compareStore.ts` + `ui/compareNotices.ts` (notices), `fileListKey` the one writer of `fileListShown`; settings through the seam `ui/settingsStore.ts`, which the merge store registers too            | one store per root (plan §2 #94)                     |
+| state                                                                           | owner                                                                                                                                                                                                                                                       | why                                                  |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| each column's text while its tab is mounted                                     | that column's CodeMirror `EditorState` (`CompareController`); Vue never holds it: a column's text passes once, from `settled`/`settleNow` into `saveColumn` → `setColumn`                                                                                   | as the merge window's documents                      |
+| the stored copy of every tab's texts, the tab list, names, languages, shown tab | Rust `yamt-compare` `TabStore` (`<data_dir>/yamt/compare/`, `CompareState = Mutex<TabStore>`); the window's `tabs`/`shown` in `ui/compareStore.ts` are written only from its replies                                                                        | survives a restart, a crash and a kill (plan §2 #97) |
+| each column's version, the columns edited since their last send                 | `Settle` (`editor/internal/compareSettle.ts`), from the versions `loadTab` returned; Rust stores a column only for a higher version, `showComparison` applies a reply only when both versions are current                                                   | a late reply never tints changed text (plan §2 #95)  |
+| the differences shown                                                           | each column's `differenceField` (`editor/internal/compareFields.ts`): set by a reply, mapped through edits until the next                                                                                                                                   | built once per reply, never per key (plan §2 #96)    |
+| Auto's finding per tab                                                          | the controller (`compareLanguage.ts`), reported through `detected` to `compareStore.detected` (names only)                                                                                                                                                  | the toolbar's "Auto · JSON"                          |
+| the compare window's notices, problem, question, screen, tab panel shown        | `ui/compareStore.ts` + `ui/compareNotices.ts` (notices), `fileListKey` the one writer of `fileListShown`; settings through the seam `ui/settingsStore.ts`, which the merge store registers too; the screen also by the merge-request slice's `show`/`close` | one store per root (plan §2 #94)                     |
+
+The merge-request page (plan §2 #128–#135; the compare and range windows) has its own rows:
+
+| state                                                                           | owner                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | why                                                                               |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| the window's GitLab project, the pairs' folder, the job pages a list handed out | Rust `MergeRequestState` (`src-tauri/src/merge_requests.rs`), managed once per compare or range window: `gitlab` set at start only (`gitlab_repository`, offline); `job_pages: Mutex<BTreeSet<JobPage>>` written only by `forward_page`, before each page is sent; read only by `open_job_page`                                                                                                                                                                                                                                                                                                                                                                                                  | the window can open only an address its own list sent (plan §2 #133)              |
+| the project, the rows, `me`, the load, the openings, the job problem            | one `MergeRequests` slice per window (`ui/mergeRequests.ts` `createMergeRequests`), built by `compareStore.ts` / `rangeStore.ts` through `ui/mergeRequestsStore.ts` `windowMergeRequests` and read only through `useMergeRequests()`: `project` written only by `findProject` (at start-up); `rows`/`me` only by a load's pages (a refresh buffers them and swaps at its end); `listing` (`ListLoad` = notLoaded \| loading{first} \| done{end, at}) only by `load` (first opening, an opening 30 s after the last load, Refresh); `openings` per iid only by `openChanges`; `jobProblem` only by `openJob` and `dismissJobProblem`; `screen` `mergeRequests` only by `show`, `files` by `close` | one list and one filter state for every mounted header button and the page (#128) |
+| the remembered filters                                                          | `ui/mergeRequestFilters.ts` `createRememberedFilters(repository)`, held by the slice: `filters` read per repository, written only by its `set` (the slice's `toggle`, `setDraft`, `clear`, `clearAll`); localStorage `yamt.mergeRequests.filters` = `{ [repository]: StoredFilters }`, an entry back at no filter removed, other repositories' kept                                                                                                                                                                                                                                                                                                                                              | survives a restart per repository; two windows: the last write wins (#134)        |
+| what the shown list is (filtered rows, choices, summary)                        | `computed` in the slice from `rows`, `filters` and `me` through `frontend/src/mergeRequests/` (`filtered`, `personChoices`/`labelChoices`, `summaryText`); never stored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | derived, nothing to keep                                                          |
 
 The window's storage is read and written in one way, `storedValue(key, fallback, { read, write }, warnEvent)`
-(`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event.
+(`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event. A
+per-key record (pins per repository root, merge-request filters per repository) goes through `storedRecord(key,
+warnEvent)` on top of it: `entryAt(at)`, `set(at, entry)`, `remove(at)`, an unreadable record read as empty.
 
 Rule: **Vue state never holds an `EditorView`, a position, or document text.** The text to write passes through
 once, from `snapshot().fileText()` or `asShown()` to `source.saveFile`/`finishFile` (`ui/saving.ts`), and the written
@@ -1219,6 +1332,28 @@ section (the settings seam `ui/settingsStore.ts`, which both stores register); `
 column first. `ui/useCompareController.ts` is the compare root's only `editor/` importer (settle → `saveColumn` →
 `showComparison`, Format failures → `reportFormat`, `track`).
 
+**The merge-request page** (plan §2 #128–#135; the compare and range windows; fence PM10 in `scripts/windowFence.ts`:
+`ui/MergeRequest*`, `ui/mergeRequest*`, `ui/CiStatus*` import no window root and no `lsp/`): `compareStore.ts` and
+`rangeStore.ts` each build one slice through `ui/mergeRequestsStore.ts` `windowMergeRequests(source, { screen, problem
+})` (`createMergeRequests` + `registerMergeRequests`; failures reach the window's problem bar as `{ action:
+"mergeRequests", step: "find" | "list" | "open" | "job" }`) and run `findProject()` beside `loadSettings()` at
+start-up; every page file reads it through `useMergeRequests()`, as Settings reads `useSettingsStore()`.
+`MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before
+the gear in `CompareView`, `RangeView` and the range window's empty-range header (kept mounted with `v-show`, so the
+keyboard can return to it). `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`,
+where each root mounts `SettingsView`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it and
+return the keyboard to the element focused before; three `MergeRequestFilter.vue` checklists (`useDropdownMenu`,
+`menuitemcheckbox` items keep it open, a narrowing box above `NARROW_FROM` values, × clears) and the Draft
+`ChoiceButtons`; the list scrolls inside, one `MergeRequestRow.vue` per shown row with its open-changes sentence;
+`CiStatusBox.vue` opens its failed-jobs box on pointer or focus (`position: fixed`, not teleported, so Tab reaches the
+jobs), held while pointer or focus is in icon or box, closed by leaving both, by Escape or by any scroll outside it. The
+pure core is `frontend/src/mergeRequests/` (`index.ts` the only surface; framework-free and self-contained like
+`search/`): `filters` (`passes`, `filtered`, the edits, `filterLabel`), `choices` (`personChoices`, `labelChoices`,
+`narrowed`), `order` (`merged`: one row per iid, newest first), `summary`, `relativeTime` (`createdAgo`), `ciBox`, `stored`
+(`filtersFrom`/`storedFilters`, the remembered form). Words: `ui/mergeRequestsText.ts` (the page's) and `ui/glab.ts`
+(`GLAB_MISSING_TEXT`, `glabNotLoggedInText`, `glabFailedText` and `RECHECK_PAUSE_MS`, shared with the range window's
+GitLab check).
+
 **Pasting on Linux** (plan §2 #99; both windows): `main.ts` calls `takeLinuxPastes(window, readClipboard)`
 (`ui/linuxPaste.ts`) when the Tauri source runs and `isLinux(navigator.platform)` (`ipc/keys.ts`, beside `isMac`; also
 behind `showsAntialiasing`). A capture-phase `paste` listener cancels and stops every trusted paste without touching
@@ -1310,16 +1445,18 @@ IPC; Rust does not know languages. Unknown → no highlighting.
   (libraries `forbid`; the one exception is the NVIDIA start-up guard, plan §2 #43, checked by `arch-check`).
 - `cargo nextest`, `insta` (goldens), `proptest` (invariants), `cargo-deny`, `tracing` for logs.
 - deps: `imara-diff`, `thiserror`, `serde`, `specta` + `tauri-specta`, `tauri 2`, `tracing`;
-  `serde_json` at run time only in `cli`, `settings` (plan §2 #57) and `compare` (plan §2 #97). Crates: merge-core,
-  gitio, session, cli, conflict-repo (dev-only), settings, lsp-host, compare, src-tauri.
+  `serde_json` at run time only in `cli`, `settings` (plan §2 #57), `compare` (plan §2 #97), `review` (#117) and
+  `merge-requests` (glab's GraphQL answers, #131). Crates: merge-core, gitio, session, cli, conflict-repo (dev-only),
+  settings, lsp-host, compare, range, review, pipe, agent, merge-requests, src-tauri.
 - **Readable-by-a-Rust-beginner rules** (the product owner reads this code; cleverness is a
   defect): owned types at crate boundaries (`String`, `Vec<T>`, `PathBuf`); no lifetimes in
   public signatures beyond `&str`/`&[T]`/`&Path` parameters; a generic needs two concrete
   uses, a trait needs two implementations, else write the concrete thing; derive macros only
   (`serde`, `thiserror`, `specta`), no `macro_rules!`; iterator chains of at most three
-  adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s three `Mutex`es
+  adapters, otherwise a `for` loop; no `Rc`/`RefCell`/`Arc` outside `src-tauri`'s `Mutex`es
   (`Merge` = the held `MergeSession` or none after an abort, #74; the language-server `Host`, plan §2 #70; the compare
-  window's `TabStore`, #97; never held together) and `yamt-compare`'s `Arc<str>` columns (a reply's diff runs outside the
+  window's `TabStore`, #97; the range window's `ThreadStore` and send guard, #117; `AiState`, #110; the merge-request
+  job pages a list handed out, #133; never held together) and `yamt-compare`'s `Arc<str>` columns (a reply's diff runs outside the
   store's lock without a copy, plan §2 #97); no async (git subprocesses and
   diffs are synchronous and fast; the language-server host uses std threads and channels).
   Per milestone the orchestrator writes `docs/walkthroughs/M<n>.md`: what was built and the

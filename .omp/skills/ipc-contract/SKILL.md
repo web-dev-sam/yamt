@@ -31,6 +31,7 @@ from them and committed.
   `EmptyMessage`, `MessagePending { message }`, `SendRunning`; #108–#110, the AI: `AiOff`, `RemoveFailed { folder,
   message }`); never a string. The frontend `switch`es on
   `kind` exhaustively. A disk change is a reply (`WriteReply::ChangedOnDisk`, `Listing::Files.disk_changes`), never an error.
+  GitLab, git and launch problems of the merge-request page are replies too (`ListEnd`, `OpenReply`, `JobOpened`, plan §2 #129).
 - [IPC5] Commands are thin (≤ 15 lines): lock the `Mutex<Merge>` (`src-tauri/src/merge.rs`), call one `session`
   method (or one `merge.rs` function: `list_stop`, and the async `continue_operation`/`abort_operation` that run git
   on its worker), map the error — or, for settings, compute `Places` and call one `yamt_settings`
@@ -87,6 +88,11 @@ send_queue(progress: Channel<SendProgress>) -> SendReply   async: Sent { sent, r
 # the AI (`--ai` only, plan §2 #108–#115, crate yamt-agent; Mutex<AiState>, AiState::workspace() the one AiOff mapping)
 prepare_checkout() -> CheckoutReply; start_agent(command, events: Channel<HostEvent>) -> AgentStartReply (async); send_to_agent(run, message); stop_agent(run)
 checkout_changes() -> CheckoutLook; discard_checkout() (async; RemoveFailed); diff_texts(old, next) -> Difference[] (merge_core::compare on a worker, #114)
+# the merge-request page (compare and range windows, plan §2 #128–#135, crate yamt-merge-requests; MergeRequestState: the GitLab project found at start, the pairs' folder, Mutex<BTreeSet<JobPage>>; registered for every window, managed only for those two)
+find_gitlab_project()             -> GitLabProject   none | found { repository }: decided once at start, offline, by a remote's host (#130); repository = the absolute common git dir, the filters' key
+list_merge_requests(messages: Channel<ListMessage>) -> ()   async: ListMessage = Page { page: MergeRequestPage { me, rows } } | End { end: ListEnd } (tagged `kind`, camelCase): every page, then exactly one End, on the channel; a load ends on its End (or the command's IpcError), never on the command's answer (tauri delivers a message of 8 KiB or more by a later fetch); ListEnd = loaded | cut { limit: 500 } | glabMissing | notLoggedIn { detail } | failed { message } (pages sent stay); each page's job pages are recorded before it is sent (#131)
+open_merge_request(iid: MergeRequestIid) -> OpenReply   async: opened (a second yamt `--diff=<base>..<head> --repo <root>` started) | alreadyOpen | preparing | notOpen | noRemote { project } | fetchFailed { message } | missingCommit { short_id } | startFailed { message } | glabMissing | notLoggedIn { detail } | failed { message } (#132)
+open_job_page(page: JobPage)      -> JobOpened   opened | notOffered (a page no list of this window sent) | failed { message }: the system opener (xdg-open / open / rundll32), never a page the window built (#133)
 ```
 
 Plan §2 #37/#41. No `quit_if_done`: after the last file the app stays open, and closing the window
@@ -101,11 +107,15 @@ authority. `SideContent.bytes` is `u64` exported as `number` (`#[specta(type = u
   the fixture source (`ipc/fixture.ts`, valibot over `fixtures/{golden,showcase}/*.json`, the only
   runtime parse, decision 19). `import.meta.env.VITE_CHUNK_SOURCE === "tauri"` (set by the app's
   dev/build commands) is read only in `main.ts` (source) and `ipc/index.ts` (log forward). The compare window has its
-  own interface, `CompareSource` (`ipc/CompareSource.ts`, extends `SettingsSource`): `createTauriCompareSource`
+  own interface, `CompareSource` (`ipc/CompareSource.ts`, extends `SettingsSource, MergeRequestSource`): `createTauriCompareSource`
   (`ipc/tauriCompare.ts`) and `createFixtureCompareSource` (`ipc/fixtureCompare.ts`, `?diff=<case>`). The range window's
-  is `RangeSource` (`ipc/RangeSource.ts`, extends `SettingsSource, ReviewSource`: `openRange`, `loadRangeFile`;
+  is `RangeSource` (`ipc/RangeSource.ts`, extends `SettingsSource, ReviewSource, MergeRequestSource`: `openRange`, `loadRangeFile`;
   `ReviewSource.ts` the threads and GitLab with `reviewDomain.ts`): `createTauriRangeSource` / `createFixtureRangeSource`
-  (`?range=<case>`, `?threads=seeded`, `?gitlab=<script>`). `AgentSource` (`ipc/AgentSource.ts` + `agentDomain.ts`, the
+  (`?range=<case>`, `?threads=seeded`, `?gitlab=<script>`). `MergeRequestSource` (`ipc/MergeRequestSource.ts`:
+  `findGitLabProject`, `listMergeRequests(onPage)` — every page reaches `onPage` before the promise settles, none after —,
+  `openMergeRequest`, `openJobPage`; shapes in `mergeRequestDomain.ts`, brands `MergeRequestIid`/`JobPage` in `domain.ts`)
+  is spread into both: `createTauriMergeRequests` (`ipc/tauriMergeRequests.ts`, one `Channel<ListMessage>` per load) and
+  `createFixtureMergeRequests` (`ipc/fixtureMergeRequests.ts`, `?mr=<script>`). `AgentSource` (`ipc/AgentSource.ts` + `agentDomain.ts`, the
   seven agent commands) is built only in `main.ts` with AI on (`createTauriAgentSource` / `createFixtureAgentSource`,
   `?ai[=<case>]`). Every Tauri source returns through `tauri.ts` `converted`; every brand through `validate.ts`
   `branded`.

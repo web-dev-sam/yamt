@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `5488d58` (the compare window, then `yamt --raw`, plan §2 #93–#98; `map-check` ok); its flag is `yamt --diff` since #101. Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `ab820bb` (the merge-request page in the compare and range windows, plan §2 #128–#135; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
@@ -33,19 +33,22 @@ updates the matching row; the docs keeper does it once per feature (`skill://orc
 merge-core ◄── session ◄── cli   (cli also uses merge-core directly)
 gitio      ◄──┘        ◄── src-tauri ─generates─► ipc/bindings.ts
 merge-core ◄── compare ◄── src-tauri   (settings, lsp-host ◄── src-tauri too)
+gitio, range ◄── merge-requests ◄── src-tauri   (range, review, agent ◄── src-tauri too; §2 of architecture)
 ipc ◄── editor ◄── ui ◄── main.ts      (ui reaches editor only through useMergeController and, for the compare root, useCompareController; ui also imports ipc: types, logger, source)
 ipc ◄── lsp ◄── editor, ui, main.ts   (lsp imports only ipc; editor and ui reach it only through lsp/index.ts)
 connectors ◄── editor                 (model/ is empty and unused)
 ```
 
-- [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`; `src-tauri` (yamt-app) depends on `session`, `settings`, `lsp-host` and `compare` only, never directly on `gitio`/`merge-core`; `compare` depends on `merge-core` only among `yamt-*`, never on tauri. Detector: `just arch-check` (`cargo tree --target all --all-features`; yamt-app's and each library crate's direct deps; std::fs/process grep), clippy `disallowed_*`.
+- [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`; `src-tauri` (yamt-app) depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent` and `merge-requests` only, never directly on `gitio`/`merge-core`; `compare` depends on `merge-core` only among `yamt-*`, never on tauri; `merge-requests` depends on `range`, `gitio` and `merge-core` only among `yamt-*`, never on tauri. Detector: `just arch-check` (`cargo tree --target all --all-features`; yamt-app's and each library crate's direct deps; std::fs/process grep), clippy `disallowed_*`.
 - [PM2] `ui/**` never imports `@codemirror/*`, `@tauri-apps/*` (only `ipc/` talks to the app), `editor/internal/**`, `model/**` (at any depth); `lsp/**` never imports `editor/`, `ui/`, `model/`, `connectors/`. Detector: oxlint overrides (`/**` globs: oxlint 1.87 does not match nested specifiers with `/*`) + `frontend/scripts/fences.test.ts`.
-- [PM3] `editor/**`, `model/**`, `connectors/**`, `lsp/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`, or `~icons/*` without `?raw`. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (`~icons/*`: `fences.test.ts` only).
+- [PM3] `editor/**`, `model/**`, `connectors/**`, `lsp/**`, `jsonrpc/**`, `agent/**`, `search/**`, `mergeRequests/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`, or `~icons/*` without `?raw`; `jsonrpc/`, `search/` and `mergeRequests/` import no other `src/` module. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (`~icons/*` and the self-contained rule: `fences.ts` only).
 - [PM4] `ipc/bindings.ts` is generated; never hand-edited. Detector: hook `generated.ts` + `hooks.test.ts`, oxlint/oxfmt `ignorePatterns`, `just bindings-check` (diffs a fresh export in `target/`).
 - [PM5] No module imports a sibling's `internal/` (bare `**/internal` included); no import cycles. Detector: oxlint overrides + `frontend/scripts/fences.test.ts`; `import/no-cycle` everywhere.
-- [PM6] Every non-test source file under `frontend/src/` (except `ipc/bindings.ts`), `frontend/scripts/`, `scripts/`, `crates/merge-core/src/` is named in this map (`tree.md`), and every IPC command / ChunkSource and CompareSource method is named in architecture (and ipc-contract). Detector: `just map-check`.
-- [PM7] The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94). Detector: `frontend/scripts/fences.ts` + `fences.test.ts`.
+- [PM6] Every non-test source file under `frontend/src/` (except `ipc/bindings.ts`), `frontend/scripts/`, `scripts/`, `crates/merge-core/src/` is named in this map (`tree.md`), and every IPC command / ChunkSource, CompareSource, RangeSource, ReviewSource and MergeRequestSource method is named in architecture (and ipc-contract). Detector: `just map-check`.
+- [PM7] The compare window's root (`ui/Compare*.vue`, `ui/compare*.ts`, `ui/useCompare*.ts`: every compare-only file carries the prefix) never imports `ui/store.ts`, `ui/App.vue` or `lsp/` (plan §2 #94). Detector: `frontend/scripts/windowFence.ts` (called by `fences.ts`) + `fences.test.ts`.
 - [PM8] Only `ui/linuxPaste.ts` reads the clipboard through WebKit: no other file reads a `clipboardData` or calls `navigator.clipboard.read`/`readText` (plan §2 #99: WebKitGTK 2.54 crashes reading an unreadable clipboard; writes stay free; its node test, which reads its fakes' data, is exempt too). Detector: `frontend/scripts/clipboardFence.ts` (called by `fences.ts`) + its failing-path test.
+- [PM9] The range root (`ui/Range*.vue`, `ui/range*.ts`, `ui/useRange*.ts`) and the AI views never import the merge or compare roots or `lsp/`; the AI views are the range window's only (plan §2 #103, #108). Detector: `frontend/scripts/windowFence.ts` + `fences.test.ts`.
+- [PM10] The merge-request page's shared files (`ui/MergeRequest*`, `ui/mergeRequest*`, `ui/CiStatus*`) never import a window root (`store.ts`, `App.vue`, `compareStore.ts`, `CompareApp.vue`, `rangeStore.ts`, `RangeApp.vue`) or `lsp/`; they reach their window's slice through `useMergeRequests()` (plan §2 #128). Detector: `frontend/scripts/windowFence.ts` + `fences.test.ts`.
 
 ## Where does X go?
 
