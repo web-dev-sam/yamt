@@ -1,8 +1,9 @@
 # Request — the GitLab project's open merge requests in the diff windows: an overview, quick filters, open an MR's changes
 
 Owner request 2026-10-30 (#1765), planned in session 37 on branch `feat/merge-requests` off main `d97a270` (the 0.7.x
-line). Status: intent captured; the three product questions answered (#1766–#1768, table below); details decided by
-the orchestrator as owner (OR13), marked "(orchestrator)", the owner may veto. A design may refine a detail it names,
+line). Status: intent captured; four product questions answered (#1766–#1769, table below); design option A by
+`MrOverviewDesign` chosen (plan §2 #128–#135, notes `.omp/run/notes/MrOverviewDesign.md`); details decided by the
+orchestrator as owner (OR13), marked "(orchestrator)", the owner may veto. A design may refine a detail it names,
 never reopen a rule.
 Facts with `path:line` at `d97a270`: `.omp/run/notes/PlanScoutMrGitlab.md`, `.omp/run/notes/PlanScoutMrChrome.md`.
 
@@ -27,11 +28,12 @@ version, so comments posted from that window line up with the MR (plan §2 #119)
 
 ## Questions (asked and answered 2026-10-30)
 
-| question                                    | options                                                                                                                                          | answer                                |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
-| Where does an MR's "open changes" go?       | **a new window; the current one stays as it is (recommended)** · the range window you are in switches to it (the compare window opens a new one) | **a new window** (#1766)              |
-| How does the list open?                     | **a drop-down under the button, over the code (recommended)** · a full page in place of the code, like Settings, with Back                       | **a full page like Settings** (#1767) |
-| Are the filters remembered across restarts? | **yes, per repository (recommended)** · only while the window is open                                                                            | **yes, per repository** (#1768)       |
+| question                                                | options                                                                                                                                                                 | answer                                |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| Where does an MR's "open changes" go?                   | **a new window; the current one stays as it is (recommended)** · the range window you are in switches to it (the compare window opens a new one)                        | **a new window** (#1766)              |
+| How does the list open?                                 | **a drop-down under the button, over the code (recommended)** · a full page in place of the code, like Settings, with Back                                              | **a full page like Settings** (#1767) |
+| Are the filters remembered across restarts?             | **yes, per repository (recommended)** · only while the window is open                                                                                                   | **yes, per repository** (#1768)       |
+| Which servers count as GitLab? (asked after the design) | **recognizable names only: gitlab.com, a name part starting with "gitlab", or `GITLAB_HOST` (recommended)** · any server glab is set up for (reads glab's own settings) | **recognizable names only** (#1769)   |
 
 ## Rules
 
@@ -39,8 +41,9 @@ version, so comments posted from that window line up with the MR (plan §2 #119)
    "Merge requests") directly left of the gear, in every header that shows the gear (also the range window's
    empty-range header). Shown only when the window's repository is a GitLab project: the range window's repository;
    for the compare window, the git repository holding the folder yamt was started in (under an AppImage, the start
-   folder it records). No repository or no GitLab remote: no button, nothing else changes. Showing the button never
-   waits on the network (orchestrator).
+   folder it records). No repository or no GitLab remote: no button, nothing else changes. A GitLab remote is one
+   whose server is gitlab.com, has a name part starting with "gitlab", or is the one named in `GITLAB_HOST` (owner,
+   #1769). Showing the button never waits on the network (orchestrator).
 2. **The page** (owner, question 2: "Full page like Settings"). A click on the button shows the overview in place of
    the window's content, as Settings does, at the window's full width: Back at the top in Settings' place and words,
    the Refresh button and the filters under it, the list below, scrolling inside. Back or Escape (as the server log
