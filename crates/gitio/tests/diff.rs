@@ -10,6 +10,7 @@ use yamt_gitio::{Changed, ChangedFile, Error, Numstat, Oid, Repo, TreeSide};
 
 const REGULAR: u32 = 0o100_644;
 const EXECUTABLE: u32 = 0o100_755;
+#[cfg(unix)]
 const LINK: u32 = 0o120_000;
 const GITLINK: u32 = 0o160_000;
 const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
@@ -314,6 +315,9 @@ fn listing_under_the_users_diff_config() {
     assert_eq!(files, expected);
 }
 
+// git for Windows refuses control characters in a path (core.protectNTFS).
+const PATHS_MAY_HOLD_CONTROL_CHARACTERS: bool = !cfg!(windows);
+
 #[test]
 fn paths_with_spaces_newlines_and_non_utf8_bytes_round_trip() {
     let text: &[u8] = b"same\ntext\n";
@@ -321,43 +325,49 @@ fn paths_with_spaces_newlines_and_non_utf8_bytes_round_trip() {
     let root = dir.path();
     let oid = blob(root, text);
     let added = blob(root, b"new\n");
+    let renamed = if PATHS_MAY_HOLD_CONTROL_CHARACTERS {
+        "renamed\tname.txt"
+    } else {
+        "renamed name.txt"
+    };
     git_ok(root, &["update-index", "--force-remove", "old name.txt"]).unwrap();
-    stage_blob(root, "100644", &oid, "renamed\tname.txt");
-    stage_blob(root, "100644", &added, "new\nline.txt");
-    #[cfg(unix)]
-    let non_utf8 = stage_non_utf8_name(root, b"new\n");
+    stage_blob(root, "100644", &oid, renamed);
+    stage_blob(root, "100644", &added, "added name.txt");
+    let (old, new) = (
+        side("old name.txt", REGULAR, oid.clone()),
+        side(renamed, REGULAR, oid),
+    );
+    let mut expected = vec![
+        counted(Changed::Renamed { old, new }, 0, 0),
+        added_file(PathBuf::from("added name.txt"), added.clone()),
+    ];
+    if PATHS_MAY_HOLD_CONTROL_CHARACTERS {
+        stage_blob(root, "100644", &added, "new\nline.txt");
+        expected.push(added_file(PathBuf::from("new\nline.txt"), added.clone()));
+    }
+    // APFS refuses a file name that is not UTF-8.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    expected.push(added_file(stage_non_utf8_name(root, b"new\n"), added));
     commit(root, "odd names");
 
     let files = listed(root);
 
-    let new = side("new\nline.txt", REGULAR, added.clone());
-    let (old, renamed) = (
-        side("old name.txt", REGULAR, oid.clone()),
-        side("renamed\tname.txt", REGULAR, oid),
-    );
-    let mut expected = vec![
-        counted(Changed::Added { new }, 1, 0),
-        counted(Changed::Renamed { old, new: renamed }, 0, 0),
-    ];
-    #[cfg(unix)]
-    expected.push(counted(
-        Changed::Added {
-            new: TreeSide {
-                path: non_utf8,
-                mode: REGULAR,
-                oid: added,
-            },
-        },
-        1,
-        0,
-    ));
     assert_eq!(files.len(), expected.len(), "{files:?}");
     for file in &expected {
         assert!(files.contains(file), "{file:?} not in {files:?}");
     }
 }
 
-#[cfg(unix)]
+fn added_file(path: PathBuf, oid: Oid) -> ChangedFile {
+    let new = TreeSide {
+        path,
+        mode: REGULAR,
+        oid,
+    };
+    counted(Changed::Added { new }, 1, 0)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn stage_non_utf8_name(root: &Path, content: &[u8]) -> PathBuf {
     use std::os::unix::ffi::OsStrExt;
     let name = PathBuf::from(std::ffi::OsStr::from_bytes(b"bytes \xff\xfe.txt"));

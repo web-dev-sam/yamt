@@ -201,8 +201,8 @@ fn a_missing_program_lists_path_and_the_home_entries() {
     let path_variable = env::var_os("PATH").unwrap_or_default();
     let home = env::home_dir().unwrap();
     let mut searched: Vec<PathBuf> = env::split_paths(&path_variable).collect();
-    searched.push(home.join("agents/bin"));
-    searched.push(home.join(".local/bin"));
+    searched.push(home.join("agents").join("bin"));
+    searched.push(home.join(".local").join("bin"));
     assert_eq!(
         reply,
         AgentStartReply::NotFound {
