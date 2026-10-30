@@ -12,10 +12,11 @@ sourced facts, risks). Read it in full; a design may refine a detail it names, n
 `path:line` at `d97a270`: `.omp/run/notes/PlanScoutMrGitlab.md`, `.omp/run/notes/PlanScoutMrChrome.md` (given; re-check
 only `[INFERENCE]` lines you rely on).
 
-**Three product answers are pending** (the request's question table). Design the recommended answer of each: a new
-window for an MR's changes, a drop-down panel, filters remembered per repository. The orchestrator messages you the
-answers when they arrive (`agent://` message); if one differs, design that answer instead and say what changed. Do the
-parts no answer touches first: detection, the query, paging, fetch, starting a window, the opener, the pure core.
+**The three product answers** (owner 2026-10-30, #1766–#1768, also messaged to you): an MR's changes open in a **new
+window**; the list is a **full page like Settings** (a screen beside `settings`/`serverLog` in each window's store,
+Back in Settings' place, Escape closes as on the server log page) — not a drop-down; filters are **remembered per
+repository** across restarts. Say what the page form decides: the screen kind, focus return, where Back, Refresh and
+the filters sit.
 
 ## Fixed constraints
 

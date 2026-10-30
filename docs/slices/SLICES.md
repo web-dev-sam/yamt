@@ -1205,19 +1205,20 @@ windows of a GitLab repository opens an overview of the project's open merge req
 title, `!iid`, "created x ago", open discussions, approvals (single numbers) and the CI status, whose hover lists only
 the failed jobs, each opening its log page in the system browser; a button opens the MR's changes; filters on
 assignee, reviewer, label and draft, set with one click each. Intent, rules 1–9, acceptance, non-goals, reopened rows
-(#94, #112/#115/#118), sourced facts and risks: `docs/slices/request-merge-requests.md`. Three product questions asked
-(where an MR's changes open, drop-down or full page, filters remembered); the design started beside them (OR13) on the
-recommended answers. Scout facts at `d97a270`: `.omp/run/notes/PlanScoutMr{Gitlab,Chrome}.md`.
+(#94, #112/#115/#118), sourced facts and risks: `docs/slices/request-merge-requests.md`. The three product questions
+answered (#1766–#1768): a new window for an MR's changes, the list as a full page like Settings (not the recommended
+drop-down), filters remembered per repository. The design started beside the questions (OR13); the answers were
+messaged to it. Scout facts at `d97a270`: `.omp/run/notes/PlanScoutMr{Gitlab,Chrome}.md`.
 
-| row | slice                                                                                                                                                                                                | owner     | status  | evidence |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
-| 0   | the three product questions (request file, "Questions")                                                                                                                                              | human     | asked   |          |
-| 1   | design: offline detection, the GraphQL query and its paging, crate, fetch and a second window, the opener, one panel per window, the pure core (`briefs/mr-overview-design.md`) (`MrOverviewDesign`) | designer  | running |          |
-| 2   | Rust: detection, the MR list and "Me" through glab, commands for both windows, fake-glab GraphQL scenarios                                                                                           | rust-impl | todo    |          |
-| 3   | Rust: open an MR's changes (fetch, start a range window), a failed job's page in the system browser                                                                                                  | rust-impl | todo    |          |
-| 4   | window core: filters, order, summary, relative time, CI box contents, remembered filters (pure)                                                                                                      | web-impl  | todo    |          |
-| 5   | window: the button beside the gear in both windows, the panel, rows, checklists, CI box, sources, both stores                                                                                        | web-impl  | todo    |          |
-| 6   | final run: `just check`, WebKit both windows, real app with the fake glab, dark and light                                                                                                            | verifier  | todo    |          |
+| row | slice                                                                                                                                                                                               | owner     | status  | evidence                                                                         |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------------------------------------------------------------------------------- |
+| 0   | the three product questions (request file, "Questions")                                                                                                                                             | human     | done    | #1766 new window; #1767 full page like Settings; #1768 remembered per repository |
+| 1   | design: offline detection, the GraphQL query and its paging, crate, fetch and a second window, the opener, one page per window, the pure core (`briefs/mr-overview-design.md`) (`MrOverviewDesign`) | designer  | running |                                                                                  |
+| 2   | Rust: detection, the MR list and "Me" through glab, commands for both windows, fake-glab GraphQL scenarios                                                                                          | rust-impl | todo    |                                                                                  |
+| 3   | Rust: open an MR's changes (fetch, start a range window), a failed job's page in the system browser                                                                                                 | rust-impl | todo    |                                                                                  |
+| 4   | window core: filters, order, summary, relative time, CI box contents, remembered filters (pure)                                                                                                     | web-impl  | todo    |                                                                                  |
+| 5   | window: the button beside the gear in both windows, the panel, rows, checklists, CI box, sources, both stores                                                                                       | web-impl  | todo    |                                                                                  |
+| 6   | final run: `just check`, WebKit both windows, real app with the fake glab, dark and light                                                                                                           | verifier  | todo    |                                                                                  |
 
 Order: 1, then 2 ∥ 4, then 3 ∥ 5 (the slice graph in the request; re-cut from the chosen design).
 
