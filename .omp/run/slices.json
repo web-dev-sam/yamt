@@ -22,12 +22,9 @@
       "frontend/src/ui/searchText.test.ts"
     ]
   },
-  "MrRustTidy": {
+  "MrRustTidyR1": {
     "owned": [
-      "src-tauri/AGENTS.md",
-      "crates/gitio/AGENTS.md",
-      "src-tauri/src/lib.rs",
-      "src-tauri/src/args.rs"
+      "src-tauri/AGENTS.md"
     ]
   }
 }

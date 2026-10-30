@@ -464,7 +464,7 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
 - **The compare window** (`yamt --diff`, plan §2 #93/#94; `args.rs` `Invocation::Compare`, `window.rs` `run_compare(folder)`,
   `compare.rs`): never opens a `MergeSession`, never manages `Mutex<Merge>` or the language-server host. It runs git and
   glab only for the merge-request page (#94 as amended, #130): the remotes once at start, in its start folder
-  (`lib.rs` `COMPARE_FOLDER` through `from_start_dir`, `OWD` under an AppImage), glab and the fetch on use.
+  (`args.rs` `START_FOLDER` through `lib.rs` `from_start_dir`, `OWD` under an AppImage), glab and the fetch on use.
   `compare::manage_store_in(app, data_dir)` opens `yamt_compare::TabStore` in `<data_dir>/yamt/compare/` and manages it
   as `CompareState = Mutex<TabStore>` (the third `Mutex`, never held with another, plan §2 #97); a failure ends before
   any window with exit 2 and one line (`another yamt --diff window is open (<folder>)`, the crate's `Broken`/`NewerFormat`
