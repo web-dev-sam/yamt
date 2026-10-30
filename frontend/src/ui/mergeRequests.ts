@@ -3,13 +3,13 @@ import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } fro
 
 import type {
   GitLabProject,
-  JobPage,
   ListEnd,
   MergeRequestIid,
   MergeRequestPage,
   MergeRequestRow,
   MergeRequestSource,
   OpenReply,
+  WebPage,
 } from "../ipc";
 import {
   cleared,
@@ -30,8 +30,8 @@ import {
 } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { createRememberedFilters } from "./mergeRequestFilters";
-import { jobOpenedText, listFailureText } from "./mergeRequestsText";
-import { attempt, type Problem } from "./problem";
+import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+import { attempt, type MergeRequestStep, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
 export type ListLoad =
@@ -61,7 +61,7 @@ export type MergeRequests = {
   readonly choices: ComputedRef<Choices>;
   readonly summary: ComputedRef<string>;
   readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
-  readonly jobProblem: Readonly<ShallowRef<string | null>>;
+  readonly pageProblem: Readonly<ShallowRef<string | null>>;
   findProject(): Promise<void>;
   show(): void;
   close(): void;
@@ -71,8 +71,8 @@ export type MergeRequests = {
   clear(filter: ListFilter): void;
   clearAll(): void;
   openChanges(iid: MergeRequestIid): Promise<void>;
-  openJob(page: JobPage): Promise<void>;
-  dismissJobProblem(): void;
+  openPage(clicked: PageKind, page: WebPage): Promise<void>;
+  dismissPageProblem(): void;
 };
 
 type Deps = {
@@ -91,7 +91,7 @@ type State = Deps & {
   readonly cut: ShallowRef<boolean>;
   readonly listing: ShallowRef<ListLoad>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
-  readonly jobProblem: ShallowRef<string | null>;
+  readonly pageProblem: ShallowRef<string | null>;
 };
 
 function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
@@ -183,13 +183,18 @@ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
   setOpening(state, iid, reply.kind === "opened" ? { kind: "opened" } : { kind: "refused", reply });
 }
 
-async function openJob(state: State, page: JobPage): Promise<void> {
-  const outcome = await attempt(() => state.source.openJobPage(page));
+const PAGE_STEPS: Readonly<Record<PageKind, MergeRequestStep>> = {
+  job: "job",
+  mergeRequest: "page",
+};
+
+async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
+  const outcome = await attempt(() => state.source.openPage(page));
   if (!outcome.ok) {
-    state.report({ action: "mergeRequests", step: "job", cause: outcome.cause });
+    state.report({ action: "mergeRequests", step: PAGE_STEPS[clicked], cause: outcome.cause });
     return;
   }
-  state.jobProblem.value = outcome.value.kind === "opened" ? null : jobOpenedText(outcome.value);
+  state.pageProblem.value = pageProblemText(outcome.value, clicked);
 }
 
 function createState(deps: Deps): State {
@@ -201,7 +206,7 @@ function createState(deps: Deps): State {
     cut: shallowRef(false),
     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
-    jobProblem: shallowRef<string | null>(null),
+    pageProblem: shallowRef<string | null>(null),
   };
 }
 
@@ -266,7 +271,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
       summaryText(shownRows.value.length, rows.value.length, state.cut.value),
     ),
     openings: state.openings,
-    jobProblem: state.jobProblem,
+    pageProblem: state.pageProblem,
     findProject: () => findProject(state),
     show: () => {
       show(state);
@@ -277,9 +282,9 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     refresh: () => load(state),
     ...filterActions(remembered),
     openChanges: (iid) => openChanges(state, iid),
-    openJob: (page) => openJob(state, page),
-    dismissJobProblem: () => {
-      state.jobProblem.value = null;
+    openPage: (clicked, page) => openPage(state, clicked, page),
+    dismissPageProblem: () => {
+      state.pageProblem.value = null;
     },
   };
 }

@@ -1,0 +1,966 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index f281b73..e260c5c 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -6,7 +6,7 @@ The range window's threads and GitLab (plan §2 #116–#120) come through `Revie
+ 
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
+-The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openJobPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`JobPage` brands in `domain.ts`, the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
++The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's or a merge request's https page, plan §2 #137), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, and an opened page logs `mergeRequests.fixture_page`; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
+ 
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+ 
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index d51c356..5fb7990 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -1,10 +1,10 @@
+-import type { JobPage, MergeRequestIid, SourceResult } from "./domain";
++import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+ import type {
+   GitLabProject,
+-  JobOpened,
+   ListEnd,
+   MergeRequestPage,
+   OpenReply,
++  PageOpened,
+ } from "./mergeRequestDomain";
+ 
+ export interface MergeRequestSource {
+@@ -12,5 +12,5 @@ export interface MergeRequestSource {
+   /** Every page reaches `onPage` before the returned promise settles, and none after. */
+   listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>;
+   openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>;
+-  openJobPage(page: JobPage): Promise<SourceResult<JobOpened>>;
++  openPage(page: WebPage): Promise<SourceResult<PageOpened>>;
+ }
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index 7c46659..f7bdc5c 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -62,7 +62,7 @@ export type AgentRun = number & { readonly __brand: "AgentRun" };
+ export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
+ export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
+ export type MergeRequestIid = number & { readonly __brand: "MergeRequestIid" };
+-export type JobPage = string & { readonly __brand: "JobPage" };
++export type WebPage = string & { readonly __brand: "WebPage" };
+ 
+ export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
+ export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
+@@ -197,7 +197,7 @@ export function isMergeRequestIid(value: number): value is MergeRequestIid {
+   return isNonNegativeInteger(value);
+ }
+ 
+-export function isJobPage(text: string): text is JobPage {
++export function isWebPage(text: string): text is WebPage {
+   return text.startsWith("https://");
+ }
+ 
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index a1f0d66..70f0362 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -114,8 +114,9 @@ function labels(index: number): string[] {
+ function row(index: number): Generated.MergeRequestRow {
+   const title = cycled(TITLES, index);
+   const draft = index % DRAFT_EVERY === DRAFT_EVERY - 1;
++  const iid = NEWEST_IID - index;
+   return {
+-    iid: NEWEST_IID - index,
++    iid,
+     title: draft ? `Draft: ${title}` : title,
+     createdAt: new Date(NEWEST_CREATED - index * index * CREATED_STEP_MS).toISOString(),
+     draft,
+@@ -125,6 +126,7 @@ function row(index: number): Generated.MergeRequestRow {
+     openDiscussions: index % BUG_EVERY,
+     approvals: index % NO_ASSIGNEE_EVERY,
+     pipeline: pipeline(index),
++    page: `${ORIGIN}/-/merge_requests/${iid}`,
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index 66a48c8..9cbd874 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -1,6 +1,6 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ 
+-import { isJobPage, isMergeRequestIid } from "./domain";
++import { isMergeRequestIid, isWebPage } from "./domain";
+ import { createFixtureCompareSource } from "./fixtureCompare";
+ import {
+   ALREADY_OPEN_IID,
+@@ -208,23 +208,33 @@ test.each([
+   expect(answered).toEqual({ ok: true, value: reply });
+ });
+ 
+-test("a job page the list offers opens as logged (catches a click that leaves no trace)", async () => {
++test.each([
++  "https://gitlab.example/taskboard/taskboard/-/jobs/9001",
++  "https://gitlab.example/taskboard/taskboard/-/merge_requests/639",
++])("the listed page %s opens as logged (catches a click that leaves no trace)", async (page) => {
+   const lines: string[] = [];
+-  const page = "https://gitlab.example/taskboard/taskboard/-/jobs/9001";
+   const { pages } = await listed(source("?mr=list"));
+-  const offered = pages
+-    .flatMap((each) => each.rows)
+-    .flatMap((row) => row.pipeline?.failedJobs ?? [])
+-    .map((job) => job.page);
++  const rows = pages.flatMap((each) => each.rows);
++  const offered = [
++    ...rows.map((row) => row.page),
++    ...rows.flatMap((row) => row.pipeline?.failedJobs ?? []).map((job) => job.page),
++  ];
+   expect(offered).toContain(page);
+-  if (!isJobPage(page)) {
+-    throw new Error(`${page} is not a job page`);
++  if (!isWebPage(page)) {
++    throw new Error(`${page} is not a web page`);
+   }
+-  expect(await source("?mr=list", lines).openJobPage(page)).toEqual({
++  expect(await source("?mr=list", lines).openPage(page)).toEqual({
+     ok: true,
+     value: { kind: "opened" },
+   });
+-  expect(lines).toEqual([`mergeRequests.fixture_job {"page":"${page}"}`]);
++  expect(lines).toEqual([`mergeRequests.fixture_page {"page":"${page}"}`]);
++});
++
++test("every listed row has its own merge request's page", async () => {
++  const { pages } = await listed(source("?mr=list"));
++  for (const row of pages.flatMap((each) => each.rows)) {
++    expect(row.page).toBe(`https://gitlab.example/taskboard/taskboard/-/merge_requests/${row.iid}`);
++  }
+ });
+ 
+ test("the compare and range fixtures answer ?mr beside their own parameters", async () => {
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index babf736..07fbdea 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -142,8 +142,8 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+       await pause(OPEN_PAUSE_MS);
+       return { ok: true, value: toOpenReply(OPEN_REPLIES[iid] ?? { kind: "opened" }) };
+     },
+-    async openJobPage(page) {
+-      log.info("mergeRequests.fixture_job", { page });
++    async openPage(page) {
++      log.info("mergeRequests.fixture_page", { page });
+       return { ok: true, value: { kind: "opened" } };
+     },
+   };
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index ea4bfd8..280848c 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -64,14 +64,14 @@ export type {
+   WriteReply,
+ } from "./domain";
+ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion } from "./domain";
+-export type { AgentSessionId, JobPage, MergeRequestIid, MessageId, ThreadId } from "./domain";
++export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+ export type {
+   GitLabProject,
+-  JobOpened,
+   ListEnd,
+   MergeRequestPage,
+   MergeRequestRow,
+   OpenReply,
++  PageOpened,
+ } from "./mergeRequestDomain";
+ export type { MergeRequestSource } from "./MergeRequestSource";
+ export type {
+diff --git a/frontend/src/ipc/mergeRequestDomain.test.ts b/frontend/src/ipc/mergeRequestDomain.test.ts
+index 32eee98..f96ac68 100644
+--- a/frontend/src/ipc/mergeRequestDomain.test.ts
++++ b/frontend/src/ipc/mergeRequestDomain.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import { isJobPage, isMergeRequestIid } from "./domain";
++import { isMergeRequestIid, isWebPage } from "./domain";
+ import { toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
+ 
+ const ROW: Generated.MergeRequestRow = {
+@@ -27,6 +27,7 @@ const ROW: Generated.MergeRequestRow = {
+     ],
+     moreFailedJobs: true,
+   },
++  page: "https://gitlab.example/taskboard/taskboard/-/merge_requests/13",
+ };
+ 
+ function page(row: Partial<Generated.MergeRequestRow>): Generated.MergeRequestPage {
+@@ -60,9 +61,9 @@ test.each([-1, 1.5, Number.NaN])("an iid %d is refused (catches an unchecked bra
+   expect(isMergeRequestIid(iid)).toBe(false);
+ });
+ 
+-test("an iid and a job page are branded as they came", () => {
++test("an iid and a web page are branded as they came", () => {
+   expect(isMergeRequestIid(0)).toBe(true);
+-  expect(isJobPage("https://gitlab.example/x/-/jobs/1")).toBe(true);
++  expect(isWebPage("https://gitlab.example/x/-/jobs/1")).toBe(true);
+ });
+ 
+ test.each(["http://gitlab.example/x/-/jobs/1", "//evil/x", "/x/-/jobs/1", ""])(
+@@ -80,8 +81,19 @@ test.each(["http://gitlab.example/x/-/jobs/1", "//evil/x", "/x/-/jobs/1", ""])(
+   },
+ );
+ 
+-test("no pipeline stays null", () => {
+-  expect(toMergeRequestPage(page({ pipeline: null })).rows[0]?.pipeline).toBeNull();
++test.each(["http://gitlab.example/x/-/merge_requests/1", "//evil/x", "/x/-/merge_requests/1", ""])(
++  "a merge request page %j that is not https is refused like a job's",
++  (address) => {
++    expect(() => toMergeRequestPage(page({ page: address }))).toThrow(
++      `rows[0].page must be an https address, got "${address}"`,
++    );
++  },
++);
++
++test("no pipeline and no page stay null", () => {
++  const [row] = toMergeRequestPage(page({ pipeline: null, page: null })).rows;
++  expect(row?.pipeline).toBeNull();
++  expect(row?.page).toBeNull();
+ });
+ 
+ test("missingCommit names its short id in camelCase; other replies pass unchanged", () => {
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index f766fc7..dc4498d 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -1,10 +1,10 @@
+ import type * as Generated from "./bindings";
+-import { isJobPage, isMergeRequestIid, type JobPage, type MergeRequestIid } from "./domain";
++import { isMergeRequestIid, isWebPage, type MergeRequestIid, type WebPage } from "./domain";
+ import { branded } from "./validate";
+ 
+ export type GitLabProject = Readonly<Generated.GitLabProject>;
+ type FailedJob = Readonly<Omit<Generated.FailedJob, "page">> & {
+-  readonly page: JobPage | null;
++  readonly page: WebPage | null;
+ };
+ type Pipeline = {
+   readonly status: Generated.CiStatus;
+@@ -12,12 +12,13 @@ type Pipeline = {
+   readonly moreFailedJobs: boolean;
+ };
+ export type MergeRequestRow = Readonly<
+-  Omit<Generated.MergeRequestRow, "iid" | "createdAt" | "pipeline">
++  Omit<Generated.MergeRequestRow, "iid" | "createdAt" | "pipeline" | "page">
+ > & {
+   readonly iid: MergeRequestIid;
+   /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
+   readonly createdAt: number;
+   readonly pipeline: Pipeline | null;
++  readonly page: WebPage | null;
+ };
+ export type MergeRequestPage = {
+   readonly me: string | null;
+@@ -27,10 +28,10 @@ export type ListEnd = Readonly<Generated.ListEnd>;
+ export type OpenReply =
+   | Readonly<Exclude<Generated.OpenReply, { kind: "missingCommit" }>>
+   | { readonly kind: "missingCommit"; readonly shortId: string };
+-export type JobOpened = Readonly<Generated.JobOpened>;
++export type PageOpened = Readonly<Generated.PageOpened>;
+ 
+-function toJobPage(text: string, field: string): JobPage {
+-  if (!isJobPage(text)) {
++function toWebPage(text: string, field: string): WebPage {
++  if (!isWebPage(text)) {
+     throw new Error(`${field} must be an https address, got "${text}"`);
+   }
+   return text;
+@@ -49,7 +50,7 @@ function toPipeline(raw: Generated.Pipeline, field: string): Pipeline {
+     status: raw.status,
+     failedJobs: raw.failedJobs.map((job, at) => ({
+       ...job,
+-      page: job.page === null ? null : toJobPage(job.page, `${field}.failedJobs[${at}].page`),
++      page: job.page === null ? null : toWebPage(job.page, `${field}.failedJobs[${at}].page`),
+     })),
+     moreFailedJobs: raw.moreFailedJobs,
+   };
+@@ -62,6 +63,7 @@ function toRow(raw: Generated.MergeRequestRow, index: number): MergeRequestRow {
+     iid: branded(raw.iid, isMergeRequestIid, `${field}.iid`),
+     createdAt: toTime(raw.createdAt, `${field}.createdAt`),
+     pipeline: raw.pipeline === null ? null : toPipeline(raw.pipeline, `${field}.pipeline`),
++    page: raw.page === null ? null : toWebPage(raw.page, `${field}.page`),
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index fa8f40f..a4cbed5 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -1,7 +1,7 @@
+ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import { isJobPage, isMergeRequestIid } from "./domain";
++import { isMergeRequestIid, isWebPage } from "./domain";
+ import type { MergeRequestPage } from "./mergeRequestDomain";
+ import { createTauriMergeRequests } from "./tauriMergeRequests";
+ import { branded } from "./validate";
+@@ -10,7 +10,7 @@ const commands = vi.hoisted(() => ({
+   findGitlabProject: vi.fn(),
+   listMergeRequests: vi.fn(),
+   openMergeRequest: vi.fn(),
+-  openJobPage: vi.fn(),
++  openPage: vi.fn(),
+ }));
+ 
+ vi.mock("./bindings", () => ({ commands }));
+@@ -34,6 +34,7 @@ const ROW: Generated.MergeRequestRow = {
+   openDiscussions: 0,
+   approvals: 2,
+   pipeline: null,
++  page: null,
+ };
+ 
+ const STOPPED = { kind: "WorkerStopped" };
+@@ -173,18 +174,18 @@ test("opening passes the iid and camelCases a missing commit", async () => {
+   expect(reply).toEqual({ ok: true, value: { kind: "missingCommit", shortId: "531ea52" } });
+ });
+ 
+-test("a job page is passed as it came and its answer comes back", async () => {
+-  const page = "https://gitlab.example/x/-/jobs/7";
+-  if (!isJobPage(page)) {
+-    throw new Error("not a job page");
++test("a page is passed as it came and its answer comes back", async () => {
++  const page = "https://gitlab.example/x/-/merge_requests/7";
++  if (!isWebPage(page)) {
++    throw new Error("not a web page");
+   }
+-  commands.openJobPage.mockResolvedValue({ kind: "notOffered" });
++  commands.openPage.mockResolvedValue({ kind: "notOffered" });
+ 
+-  expect(await createTauriMergeRequests().openJobPage(page)).toEqual({
++  expect(await createTauriMergeRequests().openPage(page)).toEqual({
+     ok: true,
+     value: { kind: "notOffered" },
+   });
+-  expect(commands.openJobPage).toHaveBeenCalledWith(page);
++  expect(commands.openPage).toHaveBeenCalledWith(page);
+ });
+ 
+ test.each([
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index a6e819c..7d72440 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -54,8 +54,8 @@ export function createTauriMergeRequests(): MergeRequestSource {
+     async openMergeRequest(iid) {
+       return converted(toResult(await commands.openMergeRequest(iid)), toOpenReply);
+     },
+-    async openJobPage(page) {
+-      return { ok: true, value: await commands.openJobPage(page) };
++    async openPage(page) {
++      return { ok: true, value: await commands.openPage(page) };
+     },
+   };
+ }
+diff --git a/frontend/src/ui/CiStatusBox.vue b/frontend/src/ui/CiStatusBox.vue
+index 2da0923..12587da 100644
+--- a/frontend/src/ui/CiStatusBox.vue
++++ b/frontend/src/ui/CiStatusBox.vue
+@@ -9,7 +9,7 @@ import CircleX from "~icons/lucide/circle-x";
+ import Clock from "~icons/lucide/clock";
+ import Cog from "~icons/lucide/cog";
+ 
+-import type { JobPage, MergeRequestRow } from "../ipc";
++import type { MergeRequestRow, WebPage } from "../ipc";
+ import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
+ import type { Point } from "./menuPosition";
+ import {
+@@ -25,7 +25,7 @@ type FailedJob = Pipeline["failedJobs"][number];
+ type StatusLook = { readonly icon: Component; readonly tone: string };
+ 
+ const props = defineProps<{ pipeline: Pipeline }>();
+-const emit = defineEmits<{ openJob: [page: JobPage] }>();
++const emit = defineEmits<{ openJob: [page: WebPage] }>();
+ 
+ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
+   passed: { icon: CircleCheck, tone: "text-success-signal" },
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 5bdc8fb..388b156 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -5,7 +5,7 @@ import LoaderCircle from "~icons/lucide/loader-circle";
+ import MessageSquare from "~icons/lucide/message-square";
+ import ThumbsUp from "~icons/lucide/thumbs-up";
+ 
+-import type { JobPage, MergeRequestIid, MergeRequestRow } from "../ipc";
++import type { MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
+ import { createdAgo } from "../mergeRequests";
+ import CiStatusBox from "./CiStatusBox.vue";
+ import type { Opening } from "./mergeRequests";
+@@ -14,11 +14,16 @@ import {
+   discussionsText,
+   mergeRequestReference,
+   openChangesTitle,
++  openPageTitle,
+   openReplyText,
++  type PageKind,
+ } from "./mergeRequestsText";
+ 
+ const props = defineProps<{ row: MergeRequestRow; now: number; opening: Opening | null }>();
+-const emit = defineEmits<{ open: [iid: MergeRequestIid]; openJob: [page: JobPage] }>();
++const emit = defineEmits<{
++  open: [iid: MergeRequestIid];
++  openPage: [clicked: PageKind, page: WebPage];
++}>();
+ 
+ const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+ 
+@@ -28,6 +33,7 @@ const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
+ const discussions = computed(() => discussionsText(props.row.openDiscussions));
+ const approvals = computed(() => approvalsText(props.row.approvals));
+ const openTitle = computed(() => openChangesTitle(props.row.iid));
++const pageTitle = computed(() => openPageTitle(props.row.iid));
+ const fetching = computed(() => props.opening?.kind === "fetching");
+ const sentence = computed(() => {
+   const opening = props.opening;
+@@ -37,13 +43,33 @@ const sentence = computed(() => {
+   const reply = opening.kind === "opened" ? ({ kind: "opened" } as const) : opening.reply;
+   return { text: openReplyText(reply, props.row.iid), refused: opening.kind === "refused" };
+ });
++
++function openPage(): void {
++  if (props.row.page !== null) {
++    emit("openPage", "mergeRequest", props.row.page);
++  }
++}
+ </script>
+ 
+ <template>
+-  <li class="flex flex-col gap-0.5 border-b border-separator px-3 py-2">
++  <li
++    class="flex flex-col gap-0.5 border-b border-separator px-3 py-2"
++    :class="{ 'cursor-pointer hover:bg-row-hover': row.page !== null }"
++    @click="openPage"
++  >
+     <div class="flex items-center gap-3">
+       <div class="flex min-w-0 flex-1 items-baseline gap-2">
+-        <span class="truncate" :title="row.title">{{ row.title }}</span>
++        <button
++          v-if="row.page !== null"
++          type="button"
++          class="min-w-0 truncate rounded text-left"
++          :title="pageTitle"
++          :aria-label="pageTitle"
++          @click.stop="openPage"
++        >
++          <span :title="row.title">{{ row.title }}</span>
++        </button>
++        <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
+         <span class="shrink-0 text-fg-muted">{{ mr }}</span>
+         <span class="shrink-0 text-fg-muted" :title="createdTitle">{{ created }}</span>
+       </div>
+@@ -65,11 +91,11 @@ const sentence = computed(() => {
+         <ThumbsUp class="size-4" aria-hidden="true" />
+         <span aria-hidden="true">{{ row.approvals }}</span>
+       </span>
+-      <span class="flex w-7 shrink-0 justify-center">
++      <span class="flex w-7 shrink-0 cursor-default justify-center" @click.stop>
+         <CiStatusBox
+           v-if="row.pipeline !== null"
+           :pipeline="row.pipeline"
+-          @open-job="emit('openJob', $event)"
++          @open-job="emit('openPage', 'job', $event)"
+         />
+       </span>
+       <button
+@@ -78,8 +104,8 @@ const sentence = computed(() => {
+         :aria-label="openTitle"
+         :aria-busy="fetching"
+         :disabled="fetching"
+-        class="shrink-0 rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+-        @click="emit('open', row.iid)"
++        class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++        @click.stop="emit('open', row.iid)"
+       >
+         <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
+         <FileDiff v-else class="size-4" aria-hidden="true" />
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 4f2a8b5..fa19a94 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -32,7 +32,7 @@ const MINUTE_MS = 60_000;
+ const LIST_FILTERS: readonly ListFilter[] = ["assignee", "reviewer", "label"];
+ 
+ const requests = useMergeRequests();
+-const { rows, listing, failure, filters, shownRows, choices, summary, openings, jobProblem } =
++const { rows, listing, failure, filters, shownRows, choices, summary, openings, pageProblem } =
+   requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const focusedBefore = document.activeElement;
+@@ -122,16 +122,16 @@ function escapePressed(event: KeyboardEvent): void {
+       </button>
+     </div>
+     <p
+-      v-if="jobProblem !== null"
++      v-if="pageProblem !== null"
+       role="alert"
+       class="flex shrink-0 items-center gap-2 border-b border-separator px-3 py-1.5 text-problem-error"
+     >
+-      {{ jobProblem }}
++      {{ pageProblem }}
+       <button
+         type="button"
+         :aria-label="DISMISS_LABEL"
+         class="ml-auto rounded p-1 text-fg hover:bg-hover"
+-        @click="requests.dismissJobProblem"
++        @click="requests.dismissPageProblem"
+       >
+         <X class="size-4" aria-hidden="true" />
+       </button>
+@@ -167,7 +167,7 @@ function escapePressed(event: KeyboardEvent): void {
+           :now="nowMs"
+           :opening="openings.get(row.iid) ?? null"
+           @open="requests.openChanges"
+-          @open-job="requests.openJob"
++          @open-page="requests.openPage"
+         />
+       </ul>
+     </template>
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index d3f904f..05d6563 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -6,16 +6,16 @@ import {
+   createFixtureCompareSource,
+   isMergeRequestIid,
+   log,
+-  type JobOpened,
+-  type JobPage,
+   type ListEnd,
+   type MergeRequestIid,
+   type MergeRequestPage,
+   type MergeRequestRow,
+   type MergeRequestSource,
+   type OpenReply,
++  type PageOpened,
+   type SourceFailure,
+   type SourceResult,
++  type WebPage,
+ } from "../ipc";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import {
+@@ -25,7 +25,8 @@ import {
+   type Opening,
+ } from "./mergeRequests";
+ import { registerMergeRequests, useMergeRequests, windowMergeRequests } from "./mergeRequestsStore";
+-import type { Problem } from "./problem";
++import type { PageKind } from "./mergeRequestsText";
++import type { MergeRequestStep, Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+ type Load = {
+@@ -57,6 +58,7 @@ const REPOSITORY = "/home/sam/taskboard/.git";
+ const STOPPED: SourceFailure = { kind: "WorkerStopped" };
+ const LOADED: SourceResult<ListEnd> = { ok: true, value: { kind: "loaded" } };
+ const JOB = "https://gitlab.example/taskboard/taskboard/-/jobs/9001";
++const MR = "https://gitlab.example/taskboard/taskboard/-/merge_requests/639";
+ 
+ let ROWS: readonly MergeRequestRow[] = [];
+ 
+@@ -94,12 +96,13 @@ function iid(value: number): MergeRequestIid {
+   return value;
+ }
+ 
+-function jobPage(): JobPage {
+-  const page = ROWS.flatMap((row) => row.pipeline?.failedJobs ?? []).find(
+-    (job) => job.page === JOB,
+-  )?.page;
++function webPage(address: string): WebPage {
++  const page = [
++    ...ROWS.map((row) => row.page),
++    ...ROWS.flatMap((row) => row.pipeline?.failedJobs ?? []).map((job) => job.page),
++  ].find((offered) => offered === address);
+   if (page === undefined || page === null) {
+-    throw new Error("the fixture offers no job page");
++    throw new Error(`the fixture offers no page ${address}`);
+   }
+   return page;
+ }
+@@ -126,7 +129,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+       new Promise((resolve) => {
+         opens.push({ iid: asked, answer: resolve });
+       }),
+-    openJobPage: async () => ({ ok: true, value: { kind: "opened" } }),
++    openPage: async () => ({ ok: true, value: { kind: "opened" } }),
+     ...edit,
+   };
+   const screen = shallowRef<Screen>({ kind: "files" });
+@@ -497,38 +500,68 @@ test("a failed open call is reported and clears the row's state", async () => {
+   expect(live.slice.openings.value.has(asked)).toBe(false);
+ });
+ 
+-test.each<[JobOpened, string | null]>([
+-  [{ kind: "opened" }, null],
+-  [{ kind: "notOffered" }, "This job's page was not listed by GitLab, so yamt did not open it."],
+-  [{ kind: "failed", message: "no opener" }, "Could not open the browser: no opener"],
+-])("a job answer %j leaves the job problem %j", async (answer, words) => {
+-  const pages: JobPage[] = [];
+-  const live = rig({
+-    openJobPage: async (page) => {
+-      pages.push(page);
+-      return { ok: true, value: answer };
+-    },
+-  });
+-  await live.slice.openJob(jobPage());
+-  expect(pages).toEqual([JOB]);
+-  expect(live.slice.jobProblem.value).toBe(words);
+-  live.slice.dismissJobProblem();
+-  expect(live.slice.jobProblem.value).toBeNull();
+-});
++test.each<[PageKind, string, PageOpened, string | null]>([
++  ["job", JOB, { kind: "opened" }, null],
++  [
++    "job",
++    JOB,
++    { kind: "notOffered" },
++    "This job's page was not listed by GitLab, so yamt did not open it.",
++  ],
++  ["job", JOB, { kind: "failed", message: "no opener" }, "Could not open the browser: no opener"],
++  ["mergeRequest", MR, { kind: "opened" }, null],
++  [
++    "mergeRequest",
++    MR,
++    { kind: "notOffered" },
++    "This merge request's page was not listed by GitLab, so yamt did not open it.",
++  ],
++  [
++    "mergeRequest",
++    MR,
++    { kind: "failed", message: "no opener" },
++    "Could not open the browser: no opener",
++  ],
++])(
++  "a %s click on %s answered %j leaves the page problem %j",
++  async (clicked, address, answer, words) => {
++    const pages: WebPage[] = [];
++    const live = rig({
++      openPage: async (page) => {
++        pages.push(page);
++        return { ok: true, value: answer };
++      },
++    });
++    await live.slice.openPage(clicked, webPage(address));
++    expect(pages).toEqual([address]);
++    expect(live.slice.pageProblem.value).toBe(words);
++    live.slice.dismissPageProblem();
++    expect(live.slice.pageProblem.value).toBeNull();
++  },
++);
+ 
+-test("an opened job clears an earlier job problem; a failed job call is reported", async () => {
+-  let answer: SourceResult<JobOpened> = { ok: true, value: { kind: "notOffered" } };
+-  const live = rig({ openJobPage: async () => answer });
+-  await live.slice.openJob(jobPage());
++test("an opened page clears an earlier page problem, whichever kind it was", async () => {
++  let answer: SourceResult<PageOpened> = { ok: true, value: { kind: "notOffered" } };
++  const live = rig({ openPage: async () => answer });
++  await live.slice.openPage("job", webPage(JOB));
+   answer = { ok: true, value: { kind: "opened" } };
+-  await live.slice.openJob(jobPage());
+-  expect(live.slice.jobProblem.value).toBeNull();
+-
+-  answer = { ok: false, failure: STOPPED };
+-  await live.slice.openJob(jobPage());
+-  expect(live.problems).toEqual([{ action: "mergeRequests", step: "job", cause: STOPPED }]);
++  await live.slice.openPage("mergeRequest", webPage(MR));
++  expect(live.slice.pageProblem.value).toBeNull();
+ });
+ 
++test.each<[PageKind, string, MergeRequestStep]>([
++  ["job", JOB, "job"],
++  ["mergeRequest", MR, "page"],
++])(
++  "a failed %s page call is reported at its own step and leaves no page problem",
++  async (clicked, address, step) => {
++    const live = rig({ openPage: async () => ({ ok: false, failure: STOPPED }) });
++    await live.slice.openPage(clicked, webPage(address));
++    expect(live.problems).toEqual([{ action: "mergeRequests", step, cause: STOPPED }]);
++    expect(live.slice.pageProblem.value).toBeNull();
++  },
++);
++
+ test("the seam hands every header and the page the window's one slice; problems reach the window's bar", async () => {
+   registerMergeRequests(rig().slice);
+   const problem = shallowRef<Problem | null>(null);
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 387e84e..0d6e194 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -3,13 +3,13 @@ import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } fro
+ 
+ import type {
+   GitLabProject,
+-  JobPage,
+   ListEnd,
+   MergeRequestIid,
+   MergeRequestPage,
+   MergeRequestRow,
+   MergeRequestSource,
+   OpenReply,
++  WebPage,
+ } from "../ipc";
+ import {
+   cleared,
+@@ -30,8 +30,8 @@ import {
+ } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { createRememberedFilters } from "./mergeRequestFilters";
+-import { jobOpenedText, listFailureText } from "./mergeRequestsText";
+-import { attempt, type Problem } from "./problem";
++import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
++import { attempt, type MergeRequestStep, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+ export type ListLoad =
+@@ -61,7 +61,7 @@ export type MergeRequests = {
+   readonly choices: ComputedRef<Choices>;
+   readonly summary: ComputedRef<string>;
+   readonly openings: Readonly<ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>>;
+-  readonly jobProblem: Readonly<ShallowRef<string | null>>;
++  readonly pageProblem: Readonly<ShallowRef<string | null>>;
+   findProject(): Promise<void>;
+   show(): void;
+   close(): void;
+@@ -71,8 +71,8 @@ export type MergeRequests = {
+   clear(filter: ListFilter): void;
+   clearAll(): void;
+   openChanges(iid: MergeRequestIid): Promise<void>;
+-  openJob(page: JobPage): Promise<void>;
+-  dismissJobProblem(): void;
++  openPage(clicked: PageKind, page: WebPage): Promise<void>;
++  dismissPageProblem(): void;
+ };
+ 
+ type Deps = {
+@@ -91,7 +91,7 @@ type State = Deps & {
+   readonly cut: ShallowRef<boolean>;
+   readonly listing: ShallowRef<ListLoad>;
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+-  readonly jobProblem: ShallowRef<string | null>;
++  readonly pageProblem: ShallowRef<string | null>;
+ };
+ 
+ function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
+@@ -183,13 +183,18 @@ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
+   setOpening(state, iid, reply.kind === "opened" ? { kind: "opened" } : { kind: "refused", reply });
+ }
+ 
+-async function openJob(state: State, page: JobPage): Promise<void> {
+-  const outcome = await attempt(() => state.source.openJobPage(page));
++const PAGE_STEPS: Readonly<Record<PageKind, MergeRequestStep>> = {
++  job: "job",
++  mergeRequest: "page",
++};
++
++async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
++  const outcome = await attempt(() => state.source.openPage(page));
+   if (!outcome.ok) {
+-    state.report({ action: "mergeRequests", step: "job", cause: outcome.cause });
++    state.report({ action: "mergeRequests", step: PAGE_STEPS[clicked], cause: outcome.cause });
+     return;
+   }
+-  state.jobProblem.value = outcome.value.kind === "opened" ? null : jobOpenedText(outcome.value);
++  state.pageProblem.value = pageProblemText(outcome.value, clicked);
+ }
+ 
+ function createState(deps: Deps): State {
+@@ -201,7 +206,7 @@ function createState(deps: Deps): State {
+     cut: shallowRef(false),
+     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
+     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
+-    jobProblem: shallowRef<string | null>(null),
++    pageProblem: shallowRef<string | null>(null),
+   };
+ }
+ 
+@@ -266,7 +271,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+       summaryText(shownRows.value.length, rows.value.length, state.cut.value),
+     ),
+     openings: state.openings,
+-    jobProblem: state.jobProblem,
++    pageProblem: state.pageProblem,
+     findProject: () => findProject(state),
+     show: () => {
+       show(state);
+@@ -277,9 +282,9 @@ export function createMergeRequests(deps: Deps): MergeRequests {
+     refresh: () => load(state),
+     ...filterActions(remembered),
+     openChanges: (iid) => openChanges(state, iid),
+-    openJob: (page) => openJob(state, page),
+-    dismissJobProblem: () => {
+-      state.jobProblem.value = null;
++    openPage: (clicked, page) => openPage(state, clicked, page),
++    dismissPageProblem: () => {
++      state.pageProblem.value = null;
+     },
+   };
+ }
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 9b26143..842be30 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -2,17 +2,16 @@ import { expect, test } from "vitest";
+ 
+ import {
+   isMergeRequestIid,
+-  type JobOpened,
+   type ListEnd,
+   type MergeRequestIid,
+   type OpenReply,
++  type PageOpened,
+   type RangeStart,
+ } from "../ipc";
+ import {
+   approvalsText,
+   clearFilterTitle,
+   discussionsText,
+-  jobOpenedText,
+   jobTitle,
+   listFailureText,
+   narrowLabel,
+@@ -20,7 +19,10 @@ import {
+   LOADING_TEXT,
+   NONE_TEXT,
+   openChangesTitle,
++  openPageTitle,
+   openReplyText,
++  pageProblemText,
++  type PageKind,
+ } from "./mergeRequestsText";
+ import { notLinedUpText } from "./rangeThreadText";
+ 
+@@ -73,6 +75,7 @@ test.each([
+ 
+ test("a row's button and a job's title name what they open; a job without a page says why", () => {
+   expect(openChangesTitle(IID)).toBe("Open the changes of !13");
++  expect(openPageTitle(IID)).toBe("Open !13 on GitLab");
+   expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
+     "Open the log of test on GitLab",
+   );
+@@ -110,15 +113,27 @@ test.each<[OpenReply, string]>([
+   expect(openReplyText(reply, IID)).toBe(words);
+ });
+ 
+-test.each<[JobOpened, string]>([
+-  [{ kind: "opened" }, "Opened the job's log in the browser."],
+-  [{ kind: "notOffered" }, "This job's page was not listed by GitLab, so yamt did not open it."],
++test.each<[PageOpened, PageKind, string | null]>([
++  [{ kind: "opened" }, "job", null],
++  [{ kind: "opened" }, "mergeRequest", null],
++  [
++    { kind: "notOffered" },
++    "job",
++    "This job's page was not listed by GitLab, so yamt did not open it.",
++  ],
++  [
++    { kind: "notOffered" },
++    "mergeRequest",
++    "This merge request's page was not listed by GitLab, so yamt did not open it.",
++  ],
+   [
+     { kind: "failed", message: "xdg-open: not found" },
++    "mergeRequest",
+     "Could not open the browser: xdg-open: not found",
+   ],
+-])("the job answer %j reads %j", (opened, words) => {
+-  expect(jobOpenedText(opened)).toBe(words);
++  [{ kind: "failed", message: "no opener" }, "job", "Could not open the browser: no opener"],
++])("the answer %j for a %s page shows %j", (opened, clicked, words) => {
++  expect(pageProblemText(opened, clicked)).toBe(words);
+ });
+ 
+ test("glab's words are the Send button's (catches the two drifting apart)", () => {
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index e470be1..32efe2f 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -1,8 +1,10 @@
+-import type { JobOpened, ListEnd, MergeRequestIid, OpenReply } from "../ipc";
++import type { ListEnd, MergeRequestIid, OpenReply, PageOpened } from "../ipc";
+ import type { DraftFilter } from "../mergeRequests";
+ import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
+ import { counted } from "./serverText";
+ 
++export type PageKind = "job" | "mergeRequest";
++
+ export const PAGE_TITLE = "Merge requests";
+ export const LIST_LABEL = "Open merge requests";
+ export const REFRESH = "Refresh";
+@@ -46,6 +48,10 @@ export function openChangesTitle(iid: MergeRequestIid): string {
+   return `Open the changes of ${mergeRequestReference(iid)}`;
+ }
+ 
++export function openPageTitle(iid: MergeRequestIid): string {
++  return `Open ${mergeRequestReference(iid)} on GitLab`;
++}
++
+ export function discussionsText(count: number): string {
+   return counted(count, "open discussion", "open discussions");
+ }
+@@ -106,12 +112,17 @@ export function openReplyText(reply: OpenReply, iid: MergeRequestIid): string {
+   return reply.kind === "opened" ? `Opened ${mr} in a new window.` : openRefusedText(reply, mr);
+ }
+ 
+-export function jobOpenedText(opened: JobOpened): string {
++const NOT_OFFERED: Readonly<Record<PageKind, string>> = {
++  job: "This job's page was not listed by GitLab, so yamt did not open it.",
++  mergeRequest: "This merge request's page was not listed by GitLab, so yamt did not open it.",
++};
++
++export function pageProblemText(opened: PageOpened, clicked: PageKind): string | null {
+   switch (opened.kind) {
+     case "opened":
+-      return "Opened the job's log in the browser.";
++      return null;
+     case "notOffered":
+-      return "This job's page was not listed by GitLab, so yamt did not open it.";
++      return NOT_OFFERED[clicked];
+     case "failed":
+       return `Could not open the browser: ${opened.message}`;
+     default: {
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index d407680..964e25b 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -35,7 +35,7 @@ export type ThreadStep =
+ 
+ export type AiAttempt = "ask" | "diff" | "discard";
+ 
+-export type MergeRequestStep = "find" | "list" | "open" | "job";
++export type MergeRequestStep = "find" | "list" | "open" | "job" | "page";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index a170f7b..e475cbc 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -287,6 +287,7 @@ test.each([
+   ["list", "Could not list the merge requests: yamt's worker stopped; try again."],
+   ["open", "Could not open the merge request's changes: yamt's worker stopped; try again."],
+   ["job", "Could not open the job's page: yamt's worker stopped; try again."],
++  ["page", "Could not open the merge request's page: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 943f585..6cbc641 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -75,6 +75,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   list: "Could not list the merge requests",
+   open: "Could not open the merge request's changes",
+   job: "Could not open the job's page",
++  page: "Could not open the merge request's page",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

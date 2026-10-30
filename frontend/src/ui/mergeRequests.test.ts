@@ -6,16 +6,16 @@ import {
   createFixtureCompareSource,
   isMergeRequestIid,
   log,
-  type JobOpened,
-  type JobPage,
   type ListEnd,
   type MergeRequestIid,
   type MergeRequestPage,
   type MergeRequestRow,
   type MergeRequestSource,
   type OpenReply,
+  type PageOpened,
   type SourceFailure,
   type SourceResult,
+  type WebPage,
 } from "../ipc";
 import { RECHECK_PAUSE_MS } from "./glab";
 import {
@@ -25,7 +25,8 @@ import {
   type Opening,
 } from "./mergeRequests";
 import { registerMergeRequests, useMergeRequests, windowMergeRequests } from "./mergeRequestsStore";
-import type { Problem } from "./problem";
+import type { PageKind } from "./mergeRequestsText";
+import type { MergeRequestStep, Problem } from "./problem";
 import type { Screen } from "./screen";
 
 type Load = {
@@ -57,6 +58,7 @@ const REPOSITORY = "/home/sam/taskboard/.git";
 const STOPPED: SourceFailure = { kind: "WorkerStopped" };
 const LOADED: SourceResult<ListEnd> = { ok: true, value: { kind: "loaded" } };
 const JOB = "https://gitlab.example/taskboard/taskboard/-/jobs/9001";
+const MR = "https://gitlab.example/taskboard/taskboard/-/merge_requests/639";
 
 let ROWS: readonly MergeRequestRow[] = [];
 
@@ -94,12 +96,13 @@ function iid(value: number): MergeRequestIid {
   return value;
 }
 
-function jobPage(): JobPage {
-  const page = ROWS.flatMap((row) => row.pipeline?.failedJobs ?? []).find(
-    (job) => job.page === JOB,
-  )?.page;
+function webPage(address: string): WebPage {
+  const page = [
+    ...ROWS.map((row) => row.page),
+    ...ROWS.flatMap((row) => row.pipeline?.failedJobs ?? []).map((job) => job.page),
+  ].find((offered) => offered === address);
   if (page === undefined || page === null) {
-    throw new Error("the fixture offers no job page");
+    throw new Error(`the fixture offers no page ${address}`);
   }
   return page;
 }
@@ -126,7 +129,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
       new Promise((resolve) => {
         opens.push({ iid: asked, answer: resolve });
       }),
-    openJobPage: async () => ({ ok: true, value: { kind: "opened" } }),
+    openPage: async () => ({ ok: true, value: { kind: "opened" } }),
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -497,37 +500,67 @@ test("a failed open call is reported and clears the row's state", async () => {
   expect(live.slice.openings.value.has(asked)).toBe(false);
 });
 
-test.each<[JobOpened, string | null]>([
-  [{ kind: "opened" }, null],
-  [{ kind: "notOffered" }, "This job's page was not listed by GitLab, so yamt did not open it."],
-  [{ kind: "failed", message: "no opener" }, "Could not open the browser: no opener"],
-])("a job answer %j leaves the job problem %j", async (answer, words) => {
-  const pages: JobPage[] = [];
-  const live = rig({
-    openJobPage: async (page) => {
-      pages.push(page);
-      return { ok: true, value: answer };
-    },
-  });
-  await live.slice.openJob(jobPage());
-  expect(pages).toEqual([JOB]);
-  expect(live.slice.jobProblem.value).toBe(words);
-  live.slice.dismissJobProblem();
-  expect(live.slice.jobProblem.value).toBeNull();
-});
+test.each<[PageKind, string, PageOpened, string | null]>([
+  ["job", JOB, { kind: "opened" }, null],
+  [
+    "job",
+    JOB,
+    { kind: "notOffered" },
+    "This job's page was not listed by GitLab, so yamt did not open it.",
+  ],
+  ["job", JOB, { kind: "failed", message: "no opener" }, "Could not open the browser: no opener"],
+  ["mergeRequest", MR, { kind: "opened" }, null],
+  [
+    "mergeRequest",
+    MR,
+    { kind: "notOffered" },
+    "This merge request's page was not listed by GitLab, so yamt did not open it.",
+  ],
+  [
+    "mergeRequest",
+    MR,
+    { kind: "failed", message: "no opener" },
+    "Could not open the browser: no opener",
+  ],
+])(
+  "a %s click on %s answered %j leaves the page problem %j",
+  async (clicked, address, answer, words) => {
+    const pages: WebPage[] = [];
+    const live = rig({
+      openPage: async (page) => {
+        pages.push(page);
+        return { ok: true, value: answer };
+      },
+    });
+    await live.slice.openPage(clicked, webPage(address));
+    expect(pages).toEqual([address]);
+    expect(live.slice.pageProblem.value).toBe(words);
+    live.slice.dismissPageProblem();
+    expect(live.slice.pageProblem.value).toBeNull();
+  },
+);
 
-test("an opened job clears an earlier job problem; a failed job call is reported", async () => {
-  let answer: SourceResult<JobOpened> = { ok: true, value: { kind: "notOffered" } };
-  const live = rig({ openJobPage: async () => answer });
-  await live.slice.openJob(jobPage());
+test("an opened page clears an earlier page problem, whichever kind it was", async () => {
+  let answer: SourceResult<PageOpened> = { ok: true, value: { kind: "notOffered" } };
+  const live = rig({ openPage: async () => answer });
+  await live.slice.openPage("job", webPage(JOB));
   answer = { ok: true, value: { kind: "opened" } };
-  await live.slice.openJob(jobPage());
-  expect(live.slice.jobProblem.value).toBeNull();
-
-  answer = { ok: false, failure: STOPPED };
-  await live.slice.openJob(jobPage());
-  expect(live.problems).toEqual([{ action: "mergeRequests", step: "job", cause: STOPPED }]);
+  await live.slice.openPage("mergeRequest", webPage(MR));
+  expect(live.slice.pageProblem.value).toBeNull();
 });
+
+test.each<[PageKind, string, MergeRequestStep]>([
+  ["job", JOB, "job"],
+  ["mergeRequest", MR, "page"],
+])(
+  "a failed %s page call is reported at its own step and leaves no page problem",
+  async (clicked, address, step) => {
+    const live = rig({ openPage: async () => ({ ok: false, failure: STOPPED }) });
+    await live.slice.openPage(clicked, webPage(address));
+    expect(live.problems).toEqual([{ action: "mergeRequests", step, cause: STOPPED }]);
+    expect(live.slice.pageProblem.value).toBeNull();
+  },
+);
 
 test("the seam hands every header and the page the window's one slice; problems reach the window's bar", async () => {
   registerMergeRequests(rig().slice);

@@ -2,17 +2,16 @@ import { expect, test } from "vitest";
 
 import {
   isMergeRequestIid,
-  type JobOpened,
   type ListEnd,
   type MergeRequestIid,
   type OpenReply,
+  type PageOpened,
   type RangeStart,
 } from "../ipc";
 import {
   approvalsText,
   clearFilterTitle,
   discussionsText,
-  jobOpenedText,
   jobTitle,
   listFailureText,
   narrowLabel,
@@ -20,7 +19,10 @@ import {
   LOADING_TEXT,
   NONE_TEXT,
   openChangesTitle,
+  openPageTitle,
   openReplyText,
+  pageProblemText,
+  type PageKind,
 } from "./mergeRequestsText";
 import { notLinedUpText } from "./rangeThreadText";
 
@@ -73,6 +75,7 @@ test.each([
 
 test("a row's button and a job's title name what they open; a job without a page says why", () => {
   expect(openChangesTitle(IID)).toBe("Open the changes of !13");
+  expect(openPageTitle(IID)).toBe("Open !13 on GitLab");
   expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
     "Open the log of test on GitLab",
   );
@@ -110,15 +113,27 @@ test.each<[OpenReply, string]>([
   expect(openReplyText(reply, IID)).toBe(words);
 });
 
-test.each<[JobOpened, string]>([
-  [{ kind: "opened" }, "Opened the job's log in the browser."],
-  [{ kind: "notOffered" }, "This job's page was not listed by GitLab, so yamt did not open it."],
+test.each<[PageOpened, PageKind, string | null]>([
+  [{ kind: "opened" }, "job", null],
+  [{ kind: "opened" }, "mergeRequest", null],
+  [
+    { kind: "notOffered" },
+    "job",
+    "This job's page was not listed by GitLab, so yamt did not open it.",
+  ],
+  [
+    { kind: "notOffered" },
+    "mergeRequest",
+    "This merge request's page was not listed by GitLab, so yamt did not open it.",
+  ],
   [
     { kind: "failed", message: "xdg-open: not found" },
+    "mergeRequest",
     "Could not open the browser: xdg-open: not found",
   ],
-])("the job answer %j reads %j", (opened, words) => {
-  expect(jobOpenedText(opened)).toBe(words);
+  [{ kind: "failed", message: "no opener" }, "job", "Could not open the browser: no opener"],
+])("the answer %j for a %s page shows %j", (opened, clicked, words) => {
+  expect(pageProblemText(opened, clicked)).toBe(words);
 });
 
 test("glab's words are the Send button's (catches the two drifting apart)", () => {

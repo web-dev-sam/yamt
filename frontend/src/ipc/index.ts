@@ -64,14 +64,14 @@ export type {
   WriteReply,
 } from "./domain";
 export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion } from "./domain";
-export type { AgentSessionId, JobPage, MergeRequestIid, MessageId, ThreadId } from "./domain";
+export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
 export type {
   GitLabProject,
-  JobOpened,
   ListEnd,
   MergeRequestPage,
   MergeRequestRow,
   OpenReply,
+  PageOpened,
 } from "./mergeRequestDomain";
 export type { MergeRequestSource } from "./MergeRequestSource";
 export type {

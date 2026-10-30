@@ -1,10 +1,10 @@
 import type * as Generated from "./bindings";
-import { isJobPage, isMergeRequestIid, type JobPage, type MergeRequestIid } from "./domain";
+import { isMergeRequestIid, isWebPage, type MergeRequestIid, type WebPage } from "./domain";
 import { branded } from "./validate";
 
 export type GitLabProject = Readonly<Generated.GitLabProject>;
 type FailedJob = Readonly<Omit<Generated.FailedJob, "page">> & {
-  readonly page: JobPage | null;
+  readonly page: WebPage | null;
 };
 type Pipeline = {
   readonly status: Generated.CiStatus;
@@ -12,12 +12,13 @@ type Pipeline = {
   readonly moreFailedJobs: boolean;
 };
 export type MergeRequestRow = Readonly<
-  Omit<Generated.MergeRequestRow, "iid" | "createdAt" | "pipeline">
+  Omit<Generated.MergeRequestRow, "iid" | "createdAt" | "pipeline" | "page">
 > & {
   readonly iid: MergeRequestIid;
   /** Milliseconds since 1970, from GitLab's ISO 8601 time. */
   readonly createdAt: number;
   readonly pipeline: Pipeline | null;
+  readonly page: WebPage | null;
 };
 export type MergeRequestPage = {
   readonly me: string | null;
@@ -27,10 +28,10 @@ export type ListEnd = Readonly<Generated.ListEnd>;
 export type OpenReply =
   | Readonly<Exclude<Generated.OpenReply, { kind: "missingCommit" }>>
   | { readonly kind: "missingCommit"; readonly shortId: string };
-export type JobOpened = Readonly<Generated.JobOpened>;
+export type PageOpened = Readonly<Generated.PageOpened>;
 
-function toJobPage(text: string, field: string): JobPage {
-  if (!isJobPage(text)) {
+function toWebPage(text: string, field: string): WebPage {
+  if (!isWebPage(text)) {
     throw new Error(`${field} must be an https address, got "${text}"`);
   }
   return text;
@@ -49,7 +50,7 @@ function toPipeline(raw: Generated.Pipeline, field: string): Pipeline {
     status: raw.status,
     failedJobs: raw.failedJobs.map((job, at) => ({
       ...job,
-      page: job.page === null ? null : toJobPage(job.page, `${field}.failedJobs[${at}].page`),
+      page: job.page === null ? null : toWebPage(job.page, `${field}.failedJobs[${at}].page`),
     })),
     moreFailedJobs: raw.moreFailedJobs,
   };
@@ -62,6 +63,7 @@ function toRow(raw: Generated.MergeRequestRow, index: number): MergeRequestRow {
     iid: branded(raw.iid, isMergeRequestIid, `${field}.iid`),
     createdAt: toTime(raw.createdAt, `${field}.createdAt`),
     pipeline: raw.pipeline === null ? null : toPipeline(raw.pipeline, `${field}.pipeline`),
+    page: raw.page === null ? null : toWebPage(raw.page, `${field}.page`),
   };
 }
 

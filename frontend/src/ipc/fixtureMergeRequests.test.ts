@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { isJobPage, isMergeRequestIid } from "./domain";
+import { isMergeRequestIid, isWebPage } from "./domain";
 import { createFixtureCompareSource } from "./fixtureCompare";
 import {
   ALREADY_OPEN_IID,
@@ -208,23 +208,33 @@ test.each([
   expect(answered).toEqual({ ok: true, value: reply });
 });
 
-test("a job page the list offers opens as logged (catches a click that leaves no trace)", async () => {
+test.each([
+  "https://gitlab.example/taskboard/taskboard/-/jobs/9001",
+  "https://gitlab.example/taskboard/taskboard/-/merge_requests/639",
+])("the listed page %s opens as logged (catches a click that leaves no trace)", async (page) => {
   const lines: string[] = [];
-  const page = "https://gitlab.example/taskboard/taskboard/-/jobs/9001";
   const { pages } = await listed(source("?mr=list"));
-  const offered = pages
-    .flatMap((each) => each.rows)
-    .flatMap((row) => row.pipeline?.failedJobs ?? [])
-    .map((job) => job.page);
+  const rows = pages.flatMap((each) => each.rows);
+  const offered = [
+    ...rows.map((row) => row.page),
+    ...rows.flatMap((row) => row.pipeline?.failedJobs ?? []).map((job) => job.page),
+  ];
   expect(offered).toContain(page);
-  if (!isJobPage(page)) {
-    throw new Error(`${page} is not a job page`);
+  if (!isWebPage(page)) {
+    throw new Error(`${page} is not a web page`);
   }
-  expect(await source("?mr=list", lines).openJobPage(page)).toEqual({
+  expect(await source("?mr=list", lines).openPage(page)).toEqual({
     ok: true,
     value: { kind: "opened" },
   });
-  expect(lines).toEqual([`mergeRequests.fixture_job {"page":"${page}"}`]);
+  expect(lines).toEqual([`mergeRequests.fixture_page {"page":"${page}"}`]);
+});
+
+test("every listed row has its own merge request's page", async () => {
+  const { pages } = await listed(source("?mr=list"));
+  for (const row of pages.flatMap((each) => each.rows)) {
+    expect(row.page).toBe(`https://gitlab.example/taskboard/taskboard/-/merge_requests/${row.iid}`);
+  }
 });
 
 test("the compare and range fixtures answer ?mr beside their own parameters", async () => {

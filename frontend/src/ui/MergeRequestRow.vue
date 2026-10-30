@@ -5,7 +5,7 @@ import LoaderCircle from "~icons/lucide/loader-circle";
 import MessageSquare from "~icons/lucide/message-square";
 import ThumbsUp from "~icons/lucide/thumbs-up";
 
-import type { JobPage, MergeRequestIid, MergeRequestRow } from "../ipc";
+import type { MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
 import { createdAgo } from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
 import type { Opening } from "./mergeRequests";
@@ -14,11 +14,16 @@ import {
   discussionsText,
   mergeRequestReference,
   openChangesTitle,
+  openPageTitle,
   openReplyText,
+  type PageKind,
 } from "./mergeRequestsText";
 
 const props = defineProps<{ row: MergeRequestRow; now: number; opening: Opening | null }>();
-const emit = defineEmits<{ open: [iid: MergeRequestIid]; openJob: [page: JobPage] }>();
+const emit = defineEmits<{
+  open: [iid: MergeRequestIid];
+  openPage: [clicked: PageKind, page: WebPage];
+}>();
 
 const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
 
@@ -28,6 +33,7 @@ const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
 const discussions = computed(() => discussionsText(props.row.openDiscussions));
 const approvals = computed(() => approvalsText(props.row.approvals));
 const openTitle = computed(() => openChangesTitle(props.row.iid));
+const pageTitle = computed(() => openPageTitle(props.row.iid));
 const fetching = computed(() => props.opening?.kind === "fetching");
 const sentence = computed(() => {
   const opening = props.opening;
@@ -37,13 +43,33 @@ const sentence = computed(() => {
   const reply = opening.kind === "opened" ? ({ kind: "opened" } as const) : opening.reply;
   return { text: openReplyText(reply, props.row.iid), refused: opening.kind === "refused" };
 });
+
+function openPage(): void {
+  if (props.row.page !== null) {
+    emit("openPage", "mergeRequest", props.row.page);
+  }
+}
 </script>
 
 <template>
-  <li class="flex flex-col gap-0.5 border-b border-separator px-3 py-2">
+  <li
+    class="flex flex-col gap-0.5 border-b border-separator px-3 py-2"
+    :class="{ 'cursor-pointer hover:bg-row-hover': row.page !== null }"
+    @click="openPage"
+  >
     <div class="flex items-center gap-3">
       <div class="flex min-w-0 flex-1 items-baseline gap-2">
-        <span class="truncate" :title="row.title">{{ row.title }}</span>
+        <button
+          v-if="row.page !== null"
+          type="button"
+          class="min-w-0 truncate rounded text-left"
+          :title="pageTitle"
+          :aria-label="pageTitle"
+          @click.stop="openPage"
+        >
+          <span :title="row.title">{{ row.title }}</span>
+        </button>
+        <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
         <span class="shrink-0 text-fg-muted">{{ mr }}</span>
         <span class="shrink-0 text-fg-muted" :title="createdTitle">{{ created }}</span>
       </div>
@@ -65,11 +91,11 @@ const sentence = computed(() => {
         <ThumbsUp class="size-4" aria-hidden="true" />
         <span aria-hidden="true">{{ row.approvals }}</span>
       </span>
-      <span class="flex w-7 shrink-0 justify-center">
+      <span class="flex w-7 shrink-0 cursor-default justify-center" @click.stop>
         <CiStatusBox
           v-if="row.pipeline !== null"
           :pipeline="row.pipeline"
-          @open-job="emit('openJob', $event)"
+          @open-job="emit('openPage', 'job', $event)"
         />
       </span>
       <button
@@ -78,8 +104,8 @@ const sentence = computed(() => {
         :aria-label="openTitle"
         :aria-busy="fetching"
         :disabled="fetching"
-        class="shrink-0 rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-        @click="emit('open', row.iid)"
+        class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+        @click.stop="emit('open', row.iid)"
       >
         <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
         <FileDiff v-else class="size-4" aria-hidden="true" />

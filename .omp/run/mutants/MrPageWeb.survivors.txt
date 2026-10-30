@@ -1,0 +1,2 @@
+just mutants HEAD: 851 killed, 85 survived, 18 no-cov (89.20%); one survivor on a changed line, the rest on unchanged lines
+frontend/src/ui/mergeRequestsText.ts:128 ConditionalExpression/BlockStatement (NoCoverage) on pageProblemText's `default: { const _exhaustive: never = opened }` — gate-covered: vue-tsc proves this arm unreachable (TS3).

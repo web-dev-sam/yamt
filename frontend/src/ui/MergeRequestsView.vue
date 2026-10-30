@@ -32,7 +32,7 @@ const MINUTE_MS = 60_000;
 const LIST_FILTERS: readonly ListFilter[] = ["assignee", "reviewer", "label"];
 
 const requests = useMergeRequests();
-const { rows, listing, failure, filters, shownRows, choices, summary, openings, jobProblem } =
+const { rows, listing, failure, filters, shownRows, choices, summary, openings, pageProblem } =
   requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const focusedBefore = document.activeElement;
@@ -122,16 +122,16 @@ function escapePressed(event: KeyboardEvent): void {
       </button>
     </div>
     <p
-      v-if="jobProblem !== null"
+      v-if="pageProblem !== null"
       role="alert"
       class="flex shrink-0 items-center gap-2 border-b border-separator px-3 py-1.5 text-problem-error"
     >
-      {{ jobProblem }}
+      {{ pageProblem }}
       <button
         type="button"
         :aria-label="DISMISS_LABEL"
         class="ml-auto rounded p-1 text-fg hover:bg-hover"
-        @click="requests.dismissJobProblem"
+        @click="requests.dismissPageProblem"
       >
         <X class="size-4" aria-hidden="true" />
       </button>
@@ -167,7 +167,7 @@ function escapePressed(event: KeyboardEvent): void {
           :now="nowMs"
           :opening="openings.get(row.iid) ?? null"
           @open="requests.openChanges"
-          @open-job="requests.openJob"
+          @open-page="requests.openPage"
         />
       </ul>
     </template>

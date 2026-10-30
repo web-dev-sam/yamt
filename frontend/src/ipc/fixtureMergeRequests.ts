@@ -142,8 +142,8 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
       await pause(OPEN_PAUSE_MS);
       return { ok: true, value: toOpenReply(OPEN_REPLIES[iid] ?? { kind: "opened" }) };
     },
-    async openJobPage(page) {
-      log.info("mergeRequests.fixture_job", { page });
+    async openPage(page) {
+      log.info("mergeRequests.fixture_page", { page });
       return { ok: true, value: { kind: "opened" } };
     },
   };

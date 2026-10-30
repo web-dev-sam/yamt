@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
-import { isJobPage, isMergeRequestIid } from "./domain";
+import { isMergeRequestIid, isWebPage } from "./domain";
 import type { MergeRequestPage } from "./mergeRequestDomain";
 import { createTauriMergeRequests } from "./tauriMergeRequests";
 import { branded } from "./validate";
@@ -10,7 +10,7 @@ const commands = vi.hoisted(() => ({
   findGitlabProject: vi.fn(),
   listMergeRequests: vi.fn(),
   openMergeRequest: vi.fn(),
-  openJobPage: vi.fn(),
+  openPage: vi.fn(),
 }));
 
 vi.mock("./bindings", () => ({ commands }));
@@ -34,6 +34,7 @@ const ROW: Generated.MergeRequestRow = {
   openDiscussions: 0,
   approvals: 2,
   pipeline: null,
+  page: null,
 };
 
 const STOPPED = { kind: "WorkerStopped" };
@@ -173,18 +174,18 @@ test("opening passes the iid and camelCases a missing commit", async () => {
   expect(reply).toEqual({ ok: true, value: { kind: "missingCommit", shortId: "531ea52" } });
 });
 
-test("a job page is passed as it came and its answer comes back", async () => {
-  const page = "https://gitlab.example/x/-/jobs/7";
-  if (!isJobPage(page)) {
-    throw new Error("not a job page");
+test("a page is passed as it came and its answer comes back", async () => {
+  const page = "https://gitlab.example/x/-/merge_requests/7";
+  if (!isWebPage(page)) {
+    throw new Error("not a web page");
   }
-  commands.openJobPage.mockResolvedValue({ kind: "notOffered" });
+  commands.openPage.mockResolvedValue({ kind: "notOffered" });
 
-  expect(await createTauriMergeRequests().openJobPage(page)).toEqual({
+  expect(await createTauriMergeRequests().openPage(page)).toEqual({
     ok: true,
     value: { kind: "notOffered" },
   });
-  expect(commands.openJobPage).toHaveBeenCalledWith(page);
+  expect(commands.openPage).toHaveBeenCalledWith(page);
 });
 
 test.each([

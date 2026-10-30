@@ -9,7 +9,7 @@ import CircleX from "~icons/lucide/circle-x";
 import Clock from "~icons/lucide/clock";
 import Cog from "~icons/lucide/cog";
 
-import type { JobPage, MergeRequestRow } from "../ipc";
+import type { MergeRequestRow, WebPage } from "../ipc";
 import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
 import type { Point } from "./menuPosition";
 import {
@@ -25,7 +25,7 @@ type FailedJob = Pipeline["failedJobs"][number];
 type StatusLook = { readonly icon: Component; readonly tone: string };
 
 const props = defineProps<{ pipeline: Pipeline }>();
-const emit = defineEmits<{ openJob: [page: JobPage] }>();
+const emit = defineEmits<{ openJob: [page: WebPage] }>();
 
 const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
   passed: { icon: CircleCheck, tone: "text-success-signal" },

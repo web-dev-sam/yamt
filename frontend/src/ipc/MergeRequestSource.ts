@@ -1,10 +1,10 @@
-import type { JobPage, MergeRequestIid, SourceResult } from "./domain";
+import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
 import type {
   GitLabProject,
-  JobOpened,
   ListEnd,
   MergeRequestPage,
   OpenReply,
+  PageOpened,
 } from "./mergeRequestDomain";
 
 export interface MergeRequestSource {
@@ -12,5 +12,5 @@ export interface MergeRequestSource {
   /** Every page reaches `onPage` before the returned promise settles, and none after. */
   listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>;
   openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>;
-  openJobPage(page: JobPage): Promise<SourceResult<JobOpened>>;
+  openPage(page: WebPage): Promise<SourceResult<PageOpened>>;
 }

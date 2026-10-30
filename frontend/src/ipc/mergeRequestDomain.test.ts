@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import type * as Generated from "./bindings";
-import { isJobPage, isMergeRequestIid } from "./domain";
+import { isMergeRequestIid, isWebPage } from "./domain";
 import { toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
 
 const ROW: Generated.MergeRequestRow = {
@@ -27,6 +27,7 @@ const ROW: Generated.MergeRequestRow = {
     ],
     moreFailedJobs: true,
   },
+  page: "https://gitlab.example/taskboard/taskboard/-/merge_requests/13",
 };
 
 function page(row: Partial<Generated.MergeRequestRow>): Generated.MergeRequestPage {
@@ -60,9 +61,9 @@ test.each([-1, 1.5, Number.NaN])("an iid %d is refused (catches an unchecked bra
   expect(isMergeRequestIid(iid)).toBe(false);
 });
 
-test("an iid and a job page are branded as they came", () => {
+test("an iid and a web page are branded as they came", () => {
   expect(isMergeRequestIid(0)).toBe(true);
-  expect(isJobPage("https://gitlab.example/x/-/jobs/1")).toBe(true);
+  expect(isWebPage("https://gitlab.example/x/-/jobs/1")).toBe(true);
 });
 
 test.each(["http://gitlab.example/x/-/jobs/1", "//evil/x", "/x/-/jobs/1", ""])(
@@ -80,8 +81,19 @@ test.each(["http://gitlab.example/x/-/jobs/1", "//evil/x", "/x/-/jobs/1", ""])(
   },
 );
 
-test("no pipeline stays null", () => {
-  expect(toMergeRequestPage(page({ pipeline: null })).rows[0]?.pipeline).toBeNull();
+test.each(["http://gitlab.example/x/-/merge_requests/1", "//evil/x", "/x/-/merge_requests/1", ""])(
+  "a merge request page %j that is not https is refused like a job's",
+  (address) => {
+    expect(() => toMergeRequestPage(page({ page: address }))).toThrow(
+      `rows[0].page must be an https address, got "${address}"`,
+    );
+  },
+);
+
+test("no pipeline and no page stay null", () => {
+  const [row] = toMergeRequestPage(page({ pipeline: null, page: null })).rows;
+  expect(row?.pipeline).toBeNull();
+  expect(row?.page).toBeNull();
 });
 
 test("missingCommit names its short id in camelCase; other replies pass unchanged", () => {

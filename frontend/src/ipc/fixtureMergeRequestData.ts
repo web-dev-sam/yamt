@@ -114,8 +114,9 @@ function labels(index: number): string[] {
 function row(index: number): Generated.MergeRequestRow {
   const title = cycled(TITLES, index);
   const draft = index % DRAFT_EVERY === DRAFT_EVERY - 1;
+  const iid = NEWEST_IID - index;
   return {
-    iid: NEWEST_IID - index,
+    iid,
     title: draft ? `Draft: ${title}` : title,
     createdAt: new Date(NEWEST_CREATED - index * index * CREATED_STEP_MS).toISOString(),
     draft,
@@ -125,6 +126,7 @@ function row(index: number): Generated.MergeRequestRow {
     openDiscussions: index % BUG_EVERY,
     approvals: index % NO_ASSIGNEE_EVERY,
     pipeline: pipeline(index),
+    page: `${ORIGIN}/-/merge_requests/${iid}`,
   };
 }
 

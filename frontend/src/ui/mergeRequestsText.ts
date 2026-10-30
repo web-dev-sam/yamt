@@ -1,7 +1,9 @@
-import type { JobOpened, ListEnd, MergeRequestIid, OpenReply } from "../ipc";
+import type { ListEnd, MergeRequestIid, OpenReply, PageOpened } from "../ipc";
 import type { DraftFilter } from "../mergeRequests";
 import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
 import { counted } from "./serverText";
+
+export type PageKind = "job" | "mergeRequest";
 
 export const PAGE_TITLE = "Merge requests";
 export const LIST_LABEL = "Open merge requests";
@@ -44,6 +46,10 @@ export function mergeRequestReference(iid: MergeRequestIid): string {
 
 export function openChangesTitle(iid: MergeRequestIid): string {
   return `Open the changes of ${mergeRequestReference(iid)}`;
+}
+
+export function openPageTitle(iid: MergeRequestIid): string {
+  return `Open ${mergeRequestReference(iid)} on GitLab`;
 }
 
 export function discussionsText(count: number): string {
@@ -106,12 +112,17 @@ export function openReplyText(reply: OpenReply, iid: MergeRequestIid): string {
   return reply.kind === "opened" ? `Opened ${mr} in a new window.` : openRefusedText(reply, mr);
 }
 
-export function jobOpenedText(opened: JobOpened): string {
+const NOT_OFFERED: Readonly<Record<PageKind, string>> = {
+  job: "This job's page was not listed by GitLab, so yamt did not open it.",
+  mergeRequest: "This merge request's page was not listed by GitLab, so yamt did not open it.",
+};
+
+export function pageProblemText(opened: PageOpened, clicked: PageKind): string | null {
   switch (opened.kind) {
     case "opened":
-      return "Opened the job's log in the browser.";
+      return null;
     case "notOffered":
-      return "This job's page was not listed by GitLab, so yamt did not open it.";
+      return NOT_OFFERED[clicked];
     case "failed":
       return `Could not open the browser: ${opened.message}`;
     default: {
