@@ -4678,6 +4678,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "yamt-local-merge"
+version = "0.6.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "yamt-conflict-repo",
+ "yamt-gitio",
+]
+
+[[package]]
 name = "yamt-lsp-host"
 version = "0.6.2"
 dependencies = [

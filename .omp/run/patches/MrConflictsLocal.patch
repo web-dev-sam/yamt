@@ -1,0 +1,2129 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index cc1f7f8..e2b90a6 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4677,6 +4677,20 @@ dependencies = [
+  "yamt-conflict-repo",
+ ]
+ 
++[[package]]
++name = "yamt-local-merge"
++version = "0.6.2"
++dependencies = [
++ "serde",
++ "serde_json",
++ "specta",
++ "tempfile",
++ "thiserror 2.0.21",
++ "tracing",
++ "yamt-conflict-repo",
++ "yamt-gitio",
++]
++
+ [[package]]
+ name = "yamt-lsp-host"
+ version = "0.6.2"
+diff --git a/crates/local-merge/AGENTS.md b/crates/local-merge/AGENTS.md
+new file mode 100644
+index 0000000..aedd875
+--- /dev/null
++++ b/crates/local-merge/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. A merge request's merge in the user's own checkout (plan §2 #139–#143, request `docs/slices/request-mr-conflicts.md` rules 4–10, design `docs/slices/briefs/mr-conflicts-design.md` §4.2–§4.6); depends on `yamt-gitio` only among yamt crates, never on tauri or GitLab (`scripts/arch-check.sh`). `lib.rs` (the IPC types `Started`, `Refusal`, `ReturnTo`, `Leftover`, `BranchBefore`, `MergeView`, `LocalMerge` (`merging` with `windowOpen`), `PushReply`; `MergeRequestBranches`, `PushOffer`, `LiveMerge` (`view`, `iid`, `restore`, `committed`), `WindowClaim`; `Error`; `local_merge`, `find_live`, `claim_window` (`try_lock` every 50 ms for up to 1 s), `window_is_open` (one `try_lock`, released at once); `git_message`: git's first stderr line), `record.rs` (the record `<git dir>/yamt-merge-request.json` through `Repo::git_path`, format 1: `MergeRecord`, `RecordedReturn`, `RecordedBranch`, never on the IPC; `read` (a newer format or unparsable JSON is `Err` with the reason), `write` (temp file, `sync_all`, rename), `remove`; `hold`, the `File::try_lock` of the start lock `yamt-merge-request.lock` and the window lock `yamt-merge-window.lock`, both never removed; `is_live`: git merging the recorded commit at the recorded head on the recorded branch), `start.rs` (`start`: design §4.2's thirteen steps in order — discover, start lock, the record (live → `AlreadyMerging`, unreadable → `RecordUnreadable` and kept, stale → removed), any operation → `Busy`, tracked changes, `fetch_branches`, the two remote-tracking tips, the local branch (created / unchanged / moved from / `LocalAhead`), `AlreadyContains`, the return place, the record written, `checkout -B` (refused → record removed, nothing changed), the upstream of a created branch, `merge --no-ff --no-commit <remote>/<target>` (the full `refs/remotes/…` when another ref has that short name), live afterwards or restored; any other git error before the checkout is `GitRefused` with `left` empty), `restore.rs` (`restore`: back to the branch or commit while HEAD is still the branch at the recorded head, then the created branch deleted or the moved one moved back (`branch --force`, or `reset --keep` when checked out) while it is still at that head; what does not match is a `Leftover`; the record removed), `push.rs` (`push`: `push_branch` to the recorded remote, `PUSH_TIMEOUT`). Tests: `tests/local_merge/` (one binary; `common.rs` builds `scripts/mr-conflict-repo.sh`'s repository and its fake GitLab), units in `record.rs` and `lib.rs`.
+diff --git a/crates/local-merge/Cargo.toml b/crates/local-merge/Cargo.toml
+new file mode 100644
+index 0000000..460d4cf
+--- /dev/null
++++ b/crates/local-merge/Cargo.toml
+@@ -0,0 +1,21 @@
++[package]
++name = "yamt-local-merge"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++yamt-gitio.workspace = true
++serde.workspace = true
++serde_json.workspace = true
++specta.workspace = true
++thiserror.workspace = true
++tracing.workspace = true
++
++[dev-dependencies]
++yamt-conflict-repo.workspace = true
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/local-merge/src/lib.rs b/crates/local-merge/src/lib.rs
+new file mode 100644
+index 0000000..eaa960e
+--- /dev/null
++++ b/crates/local-merge/src/lib.rs
+@@ -0,0 +1,364 @@
++//! A merge request's merge in the user's own checkout (plan §2 #139–#143): the checks before it, the fetch, the
++//! checkout and the merge, the record that survives a restart, the restore after Abort, the push, and the locks that
++//! keep it to one start and one window at a time.
++#![forbid(unsafe_code)]
++
++mod push;
++mod record;
++mod restore;
++mod start;
++
++use std::fs::File;
++use std::io;
++use std::path::{Path, PathBuf};
++use std::thread;
++use std::time::{Duration, Instant};
++
++use serde::Serialize;
++use specta::Type;
++use yamt_gitio::Repo;
++
++use crate::record::{MergeRecord, RECORD_FILE, WINDOW_LOCK_FILE, hold, is_live};
++
++pub use push::push;
++pub use start::start;
++
++const CLAIM_RETRY: Duration = Duration::from_millis(50);
++const CLAIM_PATIENCE: Duration = Duration::from_secs(1);
++
++/// What resolving needs from GitLab: the merge request's branch, the branch it goes into and the remote holding both.
++pub struct MergeRequestBranches {
++    pub iid: u32,
++    pub remote: String,
++    pub branch: String,
++    pub target: String,
++}
++
++/// A started merge: `target` merged into `branch`, stopped before its commit.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct Started {
++    pub branch: String,
++    pub target: String,
++    /// false: GitLab's "has conflicts" was stale, the merge is clean.
++    pub conflicts: bool,
++}
++
++/// Why a start changed nothing (or, for `GitRefused` with leftovers, could not put everything back).
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum Refusal {
++    /// `Some`: the iid of the unfinished merge; `None`: another start holds the start lock.
++    AlreadyMerging {
++        iid: Option<u32>,
++    },
++    /// git is in the middle of another operation.
++    Busy,
++    UncommittedChanges,
++    FetchFailed {
++        message: String,
++    },
++    /// The local branch has commits GitLab's does not.
++    LocalAhead {
++        branch: String,
++    },
++    AlreadyContains {
++        branch: String,
++        target: String,
++    },
++    GitRefused {
++        message: String,
++        left: Vec<Leftover>,
++    },
++    RecordUnreadable {
++        path: String,
++        message: String,
++    },
++}
++
++/// Where Abort returns HEAD to.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum ReturnTo {
++    Branch {
++        name: String,
++    },
++    /// `id`: the commit's first 7 hex characters.
++    Commit {
++        id: String,
++    },
++}
++
++/// What a restore could not put back.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum Leftover {
++    /// HEAD moved after the merge started, so it stays where it is.
++    NotReturned {
++        to: ReturnTo,
++    },
++    ReturnRefused {
++        to: ReturnTo,
++        message: String,
++    },
++    /// The branch moved after the merge started, so it stays where it is.
++    BranchKept {
++        branch: String,
++    },
++    BranchRefused {
++        branch: String,
++        message: String,
++    },
++}
++
++/// What the start did to the merge request's local branch.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum BranchBefore {
++    Created,
++    /// `id`: the first 7 hex characters of the commit it was fast-forwarded from.
++    MovedFrom {
++        id: String,
++    },
++    Unchanged,
++}
++
++/// The recorded merge as the merge window shows it.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct MergeView {
++    pub branch: String,
++    pub target: String,
++    /// `None` when the branch itself was checked out before.
++    pub return_to: Option<ReturnTo>,
++    pub branch_before: BranchBefore,
++}
++
++/// Whether a merge yamt started is unfinished in a repository.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum LocalMerge {
++    Free,
++    #[serde(rename_all = "camelCase")]
++    Merging {
++        iid: u32,
++        window_open: bool,
++    },
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum PushReply {
++    Pushed,
++    /// git's words: the ref's rejection, else its first `fatal:`/`error:` line.
++    Failed {
++        message: String,
++    },
++}
++
++/// The branch a committed merge may be pushed to, and the remote it came from.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct PushOffer {
++    remote: String,
++    branch: String,
++}
++
++impl PushOffer {
++    #[must_use]
++    pub fn branch(&self) -> &str {
++        &self.branch
++    }
++}
++
++/// The recorded merge while git is still in it.
++pub struct LiveMerge {
++    repo: Repo,
++    path: PathBuf,
++    record: MergeRecord,
++}
++
++/// The merge window's hold on `<git dir>/yamt-merge-window.lock`; dropping it (or the process ending) releases it.
++#[derive(Debug)]
++pub struct WindowClaim {
++    _lock: File,
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum Error {
++    #[error(transparent)]
++    Git(#[from] yamt_gitio::Error),
++    #[error("cannot lock {}: {source}", path.display())]
++    LockFailed { path: PathBuf, source: io::Error },
++}
++
++pub type Result<T, E = Error> = std::result::Result<T, E>;
++
++impl LiveMerge {
++    #[must_use]
++    pub fn view(&self) -> MergeView {
++        self.record.view()
++    }
++
++    #[must_use]
++    pub fn iid(&self) -> u32 {
++        self.record.iid
++    }
++
++    /// After git's merge abort: HEAD back where it was, the branch as it was; what does not match the record
++    /// stays and is listed. Removes the record.
++    #[must_use]
++    pub fn restore(self) -> Vec<Leftover> {
++        restore::restore(&self.repo, &self.path, &self.record)
++    }
++
++    /// After the merge commit: removes the record.
++    #[must_use]
++    pub fn committed(self) -> PushOffer {
++        record::remove(&self.path);
++        PushOffer {
++            remote: self.record.remote,
++            branch: self.record.branch,
++        }
++    }
++}
++
++/// `Merging` while a live record exists; any problem reading it is `Free`, with a warning.
++#[must_use]
++pub fn local_merge(root: &Path) -> LocalMerge {
++    match find_live(root) {
++        Ok(Some(live)) => LocalMerge::Merging {
++            iid: live.iid(),
++            window_open: window_is_open(root),
++        },
++        Ok(None) => LocalMerge::Free,
++        Err(error) => {
++            tracing::warn!(%error, "cannot tell whether a merge yamt started is in progress");
++            LocalMerge::Free
++        }
++    }
++}
++
++/// The recorded merge when git is still in it; an unreadable or newer record is `Ok(None)`, with a warning.
++pub fn find_live(root: &Path) -> Result<Option<LiveMerge>> {
++    let repo = Repo::discover(root)?;
++    let path = repo.git_path(RECORD_FILE)?;
++    let record = match record::read(&path) {
++        Ok(Some(record)) => record,
++        Ok(None) => return Ok(None),
++        Err(message) => {
++            tracing::warn!(path = %path.display(), message, "cannot read the merge record");
++            return Ok(None);
++        }
++    };
++    let stop = repo.stop()?;
++    let current_branch = repo.current_branch()?;
++    if !is_live(&record, &stop, current_branch.as_deref()) {
++        return Ok(None);
++    }
++    Ok(Some(LiveMerge { repo, path, record }))
++}
++
++/// Takes `<git dir>/yamt-merge-window.lock`, retrying `try_lock` every 50 ms for up to 1 s; Ok(None) when another
++/// process still holds it.
++pub fn claim_window(root: &Path) -> Result<Option<WindowClaim>> {
++    let path = Repo::discover(root)?.git_path(WINDOW_LOCK_FILE)?;
++    let deadline = Instant::now() + CLAIM_PATIENCE;
++    loop {
++        let held = hold(&path).map_err(|source| Error::LockFailed {
++            path: path.clone(),
++            source,
++        })?;
++        if let Some(file) = held {
++            return Ok(Some(WindowClaim { _lock: file }));
++        }
++        if Instant::now() >= deadline {
++            return Ok(None);
++        }
++        thread::sleep(CLAIM_RETRY);
++    }
++}
++
++/// One `try_lock` of the window lock, released at once: true when another process holds it.
++#[must_use]
++pub fn window_is_open(root: &Path) -> bool {
++    let held = Repo::discover(root)
++        .and_then(|repo| repo.git_path(WINDOW_LOCK_FILE))
++        .map_err(|error| error.to_string())
++        .and_then(|path| hold(&path).map_err(|error| error.to_string()));
++    match held {
++        Ok(Some(_released_at_once)) => false,
++        Ok(None) => true,
++        Err(error) => {
++            tracing::warn!(error, "cannot tell whether the merge window is open");
++            false
++        }
++    }
++}
++
++/// git's first stderr line when git refused, else the error in words.
++pub(crate) fn git_message(error: &yamt_gitio::Error) -> String {
++    if let yamt_gitio::Error::GitFailed { stderr, .. } = error
++        && let Some(line) = yamt_gitio::first_line(stderr.as_bytes())
++    {
++        return line;
++    }
++    error.to_string()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    use serde_json::json;
++
++    #[test]
++    fn the_window_reads_camel_case_fields_tagged_by_kind() {
++        let merging = LocalMerge::Merging {
++            iid: 21,
++            window_open: true,
++        };
++        let view = MergeView {
++            branch: "feature/x".to_owned(),
++            target: "main".to_owned(),
++            return_to: None,
++            branch_before: BranchBefore::MovedFrom {
++                id: "3f1c2a9".to_owned(),
++            },
++        };
++
++        let merging_json = json!({ "kind": "merging", "iid": 21, "windowOpen": true });
++        assert_eq!(serde_json::to_value(merging).unwrap(), merging_json);
++        let view_json = json!({
++            "branch": "feature/x", "target": "main", "returnTo": null,
++            "branchBefore": { "kind": "movedFrom", "id": "3f1c2a9" },
++        });
++        assert_eq!(serde_json::to_value(view).unwrap(), view_json);
++        let refusal = Refusal::AlreadyMerging { iid: None };
++        let refusal_json = json!({ "kind": "alreadyMerging", "iid": null });
++        assert_eq!(serde_json::to_value(refusal).unwrap(), refusal_json);
++    }
++
++    #[test]
++    fn git_message_is_gits_first_stderr_line_else_the_error() {
++        let refused = yamt_gitio::Error::GitFailed {
++            args: vec!["checkout".to_owned()],
++            status: Some(1),
++            stderr: "\nerror: first\nhint: advice\n".to_owned(),
++        };
++        let silent = yamt_gitio::Error::GitFailed {
++            args: vec!["checkout".to_owned()],
++            status: Some(1),
++            stderr: String::new(),
++        };
++
++        assert_eq!(git_message(&refused), "error: first");
++        assert_eq!(
++            git_message(&silent),
++            "`checkout` failed with exit status 1: "
++        );
++        assert_eq!(
++            git_message(&yamt_gitio::Error::GitNotFound),
++            "git executable not found on PATH"
++        );
++    }
++}
+diff --git a/crates/local-merge/src/push.rs b/crates/local-merge/src/push.rs
+new file mode 100644
+index 0000000..f90e407
+--- /dev/null
++++ b/crates/local-merge/src/push.rs
+@@ -0,0 +1,17 @@
++use std::path::Path;
++
++use yamt_gitio::{PUSH_TIMEOUT, Repo};
++
++use crate::{PushOffer, PushReply};
++
++/// A plain push of the offered branch to the remote it came from: never forced, never prompting.
++#[must_use]
++pub fn push(root: &Path, offer: &PushOffer) -> PushReply {
++    let pushed = Repo::discover(root)
++        .map_err(|error| error.to_string())
++        .and_then(|repo| repo.push_branch(&offer.remote, &offer.branch, PUSH_TIMEOUT));
++    match pushed {
++        Ok(()) => PushReply::Pushed,
++        Err(message) => PushReply::Failed { message },
++    }
++}
+diff --git a/crates/local-merge/src/record.rs b/crates/local-merge/src/record.rs
+new file mode 100644
+index 0000000..11c2add
+--- /dev/null
++++ b/crates/local-merge/src/record.rs
+@@ -0,0 +1,314 @@
++use std::fs::{self, File, OpenOptions, TryLockError};
++use std::io::{self, Write};
++use std::path::{Path, PathBuf};
++
++use serde::{Deserialize, Serialize};
++use yamt_gitio::{Operation, Stop};
++
++use crate::{BranchBefore, MergeView, ReturnTo};
++
++pub(crate) const RECORD_FILE: &str = "yamt-merge-request.json";
++pub(crate) const START_LOCK_FILE: &str = "yamt-merge-request.lock";
++pub(crate) const WINDOW_LOCK_FILE: &str = "yamt-merge-window.lock";
++pub(crate) const FORMAT: u32 = 1;
++const TEMPORARY_SUFFIX: &str = ".tmp";
++const SHORT_ID_LEN: usize = 7;
++
++/// What a start changed and what Abort puts back: `<git dir>/yamt-merge-request.json`.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(crate) struct MergeRecord {
++    pub format: u32,
++    pub iid: u32,
++    pub remote: String,
++    pub branch: String,
++    pub target: String,
++    pub return_to: RecordedReturn,
++    pub branch_before: RecordedBranch,
++    /// The full id of the branch tip the start checked out.
++    pub head: String,
++    /// The full id of the target tip the start merged.
++    pub merging: String,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub(crate) enum RecordedReturn {
++    Branch { name: String },
++    Detached { commit: String },
++}
++
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub(crate) enum RecordedBranch {
++    Created,
++    MovedFrom { commit: String },
++    Unchanged,
++}
++
++#[derive(Deserialize)]
++struct FormatOnly {
++    format: u32,
++}
++
++impl MergeRecord {
++    /// Whether the start found the merge request's branch already checked out.
++    pub fn returns_to_itself(&self) -> bool {
++        matches!(&self.return_to, RecordedReturn::Branch { name } if *name == self.branch)
++    }
++
++    pub fn view(&self) -> MergeView {
++        let return_to = if self.returns_to_itself() {
++            None
++        } else {
++            Some(self.return_to.shown())
++        };
++        let branch_before = match &self.branch_before {
++            RecordedBranch::Created => BranchBefore::Created,
++            RecordedBranch::MovedFrom { commit } => BranchBefore::MovedFrom {
++                id: short_id(commit),
++            },
++            RecordedBranch::Unchanged => BranchBefore::Unchanged,
++        };
++        MergeView {
++            branch: self.branch.clone(),
++            target: self.target.clone(),
++            return_to,
++            branch_before,
++        }
++    }
++}
++
++impl RecordedReturn {
++    pub fn shown(&self) -> ReturnTo {
++        match self {
++            RecordedReturn::Branch { name } => ReturnTo::Branch { name: name.clone() },
++            RecordedReturn::Detached { commit } => ReturnTo::Commit {
++                id: short_id(commit),
++            },
++        }
++    }
++}
++
++fn short_id(commit: &str) -> String {
++    commit.chars().take(SHORT_ID_LEN).collect()
++}
++
++/// The record at `path`; `Ok(None)` when there is none, `Err` with the reason when it cannot be read, does not
++/// parse, or has a format newer than this yamt's.
++pub(crate) fn read(path: &Path) -> Result<Option<MergeRecord>, String> {
++    let bytes = match fs::read(path) {
++        Ok(bytes) => bytes,
++        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
++        Err(error) => return Err(error.to_string()),
++    };
++    let format = serde_json::from_slice::<FormatOnly>(&bytes)
++        .map_err(|error| error.to_string())?
++        .format;
++    if format > FORMAT {
++        return Err(format!(
++            "its format {format} is newer than this yamt reads ({FORMAT})"
++        ));
++    }
++    let record = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
++    Ok(Some(record))
++}
++
++/// Writes `record` to `<path>.tmp`, syncs it and renames it over `path`, so a crash leaves the old file or the new.
++pub(crate) fn write(path: &Path, record: &MergeRecord) -> io::Result<()> {
++    let bytes = serde_json::to_vec_pretty(record).map_err(io::Error::other)?;
++    let mut temporary = path.as_os_str().to_owned();
++    temporary.push(TEMPORARY_SUFFIX);
++    let temporary = PathBuf::from(temporary);
++    let mut file = File::create(&temporary)?;
++    file.write_all(&bytes)?;
++    file.sync_all()?;
++    fs::rename(&temporary, path)
++}
++
++/// Removes the record; a failure is logged, as nobody could act on it.
++pub(crate) fn remove(path: &Path) {
++    match fs::remove_file(path) {
++        Ok(()) => {}
++        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
++        Err(error) => {
++            tracing::warn!(path = %path.display(), %error, "cannot remove the merge record");
++        }
++    }
++}
++
++/// The lock file opened (created when missing) and locked; `None` when another open file holds the lock.
++pub(crate) fn hold(path: &Path) -> io::Result<Option<File>> {
++    let file = OpenOptions::new()
++        .create(true)
++        .truncate(false)
++        .write(true)
++        .open(path)?;
++    // The lock is the open file's own: the OS releases it when the file is closed or the process ends, also on
++    // `kill -9` (`File::try_lock`, flock(2)).
++    match file.try_lock() {
++        Ok(()) => Ok(Some(file)),
++        Err(TryLockError::WouldBlock) => Ok(None),
++        Err(TryLockError::Error(error)) => Err(error),
++    }
++}
++
++/// Whether git is still in the merge `record` started: merging the recorded commit, at the recorded head, on the
++/// recorded branch.
++pub(crate) fn is_live(record: &MergeRecord, stop: &Stop, current_branch: Option<&[u8]>) -> bool {
++    let merging_it = matches!(
++        &stop.operation,
++        Some(Operation::Merge { merging }) if merging.as_str() == record.merging
++    );
++    let at_head = stop
++        .head
++        .as_ref()
++        .is_some_and(|head| head.as_str() == record.head);
++    merging_it && at_head && current_branch == Some(record.branch.as_bytes())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    use yamt_gitio::Oid;
++
++    const HEAD: &str = "1111111111111111111111111111111111111111";
++    const MERGING: &str = "2222222222222222222222222222222222222222";
++    const OTHER: &str = "3333333333333333333333333333333333333333";
++    const BRANCH: &str = "feature/due-dates";
++
++    fn record() -> MergeRecord {
++        MergeRecord {
++            format: FORMAT,
++            iid: 21,
++            remote: "origin".to_owned(),
++            branch: BRANCH.to_owned(),
++            target: "main".to_owned(),
++            return_to: RecordedReturn::Branch {
++                name: "develop".to_owned(),
++            },
++            branch_before: RecordedBranch::MovedFrom {
++                commit: OTHER.to_owned(),
++            },
++            head: HEAD.to_owned(),
++            merging: MERGING.to_owned(),
++        }
++    }
++
++    fn merge_stop(merging: &str, head: &str) -> Stop {
++        Stop {
++            operation: Some(Operation::Merge {
++                merging: Oid::parse(merging).unwrap(),
++            }),
++            head: Some(Oid::parse(head).unwrap()),
++        }
++    }
++
++    #[test]
++    fn the_recorded_merge_at_its_head_on_its_branch_is_live() {
++        let stop = merge_stop(MERGING, HEAD);
++
++        assert!(is_live(&record(), &stop, Some(BRANCH.as_bytes())));
++    }
++
++    #[test]
++    fn any_mismatch_makes_the_record_stale() {
++        let on_branch = Some(BRANCH.as_bytes());
++        let another_merge = merge_stop(OTHER, HEAD);
++        let another_head = merge_stop(MERGING, OTHER);
++        let no_operation = Stop {
++            operation: None,
++            head: Some(Oid::parse(HEAD).unwrap()),
++        };
++        let no_head = Stop {
++            head: None,
++            ..merge_stop(MERGING, HEAD)
++        };
++        let cherry_pick = Stop {
++            operation: Some(Operation::CherryPick {
++                picking: Some(Oid::parse(MERGING).unwrap()),
++                progress: None,
++            }),
++            ..merge_stop(MERGING, HEAD)
++        };
++
++        assert!(!is_live(&record(), &another_merge, on_branch));
++        assert!(!is_live(&record(), &another_head, on_branch));
++        assert!(!is_live(&record(), &no_operation, on_branch));
++        assert!(!is_live(&record(), &no_head, on_branch));
++        assert!(!is_live(&record(), &cherry_pick, on_branch));
++        let at_head = merge_stop(MERGING, HEAD);
++        assert!(!is_live(&record(), &at_head, Some(b"develop")));
++        assert!(!is_live(&record(), &at_head, None));
++    }
++
++    #[test]
++    fn a_written_record_reads_back_and_leaves_no_temporary_file() {
++        let folder = tempfile::tempdir().unwrap();
++        let path = folder.path().join(RECORD_FILE);
++
++        write(&path, &record()).unwrap();
++
++        assert_eq!(read(&path), Ok(Some(record())));
++        let files = fs::read_dir(folder.path()).unwrap().count();
++        assert_eq!(files, 1);
++    }
++
++    #[test]
++    fn a_missing_record_is_none() {
++        let folder = tempfile::tempdir().unwrap();
++
++        assert_eq!(read(&folder.path().join(RECORD_FILE)), Ok(None));
++    }
++
++    #[test]
++    fn a_record_path_that_cannot_be_read_is_unreadable_not_missing() {
++        let folder = tempfile::tempdir().unwrap();
++
++        assert!(read(folder.path()).is_err());
++    }
++
++    #[test]
++    fn a_newer_format_or_unparsable_json_is_unreadable() {
++        let folder = tempfile::tempdir().unwrap();
++        let path = folder.path().join(RECORD_FILE);
++        let mut newer = serde_json::to_value(record()).unwrap();
++        newer["format"] = serde_json::json!(FORMAT + 1);
++
++        fs::write(&path, serde_json::to_vec(&newer).unwrap()).unwrap();
++        let newer_read = read(&path);
++        fs::write(&path, b"{ \"format\": 1, \"iid\": 21 }").unwrap();
++        let incomplete_read = read(&path);
++        fs::write(&path, b"not json").unwrap();
++        let garbage_read = read(&path);
++
++        let newer_message = "its format 2 is newer than this yamt reads (1)".to_owned();
++        assert_eq!(newer_read, Err(newer_message));
++        assert!(incomplete_read.is_err());
++        assert!(garbage_read.is_err());
++    }
++
++    #[test]
++    fn the_view_shortens_ids_and_omits_a_return_to_the_branch_itself() {
++        let mut detached = record();
++        detached.return_to = RecordedReturn::Detached {
++            commit: HEAD.to_owned(),
++        };
++        let mut on_itself = record();
++        on_itself.return_to = RecordedReturn::Branch {
++            name: BRANCH.to_owned(),
++        };
++
++        let id = "1111111".to_owned();
++        assert_eq!(detached.view().return_to, Some(ReturnTo::Commit { id }));
++        assert_eq!(on_itself.view().return_to, None);
++        let name = "develop".to_owned();
++        assert_eq!(record().view().return_to, Some(ReturnTo::Branch { name }));
++        let id = "3333333".to_owned();
++        assert_eq!(
++            record().view().branch_before,
++            BranchBefore::MovedFrom { id }
++        );
++    }
++}
+diff --git a/crates/local-merge/src/restore.rs b/crates/local-merge/src/restore.rs
+new file mode 100644
+index 0000000..79ab57a
+--- /dev/null
++++ b/crates/local-merge/src/restore.rs
+@@ -0,0 +1,102 @@
++use std::path::Path;
++
++use yamt_gitio::{Oid, Repo};
++
++use crate::record::{self, MergeRecord, RecordedBranch, RecordedReturn};
++use crate::{Leftover, git_message};
++
++/// Puts back what the start changed, as far as it still matches the record (design §4.3 "Abort" steps 1–3): HEAD
++/// returned while it is still the branch at the recorded head, then the branch deleted or moved back while it is
++/// still at that head. Removes the record. Runs after git's merge abort, or after a start that failed.
++pub(crate) fn restore(repo: &Repo, path: &Path, record: &MergeRecord) -> Vec<Leftover> {
++    let mut left = Vec::new();
++    if let Some(leftover) = return_head(repo, record) {
++        left.push(leftover);
++    }
++    if let Some(leftover) = put_branch_back(repo, record) {
++        left.push(leftover);
++    }
++    record::remove(path);
++    left
++}
++
++fn return_head(repo: &Repo, record: &MergeRecord) -> Option<Leftover> {
++    if record.returns_to_itself() {
++        return None;
++    }
++    let to = record.return_to.shown();
++    match is_on_branch_at_head(repo, record) {
++        Ok(true) => {}
++        Ok(false) => return Some(Leftover::NotReturned { to }),
++        Err(error) => {
++            let message = git_message(&error);
++            return Some(Leftover::ReturnRefused { to, message });
++        }
++    }
++    let returned = match &record.return_to {
++        RecordedReturn::Branch { name } => repo.checkout_branch(name),
++        RecordedReturn::Detached { commit } => {
++            Oid::parse(commit).and_then(|commit| repo.checkout_detached(&commit))
++        }
++    };
++    let message = git_message(&returned.err()?);
++    Some(Leftover::ReturnRefused { to, message })
++}
++
++fn is_on_branch_at_head(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<bool> {
++    Ok(is_checked_out(repo, record)? && repo.head_commit()?.as_str() == record.head)
++}
++
++fn is_checked_out(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<bool> {
++    Ok(repo.current_branch()?.as_deref() == Some(record.branch.as_bytes()))
++}
++
++fn put_branch_back(repo: &Repo, record: &MergeRecord) -> Option<Leftover> {
++    let put_back = match &record.branch_before {
++        RecordedBranch::Unchanged => return None,
++        RecordedBranch::Created => delete_created(repo, record),
++        RecordedBranch::MovedFrom { commit } => move_back(repo, record, commit),
++    };
++    let branch = record.branch.clone();
++    match put_back {
++        Ok(true) => None,
++        Ok(false) => Some(Leftover::BranchKept { branch }),
++        Err(error) => {
++            let message = git_message(&error);
++            Some(Leftover::BranchRefused { branch, message })
++        }
++    }
++}
++
++/// Deletes the branch the start created while it is still at the recorded head and not checked out; true when it
++/// is gone.
++fn delete_created(repo: &Repo, record: &MergeRecord) -> yamt_gitio::Result<bool> {
++    let Some(tip) = repo.commit_named(&branch_ref(record))? else {
++        return Ok(true);
++    };
++    if tip.as_str() != record.head || is_checked_out(repo, record)? {
++        return Ok(false);
++    }
++    repo.delete_branch(&record.branch)?;
++    Ok(true)
++}
++
++/// Moves the branch the start fast-forwarded back to `from` while it is still at the recorded head; true when it
++/// is back.
++fn move_back(repo: &Repo, record: &MergeRecord, from: &str) -> yamt_gitio::Result<bool> {
++    let tip = repo.commit_named(&branch_ref(record))?;
++    if tip.as_ref().map(Oid::as_str) != Some(record.head.as_str()) {
++        return Ok(false);
++    }
++    let from = Oid::parse(from)?;
++    if is_checked_out(repo, record)? {
++        repo.reset_keep(&from)?;
++    } else {
++        repo.move_branch(&record.branch, &from)?;
++    }
++    Ok(true)
++}
++
++fn branch_ref(record: &MergeRecord) -> String {
++    format!("refs/heads/{}", record.branch)
++}
+diff --git a/crates/local-merge/src/start.rs b/crates/local-merge/src/start.rs
+new file mode 100644
+index 0000000..1939d1f
+--- /dev/null
++++ b/crates/local-merge/src/start.rs
+@@ -0,0 +1,219 @@
++use std::path::Path;
++
++use yamt_gitio::{FETCH_TIMEOUT, Oid, Repo, first_line};
++
++use crate::record::{
++    self, FORMAT, MergeRecord, RECORD_FILE, RecordedBranch, RecordedReturn, START_LOCK_FILE, hold,
++    is_live,
++};
++use crate::restore::restore;
++use crate::{MergeRequestBranches, Refusal, Started, git_message};
++
++const MERGE_FAILED: &str = "git merge stopped without a merge in progress";
++const BRANCH_NOT_UTF8: &str = "the name of the checked-out branch is not UTF-8";
++
++/// Merges the merge request's target branch into its branch, checked out in the checkout at `root`, without
++/// committing (design §4.2). Every refusal before the checkout changes nothing; a failure after it puts back what
++/// it can and lists the rest.
++pub fn start(root: &Path, branches: &MergeRequestBranches) -> Result<Started, Refusal> {
++    let repo = Repo::discover(root).map_err(|error| refused(&error))?;
++    let lock_path = repo
++        .git_path(START_LOCK_FILE)
++        .map_err(|error| refused(&error))?;
++    let held = hold(&lock_path).map_err(|error| Refusal::GitRefused {
++        message: format!("cannot lock {}: {error}", lock_path.display()),
++        left: Vec::new(),
++    })?;
++    let Some(_lock) = held else {
++        return Err(Refusal::AlreadyMerging { iid: None });
++    };
++    let path = repo
++        .git_path(RECORD_FILE)
++        .map_err(|error| refused(&error))?;
++    drop_stale_record(&repo, &path)?;
++    let (record, source) = checked_record(&repo, branches)?;
++    change_checkout(&repo, &path, &record, &source)
++}
++
++/// Step 3: a live record refuses, an unreadable one refuses and stays, a stale one is removed.
++fn drop_stale_record(repo: &Repo, path: &Path) -> Result<(), Refusal> {
++    let record = match record::read(path) {
++        Ok(None) => return Ok(()),
++        Ok(Some(record)) => record,
++        Err(message) => {
++            let path = path.display().to_string();
++            return Err(Refusal::RecordUnreadable { path, message });
++        }
++    };
++    let stop = repo.stop().map_err(|error| refused(&error))?;
++    let current_branch = repo.current_branch().map_err(|error| refused(&error))?;
++    if is_live(&record, &stop, current_branch.as_deref()) {
++        return Err(Refusal::AlreadyMerging {
++            iid: Some(record.iid),
++        });
++    }
++    tracing::info!(path = %path.display(), "dropping the record of a merge that is no longer in progress");
++    record::remove(path);
++    Ok(())
++}
++
++/// Steps 4–10: the record to write, and the commit of GitLab's branch to check out.
++fn checked_record(
++    repo: &Repo,
++    branches: &MergeRequestBranches,
++) -> Result<(MergeRecord, Oid), Refusal> {
++    let MergeRequestBranches {
++        iid,
++        remote,
++        branch,
++        target,
++    } = branches;
++    require_quiet_checkout(repo)?;
++    repo.fetch_branches(remote, &[branch, target], FETCH_TIMEOUT)
++        .map_err(|message| Refusal::FetchFailed { message })?;
++    let source = remote_tip(repo, remote, branch)?;
++    let goal = remote_tip(repo, remote, target)?;
++    let branch_before = branch_before(repo, branch, &source)?;
++    if repo
++        .is_ancestor(&goal, &source)
++        .map_err(|error| refused(&error))?
++    {
++        let (branch, target) = (branch.clone(), target.clone());
++        return Err(Refusal::AlreadyContains { branch, target });
++    }
++    let record = MergeRecord {
++        format: FORMAT,
++        iid: *iid,
++        remote: remote.clone(),
++        branch: branch.clone(),
++        target: target.clone(),
++        return_to: return_to(repo)?,
++        branch_before,
++        head: source.as_str().to_owned(),
++        merging: goal.as_str().to_owned(),
++    };
++    Ok((record, source))
++}
++
++/// Steps 4 and 5: no git operation in progress, no change to a tracked file.
++fn require_quiet_checkout(repo: &Repo) -> Result<(), Refusal> {
++    let stop = repo.stop().map_err(|error| refused(&error))?;
++    if stop.operation.is_some() {
++        return Err(Refusal::Busy);
++    }
++    if repo
++        .has_tracked_changes()
++        .map_err(|error| refused(&error))?
++    {
++        return Err(Refusal::UncommittedChanges);
++    }
++    Ok(())
++}
++
++fn remote_tip(repo: &Repo, remote: &str, branch: &str) -> Result<Oid, Refusal> {
++    let name = format!("refs/remotes/{remote}/{branch}");
++    match repo.commit_named(&name) {
++        Ok(Some(tip)) => Ok(tip),
++        Ok(None) => Err(Refusal::GitRefused {
++            message: format!("{name} names no commit after the fetch"),
++            left: Vec::new(),
++        }),
++        Err(error) => Err(refused(&error)),
++    }
++}
++
++/// Step 8: what checking out GitLab's `source` does to the local branch; a local commit GitLab's lacks refuses.
++fn branch_before(repo: &Repo, branch: &str, source: &Oid) -> Result<RecordedBranch, Refusal> {
++    let local = repo.commit_named(&format!("refs/heads/{branch}"));
++    let Some(local) = local.map_err(|error| refused(&error))? else {
++        return Ok(RecordedBranch::Created);
++    };
++    if local == *source {
++        return Ok(RecordedBranch::Unchanged);
++    }
++    if repo
++        .is_ancestor(&local, source)
++        .map_err(|error| refused(&error))?
++    {
++        let commit = local.as_str().to_owned();
++        return Ok(RecordedBranch::MovedFrom { commit });
++    }
++    Err(Refusal::LocalAhead {
++        branch: branch.to_owned(),
++    })
++}
++
++fn return_to(repo: &Repo) -> Result<RecordedReturn, Refusal> {
++    let Some(name) = repo.current_branch().map_err(|error| refused(&error))? else {
++        let head = repo.head_commit().map_err(|error| refused(&error))?;
++        let commit = head.as_str().to_owned();
++        return Ok(RecordedReturn::Detached { commit });
++    };
++    let name = String::from_utf8(name).map_err(|_| Refusal::GitRefused {
++        message: BRANCH_NOT_UTF8.to_owned(),
++        left: Vec::new(),
++    })?;
++    Ok(RecordedReturn::Branch { name })
++}
++
++/// Steps 11–13: the record written, the branch checked out at `source`, the merge started; a failure after the
++/// checkout restores.
++fn change_checkout(
++    repo: &Repo,
++    path: &Path,
++    record: &MergeRecord,
++    source: &Oid,
++) -> Result<Started, Refusal> {
++    record::write(path, record).map_err(|error| Refusal::GitRefused {
++        message: format!("cannot write {}: {error}", path.display()),
++        left: Vec::new(),
++    })?;
++    if let Err(error) = repo.checkout_branch_at(&record.branch, source) {
++        record::remove(path);
++        return Err(refused(&error));
++    }
++    merged(repo, record).map_err(|message| Refusal::GitRefused {
++        message,
++        left: restore(repo, path, record),
++    })
++}
++
++/// Steps 12 and 13; `Err` holds git's words.
++fn merged(repo: &Repo, record: &MergeRecord) -> Result<Started, String> {
++    if record.branch_before == RecordedBranch::Created {
++        repo.set_upstream(&record.branch, &record.remote)
++            .map_err(|error| git_message(&error))?;
++    }
++    let run = repo
++        .merge_no_commit(&merge_name(repo, record))
++        .map_err(|error| git_message(&error))?;
++    let stop = repo.stop().map_err(|error| git_message(&error))?;
++    let current_branch = repo.current_branch().map_err(|error| git_message(&error))?;
++    if !is_live(record, &stop, current_branch.as_deref()) {
++        return Err(first_line(&run.output).unwrap_or_else(|| MERGE_FAILED.to_owned()));
++    }
++    let unmerged = repo.unmerged().map_err(|error| git_message(&error))?;
++    Ok(Started {
++        branch: record.branch.clone(),
++        target: record.target.clone(),
++        conflicts: !unmerged.is_empty(),
++    })
++}
++
++/// `<remote>/<target>`, so git's default message reads "Merge remote-tracking branch 'origin/main' into …" (git
++/// names the merged ref as it was given); the full `refs/remotes/…` when another ref of that short name would win.
++fn merge_name(repo: &Repo, record: &MergeRecord) -> String {
++    let short = format!("{}/{}", record.remote, record.target);
++    let full = format!("refs/remotes/{short}");
++    match repo.symbolic_full_name(&short) {
++        Ok(Some(name)) if name == full.as_bytes() => short,
++        Ok(_) | Err(_) => full,
++    }
++}
++
++fn refused(error: &yamt_gitio::Error) -> Refusal {
++    Refusal::GitRefused {
++        message: git_message(error),
++        left: Vec::new(),
++    }
++}
+diff --git a/crates/local-merge/tests/local_merge/abort.rs b/crates/local-merge/tests/local_merge/abort.rs
+new file mode 100644
+index 0000000..72d03bb
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/abort.rs
+@@ -0,0 +1,172 @@
++use yamt_local_merge::{BranchBefore, Leftover, ReturnTo, find_live, start};
++
++use crate::common::{DEVELOP, DUE_DATES, Fixture, MAIN, branches};
++
++fn started(fixture: &Fixture) {
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++}
++
++fn develop() -> ReturnTo {
++    ReturnTo::Branch {
++        name: DEVELOP.to_owned(),
++    }
++}
++
++#[test]
++fn abort_after_a_restart_returns_to_develop_and_deletes_the_created_branch() {
++    let fixture = Fixture::new();
++    let before = fixture.checkout();
++    started(&fixture);
++
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    fixture.abort_git_merge();
++    let left = live.restore();
++
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++    assert!(!fixture.has_branch(DUE_DATES));
++    assert_eq!(fixture.config(&format!("branch.{DUE_DATES}.remote")), None);
++    assert_eq!(fixture.git(&["status", "--porcelain=v1"]), "");
++}
++
++#[test]
++fn abort_moves_a_fast_forwarded_branch_back() {
++    let fixture = Fixture::new();
++    let behind = fixture.gitlab(&["rev-parse", &format!("{DUE_DATES}~1")]);
++    fixture.git(&["branch", DUE_DATES, &behind]);
++    let before = fixture.checkout();
++    started(&fixture);
++
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    fixture.abort_git_merge();
++    let left = live.restore();
++
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++    assert_eq!(fixture.tip(DUE_DATES), behind);
++}
++
++#[test]
++fn abort_on_the_branch_itself_resets_it_back() {
++    let fixture = Fixture::new();
++    let behind = fixture.gitlab(&["rev-parse", &format!("{DUE_DATES}~1")]);
++    fixture.git(&["checkout", "-q", "-b", DUE_DATES, &behind]);
++    let before = fixture.checkout();
++    started(&fixture);
++
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    assert_eq!(live.view().return_to, None);
++    fixture.abort_git_merge();
++    let left = live.restore();
++
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++}
++
++#[test]
++fn abort_from_a_detached_head_returns_to_the_commit() {
++    let fixture = Fixture::new();
++    let develop_tip = fixture.tip(DEVELOP);
++    fixture.git(&["checkout", "-q", "--detach", DEVELOP]);
++    let before = fixture.checkout();
++    started(&fixture);
++
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    let id = develop_tip[..7].to_owned();
++    assert_eq!(live.view().return_to, Some(ReturnTo::Commit { id }));
++    fixture.abort_git_merge();
++    let left = live.restore();
++
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++    assert_eq!(fixture.head(), format!("HEAD {develop_tip}"));
++}
++
++#[test]
++fn abort_keeps_a_branch_that_moved_after_the_merge_started() {
++    let fixture = Fixture::new();
++    started(&fixture);
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    fixture.abort_git_merge();
++    fixture.git(&["commit", "-q", "--allow-empty", "-m", "Mine"]);
++    let mine = fixture.tip(DUE_DATES);
++
++    let left = live.restore();
++
++    let branch = DUE_DATES.to_owned();
++    let to = develop();
++    let expected = [
++        Leftover::NotReturned { to },
++        Leftover::BranchKept { branch },
++    ];
++    assert_eq!(left, expected);
++    assert_eq!(fixture.head(), format!("refs/heads/{DUE_DATES} {mine}"));
++    assert!(!fixture.record_path().exists());
++}
++
++#[test]
++fn abort_leaves_head_where_the_user_moved_it() {
++    let fixture = Fixture::new();
++    started(&fixture);
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    fixture.abort_git_merge();
++    fixture.git(&["checkout", "-q", MAIN]);
++    let main = fixture.tip(MAIN);
++
++    let left = live.restore();
++
++    assert_eq!(left, [Leftover::NotReturned { to: develop() }]);
++    assert_eq!(fixture.head(), format!("refs/heads/{MAIN} {main}"));
++    assert!(!fixture.has_branch(DUE_DATES));
++    assert!(!fixture.record_path().exists());
++}
++
++#[test]
++fn a_refused_return_is_listed_and_the_created_branch_kept() {
++    let fixture = Fixture::new();
++    started(&fixture);
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    fixture.abort_git_merge();
++    fixture.write("src/board/card.ts", "mine\n");
++
++    let left = live.restore();
++
++    let [
++        Leftover::ReturnRefused { to, message },
++        Leftover::BranchKept { branch },
++    ] = left.as_slice()
++    else {
++        panic!("{left:?}");
++    };
++    assert_eq!(*to, develop());
++    assert!(
++        message.starts_with("error: Your local changes"),
++        "{message}"
++    );
++    assert_eq!(branch, DUE_DATES);
++    assert_eq!(fixture.git(&["branch", "--show-current"]), DUE_DATES);
++    assert!(!fixture.record_path().exists());
++}
++
++#[test]
++fn a_refused_move_back_is_listed() {
++    let fixture = Fixture::new();
++    let behind = fixture.gitlab(&["rev-parse", &format!("{DUE_DATES}~1")]);
++    fixture.git(&["checkout", "-q", "-b", DUE_DATES, &behind]);
++    started(&fixture);
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    let id = behind[..7].to_owned();
++    assert_eq!(live.view().branch_before, BranchBefore::MovedFrom { id });
++    fixture.abort_git_merge();
++    fixture.write("src/board/card.ts", "mine\n");
++    let tip = fixture.tip(DUE_DATES);
++
++    let left = live.restore();
++
++    let [Leftover::BranchRefused { branch, message }] = left.as_slice() else {
++        panic!("{left:?}");
++    };
++    assert_eq!(branch, DUE_DATES);
++    assert!(message.starts_with("error:"), "{message}");
++    assert_eq!(fixture.tip(DUE_DATES), tip);
++}
+diff --git a/crates/local-merge/tests/local_merge/common.rs b/crates/local-merge/tests/local_merge/common.rs
+new file mode 100644
+index 0000000..a24288a
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/common.rs
+@@ -0,0 +1,130 @@
++use std::path::{Path, PathBuf};
++use std::process::Command;
++
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_gitio::{Operation, Repo};
++use yamt_local_merge::MergeRequestBranches;
++
++/// `scripts/mr-conflict-repo.sh`'s names.
++pub const IID: u32 = 21;
++pub const ORIGIN: &str = "origin";
++pub const MAIN: &str = "main";
++pub const DEVELOP: &str = "develop";
++pub const DUE_DATES: &str = "feature/due-dates";
++pub const CLEAN: &str = "feature/clean";
++pub const MERGED: &str = "feature/merged";
++const RECORD: &str = ".git/yamt-merge-request.json";
++const START_LOCK: &str = ".git/yamt-merge-request.lock";
++const GITLAB: &str = ".git/fake-gitlab.git";
++
++/// `scripts/mr-conflict-repo.sh`'s repository in a temporary folder, on `develop`.
++pub struct Fixture {
++    _dir: TempDir,
++    root: PathBuf,
++}
++
++/// What a refusal must leave as it was.
++#[derive(Debug, PartialEq, Eq)]
++pub struct Checkout {
++    head: String,
++    branches: String,
++    status: String,
++    has_record: bool,
++}
++
++impl Fixture {
++    pub fn new() -> Fixture {
++        let dir = tempfile::tempdir().unwrap();
++        let root = dir.path().join("mrc");
++        let script =
++            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/mr-conflict-repo.sh");
++        let built = Command::new(script).arg(&root).output().unwrap();
++        assert!(built.status.success(), "{built:?}");
++        Fixture { _dir: dir, root }
++    }
++
++    pub fn root(&self) -> &Path {
++        &self.root
++    }
++
++    /// git's output in the checkout, without its final newline.
++    pub fn git(&self, args: &[&str]) -> String {
++        output_line(git_ok(&self.root, args).unwrap())
++    }
++
++    /// git's output in the fake GitLab, without its final newline.
++    pub fn gitlab(&self, args: &[&str]) -> String {
++        output_line(git_ok(&self.root.join(GITLAB), args).unwrap())
++    }
++
++    pub fn record_path(&self) -> PathBuf {
++        self.root.join(RECORD)
++    }
++
++    pub fn start_lock_path(&self) -> PathBuf {
++        self.root.join(START_LOCK)
++    }
++
++    pub fn checkout(&self) -> Checkout {
++        Checkout {
++            head: self.head(),
++            branches: self.git(&["for-each-ref", "refs/heads"]),
++            status: self.git(&["status", "--porcelain=v1"]),
++            has_record: self.record_path().exists(),
++        }
++    }
++
++    /// HEAD's ref (`HEAD` when detached) and commit.
++    pub fn head(&self) -> String {
++        let name = self.git(&["rev-parse", "--symbolic-full-name", "HEAD"]);
++        format!("{name} {}", self.git(&["rev-parse", "HEAD"]))
++    }
++
++    pub fn tip(&self, branch: &str) -> String {
++        self.git(&["rev-parse", &format!("refs/heads/{branch}")])
++    }
++
++    pub fn has_branch(&self, branch: &str) -> bool {
++        let name = format!("refs/heads/{branch}");
++        let found =
++            yamt_conflict_repo::git(&self.root, &["rev-parse", "--verify", "--quiet", &name]);
++        found.unwrap().status.success()
++    }
++
++    pub fn gitlab_tip(&self, branch: &str) -> String {
++        self.gitlab(&["rev-parse", &format!("refs/heads/{branch}")])
++    }
++
++    /// What the merge window runs before `LiveMerge::restore`: git's own merge abort.
++    pub fn abort_git_merge(&self) {
++        let repo = Repo::discover(&self.root).unwrap();
++        let operation = repo.stop().unwrap().operation.unwrap();
++        assert!(matches!(operation, Operation::Merge { .. }));
++        repo.abort(&operation).unwrap();
++    }
++
++    pub fn write(&self, path: &str, content: &str) {
++        std::fs::write(self.root.join(path), content).unwrap();
++    }
++
++    /// A config value of the checkout; `None` when it is not set.
++    pub fn config(&self, key: &str) -> Option<String> {
++        let read = yamt_conflict_repo::git(&self.root, &["config", key]).unwrap();
++        read.status.success().then(|| output_line(read.stdout))
++    }
++}
++
++/// Merge request !21 of `branch` into `main`, on `origin`.
++pub fn branches(branch: &str) -> MergeRequestBranches {
++    MergeRequestBranches {
++        iid: IID,
++        remote: ORIGIN.to_owned(),
++        branch: branch.to_owned(),
++        target: MAIN.to_owned(),
++    }
++}
++
++fn output_line(output: Vec<u8>) -> String {
++    let text = String::from_utf8(output).unwrap();
++    text.strip_suffix('\n').unwrap_or(&text).to_owned()
++}
+diff --git a/crates/local-merge/tests/local_merge/locks.rs b/crates/local-merge/tests/local_merge/locks.rs
+new file mode 100644
+index 0000000..e850fdd
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/locks.rs
+@@ -0,0 +1,190 @@
++use std::fs::{self, File};
++use std::sync::atomic::{AtomicBool, Ordering};
++use std::thread;
++use std::time::Duration;
++
++use yamt_local_merge::{
++    LocalMerge, Refusal, claim_window, find_live, local_merge, start, window_is_open,
++};
++
++use crate::common::{CLEAN, DEVELOP, DUE_DATES, Fixture, IID, branches};
++
++/// Well inside `claim_window`'s one second of patience.
++const WINDOW_CLOSES_AFTER: Duration = Duration::from_millis(300);
++
++#[test]
++fn a_second_start_while_a_merge_is_in_progress_is_refused() {
++    let fixture = Fixture::new();
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++    let before = fixture.checkout();
++    let record = fs::read(fixture.record_path()).unwrap();
++
++    let started = start(fixture.root(), &branches(CLEAN));
++
++    assert_eq!(started, Err(Refusal::AlreadyMerging { iid: Some(IID) }));
++    assert_eq!(fixture.checkout(), before);
++    assert_eq!(fs::read(fixture.record_path()).unwrap(), record);
++}
++
++#[test]
++fn a_start_while_another_holds_the_lock_is_refused() {
++    let fixture = Fixture::new();
++    let other = File::create(fixture.start_lock_path()).unwrap();
++    other.try_lock().unwrap();
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    assert_eq!(started, Err(Refusal::AlreadyMerging { iid: None }));
++    assert_eq!(fixture.checkout(), before);
++    drop(other);
++    assert!(start(fixture.root(), &branches(DUE_DATES)).is_ok());
++}
++
++#[test]
++fn local_merge_is_merging_only_while_git_is_in_the_recorded_merge() {
++    let fixture = Fixture::new();
++    assert_eq!(local_merge(fixture.root()), LocalMerge::Free);
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    let merging = local_merge(fixture.root());
++
++    let window_open = false;
++    assert_eq!(
++        merging,
++        LocalMerge::Merging {
++            iid: IID,
++            window_open
++        }
++    );
++    fixture.abort_git_merge();
++    assert!(fixture.record_path().exists());
++    assert_eq!(local_merge(fixture.root()), LocalMerge::Free);
++}
++
++#[test]
++fn a_stale_record_is_dropped_at_the_next_start() {
++    let fixture = Fixture::new();
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++    fixture.abort_git_merge();
++    fixture.git(&["checkout", "-q", DEVELOP]);
++    fixture.git(&["branch", "-q", "-D", DUE_DATES]);
++    fixture.write("README.md", "# Edited\n");
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    assert_eq!(started, Err(Refusal::UncommittedChanges));
++    assert!(!fixture.record_path().exists());
++    fixture.git(&["checkout", "-q", "--", "README.md"]);
++    assert!(start(fixture.root(), &branches(DUE_DATES)).is_ok());
++}
++
++#[test]
++fn an_unreadable_record_refuses_and_stays_untouched() {
++    let fixture = Fixture::new();
++    let unreadable = [
++        ("not json", "expected ident"),
++        (r#"{ "format": 2, "iid": 21 }"#, "its format 2 is newer"),
++    ];
++    for (content, reason) in unreadable {
++        fs::write(fixture.record_path(), content).unwrap();
++        let before = fixture.checkout();
++
++        let started = start(fixture.root(), &branches(DUE_DATES));
++
++        let Err(Refusal::RecordUnreadable { path, message }) = started else {
++            panic!("{started:?}");
++        };
++        assert_eq!(
++            fs::canonicalize(path).unwrap(),
++            fs::canonicalize(fixture.record_path()).unwrap()
++        );
++        assert!(message.starts_with(reason), "{message}");
++        assert_eq!(fixture.checkout(), before);
++        assert_eq!(fs::read_to_string(fixture.record_path()).unwrap(), content);
++        assert!(find_live(fixture.root()).unwrap().is_none());
++        assert_eq!(local_merge(fixture.root()), LocalMerge::Free);
++    }
++}
++
++#[test]
++fn local_merge_names_the_merge_request_and_whether_its_window_is_open() {
++    let fixture = Fixture::new();
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++    assert!(!window_is_open(fixture.root()));
++
++    let claim = claim_window(fixture.root()).unwrap().unwrap();
++
++    let window_open = true;
++    assert_eq!(
++        local_merge(fixture.root()),
++        LocalMerge::Merging {
++            iid: IID,
++            window_open
++        }
++    );
++    drop(claim);
++    let window_open = false;
++    assert_eq!(
++        local_merge(fixture.root()),
++        LocalMerge::Merging {
++            iid: IID,
++            window_open
++        }
++    );
++}
++
++#[test]
++fn a_second_claim_fails_while_the_first_is_held_and_succeeds_once_it_is_dropped() {
++    let fixture = Fixture::new();
++    let first = claim_window(fixture.root()).unwrap().unwrap();
++
++    assert!(claim_window(fixture.root()).unwrap().is_none());
++    assert!(window_is_open(fixture.root()));
++    drop(first);
++    assert!(claim_window(fixture.root()).unwrap().is_some());
++}
++
++#[test]
++fn a_claim_waits_for_a_window_that_closes_within_a_second() {
++    let fixture = Fixture::new();
++    let first = claim_window(fixture.root()).unwrap().unwrap();
++
++    let second = thread::scope(|scope| {
++        scope.spawn(move || {
++            thread::sleep(WINDOW_CLOSES_AFTER);
++            drop(first);
++        });
++        claim_window(fixture.root()).unwrap()
++    });
++
++    assert!(second.is_some());
++}
++
++#[test]
++fn window_is_open_probe_never_turns_away_a_claim() {
++    let fixture = Fixture::new();
++    let claimed = AtomicBool::new(false);
++
++    let claim = thread::scope(|scope| {
++        scope.spawn(|| {
++            while !claimed.load(Ordering::SeqCst) {
++                let _probed = window_is_open(fixture.root());
++            }
++        });
++        let claim = claim_window(fixture.root()).unwrap();
++        claimed.store(true, Ordering::SeqCst);
++        claim
++    });
++
++    assert!(claim.is_some());
++    assert!(window_is_open(fixture.root()));
++}
++
++#[test]
++fn window_is_open_outside_a_repository_is_false() {
++    let folder = tempfile::tempdir().unwrap();
++
++    assert!(!window_is_open(folder.path()));
++    assert_eq!(local_merge(folder.path()), LocalMerge::Free);
++}
+diff --git a/crates/local-merge/tests/local_merge/main.rs b/crates/local-merge/tests/local_merge/main.rs
+new file mode 100644
+index 0000000..420f42e
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/main.rs
+@@ -0,0 +1,9 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++mod abort;
++mod common;
++mod locks;
++mod push;
++mod refusals;
++mod start;
+diff --git a/crates/local-merge/tests/local_merge/push.rs b/crates/local-merge/tests/local_merge/push.rs
+new file mode 100644
+index 0000000..3b17378
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/push.rs
+@@ -0,0 +1,61 @@
++use yamt_local_merge::{PushOffer, PushReply, find_live, push, start};
++
++use crate::common::{CLEAN, Fixture, branches};
++
++/// A clean merge yamt started, committed with git's default message, and its push offer.
++fn committed_merge(fixture: &Fixture) -> PushOffer {
++    start(fixture.root(), &branches(CLEAN)).unwrap();
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    fixture.git(&["commit", "-q", "--no-edit"]);
++    live.committed()
++}
++
++#[test]
++fn committed_removes_the_record_and_push_sends_only_the_branch() {
++    let fixture = Fixture::new();
++    let gitlab_before = fixture.gitlab(&["for-each-ref"]);
++    let offer = committed_merge(&fixture);
++    assert_eq!(offer.branch(), CLEAN);
++    assert!(!fixture.record_path().exists());
++    let merge_commit = fixture.tip(CLEAN);
++
++    let pushed = push(fixture.root(), &offer);
++
++    assert_eq!(pushed, PushReply::Pushed);
++    assert_eq!(fixture.gitlab_tip(CLEAN), merge_commit);
++    let subject = fixture.gitlab(&["log", "-1", "--format=%s", CLEAN]);
++    assert_eq!(
++        subject,
++        "Merge remote-tracking branch 'origin/main' into feature/clean"
++    );
++    let gitlab_after = fixture.gitlab(&["for-each-ref"]);
++    let changed: Vec<&str> = gitlab_after
++        .lines()
++        .filter(|line| !gitlab_before.contains(line))
++        .collect();
++    assert_eq!(
++        changed,
++        [format!("{merge_commit} commit\trefs/heads/{CLEAN}")]
++    );
++    assert_eq!(fixture.git(&["branch", "--show-current"]), CLEAN);
++}
++
++#[test]
++fn a_rejected_push_leaves_gitlab_and_the_commit() {
++    let fixture = Fixture::new();
++    let offer = committed_merge(&fixture);
++    let merge_commit = fixture.tip(CLEAN);
++    let theirs_tree = format!("{CLEAN}^{{tree}}");
++    let theirs = fixture.gitlab(&["commit-tree", "-p", CLEAN, "-m", "Theirs", &theirs_tree]);
++    fixture.gitlab(&["update-ref", &format!("refs/heads/{CLEAN}"), &theirs]);
++
++    let pushed = push(fixture.root(), &offer);
++
++    let PushReply::Failed { message } = pushed else {
++        panic!("{pushed:?}");
++    };
++    assert!(message.starts_with("[rejected]"), "{message}");
++    assert_eq!(fixture.gitlab_tip(CLEAN), theirs);
++    assert_eq!(fixture.tip(CLEAN), merge_commit);
++    assert_eq!(fixture.git(&["branch", "--show-current"]), CLEAN);
++}
+diff --git a/crates/local-merge/tests/local_merge/refusals.rs b/crates/local-merge/tests/local_merge/refusals.rs
+new file mode 100644
+index 0000000..fe07dee
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/refusals.rs
+@@ -0,0 +1,141 @@
++use yamt_conflict_repo::sed_sequence_editor;
++use yamt_local_merge::{MergeRequestBranches, Refusal, start};
++
++use crate::common::{DUE_DATES, Fixture, IID, MAIN, MERGED, branches};
++
++#[test]
++fn uncommitted_tracked_changes_refuse_and_change_nothing() {
++    let fixture = Fixture::new();
++    fixture.write("README.md", "# Edited\n");
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    assert_eq!(started, Err(Refusal::UncommittedChanges));
++    assert_eq!(fixture.checkout(), before);
++}
++
++#[test]
++fn staged_changes_refuse_too() {
++    let fixture = Fixture::new();
++    fixture.write("README.md", "# Edited\n");
++    fixture.git(&["add", "README.md"]);
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    assert_eq!(started, Err(Refusal::UncommittedChanges));
++    assert_eq!(fixture.checkout(), before);
++}
++
++#[test]
++fn an_untracked_file_does_not_refuse() {
++    let fixture = Fixture::new();
++    fixture.write("notes.txt", "mine\n");
++
++    let started = start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    assert!(started.conflicts);
++    assert_eq!(fixture.git(&["branch", "--show-current"]), DUE_DATES);
++    let notes = std::fs::read_to_string(fixture.root().join("notes.txt")).unwrap();
++    assert_eq!(notes, "mine\n");
++}
++
++#[test]
++fn another_operation_in_progress_refuses() {
++    let fixture = Fixture::new();
++    let edit_first = sed_sequence_editor(&["1s/^pick/edit/"]);
++    fixture.git(&["-c", &edit_first, "rebase", "-i", "HEAD~1"]);
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    assert_eq!(started, Err(Refusal::Busy));
++    assert_eq!(fixture.checkout(), before);
++    assert!(fixture.root().join(".git/rebase-merge").exists());
++}
++
++#[test]
++fn a_failed_fetch_refuses_with_gits_sentence() {
++    let fixture = Fixture::new();
++    let before = fixture.checkout();
++    let branches = MergeRequestBranches {
++        iid: IID,
++        remote: "nowhere".to_owned(),
++        branch: DUE_DATES.to_owned(),
++        target: MAIN.to_owned(),
++    };
++
++    let started = start(fixture.root(), &branches);
++
++    let message = "fatal: 'nowhere' does not appear to be a git repository".to_owned();
++    assert_eq!(started, Err(Refusal::FetchFailed { message }));
++    assert_eq!(fixture.checkout(), before);
++    assert_eq!(fixture.git(&["for-each-ref", "refs/remotes"]), "");
++}
++
++#[test]
++fn a_local_branch_with_its_own_commit_is_refused_and_nothing_changes() {
++    let fixture = Fixture::new();
++    let gitlab_tip = fixture.gitlab_tip(DUE_DATES);
++    let tree = format!("{gitlab_tip}^{{tree}}");
++    let mine = fixture.git(&["commit-tree", "-p", &gitlab_tip, "-m", "Mine", &tree]);
++    fixture.git(&["branch", DUE_DATES, &mine]);
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    let branch = DUE_DATES.to_owned();
++    assert_eq!(started, Err(Refusal::LocalAhead { branch }));
++    assert_eq!(fixture.checkout(), before);
++    assert_eq!(fixture.tip(DUE_DATES), mine);
++}
++
++#[test]
++fn a_local_branch_that_diverged_is_refused_too() {
++    let fixture = Fixture::new();
++    let behind = fixture.gitlab(&["rev-parse", &format!("{DUE_DATES}~1")]);
++    let tree = format!("{behind}^{{tree}}");
++    let mine = fixture.git(&["commit-tree", "-p", &behind, "-m", "Mine", &tree]);
++    fixture.git(&["branch", DUE_DATES, &mine]);
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    let branch = DUE_DATES.to_owned();
++    assert_eq!(started, Err(Refusal::LocalAhead { branch }));
++    assert_eq!(fixture.checkout(), before);
++}
++
++#[test]
++fn a_branch_that_already_contains_the_target_is_refused() {
++    let fixture = Fixture::new();
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(MERGED));
++
++    let (branch, target) = (MERGED.to_owned(), MAIN.to_owned());
++    assert_eq!(started, Err(Refusal::AlreadyContains { branch, target }));
++    assert_eq!(fixture.checkout(), before);
++}
++
++#[test]
++fn a_refused_checkout_changes_nothing_and_leaves_no_record() {
++    let fixture = Fixture::new();
++    fixture.write("src/board/dueDates.ts", "mine\n");
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    let Err(Refusal::GitRefused { message, left }) = started else {
++        panic!("{started:?}");
++    };
++    assert!(
++        message.starts_with(
++            "error: The following untracked working tree files would be overwritten by checkout"
++        ),
++        "{message}"
++    );
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++}
+diff --git a/crates/local-merge/tests/local_merge/start.rs b/crates/local-merge/tests/local_merge/start.rs
+new file mode 100644
+index 0000000..baa09d3
+--- /dev/null
++++ b/crates/local-merge/tests/local_merge/start.rs
+@@ -0,0 +1,175 @@
++use serde_json::json;
++use yamt_local_merge::{BranchBefore, MergeView, Refusal, ReturnTo, Started, find_live, start};
++
++use crate::common::{CLEAN, DEVELOP, DUE_DATES, Fixture, IID, MAIN, branches};
++
++#[test]
++fn a_missing_branch_is_created_tracking_gitlab_and_the_merge_stops_with_conflicts() {
++    let fixture = Fixture::new();
++    let develop = fixture.tip(DEVELOP);
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    let (branch, target) = (DUE_DATES.to_owned(), MAIN.to_owned());
++    let conflicts = true;
++    assert_eq!(
++        started,
++        Ok(Started {
++            branch,
++            target,
++            conflicts
++        })
++    );
++    let source = fixture.gitlab_tip(DUE_DATES);
++    let goal = fixture.gitlab_tip(MAIN);
++    assert_eq!(fixture.head(), format!("refs/heads/{DUE_DATES} {source}"));
++    assert_eq!(fixture.git(&["rev-parse", "MERGE_HEAD"]), goal);
++    assert_eq!(
++        fixture.git(&["diff", "--name-only", "--diff-filter=U"]),
++        "src/board/card.ts"
++    );
++    let upstream = fixture.git(&["rev-parse", "--abbrev-ref", &format!("{DUE_DATES}@{{u}}")]);
++    assert_eq!(upstream, format!("origin/{DUE_DATES}"));
++    assert_eq!(fixture.tip(DEVELOP), develop);
++}
++
++#[test]
++fn the_record_names_what_abort_needs_and_the_window_sees_it() {
++    let fixture = Fixture::new();
++
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    let record: serde_json::Value =
++        serde_json::from_slice(&std::fs::read(fixture.record_path()).unwrap()).unwrap();
++    let expected = json!({
++        "format": 1, "iid": IID, "remote": "origin", "branch": DUE_DATES, "target": MAIN,
++        "returnTo": { "kind": "branch", "name": DEVELOP },
++        "branchBefore": { "kind": "created" },
++        "head": fixture.gitlab_tip(DUE_DATES), "merging": fixture.gitlab_tip(MAIN),
++    });
++    assert_eq!(record, expected);
++    let live = find_live(fixture.root()).unwrap().unwrap();
++    assert_eq!(live.iid(), IID);
++    let return_to = Some(ReturnTo::Branch {
++        name: DEVELOP.to_owned(),
++    });
++    let (branch, target) = (DUE_DATES.to_owned(), MAIN.to_owned());
++    let branch_before = BranchBefore::Created;
++    let view = MergeView {
++        branch,
++        target,
++        return_to,
++        branch_before,
++    };
++    assert_eq!(live.view(), view);
++}
++
++fn merge_message_subject(fixture: &Fixture) -> String {
++    let message = std::fs::read_to_string(fixture.root().join(".git/MERGE_MSG")).unwrap();
++    message.lines().next().unwrap().to_owned()
++}
++
++#[test]
++fn the_merge_names_gitlabs_target_as_git_names_a_remote_tracking_branch() {
++    let fixture = Fixture::new();
++
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    let subject = format!("Merge remote-tracking branch 'origin/main' into {DUE_DATES}");
++    assert_eq!(merge_message_subject(&fixture), subject);
++}
++
++#[test]
++fn a_local_branch_named_like_the_remote_target_does_not_change_what_is_merged() {
++    let fixture = Fixture::new();
++    fixture.git(&["branch", "origin/main", DEVELOP]);
++
++    start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    assert_eq!(
++        fixture.git(&["rev-parse", "MERGE_HEAD"]),
++        fixture.gitlab_tip(MAIN)
++    );
++    let subject =
++        format!("Merge remote-tracking branch 'refs/remotes/origin/main' into {DUE_DATES}");
++    assert_eq!(merge_message_subject(&fixture), subject);
++}
++#[test]
++fn a_branch_only_behind_is_fast_forwarded() {
++    let fixture = Fixture::new();
++    let behind = fixture.gitlab(&["rev-parse", &format!("{DUE_DATES}~1")]);
++    fixture.git(&["branch", DUE_DATES, &behind]);
++
++    let started = start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    assert!(started.conflicts);
++    let source = fixture.gitlab_tip(DUE_DATES);
++    assert_eq!(fixture.head(), format!("refs/heads/{DUE_DATES} {source}"));
++    let view = find_live(fixture.root()).unwrap().unwrap().view();
++    let id = behind[..7].to_owned();
++    assert_eq!(view.branch_before, BranchBefore::MovedFrom { id });
++    assert_eq!(fixture.config(&format!("branch.{DUE_DATES}.remote")), None);
++}
++
++#[test]
++fn a_branch_already_at_gitlabs_tip_is_unchanged_and_may_be_checked_out() {
++    let fixture = Fixture::new();
++    let source = fixture.gitlab_tip(DUE_DATES);
++    fixture.git(&["checkout", "-q", "-b", DUE_DATES, &source]);
++
++    let started = start(fixture.root(), &branches(DUE_DATES)).unwrap();
++
++    assert!(started.conflicts);
++    let view = find_live(fixture.root()).unwrap().unwrap().view();
++    assert_eq!(view.branch_before, BranchBefore::Unchanged);
++    assert_eq!(view.return_to, None);
++}
++
++#[test]
++fn a_stale_has_conflicts_merges_clean_and_still_stops() {
++    let fixture = Fixture::new();
++
++    let started = start(fixture.root(), &branches(CLEAN));
++
++    let (branch, target) = (CLEAN.to_owned(), MAIN.to_owned());
++    let conflicts = false;
++    assert_eq!(
++        started,
++        Ok(Started {
++            branch,
++            target,
++            conflicts
++        })
++    );
++    assert_eq!(
++        fixture.git(&["rev-parse", "MERGE_HEAD"]),
++        fixture.gitlab_tip(MAIN)
++    );
++    assert_eq!(fixture.git(&["ls-files", "-u"]), "");
++    assert!(find_live(fixture.root()).unwrap().is_some());
++}
++
++#[test]
++fn an_untracked_file_the_merge_would_overwrite_puts_everything_back() {
++    let fixture = Fixture::new();
++    fixture.git(&["checkout", "-q", "--detach", &format!("{MAIN}~1")]);
++    fixture.write("src/board/priority.ts", "mine\n");
++    let before = fixture.checkout();
++
++    let started = start(fixture.root(), &branches(DUE_DATES));
++
++    let Err(Refusal::GitRefused { message, left }) = started else {
++        panic!("{started:?}");
++    };
++    assert!(
++        message.starts_with(
++            "error: The following untracked working tree files would be overwritten by merge"
++        ),
++        "{message}"
++    );
++    assert_eq!(left, []);
++    assert_eq!(fixture.checkout(), before);
++    let mine = std::fs::read_to_string(fixture.root().join("src/board/priority.ts")).unwrap();
++    assert_eq!(mine, "mine\n");
++    assert_eq!(fixture.config(&format!("branch.{DUE_DATES}.remote")), None);
++}
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index 11c474a..bb9ad8f 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -76,10 +76,17 @@ if [ -n "$forbidden_in_merge_requests" ]; then
+     failed=1
+ fi
+ 
++local_merge_deps=$(normal_deps yamt-local-merge)
++forbidden_in_local_merge=$(grep -E '^(yamt-|tauri(-|$))' <<<"$local_merge_deps" | grep -vxE 'yamt-(local-merge|gitio)' || true)
++if [ -n "$forbidden_in_local_merge" ]; then
++    echo "arch-check: yamt-local-merge depends on yamt-gitio only among yamt crates, and never on tauri, not:" $forbidden_in_local_merge >&2
++    failed=1
++fi
++
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent|merge-requests)' || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent|merge-requests|local-merge)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review, yamt-agent and yamt-merge-requests only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review, yamt-agent, yamt-merge-requests and yamt-local-merge only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git a/scripts/mr-conflict-repo.sh b/scripts/mr-conflict-repo.sh
+new file mode 100755
+index 0000000..dac5cc4
+--- /dev/null
++++ b/scripts/mr-conflict-repo.sh
+@@ -0,0 +1,74 @@
++#!/usr/bin/env bash
++# Usage: scripts/mr-conflict-repo.sh <dir>
++# Builds the smoke repository of resolving a merge request's conflicts in the user's own checkout (plan §2 #138–#143):
++# `main` holds a small project (README.md, src/board/card.ts) and later changes card.ts and adds
++# src/board/priority.ts; `develop` branches from main's tip with docs/develop.md and is checked out at the end;
++# `feature/due-dates` branches from main's first commit and, in two commits, adds src/board/dueDates.ts and then
++# changes the lines of card.ts main changes (a conflict); `feature/clean` adds only src/board/labels.ts, a file main
++# never touches; `feature/merged` branches from main's tip. A fake GitLab serves the project: the bare
++# `.git/fake-gitlab.git` holds main, develop and the three feature branches, reached as `origin`
++# https://gitlab.example/taskboard/taskboard.git through `url.<bare>.insteadOf`; the checkout keeps only main and
++# develop and has no `refs/remotes`. Names and dates are fixed, so the commit ids never change: crates/local-merge
++# tests and tests/glab/mr-conflicts use these names. Prints the command that opens the merge-request page. Uses no
++# user or system git config (risk RK19).
++set -euo pipefail
++# shellcheck source=scripts/git-sandbox.sh
++source "$(dirname "$0")/git-sandbox.sh"
++
++[ $# -eq 1 ] || die "usage: $0 <dir>"
++dir=$1
++
++require_empty_dir "$dir"
++isolate_git_config
++
++# $1: date, $2: message. Commits what is staged with fixed names, so the commit id depends only on the script.
++commit_at() {
++    GIT_AUTHOR_NAME=yamt GIT_AUTHOR_EMAIL=yamt@example.invalid GIT_AUTHOR_DATE=$1 \
++        GIT_COMMITTER_NAME=yamt GIT_COMMITTER_EMAIL=yamt@example.invalid GIT_COMMITTER_DATE=$1 \
++        repo_git commit -q -m "$2"
++}
++
++mkdir -p "$dir"
++git -c init.defaultBranch=main init -q "$dir"
++
++write README.md '# Taskboard\n\nCards on a board.\n'
++write src/board/card.ts 'export interface Card {\n  id: string;\n  title: string;\n}\n\nexport function label(card: Card): string {\n  return card.title;\n}\n'
++commit_at 2026-10-01T10:00:00+02:00 "Taskboard: cards"
++
++repo_git checkout -q -b feature/due-dates
++write src/board/dueDates.ts 'const DAY_MS = 86_400_000;\n\n/** Whole days from `now` until `dueAt`, negative when overdue. */\nexport function daysLeft(dueAt: string, now: Date): number {\n  return Math.floor((Date.parse(dueAt) - now.getTime()) / DAY_MS);\n}\n'
++commit_at 2026-10-02T10:00:00+02:00 "Due dates: days left"
++write src/board/card.ts 'export interface Card {\n  id: string;\n  title: string;\n  dueAt?: string;\n}\n\nexport function label(card: Card): string {\n  return card.dueAt === undefined ? card.title : `${card.title} (due ${card.dueAt})`;\n}\n'
++commit_at 2026-10-03T10:00:00+02:00 "Due dates on cards"
++
++repo_git checkout -q -b feature/clean main
++write src/board/labels.ts 'export const LABELS = ["bug", "feature", "chore"] as const;\n'
++commit_at 2026-10-04T10:00:00+02:00 "Card labels"
++
++repo_git checkout -q main
++write src/board/card.ts 'export interface Card {\n  id: string;\n  title: string;\n  priority: number;\n}\n\nexport function label(card: Card): string {\n  return `${card.title} (P${card.priority})`;\n}\n'
++write src/board/priority.ts 'export const HIGHEST_PRIORITY = 1;\n'
++commit_at 2026-10-05T10:00:00+02:00 "Priorities on cards"
++
++repo_git checkout -q -b feature/merged
++write docs/merged.md 'Priorities are merged.\n'
++commit_at 2026-10-06T10:00:00+02:00 "Notes on priorities"
++
++repo_git checkout -q -b develop main
++write docs/develop.md 'Work in progress lands here first.\n'
++commit_at 2026-10-07T10:00:00+02:00 "Develop: notes"
++
++gitlab_url=https://gitlab.example/taskboard/taskboard.git
++bare="$(cd "$dir" && pwd)/.git/fake-gitlab.git"
++git clone -q --bare "$dir" "$bare"
++repo_git --git-dir="$bare" symbolic-ref HEAD refs/heads/main
++repo_git branch -q -D feature/due-dates feature/clean feature/merged
++repo_git remote add origin "$gitlab_url"
++repo_git config "url.$bare.insteadOf" "$gitlab_url"
++# git merge and git commit need an identity, and the sandbox reads no user config.
++repo_git config user.name yamt
++repo_git config user.email yamt@example.invalid
++
++echo "mr-conflict-repo: $dir is on develop; GitLab holds main, develop, feature/due-dates, feature/clean and feature/merged."
++echo "Open its merge-request page with:"
++echo "cd $(cd "$dir" && pwd) && yamt --diff"

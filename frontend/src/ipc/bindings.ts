@@ -111,6 +111,57 @@ export type Antialiasing = "subpixel" | "greyscale";
 /**  0-based line index in the base text. */
 export type BaseLine = number;
 
+/**  What blocks a merge, GitLab's `DetailedMergeStatus` in the window's words. */
+export type BlockedReason = 
+/**  It is a draft. */
+{ kind: "draft" } | 
+/**  Discussions are unresolved. */
+{ kind: "discussions" } | 
+/**  Approvals are missing. */
+{ kind: "approvals" } | 
+/**  The pipeline must pass. */
+{ kind: "pipelineMustPass" } | 
+/**  The pipeline still runs. */
+{ kind: "pipelineRunning" } | 
+/**  A reviewer requested changes. */
+{ kind: "changesRequested" } | 
+/**  Merge requests it depends on must be merged first. */
+{ kind: "dependencies" } | 
+/**  External status checks must pass. */
+{ kind: "statusChecks" } | 
+/**  Its title or description must name a Jira issue. */
+{ kind: "jiraIssue" } | 
+/**  It changes LFS files someone locked. */
+{ kind: "lockedFiles" } | 
+/**  It changes paths someone locked. */
+{ kind: "lockedPaths" } | 
+/**  It may not be merged at this time. */
+{ kind: "mergeTime" } | 
+/**  It is not open. */
+{ kind: "notOpen" } | 
+/**  Its source branch is missing or has no commits. */
+{ kind: "sourceBranch" } | 
+/**  Security policies are not satisfied. */
+{ kind: "securityPolicies" } | 
+/**  Security policy pipelines must pass. */
+{ kind: "securityPipelines" } | 
+/**  Its title does not match the project's rule. */
+{ kind: "titleRule" } | 
+/**  A status yamt does not know. */
+{ kind: "other"; 
+/**  GitLab's word for it. */
+status: string };
+
+/**  How much a merge request changes, GitLab's counts. */
+export type ChangeSize = {
+	/**  Lines added. */
+	additions: number,
+	/**  Lines removed. */
+	deletions: number,
+	/**  Files changed. */
+	files: number,
+};
+
 /**  What the checkout holds now; `Changed` lists at least one file or ref, or has `head_moved`. */
 export type CheckoutLook = { kind: "Missing" } | { kind: "Clean" } | { kind: "Changed"; folder: string; files: string[]; 
 /**  The AI's branches and stash (plan §2 #122): the clone starts with none. */
@@ -474,6 +525,12 @@ export type MergeRequestRow = {
 	pipeline: Pipeline | null,
 	/**  Its page on GitLab; `None` when GitLab is not on https. */
 	page: WebPage | null,
+	/**  How much it changes; `None` when GitLab has not counted it. */
+	size: ChangeSize | null,
+	/**  Whether it can be merged. */
+	readiness: Readiness,
+	/**  Whether its branch lives in another project than its target, or in a deleted one. */
+	fromFork: boolean,
 };
 
 /**  One message of a thread. */
@@ -718,6 +775,26 @@ export type RangeStart = {
 	right: RangeSide,
 	files: RangeEntry[],
 };
+
+/**
+ *  Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag: one
+ *  state per row, a conflict first.
+ */
+export type Readiness = 
+/**  It can be merged. */
+{ kind: "ready" } | 
+/**  Its branch conflicts with its target. */
+{ kind: "conflicts"; 
+/**  What else blocks it, GitLab's status first, then `Draft`; empty when nothing else is known. */
+also: BlockedReason[] } | 
+/**  Its branch must be rebased first. */
+{ kind: "needsRebase" } | 
+/**  GitLab still checks whether it can be merged. */
+{ kind: "checking" } | 
+/**  Something other than a conflict blocks it. */
+{ kind: "blocked"; 
+/**  What blocks it. */
+reason: BlockedReason };
 
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;

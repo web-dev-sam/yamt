@@ -1,0 +1,5 @@
+just mutants HEAD → 91 mutants tested in 2m: 4 missed, 63 caught, 24 unviable; no TypeScript changes. The first run had 7 missed; the 3 lib.rs/record.rs:102 ones were killed by 2 new tests.
+crates/local-merge/src/record.rs:133:23 match guard NotFound → true — equivalent: remove() only decides whether a failed removal is logged as a warning; behaviour otherwise identical
+crates/local-merge/src/record.rs:133:23 match guard NotFound → false — equivalent: only adds a warning log line for an already-missing record
+crates/local-merge/src/record.rs:133:36 == → != — equivalent: same, only which removal failures are logged
+crates/local-merge/src/start.rs:209:27 guard name == full → true — equivalent: measured, `rev-parse --verify --symbolic-full-name` of an ambiguous name prints nothing (gitio → None), so after the fetch any Some is the remote-tracking ref
