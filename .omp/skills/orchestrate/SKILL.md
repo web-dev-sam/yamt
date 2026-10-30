@@ -10,8 +10,10 @@ minus `ORCHESTRATOR_EDITABLE` (`.omp/hooks/lib/policy.ts`) is hook-blocked for y
 
 ## 0. Re-hydrate (every session, before anything)
 
-`AGENTS.md` → this skill → `docs/slices/SLICES.md` → `.omp/GUARDRAILS.md` (changelog tail) → `docs/architecture.md` §0
-(visions), §9 (slice map) → `docs/plan.md` §2 if a design question is in play. Then say in one paragraph what is next.
+`AGENTS.md` → this skill → `docs/slices/SLICES.md` (open work only; closed sections live in `docs/slices/archive/board.md`,
+read by grep when a question needs history) → `.omp/GUARDRAILS.md` (changelog tail) → `docs/architecture.md` §0 (visions),
+§9 (slice map) → `docs/plan.md` §2 if a design question is in play. After an omp handoff the handoff document and the board
+are the state: read only the rows the next step needs. Then say in one paragraph what is next.
 
 ## 1. Intent capture (with the human)
 
@@ -43,13 +45,18 @@ Two of them had bugs this round that tests would have caught. Cost: minutes of a
 
 ## 2. Slice map (per wave)
 
+An open feature gets a `designer` first (§3): it writes the design document and one brief per slice of its recommended
+option (`docs/slices/briefs/`), and returns a short summary; you read the summary, check each brief against OR1–OR3 and
+edit only what fails, never rewrite. A feature whose shape is already given gets short briefs from you.
 For each slice: id, owner agent, `Owned`/`Read-only` globs, fixed `Contract`, `Acceptance`, smoke recipe; editor
 slices list `skill://cm6-rules` under `## Skills`. Hand failing-path steps only for `editor/` (not mutated) and
-type-level proofs; elsewhere `just mutants` (VF7) does it. One slice = one concern, well inside an implementer's 200-request
-budget (guide: ≤ ~25 files, ≤ ~1,500 changed lines; larger → split; SettingsWeb: 281 requests, no real-app check). The
-brief passes the design's sourced facts as given (`skill://slice-protocol`). Slices form a dependency graph: independent
-ones run in parallel; a dependent one starts once its prerequisite's round 1 is committed, not after its review. A fix
-round never touches a dependent slice's owned files; a contract change it uses goes to it (`write agent://<id>`) or into its own fix round. Checks:
+type-level proofs; elsewhere the implementer's `just mutants HEAD` (VF7) does it. One slice = one concern, well inside an
+implementer's 200-request budget (guide: ≤ ~25 files, ≤ ~1,500 changed lines; larger → split; SettingsWeb: 281 requests,
+no real-app check). The brief passes the design's sourced facts as given (`skill://slice-protocol`). Slices form a
+dependency graph: independent ones run in parallel; a dependent one starts once its prerequisite's round 1 is committed,
+not after its review. A fix round never touches a dependent slice's owned files; a contract change it uses goes to it
+(`write agent://<id>`) or into its own fix round. Name the slice that wires a window together: its commit starts the
+smoke pass (§6). Checks:
 
 - [OR1] `Owned` globs are pairwise disjoint across the wave; `SHARED_PATHS` and `GENERATED_PATHS` are never owned.
   Implementers report needed shared edits in `deviations_from_brief`; you apply them between rounds. Detector: hook `slice-registry.ts`.
@@ -64,37 +71,54 @@ round never touches a dependent slice's owned files; a contract change it uses g
 copy, so a grant applies at once. Detector: hooks `slice-registry.ts`, `task-fanout.ts`. One `task` call per isolated
 slice (OR10), `isolated: true`, `name` = slice id in CamelCase (`M0S1MergeCore`), `agent` = `rust-impl` | `web-impl`
 (language-neutral: `rust-impl`; the default `task` agent is disabled), brief as `task`, background as `context`, `solutionSpace` = openness.
+Every agent that writes is registered: the designer owns `docs/slices/briefs/<feature>-*.md`, the docs keeper
+`docs/architecture.md`, `.omp/skills/project-map/**`, `.omp/skills/ipc-contract/SKILL.md`. Briefs and tasks cite paths and
+finding ids; they never paste a document, an agent output or a finding's text.
 
 ## 4. Collect and commit
 
-Read each output field separately (`agent://<id>/<field>`), never the truncated whole document, and write
-`.omp/run/notes/<Name>.md` from them; board evidence cells ≤ ~300 characters, pointing to the note.
-`deviations_from_brief` → accept (update `SLICES.md`/brief) or reject (fix round). Apply needed shared-file edits now,
-then `just bindings` (and `just third-party-licenses` when a dependency changed); patches never carry generated files.
-Commit each applied patch (every round) before its review, caveman-commit style; only you commit; never push unasked.
+[OR16] For every finished agent run `just collect <Name>`: it writes `.omp/run/notes/<Name>.md` from omp's saved
+output, copies the patch to `.omp/run/patches/`, writes the kept survivors to `.omp/run/mutants/<Name>.survivors.txt`,
+appends the findings with ids to `.omp/run/findings.jsonl`, and prints a short summary. Act on the summary; open
+`agent://<id>/<field>` or the note only for a line the summary flags, never the whole output. Board evidence cells
+≤ ~300 characters, pointing to the note. `deviations_from_brief` → accept (update `SLICES.md`/brief) or reject (fix
+round); `NOT RUN` acceptance → a smoke pass (§6) before the slice is accepted. Apply needed shared-file edits now, then
+`just bindings` (and `just third-party-licenses` when a dependency changed) and `git add` them; patches never carry
+generated files. Then `just collect <Name> --commit "<message>"` commits the applied patch with its bookkeeping (every
+round), before its review, caveman-commit style; only you commit; never push unasked.
 
 ## 5. Review and fix rounds
 
-Once a slice's patch is committed: start `just mutants <commit before it>` as a background job (VF7) and spawn
-`boundary-reviewer` at once; spawn `correctness-reviewer` when the run ends, with its survivor list. Each gets the
-brief and the patch path. Append every finding to `.omp/run/findings.jsonl`:
-`{"ts","slice","source":"boundary|correctness|verifier|human","severity","rule_id","file","line","problem","fix","triage"}`.
+Once a slice's patch is committed, spawn both reviewers in one call: each gets the brief and the patch path; the
+correctness reviewer also gets the survivor list. A patch whose mutated files show no run (collect prints
+`no mutation run`): start `just mutants <commit before it>` in the background (VF7) and spawn the correctness reviewer
+when it ends. `just collect <Reviewer>` logs every finding with an id (`source`: boundary | correctness | verifier).
 
 - [OR12] Triage before any fix round: every `should`/`nit` and every verifier survivor gets one question — _if this
   stays, does the app get harder to grow (a component with a second job, data with two writers or two sources, a
   copied rule, a bent boundary, an untested rule other code relies on)?_ Yes → `block`, fixed in this slice's fix round
-  (`"triage": "promoted: <reason>"`); no → dropped (`"triage": "dropped: <one-line reason>"`). No backlog, no cleanup round.
+  (`just triage <id>… -- "promoted: <reason>"`); no → dropped (`just triage <id>… -- "dropped: <one-line reason>"`).
+  No backlog, no cleanup round.
 
-Only blocks (promoted ones included) start a fix round: respawn under a fresh name (`<Name>R<n>`) with the blocks
-verbatim; max **two** rounds per slice. Each round is re-checked by **one** reviewer, the lens that raised the blocks
-it fixes (both only when both did; scope RV8); its `should`/`nit` are dropped without a round. Beyond two rounds →
+Only blocks (promoted ones included) start a fix round: respawn under a fresh name (`<Name>R<n>`) with the block ids
+(the implementer runs `just findings <id>…`); max **two** rounds per slice. Each round is re-checked by **one** reviewer,
+the lens that raised the blocks it fixes (both only when both did; scope RV8); its `should`/`nit` are dropped without a
+round. Beyond two rounds →
 ── **Gate B** (escalate to the human with the findings; OR13). ──
 
-## 6. Verify (final check)
+## 6. Verify (smoke pass, docs, final check)
 
-Update `docs/architecture.md` and `skill://project-map` once per feature, now. Then spawn `verifier` alone (OR10) with
-read-only recipes (VF6): `just check` (incl. `map-check`) and the smoke recipes — never `just mutants` over the feature: each
-patch's own run is the evidence (VF7, owner #1630). `gate: fail` → fix round for the owning slice (§5), never a new slice. Evidence → board.
+The verifier's passes (VF11: smoke, final, re-pass) run read-only recipes (VF6), never `just mutants` (VF7, owner #1630);
+once per feature the docs keeper updates the documentation before the final pass:
+
+- **smoke**: once the slice that wires a window together is committed, and for any slice with `NOT RUN` acceptance: only
+  those recipes, beside that slice's reviewers, before the next implementer starts. A failure → that slice's fix round.
+- **docs**, once per feature, now: spawn `docs-keeper` (registered, §3) with the feature's base commit, its notes and the
+  documentation finding ids; it updates `docs/architecture.md` and `skill://project-map` (`tree.md`, `state.md`) and runs
+  `just map-check`.
+- **final**: `verifier` alone (OR10): `just check` (incl. `map-check`) and every smoke recipe. `gate: fail` → fix round for
+  the owning slice (§5), never a new slice; then a **re-pass**: `just check`, the failed steps and the steps the fix
+  touched, never the whole run again. Evidence → board; a closed feature's section → `just archive-board "<heading start>"`.
 
 ## 7. Milestone end and retro
 
@@ -113,8 +137,18 @@ the next milestone's first spawn (owner, #108), spawn `curator` with `findings.j
 - [OR6] You never run `just check` as proof; the verifier does. Single commands to understand a failure are fine.
 - [OR7] A `scout` is allowed for mapping unknown code; its output is context, not a plan.
 - [OR8] If the board and the tree disagree, the tree wins; fix the board, note it as a finding.
-- [OR9] Handoff = board + findings log + GUARDRAILS changelog, never chat memory; update the board before yielding. A handoff note is
-  a checkpoint, not a stop: keep executing the board until the owner says stop or the context is nearly full (owner, #352/#356).
+- [OR9] Handoff = board + findings log + GUARDRAILS changelog, never chat memory. omp hands the session off by itself at
+  450k tokens (`.omp/config.yml`: compaction by an omp handoff), so the board, notes and findings are current before every
+  `wait`: a handoff at any turn then loses nothing. After it, keep executing the board; never ask the owner to hand off and
+  never stop for context (owner, #352/#356, #1770).
 - [OR10] At most `MAX_PARALLEL_AGENTS` agents live, at most two implementers. Reviewers may run beside an implementer
-  (they read committed patches); a `just mutants` run may run beside both; the verifier runs alone (no agent, no
-  mutation run beside it: it builds and drives the app). No broadcast. Detector: hook `task-fanout.ts` (per call); across calls, you.
+  (they read committed patches). Mutation runs happen inside an implementer's workspace; your rare one (§5) may run beside
+  reviewers and implementers. A verifier pass (smoke, final, re-pass) runs with no implementer and no mutation run beside
+  it, since patches land in the tree it drives; reviewers may run beside it. No broadcast. Detector: hook `task-fanout.ts`
+  (per call); across calls, you.
+- [OR14] One feature per session: when a feature closes (final pass, board, archive), the reply ends with the one line
+  that starts the next one in a new session (`/new`, then `Implement docs/slices/request-<x>.md`). An owner's explicit
+  "then continue with X" is followed in this session; the automatic handoff (OR9) keeps the context bounded.
+- [OR15] omp ended while agents ran (a restart, SIGTERM): their isolated work survives in `~/.omp/wt/*.retained-*`. Before a
+  respawn, `git -C <dir>/m diff --stat` each one; respawn as `<Name>B` with the retained diff's path in the brief, as a
+  start to check and finish, not to redo.

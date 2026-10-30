@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Fails when a source file a reader must find is not named in skill://project-map (PM6).
+# Fails when a source file a reader must find is not named in skill://project-map (PM6): SKILL.md, tree.md or state.md.
 set -euo pipefail
 
-readonly MAP=.omp/skills/project-map/SKILL.md
+readonly MAP_FILES=(.omp/skills/project-map/SKILL.md .omp/skills/project-map/tree.md .omp/skills/project-map/state.md)
 
 missing=()
 while IFS= read -r file; do
     name=${file##*/}
     name=${name%.d.ts}
     name=${name%.*}
-    if ! grep -qw -- "$name" "$MAP"; then
-        missing+=("$file (not in $MAP)")
+    if ! grep -qw -- "$name" "${MAP_FILES[@]}"; then
+        missing+=("$file (not in skill://project-map)")
     fi
 done < <(
     git ls-files -- 'frontend/src/*.ts' 'frontend/src/*.vue' 'frontend/scripts/*.ts' 'scripts/*' 'crates/merge-core/src/*.rs' |

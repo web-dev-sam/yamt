@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
@@ -92,14 +100,21 @@ test("generated: bindings, lockfile, snapshots", async () => {
   await assertVerdict(h, write("frontend/src/ipc/log.ts"), IMPLEMENTER, false);
 });
 
-test("bash-guard: every justfile recipe except golden-update passes for an implementer", async () => {
+test("bash-guard: every justfile recipe passes for an implementer except the orchestrator's", async () => {
   const h = toolCallHandler(bashGuard);
   const recipes = [
     ...readFileSync(resolve(REPO, "justfile"), "utf8").matchAll(/^@?([a-z][\w-]*)[^:\n]*:(?!=)/gm),
   ].map((m) => m[1]);
   assert.ok(recipes.includes("bindings-check"), `parsed recipes: ${recipes.join(", ")}`);
+  const orchestratorOnly = ["golden-update", "collect", "triage", "archive-board"];
   for (const recipe of recipes)
-    await assertVerdict(h, bash(`just ${recipe}`), IMPLEMENTER, recipe === "golden-update");
+    await assertVerdict(
+      h,
+      bash(`just ${recipe}`),
+      IMPLEMENTER,
+      orchestratorOnly.includes(recipe ?? ""),
+    );
+  await assertVerdict(h, bash("just collect SearchCore --commit x"), MAIN, false);
 });
 
 test("bash-guard: git and destructive commands", async () => {
@@ -392,4 +407,23 @@ test("task-fanout: broadcasts are blocked for everyone, named messages pass", as
   await assertVerdict(h, write("agent://all", "retry"), MAIN, true);
   await assertVerdict(h, write("agent://all", "done"), IMPLEMENTER, true);
   await assertVerdict(h, write("agent://Main", "question"), IMPLEMENTER, false);
+});
+
+test("autoload budget: each autoloaded SKILL.md ≤ 10 KB, each agent's autoloaded total ≤ 28 KB", () => {
+  const agents = resolve(REPO, ".omp/agents");
+  for (const file of readdirSync(agents).filter((f) => f.endsWith(".md"))) {
+    const list =
+      /^autoloadSkills:\s*\[([^\]]*)\]/m.exec(readFileSync(resolve(agents, file), "utf8"))?.[1] ??
+      "";
+    let total = 0;
+    for (const skill of list
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "")) {
+      const bytes = statSync(resolve(REPO, ".omp/skills", skill, "SKILL.md")).size;
+      assert.ok(bytes <= 10 * 1024, `${file} autoloads ${skill}: ${bytes} bytes`);
+      total += bytes;
+    }
+    assert.ok(total <= 28 * 1024, `${file} autoloads ${total} bytes`);
+  }
 });

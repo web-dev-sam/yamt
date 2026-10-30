@@ -21,8 +21,8 @@ default and measured each milestone (`skill://guardrail-evolution` step 4).
   field or variant whose name says it all may restate it); elsewhere only if the reviewer test fails.
 - [CP3] A `//!` crate-level line in `lib.rs` naming the crate's single responsibility.
 - [CP4] Scripts and recipes: a script header may state the job and the external facts it depends
-  on, with their sources (`scripts/test-screen.sh`: KWin 6.7 ignores a forced screen,
-  `xdgshellwindow.cpp`). A shell function may state its positional parameters and its output (bash
+  on, with their sources (`justfile` `mutants`: cargo-mutants builds its copy in TMPDIR, and `/tmp` is RAM
+  here, #574). A shell function may state its positional parameters and its output (bash
   has no named parameters). A `justfile` recipe may carry one comment line (shown by `just --list`).
 
 ## Never

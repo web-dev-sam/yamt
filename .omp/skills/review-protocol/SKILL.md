@@ -10,7 +10,7 @@ orchestrator acts on mechanically; prose outside the schema is discarded.
 
 ## Procedure
 
-1. Read the brief (Target, Contract, Change, Acceptance). Read `skill://project-map`.
+1. Read the brief (Target, Contract, Change, Acceptance). Read the `skill://project-map` rows you need (by grep).
 2. Read the patch fully; then read every file it touches _as it now is_, not only the hunks.
 3. Read the implementer's `deviations_from_brief` and `open_risks` — each is either
    accepted (note it in `checked`) or becomes a finding.
@@ -19,7 +19,7 @@ orchestrator acts on mechanically; prose outside the schema is discarded.
 ## Lenses
 
 **boundary-reviewer**: ownership (files outside `Owned`), dependency direction
-(`skill://project-map` PM1–PM5), contract drift (changed signatures), state ownership table,
+(`skill://project-map` PM1–PM8), contract drift (changed signatures), state ownership (`skill://project-map/state.md`),
 naming, dead weight (one-caller wrappers, speculative generality, unused exports), comments
 (`skill://comment-policy`), vendored-rule violations the lints cannot see (RS1–RS6, TS8–TS11, TS17,
 VU2–VU16), decision-record contradictions. Test strength is the correctness reviewer's; skip it.
@@ -31,8 +31,8 @@ only by that owner; every new import edge follows §2; a second copy of a decisi
 edge cases named in the brief and in the risk register, off-by-one in line spaces, undo and
 mapping semantics (CM1–CM9), error paths (what happens when git fails mid-call), tests —
 do the added tests catch a plausible consumer-visible bug, or do they pin wiring/defaults? Judge
-by reading; never edit source to mutate it — survivors come from the orchestrator's per-slice `just mutants`
-run, given to you as input: drop each per VF7 (a)/(b)/(c) (`skill://verification`), grade the rest below.
+by reading; never edit source to mutate it — the implementer killed its survivors or kept them with a reason
+(`mutation`, VF7, SP11): check each kept one per VF7 (a)/(b)/(c) (`skill://verification`), grade a wrong one below.
 
 ## Grading
 

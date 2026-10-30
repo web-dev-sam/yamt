@@ -37,8 +37,11 @@ Gate D outcome per proposal.
 
 ## Budgets
 
-- Each `SKILL.md` ≤ 120 lines (vendored material lives in `references/`, read on demand).
-- Autoloaded total per implementer ≤ 400 lines; `GUARDRAILS.md` ≤ 60 active rules.
+- Autoloaded skills, in bytes (a line budget let 300-character lines through; #1770): each `SKILL.md` an agent
+  autoloads ≤ 10 KB, and every agent's autoloaded total ≤ 28 KB. Detail lives in sibling files
+  (`skill://<name>/<file>`) or `references/`, read by section on demand. Detector: `hooks.test.ts` (autoload budget).
+- A skill no agent autoloads is written to be read by row or section (grep-able), never whole.
+- `GUARDRAILS.md` ≤ 60 active rules.
 - Over budget ⇒ a proposal must name what it retires or promotes to make room.
 
 ## Retro procedure (curator)
