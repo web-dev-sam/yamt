@@ -1,13 +1,28 @@
 {
-  "MrConflictsLocal": {
-    "owned": ["crates/local-merge/**", "scripts/mr-conflict-repo.sh", "scripts/arch-check.sh"]
-  },
   "MrConflictsGitlabR1": {
     "owned": [
       "crates/merge-requests/tests/**",
       "tests/glab/mr-conflicts/**",
       "tests/glab/README.md",
       "frontend/src/ipc/fixtureMergeRequestData.test.ts"
+    ]
+  },
+  "MrConflictsApp": {
+    "owned": [
+      "src-tauri/Cargo.toml",
+      "src-tauri/AGENTS.md",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/merge.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/outcome.rs",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge/**",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/range_window.rs",
+      "src-tauri/src/second_window.rs",
+      "frontend/src/ipc/domain.ts",
+      "frontend/src/ipc/mergeRequestDomain.ts",
+      "frontend/src/ipc/index.ts"
     ]
   }
 }
