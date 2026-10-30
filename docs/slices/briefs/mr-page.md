@@ -21,7 +21,8 @@ Non-goals: the request's Non-goals; the merge window; a key for the page; any ch
 
 ## Contract
 
-Fixed: design §6 "B4 → B5" (use it, do not change it), the request's rule 1 placement (icon-only Lucide
+Fixed: design §6 "B4 → B5" as committed (its `Listing` is named `ListLoad`, #1941; use it, do not change it), the
+request's rule 1 placement (icon-only Lucide
 `git-pull-request`, `aria-label`/title "Merge requests", directly left of the gear in every header showing the gear,
 the range window's empty-range header included), rule 2 page layout and closing (Back, Escape by `ServerLogView.vue`'s
 rule, focus back where it was), rule 4 row content, rule 5 CI box, rule 6 filters, PM10 as design §2.3 states it.
