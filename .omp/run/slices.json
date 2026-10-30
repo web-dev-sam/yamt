@@ -5,5 +5,24 @@
       ".omp/skills/project-map/**",
       ".omp/skills/ipc-contract/SKILL.md"
     ]
+  },
+  "MrPageR1": {
+    "owned": [
+      "frontend/src/ui/MergeRequestsButton.vue",
+      "frontend/src/ui/MergeRequestsView.vue",
+      "frontend/src/ui/MergeRequestRow.vue",
+      "frontend/src/ui/MergeRequestFilter.vue",
+      "frontend/src/ui/CiStatusBox.vue",
+      "frontend/src/ui/SettingsView.vue",
+      "frontend/src/ui/focusReturn.ts",
+      "frontend/src/ui/focusReturn.test.ts",
+      "frontend/src/ui/mergeRequestsText.ts",
+      "frontend/src/ui/mergeRequestsText.test.ts",
+      "frontend/src/ui/mergeRequests.ts",
+      "frontend/src/ui/mergeRequests.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/mergeRequests/**",
+      "frontend/scripts/app-session/**"
+    ]
   }
 }
