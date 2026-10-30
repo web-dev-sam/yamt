@@ -1,0 +1,4 @@
+just mutants HEAD (final run): no Rust changes; frontend All files 89.78% (1265 killed, 117 survived, 27 no-cov); problem.ts, pushing.ts, aborting.ts 100%
+fixtureOperations.ts:92 FINISHED literals (4) — gate-covered: Stryker does not reload static module constants (untouched operationText NAMES survive the same way). Hand-mutating reply to {} fails 5 tests.
+fixtureOperations.ts:264 abort phase kind "ended"→"" — equivalent: every reader branches on kind !== "at" / !== "committed", so any other kind acts as ended. Types forbid the value.
+All other survivors listed (fixtureOperations 19–136; operationText; problemText 149–199; continuing 53/66/101/143; index.ts 160–164; domain.ts 156) are on lines this round did not change.

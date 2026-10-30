@@ -19,9 +19,11 @@ afterEach(() => {
 
 function logged(problem: Problem): string[] {
   const lines: string[] = [];
-  vi.spyOn(console, "error").mockImplementation((line: string) => {
-    lines.push(line);
-  });
+  for (const level of ["info", "error"] as const) {
+    vi.spyOn(console, level).mockImplementation((line: string) => {
+      lines.push(line);
+    });
+  }
   logProblem(problem);
   return lines;
 }
@@ -87,4 +89,33 @@ test("a failed merge-request call logs its step and cause (catches a log line wi
   expect(
     logged({ action: "mergeRequests", step: "open", cause: { kind: "WorkerStopped" } }),
   ).toEqual(['[error] store.mergeRequests_failed {step: "open", kind: "WorkerStopped"}']);
+});
+
+test("a failed push logs its branch and cause under its own event (catches a push filed as a continue)", () => {
+  expect(
+    logged({ action: "push", branch: "feature/due-dates", cause: { kind: "WorkerStopped" } }),
+  ).toEqual(['[error] store.push_failed {branch: "feature/due-dates", kind: "WorkerStopped"}']);
+});
+
+test.each(["open", "finish", "save", "take", "reset"] as const)(
+  "a failed %s logs the file and the cause (catches a log line without the path)",
+  (action) => {
+    expect(logged({ action, path: "a.ts", cause: { kind: "WorkerStopped" } })).toEqual([
+      `[error] store.${action}_failed {path: "a.ts", kind: "WorkerStopped"}`,
+    ]);
+  },
+);
+
+test("a stop without files and a refused close are logged as information, not as failures", () => {
+  expect(logged({ action: "stopped", operation: null, message: "Stopped at c92a5e1" })).toEqual([
+    '[info] store.stopped {operation: "none", message: "Stopped at c92a5e1"}',
+  ]);
+  vi.restoreAllMocks();
+  expect(logged({ action: "stopped", operation: "Rebase", message: "m" })).toEqual([
+    '[info] store.stopped {operation: "Rebase", message: "m"}',
+  ]);
+  vi.restoreAllMocks();
+  expect(logged({ action: "close" })).toEqual([
+    '[info] store.close_refused {reason: "git_running"}',
+  ]);
 });

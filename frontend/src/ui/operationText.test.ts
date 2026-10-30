@@ -1,12 +1,13 @@
 import { expect, test } from "vitest";
 
-import type { OperationKind, OperationView, SideName } from "../ipc";
+import type { MergeView, OperationKind, OperationView, SideName } from "../ipc";
 import {
   abortLabel,
   abortMessage,
   abortTitle,
   allResolvedText,
   continueLabel,
+  mergeOfText,
   operationLine,
   operationTag,
 } from "./operationText";
@@ -44,6 +45,17 @@ test.each<[OperationKind, string]>([
   ["Am", "PATCHES"],
 ])("the tag of %s reads %s, as plan #92 words it", (kind, tag) => {
   expect(operationTag(kind)).toBe(tag);
+});
+
+test("a merge yamt started is named by what goes into which branch, in one wording", () => {
+  const view: MergeView = {
+    branch: "feature/due-dates",
+    target: "main",
+    returnTo: null,
+    branchBefore: { kind: "unchanged" },
+  };
+
+  expect(mergeOfText(view)).toBe("merge of main into feature/due-dates");
 });
 
 test.each<[string, OperationView, string]>([

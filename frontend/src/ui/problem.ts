@@ -35,7 +35,15 @@ export type ThreadStep =
 
 export type AiAttempt = "ask" | "diff" | "discard";
 
-export type MergeRequestStep = "find" | "list" | "open" | "job" | "mergeRequest";
+export type MergeRequestStep =
+  | "find"
+  | "list"
+  | "open"
+  | "job"
+  | "mergeRequest"
+  | "resolve"
+  | "continue"
+  | "localMerge";
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
@@ -44,6 +52,7 @@ export type Problem =
       readonly operation: OperationKind;
       readonly cause: ProblemCause;
     }
+  | { readonly action: "push"; readonly branch: string; readonly cause: ProblemCause }
   | { readonly action: "close" }
   | {
       readonly action: "stopped";
@@ -102,45 +111,48 @@ function stoppedFields(problem: Extract<Problem, { action: "stopped" }>): Record
   return { operation: problem.operation ?? "none", message: problem.message };
 }
 
-export function logProblem(problem: Problem): void {
-  const event = `store.${problem.action}_failed`;
+function failureFields(
+  problem: Exclude<Problem, { action: "close" | "stopped" }>,
+): Record<string, string | number | boolean> {
   switch (problem.action) {
     case "list":
     case "tabs":
     case "openRange":
     case "search":
-      log.error(event, { ...problem.cause });
-      return;
+      return { ...problem.cause };
     case "abort":
     case "continue":
-      log.error(event, { operation: problem.operation, ...problem.cause });
-      return;
-    case "close":
-      log.info("store.close_refused", { reason: "git_running" });
-      return;
-    case "stopped":
-      log.info("store.stopped", stoppedFields(problem));
-      return;
+      return { operation: problem.operation, ...problem.cause };
+    case "push":
+      return { branch: problem.branch, ...problem.cause };
     case "settings":
-      log.error(event, settingsFields(problem.cause));
-      return;
+      return settingsFields(problem.cause);
     case "open":
     case "finish":
     case "save":
     case "take":
     case "reset":
-      log.error(event, { path: problem.path, ...problem.cause });
-      return;
+      return { path: problem.path, ...problem.cause };
     case "loadTab":
     case "saveTab":
-      log.error(event, { name: problem.name, ...problem.cause });
-      return;
+      return { name: problem.name, ...problem.cause };
     case "threads":
     case "ai":
     case "mergeRequests":
-      log.error(event, { step: problem.step, ...problem.cause });
-      return;
+      return { step: problem.step, ...problem.cause };
   }
+}
+
+export function logProblem(problem: Problem): void {
+  if (problem.action === "close") {
+    log.info("store.close_refused", { reason: "git_running" });
+    return;
+  }
+  if (problem.action === "stopped") {
+    log.info("store.stopped", stoppedFields(problem));
+    return;
+  }
+  log.error(`store.${problem.action}_failed`, failureFields(problem));
 }
 
 export function report(target: Target, failure: Problem): void {

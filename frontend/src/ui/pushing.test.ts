@@ -55,7 +55,7 @@ function offered(
       },
     },
   });
-  return { asking, gitRun, calls, problem, stop, done: offerPush(BRANCH, "Merge") };
+  return { asking, gitRun, calls, problem, stop, done: offerPush(BRANCH) };
 }
 
 async function asked(offer: Offered): Promise<void> {
@@ -97,7 +97,7 @@ test("a failure asks again with git's words, and Keep Local then pushes nothing 
     branch: BRANCH,
     message: REJECTED,
   });
-  expect(offer.gitRun.running.value).toBe(false);
+  expect(offer.gitRun.running.value).toBe(true);
   offer.asking.dismiss();
   await offer.done;
 
@@ -136,7 +136,7 @@ test("Keep Local closes once and the window stays ended", async () => {
   expect(offer.problem.value).toBeNull();
 });
 
-test("a push the app refuses is the continue problem, then Keep Local's path closes the merge", async () => {
+test("a push the app refuses is the push problem, then Keep Local's path closes the merge", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const offer = offered([{ ok: false, failure: { kind: "WorkerStopped" } }]);
 
@@ -146,12 +146,12 @@ test("a push the app refuses is the continue problem, then Keep Local's path clo
   expect(offer.calls).toEqual(["push", "close"]);
   const { problem } = offer;
   expect(problem.value).toEqual({
-    action: "continue",
-    operation: "Merge",
+    action: "push",
+    branch: BRANCH,
     cause: { kind: "WorkerStopped" },
   });
   expect(problem.value === null ? null : problemText(problem.value, LINUX)).toBe(
-    "Could not commit the merge: yamt's worker stopped; try again.",
+    "Could not push feature/due-dates: yamt's worker stopped; try again.",
   );
 });
 
@@ -169,17 +169,16 @@ test("a push answered after its stop was dropped asks nothing more and closes no
   ]);
 });
 
-test("a close the app refuses is the continue problem and the window can be used again", async () => {
+test("a close the app refuses after Keep Local is the push problem and the window can be used again", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const offer = offered([], { ok: false, failure: { kind: "WorkerStopped" } });
 
   offer.asking.answer(false);
   await offer.done;
 
-  expect(offer.problem.value).toEqual({
-    action: "continue",
-    operation: "Merge",
-    cause: { kind: "WorkerStopped" },
-  });
+  const { problem } = offer;
+  expect(problem.value === null ? null : problemText(problem.value, LINUX)).toBe(
+    "Could not push feature/due-dates: yamt's worker stopped; try again.",
+  );
   expect(offer.gitRun.running.value).toBe(false);
 });

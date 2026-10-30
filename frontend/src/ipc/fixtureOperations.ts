@@ -7,8 +7,8 @@ import type {
   SourceFailure,
   SourceResult,
 } from "./domain";
+import type { Leftover, MergeView, ReturnTo } from "./localMergeDomain";
 import type { Log } from "./log";
-import type { Leftover, MergeView, ReturnTo } from "./mergeRequestDomain";
 
 const OPERATIONS = ["merge", "squash", "rebase", "cherry-pick", "revert", "am", "none"] as const;
 
@@ -73,10 +73,11 @@ type FixtureStops = Pick<
 /** How the app answers every command once git finished or aborted the operation. */
 type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
 
-/**
- * Where the chosen operation is: its step, or ended by the last Continue or Abort; a merge yamt
- * started is `committed` after its Continue until it is pushed or kept local.
- */
+type Phase =
+  | { readonly kind: "at"; readonly step: number }
+  | { readonly kind: "committed" }
+  | { readonly kind: "ended"; readonly reply: Ended };
+
 type Sequence = {
   readonly operation: FixtureOperation;
   readonly rewords: boolean;
@@ -85,10 +86,10 @@ type Sequence = {
   readonly mergeRequest: MergeView | null;
   readonly leftovers: boolean;
   rejectedPushes: number;
-  committed: boolean;
-  step: number;
-  ended: Ended | null;
+  phase: Phase;
 };
+
+const FINISHED = { kind: "ended", reply: { kind: "MergeFinished" } } satisfies Phase;
 
 const EMPTY_STEP = 2;
 
@@ -97,6 +98,10 @@ function refused<T>(failure: SourceFailure): SourceResult<T> {
 }
 
 const NO_OPERATION: SourceFailure = { kind: "NoOperation" };
+
+function endedReply(phase: Exclude<Phase, { kind: "at" }>): Ended {
+  return phase.kind === "committed" ? FINISHED.reply : phase.reply;
+}
 
 function stepView(
   operation: FixtureOperation,
@@ -160,32 +165,30 @@ function sequenceOf(search: string): Sequence {
     mergeRequest,
     leftovers: params.has("leftovers"),
     rejectedPushes: params.get("push") === "rejected" ? 1 : 0,
-    committed: false,
-    step: 1,
-    ended: null,
+    phase: { kind: "at", step: 1 },
   };
 }
 
-function atEmptyStop(at: Sequence): boolean {
-  return at.empty && at.step === EMPTY_STEP;
+function atEmptyStop(at: Sequence, step: number): boolean {
+  return at.empty && step === EMPTY_STEP;
 }
 
-function listedAt(at: Sequence, files: StopFiles): FileEntry[] {
-  return at.clean || atEmptyStop(at) ? [] : files.listed();
+function listedAt(at: Sequence, step: number, files: StopFiles): FileEntry[] {
+  return at.clean || atEmptyStop(at, step) ? [] : files.listed();
 }
 
-function viewAt(at: Sequence): OperationView | null {
+function viewAt(at: Sequence, step: number): OperationView | null {
   if (at.mergeRequest === null) {
-    return stepView(at.operation, at.step, at.rewords);
+    return stepView(at.operation, step, at.rewords);
   }
   return { kind: "Merge", merging: MAIN, into: { kind: "Branch", name: at.mergeRequest.branch } };
 }
 
-function stoppedMessage(at: Sequence): string {
-  if (!atEmptyStop(at)) {
-    return `CONFLICT (content): Merge conflict at step ${at.step} of ${COMMITS.length}`;
+function stoppedMessage(at: Sequence, step: number): string {
+  if (!atEmptyStop(at, step)) {
+    return `CONFLICT (content): Merge conflict at step ${step} of ${COMMITS.length}`;
   }
-  const commit = COMMITS[at.step - 1] ?? COMMITS[0];
+  const commit = COMMITS[step - 1] ?? COMMITS[0];
   return [
     `Stopped at ${commit.short_id}...  ${commit.subject}`,
     "You can amend the commit now, with",
@@ -202,39 +205,42 @@ function stoppedMessage(at: Sequence): string {
 function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listStop"> {
   return {
     async listStop() {
-      if (at.ended !== null) {
-        return refused(at.ended);
+      const { phase } = at;
+      if (phase.kind !== "at") {
+        return refused(endedReply(phase));
       }
-      const view = viewAt(at);
+      const view = viewAt(at, phase.step);
       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
       const { mergeRequest } = at;
-      const value = { files: listedAt(at, files), diskChanges: [], operation: view, sides };
+      const listed = listedAt(at, phase.step, files);
+      const value = { files: listed, diskChanges: [], operation: view, sides };
       return { ok: true, value: { kind: "Files", ...value, mergeRequest } };
     },
   };
 }
 
 function continued(log: Log, at: Sequence, files: StopFiles): SourceResult<ContinueReply> {
-  const { operation } = at;
-  if (at.ended !== null) {
-    return refused(at.ended);
+  const { operation, phase } = at;
+  if (phase.kind !== "at") {
+    return refused(endedReply(phase));
   }
-  const view = stepView(operation, at.step, at.rewords);
+  const view = stepView(operation, phase.step, at.rewords);
   if (view === null) {
     return refused(NO_OPERATION);
   }
-  if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
-    at.ended = { kind: "MergeFinished" };
+  if (view.kind === "Merge" || view.kind === "SquashMerge" || phase.step === COMMITS.length) {
     log.info("fixture.continue_finished", { operation });
     if (at.mergeRequest !== null) {
-      at.committed = true;
+      at.phase = { kind: "committed" };
       return { ok: true, value: { kind: "ReadyToPush", branch: at.mergeRequest.branch } };
     }
+    at.phase = FINISHED;
     return { ok: true, value: { kind: "Finished" } };
   }
-  at.step += 1;
+  const step = phase.step + 1;
+  at.phase = { kind: "at", step };
   files.unresolveAll();
-  return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
+  return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at, step) } };
 }
 
 function stopActions(
@@ -248,13 +254,14 @@ function stopActions(
       return continued(log, at, files);
     },
     async abortOperation() {
-      if (at.ended !== null) {
-        return refused(at.ended);
+      const { phase } = at;
+      if (phase.kind !== "at") {
+        return refused(endedReply(phase));
       }
-      if (stepView(operation, at.step, at.rewords) === null) {
+      if (stepView(operation, phase.step, at.rewords) === null) {
         return refused(NO_OPERATION);
       }
-      at.ended = { kind: "MergeAborted" };
+      at.phase = { kind: "ended", reply: { kind: "MergeAborted" } };
       log.info("fixture.abort_operation", { operation });
       return { ok: true, value: { leftovers: at.leftovers ? [...LEFTOVERS] : [] } };
     },
@@ -267,19 +274,20 @@ function pushActions(
 ): Pick<ChunkSource, "pushMergedBranch" | "closeEndedMerge"> {
   return {
     async pushMergedBranch() {
-      if (!at.committed) {
-        return refused(at.ended ?? NO_OPERATION);
+      const { phase } = at;
+      if (phase.kind !== "committed") {
+        return refused(phase.kind === "at" ? NO_OPERATION : phase.reply);
       }
       if (at.rejectedPushes > 0) {
         at.rejectedPushes -= 1;
         return { ok: true, value: { kind: "failed", message: REJECTED_PUSH } };
       }
-      at.committed = false;
+      at.phase = FINISHED;
       log.info("fixture.push", {});
       return { ok: true, value: { kind: "pushed" } };
     },
     async closeEndedMerge() {
-      at.committed = false;
+      at.phase = at.phase.kind === "committed" ? FINISHED : at.phase;
       log.info("fixture.close_ended_merge", {});
       return { ok: true, value: null };
     },

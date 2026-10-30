@@ -16,7 +16,7 @@ import type {
   Theme,
   WriteReply,
 } from "./domain";
-import type { AbortReply, PushReply } from "./mergeRequestDomain";
+import type { AbortReply, PushReply } from "./localMergeDomain";
 
 export type WriteRequest = {
   readonly path: string;

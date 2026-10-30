@@ -288,6 +288,9 @@ test.each([
   ["open", "Could not open the merge request's changes: yamt's worker stopped; try again."],
   ["job", "Could not open the job's page: yamt's worker stopped; try again."],
   ["mergeRequest", "Could not open the merge request's page: yamt's worker stopped; try again."],
+  ["resolve", "Could not resolve the merge request's conflicts: yamt's worker stopped; try again."],
+  ["continue", "Could not continue the merge request's merge: yamt's worker stopped; try again."],
+  ["localMerge", "Could not check for an unfinished merge: yamt's worker stopped; try again."],
 ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
 });
@@ -343,6 +346,14 @@ test.each([
   const cause = { kind: "Git", message: "hook says no\n" } as const;
 
   expect(text({ action: "continue", operation, cause })).toBe(words);
+});
+
+test("a failed push or close after the commit names the branch, never the commit", () => {
+  const cause = { kind: "WorkerStopped" } as const;
+
+  expect(text({ action: "push", branch: "feature/due-dates", cause })).toBe(
+    "Could not push feature/due-dates: yamt's worker stopped; try again.",
+  );
 });
 
 test("a close refused while git runs says to wait for git", () => {

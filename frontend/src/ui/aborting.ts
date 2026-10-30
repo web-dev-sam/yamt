@@ -36,7 +36,7 @@ async function leftBehind(target: AbortTarget, pressed: Pressed): Promise<readon
   let leftovers: readonly Leftover[] = [];
   await target.gitRun.run(stop, {
     call: () => target.source.abortOperation(),
-    endsApp: (reply) => reply.leftovers.length === 0,
+    endsApp: () => true,
     landing: async (outcome) => {
       if (!outcome.ok) {
         await reportFailure(target, {

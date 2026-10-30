@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
 import type { DiskVersion, StoredSettings } from "./domain";
+import type { MergeView } from "./localMergeDomain";
 import { createTauriServerHost, createTauriSource, forwardLog } from "./tauri";
 
 const commands = vi.hoisted(() => ({
@@ -123,7 +124,7 @@ test("listStop turns the app's files list into domain data and passes MovedOn an
   const sides: Generated.SideNames = { local: null, remote: { kind: "Branch", name: "main" } };
   const files: Generated.FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
   const change: Generated.DiskChange = { path: "a.ts", result: { kind: "Staged" } };
-  const mergeRequest: Generated.MergeView = {
+  const mergeRequest: MergeView = {
     branch: "feature/due-dates",
     target: "main",
     returnTo: { kind: "branch", name: "develop" },

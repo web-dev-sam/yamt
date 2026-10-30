@@ -113,7 +113,7 @@ async function continued(
   let pushable: string | null = null;
   await target.gitRun.run(stop, {
     call: () => target.source.continueOperation(),
-    endsApp: (reply) => reply.kind === "Finished",
+    endsApp: (reply) => reply.kind !== "Stopped",
     landing: async (outcome) => {
       pushable = await landing(target, operation, outcome);
     },
@@ -149,7 +149,7 @@ export function createContinuing(target: ContinueTarget, pushing: Pushing): Cont
     }
     const branch = await continued(target, stop, operation);
     if (branch !== null) {
-      await pushing.offerPush(branch, operation.kind);
+      await pushing.offerPush(branch);
     }
   }
 

@@ -76,6 +76,9 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   open: "Could not open the merge request's changes",
   job: "Could not open the job's page",
   mergeRequest: "Could not open the merge request's page",
+  resolve: "Could not resolve the merge request's conflicts",
+  continue: "Could not continue the merge request's merge",
+  localMerge: "Could not check for an unfinished merge",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<
@@ -106,6 +109,8 @@ function attempted(problem: CausedProblem): string {
       const { verb, object } = continueAction(problem.operation);
       return `Could not ${verb.toLowerCase()} ${object}`;
     }
+    case "push":
+      return `Could not push ${problem.branch}`;
     case "list":
     case "settings":
     case "tabs":
@@ -122,10 +127,6 @@ function attempted(problem: CausedProblem): string {
       return AI_ATTEMPT_WORDS[problem.step];
     case "mergeRequests":
       return MERGE_REQUEST_STEP_WORDS[problem.step];
-    default: {
-      const _exhaustive: never = problem;
-      return _exhaustive;
-    }
   }
 }
 

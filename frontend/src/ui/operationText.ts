@@ -242,8 +242,13 @@ export function abortMessage(operation: OperationView): string {
   return `Every resolution and every save in this ${name} will be lost, and so will unsaved edits.${doneSentence(operation)} The repository goes back to how it was before the ${name}, and yamt closes.`;
 }
 
-export function mergeRequestAbortMessage({ branch, target, returnTo }: MergeView): string {
-  const merge = `Abort the merge of ${target} into ${branch}`;
+export function mergeOfText({ target, branch }: MergeView): string {
+  return `merge of ${target} into ${branch}`;
+}
+
+export function mergeRequestAbortMessage(view: MergeView): string {
+  const merge = `Abort the ${mergeOfText(view)}`;
+  const { returnTo } = view;
   return returnTo === null ? `${merge}?` : `${merge} and return to ${returnPlaceText(returnTo)}?`;
 }
 

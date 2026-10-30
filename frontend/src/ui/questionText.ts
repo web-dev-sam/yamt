@@ -13,6 +13,7 @@ import {
   abortMessage,
   abortTitle,
   continueAction,
+  mergeOfText,
   mergeRequestAbortMessage,
   mergeRequestAbortNote,
 } from "./operationText";
@@ -102,13 +103,10 @@ function pushFailedText(branch: string, message: string): QuestionText {
   };
 }
 
-function abortLeftoversText(
-  { target, branch }: MergeView,
-  leftovers: readonly Leftover[],
-): QuestionText {
+function abortLeftoversText(view: MergeView, leftovers: readonly Leftover[]): QuestionText {
   return {
     title: "Merge Aborted",
-    message: `The merge of ${target} into ${branch} is aborted, but yamt did not put everything back:`,
+    message: `The ${mergeOfText(view)} is aborted, but yamt did not put everything back:`,
     list: { kind: "lines", lines: leftovers.map(leftoverText) },
     note: null,
     confirm: "Close",

@@ -102,8 +102,8 @@ function continuing(
     },
   };
   const pushing = {
-    offerPush: (branch: string, kind: string) => {
-      offers.push(`${branch} ${kind}`);
+    offerPush: (branch: string) => {
+      offers.push(target.gitRun.running.value ? `${branch} behind running git` : branch);
       return Promise.resolve();
     },
   };
@@ -328,15 +328,15 @@ test("Finished is logged and Continue stays running: the window is closing", asy
   ]);
 });
 
-test("ReadyToPush hands the branch to the push offer once, lists nothing and does not end the window", async () => {
+test("ReadyToPush hands the branch to the push offer once, lists nothing and ends the window: Continue stays running", async () => {
   const lines = quiet();
   const press = continuing(MERGE);
 
   await answered(press, { ok: true, value: { kind: "ReadyToPush", branch: "feature/due-dates" } });
 
-  expect(press.offers).toEqual(["feature/due-dates Merge"]);
+  expect(press.offers).toEqual(["feature/due-dates behind running git"]);
   expect([press.ends, press.lists, press.problem.value]).toEqual([[], [], null]);
-  expect(press.continueState.value).toBe("ready");
+  expect(press.continueState.value).toBe("running");
   expect(lines).toEqual([
     '[info] continue.ready_to_push {operation: "Merge", branch: "feature/due-dates"}',
   ]);

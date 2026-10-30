@@ -67,25 +67,27 @@ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion 
 export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
 export type {
   AbortReply,
-  BlockedReason,
   BranchBefore,
+  Leftover,
+  MergeView,
+  PushReply,
+  ReturnTo,
+} from "./localMergeDomain";
+export type {
+  BlockedReason,
   ChangeSize,
   ContinueMergeReply,
   GitLabProject,
-  Leftover,
   ListEnd,
   LocalMerge,
   MergeRequestPage,
   MergeRequestRow,
-  MergeView,
   OpenReply,
   PageOpened,
-  PushReply,
   Readiness,
   Refusal,
   ResolveRefusal,
   ResolveReply,
-  ReturnTo,
   Started,
 } from "./mergeRequestDomain";
 export type { MergeRequestSource } from "./MergeRequestSource";

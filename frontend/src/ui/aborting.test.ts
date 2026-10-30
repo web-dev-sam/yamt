@@ -236,7 +236,7 @@ test.each<[string, (abort: Pressed) => void]>([
   ["Close", (abort) => abort.asking.answer(true)],
   ["Escape", (abort) => abort.asking.dismiss()],
 ])(
-  "leftovers show the notice; %s closes the ended merge once and the window stays ended",
+  "leftovers show the notice behind running git; %s closes the ended merge once and the window stays ended",
   async (_name, close) => {
     const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES);
 
@@ -250,7 +250,7 @@ test.each<[string, (abort: Pressed) => void]>([
       });
     });
     expect(abort.closes).toEqual([]);
-    expect(abort.abortState.value.kind).toBe("ready");
+    expect(abort.abortState.value.kind).toBe("running");
     close(abort);
     await pressed;
 

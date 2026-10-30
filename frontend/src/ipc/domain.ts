@@ -1,4 +1,5 @@
 import type * as Generated from "./bindings";
+import type { MergeView } from "./localMergeDomain";
 import { branded, invalid, isNonNegativeInteger } from "./validate";
 import { toSideWords, type SideWords } from "./words";
 
@@ -101,7 +102,7 @@ export type Listing =
       readonly diskChanges: readonly DiskChange[];
       readonly operation: OperationView | null;
       readonly sides: SideNames;
-      readonly mergeRequest: Readonly<Generated.MergeView> | null;
+      readonly mergeRequest: MergeView | null;
     }
   | { readonly kind: "MovedOn" };
 
