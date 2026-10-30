@@ -25,7 +25,6 @@ type Common = {
 export type AppState = Common & {
   readonly kind: "app";
   readonly display: number;
-  readonly configDir: string;
   readonly repoDir: string | null;
 };
 
@@ -80,7 +79,6 @@ export function parseState(text: string): SessionState {
       ...common,
       kind,
       display: numberField(record, "display"),
-      configDir: stringField(record, "configDir"),
       repoDir: record["repoDir"] === null ? null : stringField(record, "repoDir"),
     };
   }

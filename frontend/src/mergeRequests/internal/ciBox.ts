@@ -21,13 +21,17 @@ const STATUS_TEXTS: Readonly<Record<CiStatusName, string>> = {
   manual: "Pipeline waiting for a manual job",
 };
 
+export function ciStatusText(status: CiStatusName): string {
+  return STATUS_TEXTS[status];
+}
+
 export function ciBox<J extends { readonly allowFailure: boolean }>(
   status: CiStatusName,
   jobs: readonly J[],
   more: boolean,
 ): CiBoxView<J> {
   if (jobs.length === 0) {
-    return { kind: "status", text: STATUS_TEXTS[status] };
+    return { kind: "status", text: ciStatusText(status) };
   }
   return {
     kind: "jobs",

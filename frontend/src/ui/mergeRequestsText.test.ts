@@ -9,10 +9,17 @@ import {
   type RangeStart,
 } from "../ipc";
 import {
+  approvalsText,
+  clearFilterTitle,
+  discussionsText,
   jobOpenedText,
-  listEndText,
+  jobTitle,
+  listFailureText,
+  narrowLabel,
+  narrowPlaceholder,
   LOADING_TEXT,
   NONE_TEXT,
+  openChangesTitle,
   openReplyText,
 } from "./mergeRequestsText";
 import { notLinedUpText } from "./rangeThreadText";
@@ -39,9 +46,9 @@ test("the page's loading and empty words are the request's (rule 3)", () => {
   expect([LOADING_TEXT, NONE_TEXT]).toEqual(["Loading merge requests…", "No open merge requests."]);
 });
 
-test.each<[ListEnd, string]>([
-  [{ kind: "loaded" }, "Loaded the open merge requests."],
-  [{ kind: "cut", limit: 500 }, "Only the newest 500 merge requests are listed; GitLab has more."],
+test.each<[ListEnd, string | null]>([
+  [{ kind: "loaded" }, null],
+  [{ kind: "cut", limit: 500 }, null],
   [
     { kind: "glabMissing" },
     "glab is not installed (not found on PATH) — install glab, then Refresh.",
@@ -51,8 +58,31 @@ test.each<[ListEnd, string]>([
     `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
   ],
   [{ kind: "failed", message: "glab timed out" }, "glab failed: glab timed out"],
-])("the list end %j reads %j", (end, words) => {
-  expect(listEndText(end)).toBe(words);
+])("the list end %j is a failure reading %j, or none when the list was listed", (end, words) => {
+  expect(listFailureText(end)).toBe(words);
+});
+
+test.each([
+  [0, "0 open discussions", "0 approvals"],
+  [1, "1 open discussion", "1 approval"],
+  [2, "2 open discussions", "2 approvals"],
+])("a row's counts of %i read %j and %j", (count, discussions, approvals) => {
+  expect(discussionsText(count)).toBe(discussions);
+  expect(approvalsText(count)).toBe(approvals);
+});
+
+test("a row's button and a job's title name what they open; a job without a page says why", () => {
+  expect(openChangesTitle(IID)).toBe("Open the changes of !13");
+  expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
+    "Open the log of test on GitLab",
+  );
+  expect(jobTitle("test", null)).toBe("GitLab gave no address for this job's log");
+});
+
+test("a filter's clear button and narrowing box name the filter; the placeholder in lower case", () => {
+  expect(clearFilterTitle("Reviewer")).toBe("Clear the Reviewer filter");
+  expect(narrowLabel("Label")).toBe("Narrow the Label list");
+  expect(narrowPlaceholder("Label")).toBe("Find label…");
 });
 
 test.each<[OpenReply, string]>([
@@ -96,11 +126,11 @@ test("glab's words are the Send button's (catches the two drifting apart)", () =
   const loggedOut = notLinedUpText({ kind: "notLoggedIn", detail: DETAIL }, START);
   const failed = notLinedUpText({ kind: "failed", message: "boom" }, START);
 
-  expect(listEndText({ kind: "glabMissing" }).startsWith(`${missing} — `)).toBe(true);
-  expect(listEndText({ kind: "notLoggedIn", detail: DETAIL }).startsWith(`${loggedOut} — `)).toBe(
-    true,
-  );
-  expect(listEndText({ kind: "failed", message: "boom" })).toBe(failed);
+  expect(listFailureText({ kind: "glabMissing" })?.startsWith(`${missing} — `)).toBe(true);
+  expect(
+    listFailureText({ kind: "notLoggedIn", detail: DETAIL })?.startsWith(`${loggedOut} — `),
+  ).toBe(true);
+  expect(listFailureText({ kind: "failed", message: "boom" })).toBe(failed);
   expect(openReplyText({ kind: "glabMissing" }, IID)).toBe(missing);
   expect(openReplyText({ kind: "notLoggedIn", detail: DETAIL }, IID)).toBe(loggedOut);
   expect(openReplyText({ kind: "failed", message: "boom" }, IID)).toBe(failed);

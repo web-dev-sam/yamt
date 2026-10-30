@@ -139,6 +139,21 @@ export function glabFolder(scenario: string, isFolder: (path: string) => boolean
   return folder;
 }
 
+export function startFolder(
+  opens: Opening,
+  folder: string,
+  isFolder: (path: string) => boolean,
+): string {
+  if (opens.kind !== "diff" || opens.startDir === null) {
+    return folder;
+  }
+  const dir = fromRoot(opens.startDir);
+  if (!isFolder(dir)) {
+    throw new Error(`--dir ${opens.startDir}: no folder ${dir}`);
+  }
+  return dir;
+}
+
 function glabScenario(parsed: Parsed, opens: Opening): string | null {
   const scenario = parsed.values.get("glab");
   if (scenario === undefined) {

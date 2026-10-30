@@ -274,6 +274,65 @@ test("a first load that fails after a page keeps that page (the sent pages stay)
   expect(live.slice.rows.value).toHaveLength(20);
 });
 
+test.each<ListEnd>([
+  { kind: "notLoggedIn", detail: "no token" },
+  { kind: "failed", message: "glab timed out" },
+])(
+  "Retry after a first load ending %j streams its pages as the first does (catches a buffered retry showing nothing)",
+  async (end) => {
+    const live = rig();
+    live.slice.show();
+    loadAt(live, 0).end({ ok: true, value: end });
+    await settled();
+
+    const retrying = live.slice.refresh();
+    expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
+    loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 20) });
+    expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
+    expect(live.slice.me.value).toBe("sam");
+    loadAt(live, 1).end(LOADED);
+    await retrying;
+    expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 20)));
+  },
+);
+
+test("Refresh of a loaded empty list streams its pages (catches the page blank until the end)", async () => {
+  const live = rig();
+  await loaded(live, []);
+
+  const refreshing = live.slice.refresh();
+  expect(live.slice.listing.value).toEqual({ kind: "loading", first: true });
+  loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(0, 3) });
+  expect(live.slice.rows.value).toHaveLength(3);
+  loadAt(live, 1).end(LOADED);
+  await refreshing;
+});
+
+test.each<[ListEnd, string | null]>([
+  [{ kind: "loaded" }, null],
+  [{ kind: "cut", limit: 500 }, null],
+  [
+    { kind: "glabMissing" },
+    "glab is not installed (not found on PATH) — install glab, then Refresh.",
+  ],
+  [{ kind: "failed", message: "502" }, "glab failed: 502"],
+])(
+  "a load ending %j shows the failure %j, and none while the next load runs (catches the list end decided twice)",
+  async (end, failure) => {
+    const live = rig();
+    expect(live.slice.failure.value).toBeNull();
+    live.slice.show();
+    loadAt(live, 0).end({ ok: true, value: end });
+    await settled();
+    expect(live.slice.failure.value).toBe(failure);
+
+    const again = live.slice.refresh();
+    expect(live.slice.failure.value).toBeNull();
+    loadAt(live, 1).end(LOADED);
+    await again;
+  },
+);
+
 test("one load at a time: Refresh and show while loading start nothing (catches two loads racing)", async () => {
   const live = rig();
   live.slice.show();

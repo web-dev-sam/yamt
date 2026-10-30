@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import { parseCommand } from "./args";
-import { appArgs, glabFolder } from "./startArgs";
+import { appArgs, glabFolder, startFolder } from "./startArgs";
 
 test("a scenario whose folder exists is its folder under tests/glab; the lookup is asked about it", () => {
   const asked: string[] = [];
@@ -33,6 +33,24 @@ test("start-app --diff --dir starts the compare window in that folder and passes
     opens: { kind: "diff", startDir: null },
   });
   expect(appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, false)).toEqual(["--diff"]);
+});
+
+test("a compare session starts in its --dir folder, asked about once; without --dir or --diff in the session folder", () => {
+  const asked: string[] = [];
+  const dir = startFolder({ kind: "diff", startDir: "/var/tmp/rr" }, "/tmp/s", (path) => {
+    asked.push(path);
+    return true;
+  });
+  expect(dir).toBe("/var/tmp/rr");
+  expect(asked).toEqual(["/var/tmp/rr"]);
+  expect(startFolder({ kind: "diff", startDir: null }, "/tmp/s", () => false)).toBe("/tmp/s");
+  expect(startFolder({ kind: "fresh" }, "/tmp/s", () => false)).toBe("/tmp/s");
+});
+
+test("a --dir folder that does not exist is refused at start, naming it (catches a driver started nowhere)", () => {
+  expect(() =>
+    startFolder({ kind: "diff", startDir: "/var/tmp/nosuch" }, "/tmp/s", () => false),
+  ).toThrow("--dir /var/tmp/nosuch: no folder /var/tmp/nosuch");
 });
 
 test("start-app --dir goes only with --diff", () => {

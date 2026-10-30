@@ -1,4 +1,5 @@
 import type { Summary } from "../search";
+import { counted } from "./serverText";
 
 export const SEARCH_TITLE = "Search";
 export const SEARCH_PLACEHOLDER = "Search";
@@ -9,10 +10,6 @@ export const DISMISS_LABEL = "Dismiss";
 
 export const CUT_TEXT =
   "The result set only contains a subset of all matches. Be more specific in your search to narrow down the results.";
-
-function counted(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`;
-}
 
 export function summaryText(summary: Summary): string {
   switch (summary.kind) {

@@ -14,9 +14,9 @@ import { join } from "node:path";
 import type { Command } from "./args";
 import { fakeGlab, glabEnv, type FakeGlab } from "./fakeGlab";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
-import { freePort, launchTracked, waitUntil } from "./processes";
+import { freePort, launchTracked, sessionEntry, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
-import { appArgs, glabFolder } from "./startArgs";
+import { appArgs, glabFolder, startFolder } from "./startArgs";
 import {
   readState,
   saveState,
@@ -80,21 +80,10 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   const repoDir = repoFolder(command.opens, folder);
-  const driverDir = startFolder(command.opens, folder);
+  const driverDir = startFolder(command.opens, folder, existsSync);
   const glab = fakeGlab(scenarioFolder, folder);
   const args = appArgs(command.opens, repoDir, command.ai);
   return { home, configDir, repoDir, driverDir, binary, args, glab };
-}
-
-function startFolder(opens: StartApp["opens"], folder: string): string {
-  if (opens.kind !== "diff" || opens.startDir === null) {
-    return folder;
-  }
-  const dir = fromRoot(opens.startDir);
-  if (!existsSync(dir)) {
-    throw new Error(`--dir ${opens.startDir}: no folder ${dir}`);
-  }
-  return dir;
 }
 
 function repoFolder(opens: StartApp["opens"], folder: string): string | null {
@@ -114,12 +103,14 @@ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
   }
 }
 
-function appEnv(display: number, prepared: Prepared): NodeJS.ProcessEnv {
+function appEnv(state: AppState, prepared: Prepared): NodeJS.ProcessEnv {
+  const session = sessionEntry(state.folder);
   const env: NodeJS.ProcessEnv = {
-    ...displayEnv(display),
+    ...displayEnv(state.display),
     ...glabEnv(prepared.glab),
     HOME: prepared.home,
     XDG_CONFIG_HOME: prepared.configDir,
+    [session.name]: session.value,
   };
   for (const derived of ["XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"]) {
     delete env[derived];
@@ -187,7 +178,7 @@ async function startDriver(
       role: "tauri-driver",
       command: "tauri-driver",
       args: ["--port", String(driverPort), "--native-port", String(nativePort)],
-      env: appEnv(state.display, prepared),
+      env: appEnv(state, prepared),
       cwd: prepared.driverDir,
       logDir,
       fd3File: null,
@@ -245,7 +236,6 @@ export async function startApp(command: StartApp): Promise<Readonly<Record<strin
     size: command.size,
     procs: [],
     display: 0,
-    configDir,
     repoDir,
   };
   const state = await withCleanup(empty, (save) =>

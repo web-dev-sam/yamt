@@ -9,18 +9,25 @@ import type { JobPage, MergeRequestIid, MergeRequestRow } from "../ipc";
 import { createdAgo } from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
 import type { Opening } from "./mergeRequests";
-import { openReplyText } from "./mergeRequestsText";
+import {
+  approvalsText,
+  discussionsText,
+  mergeRequestReference,
+  openChangesTitle,
+  openReplyText,
+} from "./mergeRequestsText";
 
 const props = defineProps<{ row: MergeRequestRow; now: number; opening: Opening | null }>();
 const emit = defineEmits<{ open: [iid: MergeRequestIid]; openJob: [page: JobPage] }>();
 
 const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
 
-const mr = computed(() => `!${props.row.iid}`);
+const mr = computed(() => mergeRequestReference(props.row.iid));
 const created = computed(() => createdAgo(props.row.createdAt, props.now));
 const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
-const discussionsText = computed(() => countText(props.row.openDiscussions, "open discussion"));
-const approvalsText = computed(() => countText(props.row.approvals, "approval"));
+const discussions = computed(() => discussionsText(props.row.openDiscussions));
+const approvals = computed(() => approvalsText(props.row.approvals));
+const openTitle = computed(() => openChangesTitle(props.row.iid));
 const fetching = computed(() => props.opening?.kind === "fetching");
 const sentence = computed(() => {
   const opening = props.opening;
@@ -30,10 +37,6 @@ const sentence = computed(() => {
   const reply = opening.kind === "opened" ? ({ kind: "opened" } as const) : opening.reply;
   return { text: openReplyText(reply, props.row.iid), refused: opening.kind === "refused" };
 });
-
-function countText(count: number, word: string): string {
-  return `${count} ${count === 1 ? word : `${word}s`}`;
-}
 </script>
 
 <template>
@@ -47,8 +50,8 @@ function countText(count: number, word: string): string {
       <span
         class="flex w-12 shrink-0 items-center gap-1"
         :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
-        :title="discussionsText"
-        :aria-label="discussionsText"
+        :title="discussions"
+        :aria-label="discussions"
       >
         <MessageSquare class="size-4" aria-hidden="true" />
         <span aria-hidden="true">{{ row.openDiscussions }}</span>
@@ -56,8 +59,8 @@ function countText(count: number, word: string): string {
       <span
         class="flex w-12 shrink-0 items-center gap-1"
         :class="{ 'text-fg-muted': row.approvals === 0 }"
-        :title="approvalsText"
-        :aria-label="approvalsText"
+        :title="approvals"
+        :aria-label="approvals"
       >
         <ThumbsUp class="size-4" aria-hidden="true" />
         <span aria-hidden="true">{{ row.approvals }}</span>
@@ -71,8 +74,8 @@ function countText(count: number, word: string): string {
       </span>
       <button
         type="button"
-        :title="`Open the changes of ${mr}`"
-        :aria-label="`Open the changes of ${mr}`"
+        :title="openTitle"
+        :aria-label="openTitle"
         :aria-busy="fetching"
         :disabled="fetching"
         class="shrink-0 rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"

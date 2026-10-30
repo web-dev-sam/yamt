@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { isOwnTempFolder } from "./folders";
-import { runningAppsWith, stopProc, type StopResult } from "./processes";
+import { runningAppsWith, sessionEntry, stopProc, type StopResult } from "./processes";
 import { readState, statePath, type Proc, type SessionState } from "./state";
 import { deleteSession } from "./webdriver";
 
@@ -30,11 +30,9 @@ async function stopEach(procs: readonly Proc[]): Promise<Stopped[]> {
 
 export async function stopSession(state: SessionState): Promise<Readonly<Record<string, unknown>>> {
   const session = await endSession(state);
-  const procs = await stopEach(state.procs.toReversed());
   const children =
-    state.kind === "app"
-      ? await stopEach(runningAppsWith(`XDG_CONFIG_HOME=${state.configDir}`))
-      : [];
+    state.kind === "app" ? await stopEach(runningAppsWith(sessionEntry(state.folder))) : [];
+  const procs = await stopEach(state.procs.toReversed());
   const ownFolder = isOwnTempFolder(state.folder, tmpdir());
   if (ownFolder) {
     rmSync(state.folder, { recursive: true, force: true });

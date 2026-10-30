@@ -10,8 +10,14 @@ import Clock from "~icons/lucide/clock";
 import Cog from "~icons/lucide/cog";
 
 import type { JobPage, MergeRequestRow } from "../ipc";
-import { ciBox, type CiStatusName } from "../mergeRequests";
+import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
 import type { Point } from "./menuPosition";
+import {
+  ALLOWED_TO_FAIL,
+  FAILED_JOBS_TITLE,
+  jobTitle,
+  MORE_FAILED_JOBS,
+} from "./mergeRequestsText";
 import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
 
 type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
@@ -31,8 +37,6 @@ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
   manual: { icon: Cog, tone: "text-fg-muted" },
 };
 
-const NO_PAGE = "GitLab gave no address for this job's log";
-
 const area = useTemplateRef<HTMLSpanElement>("area");
 const icon = useTemplateRef<HTMLButtonElement>("icon");
 const box = useTemplateRef<HTMLDivElement>("box");
@@ -47,10 +51,7 @@ const look = computed(() => LOOKS[props.pipeline.status]);
 const view = computed(() =>
   ciBox(props.pipeline.status, props.pipeline.failedJobs, props.pipeline.moreFailedJobs),
 );
-const statusText = computed(() => {
-  const words = ciBox(props.pipeline.status, [], false);
-  return words.kind === "status" ? words.text : props.pipeline.status;
-});
+const statusText = computed(() => ciStatusText(props.pipeline.status));
 
 function show(): void {
   if (!open.value && icon.value !== null) {
@@ -103,6 +104,7 @@ function keyPressed(event: KeyboardEvent): void {
 
 function scrolled(event: Event): void {
   if (open.value && !isInside(event.target)) {
+    focusInside = document.activeElement === icon.value;
     open.value = false;
   }
 }
@@ -144,12 +146,12 @@ function openJob({ page }: FailedJob): void {
     >
       <p v-if="view.kind === 'status'" class="px-2 py-1">{{ view.text }}</p>
       <template v-else>
-        <p class="px-2 pt-1 pb-0.5 text-fg-muted">Failed jobs</p>
+        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ FAILED_JOBS_TITLE }}</p>
         <ul>
           <li v-for="(job, index) in view.jobs" :key="index">
             <button
               type="button"
-              :title="job.page === null ? NO_PAGE : `Open the log of ${job.name} on GitLab`"
+              :title="jobTitle(job.name, job.page)"
               :disabled="job.page === null"
               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
               @click="openJob(job)"
@@ -157,12 +159,12 @@ function openJob({ page }: FailedJob): void {
               <span>{{ job.name }}</span>
               <span class="text-fg-muted">{{ job.stage }}</span>
               <span v-if="job.allowFailure" class="ml-auto pl-2 text-problem-warning">
-                allowed to fail
+                {{ ALLOWED_TO_FAIL }}
               </span>
             </button>
           </li>
         </ul>
-        <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">More failed jobs on GitLab</p>
+        <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">{{ MORE_FAILED_JOBS }}</p>
       </template>
     </div>
   </span>

@@ -174,7 +174,7 @@ export function formatNote(outcome: FormatOutcome | undefined): string | null {
   }
 }
 
-function counted(count: number, one: string, many: string): string {
+export function counted(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 

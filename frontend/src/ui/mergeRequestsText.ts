@@ -1,15 +1,30 @@
 import type { JobOpened, ListEnd, MergeRequestIid, OpenReply } from "../ipc";
+import type { DraftFilter } from "../mergeRequests";
 import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
+import { counted } from "./serverText";
 
+export const PAGE_TITLE = "Merge requests";
+export const LIST_LABEL = "Open merge requests";
+export const REFRESH = "Refresh";
+export const FILTERS_LABEL = "Filters";
+export const CLEAR_FILTERS = "Clear filters";
+export const DRAFT_LABEL = "Draft";
+export const DRAFT_OPTIONS: readonly { readonly value: DraftFilter; readonly label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "drafts", label: "Drafts" },
+  { value: "ready", label: "Ready" },
+];
 export const LOADING_TEXT = "Loading merge requests…";
 export const NONE_TEXT = "No open merge requests.";
+export const FAILED_JOBS_TITLE = "Failed jobs";
+export const ALLOWED_TO_FAIL = "allowed to fail";
+export const MORE_FAILED_JOBS = "More failed jobs on GitLab";
 
-export function listEndText(end: ListEnd): string {
+export function listFailureText(end: ListEnd): string | null {
   switch (end.kind) {
     case "loaded":
-      return "Loaded the open merge requests.";
     case "cut":
-      return `Only the newest ${end.limit} merge requests are listed; GitLab has more.`;
+      return null;
     case "glabMissing":
       return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
     case "notLoggedIn":
@@ -21,6 +36,40 @@ export function listEndText(end: ListEnd): string {
       return _exhaustive;
     }
   }
+}
+
+export function mergeRequestReference(iid: MergeRequestIid): string {
+  return `!${iid}`;
+}
+
+export function openChangesTitle(iid: MergeRequestIid): string {
+  return `Open the changes of ${mergeRequestReference(iid)}`;
+}
+
+export function discussionsText(count: number): string {
+  return counted(count, "open discussion", "open discussions");
+}
+
+export function approvalsText(count: number): string {
+  return counted(count, "approval", "approvals");
+}
+
+export function jobTitle(name: string, page: string | null): string {
+  return page === null
+    ? "GitLab gave no address for this job's log"
+    : `Open the log of ${name} on GitLab`;
+}
+
+export function clearFilterTitle(name: string): string {
+  return `Clear the ${name} filter`;
+}
+
+export function narrowLabel(name: string): string {
+  return `Narrow the ${name} list`;
+}
+
+export function narrowPlaceholder(name: string): string {
+  return `Find ${name.toLowerCase()}…`;
 }
 
 function openRefusedText(reply: Exclude<OpenReply, { kind: "opened" }>, mr: string): string {
@@ -53,7 +102,7 @@ function openRefusedText(reply: Exclude<OpenReply, { kind: "opened" }>, mr: stri
 }
 
 export function openReplyText(reply: OpenReply, iid: MergeRequestIid): string {
-  const mr = `!${iid}`;
+  const mr = mergeRequestReference(iid);
   return reply.kind === "opened" ? `Opened ${mr} in a new window.` : openRefusedText(reply, mr);
 }
 

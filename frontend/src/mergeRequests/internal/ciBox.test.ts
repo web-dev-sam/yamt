@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { ciBox, type CiBoxView, type CiStatusName } from "../index";
+import { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "../index";
 
 type Job = { readonly name: string; readonly allowFailure: boolean };
 
@@ -34,6 +34,10 @@ test.each<[CiStatusName, string]>([
   ["canceled", "Pipeline canceled"],
   ["skipped", "Pipeline skipped"],
   ["manual", "Pipeline waiting for a manual job"],
-])("with no failed job a %s pipeline says so in words", (status, text) => {
-  expect(ciBox<Job>(status, [], false)).toEqual({ kind: "status", text });
-});
+])(
+  "a %s pipeline's sentence is ciStatusText's, and the box shows it when no job failed",
+  (status, text) => {
+    expect(ciStatusText(status)).toBe(text);
+    expect(ciBox<Job>(status, [], false)).toEqual({ kind: "status", text });
+  },
+);

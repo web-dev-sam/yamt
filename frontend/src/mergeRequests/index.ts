@@ -2,6 +2,7 @@ export {
   NO_FILTERS,
   cleared,
   filterLabel,
+  filterName,
   filtered,
   isFiltered,
   passes,
@@ -25,5 +26,5 @@ export {
 export { merged } from "./internal/order";
 export { summaryText } from "./internal/summary";
 export { createdAgo } from "./internal/relativeTime";
-export { ciBox, type CiBoxView, type CiStatusName } from "./internal/ciBox";
+export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
 export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";

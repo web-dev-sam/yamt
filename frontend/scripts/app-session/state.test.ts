@@ -42,7 +42,6 @@ const APP: AppState = {
     { role: "focus-window", pid: 104, startTicks: 5003 },
   ],
   display: 7,
-  configDir: "/tmp/yamt-app-session-smoke-x/home/.config",
   repoDir: "/tmp/yamt-app-session-smoke-x/repo",
 };
 

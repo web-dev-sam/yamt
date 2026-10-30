@@ -30,7 +30,7 @@ import {
 } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
 import { createRememberedFilters } from "./mergeRequestFilters";
-import { jobOpenedText } from "./mergeRequestsText";
+import { jobOpenedText, listFailureText } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
@@ -55,6 +55,7 @@ export type MergeRequests = {
   readonly me: Readonly<ShallowRef<string | null>>;
   readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
   readonly listing: Readonly<ShallowRef<ListLoad>>;
+  readonly failure: ComputedRef<string | null>;
   readonly filters: Readonly<Ref<Filters>>;
   readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
   readonly choices: ComputedRef<Choices>;
@@ -104,7 +105,7 @@ function received(state: State, load: Load, { me, rows }: MergeRequestPage): voi
 }
 
 function ended(state: State, load: Load, end: ListEnd): void {
-  const listed = end.kind === "loaded" || end.kind === "cut";
+  const listed = listFailureText(end) === null;
   if (listed) {
     state.cut.value = end.kind === "cut";
   }
@@ -120,7 +121,7 @@ async function load(state: State): Promise<void> {
   if (before.kind === "loading") {
     return;
   }
-  const first = before.kind === "notLoaded";
+  const first = state.rows.value.length === 0;
   const running: Load = { buffered: !first, buffer: [], me: null };
   state.listing.value = { kind: "loading", first };
   const outcome = await attempt(() =>
@@ -234,6 +235,16 @@ function filterActions(
   };
 }
 
+function listingOf(state: State): Pick<MergeRequests, "listing" | "failure"> {
+  const { listing } = state;
+  return {
+    listing,
+    failure: computed(() =>
+      listing.value.kind === "done" ? listFailureText(listing.value.end) : null,
+    ),
+  };
+}
+
 export function createMergeRequests(deps: Deps): MergeRequests {
   const state = createState(deps);
   const { project, me, rows } = state;
@@ -247,7 +258,7 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     project,
     me,
     rows,
-    listing: state.listing,
+    ...listingOf(state),
     filters,
     shownRows,
     choices: computed(() => choicesOf(rows.value, filters.value, me.value)),

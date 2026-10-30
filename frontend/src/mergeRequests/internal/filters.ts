@@ -144,8 +144,12 @@ function valueWord(value: PersonValue | LabelValue): string {
   }
 }
 
+export function filterName(filter: ListFilter): string {
+  return FILTER_NAMES[filter];
+}
+
 export function filterLabel(filter: ListFilter, filters: Filters): string {
   const values: readonly (PersonValue | LabelValue)[] = filters[filter];
-  const name = FILTER_NAMES[filter];
+  const name = filterName(filter);
   return values.length === 0 ? name : `${name}: ${values.map(valueWord).join(", ")}`;
 }

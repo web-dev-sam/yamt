@@ -14,6 +14,13 @@ const OWNER_DEV_PORT = 5173;
 const RUN_TIMEOUT_MS = 30_000;
 const PROCESS_ID = /^[0-9]+$/;
 const APP_COMMAND = "yamt";
+const SESSION_VARIABLE = "YAMT_APP_SESSION";
+
+export type EnvEntry = { readonly name: string; readonly value: string };
+
+export function sessionEntry(folder: string): EnvEntry {
+  return { name: SESSION_VARIABLE, value: folder };
+}
 
 export type Launch = {
   readonly role: string;
@@ -29,9 +36,9 @@ export function logFile(logDir: string, role: string): string {
   return join(logDir, `${role}.log`);
 }
 
-function startTicksOf(pid: number): number | null {
+function startTicksOf(pid: number, procRoot = "/proc"): number | null {
   try {
-    return parseStartTicks(readFileSync(`/proc/${pid}/stat`, "utf8"));
+    return parseStartTicks(readFileSync(join(procRoot, String(pid), "stat"), "utf8"));
   } catch {
     return null;
   }
@@ -132,18 +139,19 @@ function readOrNull(path: string): string | null {
   }
 }
 
-export function holdsEntry(environ: string, entry: string): boolean {
-  return environ.split("\0").includes(entry);
+export function holdsEntry(environ: string, { name, value }: EnvEntry): boolean {
+  return environ.split("\0").includes(`${name}=${value}`);
 }
 
-export function runningAppsWith(entry: string): Proc[] {
-  return readdirSync("/proc")
+export function runningAppsWith(entry: EnvEntry, procRoot = "/proc"): Proc[] {
+  return readdirSync(procRoot)
     .filter((name) => PROCESS_ID.test(name))
     .flatMap((name) => {
       const pid = Number(name);
-      const environ = readOrNull(`/proc/${name}/environ`);
-      const startTicks = startTicksOf(pid);
-      const isApp = readOrNull(`/proc/${name}/comm`)?.trim() === APP_COMMAND;
+      const folder = join(procRoot, name);
+      const environ = readOrNull(join(folder, "environ"));
+      const startTicks = startTicksOf(pid, procRoot);
+      const isApp = readOrNull(join(folder, "comm"))?.trim() === APP_COMMAND;
       return isApp && environ !== null && startTicks !== null && holdsEntry(environ, entry)
         ? [{ role: "yamt child", pid, startTicks }]
         : [];
