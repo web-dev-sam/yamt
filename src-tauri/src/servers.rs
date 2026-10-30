@@ -251,9 +251,9 @@ pub(crate) mod run_tests {
         let (sender, events) = mpsc::channel();
         let run = start_cat(&window, channel_into(sender, false));
         let pid = pid_of(&next(&events));
-        send_to_server(window.app.state(), run, "anyone there".to_owned());
         let deadline = Instant::now() + WAIT;
         while is_alive(pid) && Instant::now() < deadline {
+            send_to_server(window.app.state(), run, "anyone there".to_owned());
             thread::sleep(POLL);
         }
         assert!(!is_alive(pid));
