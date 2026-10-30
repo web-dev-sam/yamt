@@ -259,7 +259,7 @@ test.each<[string, (abort: Pressed) => void]>([
   },
 );
 
-test("a close that fails is the abort's problem and the window can be used again", async () => {
+test("a close that fails is the closeMerge problem of the pressed merge and the window can be used again", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES, {
     ok: false,
@@ -274,11 +274,15 @@ test("a close that fails is the abort's problem and the window can be used again
   abort.asking.answer(true);
   await pressed;
 
-  expect(abort.problem.value).toEqual({
-    action: "abort",
-    operation: "Merge",
+  const problem = abort.problem.value;
+  expect(problem).toEqual({
+    action: "closeMerge",
+    merge: DUE_DATES,
     cause: { kind: "WorkerStopped" },
   });
+  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
+    "Could not close the merge of main into feature/due-dates: yamt's worker stopped; try again.",
+  );
   expect(abort.abortState.value.kind).toBe("ready");
 });
 

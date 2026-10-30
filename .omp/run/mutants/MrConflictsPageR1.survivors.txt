@@ -1,0 +1,2 @@
+just mutants HEAD: 325 killed, 5 survived, 3 no coverage, 0 timeout; score 97.60%. aborting.ts 100%, mergeRequestActions.ts 100% covered
+

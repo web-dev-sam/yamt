@@ -1,0 +1,299 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 471200f..f848763 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -10,7 +10,7 @@ The GitLab merge-request overview (compare and range windows) comes through `Mer
+ 
+ Resolving a merge request's conflicts (plan §2 #139–#143) adds three `MergeRequestSource` methods, passed through unchanged by `tauriMergeRequests.ts` (`tauriResolve.test.ts`): `resolveMergeRequest(iid)` → `ResolveReply`, `continueMergeRequest(iid)` → `ContinueMergeReply`, `findLocalMerge()` → `LocalMerge`. Fixture mode (`?mr=<script>`) answers a resolve after a second as an open does: !640 `started` with conflicts, !632 `started` clean, !624 `refused` `localAhead`, !616 `windowFailed` "yamt: not found", any other `started`, on `feature/fixture-<iid>` into `main`; `findLocalMerge` is `free` until a `started` or `windowFailed`, then `merging { iid, windowOpen: false }`; `continueMergeRequest` of that iid answers `opened` (after a second) and from then `windowOpen: true`, of any other iid `ended`. Fixture mode's operation also takes ?mergeRequest=created|moved|unchanged|detached|same (Continue answers ReadyToPush), ?clean (no file listed), ?push=rejected (the first push fails) and ?leftovers (Abort leaves two).
+ 
+-`localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, BranchBefore, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
++`localMergeDomain.ts` holds the merge window's aliases (MergeView, ReturnTo, Leftover, AbortReply, PushReply) over bindings; domain.ts's Listing and ChunkSource import from it.
+ 
+ `tauri.ts` `readClipboard(selection)` reads the clipboard through the shell, never through WebKit (plan §2 #99): GTK's text request, `null` for unreadable or no text; `main.ts` hands it to `ui/linuxPaste.ts` `takeLinuxPastes` on Linux. The fence (PM8, `scripts/clipboardFence.ts`) is on WebKit's clipboard reads: `clipboardData` and `navigator.clipboard.read`/`readText` outside `ui/linuxPaste.ts`. `keys.ts` holds both platform tests: `isMac` (CodeMirror's `Mod`) and `isLinux` (the one Linux rule, also behind `showsAntialiasing`).
+ 
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 0e656ad..f2bb6a5 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -65,17 +65,8 @@ export type {
+ } from "./domain";
+ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion } from "./domain";
+ export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
++export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
+ export type {
+-  AbortReply,
+-  BranchBefore,
+-  Leftover,
+-  MergeView,
+-  PushReply,
+-  ReturnTo,
+-} from "./localMergeDomain";
+-export type {
+-  BlockedReason,
+-  ChangeSize,
+   ContinueMergeReply,
+   GitLabProject,
+   ListEnd,
+diff --git a/frontend/src/ipc/localMergeDomain.ts b/frontend/src/ipc/localMergeDomain.ts
+index 8d743f5..cf024b1 100644
+--- a/frontend/src/ipc/localMergeDomain.ts
++++ b/frontend/src/ipc/localMergeDomain.ts
+@@ -2,7 +2,6 @@ import type * as Generated from "./bindings";
+ 
+ export type MergeView = Readonly<Generated.MergeView>;
+ export type ReturnTo = Readonly<Generated.ReturnTo>;
+-export type BranchBefore = Readonly<Generated.BranchBefore>;
+ export type Leftover = Readonly<Generated.Leftover>;
+ export type AbortReply = Readonly<Generated.AbortReply>;
+ export type PushReply = Readonly<Generated.PushReply>;
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 750c9e5..49a6994 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -30,8 +30,6 @@ export type OpenReply =
+   | { readonly kind: "missingCommit"; readonly shortId: string };
+ export type PageOpened = Readonly<Generated.PageOpened>;
+ export type Readiness = Readonly<Generated.Readiness>;
+-export type BlockedReason = Readonly<Generated.BlockedReason>;
+-export type ChangeSize = Readonly<Generated.ChangeSize>;
+ export type Started = Readonly<Generated.Started>;
+ export type Refusal = Readonly<Generated.Refusal>;
+ export type ResolveRefusal = Readonly<Generated.ResolveRefusal>;
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index f60b8c4..febbcff 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -28,7 +28,7 @@ Shown views (plan §2 #51): `PaneFrame.vue` is the shell of `MergeView`, `Compar
+ 
+ Questions (`asking.ts`): one at a time; `ask` resolves `"yes" | "no" | "dismissed"` (Escape is `dismiss`, a second `ask` while one waits is dismissed at once). Callers whose Escape means cancel compare `=== "yes"`. A question about the stop (`question.ts` `endsWithStop`: Mark resolved's, Abort's) is dismissed when the stop ends; the others stay.
+ 
+-Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` — the writes, Abort, Continue, an open and every reload — goes once to `nextStop({ outside })` through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), the one path. `operationText.ts` holds every operation word (the tag `operationTag`, the line `operationLine` and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationLabel.vue` is the tag (plan §2 #92): `FileList.vue`'s last row under the list or tree while git records an operation, `App.vue` passing the store's `operation`. Its hover is yamt's own tooltip with the line's tooltip text, open at once (plan §2 #100): no `title`; shown from the tag's `mouseenter` to its `mouseleave`, no delay or fade, placed by `operationTooltip.ts` `tooltipBox` (4 px above the tag, left on its text, at most 480 px wide and as tall as the room above, inside the window); a `fixed` sibling of the tag inside the file list, so the list's `v-show` hide takes it in the same frame, and closed by the tag's zero width so it stays closed when the list shows again; `z-500`, over the minimap's 400. The tag and its word are measured on each `mouseenter`, on a resize and on a window resize, never on a scroll (`windowScroll: false`): the tag sits in no scroller, and plan §2 #51 keeps the scroll path free of layout reads. Being a `fixed` sibling places and layers it right only while the file list's `<aside>`, its ancestors and the pane hosts create no containing block or stacking context — no `transform`, `will-change`, `filter`, `contain`, `content-visibility`, `isolation` or positioned `z-index`; adding one there moves the tooltip to a `<Teleport to="body">`. Its look is `style.css`'s `hover-tooltip` (border, radius, background) and `tooltip-text` (colour, font, size) utilities, which `editor/theme.css` applies to the problem and removal tooltips too: one place changes all three. It is a `status` region whose screen-reader text is the line (a `sr-only` span, the visible tag and the tooltip `aria-hidden`), so every step and kind is announced: a live region announces text changes, never an attribute's. Its name is that span through `aria-labelledby`, because a `status` takes its name only from the author; its description is a `hidden` span with the tooltip text through `aria-describedby`, open or not.
++Listing and stops (plan §2 #87–#89): every list is `listing.ts` `refreshFiles` over `listStop`, the only writer of `files`, `operation`, `mergeRequest` and `sideNames`, all from one reply; `MovedOn` goes to `nextStop`. `stops.ts` `nextStop` ends a stop: it bumps `latestOpen`, drops the stop (`saving.ts` `dropStop`: the `Stop` token marked dropped, every claim overtaken and gone), dismisses the stop's question, clears every per-stop state (opened files, choices, taken, notices, format notes, the shown file, the problem, git's stop message `stopMessage`, the screen) and lists as at start; `outside` with unsaved edits adds the one moved-on notice, `continued` to an empty stop the `stopped` problem and git's message as `stopMessage`, kept for the whole stop. "A reply after the stop was dropped changes nothing" is written once, `currentStop.ts` (`Stop`, `landed(stop, call)`: null once dropped): every write, the format step, Abort, Continue and every reload (`views.ts` `reload`, also for disk changes, `diskChanges.ts` `applyDiskChanges`) capture `target.stop` before they call. `StopMovedOn` always means the stop the window shows is gone (#1435): a list answered after it would only open the new stop under the old views, so every failure answered `StopMovedOn` — the writes, Abort, Continue, an open and every reload — goes once to `nextStop({ outside })` through `problem.ts` `reportFailure` (logged, no problem shown; its target asks only for `nextStop`), the one path. `operationText.ts` holds every operation word (the tag `operationTag`, the line `operationLine` and its tooltip, Continue's and Abort's labels, Continue's hover, Abort's title and question); `OperationLabel.vue` is the tag (plan §2 #92): `FileList.vue`'s last row under the list or tree while git records an operation, `App.vue` passing the store's `operation`. Its hover is yamt's own tooltip with the line's tooltip text, open at once (plan §2 #100): no `title`; shown from the tag's `mouseenter` to its `mouseleave`, no delay or fade, placed by `operationTooltip.ts` `tooltipBox` (4 px above the tag, left on its text, at most 480 px wide and as tall as the room above, inside the window); a `fixed` sibling of the tag inside the file list, so the list's `v-show` hide takes it in the same frame, and closed by the tag's zero width so it stays closed when the list shows again; `z-500`, over the minimap's 400. The tag and its word are measured on each `mouseenter`, on a resize and on a window resize, never on a scroll (`windowScroll: false`): the tag sits in no scroller, and plan §2 #51 keeps the scroll path free of layout reads. Being a `fixed` sibling places and layers it right only while the file list's `<aside>`, its ancestors and the pane hosts create no containing block or stacking context — no `transform`, `will-change`, `filter`, `contain`, `content-visibility`, `isolation` or positioned `z-index`; adding one there moves the tooltip to a `<Teleport to="body">`. Its look is `style.css`'s `hover-tooltip` (border, radius, background) and `tooltip-text` (colour, font, size) utilities, which `editor/theme.css` applies to the problem and removal tooltips too: one place changes all three. It is a `status` region whose screen-reader text is the line (a `sr-only` span, the visible tag and the tooltip `aria-hidden`), so every step and kind is announced: a live region announces text changes, never an attribute's. Its name is that span through `aria-labelledby`, because a `status` takes its name only from the author; its description is a `hidden` span with the tooltip text through `aria-describedby`, open or not.
+ 
+ File marks (plan §2 #90): `FileMark.vue` renders a file's name and its mark in the list and the tree from one table per `FileStatus` (`Unresolved` none; `Resolved` the check and a muted name; `Remembered` the history icon with the rerere hint as its title and accessible name); `App.vue` puts it in the generic `FileList.vue`'s `#file` slot (list and tree rows), passing only the status and the label.
+ 
+@@ -46,6 +46,6 @@ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`
+ 
+ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; `useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+-Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeText`, title `sizeTitle`; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once.
++Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeText`, title `sizeTitle`; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
+ 
+-A failed push or close after the commit is the `push` problem ("Could not push <branch>"). Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
++The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+index bec1ed9..5c4ec4c 100644
+--- a/frontend/src/ui/aborting.test.ts
++++ b/frontend/src/ui/aborting.test.ts
+@@ -259,7 +259,7 @@ test.each<[string, (abort: Pressed) => void]>([
+   },
+ );
+ 
+-test("a close that fails is the abort's problem and the window can be used again", async () => {
++test("a close that fails is the closeMerge problem of the pressed merge and the window can be used again", async () => {
+   vi.spyOn(console, "error").mockImplementation(() => undefined);
+   const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES, {
+     ok: false,
+@@ -274,11 +274,15 @@ test("a close that fails is the abort's problem and the window can be used again
+   abort.asking.answer(true);
+   await pressed;
+ 
+-  expect(abort.problem.value).toEqual({
+-    action: "abort",
+-    operation: "Merge",
++  const problem = abort.problem.value;
++  expect(problem).toEqual({
++    action: "closeMerge",
++    merge: DUE_DATES,
+     cause: { kind: "WorkerStopped" },
+   });
++  expect(problem === null ? null : problemText(problem, LINUX)).toBe(
++    "Could not close the merge of main into feature/due-dates: yamt's worker stopped; try again.",
++  );
+   expect(abort.abortState.value.kind).toBe("ready");
+ });
+ 
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index a711764..e44dd74 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -57,7 +57,7 @@ async function closeAborted(
+   pressed: Pressed,
+   leftovers: readonly Leftover[],
+ ): Promise<void> {
+-  const { stop, operation, mergeRequest } = pressed;
++  const { stop, mergeRequest } = pressed;
+   if (mergeRequest !== null) {
+     await target.asking.ask({ kind: "abortLeftovers", mergeRequest, leftovers });
+   }
+@@ -66,7 +66,7 @@ async function closeAborted(
+     endsApp: () => true,
+     landing: async (outcome) => {
+       if (!outcome.ok) {
+-        report(target, { action: "abort", operation: operation.kind, cause: outcome.cause });
++        report(target, { action: "closeMerge", merge: mergeRequest, cause: outcome.cause });
+       }
+     },
+   });
+diff --git a/frontend/src/ui/mergeRequestActions.test.ts b/frontend/src/ui/mergeRequestActions.test.ts
+new file mode 100644
+index 0000000..c13e02b
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestActions.test.ts
+@@ -0,0 +1,50 @@
++import { expect, test } from "vitest";
++import { shallowRef } from "vue";
++
++import { isMergeRequestIid, type MergeRequestIid } from "../ipc";
++import { claimRow, setRow } from "./mergeRequestActions";
++
++type Busy = { readonly kind: "busy" } | { readonly kind: "done"; readonly note: string };
++
++function iid(value: number): MergeRequestIid {
++  if (!isMergeRequestIid(value)) {
++    throw new Error(`not an iid: ${value}`);
++  }
++  return value;
++}
++
++test("a row is claimed when free or done, never while busy (catches a second call per row)", () => {
++  const rows = shallowRef<ReadonlyMap<MergeRequestIid, Busy>>(new Map());
++  const [first, second] = [iid(640), iid(639)];
++
++  expect(claimRow(rows, first, { kind: "busy" })).toBe(true);
++  const claimed = rows.value;
++  expect(claimRow(rows, first, { kind: "busy" })).toBe(false);
++  expect(rows.value).toBe(claimed);
++  expect(claimRow(rows, second, { kind: "busy" })).toBe(true);
++
++  setRow(rows, first, { kind: "done", note: "ok" });
++  expect(claimRow(rows, first, { kind: "busy" })).toBe(true);
++  expect([...rows.value]).toEqual([
++    [first, { kind: "busy" }],
++    [second, { kind: "busy" }],
++  ]);
++});
++
++test("every write is a new map; null forgets the row and keeps the others", () => {
++  const [first, second] = [iid(640), iid(639)];
++  const before: ReadonlyMap<MergeRequestIid, Busy> = new Map([
++    [first, { kind: "busy" }],
++    [second, { kind: "busy" }],
++  ]);
++  const rows = shallowRef(before);
++
++  setRow(rows, first, null);
++  expect([...rows.value]).toEqual([[second, { kind: "busy" }]]);
++  expect([...before.keys()]).toEqual([first, second]);
++
++  const forgotten = rows.value;
++  setRow(rows, first, { kind: "done", note: "ok" });
++  expect(rows.value).not.toBe(forgotten);
++  expect(rows.value.get(first)).toEqual({ kind: "done", note: "ok" });
++});
+diff --git a/frontend/src/ui/mergeRequestActions.ts b/frontend/src/ui/mergeRequestActions.ts
+index 1a0fdb6..79731a7 100644
+--- a/frontend/src/ui/mergeRequestActions.ts
++++ b/frontend/src/ui/mergeRequestActions.ts
+@@ -57,14 +57,28 @@ async function asked(
+   }
+ }
+ 
+-function setActing(state: State, iid: MergeRequestIid, acting: RowActing | null): void {
+-  const actions = new Map(state.actions.value);
+-  if (acting === null) {
+-    actions.delete(iid);
++type Rows<V> = ShallowRef<ReadonlyMap<MergeRequestIid, V>>;
++
++export function setRow<V>(rows: Rows<V>, iid: MergeRequestIid, value: V | null): void {
++  const next = new Map(rows.value);
++  if (value === null) {
++    next.delete(iid);
+   } else {
+-    actions.set(iid, acting);
++    next.set(iid, value);
+   }
+-  state.actions.value = actions;
++  rows.value = next;
++}
++
++export function claimRow<V extends { readonly kind: string }>(
++  rows: Rows<V>,
++  iid: MergeRequestIid,
++  busy: V,
++): boolean {
++  if (rows.value.get(iid)?.kind === busy.kind) {
++    return false;
++  }
++  setRow(rows, iid, busy);
++  return true;
+ }
+ 
+ async function checkLocalMerge(state: State): Promise<void> {
+@@ -77,17 +91,16 @@ async function checkLocalMerge(state: State): Promise<void> {
+ }
+ 
+ async function act(state: State, kind: RowReply["kind"], iid: MergeRequestIid): Promise<void> {
+-  if (state.actions.value.get(iid)?.kind === "running") {
++  if (!claimRow(state.actions, iid, { kind: "running" })) {
+     return;
+   }
+-  setActing(state, iid, { kind: "running" });
+   const outcome = await attempt(() => asked(state.source, kind, iid));
+   if (!outcome.ok) {
+-    setActing(state, iid, null);
++    setRow(state.actions, iid, null);
+     state.report({ action: "mergeRequests", step: kind, cause: outcome.cause });
+     return;
+   }
+-  setActing(state, iid, { kind: "replied", reply: outcome.value });
++  setRow(state.actions, iid, { kind: "replied", reply: outcome.value });
+   await checkLocalMerge(state);
+ }
+ 
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 0f0814d..1ee4f62 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -29,7 +29,7 @@ import {
+   type PersonValue,
+ } from "../mergeRequests";
+ import { RECHECK_PAUSE_MS } from "./glab";
+-import { createRowActions, type RowActions } from "./mergeRequestActions";
++import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
+ import { createRememberedFilters } from "./mergeRequestFilters";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+ import { attempt, type Problem } from "./problem";
+@@ -160,29 +160,18 @@ async function findProject(state: State): Promise<void> {
+   }
+ }
+ 
+-function setOpening(state: State, iid: MergeRequestIid, opening: Opening | null): void {
+-  const openings = new Map(state.openings.value);
+-  if (opening === null) {
+-    openings.delete(iid);
+-  } else {
+-    openings.set(iid, opening);
+-  }
+-  state.openings.value = openings;
+-}
+-
+ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
+-  if (state.openings.value.get(iid)?.kind === "fetching") {
++  if (!claimRow(state.openings, iid, { kind: "fetching" })) {
+     return;
+   }
+-  setOpening(state, iid, { kind: "fetching" });
+   const outcome = await attempt(() => state.source.openMergeRequest(iid));
+   if (!outcome.ok) {
+-    setOpening(state, iid, null);
++    setRow(state.openings, iid, null);
+     state.report({ action: "mergeRequests", step: "open", cause: outcome.cause });
+     return;
+   }
+   const reply = outcome.value;
+-  setOpening(state, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
++  setRow(state.openings, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
+ }
+ 
+ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {

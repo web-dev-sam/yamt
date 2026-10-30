@@ -30,8 +30,6 @@ export type OpenReply =
   | { readonly kind: "missingCommit"; readonly shortId: string };
 export type PageOpened = Readonly<Generated.PageOpened>;
 export type Readiness = Readonly<Generated.Readiness>;
-export type BlockedReason = Readonly<Generated.BlockedReason>;
-export type ChangeSize = Readonly<Generated.ChangeSize>;
 export type Started = Readonly<Generated.Started>;
 export type Refusal = Readonly<Generated.Refusal>;
 export type ResolveRefusal = Readonly<Generated.ResolveRefusal>;

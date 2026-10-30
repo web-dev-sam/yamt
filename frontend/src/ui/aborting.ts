@@ -57,7 +57,7 @@ async function closeAborted(
   pressed: Pressed,
   leftovers: readonly Leftover[],
 ): Promise<void> {
-  const { stop, operation, mergeRequest } = pressed;
+  const { stop, mergeRequest } = pressed;
   if (mergeRequest !== null) {
     await target.asking.ask({ kind: "abortLeftovers", mergeRequest, leftovers });
   }
@@ -66,7 +66,7 @@ async function closeAborted(
     endsApp: () => true,
     landing: async (outcome) => {
       if (!outcome.ok) {
-        report(target, { action: "abort", operation: operation.kind, cause: outcome.cause });
+        report(target, { action: "closeMerge", merge: mergeRequest, cause: outcome.cause });
       }
     },
   });

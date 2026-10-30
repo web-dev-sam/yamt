@@ -29,7 +29,7 @@ import {
   type PersonValue,
 } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
-import { createRowActions, type RowActions } from "./mergeRequestActions";
+import { claimRow, createRowActions, setRow, type RowActions } from "./mergeRequestActions";
 import { createRememberedFilters } from "./mergeRequestFilters";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
@@ -160,29 +160,18 @@ async function findProject(state: State): Promise<void> {
   }
 }
 
-function setOpening(state: State, iid: MergeRequestIid, opening: Opening | null): void {
-  const openings = new Map(state.openings.value);
-  if (opening === null) {
-    openings.delete(iid);
-  } else {
-    openings.set(iid, opening);
-  }
-  state.openings.value = openings;
-}
-
 async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
-  if (state.openings.value.get(iid)?.kind === "fetching") {
+  if (!claimRow(state.openings, iid, { kind: "fetching" })) {
     return;
   }
-  setOpening(state, iid, { kind: "fetching" });
   const outcome = await attempt(() => state.source.openMergeRequest(iid));
   if (!outcome.ok) {
-    setOpening(state, iid, null);
+    setRow(state.openings, iid, null);
     state.report({ action: "mergeRequests", step: "open", cause: outcome.cause });
     return;
   }
   const reply = outcome.value;
-  setOpening(state, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
+  setRow(state.openings, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
 }
 
 async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {

@@ -57,14 +57,28 @@ async function asked(
   }
 }
 
-function setActing(state: State, iid: MergeRequestIid, acting: RowActing | null): void {
-  const actions = new Map(state.actions.value);
-  if (acting === null) {
-    actions.delete(iid);
+type Rows<V> = ShallowRef<ReadonlyMap<MergeRequestIid, V>>;
+
+export function setRow<V>(rows: Rows<V>, iid: MergeRequestIid, value: V | null): void {
+  const next = new Map(rows.value);
+  if (value === null) {
+    next.delete(iid);
   } else {
-    actions.set(iid, acting);
+    next.set(iid, value);
   }
-  state.actions.value = actions;
+  rows.value = next;
+}
+
+export function claimRow<V extends { readonly kind: string }>(
+  rows: Rows<V>,
+  iid: MergeRequestIid,
+  busy: V,
+): boolean {
+  if (rows.value.get(iid)?.kind === busy.kind) {
+    return false;
+  }
+  setRow(rows, iid, busy);
+  return true;
 }
 
 async function checkLocalMerge(state: State): Promise<void> {
@@ -77,17 +91,16 @@ async function checkLocalMerge(state: State): Promise<void> {
 }
 
 async function act(state: State, kind: RowReply["kind"], iid: MergeRequestIid): Promise<void> {
-  if (state.actions.value.get(iid)?.kind === "running") {
+  if (!claimRow(state.actions, iid, { kind: "running" })) {
     return;
   }
-  setActing(state, iid, { kind: "running" });
   const outcome = await attempt(() => asked(state.source, kind, iid));
   if (!outcome.ok) {
-    setActing(state, iid, null);
+    setRow(state.actions, iid, null);
     state.report({ action: "mergeRequests", step: kind, cause: outcome.cause });
     return;
   }
-  setActing(state, iid, { kind: "replied", reply: outcome.value });
+  setRow(state.actions, iid, { kind: "replied", reply: outcome.value });
   await checkLocalMerge(state);
 }
 
