@@ -1,21 +1,9 @@
 {
-  "MrPage": {
+  "MrDocs": {
     "owned": [
-      "frontend/src/ui/MergeRequestsButton.vue",
-      "frontend/src/ui/MergeRequestsView.vue",
-      "frontend/src/ui/MergeRequestRow.vue",
-      "frontend/src/ui/MergeRequestFilter.vue",
-      "frontend/src/ui/CiStatusBox.vue",
-      "frontend/src/ui/CompareView.vue",
-      "frontend/src/ui/RangeView.vue",
-      "frontend/src/ui/RangeApp.vue",
-      "frontend/src/ui/CompareApp.vue",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/scripts/fences.ts",
-      "frontend/scripts/fences.test.ts",
-      "frontend/scripts/app-session/**",
-      "scripts/map-check.sh",
-      "frontend/scripts/windowFence.ts"
+      "docs/architecture.md",
+      ".omp/skills/project-map/**",
+      ".omp/skills/ipc-contract/SKILL.md"
     ]
   }
 }
