@@ -97,7 +97,7 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
     "--repo",
     "/tmp/rr",
   ]);
-  expect(appArgs({ kind: "diff" }, null, false)).toEqual(["--diff"]);
+  expect(appArgs({ kind: "diff", startDir: "rr" }, null, false)).toEqual(["--diff"]);
   expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", false)).toEqual(["--repo", "/tmp/r"]);
   expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", false)).toEqual(["--repo", "/tmp/s/repo"]);
 });
@@ -112,21 +112,21 @@ test("start-app --ai reaches the app as its own --ai after the repository", () =
     "/tmp/rr",
     "--ai",
   ]);
-  expect(appArgs({ kind: "diff" }, null, true)).toEqual(["--diff", "--ai"]);
+  expect(appArgs({ kind: "diff", startDir: null }, null, true)).toEqual(["--diff", "--ai"]);
   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
 });
 
-test("start-app --glab names a tests/glab scenario by its form, only with --range", () => {
+test("start-app --glab names a tests/glab scenario by its form, only with --range or --diff", () => {
   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
   expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
   expect(parseCommand(range)).toMatchObject({ glab: null });
-  const needsRange = /--glab <scenario> needs --range/;
+  const needsWindow = /--glab <scenario> needs --range or --diff/;
   expect(() =>
     parseCommand(["start-app", "--name", "r", "--repo", "/r", "--glab", "moved"]),
-  ).toThrow(needsRange);
-  expect(() => parseCommand(["start-app", "--name", "r", "--diff", "--glab", "moved"])).toThrow(
-    needsRange,
-  );
+  ).toThrow(needsWindow);
+  expect(() =>
+    parseCommand(["start-app", "--name", "r", "--fresh-repo", "--glab", "moved"]),
+  ).toThrow(needsWindow);
   const folderName = /--glab .*: expected a folder name under tests\/glab\//;
   expect(() => parseCommand([...range, "--glab", "../moved"])).toThrow(folderName);
   expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);

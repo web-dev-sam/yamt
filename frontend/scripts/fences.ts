@@ -7,11 +7,12 @@ import ts from "typescript";
 import { agentViolations } from "./agentFence";
 import { clipboardViolations } from "./clipboardFence";
 import { markdownViolations } from "./markdownFence";
+import { windowFinding } from "./windowFence";
 
 export type SourceFile = { readonly path: string; readonly text: string };
 
 export type FenceViolation = {
-  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8" | "PM9";
+  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8" | "PM9" | "PM10";
   readonly file: string;
   readonly specifier: string;
   readonly reason: string;
@@ -20,10 +21,6 @@ export type FenceViolation = {
 type Finding = Pick<FenceViolation, "rule" | "reason">;
 
 type Edge = { readonly specifier: string; readonly file: string };
-
-type Root = "merge" | "compare" | "range";
-
-type WindowRoot = Exclude<Root, "merge">;
 
 const SKIPPED_FILE = "src/ipc/bindings.ts";
 const QUERY_SUFFIX = /\?.*$/;
@@ -51,28 +48,6 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
 const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
 const ICON_PREFIX = "~icons/";
 const RAW_QUERY = "?raw";
-const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
-const TEST_SOURCE_EXTENSION = /(?:\.test)?\.(?:ts|vue)$/;
-const ROOT_FILES: Readonly<Record<string, Root>> = {
-  "src/ui/store": "merge",
-  "src/ui/App": "merge",
-  "src/ui/compareStore": "compare",
-  "src/ui/CompareApp": "compare",
-  "src/ui/rangeStore": "range",
-  "src/ui/RangeApp": "range",
-};
-const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
-const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
-  compare: "PM7",
-  range: "PM9",
-};
-const AI_FILES: Readonly<Record<string, true>> = {
-  "src/ui/AiTurn": true,
-  "src/ui/AiStep": true,
-  "src/ui/EditDiff": true,
-  "src/ui/AgentSettings": true,
-  "src/ui/aiClose": true,
-};
 
 function scriptTexts(file: SourceFile): string[] {
   if (!file.path.endsWith(".vue")) {
@@ -146,40 +121,6 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
     return { rule: "PM5", reason: "no module imports another module's internal/" };
   }
   return undefined;
-}
-
-function isWindowRoot(name: string): name is WindowRoot {
-  return Object.hasOwn(WINDOW_RULES, name);
-}
-
-function windowRoot(file: string): string {
-  if (Object.hasOwn(AI_FILES, file.replace(TEST_SOURCE_EXTENSION, ""))) {
-    return "range";
-  }
-  return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
-}
-
-function rootFinding(file: string, target: string): Finding | undefined {
-  const root = windowRoot(file);
-  if (!isWindowRoot(root)) {
-    return undefined;
-  }
-  const rule = WINDOW_RULES[root];
-  const other = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
-  if (other !== undefined && other !== root) {
-    return { rule, reason: `the ${root} window never imports the ${other} window's root` };
-  }
-  if (isInside(target, "src/lsp")) {
-    return { rule, reason: `the ${root} window never imports lsp/` };
-  }
-  return undefined;
-}
-
-function aiFileFinding(file: string, target: string): Finding | undefined {
-  const aiFile = Object.hasOwn(AI_FILES, target.replace(SOURCE_EXTENSION, ""));
-  return aiFile && windowRoot(file) !== "range"
-    ? { rule: "PM9", reason: "the AI's views and close question are the range window's only" }
-    : undefined;
 }
 
 function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
@@ -268,9 +209,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
       const finding =
         target === undefined
           ? packageFinding(module, specifier)
-          : (pathFinding(module, target) ??
-            rootFinding(file.path, target) ??
-            aiFileFinding(file.path, target));
+          : (pathFinding(module, target) ?? windowFinding(file.path, target));
       if (finding !== undefined) {
         violations.push({ ...finding, file: file.path, specifier });
       }

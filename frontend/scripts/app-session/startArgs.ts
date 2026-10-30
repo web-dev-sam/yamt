@@ -7,7 +7,8 @@ import type { Size } from "./state";
 type Opening =
   | { readonly kind: "dir"; readonly dir: string }
   | { readonly kind: "range"; readonly range: string; readonly dir: string }
-  | { readonly kind: "fresh" | "diff" };
+  | { readonly kind: "diff"; readonly startDir: string | null }
+  | { readonly kind: "fresh" };
 
 export type Recording = { readonly file: string; readonly seconds: number };
 
@@ -50,8 +51,12 @@ function size(parsed: Parsed): Size {
 function opening(parsed: Parsed): Opening {
   const dir = parsed.values.get("repo");
   const range = parsed.values.get("range");
+  const startDir = parsed.values.get("dir");
   const diff = parsed.flags.has("diff");
   const fresh = parsed.flags.has("fresh-repo");
+  if (startDir !== undefined && !diff) {
+    throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
+  }
   if (range !== undefined) {
     if (dir === undefined || diff || fresh) {
       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
@@ -61,7 +66,10 @@ function opening(parsed: Parsed): Opening {
   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
   }
-  return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
+  if (dir !== undefined) {
+    return { kind: "dir", dir };
+  }
+  return diff ? { kind: "diff", startDir: startDir ?? null } : { kind: "fresh" };
 }
 
 function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
@@ -92,7 +100,7 @@ function reviewSearch(parsed: Parsed): string {
   return text === "" ? "" : `&${text}`;
 }
 
-function fixtureSearch(parsed: Parsed): string {
+function windowSearch(parsed: Parsed): string {
   const range = parsed.values.get("range-case");
   const fixture = parsed.values.get("diff-case");
   const diff = parsed.flags.has("diff") ? "?diff" : "";
@@ -109,6 +117,20 @@ function fixtureSearch(parsed: Parsed): string {
   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
 }
 
+function fixtureSearch(parsed: Parsed): string {
+  const search = windowSearch(parsed);
+  const script = parsed.values.get("mr");
+  if (script === undefined) {
+    return search;
+  }
+  if (search === "") {
+    throw new Error(
+      "start-fixture takes --mr only with --diff, --diff-case or --range-case: the merge window has no merge-request page",
+    );
+  }
+  return `${search}&mr=${encodeURIComponent(script)}`;
+}
+
 export function glabFolder(scenario: string, isFolder: (path: string) => boolean): string {
   const folder = fromRoot(join("tests/glab", scenario));
   if (!isFolder(folder)) {
@@ -122,8 +144,10 @@ function glabScenario(parsed: Parsed, opens: Opening): string | null {
   if (scenario === undefined) {
     return null;
   }
-  if (opens.kind !== "range") {
-    throw new Error("start-app --glab <scenario> needs --range: only the range window runs glab");
+  if (opens.kind !== "range" && opens.kind !== "diff") {
+    throw new Error(
+      "start-app --glab <scenario> needs --range or --diff: only the range and compare windows run glab",
+    );
   }
   if (!/^[a-z0-9-]+$/.test(scenario)) {
     throw new Error(`--glab ${scenario}: expected a folder name under tests/glab/, e.g. lined-up`);

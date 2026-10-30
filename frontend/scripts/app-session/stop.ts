@@ -2,8 +2,8 @@ import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 import { isOwnTempFolder } from "./folders";
-import { stopProc } from "./processes";
-import { readState, statePath, type SessionState } from "./state";
+import { runningAppsWith, stopProc, type StopResult } from "./processes";
+import { readState, statePath, type Proc, type SessionState } from "./state";
 import { deleteSession } from "./webdriver";
 
 async function endSession(state: SessionState): Promise<string> {
@@ -18,12 +18,23 @@ async function endSession(state: SessionState): Promise<string> {
   }
 }
 
+type Stopped = Pick<Proc, "role" | "pid"> & { readonly result: StopResult };
+
+async function stopEach(procs: readonly Proc[]): Promise<Stopped[]> {
+  const stopped = [];
+  for (const proc of procs) {
+    stopped.push({ role: proc.role, pid: proc.pid, result: await stopProc(proc) });
+  }
+  return stopped;
+}
+
 export async function stopSession(state: SessionState): Promise<Readonly<Record<string, unknown>>> {
   const session = await endSession(state);
-  const procs = [];
-  for (const proc of state.procs.toReversed()) {
-    procs.push({ role: proc.role, pid: proc.pid, result: await stopProc(proc) });
-  }
+  const procs = await stopEach(state.procs.toReversed());
+  const children =
+    state.kind === "app"
+      ? await stopEach(runningAppsWith(`XDG_CONFIG_HOME=${state.configDir}`))
+      : [];
   const ownFolder = isOwnTempFolder(state.folder, tmpdir());
   if (ownFolder) {
     rmSync(state.folder, { recursive: true, force: true });
@@ -33,6 +44,7 @@ export async function stopSession(state: SessionState): Promise<Readonly<Record<
     stopped: state.name,
     session,
     procs,
+    children,
     folder: ownFolder
       ? `removed ${state.folder}`
       : `kept ${state.folder} (not this tool's temp folder)`,

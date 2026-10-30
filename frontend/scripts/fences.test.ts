@@ -687,6 +687,105 @@ test("range files importing shared ui files and their own neighbours violate not
   expect(violationsOf(files)).toEqual([]);
 });
 
+test("a merge-request page file importing any window's root or lsp/ violates PM10", () => {
+  const files = [
+    {
+      path: "src/ui/MergeRequestsView.vue",
+      text: `<script setup lang="ts">\nimport { useCompareStore } from "./compareStore";\n</script>`,
+    },
+    {
+      path: "src/ui/MergeRequestRow.vue",
+      text: `<script setup lang="ts">\nimport "./RangeApp.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/CiStatusBox.vue",
+      text: `<script setup lang="ts">\nimport { useRangeStore } from "./rangeStore.ts";\n</script>`,
+    },
+    { path: "src/ui/mergeRequests.ts", text: `import "./store";\nimport "./App.vue";` },
+    { path: "src/ui/mergeRequestsStore.test.ts", text: `import "./CompareApp.vue";` },
+    { path: "src/ui/mergeRequestsText.ts", text: `import type { X } from "../lsp";` },
+    {
+      path: "src/ui/MergeRequestFilter.vue",
+      text: `<script setup lang="ts">\nimport "../lsp/index.ts";\n</script>`,
+    },
+  ];
+
+  expect(findFenceViolations(files)).toEqual([
+    {
+      rule: "PM10",
+      file: "src/ui/MergeRequestsView.vue",
+      specifier: "./compareStore",
+      reason:
+        "the merge-request page serves two windows; it never imports the compare window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/MergeRequestRow.vue",
+      specifier: "./RangeApp.vue",
+      reason: "the merge-request page serves two windows; it never imports the range window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/CiStatusBox.vue",
+      specifier: "./rangeStore.ts",
+      reason: "the merge-request page serves two windows; it never imports the range window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequests.ts",
+      specifier: "./store",
+      reason: "the merge-request page serves two windows; it never imports the merge window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequests.ts",
+      specifier: "./App.vue",
+      reason: "the merge-request page serves two windows; it never imports the merge window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequestsStore.test.ts",
+      specifier: "./CompareApp.vue",
+      reason:
+        "the merge-request page serves two windows; it never imports the compare window's root",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/mergeRequestsText.ts",
+      specifier: "../lsp",
+      reason: "the merge-request page never imports lsp/",
+    },
+    {
+      rule: "PM10",
+      file: "src/ui/MergeRequestFilter.vue",
+      specifier: "../lsp/index.ts",
+      reason: "the merge-request page never imports lsp/",
+    },
+  ]);
+});
+
+test("merge-request page files importing shared ui files, and the roots importing the page, violate nothing", () => {
+  const files = [
+    {
+      path: "src/ui/MergeRequestsView.vue",
+      text: `<script setup lang="ts">\nimport "./mergeRequestsStore";\nimport "./ChoiceButtons.vue";\nimport "./storeless";\n</script>`,
+    },
+    { path: "src/ui/mergeRequests.ts", text: `import "../mergeRequests";\nimport "./glab";` },
+    {
+      path: "src/ui/CompareView.vue",
+      text: `<script setup lang="ts">\nimport "./MergeRequestsButton.vue";\n</script>`,
+    },
+    {
+      path: "src/ui/RangeApp.vue",
+      text: `<script setup lang="ts">\nimport "./MergeRequestsView.vue";\n</script>`,
+    },
+    { path: "src/ui/requestMerge.ts", text: `import "./store";\nimport "../lsp";` },
+    { path: "src/ui/internal/MergeRequestNote.ts", text: `import "../store";` },
+  ];
+
+  expect(violationsOf(files)).toEqual([]);
+});
+
 test("the merge root, the compare root or a shared ui file importing an AI view violates PM9", () => {
   const files = [
     {

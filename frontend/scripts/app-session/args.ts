@@ -15,14 +15,18 @@ import type { ScrollTo } from "./placement";
 import { startCommand, type StartCommand } from "./startArgs";
 
 const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
-  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
+  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
+                | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
                 | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
-                --glab: scripts/fake-glab first on PATH; its scenario is the link <folder>/glab/scenario
+                --dir: tauri-driver and so the compare window start in that folder
+                --glab: scripts/fake-glab and scripts/fake-open first on PATH; the scenario is the link
+                <folder>/glab/scenario, opened addresses go to <folder>/glab/opened.log
   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
                 | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
+                [--mr <merge-request script: list, slow, many, …>]   (with --diff, --diff-case or --range-case)
   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
@@ -84,6 +88,7 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
       "name",
       "binary",
       "repo",
+      "dir",
       "range",
       "settings",
       "size",
@@ -95,7 +100,7 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
     flags: ["fresh-repo", "diff", "ai"],
   },
   "start-fixture": {
-    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case"],
+    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case", "mr"],
     flags: ["diff", "ai", "ai-changes"],
   },
   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },

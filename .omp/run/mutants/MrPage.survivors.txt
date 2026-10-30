@@ -1,0 +1,6 @@
+just mutants HEAD (web; .vue not mutated): 733 killed, 3 timeout, 63 survived, 344 no coverage; windowFence.ts 97.18%, startArgs.ts 96.98%, args.ts 92.8%
+windowFence.ts:44 `?.[1]?.`→`?.[1].` — equivalent: the group is required, so [1] is defined whenever exec matches (moved unchanged from fences.ts)
+windowFence.ts:44 `?? ""`→other string — equivalent: isWindowRoot is false for both
+processes.ts:140 PROCESS_ID filter→true — equivalent: non-numeric /proc entries are self/thread-self (comm node) or unreadable
+processes.ts:147 `environ !== null`/`startTicks !== null`→true — equivalent: a matching yamt has a readable environ and stat; the guards exist for the type
+stop.ts:21-37, fakeGlab.ts (moved), start.ts startFolder — wiring: process launch/stop, exercised by the app sessions above; runningAppsWith/holdsEntry are tested

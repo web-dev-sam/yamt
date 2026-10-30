@@ -1,0 +1,1606 @@
+diff --git a/frontend/scripts/app-session/args.test.ts b/frontend/scripts/app-session/args.test.ts
+index 52eb711..78dc5f9 100644
+--- a/frontend/scripts/app-session/args.test.ts
++++ b/frontend/scripts/app-session/args.test.ts
+@@ -97,7 +97,7 @@ test("the app opens the range window with --diff=<range> and --repo, the compare
+     "--repo",
+     "/tmp/rr",
+   ]);
+-  expect(appArgs({ kind: "diff" }, null, false)).toEqual(["--diff"]);
++  expect(appArgs({ kind: "diff", startDir: "rr" }, null, false)).toEqual(["--diff"]);
+   expect(appArgs({ kind: "dir", dir: "r" }, "/tmp/r", false)).toEqual(["--repo", "/tmp/r"]);
+   expect(appArgs({ kind: "fresh" }, "/tmp/s/repo", false)).toEqual(["--repo", "/tmp/s/repo"]);
+ });
+@@ -112,21 +112,21 @@ test("start-app --ai reaches the app as its own --ai after the repository", () =
+     "/tmp/rr",
+     "--ai",
+   ]);
+-  expect(appArgs({ kind: "diff" }, null, true)).toEqual(["--diff", "--ai"]);
++  expect(appArgs({ kind: "diff", startDir: null }, null, true)).toEqual(["--diff", "--ai"]);
+   expect(() => parseCommand([...range, "--ai-case", "crash"])).toThrow(/unknown option --ai-case/);
+ });
+ 
+-test("start-app --glab names a tests/glab scenario by its form, only with --range", () => {
++test("start-app --glab names a tests/glab scenario by its form, only with --range or --diff", () => {
+   const range = ["start-app", "--name", "r", "--range", "main...feature", "--repo", "/tmp/rr"];
+   expect(parseCommand([...range, "--glab", "lined-up"])).toMatchObject({ glab: "lined-up" });
+   expect(parseCommand(range)).toMatchObject({ glab: null });
+-  const needsRange = /--glab <scenario> needs --range/;
++  const needsWindow = /--glab <scenario> needs --range or --diff/;
+   expect(() =>
+     parseCommand(["start-app", "--name", "r", "--repo", "/r", "--glab", "moved"]),
+-  ).toThrow(needsRange);
+-  expect(() => parseCommand(["start-app", "--name", "r", "--diff", "--glab", "moved"])).toThrow(
+-    needsRange,
+-  );
++  ).toThrow(needsWindow);
++  expect(() =>
++    parseCommand(["start-app", "--name", "r", "--fresh-repo", "--glab", "moved"]),
++  ).toThrow(needsWindow);
+   const folderName = /--glab .*: expected a folder name under tests\/glab\//;
+   expect(() => parseCommand([...range, "--glab", "../moved"])).toThrow(folderName);
+   expect(() => parseCommand([...range, "--glab", "/tmp/moved"])).toThrow(folderName);
+diff --git a/frontend/scripts/app-session/args.ts b/frontend/scripts/app-session/args.ts
+index d4fee38..c373d97 100644
+--- a/frontend/scripts/app-session/args.ts
++++ b/frontend/scripts/app-session/args.ts
+@@ -15,14 +15,18 @@ import type { ScrollTo } from "./placement";
+ import { startCommand, type StartCommand } from "./startArgs";
+ 
+ const USAGE = `usage: app-session <command> …   (relative paths are taken from the repository root)
+-  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo | --diff
++  start-app     --name <n> [--binary target/debug/yamt] [--repo <dir> | --fresh-repo
++                | --diff [--dir <start folder>] [--glab <tests/glab scenario>]
+                 | --range <a..b or a...b> --repo <dir> [--glab <tests/glab scenario>]] [--ai]
+                 [--settings <json text>] [--size 1600x1000] [--record <file.mkv> --record-seconds <s>]
+                 [--home <dir>]   (the app's home; created when missing; stop keeps it)
+-                --glab: scripts/fake-glab first on PATH; its scenario is the link <folder>/glab/scenario
++                --dir: tauri-driver and so the compare window start in that folder
++                --glab: scripts/fake-glab and scripts/fake-open first on PATH; the scenario is the link
++                <folder>/glab/scenario, opened addresses go to <folder>/glab/opened.log
+   start-fixture --name <n> [--size 1600x1000] [--diff | --diff-case <compare fixture>
+                 | --range-case <range fixture> [--threads seeded] [--gitlab <script>]
+                   [--ai [--ai-case <agent fixture: crash, checkout-fails, cancelled, …>] [--ai-changes]]]
++                [--mr <merge-request script: list, slow, many, …>]   (with --diff, --diff-case or --range-case)
+   click         --name <n> <accessible name or css> [--role <role>] [--nth <i, from 0>] [--x11] [--double]
+   drag          --name <n> <accessible name or css> --dx <px> [--dy <px>] [--role <role>] [--nth <i>]
+   press         --name <n> <key> [<key> …] [--x11]     keys: "Ctrl+Z", "Shift+Tab", "Enter", "a"
+@@ -84,6 +88,7 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+       "name",
+       "binary",
+       "repo",
++      "dir",
+       "range",
+       "settings",
+       "size",
+@@ -95,7 +100,7 @@ const SPECS: Readonly<Record<CommandKind, Spec>> = {
+     flags: ["fresh-repo", "diff", "ai"],
+   },
+   "start-fixture": {
+-    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case"],
++    values: ["name", "size", "diff-case", "range-case", "threads", "gitlab", "ai-case", "mr"],
+     flags: ["diff", "ai", "ai-changes"],
+   },
+   click: { values: ["name", "role", "nth"], flags: ["x11", "double"] },
+diff --git a/frontend/scripts/app-session/fakeGlab.ts b/frontend/scripts/app-session/fakeGlab.ts
+new file mode 100644
+index 0000000..2467720
+--- /dev/null
++++ b/frontend/scripts/app-session/fakeGlab.ts
+@@ -0,0 +1,42 @@
++import { mkdirSync, symlinkSync } from "node:fs";
++import { delimiter, join } from "node:path";
++
++import { fromRoot } from "./session";
++
++export type FakeGlab = {
++  readonly scenario: string;
++  readonly posts: string;
++  readonly log: string;
++  readonly opened: string;
++};
++
++export function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
++  if (scenarioFolder === null) {
++    return null;
++  }
++  const dir = join(folder, "glab");
++  mkdirSync(dir);
++  const link = join(dir, "scenario");
++  symlinkSync(scenarioFolder, link);
++  return {
++    scenario: link,
++    posts: join(dir, "posts"),
++    log: join(dir, "calls.log"),
++    opened: join(dir, "opened.log"),
++  };
++}
++
++export function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
++  if (glab === null) {
++    return {};
++  }
++  const fakes = [fromRoot("scripts/fake-glab"), fromRoot("scripts/fake-open")];
++  const path = [...fakes, process.env["PATH"] ?? ""];
++  return {
++    PATH: path.join(delimiter),
++    YAMT_FAKE_GLAB: glab.scenario,
++    YAMT_FAKE_GLAB_STATE: glab.posts,
++    YAMT_FAKE_GLAB_LOG: glab.log,
++    YAMT_FAKE_OPEN_LOG: glab.opened,
++  };
++}
+diff --git a/frontend/scripts/app-session/processes.test.ts b/frontend/scripts/app-session/processes.test.ts
+new file mode 100644
+index 0000000..9771e79
+--- /dev/null
++++ b/frontend/scripts/app-session/processes.test.ts
+@@ -0,0 +1,43 @@
++import { spawn } from "node:child_process";
++import { once } from "node:events";
++import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++
++import { expect, test } from "vitest";
++
++import { holdsEntry, runningAppsWith } from "./processes";
++
++test("an environment holds an entry only as a whole NUL-separated entry, never as a prefix", () => {
++  const environ = "HOME=/tmp/s/home\0XDG_CONFIG_HOME=/tmp/s/home/.config\0PATH=/usr/bin\0";
++  expect(holdsEntry(environ, "XDG_CONFIG_HOME=/tmp/s/home/.config")).toBe(true);
++  expect(holdsEntry(environ, "XDG_CONFIG_HOME=/tmp/s/home")).toBe(false);
++  expect(holdsEntry(environ, "XDG_CONFIG_HOME=/tmp/s/home/.config/yamt")).toBe(false);
++  expect(holdsEntry("", "XDG_CONFIG_HOME=/tmp/s/home/.config")).toBe(false);
++});
++
++test("a running process named yamt with the entry is found with its start time; other entries and names are not", async () => {
++  const folder = mkdtempSync(join(tmpdir(), "yamt-sweep-"));
++  const entry = `YAMT_SWEEP_PROBE=${folder}`;
++  symlinkSync("/usr/bin/sleep", join(folder, "yamt"));
++  symlinkSync("/usr/bin/sleep", join(folder, "other"));
++  const app = spawn(join(folder, "yamt"), ["30"], {
++    env: { ...process.env, YAMT_SWEEP_PROBE: folder },
++  });
++  const other = spawn(join(folder, "other"), ["30"], {
++    env: { ...process.env, YAMT_SWEEP_PROBE: folder },
++  });
++  try {
++    await Promise.all([once(app, "spawn"), once(other, "spawn")]);
++    const found = runningAppsWith(entry);
++    expect(found.map(({ role, pid }) => ({ role, pid }))).toEqual([
++      { role: "yamt child", pid: app.pid },
++    ]);
++    expect(found[0]?.startTicks).toBeGreaterThan(0);
++    expect(runningAppsWith(`${entry}-not`)).toEqual([]);
++  } finally {
++    app.kill();
++    other.kill();
++    rmSync(folder, { recursive: true, force: true });
++  }
++});
+diff --git a/frontend/scripts/app-session/processes.ts b/frontend/scripts/app-session/processes.ts
+index 96d5d89..1fe2496 100644
+--- a/frontend/scripts/app-session/processes.ts
++++ b/frontend/scripts/app-session/processes.ts
+@@ -1,6 +1,6 @@
+ import { execFile, spawn, type ChildProcess } from "node:child_process";
+ import { once } from "node:events";
+-import { closeSync, openSync, readFileSync } from "node:fs";
++import { closeSync, openSync, readdirSync, readFileSync } from "node:fs";
+ import { createServer } from "node:net";
+ import { join } from "node:path";
+ import { setTimeout as sleep } from "node:timers/promises";
+@@ -12,6 +12,8 @@ const POLL_MS = 100;
+ const STOP_GRACE_MS = 3000;
+ const OWNER_DEV_PORT = 5173;
+ const RUN_TIMEOUT_MS = 30_000;
++const PROCESS_ID = /^[0-9]+$/;
++const APP_COMMAND = "yamt";
+ 
+ export type Launch = {
+   readonly role: string;
+@@ -103,7 +105,9 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+   }
+ }
+ 
+-export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone" | "not ours"> {
++export type StopResult = "stopped" | "killed" | "gone" | "not ours";
++
++export async function stopProc(proc: Proc): Promise<StopResult> {
+   const ticks = startTicksOf(proc.pid);
+   if (ticks !== null && ticks !== proc.startTicks) {
+     return "not ours";
+@@ -120,6 +124,32 @@ export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone
+   }
+ }
+ 
++function readOrNull(path: string): string | null {
++  try {
++    return readFileSync(path, "utf8");
++  } catch {
++    return null;
++  }
++}
++
++export function holdsEntry(environ: string, entry: string): boolean {
++  return environ.split("\0").includes(entry);
++}
++
++export function runningAppsWith(entry: string): Proc[] {
++  return readdirSync("/proc")
++    .filter((name) => PROCESS_ID.test(name))
++    .flatMap((name) => {
++      const pid = Number(name);
++      const environ = readOrNull(`/proc/${name}/environ`);
++      const startTicks = startTicksOf(pid);
++      const isApp = readOrNull(`/proc/${name}/comm`)?.trim() === APP_COMMAND;
++      return isApp && environ !== null && startTicks !== null && holdsEntry(environ, entry)
++        ? [{ role: "yamt child", pid, startTicks }]
++        : [];
++    });
++}
++
+ const execFileText = promisify(execFile);
+ 
+ export async function run(
+diff --git a/frontend/scripts/app-session/start.ts b/frontend/scripts/app-session/start.ts
+index 1c79273..ce76a78 100644
+--- a/frontend/scripts/app-session/start.ts
++++ b/frontend/scripts/app-session/start.ts
+@@ -6,13 +6,13 @@ import {
+   readFileSync,
+   realpathSync,
+   rmSync,
+-  symlinkSync,
+   writeFileSync,
+ } from "node:fs";
+ import { tmpdir, userInfo } from "node:os";
+-import { delimiter, join } from "node:path";
++import { join } from "node:path";
+ 
+ import type { Command } from "./args";
++import { fakeGlab, glabEnv, type FakeGlab } from "./fakeGlab";
+ import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
+ import { freePort, launchTracked, waitUntil } from "./processes";
+ import { displayEnv, fromRoot } from "./session";
+@@ -30,11 +30,11 @@ import { finishRecording, recordingLaunch, waitForRecording } from "./video";
+ import { inSession, isReady, newSession } from "./webdriver";
+ 
+ type StartApp = Extract<Command, { kind: "start-app" }>;
+-type FakeGlab = { readonly scenario: string; readonly posts: string; readonly log: string };
+ type Prepared = {
+   readonly home: string;
+   readonly configDir: string;
+   readonly repoDir: string | null;
++  readonly driverDir: string;
+   readonly binary: string;
+   readonly args: readonly string[];
+   readonly glab: FakeGlab | null;
+@@ -80,32 +80,21 @@ function prepareApp(command: StartApp, folder: string): Prepared {
+     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
+   }
+   const repoDir = repoFolder(command.opens, folder);
++  const driverDir = startFolder(command.opens, folder);
+   const glab = fakeGlab(scenarioFolder, folder);
+   const args = appArgs(command.opens, repoDir, command.ai);
+-  return { home, configDir, repoDir, binary, args, glab };
++  return { home, configDir, repoDir, driverDir, binary, args, glab };
+ }
+ 
+-function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
+-  if (scenarioFolder === null) {
+-    return null;
++function startFolder(opens: StartApp["opens"], folder: string): string {
++  if (opens.kind !== "diff" || opens.startDir === null) {
++    return folder;
+   }
+-  const dir = join(folder, "glab");
+-  mkdirSync(dir);
+-  const link = join(dir, "scenario");
+-  symlinkSync(scenarioFolder, link);
+-  return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
+-}
+-
+-function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
+-  if (glab === null) {
+-    return {};
++  const dir = fromRoot(opens.startDir);
++  if (!existsSync(dir)) {
++    throw new Error(`--dir ${opens.startDir}: no folder ${dir}`);
+   }
+-  return {
+-    PATH: [fromRoot("scripts/fake-glab"), process.env["PATH"] ?? ""].join(delimiter),
+-    YAMT_FAKE_GLAB: glab.scenario,
+-    YAMT_FAKE_GLAB_STATE: glab.posts,
+-    YAMT_FAKE_GLAB_LOG: glab.log,
+-  };
++  return dir;
+ }
+ 
+ function repoFolder(opens: StartApp["opens"], folder: string): string | null {
+@@ -199,7 +188,7 @@ async function startDriver(
+       command: "tauri-driver",
+       args: ["--port", String(driverPort), "--native-port", String(nativePort)],
+       env: appEnv(state.display, prepared),
+-      cwd: state.folder,
++      cwd: prepared.driverDir,
+       logDir,
+       fd3File: null,
+     },
+diff --git a/frontend/scripts/app-session/startArgs.test.ts b/frontend/scripts/app-session/startArgs.test.ts
+index 228e4a0..7225741 100644
+--- a/frontend/scripts/app-session/startArgs.test.ts
++++ b/frontend/scripts/app-session/startArgs.test.ts
+@@ -1,6 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+-import { glabFolder } from "./startArgs";
++import { parseCommand } from "./args";
++import { appArgs, glabFolder } from "./startArgs";
+ 
+ test("a scenario whose folder exists is its folder under tests/glab; the lookup is asked about it", () => {
+   const asked: string[] = [];
+@@ -24,3 +25,61 @@ test("an unknown scenario is refused at start, naming the folder it looked for",
+   expect(asked).toHaveLength(1);
+   expect(() => glabFolder("nosuch", () => false)).toThrow(`no scenario folder ${asked[0]}`);
+ });
++
++test("start-app --diff --dir starts the compare window in that folder and passes the app no --repo", () => {
++  const command = parseCommand(["start-app", "--name", "c", "--diff", "--dir", "/var/tmp/rr"]);
++  expect(command).toMatchObject({ opens: { kind: "diff", startDir: "/var/tmp/rr" } });
++  expect(parseCommand(["start-app", "--name", "c", "--diff"])).toMatchObject({
++    opens: { kind: "diff", startDir: null },
++  });
++  expect(appArgs({ kind: "diff", startDir: "/var/tmp/rr" }, null, false)).toEqual(["--diff"]);
++});
++
++test("start-app --dir goes only with --diff", () => {
++  const onlyDiff = /--dir <folder> goes with --diff/;
++  const range = ["start-app", "--name", "r", "--range", "a...b", "--repo", "/r"];
++  expect(() => parseCommand([...range, "--dir", "/d"])).toThrow(onlyDiff);
++  expect(() => parseCommand(["start-app", "--name", "r", "--repo", "/r", "--dir", "/d"])).toThrow(
++    onlyDiff,
++  );
++  expect(() => parseCommand(["start-app", "--name", "r", "--fresh-repo", "--dir", "/d"])).toThrow(
++    onlyDiff,
++  );
++});
++
++test("start-app --glab goes with --diff as with --range", () => {
++  const diff = ["start-app", "--name", "c", "--diff", "--dir", "/var/tmp/rr"];
++  expect(parseCommand([...diff, "--glab", "merge-requests"])).toMatchObject({
++    opens: { kind: "diff", startDir: "/var/tmp/rr" },
++    glab: "merge-requests",
++  });
++  expect(
++    parseCommand(["start-app", "--name", "c", "--diff", "--glab", "logged-out"]),
++  ).toMatchObject({ glab: "logged-out" });
++  expect(() => parseCommand([...diff, "--glab", "../x"])).toThrow(/expected a folder name/);
++});
++
++test("start-fixture --mr adds the merge-request script to the compare or range fixture page", () => {
++  const fixture = ["start-fixture", "--name", "fx"];
++  expect(parseCommand([...fixture, "--diff", "--mr", "list"])).toMatchObject({
++    search: "?diff&mr=list",
++  });
++  expect(parseCommand([...fixture, "--diff-case", "words", "--mr", "slow"])).toMatchObject({
++    search: "?diff=words&mr=slow",
++  });
++  expect(
++    parseCommand([...fixture, "--range-case", "review", "--gitlab", "refusal", "--mr", "a b"]),
++  ).toMatchObject({ search: "?range=review&gitlab=refusal&mr=a%20b" });
++  expect(parseCommand([...fixture, "--range-case", "empty"])).toMatchObject({
++    search: "?range=empty",
++  });
++});
++
++test("start-fixture --mr refuses the merge window, which has no merge-request page", () => {
++  expect(() => parseCommand(["start-fixture", "--name", "fx", "--mr", "list"])).toThrow(
++    /--mr only with --diff, --diff-case or --range-case/,
++  );
++  expect(() => parseCommand(["start-fixture", "--name", "fx", "--diff", "--mr"])).toThrow(
++    /--mr needs a value/,
++  );
++});
+diff --git a/frontend/scripts/app-session/startArgs.ts b/frontend/scripts/app-session/startArgs.ts
+index ceb39ba..83ade90 100644
+--- a/frontend/scripts/app-session/startArgs.ts
++++ b/frontend/scripts/app-session/startArgs.ts
+@@ -7,7 +7,8 @@ import type { Size } from "./state";
+ type Opening =
+   | { readonly kind: "dir"; readonly dir: string }
+   | { readonly kind: "range"; readonly range: string; readonly dir: string }
+-  | { readonly kind: "fresh" | "diff" };
++  | { readonly kind: "diff"; readonly startDir: string | null }
++  | { readonly kind: "fresh" };
+ 
+ export type Recording = { readonly file: string; readonly seconds: number };
+ 
+@@ -50,8 +51,12 @@ function size(parsed: Parsed): Size {
+ function opening(parsed: Parsed): Opening {
+   const dir = parsed.values.get("repo");
+   const range = parsed.values.get("range");
++  const startDir = parsed.values.get("dir");
+   const diff = parsed.flags.has("diff");
+   const fresh = parsed.flags.has("fresh-repo");
++  if (startDir !== undefined && !diff) {
++    throw new Error("start-app --dir <folder> goes with --diff: the compare window's start folder");
++  }
+   if (range !== undefined) {
+     if (dir === undefined || diff || fresh) {
+       throw new Error("start-app --range needs --repo <dir>, and neither --fresh-repo nor --diff");
+@@ -61,7 +66,10 @@ function opening(parsed: Parsed): Opening {
+   if ([dir !== undefined, fresh, diff].filter(Boolean).length !== 1) {
+     throw new Error("start-app needs one of --repo <dir>, --fresh-repo and --diff");
+   }
+-  return dir === undefined ? { kind: diff ? "diff" : "fresh" } : { kind: "dir", dir };
++  if (dir !== undefined) {
++    return { kind: "dir", dir };
++  }
++  return diff ? { kind: "diff", startDir: startDir ?? null } : { kind: "fresh" };
+ }
+ 
+ function addAiSearch(parsed: Parsed, review: URLSearchParams): void {
+@@ -92,7 +100,7 @@ function reviewSearch(parsed: Parsed): string {
+   return text === "" ? "" : `&${text}`;
+ }
+ 
+-function fixtureSearch(parsed: Parsed): string {
++function windowSearch(parsed: Parsed): string {
+   const range = parsed.values.get("range-case");
+   const fixture = parsed.values.get("diff-case");
+   const diff = parsed.flags.has("diff") ? "?diff" : "";
+@@ -109,6 +117,20 @@ function fixtureSearch(parsed: Parsed): string {
+   return fixture === undefined ? diff : `?diff=${encodeURIComponent(fixture)}`;
+ }
+ 
++function fixtureSearch(parsed: Parsed): string {
++  const search = windowSearch(parsed);
++  const script = parsed.values.get("mr");
++  if (script === undefined) {
++    return search;
++  }
++  if (search === "") {
++    throw new Error(
++      "start-fixture takes --mr only with --diff, --diff-case or --range-case: the merge window has no merge-request page",
++    );
++  }
++  return `${search}&mr=${encodeURIComponent(script)}`;
++}
++
+ export function glabFolder(scenario: string, isFolder: (path: string) => boolean): string {
+   const folder = fromRoot(join("tests/glab", scenario));
+   if (!isFolder(folder)) {
+@@ -122,8 +144,10 @@ function glabScenario(parsed: Parsed, opens: Opening): string | null {
+   if (scenario === undefined) {
+     return null;
+   }
+-  if (opens.kind !== "range") {
+-    throw new Error("start-app --glab <scenario> needs --range: only the range window runs glab");
++  if (opens.kind !== "range" && opens.kind !== "diff") {
++    throw new Error(
++      "start-app --glab <scenario> needs --range or --diff: only the range and compare windows run glab",
++    );
+   }
+   if (!/^[a-z0-9-]+$/.test(scenario)) {
+     throw new Error(`--glab ${scenario}: expected a folder name under tests/glab/, e.g. lined-up`);
+diff --git a/frontend/scripts/app-session/stop.ts b/frontend/scripts/app-session/stop.ts
+index 16754ae..ead386c 100644
+--- a/frontend/scripts/app-session/stop.ts
++++ b/frontend/scripts/app-session/stop.ts
+@@ -2,8 +2,8 @@ import { rmSync } from "node:fs";
+ import { tmpdir } from "node:os";
+ 
+ import { isOwnTempFolder } from "./folders";
+-import { stopProc } from "./processes";
+-import { readState, statePath, type SessionState } from "./state";
++import { runningAppsWith, stopProc, type StopResult } from "./processes";
++import { readState, statePath, type Proc, type SessionState } from "./state";
+ import { deleteSession } from "./webdriver";
+ 
+ async function endSession(state: SessionState): Promise<string> {
+@@ -18,12 +18,23 @@ async function endSession(state: SessionState): Promise<string> {
+   }
+ }
+ 
++type Stopped = Pick<Proc, "role" | "pid"> & { readonly result: StopResult };
++
++async function stopEach(procs: readonly Proc[]): Promise<Stopped[]> {
++  const stopped = [];
++  for (const proc of procs) {
++    stopped.push({ role: proc.role, pid: proc.pid, result: await stopProc(proc) });
++  }
++  return stopped;
++}
++
+ export async function stopSession(state: SessionState): Promise<Readonly<Record<string, unknown>>> {
+   const session = await endSession(state);
+-  const procs = [];
+-  for (const proc of state.procs.toReversed()) {
+-    procs.push({ role: proc.role, pid: proc.pid, result: await stopProc(proc) });
+-  }
++  const procs = await stopEach(state.procs.toReversed());
++  const children =
++    state.kind === "app"
++      ? await stopEach(runningAppsWith(`XDG_CONFIG_HOME=${state.configDir}`))
++      : [];
+   const ownFolder = isOwnTempFolder(state.folder, tmpdir());
+   if (ownFolder) {
+     rmSync(state.folder, { recursive: true, force: true });
+@@ -33,6 +44,7 @@ export async function stopSession(state: SessionState): Promise<Readonly<Record<
+     stopped: state.name,
+     session,
+     procs,
++    children,
+     folder: ownFolder
+       ? `removed ${state.folder}`
+       : `kept ${state.folder} (not this tool's temp folder)`,
+diff --git a/frontend/scripts/fences.test.ts b/frontend/scripts/fences.test.ts
+index 793f9e3..5bca645 100644
+--- a/frontend/scripts/fences.test.ts
++++ b/frontend/scripts/fences.test.ts
+@@ -687,6 +687,105 @@ test("range files importing shared ui files and their own neighbours violate not
+   expect(violationsOf(files)).toEqual([]);
+ });
+ 
++test("a merge-request page file importing any window's root or lsp/ violates PM10", () => {
++  const files = [
++    {
++      path: "src/ui/MergeRequestsView.vue",
++      text: `<script setup lang="ts">\nimport { useCompareStore } from "./compareStore";\n</script>`,
++    },
++    {
++      path: "src/ui/MergeRequestRow.vue",
++      text: `<script setup lang="ts">\nimport "./RangeApp.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/CiStatusBox.vue",
++      text: `<script setup lang="ts">\nimport { useRangeStore } from "./rangeStore.ts";\n</script>`,
++    },
++    { path: "src/ui/mergeRequests.ts", text: `import "./store";\nimport "./App.vue";` },
++    { path: "src/ui/mergeRequestsStore.test.ts", text: `import "./CompareApp.vue";` },
++    { path: "src/ui/mergeRequestsText.ts", text: `import type { X } from "../lsp";` },
++    {
++      path: "src/ui/MergeRequestFilter.vue",
++      text: `<script setup lang="ts">\nimport "../lsp/index.ts";\n</script>`,
++    },
++  ];
++
++  expect(findFenceViolations(files)).toEqual([
++    {
++      rule: "PM10",
++      file: "src/ui/MergeRequestsView.vue",
++      specifier: "./compareStore",
++      reason:
++        "the merge-request page serves two windows; it never imports the compare window's root",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/MergeRequestRow.vue",
++      specifier: "./RangeApp.vue",
++      reason: "the merge-request page serves two windows; it never imports the range window's root",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/CiStatusBox.vue",
++      specifier: "./rangeStore.ts",
++      reason: "the merge-request page serves two windows; it never imports the range window's root",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/mergeRequests.ts",
++      specifier: "./store",
++      reason: "the merge-request page serves two windows; it never imports the merge window's root",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/mergeRequests.ts",
++      specifier: "./App.vue",
++      reason: "the merge-request page serves two windows; it never imports the merge window's root",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/mergeRequestsStore.test.ts",
++      specifier: "./CompareApp.vue",
++      reason:
++        "the merge-request page serves two windows; it never imports the compare window's root",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/mergeRequestsText.ts",
++      specifier: "../lsp",
++      reason: "the merge-request page never imports lsp/",
++    },
++    {
++      rule: "PM10",
++      file: "src/ui/MergeRequestFilter.vue",
++      specifier: "../lsp/index.ts",
++      reason: "the merge-request page never imports lsp/",
++    },
++  ]);
++});
++
++test("merge-request page files importing shared ui files, and the roots importing the page, violate nothing", () => {
++  const files = [
++    {
++      path: "src/ui/MergeRequestsView.vue",
++      text: `<script setup lang="ts">\nimport "./mergeRequestsStore";\nimport "./ChoiceButtons.vue";\nimport "./storeless";\n</script>`,
++    },
++    { path: "src/ui/mergeRequests.ts", text: `import "../mergeRequests";\nimport "./glab";` },
++    {
++      path: "src/ui/CompareView.vue",
++      text: `<script setup lang="ts">\nimport "./MergeRequestsButton.vue";\n</script>`,
++    },
++    {
++      path: "src/ui/RangeApp.vue",
++      text: `<script setup lang="ts">\nimport "./MergeRequestsView.vue";\n</script>`,
++    },
++    { path: "src/ui/requestMerge.ts", text: `import "./store";\nimport "../lsp";` },
++    { path: "src/ui/internal/MergeRequestNote.ts", text: `import "../store";` },
++  ];
++
++  expect(violationsOf(files)).toEqual([]);
++});
++
+ test("the merge root, the compare root or a shared ui file importing an AI view violates PM9", () => {
+   const files = [
+     {
+diff --git a/frontend/scripts/fences.ts b/frontend/scripts/fences.ts
+index 29573b1..8cc046f 100644
+--- a/frontend/scripts/fences.ts
++++ b/frontend/scripts/fences.ts
+@@ -7,11 +7,12 @@ import ts from "typescript";
+ import { agentViolations } from "./agentFence";
+ import { clipboardViolations } from "./clipboardFence";
+ import { markdownViolations } from "./markdownFence";
++import { windowFinding } from "./windowFence";
+ 
+ export type SourceFile = { readonly path: string; readonly text: string };
+ 
+ export type FenceViolation = {
+-  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8" | "PM9";
++  readonly rule: "PM2" | "PM3" | "PM5" | "PM7" | "PM8" | "PM9" | "PM10";
+   readonly file: string;
+   readonly specifier: string;
+   readonly reason: string;
+@@ -21,10 +22,6 @@ type Finding = Pick<FenceViolation, "rule" | "reason">;
+ 
+ type Edge = { readonly specifier: string; readonly file: string };
+ 
+-type Root = "merge" | "compare" | "range";
+-
+-type WindowRoot = Exclude<Root, "merge">;
+-
+ const SKIPPED_FILE = "src/ipc/bindings.ts";
+ const QUERY_SUFFIX = /\?.*$/;
+ const MODULE_OF = /^src\/([^/]+)\//;
+@@ -51,28 +48,6 @@ const LSP_FORBIDDEN_MODULES = ["src/editor", "src/ui", "src/model", "src/connect
+ const FRAMEWORK_PACKAGE_PREFIXES = ["vue/", "@vue/", "@vueuse/", "@tauri-apps/"] as const;
+ const ICON_PREFIX = "~icons/";
+ const RAW_QUERY = "?raw";
+-const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
+-const TEST_SOURCE_EXTENSION = /(?:\.test)?\.(?:ts|vue)$/;
+-const ROOT_FILES: Readonly<Record<string, Root>> = {
+-  "src/ui/store": "merge",
+-  "src/ui/App": "merge",
+-  "src/ui/compareStore": "compare",
+-  "src/ui/CompareApp": "compare",
+-  "src/ui/rangeStore": "range",
+-  "src/ui/RangeApp": "range",
+-};
+-const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
+-const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
+-  compare: "PM7",
+-  range: "PM9",
+-};
+-const AI_FILES: Readonly<Record<string, true>> = {
+-  "src/ui/AiTurn": true,
+-  "src/ui/AiStep": true,
+-  "src/ui/EditDiff": true,
+-  "src/ui/AgentSettings": true,
+-  "src/ui/aiClose": true,
+-};
+ 
+ function scriptTexts(file: SourceFile): string[] {
+   if (!file.path.endsWith(".vue")) {
+@@ -148,40 +123,6 @@ function pathFinding(module: string | undefined, target: string): Finding | unde
+   return undefined;
+ }
+ 
+-function isWindowRoot(name: string): name is WindowRoot {
+-  return Object.hasOwn(WINDOW_RULES, name);
+-}
+-
+-function windowRoot(file: string): string {
+-  if (Object.hasOwn(AI_FILES, file.replace(TEST_SOURCE_EXTENSION, ""))) {
+-    return "range";
+-  }
+-  return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
+-}
+-
+-function rootFinding(file: string, target: string): Finding | undefined {
+-  const root = windowRoot(file);
+-  if (!isWindowRoot(root)) {
+-    return undefined;
+-  }
+-  const rule = WINDOW_RULES[root];
+-  const other = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
+-  if (other !== undefined && other !== root) {
+-    return { rule, reason: `the ${root} window never imports the ${other} window's root` };
+-  }
+-  if (isInside(target, "src/lsp")) {
+-    return { rule, reason: `the ${root} window never imports lsp/` };
+-  }
+-  return undefined;
+-}
+-
+-function aiFileFinding(file: string, target: string): Finding | undefined {
+-  const aiFile = Object.hasOwn(AI_FILES, target.replace(SOURCE_EXTENSION, ""));
+-  return aiFile && windowRoot(file) !== "range"
+-    ? { rule: "PM9", reason: "the AI's views and close question are the range window's only" }
+-    : undefined;
+-}
+-
+ function stronglyConnected(graph: ReadonlyMap<string, readonly Edge[]>): string[][] {
+   type Visit = { readonly index: number; low: number };
+   const visits = new Map<string, Visit>();
+@@ -268,9 +209,7 @@ export function findFenceViolations(files: readonly SourceFile[]): FenceViolatio
+       const finding =
+         target === undefined
+           ? packageFinding(module, specifier)
+-          : (pathFinding(module, target) ??
+-            rootFinding(file.path, target) ??
+-            aiFileFinding(file.path, target));
++          : (pathFinding(module, target) ?? windowFinding(file.path, target));
+       if (finding !== undefined) {
+         violations.push({ ...finding, file: file.path, specifier });
+       }
+diff --git a/frontend/scripts/windowFence.ts b/frontend/scripts/windowFence.ts
+new file mode 100644
+index 0000000..1560467
+--- /dev/null
++++ b/frontend/scripts/windowFence.ts
+@@ -0,0 +1,90 @@
++type Root = "merge" | "compare" | "range";
++
++type WindowRoot = Exclude<Root, "merge">;
++
++export type WindowFinding = { readonly rule: "PM7" | "PM9" | "PM10"; readonly reason: string };
++
++const LSP = "src/lsp";
++const SOURCE_EXTENSION = /\.(?:ts|vue)$/;
++const TEST_SOURCE_EXTENSION = /(?:\.test)?\.(?:ts|vue)$/;
++const ROOT_FILES: Readonly<Record<string, Root>> = {
++  "src/ui/store": "merge",
++  "src/ui/App": "merge",
++  "src/ui/compareStore": "compare",
++  "src/ui/CompareApp": "compare",
++  "src/ui/rangeStore": "range",
++  "src/ui/RangeApp": "range",
++};
++const WINDOW_FILE = /^src\/ui\/(?:use)?(compare|range)[^/]*\.(?:ts|vue)$/i;
++const WINDOW_RULES: Readonly<Record<WindowRoot, "PM7" | "PM9">> = {
++  compare: "PM7",
++  range: "PM9",
++};
++const SHARED_PAGE_FILE = /^src\/ui\/(?:MergeRequest|mergeRequest|CiStatus)[^/]*\.(?:ts|vue)$/;
++const AI_FILES: Readonly<Record<string, true>> = {
++  "src/ui/AiTurn": true,
++  "src/ui/AiStep": true,
++  "src/ui/EditDiff": true,
++  "src/ui/AgentSettings": true,
++  "src/ui/aiClose": true,
++};
++
++function isLsp(target: string): boolean {
++  return target === LSP || target.startsWith(`${LSP}/`);
++}
++
++function isWindowRoot(name: string): name is WindowRoot {
++  return Object.hasOwn(WINDOW_RULES, name);
++}
++
++function windowRoot(file: string): string {
++  if (Object.hasOwn(AI_FILES, file.replace(TEST_SOURCE_EXTENSION, ""))) {
++    return "range";
++  }
++  return WINDOW_FILE.exec(file)?.[1]?.toLowerCase() ?? "";
++}
++
++function rootFinding(file: string, target: string): WindowFinding | undefined {
++  const root = windowRoot(file);
++  if (!isWindowRoot(root)) {
++    return undefined;
++  }
++  const rule = WINDOW_RULES[root];
++  const other = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
++  if (other !== undefined && other !== root) {
++    return { rule, reason: `the ${root} window never imports the ${other} window's root` };
++  }
++  if (isLsp(target)) {
++    return { rule, reason: `the ${root} window never imports lsp/` };
++  }
++  return undefined;
++}
++
++function aiFileFinding(file: string, target: string): WindowFinding | undefined {
++  const aiFile = Object.hasOwn(AI_FILES, target.replace(SOURCE_EXTENSION, ""));
++  return aiFile && windowRoot(file) !== "range"
++    ? { rule: "PM9", reason: "the AI's views and close question are the range window's only" }
++    : undefined;
++}
++
++function sharedPageFinding(file: string, target: string): WindowFinding | undefined {
++  if (!SHARED_PAGE_FILE.test(file)) {
++    return undefined;
++  }
++  const root = ROOT_FILES[target.replace(SOURCE_EXTENSION, "")];
++  if (root !== undefined) {
++    return {
++      rule: "PM10",
++      reason: `the merge-request page serves two windows; it never imports the ${root} window's root`,
++    };
++  }
++  return isLsp(target)
++    ? { rule: "PM10", reason: "the merge-request page never imports lsp/" }
++    : undefined;
++}
++
++export function windowFinding(file: string, target: string): WindowFinding | undefined {
++  return (
++    rootFinding(file, target) ?? aiFileFinding(file, target) ?? sharedPageFinding(file, target)
++  );
++}
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 74f5e49..3c9429f 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -43,3 +43,5 @@ Paste on Linux (plan §2 #99): `linuxPaste.ts` `takeLinuxPastes`, installed once
+ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is the only later writer of `<html data-theme>` and of `documentElement.style.colorScheme` (from `themeKind`; `style.css`'s `color-scheme: dark` covers only the frames before mount). Settings → Theme shows `themeRows()` as five `role="group"` rows named by their editor, one `ChoiceButtons` pair each, `settings.theme` the one pressed button across them.
+ 
+ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
++
++Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it and return the keyboard to the element focused before. Its filter row is three `MergeRequestFilter.vue` checklists (`useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons`; the list scrolls inside. `MergeRequestRow.vue` shows one row and its open-changes sentence (`openReplyText`). `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it. Words come only from `mergeRequestsText.ts` and `mergeRequests/`.
+diff --git a/frontend/src/ui/CiStatusBox.vue b/frontend/src/ui/CiStatusBox.vue
+new file mode 100644
+index 0000000..671779c
+--- /dev/null
++++ b/frontend/src/ui/CiStatusBox.vue
+@@ -0,0 +1,169 @@
++<script setup lang="ts">
++import { useEventListener } from "@vueuse/core";
++import { computed, shallowRef, useTemplateRef, type Component } from "vue";
++import CircleCheck from "~icons/lucide/circle-check";
++import CircleDot from "~icons/lucide/circle-dot";
++import CircleMinus from "~icons/lucide/circle-minus";
++import CircleSlash from "~icons/lucide/circle-slash";
++import CircleX from "~icons/lucide/circle-x";
++import Clock from "~icons/lucide/clock";
++import Cog from "~icons/lucide/cog";
++
++import type { JobPage, MergeRequestRow } from "../ipc";
++import { ciBox, type CiStatusName } from "../mergeRequests";
++import type { Point } from "./menuPosition";
++import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
++
++type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
++type FailedJob = Pipeline["failedJobs"][number];
++type StatusLook = { readonly icon: Component; readonly tone: string };
++
++const props = defineProps<{ pipeline: Pipeline }>();
++const emit = defineEmits<{ openJob: [page: JobPage] }>();
++
++const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
++  passed: { icon: CircleCheck, tone: "text-success-signal" },
++  failed: { icon: CircleX, tone: "text-problem-error" },
++  running: { icon: CircleDot, tone: "text-primary" },
++  pending: { icon: Clock, tone: "text-problem-warning" },
++  canceled: { icon: CircleSlash, tone: "text-fg-muted" },
++  skipped: { icon: CircleMinus, tone: "text-fg-muted" },
++  manual: { icon: Cog, tone: "text-fg-muted" },
++};
++
++const NO_PAGE = "GitLab gave no address for this job's log";
++
++const area = useTemplateRef<HTMLSpanElement>("area");
++const icon = useTemplateRef<HTMLButtonElement>("icon");
++const box = useTemplateRef<HTMLDivElement>("box");
++const open = shallowRef(false);
++const at = shallowRef<Point>({ x: 0, y: 0 });
++const placement = useMenuPlacement(box, at);
++let pointerInside = false;
++let focusInside = false;
++useEventListener(window, "scroll", scrolled, { capture: true, passive: true });
++
++const look = computed(() => LOOKS[props.pipeline.status]);
++const view = computed(() =>
++  ciBox(props.pipeline.status, props.pipeline.failedJobs, props.pipeline.moreFailedJobs),
++);
++const statusText = computed(() => {
++  const words = ciBox(props.pipeline.status, [], false);
++  return words.kind === "status" ? words.text : props.pipeline.status;
++});
++
++function show(): void {
++  if (!open.value && icon.value !== null) {
++    at.value = belowLeft(icon.value);
++    open.value = true;
++  }
++}
++
++function hideUnlessHeld(): void {
++  if (!pointerInside && !focusInside) {
++    open.value = false;
++  }
++}
++
++function pointerEntered(): void {
++  pointerInside = true;
++  show();
++}
++
++function pointerLeft(): void {
++  pointerInside = false;
++  hideUnlessHeld();
++}
++
++function isInside(target: EventTarget | null): boolean {
++  return target instanceof Node && area.value?.contains(target) === true;
++}
++
++function focusEntered(event: FocusEvent): void {
++  if (!isInside(event.relatedTarget)) {
++    focusInside = true;
++    show();
++  }
++}
++
++function focusLeft(event: FocusEvent): void {
++  if (!isInside(event.relatedTarget)) {
++    focusInside = false;
++    hideUnlessHeld();
++  }
++}
++
++function keyPressed(event: KeyboardEvent): void {
++  if (event.key === "Escape" && open.value) {
++    event.preventDefault();
++    open.value = false;
++    icon.value?.focus();
++  }
++}
++
++function scrolled(event: Event): void {
++  if (open.value && !isInside(event.target)) {
++    open.value = false;
++  }
++}
++
++function openJob({ page }: FailedJob): void {
++  if (page !== null) {
++    emit("openJob", page);
++  }
++}
++</script>
++
++<template>
++  <span
++    ref="area"
++    class="flex"
++    @pointerenter="pointerEntered"
++    @pointerleave="pointerLeft"
++    @focusin="focusEntered"
++    @focusout="focusLeft"
++    @keydown="keyPressed"
++  >
++    <button
++      ref="icon"
++      type="button"
++      :aria-label="statusText"
++      :aria-expanded="open"
++      class="rounded p-1 hover:bg-hover"
++      :class="look.tone"
++    >
++      <component :is="look.icon" class="size-4" aria-hidden="true" />
++    </button>
++    <div
++      v-if="open"
++      ref="box"
++      role="group"
++      :aria-label="statusText"
++      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg"
++      :style="placement"
++    >
++      <p v-if="view.kind === 'status'" class="px-2 py-1">{{ view.text }}</p>
++      <template v-else>
++        <p class="px-2 pt-1 pb-0.5 text-fg-muted">Failed jobs</p>
++        <ul>
++          <li v-for="(job, index) in view.jobs" :key="index">
++            <button
++              type="button"
++              :title="job.page === null ? NO_PAGE : `Open the log of ${job.name} on GitLab`"
++              :disabled="job.page === null"
++              class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
++              @click="openJob(job)"
++            >
++              <span>{{ job.name }}</span>
++              <span class="text-fg-muted">{{ job.stage }}</span>
++              <span v-if="job.allowFailure" class="ml-auto pl-2 text-problem-warning">
++                allowed to fail
++              </span>
++            </button>
++          </li>
++        </ul>
++        <p v-if="view.more" class="px-2 pt-0.5 pb-1 text-fg-muted">More failed jobs on GitLab</p>
++      </template>
++    </div>
++  </span>
++</template>
+diff --git a/frontend/src/ui/CompareApp.vue b/frontend/src/ui/CompareApp.vue
+index 3c3faa1..6bec3a3 100644
+--- a/frontend/src/ui/CompareApp.vue
++++ b/frontend/src/ui/CompareApp.vue
+@@ -6,6 +6,7 @@ import { log, onWindowClose } from "../ipc";
+ import { useCompareStore } from "./compareStore";
+ import CompareTabList from "./CompareTabList.vue";
+ import CompareView from "./CompareView.vue";
++import MergeRequestsView from "./MergeRequestsView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import { unexpected } from "./problem";
+ import ProblemBar from "./ProblemBar.vue";
+@@ -89,6 +90,7 @@ async function watchWindowClose(): Promise<void> {
+           :shown="tab.id === shown && screen.kind === 'files'"
+         />
+         <SettingsView v-if="screen.kind === 'settings'" />
++        <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />
+       </div>
+     </div>
+     <QuestionDialog
+diff --git a/frontend/src/ui/CompareView.vue b/frontend/src/ui/CompareView.vue
+index 8b4fff7..4537255 100644
+--- a/frontend/src/ui/CompareView.vue
++++ b/frontend/src/ui/CompareView.vue
+@@ -7,6 +7,7 @@ import type { TabEntry, TabLanguage } from "../ipc";
+ import CompareLanguagePicker from "./CompareLanguagePicker.vue";
+ import { useCompareStore } from "./compareStore";
+ import { ACTION_NAMES } from "./keyText";
++import MergeRequestsButton from "./MergeRequestsButton.vue";
+ import PaneFrame from "./PaneFrame.vue";
+ import { compareColumns } from "./paneSplit";
+ import SettingsButton from "./SettingsButton.vue";
+@@ -86,7 +87,10 @@ function pickLanguage(language: TabLanguage): void {
+         >
+           <ArrowDown class="size-4" aria-hidden="true" />
+         </button>
+-        <SettingsButton class="ml-auto" />
++        <div class="ml-auto flex items-center gap-1">
++          <MergeRequestsButton />
++          <SettingsButton />
++        </div>
+       </header>
+     </template>
+     <template #default="{ stripLayer }">
+diff --git a/frontend/src/ui/MergeRequestFilter.vue b/frontend/src/ui/MergeRequestFilter.vue
+new file mode 100644
+index 0000000..a7250eb
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestFilter.vue
+@@ -0,0 +1,124 @@
++<script setup lang="ts">
++import { computed, shallowRef, useTemplateRef } from "vue";
++import Check from "~icons/lucide/check";
++import ChevronDown from "~icons/lucide/chevron-down";
++import X from "~icons/lucide/x";
++
++import {
++  NARROW_FROM,
++  narrowed,
++  type Choice,
++  type LabelValue,
++  type ListFilter,
++  type PersonValue,
++} from "../mergeRequests";
++import { useDropdownMenu } from "./useDropdownMenu";
++
++type Value = PersonValue | LabelValue;
++
++const props = defineProps<{
++  filter: ListFilter;
++  name: string;
++  label: string;
++  set: boolean;
++  choices: readonly Choice<Value>[];
++}>();
++const emit = defineEmits<{ toggle: [value: Value]; clear: [] }>();
++
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const menu = useTemplateRef<HTMLDivElement>("menu");
++const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
++const typed = shallowRef("");
++const { openFor, above, toggle, menuKey } = useDropdownMenu<ListFilter>({
++  menu: () => menu.value,
++  opener: () => opener.value,
++});
++
++const narrows = computed(() => props.choices.length > NARROW_FROM);
++const shown = computed(() =>
++  narrows.value ? narrowed(props.choices, typed.value) : props.choices,
++);
++
++function keyOf(value: Value): string {
++  switch (value.kind) {
++    case "me":
++    case "none":
++      return value.kind;
++    case "person":
++      return `user:${value.username}`;
++    case "label":
++      return `label:${value.title}`;
++    default: {
++      const _exhaustive: never = value;
++      return _exhaustive;
++    }
++  }
++}
++
++async function openerClicked(): Promise<void> {
++  typed.value = "";
++  await toggle(props.filter);
++  narrowBox.value?.focus();
++}
++</script>
++
++<template>
++  <div class="relative flex items-center">
++    <button
++      ref="opener"
++      type="button"
++      aria-haspopup="menu"
++      :aria-expanded="openFor !== null"
++      class="flex items-center gap-1 border border-control-border py-1 pr-2 pl-3 hover:bg-hover aria-expanded:bg-row-selected"
++      :class="set ? 'rounded-l border-primary' : 'rounded'"
++      @click="openerClicked"
++    >
++      {{ label }}
++      <ChevronDown class="size-3.5" aria-hidden="true" />
++    </button>
++    <button
++      v-if="set"
++      type="button"
++      :title="`Clear the ${name} filter`"
++      :aria-label="`Clear the ${name} filter`"
++      class="self-stretch rounded-r border border-l-0 border-primary px-1.5 hover:bg-hover"
++      @click="emit('clear')"
++    >
++      <X class="size-3.5" aria-hidden="true" />
++    </button>
++    <div
++      v-if="openFor !== null"
++      ref="menu"
++      class="absolute left-0 z-10 flex max-h-[60vh] min-w-56 flex-col rounded border border-control-border bg-panel-inline p-1 shadow-lg"
++      :class="above ? 'bottom-full' : 'top-full'"
++      @keydown="menuKey"
++    >
++      <input
++        v-if="narrows"
++        ref="narrowBox"
++        v-model="typed"
++        type="search"
++        :aria-label="`Narrow the ${name} list`"
++        :placeholder="`Find ${name.toLowerCase()}…`"
++        spellcheck="false"
++        class="mb-1 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
++      />
++      <ul role="menu" :aria-label="name" class="min-h-0 overflow-y-auto">
++        <li v-for="choice in shown" :key="keyOf(choice.value)" role="none">
++          <button
++            type="button"
++            role="menuitemcheckbox"
++            :aria-checked="choice.checked"
++            class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
++            @click="emit('toggle', choice.value)"
++          >
++            <Check v-if="choice.checked" class="size-4 shrink-0" aria-hidden="true" />
++            <span v-else class="size-4 shrink-0" aria-hidden="true" />
++            <span class="truncate">{{ choice.label }}</span>
++            <span class="ml-auto pl-3 text-fg-muted">{{ choice.count }}</span>
++          </button>
++        </li>
++      </ul>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+new file mode 100644
+index 0000000..f976a7a
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -0,0 +1,93 @@
++<script setup lang="ts">
++import { computed } from "vue";
++import FileDiff from "~icons/lucide/file-diff";
++import LoaderCircle from "~icons/lucide/loader-circle";
++import MessageSquare from "~icons/lucide/message-square";
++import ThumbsUp from "~icons/lucide/thumbs-up";
++
++import type { JobPage, MergeRequestIid, MergeRequestRow } from "../ipc";
++import { createdAgo } from "../mergeRequests";
++import CiStatusBox from "./CiStatusBox.vue";
++import type { Opening } from "./mergeRequests";
++import { openReplyText } from "./mergeRequestsText";
++
++const props = defineProps<{ row: MergeRequestRow; now: number; opening: Opening | null }>();
++const emit = defineEmits<{ open: [iid: MergeRequestIid]; openJob: [page: JobPage] }>();
++
++const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
++
++const mr = computed(() => `!${props.row.iid}`);
++const created = computed(() => createdAgo(props.row.createdAt, props.now));
++const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
++const discussionsText = computed(() => countText(props.row.openDiscussions, "open discussion"));
++const approvalsText = computed(() => countText(props.row.approvals, "approval"));
++const fetching = computed(() => props.opening?.kind === "fetching");
++const sentence = computed(() => {
++  const opening = props.opening;
++  if (opening === null || opening.kind === "fetching") {
++    return null;
++  }
++  const reply = opening.kind === "opened" ? ({ kind: "opened" } as const) : opening.reply;
++  return { text: openReplyText(reply, props.row.iid), refused: opening.kind === "refused" };
++});
++
++function countText(count: number, word: string): string {
++  return `${count} ${count === 1 ? word : `${word}s`}`;
++}
++</script>
++
++<template>
++  <li class="flex flex-col gap-0.5 border-b border-separator px-3 py-2">
++    <div class="flex items-center gap-3">
++      <div class="flex min-w-0 flex-1 items-baseline gap-2">
++        <span class="truncate" :title="row.title">{{ row.title }}</span>
++        <span class="shrink-0 text-fg-muted">{{ mr }}</span>
++        <span class="shrink-0 text-fg-muted" :title="createdTitle">{{ created }}</span>
++      </div>
++      <span
++        class="flex w-12 shrink-0 items-center gap-1"
++        :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
++        :title="discussionsText"
++        :aria-label="discussionsText"
++      >
++        <MessageSquare class="size-4" aria-hidden="true" />
++        <span aria-hidden="true">{{ row.openDiscussions }}</span>
++      </span>
++      <span
++        class="flex w-12 shrink-0 items-center gap-1"
++        :class="{ 'text-fg-muted': row.approvals === 0 }"
++        :title="approvalsText"
++        :aria-label="approvalsText"
++      >
++        <ThumbsUp class="size-4" aria-hidden="true" />
++        <span aria-hidden="true">{{ row.approvals }}</span>
++      </span>
++      <span class="flex w-7 shrink-0 justify-center">
++        <CiStatusBox
++          v-if="row.pipeline !== null"
++          :pipeline="row.pipeline"
++          @open-job="emit('openJob', $event)"
++        />
++      </span>
++      <button
++        type="button"
++        :title="`Open the changes of ${mr}`"
++        :aria-label="`Open the changes of ${mr}`"
++        :aria-busy="fetching"
++        :disabled="fetching"
++        class="shrink-0 rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++        @click="emit('open', row.iid)"
++      >
++        <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
++        <FileDiff v-else class="size-4" aria-hidden="true" />
++      </button>
++    </div>
++    <p
++      v-if="sentence !== null"
++      role="status"
++      :class="sentence.refused ? 'text-problem-error' : 'text-fg-muted'"
++    >
++      {{ sentence.text }}
++    </p>
++  </li>
++</template>
+diff --git a/frontend/src/ui/MergeRequestsButton.vue b/frontend/src/ui/MergeRequestsButton.vue
+new file mode 100644
+index 0000000..4094209
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestsButton.vue
+@@ -0,0 +1,20 @@
++<script setup lang="ts">
++import GitPullRequest from "~icons/lucide/git-pull-request";
++
++import { useMergeRequests } from "./mergeRequestsStore";
++
++const { project, show } = useMergeRequests();
++</script>
++
++<template>
++  <button
++    v-if="project.kind === 'found'"
++    type="button"
++    title="Merge requests"
++    aria-label="Merge requests"
++    class="rounded p-1.5 hover:bg-hover"
++    @click="show"
++  >
++    <GitPullRequest class="size-4" aria-hidden="true" />
++  </button>
++</template>
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+new file mode 100644
+index 0000000..d90f089
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -0,0 +1,187 @@
++<script setup lang="ts">
++import { useEventListener, useIntervalFn, useNow } from "@vueuse/core";
++import { computed, nextTick, onMounted, useTemplateRef } from "vue";
++import ArrowLeft from "~icons/lucide/arrow-left";
++import RefreshCw from "~icons/lucide/refresh-cw";
++import X from "~icons/lucide/x";
++
++import { filterLabel, isFiltered, type DraftFilter, type ListFilter } from "../mergeRequests";
++import ChoiceButtons from "./ChoiceButtons.vue";
++import MergeRequestFilter from "./MergeRequestFilter.vue";
++import MergeRequestRow from "./MergeRequestRow.vue";
++import { useMergeRequests } from "./mergeRequestsStore";
++import { listEndText, LOADING_TEXT, NONE_TEXT } from "./mergeRequestsText";
++import { BACK } from "./serverText";
++
++const props = defineProps<{ asking: boolean }>();
++
++const MINUTE_MS = 60_000;
++const LIST_FILTERS: readonly { readonly filter: ListFilter; readonly name: string }[] = [
++  { filter: "assignee", name: "Assignee" },
++  { filter: "reviewer", name: "Reviewer" },
++  { filter: "label", name: "Label" },
++];
++const DRAFTS: readonly { readonly value: DraftFilter; readonly label: string }[] = [
++  { value: "all", label: "All" },
++  { value: "drafts", label: "Drafts" },
++  { value: "ready", label: "Ready" },
++];
++
++const requests = useMergeRequests();
++const { rows, listing, filters, shownRows, choices, summary, openings, jobProblem } = requests;
++const back = useTemplateRef<HTMLButtonElement>("back");
++const focusedBefore = document.activeElement;
++const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
++useEventListener(window, "keydown", escapePressed);
++
++const loading = computed(() => listing.value.kind === "loading");
++const firstLoad = computed(
++  () => listing.value.kind === "loading" && listing.value.first && rows.value.length === 0,
++);
++const failure = computed(() => {
++  const load = listing.value;
++  if (load.kind !== "done" || load.end.kind === "loaded" || load.end.kind === "cut") {
++    return null;
++  }
++  return listEndText(load.end);
++});
++const empty = computed(
++  () => listing.value.kind === "done" && failure.value === null && rows.value.length === 0,
++);
++const filtered = computed(() => isFiltered(filters.value));
++const nowMs = computed(() => now.value.getTime());
++
++onMounted(() => {
++  back.value?.focus();
++});
++
++async function goBack(): Promise<void> {
++  requests.close();
++  await nextTick();
++  if (
++    focusedBefore instanceof HTMLElement &&
++    focusedBefore.isConnected &&
++    getComputedStyle(focusedBefore).visibility === "visible"
++  ) {
++    focusedBefore.focus();
++  }
++}
++
++function escapePressed(event: KeyboardEvent): void {
++  if (event.key === "Escape" && !event.defaultPrevented && !props.asking) {
++    event.preventDefault();
++    void goBack();
++  }
++}
++</script>
++
++<template>
++  <section
++    aria-label="Merge requests"
++    class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col island bg-panel"
++  >
++    <header class="flex shrink-0 items-center gap-3 border-b border-separator px-3 py-2">
++      <button
++        ref="back"
++        type="button"
++        class="flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover"
++        @click="goBack"
++      >
++        <ArrowLeft class="size-4" aria-hidden="true" />
++        {{ BACK }}
++      </button>
++      <h2 class="font-semibold">Merge requests</h2>
++      <button
++        type="button"
++        :disabled="loading"
++        class="ml-auto flex items-center gap-1.5 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++        @click="requests.refresh"
++      >
++        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" aria-hidden="true" />
++        Refresh
++      </button>
++    </header>
++    <div
++      role="group"
++      aria-label="Filters"
++      class="flex shrink-0 flex-wrap items-center gap-2 border-b border-separator px-3 py-2"
++    >
++      <MergeRequestFilter
++        v-for="{ filter, name } in LIST_FILTERS"
++        :key="filter"
++        :filter="filter"
++        :name="name"
++        :label="filterLabel(filter, filters)"
++        :set="filters[filter].length > 0"
++        :choices="choices[filter]"
++        @toggle="requests.toggle(filter, $event)"
++        @clear="requests.clear(filter)"
++      />
++      <ChoiceButtons
++        role="group"
++        aria-label="Draft"
++        :options="DRAFTS"
++        :pressed="filters.draft"
++        @pick="requests.setDraft"
++      />
++      <button
++        v-if="filtered"
++        type="button"
++        class="rounded px-2 py-1 text-primary hover:bg-hover"
++        @click="requests.clearAll"
++      >
++        Clear filters
++      </button>
++    </div>
++    <p
++      v-if="jobProblem !== null"
++      role="alert"
++      class="flex shrink-0 items-center gap-2 border-b border-separator px-3 py-1.5 text-problem-error"
++    >
++      {{ jobProblem }}
++      <button
++        type="button"
++        aria-label="Dismiss"
++        class="ml-auto rounded p-1 text-fg hover:bg-hover"
++        @click="requests.dismissJobProblem"
++      >
++        <X class="size-4" aria-hidden="true" />
++      </button>
++    </p>
++    <p
++      v-if="failure !== null"
++      role="alert"
++      class="flex shrink-0 items-center gap-3 border-b border-separator px-3 py-2"
++    >
++      {{ failure }}
++      <button
++        type="button"
++        :disabled="loading"
++        class="shrink-0 rounded border border-control-border px-3.5 py-1 hover:bg-hover disabled:text-fg-muted"
++        @click="requests.refresh"
++      >
++        Retry
++      </button>
++    </p>
++    <p v-if="firstLoad" class="px-3 py-2 text-fg-muted">{{ LOADING_TEXT }}</p>
++    <p v-else-if="empty" class="px-3 py-2 text-fg-muted">{{ NONE_TEXT }}</p>
++    <template v-else-if="rows.length > 0">
++      <p class="shrink-0 px-3 pt-2 pb-1 text-fg-muted" aria-live="polite">{{ summary }}</p>
++      <ul
++        aria-label="Open merge requests"
++        :aria-busy="loading"
++        class="min-h-0 flex-1 overflow-y-auto rounded-b-island opaque-scroller"
++      >
++        <MergeRequestRow
++          v-for="row in shownRows"
++          :key="row.iid"
++          :row="row"
++          :now="nowMs"
++          :opening="openings.get(row.iid) ?? null"
++          @open="requests.openChanges"
++          @open-job="requests.openJob"
++        />
++      </ul>
++    </template>
++  </section>
++</template>
+diff --git a/frontend/src/ui/RangeApp.vue b/frontend/src/ui/RangeApp.vue
+index 667f27c..2b2758d 100644
+--- a/frontend/src/ui/RangeApp.vue
++++ b/frontend/src/ui/RangeApp.vue
+@@ -5,6 +5,8 @@ import { computed, onMounted, watch } from "vue";
+ import { log, onWindowClose, type RangeLineCounts } from "../ipc";
+ import AgentSettings from "./AgentSettings.vue";
+ import FileList from "./FileList.vue";
++import MergeRequestsButton from "./MergeRequestsButton.vue";
++import MergeRequestsView from "./MergeRequestsView.vue";
+ import NoticeBar from "./NoticeBar.vue";
+ import type { NoticeRow } from "./noticeText";
+ import { unexpected } from "./problem";
+@@ -131,17 +133,22 @@ function folderLines(path: string): RangeLineCounts {
+           />
+         </template>
+         <div
+-          v-if="emptyText !== null && screen.kind === 'files'"
++          v-if="emptyText !== null"
++          v-show="screen.kind === 'files'"
+           class="col-start-1 row-start-1 flex min-h-0 min-w-0 flex-col gap-island"
+         >
+-          <header class="flex h-10 shrink-0 items-center px-2">
+-            <SettingsButton class="ml-auto" />
++          <header class="flex h-10 shrink-0 items-center gap-1 px-2">
++            <div class="ml-auto flex items-center gap-1">
++              <MergeRequestsButton />
++              <SettingsButton />
++            </div>
+           </header>
+           <p class="island bg-panel px-4 py-3">{{ emptyText }}</p>
+         </div>
+         <SettingsView v-if="screen.kind === 'settings'">
+           <AgentSettings v-if="ai !== null" />
+         </SettingsView>
++        <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />
+       </div>
+     </div>
+     <QuestionDialog
+diff --git a/frontend/src/ui/RangeView.vue b/frontend/src/ui/RangeView.vue
+index 84b4d7c..2cf7c16 100644
+--- a/frontend/src/ui/RangeView.vue
++++ b/frontend/src/ui/RangeView.vue
+@@ -8,6 +8,7 @@ import type { RangeEntry, RangeSide } from "../ipc";
+ import { COLLAPSE_LABEL } from "./collapsing";
+ import { fileIcon } from "./fileIcon";
+ import { ACTION_NAMES } from "./keyText";
++import MergeRequestsButton from "./MergeRequestsButton.vue";
+ import PaneFrame from "./PaneFrame.vue";
+ import { compareColumns } from "./paneSplit";
+ import RangeSendButton from "./RangeSendButton.vue";
+@@ -105,6 +106,7 @@ watch(
+           <ChevronsDownUp class="size-4" aria-hidden="true" />
+         </button>
+         <RangeSendButton class="ml-auto" />
++        <MergeRequestsButton />
+         <SettingsButton />
+       </header>
+     </template>
+diff --git a/scripts/map-check.sh b/scripts/map-check.sh
+index 216d779..53a10b3 100755
+--- a/scripts/map-check.sh
++++ b/scripts/map-check.sh
+@@ -27,8 +27,9 @@ while IFS= read -r command; do
+     done
+ done < <(awk '/#\[tauri::command/ { pending = 1 } pending && match($0, /fn [a-z_]+/) { print substr($0, RSTART + 3, RLENGTH - 3); pending = 0 }' src-tauri/src/*.rs)
+ 
+-# Every window data-source method must be named in architecture (the merge, compare and range windows').
+-for source in ChunkSource CompareSource RangeSource ReviewSource; do
++# Every window data-source method must be named in architecture (the merge, compare and range windows', and the
++# merge-request page's, which the compare and range sources extend).
++for source in ChunkSource CompareSource RangeSource ReviewSource MergeRequestSource; do
+     while IFS= read -r method; do
+         grep -qw -- "$method" "$ARCH" || missing+=("$source.$method (not in $ARCH)")
+     done < <(sed -n 's/^  \([a-zA-Z]*\)(.*/\1/p' "frontend/src/ipc/$source.ts")

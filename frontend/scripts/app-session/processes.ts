@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { closeSync, openSync, readFileSync } from "node:fs";
+import { closeSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -12,6 +12,8 @@ const POLL_MS = 100;
 const STOP_GRACE_MS = 3000;
 const OWNER_DEV_PORT = 5173;
 const RUN_TIMEOUT_MS = 30_000;
+const PROCESS_ID = /^[0-9]+$/;
+const APP_COMMAND = "yamt";
 
 export type Launch = {
   readonly role: string;
@@ -103,7 +105,9 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
   }
 }
 
-export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone" | "not ours"> {
+export type StopResult = "stopped" | "killed" | "gone" | "not ours";
+
+export async function stopProc(proc: Proc): Promise<StopResult> {
   const ticks = startTicksOf(proc.pid);
   if (ticks !== null && ticks !== proc.startTicks) {
     return "not ours";
@@ -118,6 +122,32 @@ export async function stopProc(proc: Proc): Promise<"stopped" | "killed" | "gone
     signalGroup(proc.pid, "SIGKILL");
     return "killed";
   }
+}
+
+function readOrNull(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+export function holdsEntry(environ: string, entry: string): boolean {
+  return environ.split("\0").includes(entry);
+}
+
+export function runningAppsWith(entry: string): Proc[] {
+  return readdirSync("/proc")
+    .filter((name) => PROCESS_ID.test(name))
+    .flatMap((name) => {
+      const pid = Number(name);
+      const environ = readOrNull(`/proc/${name}/environ`);
+      const startTicks = startTicksOf(pid);
+      const isApp = readOrNull(`/proc/${name}/comm`)?.trim() === APP_COMMAND;
+      return isApp && environ !== null && startTicks !== null && holdsEntry(environ, entry)
+        ? [{ role: "yamt child", pid, startTicks }]
+        : [];
+    });
 }
 
 const execFileText = promisify(execFile);

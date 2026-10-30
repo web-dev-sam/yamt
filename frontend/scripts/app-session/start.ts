@@ -6,13 +6,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 
 import type { Command } from "./args";
+import { fakeGlab, glabEnv, type FakeGlab } from "./fakeGlab";
 import { logsFolder, ownerConfigClash, TEMP_PREFIX } from "./folders";
 import { freePort, launchTracked, waitUntil } from "./processes";
 import { displayEnv, fromRoot } from "./session";
@@ -30,11 +30,11 @@ import { finishRecording, recordingLaunch, waitForRecording } from "./video";
 import { inSession, isReady, newSession } from "./webdriver";
 
 type StartApp = Extract<Command, { kind: "start-app" }>;
-type FakeGlab = { readonly scenario: string; readonly posts: string; readonly log: string };
 type Prepared = {
   readonly home: string;
   readonly configDir: string;
   readonly repoDir: string | null;
+  readonly driverDir: string;
   readonly binary: string;
   readonly args: readonly string[];
   readonly glab: FakeGlab | null;
@@ -80,32 +80,21 @@ function prepareApp(command: StartApp, folder: string): Prepared {
     writeFileSync(join(configDir, "yamt", "settings.json"), command.settings);
   }
   const repoDir = repoFolder(command.opens, folder);
+  const driverDir = startFolder(command.opens, folder);
   const glab = fakeGlab(scenarioFolder, folder);
   const args = appArgs(command.opens, repoDir, command.ai);
-  return { home, configDir, repoDir, binary, args, glab };
+  return { home, configDir, repoDir, driverDir, binary, args, glab };
 }
 
-function fakeGlab(scenarioFolder: string | null, folder: string): FakeGlab | null {
-  if (scenarioFolder === null) {
-    return null;
+function startFolder(opens: StartApp["opens"], folder: string): string {
+  if (opens.kind !== "diff" || opens.startDir === null) {
+    return folder;
   }
-  const dir = join(folder, "glab");
-  mkdirSync(dir);
-  const link = join(dir, "scenario");
-  symlinkSync(scenarioFolder, link);
-  return { scenario: link, posts: join(dir, "posts"), log: join(dir, "calls.log") };
-}
-
-function glabEnv(glab: FakeGlab | null): NodeJS.ProcessEnv {
-  if (glab === null) {
-    return {};
+  const dir = fromRoot(opens.startDir);
+  if (!existsSync(dir)) {
+    throw new Error(`--dir ${opens.startDir}: no folder ${dir}`);
   }
-  return {
-    PATH: [fromRoot("scripts/fake-glab"), process.env["PATH"] ?? ""].join(delimiter),
-    YAMT_FAKE_GLAB: glab.scenario,
-    YAMT_FAKE_GLAB_STATE: glab.posts,
-    YAMT_FAKE_GLAB_LOG: glab.log,
-  };
+  return dir;
 }
 
 function repoFolder(opens: StartApp["opens"], folder: string): string | null {
@@ -199,7 +188,7 @@ async function startDriver(
       command: "tauri-driver",
       args: ["--port", String(driverPort), "--native-port", String(nativePort)],
       env: appEnv(state.display, prepared),
-      cwd: state.folder,
+      cwd: prepared.driverDir,
       logDir,
       fd3File: null,
     },

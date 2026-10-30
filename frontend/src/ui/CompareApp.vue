@@ -6,6 +6,7 @@ import { log, onWindowClose } from "../ipc";
 import { useCompareStore } from "./compareStore";
 import CompareTabList from "./CompareTabList.vue";
 import CompareView from "./CompareView.vue";
+import MergeRequestsView from "./MergeRequestsView.vue";
 import NoticeBar from "./NoticeBar.vue";
 import { unexpected } from "./problem";
 import ProblemBar from "./ProblemBar.vue";
@@ -89,6 +90,7 @@ async function watchWindowClose(): Promise<void> {
           :shown="tab.id === shown && screen.kind === 'files'"
         />
         <SettingsView v-if="screen.kind === 'settings'" />
+        <MergeRequestsView v-if="screen.kind === 'mergeRequests'" :asking="question !== null" />
       </div>
     </div>
     <QuestionDialog
