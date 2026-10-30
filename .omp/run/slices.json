@@ -14,7 +14,8 @@
       "frontend/scripts/fences.ts",
       "frontend/scripts/fences.test.ts",
       "frontend/scripts/app-session/**",
-      "scripts/map-check.sh"
+      "scripts/map-check.sh",
+      "frontend/scripts/windowFence.ts"
     ]
   },
   "MrOpenCommandsR1": {
