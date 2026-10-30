@@ -16,6 +16,7 @@ const GITLINK: u32 = 0o160_000;
 const FIRST_COMMIT: &str = "1111111111111111111111111111111111111111";
 const SECOND_COMMIT: &str = "2222222222222222222222222222222222222222";
 const USERS_DIFF_CONFIG_TEST: &str = "listing_under_the_users_diff_config";
+const STORED_BLOB_FILE: &str = ".git/stored-blob";
 
 fn oid_of(root: &Path, revision: &str) -> Oid {
     let output = git_ok(root, &["rev-parse", revision]).unwrap();
@@ -63,6 +64,12 @@ fn listed(root: &Path) -> Vec<ChangedFile> {
 
 fn commit(root: &Path, message: &str) {
     git_ok(root, &["commit", "--quiet", "-m", message]).unwrap();
+}
+
+fn stored_blob(root: &Path, content: &[u8]) -> Oid {
+    fs::write(root.join(STORED_BLOB_FILE), content).unwrap();
+    let output = git_ok(root, &["hash-object", "-w", STORED_BLOB_FILE]).unwrap();
+    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
 }
 
 fn stage_blob(root: &Path, mode: &str, oid: &Oid, path: &str) {
@@ -323,8 +330,8 @@ fn paths_with_spaces_newlines_and_non_utf8_bytes_round_trip() {
     let text: &[u8] = b"same\ntext\n";
     let dir = diverged_repo(&[regular("old name.txt", Some(text), Some(text))]).unwrap();
     let root = dir.path();
-    let oid = blob(root, text);
-    let added = blob(root, b"new\n");
+    let oid = stored_blob(root, text);
+    let added = stored_blob(root, b"new\n");
     let renamed = if PATHS_MAY_HOLD_CONTROL_CHARACTERS {
         "renamed\tname.txt"
     } else {
