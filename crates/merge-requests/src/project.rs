@@ -11,6 +11,9 @@ const PROJECT_ROUTE: &str = "projects/:fullpath";
 /// The GitLab project of the repository's remotes.
 pub(crate) struct Project {
     pub full_path: String,
+    /// Its `web_url` after the origin: `/<full_path>` behind any sub-path GitLab is installed under; empty when
+    /// GitLab is not on https.
+    pub web_path: String,
     /// `https://<host[:port]>` of its web page; `None` when GitLab is not on https.
     pub web_origin: Option<String>,
 }
@@ -31,8 +34,16 @@ fn project_from(json: &[u8]) -> Result<Project, String> {
         .map_err(|error| format!("GitLab's project answer is not what yamt expects: {error}"))?;
     Ok(Project {
         full_path: answer.path_with_namespace,
+        web_path: web_path(&answer.web_url),
         web_origin: web_origin(&answer.web_url),
     })
+}
+
+fn web_path(web_url: &str) -> String {
+    web_url
+        .strip_prefix(HTTPS)
+        .and_then(|address| address.split_once('/'))
+        .map_or_else(String::new, |(_, path)| format!("/{path}"))
 }
 
 fn web_origin(web_url: &str) -> Option<String> {
@@ -45,12 +56,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_full_path_and_the_https_origin_come_from_the_project() {
+    fn the_full_path_the_web_path_and_the_https_origin_come_from_the_project() {
         let json = br#"{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example:8443/taskboard/taskboard"}"#;
 
         let project = project_from(json).unwrap();
 
         assert_eq!(project.full_path, "taskboard/taskboard");
+        assert_eq!(project.web_path, "/taskboard/taskboard");
         assert_eq!(
             project.web_origin.as_deref(),
             Some("https://gitlab.example:8443")
@@ -58,11 +70,21 @@ mod tests {
     }
 
     #[test]
-    fn a_gitlab_on_http_has_no_origin_and_a_strange_answer_is_an_error() {
-        assert_eq!(
-            web_origin("http://gitlab.example/taskboard/taskboard"),
-            None
-        );
+    fn a_gitlab_under_a_sub_path_keeps_it_in_the_web_path_not_in_the_full_path() {
+        let json = br#"{"path_with_namespace":"grp/proj","web_url":"https://host.example/gitlab/grp/proj"}"#;
+
+        let project = project_from(json).unwrap();
+
+        assert_eq!(project.full_path, "grp/proj");
+        assert_eq!(project.web_path, "/gitlab/grp/proj");
+        assert_eq!(project.web_origin.as_deref(), Some("https://host.example"));
+    }
+
+    #[test]
+    fn a_gitlab_on_http_has_no_origin_nor_web_path_and_a_strange_answer_is_an_error() {
+        let http = "http://gitlab.example/taskboard/taskboard";
+        assert_eq!(web_origin(http), None);
+        assert_eq!(web_path(http), "");
         let refused = project_from(br#"{"message":"404 Project Not Found"}"#);
         assert!(refused.is_err());
     }

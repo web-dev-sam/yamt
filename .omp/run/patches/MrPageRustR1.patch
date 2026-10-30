@@ -1,0 +1,271 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index 5c73a9c..7b45ba2 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, request `docs/slices/request-merge-requests.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`glab api projects/:fullpath` → `Project { full_path, web_origin }`, the origin only on https), `query.rs` (the one list query and the details query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; `details_args`: `… -f fullPath=<path> -f iid=<n>`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's page through `WebPage::merge_request` from the project's origin and full path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `Glab::auth_status` → `NotLoggedIn`/`Failed`, the project, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, logged in, the project, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target with `:` refused); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `/<full_path>/-/jobs/<digits>`; `WebPage::merge_request`: `<full_path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + `/<full_path>`, segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules; the opener per system, `cfg`-gated; the Unix process group), `project.rs`, `query.rs`, `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs` and `tests/open.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, request `docs/slices/request-merge-requests.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https), `query.rs` (the one list query and the details query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; `details_args`: `… -f fullPath=<path> -f iid=<n>`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `Glab::auth_status` → `NotLoggedIn`/`Failed`, the project, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, logged in, the project, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target with `:` refused); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs`, `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs` and `tests/open.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index 08ca72b..dfeaf8b 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -160,7 +160,7 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
+         .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
+     let iid = MergeRequestIid(iid);
+     let origin = project.web_origin.as_deref();
+-    let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.full_path, iid));
++    let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.web_path, iid));
+     let labels = listed(node.labels).into_iter().map(|label| label.title);
+     Ok(MergeRequestRow {
+         iid,
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+index f04f034..95a3417 100644
+--- a/crates/merge-requests/src/page/tests.rs
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -4,6 +4,7 @@ use super::*;
+ 
+ const ORIGIN: &str = "https://gitlab.example";
+ const FULL_PATH: &str = "taskboard/taskboard";
++const WEB_PATH: &str = "/taskboard/taskboard";
+ const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
+ const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
+ 
+@@ -17,6 +18,7 @@ fn person(username: &str, name: &str) -> Person {
+ fn taskboard(web_origin: Option<&str>) -> Project {
+     Project {
+         full_path: FULL_PATH.to_owned(),
++        web_path: WEB_PATH.to_owned(),
+         web_origin: web_origin.map(str::to_owned),
+     }
+ }
+@@ -112,6 +114,22 @@ fn without_an_https_origin_no_row_and_no_job_has_a_page() {
+     assert!(page.rows.iter().all(|row| row.page.is_none()));
+ }
+ 
++#[test]
++fn on_a_gitlab_under_a_sub_path_a_row_s_page_keeps_the_sub_path() {
++    let project = Project {
++        web_path: format!("/gitlab{WEB_PATH}"),
++        ..taskboard(Some(ORIGIN))
++    };
++
++    let page = parsed(PAGE_1, &project).unwrap();
++
++    let expected = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/13";
++    assert_eq!(
++        page.rows[0].page.as_ref().map(WebPage::as_str),
++        Some(expected)
++    );
++}
++
+ #[test]
+ fn null_fields_are_empty_or_zero_and_more_failed_jobs_than_asked_are_flagged() {
+     let node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+index dfeac33..b6a3b7a 100644
+--- a/crates/merge-requests/src/project.rs
++++ b/crates/merge-requests/src/project.rs
+@@ -11,6 +11,9 @@ const PROJECT_ROUTE: &str = "projects/:fullpath";
+ /// The GitLab project of the repository's remotes.
+ pub(crate) struct Project {
+     pub full_path: String,
++    /// Its `web_url` after the origin: `/<full_path>` behind any sub-path GitLab is installed under; empty when
++    /// GitLab is not on https.
++    pub web_path: String,
+     /// `https://<host[:port]>` of its web page; `None` when GitLab is not on https.
+     pub web_origin: Option<String>,
+ }
+@@ -31,10 +34,18 @@ fn project_from(json: &[u8]) -> Result<Project, String> {
+         .map_err(|error| format!("GitLab's project answer is not what yamt expects: {error}"))?;
+     Ok(Project {
+         full_path: answer.path_with_namespace,
++        web_path: web_path(&answer.web_url),
+         web_origin: web_origin(&answer.web_url),
+     })
+ }
+ 
++fn web_path(web_url: &str) -> String {
++    web_url
++        .strip_prefix(HTTPS)
++        .and_then(|address| address.split_once('/'))
++        .map_or_else(String::new, |(_, path)| format!("/{path}"))
++}
++
+ fn web_origin(web_url: &str) -> Option<String> {
+     let authority = web_url.strip_prefix(HTTPS)?.split('/').next()?;
+     Some(format!("{HTTPS}{authority}"))
+@@ -45,12 +56,13 @@ mod tests {
+     use super::*;
+ 
+     #[test]
+-    fn the_full_path_and_the_https_origin_come_from_the_project() {
++    fn the_full_path_the_web_path_and_the_https_origin_come_from_the_project() {
+         let json = br#"{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example:8443/taskboard/taskboard"}"#;
+ 
+         let project = project_from(json).unwrap();
+ 
+         assert_eq!(project.full_path, "taskboard/taskboard");
++        assert_eq!(project.web_path, "/taskboard/taskboard");
+         assert_eq!(
+             project.web_origin.as_deref(),
+             Some("https://gitlab.example:8443")
+@@ -58,11 +70,21 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn a_gitlab_on_http_has_no_origin_and_a_strange_answer_is_an_error() {
+-        assert_eq!(
+-            web_origin("http://gitlab.example/taskboard/taskboard"),
+-            None
+-        );
++    fn a_gitlab_under_a_sub_path_keeps_it_in_the_web_path_not_in_the_full_path() {
++        let json = br#"{"path_with_namespace":"grp/proj","web_url":"https://host.example/gitlab/grp/proj"}"#;
++
++        let project = project_from(json).unwrap();
++
++        assert_eq!(project.full_path, "grp/proj");
++        assert_eq!(project.web_path, "/gitlab/grp/proj");
++        assert_eq!(project.web_origin.as_deref(), Some("https://host.example"));
++    }
++
++    #[test]
++    fn a_gitlab_on_http_has_no_origin_nor_web_path_and_a_strange_answer_is_an_error() {
++        let http = "http://gitlab.example/taskboard/taskboard";
++        assert_eq!(web_origin(http), None);
++        assert_eq!(web_path(http), "");
+         let refused = project_from(br#"{"message":"404 Project Not Found"}"#);
+         assert!(refused.is_err());
+     }
+diff --git a/crates/merge-requests/src/web_page.rs b/crates/merge-requests/src/web_page.rs
+index eac1719..cd0bf50 100644
+--- a/crates/merge-requests/src/web_page.rs
++++ b/crates/merge-requests/src/web_page.rs
+@@ -18,26 +18,25 @@ const URL_HANDLER: &str = "url.dll,FileProtocolHandler";
+ const OPENER: &str = "xdg-open";
+ 
+ impl WebPage {
+-    /// The job log page `web_path` (`/<full_path>/-/jobs/<id>`) names on the GitLab at `origin`; `None` for any
+-    /// other origin or path.
++    /// The job log page `web_path` (`<project's web path>/-/jobs/<id>`) names on the GitLab at `origin`; `None` for
++    /// any other origin or path.
+     pub(crate) fn job(origin: &str, web_path: &str) -> Option<WebPage> {
+         let (project, job) = web_path.rsplit_once(JOBS_SEGMENT)?;
+-        let full_path = project.strip_prefix('/')?;
+         if !is_number(job) {
+             return None;
+         }
+-        project_page(origin, full_path, &format!("{JOBS_SEGMENT}{job}"))
++        project_page(origin, project, &format!("{JOBS_SEGMENT}{job}"))
+     }
+ 
+-    /// Merge request `iid`'s page of project `full_path` (`group/project`) on the GitLab at `origin`; `None` for
+-    /// any other origin or path.
++    /// Merge request `iid`'s page of the project at `web_path` (`/group/project`, after any sub-path GitLab is
++    /// installed under) on the GitLab at `origin`; `None` for any other origin or path.
+     pub(crate) fn merge_request(
+         origin: &str,
+-        full_path: &str,
++        web_path: &str,
+         iid: MergeRequestIid,
+     ) -> Option<WebPage> {
+         let tail = format!("{MERGE_REQUESTS_SEGMENT}{}", iid.0);
+-        project_page(origin, full_path, &tail)
++        project_page(origin, web_path, &tail)
+     }
+ 
+     /// The page's address.
+@@ -47,12 +46,12 @@ impl WebPage {
+     }
+ }
+ 
+-/// `<origin>/<full_path><tail>` when `origin` is `https://<host[:port]>` and `full_path` a plain project path, so a
+-/// page never leaves the project's GitLab.
+-fn project_page(origin: &str, full_path: &str, tail: &str) -> Option<WebPage> {
++/// `<origin><web_path><tail>` when `origin` is `https://<host[:port]>` and `web_path` a plain path, so a page never
++/// leaves the project's GitLab.
++fn project_page(origin: &str, web_path: &str, tail: &str) -> Option<WebPage> {
+     let authority = origin.strip_prefix(HTTPS)?;
+-    let is_page = is_authority(authority) && is_full_path(full_path);
+-    is_page.then(|| WebPage(format!("{origin}/{full_path}{tail}")))
++    let is_page = is_authority(authority) && is_web_path(web_path);
++    is_page.then(|| WebPage(format!("{origin}{web_path}{tail}")))
+ }
+ 
+ /// Asks the system's browser to show `page`; the opener runs on its own, in a process group of its own on Unix so
+@@ -108,13 +107,15 @@ fn is_authority(authority: &str) -> bool {
+     !authority.is_empty() && authority.chars().all(is_host_char)
+ }
+ 
+-/// `<group>/<project>`: URL path characters only, no empty or `..` segment.
+-fn is_full_path(full_path: &str) -> bool {
++/// `/<segment>/…`: URL path characters only, no empty or `..` segment.
++fn is_web_path(web_path: &str) -> bool {
+     let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-');
+     let is_segment = |segment: &str| {
+         !segment.is_empty() && segment != PARENT_SEGMENT && segment.chars().all(is_path_char)
+     };
+-    full_path.split('/').all(is_segment)
++    web_path
++        .strip_prefix('/')
++        .is_some_and(|path| path.split('/').all(is_segment))
+ }
+ 
+ fn is_number(text: &str) -> bool {
+@@ -133,8 +134,8 @@ mod tests {
+         WebPage::job(origin, web_path).map(|page| page.as_str().to_owned())
+     }
+ 
+-    fn merge_request(origin: &str, full_path: &str) -> Option<String> {
+-        WebPage::merge_request(origin, full_path, IID).map(|page| page.as_str().to_owned())
++    fn merge_request(origin: &str, web_path: &str) -> Option<String> {
++        WebPage::merge_request(origin, web_path, IID).map(|page| page.as_str().to_owned())
+     }
+ 
+     #[test]
+@@ -182,7 +183,7 @@ mod tests {
+ 
+     #[test]
+     fn a_merge_request_of_a_nested_project_on_an_https_gitlab_with_a_port_is_its_page() {
+-        let page = merge_request("https://gitlab-2.example:8443", "group/sub.group/b_c~d-e");
++        let page = merge_request("https://gitlab-2.example:8443", "/group/sub.group/b_c~d-e");
+         assert_eq!(
+             page.as_deref(),
+             Some("https://gitlab-2.example:8443/group/sub.group/b_c~d-e/-/merge_requests/12")
+@@ -190,7 +191,16 @@ mod tests {
+     }
+ 
+     #[test]
+-    fn another_origin_or_an_odd_full_path_gives_a_merge_request_no_page() {
++    fn a_merge_request_on_a_gitlab_under_a_sub_path_keeps_the_sub_path() {
++        let page = merge_request(ORIGIN, "/gitlab/grp/proj");
++        assert_eq!(
++            page.as_deref(),
++            Some("https://gitlab.example/gitlab/grp/proj/-/merge_requests/12")
++        );
++    }
++
++    #[test]
++    fn another_origin_or_an_odd_web_path_gives_a_merge_request_no_page() {
+         let origins = [
+             "http://gitlab.example",
+             "https://",
+@@ -198,13 +208,14 @@ mod tests {
+             "https://gitlab.example/",
+         ];
+         for origin in origins {
+-            assert_eq!(merge_request(origin, "a/b"), None, "{origin}");
++            assert_eq!(merge_request(origin, "/a/b"), None, "{origin}");
+         }
+-        let full_paths = [
+-            "", "/a/b", "a/b/", "a//b", "a/../b", "..", "a b/c", "a/b?x=1", "a/b#c", "a@b/c",
++        let web_paths = [
++            "", "/", "a/b", "/a/b/", "/a//b", "//a/b", "/a/../b", "/..", "/a b/c", "/a/b?x=1",
++            "/a/b#c", "/a@b/c",
+         ];
+-        for full_path in full_paths {
+-            assert_eq!(merge_request(ORIGIN, full_path), None, "{full_path}");
++        for web_path in web_paths {
++            assert_eq!(merge_request(ORIGIN, web_path), None, "{web_path}");
+         }
+     }
+ 

@@ -4,6 +4,7 @@ use super::*;
 
 const ORIGIN: &str = "https://gitlab.example";
 const FULL_PATH: &str = "taskboard/taskboard";
+const WEB_PATH: &str = "/taskboard/taskboard";
 const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
 const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
 
@@ -17,6 +18,7 @@ fn person(username: &str, name: &str) -> Person {
 fn taskboard(web_origin: Option<&str>) -> Project {
     Project {
         full_path: FULL_PATH.to_owned(),
+        web_path: WEB_PATH.to_owned(),
         web_origin: web_origin.map(str::to_owned),
     }
 }
@@ -110,6 +112,22 @@ fn without_an_https_origin_no_row_and_no_job_has_a_page() {
     let pages: Vec<_> = pipeline.failed_jobs.iter().map(|job| &job.page).collect();
     assert_eq!(pages, [&None, &None]);
     assert!(page.rows.iter().all(|row| row.page.is_none()));
+}
+
+#[test]
+fn on_a_gitlab_under_a_sub_path_a_row_s_page_keeps_the_sub_path() {
+    let project = Project {
+        web_path: format!("/gitlab{WEB_PATH}"),
+        ..taskboard(Some(ORIGIN))
+    };
+
+    let page = parsed(PAGE_1, &project).unwrap();
+
+    let expected = "https://gitlab.example/gitlab/taskboard/taskboard/-/merge_requests/13";
+    assert_eq!(
+        page.rows[0].page.as_ref().map(WebPage::as_str),
+        Some(expected)
+    );
 }
 
 #[test]

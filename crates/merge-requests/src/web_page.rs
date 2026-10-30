@@ -18,26 +18,25 @@ const URL_HANDLER: &str = "url.dll,FileProtocolHandler";
 const OPENER: &str = "xdg-open";
 
 impl WebPage {
-    /// The job log page `web_path` (`/<full_path>/-/jobs/<id>`) names on the GitLab at `origin`; `None` for any
-    /// other origin or path.
+    /// The job log page `web_path` (`<project's web path>/-/jobs/<id>`) names on the GitLab at `origin`; `None` for
+    /// any other origin or path.
     pub(crate) fn job(origin: &str, web_path: &str) -> Option<WebPage> {
         let (project, job) = web_path.rsplit_once(JOBS_SEGMENT)?;
-        let full_path = project.strip_prefix('/')?;
         if !is_number(job) {
             return None;
         }
-        project_page(origin, full_path, &format!("{JOBS_SEGMENT}{job}"))
+        project_page(origin, project, &format!("{JOBS_SEGMENT}{job}"))
     }
 
-    /// Merge request `iid`'s page of project `full_path` (`group/project`) on the GitLab at `origin`; `None` for
-    /// any other origin or path.
+    /// Merge request `iid`'s page of the project at `web_path` (`/group/project`, after any sub-path GitLab is
+    /// installed under) on the GitLab at `origin`; `None` for any other origin or path.
     pub(crate) fn merge_request(
         origin: &str,
-        full_path: &str,
+        web_path: &str,
         iid: MergeRequestIid,
     ) -> Option<WebPage> {
         let tail = format!("{MERGE_REQUESTS_SEGMENT}{}", iid.0);
-        project_page(origin, full_path, &tail)
+        project_page(origin, web_path, &tail)
     }
 
     /// The page's address.
@@ -47,12 +46,12 @@ impl WebPage {
     }
 }
 
-/// `<origin>/<full_path><tail>` when `origin` is `https://<host[:port]>` and `full_path` a plain project path, so a
-/// page never leaves the project's GitLab.
-fn project_page(origin: &str, full_path: &str, tail: &str) -> Option<WebPage> {
+/// `<origin><web_path><tail>` when `origin` is `https://<host[:port]>` and `web_path` a plain path, so a page never
+/// leaves the project's GitLab.
+fn project_page(origin: &str, web_path: &str, tail: &str) -> Option<WebPage> {
     let authority = origin.strip_prefix(HTTPS)?;
-    let is_page = is_authority(authority) && is_full_path(full_path);
-    is_page.then(|| WebPage(format!("{origin}/{full_path}{tail}")))
+    let is_page = is_authority(authority) && is_web_path(web_path);
+    is_page.then(|| WebPage(format!("{origin}{web_path}{tail}")))
 }
 
 /// Asks the system's browser to show `page`; the opener runs on its own, in a process group of its own on Unix so
@@ -108,13 +107,15 @@ fn is_authority(authority: &str) -> bool {
     !authority.is_empty() && authority.chars().all(is_host_char)
 }
 
-/// `<group>/<project>`: URL path characters only, no empty or `..` segment.
-fn is_full_path(full_path: &str) -> bool {
+/// `/<segment>/…`: URL path characters only, no empty or `..` segment.
+fn is_web_path(web_path: &str) -> bool {
     let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-');
     let is_segment = |segment: &str| {
         !segment.is_empty() && segment != PARENT_SEGMENT && segment.chars().all(is_path_char)
     };
-    full_path.split('/').all(is_segment)
+    web_path
+        .strip_prefix('/')
+        .is_some_and(|path| path.split('/').all(is_segment))
 }
 
 fn is_number(text: &str) -> bool {
@@ -133,8 +134,8 @@ mod tests {
         WebPage::job(origin, web_path).map(|page| page.as_str().to_owned())
     }
 
-    fn merge_request(origin: &str, full_path: &str) -> Option<String> {
-        WebPage::merge_request(origin, full_path, IID).map(|page| page.as_str().to_owned())
+    fn merge_request(origin: &str, web_path: &str) -> Option<String> {
+        WebPage::merge_request(origin, web_path, IID).map(|page| page.as_str().to_owned())
     }
 
     #[test]
@@ -182,7 +183,7 @@ mod tests {
 
     #[test]
     fn a_merge_request_of_a_nested_project_on_an_https_gitlab_with_a_port_is_its_page() {
-        let page = merge_request("https://gitlab-2.example:8443", "group/sub.group/b_c~d-e");
+        let page = merge_request("https://gitlab-2.example:8443", "/group/sub.group/b_c~d-e");
         assert_eq!(
             page.as_deref(),
             Some("https://gitlab-2.example:8443/group/sub.group/b_c~d-e/-/merge_requests/12")
@@ -190,7 +191,16 @@ mod tests {
     }
 
     #[test]
-    fn another_origin_or_an_odd_full_path_gives_a_merge_request_no_page() {
+    fn a_merge_request_on_a_gitlab_under_a_sub_path_keeps_the_sub_path() {
+        let page = merge_request(ORIGIN, "/gitlab/grp/proj");
+        assert_eq!(
+            page.as_deref(),
+            Some("https://gitlab.example/gitlab/grp/proj/-/merge_requests/12")
+        );
+    }
+
+    #[test]
+    fn another_origin_or_an_odd_web_path_gives_a_merge_request_no_page() {
         let origins = [
             "http://gitlab.example",
             "https://",
@@ -198,13 +208,14 @@ mod tests {
             "https://gitlab.example/",
         ];
         for origin in origins {
-            assert_eq!(merge_request(origin, "a/b"), None, "{origin}");
+            assert_eq!(merge_request(origin, "/a/b"), None, "{origin}");
         }
-        let full_paths = [
-            "", "/a/b", "a/b/", "a//b", "a/../b", "..", "a b/c", "a/b?x=1", "a/b#c", "a@b/c",
+        let web_paths = [
+            "", "/", "a/b", "/a/b/", "/a//b", "//a/b", "/a/../b", "/..", "/a b/c", "/a/b?x=1",
+            "/a/b#c", "/a@b/c",
         ];
-        for full_path in full_paths {
-            assert_eq!(merge_request(ORIGIN, full_path), None, "{full_path}");
+        for web_path in web_paths {
+            assert_eq!(merge_request(ORIGIN, web_path), None, "{web_path}");
         }
     }
 

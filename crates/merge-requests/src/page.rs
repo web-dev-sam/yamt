@@ -160,7 +160,7 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
         .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
     let iid = MergeRequestIid(iid);
     let origin = project.web_origin.as_deref();
-    let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.full_path, iid));
+    let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.web_path, iid));
     let labels = listed(node.labels).into_iter().map(|label| label.title);
     Ok(MergeRequestRow {
         iid,
