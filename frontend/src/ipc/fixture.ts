@@ -284,6 +284,8 @@ export function createFixtureSource(
     listStop: stops.listStop,
     continueOperation: stops.continueOperation,
     abortOperation: stops.abortOperation,
+    pushMergedBranch: stops.pushMergedBranch,
+    closeEndedMerge: stops.closeEndedMerge,
     async loadFile(path) {
       const data = records.fixtures.get(path);
       return data === undefined ? unknownPath(path) : { ok: true, value: data };

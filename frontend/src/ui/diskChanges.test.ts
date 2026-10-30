@@ -35,6 +35,8 @@ const SOURCE: ChunkSource = {
   listStop: notUsed,
   continueOperation: notUsed,
   abortOperation: notUsed,
+  pushMergedBranch: notUsed,
+  closeEndedMerge: notUsed,
   loadSettings: notUsed,
   setTheme: notUsed,
   setAntialiasing: notUsed,

@@ -82,7 +82,7 @@ export function createTauriSettings(): SettingsSource {
 
 function createTauriStops(): Pick<
   ChunkSource,
-  "listStop" | "continueOperation" | "abortOperation"
+  "listStop" | "continueOperation" | "abortOperation" | "pushMergedBranch" | "closeEndedMerge"
 > {
   return {
     async listStop() {
@@ -93,6 +93,13 @@ function createTauriStops(): Pick<
     },
     async abortOperation() {
       return toResult(await commands.abortOperation());
+    },
+    async pushMergedBranch() {
+      return toResult(await commands.pushMergedBranch());
+    },
+    async closeEndedMerge() {
+      await commands.closeEndedMerge();
+      return { ok: true, value: null };
     },
   };
 }

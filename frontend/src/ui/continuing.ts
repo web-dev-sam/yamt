@@ -13,6 +13,7 @@ import type { Stop } from "./currentStop";
 import type { GitRun } from "./gitRun";
 import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
 import { reportFailure, type Outcome, type Problem, type ProblemCause } from "./problem";
+import type { Pushing } from "./pushing";
 import type { Question } from "./question";
 import type { StopEnd } from "./stops";
 
@@ -81,17 +82,46 @@ async function landing(
   target: ContinueTarget,
   operation: OperationView,
   outcome: Outcome<ContinueReply>,
-): Promise<void> {
+): Promise<string | null> {
   if (!outcome.ok) {
     await refused(target, operation, outcome.cause);
-  } else if (outcome.value.kind === "Stopped") {
-    await target.nextStop({ kind: "continued", message: outcome.value.message });
-  } else {
-    log.info("continue.finished", { operation: operation.kind });
+    return null;
+  }
+  const reply = outcome.value;
+  switch (reply.kind) {
+    case "Stopped":
+      await target.nextStop({ kind: "continued", message: reply.message });
+      return null;
+    case "Finished":
+      log.info("continue.finished", { operation: operation.kind });
+      return null;
+    case "ReadyToPush":
+      log.info("continue.ready_to_push", { operation: operation.kind, branch: reply.branch });
+      return reply.branch;
+    default: {
+      const _exhaustive: never = reply;
+      return _exhaustive;
+    }
   }
 }
 
-export function createContinuing(target: ContinueTarget): Continuing {
+async function continued(
+  target: ContinueTarget,
+  stop: Stop,
+  operation: OperationView,
+): Promise<string | null> {
+  let pushable: string | null = null;
+  await target.gitRun.run(stop, {
+    call: () => target.source.continueOperation(),
+    endsApp: (reply) => reply.kind === "Finished",
+    landing: async (outcome) => {
+      pushable = await landing(target, operation, outcome);
+    },
+  });
+  return pushable;
+}
+
+export function createContinuing(target: ContinueTarget, pushing: Pushing): Continuing {
   const filesLeft = computed(
     () => target.files.value.filter((file) => file.status !== "Resolved").length,
   );
@@ -117,11 +147,10 @@ export function createContinuing(target: ContinueTarget): Continuing {
     if (!(await confirmed(target, operation))) {
       return;
     }
-    await target.gitRun.run(stop, {
-      call: () => target.source.continueOperation(),
-      endsApp: (reply) => reply.kind === "Finished",
-      landing: (outcome) => landing(target, operation, outcome),
-    });
+    const branch = await continued(target, stop, operation);
+    if (branch !== null) {
+      await pushing.offerPush(branch, operation.kind);
+    }
   }
 
   return {

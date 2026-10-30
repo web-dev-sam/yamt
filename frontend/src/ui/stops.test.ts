@@ -7,6 +7,7 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
+  type MergeView,
   type OperationView,
   type WriteRequest,
 } from "../ipc";
@@ -93,8 +94,10 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
     continueOperation: notUsed,
     abortOperation: () => {
       aborts.push("abort");
-      return Promise.resolve({ ok: true, value: null });
+      return Promise.resolve({ ok: true, value: { leftovers: [] } });
     },
+    pushMergedBranch: notUsed,
+    closeEndedMerge: notUsed,
     loadSettings: notUsed,
     setTheme: notUsed,
     setAntialiasing: notUsed,
@@ -369,7 +372,11 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
 test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
   quiet();
   const stop = stopAt([]);
-  const { abortOperation } = createAborting(Object.assign(stop, { gitRun: createGitRun() }));
+  const target = Object.assign(stop, {
+    gitRun: createGitRun(),
+    mergeRequest: shallowRef<MergeView | null>(null),
+  });
+  const { abortOperation } = createAborting(target);
   const pressed = abortOperation();
   expect(stop.asking.question.value?.kind).toBe("abort");
 

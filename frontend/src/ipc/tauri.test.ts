@@ -14,6 +14,8 @@ const commands = vi.hoisted(() => ({
   listStop: vi.fn(),
   continueOperation: vi.fn(),
   abortOperation: vi.fn(),
+  pushMergedBranch: vi.fn(),
+  closeEndedMerge: vi.fn(),
   log: vi.fn(),
   loadSettings: vi.fn(),
   setTheme: vi.fn(),
@@ -121,7 +123,20 @@ test("listStop turns the app's files list into domain data and passes MovedOn an
   const sides: Generated.SideNames = { local: null, remote: { kind: "Branch", name: "main" } };
   const files: Generated.FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
   const change: Generated.DiskChange = { path: "a.ts", result: { kind: "Staged" } };
-  const listing = { kind: "Files", files, disk_changes: [change], operation, sides };
+  const mergeRequest: Generated.MergeView = {
+    branch: "feature/due-dates",
+    target: "main",
+    returnTo: { kind: "branch", name: "develop" },
+    branchBefore: { kind: "created" },
+  };
+  const listing: Generated.Listing = {
+    kind: "Files",
+    files,
+    disk_changes: [change],
+    operation,
+    sides,
+    merge_request: mergeRequest,
+  };
   const running: Generated.IpcError = { kind: "GitRunning" };
   commands.listStop.mockResolvedValueOnce({ status: "ok", data: listing });
   commands.listStop.mockResolvedValueOnce({ status: "ok", data: { kind: "MovedOn" } });
@@ -130,36 +145,64 @@ test("listStop turns the app's files list into domain data and passes MovedOn an
 
   expect(await source.listStop()).toEqual({
     ok: true,
-    value: { kind: "Files", files, diskChanges: [change], operation, sides },
+    value: { kind: "Files", files, diskChanges: [change], operation, sides, mergeRequest },
   });
   expect(await source.listStop()).toEqual({ ok: true, value: { kind: "MovedOn" } });
   expect(await source.listStop()).toEqual({ ok: false, failure: running });
 });
 
-test("continueOperation answers Finished or Stopped with git's message, and a failure unchanged", async () => {
+test("continueOperation answers Finished, ReadyToPush or Stopped with git's message, and a failure unchanged", async () => {
   const stopped: Generated.ContinueReply = { kind: "Stopped", message: "CONFLICT in b.ts" };
+  const ready: Generated.ContinueReply = { kind: "ReadyToPush", branch: "feature/due-dates" };
   const refused: Generated.IpcError = { kind: "Git", message: "b.ts: needs merge" };
   commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: stopped });
   commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: { kind: "Finished" } });
+  commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: ready });
   commands.continueOperation.mockResolvedValueOnce({ status: "error", error: refused });
   const source = createTauriSource();
 
   expect(await source.continueOperation()).toEqual({ ok: true, value: stopped });
   expect(await source.continueOperation()).toEqual({ ok: true, value: { kind: "Finished" } });
+  expect(await source.continueOperation()).toEqual({ ok: true, value: ready });
   expect(await source.continueOperation()).toEqual({ ok: false, failure: refused });
 });
 
-test("abortOperation answers null, and a moved-on stop or no operation as the failure unchanged", async () => {
+test("abortOperation answers the leftovers, and a moved-on stop or no operation as the failure unchanged", async () => {
   const movedOn: Generated.IpcError = { kind: "StopMovedOn" };
   const none: Generated.IpcError = { kind: "NoOperation" };
-  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: null });
+  const left: Generated.AbortReply = {
+    leftovers: [{ kind: "branchKept", branch: "feature/due-dates" }],
+  };
+  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: { leftovers: [] } });
+  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: left });
   commands.abortOperation.mockResolvedValueOnce({ status: "error", error: movedOn });
   commands.abortOperation.mockResolvedValueOnce({ status: "error", error: none });
   const source = createTauriSource();
 
-  expect(await source.abortOperation()).toEqual({ ok: true, value: null });
+  expect(await source.abortOperation()).toEqual({ ok: true, value: { leftovers: [] } });
+  expect(await source.abortOperation()).toEqual({ ok: true, value: left });
   expect(await source.abortOperation()).toEqual({ ok: false, failure: movedOn });
   expect(await source.abortOperation()).toEqual({ ok: false, failure: none });
+});
+
+test("pushMergedBranch answers Pushed or git's words, and a failure unchanged", async () => {
+  const failed: Generated.PushReply = { kind: "failed", message: "[rejected] (fetch first)" };
+  const none: Generated.IpcError = { kind: "NoOperation" };
+  commands.pushMergedBranch.mockResolvedValueOnce({ status: "ok", data: { kind: "pushed" } });
+  commands.pushMergedBranch.mockResolvedValueOnce({ status: "ok", data: failed });
+  commands.pushMergedBranch.mockResolvedValueOnce({ status: "error", error: none });
+  const source = createTauriSource();
+
+  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: { kind: "pushed" } });
+  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: failed });
+  expect(await source.pushMergedBranch()).toEqual({ ok: false, failure: none });
+});
+
+test("closeEndedMerge calls the command once and answers null", async () => {
+  commands.closeEndedMerge.mockResolvedValueOnce(null);
+
+  expect(await createTauriSource().closeEndedMerge()).toEqual({ ok: true, value: null });
+  expect(commands.closeEndedMerge).toHaveBeenCalledTimes(1);
 });
 
 test("loadFile turns the app's data into domain data: the middle range, not base", async () => {

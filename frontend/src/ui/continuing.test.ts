@@ -39,6 +39,7 @@ type Pressed = Continuing & {
   readonly calls: number[];
   readonly ends: StopEnd[];
   readonly lists: string[];
+  readonly offers: string[];
   readonly answers: ((reply: Reply) => void)[];
   unsaved: string[];
   stop: Stop;
@@ -66,6 +67,7 @@ function continuing(
   const answers: ((reply: Reply) => void)[] = [];
   const ends: StopEnd[] = [];
   const lists: string[] = [];
+  const offers: string[] = [];
   const unsaved: string[] = [];
   const target = {
     asking: createAsking(),
@@ -77,6 +79,7 @@ function continuing(
     calls,
     ends,
     lists,
+    offers,
     answers,
     unsaved,
     stop: { dropped: false },
@@ -98,7 +101,13 @@ function continuing(
       return Promise.resolve();
     },
   };
-  return Object.assign(target, createContinuing(target));
+  const pushing = {
+    offerPush: (branch: string, kind: string) => {
+      offers.push(`${branch} ${kind}`);
+      return Promise.resolve();
+    },
+  };
+  return Object.assign(target, createContinuing(target, pushing));
 }
 
 async function answered(press: Pressed, reply: Reply): Promise<void> {
@@ -311,11 +320,39 @@ test("Finished is logged and Continue stays running: the window is closing", asy
   await answered(press, { ok: true, value: { kind: "Finished" } });
 
   expect(lines).toEqual(['[info] continue.finished {operation: "Rebase"}']);
-  expect([press.ends, press.problem.value, press.continueState.value]).toEqual([
+  expect([press.ends, press.problem.value, press.continueState.value, press.offers]).toEqual([
     [],
     null,
     "running",
+    [],
   ]);
+});
+
+test("ReadyToPush hands the branch to the push offer once, lists nothing and does not end the window", async () => {
+  const lines = quiet();
+  const press = continuing(MERGE);
+
+  await answered(press, { ok: true, value: { kind: "ReadyToPush", branch: "feature/due-dates" } });
+
+  expect(press.offers).toEqual(["feature/due-dates Merge"]);
+  expect([press.ends, press.lists, press.problem.value]).toEqual([[], [], null]);
+  expect(press.continueState.value).toBe("ready");
+  expect(lines).toEqual([
+    '[info] continue.ready_to_push {operation: "Merge", branch: "feature/due-dates"}',
+  ]);
+});
+
+test("a ReadyToPush after its stop was dropped offers no push", async () => {
+  const press = continuing(MERGE);
+  const pressed = press.continueOperation();
+  await vi.waitFor(() => {
+    expect(press.calls).toEqual([1]);
+  });
+  press.stop.dropped = true;
+  press.answers[0]?.({ ok: true, value: { kind: "ReadyToPush", branch: "feature/due-dates" } });
+  await pressed;
+
+  expect(press.offers).toEqual([]);
 });
 
 test("a reply after its stop was dropped changes nothing but the running state", async () => {

@@ -6,6 +6,7 @@ import {
   type FileEntry,
   type FileMergeData,
   type FileSides,
+  type MergeView,
   type OperationView,
   type ServerHost,
   type Side,
@@ -27,6 +28,7 @@ import { noticeKey, type Notice } from "./noticeText";
 import { open, pick, thenMoveOn } from "./opening";
 import { createPaneSplit, type PaneSplitState } from "./paneSplit";
 import type { Problem } from "./problem";
+import { createPushing } from "./pushing";
 import type { Question } from "./question";
 import { createSaving, finish, reset, take } from "./saving";
 import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
@@ -44,6 +46,7 @@ import type { FormatOutcome, Preferences } from "./useMergeController";
 type Refs = {
   readonly files: ShallowRef<readonly FileEntry[]>;
   readonly operation: ShallowRef<OperationView | null>;
+  readonly mergeRequest: ShallowRef<MergeView | null>;
   readonly opened: ShallowRef<readonly FileMergeData[]>;
   readonly choices: ShallowRef<readonly FileSides[]>;
   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
@@ -114,6 +117,7 @@ function createRefs(startTheme: Theme): Refs {
   return {
     files: shallowRef<readonly FileEntry[]>([]),
     operation: shallowRef<OperationView | null>(null),
+    mergeRequest: shallowRef<MergeView | null>(null),
     opened: shallowRef<readonly FileMergeData[]>([]),
     choices: shallowRef<readonly FileSides[]>([]),
     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
@@ -194,7 +198,7 @@ export function createAppStore(
     ...createCollapsing(),
     ...createPaneSplit(),
     ...createAborting(state),
-    ...createContinuing(state),
+    ...createContinuing(state, createPushing(state)),
     ...createSaving(state),
     ...createServers(refs.screen, servers),
     ...createServerSetup({ ...state, ...acts, host, servers }),

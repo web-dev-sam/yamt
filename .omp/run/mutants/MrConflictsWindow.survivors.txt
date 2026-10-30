@@ -1,0 +1,5 @@
+just mutants HEAD: 1236 killed, 2 timeout, 158 survived, 29 no-cov (86.88%); aborting/pushing/listing 100%. Most survivors are on lines this slice did not change.
+fixtureOperations.ts:43-59 literal mutants on MERGE_REQUEST_STARTS, LEFTOVERS, DEVELOP, REJECTED_PUSH — equivalent: module-level constants with --ignoreStatic (#732); the tests check every value
+leftoverText.ts:9,28 exhaustive never default (NoCoverage) — equivalent: unreachable
+operationText.ts:258 exhaustive never default in mergeRequestAbortNote — equivalent: unreachable
+question.ts:70, questionText.ts:259 exhaustive never defaults — equivalent: unreachable

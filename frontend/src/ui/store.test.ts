@@ -5,6 +5,7 @@ import {
   DEFAULT_KEYS,
   loadFixture,
   parseKey,
+  type AbortReply,
   type ChunkSource,
   type ContinueReply,
   type DiskChange,
@@ -12,6 +13,7 @@ import {
   type DiskVersion,
   type FileEntry,
   type Listing,
+  type MergeView,
   type FileMergeData,
   type FileSides,
   type Key,
@@ -104,6 +106,7 @@ function listing(
     diskChanges,
     operation: MERGING,
     sides: { local: null, remote: null },
+    mergeRequest: null,
   });
 }
 
@@ -146,6 +149,8 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
     listStop: () => Promise.resolve(listing(files)),
     continueOperation: () => Promise.reject(new Error("not used")),
     abortOperation: () => Promise.reject(new Error("not used")),
+    pushMergedBranch: () => Promise.reject(new Error("not used")),
+    closeEndedMerge: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
   };
   return { source, pending };
@@ -1090,6 +1095,8 @@ function choiceSource(
     listStop: () => Promise.resolve(listing(files)),
     continueOperation: () => Promise.reject(new Error("not used")),
     abortOperation: () => Promise.reject(new Error("not used")),
+    pushMergedBranch: () => Promise.reject(new Error("not used")),
+    closeEndedMerge: () => Promise.reject(new Error("not used")),
     ...NO_SETTINGS,
     ...overrides,
   };
@@ -2529,7 +2536,14 @@ test("a focus list that finds git moved on outside drops the old stop, names the
   };
   const sides: SideNames = { local: { kind: "Branch", name: "x" }, remote: null };
   const answers: SourceResult<Listing>[] = [
-    ok({ kind: "Files", files: [entry("a.ts")], diskChanges: [], operation: rebase, sides }),
+    ok({
+      kind: "Files",
+      files: [entry("a.ts")],
+      diskChanges: [],
+      operation: rebase,
+      sides,
+      mergeRequest: null,
+    }),
     ok({ kind: "MovedOn" }),
     ok({
       kind: "Files",
@@ -2537,6 +2551,7 @@ test("a focus list that finds git moved on outside drops the old stop, names the
       diskChanges: [],
       operation: { ...rebase, progress: { step: 2, total: 3 } },
       sides: { local: null, remote: null },
+      mergeRequest: null,
     }),
   ];
   const { source, calls } = choiceSource({
@@ -2775,8 +2790,16 @@ test("Continue answered Stopped runs the store's own nextStop: the old stop is d
       diskChanges: [],
       operation: rebase,
       sides,
+      mergeRequest: null,
     }),
-    ok({ kind: "Files", files: [entry("c.ts")], diskChanges: [], operation: step2, sides }),
+    ok({
+      kind: "Files",
+      files: [entry("c.ts")],
+      diskChanges: [],
+      operation: step2,
+      sides,
+      mergeRequest: null,
+    }),
   ];
   const { source, calls } = choiceSource({
     listStop: () => {
@@ -2832,7 +2855,7 @@ test("a take git refuses stays on the file: no move to the next unresolved one",
 
 type HeldGit = {
   readonly store: AppStore;
-  readonly aborts: ((reply: SourceResult<null>) => void)[];
+  readonly aborts: ((reply: SourceResult<AbortReply>) => void)[];
   readonly continues: ((reply: SourceResult<ContinueReply>) => void)[];
 };
 
@@ -2922,4 +2945,99 @@ test("a stop without files shows git's message in the stop view, not the bar; se
   await aborting;
   expect(store.emptyStop.value.stopView).toEqual(stopView);
   expect(store.emptyStop.value.barProblem?.action).toBe("abort");
+});
+
+const DUE_DATES: MergeView = {
+  branch: "feature/due-dates",
+  target: "main",
+  returnTo: { kind: "branch", name: "develop" },
+  branchBefore: { kind: "created" },
+};
+
+function recordedMergeSource(overrides: Partial<ChunkSource>): {
+  source: ChunkSource;
+  calls: string[];
+} {
+  const files = [resolvedEntry("a.ts")];
+  const recorded = {
+    files,
+    diskChanges: [],
+    operation: MERGING,
+    sides: { local: null, remote: null },
+  };
+  const { source, calls } = choiceSource({
+    listStop: () => {
+      calls.push("listStop");
+      return Promise.resolve(ok({ kind: "Files", ...recorded, mergeRequest: DUE_DATES }));
+    },
+    closeEndedMerge: () => {
+      calls.push("closeEndedMerge");
+      return Promise.resolve(ok(null));
+    },
+    ...overrides,
+  });
+  return { source, calls };
+}
+
+test("a recorded merge's Abort asks with its words, then lists what was left in a notice and closes the ended merge", async () => {
+  spyConsole();
+  const leftovers: AbortReply["leftovers"] = [
+    { kind: "notReturned", to: { kind: "branch", name: "develop" } },
+  ];
+  const { source, calls } = recordedMergeSource({
+    abortOperation: () => {
+      calls.push("abortOperation");
+      return Promise.resolve(ok({ leftovers }));
+    },
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+  expect(store.mergeRequest.value).toEqual(DUE_DATES);
+
+  const aborting = store.abortOperation();
+  expect(store.question.value).toEqual({
+    kind: "abort",
+    operation: MERGING,
+    mergeRequest: DUE_DATES,
+  });
+  store.answer(true);
+  await vi.waitFor(() => {
+    expect(store.question.value).toEqual({
+      kind: "abortLeftovers",
+      mergeRequest: DUE_DATES,
+      leftovers,
+    });
+  });
+  store.dismissQuestion();
+  await aborting;
+
+  expect(calls).toEqual(["listStop", "loadFile a.ts", "abortOperation", "closeEndedMerge"]);
+  expect(store.continueState.value).toBe("running");
+});
+
+test("a recorded merge's Continue asks to push without listing again, and Push ends the window", async () => {
+  spyConsole();
+  const { source, calls } = recordedMergeSource({
+    continueOperation: () => {
+      calls.push("continueOperation");
+      return Promise.resolve(ok({ kind: "ReadyToPush", branch: "feature/due-dates" }));
+    },
+    pushMergedBranch: () => {
+      calls.push("pushMergedBranch");
+      return Promise.resolve(ok({ kind: "pushed" }));
+    },
+  });
+  const store = createAppStore(source);
+  await store.loadFiles();
+
+  const continuing = store.continueOperation();
+  await vi.waitFor(() => {
+    expect(store.question.value).toEqual({ kind: "push", branch: "feature/due-dates" });
+  });
+  store.answer(true);
+  await continuing;
+
+  expect(calls).toEqual(["listStop", "loadFile a.ts", "continueOperation", "pushMergedBranch"]);
+  expect([store.question.value, store.problem.value]).toEqual([null, null]);
+  expect(store.continueState.value).toBe("running");
 });

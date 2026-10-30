@@ -1,0 +1,3206 @@
+diff --git a/frontend/src/ipc/ChunkSource.ts b/frontend/src/ipc/ChunkSource.ts
+index 2f48c0a..26f23f2 100644
+--- a/frontend/src/ipc/ChunkSource.ts
++++ b/frontend/src/ipc/ChunkSource.ts
+@@ -16,6 +16,7 @@ import type {
+   Theme,
+   WriteReply,
+ } from "./domain";
++import type { AbortReply, PushReply } from "./mergeRequestDomain";
+ 
+ export type WriteRequest = {
+   readonly path: string;
+@@ -32,7 +33,9 @@ export interface ChunkSource {
+   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
+   listStop(): Promise<SourceResult<Listing>>;
+   continueOperation(): Promise<SourceResult<ContinueReply>>;
+-  abortOperation(): Promise<SourceResult<null>>;
++  abortOperation(): Promise<SourceResult<AbortReply>>;
++  pushMergedBranch(): Promise<SourceResult<PushReply>>;
++  closeEndedMerge(): Promise<SourceResult<null>>;
+   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
+   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
+   setAntialiasing(
+diff --git a/frontend/src/ipc/fixture.ts b/frontend/src/ipc/fixture.ts
+index 88dff8b..7661bf8 100644
+--- a/frontend/src/ipc/fixture.ts
++++ b/frontend/src/ipc/fixture.ts
+@@ -284,6 +284,8 @@ export function createFixtureSource(
+     listStop: stops.listStop,
+     continueOperation: stops.continueOperation,
+     abortOperation: stops.abortOperation,
++    pushMergedBranch: stops.pushMergedBranch,
++    closeEndedMerge: stops.closeEndedMerge,
+     async loadFile(path) {
+       const data = records.fixtures.get(path);
+       return data === undefined ? unknownPath(path) : { ok: true, value: data };
+diff --git a/frontend/src/ipc/fixtureOperations.test.ts b/frontend/src/ipc/fixtureOperations.test.ts
+index c13a744..efc0439 100644
+--- a/frontend/src/ipc/fixtureOperations.test.ts
++++ b/frontend/src/ipc/fixtureOperations.test.ts
+@@ -3,7 +3,14 @@ import { expect, test, vi } from "vitest";
+ import type { ChunkSource } from "./ChunkSource";
+ import type { SourceResult } from "./domain";
+ import { createFixtureSource } from "./fixture";
+-import type { ContinueReply, Listing, OperationKind, OperationView, ProgressView } from "./index";
++import type {
++  ContinueReply,
++  Listing,
++  MergeView,
++  OperationKind,
++  OperationView,
++  ProgressView,
++} from "./index";
+ import { createLog, type Log, type LogEntry } from "./log";
+ 
+ const FIRST_STEP: ProgressView = { step: 1, total: 3 };
+@@ -172,7 +179,7 @@ test("abortOperation answers done, logs the abort once, then every command answe
+   const { log, entries } = quietLog();
+   const source = sourceAt("?operation=revert", log);
+ 
+-  expect(await source.abortOperation()).toEqual({ ok: true, value: null });
++  expect(await source.abortOperation()).toEqual({ ok: true, value: { leftovers: [] } });
+ 
+   expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeAborted"));
+   expect(entries).toEqual([
+@@ -190,3 +197,110 @@ test("none lists no operation and has nothing to continue or abort", async () =>
+   expect(await source.abortOperation()).toEqual(nothing);
+   expect(entries).toEqual([]);
+ });
++
++const DEVELOP = { kind: "branch", name: "develop" } as const;
++
++test.each<[string, Pick<MergeView, "returnTo" | "branchBefore">]>([
++  ["created", { returnTo: DEVELOP, branchBefore: { kind: "created" } }],
++  ["moved", { returnTo: DEVELOP, branchBefore: { kind: "movedFrom", id: "3f1c2a9" } }],
++  ["unchanged", { returnTo: DEVELOP, branchBefore: { kind: "unchanged" } }],
++  ["detached", { returnTo: { kind: "commit", id: "9b0d4e1" }, branchBefore: { kind: "created" } }],
++  ["same", { returnTo: null, branchBefore: { kind: "unchanged" } }],
++])(
++  "?mergeRequest=%s lists the merge of main into feature/due-dates it names",
++  async (name, start) => {
++    const listed = await filesListed(sourceAt(`?operation=merge&mergeRequest=${name}`));
++
++    expect(listed.mergeRequest).toEqual({ branch: "feature/due-dates", target: "main", ...start });
++    expect(listed.operation).toEqual({
++      kind: "Merge",
++      merging: { kind: "Branch", name: "main" },
++      into: { kind: "Branch", name: "feature/due-dates" },
++    });
++    expect(listed.files.map((file) => file.path)).toEqual(["a.ts"]);
++  },
++);
++
++test.each(["", "?mergeRequest=nonsense", "?operation=rebase&mergeRequest=created"])(
++  "%j lists no merge request",
++  async (search) => {
++    expect((await filesListed(sourceAt(search))).mergeRequest).toBeNull();
++  },
++);
++
++test("?clean lists no file at any step", async () => {
++  const source = sourceAt("?operation=rebase&clean");
++
++  expect((await filesListed(source)).files).toEqual([]);
++  await source.continueOperation();
++  expect((await filesListed(source)).files).toEqual([]);
++});
++
++test("a merge yamt started answers ReadyToPush, then MergeFinished to every stop command, and Pushed once", async () => {
++  const { log, entries } = quietLog();
++  const source = sourceAt("?mergeRequest=created&clean", log);
++
++  expect(await source.pushMergedBranch()).toEqual({ ok: false, failure: { kind: "NoOperation" } });
++  expect(await source.continueOperation()).toEqual({
++    ok: true,
++    value: { kind: "ReadyToPush", branch: "feature/due-dates" },
++  });
++  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
++  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: { kind: "pushed" } });
++  expect(await source.pushMergedBranch()).toEqual({
++    ok: false,
++    failure: { kind: "MergeFinished" },
++  });
++  expect(entries.map((entry) => entry.event)).toEqual([
++    "fixture.continue_finished",
++    "fixture.push",
++  ]);
++});
++
++test("?push=rejected fails the first push with git's words, then pushes", async () => {
++  const source = sourceAt("?mergeRequest=created&push=rejected");
++  await source.continueOperation();
++
++  expect(await source.pushMergedBranch()).toEqual({
++    ok: true,
++    value: { kind: "failed", message: "[rejected] (fetch first)" },
++  });
++  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: { kind: "pushed" } });
++});
++
++test("closeEndedMerge after ReadyToPush keeps the commit local: no push follows and every command answers MergeFinished", async () => {
++  const { log, entries } = quietLog();
++  const source = sourceAt("?mergeRequest=created&push=rejected", log);
++  await source.continueOperation();
++
++  expect(await source.closeEndedMerge()).toEqual({ ok: true, value: null });
++  expect(await source.pushMergedBranch()).toEqual({
++    ok: false,
++    failure: { kind: "MergeFinished" },
++  });
++  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
++  expect(entries.map((entry) => entry.event)).toEqual([
++    "fixture.continue_finished",
++    "fixture.close_ended_merge",
++  ]);
++});
++
++test("?leftovers answers Abort with what was not put back, then every command answers MergeAborted", async () => {
++  const source = sourceAt("?mergeRequest=created&leftovers");
++
++  expect(await source.abortOperation()).toEqual({
++    ok: true,
++    value: {
++      leftovers: [
++        { kind: "notReturned", to: DEVELOP },
++        { kind: "branchKept", branch: "feature/due-dates" },
++      ],
++    },
++  });
++  expect(await source.closeEndedMerge()).toEqual({ ok: true, value: null });
++  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeAborted"));
++  expect(await source.pushMergedBranch()).toEqual({
++    ok: false,
++    failure: { kind: "MergeAborted" },
++  });
++});
+diff --git a/frontend/src/ipc/fixtureOperations.ts b/frontend/src/ipc/fixtureOperations.ts
+index 3fee626..eabab64 100644
+--- a/frontend/src/ipc/fixtureOperations.ts
++++ b/frontend/src/ipc/fixtureOperations.ts
+@@ -1,6 +1,14 @@
+ import type { ChunkSource } from "./ChunkSource";
+-import type { FileEntry, OperationView, SideName, SourceFailure, SourceResult } from "./domain";
++import type {
++  ContinueReply,
++  FileEntry,
++  OperationView,
++  SideName,
++  SourceFailure,
++  SourceResult,
++} from "./domain";
+ import type { Log } from "./log";
++import type { Leftover, MergeView, ReturnTo } from "./mergeRequestDomain";
+ 
+ const OPERATIONS = ["merge", "squash", "rebase", "cherry-pick", "revert", "am", "none"] as const;
+ 
+@@ -32,6 +40,24 @@ const COMMITS: readonly [CommitName, ...CommitName[]] = [
+   },
+ ];
+ 
++const MERGE_REQUEST_BRANCH = "feature/due-dates";
++const DEVELOP: ReturnTo = { kind: "branch", name: "develop" };
++
++const MERGE_REQUEST_STARTS = {
++  created: { returnTo: DEVELOP, branchBefore: { kind: "created" } },
++  moved: { returnTo: DEVELOP, branchBefore: { kind: "movedFrom", id: "3f1c2a9" } },
++  unchanged: { returnTo: DEVELOP, branchBefore: { kind: "unchanged" } },
++  detached: { returnTo: { kind: "commit", id: "9b0d4e1" }, branchBefore: { kind: "created" } },
++  same: { returnTo: null, branchBefore: { kind: "unchanged" } },
++} satisfies Readonly<Record<string, Pick<MergeView, "returnTo" | "branchBefore">>>;
++
++const LEFTOVERS: readonly Leftover[] = [
++  { kind: "notReturned", to: DEVELOP },
++  { kind: "branchKept", branch: MERGE_REQUEST_BRANCH },
++];
++
++const REJECTED_PUSH = "[rejected] (fetch first)";
++
+ /** The fixture files as listed now, and making every one unresolved again for the next step. */
+ type StopFiles = {
+   readonly listed: () => FileEntry[];
+@@ -39,16 +65,27 @@ type StopFiles = {
+ };
+ 
+ /** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
+-type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation">;
++type FixtureStops = Pick<
++  ChunkSource,
++  "listStop" | "continueOperation" | "abortOperation" | "pushMergedBranch" | "closeEndedMerge"
++>;
+ 
+ /** How the app answers every command once git finished or aborted the operation. */
+ type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
+ 
+-/** Where the chosen operation is: its step, or ended by the last Continue or Abort. */
++/**
++ * Where the chosen operation is: its step, or ended by the last Continue or Abort; a merge yamt
++ * started is `committed` after its Continue until it is pushed or kept local.
++ */
+ type Sequence = {
+   readonly operation: FixtureOperation;
+   readonly rewords: boolean;
+   readonly empty: boolean;
++  readonly clean: boolean;
++  readonly mergeRequest: MergeView | null;
++  readonly leftovers: boolean;
++  rejectedPushes: number;
++  committed: boolean;
+   step: number;
+   ended: Ended | null;
+ };
+@@ -98,16 +135,35 @@ function stepView(
+   }
+ }
+ 
++function mergeRequestOf(chosen: string | null): MergeView | null {
++  const start = Object.entries(MERGE_REQUEST_STARTS).find(([name]) => name === chosen)?.[1];
++  return start === undefined ? null : { branch: MERGE_REQUEST_BRANCH, target: "main", ...start };
++}
++
+ /**
+  * `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`;
+- * `?empty`: the second step stops without conflicts, as git stops at a rebase's `edit`.
++ * `?empty`: the second step stops without conflicts, as git stops at a rebase's `edit`;
++ * `?clean`: no step lists a file. A merge only: `?mergeRequest=created|moved|unchanged|detached|same`
++ * (the merge yamt started, its Continue answers ReadyToPush), `?push=rejected` (the first push
++ * fails), `?leftovers` (Abort leaves two).
+  */
+ function sequenceOf(search: string): Sequence {
+   const params = new URLSearchParams(search);
+   const chosen = params.get("operation");
+   const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
+-  const empty = params.has("empty");
+-  return { operation, rewords: params.has("rewords"), empty, step: 1, ended: null };
++  const mergeRequest = operation === "merge" ? mergeRequestOf(params.get("mergeRequest")) : null;
++  return {
++    operation,
++    rewords: params.has("rewords"),
++    empty: params.has("empty"),
++    clean: params.has("clean"),
++    mergeRequest,
++    leftovers: params.has("leftovers"),
++    rejectedPushes: params.get("push") === "rejected" ? 1 : 0,
++    committed: false,
++    step: 1,
++    ended: null,
++  };
+ }
+ 
+ function atEmptyStop(at: Sequence): boolean {
+@@ -115,7 +171,14 @@ function atEmptyStop(at: Sequence): boolean {
+ }
+ 
+ function listedAt(at: Sequence, files: StopFiles): FileEntry[] {
+-  return atEmptyStop(at) ? [] : files.listed();
++  return at.clean || atEmptyStop(at) ? [] : files.listed();
++}
++
++function viewAt(at: Sequence): OperationView | null {
++  if (at.mergeRequest === null) {
++    return stepView(at.operation, at.step, at.rewords);
++  }
++  return { kind: "Merge", merging: MAIN, into: { kind: "Branch", name: at.mergeRequest.branch } };
+ }
+ 
+ function stoppedMessage(at: Sequence): string {
+@@ -142,14 +205,38 @@ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listSt
+       if (at.ended !== null) {
+         return refused(at.ended);
+       }
+-      const view = stepView(at.operation, at.step, at.rewords);
++      const view = viewAt(at);
+       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
++      const { mergeRequest } = at;
+       const value = { files: listedAt(at, files), diskChanges: [], operation: view, sides };
+-      return { ok: true, value: { kind: "Files", ...value } };
++      return { ok: true, value: { kind: "Files", ...value, mergeRequest } };
+     },
+   };
+ }
+ 
++function continued(log: Log, at: Sequence, files: StopFiles): SourceResult<ContinueReply> {
++  const { operation } = at;
++  if (at.ended !== null) {
++    return refused(at.ended);
++  }
++  const view = stepView(operation, at.step, at.rewords);
++  if (view === null) {
++    return refused(NO_OPERATION);
++  }
++  if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
++    at.ended = { kind: "MergeFinished" };
++    log.info("fixture.continue_finished", { operation });
++    if (at.mergeRequest !== null) {
++      at.committed = true;
++      return { ok: true, value: { kind: "ReadyToPush", branch: at.mergeRequest.branch } };
++    }
++    return { ok: true, value: { kind: "Finished" } };
++  }
++  at.step += 1;
++  files.unresolveAll();
++  return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
++}
++
+ function stopActions(
+   log: Log,
+   at: Sequence,
+@@ -158,21 +245,7 @@ function stopActions(
+   const { operation } = at;
+   return {
+     async continueOperation() {
+-      if (at.ended !== null) {
+-        return refused(at.ended);
+-      }
+-      const view = stepView(operation, at.step, at.rewords);
+-      if (view === null) {
+-        return refused(NO_OPERATION);
+-      }
+-      if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
+-        at.ended = { kind: "MergeFinished" };
+-        log.info("fixture.continue_finished", { operation });
+-        return { ok: true, value: { kind: "Finished" } };
+-      }
+-      at.step += 1;
+-      files.unresolveAll();
+-      return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
++      return continued(log, at, files);
+     },
+     async abortOperation() {
+       if (at.ended !== null) {
+@@ -183,6 +256,31 @@ function stopActions(
+       }
+       at.ended = { kind: "MergeAborted" };
+       log.info("fixture.abort_operation", { operation });
++      return { ok: true, value: { leftovers: at.leftovers ? [...LEFTOVERS] : [] } };
++    },
++  };
++}
++
++function pushActions(
++  log: Log,
++  at: Sequence,
++): Pick<ChunkSource, "pushMergedBranch" | "closeEndedMerge"> {
++  return {
++    async pushMergedBranch() {
++      if (!at.committed) {
++        return refused(at.ended ?? NO_OPERATION);
++      }
++      if (at.rejectedPushes > 0) {
++        at.rejectedPushes -= 1;
++        return { ok: true, value: { kind: "failed", message: REJECTED_PUSH } };
++      }
++      at.committed = false;
++      log.info("fixture.push", {});
++      return { ok: true, value: { kind: "pushed" } };
++    },
++    async closeEndedMerge() {
++      at.committed = false;
++      log.info("fixture.close_ended_merge", {});
+       return { ok: true, value: null };
+     },
+   };
+@@ -190,5 +288,5 @@ function stopActions(
+ 
+ export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
+   const at = sequenceOf(search);
+-  return { ...stopListings(at, files), ...stopActions(log, at, files) };
++  return { ...stopListings(at, files), ...stopActions(log, at, files), ...pushActions(log, at) };
+ }
+diff --git a/frontend/src/ipc/tauri.test.ts b/frontend/src/ipc/tauri.test.ts
+index f6178c5..6d3b1ee 100644
+--- a/frontend/src/ipc/tauri.test.ts
++++ b/frontend/src/ipc/tauri.test.ts
+@@ -14,6 +14,8 @@ const commands = vi.hoisted(() => ({
+   listStop: vi.fn(),
+   continueOperation: vi.fn(),
+   abortOperation: vi.fn(),
++  pushMergedBranch: vi.fn(),
++  closeEndedMerge: vi.fn(),
+   log: vi.fn(),
+   loadSettings: vi.fn(),
+   setTheme: vi.fn(),
+@@ -121,7 +123,20 @@ test("listStop turns the app's files list into domain data and passes MovedOn an
+   const sides: Generated.SideNames = { local: null, remote: { kind: "Branch", name: "main" } };
+   const files: Generated.FileEntry[] = [{ path: "a.ts", status: "Unresolved", unsupported: null }];
+   const change: Generated.DiskChange = { path: "a.ts", result: { kind: "Staged" } };
+-  const listing = { kind: "Files", files, disk_changes: [change], operation, sides };
++  const mergeRequest: Generated.MergeView = {
++    branch: "feature/due-dates",
++    target: "main",
++    returnTo: { kind: "branch", name: "develop" },
++    branchBefore: { kind: "created" },
++  };
++  const listing: Generated.Listing = {
++    kind: "Files",
++    files,
++    disk_changes: [change],
++    operation,
++    sides,
++    merge_request: mergeRequest,
++  };
+   const running: Generated.IpcError = { kind: "GitRunning" };
+   commands.listStop.mockResolvedValueOnce({ status: "ok", data: listing });
+   commands.listStop.mockResolvedValueOnce({ status: "ok", data: { kind: "MovedOn" } });
+@@ -130,38 +145,66 @@ test("listStop turns the app's files list into domain data and passes MovedOn an
+ 
+   expect(await source.listStop()).toEqual({
+     ok: true,
+-    value: { kind: "Files", files, diskChanges: [change], operation, sides },
++    value: { kind: "Files", files, diskChanges: [change], operation, sides, mergeRequest },
+   });
+   expect(await source.listStop()).toEqual({ ok: true, value: { kind: "MovedOn" } });
+   expect(await source.listStop()).toEqual({ ok: false, failure: running });
+ });
+ 
+-test("continueOperation answers Finished or Stopped with git's message, and a failure unchanged", async () => {
++test("continueOperation answers Finished, ReadyToPush or Stopped with git's message, and a failure unchanged", async () => {
+   const stopped: Generated.ContinueReply = { kind: "Stopped", message: "CONFLICT in b.ts" };
++  const ready: Generated.ContinueReply = { kind: "ReadyToPush", branch: "feature/due-dates" };
+   const refused: Generated.IpcError = { kind: "Git", message: "b.ts: needs merge" };
+   commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: stopped });
+   commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: { kind: "Finished" } });
++  commands.continueOperation.mockResolvedValueOnce({ status: "ok", data: ready });
+   commands.continueOperation.mockResolvedValueOnce({ status: "error", error: refused });
+   const source = createTauriSource();
+ 
+   expect(await source.continueOperation()).toEqual({ ok: true, value: stopped });
+   expect(await source.continueOperation()).toEqual({ ok: true, value: { kind: "Finished" } });
++  expect(await source.continueOperation()).toEqual({ ok: true, value: ready });
+   expect(await source.continueOperation()).toEqual({ ok: false, failure: refused });
+ });
+ 
+-test("abortOperation answers null, and a moved-on stop or no operation as the failure unchanged", async () => {
++test("abortOperation answers the leftovers, and a moved-on stop or no operation as the failure unchanged", async () => {
+   const movedOn: Generated.IpcError = { kind: "StopMovedOn" };
+   const none: Generated.IpcError = { kind: "NoOperation" };
+-  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: null });
++  const left: Generated.AbortReply = {
++    leftovers: [{ kind: "branchKept", branch: "feature/due-dates" }],
++  };
++  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: { leftovers: [] } });
++  commands.abortOperation.mockResolvedValueOnce({ status: "ok", data: left });
+   commands.abortOperation.mockResolvedValueOnce({ status: "error", error: movedOn });
+   commands.abortOperation.mockResolvedValueOnce({ status: "error", error: none });
+   const source = createTauriSource();
+ 
+-  expect(await source.abortOperation()).toEqual({ ok: true, value: null });
++  expect(await source.abortOperation()).toEqual({ ok: true, value: { leftovers: [] } });
++  expect(await source.abortOperation()).toEqual({ ok: true, value: left });
+   expect(await source.abortOperation()).toEqual({ ok: false, failure: movedOn });
+   expect(await source.abortOperation()).toEqual({ ok: false, failure: none });
+ });
+ 
++test("pushMergedBranch answers Pushed or git's words, and a failure unchanged", async () => {
++  const failed: Generated.PushReply = { kind: "failed", message: "[rejected] (fetch first)" };
++  const none: Generated.IpcError = { kind: "NoOperation" };
++  commands.pushMergedBranch.mockResolvedValueOnce({ status: "ok", data: { kind: "pushed" } });
++  commands.pushMergedBranch.mockResolvedValueOnce({ status: "ok", data: failed });
++  commands.pushMergedBranch.mockResolvedValueOnce({ status: "error", error: none });
++  const source = createTauriSource();
++
++  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: { kind: "pushed" } });
++  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: failed });
++  expect(await source.pushMergedBranch()).toEqual({ ok: false, failure: none });
++});
++
++test("closeEndedMerge calls the command once and answers null", async () => {
++  commands.closeEndedMerge.mockResolvedValueOnce(null);
++
++  expect(await createTauriSource().closeEndedMerge()).toEqual({ ok: true, value: null });
++  expect(commands.closeEndedMerge).toHaveBeenCalledTimes(1);
++});
++
+ test("loadFile turns the app's data into domain data: the middle range, not base", async () => {
+   commands.loadFile.mockResolvedValue({ status: "ok", data: DTO });
+ 
+diff --git a/frontend/src/ipc/tauri.ts b/frontend/src/ipc/tauri.ts
+index a1d9ae0..fdc4c45 100644
+--- a/frontend/src/ipc/tauri.ts
++++ b/frontend/src/ipc/tauri.ts
+@@ -82,7 +82,7 @@ export function createTauriSettings(): SettingsSource {
+ 
+ function createTauriStops(): Pick<
+   ChunkSource,
+-  "listStop" | "continueOperation" | "abortOperation"
++  "listStop" | "continueOperation" | "abortOperation" | "pushMergedBranch" | "closeEndedMerge"
+ > {
+   return {
+     async listStop() {
+@@ -94,6 +94,13 @@ function createTauriStops(): Pick<
+     async abortOperation() {
+       return toResult(await commands.abortOperation());
+     },
++    async pushMergedBranch() {
++      return toResult(await commands.pushMergedBranch());
++    },
++    async closeEndedMerge() {
++      await commands.closeEndedMerge();
++      return { ok: true, value: null };
++    },
+   };
+ }
+ 
+diff --git a/frontend/src/ui/QuestionDialog.vue b/frontend/src/ui/QuestionDialog.vue
+index a73fcbc..b598069 100644
+--- a/frontend/src/ui/QuestionDialog.vue
++++ b/frontend/src/ui/QuestionDialog.vue
+@@ -1,7 +1,8 @@
+ <script setup lang="ts">
+ import { computed, onMounted, useTemplateRef } from "vue";
+ 
+-import { questionText, type Question } from "./question";
++import type { Question } from "./question";
++import { questionText } from "./questionText";
+ 
+ const props = defineProps<{ question: Question }>();
+ const emit = defineEmits<{ answer: [yes: boolean]; dismiss: [] }>();
+@@ -35,7 +36,7 @@ function dismiss(event: Event): void {
+     >
+       <li v-for="file in text.list.files" :key="file" class="truncate">{{ file }}</li>
+     </ul>
+-    <ul v-else-if="text.list.kind === 'servers'" class="mt-2 list-disc pl-5">
++    <ul v-else-if="text.list.kind === 'lines'" class="mt-2 list-disc pl-5">
+       <li v-for="line in text.list.lines" :key="line">{{ line }}</li>
+     </ul>
+     <p v-if="text.note !== null" class="mt-3 text-fg-muted">{{ text.note }}</p>
+@@ -49,6 +50,7 @@ function dismiss(event: Event): void {
+         {{ text.confirm }}
+       </button>
+       <button
++        v-if="text.cancel !== null"
+         type="button"
+         class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
+         @click="emit('answer', false)"
+diff --git a/frontend/src/ui/aborting.test.ts b/frontend/src/ui/aborting.test.ts
+index 9fbdadf..d361175 100644
+--- a/frontend/src/ui/aborting.test.ts
++++ b/frontend/src/ui/aborting.test.ts
+@@ -1,7 +1,7 @@
+ import { afterEach, expect, test, vi } from "vitest";
+ import { shallowRef, type ShallowRef } from "vue";
+ 
+-import type { OperationView, SourceFailure, SourceResult } from "../ipc";
++import type { AbortReply, MergeView, OperationView, SourceFailure, SourceResult } from "../ipc";
+ import { createAborting, type Aborting } from "./aborting";
+ import { createAsking, type Asking } from "./asking";
+ import type { Stop } from "./currentStop";
+@@ -20,11 +20,22 @@ const REBASE: OperationView = {
+   editor_steps_ahead: false,
+ };
+ 
++const DUE_DATES: MergeView = {
++  branch: "feature/due-dates",
++  target: "main",
++  returnTo: { kind: "commit", id: "9b0d4e1" },
++  branchBefore: { kind: "movedFrom", id: "3f1c2a9" },
++};
++
++const CLEAN: SourceResult<AbortReply> = { ok: true, value: { leftovers: [] } };
++
+ type Pressed = Aborting & {
+   readonly asking: Asking;
+   readonly operation: ShallowRef<OperationView | null>;
++  readonly mergeRequest: ShallowRef<MergeView | null>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly ends: string[];
++  readonly closes: string[];
+   stop: Stop;
+ };
+ 
+@@ -33,17 +44,28 @@ afterEach(() => {
+ });
+ 
+ function aborting(
+-  abortOperation: () => Promise<SourceResult<null>>,
++  abortOperation: () => Promise<SourceResult<AbortReply>>,
+   operation: OperationView | null = REBASE,
++  mergeRequest: MergeView | null = null,
++  closeReply: SourceResult<null> = { ok: true, value: null },
+ ): Pressed {
+   const asking = createAsking();
+   const ends: string[] = [];
++  const closes: string[] = [];
+   const target = {
+-    source: { abortOperation },
++    source: {
++      abortOperation,
++      closeEndedMerge: () => {
++        closes.push("closeEndedMerge");
++        return Promise.resolve(closeReply);
++      },
++    },
+     asking,
+     operation: shallowRef(operation),
++    mergeRequest: shallowRef(mergeRequest),
+     problem: shallowRef<Problem | null>(null),
+     ends,
++    closes,
+     stop: { dropped: false },
+     gitRun: createGitRun(),
+     nextStop: (end: { readonly kind: "outside" }) => {
+@@ -65,7 +87,7 @@ test("without a recorded operation there is no Abort: the state is none and a pr
+   let aborts = 0;
+   const abort = aborting(() => {
+     aborts += 1;
+-    return Promise.resolve({ ok: true, value: null });
++    return Promise.resolve(CLEAN);
+   }, null);
+ 
+   expect(abort.abortState.value).toEqual({ kind: "none" });
+@@ -74,7 +96,7 @@ test("without a recorded operation there is no Abort: the state is none and a pr
+ });
+ 
+ test("the state follows the operation git lists", () => {
+-  const abort = aborting(() => Promise.resolve({ ok: true, value: null }), null);
++  const abort = aborting(() => Promise.resolve(CLEAN), null);
+ 
+   abort.operation.value = REBASE;
+   expect(abort.abortState.value).toEqual({ kind: "ready", operation: REBASE });
+@@ -86,11 +108,15 @@ test("Abort asks about the operation and calls git only after a yes; No and Esca
+   let aborts = 0;
+   const abort = aborting(() => {
+     aborts += 1;
+-    return Promise.resolve({ ok: true, value: null });
++    return Promise.resolve(CLEAN);
+   });
+ 
+   const declined = abort.abortOperation();
+-  expect(abort.asking.question.value).toEqual({ kind: "abort", operation: REBASE });
++  expect(abort.asking.question.value).toEqual({
++    kind: "abort",
++    operation: REBASE,
++    mergeRequest: null,
++  });
+   abort.asking.answer(false);
+   await declined;
+   const escaped = abort.abortOperation();
+@@ -107,7 +133,7 @@ test("Abort asks about the operation and calls git only after a yes; No and Esca
+   expect(abort.abortState.value).toEqual({ kind: "running", operation: REBASE });
+   expect(abort.problem.value).toBeNull();
+   await pressUnasked(abort);
+-  expect(aborts).toBe(1);
++  expect([aborts, abort.closes]).toEqual([1, []]);
+ });
+ 
+ test("git's refusal names the operation, logs it, and a later press asks again", async () => {
+@@ -137,7 +163,11 @@ test("git's refusal names the operation, logs it, and a later press asks again",
+   expect(abort.abortState.value.kind).toBe("ready");
+ 
+   const again = abort.abortOperation();
+-  expect(abort.asking.question.value).toEqual({ kind: "abort", operation: REBASE });
++  expect(abort.asking.question.value).toEqual({
++    kind: "abort",
++    operation: REBASE,
++    mergeRequest: null,
++  });
+   abort.asking.answer(true);
+   await again;
+   expect(aborts).toBe(2);
+@@ -156,7 +186,7 @@ test("an abort git answers StopMovedOn goes on to the new stop and shows no prob
+ });
+ 
+ test("an abort answered after its stop was dropped reports nothing and lists nothing", async () => {
+-  const answers: ((reply: SourceResult<null>) => void)[] = [];
++  const answers: ((reply: SourceResult<AbortReply>) => void)[] = [];
+   const abort = aborting(
+     () =>
+       new Promise((resolve) => {
+@@ -176,3 +206,88 @@ test("an abort answered after its stop was dropped reports nothing and lists not
+   expect([abort.problem.value, abort.ends]).toEqual([null, []]);
+   expect(abort.abortState.value.kind).toBe("ready");
+ });
++
++const MERGING: OperationView = { kind: "Merge", merging: null, into: null };
++
++const LEFT: AbortReply = {
++  leftovers: [
++    { kind: "notReturned", to: { kind: "commit", id: "9b0d4e1" } },
++    { kind: "branchKept", branch: "feature/due-dates" },
++  ],
++};
++
++test("a recorded merge's Abort asks with its merge request, and without leftovers ends as today", async () => {
++  const abort = aborting(() => Promise.resolve(CLEAN), MERGING, DUE_DATES);
++
++  const pressed = abort.abortOperation();
++  expect(abort.asking.question.value).toEqual({
++    kind: "abort",
++    operation: MERGING,
++    mergeRequest: DUE_DATES,
++  });
++  abort.asking.answer(true);
++  await pressed;
++
++  expect([abort.asking.question.value, abort.closes]).toEqual([null, []]);
++  expect(abort.abortState.value.kind).toBe("running");
++});
++
++test.each<[string, (abort: Pressed) => void]>([
++  ["Close", (abort) => abort.asking.answer(true)],
++  ["Escape", (abort) => abort.asking.dismiss()],
++])(
++  "leftovers show the notice; %s closes the ended merge once and the window stays ended",
++  async (_name, close) => {
++    const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES);
++
++    const pressed = abort.abortOperation();
++    abort.asking.answer(true);
++    await vi.waitFor(() => {
++      expect(abort.asking.question.value).toEqual({
++        kind: "abortLeftovers",
++        mergeRequest: DUE_DATES,
++        leftovers: LEFT.leftovers,
++      });
++    });
++    expect(abort.closes).toEqual([]);
++    expect(abort.abortState.value.kind).toBe("ready");
++    close(abort);
++    await pressed;
++
++    expect([abort.closes, abort.problem.value]).toEqual([["closeEndedMerge"], null]);
++    expect(abort.abortState.value.kind).toBe("running");
++  },
++);
++
++test("a close that fails is the abort's problem and the window can be used again", async () => {
++  vi.spyOn(console, "error").mockImplementation(() => undefined);
++  const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES, {
++    ok: false,
++    failure: { kind: "WorkerStopped" },
++  });
++
++  const pressed = abort.abortOperation();
++  abort.asking.answer(true);
++  await vi.waitFor(() => {
++    expect(abort.asking.question.value?.kind).toBe("abortLeftovers");
++  });
++  abort.asking.answer(true);
++  await pressed;
++
++  expect(abort.problem.value).toEqual({
++    action: "abort",
++    operation: "Merge",
++    cause: { kind: "WorkerStopped" },
++  });
++  expect(abort.abortState.value.kind).toBe("ready");
++});
++
++test("leftovers without a recorded merge ask nothing and still close the ended merge", async () => {
++  const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, null);
++
++  const pressed = abort.abortOperation();
++  abort.asking.answer(true);
++  await pressed;
++
++  expect([abort.asking.question.value, abort.closes]).toEqual([null, ["closeEndedMerge"]]);
++});
+diff --git a/frontend/src/ui/aborting.ts b/frontend/src/ui/aborting.ts
+index 145803f..32ebc47 100644
+--- a/frontend/src/ui/aborting.ts
++++ b/frontend/src/ui/aborting.ts
+@@ -1,10 +1,10 @@
+ import { computed, type ComputedRef, type ShallowRef } from "vue";
+ 
+-import type { ChunkSource, OperationView } from "../ipc";
++import type { ChunkSource, Leftover, MergeView, OperationView } from "../ipc";
+ import type { Asking } from "./asking";
+ import type { Stop } from "./currentStop";
+ import type { GitRun } from "./gitRun";
+-import { reportFailure, type EndsStop, type Problem } from "./problem";
++import { report, reportFailure, type EndsStop, type Problem } from "./problem";
+ 
+ type AbortState =
+   | { readonly kind: "none" }
+@@ -12,9 +12,10 @@ type AbortState =
+ 
+ type AbortTarget = EndsStop & {
+   readonly stop: Stop;
+-  readonly source: Pick<ChunkSource, "abortOperation">;
++  readonly source: Pick<ChunkSource, "abortOperation" | "closeEndedMerge">;
+   readonly asking: Pick<Asking, "ask">;
+   readonly operation: Readonly<ShallowRef<OperationView | null>>;
++  readonly mergeRequest: Readonly<ShallowRef<MergeView | null>>;
+   readonly problem: ShallowRef<Problem | null>;
+   readonly gitRun: GitRun;
+ };
+@@ -24,6 +25,53 @@ export type Aborting = {
+   readonly abortOperation: () => Promise<void>;
+ };
+ 
++type Pressed = {
++  readonly stop: Stop;
++  readonly operation: OperationView;
++  readonly mergeRequest: MergeView | null;
++};
++
++async function leftBehind(target: AbortTarget, pressed: Pressed): Promise<readonly Leftover[]> {
++  const { stop, operation } = pressed;
++  let leftovers: readonly Leftover[] = [];
++  await target.gitRun.run(stop, {
++    call: () => target.source.abortOperation(),
++    endsApp: (reply) => reply.leftovers.length === 0,
++    landing: async (outcome) => {
++      if (!outcome.ok) {
++        await reportFailure(target, {
++          action: "abort",
++          operation: operation.kind,
++          cause: outcome.cause,
++        });
++        return;
++      }
++      leftovers = outcome.value.leftovers;
++    },
++  });
++  return leftovers;
++}
++
++async function closeAborted(
++  target: AbortTarget,
++  pressed: Pressed,
++  leftovers: readonly Leftover[],
++): Promise<void> {
++  const { stop, operation, mergeRequest } = pressed;
++  if (mergeRequest !== null) {
++    await target.asking.ask({ kind: "abortLeftovers", mergeRequest, leftovers });
++  }
++  await target.gitRun.run(stop, {
++    call: () => target.source.closeEndedMerge(),
++    endsApp: () => true,
++    landing: async (outcome) => {
++      if (!outcome.ok) {
++        report(target, { action: "abort", operation: operation.kind, cause: outcome.cause });
++      }
++    },
++  });
++}
++
+ export function createAborting(target: AbortTarget): Aborting {
+   const { running } = target.gitRun;
+   const abortState = computed((): AbortState => {
+@@ -39,24 +87,19 @@ export function createAborting(target: AbortTarget): Aborting {
+     if (state.kind !== "ready") {
+       return;
+     }
+-    const { operation } = state;
+-    const { stop } = target;
+-    if ((await target.asking.ask({ kind: "abort", operation })) !== "yes") {
++    const pressed = {
++      stop: target.stop,
++      operation: state.operation,
++      mergeRequest: target.mergeRequest.value,
++    };
++    const { operation, mergeRequest } = pressed;
++    if ((await target.asking.ask({ kind: "abort", operation, mergeRequest })) !== "yes") {
+       return;
+     }
+-    await target.gitRun.run(stop, {
+-      call: () => target.source.abortOperation(),
+-      endsApp: () => true,
+-      landing: async (outcome) => {
+-        if (!outcome.ok) {
+-          await reportFailure(target, {
+-            action: "abort",
+-            operation: operation.kind,
+-            cause: outcome.cause,
+-          });
+-        }
+-      },
+-    });
++    const leftovers = await leftBehind(target, pressed);
++    if (leftovers.length > 0) {
++      await closeAborted(target, pressed, leftovers);
++    }
+   }
+ 
+   return { abortState, abortOperation };
+diff --git a/frontend/src/ui/continuing.test.ts b/frontend/src/ui/continuing.test.ts
+index 368bcfd..6bc7ec7 100644
+--- a/frontend/src/ui/continuing.test.ts
++++ b/frontend/src/ui/continuing.test.ts
+@@ -39,6 +39,7 @@ type Pressed = Continuing & {
+   readonly calls: number[];
+   readonly ends: StopEnd[];
+   readonly lists: string[];
++  readonly offers: string[];
+   readonly answers: ((reply: Reply) => void)[];
+   unsaved: string[];
+   stop: Stop;
+@@ -66,6 +67,7 @@ function continuing(
+   const answers: ((reply: Reply) => void)[] = [];
+   const ends: StopEnd[] = [];
+   const lists: string[] = [];
++  const offers: string[] = [];
+   const unsaved: string[] = [];
+   const target = {
+     asking: createAsking(),
+@@ -77,6 +79,7 @@ function continuing(
+     calls,
+     ends,
+     lists,
++    offers,
+     answers,
+     unsaved,
+     stop: { dropped: false },
+@@ -98,7 +101,13 @@ function continuing(
+       return Promise.resolve();
+     },
+   };
+-  return Object.assign(target, createContinuing(target));
++  const pushing = {
++    offerPush: (branch: string, kind: string) => {
++      offers.push(`${branch} ${kind}`);
++      return Promise.resolve();
++    },
++  };
++  return Object.assign(target, createContinuing(target, pushing));
+ }
+ 
+ async function answered(press: Pressed, reply: Reply): Promise<void> {
+@@ -311,13 +320,41 @@ test("Finished is logged and Continue stays running: the window is closing", asy
+   await answered(press, { ok: true, value: { kind: "Finished" } });
+ 
+   expect(lines).toEqual(['[info] continue.finished {operation: "Rebase"}']);
+-  expect([press.ends, press.problem.value, press.continueState.value]).toEqual([
++  expect([press.ends, press.problem.value, press.continueState.value, press.offers]).toEqual([
+     [],
+     null,
+     "running",
++    [],
+   ]);
+ });
+ 
++test("ReadyToPush hands the branch to the push offer once, lists nothing and does not end the window", async () => {
++  const lines = quiet();
++  const press = continuing(MERGE);
++
++  await answered(press, { ok: true, value: { kind: "ReadyToPush", branch: "feature/due-dates" } });
++
++  expect(press.offers).toEqual(["feature/due-dates Merge"]);
++  expect([press.ends, press.lists, press.problem.value]).toEqual([[], [], null]);
++  expect(press.continueState.value).toBe("ready");
++  expect(lines).toEqual([
++    '[info] continue.ready_to_push {operation: "Merge", branch: "feature/due-dates"}',
++  ]);
++});
++
++test("a ReadyToPush after its stop was dropped offers no push", async () => {
++  const press = continuing(MERGE);
++  const pressed = press.continueOperation();
++  await vi.waitFor(() => {
++    expect(press.calls).toEqual([1]);
++  });
++  press.stop.dropped = true;
++  press.answers[0]?.({ ok: true, value: { kind: "ReadyToPush", branch: "feature/due-dates" } });
++  await pressed;
++
++  expect(press.offers).toEqual([]);
++});
++
+ test("a reply after its stop was dropped changes nothing but the running state", async () => {
+   const press = continuing();
+   const pressed = press.continueOperation();
+diff --git a/frontend/src/ui/continuing.ts b/frontend/src/ui/continuing.ts
+index 3f5a6e9..afb84b7 100644
+--- a/frontend/src/ui/continuing.ts
++++ b/frontend/src/ui/continuing.ts
+@@ -13,6 +13,7 @@ import type { Stop } from "./currentStop";
+ import type { GitRun } from "./gitRun";
+ import { CONTINUING_TEXT, filesLeftText, SAVING_TEXT } from "./operationText";
+ import { reportFailure, type Outcome, type Problem, type ProblemCause } from "./problem";
++import type { Pushing } from "./pushing";
+ import type { Question } from "./question";
+ import type { StopEnd } from "./stops";
+ 
+@@ -81,17 +82,46 @@ async function landing(
+   target: ContinueTarget,
+   operation: OperationView,
+   outcome: Outcome<ContinueReply>,
+-): Promise<void> {
++): Promise<string | null> {
+   if (!outcome.ok) {
+     await refused(target, operation, outcome.cause);
+-  } else if (outcome.value.kind === "Stopped") {
+-    await target.nextStop({ kind: "continued", message: outcome.value.message });
+-  } else {
+-    log.info("continue.finished", { operation: operation.kind });
++    return null;
++  }
++  const reply = outcome.value;
++  switch (reply.kind) {
++    case "Stopped":
++      await target.nextStop({ kind: "continued", message: reply.message });
++      return null;
++    case "Finished":
++      log.info("continue.finished", { operation: operation.kind });
++      return null;
++    case "ReadyToPush":
++      log.info("continue.ready_to_push", { operation: operation.kind, branch: reply.branch });
++      return reply.branch;
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
+   }
+ }
+ 
+-export function createContinuing(target: ContinueTarget): Continuing {
++async function continued(
++  target: ContinueTarget,
++  stop: Stop,
++  operation: OperationView,
++): Promise<string | null> {
++  let pushable: string | null = null;
++  await target.gitRun.run(stop, {
++    call: () => target.source.continueOperation(),
++    endsApp: (reply) => reply.kind === "Finished",
++    landing: async (outcome) => {
++      pushable = await landing(target, operation, outcome);
++    },
++  });
++  return pushable;
++}
++
++export function createContinuing(target: ContinueTarget, pushing: Pushing): Continuing {
+   const filesLeft = computed(
+     () => target.files.value.filter((file) => file.status !== "Resolved").length,
+   );
+@@ -117,11 +147,10 @@ export function createContinuing(target: ContinueTarget): Continuing {
+     if (!(await confirmed(target, operation))) {
+       return;
+     }
+-    await target.gitRun.run(stop, {
+-      call: () => target.source.continueOperation(),
+-      endsApp: (reply) => reply.kind === "Finished",
+-      landing: (outcome) => landing(target, operation, outcome),
+-    });
++    const branch = await continued(target, stop, operation);
++    if (branch !== null) {
++      await pushing.offerPush(branch, operation.kind);
++    }
+   }
+ 
+   return {
+diff --git a/frontend/src/ui/diskChanges.test.ts b/frontend/src/ui/diskChanges.test.ts
+index 41e054d..9554dc9 100644
+--- a/frontend/src/ui/diskChanges.test.ts
++++ b/frontend/src/ui/diskChanges.test.ts
+@@ -35,6 +35,8 @@ const SOURCE: ChunkSource = {
+   listStop: notUsed,
+   continueOperation: notUsed,
+   abortOperation: notUsed,
++  pushMergedBranch: notUsed,
++  closeEndedMerge: notUsed,
+   loadSettings: notUsed,
+   setTheme: notUsed,
+   setAntialiasing: notUsed,
+diff --git a/frontend/src/ui/leftoverText.test.ts b/frontend/src/ui/leftoverText.test.ts
+new file mode 100644
+index 0000000..0644ab4
+--- /dev/null
++++ b/frontend/src/ui/leftoverText.test.ts
+@@ -0,0 +1,44 @@
++import { expect, test } from "vitest";
++
++import type { Leftover } from "../ipc";
++import { leftoverText } from "./leftoverText";
++
++const DEVELOP = { kind: "branch", name: "develop" } as const;
++const COMMIT = { kind: "commit", id: "9b0d4e1" } as const;
++
++test.each<[Leftover, string]>([
++  [
++    { kind: "notReturned", to: DEVELOP },
++    "HEAD moved after the merge started, so yamt did not check out develop again.",
++  ],
++  [
++    { kind: "notReturned", to: COMMIT },
++    "HEAD moved after the merge started, so yamt did not check out commit 9b0d4e1 again.",
++  ],
++  [
++    {
++      kind: "returnRefused",
++      to: DEVELOP,
++      message: "error: your local changes would be overwritten",
++    },
++    "git did not check out develop again: error: your local changes would be overwritten",
++  ],
++  [
++    { kind: "returnRefused", to: COMMIT, message: "fatal: reference is not a tree" },
++    "git did not check out commit 9b0d4e1 again: fatal: reference is not a tree",
++  ],
++  [
++    { kind: "branchKept", branch: "feature/due-dates" },
++    "feature/due-dates changed after the merge started, so yamt left it as it is.",
++  ],
++  [
++    { kind: "branchCheckedOut", branch: "feature/due-dates" },
++    "feature/due-dates is still checked out, so yamt did not delete it.",
++  ],
++  [
++    { kind: "branchRefused", branch: "feature/due-dates", message: "error: cannot lock ref" },
++    "git did not put feature/due-dates back: error: cannot lock ref",
++  ],
++])("%j reads as the one sentence for it", (leftover, sentence) => {
++  expect(leftoverText(leftover)).toBe(sentence);
++});
+diff --git a/frontend/src/ui/leftoverText.ts b/frontend/src/ui/leftoverText.ts
+new file mode 100644
+index 0000000..034f6be
+--- /dev/null
++++ b/frontend/src/ui/leftoverText.ts
+@@ -0,0 +1,33 @@
++import type { Leftover, ReturnTo } from "../ipc";
++
++export function returnPlaceText(to: ReturnTo): string {
++  switch (to.kind) {
++    case "branch":
++      return to.name;
++    case "commit":
++      return `commit ${to.id}`;
++    default: {
++      const _exhaustive: never = to;
++      return _exhaustive;
++    }
++  }
++}
++
++export function leftoverText(leftover: Leftover): string {
++  switch (leftover.kind) {
++    case "notReturned":
++      return `HEAD moved after the merge started, so yamt did not check out ${returnPlaceText(leftover.to)} again.`;
++    case "returnRefused":
++      return `git did not check out ${returnPlaceText(leftover.to)} again: ${leftover.message}`;
++    case "branchKept":
++      return `${leftover.branch} changed after the merge started, so yamt left it as it is.`;
++    case "branchCheckedOut":
++      return `${leftover.branch} is still checked out, so yamt did not delete it.`;
++    case "branchRefused":
++      return `git did not put ${leftover.branch} back: ${leftover.message}`;
++    default: {
++      const _exhaustive: never = leftover;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/listing.test.ts b/frontend/src/ui/listing.test.ts
+index 66b6c94..5d0b82e 100644
+--- a/frontend/src/ui/listing.test.ts
++++ b/frontend/src/ui/listing.test.ts
+@@ -7,6 +7,7 @@ import type {
+   FileMergeData,
+   FileSides,
+   Listing,
++  MergeView,
+   OperationView,
+   SideNames,
+   SourceResult,
+@@ -22,6 +23,7 @@ type Listed = {
+   readonly source: ChunkSource;
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly operation: ShallowRef<OperationView | null>;
++  readonly mergeRequest: ShallowRef<MergeView | null>;
+   readonly sideNames: ShallowRef<SideNames>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+   readonly choices: ShallowRef<readonly FileSides[]>;
+@@ -49,6 +51,12 @@ const SIDES: SideNames = {
+   remote: { kind: "Branch", name: "main" },
+ };
+ const NO_NAMES: SideNames = { local: null, remote: null };
++const MERGE_REQUEST: MergeView = {
++  branch: "feature/due-dates",
++  target: "main",
++  returnTo: { kind: "branch", name: "develop" },
++  branchBefore: { kind: "created" },
++};
+ 
+ afterEach(() => {
+   vi.restoreAllMocks();
+@@ -70,6 +78,8 @@ function sourceListing(answers: SourceResult<Listing>[]): ChunkSource {
+     takeSide: notUsed,
+     continueOperation: notUsed,
+     abortOperation: notUsed,
++    pushMergedBranch: notUsed,
++    closeEndedMerge: notUsed,
+     loadSettings: notUsed,
+     setTheme: notUsed,
+     setAntialiasing: notUsed,
+@@ -88,6 +98,7 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
+     source: sourceListing(answers),
+     files: shallowRef<readonly FileEntry[]>([]),
+     operation: shallowRef<OperationView | null>(null),
++    mergeRequest: shallowRef<MergeView | null>(null),
+     sideNames: shallowRef<SideNames>(NO_NAMES),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+     choices: shallowRef<readonly FileSides[]>([]),
+@@ -105,22 +116,32 @@ function listedBy(answers: SourceResult<Listing>[]): Listed {
+   };
+ }
+ 
+-function files(operation: OperationView | null, sides: SideNames): SourceResult<Listing> {
+-  return { ok: true, value: { kind: "Files", files: FILES, diskChanges: [], operation, sides } };
++function files(
++  operation: OperationView | null,
++  sides: SideNames,
++  mergeRequest: MergeView | null = null,
++): SourceResult<Listing> {
++  const value = { files: FILES, diskChanges: [], operation, sides, mergeRequest };
++  return { ok: true, value: { kind: "Files", ...value } };
+ }
+ 
+-test("a list sets the files, the operation and both names from the one reply", async () => {
+-  const target = listedBy([files(REBASE, SIDES), files(null, NO_NAMES)]);
++test("a list sets the files, the operation, both names and the merge request from the one reply", async () => {
++  const target = listedBy([files(REBASE, SIDES, MERGE_REQUEST), files(null, NO_NAMES)]);
+ 
+   expect(await refreshFiles(target, "start")).toBe(FILES);
+-  expect([target.files.value, target.operation.value, target.sideNames.value]).toEqual([
+-    FILES,
+-    REBASE,
+-    SIDES,
+-  ]);
++  expect([
++    target.files.value,
++    target.operation.value,
++    target.sideNames.value,
++    target.mergeRequest.value,
++  ]).toEqual([FILES, REBASE, SIDES, MERGE_REQUEST]);
+ 
+   await refreshFiles(target, "running");
+-  expect([target.operation.value, target.sideNames.value]).toEqual([null, NO_NAMES]);
++  expect([target.operation.value, target.sideNames.value, target.mergeRequest.value]).toEqual([
++    null,
++    NO_NAMES,
++    null,
++  ]);
+   expect(target.ends).toEqual([]);
+ });
+ 
+diff --git a/frontend/src/ui/listing.ts b/frontend/src/ui/listing.ts
+index 24ae0a6..055e370 100644
+--- a/frontend/src/ui/listing.ts
++++ b/frontend/src/ui/listing.ts
+@@ -1,6 +1,6 @@
+ import type { ShallowRef } from "vue";
+ 
+-import type { FileEntry, OperationView, SideNames } from "../ipc";
++import type { FileEntry, MergeView, OperationView, SideNames } from "../ipc";
+ import { landed, type Stop } from "./currentStop";
+ import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
+ import type { DiskNotice } from "./noticeText";
+@@ -11,6 +11,7 @@ type ListTarget = DiskChangeTarget & {
+   readonly stop: Stop;
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly operation: ShallowRef<OperationView | null>;
++  readonly mergeRequest: ShallowRef<MergeView | null>;
+   readonly sideNames: ShallowRef<SideNames>;
+   nextStop(end: StopEnd): Promise<void>;
+ };
+@@ -28,9 +29,10 @@ export async function refreshFiles(
+     await target.nextStop({ kind: "outside" });
+     return null;
+   }
+-  const { files, diskChanges, operation, sides } = listed.value;
++  const { files, diskChanges, operation, sides, mergeRequest } = listed.value;
+   target.files.value = files;
+   target.operation.value = operation;
++  target.mergeRequest.value = mergeRequest;
+   target.sideNames.value = sides;
+   if (target.problem.value?.action === "list") {
+     target.problem.value = null;
+diff --git a/frontend/src/ui/operationText.ts b/frontend/src/ui/operationText.ts
+index 6f80459..a33ad50 100644
+--- a/frontend/src/ui/operationText.ts
++++ b/frontend/src/ui/operationText.ts
+@@ -1,4 +1,5 @@
+-import type { OperationKind, OperationView, ProgressView, SideName } from "../ipc";
++import type { MergeView, OperationKind, OperationView, ProgressView, SideName } from "../ipc";
++import { returnPlaceText } from "./leftoverText";
+ 
+ type OperationLine = { readonly text: string; readonly tooltip: string };
+ 
+@@ -240,3 +241,23 @@ export function abortMessage(operation: OperationView): string {
+   const name = NAMES[operation.kind];
+   return `Every resolution and every save in this ${name} will be lost, and so will unsaved edits.${doneSentence(operation)} The repository goes back to how it was before the ${name}, and yamt closes.`;
+ }
++
++export function mergeRequestAbortMessage({ branch, target, returnTo }: MergeView): string {
++  const merge = `Abort the merge of ${target} into ${branch}`;
++  return returnTo === null ? `${merge}?` : `${merge} and return to ${returnPlaceText(returnTo)}?`;
++}
++
++export function mergeRequestAbortNote({ branch, branchBefore }: MergeView): string | null {
++  switch (branchBefore.kind) {
++    case "created":
++      return `yamt deletes ${branch}, which it created for this merge.`;
++    case "movedFrom":
++      return `${branch} goes back to ${branchBefore.id}, where it was before.`;
++    case "unchanged":
++      return null;
++    default: {
++      const _exhaustive: never = branchBefore;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/pushing.test.ts b/frontend/src/ui/pushing.test.ts
+new file mode 100644
+index 0000000..bd372b1
+--- /dev/null
++++ b/frontend/src/ui/pushing.test.ts
+@@ -0,0 +1,185 @@
++import { afterEach, expect, test, vi } from "vitest";
++import { shallowRef } from "vue";
++
++import type { PushReply, SourceResult } from "../ipc";
++import { createAsking, type Asking } from "./asking";
++import { createGitRun, type GitRun } from "./gitRun";
++import type { Problem } from "./problem";
++import { problemText } from "./problemText";
++import { createPushing } from "./pushing";
++
++const LINUX = "Linux x86_64";
++const BRANCH = "feature/due-dates";
++const REJECTED = "[rejected] (fetch first)";
++const PUSHED: SourceResult<PushReply> = { ok: true, value: { kind: "pushed" } };
++const FAILED: SourceResult<PushReply> = {
++  ok: true,
++  value: { kind: "failed", message: REJECTED },
++};
++
++type Offered = {
++  readonly asking: Asking;
++  readonly gitRun: GitRun;
++  readonly calls: string[];
++  readonly problem: { value: Problem | null };
++  readonly stop: { dropped: boolean };
++  readonly done: Promise<void>;
++};
++
++afterEach(() => {
++  vi.restoreAllMocks();
++});
++
++function offered(
++  pushes: SourceResult<PushReply>[],
++  closeReply: SourceResult<null> = { ok: true, value: null },
++): Offered {
++  const asking = createAsking();
++  const gitRun = createGitRun();
++  const calls: string[] = [];
++  const problem = shallowRef<Problem | null>(null);
++  const stop = { dropped: false };
++  const { offerPush } = createPushing({
++    stop,
++    asking,
++    gitRun,
++    problem,
++    source: {
++      pushMergedBranch: () => {
++        calls.push("push");
++        return Promise.resolve(pushes.shift() ?? PUSHED);
++      },
++      closeEndedMerge: () => {
++        calls.push("close");
++        return Promise.resolve(closeReply);
++      },
++    },
++  });
++  return { asking, gitRun, calls, problem, stop, done: offerPush(BRANCH, "Merge") };
++}
++
++async function asked(offer: Offered): Promise<void> {
++  await vi.waitFor(() => {
++    expect(offer.asking.question.value).not.toBeNull();
++  });
++}
++
++test("Push pushes once", async () => {
++  const offer = offered([PUSHED]);
++
++  expect(offer.asking.question.value).toEqual({ kind: "push", branch: BRANCH });
++  offer.asking.answer(true);
++  await offer.done;
++
++  expect(offer.calls).toEqual(["push"]);
++  expect(offer.asking.question.value).toBeNull();
++});
++
++test.each<[string, (asking: Asking) => void]>([
++  ["Keep Local", (asking) => asking.answer(false)],
++  ["Escape", (asking) => asking.dismiss()],
++])("Escape and Keep Local never push: %s closes the ended merge instead", async (_name, keep) => {
++  const offer = offered([PUSHED]);
++
++  keep(offer.asking);
++  await offer.done;
++
++  expect(offer.calls).toEqual(["close"]);
++});
++
++test("a failure asks again with git's words, and Keep Local then pushes nothing more", async () => {
++  const offer = offered([FAILED]);
++
++  offer.asking.answer(true);
++  await asked(offer);
++  expect(offer.asking.question.value).toEqual({
++    kind: "pushFailed",
++    branch: BRANCH,
++    message: REJECTED,
++  });
++  expect(offer.gitRun.running.value).toBe(false);
++  offer.asking.dismiss();
++  await offer.done;
++
++  expect(offer.calls).toEqual(["push", "close"]);
++});
++
++test("a failure asks again and Push Again pushes a second time", async () => {
++  const offer = offered([FAILED, PUSHED]);
++
++  offer.asking.answer(true);
++  await asked(offer);
++  offer.asking.answer(true);
++  await offer.done;
++
++  expect(offer.calls).toEqual(["push", "push"]);
++});
++
++test("Pushed ends the app: git stays running and nothing else is asked or closed", async () => {
++  const offer = offered([PUSHED]);
++
++  offer.asking.answer(true);
++  await offer.done;
++
++  expect([offer.gitRun.running.value, offer.asking.question.value]).toEqual([true, null]);
++  expect(offer.calls).toEqual(["push"]);
++});
++
++test("Keep Local closes once and the window stays ended", async () => {
++  const offer = offered([]);
++
++  offer.asking.answer(false);
++  await offer.done;
++
++  expect(offer.calls).toEqual(["close"]);
++  expect(offer.gitRun.running.value).toBe(true);
++  expect(offer.problem.value).toBeNull();
++});
++
++test("a push the app refuses is the continue problem, then Keep Local's path closes the merge", async () => {
++  vi.spyOn(console, "error").mockImplementation(() => undefined);
++  const offer = offered([{ ok: false, failure: { kind: "WorkerStopped" } }]);
++
++  offer.asking.answer(true);
++  await offer.done;
++
++  expect(offer.calls).toEqual(["push", "close"]);
++  const { problem } = offer;
++  expect(problem.value).toEqual({
++    action: "continue",
++    operation: "Merge",
++    cause: { kind: "WorkerStopped" },
++  });
++  expect(problem.value === null ? null : problemText(problem.value, LINUX)).toBe(
++    "Could not commit the merge: yamt's worker stopped; try again.",
++  );
++});
++
++test("a push answered after its stop was dropped asks nothing more and closes nothing", async () => {
++  const offer = offered([FAILED]);
++
++  offer.stop.dropped = true;
++  offer.asking.answer(true);
++  await offer.done;
++
++  expect([offer.calls, offer.asking.question.value, offer.problem.value]).toEqual([
++    ["push"],
++    null,
++    null,
++  ]);
++});
++
++test("a close the app refuses is the continue problem and the window can be used again", async () => {
++  vi.spyOn(console, "error").mockImplementation(() => undefined);
++  const offer = offered([], { ok: false, failure: { kind: "WorkerStopped" } });
++
++  offer.asking.answer(false);
++  await offer.done;
++
++  expect(offer.problem.value).toEqual({
++    action: "continue",
++    operation: "Merge",
++    cause: { kind: "WorkerStopped" },
++  });
++  expect(offer.gitRun.running.value).toBe(false);
++});
+diff --git a/frontend/src/ui/pushing.ts b/frontend/src/ui/pushing.ts
+new file mode 100644
+index 0000000..ba72a0b
+--- /dev/null
++++ b/frontend/src/ui/pushing.ts
+@@ -0,0 +1,76 @@
++import type { ShallowRef } from "vue";
++
++import type { ChunkSource, OperationKind, PushReply } from "../ipc";
++import type { Asking } from "./asking";
++import type { Stop } from "./currentStop";
++import type { GitRun } from "./gitRun";
++import { report, type Outcome, type Problem } from "./problem";
++import type { Question } from "./question";
++
++type PushTarget = {
++  readonly stop: Stop;
++  readonly source: Pick<ChunkSource, "pushMergedBranch" | "closeEndedMerge">;
++  readonly asking: Pick<Asking, "ask">;
++  readonly gitRun: GitRun;
++  readonly problem: ShallowRef<Problem | null>;
++};
++
++export type Pushing = {
++  readonly offerPush: (branch: string, operation: OperationKind) => Promise<void>;
++};
++
++function reported<T>(target: PushTarget, operation: OperationKind, outcome: Outcome<T>): void {
++  if (!outcome.ok) {
++    report(target, { action: "continue", operation, cause: outcome.cause });
++  }
++}
++
++async function pushed(
++  target: PushTarget,
++  stop: Stop,
++  operation: OperationKind,
++): Promise<Outcome<PushReply> | null> {
++  let replied: Outcome<PushReply> | null = null;
++  await target.gitRun.run(stop, {
++    call: () => target.source.pushMergedBranch(),
++    endsApp: (reply) => reply.kind === "pushed",
++    landing: async (outcome) => {
++      replied = outcome;
++      reported(target, operation, outcome);
++    },
++  });
++  return replied;
++}
++
++async function offerPush(
++  target: PushTarget,
++  branch: string,
++  operation: OperationKind,
++): Promise<void> {
++  const { stop } = target;
++  let question: Question = { kind: "push", branch };
++  while ((await target.asking.ask(question)) === "yes") {
++    const outcome = await pushed(target, stop, operation);
++    if (outcome === null) {
++      return;
++    }
++    if (!outcome.ok) {
++      break;
++    }
++    if (outcome.value.kind === "pushed") {
++      return;
++    }
++    question = { kind: "pushFailed", branch, message: outcome.value.message };
++  }
++  await target.gitRun.run(stop, {
++    call: () => target.source.closeEndedMerge(),
++    endsApp: () => true,
++    landing: async (outcome) => {
++      reported(target, operation, outcome);
++    },
++  });
++}
++
++export function createPushing(target: PushTarget): Pushing {
++  return { offerPush: (branch, operation) => offerPush(target, branch, operation) };
++}
+diff --git a/frontend/src/ui/question.test.ts b/frontend/src/ui/question.test.ts
+index a507b75..e4a2b4f 100644
+--- a/frontend/src/ui/question.test.ts
++++ b/frontend/src/ui/question.test.ts
+@@ -1,15 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { parseKey } from "../ipc";
+-import { serverKey, type ServerSpec } from "../lsp";
+-import { endsWithStop, exitMustAsk, finishMustAsk, questionText } from "./question";
+-
+-const LINUX = "Linux x86_64";
+-
+-function unprocessed(conflicts: number, changes: number, remembered = 0): string {
+-  return questionText({ kind: "unprocessed", summary: { conflicts, changes, remembered } }, LINUX)
+-    .message;
+-}
++import { endsWithStop, exitMustAsk, finishMustAsk } from "./question";
+ 
+ test("Mark resolved asks exactly when the summary counts a conflict or a change", () => {
+   expect(finishMustAsk({ conflicts: 0, changes: 0, remembered: 0 })).toBe(false);
+@@ -23,206 +14,11 @@ test("Mark resolved never asks for conflicts git rerere filled in, but still ask
+   expect(finishMustAsk({ conflicts: 0, changes: 1, remembered: 2 })).toBe(true);
+ });
+ 
+-test("the unprocessed sentence never mentions remembered conflicts", () => {
+-  const message = unprocessed(1, 0, 3);
+-  expect(message).toContain("1 unresolved conflict still remains.");
+-  expect(message).not.toContain("3");
+-  expect(message).not.toContain("remembered");
+-});
+-
+ test("quitting asks exactly when some file has unsaved work", () => {
+   expect(exitMustAsk([])).toBe(false);
+   expect(exitMustAsk(["src/App.vue"])).toBe(true);
+ });
+ 
+-test("the unprocessed sentence names only the non-zero counts with singular and plural", () => {
+-  const both = unprocessed(2, 3);
+-  expect(both).toContain("2 unresolved conflicts and 3 unprocessed changes still remain.");
+-  expect(both).toContain("The file will be saved exactly as shown in the Result pane.");
+-
+-  expect(unprocessed(1, 1)).toContain(
+-    "1 unresolved conflict and 1 unprocessed change still remain.",
+-  );
+-  expect(unprocessed(1, 0)).toContain("1 unresolved conflict still remains.");
+-  expect(unprocessed(0, 1)).toContain("1 unprocessed change still remains.");
+-  expect(unprocessed(0, 4)).toContain("4 unprocessed changes still remain.");
+-  expect(unprocessed(0, 4)).not.toContain("conflict");
+-  expect(unprocessed(5, 0)).not.toContain("change");
+-});
+-
+-test("the unprocessed question carries WebStorm's title and buttons", () => {
+-  expect(
+-    questionText(
+-      { kind: "unprocessed", summary: { conflicts: 1, changes: 0, remembered: 0 } },
+-      LINUX,
+-    ),
+-  ).toMatchObject({
+-    title: "Unprocessed Changes",
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Save Current Result",
+-    cancel: "Back to Resolving",
+-  });
+-});
+-
+-test("the exit question says the listed files are not saved to disk (plan §2 #69)", () => {
+-  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] }, LINUX)).toEqual({
+-    title: "Unsaved Changes",
+-    message: "These files have changes that are not saved to disk. Exit without saving them?",
+-    list: { kind: "files", files: ["src/App.vue", "a.ts"] },
+-    note: null,
+-    confirm: "Exit Without Saving",
+-    cancel: "Cancel",
+-  });
+-});
+-
+-test("the clash question names the key in the platform's words, its owner and the asking action", () => {
+-  const key = parseKey("Mod-f");
+-  if (key === null) {
+-    throw new Error("Mod-f does not parse");
+-  }
+-  const clash = { kind: "clash", key, action: "undo", owner: "find" } as const;
+-
+-  expect(questionText(clash, LINUX)).toEqual({
+-    title: "Key Already in Use",
+-    message: "Ctrl+F is already used by Find. Move it to Undo?",
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Move",
+-    cancel: "Cancel",
+-  });
+-  expect(questionText(clash, "MacIntel").message).toBe(
+-    "⌘F is already used by Find. Move it to Undo?",
+-  );
+-});
+-
+-function spec(name: string, project: string, installed = true): ServerSpec {
+-  return {
+-    key: serverKey(`${name} (${project})`),
+-    name,
+-    command: { program: name, args: [] },
+-    project,
+-    folders: { project: ["node_modules/.bin"], home: [] },
+-    fileTypes: ["ts"],
+-    formats: false,
+-    settings: null,
+-    initializationOptions: null,
+-    install: installed
+-      ? null
+-      : {
+-          kind: "node",
+-          package: "typescript-language-server",
+-          program: "typescript-language-server",
+-          folder: project,
+-          manager: "pnpm",
+-          reason: { kind: "typescript", version: "5.9.3" },
+-        },
+-    help: null,
+-    notes: [],
+-  };
+-}
+-
+-test("the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67)", () => {
+-  const found = [
+-    spec("oxfmt", "frontend"),
+-    spec("oxlint", "frontend"),
+-    spec("TypeScript", "frontend", false),
+-    spec("oxlint (repository root)", ""),
+-  ];
+-  const added = [spec("pylsp", ""), spec("gopls", "")];
+-
+-  expect(questionText({ kind: "servers", found, added }, LINUX)).toEqual({
+-    title: "Language Servers",
+-    message: "Start this project's language servers?",
+-    list: {
+-      kind: "servers",
+-      lines: [
+-        "oxfmt, oxlint, TypeScript (not installed) — frontend/",
+-        "oxlint (repository root) — the repository root",
+-        "pylsp, gopls — added by you",
+-      ],
+-    },
+-    note: "yamt remembers your answer for this repository. You can change it in Settings.",
+-    confirm: "Start",
+-    cancel: "Don't start",
+-  });
+-  expect(
+-    questionText({ kind: "servers", found: [], added: [spec("pylsp", "")] }, LINUX).list,
+-  ).toEqual({ kind: "servers", lines: ["pylsp — added by you"] });
+-  expect(questionText({ kind: "servers", found, added: [] }, LINUX).list).toEqual({
+-    kind: "servers",
+-    lines: [
+-      "oxfmt, oxlint, TypeScript (not installed) — frontend/",
+-      "oxlint (repository root) — the repository root",
+-    ],
+-  });
+-});
+-
+-test("aborting a merge asks with plan #74's words, unchanged", () => {
+-  const operation = { kind: "Merge", merging: null, into: null } as const;
+-
+-  expect(questionText({ kind: "abort", operation }, LINUX)).toEqual({
+-    title: "Abort Merge",
+-    message:
+-      "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Abort Merge",
+-    cancel: "Cancel",
+-  });
+-});
+-
+-test("aborting a rebase names it and counts the commits already replayed", () => {
+-  const operation = {
+-    kind: "Rebase",
+-    branch: "feature",
+-    onto: null,
+-    replaying: null,
+-    progress: { step: 3, total: 3 },
+-    editor_steps_ahead: false,
+-  } as const;
+-
+-  const text = questionText({ kind: "abort", operation }, LINUX);
+-
+-  expect([text.title, text.confirm]).toEqual(["Abort Rebase", "Abort Rebase"]);
+-  expect(text.message).toBe(
+-    "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The 2 commits already replayed are undone too. The repository goes back to how it was before the rebase, and yamt closes.",
+-  );
+-});
+-
+-test("Continue with unsaved edits names the files and continues or commits by the operation", () => {
+-  const files = ["src/App.vue", "a.ts"];
+-
+-  expect(questionText({ kind: "continueUnsaved", operation: "Rebase", files }, LINUX)).toEqual({
+-    title: "Unsaved Changes",
+-    message:
+-      "These files have changes that are not saved to disk. Continue the rebase without saving them?",
+-    list: { kind: "files", files },
+-    note: null,
+-    confirm: "Continue Without Saving",
+-    cancel: "Cancel",
+-  });
+-  expect(questionText({ kind: "continueUnsaved", operation: "Merge", files }, LINUX)).toMatchObject(
+-    {
+-      message:
+-        "These files have changes that are not saved to disk. Commit the merge without saving them?",
+-      confirm: "Commit Without Saving",
+-    },
+-  );
+-});
+-
+-test("the reword question says the message stays as git prepares it (plan §2 #91)", () => {
+-  expect(questionText({ kind: "rewords" }, LINUX)).toEqual({
+-    title: "Commit Messages",
+-    message:
+-      "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Continue rebase",
+-    cancel: "Cancel",
+-  });
+-});
+-
+ test("both Continue questions are about the stop and end with it; the exit question does not", () => {
+   expect(endsWithStop({ kind: "continueUnsaved", operation: "Rebase", files: ["a.ts"] })).toBe(
+     true,
+@@ -231,106 +27,22 @@ test("both Continue questions are about the stop and end with it; the exit quest
+   expect(endsWithStop({ kind: "exit", files: ["a.ts"] })).toBe(false);
+ });
+ 
+-test("closing a tab that holds text asks with its name, Yes or No, and never ends with a stop (catches a question that does not name the tab)", () => {
+-  const question = { kind: "closeTab", name: "Compare 2" } as const;
+-
+-  expect(questionText(question, LINUX)).toEqual({
+-    title: "Close Tab",
+-    message: "Close Compare 2? Its text is lost.",
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Yes",
+-    cancel: "No",
+-  });
+-  expect(endsWithStop(question)).toBe(false);
+-});
+-
+-test("deleting a note asks GitLab's question, Delete or Cancel, and never ends with a stop", () => {
+-  const question = { kind: "deleteNote" } as const;
+-
+-  expect(questionText(question, LINUX)).toEqual({
+-    title: "Delete Comment",
+-    message: "Delete this comment?",
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Delete",
+-    cancel: "Cancel",
+-  });
+-  expect(endsWithStop(question)).toBe(false);
+-});
+-
+-const CHECKOUT = "/home/me/.local/share/yamt/range/repo/pair/checkout";
+-const NO_REFS = { branches: [], stash: false } as const;
+-
+-test("the AI's changes question lists the files and the folder, Keep Changes the confirm", () => {
+-  const question = {
+-    kind: "keepAiChanges",
+-    folder: CHECKOUT,
+-    files: ["README.md", "src/a.ts"],
+-    headMoved: false,
+-    refs: NO_REFS,
++test("the abort question, of a merge yamt started too, is about the stop and ends with it", () => {
++  const operation = { kind: "Merge", merging: null, into: null } as const;
++  const mergeRequest = {
++    branch: "feature/due-dates",
++    target: "main",
++    returnTo: null,
++    branchBefore: { kind: "unchanged" },
+   } as const;
+ 
+-  expect(questionText(question, LINUX)).toEqual({
+-    title: "Keep the AI's changes?",
+-    message: `The AI changed these files in its checkout at ${CHECKOUT}:`,
+-    list: { kind: "files", files: ["README.md", "src/a.ts"] },
+-    note: null,
+-    confirm: "Keep Changes",
+-    cancel: "Discard Changes",
+-  });
+-  expect(endsWithStop(question)).toBe(false);
++  expect(endsWithStop({ kind: "abort", operation, mergeRequest: null })).toBe(true);
++  expect(endsWithStop({ kind: "abort", operation, mergeRequest })).toBe(true);
+ });
+ 
+-test.each([
+-  [true, NO_REFS, "It also made commits there."],
+-  [false, { branches: ["fix"], stash: false }, "It also left the branch fix there."],
+-  [false, { branches: ["fix", "try"], stash: false }, "It also left the branches fix, try there."],
+-  [false, { branches: [], stash: true }, "It also left a stash there."],
+-  [false, { branches: ["stash"], stash: false }, "It also left the branch stash there."],
+-  [
+-    true,
+-    { branches: ["fix"], stash: true },
+-    "It also made commits and left the branch fix and a stash there.",
+-  ],
+-] as const)(
+-  "a moved HEAD (%s) and the AI's refs %o are named in the note",
+-  (headMoved, refs, note) => {
+-    const text = questionText(
+-      { kind: "keepAiChanges", folder: CHECKOUT, files: ["a"], headMoved, refs },
+-      LINUX,
+-    );
++test("Mark resolved's question ends with the stop; the clash and servers questions do not", () => {
++  const summary = { conflicts: 1, changes: 0, remembered: 0 };
+ 
+-    expect(text.note).toBe(note);
+-  },
+-);
+-
+-test("work without changed files says the AI left work there, without 'also'", () => {
+-  const text = questionText(
+-    { kind: "keepAiChanges", folder: CHECKOUT, files: [], headMoved: true, refs: NO_REFS },
+-    LINUX,
+-  );
+-
+-  expect([text.message, text.note]).toEqual([
+-    `The AI left work in its checkout at ${CHECKOUT}.`,
+-    "It made commits there.",
+-  ]);
+-});
+-
+-test("an unreadable checkout asks the same question with git's words, Keep the confirm", () => {
+-  const question = {
+-    kind: "keepUnreadableCheckout",
+-    folder: CHECKOUT,
+-    message: "fatal: bad object HEAD\n",
+-  } as const;
+-
+-  expect(questionText(question, LINUX)).toEqual({
+-    title: "Keep the AI's changes?",
+-    message: `Git cannot read the AI's checkout at ${CHECKOUT}, so yamt cannot tell what the AI changed there: fatal: bad object HEAD`,
+-    list: { kind: "none" },
+-    note: "Discard Changes removes the checkout.",
+-    confirm: "Keep Changes",
+-    cancel: "Discard Changes",
+-  });
+-  expect(endsWithStop(question)).toBe(false);
++  expect(endsWithStop({ kind: "unprocessed", summary })).toBe(true);
++  expect(endsWithStop({ kind: "servers", found: [], added: [] })).toBe(false);
+ });
+diff --git a/frontend/src/ui/question.ts b/frontend/src/ui/question.ts
+index 2945869..5600cce 100644
+--- a/frontend/src/ui/question.ts
++++ b/frontend/src/ui/question.ts
+@@ -1,15 +1,16 @@
+-import { keyLabel, type OperationKind, type OperationView } from "../ipc";
++import type { Leftover, MergeView, OperationKind, OperationView } from "../ipc";
+ import type { ServerSpec } from "../lsp";
+ import type { Clash } from "./keymapEdit";
+-import { ACTION_NAMES } from "./keyText";
+-import { abortMessage, abortTitle, continueAction } from "./operationText";
+-import { projectLabel, serverLabel } from "./serverText";
+ import type { MergeSummary } from "./useMergeController";
+ 
+ export type Question =
+   | { readonly kind: "unprocessed"; readonly summary: MergeSummary }
+   | { readonly kind: "exit"; readonly files: readonly string[] }
+-  | { readonly kind: "abort"; readonly operation: OperationView }
++  | {
++      readonly kind: "abort";
++      readonly operation: OperationView;
++      readonly mergeRequest: MergeView | null;
++    }
+   | {
+       readonly kind: "continueUnsaved";
+       readonly operation: OperationKind;
+@@ -31,39 +32,14 @@ export type Question =
+       readonly refs: { readonly branches: readonly string[]; readonly stash: boolean };
+     }
+   | { readonly kind: "keepUnreadableCheckout"; readonly folder: string; readonly message: string }
+-  | { readonly kind: "deleteNote" };
+-
+-type QuestionList =
+-  | { readonly kind: "none" }
+-  | { readonly kind: "files"; readonly files: readonly string[] }
+-  | { readonly kind: "servers"; readonly lines: readonly string[] };
+-
+-export type QuestionText = {
+-  readonly title: string;
+-  readonly message: string;
+-  readonly list: QuestionList;
+-  readonly note: string | null;
+-  readonly confirm: string;
+-  readonly cancel: string;
+-};
+-
+-function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
+-  const folders = [...new Set(found.map((spec) => spec.project))];
+-  const foundLines = folders.map((folder) => {
+-    const names = found.filter((spec) => spec.project === folder).map(serverLabel);
+-    return `${names.join(", ")} — ${projectLabel(folder)}`;
+-  });
+-  const addedLines =
+-    added.length > 0 ? [`${added.map((spec) => spec.name).join(", ")} — added by you`] : [];
+-  return {
+-    title: "Language Servers",
+-    message: "Start this project's language servers?",
+-    list: { kind: "servers", lines: [...foundLines, ...addedLines] },
+-    note: "yamt remembers your answer for this repository. You can change it in Settings.",
+-    confirm: "Start",
+-    cancel: "Don't start",
+-  };
+-}
++  | { readonly kind: "deleteNote" }
++  | { readonly kind: "push"; readonly branch: string }
++  | { readonly kind: "pushFailed"; readonly branch: string; readonly message: string }
++  | {
++      readonly kind: "abortLeftovers";
++      readonly mergeRequest: MergeView;
++      readonly leftovers: readonly Leftover[];
++    };
+ 
+ export function finishMustAsk({ conflicts, changes }: MergeSummary): boolean {
+   return conflicts > 0 || changes > 0;
+@@ -87,6 +63,9 @@ export function endsWithStop(question: Question): boolean {
+     case "keepAiChanges":
+     case "keepUnreadableCheckout":
+     case "deleteNote":
++    case "push":
++    case "pushFailed":
++    case "abortLeftovers":
+       return false;
+     default: {
+       const _exhaustive: never = question;
+@@ -94,168 +73,3 @@ export function endsWithStop(question: Question): boolean {
+     }
+   }
+ }
+-
+-function unprocessedText({ conflicts, changes }: MergeSummary): QuestionText {
+-  const parts = [
+-    ...(conflicts > 0 ? [`${conflicts} unresolved conflict${conflicts === 1 ? "" : "s"}`] : []),
+-    ...(changes > 0 ? [`${changes} unprocessed change${changes === 1 ? "" : "s"}`] : []),
+-  ];
+-  const verb = conflicts + changes === 1 ? "remains" : "remain";
+-  return {
+-    title: "Unprocessed Changes",
+-    message: `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`,
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Save Current Result",
+-    cancel: "Back to Resolving",
+-  };
+-}
+-
+-function abortText(operation: OperationView): QuestionText {
+-  const title = abortTitle(operation);
+-  return {
+-    title,
+-    message: abortMessage(operation),
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: title,
+-    cancel: "Cancel",
+-  };
+-}
+-
+-function continueUnsavedText(operation: OperationKind, files: readonly string[]): QuestionText {
+-  const { verb, object } = continueAction(operation);
+-  return {
+-    title: "Unsaved Changes",
+-    message: `These files have changes that are not saved to disk. ${verb} ${object} without saving them?`,
+-    list: { kind: "files", files },
+-    note: null,
+-    confirm: `${verb} Without Saving`,
+-    cancel: "Cancel",
+-  };
+-}
+-
+-const REWORDS_TEXT: QuestionText = {
+-  title: "Commit Messages",
+-  message:
+-    "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
+-  list: { kind: "none" },
+-  note: null,
+-  confirm: "Continue rebase",
+-  cancel: "Cancel",
+-};
+-
+-const DELETE_NOTE_TEXT: QuestionText = {
+-  title: "Delete Comment",
+-  message: "Delete this comment?",
+-  list: { kind: "none" },
+-  note: null,
+-  confirm: "Delete",
+-  cancel: "Cancel",
+-};
+-
+-function closeTabText(name: string): QuestionText {
+-  return {
+-    title: "Close Tab",
+-    message: `Close ${name}? Its text is lost.`,
+-    list: { kind: "none" },
+-    note: null,
+-    confirm: "Yes",
+-    cancel: "No",
+-  };
+-}
+-
+-const KEEP_TITLE = "Keep the AI's changes?";
+-const KEEP = "Keep Changes";
+-const DISCARD = "Discard Changes";
+-
+-function leftRefs({
+-  branches,
+-  stash,
+-}: Extract<Question, { readonly kind: "keepAiChanges" }>["refs"]): string[] {
+-  const left = [
+-    ...(branches.length === 0
+-      ? []
+-      : [`the branch${branches.length === 1 ? "" : "es"} ${branches.join(", ")}`]),
+-    ...(stash ? ["a stash"] : []),
+-  ];
+-  return left.length === 0 ? [] : [`left ${left.join(" and ")}`];
+-}
+-
+-function keepAiChangesText(
+-  question: Extract<Question, { readonly kind: "keepAiChanges" }>,
+-): QuestionText {
+-  const { folder, files, headMoved, refs } = question;
+-  const changed = files.length > 0;
+-  const done = [...(headMoved ? ["made commits"] : []), ...leftRefs(refs)];
+-  return {
+-    title: KEEP_TITLE,
+-    message: changed
+-      ? `The AI changed these files in its checkout at ${folder}:`
+-      : `The AI left work in its checkout at ${folder}.`,
+-    list: { kind: "files", files },
+-    note: done.length === 0 ? null : `It ${changed ? "also " : ""}${done.join(" and ")} there.`,
+-    confirm: KEEP,
+-    cancel: DISCARD,
+-  };
+-}
+-
+-function keepUnreadableText(folder: string, message: string): QuestionText {
+-  return {
+-    title: KEEP_TITLE,
+-    message: `Git cannot read the AI's checkout at ${folder}, so yamt cannot tell what the AI changed there: ${message.trim()}`,
+-    list: { kind: "none" },
+-    note: `${DISCARD} removes the checkout.`,
+-    confirm: KEEP,
+-    cancel: DISCARD,
+-  };
+-}
+-
+-function exitText(files: readonly string[]): QuestionText {
+-  return {
+-    title: "Unsaved Changes",
+-    message: "These files have changes that are not saved to disk. Exit without saving them?",
+-    list: { kind: "files", files },
+-    note: null,
+-    confirm: "Exit Without Saving",
+-    cancel: "Cancel",
+-  };
+-}
+-
+-export function questionText(question: Question, platform: string): QuestionText {
+-  switch (question.kind) {
+-    case "unprocessed":
+-      return unprocessedText(question.summary);
+-    case "exit":
+-      return exitText(question.files);
+-    case "clash":
+-      return {
+-        title: "Key Already in Use",
+-        message: `${keyLabel(question.key, platform)} is already used by ${ACTION_NAMES[question.owner]}. Move it to ${ACTION_NAMES[question.action]}?`,
+-        list: { kind: "none" },
+-        note: null,
+-        confirm: "Move",
+-        cancel: "Cancel",
+-      };
+-    case "servers":
+-      return serversText(question.found, question.added);
+-    case "abort":
+-      return abortText(question.operation);
+-    case "continueUnsaved":
+-      return continueUnsavedText(question.operation, question.files);
+-    case "rewords":
+-      return REWORDS_TEXT;
+-    case "closeTab":
+-      return closeTabText(question.name);
+-    case "keepAiChanges":
+-      return keepAiChangesText(question);
+-    case "keepUnreadableCheckout":
+-      return keepUnreadableText(question.folder, question.message);
+-    case "deleteNote":
+-      return DELETE_NOTE_TEXT;
+-    default: {
+-      const _exhaustive: never = question;
+-      return _exhaustive;
+-    }
+-  }
+-}
+diff --git a/frontend/src/ui/questionText.test.ts b/frontend/src/ui/questionText.test.ts
+new file mode 100644
+index 0000000..71d23ab
+--- /dev/null
++++ b/frontend/src/ui/questionText.test.ts
+@@ -0,0 +1,420 @@
++import { expect, test } from "vitest";
++
++import { parseKey, type Leftover, type MergeView } from "../ipc";
++import { serverKey, type ServerSpec } from "../lsp";
++import { endsWithStop } from "./question";
++import { questionText } from "./questionText";
++
++const LINUX = "Linux x86_64";
++
++function unprocessed(conflicts: number, changes: number, remembered = 0): string {
++  return questionText({ kind: "unprocessed", summary: { conflicts, changes, remembered } }, LINUX)
++    .message;
++}
++
++test("the unprocessed sentence never mentions remembered conflicts", () => {
++  const message = unprocessed(1, 0, 3);
++  expect(message).toContain("1 unresolved conflict still remains.");
++  expect(message).not.toContain("3");
++  expect(message).not.toContain("remembered");
++});
++
++test("the unprocessed sentence names only the non-zero counts with singular and plural", () => {
++  const both = unprocessed(2, 3);
++  expect(both).toContain("2 unresolved conflicts and 3 unprocessed changes still remain.");
++  expect(both).toContain("The file will be saved exactly as shown in the Result pane.");
++
++  expect(unprocessed(1, 1)).toContain(
++    "1 unresolved conflict and 1 unprocessed change still remain.",
++  );
++  expect(unprocessed(1, 0)).toContain("1 unresolved conflict still remains.");
++  expect(unprocessed(0, 1)).toContain("1 unprocessed change still remains.");
++  expect(unprocessed(0, 4)).toBe(
++    "4 unprocessed changes still remain. The file will be saved exactly as shown in the Result pane.",
++  );
++  expect(unprocessed(0, 4)).not.toContain("conflict");
++  expect(unprocessed(5, 0)).not.toContain("change");
++});
++
++test("the unprocessed question carries WebStorm's title and buttons", () => {
++  expect(
++    questionText(
++      { kind: "unprocessed", summary: { conflicts: 1, changes: 0, remembered: 0 } },
++      LINUX,
++    ),
++  ).toMatchObject({
++    title: "Unprocessed Changes",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Save Current Result",
++    cancel: "Back to Resolving",
++  });
++});
++
++test("the exit question says the listed files are not saved to disk (plan §2 #69)", () => {
++  expect(questionText({ kind: "exit", files: ["src/App.vue", "a.ts"] }, LINUX)).toEqual({
++    title: "Unsaved Changes",
++    message: "These files have changes that are not saved to disk. Exit without saving them?",
++    list: { kind: "files", files: ["src/App.vue", "a.ts"] },
++    note: null,
++    confirm: "Exit Without Saving",
++    cancel: "Cancel",
++  });
++});
++
++test("the clash question names the key in the platform's words, its owner and the asking action", () => {
++  const key = parseKey("Mod-f");
++  if (key === null) {
++    throw new Error("Mod-f does not parse");
++  }
++  const clash = { kind: "clash", key, action: "undo", owner: "find" } as const;
++  expect(endsWithStop(clash)).toBe(false);
++
++  expect(questionText(clash, LINUX)).toEqual({
++    title: "Key Already in Use",
++    message: "Ctrl+F is already used by Find. Move it to Undo?",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Move",
++    cancel: "Cancel",
++  });
++  expect(questionText(clash, "MacIntel").message).toBe(
++    "⌘F is already used by Find. Move it to Undo?",
++  );
++});
++
++function spec(name: string, project: string, installed = true): ServerSpec {
++  return {
++    key: serverKey(`${name} (${project})`),
++    name,
++    command: { program: name, args: [] },
++    project,
++    folders: { project: ["node_modules/.bin"], home: [] },
++    fileTypes: ["ts"],
++    formats: false,
++    settings: null,
++    initializationOptions: null,
++    install: installed
++      ? null
++      : {
++          kind: "node",
++          package: "typescript-language-server",
++          program: "typescript-language-server",
++          folder: project,
++          manager: "pnpm",
++          reason: { kind: "typescript", version: "5.9.3" },
++        },
++    help: null,
++    notes: [],
++  };
++}
++
++test("the servers question lists the found servers per project folder, the added ones, and the note (plan §2 #67)", () => {
++  const found = [
++    spec("oxfmt", "frontend"),
++    spec("oxlint", "frontend"),
++    spec("TypeScript", "frontend", false),
++    spec("oxlint (repository root)", ""),
++  ];
++  const added = [spec("pylsp", ""), spec("gopls", "")];
++
++  expect(questionText({ kind: "servers", found, added }, LINUX)).toEqual({
++    title: "Language Servers",
++    message: "Start this project's language servers?",
++    list: {
++      kind: "lines",
++      lines: [
++        "oxfmt, oxlint, TypeScript (not installed) — frontend/",
++        "oxlint (repository root) — the repository root",
++        "pylsp, gopls — added by you",
++      ],
++    },
++    note: "yamt remembers your answer for this repository. You can change it in Settings.",
++    confirm: "Start",
++    cancel: "Don't start",
++  });
++  expect(
++    questionText({ kind: "servers", found: [], added: [spec("pylsp", "")] }, LINUX).list,
++  ).toEqual({ kind: "lines", lines: ["pylsp — added by you"] });
++  expect(questionText({ kind: "servers", found, added: [] }, LINUX).list).toEqual({
++    kind: "lines",
++    lines: [
++      "oxfmt, oxlint, TypeScript (not installed) — frontend/",
++      "oxlint (repository root) — the repository root",
++    ],
++  });
++});
++
++test("aborting a merge asks with plan #74's words, unchanged", () => {
++  const operation = { kind: "Merge", merging: null, into: null } as const;
++
++  expect(questionText({ kind: "abort", operation, mergeRequest: null }, LINUX)).toEqual({
++    title: "Abort Merge",
++    message:
++      "Every resolution and every save in this merge will be lost, and so will unsaved edits. The repository goes back to how it was before the merge, and yamt closes.",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Abort Merge",
++    cancel: "Cancel",
++  });
++});
++
++test("aborting a rebase names it and counts the commits already replayed", () => {
++  const operation = {
++    kind: "Rebase",
++    branch: "feature",
++    onto: null,
++    replaying: null,
++    progress: { step: 3, total: 3 },
++    editor_steps_ahead: false,
++  } as const;
++
++  const text = questionText({ kind: "abort", operation, mergeRequest: null }, LINUX);
++
++  expect([text.title, text.confirm]).toEqual(["Abort Rebase", "Abort Rebase"]);
++  expect(text.message).toBe(
++    "Every resolution and every save in this rebase will be lost, and so will unsaved edits. The 2 commits already replayed are undone too. The repository goes back to how it was before the rebase, and yamt closes.",
++  );
++});
++
++const MERGING = { kind: "Merge", merging: null, into: null } as const;
++const DEVELOP = { kind: "branch", name: "develop" } as const;
++const COMMIT = { kind: "commit", id: "9b0d4e1" } as const;
++
++function dueDates(
++  returnTo: MergeView["returnTo"],
++  branchBefore: MergeView["branchBefore"],
++): MergeView {
++  return { branch: "feature/due-dates", target: "main", returnTo, branchBefore };
++}
++
++test.each<[MergeView["returnTo"], string]>([
++  [DEVELOP, "Abort the merge of main into feature/due-dates and return to develop?"],
++  [COMMIT, "Abort the merge of main into feature/due-dates and return to commit 9b0d4e1?"],
++  [null, "Abort the merge of main into feature/due-dates?"],
++])("aborting a merge yamt started names the place it returns to: %j", (returnTo, message) => {
++  const mergeRequest = dueDates(returnTo, { kind: "unchanged" });
++
++  expect(questionText({ kind: "abort", operation: MERGING, mergeRequest }, LINUX)).toEqual({
++    title: "Abort Merge",
++    message,
++    list: { kind: "none" },
++    note: null,
++    confirm: "Abort Merge",
++    cancel: "Cancel",
++  });
++});
++
++test.each<[MergeView["branchBefore"], string | null]>([
++  [{ kind: "created" }, "yamt deletes feature/due-dates, which it created for this merge."],
++  [
++    { kind: "movedFrom", id: "3f1c2a9" },
++    "feature/due-dates goes back to 3f1c2a9, where it was before.",
++  ],
++  [{ kind: "unchanged" }, null],
++])("the abort note says what happens to the branch: %j", (branchBefore, note) => {
++  for (const returnTo of [DEVELOP, COMMIT, null]) {
++    const mergeRequest = dueDates(returnTo, branchBefore);
++    expect(questionText({ kind: "abort", operation: MERGING, mergeRequest }, LINUX).note).toBe(
++      note,
++    );
++  }
++});
++
++test("the push question offers Push and Keep Local, and never ends with a stop", () => {
++  const question = { kind: "push", branch: "feature/due-dates" } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Push to GitLab",
++    message: "Push feature/due-dates to GitLab?",
++    list: { kind: "none" },
++    note: "The merge is committed on feature/due-dates. Keep Local leaves it there; you can push it later.",
++    confirm: "Push",
++    cancel: "Keep Local",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++test("a failed push asks again with git's words, Push Again or Keep Local, and never ends with a stop", () => {
++  const question = {
++    kind: "pushFailed",
++    branch: "feature/due-dates",
++    message: "[rejected] (fetch first)",
++  } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Push Failed",
++    message: "git did not push feature/due-dates: [rejected] (fetch first)",
++    list: { kind: "none" },
++    note: "The merge commit stays on your feature/due-dates.",
++    confirm: "Push Again",
++    cancel: "Keep Local",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++test("what an abort left is a notice with one Close button listing each leftover, and never ends with a stop", () => {
++  const leftovers: Leftover[] = [
++    { kind: "notReturned", to: DEVELOP },
++    { kind: "branchKept", branch: "feature/due-dates" },
++  ];
++  const question = {
++    kind: "abortLeftovers",
++    mergeRequest: dueDates(DEVELOP, { kind: "created" }),
++    leftovers,
++  } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Merge Aborted",
++    message:
++      "The merge of main into feature/due-dates is aborted, but yamt did not put everything back:",
++    list: {
++      kind: "lines",
++      lines: [
++        "HEAD moved after the merge started, so yamt did not check out develop again.",
++        "feature/due-dates changed after the merge started, so yamt left it as it is.",
++      ],
++    },
++    note: null,
++    confirm: "Close",
++    cancel: null,
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++test("Continue with unsaved edits names the files and continues or commits by the operation", () => {
++  const files = ["src/App.vue", "a.ts"];
++
++  expect(questionText({ kind: "continueUnsaved", operation: "Rebase", files }, LINUX)).toEqual({
++    title: "Unsaved Changes",
++    message:
++      "These files have changes that are not saved to disk. Continue the rebase without saving them?",
++    list: { kind: "files", files },
++    note: null,
++    confirm: "Continue Without Saving",
++    cancel: "Cancel",
++  });
++  expect(questionText({ kind: "continueUnsaved", operation: "Merge", files }, LINUX)).toMatchObject(
++    {
++      message:
++        "These files have changes that are not saved to disk. Commit the merge without saving them?",
++      confirm: "Commit Without Saving",
++    },
++  );
++});
++
++test("the reword question says the message stays as git prepares it (plan §2 #91)", () => {
++  expect(questionText({ kind: "rewords" }, LINUX)).toEqual({
++    title: "Commit Messages",
++    message:
++      "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Continue rebase",
++    cancel: "Cancel",
++  });
++});
++
++test("closing a tab that holds text asks with its name, Yes or No, and never ends with a stop (catches a question that does not name the tab)", () => {
++  const question = { kind: "closeTab", name: "Compare 2" } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Close Tab",
++    message: "Close Compare 2? Its text is lost.",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Yes",
++    cancel: "No",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++test("deleting a note asks GitLab's question, Delete or Cancel, and never ends with a stop", () => {
++  const question = { kind: "deleteNote" } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Delete Comment",
++    message: "Delete this comment?",
++    list: { kind: "none" },
++    note: null,
++    confirm: "Delete",
++    cancel: "Cancel",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++const CHECKOUT = "/home/me/.local/share/yamt/range/repo/pair/checkout";
++const NO_REFS = { branches: [], stash: false } as const;
++
++test("the AI's changes question lists the files and the folder, Keep Changes the confirm", () => {
++  const question = {
++    kind: "keepAiChanges",
++    folder: CHECKOUT,
++    files: ["README.md", "src/a.ts"],
++    headMoved: false,
++    refs: NO_REFS,
++  } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Keep the AI's changes?",
++    message: `The AI changed these files in its checkout at ${CHECKOUT}:`,
++    list: { kind: "files", files: ["README.md", "src/a.ts"] },
++    note: null,
++    confirm: "Keep Changes",
++    cancel: "Discard Changes",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
++
++test.each([
++  [true, NO_REFS, "It also made commits there."],
++  [false, { branches: ["fix"], stash: false }, "It also left the branch fix there."],
++  [false, { branches: ["fix", "try"], stash: false }, "It also left the branches fix, try there."],
++  [false, { branches: [], stash: true }, "It also left a stash there."],
++  [false, { branches: ["stash"], stash: false }, "It also left the branch stash there."],
++  [
++    true,
++    { branches: ["fix"], stash: true },
++    "It also made commits and left the branch fix and a stash there.",
++  ],
++] as const)(
++  "a moved HEAD (%s) and the AI's refs %o are named in the note",
++  (headMoved, refs, note) => {
++    const text = questionText(
++      { kind: "keepAiChanges", folder: CHECKOUT, files: ["a"], headMoved, refs },
++      LINUX,
++    );
++
++    expect(text.note).toBe(note);
++  },
++);
++
++test("work without changed files says the AI left work there, without 'also'", () => {
++  const text = questionText(
++    { kind: "keepAiChanges", folder: CHECKOUT, files: [], headMoved: true, refs: NO_REFS },
++    LINUX,
++  );
++
++  expect([text.message, text.note]).toEqual([
++    `The AI left work in its checkout at ${CHECKOUT}.`,
++    "It made commits there.",
++  ]);
++});
++
++test("an unreadable checkout asks the same question with git's words, Keep the confirm", () => {
++  const question = {
++    kind: "keepUnreadableCheckout",
++    folder: CHECKOUT,
++    message: "fatal: bad object HEAD\n",
++  } as const;
++
++  expect(questionText(question, LINUX)).toEqual({
++    title: "Keep the AI's changes?",
++    message: `Git cannot read the AI's checkout at ${CHECKOUT}, so yamt cannot tell what the AI changed there: fatal: bad object HEAD`,
++    list: { kind: "none" },
++    note: "Discard Changes removes the checkout.",
++    confirm: "Keep Changes",
++    cancel: "Discard Changes",
++  });
++  expect(endsWithStop(question)).toBe(false);
++});
+diff --git a/frontend/src/ui/questionText.ts b/frontend/src/ui/questionText.ts
+new file mode 100644
+index 0000000..13a8661
+--- /dev/null
++++ b/frontend/src/ui/questionText.ts
+@@ -0,0 +1,264 @@
++import {
++  keyLabel,
++  type Leftover,
++  type MergeView,
++  type OperationKind,
++  type OperationView,
++} from "../ipc";
++import type { ServerSpec } from "../lsp";
++import type { Clash } from "./keymapEdit";
++import { ACTION_NAMES } from "./keyText";
++import { leftoverText } from "./leftoverText";
++import {
++  abortMessage,
++  abortTitle,
++  continueAction,
++  mergeRequestAbortMessage,
++  mergeRequestAbortNote,
++} from "./operationText";
++import type { Question } from "./question";
++import { projectLabel, serverLabel } from "./serverText";
++import type { MergeSummary } from "./useMergeController";
++
++type QuestionList =
++  | { readonly kind: "none" }
++  | { readonly kind: "files"; readonly files: readonly string[] }
++  | { readonly kind: "lines"; readonly lines: readonly string[] };
++
++export type QuestionText = {
++  readonly title: string;
++  readonly message: string;
++  readonly list: QuestionList;
++  readonly note: string | null;
++  readonly confirm: string;
++  readonly cancel: string | null;
++};
++
++function serversText(found: readonly ServerSpec[], added: readonly ServerSpec[]): QuestionText {
++  const folders = [...new Set(found.map((spec) => spec.project))];
++  const foundLines = folders.map((folder) => {
++    const names = found.filter((spec) => spec.project === folder).map(serverLabel);
++    return `${names.join(", ")} — ${projectLabel(folder)}`;
++  });
++  const addedLines =
++    added.length > 0 ? [`${added.map((spec) => spec.name).join(", ")} — added by you`] : [];
++  return {
++    title: "Language Servers",
++    message: "Start this project's language servers?",
++    list: { kind: "lines", lines: [...foundLines, ...addedLines] },
++    note: "yamt remembers your answer for this repository. You can change it in Settings.",
++    confirm: "Start",
++    cancel: "Don't start",
++  };
++}
++
++function unprocessedText({ conflicts, changes }: MergeSummary): QuestionText {
++  const parts = [
++    ...(conflicts > 0 ? [`${conflicts} unresolved conflict${conflicts === 1 ? "" : "s"}`] : []),
++    ...(changes > 0 ? [`${changes} unprocessed change${changes === 1 ? "" : "s"}`] : []),
++  ];
++  const verb = conflicts + changes === 1 ? "remains" : "remain";
++  return {
++    title: "Unprocessed Changes",
++    message: `${parts.join(" and ")} still ${verb}. The file will be saved exactly as shown in the Result pane.`,
++    list: { kind: "none" },
++    note: null,
++    confirm: "Save Current Result",
++    cancel: "Back to Resolving",
++  };
++}
++
++function abortText(operation: OperationView, mergeRequest: MergeView | null): QuestionText {
++  const title = abortTitle(operation);
++  const words =
++    mergeRequest === null
++      ? { message: abortMessage(operation), note: null }
++      : {
++          message: mergeRequestAbortMessage(mergeRequest),
++          note: mergeRequestAbortNote(mergeRequest),
++        };
++  return { title, ...words, list: { kind: "none" }, confirm: title, cancel: "Cancel" };
++}
++
++function pushText(branch: string): QuestionText {
++  return {
++    title: "Push to GitLab",
++    message: `Push ${branch} to GitLab?`,
++    list: { kind: "none" },
++    note: `The merge is committed on ${branch}. Keep Local leaves it there; you can push it later.`,
++    confirm: "Push",
++    cancel: "Keep Local",
++  };
++}
++
++function pushFailedText(branch: string, message: string): QuestionText {
++  return {
++    title: "Push Failed",
++    message: `git did not push ${branch}: ${message}`,
++    list: { kind: "none" },
++    note: `The merge commit stays on your ${branch}.`,
++    confirm: "Push Again",
++    cancel: "Keep Local",
++  };
++}
++
++function abortLeftoversText(
++  { target, branch }: MergeView,
++  leftovers: readonly Leftover[],
++): QuestionText {
++  return {
++    title: "Merge Aborted",
++    message: `The merge of ${target} into ${branch} is aborted, but yamt did not put everything back:`,
++    list: { kind: "lines", lines: leftovers.map(leftoverText) },
++    note: null,
++    confirm: "Close",
++    cancel: null,
++  };
++}
++
++function continueUnsavedText(operation: OperationKind, files: readonly string[]): QuestionText {
++  const { verb, object } = continueAction(operation);
++  return {
++    title: "Unsaved Changes",
++    message: `These files have changes that are not saved to disk. ${verb} ${object} without saving them?`,
++    list: { kind: "files", files },
++    note: null,
++    confirm: `${verb} Without Saving`,
++    cancel: "Cancel",
++  };
++}
++
++const REWORDS_TEXT: QuestionText = {
++  title: "Commit Messages",
++  message:
++    "This step or a later one rewords or squashes a commit. yamt cannot open an editor, so that message stays as git prepares it.",
++  list: { kind: "none" },
++  note: null,
++  confirm: "Continue rebase",
++  cancel: "Cancel",
++};
++
++const DELETE_NOTE_TEXT: QuestionText = {
++  title: "Delete Comment",
++  message: "Delete this comment?",
++  list: { kind: "none" },
++  note: null,
++  confirm: "Delete",
++  cancel: "Cancel",
++};
++
++function closeTabText(name: string): QuestionText {
++  return {
++    title: "Close Tab",
++    message: `Close ${name}? Its text is lost.`,
++    list: { kind: "none" },
++    note: null,
++    confirm: "Yes",
++    cancel: "No",
++  };
++}
++
++const KEEP_TITLE = "Keep the AI's changes?";
++const KEEP = "Keep Changes";
++const DISCARD = "Discard Changes";
++
++function leftRefs({
++  branches,
++  stash,
++}: Extract<Question, { readonly kind: "keepAiChanges" }>["refs"]): string[] {
++  const left = [
++    ...(branches.length === 0
++      ? []
++      : [`the branch${branches.length === 1 ? "" : "es"} ${branches.join(", ")}`]),
++    ...(stash ? ["a stash"] : []),
++  ];
++  return left.length === 0 ? [] : [`left ${left.join(" and ")}`];
++}
++
++function keepAiChangesText(
++  question: Extract<Question, { readonly kind: "keepAiChanges" }>,
++): QuestionText {
++  const { folder, files, headMoved, refs } = question;
++  const changed = files.length > 0;
++  const done = [...(headMoved ? ["made commits"] : []), ...leftRefs(refs)];
++  return {
++    title: KEEP_TITLE,
++    message: changed
++      ? `The AI changed these files in its checkout at ${folder}:`
++      : `The AI left work in its checkout at ${folder}.`,
++    list: { kind: "files", files },
++    note: done.length === 0 ? null : `It ${changed ? "also " : ""}${done.join(" and ")} there.`,
++    confirm: KEEP,
++    cancel: DISCARD,
++  };
++}
++
++function keepUnreadableText(folder: string, message: string): QuestionText {
++  return {
++    title: KEEP_TITLE,
++    message: `Git cannot read the AI's checkout at ${folder}, so yamt cannot tell what the AI changed there: ${message.trim()}`,
++    list: { kind: "none" },
++    note: `${DISCARD} removes the checkout.`,
++    confirm: KEEP,
++    cancel: DISCARD,
++  };
++}
++
++function exitText(files: readonly string[]): QuestionText {
++  return {
++    title: "Unsaved Changes",
++    message: "These files have changes that are not saved to disk. Exit without saving them?",
++    list: { kind: "files", files },
++    note: null,
++    confirm: "Exit Without Saving",
++    cancel: "Cancel",
++  };
++}
++
++function clashText(clash: Clash, platform: string): QuestionText {
++  return {
++    title: "Key Already in Use",
++    message: `${keyLabel(clash.key, platform)} is already used by ${ACTION_NAMES[clash.owner]}. Move it to ${ACTION_NAMES[clash.action]}?`,
++    list: { kind: "none" },
++    note: null,
++    confirm: "Move",
++    cancel: "Cancel",
++  };
++}
++
++export function questionText(question: Question, platform: string): QuestionText {
++  switch (question.kind) {
++    case "unprocessed":
++      return unprocessedText(question.summary);
++    case "exit":
++      return exitText(question.files);
++    case "clash":
++      return clashText(question, platform);
++    case "servers":
++      return serversText(question.found, question.added);
++    case "abort":
++      return abortText(question.operation, question.mergeRequest);
++    case "continueUnsaved":
++      return continueUnsavedText(question.operation, question.files);
++    case "rewords":
++      return REWORDS_TEXT;
++    case "closeTab":
++      return closeTabText(question.name);
++    case "keepAiChanges":
++      return keepAiChangesText(question);
++    case "keepUnreadableCheckout":
++      return keepUnreadableText(question.folder, question.message);
++    case "deleteNote":
++      return DELETE_NOTE_TEXT;
++    case "push":
++      return pushText(question.branch);
++    case "pushFailed":
++      return pushFailedText(question.branch, question.message);
++    case "abortLeftovers":
++      return abortLeftoversText(question.mergeRequest, question.leftovers);
++    default: {
++      const _exhaustive: never = question;
++      return _exhaustive;
++    }
++  }
++}
+diff --git a/frontend/src/ui/saving.test.ts b/frontend/src/ui/saving.test.ts
+index 6cd5b5c..078aaeb 100644
+--- a/frontend/src/ui/saving.test.ts
++++ b/frontend/src/ui/saving.test.ts
+@@ -138,6 +138,8 @@ function writeTarget(
+     listStop: notUsed,
+     continueOperation: notUsed,
+     abortOperation: notUsed,
++    pushMergedBranch: notUsed,
++    closeEndedMerge: notUsed,
+     loadSettings: notUsed,
+     setTheme: notUsed,
+     setAntialiasing: notUsed,
+diff --git a/frontend/src/ui/stops.test.ts b/frontend/src/ui/stops.test.ts
+index 2710a5e..722bfee 100644
+--- a/frontend/src/ui/stops.test.ts
++++ b/frontend/src/ui/stops.test.ts
+@@ -7,6 +7,7 @@ import {
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
++  type MergeView,
+   type OperationView,
+   type WriteRequest,
+ } from "../ipc";
+@@ -93,8 +94,10 @@ function writesSource(finishes: WriteRequest[], aborts: string[]): ChunkSource {
+     continueOperation: notUsed,
+     abortOperation: () => {
+       aborts.push("abort");
+-      return Promise.resolve({ ok: true, value: null });
++      return Promise.resolve({ ok: true, value: { leftovers: [] } });
+     },
++    pushMergedBranch: notUsed,
++    closeEndedMerge: notUsed,
+     loadSettings: notUsed,
+     setTheme: notUsed,
+     setAntialiasing: notUsed,
+@@ -369,7 +372,11 @@ test("a Mark resolved question waiting when the stop ends ends with it: a Yes af
+ test("an Abort question waiting when the stop ends ends with it: a Yes afterwards aborts nothing", async () => {
+   quiet();
+   const stop = stopAt([]);
+-  const { abortOperation } = createAborting(Object.assign(stop, { gitRun: createGitRun() }));
++  const target = Object.assign(stop, {
++    gitRun: createGitRun(),
++    mergeRequest: shallowRef<MergeView | null>(null),
++  });
++  const { abortOperation } = createAborting(target);
+   const pressed = abortOperation();
+   expect(stop.asking.question.value?.kind).toBe("abort");
+ 
+diff --git a/frontend/src/ui/store.test.ts b/frontend/src/ui/store.test.ts
+index 0c236d4..7eb3a2d 100644
+--- a/frontend/src/ui/store.test.ts
++++ b/frontend/src/ui/store.test.ts
+@@ -5,6 +5,7 @@ import {
+   DEFAULT_KEYS,
+   loadFixture,
+   parseKey,
++  type AbortReply,
+   type ChunkSource,
+   type ContinueReply,
+   type DiskChange,
+@@ -12,6 +13,7 @@ import {
+   type DiskVersion,
+   type FileEntry,
+   type Listing,
++  type MergeView,
+   type FileMergeData,
+   type FileSides,
+   type Key,
+@@ -104,6 +106,7 @@ function listing(
+     diskChanges,
+     operation: MERGING,
+     sides: { local: null, remote: null },
++    mergeRequest: null,
+   });
+ }
+ 
+@@ -146,6 +149,8 @@ function handSource(files: FileEntry[]): { source: ChunkSource; pending: Pending
+     listStop: () => Promise.resolve(listing(files)),
+     continueOperation: () => Promise.reject(new Error("not used")),
+     abortOperation: () => Promise.reject(new Error("not used")),
++    pushMergedBranch: () => Promise.reject(new Error("not used")),
++    closeEndedMerge: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+   };
+   return { source, pending };
+@@ -1090,6 +1095,8 @@ function choiceSource(
+     listStop: () => Promise.resolve(listing(files)),
+     continueOperation: () => Promise.reject(new Error("not used")),
+     abortOperation: () => Promise.reject(new Error("not used")),
++    pushMergedBranch: () => Promise.reject(new Error("not used")),
++    closeEndedMerge: () => Promise.reject(new Error("not used")),
+     ...NO_SETTINGS,
+     ...overrides,
+   };
+@@ -2529,7 +2536,14 @@ test("a focus list that finds git moved on outside drops the old stop, names the
+   };
+   const sides: SideNames = { local: { kind: "Branch", name: "x" }, remote: null };
+   const answers: SourceResult<Listing>[] = [
+-    ok({ kind: "Files", files: [entry("a.ts")], diskChanges: [], operation: rebase, sides }),
++    ok({
++      kind: "Files",
++      files: [entry("a.ts")],
++      diskChanges: [],
++      operation: rebase,
++      sides,
++      mergeRequest: null,
++    }),
+     ok({ kind: "MovedOn" }),
+     ok({
+       kind: "Files",
+@@ -2537,6 +2551,7 @@ test("a focus list that finds git moved on outside drops the old stop, names the
+       diskChanges: [],
+       operation: { ...rebase, progress: { step: 2, total: 3 } },
+       sides: { local: null, remote: null },
++      mergeRequest: null,
+     }),
+   ];
+   const { source, calls } = choiceSource({
+@@ -2775,8 +2790,16 @@ test("Continue answered Stopped runs the store's own nextStop: the old stop is d
+       diskChanges: [],
+       operation: rebase,
+       sides,
++      mergeRequest: null,
++    }),
++    ok({
++      kind: "Files",
++      files: [entry("c.ts")],
++      diskChanges: [],
++      operation: step2,
++      sides,
++      mergeRequest: null,
+     }),
+-    ok({ kind: "Files", files: [entry("c.ts")], diskChanges: [], operation: step2, sides }),
+   ];
+   const { source, calls } = choiceSource({
+     listStop: () => {
+@@ -2832,7 +2855,7 @@ test("a take git refuses stays on the file: no move to the next unresolved one",
+ 
+ type HeldGit = {
+   readonly store: AppStore;
+-  readonly aborts: ((reply: SourceResult<null>) => void)[];
++  readonly aborts: ((reply: SourceResult<AbortReply>) => void)[];
+   readonly continues: ((reply: SourceResult<ContinueReply>) => void)[];
+ };
+ 
+@@ -2923,3 +2946,98 @@ test("a stop without files shows git's message in the stop view, not the bar; se
+   expect(store.emptyStop.value.stopView).toEqual(stopView);
+   expect(store.emptyStop.value.barProblem?.action).toBe("abort");
+ });
++
++const DUE_DATES: MergeView = {
++  branch: "feature/due-dates",
++  target: "main",
++  returnTo: { kind: "branch", name: "develop" },
++  branchBefore: { kind: "created" },
++};
++
++function recordedMergeSource(overrides: Partial<ChunkSource>): {
++  source: ChunkSource;
++  calls: string[];
++} {
++  const files = [resolvedEntry("a.ts")];
++  const recorded = {
++    files,
++    diskChanges: [],
++    operation: MERGING,
++    sides: { local: null, remote: null },
++  };
++  const { source, calls } = choiceSource({
++    listStop: () => {
++      calls.push("listStop");
++      return Promise.resolve(ok({ kind: "Files", ...recorded, mergeRequest: DUE_DATES }));
++    },
++    closeEndedMerge: () => {
++      calls.push("closeEndedMerge");
++      return Promise.resolve(ok(null));
++    },
++    ...overrides,
++  });
++  return { source, calls };
++}
++
++test("a recorded merge's Abort asks with its words, then lists what was left in a notice and closes the ended merge", async () => {
++  spyConsole();
++  const leftovers: AbortReply["leftovers"] = [
++    { kind: "notReturned", to: { kind: "branch", name: "develop" } },
++  ];
++  const { source, calls } = recordedMergeSource({
++    abortOperation: () => {
++      calls.push("abortOperation");
++      return Promise.resolve(ok({ leftovers }));
++    },
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++  expect(store.mergeRequest.value).toEqual(DUE_DATES);
++
++  const aborting = store.abortOperation();
++  expect(store.question.value).toEqual({
++    kind: "abort",
++    operation: MERGING,
++    mergeRequest: DUE_DATES,
++  });
++  store.answer(true);
++  await vi.waitFor(() => {
++    expect(store.question.value).toEqual({
++      kind: "abortLeftovers",
++      mergeRequest: DUE_DATES,
++      leftovers,
++    });
++  });
++  store.dismissQuestion();
++  await aborting;
++
++  expect(calls).toEqual(["listStop", "loadFile a.ts", "abortOperation", "closeEndedMerge"]);
++  expect(store.continueState.value).toBe("running");
++});
++
++test("a recorded merge's Continue asks to push without listing again, and Push ends the window", async () => {
++  spyConsole();
++  const { source, calls } = recordedMergeSource({
++    continueOperation: () => {
++      calls.push("continueOperation");
++      return Promise.resolve(ok({ kind: "ReadyToPush", branch: "feature/due-dates" }));
++    },
++    pushMergedBranch: () => {
++      calls.push("pushMergedBranch");
++      return Promise.resolve(ok({ kind: "pushed" }));
++    },
++  });
++  const store = createAppStore(source);
++  await store.loadFiles();
++
++  const continuing = store.continueOperation();
++  await vi.waitFor(() => {
++    expect(store.question.value).toEqual({ kind: "push", branch: "feature/due-dates" });
++  });
++  store.answer(true);
++  await continuing;
++
++  expect(calls).toEqual(["listStop", "loadFile a.ts", "continueOperation", "pushMergedBranch"]);
++  expect([store.question.value, store.problem.value]).toEqual([null, null]);
++  expect(store.continueState.value).toBe("running");
++});
+diff --git a/frontend/src/ui/store.ts b/frontend/src/ui/store.ts
+index c0d8e7e..8cfa545 100644
+--- a/frontend/src/ui/store.ts
++++ b/frontend/src/ui/store.ts
+@@ -6,6 +6,7 @@ import {
+   type FileEntry,
+   type FileMergeData,
+   type FileSides,
++  type MergeView,
+   type OperationView,
+   type ServerHost,
+   type Side,
+@@ -27,6 +28,7 @@ import { noticeKey, type Notice } from "./noticeText";
+ import { open, pick, thenMoveOn } from "./opening";
+ import { createPaneSplit, type PaneSplitState } from "./paneSplit";
+ import type { Problem } from "./problem";
++import { createPushing } from "./pushing";
+ import type { Question } from "./question";
+ import { createSaving, finish, reset, take } from "./saving";
+ import type { FinishRequest, FormatOutcomes, Saving, Writing } from "./saving";
+@@ -44,6 +46,7 @@ import type { FormatOutcome, Preferences } from "./useMergeController";
+ type Refs = {
+   readonly files: ShallowRef<readonly FileEntry[]>;
+   readonly operation: ShallowRef<OperationView | null>;
++  readonly mergeRequest: ShallowRef<MergeView | null>;
+   readonly opened: ShallowRef<readonly FileMergeData[]>;
+   readonly choices: ShallowRef<readonly FileSides[]>;
+   readonly taken: ShallowRef<ReadonlyMap<string, Taken>>;
+@@ -114,6 +117,7 @@ function createRefs(startTheme: Theme): Refs {
+   return {
+     files: shallowRef<readonly FileEntry[]>([]),
+     operation: shallowRef<OperationView | null>(null),
++    mergeRequest: shallowRef<MergeView | null>(null),
+     opened: shallowRef<readonly FileMergeData[]>([]),
+     choices: shallowRef<readonly FileSides[]>([]),
+     taken: shallowRef<ReadonlyMap<string, Taken>>(new Map()),
+@@ -194,7 +198,7 @@ export function createAppStore(
+     ...createCollapsing(),
+     ...createPaneSplit(),
+     ...createAborting(state),
+-    ...createContinuing(state),
++    ...createContinuing(state, createPushing(state)),
+     ...createSaving(state),
+     ...createServers(refs.screen, servers),
+     ...createServerSetup({ ...state, ...acts, host, servers }),

@@ -1,4 +1,5 @@
-import type { OperationKind, OperationView, ProgressView, SideName } from "../ipc";
+import type { MergeView, OperationKind, OperationView, ProgressView, SideName } from "../ipc";
+import { returnPlaceText } from "./leftoverText";
 
 type OperationLine = { readonly text: string; readonly tooltip: string };
 
@@ -239,4 +240,24 @@ function doneSentence(operation: OperationView): string {
 export function abortMessage(operation: OperationView): string {
   const name = NAMES[operation.kind];
   return `Every resolution and every save in this ${name} will be lost, and so will unsaved edits.${doneSentence(operation)} The repository goes back to how it was before the ${name}, and yamt closes.`;
+}
+
+export function mergeRequestAbortMessage({ branch, target, returnTo }: MergeView): string {
+  const merge = `Abort the merge of ${target} into ${branch}`;
+  return returnTo === null ? `${merge}?` : `${merge} and return to ${returnPlaceText(returnTo)}?`;
+}
+
+export function mergeRequestAbortNote({ branch, branchBefore }: MergeView): string | null {
+  switch (branchBefore.kind) {
+    case "created":
+      return `yamt deletes ${branch}, which it created for this merge.`;
+    case "movedFrom":
+      return `${branch} goes back to ${branchBefore.id}, where it was before.`;
+    case "unchanged":
+      return null;
+    default: {
+      const _exhaustive: never = branchBefore;
+      return _exhaustive;
+    }
+  }
 }

@@ -16,6 +16,7 @@ import type {
   Theme,
   WriteReply,
 } from "./domain";
+import type { AbortReply, PushReply } from "./mergeRequestDomain";
 
 export type WriteRequest = {
   readonly path: string;
@@ -32,7 +33,9 @@ export interface ChunkSource {
   takeSide(path: string, side: Side, diskVersion: DiskVersion): Promise<SourceResult<WriteReply>>;
   listStop(): Promise<SourceResult<Listing>>;
   continueOperation(): Promise<SourceResult<ContinueReply>>;
-  abortOperation(): Promise<SourceResult<null>>;
+  abortOperation(): Promise<SourceResult<AbortReply>>;
+  pushMergedBranch(): Promise<SourceResult<PushReply>>;
+  closeEndedMerge(): Promise<SourceResult<null>>;
   loadSettings(current: StoredSettings): Promise<SourceResult<SettingsRead>>;
   setTheme(current: StoredSettings, theme: Theme): Promise<SourceResult<SettingsRead>>;
   setAntialiasing(

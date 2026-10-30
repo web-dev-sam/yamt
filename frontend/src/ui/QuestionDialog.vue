@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, useTemplateRef } from "vue";
 
-import { questionText, type Question } from "./question";
+import type { Question } from "./question";
+import { questionText } from "./questionText";
 
 const props = defineProps<{ question: Question }>();
 const emit = defineEmits<{ answer: [yes: boolean]; dismiss: [] }>();
@@ -35,7 +36,7 @@ function dismiss(event: Event): void {
     >
       <li v-for="file in text.list.files" :key="file" class="truncate">{{ file }}</li>
     </ul>
-    <ul v-else-if="text.list.kind === 'servers'" class="mt-2 list-disc pl-5">
+    <ul v-else-if="text.list.kind === 'lines'" class="mt-2 list-disc pl-5">
       <li v-for="line in text.list.lines" :key="line">{{ line }}</li>
     </ul>
     <p v-if="text.note !== null" class="mt-3 text-fg-muted">{{ text.note }}</p>
@@ -49,6 +50,7 @@ function dismiss(event: Event): void {
         {{ text.confirm }}
       </button>
       <button
+        v-if="text.cancel !== null"
         type="button"
         class="rounded border border-control-border px-3.5 py-1 hover:bg-hover"
         @click="emit('answer', false)"

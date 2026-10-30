@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { shallowRef, type ShallowRef } from "vue";
 
-import type { OperationView, SourceFailure, SourceResult } from "../ipc";
+import type { AbortReply, MergeView, OperationView, SourceFailure, SourceResult } from "../ipc";
 import { createAborting, type Aborting } from "./aborting";
 import { createAsking, type Asking } from "./asking";
 import type { Stop } from "./currentStop";
@@ -20,11 +20,22 @@ const REBASE: OperationView = {
   editor_steps_ahead: false,
 };
 
+const DUE_DATES: MergeView = {
+  branch: "feature/due-dates",
+  target: "main",
+  returnTo: { kind: "commit", id: "9b0d4e1" },
+  branchBefore: { kind: "movedFrom", id: "3f1c2a9" },
+};
+
+const CLEAN: SourceResult<AbortReply> = { ok: true, value: { leftovers: [] } };
+
 type Pressed = Aborting & {
   readonly asking: Asking;
   readonly operation: ShallowRef<OperationView | null>;
+  readonly mergeRequest: ShallowRef<MergeView | null>;
   readonly problem: ShallowRef<Problem | null>;
   readonly ends: string[];
+  readonly closes: string[];
   stop: Stop;
 };
 
@@ -33,17 +44,28 @@ afterEach(() => {
 });
 
 function aborting(
-  abortOperation: () => Promise<SourceResult<null>>,
+  abortOperation: () => Promise<SourceResult<AbortReply>>,
   operation: OperationView | null = REBASE,
+  mergeRequest: MergeView | null = null,
+  closeReply: SourceResult<null> = { ok: true, value: null },
 ): Pressed {
   const asking = createAsking();
   const ends: string[] = [];
+  const closes: string[] = [];
   const target = {
-    source: { abortOperation },
+    source: {
+      abortOperation,
+      closeEndedMerge: () => {
+        closes.push("closeEndedMerge");
+        return Promise.resolve(closeReply);
+      },
+    },
     asking,
     operation: shallowRef(operation),
+    mergeRequest: shallowRef(mergeRequest),
     problem: shallowRef<Problem | null>(null),
     ends,
+    closes,
     stop: { dropped: false },
     gitRun: createGitRun(),
     nextStop: (end: { readonly kind: "outside" }) => {
@@ -65,7 +87,7 @@ test("without a recorded operation there is no Abort: the state is none and a pr
   let aborts = 0;
   const abort = aborting(() => {
     aborts += 1;
-    return Promise.resolve({ ok: true, value: null });
+    return Promise.resolve(CLEAN);
   }, null);
 
   expect(abort.abortState.value).toEqual({ kind: "none" });
@@ -74,7 +96,7 @@ test("without a recorded operation there is no Abort: the state is none and a pr
 });
 
 test("the state follows the operation git lists", () => {
-  const abort = aborting(() => Promise.resolve({ ok: true, value: null }), null);
+  const abort = aborting(() => Promise.resolve(CLEAN), null);
 
   abort.operation.value = REBASE;
   expect(abort.abortState.value).toEqual({ kind: "ready", operation: REBASE });
@@ -86,11 +108,15 @@ test("Abort asks about the operation and calls git only after a yes; No and Esca
   let aborts = 0;
   const abort = aborting(() => {
     aborts += 1;
-    return Promise.resolve({ ok: true, value: null });
+    return Promise.resolve(CLEAN);
   });
 
   const declined = abort.abortOperation();
-  expect(abort.asking.question.value).toEqual({ kind: "abort", operation: REBASE });
+  expect(abort.asking.question.value).toEqual({
+    kind: "abort",
+    operation: REBASE,
+    mergeRequest: null,
+  });
   abort.asking.answer(false);
   await declined;
   const escaped = abort.abortOperation();
@@ -107,7 +133,7 @@ test("Abort asks about the operation and calls git only after a yes; No and Esca
   expect(abort.abortState.value).toEqual({ kind: "running", operation: REBASE });
   expect(abort.problem.value).toBeNull();
   await pressUnasked(abort);
-  expect(aborts).toBe(1);
+  expect([aborts, abort.closes]).toEqual([1, []]);
 });
 
 test("git's refusal names the operation, logs it, and a later press asks again", async () => {
@@ -137,7 +163,11 @@ test("git's refusal names the operation, logs it, and a later press asks again",
   expect(abort.abortState.value.kind).toBe("ready");
 
   const again = abort.abortOperation();
-  expect(abort.asking.question.value).toEqual({ kind: "abort", operation: REBASE });
+  expect(abort.asking.question.value).toEqual({
+    kind: "abort",
+    operation: REBASE,
+    mergeRequest: null,
+  });
   abort.asking.answer(true);
   await again;
   expect(aborts).toBe(2);
@@ -156,7 +186,7 @@ test("an abort git answers StopMovedOn goes on to the new stop and shows no prob
 });
 
 test("an abort answered after its stop was dropped reports nothing and lists nothing", async () => {
-  const answers: ((reply: SourceResult<null>) => void)[] = [];
+  const answers: ((reply: SourceResult<AbortReply>) => void)[] = [];
   const abort = aborting(
     () =>
       new Promise((resolve) => {
@@ -175,4 +205,89 @@ test("an abort answered after its stop was dropped reports nothing and lists not
 
   expect([abort.problem.value, abort.ends]).toEqual([null, []]);
   expect(abort.abortState.value.kind).toBe("ready");
+});
+
+const MERGING: OperationView = { kind: "Merge", merging: null, into: null };
+
+const LEFT: AbortReply = {
+  leftovers: [
+    { kind: "notReturned", to: { kind: "commit", id: "9b0d4e1" } },
+    { kind: "branchKept", branch: "feature/due-dates" },
+  ],
+};
+
+test("a recorded merge's Abort asks with its merge request, and without leftovers ends as today", async () => {
+  const abort = aborting(() => Promise.resolve(CLEAN), MERGING, DUE_DATES);
+
+  const pressed = abort.abortOperation();
+  expect(abort.asking.question.value).toEqual({
+    kind: "abort",
+    operation: MERGING,
+    mergeRequest: DUE_DATES,
+  });
+  abort.asking.answer(true);
+  await pressed;
+
+  expect([abort.asking.question.value, abort.closes]).toEqual([null, []]);
+  expect(abort.abortState.value.kind).toBe("running");
+});
+
+test.each<[string, (abort: Pressed) => void]>([
+  ["Close", (abort) => abort.asking.answer(true)],
+  ["Escape", (abort) => abort.asking.dismiss()],
+])(
+  "leftovers show the notice; %s closes the ended merge once and the window stays ended",
+  async (_name, close) => {
+    const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES);
+
+    const pressed = abort.abortOperation();
+    abort.asking.answer(true);
+    await vi.waitFor(() => {
+      expect(abort.asking.question.value).toEqual({
+        kind: "abortLeftovers",
+        mergeRequest: DUE_DATES,
+        leftovers: LEFT.leftovers,
+      });
+    });
+    expect(abort.closes).toEqual([]);
+    expect(abort.abortState.value.kind).toBe("ready");
+    close(abort);
+    await pressed;
+
+    expect([abort.closes, abort.problem.value]).toEqual([["closeEndedMerge"], null]);
+    expect(abort.abortState.value.kind).toBe("running");
+  },
+);
+
+test("a close that fails is the abort's problem and the window can be used again", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, DUE_DATES, {
+    ok: false,
+    failure: { kind: "WorkerStopped" },
+  });
+
+  const pressed = abort.abortOperation();
+  abort.asking.answer(true);
+  await vi.waitFor(() => {
+    expect(abort.asking.question.value?.kind).toBe("abortLeftovers");
+  });
+  abort.asking.answer(true);
+  await pressed;
+
+  expect(abort.problem.value).toEqual({
+    action: "abort",
+    operation: "Merge",
+    cause: { kind: "WorkerStopped" },
+  });
+  expect(abort.abortState.value.kind).toBe("ready");
+});
+
+test("leftovers without a recorded merge ask nothing and still close the ended merge", async () => {
+  const abort = aborting(() => Promise.resolve({ ok: true, value: LEFT }), MERGING, null);
+
+  const pressed = abort.abortOperation();
+  abort.asking.answer(true);
+  await pressed;
+
+  expect([abort.asking.question.value, abort.closes]).toEqual([null, ["closeEndedMerge"]]);
 });

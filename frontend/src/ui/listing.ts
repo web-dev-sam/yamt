@@ -1,6 +1,6 @@
 import type { ShallowRef } from "vue";
 
-import type { FileEntry, OperationView, SideNames } from "../ipc";
+import type { FileEntry, MergeView, OperationView, SideNames } from "../ipc";
 import { landed, type Stop } from "./currentStop";
 import { applyDiskChanges, type DiskChangeTarget } from "./diskChanges";
 import type { DiskNotice } from "./noticeText";
@@ -11,6 +11,7 @@ type ListTarget = DiskChangeTarget & {
   readonly stop: Stop;
   readonly files: ShallowRef<readonly FileEntry[]>;
   readonly operation: ShallowRef<OperationView | null>;
+  readonly mergeRequest: ShallowRef<MergeView | null>;
   readonly sideNames: ShallowRef<SideNames>;
   nextStop(end: StopEnd): Promise<void>;
 };
@@ -28,9 +29,10 @@ export async function refreshFiles(
     await target.nextStop({ kind: "outside" });
     return null;
   }
-  const { files, diskChanges, operation, sides } = listed.value;
+  const { files, diskChanges, operation, sides, mergeRequest } = listed.value;
   target.files.value = files;
   target.operation.value = operation;
+  target.mergeRequest.value = mergeRequest;
   target.sideNames.value = sides;
   if (target.problem.value?.action === "list") {
     target.problem.value = null;

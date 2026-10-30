@@ -1,6 +1,14 @@
 import type { ChunkSource } from "./ChunkSource";
-import type { FileEntry, OperationView, SideName, SourceFailure, SourceResult } from "./domain";
+import type {
+  ContinueReply,
+  FileEntry,
+  OperationView,
+  SideName,
+  SourceFailure,
+  SourceResult,
+} from "./domain";
 import type { Log } from "./log";
+import type { Leftover, MergeView, ReturnTo } from "./mergeRequestDomain";
 
 const OPERATIONS = ["merge", "squash", "rebase", "cherry-pick", "revert", "am", "none"] as const;
 
@@ -32,6 +40,24 @@ const COMMITS: readonly [CommitName, ...CommitName[]] = [
   },
 ];
 
+const MERGE_REQUEST_BRANCH = "feature/due-dates";
+const DEVELOP: ReturnTo = { kind: "branch", name: "develop" };
+
+const MERGE_REQUEST_STARTS = {
+  created: { returnTo: DEVELOP, branchBefore: { kind: "created" } },
+  moved: { returnTo: DEVELOP, branchBefore: { kind: "movedFrom", id: "3f1c2a9" } },
+  unchanged: { returnTo: DEVELOP, branchBefore: { kind: "unchanged" } },
+  detached: { returnTo: { kind: "commit", id: "9b0d4e1" }, branchBefore: { kind: "created" } },
+  same: { returnTo: null, branchBefore: { kind: "unchanged" } },
+} satisfies Readonly<Record<string, Pick<MergeView, "returnTo" | "branchBefore">>>;
+
+const LEFTOVERS: readonly Leftover[] = [
+  { kind: "notReturned", to: DEVELOP },
+  { kind: "branchKept", branch: MERGE_REQUEST_BRANCH },
+];
+
+const REJECTED_PUSH = "[rejected] (fetch first)";
+
 /** The fixture files as listed now, and making every one unresolved again for the next step. */
 type StopFiles = {
   readonly listed: () => FileEntry[];
@@ -39,16 +65,27 @@ type StopFiles = {
 };
 
 /** What fixture mode's git is doing: chosen by `?operation=`, advanced by Continue. */
-type FixtureStops = Pick<ChunkSource, "listStop" | "continueOperation" | "abortOperation">;
+type FixtureStops = Pick<
+  ChunkSource,
+  "listStop" | "continueOperation" | "abortOperation" | "pushMergedBranch" | "closeEndedMerge"
+>;
 
 /** How the app answers every command once git finished or aborted the operation. */
 type Ended = Extract<SourceFailure, { kind: "MergeFinished" | "MergeAborted" }>;
 
-/** Where the chosen operation is: its step, or ended by the last Continue or Abort. */
+/**
+ * Where the chosen operation is: its step, or ended by the last Continue or Abort; a merge yamt
+ * started is `committed` after its Continue until it is pushed or kept local.
+ */
 type Sequence = {
   readonly operation: FixtureOperation;
   readonly rewords: boolean;
   readonly empty: boolean;
+  readonly clean: boolean;
+  readonly mergeRequest: MergeView | null;
+  readonly leftovers: boolean;
+  rejectedPushes: number;
+  committed: boolean;
   step: number;
   ended: Ended | null;
 };
@@ -98,16 +135,35 @@ function stepView(
   }
 }
 
+function mergeRequestOf(chosen: string | null): MergeView | null {
+  const start = Object.entries(MERGE_REQUEST_STARTS).find(([name]) => name === chosen)?.[1];
+  return start === undefined ? null : { branch: MERGE_REQUEST_BRANCH, target: "main", ...start };
+}
+
 /**
  * `?operation=merge|squash|rebase|cherry-pick|revert|am|none` (merge when missing), `?rewords`;
- * `?empty`: the second step stops without conflicts, as git stops at a rebase's `edit`.
+ * `?empty`: the second step stops without conflicts, as git stops at a rebase's `edit`;
+ * `?clean`: no step lists a file. A merge only: `?mergeRequest=created|moved|unchanged|detached|same`
+ * (the merge yamt started, its Continue answers ReadyToPush), `?push=rejected` (the first push
+ * fails), `?leftovers` (Abort leaves two).
  */
 function sequenceOf(search: string): Sequence {
   const params = new URLSearchParams(search);
   const chosen = params.get("operation");
   const operation = OPERATIONS.find((each) => each === chosen) ?? "merge";
-  const empty = params.has("empty");
-  return { operation, rewords: params.has("rewords"), empty, step: 1, ended: null };
+  const mergeRequest = operation === "merge" ? mergeRequestOf(params.get("mergeRequest")) : null;
+  return {
+    operation,
+    rewords: params.has("rewords"),
+    empty: params.has("empty"),
+    clean: params.has("clean"),
+    mergeRequest,
+    leftovers: params.has("leftovers"),
+    rejectedPushes: params.get("push") === "rejected" ? 1 : 0,
+    committed: false,
+    step: 1,
+    ended: null,
+  };
 }
 
 function atEmptyStop(at: Sequence): boolean {
@@ -115,7 +171,14 @@ function atEmptyStop(at: Sequence): boolean {
 }
 
 function listedAt(at: Sequence, files: StopFiles): FileEntry[] {
-  return atEmptyStop(at) ? [] : files.listed();
+  return at.clean || atEmptyStop(at) ? [] : files.listed();
+}
+
+function viewAt(at: Sequence): OperationView | null {
+  if (at.mergeRequest === null) {
+    return stepView(at.operation, at.step, at.rewords);
+  }
+  return { kind: "Merge", merging: MAIN, into: { kind: "Branch", name: at.mergeRequest.branch } };
 }
 
 function stoppedMessage(at: Sequence): string {
@@ -142,12 +205,36 @@ function stopListings(at: Sequence, files: StopFiles): Pick<ChunkSource, "listSt
       if (at.ended !== null) {
         return refused(at.ended);
       }
-      const view = stepView(at.operation, at.step, at.rewords);
+      const view = viewAt(at);
       const sides = { local: view?.kind === "Rebase" ? view.replaying : null, remote: null };
+      const { mergeRequest } = at;
       const value = { files: listedAt(at, files), diskChanges: [], operation: view, sides };
-      return { ok: true, value: { kind: "Files", ...value } };
+      return { ok: true, value: { kind: "Files", ...value, mergeRequest } };
     },
   };
+}
+
+function continued(log: Log, at: Sequence, files: StopFiles): SourceResult<ContinueReply> {
+  const { operation } = at;
+  if (at.ended !== null) {
+    return refused(at.ended);
+  }
+  const view = stepView(operation, at.step, at.rewords);
+  if (view === null) {
+    return refused(NO_OPERATION);
+  }
+  if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
+    at.ended = { kind: "MergeFinished" };
+    log.info("fixture.continue_finished", { operation });
+    if (at.mergeRequest !== null) {
+      at.committed = true;
+      return { ok: true, value: { kind: "ReadyToPush", branch: at.mergeRequest.branch } };
+    }
+    return { ok: true, value: { kind: "Finished" } };
+  }
+  at.step += 1;
+  files.unresolveAll();
+  return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
 }
 
 function stopActions(
@@ -158,21 +245,7 @@ function stopActions(
   const { operation } = at;
   return {
     async continueOperation() {
-      if (at.ended !== null) {
-        return refused(at.ended);
-      }
-      const view = stepView(operation, at.step, at.rewords);
-      if (view === null) {
-        return refused(NO_OPERATION);
-      }
-      if (view.kind === "Merge" || view.kind === "SquashMerge" || at.step === COMMITS.length) {
-        at.ended = { kind: "MergeFinished" };
-        log.info("fixture.continue_finished", { operation });
-        return { ok: true, value: { kind: "Finished" } };
-      }
-      at.step += 1;
-      files.unresolveAll();
-      return { ok: true, value: { kind: "Stopped", message: stoppedMessage(at) } };
+      return continued(log, at, files);
     },
     async abortOperation() {
       if (at.ended !== null) {
@@ -183,6 +256,31 @@ function stopActions(
       }
       at.ended = { kind: "MergeAborted" };
       log.info("fixture.abort_operation", { operation });
+      return { ok: true, value: { leftovers: at.leftovers ? [...LEFTOVERS] : [] } };
+    },
+  };
+}
+
+function pushActions(
+  log: Log,
+  at: Sequence,
+): Pick<ChunkSource, "pushMergedBranch" | "closeEndedMerge"> {
+  return {
+    async pushMergedBranch() {
+      if (!at.committed) {
+        return refused(at.ended ?? NO_OPERATION);
+      }
+      if (at.rejectedPushes > 0) {
+        at.rejectedPushes -= 1;
+        return { ok: true, value: { kind: "failed", message: REJECTED_PUSH } };
+      }
+      at.committed = false;
+      log.info("fixture.push", {});
+      return { ok: true, value: { kind: "pushed" } };
+    },
+    async closeEndedMerge() {
+      at.committed = false;
+      log.info("fixture.close_ended_merge", {});
       return { ok: true, value: null };
     },
   };
@@ -190,5 +288,5 @@ function stopActions(
 
 export function createFixtureStops(log: Log, search: string, files: StopFiles): FixtureStops {
   const at = sequenceOf(search);
-  return { ...stopListings(at, files), ...stopActions(log, at, files) };
+  return { ...stopListings(at, files), ...stopActions(log, at, files), ...pushActions(log, at) };
 }

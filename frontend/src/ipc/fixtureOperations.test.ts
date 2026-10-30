@@ -3,7 +3,14 @@ import { expect, test, vi } from "vitest";
 import type { ChunkSource } from "./ChunkSource";
 import type { SourceResult } from "./domain";
 import { createFixtureSource } from "./fixture";
-import type { ContinueReply, Listing, OperationKind, OperationView, ProgressView } from "./index";
+import type {
+  ContinueReply,
+  Listing,
+  MergeView,
+  OperationKind,
+  OperationView,
+  ProgressView,
+} from "./index";
 import { createLog, type Log, type LogEntry } from "./log";
 
 const FIRST_STEP: ProgressView = { step: 1, total: 3 };
@@ -172,7 +179,7 @@ test("abortOperation answers done, logs the abort once, then every command answe
   const { log, entries } = quietLog();
   const source = sourceAt("?operation=revert", log);
 
-  expect(await source.abortOperation()).toEqual({ ok: true, value: null });
+  expect(await source.abortOperation()).toEqual({ ok: true, value: { leftovers: [] } });
 
   expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeAborted"));
   expect(entries).toEqual([
@@ -189,4 +196,111 @@ test("none lists no operation and has nothing to continue or abort", async () =>
   expect(await source.continueOperation()).toEqual(nothing);
   expect(await source.abortOperation()).toEqual(nothing);
   expect(entries).toEqual([]);
+});
+
+const DEVELOP = { kind: "branch", name: "develop" } as const;
+
+test.each<[string, Pick<MergeView, "returnTo" | "branchBefore">]>([
+  ["created", { returnTo: DEVELOP, branchBefore: { kind: "created" } }],
+  ["moved", { returnTo: DEVELOP, branchBefore: { kind: "movedFrom", id: "3f1c2a9" } }],
+  ["unchanged", { returnTo: DEVELOP, branchBefore: { kind: "unchanged" } }],
+  ["detached", { returnTo: { kind: "commit", id: "9b0d4e1" }, branchBefore: { kind: "created" } }],
+  ["same", { returnTo: null, branchBefore: { kind: "unchanged" } }],
+])(
+  "?mergeRequest=%s lists the merge of main into feature/due-dates it names",
+  async (name, start) => {
+    const listed = await filesListed(sourceAt(`?operation=merge&mergeRequest=${name}`));
+
+    expect(listed.mergeRequest).toEqual({ branch: "feature/due-dates", target: "main", ...start });
+    expect(listed.operation).toEqual({
+      kind: "Merge",
+      merging: { kind: "Branch", name: "main" },
+      into: { kind: "Branch", name: "feature/due-dates" },
+    });
+    expect(listed.files.map((file) => file.path)).toEqual(["a.ts"]);
+  },
+);
+
+test.each(["", "?mergeRequest=nonsense", "?operation=rebase&mergeRequest=created"])(
+  "%j lists no merge request",
+  async (search) => {
+    expect((await filesListed(sourceAt(search))).mergeRequest).toBeNull();
+  },
+);
+
+test("?clean lists no file at any step", async () => {
+  const source = sourceAt("?operation=rebase&clean");
+
+  expect((await filesListed(source)).files).toEqual([]);
+  await source.continueOperation();
+  expect((await filesListed(source)).files).toEqual([]);
+});
+
+test("a merge yamt started answers ReadyToPush, then MergeFinished to every stop command, and Pushed once", async () => {
+  const { log, entries } = quietLog();
+  const source = sourceAt("?mergeRequest=created&clean", log);
+
+  expect(await source.pushMergedBranch()).toEqual({ ok: false, failure: { kind: "NoOperation" } });
+  expect(await source.continueOperation()).toEqual({
+    ok: true,
+    value: { kind: "ReadyToPush", branch: "feature/due-dates" },
+  });
+  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
+  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: { kind: "pushed" } });
+  expect(await source.pushMergedBranch()).toEqual({
+    ok: false,
+    failure: { kind: "MergeFinished" },
+  });
+  expect(entries.map((entry) => entry.event)).toEqual([
+    "fixture.continue_finished",
+    "fixture.push",
+  ]);
+});
+
+test("?push=rejected fails the first push with git's words, then pushes", async () => {
+  const source = sourceAt("?mergeRequest=created&push=rejected");
+  await source.continueOperation();
+
+  expect(await source.pushMergedBranch()).toEqual({
+    ok: true,
+    value: { kind: "failed", message: "[rejected] (fetch first)" },
+  });
+  expect(await source.pushMergedBranch()).toEqual({ ok: true, value: { kind: "pushed" } });
+});
+
+test("closeEndedMerge after ReadyToPush keeps the commit local: no push follows and every command answers MergeFinished", async () => {
+  const { log, entries } = quietLog();
+  const source = sourceAt("?mergeRequest=created&push=rejected", log);
+  await source.continueOperation();
+
+  expect(await source.closeEndedMerge()).toEqual({ ok: true, value: null });
+  expect(await source.pushMergedBranch()).toEqual({
+    ok: false,
+    failure: { kind: "MergeFinished" },
+  });
+  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeFinished"));
+  expect(entries.map((entry) => entry.event)).toEqual([
+    "fixture.continue_finished",
+    "fixture.close_ended_merge",
+  ]);
+});
+
+test("?leftovers answers Abort with what was not put back, then every command answers MergeAborted", async () => {
+  const source = sourceAt("?mergeRequest=created&leftovers");
+
+  expect(await source.abortOperation()).toEqual({
+    ok: true,
+    value: {
+      leftovers: [
+        { kind: "notReturned", to: DEVELOP },
+        { kind: "branchKept", branch: "feature/due-dates" },
+      ],
+    },
+  });
+  expect(await source.closeEndedMerge()).toEqual({ ok: true, value: null });
+  expect(await everyStopCommand(source)).toEqual(everyCommandRefused("MergeAborted"));
+  expect(await source.pushMergedBranch()).toEqual({
+    ok: false,
+    failure: { kind: "MergeAborted" },
+  });
 });
