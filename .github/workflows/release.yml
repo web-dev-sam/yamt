@@ -30,7 +30,7 @@ jobs:
         include:
           - runner: ubuntu-22.04
             args: ""
-          - runner: macos-14
+          - runner: macos-15
             args: --target universal-apple-darwin
           - runner: windows-2025
             args: ""

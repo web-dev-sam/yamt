@@ -19,7 +19,7 @@ jobs:
         include:
           - runner: ubuntu-22.04
             app: --no-bundle
-          - runner: macos-14
+          - runner: macos-15
             app: --no-bundle
           - runner: windows-2025
             app: --bundles nsis
