@@ -21,7 +21,9 @@ Non-goals: the request's Non-goals; the merge window; a key for the page; any ch
 
 ## Contract
 
-Fixed: design §6 "B4 → B5" as committed (its `Listing` is named `ListLoad`, #1941; use it, do not change it), the
+Fixed: design §6 "B4 → B5" as committed in `635f4e5` (use it, do not change it). A fix round running beside you renames
+the slice's exported type `Listing` to `ListLoad` (#1941) and moves the list's end onto the Tauri channel; no field or
+method of `MergeRequests` changes, so never import the type `Listing` by name (read `slice.listing.value.kind`). The
 request's rule 1 placement (icon-only Lucide
 `git-pull-request`, `aria-label`/title "Merge requests", directly left of the gear in every header showing the gear,
 the range window's empty-range header included), rule 2 page layout and closing (Back, Escape by `ServerLogView.vue`'s
@@ -34,7 +36,12 @@ opens to `<session>/glab/opened.log`; `stop` sweeps child yamt processes of the 
 
 - `fences.test` (PM10 refuses a root import and an `lsp/` import from `MergeRequest*`/`mergeRequest*`/`CiStatus*`
   files under `src/ui/`), `startArgs.test` (`--diff --dir`, `--glab` with `--diff`, `--mr`).
-- `pnpm -C frontend typecheck`, `lint`, `test`, `fmt:check`, `unused`, `sfc-order` pass.
+- `pnpm -C frontend typecheck`, `lint`, `test`, `fmt:check`, `unused`, `sfc-order` pass. At `03800ff` two type
+  errors sit in `src/ipc/tauriMergeRequests.ts` (the channel change the fix round beside you makes); those two only
+  may stay, listed in `acceptance_not_run`. The real app's list then loads only after that fix: if your real-app
+  steps need it before, say so in `acceptance_not_run` and the check is re-run after both land. `just map-check`
+  turns green only after the documentation pass names `MergeRequestSource`'s methods; your `map-check.sh` change
+  must be correct, not green.
 - Design §8 WebKit fixture steps 1–9, both windows, dark and light, through `just app-session start-fixture`
   (private display): paste the observed values and screenshot paths per step.
 - Design §8 real-app steps on `scripts/range-repo.sh`: range window and compare window, opened.log line, the child

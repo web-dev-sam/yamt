@@ -12,8 +12,9 @@ notes `.omp/run/notes/MrWindowState.md`). The Rust commands are committed with t
    needs late-page handling after an end; remove what only served it.
 2. **Bindings**: `pnpm -C frontend typecheck` and `lint` green against the real bindings (round 1's NOT RUN);
    `mergeRequestDomain.ts` follows the generated field names.
-3. **#1941** The slice's `Listing` is renamed `ListLoad` (contract amendment, design §6 "B4 → B5"); the fixture's
-   private `Listing`/`listing` pair gets a name of its own.
+3. **#1941** The slice's `Listing` type is renamed `ListLoad` (contract amendment, design §6 "B4 → B5"); every field
+   and method name of `MergeRequests` stays as committed (`listing` included: the page build running beside you reads
+   them); the fixture's private `Listing`/`listing` pair gets a name of its own.
 4. **#1938** The merge window's `ui/store.ts` uses `screen.ts`'s settings-screen actions instead of its own
    open/close closures; one rule for Back's target in all three windows.
 5. **#1939** One `pause(ms)` exported from `ipc/fixture.ts`, used by `fixtureMergeRequests.ts` and `fixtureReview.ts`.
