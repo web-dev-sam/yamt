@@ -1,11 +1,4 @@
 {
-  "MrDocs": {
-    "owned": [
-      "docs/architecture.md",
-      ".omp/skills/project-map/**",
-      ".omp/skills/ipc-contract/SKILL.md"
-    ]
-  },
   "MrPageR1": {
     "owned": [
       "frontend/src/ui/MergeRequestsButton.vue",
@@ -27,6 +20,14 @@
       "frontend/src/ui/serverText.test.ts",
       "frontend/src/ui/searchText.ts",
       "frontend/src/ui/searchText.test.ts"
+    ]
+  },
+  "MrRustTidy": {
+    "owned": [
+      "src-tauri/AGENTS.md",
+      "crates/gitio/AGENTS.md",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/args.rs"
     ]
   }
 }
