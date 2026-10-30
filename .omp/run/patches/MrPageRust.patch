@@ -1,0 +1,809 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index b84d8fd..5c73a9c 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, request `docs/slices/request-merge-requests.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `JobPage` (a string only `JobPage::built` makes), `FailedJob`, `Pipeline`, `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `JobOpened` `opened`/`notOffered`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`glab api projects/:fullpath` → `Project { full_path, web_origin }`, the origin only on https), `query.rs` (the one list query and the details query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; `details_args`: `… -f fullPath=<path> -f iid=<n>`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; job pages through `JobPage::built`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `Glab::auth_status` → `NotLoggedIn`/`Failed`, the project, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, logged in, the project, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target with `:` refused); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `job_page.rs` (`JobPage::built`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a path matching `/<segments>/-/jobs/<digits>`, segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_job_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `job_page.rs` (the opener per system, `cfg`-gated; the Unix process group), `project.rs`, `query.rs`, `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs` and `tests/open.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, request `docs/slices/request-merge-requests.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`glab api projects/:fullpath` → `Project { full_path, web_origin }`, the origin only on https), `query.rs` (the one list query and the details query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; `details_args`: `… -f fullPath=<path> -f iid=<n>`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's page through `WebPage::merge_request` from the project's origin and full path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `Glab::auth_status` → `NotLoggedIn`/`Failed`, the project, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, logged in, the project, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target with `:` refused); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `/<full_path>/-/jobs/<digits>`; `WebPage::merge_request`: `<full_path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + `/<full_path>`, segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules; the opener per system, `cfg`-gated; the Unix process group), `project.rs`, `query.rs`, `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs` and `tests/open.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+index dc79859..f06d574 100644
+--- a/crates/merge-requests/src/lib.rs
++++ b/crates/merge-requests/src/lib.rs
+@@ -1,16 +1,16 @@
+ //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
+-//! each one's changes prepared for a window of their own, a failed job's page opened in the browser.
++//! each one's changes prepared for a window of their own, its page or a failed job's opened in the browser.
+ #![forbid(unsafe_code)]
+ #![warn(missing_docs)]
+ 
+ mod detect;
+-mod job_page;
+ mod list;
+ mod open;
+ mod page;
+ mod project;
+ mod query;
+ mod remote;
++mod web_page;
+ 
+ use std::path::PathBuf;
+ 
+@@ -18,9 +18,9 @@ use serde::{Deserialize, Serialize};
+ use specta::Type;
+ 
+ pub use detect::{GitLabRepository, gitlab_repository};
+-pub use job_page::open_job_page;
+ pub use list::list_merge_requests;
+ pub use open::prepare_open;
++pub use web_page::open_page;
+ pub use yamt_gitio::Glab;
+ 
+ /// Merge requests asked for in one glab call: GitLab's largest page.
+@@ -78,9 +78,10 @@ pub enum CiStatus {
+     Manual,
+ }
+ 
+-/// The address of a failed job's log page on the project's GitLab; only `JobPage::built` makes one.
++/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
++/// a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
+ #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
+-pub struct JobPage(String);
++pub struct WebPage(String);
+ 
+ /// A failed job of a merge request's latest pipeline, the latest run of it.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+@@ -93,7 +94,7 @@ pub struct FailedJob {
+     /// Whether the pipeline may pass while it fails.
+     pub allow_failure: bool,
+     /// Its log page; `None` when GitLab is not on https or sent an odd path.
+-    pub page: Option<JobPage>,
++    pub page: Option<WebPage>,
+ }
+ 
+ /// A merge request's latest pipeline.
+@@ -132,6 +133,8 @@ pub struct MergeRequestRow {
+     pub approvals: u32,
+     /// Its latest pipeline; `None` when it has none.
+     pub pipeline: Option<Pipeline>,
++    /// Its page on GitLab; `None` when GitLab is not on https.
++    pub page: Option<WebPage>,
+ }
+ 
+ /// One page of the list, sent as soon as it arrives.
+@@ -215,10 +218,10 @@ pub enum OpenReply {
+     },
+ }
+ 
+-/// How asking to open a failed job's page ended.
++/// How asking to open a page on GitLab ended.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(tag = "kind", rename_all = "camelCase")]
+-pub enum JobOpened {
++pub enum PageOpened {
+     /// The browser was asked to show it.
+     Opened,
+     /// This window's list never offered that address, so it is not opened.
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+index 94f10ea..51cbeec 100644
+--- a/crates/merge-requests/src/list.rs
++++ b/crates/merge-requests/src/list.rs
+@@ -31,7 +31,7 @@ pub fn list_merge_requests(
+         let args = list_args(&project.full_path, after);
+         let args: Vec<&str> = args.iter().map(String::as_str).collect();
+         let json = glab.get(root, &args)?;
+-        parsed(&json, project.web_origin.as_deref())
++        parsed(&json, &project)
+     };
+     pages(&mut fetch, on_page)
+ }
+@@ -87,6 +87,7 @@ mod tests {
+             open_discussions: 0,
+             approvals: 0,
+             pipeline: None,
++            page: None,
+         }
+     }
+ 
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index c59f852..08ca72b 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -2,7 +2,8 @@ use serde::Deserialize;
+ use serde::de::DeserializeOwned;
+ use serde::de::IgnoredAny;
+ 
+-use crate::{CiStatus, FailedJob, JobPage, MergeRequestIid, MergeRequestRow, Person, Pipeline};
++use crate::project::Project;
++use crate::{CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person, Pipeline, WebPage};
+ 
+ const NO_DATA: &str = "GitLab's answer holds no data";
+ pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
+@@ -41,7 +42,7 @@ struct GraphQlError {
+ struct Data {
+     query_complexity: Option<Complexity>,
+     current_user: Option<User>,
+-    project: Option<Project>,
++    project: Option<ProjectNode>,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -51,7 +52,7 @@ struct User {
+ 
+ #[derive(Deserialize)]
+ #[serde(rename_all = "camelCase")]
+-struct Project {
++struct ProjectNode {
+     merge_requests: Option<Connection<Node>>,
+ }
+ 
+@@ -115,15 +116,16 @@ struct Stage {
+     name: String,
+ }
+ 
+-/// The page in a GraphQL answer; `Err` holds GitLab's first error, or what yamt could not read. `origin` is the
+-/// project's `https://<host[:port]>`, which job pages are built on.
+-pub(crate) fn parsed(json: &[u8], origin: Option<&str>) -> Result<ParsedPage, String> {
++/// The page in a GraphQL answer of `project`'s list; `Err` holds GitLab's first error, or what yamt could not read.
++pub(crate) fn parsed(json: &[u8], project: &Project) -> Result<ParsedPage, String> {
+     let data: Data = graphql_data(json)?;
+-    let project = data.project.ok_or(NO_PROJECT)?;
+-    let merge_requests = project.merge_requests.ok_or(NO_PROJECT)?;
++    let merge_requests = data
++        .project
++        .and_then(|found| found.merge_requests)
++        .ok_or(NO_PROJECT)?;
+     let mut rows = Vec::new();
+     for node in merge_requests.nodes {
+-        rows.push(row(node, origin)?);
++        rows.push(row(node, project)?);
+     }
+     Ok(ParsedPage {
+         me: data.current_user.map(|user| user.username),
+@@ -151,14 +153,17 @@ fn next_cursor(page_info: PageInfo) -> Result<Option<String>, String> {
+     }
+ }
+ 
+-fn row(node: Node, origin: Option<&str>) -> Result<MergeRequestRow, String> {
++fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
+     let iid = node
+         .iid
+         .parse()
+         .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
++    let iid = MergeRequestIid(iid);
++    let origin = project.web_origin.as_deref();
++    let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.full_path, iid));
+     let labels = listed(node.labels).into_iter().map(|label| label.title);
+     Ok(MergeRequestRow {
+-        iid: MergeRequestIid(iid),
++        iid,
+         title: node.title,
+         created_at: node.created_at,
+         draft: node.draft,
+@@ -171,6 +176,7 @@ fn row(node: Node, origin: Option<&str>) -> Result<MergeRequestRow, String> {
+         ),
+         approvals: count(listed(node.approved_by).len()),
+         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
++        page,
+     })
+ }
+ 
+@@ -206,7 +212,7 @@ fn pipeline(found: PipelineNode, origin: Option<&str>) -> Pipeline {
+ fn failed_job(job: Job, origin: Option<&str>) -> FailedJob {
+     let page = origin.zip(job.web_path.as_deref());
+     FailedJob {
+-        page: page.and_then(|(origin, web_path)| JobPage::built(origin, web_path)),
++        page: page.and_then(|(origin, web_path)| WebPage::job(origin, web_path)),
+         name: job.name,
+         stage: job.stage.map(|stage| stage.name).unwrap_or_default(),
+         allow_failure: job.allow_failure,
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+index 4eb906d..f04f034 100644
+--- a/crates/merge-requests/src/page/tests.rs
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -3,6 +3,7 @@ use serde_json::{Value, json};
+ use super::*;
+ 
+ const ORIGIN: &str = "https://gitlab.example";
++const FULL_PATH: &str = "taskboard/taskboard";
+ const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
+ const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
+ 
+@@ -13,13 +14,20 @@ fn person(username: &str, name: &str) -> Person {
+     }
+ }
+ 
++fn taskboard(web_origin: Option<&str>) -> Project {
++    Project {
++        full_path: FULL_PATH.to_owned(),
++        web_origin: web_origin.map(str::to_owned),
++    }
++}
++
+ fn job(name: &str, allow_failure: bool, id: u32) -> FailedJob {
+     let page = format!("https://gitlab.example/taskboard/taskboard/-/jobs/{id}");
+     FailedJob {
+         name: name.to_owned(),
+         stage: "test".to_owned(),
+         allow_failure,
+-        page: Some(JobPage(page)),
++        page: Some(WebPage(page)),
+     }
+ }
+ 
+@@ -41,6 +49,9 @@ fn snooze_a_reminder() -> MergeRequestRow {
+         open_discussions: 0,
+         approvals: 0,
+         pipeline: Some(failed),
++        page: Some(WebPage(
++            "https://gitlab.example/taskboard/taskboard/-/merge_requests/13".to_owned(),
++        )),
+     }
+ }
+ 
+@@ -52,7 +63,7 @@ fn answer(nodes: &Value, page_info: &Value) -> Vec<u8> {
+ 
+ fn last_page_of(nodes: &Value) -> Result<ParsedPage, String> {
+     let page_info = json!({ "hasNextPage": false, "endCursor": null });
+-    parsed(&answer(nodes, &page_info), Some(ORIGIN))
++    parsed(&answer(nodes, &page_info), &taskboard(Some(ORIGIN)))
+ }
+ 
+ fn status_of(row: &MergeRequestRow) -> Option<CiStatus> {
+@@ -61,7 +72,7 @@ fn status_of(row: &MergeRequestRow) -> Option<CiStatus> {
+ 
+ #[test]
+ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
+-    let page = parsed(PAGE_1, Some(ORIGIN)).unwrap();
++    let page = parsed(PAGE_1, &taskboard(Some(ORIGIN))).unwrap();
+ 
+     assert_eq!(page.me.as_deref(), Some("sam"));
+     assert_eq!(page.next.as_deref(), Some("page-2"));
+@@ -83,7 +94,7 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
+ 
+ #[test]
+ fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
+-    let page = parsed(PAGE_2, Some(ORIGIN)).unwrap();
++    let page = parsed(PAGE_2, &taskboard(Some(ORIGIN))).unwrap();
+ 
+     assert_eq!(page.next, None);
+     assert_eq!(page.rows[0].pipeline, None);
+@@ -92,12 +103,13 @@ fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
+ }
+ 
+ #[test]
+-fn without_an_https_origin_no_job_has_a_page() {
+-    let page = parsed(PAGE_1, None).unwrap();
++fn without_an_https_origin_no_row_and_no_job_has_a_page() {
++    let page = parsed(PAGE_1, &taskboard(None)).unwrap();
+ 
+     let pipeline = page.rows[0].pipeline.as_ref().unwrap();
+     let pages: Vec<_> = pipeline.failed_jobs.iter().map(|job| &job.page).collect();
+     assert_eq!(pages, [&None, &None]);
++    assert!(page.rows.iter().all(|row| row.page.is_none()));
+ }
+ 
+ #[test]
+@@ -166,7 +178,7 @@ fn graphql_errors_are_gitlab_s_first_message_even_beside_data() {
+     let refused = json!({ "errors": [{ "message": too_complex }, { "message": "second" }],
+         "data": { "project": null } });
+ 
+-    let page = parsed(refused.to_string().as_bytes(), Some(ORIGIN));
++    let page = parsed(refused.to_string().as_bytes(), &taskboard(Some(ORIGIN)));
+ 
+     assert_eq!(page.err().as_deref(), Some(too_complex));
+ }
+@@ -177,7 +189,7 @@ fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
+     let no_project = json!({ "data": { "project": null } }).to_string();
+     let no_merge_requests = json!({ "data": { "project": { "mergeRequests": null } } }).to_string();
+     let bad_iid = json!([{ "iid": "!4", "title": "t", "createdAt": "x", "draft": false }]);
+-    let error = |answer: &[u8]| parsed(answer, Some(ORIGIN)).err();
++    let error = |answer: &[u8]| parsed(answer, &taskboard(Some(ORIGIN))).err();
+ 
+     assert_eq!(error(b"{}").as_deref(), Some(NO_DATA));
+     assert_eq!(error(no_project.as_bytes()).as_deref(), Some(NO_PROJECT));
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+index a8af248..dfeac33 100644
+--- a/crates/merge-requests/src/project.rs
++++ b/crates/merge-requests/src/project.rs
+@@ -3,7 +3,7 @@ use std::path::Path;
+ use serde::Deserialize;
+ use yamt_gitio::Glab;
+ 
+-use crate::job_page::HTTPS;
++use crate::web_page::HTTPS;
+ 
+ /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
+ const PROJECT_ROUTE: &str = "projects/:fullpath";
+diff --git a/crates/merge-requests/src/job_page.rs b/crates/merge-requests/src/web_page.rs
+similarity index 58%
+rename from crates/merge-requests/src/job_page.rs
+rename to crates/merge-requests/src/web_page.rs
+index a57d5f0..eac1719 100644
+--- a/crates/merge-requests/src/job_page.rs
++++ b/crates/merge-requests/src/web_page.rs
+@@ -1,10 +1,11 @@
+ use std::process::{Command, Stdio};
+ use std::thread;
+ 
+-use crate::{JobOpened, JobPage};
++use crate::{MergeRequestIid, PageOpened, WebPage};
+ 
+ pub(crate) const HTTPS: &str = "https://";
+ const JOBS_SEGMENT: &str = "/-/jobs/";
++const MERGE_REQUESTS_SEGMENT: &str = "/-/merge_requests/";
+ const PARENT_SEGMENT: &str = "..";
+ #[cfg(target_os = "macos")]
+ const OPENER: &str = "/usr/bin/open";
+@@ -16,14 +17,27 @@ const URL_HANDLER: &str = "url.dll,FileProtocolHandler";
+ #[cfg(not(any(target_os = "macos", windows)))]
+ const OPENER: &str = "xdg-open";
+ 
+-impl JobPage {
+-    /// The job log page `web_path` names on the GitLab at `origin` (`https://<host[:port]>`); `None` for any other
+-    /// origin or path, so a page never leaves the project's GitLab.
+-    pub(crate) fn built(origin: &str, web_path: &str) -> Option<JobPage> {
+-        let authority = origin.strip_prefix(HTTPS)?;
++impl WebPage {
++    /// The job log page `web_path` (`/<full_path>/-/jobs/<id>`) names on the GitLab at `origin`; `None` for any
++    /// other origin or path.
++    pub(crate) fn job(origin: &str, web_path: &str) -> Option<WebPage> {
+         let (project, job) = web_path.rsplit_once(JOBS_SEGMENT)?;
+-        let is_page = is_authority(authority) && is_project_path(project) && is_number(job);
+-        is_page.then(|| JobPage(format!("{origin}{web_path}")))
++        let full_path = project.strip_prefix('/')?;
++        if !is_number(job) {
++            return None;
++        }
++        project_page(origin, full_path, &format!("{JOBS_SEGMENT}{job}"))
++    }
++
++    /// Merge request `iid`'s page of project `full_path` (`group/project`) on the GitLab at `origin`; `None` for
++    /// any other origin or path.
++    pub(crate) fn merge_request(
++        origin: &str,
++        full_path: &str,
++        iid: MergeRequestIid,
++    ) -> Option<WebPage> {
++        let tail = format!("{MERGE_REQUESTS_SEGMENT}{}", iid.0);
++        project_page(origin, full_path, &tail)
+     }
+ 
+     /// The page's address.
+@@ -33,10 +47,18 @@ impl JobPage {
+     }
+ }
+ 
++/// `<origin>/<full_path><tail>` when `origin` is `https://<host[:port]>` and `full_path` a plain project path, so a
++/// page never leaves the project's GitLab.
++fn project_page(origin: &str, full_path: &str, tail: &str) -> Option<WebPage> {
++    let authority = origin.strip_prefix(HTTPS)?;
++    let is_page = is_authority(authority) && is_full_path(full_path);
++    is_page.then(|| WebPage(format!("{origin}/{full_path}{tail}")))
++}
++
+ /// Asks the system's browser to show `page`; the opener runs on its own, in a process group of its own on Unix so
+ /// it outlives this one and the terminal, and a thread waits for its exit.
+ #[must_use]
+-pub fn open_job_page(page: &JobPage) -> JobOpened {
++pub fn open_page(page: &WebPage) -> PageOpened {
+     let mut command = opener(page.as_str());
+     command
+         .stdin(Stdio::null())
+@@ -44,17 +66,17 @@ pub fn open_job_page(page: &JobPage) -> JobOpened {
+         .stderr(Stdio::null());
+     #[cfg(unix)]
+     detach(&mut command);
+-    tracing::info!(page = page.as_str(), "opening a job page");
++    tracing::info!(page = page.as_str(), "opening a GitLab page");
+     match command.spawn() {
+         Ok(mut child) => {
+             thread::spawn(move || {
+                 if let Err(error) = child.wait() {
+-                    tracing::warn!(%error, "the job page's opener was not waited for");
++                    tracing::warn!(%error, "the GitLab page's opener was not waited for");
+                 }
+             });
+-            JobOpened::Opened
++            PageOpened::Opened
+         }
+-        Err(error) => JobOpened::Failed {
++        Err(error) => PageOpened::Failed {
+             message: format!("cannot start {}: {error}", command.get_program().display()),
+         },
+     }
+@@ -67,7 +89,7 @@ fn opener(url: &str) -> Command {
+     command
+ }
+ 
+-// Windows passes arguments as one command line; `JobPage::built` lets no space or quote in, so none needs quoting.
++// Windows passes arguments as one command line; `project_page` lets no space or quote in, so none needs quoting.
+ #[cfg(windows)]
+ fn opener(url: &str) -> Command {
+     let mut command = Command::new(OPENER);
+@@ -86,16 +108,13 @@ fn is_authority(authority: &str) -> bool {
+     !authority.is_empty() && authority.chars().all(is_host_char)
+ }
+ 
+-/// `/<group>/<project>`: URL path characters only, no empty or `..` segment.
+-fn is_project_path(path: &str) -> bool {
+-    let Some(segments) = path.strip_prefix('/') else {
+-        return false;
+-    };
++/// `<group>/<project>`: URL path characters only, no empty or `..` segment.
++fn is_full_path(full_path: &str) -> bool {
+     let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-');
+     let is_segment = |segment: &str| {
+         !segment.is_empty() && segment != PARENT_SEGMENT && segment.chars().all(is_path_char)
+     };
+-    segments.split('/').all(is_segment)
++    full_path.split('/').all(is_segment)
+ }
+ 
+ fn is_number(text: &str) -> bool {
+@@ -108,19 +127,24 @@ mod tests {
+ 
+     const ORIGIN: &str = "https://gitlab.example";
+     const PAGE: &str = "https://gitlab.example/a/b/-/jobs/1";
++    const IID: MergeRequestIid = MergeRequestIid(12);
+ 
+-    fn built(origin: &str, web_path: &str) -> Option<String> {
+-        JobPage::built(origin, web_path).map(|page| page.as_str().to_owned())
++    fn job(origin: &str, web_path: &str) -> Option<String> {
++        WebPage::job(origin, web_path).map(|page| page.as_str().to_owned())
++    }
++
++    fn merge_request(origin: &str, full_path: &str) -> Option<String> {
++        WebPage::merge_request(origin, full_path, IID).map(|page| page.as_str().to_owned())
+     }
+ 
+     #[test]
+     fn a_job_path_on_an_https_gitlab_is_its_page() {
+-        let page = built(ORIGIN, "/taskboard/taskboard/-/jobs/301");
++        let page = job(ORIGIN, "/taskboard/taskboard/-/jobs/301");
+         assert_eq!(
+             page.as_deref(),
+             Some("https://gitlab.example/taskboard/taskboard/-/jobs/301")
+         );
+-        let with_port = built("https://gitlab-2.example:8443", "/a/b.c_d~e-f/-/jobs/7");
++        let with_port = job("https://gitlab-2.example:8443", "/a/b.c_d~e-f/-/jobs/7");
+         assert_eq!(
+             with_port.as_deref(),
+             Some("https://gitlab-2.example:8443/a/b.c_d~e-f/-/jobs/7")
+@@ -136,7 +160,7 @@ mod tests {
+             "https://gitlab.example/",
+         ];
+         for origin in origins {
+-            assert_eq!(built(origin, "/a/b/-/jobs/1"), None, "{origin}");
++            assert_eq!(job(origin, "/a/b/-/jobs/1"), None, "{origin}");
+         }
+         let paths = [
+             "//evil.example/a/-/jobs/1",
+@@ -152,7 +176,35 @@ mod tests {
+             "/a b/-/jobs/1",
+         ];
+         for path in paths {
+-            assert_eq!(built(ORIGIN, path), None, "{path}");
++            assert_eq!(job(ORIGIN, path), None, "{path}");
++        }
++    }
++
++    #[test]
++    fn a_merge_request_of_a_nested_project_on_an_https_gitlab_with_a_port_is_its_page() {
++        let page = merge_request("https://gitlab-2.example:8443", "group/sub.group/b_c~d-e");
++        assert_eq!(
++            page.as_deref(),
++            Some("https://gitlab-2.example:8443/group/sub.group/b_c~d-e/-/merge_requests/12")
++        );
++    }
++
++    #[test]
++    fn another_origin_or_an_odd_full_path_gives_a_merge_request_no_page() {
++        let origins = [
++            "http://gitlab.example",
++            "https://",
++            "https://sam@gitlab.example",
++            "https://gitlab.example/",
++        ];
++        for origin in origins {
++            assert_eq!(merge_request(origin, "a/b"), None, "{origin}");
++        }
++        let full_paths = [
++            "", "/a/b", "a/b/", "a//b", "a/../b", "..", "a b/c", "a/b?x=1", "a/b#c", "a@b/c",
++        ];
++        for full_path in full_paths {
++            assert_eq!(merge_request(ORIGIN, full_path), None, "{full_path}");
+         }
+     }
+ 
+diff --git a/crates/merge-requests/tests/list.rs b/crates/merge-requests/tests/list.rs
+index 2daab88..f74a8ab 100644
+--- a/crates/merge-requests/tests/list.rs
++++ b/crates/merge-requests/tests/list.rs
+@@ -65,6 +65,11 @@ fn the_list_comes_page_by_page_from_glab_graphql_after_each_cursor() {
+         job_page.as_str(),
+         "https://gitlab.example/taskboard/taskboard/-/jobs/302"
+     );
++    let row_page = pages[0].rows[0].page.as_ref().unwrap();
++    assert_eq!(
++        row_page.as_str(),
++        "https://gitlab.example/taskboard/taskboard/-/merge_requests/13"
++    );
+     let argv = fake.logged("argv: ");
+     assert_eq!(
+         argv[..2],
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index 99362c3..8d7fea0 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -74,7 +74,7 @@ export const commands = {
+ 	 *  Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
+ 	 *  address to the system.
+ 	 */
+-	openJobPage: (page: JobPage) => __TAURI_INVOKE<JobOpened>("open_job_page", { page }),
++	openPage: (page: WebPage) => __TAURI_INVOKE<PageOpened>("open_page", { page }),
+ };
+ 
+ /* Types */
+@@ -249,7 +249,7 @@ export type FailedJob = {
+ 	/**  Whether the pipeline may pass while it fails. */
+ 	allowFailure: boolean,
+ 	/**  Its log page; `None` when GitLab is not on https or sent an odd path. */
+-	page: JobPage | null,
++	page: WebPage | null,
+ };
+ 
+ export type FileEntry = {
+@@ -330,20 +330,6 @@ export type InlineRange<L> = {
+ 
+ export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "NotANote"; message: MessageId } | { kind: "SendRunning" } | { kind: "AiOff" } | { kind: "RemoveFailed"; folder: string; message: string };
+ 
+-/**  How asking to open a failed job's page ended. */
+-export type JobOpened = 
+-/**  The browser was asked to show it. */
+-{ kind: "opened" } | 
+-/**  This window's list never offered that address, so it is not opened. */
+-{ kind: "notOffered" } | 
+-/**  The browser could not be asked. */
+-{ kind: "failed"; 
+-/**  Why, in the system's words. */
+-message: string };
+-
+-/**  The address of a failed job's log page on the project's GitLab; only `JobPage::built` makes one. */
+-export type JobPage = string;
+-
+ /**
+  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
+  *  `None` removes the entry (the action is back on its defaults).
+@@ -486,6 +472,8 @@ export type MergeRequestRow = {
+ 	approvals: number,
+ 	/**  Its latest pipeline; `None` when it has none. */
+ 	pipeline: Pipeline | null,
++	/**  Its page on GitLab; `None` when GitLab is not on https. */
++	page: WebPage | null,
+ };
+ 
+ /**  One message of a thread. */
+@@ -608,6 +596,17 @@ message: string };
+ /**  What git is doing, with the names of what it applies (plan §2 #87). */
+ export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
+ 
++/**  How asking to open a page on GitLab ended. */
++export type PageOpened = 
++/**  The browser was asked to show it. */
++{ kind: "opened" } | 
++/**  This window's list never offered that address, so it is not opened. */
++{ kind: "notOffered" } | 
++/**  The browser could not be asked. */
++{ kind: "failed"; 
++/**  Why, in the system's words. */
++message: string };
++
+ /**  A GitLab user. */
+ export type Person = {
+ 	/**  The login name, without "@". */
+@@ -970,6 +969,12 @@ export type Waiting =
+  */
+ { kind: "Remembered" };
+ 
++/**
++ *  The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
++ *  a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
++ */
++export type WebPage = string;
++
+ /**  Where one chunk's sides differ from base. */
+ export type WordChanges = {
+ 	/**  The chunk these changes belong to. */
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index 7384158..deffcfb 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `range_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root, and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135: `manage(app, folder, app_folder)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, job_pages: Mutex<BTreeSet<JobPage>> }`; no GitLab remote → every list and open answers the one line `NO_PROJECT`; the four commands `find_gitlab_project`, `list_merge_requests` (a worker: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's failed jobs' pages remembered as offered before it is sent), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `range_window::start`) and `open_job_page` (only a page a list of this window sent reaches the browser, else `NotOffered`); glab is `Glab::find()` at each call; `job_pages` is locked only to add or look; its tests in `merge_requests/tests.rs`, whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenario `tests/glab/merge-requests`), `range_window.rs` (`start(range)`: a second yamt, `yamt --diff=<spec> --repo <root>` in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; a failed start → `OpenReply::StartFailed`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` (plan §2 #94 as amended for #130, #132): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `job_pages` `Mutex`. Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent` and `merge-requests` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135, #137): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `range_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root, and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135, #137: `manage(app, folder, app_folder)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, pages: Mutex<BTreeSet<WebPage>> }`; no GitLab remote → every list and open answers the one line `NO_PROJECT`; the four commands `find_gitlab_project`, `list_merge_requests` (a worker: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's rows' and failed jobs' pages remembered as offered before it is sent), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `range_window::start`) and `open_page` (only a merge request's or failed job's page a list of this window sent reaches the browser, else `NotOffered`); glab is `Glab::find()` at each call; `pages` is locked only to add or look; its tests in `merge_requests/tests.rs`, whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenario `tests/glab/merge-requests`), `range_window.rs` (`start(range)`: a second yamt, `yamt --diff=<spec> --repo <root>` in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; a failed start → `OpenReply::StartFailed`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` (plan §2 #94 as amended for #130, #132): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `pages` `Mutex`. Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent` and `merge-requests` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index d6a61f7..cb5b439 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -72,7 +72,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         merge_requests::find_gitlab_project,
+         merge_requests::list_merge_requests::<tauri::Wry>,
+         merge_requests::open_merge_request::<tauri::Wry>,
+-        merge_requests::open_job_page,
++        merge_requests::open_page,
+     ])
+ }
+ 
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index 5df370d..5b882d3 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -5,8 +5,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
+ use tauri::ipc::Channel;
+ use tauri::{App, Manager, Runtime, State, WebviewWindow};
+ use yamt_merge_requests::{
+-    GitLabProject, GitLabRepository, Glab, JobOpened, JobPage, ListEnd, MergeRequestIid,
+-    MergeRequestPage, OpenReply, gitlab_repository, prepare_open,
++    GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage, OpenReply,
++    PageOpened, WebPage, gitlab_repository, prepare_open,
+ };
+ 
+ use crate::ipc_error::{IpcError, blocking_reply};
+@@ -25,12 +25,13 @@ pub(crate) enum ListMessage {
+     End { end: ListEnd },
+ }
+ 
+-/// The window's GitLab project, found once at start, the folder pair locks live in, and every job page a list
+-/// sent in this run: only those may be opened (plan §2 #128–#135); never locked together with another `Mutex`.
++/// The window's GitLab project, found once at start, the folder pair locks live in, and every merge request's and
++/// failed job's page a list sent in this run: only those may be opened (plan §2 #128–#137); never locked together
++/// with another `Mutex`.
+ pub(crate) struct MergeRequestState {
+     gitlab: Option<GitLabRepository>,
+     range_dir: PathBuf,
+-    job_pages: Mutex<BTreeSet<JobPage>>,
++    pages: Mutex<BTreeSet<WebPage>>,
+ }
+ 
+ /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app.
+@@ -38,25 +39,26 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path)
+     app.manage(MergeRequestState {
+         gitlab: gitlab_repository(folder),
+         range_dir: range_folder(app_folder),
+-        job_pages: Mutex::new(BTreeSet::new()),
++        pages: Mutex::new(BTreeSet::new()),
+     });
+ }
+ 
+-fn offered(job_pages: &Mutex<BTreeSet<JobPage>>) -> MutexGuard<'_, BTreeSet<JobPage>> {
+-    job_pages.lock().unwrap_or_else(PoisonError::into_inner)
++fn offered(pages: &Mutex<BTreeSet<WebPage>>) -> MutexGuard<'_, BTreeSet<WebPage>> {
++    pages.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+ 
+-/// Remembers the page's job pages as offered, then sends the page to the window.
++/// Remembers the page's merge request and failed job pages as offered, then sends the page to the window.
+ fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, page: MergeRequestPage) {
+-    let mut job_pages = offered(&state.job_pages);
++    let mut pages = offered(&state.pages);
+     for row in &page.rows {
++        pages.extend(row.page.clone());
+         let jobs = row
+             .pipeline
+             .iter()
+             .flat_map(|pipeline| &pipeline.failed_jobs);
+-        job_pages.extend(jobs.filter_map(|job| job.page.clone()));
++        pages.extend(jobs.filter_map(|job| job.page.clone()));
+     }
+-    drop(job_pages);
++    drop(pages);
+     send(channel, ListMessage::Page { page });
+ }
+ 
+@@ -131,12 +133,12 @@ pub(crate) async fn open_merge_request<R: Runtime>(
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+-pub(crate) fn open_job_page(state: State<'_, MergeRequestState>, page: JobPage) -> JobOpened {
+-    if !offered(&state.job_pages).contains(&page) {
+-        tracing::warn!(page = page.as_str(), "a job page no list sent");
+-        return JobOpened::NotOffered;
++pub(crate) fn open_page(state: State<'_, MergeRequestState>, page: WebPage) -> PageOpened {
++    if !offered(&state.pages).contains(&page) {
++        tracing::warn!(page = page.as_str(), "a GitLab page no list sent");
++        return PageOpened::NotOffered;
+     }
+-    yamt_merge_requests::open_job_page(&page)
++    yamt_merge_requests::open_page(&page)
+ }
+ 
+ #[cfg(test)]
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 96502d3..9f0a8f5 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -118,9 +118,13 @@ mod through_glab {
+ 
+     const FAKE_OPEN_LOG: &str = "YAMT_FAKE_OPEN_LOG";
+     const LIST_TEST: &str = "merge_requests::tests::through_glab::a_list_on_path_s_glab";
+-    const JOB_TEST: &str = "merge_requests::tests::through_glab::job_pages_on_path_s_opener";
++    const PAGES_TEST: &str = "merge_requests::tests::through_glab::pages_on_path_s_opener";
+     const LISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/302";
+     const UNLISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/999";
++    const LISTED_MERGE_REQUEST: &str =
++        "https://gitlab.example/taskboard/taskboard/-/merge_requests/13";
++    const UNLISTED_MERGE_REQUEST: &str =
++        "https://gitlab.example/taskboard/taskboard/-/merge_requests/999";
+     const OPEN_WAIT: Duration = Duration::from_secs(10);
+     const POLL: Duration = Duration::from_millis(10);
+ 
+@@ -172,8 +176,8 @@ mod through_glab {
+             .collect()
+     }
+ 
+-    fn open_job(window: &MergeRequestWindow, page: &str) -> Value {
+-        invoke(window, "open_job_page", json!({ "page": page })).unwrap()
++    fn open(window: &MergeRequestWindow, page: &str) -> Value {
++        invoke(window, "open_page", json!({ "page": page })).unwrap()
+     }
+ 
+     fn opened_log() -> String {
+@@ -181,11 +185,12 @@ mod through_glab {
+         std::fs::read_to_string(log).unwrap_or_default()
+     }
+ 
+-    fn wait_for_the_opener() -> String {
++    /// The opener's log once it is no longer `before`.
++    fn log_after(before: &str) -> String {
+         let deadline = Instant::now() + OPEN_WAIT;
+         loop {
+             let logged = opened_log();
+-            if !logged.is_empty() {
++            if logged != before {
+                 return logged;
+             }
+             assert!(Instant::now() < deadline, "the opener never ran");
+@@ -220,27 +225,34 @@ mod through_glab {
+     }
+ 
+     #[test]
+-    fn only_a_job_page_a_list_sent_is_handed_to_the_browser() {
+-        run_with_fakes(JOB_TEST);
++    fn only_a_page_a_list_sent_is_handed_to_the_browser() {
++        run_with_fakes(PAGES_TEST);
+     }
+ 
+     #[test]
+-    #[ignore = "run by only_a_job_page_a_list_sent_is_handed_to_the_browser"]
+-    fn job_pages_on_path_s_opener() {
++    #[ignore = "run by only_a_page_a_list_sent_is_handed_to_the_browser"]
++    fn pages_on_path_s_opener() {
+         let window = range_repo_window();
+         let not_offered = json!({ "kind": "notOffered" });
+ 
+-        assert_eq!(open_job(&window, LISTED_JOB), not_offered);
++        assert_eq!(open(&window, LISTED_JOB), not_offered);
++        assert_eq!(open(&window, LISTED_MERGE_REQUEST), not_offered);
+         list(&window);
+-        assert_eq!(open_job(&window, UNLISTED_JOB), not_offered);
++        assert_eq!(open(&window, UNLISTED_JOB), not_offered);
++        assert_eq!(open(&window, UNLISTED_MERGE_REQUEST), not_offered);
+         assert_eq!(opened_log(), "");
+-        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `job_page.rs`), not PATH's fake: it would
++        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
+         // open the real browser.
+         if cfg!(target_os = "macos") {
+             return;
+         }
+-        assert_eq!(open_job(&window, LISTED_JOB), json!({ "kind": "opened" }));
++        let opened = json!({ "kind": "opened" });
++        assert_eq!(open(&window, LISTED_JOB), opened);
++        let job_opened = format!("argv: {LISTED_JOB}\n");
++        assert_eq!(log_after(""), job_opened);
++        assert_eq!(open(&window, LISTED_MERGE_REQUEST), opened);
+ 
+-        assert_eq!(wait_for_the_opener(), format!("argv: {LISTED_JOB}\n"));
++        let both_opened = format!("{job_opened}argv: {LISTED_MERGE_REQUEST}\n");
++        assert_eq!(log_after(&job_opened), both_opened);
+     }
+ }

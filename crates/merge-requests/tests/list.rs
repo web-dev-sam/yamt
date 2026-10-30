@@ -65,6 +65,11 @@ fn the_list_comes_page_by_page_from_glab_graphql_after_each_cursor() {
         job_page.as_str(),
         "https://gitlab.example/taskboard/taskboard/-/jobs/302"
     );
+    let row_page = pages[0].rows[0].page.as_ref().unwrap();
+    assert_eq!(
+        row_page.as_str(),
+        "https://gitlab.example/taskboard/taskboard/-/merge_requests/13"
+    );
     let argv = fake.logged("argv: ");
     assert_eq!(
         argv[..2],

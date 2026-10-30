@@ -74,7 +74,7 @@ export const commands = {
 	 *  Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
 	 *  address to the system.
 	 */
-	openJobPage: (page: JobPage) => __TAURI_INVOKE<JobOpened>("open_job_page", { page }),
+	openPage: (page: WebPage) => __TAURI_INVOKE<PageOpened>("open_page", { page }),
 };
 
 /* Types */
@@ -249,7 +249,7 @@ export type FailedJob = {
 	/**  Whether the pipeline may pass while it fails. */
 	allowFailure: boolean,
 	/**  Its log page; `None` when GitLab is not on https or sent an odd path. */
-	page: JobPage | null,
+	page: WebPage | null,
 };
 
 export type FileEntry = {
@@ -329,20 +329,6 @@ export type InlineRange<L> = {
 };
 
 export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath"; path: string } | { kind: "Unsupported"; path: string; reason: UnsupportedReason } | { kind: "WriteFailed"; path: string; message: string } | { kind: "NotAFile"; path: string } | { kind: "ReadFailed"; path: string; message: string } | { kind: "SettingsBroken"; path: string; message: string } | { kind: "NotAbsolute"; path: string } | { kind: "NoConfigFolder" } | { kind: "MergeAborted" } | { kind: "StopMovedOn" } | { kind: "GitRunning" } | { kind: "MergeFinished" } | { kind: "NoOperation" } | { kind: "UnknownTab"; tab: TabId } | { kind: "ColumnTooLarge"; limit: number } | { kind: "UnknownRangeFile"; file: RangeFileId } | { kind: "WorkerStopped" } | { kind: "UnknownThread"; thread: ThreadId } | { kind: "UnknownMessage"; message: MessageId } | { kind: "EmptyMessage" } | { kind: "MessagePending"; message: MessageId } | { kind: "NotANote"; message: MessageId } | { kind: "SendRunning" } | { kind: "AiOff" } | { kind: "RemoveFailed"; folder: string; message: string };
-
-/**  How asking to open a failed job's page ended. */
-export type JobOpened = 
-/**  The browser was asked to show it. */
-{ kind: "opened" } | 
-/**  This window's list never offered that address, so it is not opened. */
-{ kind: "notOffered" } | 
-/**  The browser could not be asked. */
-{ kind: "failed"; 
-/**  Why, in the system's words. */
-message: string };
-
-/**  The address of a failed job's log page on the project's GitLab; only `JobPage::built` makes one. */
-export type JobPage = string;
 
 /**
  *  `Some(keys)` replaces the action's entry (an empty list = the action has no key);
@@ -486,6 +472,8 @@ export type MergeRequestRow = {
 	approvals: number,
 	/**  Its latest pipeline; `None` when it has none. */
 	pipeline: Pipeline | null,
+	/**  Its page on GitLab; `None` when GitLab is not on https. */
+	page: WebPage | null,
 };
 
 /**  One message of a thread. */
@@ -607,6 +595,17 @@ message: string };
 
 /**  What git is doing, with the names of what it applies (plan §2 #87). */
 export type OperationView = { kind: "Merge"; merging: SideName | null; into: SideName | null } | { kind: "SquashMerge"; merging: SideName | null; into: SideName | null } | { kind: "Rebase"; branch: string | null; onto: SideName | null; replaying: SideName | null; progress: ProgressView | null; editor_steps_ahead: boolean } | { kind: "CherryPick"; picking: SideName | null; progress: ProgressView | null } | { kind: "Revert"; reverting: SideName | null; progress: ProgressView | null } | { kind: "Am"; subject: string; message: string; progress: ProgressView | null };
+
+/**  How asking to open a page on GitLab ended. */
+export type PageOpened = 
+/**  The browser was asked to show it. */
+{ kind: "opened" } | 
+/**  This window's list never offered that address, so it is not opened. */
+{ kind: "notOffered" } | 
+/**  The browser could not be asked. */
+{ kind: "failed"; 
+/**  Why, in the system's words. */
+message: string };
 
 /**  A GitLab user. */
 export type Person = {
@@ -969,6 +968,12 @@ export type Waiting =
  *  shows it, rerere's text unless the user changed it (plan §2 #90).
  */
 { kind: "Remembered" };
+
+/**
+ *  The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
+ *  a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
+ */
+export type WebPage = string;
 
 /**  Where one chunk's sides differ from base. */
 export type WordChanges = {

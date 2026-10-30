@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use super::*;
 
 const ORIGIN: &str = "https://gitlab.example";
+const FULL_PATH: &str = "taskboard/taskboard";
 const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
 const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
 
@@ -13,13 +14,20 @@ fn person(username: &str, name: &str) -> Person {
     }
 }
 
+fn taskboard(web_origin: Option<&str>) -> Project {
+    Project {
+        full_path: FULL_PATH.to_owned(),
+        web_origin: web_origin.map(str::to_owned),
+    }
+}
+
 fn job(name: &str, allow_failure: bool, id: u32) -> FailedJob {
     let page = format!("https://gitlab.example/taskboard/taskboard/-/jobs/{id}");
     FailedJob {
         name: name.to_owned(),
         stage: "test".to_owned(),
         allow_failure,
-        page: Some(JobPage(page)),
+        page: Some(WebPage(page)),
     }
 }
 
@@ -41,6 +49,9 @@ fn snooze_a_reminder() -> MergeRequestRow {
         open_discussions: 0,
         approvals: 0,
         pipeline: Some(failed),
+        page: Some(WebPage(
+            "https://gitlab.example/taskboard/taskboard/-/merge_requests/13".to_owned(),
+        )),
     }
 }
 
@@ -52,7 +63,7 @@ fn answer(nodes: &Value, page_info: &Value) -> Vec<u8> {
 
 fn last_page_of(nodes: &Value) -> Result<ParsedPage, String> {
     let page_info = json!({ "hasNextPage": false, "endCursor": null });
-    parsed(&answer(nodes, &page_info), Some(ORIGIN))
+    parsed(&answer(nodes, &page_info), &taskboard(Some(ORIGIN)))
 }
 
 fn status_of(row: &MergeRequestRow) -> Option<CiStatus> {
@@ -61,7 +72,7 @@ fn status_of(row: &MergeRequestRow) -> Option<CiStatus> {
 
 #[test]
 fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
-    let page = parsed(PAGE_1, Some(ORIGIN)).unwrap();
+    let page = parsed(PAGE_1, &taskboard(Some(ORIGIN))).unwrap();
 
     assert_eq!(page.me.as_deref(), Some("sam"));
     assert_eq!(page.next.as_deref(), Some("page-2"));
@@ -83,7 +94,7 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
 
 #[test]
 fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
-    let page = parsed(PAGE_2, Some(ORIGIN)).unwrap();
+    let page = parsed(PAGE_2, &taskboard(Some(ORIGIN))).unwrap();
 
     assert_eq!(page.next, None);
     assert_eq!(page.rows[0].pipeline, None);
@@ -92,12 +103,13 @@ fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
 }
 
 #[test]
-fn without_an_https_origin_no_job_has_a_page() {
-    let page = parsed(PAGE_1, None).unwrap();
+fn without_an_https_origin_no_row_and_no_job_has_a_page() {
+    let page = parsed(PAGE_1, &taskboard(None)).unwrap();
 
     let pipeline = page.rows[0].pipeline.as_ref().unwrap();
     let pages: Vec<_> = pipeline.failed_jobs.iter().map(|job| &job.page).collect();
     assert_eq!(pages, [&None, &None]);
+    assert!(page.rows.iter().all(|row| row.page.is_none()));
 }
 
 #[test]
@@ -166,7 +178,7 @@ fn graphql_errors_are_gitlab_s_first_message_even_beside_data() {
     let refused = json!({ "errors": [{ "message": too_complex }, { "message": "second" }],
         "data": { "project": null } });
 
-    let page = parsed(refused.to_string().as_bytes(), Some(ORIGIN));
+    let page = parsed(refused.to_string().as_bytes(), &taskboard(Some(ORIGIN)));
 
     assert_eq!(page.err().as_deref(), Some(too_complex));
 }
@@ -177,7 +189,7 @@ fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
     let no_project = json!({ "data": { "project": null } }).to_string();
     let no_merge_requests = json!({ "data": { "project": { "mergeRequests": null } } }).to_string();
     let bad_iid = json!([{ "iid": "!4", "title": "t", "createdAt": "x", "draft": false }]);
-    let error = |answer: &[u8]| parsed(answer, Some(ORIGIN)).err();
+    let error = |answer: &[u8]| parsed(answer, &taskboard(Some(ORIGIN))).err();
 
     assert_eq!(error(b"{}").as_deref(), Some(NO_DATA));
     assert_eq!(error(no_project.as_bytes()).as_deref(), Some(NO_PROJECT));

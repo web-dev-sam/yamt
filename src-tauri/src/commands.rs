@@ -72,7 +72,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::find_gitlab_project,
         merge_requests::list_merge_requests::<tauri::Wry>,
         merge_requests::open_merge_request::<tauri::Wry>,
-        merge_requests::open_job_page,
+        merge_requests::open_page,
     ])
 }
 

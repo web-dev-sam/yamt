@@ -1,0 +1,2 @@
+just mutants HEAD → 49 mutants tested in 2m: 1 missed, 27 caught, 21 unviable
+crates/merge-requests/src/web_page.rs:95 opener -> Default::default() — gate-covered: #[cfg(windows)] opener, killed on Windows CI by windows_opens_a_page_with_the_url_protocol_handler; changed only by the file move

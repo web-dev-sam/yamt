@@ -2,7 +2,8 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde::de::IgnoredAny;
 
-use crate::{CiStatus, FailedJob, JobPage, MergeRequestIid, MergeRequestRow, Person, Pipeline};
+use crate::project::Project;
+use crate::{CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person, Pipeline, WebPage};
 
 const NO_DATA: &str = "GitLab's answer holds no data";
 pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
@@ -41,7 +42,7 @@ struct GraphQlError {
 struct Data {
     query_complexity: Option<Complexity>,
     current_user: Option<User>,
-    project: Option<Project>,
+    project: Option<ProjectNode>,
 }
 
 #[derive(Deserialize)]
@@ -51,7 +52,7 @@ struct User {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Project {
+struct ProjectNode {
     merge_requests: Option<Connection<Node>>,
 }
 
@@ -115,15 +116,16 @@ struct Stage {
     name: String,
 }
 
-/// The page in a GraphQL answer; `Err` holds GitLab's first error, or what yamt could not read. `origin` is the
-/// project's `https://<host[:port]>`, which job pages are built on.
-pub(crate) fn parsed(json: &[u8], origin: Option<&str>) -> Result<ParsedPage, String> {
+/// The page in a GraphQL answer of `project`'s list; `Err` holds GitLab's first error, or what yamt could not read.
+pub(crate) fn parsed(json: &[u8], project: &Project) -> Result<ParsedPage, String> {
     let data: Data = graphql_data(json)?;
-    let project = data.project.ok_or(NO_PROJECT)?;
-    let merge_requests = project.merge_requests.ok_or(NO_PROJECT)?;
+    let merge_requests = data
+        .project
+        .and_then(|found| found.merge_requests)
+        .ok_or(NO_PROJECT)?;
     let mut rows = Vec::new();
     for node in merge_requests.nodes {
-        rows.push(row(node, origin)?);
+        rows.push(row(node, project)?);
     }
     Ok(ParsedPage {
         me: data.current_user.map(|user| user.username),
@@ -151,14 +153,17 @@ fn next_cursor(page_info: PageInfo) -> Result<Option<String>, String> {
     }
 }
 
-fn row(node: Node, origin: Option<&str>) -> Result<MergeRequestRow, String> {
+fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
     let iid = node
         .iid
         .parse()
         .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
+    let iid = MergeRequestIid(iid);
+    let origin = project.web_origin.as_deref();
+    let page = origin.and_then(|origin| WebPage::merge_request(origin, &project.full_path, iid));
     let labels = listed(node.labels).into_iter().map(|label| label.title);
     Ok(MergeRequestRow {
-        iid: MergeRequestIid(iid),
+        iid,
         title: node.title,
         created_at: node.created_at,
         draft: node.draft,
@@ -171,6 +176,7 @@ fn row(node: Node, origin: Option<&str>) -> Result<MergeRequestRow, String> {
         ),
         approvals: count(listed(node.approved_by).len()),
         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
+        page,
     })
 }
 
@@ -206,7 +212,7 @@ fn pipeline(found: PipelineNode, origin: Option<&str>) -> Pipeline {
 fn failed_job(job: Job, origin: Option<&str>) -> FailedJob {
     let page = origin.zip(job.web_path.as_deref());
     FailedJob {
-        page: page.and_then(|(origin, web_path)| JobPage::built(origin, web_path)),
+        page: page.and_then(|(origin, web_path)| WebPage::job(origin, web_path)),
         name: job.name,
         stage: job.stage.map(|stage| stage.name).unwrap_or_default(),
         allow_failure: job.allow_failure,

@@ -1,16 +1,16 @@
 //! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab,
-//! each one's changes prepared for a window of their own, a failed job's page opened in the browser.
+//! each one's changes prepared for a window of their own, its page or a failed job's opened in the browser.
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
 mod detect;
-mod job_page;
 mod list;
 mod open;
 mod page;
 mod project;
 mod query;
 mod remote;
+mod web_page;
 
 use std::path::PathBuf;
 
@@ -18,9 +18,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 pub use detect::{GitLabRepository, gitlab_repository};
-pub use job_page::open_job_page;
 pub use list::list_merge_requests;
 pub use open::prepare_open;
+pub use web_page::open_page;
 pub use yamt_gitio::Glab;
 
 /// Merge requests asked for in one glab call: GitLab's largest page.
@@ -78,9 +78,10 @@ pub enum CiStatus {
     Manual,
 }
 
-/// The address of a failed job's log page on the project's GitLab; only `JobPage::built` makes one.
+/// The address of a page on the project's GitLab that this window may open in the browser: a failed job's log or
+/// a merge request; only `WebPage::job` and `WebPage::merge_request` make one.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
-pub struct JobPage(String);
+pub struct WebPage(String);
 
 /// A failed job of a merge request's latest pipeline, the latest run of it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -93,7 +94,7 @@ pub struct FailedJob {
     /// Whether the pipeline may pass while it fails.
     pub allow_failure: bool,
     /// Its log page; `None` when GitLab is not on https or sent an odd path.
-    pub page: Option<JobPage>,
+    pub page: Option<WebPage>,
 }
 
 /// A merge request's latest pipeline.
@@ -132,6 +133,8 @@ pub struct MergeRequestRow {
     pub approvals: u32,
     /// Its latest pipeline; `None` when it has none.
     pub pipeline: Option<Pipeline>,
+    /// Its page on GitLab; `None` when GitLab is not on https.
+    pub page: Option<WebPage>,
 }
 
 /// One page of the list, sent as soon as it arrives.
@@ -215,10 +218,10 @@ pub enum OpenReply {
     },
 }
 
-/// How asking to open a failed job's page ended.
+/// How asking to open a page on GitLab ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum JobOpened {
+pub enum PageOpened {
     /// The browser was asked to show it.
     Opened,
     /// This window's list never offered that address, so it is not opened.

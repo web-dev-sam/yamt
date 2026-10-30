@@ -118,9 +118,13 @@ mod through_glab {
 
     const FAKE_OPEN_LOG: &str = "YAMT_FAKE_OPEN_LOG";
     const LIST_TEST: &str = "merge_requests::tests::through_glab::a_list_on_path_s_glab";
-    const JOB_TEST: &str = "merge_requests::tests::through_glab::job_pages_on_path_s_opener";
+    const PAGES_TEST: &str = "merge_requests::tests::through_glab::pages_on_path_s_opener";
     const LISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/302";
     const UNLISTED_JOB: &str = "https://gitlab.example/taskboard/taskboard/-/jobs/999";
+    const LISTED_MERGE_REQUEST: &str =
+        "https://gitlab.example/taskboard/taskboard/-/merge_requests/13";
+    const UNLISTED_MERGE_REQUEST: &str =
+        "https://gitlab.example/taskboard/taskboard/-/merge_requests/999";
     const OPEN_WAIT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(10);
 
@@ -172,8 +176,8 @@ mod through_glab {
             .collect()
     }
 
-    fn open_job(window: &MergeRequestWindow, page: &str) -> Value {
-        invoke(window, "open_job_page", json!({ "page": page })).unwrap()
+    fn open(window: &MergeRequestWindow, page: &str) -> Value {
+        invoke(window, "open_page", json!({ "page": page })).unwrap()
     }
 
     fn opened_log() -> String {
@@ -181,11 +185,12 @@ mod through_glab {
         std::fs::read_to_string(log).unwrap_or_default()
     }
 
-    fn wait_for_the_opener() -> String {
+    /// The opener's log once it is no longer `before`.
+    fn log_after(before: &str) -> String {
         let deadline = Instant::now() + OPEN_WAIT;
         loop {
             let logged = opened_log();
-            if !logged.is_empty() {
+            if logged != before {
                 return logged;
             }
             assert!(Instant::now() < deadline, "the opener never ran");
@@ -220,27 +225,34 @@ mod through_glab {
     }
 
     #[test]
-    fn only_a_job_page_a_list_sent_is_handed_to_the_browser() {
-        run_with_fakes(JOB_TEST);
+    fn only_a_page_a_list_sent_is_handed_to_the_browser() {
+        run_with_fakes(PAGES_TEST);
     }
 
     #[test]
-    #[ignore = "run by only_a_job_page_a_list_sent_is_handed_to_the_browser"]
-    fn job_pages_on_path_s_opener() {
+    #[ignore = "run by only_a_page_a_list_sent_is_handed_to_the_browser"]
+    fn pages_on_path_s_opener() {
         let window = range_repo_window();
         let not_offered = json!({ "kind": "notOffered" });
 
-        assert_eq!(open_job(&window, LISTED_JOB), not_offered);
+        assert_eq!(open(&window, LISTED_JOB), not_offered);
+        assert_eq!(open(&window, LISTED_MERGE_REQUEST), not_offered);
         list(&window);
-        assert_eq!(open_job(&window, UNLISTED_JOB), not_offered);
+        assert_eq!(open(&window, UNLISTED_JOB), not_offered);
+        assert_eq!(open(&window, UNLISTED_MERGE_REQUEST), not_offered);
         assert_eq!(opened_log(), "");
-        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `job_page.rs`), not PATH's fake: it would
+        // macOS starts `/usr/bin/open` by its path (`yamt_merge_requests` `web_page.rs`), not PATH's fake: it would
         // open the real browser.
         if cfg!(target_os = "macos") {
             return;
         }
-        assert_eq!(open_job(&window, LISTED_JOB), json!({ "kind": "opened" }));
+        let opened = json!({ "kind": "opened" });
+        assert_eq!(open(&window, LISTED_JOB), opened);
+        let job_opened = format!("argv: {LISTED_JOB}\n");
+        assert_eq!(log_after(""), job_opened);
+        assert_eq!(open(&window, LISTED_MERGE_REQUEST), opened);
 
-        assert_eq!(wait_for_the_opener(), format!("argv: {LISTED_JOB}\n"));
+        let both_opened = format!("{job_opened}argv: {LISTED_MERGE_REQUEST}\n");
+        assert_eq!(log_after(&job_opened), both_opened);
     }
 }

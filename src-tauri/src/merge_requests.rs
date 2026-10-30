@@ -5,8 +5,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::ipc::Channel;
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_merge_requests::{
-    GitLabProject, GitLabRepository, Glab, JobOpened, JobPage, ListEnd, MergeRequestIid,
-    MergeRequestPage, OpenReply, gitlab_repository, prepare_open,
+    GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage, OpenReply,
+    PageOpened, WebPage, gitlab_repository, prepare_open,
 };
 
 use crate::ipc_error::{IpcError, blocking_reply};
@@ -25,12 +25,13 @@ pub(crate) enum ListMessage {
     End { end: ListEnd },
 }
 
-/// The window's GitLab project, found once at start, the folder pair locks live in, and every job page a list
-/// sent in this run: only those may be opened (plan §2 #128–#135); never locked together with another `Mutex`.
+/// The window's GitLab project, found once at start, the folder pair locks live in, and every merge request's and
+/// failed job's page a list sent in this run: only those may be opened (plan §2 #128–#137); never locked together
+/// with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
-    job_pages: Mutex<BTreeSet<JobPage>>,
+    pages: Mutex<BTreeSet<WebPage>>,
 }
 
 /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app.
@@ -38,25 +39,26 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path)
     app.manage(MergeRequestState {
         gitlab: gitlab_repository(folder),
         range_dir: range_folder(app_folder),
-        job_pages: Mutex::new(BTreeSet::new()),
+        pages: Mutex::new(BTreeSet::new()),
     });
 }
 
-fn offered(job_pages: &Mutex<BTreeSet<JobPage>>) -> MutexGuard<'_, BTreeSet<JobPage>> {
-    job_pages.lock().unwrap_or_else(PoisonError::into_inner)
+fn offered(pages: &Mutex<BTreeSet<WebPage>>) -> MutexGuard<'_, BTreeSet<WebPage>> {
+    pages.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Remembers the page's job pages as offered, then sends the page to the window.
+/// Remembers the page's merge request and failed job pages as offered, then sends the page to the window.
 fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, page: MergeRequestPage) {
-    let mut job_pages = offered(&state.job_pages);
+    let mut pages = offered(&state.pages);
     for row in &page.rows {
+        pages.extend(row.page.clone());
         let jobs = row
             .pipeline
             .iter()
             .flat_map(|pipeline| &pipeline.failed_jobs);
-        job_pages.extend(jobs.filter_map(|job| job.page.clone()));
+        pages.extend(jobs.filter_map(|job| job.page.clone()));
     }
-    drop(job_pages);
+    drop(pages);
     send(channel, ListMessage::Page { page });
 }
 
@@ -131,12 +133,12 @@ pub(crate) async fn open_merge_request<R: Runtime>(
 #[tauri::command]
 #[specta::specta]
 #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
-pub(crate) fn open_job_page(state: State<'_, MergeRequestState>, page: JobPage) -> JobOpened {
-    if !offered(&state.job_pages).contains(&page) {
-        tracing::warn!(page = page.as_str(), "a job page no list sent");
-        return JobOpened::NotOffered;
+pub(crate) fn open_page(state: State<'_, MergeRequestState>, page: WebPage) -> PageOpened {
+    if !offered(&state.pages).contains(&page) {
+        tracing::warn!(page = page.as_str(), "a GitLab page no list sent");
+        return PageOpened::NotOffered;
     }
-    yamt_merge_requests::open_job_page(&page)
+    yamt_merge_requests::open_page(&page)
 }
 
 #[cfg(test)]

@@ -31,7 +31,7 @@ pub fn list_merge_requests(
         let args = list_args(&project.full_path, after);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let json = glab.get(root, &args)?;
-        parsed(&json, project.web_origin.as_deref())
+        parsed(&json, &project)
     };
     pages(&mut fetch, on_page)
 }
@@ -87,6 +87,7 @@ mod tests {
             open_discussions: 0,
             approvals: 0,
             pipeline: None,
+            page: None,
         }
     }
 
