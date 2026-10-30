@@ -16,8 +16,5 @@
       "frontend/src/ipc/mergeRequestDomain.ts",
       "frontend/src/ipc/index.ts"
     ]
-  },
-  "MrConflictsLocalR1": {
-    "owned": ["crates/local-merge/**"]
   }
 }
