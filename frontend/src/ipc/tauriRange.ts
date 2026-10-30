@@ -2,6 +2,7 @@ import { commands } from "./bindings";
 import { toRangeFile, toRangeStart, toSearchTexts } from "./rangeDomain";
 import type { RangeSource } from "./RangeSource";
 import { converted, createTauriSettings, toResult } from "./tauri";
+import { createTauriMergeRequests } from "./tauriMergeRequests";
 import { createTauriReview } from "./tauriReview";
 
 export function createTauriRangeSource(): RangeSource {
@@ -17,5 +18,6 @@ export function createTauriRangeSource(): RangeSource {
     },
     ...createTauriReview(),
     ...createTauriSettings(),
+    ...createTauriMergeRequests(),
   };
 }

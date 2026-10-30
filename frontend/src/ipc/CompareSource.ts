@@ -8,8 +8,9 @@ import type {
   TabTexts,
 } from "./compareDomain";
 import type { SourceResult, TabId } from "./domain";
+import type { MergeRequestSource } from "./MergeRequestSource";
 
-export interface CompareSource extends SettingsSource {
+export interface CompareSource extends SettingsSource, MergeRequestSource {
   openCompare(): Promise<SourceResult<CompareStart>>;
   loadTab(tab: TabId): Promise<SourceResult<TabTexts>>;
   setColumn(write: ColumnWrite): Promise<SourceResult<Comparison>>;

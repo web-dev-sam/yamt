@@ -63,8 +63,17 @@ export type {
   Theme,
   WriteReply,
 } from "./domain";
-export { agentSessionId, isAgentSessionId, nextColumnVersion } from "./domain";
-export type { AgentSessionId, MessageId, ThreadId } from "./domain";
+export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion } from "./domain";
+export type { AgentSessionId, JobPage, MergeRequestIid, MessageId, ThreadId } from "./domain";
+export type {
+  GitLabProject,
+  JobOpened,
+  ListEnd,
+  MergeRequestPage,
+  MergeRequestRow,
+  OpenReply,
+} from "./mergeRequestDomain";
+export type { MergeRequestSource } from "./MergeRequestSource";
 export type {
   GitLabCheck,
   MergeRequestRef,

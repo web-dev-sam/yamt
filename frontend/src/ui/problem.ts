@@ -35,6 +35,8 @@ export type ThreadStep =
 
 export type AiAttempt = "ask" | "diff" | "discard";
 
+export type MergeRequestStep = "find" | "list" | "open" | "job";
+
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }
   | {
@@ -58,6 +60,11 @@ export type Problem =
   | { readonly action: "loadTab"; readonly name: string; readonly cause: ProblemCause }
   | { readonly action: "threads"; readonly step: ThreadStep; readonly cause: ProblemCause }
   | { readonly action: "ai"; readonly step: AiAttempt; readonly cause: ProblemCause }
+  | {
+      readonly action: "mergeRequests";
+      readonly step: MergeRequestStep;
+      readonly cause: ProblemCause;
+    }
   | {
       readonly action: "saveTab";
       readonly tab: TabId;
@@ -130,6 +137,7 @@ export function logProblem(problem: Problem): void {
       return;
     case "threads":
     case "ai":
+    case "mergeRequests":
       log.error(event, { step: problem.step, ...problem.cause });
       return;
   }

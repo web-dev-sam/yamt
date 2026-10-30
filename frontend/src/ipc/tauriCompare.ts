@@ -2,6 +2,7 @@ import { commands } from "./bindings";
 import { toComparison, toCompareStart, toTabList, toTabTexts } from "./compareDomain";
 import type { CompareSource } from "./CompareSource";
 import { converted, createTauriSettings, toResult } from "./tauri";
+import { createTauriMergeRequests } from "./tauriMergeRequests";
 
 export function createTauriCompareSource(): CompareSource {
   return {
@@ -33,5 +34,6 @@ export function createTauriCompareSource(): CompareSource {
       return converted(toResult(await commands.showTab(tab)), toTabList);
     },
     ...createTauriSettings(),
+    ...createTauriMergeRequests(),
   };
 }

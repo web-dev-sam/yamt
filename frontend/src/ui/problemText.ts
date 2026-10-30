@@ -2,7 +2,7 @@ import { keyLabel, type KeyProblem } from "../ipc";
 import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
 import { continueAction, operationName } from "./operationText";
-import type { AiAttempt, Problem, ProblemCause, ThreadStep } from "./problem";
+import type { AiAttempt, MergeRequestStep, Problem, ProblemCause, ThreadStep } from "./problem";
 
 type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
 
@@ -70,7 +70,18 @@ const AI_ATTEMPT_WORDS: Readonly<Record<AiAttempt, string>> = {
   discard: "The AI's checkout could not be removed",
 };
 
-const WINDOW_ATTEMPT_WORDS: Readonly<Record<"tabs" | "openRange" | "search", string>> = {
+const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+  find: "Could not look for the GitLab project",
+  list: "Could not list the merge requests",
+  open: "Could not open the merge request's changes",
+  job: "Could not open the job's page",
+};
+
+const FIXED_ATTEMPT_WORDS: Readonly<
+  Record<"list" | "settings" | "tabs" | "openRange" | "search", string>
+> = {
+  list: "Could not list the conflicted files",
+  settings: "Could not use the settings file",
   tabs: "Could not update the tabs",
   openRange: "Could not open the range",
   search: "Search stopped",
@@ -78,8 +89,6 @@ const WINDOW_ATTEMPT_WORDS: Readonly<Record<"tabs" | "openRange" | "search", str
 
 function attempted(problem: CausedProblem): string {
   switch (problem.action) {
-    case "list":
-      return "Could not list the conflicted files";
     case "open":
       return `Could not open ${problem.path}`;
     case "finish":
@@ -90,18 +99,18 @@ function attempted(problem: CausedProblem): string {
       return `Could not resolve ${problem.path} with one side`;
     case "reset":
       return `Could not reset ${problem.path}`;
-    case "settings":
-      return "Could not use the settings file";
     case "abort":
       return `Could not abort the ${operationName(problem.operation)}`;
     case "continue": {
       const { verb, object } = continueAction(problem.operation);
       return `Could not ${verb.toLowerCase()} ${object}`;
     }
+    case "list":
+    case "settings":
     case "tabs":
     case "openRange":
     case "search":
-      return WINDOW_ATTEMPT_WORDS[problem.action];
+      return FIXED_ATTEMPT_WORDS[problem.action];
     case "loadTab":
       return `Could not load ${problem.name}`;
     case "saveTab":
@@ -110,6 +119,8 @@ function attempted(problem: CausedProblem): string {
       return THREAD_STEP_WORDS[problem.step];
     case "ai":
       return AI_ATTEMPT_WORDS[problem.step];
+    case "mergeRequests":
+      return MERGE_REQUEST_STEP_WORDS[problem.step];
     default: {
       const _exhaustive: never = problem;
       return _exhaustive;

@@ -282,6 +282,15 @@ test.each([
   expect(text({ action: "ai", step, cause: { kind: "AiOff" } })).toBe(words);
 });
 
+test.each([
+  ["find", "Could not look for the GitLab project: yamt's worker stopped; try again."],
+  ["list", "Could not list the merge requests: yamt's worker stopped; try again."],
+  ["open", "Could not open the merge request's changes: yamt's worker stopped; try again."],
+  ["job", "Could not open the job's page: yamt's worker stopped; try again."],
+] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+  expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+});
+
 test("a failed discard names the checkout and the system's message", () => {
   expect(
     text({

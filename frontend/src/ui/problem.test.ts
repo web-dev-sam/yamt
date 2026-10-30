@@ -82,3 +82,9 @@ test("a failed AI call logs its step and cause (catches a log line without the s
     '[error] store.ai_failed {step: "discard", kind: "AiOff"}',
   ]);
 });
+
+test("a failed merge-request call logs its step and cause (catches a log line without the step)", () => {
+  expect(
+    logged({ action: "mergeRequests", step: "open", cause: { kind: "WorkerStopped" } }),
+  ).toEqual(['[error] store.mergeRequests_failed {step: "open", kind: "WorkerStopped"}']);
+});

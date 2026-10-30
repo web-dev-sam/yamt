@@ -61,6 +61,8 @@ export type RunId = number & { readonly __brand: "RunId" };
 export type AgentRun = number & { readonly __brand: "AgentRun" };
 export type CheckoutFolder = string & { readonly __brand: "CheckoutFolder" };
 export type AgentSessionId = string & { readonly __brand: "AgentSessionId" };
+export type MergeRequestIid = number & { readonly __brand: "MergeRequestIid" };
+export type JobPage = string & { readonly __brand: "JobPage" };
 
 export type ProgramFolders = Readonly<Record<keyof Generated.ProgramFolders, readonly string[]>>;
 export type ServerCommand = Omit<Generated.ServerCommand, "args" | "folders"> & {
@@ -189,6 +191,14 @@ export function isThreadId(value: number): value is ThreadId {
 
 export function isMessageId(value: number): value is MessageId {
   return isNonNegativeInteger(value);
+}
+
+export function isMergeRequestIid(value: number): value is MergeRequestIid {
+  return isNonNegativeInteger(value);
+}
+
+export function isJobPage(text: string): text is JobPage {
+  return text.startsWith("https://");
 }
 
 export function nextColumnVersion(version: ColumnVersion): ColumnVersion {

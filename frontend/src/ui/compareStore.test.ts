@@ -19,6 +19,7 @@ import {
   type TrackedTab,
 } from "./compareStore";
 import type { KeyPress } from "./fileListKey";
+import { useMergeRequests } from "./mergeRequestsStore";
 import { problemText } from "./problemText";
 import { useSettingsStore } from "./settingsStore";
 
@@ -143,6 +144,34 @@ test("start-up lists the stored tabs, sets the column limit and loads the settin
   ]);
   expect(useCompareStore()).toBe(store);
   expect(useSettingsStore()).toBe(store);
+});
+
+test("start-up finds the GitLab project for the one slice the window registers (catches a button that never shows)", async () => {
+  const store = createCompareStore(createFixtureCompareSource(log, "?mr=list", {}), "dark");
+  expect(useMergeRequests()).toBe(store.mergeRequests);
+  expect(store.mergeRequests.project.value).toEqual({ kind: "none" });
+
+  await store.startUp();
+
+  expect(store.mergeRequests.project.value).toEqual({
+    kind: "found",
+    repository: "/home/sam/taskboard/.git",
+  });
+  store.mergeRequests.show();
+  expect(store.screen.value).toEqual({ kind: "mergeRequests" });
+});
+
+test("a failed project lookup at start-up reaches the problem bar and leaves the tabs working", async () => {
+  spyConsole();
+  const store = await started(() => ({
+    findGitLabProject: () => failed({ kind: "WorkerStopped" }),
+  }));
+  expect(store.problem.value).toEqual({
+    action: "mergeRequests",
+    step: "find",
+    cause: { kind: "WorkerStopped" },
+  });
+  expect(store.tabs.value).toHaveLength(1);
 });
 
 test("a failed start shows the problem and lists nothing (catches a failure read as an empty list)", async () => {
