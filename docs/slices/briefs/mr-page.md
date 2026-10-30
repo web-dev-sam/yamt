@@ -32,8 +32,7 @@ opens to `<session>/glab/opened.log`; `stop` sweeps child yamt processes of the 
 ## Acceptance
 
 - `fences.test` (PM10 refuses a root import and an `lsp/` import from `MergeRequest*`/`mergeRequest*`/`CiStatus*`
-  files under `src/ui/`; `src/mergeRequests/` gets search's PM3 and PM2 cases and "importing itself is fine", which
-  round 1 could not add), `startArgs.test` (`--diff --dir`, `--glab` with `--diff`, `--mr`).
+  files under `src/ui/`), `startArgs.test` (`--diff --dir`, `--glab` with `--diff`, `--mr`).
 - `pnpm -C frontend typecheck`, `lint`, `test`, `fmt:check`, `unused`, `sfc-order` pass.
 - Design §8 WebKit fixture steps 1–9, both windows, dark and light, through `just app-session start-fixture`
   (private display): paste the observed values and screenshot paths per step.

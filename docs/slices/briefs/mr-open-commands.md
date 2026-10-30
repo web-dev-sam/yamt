@@ -7,7 +7,10 @@ chosen): `.omp/run/notes/MrOverviewDesign.md` — §1 facts and I3–I7, §2.1 `
 "R2 · B3", §6 "Fake glab (… extended by B3)", "B3 → B4 and B5", "B3 → B5 (real-app repository)", §7 Rust rows for
 remote/fetch/open/src-tauri/range_window. Those sections are given; build them as written. Round 1 (`MrDetectList`,
 notes `.omp/run/notes/MrDetectList.md`) built the crate's list side, the gitio glab helpers and the fake glab's GraphQL
-routes; build on what is committed.
+routes (commit `7478f81`); build on what is committed. Left for you by round 1: `DETAILS_QUERY`/`details_args` in
+`query.rs` and the `yamt-range` dependency (round 1 had no caller); payload fields of tagged enums follow
+`yamt_review::NotLinedUp` (variants camelCase, as round 1's `ListEnd`); the generated bindings are what the window builds
+against, so paste them.
 
 ## Target
 

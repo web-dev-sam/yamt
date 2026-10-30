@@ -1,21 +1,4 @@
 {
-  "MrDetectList": {
-    "owned": [
-      "crates/merge-requests/**",
-      "crates/gitio/src/glab.rs",
-      "crates/gitio/src/names.rs",
-      "crates/gitio/src/lib.rs",
-      "crates/gitio/tests/glab.rs",
-      "crates/review/src/glab_answer.rs",
-      "crates/review/src/send.rs",
-      "crates/review/src/lib.rs",
-      "scripts/arch-check.sh",
-      "scripts/fake-glab/glab",
-      "tests/glab/README.md",
-      "tests/glab/merge-requests/**",
-      "tests/glab/merge-requests-timeout/**"
-    ]
-  },
   "MrWindowState": {
     "owned": [
       "frontend/src/ipc/MergeRequestSource.ts",
@@ -55,6 +38,29 @@
       "frontend/src/ui/compareStore.test.ts",
       "frontend/src/ui/rangeStore.ts",
       "frontend/src/ui/rangeStore.test.ts"
+    ]
+  },
+  "MrOpenCommands": {
+    "owned": [
+      "crates/merge-requests/**",
+      "crates/gitio/src/fetch.rs",
+      "crates/gitio/src/lib.rs",
+      "crates/gitio/tests/fetch.rs",
+      "src-tauri/Cargo.toml",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/range_window.rs",
+      "src-tauri/src/appimage.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/compare.rs",
+      "src-tauri/src/range.rs",
+      "src-tauri/src/commands.rs",
+      "src-tauri/src/lib.rs",
+      "scripts/range-repo.sh",
+      "scripts/fake-open/**",
+      "scripts/fake-glab/glab",
+      "tests/glab/README.md",
+      "tests/glab/merge-requests/**"
     ]
   }
 }
