@@ -6,10 +6,12 @@ export type Screen =
   | { readonly kind: "serverLog"; readonly name: string }
   | { readonly kind: "mergeRequests" };
 
-export function settingsScreen(screen: ShallowRef<Screen>): {
+export type SettingsScreen = {
   openSettings(): void;
   closeSettings(): void;
-} {
+};
+
+export function settingsScreen(screen: ShallowRef<Screen>): SettingsScreen {
   return {
     openSettings: () => {
       screen.value = { kind: "settings" };

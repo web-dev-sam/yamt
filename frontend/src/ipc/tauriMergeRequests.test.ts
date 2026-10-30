@@ -21,7 +21,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   },
 }));
 
-type PageChannel = { onmessage: (page: Generated.MergeRequestPage) => void };
+type MessageChannel = { onmessage: (message: Generated.ListMessage) => void };
 
 const ROW: Generated.MergeRequestRow = {
   iid: 12,
@@ -37,6 +37,39 @@ const ROW: Generated.MergeRequestRow = {
 };
 
 const STOPPED = { kind: "WorkerStopped" };
+const MICROTASKS = 10;
+
+function page(rows: Generated.MergeRequestRow[]): Generated.ListMessage {
+  return { kind: "page", page: { me: "sam", rows } };
+}
+
+function end(listEnd: Generated.ListEnd): Generated.ListMessage {
+  return { kind: "end", end: listEnd };
+}
+
+async function settled(): Promise<void> {
+  for (let turn = 0; turn < MICROTASKS; turn += 1) {
+    await Promise.resolve();
+  }
+}
+
+function heldChannel(reply: unknown = { status: "ok", data: null }): {
+  readonly channel: () => MessageChannel;
+} {
+  let held: MessageChannel | null = null;
+  commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
+    held = channel;
+    return reply;
+  });
+  return {
+    channel: () => {
+      if (held === null) {
+        throw new Error("the list command was not called");
+      }
+      return held;
+    },
+  };
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -50,36 +83,80 @@ test("the project comes back as GitLab answered it", async () => {
   });
 });
 
-test("each page from the channel reaches the callback converted, then the end (catches a time left as text)", async () => {
-  commands.listMergeRequests.mockImplementation(async (channel: PageChannel) => {
-    channel.onmessage({ me: "sam", rows: [ROW] });
-    channel.onmessage({ me: "sam", rows: [] });
-    return { status: "ok", data: { kind: "cut", limit: 500 } };
+test("each page from the channel reaches the callback converted, then the end message ends the load (catches a time left as text)", async () => {
+  commands.listMergeRequests.mockImplementation(async (channel: MessageChannel) => {
+    channel.onmessage(page([ROW]));
+    channel.onmessage(page([]));
+    channel.onmessage(end({ kind: "cut", limit: 500 }));
+    return { status: "ok", data: null };
   });
   const pages: MergeRequestPage[] = [];
 
-  const end = await createTauriMergeRequests().listMergeRequests((page) => pages.push(page));
+  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
 
   expect(pages).toEqual([
     { me: "sam", rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 29, 8) }] },
     { me: "sam", rows: [] },
   ]);
-  expect(end).toEqual({ ok: true, value: { kind: "cut", limit: 500 } });
+  expect(ended).toEqual({ ok: true, value: { kind: "cut", limit: 500 } });
 });
 
-test("an unreadable page fails the load after the pages before it arrived (catches it lost in the channel)", async () => {
-  commands.listMergeRequests.mockImplementation(async (channel: PageChannel) => {
-    channel.onmessage({ me: null, rows: [ROW] });
-    channel.onmessage({ me: null, rows: [{ ...ROW, createdAt: "soon" }] });
-    channel.onmessage({ me: null, rows: [] });
-    return { status: "ok", data: { kind: "loaded" } };
-  });
+test("a page that arrives after the command resolved is still in the load, which ends only on the end message (catches the command's answer taken as the end)", async () => {
+  const held = heldChannel();
+  const pages: MergeRequestPage[] = [];
+  let answer: unknown = null;
+  const loading = createTauriMergeRequests()
+    .listMergeRequests((got) => pages.push(got))
+    .then((result) => {
+      answer = result;
+      return result;
+    });
+  await settled();
+  expect(answer).toBeNull();
+
+  held.channel().onmessage(page([ROW]));
+  await settled();
+  expect(pages).toHaveLength(1);
+  expect(answer).toBeNull();
+
+  held.channel().onmessage(end({ kind: "loaded" }));
+  expect(await loading).toEqual({ ok: true, value: { kind: "loaded" } });
+  held.channel().onmessage(page([ROW]));
+  expect(pages).toHaveLength(1);
+});
+
+test("an unreadable page fails the load even after the command resolved, and no page is passed on after it (catches it lost in the channel)", async () => {
+  const held = heldChannel();
+  const pages: MergeRequestPage[] = [];
+  const loading = createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
+  await settled();
+
+  held.channel().onmessage(page([ROW]));
+  held.channel().onmessage(page([{ ...ROW, createdAt: "soon" }]));
+  held.channel().onmessage(page([]));
+  held.channel().onmessage(end({ kind: "loaded" }));
+
+  await expect(loading).rejects.toThrow('rows[0].createdAt must be an ISO 8601 time, got "soon"');
+  expect(pages.map((got) => got.rows.length)).toEqual([1]);
+});
+
+test("an IPC failure of the command ends the load as that failure, and a later page is not passed on", async () => {
+  const held = heldChannel({ status: "error", error: STOPPED });
   const pages: MergeRequestPage[] = [];
 
-  await expect(
-    createTauriMergeRequests().listMergeRequests((page) => pages.push(page)),
-  ).rejects.toThrow('rows[0].createdAt must be an ISO 8601 time, got "soon"');
-  expect(pages.map((page) => page.rows.length)).toEqual([1, 0]);
+  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
+  held.channel().onmessage(page([ROW]));
+
+  expect(ended).toEqual({ ok: false, failure: STOPPED });
+  expect(pages).toEqual([]);
+});
+
+test("a command that throws fails the load", async () => {
+  commands.listMergeRequests.mockRejectedValue(new Error("no app"));
+
+  await expect(createTauriMergeRequests().listMergeRequests(() => undefined)).rejects.toThrow(
+    "no app",
+  );
 });
 
 test("opening passes the iid and camelCases a missing commit", async () => {

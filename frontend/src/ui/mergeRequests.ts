@@ -34,7 +34,7 @@ import { jobOpenedText } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
-export type Listing =
+export type ListLoad =
   | { readonly kind: "notLoaded" }
   | { readonly kind: "loading"; readonly first: boolean }
   | { readonly kind: "done"; readonly end: ListEnd; readonly at: number };
@@ -54,7 +54,7 @@ export type MergeRequests = {
   readonly project: Readonly<ShallowRef<GitLabProject>>;
   readonly me: Readonly<ShallowRef<string | null>>;
   readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
-  readonly listing: Readonly<ShallowRef<Listing>>;
+  readonly listing: Readonly<ShallowRef<ListLoad>>;
   readonly filters: Readonly<Ref<Filters>>;
   readonly shownRows: ComputedRef<readonly MergeRequestRow[]>;
   readonly choices: ComputedRef<Choices>;
@@ -81,23 +81,19 @@ type Deps = {
   readonly storage?: StorageLike;
 };
 
-type Load = { buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
 
 type State = Deps & {
   readonly project: ShallowRef<GitLabProject>;
   readonly me: ShallowRef<string | null>;
   readonly rows: ShallowRef<readonly MergeRequestRow[]>;
   readonly cut: ShallowRef<boolean>;
-  readonly listing: ShallowRef<Listing>;
+  readonly listing: ShallowRef<ListLoad>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
   readonly jobProblem: ShallowRef<string | null>;
-  load: Load | null;
 };
 
 function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
-  if (state.load !== load) {
-    return;
-  }
   if (load.buffered) {
     load.buffer = merged(load.buffer, rows);
     load.me = me;
@@ -115,7 +111,6 @@ function ended(state: State, load: Load, end: ListEnd): void {
   if (load.buffered && listed) {
     state.rows.value = load.buffer;
     state.me.value = load.me;
-    load.buffered = false;
   }
   state.listing.value = { kind: "done", end, at: Date.now() };
 }
@@ -127,7 +122,6 @@ async function load(state: State): Promise<void> {
   }
   const first = before.kind === "notLoaded";
   const running: Load = { buffered: !first, buffer: [], me: null };
-  state.load = running;
   state.listing.value = { kind: "loading", first };
   const outcome = await attempt(() =>
     state.source.listMergeRequests((page) => {
@@ -138,7 +132,6 @@ async function load(state: State): Promise<void> {
     ended(state, running, outcome.value);
     return;
   }
-  state.load = null;
   state.listing.value = before;
   if (first) {
     state.rows.value = [];
@@ -205,10 +198,9 @@ function createState(deps: Deps): State {
     me: shallowRef<string | null>(null),
     rows: shallowRef<readonly MergeRequestRow[]>([]),
     cut: shallowRef(false),
-    listing: shallowRef<Listing>({ kind: "notLoaded" }),
+    listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
     jobProblem: shallowRef<string | null>(null),
-    load: null,
   };
 }
 

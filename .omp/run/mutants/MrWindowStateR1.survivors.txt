@@ -1,0 +1,2 @@
+just mutants HEAD (web only): 841 killed, 0 timeout, 71 survived, 2 no cov; tauriMergeRequests.ts 100%, screen.ts 100%, mergeRequests.ts 99.43%
+

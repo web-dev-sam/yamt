@@ -20,7 +20,7 @@ import {
 import { RECHECK_PAUSE_MS } from "./glab";
 import {
   createMergeRequests,
-  type Listing,
+  type ListLoad,
   type MergeRequests,
   type Opening,
 } from "./mergeRequests";
@@ -181,7 +181,7 @@ test("show opens the page and starts the first load; close returns to the files"
   const live = rig();
   live.slice.show();
   expect(live.screen.value).toEqual({ kind: "mergeRequests" });
-  const firstLoad: Listing = { kind: "loading", first: true };
+  const firstLoad: ListLoad = { kind: "loading", first: true };
   expect(live.slice.listing.value).toEqual(firstLoad);
   expect(live.loads).toHaveLength(1);
 
@@ -261,9 +261,6 @@ test.each<ListEnd>([
     await reloading;
     expect(iids(live.slice.rows.value)).toEqual(iids(ROWS));
     expect(live.slice.listing.value).toEqual({ kind: "done", end, at: T0 });
-
-    reload.send({ me: "sam", rows: [] });
-    expect(iids(live.slice.rows.value)).toEqual(iids(ROWS));
   },
 );
 
@@ -275,36 +272,6 @@ test("a first load that fails after a page keeps that page (the sent pages stay)
   load.end({ ok: true, value: { kind: "failed", message: "502" } });
   await settled();
   expect(live.slice.rows.value).toHaveLength(20);
-});
-
-test("a page from an older load is dropped (catches stale pages applied)", async () => {
-  const live = rig();
-  await loaded(live, ROWS.slice(0, 3));
-  const old = loadAt(live, 0);
-
-  const reloading = live.slice.refresh();
-  old.send({ me: "ben", rows: ROWS.slice(10, 12) });
-  expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(0, 3)));
-  loadAt(live, 1).send({ me: "sam", rows: ROWS.slice(1, 2) });
-  loadAt(live, 1).end(LOADED);
-  await reloading;
-  old.send({ me: "ben", rows: ROWS.slice(12, 14) });
-
-  expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(1, 2)));
-  expect(live.slice.me.value).toBe("sam");
-});
-
-test("a page of the latest load that arrives after its end still counts (Tauri may deliver a large page late)", async () => {
-  const live = rig();
-  await loaded(live, ROWS.slice(0, 3));
-
-  const reloading = live.slice.refresh();
-  const reload = loadAt(live, 1);
-  reload.end(LOADED);
-  await reloading;
-  reload.send({ me: "sam", rows: ROWS.slice(5, 7) });
-
-  expect(iids(live.slice.rows.value)).toEqual(iids(ROWS.slice(5, 7)));
 });
 
 test("one load at a time: Refresh and show while loading start nothing (catches two loads racing)", async () => {
@@ -323,7 +290,6 @@ test("a failed first list call is reported and leaves nothing loaded, so the nex
   loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(0, 2) });
   loadAt(live, 0).end({ ok: false, failure: STOPPED });
   await settled();
-  loadAt(live, 0).send({ me: "sam", rows: ROWS.slice(2, 4) });
 
   expect(live.problems).toEqual([{ action: "mergeRequests", step: "list", cause: STOPPED }]);
   expect(live.slice.listing.value).toEqual({ kind: "notLoaded" });

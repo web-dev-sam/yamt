@@ -1,4 +1,5 @@
 import type * as Generated from "./bindings";
+import { pause } from "./fixture";
 import { TIMED_OUT } from "./fixtureGitLab";
 import {
   DROPPED_LABEL,
@@ -25,7 +26,7 @@ export type MergeRequestScript =
   | "refused"
   | "pageFails";
 
-type Listing = {
+type Scripted = {
   readonly pages: readonly (readonly Generated.MergeRequestRow[])[];
   readonly end: Generated.ListEnd;
 };
@@ -66,12 +67,6 @@ function shownScript(log: Log, search: string): MergeRequestScript | null {
   return null;
 }
 
-function pause(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
 function pages(size: number, count: number): Generated.MergeRequestRow[][] {
   return Array.from({ length: count }, (_, page) => fixtureRows(page * size, size));
 }
@@ -85,7 +80,7 @@ function withoutDroppedLabel(
   }));
 }
 
-function listing(script: MergeRequestScript, load: number): Listing {
+function scripted(script: MergeRequestScript, load: number): Scripted {
   switch (script) {
     case "list": {
       const first = pages(LIST_PAGE, LIST_PAGES);
@@ -134,7 +129,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
         return { ok: true, value: LOADED };
       }
       loads += 1;
-      const { pages: sent, end } = listing(script, loads);
+      const { pages: sent, end } = scripted(script, loads);
       for (const rows of sent) {
         if (script === "slow") {
           await pause(SLOW_PAGE_MS);

@@ -182,6 +182,12 @@ function parseFixtures(files: Readonly<Record<string, unknown>>): Map<string, Fi
   return new Map(parsed.map((data) => [data.path, data]));
 }
 
+export function pause(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
 function unknownPath(path: string): SourceResult<never> {
   return { ok: false, failure: { kind: "UnknownPath", path } };
 }

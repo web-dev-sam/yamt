@@ -1,5 +1,6 @@
 import type * as Generated from "./bindings";
 import type { SourceResult } from "./domain";
+import { pause } from "./fixture";
 import {
   gitLabCheck,
   postOutcome,
@@ -39,12 +40,6 @@ type Tally = { sent: number; refused: number };
 const CHECKING_MS = 3000;
 const POST_PAUSE_MS = 300;
 const MS_PER_SECOND = 1000;
-
-function pause(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
 
 function listed(store: Store): Generated.ThreadList {
   return { threads: store.threads };
