@@ -32,12 +32,24 @@ const MINUTE_MS = 60_000;
 const LIST_FILTERS: readonly ListFilter[] = ["assignee", "reviewer", "label"];
 
 const requests = useMergeRequests();
-const { rows, listing, failure, filters, shownRows, choices, summary, openings, pageProblem } =
-  requests;
+const {
+  rows,
+  listing,
+  failure,
+  filters,
+  shownRows,
+  choices,
+  summary,
+  openings,
+  pageProblem,
+  actions,
+  localMerge,
+} = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const focusedBefore = document.activeElement;
 const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
 useEventListener(window, "keydown", escapePressed);
+useEventListener(window, "focus", windowFocused);
 
 const loading = computed(() => listing.value.kind === "loading");
 const waiting = computed(() => loading.value && rows.value.length === 0);
@@ -61,6 +73,10 @@ function escapePressed(event: KeyboardEvent): void {
     event.preventDefault();
     void goBack();
   }
+}
+
+function windowFocused(): void {
+  void requests.checkLocalMerge();
 }
 </script>
 
@@ -167,8 +183,12 @@ function escapePressed(event: KeyboardEvent): void {
           :row="row"
           :now="nowMs"
           :opening="openings.get(row.iid) ?? null"
+          :local-merge="localMerge"
+          :acting="actions.get(row.iid) ?? null"
           @open="requests.openChanges"
           @open-page="requests.openPage"
+          @resolve="requests.resolve"
+          @continue-merge="requests.continueMerge"
         />
       </ul>
     </template>

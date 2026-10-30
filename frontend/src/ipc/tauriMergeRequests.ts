@@ -57,5 +57,14 @@ export function createTauriMergeRequests(): MergeRequestSource {
     async openPage(page) {
       return { ok: true, value: await commands.openPage(page) };
     },
+    async resolveMergeRequest(iid) {
+      return toResult(await commands.resolveMergeRequest(iid));
+    },
+    async continueMergeRequest(iid) {
+      return toResult(await commands.continueMergeRequest(iid));
+    },
+    async findLocalMerge() {
+      return toResult(await commands.findLocalMerge());
+    },
   };
 }

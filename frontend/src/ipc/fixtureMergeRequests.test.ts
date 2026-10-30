@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { isMergeRequestIid, isWebPage } from "./domain";
+import { isMergeRequestIid, isWebPage, type MergeRequestIid } from "./domain";
 import { createFixtureCompareSource } from "./fixtureCompare";
 import {
   ALREADY_OPEN_IID,
@@ -14,7 +14,13 @@ import {
 import { createFixtureMergeRequests, type MergeRequestScript } from "./fixtureMergeRequests";
 import { createFixtureRangeSource } from "./fixtureRange";
 import type { Log } from "./log";
-import type { ListEnd, MergeRequestPage } from "./mergeRequestDomain";
+import type {
+  ContinueMergeReply,
+  ListEnd,
+  LocalMerge,
+  MergeRequestPage,
+  ResolveReply,
+} from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { branded } from "./validate";
 
@@ -247,4 +253,105 @@ test("the compare and range fixtures answer ?mr beside their own parameters", as
     ok: true,
     value: { kind: "none" },
   });
+});
+
+function iid(value: number): MergeRequestIid {
+  return branded(value, isMergeRequestIid, "iid");
+}
+
+async function answered<T>(asked: Promise<T>): Promise<T> {
+  await vi.advanceTimersByTimeAsync(1000);
+  return asked;
+}
+
+test.each<[number, ResolveReply]>([
+  [
+    640,
+    {
+      kind: "started",
+      started: { branch: "feature/fixture-640", target: "main", conflicts: true },
+    },
+  ],
+  [
+    632,
+    {
+      kind: "started",
+      started: { branch: "feature/fixture-632", target: "main", conflicts: false },
+    },
+  ],
+  [624, { kind: "refused", refusal: { kind: "localAhead", branch: "feature/fixture-624" } }],
+  [
+    616,
+    {
+      kind: "windowFailed",
+      started: { branch: "feature/fixture-616", target: "main", conflicts: true },
+      message: "yamt: not found",
+    },
+  ],
+  [
+    636,
+    {
+      kind: "started",
+      started: { branch: "feature/fixture-636", target: "main", conflicts: true },
+    },
+  ],
+])("resolving !%i answers after a second with its scripted reply", async (number, reply) => {
+  vi.useFakeTimers();
+  let replied: unknown = null;
+  void source("?mr=list")
+    .resolveMergeRequest(iid(number))
+    .then((result) => {
+      replied = result;
+    });
+  await vi.advanceTimersByTimeAsync(999);
+  expect(replied).toBeNull();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(replied).toEqual({ ok: true, value: reply });
+});
+
+test.each([640, 616])(
+  "after !%i started, the local merge names it with its window closed",
+  async (number) => {
+    vi.useFakeTimers();
+    const mergeRequests = source("?mr=list");
+    expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: { kind: "free" } });
+    await answered(mergeRequests.resolveMergeRequest(iid(number)));
+    const merging: LocalMerge = { kind: "merging", iid: number, windowOpen: false };
+    expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: merging });
+  },
+);
+
+test("a refused resolve leaves no local merge", async () => {
+  vi.useFakeTimers();
+  const mergeRequests = source("?mr=list");
+  await answered(mergeRequests.resolveMergeRequest(iid(624)));
+  expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: { kind: "free" } });
+});
+
+test("continuing the started merge opens its window, and from then the window is open", async () => {
+  vi.useFakeTimers();
+  const mergeRequests = source("?mr=list");
+  await answered(mergeRequests.resolveMergeRequest(iid(640)));
+  const opened: ContinueMergeReply = {
+    kind: "opened",
+    branch: "feature/fixture-640",
+    target: "main",
+  };
+  expect(await answered(mergeRequests.continueMergeRequest(iid(640)))).toEqual({
+    ok: true,
+    value: opened,
+  });
+  const open: LocalMerge = { kind: "merging", iid: 640, windowOpen: true };
+  expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: open });
+});
+
+test("continuing another merge request, or with nothing started, answers ended", async () => {
+  vi.useFakeTimers();
+  const mergeRequests = source("?mr=list");
+  const ended = { ok: true, value: { kind: "ended" } };
+  expect(await answered(mergeRequests.continueMergeRequest(iid(640)))).toEqual(ended);
+  await answered(mergeRequests.resolveMergeRequest(iid(640)));
+  expect(await answered(mergeRequests.continueMergeRequest(iid(636)))).toEqual(ended);
+  const stillClosed: LocalMerge = { kind: "merging", iid: 640, windowOpen: false };
+  expect(await mergeRequests.findLocalMerge()).toEqual({ ok: true, value: stillClosed });
 });

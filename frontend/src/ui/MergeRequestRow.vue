@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import FileDiff from "~icons/lucide/file-diff";
+import GitMerge from "~icons/lucide/git-merge";
 import LoaderCircle from "~icons/lucide/loader-circle";
 import MessageSquare from "~icons/lucide/message-square";
+import StepForward from "~icons/lucide/step-forward";
 import ThumbsUp from "~icons/lucide/thumbs-up";
 
-import type { MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
-import { createdAgo } from "../mergeRequests";
+import type { LocalMerge, MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
+import { createdAgo, rowAction, sizeText, sizeTitle } from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
+import type { RowActing } from "./mergeRequestActions";
+import MergeRequestReadiness from "./MergeRequestReadiness.vue";
 import type { Opening } from "./mergeRequests";
 import {
   approvalsText,
@@ -16,13 +20,22 @@ import {
   openChangesTitle,
   openPageTitle,
   openReplyText,
+  rowReplyText,
   type PageKind,
 } from "./mergeRequestsText";
 
-const props = defineProps<{ row: MergeRequestRow; now: number; opening: Opening | null }>();
+const props = defineProps<{
+  row: MergeRequestRow;
+  now: number;
+  opening: Opening | null;
+  localMerge: LocalMerge;
+  acting: RowActing | null;
+}>();
 const emit = defineEmits<{
   open: [iid: MergeRequestIid];
   openPage: [clicked: PageKind, page: WebPage];
+  resolve: [iid: MergeRequestIid];
+  continueMerge: [iid: MergeRequestIid];
 }>();
 
 const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
@@ -38,10 +51,34 @@ const fetching = computed(() => props.opening?.kind === "fetching");
 const refusal = computed(() =>
   props.opening?.kind === "refused" ? openReplyText(props.opening.reply, props.row.iid) : null,
 );
+const size = computed(() =>
+  props.row.size === null
+    ? null
+    : { text: sizeText(props.row.size), title: sizeTitle(props.row.size) },
+);
+const action = computed(() =>
+  rowAction(props.row, props.localMerge, props.acting?.kind === "running"),
+);
+const actionHover = computed(() =>
+  action.value.kind !== "none" && action.value.state.kind === "disabled"
+    ? action.value.state.hover
+    : null,
+);
+const reply = computed(() =>
+  props.acting?.kind === "replied" ? rowReplyText(props.acting.reply, props.row.iid) : null,
+);
 
 function openPage(): void {
   if (props.row.page !== null) {
     emit("openPage", "mergeRequest", props.row.page);
+  }
+}
+
+function act(): void {
+  if (action.value.kind === "resolve") {
+    emit("resolve", props.row.iid);
+  } else if (action.value.kind === "continue") {
+    emit("continueMerge", props.row.iid);
   }
 }
 </script>
@@ -67,6 +104,9 @@ function openPage(): void {
         <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
         <span class="shrink-0 text-fg-muted">{{ mr }}</span>
         <span class="shrink-0 text-fg-muted" :title="createdTitle">{{ created }}</span>
+        <span v-if="size !== null" class="shrink-0 text-fg-muted" :title="size.title">
+          {{ size.text }}
+        </span>
       </div>
       <span
         class="flex w-12 shrink-0 items-center gap-1"
@@ -95,6 +135,29 @@ function openPage(): void {
           @open-job="emit('openPage', 'job', $event)"
         />
       </span>
+      <span class="flex w-7 shrink-0 justify-center">
+        <MergeRequestReadiness :readiness="row.readiness" />
+      </span>
+      <span class="flex w-7 shrink-0" @click.stop>
+        <span v-if="action.kind !== 'none'" class="flex" :title="actionHover ?? action.label">
+          <button
+            type="button"
+            :aria-label="action.label"
+            :aria-busy="action.state.kind === 'running'"
+            :disabled="action.state.kind !== 'enabled'"
+            class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+            @click="act"
+          >
+            <LoaderCircle
+              v-if="action.state.kind === 'running'"
+              class="size-4 animate-spin"
+              aria-hidden="true"
+            />
+            <GitMerge v-else-if="action.kind === 'resolve'" class="size-4" aria-hidden="true" />
+            <StepForward v-else class="size-4" aria-hidden="true" />
+          </button>
+        </span>
+      </span>
       <span class="flex shrink-0" @click.stop>
         <button
           type="button"
@@ -112,6 +175,9 @@ function openPage(): void {
     </div>
     <p v-if="refusal !== null" role="status" class="text-problem-error">
       {{ refusal }}
+    </p>
+    <p v-if="reply !== null" role="status" :class="{ 'text-problem-error': reply.refused }">
+      {{ reply.text }}
     </p>
   </li>
 </template>

@@ -12,7 +12,13 @@ import {
   REFUSED_MESSAGE,
 } from "./fixtureMergeRequestData";
 import type { Log } from "./log";
-import { toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
+import {
+  toMergeRequestPage,
+  toOpenReply,
+  type ContinueMergeReply,
+  type LocalMerge,
+  type ResolveReply,
+} from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 
 export type MergeRequestScript =
@@ -50,6 +56,11 @@ const MANY_PAGES = 5;
 const SLOW_PAGE_MS = 1000;
 const OPEN_PAUSE_MS = 1000;
 const LOADED: Generated.ListEnd = { kind: "loaded" };
+const CLEAN_IID = 632;
+const LOCAL_AHEAD_IID = 624;
+const WINDOW_FAILS_IID = 616;
+const FIXTURE_TARGET = "main";
+const WINDOW_FAILED_MESSAGE = "yamt: not found";
 
 function isScript(name: string): name is MergeRequestScript {
   return Object.hasOwn(SCRIPTS, name);
@@ -112,6 +123,58 @@ function scripted(script: MergeRequestScript, load: number): Scripted {
   }
 }
 
+function fixtureBranch(iid: number): string {
+  return `feature/fixture-${iid}`;
+}
+
+function resolveReply(iid: number): ResolveReply {
+  const branch = fixtureBranch(iid);
+  const started = { branch, target: FIXTURE_TARGET, conflicts: iid !== CLEAN_IID };
+  switch (iid) {
+    case LOCAL_AHEAD_IID:
+      return { kind: "refused", refusal: { kind: "localAhead", branch } };
+    case WINDOW_FAILS_IID:
+      return { kind: "windowFailed", started, message: WINDOW_FAILED_MESSAGE };
+    default:
+      return { kind: "started", started };
+  }
+}
+
+function continueReply(localMerge: LocalMerge, iid: number): ContinueMergeReply {
+  if (localMerge.kind !== "merging" || localMerge.iid !== iid) {
+    return { kind: "ended" };
+  }
+  return { kind: "opened", branch: fixtureBranch(iid), target: FIXTURE_TARGET };
+}
+
+function localMergeScript(): Pick<
+  MergeRequestSource,
+  "resolveMergeRequest" | "continueMergeRequest" | "findLocalMerge"
+> {
+  let localMerge: LocalMerge = { kind: "free" };
+  return {
+    async resolveMergeRequest(iid) {
+      await pause(OPEN_PAUSE_MS);
+      const reply = resolveReply(iid);
+      if (reply.kind !== "refused") {
+        localMerge = { kind: "merging", iid, windowOpen: false };
+      }
+      return { ok: true, value: reply };
+    },
+    async continueMergeRequest(iid) {
+      await pause(OPEN_PAUSE_MS);
+      const reply = continueReply(localMerge, iid);
+      if (reply.kind === "opened") {
+        localMerge = { kind: "merging", iid, windowOpen: true };
+      }
+      return { ok: true, value: reply };
+    },
+    async findLocalMerge() {
+      return { ok: true, value: localMerge };
+    },
+  };
+}
+
 /** `?mr=<script>` scripts GitLab's answers; without it the window has no GitLab project. */
 export function createFixtureMergeRequests(log: Log, search: string): MergeRequestSource {
   const script = shownScript(log, search);
@@ -146,5 +209,6 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
       log.info("mergeRequests.fixture_page", { page });
       return { ok: true, value: { kind: "opened" } };
     },
+    ...localMergeScript(),
   };
 }

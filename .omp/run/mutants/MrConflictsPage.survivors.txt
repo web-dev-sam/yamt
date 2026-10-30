@@ -1,0 +1,5 @@
+just mutants HEAD (web, 8 files): 690 killed, 17 survived, 18 no coverage, score 95.17%
+src/ipc/fixtureMergeRequests.ts:144 `localMerge.kind !== "merging"`→false — equivalent: free has no iid, so `undefined !== iid` still answers ended; the check exists for TS narrowing
+src/mergeRequests/internal/rowAction.ts:48 `localMerge.kind === "merging"`→true — equivalent: `undefined === row.iid` is false
+src/ipc/fixtureMergeRequests.ts:62,63 FIXTURE_TARGET / WINDOW_FAILED_MESSAGE "" — wiring: module constants not re-evaluated under vitest (#732); the tests assert both values
+default `never` arms in readiness.ts:84, mergeRequestActions.ts:53, mergeRequestsText.ts:177,201,219 (no coverage) — gate-covered: unreachable by type (vue-tsc)

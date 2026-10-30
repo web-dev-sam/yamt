@@ -29,6 +29,7 @@ import {
   type PersonValue,
 } from "../mergeRequests";
 import { RECHECK_PAUSE_MS } from "./glab";
+import { createRowActions, type RowActions } from "./mergeRequestActions";
 import { createRememberedFilters } from "./mergeRequestFilters";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
 import { attempt, type Problem } from "./problem";
@@ -49,7 +50,7 @@ type Choices = Readonly<{
   label: readonly Choice<LabelValue>[];
 }>;
 
-export type MergeRequests = {
+export type MergeRequests = RowActions & {
   readonly project: Readonly<ShallowRef<GitLabProject>>;
   readonly me: Readonly<ShallowRef<string | null>>;
   readonly rows: Readonly<ShallowRef<readonly MergeRequestRow[]>>;
@@ -91,6 +92,7 @@ type State = Deps & {
   readonly listing: ShallowRef<ListLoad>;
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
   readonly pageProblem: ShallowRef<string | null>;
+  readonly rowActions: RowActions;
 };
 
 function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
@@ -141,6 +143,7 @@ async function load(state: State): Promise<void> {
 
 function show(state: State): void {
   state.screen.value = { kind: "mergeRequests" };
+  void state.rowActions.checkLocalMerge();
   const listing = state.listing.value;
   const stale = listing.kind === "done" && Date.now() - listing.at >= RECHECK_PAUSE_MS;
   if (listing.kind === "notLoaded" || stale) {
@@ -201,6 +204,7 @@ function createState(deps: Deps): State {
     listing: shallowRef<ListLoad>({ kind: "notLoaded" }),
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
     pageProblem: shallowRef<string | null>(null),
+    rowActions: createRowActions(deps),
   };
 }
 
@@ -280,5 +284,6 @@ export function createMergeRequests(deps: Deps): MergeRequests {
     dismissPageProblem: () => {
       state.pageProblem.value = null;
     },
+    ...state.rowActions,
   };
 }

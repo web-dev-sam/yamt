@@ -6,18 +6,22 @@ import {
   createFixtureCompareSource,
   isMergeRequestIid,
   log,
+  type ContinueMergeReply,
   type ListEnd,
+  type LocalMerge,
   type MergeRequestIid,
   type MergeRequestPage,
   type MergeRequestRow,
   type MergeRequestSource,
   type OpenReply,
   type PageOpened,
+  type ResolveReply,
   type SourceFailure,
   type SourceResult,
   type WebPage,
 } from "../ipc";
 import { RECHECK_PAUSE_MS } from "./glab";
+import type { RowActing } from "./mergeRequestActions";
 import {
   createMergeRequests,
   type ListLoad,
@@ -39,12 +43,20 @@ type Open = {
   readonly answer: (result: SourceResult<OpenReply>) => void;
 };
 
+type Asked<T> = {
+  readonly iid: MergeRequestIid;
+  readonly answer: (result: SourceResult<T>) => void;
+};
+
 type Rig = {
   readonly slice: MergeRequests;
   readonly screen: ShallowRef<Screen>;
   readonly problems: Problem[];
   readonly loads: Load[];
   readonly opens: Open[];
+  readonly resolves: Asked<ResolveReply>[];
+  readonly continues: Asked<ContinueMergeReply>[];
+  readonly localMerges: LocalMerge[];
   readonly storage: MemoryStorage;
 };
 
@@ -56,6 +68,7 @@ const T0 = 1_767_225_600_000;
 const MICROTASKS = 10;
 const REPOSITORY = "/home/sam/taskboard/.git";
 const STOPPED: SourceFailure = { kind: "WorkerStopped" };
+const FREE: LocalMerge = { kind: "free" };
 const LOADED: SourceResult<ListEnd> = { ok: true, value: { kind: "loaded" } };
 const JOB = "https://gitlab.example/taskboard/taskboard/-/jobs/9001";
 const MR = "https://gitlab.example/taskboard/taskboard/-/merge_requests/639";
@@ -118,6 +131,9 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
   vi.setSystemTime(T0);
   const loads: Load[] = [];
   const opens: Open[] = [];
+  const resolves: Asked<ResolveReply>[] = [];
+  const continues: Asked<ContinueMergeReply>[] = [];
+  const localMerges: LocalMerge[] = [];
   const problems: Problem[] = [];
   const source: MergeRequestSource = {
     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
@@ -130,6 +146,18 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
         opens.push({ iid: asked, answer: resolve });
       }),
     openPage: async () => ({ ok: true, value: { kind: "opened" } }),
+    resolveMergeRequest: (asked) =>
+      new Promise((resolve) => {
+        resolves.push({ iid: asked, answer: resolve });
+      }),
+    continueMergeRequest: (asked) =>
+      new Promise((resolve) => {
+        continues.push({ iid: asked, answer: resolve });
+      }),
+    findLocalMerge: async () => {
+      const found = localMerges.shift() ?? FREE;
+      return { ok: true, value: found };
+    },
     ...edit,
   };
   const screen = shallowRef<Screen>({ kind: "files" });
@@ -139,7 +167,7 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
     report: (problem) => problems.push(problem),
     storage,
   });
-  return { slice, screen, problems, loads, opens, storage };
+  return { slice, screen, problems, loads, opens, resolves, continues, localMerges, storage };
 }
 
 function loadAt(live: Rig, index: number): Load {
@@ -578,4 +606,146 @@ test("the seam hands every header and the page the window's one slice; problems 
   expect(problem.value).toEqual({ action: "mergeRequests", step: "find", cause: STOPPED });
   slice.show();
   expect(screen.value).toEqual({ kind: "mergeRequests" });
+});
+
+const MERGING_640: LocalMerge = { kind: "merging", iid: 640, windowOpen: false };
+const STARTED_640: ResolveReply = {
+  kind: "started",
+  started: { branch: "feature/fixture-640", target: "main", conflicts: true },
+};
+
+function askedAt<T>(asked: readonly Asked<T>[], index: number): Asked<T> {
+  const found = asked[index];
+  if (found === undefined) {
+    throw new Error(`no call ${index}; ${asked.length} made`);
+  }
+  return found;
+}
+
+test("a resolve runs, then holds its reply, and the local merge is read after the reply (catches a stale Resolve after a start)", async () => {
+  const live = rig();
+  live.localMerges.push(MERGING_640);
+  const asked = iid(640);
+  const resolving = live.slice.resolve(asked);
+  const running: RowActing = { kind: "running" };
+  expect(live.slice.actions.value.get(asked)).toEqual(running);
+  expect(live.slice.localMerge.value).toEqual(FREE);
+
+  askedAt(live.resolves, 0).answer({ ok: true, value: STARTED_640 });
+  await resolving;
+  const replied: RowActing = { kind: "replied", reply: { kind: "resolve", reply: STARTED_640 } };
+  expect(live.slice.actions.value.get(asked)).toEqual(replied);
+  expect(live.slice.localMerge.value).toEqual(MERGING_640);
+  expect(live.resolves.map((each) => each.iid)).toEqual([asked]);
+});
+
+test("a continue runs, then holds its reply, and the local merge is read after the reply", async () => {
+  const live = rig();
+  const open: LocalMerge = { ...MERGING_640, windowOpen: true };
+  live.localMerges.push(open);
+  const asked = iid(640);
+  const continuing = live.slice.continueMerge(asked);
+  expect(live.slice.actions.value.get(asked)).toEqual({ kind: "running" });
+
+  const opened: ContinueMergeReply = {
+    kind: "opened",
+    branch: "feature/fixture-640",
+    target: "main",
+  };
+  askedAt(live.continues, 0).answer({ ok: true, value: opened });
+  await continuing;
+  expect(live.slice.actions.value.get(asked)).toEqual({
+    kind: "replied",
+    reply: { kind: "continue", reply: opened },
+  });
+  expect(live.slice.localMerge.value).toEqual(open);
+  expect(live.continues.map((each) => each.iid)).toEqual([asked]);
+});
+
+test("a second click while the row runs sends nothing; another row runs beside it", async () => {
+  const live = rig();
+  const [first, second] = [iid(640), iid(636)];
+  const resolving = live.slice.resolve(first);
+  await live.slice.resolve(first);
+  await live.slice.continueMerge(first);
+  const other = live.slice.resolve(second);
+  expect(live.resolves.map((each) => each.iid)).toEqual([first, second]);
+  expect(live.continues).toEqual([]);
+
+  askedAt(live.resolves, 0).answer({ ok: true, value: STARTED_640 });
+  askedAt(live.resolves, 1).answer({
+    ok: true,
+    value: { kind: "refused", refusal: { kind: "alreadyMerging", iid: 640 } },
+  });
+  await Promise.all([resolving, other]);
+  expect(live.slice.actions.value.get(second)).toEqual({
+    kind: "replied",
+    reply: {
+      kind: "resolve",
+      reply: { kind: "refused", refusal: { kind: "alreadyMerging", iid: 640 } },
+    },
+  });
+});
+
+test("the next click replaces the row's reply with running", async () => {
+  const live = rig();
+  const asked = iid(640);
+  const resolving = live.slice.resolve(asked);
+  askedAt(live.resolves, 0).answer({ ok: true, value: STARTED_640 });
+  await resolving;
+  const continuing = live.slice.continueMerge(asked);
+  expect(live.slice.actions.value.get(asked)).toEqual({ kind: "running" });
+  askedAt(live.continues, 0).answer({ ok: true, value: { kind: "ended" } });
+  await continuing;
+  expect(live.slice.actions.value.get(asked)).toEqual({
+    kind: "replied",
+    reply: { kind: "continue", reply: { kind: "ended" } },
+  });
+});
+
+test.each(["resolve", "continue"] as const)(
+  "a failed %s call is reported, clears the row and reads no local merge",
+  async (step) => {
+    const live = rig();
+    live.localMerges.push(MERGING_640);
+    const asked = iid(640);
+    const acting = step === "resolve" ? live.slice.resolve(asked) : live.slice.continueMerge(asked);
+    if (step === "resolve") {
+      askedAt(live.resolves, 0).answer({ ok: false, failure: STOPPED });
+    } else {
+      askedAt(live.continues, 0).answer({ ok: false, failure: STOPPED });
+    }
+    await acting;
+    expect(live.problems).toEqual([{ action: "mergeRequests", step, cause: STOPPED }]);
+    expect(live.slice.actions.value.has(asked)).toBe(false);
+    expect(live.slice.localMerge.value).toEqual(FREE);
+  },
+);
+
+test("the local merge is read at show and at checkLocalMerge (catches a merge window closed meanwhile)", async () => {
+  const live = rig();
+  live.localMerges.push(MERGING_640, { kind: "free" });
+  live.slice.show();
+  await settled();
+  expect(live.slice.localMerge.value).toEqual(MERGING_640);
+  await live.slice.checkLocalMerge();
+  expect(live.slice.localMerge.value).toEqual(FREE);
+});
+
+test("a failed local merge read is reported and keeps what was known", async () => {
+  let answers: SourceResult<LocalMerge>[] = [
+    { ok: true, value: MERGING_640 },
+    { ok: false, failure: STOPPED },
+  ];
+  const live = rig({
+    findLocalMerge: async () => {
+      const [next, ...rest] = answers;
+      answers = rest;
+      return next ?? { ok: true, value: FREE };
+    },
+  });
+  await live.slice.checkLocalMerge();
+  await live.slice.checkLocalMerge();
+  expect(live.slice.localMerge.value).toEqual(MERGING_640);
+  expect(live.problems).toEqual([{ action: "mergeRequests", step: "localMerge", cause: STOPPED }]);
 });
