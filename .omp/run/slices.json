@@ -1,19 +1,18 @@
 {
-  "MrConflictsGitlab": {
-    "owned": [
-      "crates/merge-requests/**",
-      "tests/glab/merge-requests/graphql-page-1.json",
-      "tests/glab/merge-requests/graphql-page-2.json",
-      "tests/glab/merge-requests-timeout/graphql-page-1.json",
-      "tests/glab/mr-conflicts/**",
-      "tests/glab/README.md",
-      "frontend/src/ipc/fixtureMergeRequestData.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.test.ts",
-      "frontend/src/ipc/mergeRequestDomain.test.ts",
-      "frontend/src/ipc/tauriMergeRequests.test.ts"
-    ]
-  },
   "MrConflictsLocal": {
     "owned": ["crates/local-merge/**", "scripts/mr-conflict-repo.sh", "scripts/arch-check.sh"]
+  },
+  "MrConflictsGitR1": {
+    "owned": [
+      "crates/gitio/src/repo.rs",
+      "crates/gitio/src/fetch.rs",
+      "crates/gitio/src/lib.rs",
+      "crates/gitio/src/branch.rs",
+      "crates/gitio/src/push.rs",
+      "crates/gitio/tests/branch.rs",
+      "crates/gitio/tests/push.rs",
+      "crates/gitio/tests/fetch.rs",
+      "crates/gitio/AGENTS.md"
+    ]
   }
 }
