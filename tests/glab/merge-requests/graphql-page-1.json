@@ -1,0 +1,82 @@
+{
+  "data": {
+    "queryComplexity": { "score": 112, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": true, "endCursor": "page-2" },
+        "nodes": [
+          {
+            "iid": "13",
+            "title": "Snooze a reminder",
+            "createdAt": "2026-10-28T09:15:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "reminders" }, { "title": "ui" }] },
+            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "FAILED",
+              "jobs": {
+                "pageInfo": { "hasNextPage": false },
+                "nodes": [
+                  {
+                    "name": "lint",
+                    "allowFailure": true,
+                    "webPath": "/taskboard/taskboard/-/jobs/302",
+                    "stage": { "name": "test" }
+                  },
+                  {
+                    "name": "unit tests",
+                    "allowFailure": false,
+                    "webPath": "/taskboard/taskboard/-/jobs/301",
+                    "stage": { "name": "test" }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "iid": "12",
+            "title": "Reminders before a card is due",
+            "createdAt": "2026-10-20T14:02:11Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "reminders" }] },
+            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "reviewers": {
+              "nodes": [
+                { "username": "sam", "name": "Sam Doe" },
+                { "username": "lee", "name": "Lee Park" }
+              ]
+            },
+            "approvedBy": { "nodes": [{ "username": "sam" }, { "username": "lee" }] },
+            "resolvableDiscussionsCount": 3,
+            "resolvedDiscussionsCount": 2,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            }
+          },
+          {
+            "iid": "11",
+            "title": "Draft: Move reminders to the settings page",
+            "createdAt": "2026-10-15T08:30:00Z",
+            "draft": true,
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 1,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "RUNNING",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

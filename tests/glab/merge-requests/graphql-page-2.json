@@ -1,0 +1,42 @@
+{
+  "data": {
+    "queryComplexity": { "score": 112, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": "page-3" },
+        "nodes": [
+          {
+            "iid": "9",
+            "title": "Archive finished boards",
+            "createdAt": "2026-09-30T16:45:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "boards" }] },
+            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": null
+          },
+          {
+            "iid": "8",
+            "title": "Deploy previews",
+            "createdAt": "2026-09-12T11:20:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "ci" }] },
+            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "approvedBy": { "nodes": [{ "username": "anna" }] },
+            "resolvableDiscussionsCount": 2,
+            "resolvedDiscussionsCount": 2,
+            "headPipeline": {
+              "status": "MANUAL",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

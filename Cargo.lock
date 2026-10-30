@@ -4697,6 +4697,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "yamt-merge-requests"
+version = "0.6.0-beta.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "specta",
+ "tempfile",
+ "tracing",
+ "yamt-conflict-repo",
+ "yamt-gitio",
+]
+
+[[package]]
 name = "yamt-pipe"
 version = "0.6.0-beta.2"
 dependencies = [

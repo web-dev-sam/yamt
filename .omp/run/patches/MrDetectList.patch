@@ -1,0 +1,2402 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index f2c4200..ef5a32c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4696,6 +4696,19 @@ dependencies = [
+  "specta",
+ ]
+ 
++[[package]]
++name = "yamt-merge-requests"
++version = "0.6.0-beta.2"
++dependencies = [
++ "serde",
++ "serde_json",
++ "specta",
++ "tempfile",
++ "tracing",
++ "yamt-conflict-repo",
++ "yamt-gitio",
++]
++
+ [[package]]
+ name = "yamt-pipe"
+ version = "0.6.0-beta.2"
+diff --git a/crates/gitio/src/glab.rs b/crates/gitio/src/glab.rs
+index 91e099a..cea258d 100644
+--- a/crates/gitio/src/glab.rs
++++ b/crates/gitio/src/glab.rs
+@@ -8,6 +8,8 @@ use crate::{Error, Result};
+ 
+ /// One glab call's deadline: glab talks to a GitLab server over the network (plan §2 #118).
+ pub const GLAB_TIMEOUT: Duration = Duration::from_secs(20);
++/// What a glab call that ran past its deadline came to.
++pub const TIMED_OUT: &str = "glab timed out";
+ const GLAB: &str = "glab";
+ 
+ /// The glab program yamt runs, and how long each of its calls may take.
+@@ -30,6 +32,20 @@ pub enum GlabRun {
+     TimedOut,
+ }
+ 
++/// What `glab auth status` says about the instance of the folder it runs in.
++#[derive(Debug, PartialEq, Eq)]
++pub enum AuthStatus {
++    LoggedIn,
++    /// glab's first output line, which names the instance.
++    LoggedOut {
++        detail: String,
++    },
++    /// glab could not run or timed out.
++    Failed {
++        message: String,
++    },
++}
++
+ impl Glab {
+     /// The first runnable `glab` on PATH; `None` when it is not installed.
+     #[must_use]
+@@ -81,4 +97,80 @@ impl Glab {
+             stderr: finished.stderr,
+         })
+     }
++
++    /// What `glab <args>` printed with stdin closed; `Err` holds what went wrong, glab's own line when it printed one.
++    pub fn get(&self, cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
++        match self
++            .run(cwd, args, None)
++            .map_err(|error| error.to_string())?
++        {
++            GlabRun::Printed { stdout } => Ok(stdout),
++            GlabRun::Failed { status, stderr, .. } => {
++                Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
++            }
++            GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
++        }
++    }
++
++    #[must_use]
++    pub fn auth_status(&self, cwd: &Path) -> AuthStatus {
++        match self.run(cwd, &["auth", "status"], None) {
++            Err(error) => AuthStatus::Failed {
++                message: error.to_string(),
++            },
++            Ok(GlabRun::Printed { .. }) => AuthStatus::LoggedIn,
++            Ok(GlabRun::Failed { stdout, stderr, .. }) => {
++                let detail = first_line(&stderr).or_else(|| first_line(&stdout));
++                AuthStatus::LoggedOut {
++                    detail: detail.unwrap_or_default(),
++                }
++            }
++            Ok(GlabRun::TimedOut) => AuthStatus::Failed {
++                message: TIMED_OUT.to_owned(),
++            },
++        }
++    }
++}
++
++fn exit_words(status: Option<i32>) -> String {
++    match status {
++        Some(code) => format!("glab exited with status {code}"),
++        None => "glab was stopped by a signal".to_owned(),
++    }
++}
++
++/// The first line of `output` that is not blank, trimmed.
++#[must_use]
++pub fn first_line(output: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(output);
++    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
++    line.map(str::to_owned)
++}
++
++/// glab prints its error last, after any notice such as a first run's "What's new".
++#[must_use]
++pub fn last_line(output: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(output);
++    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty());
++    line.map(str::to_owned)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_first_and_last_lines_skip_blank_lines_and_trim() {
++        let printed = b"\n  What's new  \n\nglab: no route\n \n";
++        assert_eq!(first_line(printed).as_deref(), Some("What's new"));
++        assert_eq!(last_line(printed).as_deref(), Some("glab: no route"));
++        assert_eq!(first_line(b" \n\n"), None);
++        assert_eq!(last_line(b""), None);
++    }
++
++    #[test]
++    fn an_exit_without_a_line_is_named_by_its_status_or_signal() {
++        assert_eq!(exit_words(Some(2)), "glab exited with status 2");
++        assert_eq!(exit_words(None), "glab was stopped by a signal");
++    }
+ }
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 9d8067e..e85b172 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -30,10 +30,10 @@ pub use blob::BlobReader;
+ pub use checkout::StatusEntry;
+ pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
+ pub use entry::{Oid, Stage, StageEntry};
+-pub use glab::{GLAB_TIMEOUT, Glab, GlabRun};
++pub use glab::{AuthStatus, GLAB_TIMEOUT, Glab, GlabRun, TIMED_OUT, first_line, last_line};
+ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+-pub use names::CommitSummary;
++pub use names::{CommitSummary, RemoteUrl};
+ pub use operation::{Operation, Progress, Rebase, Stop, StopId};
+ pub use repo::Repo;
+ pub use version::GitVersion;
+diff --git a/crates/gitio/src/names.rs b/crates/gitio/src/names.rs
+index 854e8ef..587b3ad 100644
+--- a/crates/gitio/src/names.rs
++++ b/crates/gitio/src/names.rs
+@@ -1,6 +1,8 @@
++use std::process::ExitStatus;
++
+ use crate::entry::Oid;
+ use crate::repo::{REV_PARSE, Repo, read_if_present, without_final_newline};
+-use crate::run::{Access, GIT_TIMEOUT, run};
++use crate::run::{Access, GIT_TIMEOUT, run, run_accepting};
+ use crate::{Error, Result};
+ 
+ const BRANCH: &str = "branch";
+@@ -10,6 +12,11 @@ const NON_SYMBOLIC_SHORT_NAME: &str =
+     "--format=%(if)%(symref)%(then)%(else)%(refname:lstrip=2)%(end)";
+ const SHORT_ID_SUBJECT_MESSAGE: &str = "--format=%h%x00%s%x00%B";
+ const COMMIT_SUMMARY_FIELDS: usize = 3;
++const REMOTE_URL_KEYS: &str = r"^remote\..*\.url$";
++const REMOTE_KEY_PREFIX: &[u8] = b"remote.";
++const URL_KEY_SUFFIX: &[u8] = b".url";
++// git-config(1): `--get-regexp` exits with 1 when no key matches.
++const NO_MATCH_STATUS: i32 = 1;
+ 
+ /// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -19,6 +26,13 @@ pub struct CommitSummary {
+     pub message: Vec<u8>,
+ }
+ 
++/// One `remote.<name>.url` entry, bytes as git stores them.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct RemoteUrl {
++    pub name: Vec<u8>,
++    pub url: Vec<u8>,
++}
++
+ impl Repo {
+     /// The branch HEAD is on (`branch --show-current`); `None` when HEAD is detached.
+     pub fn current_branch(&self) -> Result<Option<Vec<u8>>> {
+@@ -59,6 +73,14 @@ impl Repo {
+         Ok(non_empty_lines(&output))
+     }
+ 
++    /// Every remote's URL in config order (`config -z --get-regexp`); empty when there is none.
++    pub fn remote_urls(&self) -> Result<Vec<RemoteUrl>> {
++        let args = ["config", "-z", "--get-regexp", REMOTE_URL_KEYS];
++        let command = self.command(Access::Read, &args);
++        let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_no_match)?;
++        Ok(parse_remote_urls(&output))
++    }
++
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+         read_if_present(&self.git_path(MERGE_MSG)?)
+     }
+@@ -97,3 +119,54 @@ fn non_empty_lines(output: &[u8]) -> Vec<Vec<u8>> {
+         .map(<[u8]>::to_vec)
+         .collect()
+ }
++
++fn is_found_or_no_match(status: ExitStatus) -> bool {
++    status.success() || status.code() == Some(NO_MATCH_STATUS)
++}
++
++// git-config(1) `-z`: each entry is `<key> NL <value> NUL`; the `<name>` subsection is kept as written.
++fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
++    let mut urls = Vec::new();
++    for entry in output.split(|&byte| byte == b'\0') {
++        let mut parts = entry.splitn(2, |&byte| byte == b'\n');
++        let (Some(key), Some(url)) = (parts.next(), parts.next()) else {
++            continue;
++        };
++        let name = key
++            .strip_prefix(REMOTE_KEY_PREFIX)
++            .and_then(|rest| rest.strip_suffix(URL_KEY_SUFFIX));
++        if let Some(name) = name {
++            urls.push(RemoteUrl {
++                name: name.to_vec(),
++                url: url.to_vec(),
++            });
++        }
++    }
++    urls
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn remote_urls_keep_config_order_and_dotted_names_and_skip_valueless_keys() {
++        let output =
++            b"remote.origin.url\nhttps://gitlab.example/a.git\0remote.my.fork.url\ngit@host:b\0\
++remote.empty.url\0remote.origin.url\nsecond\0";
++
++        let urls = parse_remote_urls(output);
++
++        let url = |name: &[u8], url: &[u8]| RemoteUrl {
++            name: name.to_vec(),
++            url: url.to_vec(),
++        };
++        let expected = [
++            url(b"origin", b"https://gitlab.example/a.git"),
++            url(b"my.fork", b"git@host:b"),
++            url(b"origin", b"second"),
++        ];
++        assert_eq!(urls, expected);
++        assert_eq!(parse_remote_urls(b""), []);
++    }
++}
+diff --git a/crates/gitio/tests/glab.rs b/crates/gitio/tests/glab.rs
+index c3a94d0..744d93a 100644
+--- a/crates/gitio/tests/glab.rs
++++ b/crates/gitio/tests/glab.rs
+@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
+ use yamt_conflict_repo::{
+     ConflictFile, FileKind, TempDir, diverged_repo, git_ok, run_ignored_in_child,
+ };
+-use yamt_gitio::{Error, Glab, GlabRun, Oid, Repo};
++use yamt_gitio::{AuthStatus, Error, Glab, GlabRun, Oid, RemoteUrl, Repo, TIMED_OUT};
+ 
+ const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
+ const HANG_SECONDS: u64 = 5;
+@@ -63,12 +63,16 @@ struct Fake {
+ 
+ impl Fake {
+     fn new(posts_before: u32) -> Fake {
++        Fake::on(&runner_scenario(), posts_before)
++    }
++
++    fn on(scenario: &Path, posts_before: u32) -> Fake {
+         let dir = tempfile::tempdir().unwrap();
+         let state = dir.path().join("state");
+         fs::write(&state, format!("{posts_before}\n")).unwrap();
+         let settings = format!(
+             "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_STATE={}\nYAMT_FAKE_GLAB_LOG={}\n",
+-            runner_scenario().display(),
++            scenario.display(),
+             state.display(),
+             dir.path().join("log").display(),
+         );
+@@ -347,3 +351,64 @@ fn remote_names_lists_every_remote() {
+     let expected: [&[u8]; 3] = [b"fork", b"origin", b"upstream"];
+     assert_eq!(repo.remote_names().unwrap(), expected);
+ }
++
++#[test]
++fn remote_urls_are_in_config_order_none_without_remotes_and_an_error_on_a_broken_config() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    assert_eq!(repo.remote_urls().unwrap(), []);
++    let remotes = [
++        ("upstream", "git@gitlab.example:a/b.git"),
++        ("fork", "https://gitlab.example/c/b"),
++    ];
++
++    for (name, url) in remotes {
++        git_ok(dir.path(), &["remote", "add", name, url]).unwrap();
++    }
++
++    let expected = remotes.map(|(name, url)| RemoteUrl {
++        name: name.as_bytes().to_vec(),
++        url: url.as_bytes().to_vec(),
++    });
++    assert_eq!(repo.remote_urls().unwrap(), expected);
++    fs::write(dir.path().join(".git/config"), "[remote \"broken\"\n").unwrap();
++    let broken = repo.remote_urls();
++    assert!(matches!(broken, Err(Error::GitFailed { .. })), "{broken:?}");
++}
++
++#[test]
++fn get_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_start() {
++    let fake = Fake::new(3);
++    let cwd = fake.dir.path();
++    let merge_request = ["api", "projects/7/merge_requests/12"];
++    let missing = cwd.join("no-glab");
++
++    let printed = fake.glab.get(cwd, &merge_request);
++    let not_found = fake.glab.get(cwd, &["api", "projects/7/unknown"]);
++    let silent = Glab::at(PathBuf::from("false")).get(cwd, &merge_request);
++    let hanging = fake.glab.with_timeout(SHORT_TIMEOUT).get(cwd, &POST);
++    let not_started = Glab::at(missing.clone()).get(cwd, &merge_request);
++
++    let body = without_final_newline(runner_file("merge-request.json"));
++    assert_eq!(printed, Ok(body));
++    assert_eq!(not_found, Err("glab: 404 Not Found (HTTP 404)".to_owned()));
++    assert_eq!(silent, Err("glab exited with status 1".to_owned()));
++    assert_eq!(hanging, Err(TIMED_OUT.to_owned()));
++    let reason = not_started.unwrap_err();
++    assert!(reason.contains(&missing.display().to_string()), "{reason}");
++}
++
++#[test]
++fn auth_status_is_logged_in_or_out_with_glab_s_first_line_or_failed() {
++    let logged_in = Fake::on(&in_this_repository("tests/glab/merge-requests"), 0);
++    let logged_out = Fake::new(0);
++    let missing = Glab::at(logged_in.dir.path().join("no-glab"));
++
++    let status = |fake: &Fake| fake.glab.auth_status(fake.dir.path());
++    assert_eq!(status(&logged_in), AuthStatus::LoggedIn);
++    let detail = "gitlab.com".to_owned();
++    assert_eq!(status(&logged_out), AuthStatus::LoggedOut { detail });
++    let failed = missing.auth_status(logged_in.dir.path());
++    assert!(matches!(failed, AuthStatus::Failed { .. }), "{failed:?}");
++    assert_eq!(logged_in.log().lines().next(), Some("argv: auth status"));
++}
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+new file mode 100644
+index 0000000..1f0464f
+--- /dev/null
++++ b/crates/merge-requests/AGENTS.md
+@@ -0,0 +1 @@
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, request `docs/slices/request-merge-requests.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `JobPage` (a string only `JobPage::built` makes), `FailedJob`, `Pipeline`, `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`; `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `GitLabRepository` holds the `Repo` and every remote, lossy UTF-8), `project.rs` (`glab api projects/:fullpath` → `Project { full_path, web_origin }`, the origin only on https), `query.rs` (the one list query, a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`), `page.rs` (one GraphQL answer → `ParsedPage`: GraphQL `errors` → `Err(first message)`; no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; job pages through `JobPage::built`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `Glab::auth_status` → `NotLoggedIn`/`Failed`, the project, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `job_page.rs` (`JobPage::built`: `https://<host[:port]>` + a path matching `/<segments>/-/jobs/<digits>`, segments of `[A-Za-z0-9._~-]`, none empty or `..`). Depends on `yamt-gitio` among `yamt-*` (may use `yamt-range` and `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `job_page.rs`, `project.rs`, `query.rs`, `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s recorded pages); `tests/list.rs` (the fake glab, scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+diff --git a/crates/merge-requests/Cargo.toml b/crates/merge-requests/Cargo.toml
+new file mode 100644
+index 0000000..8c3c0b3
+--- /dev/null
++++ b/crates/merge-requests/Cargo.toml
+@@ -0,0 +1,20 @@
++[package]
++name = "yamt-merge-requests"
++version.workspace = true
++edition.workspace = true
++publish.workspace = true
++license.workspace = true
++
++[dependencies]
++yamt-gitio.workspace = true
++serde.workspace = true
++serde_json.workspace = true
++specta.workspace = true
++tracing.workspace = true
++
++[dev-dependencies]
++yamt-conflict-repo.workspace = true
++tempfile.workspace = true
++
++[lints]
++workspace = true
+diff --git a/crates/merge-requests/src/detect.rs b/crates/merge-requests/src/detect.rs
+new file mode 100644
+index 0000000..771ebd5
+--- /dev/null
++++ b/crates/merge-requests/src/detect.rs
+@@ -0,0 +1,184 @@
++use std::path::Path;
++
++use yamt_gitio::{RemoteUrl, Repo};
++
++use crate::GitLabProject;
++
++const GITLAB_LABEL_START: &str = "gitlab";
++const SCHEME_END: &str = "://";
++const FILE_SCHEME: &str = "file";
++/// glab's own variables naming a self-managed GitLab (glab docs, "Environment variables").
++const GLAB_HOST_VARIABLES: [&str; 2] = ["GITLAB_HOST", "GL_HOST"];
++
++/// A repository with a remote on a GitLab server, found without the network.
++pub struct GitLabRepository {
++    repo: Repo,
++    repository: String,
++    remotes: Vec<Remote>,
++}
++
++/// A remote's name and URL: lossy UTF-8 of git's bytes.
++pub(crate) struct Remote {
++    pub name: String,
++    pub url: String,
++}
++
++/// The repository holding `folder` when one of its remotes is on a GitLab server; `None` otherwise.
++#[must_use]
++pub fn gitlab_repository(folder: &Path) -> Option<GitLabRepository> {
++    let repo = Repo::discover(folder)
++        .inspect_err(|error| tracing::info!(%error, "no git repository, so no merge requests"))
++        .ok()?;
++    let urls = repo
++        .remote_urls()
++        .inspect_err(|error| tracing::warn!(%error, "cannot read the remotes"))
++        .ok()?;
++    let common_dir = repo
++        .common_dir()
++        .inspect_err(|error| tracing::warn!(%error, "cannot find the common git dir"))
++        .ok()?;
++    let found = GitLabRepository {
++        repo,
++        repository: common_dir.to_string_lossy().into_owned(),
++        remotes: urls.into_iter().map(Remote::from).collect(),
++    };
++    let glab_host = glab_host();
++    let gitlab_remote = found.remotes().iter().find(|remote| {
++        remote_host(&remote.url).is_some_and(|host| is_gitlab_host(&host, glab_host.as_deref()))
++    })?;
++    tracing::info!(remote = %gitlab_remote.name, "a remote on GitLab");
++    Some(found)
++}
++
++impl GitLabRepository {
++    /// What the window is told at start.
++    #[must_use]
++    pub fn project(&self) -> GitLabProject {
++        GitLabProject::Found {
++            repository: self.repository.clone(),
++        }
++    }
++
++    /// The repository's root: glab and git run there.
++    #[must_use]
++    pub fn root(&self) -> &Path {
++        self.repo().root()
++    }
++
++    pub(crate) fn remotes(&self) -> &[Remote] {
++        &self.remotes
++    }
++
++    pub(crate) fn repo(&self) -> &Repo {
++        &self.repo
++    }
++}
++
++impl From<RemoteUrl> for Remote {
++    fn from(remote: RemoteUrl) -> Remote {
++        Remote {
++            name: String::from_utf8_lossy(&remote.name).into_owned(),
++            url: String::from_utf8_lossy(&remote.url).into_owned(),
++        }
++    }
++}
++
++/// The host in `GITLAB_HOST`, else `GL_HOST`: a host, `host:port` or a URL.
++fn glab_host() -> Option<String> {
++    let set = |name: &&str| std::env::var(name).ok().filter(|value| !value.is_empty());
++    let value = GLAB_HOST_VARIABLES.iter().find_map(set)?;
++    Some(remote_host(&value).unwrap_or_else(|| value.to_ascii_lowercase()))
++}
++
++/// The server a remote URL names (git-clone(1) "GIT URLS"), lowercase; `None` for a local path or `file://`.
++fn remote_host(url: &str) -> Option<String> {
++    let authority = match url.split_once(SCHEME_END) {
++        Some((scheme, _)) if scheme.eq_ignore_ascii_case(FILE_SCHEME) => return None,
++        Some((_, rest)) => rest.split('/').next()?,
++        None => scp_authority(url)?,
++    };
++    let host_and_port = authority
++        .rsplit_once('@')
++        .map_or(authority, |(_, host)| host);
++    let host = host_and_port.split(':').next()?;
++    (!host.is_empty()).then(|| host.to_ascii_lowercase())
++}
++
++/// git reads `[user@]host:path` as scp-like when the colon comes before any slash; a single letter before it is a
++/// Windows drive (git-clone(1) "GIT URLS").
++fn scp_authority(url: &str) -> Option<&str> {
++    let (before, _) = url.split_once(':')?;
++    let is_path = before.contains(['/', '\\']) || before.len() == 1;
++    (!is_path).then_some(before)
++}
++
++/// A host is GitLab's when one of its dot-separated labels starts with "gitlab" (gitlab.com included), or when glab
++/// is set up for it (`GITLAB_HOST`).
++fn is_gitlab_host(host: &str, glab_host: Option<&str>) -> bool {
++    let named_gitlab = host
++        .split('.')
++        .any(|label| label.starts_with(GITLAB_LABEL_START));
++    named_gitlab || glab_host == Some(host)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_host_comes_from_scp_like_ssh_and_https_urls_without_user_or_port() {
++        let hosts = [
++            (
++                "git@gitlab.example:taskboard/taskboard.git",
++                "gitlab.example",
++            ),
++            (
++                "ssh://git@GitLab.Example:2222/taskboard/taskboard",
++                "gitlab.example",
++            ),
++            (
++                "https://sam:token@gitlab.com/taskboard/taskboard.git",
++                "gitlab.com",
++            ),
++            ("https://gitlab.example:8443", "gitlab.example"),
++            ("gitlab.example:taskboard", "gitlab.example"),
++        ];
++        for (url, host) in hosts {
++            assert_eq!(remote_host(url).as_deref(), Some(host), "{url}");
++        }
++    }
++
++    #[test]
++    fn a_local_path_a_file_url_or_a_drive_letter_has_no_host() {
++        let local = [
++            "/srv/git/taskboard.git",
++            "../taskboard",
++            "./with:colon",
++            "file:///srv/git/taskboard.git",
++            "FILE://gitlab.example/x",
++            r"C:\repo",
++            "C:/repo",
++            r"..\x:y",
++            "https:///no-host",
++            "git@:path",
++        ];
++        for url in local {
++            assert_eq!(remote_host(url), None, "{url}");
++        }
++    }
++
++    #[test]
++    fn gitlab_hosts_are_gitlab_com_a_label_starting_with_gitlab_or_glab_s_host() {
++        for host in ["gitlab.com", "gitlab.example", "code.gitlab-int.corp"] {
++            assert!(is_gitlab_host(host, None), "{host}");
++        }
++        for host in ["github.com", "my-gitlab.com", "notgitlab.example"] {
++            assert!(!is_gitlab_host(host, None), "{host}");
++        }
++        assert!(is_gitlab_host("git.corp.example", Some("git.corp.example")));
++        assert!(!is_gitlab_host(
++            "git.corp.example",
++            Some("git.other.example")
++        ));
++    }
++}
+diff --git a/crates/merge-requests/src/job_page.rs b/crates/merge-requests/src/job_page.rs
+new file mode 100644
+index 0000000..5110b5f
+--- /dev/null
++++ b/crates/merge-requests/src/job_page.rs
+@@ -0,0 +1,97 @@
++use crate::JobPage;
++
++const HTTPS: &str = "https://";
++const JOBS_SEGMENT: &str = "/-/jobs/";
++const PARENT_SEGMENT: &str = "..";
++
++impl JobPage {
++    /// The job log page `web_path` names on the GitLab at `origin` (`https://<host[:port]>`); `None` for any other
++    /// origin or path, so a page never leaves the project's GitLab.
++    pub(crate) fn built(origin: &str, web_path: &str) -> Option<JobPage> {
++        let authority = origin.strip_prefix(HTTPS)?;
++        let (project, job) = web_path.rsplit_once(JOBS_SEGMENT)?;
++        let is_page = is_authority(authority) && is_project_path(project) && is_number(job);
++        is_page.then(|| JobPage(format!("{origin}{web_path}")))
++    }
++
++    /// The page's address.
++    #[must_use]
++    pub fn as_str(&self) -> &str {
++        &self.0
++    }
++}
++
++fn is_authority(authority: &str) -> bool {
++    let is_host_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':');
++    !authority.is_empty() && authority.chars().all(is_host_char)
++}
++
++/// `/<group>/<project>`: URL path characters only, no empty or `..` segment.
++fn is_project_path(path: &str) -> bool {
++    let Some(segments) = path.strip_prefix('/') else {
++        return false;
++    };
++    let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-');
++    let is_segment = |segment: &str| {
++        !segment.is_empty() && segment != PARENT_SEGMENT && segment.chars().all(is_path_char)
++    };
++    segments.split('/').all(is_segment)
++}
++
++fn is_number(text: &str) -> bool {
++    !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const ORIGIN: &str = "https://gitlab.example";
++
++    fn built(origin: &str, web_path: &str) -> Option<String> {
++        JobPage::built(origin, web_path).map(|page| page.as_str().to_owned())
++    }
++
++    #[test]
++    fn a_job_path_on_an_https_gitlab_is_its_page() {
++        let page = built(ORIGIN, "/taskboard/taskboard/-/jobs/301");
++        assert_eq!(
++            page.as_deref(),
++            Some("https://gitlab.example/taskboard/taskboard/-/jobs/301")
++        );
++        let with_port = built("https://gitlab-2.example:8443", "/a/b.c_d~e-f/-/jobs/7");
++        assert_eq!(
++            with_port.as_deref(),
++            Some("https://gitlab-2.example:8443/a/b.c_d~e-f/-/jobs/7")
++        );
++    }
++
++    #[test]
++    fn another_origin_or_an_odd_path_is_no_page() {
++        let origins = [
++            "http://gitlab.example",
++            "https://",
++            "https://sam@gitlab.example",
++            "https://gitlab.example/",
++        ];
++        for origin in origins {
++            assert_eq!(built(origin, "/a/b/-/jobs/1"), None, "{origin}");
++        }
++        let paths = [
++            "//evil.example/a/-/jobs/1",
++            "/a/../../b/-/jobs/1",
++            "/a/-/jobs/1?x=1",
++            "/a/-/jobs/1#log",
++            "/a/-/jobs/",
++            "/a/-/jobs/-1",
++            "/a/-/pipelines/1",
++            "a/-/jobs/1",
++            "https://evil.example/a/-/jobs/1",
++            "/-/jobs/1",
++            "/a b/-/jobs/1",
++        ];
++        for path in paths {
++            assert_eq!(built(ORIGIN, path), None, "{path}");
++        }
++    }
++}
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+new file mode 100644
+index 0000000..7845770
+--- /dev/null
++++ b/crates/merge-requests/src/lib.rs
+@@ -0,0 +1,162 @@
++//! The GitLab project's open merge requests for the compare and range windows: found offline, listed through glab.
++#![forbid(unsafe_code)]
++#![warn(missing_docs)]
++
++mod detect;
++mod job_page;
++mod list;
++mod page;
++mod project;
++mod query;
++
++use serde::{Deserialize, Serialize};
++use specta::Type;
++
++pub use detect::{GitLabRepository, gitlab_repository};
++pub use list::list_merge_requests;
++
++/// Merge requests asked for in one glab call: GitLab's largest page.
++pub const PAGE_SIZE: u32 = 100;
++/// The most merge requests one load lists; beyond, the list ends `Cut`.
++pub const MAX_MERGE_REQUESTS: u32 = 500;
++const MAX_FAILED_JOBS: u32 = 50;
++
++/// Whether the window shows the button: decided once at start, offline.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum GitLabProject {
++    /// No repository, or no remote on a GitLab server.
++    None,
++    /// A repository with a remote on a GitLab server.
++    Found {
++        /// The absolute common git dir (lossy UTF-8): the key filters are remembered by.
++        repository: String,
++    },
++}
++
++/// A merge request's number within its project, "!12" without the "!".
++#[derive(
++    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type,
++)]
++pub struct MergeRequestIid(pub u32);
++
++/// A GitLab user.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct Person {
++    /// The login name, without "@".
++    pub username: String,
++    /// The display name.
++    pub name: String,
++}
++
++/// A pipeline's status, GitLab's fifteen folded into the seven the window shows.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub enum CiStatus {
++    /// It succeeded.
++    Passed,
++    /// It failed.
++    Failed,
++    /// It runs.
++    Running,
++    /// It waits to run.
++    Pending,
++    /// It was canceled.
++    Canceled,
++    /// It was skipped.
++    Skipped,
++    /// It waits for a manual job.
++    Manual,
++}
++
++/// The address of a failed job's log page on the project's GitLab; only `JobPage::built` makes one.
++#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Type)]
++pub struct JobPage(String);
++
++/// A failed job of a merge request's latest pipeline, the latest run of it.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct FailedJob {
++    /// The job's name.
++    pub name: String,
++    /// Its stage's name.
++    pub stage: String,
++    /// Whether the pipeline may pass while it fails.
++    pub allow_failure: bool,
++    /// Its log page; `None` when GitLab is not on https or sent an odd path.
++    pub page: Option<JobPage>,
++}
++
++/// A merge request's latest pipeline.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct Pipeline {
++    /// Its status.
++    pub status: CiStatus,
++    /// Its failed jobs, in GitLab's order.
++    pub failed_jobs: Vec<FailedJob>,
++    /// Whether it has more failed jobs than were asked for.
++    pub more_failed_jobs: bool,
++}
++
++/// One open merge request as a row of the list.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct MergeRequestRow {
++    /// Its number.
++    pub iid: MergeRequestIid,
++    /// Its title, GitLab's "Draft: " prefix included.
++    pub title: String,
++    /// GitLab's ISO 8601 time, as sent.
++    pub created_at: String,
++    /// Whether it is a draft.
++    pub draft: bool,
++    /// Its assignees.
++    pub assignees: Vec<Person>,
++    /// Its reviewers.
++    pub reviewers: Vec<Person>,
++    /// Its labels' titles.
++    pub labels: Vec<String>,
++    /// Resolvable discussions not yet resolved.
++    pub open_discussions: u32,
++    /// Approvals given.
++    pub approvals: u32,
++    /// Its latest pipeline; `None` when it has none.
++    pub pipeline: Option<Pipeline>,
++}
++
++/// One page of the list, sent as soon as it arrives.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct MergeRequestPage {
++    /// The logged-in user's username.
++    pub me: Option<String>,
++    /// The page's merge requests, newest first.
++    pub rows: Vec<MergeRequestRow>,
++}
++
++/// How a load ended; the pages already sent stay.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum ListEnd {
++    /// Every open merge request was sent.
++    Loaded,
++    /// The newest `limit` were sent; GitLab has more.
++    Cut {
++        /// How many were sent.
++        limit: u32,
++    },
++    /// glab is not found on PATH.
++    GlabMissing,
++    /// `glab auth status` failed.
++    NotLoggedIn {
++        /// glab's first output line, which names the instance.
++        detail: String,
++    },
++    /// glab failed, timed out or answered something unexpected.
++    Failed {
++        /// What went wrong, in glab's, GitLab's or yamt's words.
++        message: String,
++    },
++}
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+new file mode 100644
+index 0000000..94f10ea
+--- /dev/null
++++ b/crates/merge-requests/src/list.rs
+@@ -0,0 +1,153 @@
++use yamt_gitio::{AuthStatus, Glab};
++
++use crate::page::{ParsedPage, parsed};
++use crate::project::project;
++use crate::query::list_args;
++use crate::{GitLabRepository, ListEnd, MAX_MERGE_REQUESTS, MergeRequestPage, PAGE_SIZE};
++
++const MAX_PAGES: u32 = MAX_MERGE_REQUESTS / PAGE_SIZE;
++
++/// The project's open merge requests, newest created first: each page goes to `on_page` as it arrives, one glab call
++/// (and one deadline) per page, at most `MAX_MERGE_REQUESTS`.
++pub fn list_merge_requests(
++    repository: &GitLabRepository,
++    glab: Option<&Glab>,
++    on_page: &dyn Fn(MergeRequestPage),
++) -> ListEnd {
++    let Some(glab) = glab else {
++        return ListEnd::GlabMissing;
++    };
++    let root = repository.root();
++    match glab.auth_status(root) {
++        AuthStatus::LoggedIn => {}
++        AuthStatus::LoggedOut { detail } => return ListEnd::NotLoggedIn { detail },
++        AuthStatus::Failed { message } => return ListEnd::Failed { message },
++    }
++    let project = match project(glab, root) {
++        Ok(project) => project,
++        Err(message) => return ListEnd::Failed { message },
++    };
++    let mut fetch = |after: Option<&str>| {
++        let args = list_args(&project.full_path, after);
++        let args: Vec<&str> = args.iter().map(String::as_str).collect();
++        let json = glab.get(root, &args)?;
++        parsed(&json, project.web_origin.as_deref())
++    };
++    pages(&mut fetch, on_page)
++}
++
++/// Fetches page after page, each after the cursor the one before ended at; the pages sent stay whatever comes next.
++fn pages(
++    fetch: &mut dyn FnMut(Option<&str>) -> Result<ParsedPage, String>,
++    on_page: &dyn Fn(MergeRequestPage),
++) -> ListEnd {
++    let mut after: Option<String> = None;
++    for number in 1..=MAX_PAGES {
++        let page = match fetch(after.as_deref()) {
++            Ok(page) => page,
++            Err(message) => return ListEnd::Failed { message },
++        };
++        if let (1, Some(complexity)) = (number, page.complexity) {
++            tracing::info!(
++                score = complexity.score,
++                limit = complexity.limit,
++                "GitLab's complexity of the merge-request query"
++            );
++        }
++        on_page(MergeRequestPage {
++            me: page.me,
++            rows: page.rows,
++        });
++        match page.next {
++            Some(cursor) => after = Some(cursor),
++            None => return ListEnd::Loaded,
++        }
++    }
++    ListEnd::Cut {
++        limit: MAX_MERGE_REQUESTS,
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::sync::mpsc;
++
++    use super::*;
++    use crate::{MergeRequestIid, MergeRequestRow};
++
++    fn row(iid: u32) -> MergeRequestRow {
++        MergeRequestRow {
++            iid: MergeRequestIid(iid),
++            title: format!("MR {iid}"),
++            created_at: "2026-10-30T00:00:00Z".to_owned(),
++            draft: false,
++            assignees: Vec::new(),
++            reviewers: Vec::new(),
++            labels: Vec::new(),
++            open_discussions: 0,
++            approvals: 0,
++            pipeline: None,
++        }
++    }
++
++    /// Page `n` (from 1) holds the merge request numbered `n`, and names `cursor-<n+1>` as the next while `n` is
++    /// below `last`; page `fails_at` fails.
++    fn answer(after: Option<&str>, last: u32, fails_at: Option<u32>) -> Result<ParsedPage, String> {
++        let number = after.map_or(1, |cursor| cursor["cursor-".len()..].parse().unwrap());
++        if fails_at == Some(number) {
++            return Err(format!("page {number} failed"));
++        }
++        Ok(ParsedPage {
++            me: Some("sam".to_owned()),
++            rows: vec![row(number)],
++            next: (number < last).then(|| format!("cursor-{}", number + 1)),
++            complexity: None,
++        })
++    }
++
++    /// The end, each cursor asked with, and the merge requests sent, page by page.
++    fn listed(last: u32, fails_at: Option<u32>) -> (ListEnd, Vec<Option<String>>, Vec<Vec<u32>>) {
++        let mut asked = Vec::new();
++        let (sender, sent) = mpsc::channel();
++        let mut fetch = |after: Option<&str>| {
++            asked.push(after.map(str::to_owned));
++            answer(after, last, fails_at)
++        };
++        let on_page = |page: MergeRequestPage| {
++            let iids = page.rows.iter().map(|row| row.iid.0).collect();
++            sender.send(iids).unwrap();
++        };
++        let end = pages(&mut fetch, &on_page);
++        (end, asked, sent.try_iter().collect())
++    }
++
++    #[test]
++    fn each_page_is_asked_after_the_cursor_the_one_before_ended_at() {
++        let (end, asked, sent) = listed(2, None);
++
++        assert_eq!(end, ListEnd::Loaded);
++        assert_eq!(asked, [None, Some("cursor-2".to_owned())]);
++        assert_eq!(sent, [[1], [2]]);
++    }
++
++    #[test]
++    fn five_full_pages_with_more_to_come_are_cut_at_500_without_a_sixth_call() {
++        let (end, asked, sent) = listed(6, None);
++
++        assert_eq!(end, ListEnd::Cut { limit: 500 });
++        assert_eq!(asked.len(), 5);
++        assert_eq!(sent, [[1], [2], [3], [4], [5]]);
++        let (exactly_five, _, _) = listed(5, None);
++        assert_eq!(exactly_five, ListEnd::Loaded);
++    }
++
++    #[test]
++    fn a_failing_page_ends_the_list_and_the_pages_sent_before_stay_sent() {
++        let (end, asked, sent) = listed(4, Some(3));
++
++        let message = "page 3 failed".to_owned();
++        assert_eq!(end, ListEnd::Failed { message });
++        assert_eq!(asked.len(), 3);
++        assert_eq!(sent, [[1], [2]]);
++    }
++}
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+new file mode 100644
+index 0000000..474bb22
+--- /dev/null
++++ b/crates/merge-requests/src/page.rs
+@@ -0,0 +1,236 @@
++use serde::Deserialize;
++use serde::de::IgnoredAny;
++
++use crate::{CiStatus, FailedJob, JobPage, MergeRequestIid, MergeRequestRow, Person, Pipeline};
++
++const NO_DATA: &str = "GitLab's answer holds no data";
++const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
++const NO_CURSOR: &str = "GitLab says more merge requests follow, but sent no cursor for them";
++
++/// One GraphQL answer of the list query.
++pub(crate) struct ParsedPage {
++    pub me: Option<String>,
++    pub rows: Vec<MergeRequestRow>,
++    /// The cursor of the next page; `None` on the last.
++    pub next: Option<String>,
++    pub complexity: Option<Complexity>,
++}
++
++/// GitLab's cost of the query, and its limit (GitLab GraphQL docs, "Query complexity").
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
++pub(crate) struct Complexity {
++    pub score: u32,
++    pub limit: u32,
++}
++
++#[derive(Deserialize)]
++struct Answer {
++    data: Option<Data>,
++    #[serde(default)]
++    errors: Vec<GraphQlError>,
++}
++
++#[derive(Deserialize)]
++struct GraphQlError {
++    message: String,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Data {
++    query_complexity: Option<Complexity>,
++    current_user: Option<User>,
++    project: Option<Project>,
++}
++
++#[derive(Deserialize)]
++struct User {
++    username: String,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Project {
++    merge_requests: Option<Connection<Node>>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Connection<T> {
++    page_info: PageInfo,
++    nodes: Vec<T>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct PageInfo {
++    has_next_page: bool,
++    end_cursor: Option<String>,
++}
++
++#[derive(Deserialize)]
++struct Nodes<T> {
++    nodes: Vec<T>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Node {
++    iid: String,
++    title: String,
++    created_at: String,
++    draft: bool,
++    labels: Option<Nodes<Label>>,
++    assignees: Option<Nodes<Person>>,
++    reviewers: Option<Nodes<Person>>,
++    approved_by: Option<Nodes<IgnoredAny>>,
++    resolvable_discussions_count: Option<i64>,
++    resolved_discussions_count: Option<i64>,
++    head_pipeline: Option<PipelineNode>,
++}
++
++#[derive(Deserialize)]
++struct Label {
++    title: String,
++}
++
++#[derive(Deserialize)]
++struct PipelineNode {
++    status: String,
++    jobs: Option<Connection<Job>>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Job {
++    name: String,
++    allow_failure: bool,
++    web_path: Option<String>,
++    stage: Option<Stage>,
++}
++
++#[derive(Deserialize)]
++struct Stage {
++    name: String,
++}
++
++/// The page in a GraphQL answer; `Err` holds GitLab's first error, or what yamt could not read. `origin` is the
++/// project's `https://<host[:port]>`, which job pages are built on.
++pub(crate) fn parsed(json: &[u8], origin: Option<&str>) -> Result<ParsedPage, String> {
++    let answer: Answer = serde_json::from_slice(json)
++        .map_err(|error| format!("GitLab's answer is not what yamt expects: {error}"))?;
++    if let Some(error) = answer.errors.into_iter().next() {
++        return Err(error.message);
++    }
++    let data = answer.data.ok_or(NO_DATA)?;
++    let project = data.project.ok_or(NO_PROJECT)?;
++    let merge_requests = project.merge_requests.ok_or(NO_PROJECT)?;
++    let mut rows = Vec::new();
++    for node in merge_requests.nodes {
++        rows.push(row(node, origin)?);
++    }
++    Ok(ParsedPage {
++        me: data.current_user.map(|user| user.username),
++        rows,
++        next: next_cursor(merge_requests.page_info)?,
++        complexity: data.query_complexity,
++    })
++}
++
++fn next_cursor(page_info: PageInfo) -> Result<Option<String>, String> {
++    match (page_info.has_next_page, page_info.end_cursor) {
++        (false, _) => Ok(None),
++        (true, Some(cursor)) => Ok(Some(cursor)),
++        (true, None) => Err(NO_CURSOR.to_owned()),
++    }
++}
++
++fn row(node: Node, origin: Option<&str>) -> Result<MergeRequestRow, String> {
++    let iid = node
++        .iid
++        .parse()
++        .map_err(|_| format!("GitLab sent {:?} as a merge request number", node.iid))?;
++    let labels = listed(node.labels).into_iter().map(|label| label.title);
++    Ok(MergeRequestRow {
++        iid: MergeRequestIid(iid),
++        title: node.title,
++        created_at: node.created_at,
++        draft: node.draft,
++        assignees: listed(node.assignees),
++        reviewers: listed(node.reviewers),
++        labels: labels.collect(),
++        open_discussions: open_discussions(
++            node.resolvable_discussions_count,
++            node.resolved_discussions_count,
++        ),
++        approvals: count(listed(node.approved_by).len()),
++        pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
++    })
++}
++
++fn listed<T>(connection: Option<Nodes<T>>) -> Vec<T> {
++    connection.map_or_else(Vec::new, |connection| connection.nodes)
++}
++
++/// Resolvable discussions not resolved; a missing count is 0, and the result never below 0.
++fn open_discussions(resolvable: Option<i64>, resolved: Option<i64>) -> u32 {
++    let open = resolvable
++        .unwrap_or(0)
++        .saturating_sub(resolved.unwrap_or(0));
++    u32::try_from(open.max(0)).unwrap_or(u32::MAX)
++}
++
++fn count(length: usize) -> u32 {
++    u32::try_from(length).unwrap_or(u32::MAX)
++}
++
++fn pipeline(found: PipelineNode, origin: Option<&str>) -> Pipeline {
++    let (jobs, more_failed_jobs) = match found.jobs {
++        Some(jobs) => (jobs.nodes, jobs.page_info.has_next_page),
++        None => (Vec::new(), false),
++    };
++    let failed_jobs = jobs.into_iter().map(|job| failed_job(job, origin));
++    Pipeline {
++        status: ci_status(&found.status),
++        failed_jobs: failed_jobs.collect(),
++        more_failed_jobs,
++    }
++}
++
++fn failed_job(job: Job, origin: Option<&str>) -> FailedJob {
++    let page = origin.zip(job.web_path.as_deref());
++    FailedJob {
++        page: page.and_then(|(origin, web_path)| JobPage::built(origin, web_path)),
++        name: job.name,
++        stage: job.stage.map(|stage| stage.name).unwrap_or_default(),
++        allow_failure: job.allow_failure,
++    }
++}
++
++/// GitLab's `PipelineStatusEnum` (GraphQL reference) in the window's seven.
++fn ci_status(status: &str) -> CiStatus {
++    match status {
++        "SUCCESS" => CiStatus::Passed,
++        "FAILED" => CiStatus::Failed,
++        "RUNNING" => CiStatus::Running,
++        "CREATED"
++        | "WAITING_FOR_RESOURCE"
++        | "PREPARING"
++        | "WAITING_FOR_CALLBACK"
++        | "PENDING"
++        | "SCHEDULED" => CiStatus::Pending,
++        "CANCELED" | "CANCELING" => CiStatus::Canceled,
++        "SKIPPED" => CiStatus::Skipped,
++        "MANUAL" => CiStatus::Manual,
++        unknown => {
++            tracing::warn!(
++                status = unknown,
++                "unknown pipeline status, shown as pending"
++            );
++            CiStatus::Pending
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+new file mode 100644
+index 0000000..4eb906d
+--- /dev/null
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -0,0 +1,192 @@
++use serde_json::{Value, json};
++
++use super::*;
++
++const ORIGIN: &str = "https://gitlab.example";
++const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
++const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
++
++fn person(username: &str, name: &str) -> Person {
++    Person {
++        username: username.to_owned(),
++        name: name.to_owned(),
++    }
++}
++
++fn job(name: &str, allow_failure: bool, id: u32) -> FailedJob {
++    let page = format!("https://gitlab.example/taskboard/taskboard/-/jobs/{id}");
++    FailedJob {
++        name: name.to_owned(),
++        stage: "test".to_owned(),
++        allow_failure,
++        page: Some(JobPage(page)),
++    }
++}
++
++/// !13 of the recorded first page.
++fn snooze_a_reminder() -> MergeRequestRow {
++    let failed = Pipeline {
++        status: CiStatus::Failed,
++        failed_jobs: vec![job("lint", true, 302), job("unit tests", false, 301)],
++        more_failed_jobs: false,
++    };
++    MergeRequestRow {
++        iid: MergeRequestIid(13),
++        title: "Snooze a reminder".to_owned(),
++        created_at: "2026-10-28T09:15:00Z".to_owned(),
++        draft: false,
++        assignees: vec![person("sam", "Sam Doe")],
++        reviewers: vec![person("anna", "Anna Berg")],
++        labels: vec!["reminders".to_owned(), "ui".to_owned()],
++        open_discussions: 0,
++        approvals: 0,
++        pipeline: Some(failed),
++    }
++}
++
++fn answer(nodes: &Value, page_info: &Value) -> Vec<u8> {
++    let page = json!({ "data": { "currentUser": null, "project": { "mergeRequests": {
++        "pageInfo": page_info, "nodes": nodes } } } });
++    page.to_string().into_bytes()
++}
++
++fn last_page_of(nodes: &Value) -> Result<ParsedPage, String> {
++    let page_info = json!({ "hasNextPage": false, "endCursor": null });
++    parsed(&answer(nodes, &page_info), Some(ORIGIN))
++}
++
++fn status_of(row: &MergeRequestRow) -> Option<CiStatus> {
++    row.pipeline.as_ref().map(|pipeline| pipeline.status)
++}
++
++#[test]
++fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
++    let page = parsed(PAGE_1, Some(ORIGIN)).unwrap();
++
++    assert_eq!(page.me.as_deref(), Some("sam"));
++    assert_eq!(page.next.as_deref(), Some("page-2"));
++    let complexity = Complexity {
++        score: 112,
++        limit: 250,
++    };
++    assert_eq!(page.complexity, Some(complexity));
++    let iids: Vec<u32> = page.rows.iter().map(|row| row.iid.0).collect();
++    assert_eq!(iids, [13, 12, 11]);
++    assert_eq!(page.rows[0], snooze_a_reminder());
++    let passed = &page.rows[1];
++    assert_eq!((passed.open_discussions, passed.approvals), (1, 2));
++    assert_eq!(status_of(passed), Some(CiStatus::Passed));
++    let draft = &page.rows[2];
++    assert!(draft.draft);
++    assert_eq!(draft.title, "Draft: Move reminders to the settings page");
++}
++
++#[test]
++fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
++    let page = parsed(PAGE_2, Some(ORIGIN)).unwrap();
++
++    assert_eq!(page.next, None);
++    assert_eq!(page.rows[0].pipeline, None);
++    assert_eq!(status_of(&page.rows[1]), Some(CiStatus::Manual));
++    assert_eq!(page.rows[1].approvals, 1);
++}
++
++#[test]
++fn without_an_https_origin_no_job_has_a_page() {
++    let page = parsed(PAGE_1, None).unwrap();
++
++    let pipeline = page.rows[0].pipeline.as_ref().unwrap();
++    let pages: Vec<_> = pipeline.failed_jobs.iter().map(|job| &job.page).collect();
++    assert_eq!(pages, [&None, &None]);
++}
++
++#[test]
++fn null_fields_are_empty_or_zero_and_more_failed_jobs_than_asked_are_flagged() {
++    let node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
++        "labels": null, "assignees": null, "reviewers": null, "approvedBy": null,
++        "resolvableDiscussionsCount": null, "resolvedDiscussionsCount": null,
++        "headPipeline": { "status": "CANCELING", "jobs": { "pageInfo": { "hasNextPage": true },
++            "nodes": [{ "name": "e2e", "allowFailure": false, "webPath": "/a/-/jobs/x", "stage": null }] } } });
++
++    let page = last_page_of(&json!([node])).unwrap();
++
++    let row = &page.rows[0];
++    assert_eq!((row.open_discussions, row.approvals), (0, 0));
++    assert!(row.labels.is_empty() && row.assignees.is_empty() && row.reviewers.is_empty());
++    let expected = Pipeline {
++        status: CiStatus::Canceled,
++        failed_jobs: vec![FailedJob {
++            name: "e2e".to_owned(),
++            stage: String::new(),
++            allow_failure: false,
++            page: None,
++        }],
++        more_failed_jobs: true,
++    };
++    assert_eq!(row.pipeline, Some(expected));
++    assert_eq!(page.me, None);
++    assert_eq!(page.complexity, None);
++}
++
++#[test]
++fn open_discussions_are_resolvable_minus_resolved_never_negative() {
++    assert_eq!(open_discussions(Some(3), Some(1)), 2);
++    assert_eq!(open_discussions(Some(1), None), 1);
++    assert_eq!(open_discussions(None, Some(2)), 0);
++    assert_eq!(open_discussions(Some(2), Some(5)), 0);
++    assert_eq!(open_discussions(Some(i64::MAX), Some(-1)), u32::MAX);
++}
++
++#[test]
++fn every_gitlab_pipeline_status_folds_into_one_of_seven_and_an_unknown_one_is_pending() {
++    let statuses = [
++        ("SUCCESS", CiStatus::Passed),
++        ("FAILED", CiStatus::Failed),
++        ("RUNNING", CiStatus::Running),
++        ("CREATED", CiStatus::Pending),
++        ("WAITING_FOR_RESOURCE", CiStatus::Pending),
++        ("PREPARING", CiStatus::Pending),
++        ("WAITING_FOR_CALLBACK", CiStatus::Pending),
++        ("PENDING", CiStatus::Pending),
++        ("SCHEDULED", CiStatus::Pending),
++        ("CANCELED", CiStatus::Canceled),
++        ("CANCELING", CiStatus::Canceled),
++        ("SKIPPED", CiStatus::Skipped),
++        ("MANUAL", CiStatus::Manual),
++        ("BLOCKED", CiStatus::Pending),
++    ];
++    for (gitlab, shown) in statuses {
++        assert_eq!(ci_status(gitlab), shown, "{gitlab}");
++    }
++}
++
++#[test]
++fn graphql_errors_are_gitlab_s_first_message_even_beside_data() {
++    let too_complex = "Query has complexity of 260, which exceeds max complexity of 250";
++    let refused = json!({ "errors": [{ "message": too_complex }, { "message": "second" }],
++        "data": { "project": null } });
++
++    let page = parsed(refused.to_string().as_bytes(), Some(ORIGIN));
++
++    assert_eq!(page.err().as_deref(), Some(too_complex));
++}
++
++#[test]
++fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
++    let no_cursor = json!({ "hasNextPage": true, "endCursor": null });
++    let no_project = json!({ "data": { "project": null } }).to_string();
++    let no_merge_requests = json!({ "data": { "project": { "mergeRequests": null } } }).to_string();
++    let bad_iid = json!([{ "iid": "!4", "title": "t", "createdAt": "x", "draft": false }]);
++    let error = |answer: &[u8]| parsed(answer, Some(ORIGIN)).err();
++
++    assert_eq!(error(b"{}").as_deref(), Some(NO_DATA));
++    assert_eq!(error(no_project.as_bytes()).as_deref(), Some(NO_PROJECT));
++    let no_list = error(no_merge_requests.as_bytes());
++    assert_eq!(no_list.as_deref(), Some(NO_PROJECT));
++    let no_next = error(&answer(&json!([]), &no_cursor));
++    assert_eq!(no_next.as_deref(), Some(NO_CURSOR));
++    let bad = last_page_of(&bad_iid).err();
++    let expected = r#"GitLab sent "!4" as a merge request number"#;
++    assert_eq!(bad.as_deref(), Some(expected));
++    assert!(error(b"<html>").is_some());
++}
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+new file mode 100644
+index 0000000..47c2388
+--- /dev/null
++++ b/crates/merge-requests/src/project.rs
+@@ -0,0 +1,68 @@
++use std::path::Path;
++
++use serde::Deserialize;
++use yamt_gitio::Glab;
++
++const HTTPS: &str = "https://";
++/// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
++const PROJECT_ROUTE: &str = "projects/:fullpath";
++
++/// The GitLab project of the repository's remotes.
++pub(crate) struct Project {
++    pub full_path: String,
++    /// `https://<host[:port]>` of its web page; `None` when GitLab is not on https.
++    pub web_origin: Option<String>,
++}
++
++#[derive(Deserialize)]
++struct ProjectAnswer {
++    path_with_namespace: String,
++    web_url: String,
++}
++
++pub(crate) fn project(glab: &Glab, root: &Path) -> Result<Project, String> {
++    let json = glab.get(root, &["api", PROJECT_ROUTE])?;
++    project_from(&json)
++}
++
++fn project_from(json: &[u8]) -> Result<Project, String> {
++    let answer: ProjectAnswer = serde_json::from_slice(json)
++        .map_err(|error| format!("GitLab's project answer is not what yamt expects: {error}"))?;
++    Ok(Project {
++        full_path: answer.path_with_namespace,
++        web_origin: web_origin(&answer.web_url),
++    })
++}
++
++fn web_origin(web_url: &str) -> Option<String> {
++    let authority = web_url.strip_prefix(HTTPS)?.split('/').next()?;
++    Some(format!("{HTTPS}{authority}"))
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_full_path_and_the_https_origin_come_from_the_project() {
++        let json = br#"{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example:8443/taskboard/taskboard"}"#;
++
++        let project = project_from(json).unwrap();
++
++        assert_eq!(project.full_path, "taskboard/taskboard");
++        assert_eq!(
++            project.web_origin.as_deref(),
++            Some("https://gitlab.example:8443")
++        );
++    }
++
++    #[test]
++    fn a_gitlab_on_http_has_no_origin_and_a_strange_answer_is_an_error() {
++        assert_eq!(
++            web_origin("http://gitlab.example/taskboard/taskboard"),
++            None
++        );
++        let refused = project_from(br#"{"message":"404 Project Not Found"}"#);
++        assert!(refused.is_err());
++    }
++}
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+new file mode 100644
+index 0000000..d7a88a8
+--- /dev/null
++++ b/crates/merge-requests/src/query.rs
+@@ -0,0 +1,58 @@
++use crate::{MAX_FAILED_JOBS, PAGE_SIZE};
++
++/// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
++/// jobs (the latest run of each); about 112 of GitLab's complexity limit of 250 (`.omp/run/notes/MrOverviewDesign.md`
++/// §2.2). One line, so the fake glab logs each call on one line.
++fn list_query() -> String {
++    format!(
++        "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
++         queryComplexity {{ score limit }} \
++         currentUser {{ username }} \
++         project(fullPath: $fullPath) {{ \
++         mergeRequests(state: opened, sort: CREATED_DESC, first: $first, after: $after) {{ \
++         pageInfo {{ hasNextPage endCursor }} \
++         nodes {{ \
++         iid title createdAt draft \
++         labels {{ nodes {{ title }} }} \
++         assignees {{ nodes {{ username name }} }} \
++         reviewers {{ nodes {{ username name }} }} \
++         approvedBy {{ nodes {{ username }} }} \
++         resolvableDiscussionsCount resolvedDiscussionsCount \
++         headPipeline {{ status \
++         jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
++         pageInfo {{ hasNextPage }} nodes {{ name allowFailure webPath stage {{ name }} }} }} }} \
++         }} }} }} }}"
++    )
++}
++
++/// `glab api graphql` for the page after `after`, the first page when `None`.
++pub(crate) fn list_args(full_path: &str, after: Option<&str>) -> Vec<String> {
++    let mut args = vec![
++        "api".to_owned(),
++        "graphql".to_owned(),
++        "-f".to_owned(),
++        format!("query={}", list_query()),
++        "-f".to_owned(),
++        format!("fullPath={full_path}"),
++        "-F".to_owned(),
++        format!("first={PAGE_SIZE}"),
++    ];
++    if let Some(cursor) = after {
++        args.push("-f".to_owned());
++        args.push(format!("after={cursor}"));
++    }
++    args
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn the_query_is_one_line_with_balanced_braces_and_the_failed_job_limit() {
++        let query = list_query();
++        assert!(!query.contains('\n'), "{query}");
++        assert_eq!(query.matches('{').count(), query.matches('}').count());
++        assert!(query.contains("first: 50)"), "{query}");
++    }
++}
+diff --git a/crates/merge-requests/tests/detect.rs b/crates/merge-requests/tests/detect.rs
+new file mode 100644
+index 0000000..d3cb04e
+--- /dev/null
++++ b/crates/merge-requests/tests/detect.rs
+@@ -0,0 +1,99 @@
++#![cfg(test)]
++
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, diverged_repo, git_ok, run_ignored_in_child,
++};
++use yamt_merge_requests::{GitLabProject, gitlab_repository};
++
++const CORP_REMOTE: &str = "git@git.corp.example:taskboard/taskboard.git";
++const GITLAB_HOST_TEST: &str = "a_remote_on_the_host_glab_is_set_up_for_is_gitlab";
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "a.txt",
++    kind: FileKind::Regular,
++    base: Some(b"base\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++
++fn repo_with_remotes(remotes: &[(&str, &str)]) -> TempDir {
++    let dir = diverged_repo(&FILES).unwrap();
++    for (name, url) in remotes {
++        git_ok(dir.path(), &["remote", "add", name, url]).unwrap();
++    }
++    dir
++}
++
++fn common_dir(root: &Path) -> String {
++    let args = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
++    let output = git_ok(root, &args).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn project_of(folder: &Path) -> GitLabProject {
++    gitlab_repository(folder).map_or(GitLabProject::None, |found| found.project())
++}
++
++#[test]
++fn a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder() {
++    let repo = repo_with_remotes(&[
++        ("github", "https://github.com/taskboard/taskboard.git"),
++        ("origin", "git@gitlab.example:taskboard/taskboard.git"),
++    ]);
++    let subfolder = repo.path().join("sub");
++    std::fs::create_dir(&subfolder).unwrap();
++
++    let found = gitlab_repository(&subfolder).unwrap();
++
++    let repository = common_dir(repo.path());
++    assert_eq!(found.project(), GitLabProject::Found { repository });
++    assert_eq!(found.root(), repo.path());
++}
++
++#[test]
++fn no_repository_no_remote_or_no_gitlab_remote_is_no_project() {
++    let folder = tempfile::tempdir().unwrap();
++    let bare = repo_with_remotes(&[]);
++    let elsewhere = repo_with_remotes(&[
++        ("origin", "https://github.com/taskboard/taskboard.git"),
++        ("local", "/srv/git/gitlab.git"),
++        ("corp", CORP_REMOTE),
++    ]);
++
++    for folder in [folder.path(), bare.path(), elsewhere.path()] {
++        assert_eq!(
++            project_of(folder),
++            GitLabProject::None,
++            "{}",
++            folder.display()
++        );
++    }
++}
++
++#[test]
++fn gitlab_host_and_gl_host_name_glab_s_server() {
++    for (variable, value) in [
++        ("GITLAB_HOST", "https://git.corp.example/"),
++        ("GL_HOST", "GIT.corp.example"),
++    ] {
++        let ran = run_ignored_in_child(&[GITLAB_HOST_TEST], |child| {
++            child
++                .env_remove("GITLAB_HOST")
++                .env_remove("GL_HOST")
++                .env(variable, value);
++        });
++        ran.unwrap_or_else(|error| panic!("{variable}={value}: {error}"));
++    }
++}
++
++#[test]
++#[ignore = "run by gitlab_host_and_gl_host_name_glab_s_server"]
++fn a_remote_on_the_host_glab_is_set_up_for_is_gitlab() {
++    let repo = repo_with_remotes(&[("corp", CORP_REMOTE)]);
++
++    let found = project_of(repo.path());
++
++    let repository = common_dir(repo.path());
++    assert_eq!(found, GitLabProject::Found { repository });
++}
+diff --git a/crates/merge-requests/tests/list.rs b/crates/merge-requests/tests/list.rs
+new file mode 100644
+index 0000000..00c500b
+--- /dev/null
++++ b/crates/merge-requests/tests/list.rs
+@@ -0,0 +1,173 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++use std::fs;
++use std::path::{Path, PathBuf};
++use std::sync::mpsc;
++use std::time::{Duration, Instant};
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_gitio::{Glab, TIMED_OUT};
++use yamt_merge_requests::{
++    GitLabRepository, ListEnd, MergeRequestPage, gitlab_repository, list_merge_requests,
++};
++
++const SHORT_TIMEOUT: Duration = Duration::from_secs(2);
++const TIMEOUT_SCENARIO_SLEEP: Duration = Duration::from_secs(25);
++const GITLAB_REMOTE: &str = "https://gitlab.example/taskboard/taskboard.git";
++const FIRST_PAGE_FIELDS: &str = " -f fullPath=taskboard/taskboard -F first=100";
++const QUERY_START: &str = "argv: api graphql -f query=query MergeRequestPage(";
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "a.txt",
++    kind: FileKind::Regular,
++    base: Some(b"base\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++
++fn in_this_repository(relative: &str) -> PathBuf {
++    Path::new(env!("CARGO_MANIFEST_DIR"))
++        .join("../..")
++        .join(relative)
++}
++
++/// The fake glab on a scenario through a symlink beside its `glab.env`, never a file written here (ETXTBSY); the
++/// log lives beside it (`tests/glab/README.md`).
++struct Fake {
++    dir: TempDir,
++    glab: Glab,
++}
++
++impl Fake {
++    fn new(scenario: &str) -> Fake {
++        let dir = tempfile::tempdir().unwrap();
++        let settings = format!(
++            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_LOG={}\n",
++            in_this_repository(&format!("tests/glab/{scenario}")).display(),
++            dir.path().join("log").display(),
++        );
++        fs::write(dir.path().join("glab.env"), settings).unwrap();
++        let link = dir.path().join("glab");
++        std::os::unix::fs::symlink(in_this_repository("scripts/fake-glab/glab"), &link).unwrap();
++        Fake {
++            glab: Glab::at(link),
++            dir,
++        }
++    }
++
++    fn logged(&self, prefix: &str) -> Vec<String> {
++        let log = fs::read_to_string(self.dir.path().join("log")).unwrap_or_default();
++        let lines = log.lines().filter(|line| line.starts_with(prefix));
++        lines.map(str::to_owned).collect()
++    }
++}
++
++/// A repository whose `origin` is on gitlab.example, and its `GitLabRepository`.
++fn gitlab_repo() -> (TempDir, GitLabRepository) {
++    let dir = diverged_repo(&FILES).unwrap();
++    git_ok(dir.path(), &["remote", "add", "origin", GITLAB_REMOTE]).unwrap();
++    let repository = gitlab_repository(dir.path()).unwrap();
++    (dir, repository)
++}
++
++/// The end of a load and the pages sent before it.
++fn listed(repository: &GitLabRepository, glab: Option<&Glab>) -> (ListEnd, Vec<MergeRequestPage>) {
++    let (sender, sent) = mpsc::channel();
++    let on_page = |page: MergeRequestPage| sender.send(page).unwrap();
++    let end = list_merge_requests(repository, glab, &on_page);
++    (end, sent.try_iter().collect())
++}
++
++fn iids(page: &MergeRequestPage) -> Vec<u32> {
++    page.rows.iter().map(|row| row.iid.0).collect()
++}
++
++#[test]
++fn the_list_comes_page_by_page_from_glab_graphql_after_each_cursor() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new("merge-requests");
++
++    let (end, pages) = listed(&repository, Some(&fake.glab));
++
++    assert_eq!(end, ListEnd::Loaded);
++    let sent: Vec<Vec<u32>> = pages.iter().map(iids).collect();
++    assert_eq!(sent, [vec![13, 12, 11], vec![9, 8]]);
++    assert_eq!(pages[0].me.as_deref(), Some("sam"));
++    let failed = pages[0].rows[0].pipeline.as_ref().unwrap();
++    let job_page = failed.failed_jobs[0].page.as_ref().unwrap();
++    assert_eq!(
++        job_page.as_str(),
++        "https://gitlab.example/taskboard/taskboard/-/jobs/302"
++    );
++    let argv = fake.logged("argv: ");
++    assert_eq!(
++        argv[..2],
++        ["argv: auth status", "argv: api projects/:fullpath"]
++    );
++    let [first, second] = &argv[2..] else {
++        panic!("{argv:?}");
++    };
++    assert!(first.starts_with(QUERY_START), "{first}");
++    assert!(first.ends_with(FIRST_PAGE_FIELDS), "{first}");
++    assert!(second.starts_with(QUERY_START), "{second}");
++    let after = format!("{FIRST_PAGE_FIELDS} -f after=page-2");
++    assert!(second.ends_with(&after), "{second}");
++}
++
++#[test]
++fn glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt() {
++    let (repo, repository) = gitlab_repo();
++    let fake = Fake::new("merge-requests");
++
++    listed(&repository, Some(&fake.glab));
++
++    let root = fs::canonicalize(repo.path()).unwrap();
++    let cwd = format!("cwd: {}", root.display());
++    assert_eq!(fake.logged("cwd: "), vec![cwd; 4]);
++    let env = "env: NO_COLOR=1 GIT_TERMINAL_PROMPT=0".to_owned();
++    assert_eq!(fake.logged("env: "), vec![env; 4]);
++    assert_eq!(repository.root(), repo.path());
++}
++
++#[test]
++fn glab_missing_or_logged_out_ends_the_list_before_any_page() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new("logged-out");
++
++    let missing = listed(&repository, None);
++    let logged_out = listed(&repository, Some(&fake.glab));
++
++    assert_eq!(missing, (ListEnd::GlabMissing, Vec::new()));
++    let detail = "gitlab.com".to_owned();
++    assert_eq!(logged_out, (ListEnd::NotLoggedIn { detail }, Vec::new()));
++    assert_eq!(fake.logged("argv: "), ["argv: auth status"]);
++}
++
++#[test]
++fn a_page_past_glab_s_deadline_fails_the_list_in_glab_s_timeout_words() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new("merge-requests-timeout");
++    let glab = Glab::at(fake.dir.path().join("glab")).with_timeout(SHORT_TIMEOUT);
++    let started = Instant::now();
++
++    let timed_out = listed(&repository, Some(&glab));
++
++    let message = TIMED_OUT.to_owned();
++    assert_eq!(timed_out, (ListEnd::Failed { message }, Vec::new()));
++    assert!(
++        started.elapsed() < TIMEOUT_SCENARIO_SLEEP,
++        "{:?}",
++        started.elapsed()
++    );
++}
++
++#[test]
++fn a_project_glab_cannot_find_fails_the_list_in_glab_s_words() {
++    let (_repo, repository) = gitlab_repo();
++    let fake = Fake::new("lined-up");
++
++    let not_found = listed(&repository, Some(&fake.glab));
++
++    let message = "glab: 404 Not Found (HTTP 404)".to_owned();
++    assert_eq!(not_found, (ListEnd::Failed { message }, Vec::new()));
++}
+diff --git a/crates/review/src/glab_answer.rs b/crates/review/src/glab_answer.rs
+index bc6b75a..506d4af 100644
+--- a/crates/review/src/glab_answer.rs
++++ b/crates/review/src/glab_answer.rs
+@@ -1,10 +1,9 @@
+ use std::path::Path;
+ 
+-use yamt_gitio::{Glab, GlabRun};
++use yamt_gitio::{Glab, GlabRun, TIMED_OUT, last_line};
+ 
+ use crate::gitlab::{draft_id_from, error_message_from};
+ 
+-pub(crate) const TIMED_OUT: &str = "glab timed out";
+ const NO_HTTP_ANSWER: &str = "glab printed no HTTP answer";
+ 
+ /// What one message's post came to.
+@@ -78,20 +77,7 @@ pub(crate) fn answer(
+     root: &Path,
+     args: &[String],
+ ) -> std::result::Result<Vec<u8>, String> {
+-    match run(glab, root, args, None)? {
+-        GlabRun::Printed { stdout } => Ok(stdout),
+-        GlabRun::Failed { status, stderr, .. } => {
+-            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
+-        }
+-        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
+-    }
+-}
+-
+-fn exit_words(status: Option<i32>) -> String {
+-    match status {
+-        Some(code) => format!("glab exited with status {code}"),
+-        None => "glab was stopped by a signal".to_owned(),
+-    }
++    glab.get(root, &as_strs(args))
+ }
+ 
+ /// `Err` when glab could not run at all, in gitio's words.
+@@ -101,22 +87,12 @@ pub(crate) fn run(
+     args: &[String],
+     stdin: Option<Vec<u8>>,
+ ) -> std::result::Result<GlabRun, String> {
+-    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+-    glab.run(root, &args, stdin)
++    glab.run(root, &as_strs(args), stdin)
+         .map_err(|error| error.to_string())
+ }
+ 
+-pub(crate) fn first_line(output: &[u8]) -> Option<String> {
+-    let text = String::from_utf8_lossy(output);
+-    let line = text.lines().map(str::trim).find(|line| !line.is_empty());
+-    line.map(str::to_owned)
+-}
+-
+-/// glab prints its error last, after any notice such as a first run's "What's new".
+-fn last_line(output: &[u8]) -> Option<String> {
+-    let text = String::from_utf8_lossy(output);
+-    let line = text.lines().map(str::trim).rfind(|line| !line.is_empty());
+-    line.map(str::to_owned)
++fn as_strs(args: &[String]) -> Vec<&str> {
++    args.iter().map(String::as_str).collect()
+ }
+ 
+ #[cfg(test)]
+@@ -187,7 +163,5 @@ mod tests {
+         assert_eq!(posted(Ok(no_answer(b""))), stop(NO_HTTP_ANSWER));
+         assert_eq!(posted(Ok(GlabRun::TimedOut)), stop(TIMED_OUT));
+         assert_eq!(posted(Err("gone".to_owned())), stop("gone"));
+-        assert_eq!(exit_words(Some(2)), "glab exited with status 2");
+-        assert_eq!(exit_words(None), "glab was stopped by a signal");
+     }
+ }
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+index a527632..ee16005 100644
+--- a/crates/review/src/send.rs
++++ b/crates/review/src/send.rs
+@@ -1,14 +1,14 @@
+ use std::path::Path;
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+-use yamt_gitio::{Glab, GlabRun, Repo};
++use yamt_gitio::{AuthStatus, Glab, Repo};
+ use yamt_range::{Compared, Range};
+ 
+ use crate::gitlab::{
+     DraftNote, draft_notes, draft_notes_from, listed_from, merge_request_details,
+     merge_request_from, merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
+ };
+-use crate::glab_answer::{Outcome, TIMED_OUT, answer, first_line, posted, run};
++use crate::glab_answer::{Outcome, answer, posted, run};
+ use crate::lines_up::{Found, LinedUp, candidates, lines_up};
+ use crate::position::{PostBody, line_place, same_draft};
+ use crate::right_branch::right_branch;
+@@ -242,16 +242,10 @@ fn lookup(branch: Option<String>, compared: &Compared) -> (LookedAt, Vec<String>
+ }
+ 
+ fn require_logged_in(glab: &Glab, root: &Path) -> std::result::Result<(), NotLinedUp> {
+-    let args = ["auth".to_owned(), "status".to_owned()];
+-    match run(glab, root, &args, None).map_err(failed)? {
+-        GlabRun::Printed { .. } => Ok(()),
+-        GlabRun::Failed { stdout, stderr, .. } => {
+-            let detail = first_line(&stderr).or_else(|| first_line(&stdout));
+-            Err(NotLinedUp::NotLoggedIn {
+-                detail: detail.unwrap_or_default(),
+-            })
+-        }
+-        GlabRun::TimedOut => Err(failed(TIMED_OUT.to_owned())),
++    match glab.auth_status(root) {
++        AuthStatus::LoggedIn => Ok(()),
++        AuthStatus::LoggedOut { detail } => Err(NotLinedUp::NotLoggedIn { detail }),
++        AuthStatus::Failed { message } => Err(failed(message)),
+     }
+ }
+ 
+diff --git a/scripts/arch-check.sh b/scripts/arch-check.sh
+index 5a50d78..11c474a 100755
+--- a/scripts/arch-check.sh
++++ b/scripts/arch-check.sh
+@@ -69,10 +69,17 @@ if [ -n "$forbidden_in_agent" ]; then
+     failed=1
+ fi
+ 
++merge_requests_deps=$(normal_deps yamt-merge-requests)
++forbidden_in_merge_requests=$(grep -E '^(yamt-|tauri(-|$))' <<<"$merge_requests_deps" | grep -vxE 'yamt-(merge-requests|range|gitio|merge-core)' || true)
++if [ -n "$forbidden_in_merge_requests" ]; then
++    echo "arch-check: yamt-merge-requests depends on yamt-range, yamt-gitio and yamt-merge-core only among yamt crates, and never on tauri, not:" $forbidden_in_merge_requests >&2
++    failed=1
++fi
++
+ app_deps=$(cargo tree --package yamt-app --edges normal --depth 1 --prefix none | cut -d' ' -f1 | sort -u)
+-forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent)' || true)
++forbidden_in_app=$(grep -E '^yamt-' <<<"$app_deps" | grep -vxE 'yamt-(app|session|settings|lsp-host|compare|range|review|agent|merge-requests)' || true)
+ if [ -n "$forbidden_in_app" ]; then
+-    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review and yamt-agent only, not:" $forbidden_in_app >&2
++    echo "arch-check: yamt-app depends on yamt-session, yamt-settings, yamt-lsp-host, yamt-compare, yamt-range, yamt-review, yamt-agent and yamt-merge-requests only, not:" $forbidden_in_app >&2
+     failed=1
+ fi
+ 
+diff --git a/scripts/fake-glab/glab b/scripts/fake-glab/glab
+index 225f6cc..54725ad 100755
+--- a/scripts/fake-glab/glab
++++ b/scripts/fake-glab/glab
+@@ -61,6 +61,7 @@ include=no
+ method=
+ input=
+ endpoint=
++fields=
+ 
+ # $1 status line ("200 OK"), $2 the body, $3 (optional) a file holding what glab prints on stderr for an HTTP
+ # error instead of its own line: printed as glab prints an HTTP answer, then exits as glab does.
+@@ -90,24 +91,50 @@ answer_file() {
+ 	answer '404 Not Found' '{"message":"404 Not Found"}'
+ }
+ 
++# $1 a field's name: the value the call gave it (the first, when given twice), empty when not given.
++field() {
++	printf '%s' "$fields" | sed -n "s/^$1=//p" | head -n 1
++}
++
++# $1 the answer's path without its extension, $2 its default status line: waits $1.sleep seconds, then fails before
++# any HTTP answer as $1.exit and $1.err say, or answers $1.json with the status line in $1.status (or $2).
++reply() {
++	if [ -f "$1.sleep" ]; then
++		sleep "$(cat "$1.sleep")"
++	fi
++	if [ -f "$1.exit" ]; then
++		if [ -f "$1.err" ]; then
++			cat "$1.err" >&2
++		fi
++		exit "$(cat "$1.exit")"
++	fi
++	[ -f "$1.json" ] || fail "the scenario has no answer $(basename "$1").json"
++	answer "$(text_or "$1.status" "$2")" "$(cat "$1.json")" "$1.err"
++}
++
+ post() {
+ 	state=${YAMT_FAKE_GLAB_STATE:-}
+ 	[ -n "$state" ] || fail 'YAMT_FAKE_GLAB_STATE names no file'
+ 	count=$(text_or "$state" 0)
+ 	number=$((count + 1))
+ 	printf '%s\n' "$number" >"$state"
+-	answer_at="$scenario/post-$number"
+-	if [ -f "$answer_at.sleep" ]; then
+-		sleep "$(cat "$answer_at.sleep")"
++	reply "$scenario/post-$number" '201 Created'
++}
++
++# A merge request's details with a field iid=<n>; else a page of the list: the first without a field after, the
++# n-th for after=page-<n>.
++graphql() {
++	iid=$(field iid)
++	if [ -n "$iid" ]; then
++		reply "$scenario/graphql-merge-request-$iid" '200 OK'
+ 	fi
+-	if [ -f "$answer_at.exit" ]; then
+-		if [ -f "$answer_at.err" ]; then
+-			cat "$answer_at.err" >&2
+-		fi
+-		exit "$(cat "$answer_at.exit")"
+-	fi
+-	[ -f "$answer_at.json" ] || fail "the scenario has no answer for post $number"
+-	answer "$(text_or "$answer_at.status" '201 Created')" "$(cat "$answer_at.json")" "$answer_at.err"
++	after=$(field after)
++	case $after in
++	'') page=1 ;;
++	page-*) page=${after#page-} ;;
++	*) fail "unknown cursor $after" ;;
++	esac
++	reply "$scenario/graphql-page-$page" '200 OK'
+ }
+ 
+ api() {
+@@ -122,7 +149,12 @@ api() {
+ 			input=${2-}
+ 			shift
+ 			;;
+-		-f | --field | -F | --raw-field | -H | --header | --hostname) shift ;;
++		-f | --field | -F | --raw-field)
++			fields="$fields${2-}
++"
++			shift
++			;;
++		-H | --header | --hostname) shift ;;
+ 		--paginate) ;;
+ 		-*) fail "unknown api option $1" ;;
+ 		*) [ -n "$endpoint" ] || endpoint=$1 ;;
+@@ -137,10 +169,12 @@ api() {
+ 		log "stdin: ${body%x}"
+ 	fi
+ 	if [ -z "$method" ]; then
+-		if [ -n "$input" ]; then method=POST; else method=GET; fi
++		if [ -n "$input" ] || [ -n "$fields" ]; then method=POST; else method=GET; fi
+ 	fi
+ 	case "$method $endpoint" in
+ 	"POST "*/draft_notes) post ;;
++	"POST graphql") graphql ;;
++	"GET projects/:fullpath") answer_file project.json ;;
+ 	"GET "*/draft_notes) answer_file draft-notes.json ;;
+ 	"GET "*/merge_requests) answer_file merge-requests.json ;;
+ 	"GET "*/merge_requests/*)
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index b29ec6c..e44d6d9 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -22,6 +22,7 @@ test ever runs a file it has just written (ETXTBSY).
+ |---|---|
+ | `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
+ | `auth-status.exit` | its exit status (missing = 0) |
++| `project.json` | `glab api` GET `projects/:fullpath` |
+ | `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
+ | `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
+ | `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
+@@ -31,9 +32,15 @@ test ever runs a file it has just written (ETXTBSY).
+ | `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
+ | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
+ | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
++| `graphql-page-<n>.json` | `glab api graphql` without a field `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
++| `graphql-merge-request-<iid>.json` | `glab api graphql` with a field `iid=<iid>` |
++| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
+ 
+-A GET whose file is missing, or any other endpoint, answers `404 Not Found` with the body
+-`{"message":"404 Not Found"}`. Any other glab command exits 2 with "fake glab: unknown command".
++`glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
++is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
++whose file is missing, or any other endpoint, answers `404 Not Found` with the body `{"message":"404 Not Found"}`.
++A POST or GraphQL call whose `.json` is missing, or an `after` not of the form `page-<n>`, exits 2. Any other glab
++command exits 2 with "fake glab: unknown command".
+ 
+ ## What the fake prints, as glab 1.124.0 does
+ 
+@@ -71,3 +78,9 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
+ - `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
+   2 s before it is accepted, so a second send can arrive while it runs.
++- `merge-requests/` — the merge-request list (`crates/merge-requests/tests/list.rs`): logged in; project
++  `taskboard/taskboard` on `https://gitlab.example`; user `sam`. Page 1: !13 (failed pipeline, two failed jobs,
++  `lint` allowed to fail), !12 (passed, 2 approvals, 1 open discussion), !11 (a draft, "Draft: …", running), more to
++  come (`page-2`); page 2: !9 (no pipeline), !8 (manual), the last.
++- `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's
++  deadline.
+diff --git a/tests/glab/merge-requests-timeout/graphql-page-1.json b/tests/glab/merge-requests-timeout/graphql-page-1.json
+new file mode 100644
+index 0000000..db3d068
+--- /dev/null
++++ b/tests/glab/merge-requests-timeout/graphql-page-1.json
+@@ -0,0 +1,82 @@
++{
++  "data": {
++    "queryComplexity": { "score": 112, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": true, "endCursor": "page-2" },
++        "nodes": [
++          {
++            "iid": "13",
++            "title": "Snooze a reminder",
++            "createdAt": "2026-10-28T09:15:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "reminders" }, { "title": "ui" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "FAILED",
++              "jobs": {
++                "pageInfo": { "hasNextPage": false },
++                "nodes": [
++                  {
++                    "name": "lint",
++                    "allowFailure": true,
++                    "webPath": "/taskboard/taskboard/-/jobs/302",
++                    "stage": { "name": "test" }
++                  },
++                  {
++                    "name": "unit tests",
++                    "allowFailure": false,
++                    "webPath": "/taskboard/taskboard/-/jobs/301",
++                    "stage": { "name": "test" }
++                  }
++                ]
++              }
++            }
++          },
++          {
++            "iid": "12",
++            "title": "Reminders before a card is due",
++            "createdAt": "2026-10-20T14:02:11Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "reminders" }] },
++            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "reviewers": {
++              "nodes": [
++                { "username": "sam", "name": "Sam Doe" },
++                { "username": "lee", "name": "Lee Park" }
++              ]
++            },
++            "approvedBy": { "nodes": [{ "username": "sam" }, { "username": "lee" }] },
++            "resolvableDiscussionsCount": 3,
++            "resolvedDiscussionsCount": 2,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            }
++          },
++          {
++            "iid": "11",
++            "title": "Draft: Move reminders to the settings page",
++            "createdAt": "2026-10-15T08:30:00Z",
++            "draft": true,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "RUNNING",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/merge-requests-timeout/graphql-page-1.sleep b/tests/glab/merge-requests-timeout/graphql-page-1.sleep
+new file mode 100644
+index 0000000..7273c0f
+--- /dev/null
++++ b/tests/glab/merge-requests-timeout/graphql-page-1.sleep
+@@ -0,0 +1 @@
++25
+diff --git a/tests/glab/merge-requests-timeout/project.json b/tests/glab/merge-requests-timeout/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/merge-requests-timeout/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}
+diff --git a/tests/glab/merge-requests/graphql-page-1.json b/tests/glab/merge-requests/graphql-page-1.json
+new file mode 100644
+index 0000000..db3d068
+--- /dev/null
++++ b/tests/glab/merge-requests/graphql-page-1.json
+@@ -0,0 +1,82 @@
++{
++  "data": {
++    "queryComplexity": { "score": 112, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": true, "endCursor": "page-2" },
++        "nodes": [
++          {
++            "iid": "13",
++            "title": "Snooze a reminder",
++            "createdAt": "2026-10-28T09:15:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "reminders" }, { "title": "ui" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "FAILED",
++              "jobs": {
++                "pageInfo": { "hasNextPage": false },
++                "nodes": [
++                  {
++                    "name": "lint",
++                    "allowFailure": true,
++                    "webPath": "/taskboard/taskboard/-/jobs/302",
++                    "stage": { "name": "test" }
++                  },
++                  {
++                    "name": "unit tests",
++                    "allowFailure": false,
++                    "webPath": "/taskboard/taskboard/-/jobs/301",
++                    "stage": { "name": "test" }
++                  }
++                ]
++              }
++            }
++          },
++          {
++            "iid": "12",
++            "title": "Reminders before a card is due",
++            "createdAt": "2026-10-20T14:02:11Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "reminders" }] },
++            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "reviewers": {
++              "nodes": [
++                { "username": "sam", "name": "Sam Doe" },
++                { "username": "lee", "name": "Lee Park" }
++              ]
++            },
++            "approvedBy": { "nodes": [{ "username": "sam" }, { "username": "lee" }] },
++            "resolvableDiscussionsCount": 3,
++            "resolvedDiscussionsCount": 2,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            }
++          },
++          {
++            "iid": "11",
++            "title": "Draft: Move reminders to the settings page",
++            "createdAt": "2026-10-15T08:30:00Z",
++            "draft": true,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "RUNNING",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/merge-requests/graphql-page-2.json b/tests/glab/merge-requests/graphql-page-2.json
+new file mode 100644
+index 0000000..ba3895f
+--- /dev/null
++++ b/tests/glab/merge-requests/graphql-page-2.json
+@@ -0,0 +1,42 @@
++{
++  "data": {
++    "queryComplexity": { "score": 112, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": false, "endCursor": "page-3" },
++        "nodes": [
++          {
++            "iid": "9",
++            "title": "Archive finished boards",
++            "createdAt": "2026-09-30T16:45:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "boards" }] },
++            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null
++          },
++          {
++            "iid": "8",
++            "title": "Deploy previews",
++            "createdAt": "2026-09-12T11:20:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "ci" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "approvedBy": { "nodes": [{ "username": "anna" }] },
++            "resolvableDiscussionsCount": 2,
++            "resolvedDiscussionsCount": 2,
++            "headPipeline": {
++              "status": "MANUAL",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            }
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/merge-requests/project.json b/tests/glab/merge-requests/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/merge-requests/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}

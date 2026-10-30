@@ -22,6 +22,7 @@ test ever runs a file it has just written (ETXTBSY).
 |---|---|
 | `auth-status.out` | `glab auth status`: printed on **stderr**, as glab prints all of it |
 | `auth-status.exit` | its exit status (missing = 0) |
+| `project.json` | `glab api` GET `projects/:fullpath` |
 | `merge-requests.json` | `glab api` GET `…/merge_requests` (by branch) and `…/commits/<id>/merge_requests` |
 | `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
 | `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
@@ -31,9 +32,15 @@ test ever runs a file it has just written (ETXTBSY).
 | `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
 | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
 | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
+| `graphql-page-<n>.json` | `glab api graphql` without a field `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
+| `graphql-merge-request-<iid>.json` | `glab api graphql` with a field `iid=<iid>` |
+| `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
 
-A GET whose file is missing, or any other endpoint, answers `404 Not Found` with the body
-`{"message":"404 Not Found"}`. Any other glab command exits 2 with "fake glab: unknown command".
+`glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
+is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
+whose file is missing, or any other endpoint, answers `404 Not Found` with the body `{"message":"404 Not Found"}`.
+A POST or GraphQL call whose `.json` is missing, or an `after` not of the form `page-<n>`, exits 2. Any other glab
+command exits 2 with "fake glab: unknown command".
 
 ## What the fake prints, as glab 1.124.0 does
 
@@ -71,3 +78,9 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
 - `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
   2 s before it is accepted, so a second send can arrive while it runs.
+- `merge-requests/` — the merge-request list (`crates/merge-requests/tests/list.rs`): logged in; project
+  `taskboard/taskboard` on `https://gitlab.example`; user `sam`. Page 1: !13 (failed pipeline, two failed jobs,
+  `lint` allowed to fail), !12 (passed, 2 approvals, 1 open discussion), !11 (a draft, "Draft: …", running), more to
+  come (`page-2`); page 2: !9 (no pipeline), !8 (manual), the last.
+- `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's
+  deadline.

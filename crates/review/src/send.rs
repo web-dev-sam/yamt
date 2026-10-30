@@ -1,14 +1,14 @@
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use yamt_gitio::{Glab, GlabRun, Repo};
+use yamt_gitio::{AuthStatus, Glab, Repo};
 use yamt_range::{Compared, Range};
 
 use crate::gitlab::{
     DraftNote, draft_notes, draft_notes_from, listed_from, merge_request_details,
     merge_request_from, merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
 };
-use crate::glab_answer::{Outcome, TIMED_OUT, answer, first_line, posted, run};
+use crate::glab_answer::{Outcome, answer, posted, run};
 use crate::lines_up::{Found, LinedUp, candidates, lines_up};
 use crate::position::{PostBody, line_place, same_draft};
 use crate::right_branch::right_branch;
@@ -242,16 +242,10 @@ fn lookup(branch: Option<String>, compared: &Compared) -> (LookedAt, Vec<String>
 }
 
 fn require_logged_in(glab: &Glab, root: &Path) -> std::result::Result<(), NotLinedUp> {
-    let args = ["auth".to_owned(), "status".to_owned()];
-    match run(glab, root, &args, None).map_err(failed)? {
-        GlabRun::Printed { .. } => Ok(()),
-        GlabRun::Failed { stdout, stderr, .. } => {
-            let detail = first_line(&stderr).or_else(|| first_line(&stdout));
-            Err(NotLinedUp::NotLoggedIn {
-                detail: detail.unwrap_or_default(),
-            })
-        }
-        GlabRun::TimedOut => Err(failed(TIMED_OUT.to_owned())),
+    match glab.auth_status(root) {
+        AuthStatus::LoggedIn => Ok(()),
+        AuthStatus::LoggedOut { detail } => Err(NotLinedUp::NotLoggedIn { detail }),
+        AuthStatus::Failed { message } => Err(failed(message)),
     }
 }
 
