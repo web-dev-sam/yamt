@@ -36,7 +36,7 @@ Yours to fix, and `MrConflictsPage` reads it:
 
 - `ChunkSource`: `abortOperation(): Promise<SourceResult<AbortReply>>`; new `pushMergedBranch():
   Promise<SourceResult<PushReply>>`, `closeEndedMerge(): Promise<SourceResult<null>>`.
-- `ui/leftoverText.ts`: `export function leftoverText(leftover: Leftover): string` — the four sentences of design §4.5
+- `ui/leftoverText.ts`: `export function leftoverText(leftover: Leftover): string` — the five sentences of design §4.5
   "Leftovers" (`ReturnTo` named as the branch, or "commit <id>"), the one wording of a leftover in the app.
 
 Behaviour:

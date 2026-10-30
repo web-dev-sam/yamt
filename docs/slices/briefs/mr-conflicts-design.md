@@ -333,7 +333,8 @@ harmlessly). The claim lives in the window's managed state until the process end
      `git checkout --quiet <name> --` or `checkout_detached(<commit>)`; refused → `ReturnRefused { to, message }`.
      HEAD elsewhere → `NotReturned { to }` (the user moved it; yamt leaves it).
   2. **Branch:** created → if `refs/heads/<branch>` is still `record.head` and not checked out: `git branch --quiet -D
-     <branch>` (also drops the `branch.<branch>.*` config; git refuses it while any worktree has it); moved →
+     <branch>` (also drops the `branch.<branch>.*` config; git refuses it while any worktree has it); still
+     `record.head` but checked out (the return was refused or not done) → `BranchCheckedOut { branch }` (#2012); moved →
      if still `record.head`: `git branch --quiet --force <branch> <from>`, or `git reset --quiet --keep <from>` when it
      is the checked-out branch; anything else → `BranchKept { branch }`; git's refusal → `BranchRefused { branch,
      message }`; unchanged → nothing.
@@ -413,8 +414,9 @@ branch }`; the state becomes `Merge::Committed { offer }` (not ended: the window
   feature/x, which it created for this merge." / "feature/x goes back to 3f1c2a9, where it was before." / none.
   Leftovers — title "Merge Aborted", "The merge of main into feature/x is aborted, but yamt did not put everything
   back:", lines "HEAD moved after the merge started, so yamt did not check out develop again.", "git did not check out
-  develop again: <message>", "feature/x changed after the merge started, so yamt left it as it is.", "git did not put
-  feature/x back: <message>", button "Close". Push — title "Push to GitLab", "Push feature/x to GitLab?", note "The
+  develop again: <message>", "feature/x changed after the merge started, so yamt left it as it is.", "feature/x is
+  still checked out, so yamt did not delete it.", "git did not put feature/x back: <message>", button "Close". Push —
+  title "Push to GitLab", "Push feature/x to GitLab?", note "The
   merge is committed on feature/x. Keep Local leaves it there; you can push it later.", "Push" / "Keep Local"; failed —
   title "Push Failed", "git did not push feature/x: <message>", note "The merge commit stays on your feature/x.",
   "Push Again" / "Keep Local".
@@ -460,6 +462,7 @@ pub enum Leftover {
     NotReturned { to: ReturnTo },
     ReturnRefused { to: ReturnTo, message: String },
     BranchKept { branch: String },
+    BranchCheckedOut { branch: String },   // a created branch yamt could not delete: still checked out (#2012)
     BranchRefused { branch: String, message: String },
 }
 

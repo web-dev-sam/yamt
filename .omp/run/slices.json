@@ -1,12 +1,4 @@
 {
-  "MrConflictsGitlabR1": {
-    "owned": [
-      "crates/merge-requests/tests/**",
-      "tests/glab/mr-conflicts/**",
-      "tests/glab/README.md",
-      "frontend/src/ipc/fixtureMergeRequestData.test.ts"
-    ]
-  },
   "MrConflictsApp": {
     "owned": [
       "src-tauri/Cargo.toml",
@@ -24,5 +16,8 @@
       "frontend/src/ipc/mergeRequestDomain.ts",
       "frontend/src/ipc/index.ts"
     ]
+  },
+  "MrConflictsLocalR1": {
+    "owned": ["crates/local-merge/**"]
   }
 }
