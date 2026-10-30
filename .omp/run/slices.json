@@ -1,26 +1,4 @@
 {
-  "MrWindowStateR1": {
-    "owned": [
-      "frontend/src/ipc/MergeRequestSource.ts",
-      "frontend/src/ipc/mergeRequestDomain.ts",
-      "frontend/src/ipc/mergeRequestDomain.test.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/tauriMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/fixtureReview.ts",
-      "frontend/src/ipc/fixtureReview.test.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ui/screen.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/store.ts",
-      "frontend/src/ui/store.test.ts"
-    ]
-  },
   "MrPage": {
     "owned": [
       "frontend/src/ui/MergeRequestsButton.vue",
@@ -37,6 +15,19 @@
       "frontend/scripts/fences.test.ts",
       "frontend/scripts/app-session/**",
       "scripts/map-check.sh"
+    ]
+  },
+  "MrOpenCommandsR1": {
+    "owned": [
+      "crates/merge-requests/**",
+      "src-tauri/src/range_window.rs",
+      "src-tauri/src/appimage.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "tests/glab/merge-requests/**",
+      "tests/glab/README.md"
     ]
   }
 }
