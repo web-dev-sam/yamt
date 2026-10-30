@@ -1,0 +1,2 @@
+just mutants HEAD → 28 mutants tested in 2m: 26 caught, 2 unviable; no TypeScript changes
+

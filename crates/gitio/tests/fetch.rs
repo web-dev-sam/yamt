@@ -24,6 +24,7 @@ fn text(dir: &Path, args: &[&str]) -> String {
 struct Fixture {
     repo: TempDir,
     _server: TempDir,
+    bare: std::path::PathBuf,
     merge_request_head: String,
 }
 
@@ -51,6 +52,7 @@ fn fixture() -> Fixture {
     Fixture {
         repo,
         _server: server,
+        bare,
         merge_request_head: head,
     }
 }
@@ -86,21 +88,18 @@ fn a_merge_request_head_is_fetched_without_writing_any_ref_or_fetch_head() {
     assert!(!root.join(".git/FETCH_HEAD").exists());
 }
 
-// git runs a local remote's `remote.<name>.uploadpack` through the shell with fetch's environment
-// (git-config(1)), so it can record that environment.
+/// Makes the remote `gitlab` record the environment fetch runs it with, in the returned file: git runs a local
+/// remote's `remote.<name>.uploadpack` through the shell with fetch's environment (git-config(1)).
 #[cfg(unix)]
-#[test]
-fn the_fetch_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
-    let fixture = fixture();
-    let root = fixture.repo.path();
+fn recording_fetch_environment(root: &Path) -> std::path::PathBuf {
     let recorded = root.join("fetch.env");
     let upload_pack = format!("env > '{}'; git-upload-pack", recorded.display());
     git_ok(root, &["config", "remote.gitlab.uploadpack", &upload_pack]).unwrap();
+    recorded
+}
 
-    let repo = Repo::discover(root).unwrap();
-    repo.fetch_without_refs("gitlab", &[MR_REF], FETCH_TIMEOUT)
-        .unwrap();
-
+#[cfg(unix)]
+fn assert_no_prompt_in(recorded: &Path) {
     let environment = std::fs::read_to_string(recorded).unwrap();
     let lines: Vec<&str> = environment.lines().collect();
     for wanted in [
@@ -112,6 +111,20 @@ fn the_fetch_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
     ] {
         assert!(lines.contains(&wanted), "{wanted} not in {environment}");
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn the_fetch_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
+    let fixture = fixture();
+    let root = fixture.repo.path();
+    let recorded = recording_fetch_environment(root);
+
+    let repo = Repo::discover(root).unwrap();
+    repo.fetch_without_refs("gitlab", &[MR_REF], FETCH_TIMEOUT)
+        .unwrap();
+
+    assert_no_prompt_in(&recorded);
 }
 
 #[test]
@@ -170,4 +183,49 @@ fn a_fetch_that_gets_no_answer_fails_at_its_deadline() {
         Err("git fetch got no answer within 1 s".to_owned())
     );
     assert!(started.elapsed() < HANG, "{:?}", started.elapsed());
+}
+
+/// Every ref with its commit, one `<refname> <objectname>` line each, sorted.
+fn refs(root: &Path) -> Vec<String> {
+    let listing = text(root, &["for-each-ref", "--format=%(refname) %(objectname)"]);
+    let mut lines: Vec<String> = listing.lines().map(str::to_owned).collect();
+    lines.sort();
+    lines
+}
+
+#[test]
+fn fetch_branches_writes_only_the_two_remote_tracking_refs() {
+    let fixture = fixture();
+    let root = fixture.repo.path();
+    let bare = &fixture.bare;
+    let configured = text(root, &["config", "remote.gitlab.fetch"]);
+    assert_eq!(configured.trim_end(), "+refs/heads/*:refs/remotes/gitlab/*");
+    let head = &fixture.merge_request_head;
+    git_ok(bare, &["update-ref", "refs/heads/remote", head]).unwrap();
+    let main = text(bare, &["rev-parse", "refs/heads/main"]);
+    let mut expected = refs(root);
+    expected.push(format!("refs/remotes/gitlab/main {}", main.trim_end()));
+    expected.push(format!("refs/remotes/gitlab/remote {head}"));
+    expected.sort();
+
+    let repo = Repo::discover(root).unwrap();
+    let fetched = repo.fetch_branches("gitlab", &["main", "remote"], FETCH_TIMEOUT);
+
+    assert_eq!(fetched, Ok(()));
+    assert_eq!(refs(root), expected);
+    assert!(!root.join(".git/FETCH_HEAD").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn fetch_branches_never_prompts() {
+    let fixture = fixture();
+    let root = fixture.repo.path();
+    let recorded = recording_fetch_environment(root);
+
+    let repo = Repo::discover(root).unwrap();
+    repo.fetch_branches("gitlab", &["main"], FETCH_TIMEOUT)
+        .unwrap();
+
+    assert_no_prompt_in(&recorded);
 }

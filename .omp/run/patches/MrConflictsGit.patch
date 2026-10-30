@@ -1,0 +1,974 @@
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index ca964bd..d9e7af9 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -8,4 +8,6 @@ The AI's checkout (`src/checkout.rs`, plan §2 #110, #122): `clone_shared_into(i
+ 
+ The merge-request fetch (`src/fetch.rs`, plan §2 #128–#135): `Repo::fetch_without_refs(remote, refspecs, timeout)` (`fetch --no-tags --no-write-fetch-head --no-recurse-submodules --no-auto-maintenance --refmap= --quiet --end-of-options <remote> <refspecs>`, `Access::Write`: refspecs without a destination and an empty `--refmap=` bring the commits and write no ref and no `FETCH_HEAD`; `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and on Unix `SSH_ASKPASS_REQUIRE=force` with `SSH_ASKPASS=false`, so no prompt of git, ssh or a credential manager waits; run by `run_with_deadline`, killed at `timeout` — callers pass `FETCH_TIMEOUT`, 120 s, a test a shorter one; `Err(String)` is git's first stderr line through `glab.rs` `first_line`, the deadline's own words or the exit status). `tests/fetch.rs` against a bare server in a tempdir: no ref, status, index or HEAD changed, the no-prompt environment recorded, a missing server or ref in git's words, a hang ended at its deadline.
+ 
++The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): the no-prompt environment above is one helper, `fetch.rs` `refuse_prompts`, called by both fetches and the push. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit <rev>` and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
++
+ glab (`src/glab.rs`, plan §2 #118, #128–#135): `Glab::find()` (the first runnable `glab` on PATH, `program.rs` `program_in`; `None` when not installed), `Glab::at(program)`, `with_timeout` (default `GLAB_TIMEOUT`, 20 s); `run(cwd, args, stdin)` → `GlabRun` = `Printed { stdout }` | `Failed { status, stdout, stderr }` | `TimedOut`, with the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`, stdin closed or written and closed, a glab that cannot start `Error::GlabIo { program, source }`; `get(cwd, args)` → stdout or `Err(String)`: glab's `last_line` of stderr (its error comes after any notice), else the exit status or signal in words, `TIMED_OUT` (`"glab timed out"`) at the deadline; `auth_status(cwd)` → `AuthStatus` = `LoggedIn` | `LoggedOut { detail }` (glab's first line of stderr, else stdout, naming the instance) | `Failed { message }` (could not run, or `TIMED_OUT`). `first_line`/`last_line`: the first or last non-blank line, trimmed, of bytes decoded lossily. `tests/glab.rs` runs the committed `scripts/fake-glab` on the `tests/glab/runner` scenario through a symlink (stdin and stdout, a failure's exit and streams, a hang's timeout, the environment overrides in a child process, a missing glab).
+diff --git a/crates/gitio/src/branch.rs b/crates/gitio/src/branch.rs
+new file mode 100644
+index 0000000..0c9cdaa
+--- /dev/null
++++ b/crates/gitio/src/branch.rs
+@@ -0,0 +1,75 @@
++use crate::Result;
++use crate::abort_continue::GitRun;
++use crate::entry::Oid;
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run, run_to_end, run_to_success};
++
++impl Repo {
++    /// `git checkout --quiet -B <branch> <commit>`: the branch created, or moved, at `commit` and checked out; an
++    /// existing branch keeps its `branch.<branch>.*` config. No deadline: writing a large tree takes long.
++    pub fn checkout_branch_at(&self, branch: &str, commit: &Oid) -> Result<()> {
++        let args = ["checkout", "--quiet", "-B", branch, commit.as_str()];
++        run_to_success(self.command(Access::Write, &args))?;
++        Ok(())
++    }
++
++    /// `git checkout --quiet <branch> --`. No deadline: writing a large tree takes long.
++    pub fn checkout_branch(&self, branch: &str) -> Result<()> {
++        let args = ["checkout", "--quiet", branch, "--"];
++        run_to_success(self.command(Access::Write, &args))?;
++        Ok(())
++    }
++
++    /// `git config branch.<branch>.remote <remote>`, then `git config branch.<branch>.merge refs/heads/<branch>`:
++    /// what `--track` writes, whatever the remote's fetch refspec.
++    pub fn set_upstream(&self, branch: &str, remote: &str) -> Result<()> {
++        self.set_config(&format!("branch.{branch}.remote"), remote)?;
++        self.set_config(
++            &format!("branch.{branch}.merge"),
++            &format!("refs/heads/{branch}"),
++        )
++    }
++
++    fn set_config(&self, key: &str, value: &str) -> Result<()> {
++        run(
++            self.command(Access::Write, &["config", key, value]),
++            None,
++            GIT_TIMEOUT,
++        )?;
++        Ok(())
++    }
++
++    /// `git branch --quiet -D <branch>`, its `branch.<branch>.*` config with it; git refuses a branch checked out
++    /// in any worktree.
++    pub fn delete_branch(&self, branch: &str) -> Result<()> {
++        let command = self.command(Access::Write, &["branch", "--quiet", "-D", branch]);
++        run(command, None, GIT_TIMEOUT)?;
++        Ok(())
++    }
++
++    /// `git branch --quiet --force <branch> <commit>`; git refuses a branch checked out in any worktree.
++    pub fn move_branch(&self, branch: &str, commit: &Oid) -> Result<()> {
++        let args = ["branch", "--quiet", "--force", branch, commit.as_str()];
++        run(self.command(Access::Write, &args), None, GIT_TIMEOUT)?;
++        Ok(())
++    }
++
++    /// `git reset --quiet --keep <commit>`: the checked-out branch moved to `commit`, refused when a local change
++    /// is in the way (git-reset(1)). No deadline: writing a large tree takes long.
++    pub fn reset_keep(&self, commit: &Oid) -> Result<()> {
++        let args = ["reset", "--quiet", "--keep", commit.as_str()];
++        run_to_success(self.command(Access::Write, &args))?;
++        Ok(())
++    }
++
++    /// `git merge --no-ff --no-commit <rev>`. No deadline: a large merge takes long. A non-zero exit is not an
++    /// `Err`, as in `continue_operation`: the caller reads the stop to learn what happened.
++    pub fn merge_no_commit(&self, rev: &str) -> Result<GitRun> {
++        let args = ["merge", "--no-ff", "--no-commit", rev];
++        let finished = run_to_end(self.command(Access::Write, &args))?;
++        Ok(GitRun {
++            succeeded: finished.status.success(),
++            output: finished.combined(),
++        })
++    }
++}
+diff --git a/crates/gitio/src/fetch.rs b/crates/gitio/src/fetch.rs
+index 6469889..8fd3b4e 100644
+--- a/crates/gitio/src/fetch.rs
++++ b/crates/gitio/src/fetch.rs
+@@ -1,3 +1,4 @@
++use std::process::Command;
+ use std::time::Duration;
+ 
+ use crate::Repo;
+@@ -6,7 +7,7 @@ use crate::run::{Access, Waited, argv, run_with_deadline};
+ 
+ /// A fetch's deadline: it talks to a server over the network, and may never get an answer.
+ pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+-const FETCH_WITHOUT_REFS: [&str; 8] = [
++const FETCH: [&str; 8] = [
+     "fetch",
+     "--no-tags",
+     "--no-write-fetch-head",
+@@ -28,17 +29,31 @@ impl Repo {
+         refspecs: &[&str],
+         timeout: Duration,
+     ) -> Result<(), String> {
+-        let mut command = self.command(Access::Write, &FETCH_WITHOUT_REFS);
++        self.fetch(remote, refspecs, timeout)
++    }
++
++    /// `git fetch` of each of `branches` from `remote` into its remote-tracking branch
++    /// (`+refs/heads/<b>:refs/remotes/<remote>/<b>`), which writes those refs only: no `FETCH_HEAD`, and the empty
++    /// `--refmap=` keeps the configured refspec from updating others. As `fetch_without_refs`: no prompt, killed at
++    /// `timeout`, `Err` git's first stderr line. The caller checks that no branch name holds ':'.
++    pub fn fetch_branches(
++        &self,
++        remote: &str,
++        branches: &[&str],
++        timeout: Duration,
++    ) -> Result<(), String> {
++        let refspecs: Vec<String> = branches
++            .iter()
++            .map(|branch| format!("+refs/heads/{branch}:refs/remotes/{remote}/{branch}"))
++            .collect();
++        let refspecs: Vec<&str> = refspecs.iter().map(String::as_str).collect();
++        self.fetch(remote, &refspecs, timeout)
++    }
++
++    fn fetch(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String> {
++        let mut command = self.command(Access::Write, &FETCH);
+         command.arg(remote).args(refspecs);
+-        command
+-            .env("GIT_TERMINAL_PROMPT", "0")
+-            .env("GCM_INTERACTIVE", "never");
+-        // OpenSSH 8.4+ asks SSH_ASKPASS instead of the terminal when SSH_ASKPASS_REQUIRE=force (ssh(1)
+-        // "ENVIRONMENT"); `false` refuses at once, so a passphrase or host-key question fails the fetch.
+-        #[cfg(unix)]
+-        command
+-            .env("SSH_ASKPASS_REQUIRE", "force")
+-            .env("SSH_ASKPASS", "false");
++        refuse_prompts(&mut command);
+         tracing::debug!(args = ?argv(&command), "running git");
+         match run_with_deadline(command, None, timeout) {
+             Err(error) => Err(format!("cannot run git fetch: {error}")),
+@@ -52,3 +67,17 @@ impl Repo {
+         }
+     }
+ }
++
++/// Sets `command`'s environment so that no prompt of git, ssh or a credential manager waits for an answer: a
++/// question that needs one fails the run instead.
++pub(crate) fn refuse_prompts(command: &mut Command) {
++    command
++        .env("GIT_TERMINAL_PROMPT", "0")
++        .env("GCM_INTERACTIVE", "never");
++    // OpenSSH 8.4+ asks SSH_ASKPASS instead of the terminal when SSH_ASKPASS_REQUIRE=force (ssh(1)
++    // "ENVIRONMENT"); `false` refuses at once, so a passphrase or host-key question fails the run.
++    #[cfg(unix)]
++    command
++        .env("SSH_ASKPASS_REQUIRE", "force")
++        .env("SSH_ASKPASS", "false");
++}
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index aa6c56c..3e97d90 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -2,13 +2,15 @@
+ //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
+ //! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
+ //! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
+-//! fetches a merge request's commits without writing a ref (`fetch.rs`); runs glab, GitLab's command line, the
+-//! same way.
++//! fetches a merge request's commits without writing a ref, or its branches into their remote-tracking branches
++//! (`fetch.rs`); creates, checks out, moves and deletes a branch and starts a merge (`branch.rs`); pushes a branch
++//! (`push.rs`); runs glab, GitLab's command line, the same way.
+ #![forbid(unsafe_code)]
+ 
+ mod abort_continue;
+ mod attributes;
+ mod blob;
++mod branch;
+ mod checkout;
+ mod diff;
+ mod entry;
+@@ -19,6 +21,7 @@ mod merge_file;
+ mod names;
+ mod operation;
+ mod program;
++mod push;
+ mod repo;
+ mod rerere;
+ mod run;
+@@ -38,6 +41,7 @@ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+ pub use names::{CommitSummary, RemoteUrl};
+ pub use operation::{Operation, Progress, Rebase, Stop, StopId};
++pub use push::PUSH_TIMEOUT;
+ pub use repo::Repo;
+ pub use version::GitVersion;
+ 
+diff --git a/crates/gitio/src/push.rs b/crates/gitio/src/push.rs
+new file mode 100644
+index 0000000..d27e620
+--- /dev/null
++++ b/crates/gitio/src/push.rs
+@@ -0,0 +1,125 @@
++use std::time::Duration;
++
++use crate::fetch::refuse_prompts;
++use crate::repo::Repo;
++use crate::run::{Access, Waited, argv, run_with_deadline};
++
++/// A push's deadline: it talks to a server over the network, and may never get an answer.
++pub const PUSH_TIMEOUT: Duration = Duration::from_secs(120);
++const PUSH: [&str; 5] = [
++    "push",
++    "--porcelain",
++    "--no-follow-tags",
++    "--recurse-submodules=no",
++    "--end-of-options",
++];
++const REJECTED_FLAG: &str = "!";
++
++impl Repo {
++    /// `git push` of `branch` to the branch of the same name on `remote`, never forced (no `+`, no `--force`), and
++    /// never waiting on a prompt; killed at `timeout` (`PUSH_TIMEOUT`). `Err` holds the ref's summary and reason
++    /// when the remote rejected it ("[rejected] (fetch first)"), else git's first `fatal:` or `error:` line, else
++    /// git's exit in words.
++    pub fn push_branch(&self, remote: &str, branch: &str, timeout: Duration) -> Result<(), String> {
++        let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
++        let mut command = self.command(Access::Write, &PUSH);
++        command.arg(remote).arg(&refspec);
++        refuse_prompts(&mut command);
++        tracing::debug!(args = ?argv(&command), "running git");
++        let finished = match run_with_deadline(command, None, timeout) {
++            Err(error) => return Err(format!("cannot run git push: {error}")),
++            Ok(Waited::TimedOut) => {
++                return Err(format!(
++                    "git push got no answer within {} s",
++                    timeout.as_secs()
++                ));
++            }
++            Ok(Waited::Exited(finished)) => finished,
++        };
++        if let Some(summary) = rejection(&finished.stdout, &refspec) {
++            return Err(summary);
++        }
++        if finished.status.success() {
++            return Ok(());
++        }
++        Err(failure_line(&finished.stderr)
++            .unwrap_or_else(|| format!("git push failed: {}", finished.status)))
++    }
++}
++
++/// The summary and reason of `refspec`'s line when its flag says the push of it was rejected. git-push(1)
++/// "OUTPUT": with `--porcelain`, each ref is a line `<flag> TAB <from>:<to> TAB <summary> (<reason>)`, flag `!`
++/// for a rejected ref.
++fn rejection(porcelain: &[u8], refspec: &str) -> Option<String> {
++    let text = String::from_utf8_lossy(porcelain);
++    for line in text.lines() {
++        let fields: Vec<&str> = line.split('\t').collect();
++        if let [flag, ref_pair, summary] = fields.as_slice()
++            && *ref_pair == refspec
++        {
++            return (*flag == REJECTED_FLAG).then(|| (*summary).to_owned());
++        }
++    }
++    None
++}
++
++/// git's first stderr line that states a failure: the cause, before hints and advice.
++fn failure_line(stderr: &[u8]) -> Option<String> {
++    let text = String::from_utf8_lossy(stderr);
++    let line = text
++        .lines()
++        .find(|line| line.starts_with("fatal:") || line.starts_with("error:"));
++    line.map(str::to_owned)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const REFSPEC: &str = "refs/heads/feature:refs/heads/feature";
++
++    #[test]
++    fn a_rejected_ref_gives_its_summary_and_reason() {
++        let porcelain = b"To /srv/remote.git\n\
++            !\trefs/heads/feature:refs/heads/feature\t[rejected] (fetch first)\nDone\n";
++
++        assert_eq!(
++            rejection(porcelain, REFSPEC),
++            Some("[rejected] (fetch first)".to_owned())
++        );
++    }
++
++    #[test]
++    fn a_pushed_or_up_to_date_ref_is_no_rejection() {
++        let pushed = b"To /srv/remote.git\n \trefs/heads/feature:refs/heads/feature\t1111111..2222222\nDone\n";
++        let up_to_date =
++            b"To /srv/remote.git\n=\trefs/heads/feature:refs/heads/feature\t[up to date]\nDone\n";
++
++        assert_eq!(rejection(pushed, REFSPEC), None);
++        assert_eq!(rejection(up_to_date, REFSPEC), None);
++    }
++
++    #[test]
++    fn another_ref_s_rejection_is_not_this_ref_s() {
++        let porcelain =
++            b"To /srv/remote.git\n!\trefs/heads/other:refs/heads/other\t[rejected] (fetch first)\nDone\n";
++
++        assert_eq!(rejection(porcelain, REFSPEC), None);
++    }
++
++    #[test]
++    fn the_failure_line_is_the_first_fatal_or_error_line() {
++        let fatal = b"hint: something\nfatal: 'gone' does not appear to be a git repository\nfatal: second\n";
++        let error = b"To /srv/remote.git\nerror: failed to push some refs to '/srv/remote.git'\n";
++
++        assert_eq!(
++            failure_line(fatal),
++            Some("fatal: 'gone' does not appear to be a git repository".to_owned())
++        );
++        assert_eq!(
++            failure_line(error),
++            Some("error: failed to push some refs to '/srv/remote.git'".to_owned())
++        );
++        assert_eq!(failure_line(b"hint: only advice\n"), None);
++    }
++}
+diff --git a/crates/gitio/src/repo.rs b/crates/gitio/src/repo.rs
+index e5f6925..1266634 100644
+--- a/crates/gitio/src/repo.rs
++++ b/crates/gitio/src/repo.rs
+@@ -82,6 +82,27 @@ impl Repo {
+         oid_unless_silent(command, MERGE_BASE)
+     }
+ 
++    /// `git merge-base --is-ancestor <ancestor> <of>`: exit 0 → true, exit 1 → false, anything else an `Err`.
++    pub fn is_ancestor(&self, ancestor: &Oid, of: &Oid) -> Result<bool> {
++        let args = [MERGE_BASE, "--is-ancestor", ancestor.as_str(), of.as_str()];
++        match run(self.command(Access::Read, &args), None, GIT_TIMEOUT) {
++            Ok(_) => Ok(true),
++            Err(Error::GitFailed {
++                status: Some(SILENT_FAILURE_STATUS),
++                ..
++            }) => Ok(false),
++            Err(error) => Err(error),
++        }
++    }
++
++    /// Whether any tracked file is staged, unstaged or unmerged; untracked files do not count:
++    /// `git status --porcelain=v1 -z --untracked-files=no` lists anything.
++    pub fn has_tracked_changes(&self) -> Result<bool> {
++        let args = ["status", "--porcelain=v1", "-z", "--untracked-files=no"];
++        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
++        Ok(!output.is_empty())
++    }
++
+     /// `git rev-parse --path-format=absolute --git-common-dir`: one identity for every worktree of a repository
+     pub fn common_dir(&self) -> Result<PathBuf> {
+         let args = [REV_PARSE, "--path-format=absolute", "--git-common-dir"];
+@@ -89,7 +110,8 @@ impl Repo {
+         Ok(path_from_git(&without_final_newline(REV_PARSE, output)?))
+     }
+ 
+-    pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
++    /// The path of `name` inside this checkout's git directory: `git rev-parse --git-path <name>`.
++    pub fn git_path(&self, name: &str) -> Result<PathBuf> {
+         let [path] = self.git_paths([name])?;
+         Ok(path)
+     }
+diff --git a/crates/gitio/tests/branch.rs b/crates/gitio/tests/branch.rs
+new file mode 100644
+index 0000000..6ca79f2
+--- /dev/null
++++ b/crates/gitio/tests/branch.rs
+@@ -0,0 +1,274 @@
++#![cfg(test)]
++
++use std::path::Path;
++
++use yamt_conflict_repo::{
++    ConflictFile, FileKind, TempDir, conflict_repo, diverged_repo, git, git_ok,
++};
++use yamt_gitio::{Error, Oid, Repo};
++
++const UNKNOWN_COMMIT: &str = "1111111111111111111111111111111111111111";
++const GIT_FATAL_STATUS: i32 = 128;
++const CONFLICTED: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "a.txt",
++    kind: FileKind::Regular,
++    base: Some(b"base\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++const MERGES_CLEANLY: [ConflictFile<'static>; 2] = [
++    ConflictFile {
++        path: "local.txt",
++        kind: FileKind::Regular,
++        base: Some(b"base\n"),
++        local: Some(b"local\n"),
++        remote: Some(b"base\n"),
++    },
++    ConflictFile {
++        path: "remote.txt",
++        kind: FileKind::Regular,
++        base: Some(b"base\n"),
++        local: Some(b"base\n"),
++        remote: Some(b"remote\n"),
++    },
++];
++
++fn text(dir: &Path, args: &[&str]) -> String {
++    String::from_utf8(git_ok(dir, args).unwrap())
++        .unwrap()
++        .trim_end()
++        .to_owned()
++}
++
++fn commit(repo: &Repo, name: &str) -> Oid {
++    repo.commit_named(name).unwrap().unwrap()
++}
++
++/// `git config <key>`, `None` when it is not set.
++fn config(dir: &Path, key: &str) -> Option<String> {
++    let output = git(dir, &["config", key]).unwrap();
++    output.status.success().then(|| {
++        String::from_utf8(output.stdout)
++            .unwrap()
++            .trim_end()
++            .to_owned()
++    })
++}
++
++/// The diverged repository (on `local`; `main` is the base, `remote` the other side) and its `Repo`.
++fn diverged() -> (TempDir, Repo) {
++    let dir = diverged_repo(&CONFLICTED).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    (dir, repo)
++}
++
++#[test]
++fn checkout_branch_at_creates_fast_forwards_and_keeps_upstream() {
++    let (dir, repo) = diverged();
++    let root = dir.path();
++    let (main, local) = (commit(&repo, "main"), commit(&repo, "local"));
++
++    repo.checkout_branch_at("feature", &main).unwrap();
++    repo.set_upstream("feature", "gitlab").unwrap();
++
++    assert_eq!(text(root, &["symbolic-ref", "HEAD"]), "refs/heads/feature");
++    assert_eq!(commit(&repo, "HEAD"), main);
++    assert_eq!(
++        config(root, "branch.feature.remote").as_deref(),
++        Some("gitlab")
++    );
++    assert_eq!(
++        config(root, "branch.feature.merge").as_deref(),
++        Some("refs/heads/feature")
++    );
++
++    repo.checkout_branch("local").unwrap();
++    repo.checkout_branch_at("feature", &local).unwrap();
++
++    assert_eq!(text(root, &["symbolic-ref", "HEAD"]), "refs/heads/feature");
++    assert_eq!(commit(&repo, "feature"), local);
++    assert_eq!(text(root, &["status", "--porcelain=v1"]), "");
++    assert_eq!(
++        config(root, "branch.feature.remote").as_deref(),
++        Some("gitlab")
++    );
++    assert_eq!(
++        config(root, "branch.feature.merge").as_deref(),
++        Some("refs/heads/feature")
++    );
++}
++
++#[test]
++fn checkout_branch_switches_head_and_the_worktree_to_the_branch() {
++    let (dir, repo) = diverged();
++    let root = dir.path();
++
++    repo.checkout_branch("remote").unwrap();
++
++    assert_eq!(text(root, &["symbolic-ref", "HEAD"]), "refs/heads/remote");
++    assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"remote\n");
++}
++
++#[test]
++fn branch_force_keeps_the_upstream_config() {
++    let (dir, repo) = diverged();
++    let root = dir.path();
++    let main = commit(&repo, "main");
++    repo.set_upstream("remote", "gitlab").unwrap();
++
++    repo.move_branch("remote", &main).unwrap();
++
++    assert_eq!(commit(&repo, "remote"), main);
++    assert_eq!(
++        config(root, "branch.remote.remote").as_deref(),
++        Some("gitlab")
++    );
++    assert_eq!(
++        config(root, "branch.remote.merge").as_deref(),
++        Some("refs/heads/remote")
++    );
++}
++
++#[test]
++fn delete_branch_removes_the_branch_and_its_config() {
++    let (dir, repo) = diverged();
++    let root = dir.path();
++    repo.set_upstream("remote", "gitlab").unwrap();
++
++    repo.delete_branch("remote").unwrap();
++
++    assert_eq!(repo.commit_named("refs/heads/remote").unwrap(), None);
++    assert_eq!(config(root, "branch.remote.remote"), None);
++    assert_eq!(config(root, "branch.remote.merge"), None);
++}
++
++#[test]
++fn delete_and_move_refuse_a_branch_checked_out_in_another_worktree() {
++    let (dir, repo) = diverged();
++    let elsewhere = tempfile::tempdir().unwrap();
++    let worktree = elsewhere.path().join("worktree");
++    let worktree_path = worktree.display().to_string();
++    git_ok(
++        dir.path(),
++        &["worktree", "add", "-q", &worktree_path, "remote"],
++    )
++    .unwrap();
++    let (main, remote) = (commit(&repo, "main"), commit(&repo, "remote"));
++
++    let deleted = repo.delete_branch("remote");
++    let moved = repo.move_branch("remote", &main);
++
++    assert!(
++        matches!(deleted, Err(Error::GitFailed { .. })),
++        "{deleted:?}"
++    );
++    assert!(matches!(moved, Err(Error::GitFailed { .. })), "{moved:?}");
++    assert_eq!(commit(&repo, "remote"), remote);
++}
++
++#[test]
++fn reset_keep_moves_the_checked_out_branch_and_refuses_a_change_in_the_way() {
++    let (dir, repo) = diverged();
++    let root = dir.path();
++    let (main, remote) = (commit(&repo, "main"), commit(&repo, "remote"));
++
++    repo.reset_keep(&main).unwrap();
++
++    assert_eq!(text(root, &["symbolic-ref", "HEAD"]), "refs/heads/local");
++    assert_eq!(commit(&repo, "local"), main);
++    assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"base\n");
++
++    std::fs::write(root.join("a.txt"), b"mine\n").unwrap();
++    let refused = repo.reset_keep(&remote);
++
++    assert!(
++        matches!(refused, Err(Error::GitFailed { .. })),
++        "{refused:?}"
++    );
++    assert_eq!(commit(&repo, "local"), main);
++    assert_eq!(std::fs::read(root.join("a.txt")).unwrap(), b"mine\n");
++}
++
++#[test]
++fn is_ancestor_answers_both_ways_and_fails_on_an_unknown_commit() {
++    let (_dir, repo) = diverged();
++    let (main, local) = (commit(&repo, "main"), commit(&repo, "local"));
++    let unknown = Oid::parse(UNKNOWN_COMMIT).unwrap();
++
++    assert!(repo.is_ancestor(&main, &local).unwrap());
++    assert!(!repo.is_ancestor(&local, &main).unwrap());
++    let failed = repo.is_ancestor(&unknown, &local);
++    assert!(
++        matches!(
++            failed,
++            Err(Error::GitFailed {
++                status: Some(GIT_FATAL_STATUS),
++                ..
++            })
++        ),
++        "{failed:?}"
++    );
++}
++
++#[test]
++fn has_tracked_changes_ignores_untracked_files_and_sees_staged_unstaged_and_unmerged() {
++    let (dir, repo) = diverged();
++    let root = dir.path();
++    assert!(!repo.has_tracked_changes().unwrap());
++
++    std::fs::write(root.join("untracked.txt"), b"new\n").unwrap();
++    assert!(!repo.has_tracked_changes().unwrap());
++
++    std::fs::write(root.join("a.txt"), b"changed\n").unwrap();
++    assert!(repo.has_tracked_changes().unwrap());
++
++    git_ok(root, &["add", "a.txt"]).unwrap();
++    git_ok(root, &["checkout", "--", "a.txt"]).unwrap();
++    assert_eq!(
++        text(root, &["status", "--porcelain=v1", "--untracked-files=no"]),
++        "M  a.txt"
++    );
++    assert!(repo.has_tracked_changes().unwrap());
++
++    let conflicted = conflict_repo(&CONFLICTED).unwrap();
++    let unmerged = Repo::discover(conflicted.path()).unwrap();
++    assert!(unmerged.has_tracked_changes().unwrap());
++}
++
++#[test]
++fn merge_no_commit_stops_with_merge_head_on_conflicts_and_on_a_clean_merge() {
++    let (_conflicting_dir, conflicting) = diverged();
++    let head = commit(&conflicting, "HEAD");
++
++    let stopped = conflicting.merge_no_commit("remote").unwrap();
++
++    assert!(!stopped.succeeded);
++    let conflicted: Vec<String> = conflicting
++        .unmerged()
++        .unwrap()
++        .iter()
++        .map(|entry| entry.path.display().to_string())
++        .collect();
++    assert_eq!(conflicted, ["a.txt", "a.txt", "a.txt"]);
++    assert!(conflicting.git_path("MERGE_HEAD").unwrap().exists());
++    assert_eq!(commit(&conflicting, "HEAD"), head);
++
++    let clean_dir = diverged_repo(&MERGES_CLEANLY).unwrap();
++    let clean = Repo::discover(clean_dir.path()).unwrap();
++    let head = commit(&clean, "HEAD");
++
++    let merged = clean.merge_no_commit("remote").unwrap();
++
++    assert!(
++        merged.succeeded,
++        "{}",
++        String::from_utf8_lossy(&merged.output)
++    );
++    assert_eq!(clean.unmerged().unwrap(), Vec::new());
++    assert!(clean.git_path("MERGE_HEAD").unwrap().exists());
++    assert_eq!(commit(&clean, "HEAD"), head);
++    assert_eq!(
++        std::fs::read(clean_dir.path().join("remote.txt")).unwrap(),
++        b"remote\n"
++    );
++}
+diff --git a/crates/gitio/tests/fetch.rs b/crates/gitio/tests/fetch.rs
+index bbf1eff..a43ea06 100644
+--- a/crates/gitio/tests/fetch.rs
++++ b/crates/gitio/tests/fetch.rs
+@@ -24,6 +24,7 @@ fn text(dir: &Path, args: &[&str]) -> String {
+ struct Fixture {
+     repo: TempDir,
+     _server: TempDir,
++    bare: std::path::PathBuf,
+     merge_request_head: String,
+ }
+ 
+@@ -51,6 +52,7 @@ fn fixture() -> Fixture {
+     Fixture {
+         repo,
+         _server: server,
++        bare,
+         merge_request_head: head,
+     }
+ }
+@@ -86,21 +88,18 @@ fn a_merge_request_head_is_fetched_without_writing_any_ref_or_fetch_head() {
+     assert!(!root.join(".git/FETCH_HEAD").exists());
+ }
+ 
+-// git runs a local remote's `remote.<name>.uploadpack` through the shell with fetch's environment
+-// (git-config(1)), so it can record that environment.
++/// Makes the remote `gitlab` record the environment fetch runs it with, in the returned file: git runs a local
++/// remote's `remote.<name>.uploadpack` through the shell with fetch's environment (git-config(1)).
+ #[cfg(unix)]
+-#[test]
+-fn the_fetch_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
+-    let fixture = fixture();
+-    let root = fixture.repo.path();
++fn recording_fetch_environment(root: &Path) -> std::path::PathBuf {
+     let recorded = root.join("fetch.env");
+     let upload_pack = format!("env > '{}'; git-upload-pack", recorded.display());
+     git_ok(root, &["config", "remote.gitlab.uploadpack", &upload_pack]).unwrap();
++    recorded
++}
+ 
+-    let repo = Repo::discover(root).unwrap();
+-    repo.fetch_without_refs("gitlab", &[MR_REF], FETCH_TIMEOUT)
+-        .unwrap();
+-
++#[cfg(unix)]
++fn assert_no_prompt_in(recorded: &Path) {
+     let environment = std::fs::read_to_string(recorded).unwrap();
+     let lines: Vec<&str> = environment.lines().collect();
+     for wanted in [
+@@ -114,6 +113,20 @@ fn the_fetch_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
+     }
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn the_fetch_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
++    let fixture = fixture();
++    let root = fixture.repo.path();
++    let recorded = recording_fetch_environment(root);
++
++    let repo = Repo::discover(root).unwrap();
++    repo.fetch_without_refs("gitlab", &[MR_REF], FETCH_TIMEOUT)
++        .unwrap();
++
++    assert_no_prompt_in(&recorded);
++}
++
+ #[test]
+ fn a_server_that_is_not_there_fails_in_git_s_words_before_the_deadline() {
+     let fixture = fixture();
+@@ -171,3 +184,48 @@ fn a_fetch_that_gets_no_answer_fails_at_its_deadline() {
+     );
+     assert!(started.elapsed() < HANG, "{:?}", started.elapsed());
+ }
++
++/// Every ref with its commit, one `<refname> <objectname>` line each, sorted.
++fn refs(root: &Path) -> Vec<String> {
++    let listing = text(root, &["for-each-ref", "--format=%(refname) %(objectname)"]);
++    let mut lines: Vec<String> = listing.lines().map(str::to_owned).collect();
++    lines.sort();
++    lines
++}
++
++#[test]
++fn fetch_branches_writes_only_the_two_remote_tracking_refs() {
++    let fixture = fixture();
++    let root = fixture.repo.path();
++    let bare = &fixture.bare;
++    let configured = text(root, &["config", "remote.gitlab.fetch"]);
++    assert_eq!(configured.trim_end(), "+refs/heads/*:refs/remotes/gitlab/*");
++    let head = &fixture.merge_request_head;
++    git_ok(bare, &["update-ref", "refs/heads/remote", head]).unwrap();
++    let main = text(bare, &["rev-parse", "refs/heads/main"]);
++    let mut expected = refs(root);
++    expected.push(format!("refs/remotes/gitlab/main {}", main.trim_end()));
++    expected.push(format!("refs/remotes/gitlab/remote {head}"));
++    expected.sort();
++
++    let repo = Repo::discover(root).unwrap();
++    let fetched = repo.fetch_branches("gitlab", &["main", "remote"], FETCH_TIMEOUT);
++
++    assert_eq!(fetched, Ok(()));
++    assert_eq!(refs(root), expected);
++    assert!(!root.join(".git/FETCH_HEAD").exists());
++}
++
++#[cfg(unix)]
++#[test]
++fn fetch_branches_never_prompts() {
++    let fixture = fixture();
++    let root = fixture.repo.path();
++    let recorded = recording_fetch_environment(root);
++
++    let repo = Repo::discover(root).unwrap();
++    repo.fetch_branches("gitlab", &["main"], FETCH_TIMEOUT)
++        .unwrap();
++
++    assert_no_prompt_in(&recorded);
++}
+diff --git a/crates/gitio/tests/push.rs b/crates/gitio/tests/push.rs
+new file mode 100644
+index 0000000..38e2d90
+--- /dev/null
++++ b/crates/gitio/tests/push.rs
+@@ -0,0 +1,188 @@
++#![cfg(test)]
++
++use std::path::{Path, PathBuf};
++
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_gitio::{PUSH_TIMEOUT, Repo};
++
++fn text(dir: &Path, args: &[&str]) -> String {
++    String::from_utf8(git_ok(dir, args).unwrap())
++        .unwrap()
++        .trim_end()
++        .to_owned()
++}
++
++/// A bare "remote" with one commit on `main`, and a clone of it, `work`, whose `origin` it is.
++struct Fixture {
++    dir: TempDir,
++    remote: PathBuf,
++    work: PathBuf,
++}
++
++impl Fixture {
++    fn new() -> Fixture {
++        let dir = tempfile::tempdir().unwrap();
++        let remote = dir.path().join("remote.git");
++        git_ok(dir.path(), &["init", "-q", "--bare", &path_text(&remote)]).unwrap();
++        let fixture = Fixture {
++            work: fixture_clone(dir.path(), &remote, "work"),
++            dir,
++            remote,
++        };
++        commit_file(&fixture.work, "a.txt", "first\n");
++        git_ok(&fixture.work, &["push", "-q", "origin", "main"]).unwrap();
++        fixture
++    }
++
++    /// Another clone that pushes a commit of its own onto the remote's `main`; that commit.
++    fn someone_else_pushes(&self) -> String {
++        let other = fixture_clone(self.dir.path(), &self.remote, "other");
++        commit_file(&other, "b.txt", "theirs\n");
++        git_ok(&other, &["push", "-q", "origin", "main"]).unwrap();
++        text(&other, &["rev-parse", "HEAD"])
++    }
++
++    fn remote_main(&self) -> String {
++        text(&self.remote, &["rev-parse", "refs/heads/main"])
++    }
++
++    fn repo(&self) -> Repo {
++        Repo::discover(&self.work).unwrap()
++    }
++}
++
++fn path_text(path: &Path) -> String {
++    path.display().to_string()
++}
++
++fn fixture_clone(dir: &Path, remote: &Path, name: &str) -> PathBuf {
++    let clone = dir.join(name);
++    git_ok(
++        dir,
++        &["clone", "-q", &path_text(remote), &path_text(&clone)],
++    )
++    .unwrap();
++    git_ok(&clone, &["config", "user.name", "yamt test"]).unwrap();
++    git_ok(&clone, &["config", "user.email", "test@yamt.invalid"]).unwrap();
++    clone
++}
++
++fn commit_file(dir: &Path, name: &str, content: &str) {
++    std::fs::write(dir.join(name), content).unwrap();
++    git_ok(dir, &["add", name]).unwrap();
++    git_ok(dir, &["commit", "-q", "-m", name]).unwrap();
++}
++
++#[test]
++fn a_fast_forward_push_sends_only_the_branch_and_no_tag() {
++    let fixture = Fixture::new();
++    commit_file(&fixture.work, "c.txt", "mine\n");
++    git_ok(&fixture.work, &["tag", "-a", "-m", "release", "v1"]).unwrap();
++    git_ok(&fixture.work, &["config", "push.followTags", "true"]).unwrap();
++    git_ok(&fixture.work, &["branch", "unpushed"]).unwrap();
++
++    let pushed = fixture.repo().push_branch("origin", "main", PUSH_TIMEOUT);
++
++    assert_eq!(pushed, Ok(()));
++    assert_eq!(
++        fixture.remote_main(),
++        text(&fixture.work, &["rev-parse", "HEAD"])
++    );
++    assert_eq!(
++        text(&fixture.remote, &["for-each-ref", "--format=%(refname)"]),
++        "refs/heads/main"
++    );
++}
++
++#[test]
++fn a_rejected_push_names_the_ref_and_reason() {
++    let fixture = Fixture::new();
++    let theirs = fixture.someone_else_pushes();
++    commit_file(&fixture.work, "c.txt", "mine\n");
++
++    let pushed = fixture.repo().push_branch("origin", "main", PUSH_TIMEOUT);
++
++    assert_eq!(pushed, Err("[rejected] (fetch first)".to_owned()));
++    assert_eq!(fixture.remote_main(), theirs);
++}
++
++#[test]
++fn a_push_never_forces() {
++    let fixture = Fixture::new();
++    let theirs = fixture.someone_else_pushes();
++    commit_file(&fixture.work, "c.txt", "mine\n");
++    git_ok(&fixture.work, &["fetch", "-q", "origin"]).unwrap();
++    let forcing = "+refs/heads/main:refs/heads/main";
++    git_ok(&fixture.work, &["config", "remote.origin.push", forcing]).unwrap();
++
++    let pushed = fixture.repo().push_branch("origin", "main", PUSH_TIMEOUT);
++
++    assert_eq!(pushed, Err("[rejected] (non-fast-forward)".to_owned()));
++    assert_eq!(fixture.remote_main(), theirs);
++}
++
++#[test]
++fn a_push_to_a_missing_remote_gives_gits_fatal_line() {
++    let fixture = Fixture::new();
++
++    let pushed = fixture.repo().push_branch("nowhere", "main", PUSH_TIMEOUT);
++
++    assert_eq!(
++        pushed,
++        Err("fatal: 'nowhere' does not appear to be a git repository".to_owned())
++    );
++}
++
++// git runs a local remote's `remote.<name>.receivepack` through the shell with push's environment
++// (git-config(1)), so it can record that environment.
++#[cfg(unix)]
++#[test]
++fn the_push_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
++    let fixture = Fixture::new();
++    commit_file(&fixture.work, "c.txt", "mine\n");
++    let recorded = fixture.dir.path().join("push.env");
++    let receive_pack = format!("env > '{}'; git-receive-pack", recorded.display());
++    git_ok(
++        &fixture.work,
++        &["config", "remote.origin.receivepack", &receive_pack],
++    )
++    .unwrap();
++
++    let pushed = fixture.repo().push_branch("origin", "main", PUSH_TIMEOUT);
++
++    assert_eq!(pushed, Ok(()));
++    let environment = std::fs::read_to_string(recorded).unwrap();
++    let lines: Vec<&str> = environment.lines().collect();
++    for wanted in [
++        "GIT_TERMINAL_PROMPT=0",
++        "GCM_INTERACTIVE=never",
++        "SSH_ASKPASS_REQUIRE=force",
++        "SSH_ASKPASS=false",
++        "LC_ALL=C",
++    ] {
++        assert!(lines.contains(&wanted), "{wanted} not in {environment}");
++    }
++}
++
++#[cfg(unix)]
++#[test]
++fn a_push_that_gets_no_answer_fails_at_its_deadline() {
++    use std::time::{Duration, Instant};
++
++    const SHORT_TIMEOUT: Duration = Duration::from_secs(1);
++    const HANG: Duration = Duration::from_secs(5);
++    let fixture = Fixture::new();
++    commit_file(&fixture.work, "c.txt", "mine\n");
++    let receive_pack = format!("sleep {}; git-receive-pack", HANG.as_secs());
++    git_ok(
++        &fixture.work,
++        &["config", "remote.origin.receivepack", &receive_pack],
++    )
++    .unwrap();
++
++    let started = Instant::now();
++    let pushed = fixture.repo().push_branch("origin", "main", SHORT_TIMEOUT);
++
++    assert_eq!(pushed, Err("git push got no answer within 1 s".to_owned()));
++    assert!(started.elapsed() < HANG, "{:?}", started.elapsed());
++}

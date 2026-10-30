@@ -2,13 +2,15 @@
 //! (`Repo::stop`), the merge heads, the refs that point at them, the merge message, the paths rerere still
 //! tracks and the merge driver config, re-runs git's merge of one file, aborts or continues the operation,
 //! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
-//! fetches a merge request's commits without writing a ref (`fetch.rs`); runs glab, GitLab's command line, the
-//! same way.
+//! fetches a merge request's commits without writing a ref, or its branches into their remote-tracking branches
+//! (`fetch.rs`); creates, checks out, moves and deletes a branch and starts a merge (`branch.rs`); pushes a branch
+//! (`push.rs`); runs glab, GitLab's command line, the same way.
 #![forbid(unsafe_code)]
 
 mod abort_continue;
 mod attributes;
 mod blob;
+mod branch;
 mod checkout;
 mod diff;
 mod entry;
@@ -19,6 +21,7 @@ mod merge_file;
 mod names;
 mod operation;
 mod program;
+mod push;
 mod repo;
 mod rerere;
 mod run;
@@ -38,6 +41,7 @@ pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
 pub use names::{CommitSummary, RemoteUrl};
 pub use operation::{Operation, Progress, Rebase, Stop, StopId};
+pub use push::PUSH_TIMEOUT;
 pub use repo::Repo;
 pub use version::GitVersion;
 

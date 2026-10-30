@@ -82,6 +82,27 @@ impl Repo {
         oid_unless_silent(command, MERGE_BASE)
     }
 
+    /// `git merge-base --is-ancestor <ancestor> <of>`: exit 0 → true, exit 1 → false, anything else an `Err`.
+    pub fn is_ancestor(&self, ancestor: &Oid, of: &Oid) -> Result<bool> {
+        let args = [MERGE_BASE, "--is-ancestor", ancestor.as_str(), of.as_str()];
+        match run(self.command(Access::Read, &args), None, GIT_TIMEOUT) {
+            Ok(_) => Ok(true),
+            Err(Error::GitFailed {
+                status: Some(SILENT_FAILURE_STATUS),
+                ..
+            }) => Ok(false),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Whether any tracked file is staged, unstaged or unmerged; untracked files do not count:
+    /// `git status --porcelain=v1 -z --untracked-files=no` lists anything.
+    pub fn has_tracked_changes(&self) -> Result<bool> {
+        let args = ["status", "--porcelain=v1", "-z", "--untracked-files=no"];
+        let output = run(self.command(Access::Read, &args), None, GIT_TIMEOUT)?;
+        Ok(!output.is_empty())
+    }
+
     /// `git rev-parse --path-format=absolute --git-common-dir`: one identity for every worktree of a repository
     pub fn common_dir(&self) -> Result<PathBuf> {
         let args = [REV_PARSE, "--path-format=absolute", "--git-common-dir"];
@@ -89,7 +110,8 @@ impl Repo {
         Ok(path_from_git(&without_final_newline(REV_PARSE, output)?))
     }
 
-    pub(crate) fn git_path(&self, name: &str) -> Result<PathBuf> {
+    /// The path of `name` inside this checkout's git directory: `git rev-parse --git-path <name>`.
+    pub fn git_path(&self, name: &str) -> Result<PathBuf> {
         let [path] = self.git_paths([name])?;
         Ok(path)
     }
