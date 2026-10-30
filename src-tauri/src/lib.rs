@@ -36,13 +36,10 @@ use specta_typescript::Typescript;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::LevelFilter;
 
-use crate::args::{Invocation, USAGE};
+use crate::args::{Invocation, START_FOLDER, USAGE};
 use crate::outcome::{Ending, Startup, startup};
 
 const LOG_FILTER_VAR: &str = "YAMT_LOG";
-/// The folder the compare window was started in, where its merge-request page looks for a repository (plan §2 #94
-/// as amended for #128–#135).
-const COMPARE_FOLDER: &str = ".";
 
 #[must_use]
 pub fn run() -> ExitCode {
@@ -59,7 +56,7 @@ pub fn run() -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(Invocation::Compare) => {
-            window::run_compare(&from_start_dir(PathBuf::from(COMPARE_FOLDER))).report()
+            window::run_compare(&from_start_dir(PathBuf::from(START_FOLDER))).report()
         }
         Ok(Invocation::Merge { repo }) => merge(&from_start_dir(repo)).report(),
         Ok(Invocation::Range { spec, repo, ai }) => {
@@ -105,7 +102,7 @@ mod tests {
     #[test]
     fn outside_an_appimage_a_window_s_folder_stays_as_given() {
         assert_eq!(
-            from_start_dir(PathBuf::from(COMPARE_FOLDER)),
+            from_start_dir(PathBuf::from(START_FOLDER)),
             PathBuf::from(".")
         );
         assert_eq!(from_start_dir(PathBuf::from("sub")), PathBuf::from("sub"));

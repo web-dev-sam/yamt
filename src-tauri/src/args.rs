@@ -26,7 +26,9 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
 const DIFF_WITH_REPO: &str = "--diff compares pasted text and takes no --repo";
 const DIFF_TWICE: &str = "give --diff or one --diff=<range>, not both";
 const RANGE_FLAG: &str = "--diff=";
-const CURRENT_DIR: &str = ".";
+/// The folder yamt was started in: a merge's or range's repository unless `--repo` names one, and where the
+/// compare window's merge-request page looks for a repository (plan §2 #94 as amended for #128–#135).
+pub(crate) const START_FOLDER: &str = ".";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Invocation {
@@ -104,11 +106,11 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
         (Window::Compare, None) => Ok(Invocation::Compare),
         (Window::Range(spec), repo) => Ok(Invocation::Range {
             spec,
-            repo: repo.unwrap_or_else(|| PathBuf::from(CURRENT_DIR)),
+            repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
             ai,
         }),
         (Window::Merge, repo) => Ok(Invocation::Merge {
-            repo: repo.unwrap_or_else(|| PathBuf::from(CURRENT_DIR)),
+            repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
         }),
     }
 }
