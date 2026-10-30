@@ -7,6 +7,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A click on a merge request's row in the merge-request page opens it on GitLab in the system browser (anywhere on
+  the row except its CI box and its open-changes button); its title is reachable with Tab and opens on Enter or
+  Space. A GitLab installed under a sub-path (`https://host/gitlab`) keeps it in the address.
+
 ## [0.6.2] - 2026-10-30
 
 No change to the app since 0.6.1. The merge-request overview's tests now also pass on macOS and Windows, and the

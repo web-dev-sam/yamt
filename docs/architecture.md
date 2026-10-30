@@ -476,18 +476,18 @@ M0 acceptance lives here: `just golden` (`golden run`) passes, the `git merge-fi
   lock is released; a worker panic answers `WorkerStopped` and the lock recovers), `add_tab`, `close_tab(tab)`,
   `rename_tab(tab, name)`, `set_tab_language(tab, language)`, `show_tab(tab)` (each `-> TabList`). The merge commands are
   registered there too and answer Tauri's "state not managed"; the compare page never calls them.
-- **Merge requests** (`merge_requests.rs`, crate `yamt-merge-requests`, plan §2 #128–#135): `manage(app, folder,
+- **Merge requests** (`merge_requests.rs`, crate `yamt-merge-requests`, plan §2 #128–#137): `manage(app, folder,
   app_folder)` runs for the compare window (its start folder, `window.rs` `open_compare`) and the range window (its
-  repository, `range.rs`) and manages `MergeRequestState { gitlab: Option<GitLabRepository>, range_dir, job_pages:
-  Mutex<BTreeSet<JobPage>> }` (`gitlab_repository`: offline, once; the `Mutex` never held with another). Commands,
+  repository, `range.rs`) and manages `MergeRequestState { gitlab: Option<GitLabRepository>, range_dir, pages:
+  Mutex<BTreeSet<WebPage>> }` (`gitlab_repository`: offline, once; the `Mutex` never held with another). Commands,
   registered for every window (the merge window never calls them): `find_gitlab_project() -> GitLabProject`
   (`none` | `found { repository }`); async `list_merge_requests(messages: Channel<ListMessage>) -> ()` sends every page
   as `ListMessage::Page { page }` and then exactly one `ListMessage::End { end: ListEnd }` on the channel (tauri 2.12
   delivers a channel message of 8 KiB or more by a later fetch, so the end cannot be the command's answer), each page's
-  job pages added to `job_pages` before it is sent (`forward_page`); async `open_merge_request(iid) -> OpenReply`
-  (`prepare_open`, then `range_window::start`); `open_job_page(page) -> JobOpened` opens only a page in `job_pages`
-  (else `NotOffered`). GitLab, git and launch problems are values (`ListEnd`, `OpenReply`, `JobOpened`), never an
-  `IpcError`; a window without a project answers `Failed`.
+  merge-request and failed-job pages added to `pages` before it is sent (`forward_page`); async
+  `open_merge_request(iid) -> OpenReply` (`prepare_open`, then `range_window::start`); `open_page(page) -> PageOpened`
+  opens only a page in `pages` (else `NotOffered`). GitLab, git and launch problems are values (`ListEnd`, `OpenReply`,
+  `PageOpened`), never an `IpcError`; a window without a project answers `Failed`.
 - **A second process** (`range_window.rs`, plan §2 #132; amends "one process, one window": opening a merge request's
   changes starts another yamt): `start(range)` runs `yamt --diff=<base_sha>..<head_sha> --repo <root>` (`arguments`, no
   `--ai`) with cwd `root`, stdin and stdout null, stderr inherited; the program is `$APPIMAGE` when this one runs from
@@ -629,7 +629,7 @@ Plan §2 #93, #97. Package `yamt-compare`; depends on `merge-core` only among `y
   folder's sum), built once per list by `RangeApp`, which fills the tree's optional `folder` slot (after the label;
   the merge window passes none) with `RangeCounts.vue`, the one `+a −r` pair of file and folder rows.
 
-### 3.9 `merge-requests` — the GitLab project's open merge requests (plan §2 #128–#135)
+### 3.9 `merge-requests` — the GitLab project's open merge requests (plan §2 #128–#137)
 
 Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (may use `merge-core`), never on tauri
 (`scripts/arch-check.sh`); no `Mutex`, nothing cached. Every glab call goes through `Glab::get`/`Glab::auth_status`
@@ -638,21 +638,23 @@ Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (ma
 - **Types crossing the IPC** (`lib.rs`): `GitLabProject` `none` | `found { repository }` (the absolute common git dir,
   the key the window remembers filters by), `MergeRequestIid`, `Person { username, name }`, `CiStatus` (GitLab's
   fifteen folded into seven: `passed`, `failed`, `running`, `pending`, `canceled`, `skipped`, `manual`; an unknown one
-  `pending` with a warning), `JobPage` (a string only `JobPage::built` makes), `FailedJob { name, stage, allowFailure,
-  page }`, `Pipeline { status, failedJobs, moreFailedJobs }`, `MergeRequestRow` (`createdAt` as GitLab sent it,
-  `openDiscussions` = resolvable − resolved saturating, `approvals` = `approvedBy` nodes), `MergeRequestPage { me, rows }`,
-  `ListEnd` `loaded` | `cut { limit }` | `glabMissing` | `notLoggedIn { detail }` | `failed { message }`, `OpenReply`
-  `opened` | `alreadyOpen` | `preparing` | `notOpen` | `noRemote` | `fetchFailed` | `missingCommit` | `startFailed` |
-  `glabMissing` | `notLoggedIn` | `failed`, `JobOpened` `opened` | `notOffered` | `failed`; `RangeToOpen { root, spec }`
-  (not IPC). `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50.
+  `pending` with a warning), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob {
+  name, stage, allowFailure, page }`, `Pipeline { status, failedJobs, moreFailedJobs }`, `MergeRequestRow` (`createdAt`
+  as GitLab sent it, `openDiscussions` = resolvable − resolved saturating, `approvals` = `approvedBy` nodes, `page` its
+  GitLab page or `None` off https), `MergeRequestPage { me, rows }`, `ListEnd` `loaded` | `cut { limit }` |
+  `glabMissing` | `notLoggedIn { detail }` | `failed { message }`, `OpenReply` `opened` | `alreadyOpen` | `preparing` |
+  `notOpen` | `noRemote` | `fetchFailed` | `missingCommit` | `startFailed` | `glabMissing` | `notLoggedIn` | `failed`,
+  `PageOpened` `opened` | `notOffered` | `failed`; `RangeToOpen { root, spec }` (not IPC). `PAGE_SIZE` 100,
+  `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50.
 - **Detection** (`detect.rs`, #130): `gitlab_repository(folder)`: `Repo::discover`, `Repo::remote_urls`,
   `Repo::common_dir`, no network and no glab; a remote is on GitLab when its URL's host (scp-like or
   `scheme://[user@]host[:port]`; never a local path, `file://` or a drive letter) is `gitlab.com`, has a dot-label
   starting with `gitlab`, or is `GITLAB_HOST`/`GL_HOST`. `GitLabRepository` holds the `Repo` and only those remotes, in
   config order (`gitlab_remotes`).
 - **The list** (`project.rs`, `query.rs`, `page.rs`, `list.rs`, #131): glab missing → `GlabMissing`; `auth_status` →
-  `NotLoggedIn`/`Failed`; `glab api projects/:fullpath` → `Project { full_path, web_origin }` (the origin only on
-  https); then at most 5 pages of the one single-line GraphQL query (`list_args`: `api graphql -f query=… -f
+  `NotLoggedIn`/`Failed`; `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }` (`web_path`:
+  the `web_url` after the origin, so any sub-path GitLab is installed under stays; origin and path only on https,
+  else `None` and empty); then at most 5 pages of the one single-line GraphQL query (`list_args`: `api graphql -f query=… -f
   fullPath=<path> -F first=100 [-f after=<cursor>]`), each its own glab call handed to `on_page` as it arrives; a 5th
   page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GraphQL `errors` win
   over `data`; the first page's `queryComplexity` logged at info.
@@ -663,9 +665,10 @@ Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (ma
   `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target holding `:` → `Failed`); then
   `Resolved::resolve` of `<base>..<head>` (`MissingCommit`, 7 characters) and a `PairLock::take` probe let go at once
   (`AlreadyOpen`); `Ok(RangeToOpen)` for the shell to start (§3.5).
-- **Job pages** (`job_page.rs`, #133): `JobPage::built(origin, web_path)`: `https://<host[:port]>` plus a path
-  `/<segments>/-/jobs/<digits>`, segments of `[A-Za-z0-9._~-]`, none empty or `..`; anything else → no page.
-  `open_job_page(page)`: `xdg-open <url>` from PATH (Linux, BSD), `/usr/bin/open` (macOS), `rundll32.exe
+- **Web pages** (`web_page.rs`, #133, #137): `WebPage::job(origin, web_path)` (a job's `/<project>/-/jobs/<digits>`)
+  and `WebPage::merge_request(origin, web_path, iid)` (`<web_path>/-/merge_requests/<iid>`) share one check,
+  `project_page`: `https://<host[:port]>` plus a path of segments of `[A-Za-z0-9._~-]`, none empty or `..`; anything
+  else → no page. `open_page(page)`: `xdg-open <url>` from PATH (Linux, BSD), `/usr/bin/open` (macOS), `rundll32.exe
   url.dll,FileProtocolHandler` (Windows); streams null, a process group of its own on Unix, a thread reaps it.
 - Tests: unit tests per file (`page/tests.rs` over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/`
   the one fake-glab helper of `tests/list.rs` and `tests/open.rs` (`scripts/range-repo.sh`'s repository and its fake
@@ -701,10 +704,10 @@ export type TabLanguage = { kind: "auto" } | { kind: "picked"; name: string };
 export type TabList = { tabs: { id: TabId; name: string; language: TabLanguage; holds_text: boolean }[]; shown: TabId };
 export type CompareStart = { list: TabList; column_limit: number };
 export type TabTexts = { left: string; right: string; comparison: Comparison };
-// the merge-request page (plan §2 #128-#135; the compare and range windows): MergeRequestIid = number, JobPage = string
+// the merge-request page (plan §2 #128-#137; the compare and range windows): MergeRequestIid = number, WebPage = string
 export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd }; // every page, then one end, on the load's Channel
 export type GitLabProject = { kind: "none" } | { kind: "found"; repository: string };
-export type MergeRequestRow = { iid: MergeRequestIid; title: string; createdAt: string; draft: boolean; assignees: Person[]; reviewers: Person[]; labels: string[]; openDiscussions: number; approvals: number; pipeline: Pipeline | null };
+export type MergeRequestRow = { iid: MergeRequestIid; title: string; createdAt: string; draft: boolean; assignees: Person[]; reviewers: Person[]; labels: string[]; openDiscussions: number; approvals: number; pipeline: Pipeline | null; page: WebPage | null };
 ```
 
 Brands: specta emits the Rust newtypes as plain `number`, so the generated DTOs are
@@ -817,7 +820,7 @@ puts `frontend/fixtures/compare/<case>.json` (written by `just fixtures` from `t
 `yamt-compare`'s tab rules, and answers a column with a case's differences only when both texts equal that case's, else
 none and an `info` log `compare.fixture_miss`; both fixture sources parse through one `parsedFixture` (`ipc/fixture.ts`).
 
-The merge-request page (plan §2 #128–#135) talks to `frontend/src/ipc/MergeRequestSource.ts`, which `CompareSource` and
+The merge-request page (plan §2 #128–#137) talks to `frontend/src/ipc/MergeRequestSource.ts`, which `CompareSource` and
 `RangeSource` extend:
 
 ```ts
@@ -825,18 +828,19 @@ export interface MergeRequestSource {
   findGitLabProject(): Promise<SourceResult<GitLabProject>>; // decided once at start, offline (#130)
   listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>; // every page reaches onPage before the promise settles, and none after
   openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>; // opened = a second yamt shows the changes (#132)
-  openJobPage(page: JobPage): Promise<SourceResult<JobOpened>>; // only a page this window's list handed out (#133)
+  openPage(page: WebPage): Promise<SourceResult<PageOpened>>; // a merge request's or a failed job's page, only one this window's list handed out (#133, #137)
 }
 ```
 
-The brands `MergeRequestIid` and `JobPage` (an `https://` address) live in `ipc/domain.ts`; the shapes and conversions in
-`ipc/mergeRequestDomain.ts` (`toMergeRequestPage`: `createdAt` to ms since 1970, job pages branded; `toOpenReply`:
-`short_id` → `shortId`). `createTauriMergeRequests` (`ipc/tauriMergeRequests.ts`) opens one `Channel<ListMessage>` per
+The brands `MergeRequestIid` and `WebPage` (an `https://` address) live in `ipc/domain.ts`; the shapes and conversions in
+`ipc/mergeRequestDomain.ts` (`toMergeRequestPage`: `createdAt` to ms since 1970, row and job pages branded through
+`toWebPage`; `toOpenReply`: `short_id` → `shortId`). `createTauriMergeRequests` (`ipc/tauriMergeRequests.ts`) opens one `Channel<ListMessage>` per
 load; the load ends on the channel's `end` message or on the command's IPC failure, never on the command's own answer;
 an unreadable page fails the load. `createFixtureMergeRequests(log, search)` (`ipc/fixtureMergeRequests.ts` over
 `ipc/fixtureMergeRequestData.ts`): `?mr=<script>` (`list`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`,
-`refused`, `pageFails`) scripts GitLab's answers; without `mr`, or with an unknown script (`mergeRequests.fixture_miss`),
-the project is `none`.
+`refused`, `pageFails`) scripts GitLab's answers (each row's page `<ORIGIN>/-/merge_requests/<iid>`; `openPage` logs
+`mergeRequests.fixture_page`); without `mr`, or with an unknown script (`mergeRequests.fixture_miss`), the project is
+`none`.
 
 ---
 
@@ -895,14 +899,14 @@ The compare window (`yamt --diff`, plan §2 #93–#97) has its own rows:
 | Auto's finding per tab                                                          | the controller (`compareLanguage.ts`), reported through `detected` to `compareStore.detected` (names only)                                                                                                                                                  | the toolbar's "Auto · JSON"                          |
 | the compare window's notices, problem, question, screen, tab panel shown        | `ui/compareStore.ts` + `ui/compareNotices.ts` (notices), `fileListKey` the one writer of `fileListShown`; settings through the seam `ui/settingsStore.ts`, which the merge store registers too; the screen also by the merge-request slice's `show`/`close` | one store per root (plan §2 #94)                     |
 
-The merge-request page (plan §2 #128–#135; the compare and range windows) has its own rows:
+The merge-request page (plan §2 #128–#137; the compare and range windows) has its own rows:
 
-| state                                                                           | owner                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | why                                                                               |
-| ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| the window's GitLab project, the pairs' folder, the job pages a list handed out | Rust `MergeRequestState` (`src-tauri/src/merge_requests.rs`), managed once per compare or range window: `gitlab` set at start only (`gitlab_repository`, offline); `job_pages: Mutex<BTreeSet<JobPage>>` written only by `forward_page`, before each page is sent; read only by `open_job_page`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | the window can open only an address its own list sent (plan §2 #133)              |
-| the project, the rows, `me`, the load, the openings, the job problem            | one `MergeRequests` slice per window (`ui/mergeRequests.ts` `createMergeRequests`), built by `compareStore.ts` / `rangeStore.ts` through `ui/mergeRequestsStore.ts` `windowMergeRequests` and read only through `useMergeRequests()`: `project` written only by `findProject` (at start-up); `rows`/`me` only by a load's pages (a load with no rows shown streams them; a refresh over shown rows buffers them and swaps at its end); `listing` (`ListLoad` = notLoaded \| loading{first} \| done{end, at}) only by `load` (first opening, an opening 30 s after the last load, Refresh); `failure` derived from the last end through `listFailureText`; `openings` per iid only by `openChanges`; `jobProblem` only by `openJob` and `dismissJobProblem`; `screen` `mergeRequests` only by `show`, `files` by `close` | one list and one filter state for every mounted header button and the page (#128) |
-| the remembered filters                                                          | `ui/mergeRequestFilters.ts` `createRememberedFilters(repository)`, held by the slice: `filters` read per repository, written only by its `set` (the slice's `toggle`, `setDraft`, `clear`, `clearAll`); localStorage `yamt.mergeRequests.filters` = `{ [repository]: StoredFilters }`, an entry back at no filter removed, other repositories' kept                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | survives a restart per repository; two windows: the last write wins (#134)        |
-| what the shown list is (filtered rows, choices, summary)                        | `computed` in the slice from `rows`, `filters` and `me` through `frontend/src/mergeRequests/` (`filtered`, `personChoices`/`labelChoices`, `summaryText`); never stored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | derived, nothing to keep                                                          |
+| state                                                                       | owner                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | why                                                                               |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| the window's GitLab project, the pairs' folder, the pages a list handed out | Rust `MergeRequestState` (`src-tauri/src/merge_requests.rs`), managed once per compare or range window: `gitlab` set at start only (`gitlab_repository`, offline); `pages: Mutex<BTreeSet<WebPage>>` (every row's and failed job's page) written only by `forward_page`, before each page is sent; read only by `open_page`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | the window can open only an address its own list sent (plan §2 #133, #137)        |
+| the project, the rows, `me`, the load, the openings, the page problem       | one `MergeRequests` slice per window (`ui/mergeRequests.ts` `createMergeRequests`), built by `compareStore.ts` / `rangeStore.ts` through `ui/mergeRequestsStore.ts` `windowMergeRequests` and read only through `useMergeRequests()`: `project` written only by `findProject` (at start-up); `rows`/`me` only by a load's pages (a load with no rows shown streams them; a refresh over shown rows buffers them and swaps at its end); `listing` (`ListLoad` = notLoaded \| loading{first} \| done{end, at}) only by `load` (first opening, an opening 30 s after the last load, Refresh); `failure` derived from the last end through `listFailureText`; `openings` per iid only by `openChanges`; `pageProblem` only by `openPage` and `dismissPageProblem`; `screen` `mergeRequests` only by `show`, `files` by `close` | one list and one filter state for every mounted header button and the page (#128) |
+| the remembered filters                                                      | `ui/mergeRequestFilters.ts` `createRememberedFilters(repository)`, held by the slice: `filters` read per repository, written only by its `set` (the slice's `toggle`, `setDraft`, `clear`, `clearAll`); localStorage `yamt.mergeRequests.filters` = `{ [repository]: StoredFilters }`, an entry back at no filter removed, other repositories' kept                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | survives a restart per repository; two windows: the last write wins (#134)        |
+| what the shown list is (filtered rows, choices, summary)                    | `computed` in the slice from `rows`, `filters` and `me` through `frontend/src/mergeRequests/` (`filtered`, `personChoices`/`labelChoices`, `summaryText`); never stored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | derived, nothing to keep                                                          |
 
 The window's storage is read and written in one way, `storedValue(key, fallback, { read, write }, warnEvent)`
 (`ui/windowStorage.ts`): synchronous writes, defaults never written, failures logged under the caller's event. A
@@ -1333,11 +1337,11 @@ section (the settings seam `ui/settingsStore.ts`, which both stores register); `
 column first. `ui/useCompareController.ts` is the compare root's only `editor/` importer (settle → `saveColumn` →
 `showComparison`, Format failures → `reportFormat`, `track`).
 
-**The merge-request page** (plan §2 #128–#135; the compare and range windows; fence PM10 in `scripts/windowFence.ts`:
+**The merge-request page** (plan §2 #128–#137; the compare and range windows; fence PM10 in `scripts/windowFence.ts`:
 `ui/MergeRequest*`, `ui/mergeRequest*`, `ui/CiStatus*` import no window root and no `lsp/`): `compareStore.ts` and
 `rangeStore.ts` each build one slice through `ui/mergeRequestsStore.ts` `windowMergeRequests(source, { screen, problem
 })` (`createMergeRequests` + `registerMergeRequests`; failures reach the window's problem bar as `{ action:
-"mergeRequests", step: "find" | "list" | "open" | "job" }`) and run `findProject()` beside `loadSettings()` at
+"mergeRequests", step: "find" | "list" | "open" | "job" | "mergeRequest" }`) and run `findProject()` beside `loadSettings()` at
 start-up; every page file reads it through `useMergeRequests()`, as Settings reads `useSettingsStore()`.
 `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before
 the gear in `CompareView`, `RangeView` and the range window's empty-range header (kept mounted with `v-show`, so the
@@ -1345,7 +1349,12 @@ keyboard can return to it). `MergeRequestsView.vue` is a screen like Settings (`
 where each root mounts `SettingsView`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it and
 return the keyboard to the element focused before; three `MergeRequestFilter.vue` checklists (`useDropdownMenu`,
 `menuitemcheckbox` items keep it open, a narrowing box above `NARROW_FROM` values, × clears) and the Draft
-`ChoiceButtons`; the list scrolls inside, one `MergeRequestRow.vue` per shown row with its open-changes sentence;
+`ChoiceButtons`; the list scrolls inside, one `MergeRequestRow.vue` per shown row with its open-changes sentence. A
+row with a page opens it on a click anywhere but the CI box and the open-changes button, which stop the click; its
+title is a button (`openPageTitle`: "Open !N on GitLab: <title>") for the keyboard; a page-less row is plain. Both a
+row's and a failed job's click go through the slice's `openPage(kind, page)` (`PageKind` `job` | `mergeRequest`):
+an IPC failure reaches the problem bar at that step; an answer sets `pageProblem` to `pageProblemText` (`null` when
+opened, a sentence for `notOffered`/`failed`), one line above the list with Dismiss.
 `CiStatusBox.vue` opens its failed-jobs box on pointer or focus (`position: fixed`, not teleported, so Tab reaches the
 jobs), held while pointer or focus is in icon or box, closed by leaving both, by Escape or by any scroll outside it. The
 pure core is `frontend/src/mergeRequests/` (`index.ts` the only surface; framework-free and self-contained like

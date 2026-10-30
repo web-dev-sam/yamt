@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `ab820bb` (the merge-request page in the compare and range windows, plan §2 #128–#135; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `abcb805` (the merge-request page in the compare and range windows, plan §2 #128–#137: a row opens its GitLab page; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 

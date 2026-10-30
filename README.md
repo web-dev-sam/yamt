@@ -12,6 +12,7 @@ _A three-way merge window like the one in JetBrains IDEs, for every git conflict
 &nbsp;
 
 ## Why does this exist?
+
 1. JetBrains IDE's three-pane merge window is the only merge tool I find usable. VS Code's merge editor, its extensions and the TUI mergetools all felt unintuitive.
 2. They all start from the `<<<<<<<` conflict markers. Once git has collapsed a merge into markers the base is gone, so you can see _that_ two sides differ but not _what each side changed_. yamt never parses a conflict marker: it reads the base, your side and theirs from git's index and diffs them itself.
 3. `git mergetool` opens one file at a time, and real merges touch many files. yamt takes over the whole merge: every conflicted file in one window, your side on the left, theirs on the right, the result in the middle.
@@ -80,7 +81,7 @@ yamt --diff=main...feature --ai   # the same, with an AI to ask about each comme
 
 `yamt --diff=<a>...<b>` (or `<a>..<b>`, with git's meaning) reviews a commit range: the changed files on the left as GitLab lists them, and each file's two versions side by side, read-only. Hover a line number to start a comment thread there, as in GitLab. Each message can be queued with "Post", and "Send to GitLab (n)" sends the queue as pending comments of your merge request's review through `glab` (installed and logged in; it is enabled only while the merge request shows exactly this diff). Your own comments can be edited or deleted until they are sent. Threads are kept per repository and commit pair.
 
-In a repository with a GitLab remote, both `--diff` windows have a merge-requests button left of the gear: the project's open merge requests, newest first, with their open discussions, approvals and CI status (hover it for the failed jobs; a click opens a job's log in the browser). Filter by assignee, reviewer, label and draft with one click each; the filters are remembered per repository. A row's button fetches that merge request's commits, without touching your branches or files, and opens its changes in a new window, lined up with the merge request for comments.
+In a repository with a GitLab remote, both `--diff` windows have a merge-requests button left of the gear: the project's open merge requests, newest first, with their open discussions, approvals and CI status (hover it for the failed jobs; a click opens a job's log in the browser). A click on a row opens that merge request on GitLab in the browser. Filter by assignee, reviewer, label and draft with one click each; the filters are remembered per repository. A row's button fetches that merge request's commits, without touching your branches or files, and opens its changes in a new window, lined up with the merge request for comments.
 
 With `--ai`, each thread has "Ask AI": the AI (`omp acp` by default, set in Settings) answers in the thread, working in a temporary checkout of the right-hand commit. Its thinking and steps open under the answer, its edits show as diffs, and closing the window asks whether to keep its changes.
 
