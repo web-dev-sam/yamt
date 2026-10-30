@@ -1,0 +1,3 @@
+just mutants HEAD → Found 4 mutants to test; 4 mutants tested in 75s: 1 caught, 3 unviable; no TypeScript changes since HEAD
+second_window.rs:66 running_appimage → Some(Default) — gate-covered: killed by outside_an_appimage_a_second_yamt_starts_from_this_binary, ci.yml job `rust` (just test) on macos-15 and windows-2025
+second_window.rs:86 detach → () — gap: RK42, Windows detach unpinned (no test can read a Command's creation flags)

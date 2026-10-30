@@ -5,21 +5,21 @@ use std::process::Command;
 use serde_json::{Value, json};
 use tauri::Manager;
 use yamt_conflict_repo::{TempDir, git_ok};
-use yamt_local_merge::{MergeRequestBranches, claim_window};
+use yamt_local_merge::MergeRequestBranches;
 
 use super::*;
 use crate::mock_window::{Window, open_window, open_window_in};
-use crate::outcome::{Ending, Exit, Startup, startup};
+use crate::outcome::{Ending, Exit};
 
-const IID: u32 = 21;
-const DUE_DATES: &str = "feature/due-dates";
-const CLEAN: &str = "feature/clean";
+pub(crate) const IID: u32 = 21;
+pub(crate) const DUE_DATES: &str = "feature/due-dates";
+pub(crate) const CLEAN: &str = "feature/clean";
 const CARD: &str = "src/board/card.ts";
 const GITLAB: &str = ".git/fake-gitlab.git";
-const RECORD: &str = ".git/yamt-merge-request.json";
+pub(crate) const RECORD: &str = ".git/yamt-merge-request.json";
 
 /// `scripts/mr-conflict-repo.sh`'s repository, on `develop`.
-fn mr_conflict_repo() -> TempDir {
+pub(crate) fn mr_conflict_repo() -> TempDir {
     let repo = TempDir::new().unwrap();
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/mr-conflict-repo.sh");
     let built = Command::new(script).arg(repo.path()).output().unwrap();
@@ -28,7 +28,7 @@ fn mr_conflict_repo() -> TempDir {
 }
 
 /// Merge request !21 of `branch` into `main` started in `repo` as the page's Resolve starts it.
-fn start_merge(repo: &TempDir, branch: &str) {
+pub(crate) fn start_merge(repo: &TempDir, branch: &str) {
     let branches = MergeRequestBranches {
         iid: IID,
         remote: "origin".to_owned(),
@@ -251,55 +251,4 @@ fn close_ended_merge_after_keep_local_ends_with_exit_0() {
         gitlab_tip,
         git_line(window.repo.path(), &["rev-parse", "HEAD"])
     );
-}
-
-fn startup_ending(started: Startup) -> Ending {
-    match started {
-        Startup::Merge { session, .. } => panic!("a merge in {:?}", session.root()),
-        Startup::Done(ending) => ending,
-    }
-}
-
-#[test]
-fn startup_opens_a_clean_merge_yamt_started() {
-    let repo = mr_conflict_repo();
-    start_merge(&repo, CLEAN);
-
-    let Startup::Merge { session, claim } = startup(repo.path()) else {
-        panic!("expected a merge");
-    };
-
-    assert_eq!(session.files(), []);
-    assert!(claim.is_some());
-}
-
-#[test]
-fn startup_still_says_nothing_to_merge_without_a_record() {
-    let repo = mr_conflict_repo();
-    start_merge(&repo, CLEAN);
-    fs::remove_file(repo.path().join(RECORD)).unwrap();
-
-    let ending = startup_ending(startup(repo.path()));
-
-    assert_eq!(ending.exit, Exit::Success);
-    let message = ending.message.unwrap();
-    assert!(message.starts_with("nothing to merge in "), "{message}");
-}
-
-#[test]
-fn startup_refuses_a_second_window_on_a_recorded_merge() {
-    let repo = mr_conflict_repo();
-    start_merge(&repo, DUE_DATES);
-    let refused = Ending::failure(format!(
-        "the merge of !{IID} is already open in another yamt window"
-    ));
-    let held_by_the_test = claim_window(repo.path()).unwrap().unwrap();
-
-    assert_eq!(startup_ending(startup(repo.path())), refused);
-
-    drop(held_by_the_test);
-    let first = startup(repo.path());
-    assert!(matches!(first, Startup::Merge { claim: Some(_), .. }));
-    assert_eq!(startup_ending(startup(repo.path())), refused);
-    assert_eq!(refused.exit as u8, 2);
 }

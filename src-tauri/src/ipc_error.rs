@@ -216,5 +216,18 @@ impl From<yamt_agent::Error> for IpcError {
     }
 }
 
+impl From<yamt_local_merge::Error> for IpcError {
+    fn from(error: yamt_local_merge::Error) -> IpcError {
+        match error {
+            yamt_local_merge::Error::Git(source) => IpcError::Git {
+                message: source.to_string(),
+            },
+            yamt_local_merge::Error::LockFailed { .. } => IpcError::Git {
+                message: error.to_string(),
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

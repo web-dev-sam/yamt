@@ -9,7 +9,7 @@ use yamt_session::{
     Refreshed, SideNames, StopList,
 };
 
-use crate::ipc_error::IpcError;
+use crate::ipc_error::{IpcError, blocking_reply};
 
 const GIT_RUNNING_POLL: Duration = Duration::from_millis(50);
 
@@ -184,9 +184,7 @@ impl Merge {
 
 /// The merge yamt started in `root`, read fresh from its record while git is still in it.
 fn recorded_merge(root: &Path) -> Result<Option<LiveMerge>, IpcError> {
-    find_live(root).map_err(|error| IpcError::Git {
-        message: error.to_string(),
-    })
+    Ok(find_live(root)?)
 }
 
 /// The recorded merge at the held stop; read before the session goes to a worker.
@@ -278,31 +276,16 @@ pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueRep
 /// or a worker that panicked, → `Committed` again, so the window may ask once more.
 pub(crate) async fn push_merged_branch(state: &MergeState) -> Result<PushReply, IpcError> {
     let (root, offer) = lock(state).take_committed()?;
-    let worker = {
+    let pushed = {
         let (root, offer) = (root.clone(), offer.clone());
-        tauri::async_runtime::spawn_blocking(move || yamt_local_merge::push(&root, &offer))
+        blocking_reply(move || Ok(yamt_local_merge::push(&root, &offer))).await
     };
-    let pushed = worker.await;
-    let mut merge = lock(state);
-    match pushed {
-        Ok(PushReply::Pushed) => {
-            *merge = Merge::Finished(OperationKind::Merge);
-            Ok(PushReply::Pushed)
-        }
-        Ok(failed @ PushReply::Failed { .. }) => {
-            *merge = Merge::Committed { root, offer };
-            Ok(failed)
-        }
-        Err(error) => {
-            tracing::error!(%error, "yamt's worker stopped while git pushed");
-            *merge = Merge::Committed { root, offer };
-            Err(IpcError::WorkerStopped)
-        }
-    }
+    *lock(state) = match pushed {
+        Ok(PushReply::Pushed) => Merge::Finished(OperationKind::Merge),
+        Ok(PushReply::Failed { .. }) | Err(_) => Merge::Committed { root, offer },
+    };
+    pushed
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod merge_request_tests;
+pub(crate) mod tests;

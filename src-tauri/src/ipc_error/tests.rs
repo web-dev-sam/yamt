@@ -301,6 +301,26 @@ fn ai_off_and_a_failed_removal_serialise_with_their_kinds() {
 }
 
 #[test]
+fn a_local_merge_error_is_git_s_message_or_the_lock_that_failed() {
+    let plain_dir = TempDir::new().unwrap();
+    let Err(git_error) = yamt_local_merge::find_live(plain_dir.path()) else {
+        panic!("a plain directory had a recorded merge");
+    };
+    let git_json = serde_json::to_value(IpcError::from(git_error)).unwrap();
+    assert_eq!(git_json["kind"], "Git");
+    let message = git_json["message"].as_str().unwrap();
+    assert!(message.contains("not a git repository"), "{git_json}");
+    let lock_failed = yamt_local_merge::Error::LockFailed {
+        path: "/r/.git/yamt-merge-window.lock".into(),
+        source: std::io::Error::other("busy"),
+    };
+    assert_eq!(
+        serde_json::to_value(IpcError::from(lock_failed)).unwrap(),
+        json!({ "kind": "Git", "message": "cannot lock /r/.git/yamt-merge-window.lock: busy" })
+    );
+}
+
+#[test]
 fn a_worker_that_panics_answers_worker_stopped() {
     let answered = tauri::async_runtime::block_on(blocking_reply(|| -> Result<(), IpcError> {
         panic!("worker panic")

@@ -461,3 +461,5 @@ fn continue_and_abort_at_a_stop_git_records_no_operation_for_answer_no_operation
         Value::Null
     );
 }
+
+pub(crate) mod merge_request;
