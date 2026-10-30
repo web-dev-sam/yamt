@@ -22,13 +22,5 @@
       "tests/glab/merge-requests/**",
       "crates/review/tests/review.rs"
     ]
-  },
-  "MrDetectListR1": {
-    "owned": [
-      "crates/gitio/src/names.rs",
-      "crates/gitio/src/merge_config.rs",
-      "crates/gitio/tests/glab.rs",
-      "crates/gitio/tests/names.rs"
-    ]
   }
 }
