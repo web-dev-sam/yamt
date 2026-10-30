@@ -1,0 +1,5 @@
+just mutants HEAD: 567 killed, 14 timeout, 36 survived, 10 no cov, none on my changed lines; glab.ts 100%. mergeRequests/ is not in its globs; by-hand stryker run: 414 killed, 3 survived
+frontend/src/ui/mergeRequestFilters.ts:13 `stored !== null`→true — equivalent: typeof null is "object" and {...null} is {}, so the result is the same
+frontend/src/ui/mergeRequestFilters.ts:26 warn event string→"" — wiring: the log name passed to storedValue (windowStorage.test covers the logging)
+frontend/src/mergeRequests/internal/stored.ts:46 `return []`→["Stryker was here"] — equivalent: personFrom/labelFrom drop the unreadable word
+frontend/src/mergeRequests/internal/filters.ts:47,128 NoCoverage `default` never-arms — gate-covered: TS3 exhaustiveness checked by vue-tsc

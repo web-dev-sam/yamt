@@ -133,7 +133,7 @@ mutants base:
     if [ -s target/mutants/rust.diff ]; then
         rust_mutants=$(cargo mutants --in-diff target/mutants/rust.diff --list | wc -l)
     fi
-    web_globs=('frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/src/search/*.ts' 'frontend/src/search/internal/*.ts' 'frontend/scripts/*.ts')
+    web_globs=('frontend/src/ipc/*.ts' 'frontend/src/ui/*.ts' 'frontend/src/model/*.ts' 'frontend/src/connectors/*.ts' 'frontend/src/lsp/*.ts' 'frontend/src/lsp/internal/*.ts' 'frontend/src/jsonrpc/*.ts' 'frontend/src/jsonrpc/internal/*.ts' 'frontend/src/agent/*.ts' 'frontend/src/agent/internal/*.ts' 'frontend/src/search/*.ts' 'frontend/src/search/internal/*.ts' 'frontend/src/mergeRequests/*.ts' 'frontend/src/mergeRequests/internal/*.ts' 'frontend/scripts/*.ts')
     web_files=$({ git diff --name-only --no-renames --diff-filter=AM {{ base }} -- "${web_globs[@]}"; git ls-files --others --exclude-standard -- "${web_globs[@]}"; } | grep -v -e '\.test\.ts$' -e '/bindings\.ts$' | sed 's|^frontend/||' | paste -sd, -) || true
     web_count=$(printf '%s' "$web_files" | tr ',' '\n' | grep -c . || true)
     if [ "$rust_mutants" -gt "$max_rust_mutants" ] || [ "$web_count" -gt "$max_web_files" ]; then

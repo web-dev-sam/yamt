@@ -37,6 +37,7 @@ const FRAMEWORK_FREE_MODULES: Readonly<Record<string, "framework-free" | "self-c
   jsonrpc: "self-contained",
   agent: "framework-free",
   search: "self-contained",
+  mergeRequests: "self-contained",
 };
 const AGENT_IMPORTS: Readonly<Record<string, true>> = {
   "src/ipc": true,
