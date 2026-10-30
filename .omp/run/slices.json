@@ -5,5 +5,18 @@
       ".omp/skills/project-map/**",
       ".omp/skills/ipc-contract/SKILL.md"
     ]
+  },
+  "MrConflictsAppR2": {
+    "owned": ["src-tauri/src/merge_requests.rs", "src-tauri/src/merge_requests/**"]
+  },
+  "MrConflictsPageR2": {
+    "owned": [
+      "frontend/src/ui/aborting.ts",
+      "frontend/src/ui/aborting.test.ts",
+      "frontend/src/ui/pushing.ts",
+      "frontend/src/ui/pushing.test.ts",
+      "frontend/src/ui/closingMerge.ts",
+      "frontend/src/ui/closingMerge.test.ts"
+    ]
   }
 }
