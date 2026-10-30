@@ -32,6 +32,7 @@ yamt-range.workspace = true
 yamt-review.workspace = true
 yamt-agent.workspace = true
 yamt-merge-requests.workspace = true
+yamt-local-merge.workspace = true
 serde.workspace = true
 specta.workspace = true
 specta-typescript.workspace = true

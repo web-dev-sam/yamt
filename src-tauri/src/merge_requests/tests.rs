@@ -106,6 +106,9 @@ fn list(window: &MergeRequestWindow) -> Vec<Value> {
 }
 
 #[cfg(unix)]
+mod resolve;
+
+#[cfg(unix)]
 mod through_glab {
     use std::path::PathBuf;
     use std::process::Command;
@@ -128,7 +131,7 @@ mod through_glab {
     const OPEN_WAIT: Duration = Duration::from_secs(10);
     const POLL: Duration = Duration::from_millis(10);
 
-    fn in_this_repository(relative: &str) -> PathBuf {
+    pub(super) fn in_this_repository(relative: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join(relative)
@@ -145,9 +148,9 @@ mod through_glab {
         open_window_in(repo)
     }
 
-    /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `merge-requests`
+    /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `tests/glab/<scenario>`
     /// and the fake xdg-open, their logs in a folder of this test's.
-    fn run_with_fakes(test: &str) {
+    pub(super) fn run_with_fakes(test: &str, scenario: &str) {
         let fake = TempDir::new().unwrap();
         let inherited = std::env::var_os("PATH").unwrap_or_default();
         let mut folders = vec![
@@ -156,7 +159,7 @@ mod through_glab {
         ];
         folders.extend(std::env::split_paths(&inherited));
         let path = std::env::join_paths(folders).unwrap();
-        let scenario = in_this_repository("tests/glab/merge-requests");
+        let scenario = in_this_repository("tests/glab").join(scenario);
 
         let ran = run_ignored_in_child(&[test], |child| {
             child
@@ -200,7 +203,7 @@ mod through_glab {
 
     #[test]
     fn every_page_then_one_end_reaches_the_window_s_channel() {
-        run_with_fakes(LIST_TEST);
+        run_with_fakes(LIST_TEST, "merge-requests");
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod through_glab {
 
     #[test]
     fn only_a_page_a_list_sent_is_handed_to_the_browser() {
-        run_with_fakes(PAGES_TEST);
+        run_with_fakes(PAGES_TEST, "merge-requests");
     }
 
     #[test]

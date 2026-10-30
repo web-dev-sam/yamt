@@ -4,14 +4,15 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use tauri::ipc::Channel;
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
+use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
     GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage, OpenReply,
-    PageOpened, WebPage, gitlab_repository, prepare_open,
+    PageOpened, ResolveRefusal, WebPage, gitlab_repository, prepare_open, prepare_resolve,
 };
 
 use crate::ipc_error::{IpcError, blocking_reply};
 use crate::range::range_folder;
-use crate::range_window;
+use crate::second_window;
 
 const NO_PROJECT: &str = "this window's folder has no remote on a GitLab server";
 
@@ -23,6 +24,27 @@ const NO_PROJECT: &str = "this window's folder has no remote on a GitLab server"
 pub(crate) enum ListMessage {
     Page { page: MergeRequestPage },
     End { end: ListEnd },
+}
+
+/// What resolving a merge request's conflicts did (plan §2 #139): a merge started in this checkout and its
+/// window started or not, or why nothing changed.
+#[derive(Debug, serde::Serialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum ResolveReply {
+    Started { started: Started },
+    WindowFailed { started: Started, message: String },
+    Refused { refusal: Refusal },
+    GitLabRefused { refusal: ResolveRefusal },
+}
+
+/// What continuing an unfinished merge yamt started did (plan §2 #143); nothing in git changes.
+#[derive(Debug, serde::Serialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub(crate) enum ContinueMergeReply {
+    Opened { branch: String, target: String },
+    AlreadyOpen,
+    Ended,
+    WindowFailed { message: String },
 }
 
 /// The window's GitLab project, found once at start, the folder pair locks live in, and every merge request's and
@@ -89,8 +111,72 @@ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) 
         };
     };
     match prepare_open(repository, glab, iid, &state.range_dir) {
-        Ok(range) => range_window::start(&range),
+        Ok(range) => second_window::start_range(&range),
         Err(reply) => reply,
+    }
+}
+
+/// Starts merge request `iid`'s merge in this checkout, then its window by `start_window`.
+fn resolved(
+    state: &MergeRequestState,
+    glab: Option<&Glab>,
+    iid: MergeRequestIid,
+    start_window: impl FnOnce(&Path) -> Result<(), String>,
+) -> ResolveReply {
+    let Some(repository) = &state.gitlab else {
+        let message = NO_PROJECT.to_owned();
+        return ResolveReply::GitLabRefused {
+            refusal: ResolveRefusal::Failed { message },
+        };
+    };
+    let target = match prepare_resolve(repository, glab, iid) {
+        Ok(target) => target,
+        Err(refusal) => return ResolveReply::GitLabRefused { refusal },
+    };
+    let branches = MergeRequestBranches {
+        iid: target.iid.0,
+        remote: target.remote,
+        branch: target.branch,
+        target: target.target,
+    };
+    match yamt_local_merge::start(&target.root, &branches) {
+        Err(refusal) => ResolveReply::Refused { refusal },
+        Ok(started) => match start_window(&target.root) {
+            Ok(()) => ResolveReply::Started { started },
+            Err(message) => ResolveReply::WindowFailed { started, message },
+        },
+    }
+}
+
+/// Starts the window of merge request `iid`'s unfinished merge again by `start_window`, unless the merge ended
+/// or its window is open.
+fn continued(
+    state: &MergeRequestState,
+    iid: MergeRequestIid,
+    start_window: impl FnOnce(&Path) -> Result<(), String>,
+) -> ContinueMergeReply {
+    let Some(repository) = &state.gitlab else {
+        return ContinueMergeReply::Ended;
+    };
+    let root = repository.root();
+    let live = match yamt_local_merge::find_live(root) {
+        Ok(Some(live)) if live.iid() == iid.0 => live,
+        Ok(_) => return ContinueMergeReply::Ended,
+        Err(error) => {
+            tracing::warn!(%error, "cannot tell whether a merge yamt started is in progress");
+            return ContinueMergeReply::Ended;
+        }
+    };
+    if yamt_local_merge::window_is_open(root) {
+        return ContinueMergeReply::AlreadyOpen;
+    }
+    let view = live.view();
+    match start_window(root) {
+        Ok(()) => ContinueMergeReply::Opened {
+            branch: view.branch,
+            target: view.target,
+        },
+        Err(message) => ContinueMergeReply::WindowFailed { message },
     }
 }
 
@@ -126,6 +212,51 @@ pub(crate) async fn open_merge_request<R: Runtime>(
     iid: MergeRequestIid,
 ) -> Result<OpenReply, IpcError> {
     blocking_reply(move || Ok(opened(&window.state(), Glab::find().as_ref(), iid))).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn resolve_merge_request<R: Runtime>(
+    window: WebviewWindow<R>,
+    iid: MergeRequestIid,
+) -> Result<ResolveReply, IpcError> {
+    blocking_reply(move || {
+        let glab = Glab::find();
+        Ok(resolved(
+            &window.state(),
+            glab.as_ref(),
+            iid,
+            second_window::start_merge,
+        ))
+    })
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn continue_merge_request<R: Runtime>(
+    window: WebviewWindow<R>,
+    iid: MergeRequestIid,
+) -> Result<ContinueMergeReply, IpcError> {
+    blocking_reply(move || Ok(continued(&window.state(), iid, second_window::start_merge))).await
+}
+
+/// Whether a merge yamt started is unfinished in this window's repository; no GitLab project is `Free`.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn find_local_merge<R: Runtime>(
+    window: WebviewWindow<R>,
+) -> Result<LocalMerge, IpcError> {
+    blocking_reply(move || Ok(local_merge(&window.state()))).await
+}
+
+fn local_merge(state: &MergeRequestState) -> LocalMerge {
+    state
+        .gitlab
+        .as_ref()
+        .map_or(LocalMerge::Free, |repository| {
+            yamt_local_merge::local_merge(repository.root())
+        })
 }
 
 /// Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other

@@ -4625,6 +4625,7 @@ dependencies = [
  "yamt-agent",
  "yamt-compare",
  "yamt-conflict-repo",
+ "yamt-local-merge",
  "yamt-lsp-host",
  "yamt-merge-requests",
  "yamt-range",

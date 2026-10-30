@@ -1,0 +1,5 @@
+just mutants HEAD: Rust 54 tested in 6m, 4 missed, 22 caught, 28 unviable (2 more killed by a new test); stryker domain.ts 87/3, mergeRequestDomain.ts 41/0, index.ts 0/4
+src-tauri/src/second_window.rs:66 running_appimage → Some(Default) — gate-covered: #[cfg(not(target_os = "linux"))] body, never built on Linux; it moved unchanged from range_window.rs
+src-tauri/src/second_window.rs:82 | → & and | → ^ (DETACH_FLAGS) — gate-covered: #[cfg(windows)]; pinned by the_detach_flags_… on Windows CI; moved unchanged
+src-tauri/src/second_window.rs:86 detach → () — gate-covered: the #[cfg(windows)] detach; the Unix twin is pinned by a_detached_child_leads_a_process_group_of_its_own
+domain.ts:155 ABSOLUTE_PATH (3) and index.ts:158-162 IN_APP/onWindowClose (5) — not on changed lines: stryker mutates whole files

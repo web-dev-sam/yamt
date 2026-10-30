@@ -29,6 +29,21 @@ export type OpenReply =
   | Readonly<Exclude<Generated.OpenReply, { kind: "missingCommit" }>>
   | { readonly kind: "missingCommit"; readonly shortId: string };
 export type PageOpened = Readonly<Generated.PageOpened>;
+export type Readiness = Readonly<Generated.Readiness>;
+export type BlockedReason = Readonly<Generated.BlockedReason>;
+export type ChangeSize = Readonly<Generated.ChangeSize>;
+export type Started = Readonly<Generated.Started>;
+export type Refusal = Readonly<Generated.Refusal>;
+export type ResolveRefusal = Readonly<Generated.ResolveRefusal>;
+export type ResolveReply = Readonly<Generated.ResolveReply>;
+export type ContinueMergeReply = Readonly<Generated.ContinueMergeReply>;
+export type LocalMerge = Readonly<Generated.LocalMerge>;
+export type MergeView = Readonly<Generated.MergeView>;
+export type ReturnTo = Readonly<Generated.ReturnTo>;
+export type BranchBefore = Readonly<Generated.BranchBefore>;
+export type Leftover = Readonly<Generated.Leftover>;
+export type AbortReply = Readonly<Generated.AbortReply>;
+export type PushReply = Readonly<Generated.PushReply>;
 
 function toWebPage(text: string, field: string): WebPage {
   if (!isWebPage(text)) {

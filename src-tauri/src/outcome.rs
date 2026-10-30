@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use yamt_local_merge::{WindowClaim, claim_window, find_live};
 use yamt_session::{MergeSession, OperationKind, Refreshed};
 
 use crate::merge::{Merge, MergeState, lock_when_git_is_done};
@@ -35,18 +36,49 @@ impl Ending {
 }
 
 pub(crate) enum Startup {
-    Merge(Box<MergeSession>),
+    /// `claim`: this window's hold on a merge yamt started, kept until the window closes (RK47).
+    Merge {
+        session: Box<MergeSession>,
+        claim: Option<WindowClaim>,
+    },
     Done(Ending),
 }
 
+/// A merge yamt started opens the window even without a conflicted file, so its merge can be committed.
 pub(crate) fn startup(repo: &Path) -> Startup {
-    match MergeSession::open(repo) {
-        Err(error) => Startup::Done(Ending::failure(error.to_string())),
-        Ok(session) if session.files().is_empty() => Startup::Done(Ending {
+    let session = match MergeSession::open(repo) {
+        Ok(session) => session,
+        Err(error) => return Startup::Done(Ending::failure(error.to_string())),
+    };
+    let claim = match claim_recorded_merge(session.root()) {
+        Ok(claim) => claim,
+        Err(ending) => return Startup::Done(ending),
+    };
+    if session.files().is_empty() && claim.is_none() {
+        return Startup::Done(Ending {
             exit: Exit::Success,
             message: Some(format!("nothing to merge in {}", session.root().display())),
-        }),
-        Ok(session) => Startup::Merge(Box::new(session)),
+        });
+    }
+    Startup::Merge {
+        session: Box::new(session),
+        claim,
+    }
+}
+
+/// The window's claim on the merge yamt started in `root`, if there is one; another window holding it is the
+/// ending instead.
+fn claim_recorded_merge(root: &Path) -> Result<Option<WindowClaim>, Ending> {
+    let failure = |error: yamt_local_merge::Error| Ending::failure(error.to_string());
+    let Some(live) = find_live(root).map_err(failure)? else {
+        return Ok(None);
+    };
+    match claim_window(root).map_err(failure)? {
+        Some(claim) => Ok(Some(claim)),
+        None => Err(Ending::failure(format!(
+            "the merge of !{} is already open in another yamt window",
+            live.iid()
+        ))),
     }
 }
 
@@ -64,14 +96,19 @@ pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
             exit: Exit::Unresolved,
             message: Some(format!("{} aborted", operation_name(*kind))),
         },
-        Merge::Finished(kind) => Ending {
-            exit: Exit::Success,
-            message: Some(format!("{} finished", operation_name(*kind))),
-        },
+        Merge::Finished(kind) => finished_ending(*kind),
+        Merge::Committed { .. } => finished_ending(OperationKind::Merge),
         Merge::Running(kind) => Ending::failure(format!(
             "closed while git ran the {}",
             operation_name(*kind)
         )),
+    }
+}
+
+fn finished_ending(kind: OperationKind) -> Ending {
+    Ending {
+        exit: Exit::Success,
+        message: Some(format!("{} finished", operation_name(kind))),
     }
 }
 
@@ -146,7 +183,7 @@ mod tests {
 
     fn ending(startup: Startup) -> Ending {
         match startup {
-            Startup::Merge(session) => {
+            Startup::Merge { session, .. } => {
                 panic!("expected an ending, got a merge in {:?}", session.root())
             }
             Startup::Done(ending) => ending,
@@ -253,7 +290,7 @@ mod tests {
         .unwrap();
         let inside = repo.path().join("inside");
         std::fs::create_dir(&inside).unwrap();
-        let Startup::Merge(session) = startup(&inside) else {
+        let Startup::Merge { session, .. } = startup(&inside) else {
             panic!("expected a merge");
         };
         assert_eq!(

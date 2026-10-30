@@ -22,8 +22,8 @@ mod merge_requests;
 mod mock_window;
 mod outcome;
 mod range;
-mod range_window;
 mod review;
+mod second_window;
 mod servers;
 mod settings;
 mod start_script;
@@ -79,7 +79,11 @@ pub fn export_bindings(path: &Path) -> Result<(), specta_typescript::Error> {
 
 fn merge(repo: &Path) -> Ending {
     match startup(repo) {
-        Startup::Merge(session) => window::run(session),
+        Startup::Merge { session, claim } => {
+            let ending = window::run(session);
+            drop(claim);
+            ending
+        }
         Startup::Done(ending) => ending,
     }
 }

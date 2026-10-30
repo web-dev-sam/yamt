@@ -1,11 +1,12 @@
 use std::sync::Mutex;
 
 use tauri::{Manager, Runtime, State, WebviewWindow};
+use yamt_local_merge::PushReply;
 use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, WriteReply};
 
 use crate::frontend_log::LogEntry;
 use crate::ipc_error::IpcError;
-use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
+use crate::merge::{self, AbortReply, ContinueReply, Listing, Merge, MergeState, lock};
 use crate::{ai, clipboard, compare, merge_requests, range, review, servers, settings};
 
 #[expect(
@@ -23,6 +24,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         list_stop,
         continue_operation::<tauri::Wry>,
         abort_operation::<tauri::Wry>,
+        push_merged_branch::<tauri::Wry>,
+        close_ended_merge::<tauri::Wry>,
         log,
         settings::load_settings::<tauri::Wry>,
         settings::set_theme::<tauri::Wry>,
@@ -73,6 +76,9 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::list_merge_requests::<tauri::Wry>,
         merge_requests::open_merge_request::<tauri::Wry>,
         merge_requests::open_page,
+        merge_requests::resolve_merge_request::<tauri::Wry>,
+        merge_requests::continue_merge_request::<tauri::Wry>,
+        merge_requests::find_local_merge::<tauri::Wry>,
     ])
 }
 
@@ -190,10 +196,31 @@ async fn continue_operation<R: Runtime>(
 
 #[tauri::command]
 #[specta::specta]
-async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
-    merge::abort_operation(&window.state()).await?;
-    close_window_if_ended(&window, "aborted");
-    Ok(())
+async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<AbortReply, IpcError> {
+    let reply = merge::abort_operation(&window.state()).await?;
+    if reply.leftovers.is_empty() {
+        close_window_if_ended(&window, "aborted");
+    }
+    Ok(reply)
+}
+
+#[tauri::command]
+#[specta::specta]
+async fn push_merged_branch<R: Runtime>(window: WebviewWindow<R>) -> Result<PushReply, IpcError> {
+    let reply = merge::push_merged_branch(&window.state()).await?;
+    close_window_if_ended(&window, "pushed");
+    Ok(reply)
+}
+
+#[tauri::command]
+#[specta::specta]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri passes the window by value"
+)]
+fn close_ended_merge<R: Runtime>(window: WebviewWindow<R>) {
+    lock(&window.state()).end_committed();
+    close_window_if_ended(&window, "finished");
 }
 
 fn close_window_if_ended<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {

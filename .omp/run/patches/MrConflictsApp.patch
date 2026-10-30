@@ -1,0 +1,1663 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index e2b90a6..a2c12a5 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -4625,6 +4625,7 @@ dependencies = [
+  "yamt-agent",
+  "yamt-compare",
+  "yamt-conflict-repo",
++ "yamt-local-merge",
+  "yamt-lsp-host",
+  "yamt-merge-requests",
+  "yamt-range",
+diff --git a/frontend/src/ipc/bindings.ts b/frontend/src/ipc/bindings.ts
+index 870e5f1..9db16fd 100644
+--- a/frontend/src/ipc/bindings.ts
++++ b/frontend/src/ipc/bindings.ts
+@@ -12,7 +12,9 @@ export const commands = {
+ 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
+ 	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
+ 	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
+-	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
++	abortOperation: () => typedError<AbortReply, IpcError>(__TAURI_INVOKE("abort_operation")),
++	pushMergedBranch: () => typedError<PushReply, IpcError>(__TAURI_INVOKE("push_merged_branch")),
++	closeEndedMerge: () => __TAURI_INVOKE<void>("close_ended_merge"),
+ 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
+ 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
+ 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
+@@ -75,9 +77,18 @@ export const commands = {
+ 	 *  address to the system.
+ 	 */
+ 	openPage: (page: WebPage) => __TAURI_INVOKE<PageOpened>("open_page", { page }),
++	resolveMergeRequest: (iid: MergeRequestIid) => typedError<ResolveReply, IpcError>(__TAURI_INVOKE("resolve_merge_request", { iid })),
++	continueMergeRequest: (iid: MergeRequestIid) => typedError<ContinueMergeReply, IpcError>(__TAURI_INVOKE("continue_merge_request", { iid })),
++	/**  Whether a merge yamt started is unfinished in this window's repository; no GitLab project is `Free`. */
++	findLocalMerge: () => typedError<LocalMerge, IpcError>(__TAURI_INVOKE("find_local_merge")),
+ };
+ 
+ /* Types */
++/**  What an Abort git accepted could not put back of a merge yamt started. */
++export type AbortReply = {
++	leftovers: Leftover[],
++};
++
+ /**
+  *  A server the user added: the program and its arguments, and the file extensions it serves
+  *  (without dots).
+@@ -152,6 +163,11 @@ export type BlockedReason =
+ /**  GitLab's word for it. */
+ status: string };
+ 
++/**  What the start did to the merge request's local branch. */
++export type BranchBefore = { kind: "created" } | 
++/**  `id`: the first 7 hex characters of the commit it was fast-forwarded from. */
++{ kind: "movedFrom"; id: string } | { kind: "unchanged" };
++
+ /**  How much a merge request changes, GitLab's counts. */
+ export type ChangeSize = {
+ 	/**  Lines added. */
+@@ -250,8 +266,14 @@ export type Comparison = {
+ 	differences: Difference[],
+ };
+ 
+-/**  What a Continue git accepted led to: the operation ended, or git stopped at another stop. */
+-export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
++/**  What continuing an unfinished merge yamt started did (plan §2 #143); nothing in git changes. */
++export type ContinueMergeReply = { kind: "opened"; branch: string; target: string } | { kind: "alreadyOpen" } | { kind: "ended" } | { kind: "windowFailed"; message: string };
++
++/**
++ *  What a Continue git accepted led to: the operation ended, a merge yamt started was committed and may be
++ *  pushed, or git stopped at another stop.
++ */
++export type ContinueReply = { kind: "Finished" } | { kind: "ReadyToPush"; branch: string } | { kind: "Stopped"; message: string };
+ 
+ /**  One place where the right text differs from the left, located in both texts. */
+ export type Difference = {
+@@ -404,6 +426,13 @@ export type LanguageServerSettings = {
+ /**  0-based line index in the left text of a 2-way compare. */
+ export type LeftLine = number;
+ 
++/**  What a restore could not put back. */
++export type Leftover = 
++/**  HEAD moved after the merge started, so it stays where it is. */
++{ kind: "notReturned"; to: ReturnTo } | { kind: "returnRefused"; to: ReturnTo; message: string } | 
++/**  The branch moved after the merge started, so it stays where it is. */
++{ kind: "branchKept"; branch: string } | { kind: "branchRefused"; branch: string; message: string };
++
+ /**  Where two texts differ, by lines only: the same ranges as a [`Difference`], without its word marks. */
+ export type LineChange = {
+ 	/**  The lines in the left; empty where the right inserted lines. */
+@@ -447,11 +476,16 @@ message: string };
+ export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd };
+ 
+ /**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
+-export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" };
++export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames; 
++/**  The merge yamt started at this stop, from its record; `None` for any other stop. */
++merge_request: MergeView | null } | { kind: "MovedOn" };
+ 
+ /**  0-based line index in the local text. */
+ export type LocalLine = number;
+ 
++/**  Whether a merge yamt started is unfinished in a repository. */
++export type LocalMerge = { kind: "free" } | { kind: "merging"; iid: number; windowOpen: boolean };
++
+ export type LogEntry = {
+ 	level: LogLevel,
+ 	event: string,
+@@ -533,6 +567,15 @@ export type MergeRequestRow = {
+ 	fromFork: boolean,
+ };
+ 
++/**  The recorded merge as the merge window shows it. */
++export type MergeView = {
++	branch: string,
++	target: string,
++	/**  `None` when the branch itself was checked out before. */
++	returnTo: ReturnTo | null,
++	branchBefore: BranchBefore,
++};
++
+ /**  One message of a thread. */
+ export type Message = {
+ 	/**  The message's id. */
+@@ -732,6 +775,10 @@ export type ProgressView = {
+ /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
+ export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };
+ 
++export type PushReply = { kind: "pushed" } | 
++/**  git's words: the ref's rejection, else its first `fatal:`/`error:` line. */
++{ kind: "failed"; message: string };
++
+ export type RangeChange = { kind: "added" } | { kind: "modified" } | { kind: "deleted" } | { kind: "renamed"; old_path: string };
+ 
+ /**  One row of the list; `path` is the new path, the old one for a deleted file (UTF-8, lossy for display). */
+@@ -796,6 +843,15 @@ also: BlockedReason[] } |
+ /**  What blocks it. */
+ reason: BlockedReason };
+ 
++/**  Why a start changed nothing (or, for `GitRefused` with leftovers, could not put everything back). */
++export type Refusal = 
++/**  `Some`: the iid of the unfinished merge; `None`: another start holds the start lock. */
++{ kind: "alreadyMerging"; iid: number | null } | 
++/**  git is in the middle of another operation. */
++{ kind: "busy" } | { kind: "uncommittedChanges" } | { kind: "fetchFailed"; message: string } | 
++/**  The local branch has commits GitLab's does not. */
++{ kind: "localAhead"; branch: string } | { kind: "alreadyContains"; branch: string; target: string } | { kind: "gitRefused"; message: string; left: Leftover[] } | { kind: "recordUnreadable"; path: string; message: string };
++
+ /**  0-based line index in the remote text. */
+ export type RemoteLine = number;
+ 
+@@ -812,6 +868,38 @@ export type Removal<L> = {
+ 
+ export type RepositoryAnswer = "start" | "dontStart";
+ 
++/**  Why the branches of a merge request to resolve are not given. */
++export type ResolveRefusal = 
++/**  The merge request is no longer open. */
++{ kind: "notOpen" } | 
++/**  Its source branch lives in another project. */
++{ kind: "fromFork" } | 
++/**  No remote of the repository names the project. */
++{ kind: "noRemote"; 
++/**  The project's full path, `group/project`. */
++project: string } | 
++/**  glab is not found on PATH. */
++{ kind: "glabMissing" } | 
++/**  `glab auth status` failed. */
++{ kind: "notLoggedIn"; 
++/**  glab's first output line, which names the instance. */
++detail: string } | 
++/**  glab failed, timed out or answered something unexpected. */
++{ kind: "failed"; 
++/**  What went wrong, in glab's, GitLab's or yamt's words. */
++message: string };
++
++/**
++ *  What resolving a merge request's conflicts did (plan §2 #139): a merge started in this checkout and its
++ *  window started or not, or why nothing changed.
++ */
++export type ResolveReply = { kind: "started"; started: Started } | { kind: "windowFailed"; started: Started; message: string } | { kind: "refused"; refusal: Refusal } | { kind: "gitLabRefused"; refusal: ResolveRefusal };
++
++/**  Where Abort returns HEAD to. */
++export type ReturnTo = { kind: "branch"; name: string } | 
++/**  `id`: the commit's first 7 hex characters. */
++{ kind: "commit"; id: string };
++
+ /**  0-based line index in the right text of a 2-way compare. */
+ export type RightLine = number;
+ 
+@@ -916,6 +1004,14 @@ export type SideWordChanges<L> = {
+ 
+ export type StartReply = { kind: "Started"; run: RunId } | { kind: "NotFound"; program: string; searched: string[] } | { kind: "SpawnFailed"; program: string; message: string } | { kind: "OutsideRepository"; project: string };
+ 
++/**  A started merge: `target` merged into `branch`, stopped before its commit. */
++export type Started = {
++	branch: string,
++	target: string,
++	/**  false: GitLab's "has conflicts" was stale, the merge is clean. */
++	conflicts: boolean,
++};
++
+ /**
+  *  What the window holds and sends: `keys` = action id → key strings, only for actions whose
+  *  keys differ from the defaults (the window knows the defaults; Rust never does).
+diff --git a/frontend/src/ipc/domain.ts b/frontend/src/ipc/domain.ts
+index f7bdc5c..7113eb3 100644
+--- a/frontend/src/ipc/domain.ts
++++ b/frontend/src/ipc/domain.ts
+@@ -101,6 +101,7 @@ export type Listing =
+       readonly diskChanges: readonly DiskChange[];
+       readonly operation: OperationView | null;
+       readonly sides: SideNames;
++      readonly mergeRequest: Readonly<Generated.MergeView> | null;
+     }
+   | { readonly kind: "MovedOn" };
+ 
+@@ -277,8 +278,8 @@ export function toListing(dto: Generated.Listing): Listing {
+   if (dto.kind === "MovedOn") {
+     return dto;
+   }
+-  const { files, disk_changes: diskChanges, operation, sides } = dto;
+-  return { kind: "Files", files, diskChanges, operation, sides };
++  const { files, disk_changes: diskChanges, operation, sides, merge_request: mergeRequest } = dto;
++  return { kind: "Files", files, diskChanges, operation, sides, mergeRequest };
+ }
+ 
+ export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 280848c..779420d 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -66,12 +66,27 @@ export type {
+ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion } from "./domain";
+ export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+ export type {
++  AbortReply,
++  BlockedReason,
++  BranchBefore,
++  ChangeSize,
++  ContinueMergeReply,
+   GitLabProject,
++  Leftover,
+   ListEnd,
++  LocalMerge,
+   MergeRequestPage,
+   MergeRequestRow,
++  MergeView,
+   OpenReply,
+   PageOpened,
++  PushReply,
++  Readiness,
++  Refusal,
++  ResolveRefusal,
++  ResolveReply,
++  ReturnTo,
++  Started,
+ } from "./mergeRequestDomain";
+ export type { MergeRequestSource } from "./MergeRequestSource";
+ export type {
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index dc4498d..72642db 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -29,6 +29,21 @@ export type OpenReply =
+   | Readonly<Exclude<Generated.OpenReply, { kind: "missingCommit" }>>
+   | { readonly kind: "missingCommit"; readonly shortId: string };
+ export type PageOpened = Readonly<Generated.PageOpened>;
++export type Readiness = Readonly<Generated.Readiness>;
++export type BlockedReason = Readonly<Generated.BlockedReason>;
++export type ChangeSize = Readonly<Generated.ChangeSize>;
++export type Started = Readonly<Generated.Started>;
++export type Refusal = Readonly<Generated.Refusal>;
++export type ResolveRefusal = Readonly<Generated.ResolveRefusal>;
++export type ResolveReply = Readonly<Generated.ResolveReply>;
++export type ContinueMergeReply = Readonly<Generated.ContinueMergeReply>;
++export type LocalMerge = Readonly<Generated.LocalMerge>;
++export type MergeView = Readonly<Generated.MergeView>;
++export type ReturnTo = Readonly<Generated.ReturnTo>;
++export type BranchBefore = Readonly<Generated.BranchBefore>;
++export type Leftover = Readonly<Generated.Leftover>;
++export type AbortReply = Readonly<Generated.AbortReply>;
++export type PushReply = Readonly<Generated.PushReply>;
+ 
+ function toWebPage(text: string, field: string): WebPage {
+   if (!isWebPage(text)) {
+diff --git a/src-tauri/AGENTS.md b/src-tauri/AGENTS.md
+index deffcfb..39b4bc8 100644
+--- a/src-tauri/AGENTS.md
++++ b/src-tauri/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135, #137): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `range_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` 0 with `<operation> finished`, `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted`; `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed; every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89; its tests in `merge/tests.rs`), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root, and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135, #137: `manage(app, folder, app_folder)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, pages: Mutex<BTreeSet<WebPage>> }`; no GitLab remote → every list and open answers the one line `NO_PROJECT`; the four commands `find_gitlab_project`, `list_merge_requests` (a worker: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's rows' and failed jobs' pages remembered as offered before it is sent), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `range_window::start`) and `open_page` (only a merge request's or failed job's page a list of this window sent reaches the browser, else `NotOffered`); glab is `Glab::find()` at each call; `pages` is locked only to add or look; its tests in `merge_requests/tests.rs`, whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenario `tests/glab/merge-requests`), `range_window.rs` (`start(range)`: a second yamt, `yamt --diff=<spec> --repo <root>` in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; a failed start → `OpenReply::StartFailed`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` (plan §2 #94 as amended for #130, #132): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the two async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped`), which ends the event loop without a close request, so the page asks nothing; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`; compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `pages` `Mutex`. Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent` and `merge-requests` only, never on `gitio` or `merge-core` (arch-check).
++Owner skill: `skill://ipc-contract`. Thin Tauri shell over `yamt_session::MergeSession` and `yamt_lsp_host::Host`, or with `--diff` over `yamt_compare::TabStore` (plan §2 #93–#97, #101), or with `--diff=<range>` over `yamt_range::Range` and the pair's review threads in `yamt_review::ThreadStore` (plan §2 #103–#107, #117–#119), with `--ai` also over the AI's `yamt_agent::Workspace` (plan §2 #108–#111, #114); the compare and range windows also over `yamt_merge_requests` for their merge-request page (plan §2 #128–#135, #137) and over `yamt_local_merge` for resolving a merge request's conflicts in this checkout, which the merge window then finishes, aborts or pushes (plan §2 #139–#143): `lib.rs` (`run`, `export_bindings`) shared by both bins, `from_start_dir` (every window's folder as given, through `appimage.rs` on Linux; the compare window's is `args.rs` `START_FOLDER`); `merge(repo)` keeps `Startup::Merge`'s window claim alive until `window::run` returns; `graphics.rs` (NVIDIA guard: the first statement of `run()`, the project's one `unsafe` line, plan §2 #43), `args.rs` (`yamt [--repo <path>]` → `Merge`, `yamt --diff` → `Compare`, `yamt --diff=<a>..<b>`/`--diff=<a>...<b>` with `--repo <path>` in either order → `Range { spec, repo, ai }` through `RangeSpec::parse`, whose error is the usage line; without `--repo` the repository is `START_FOLDER`, the folder yamt was started in; `--diff` with `--repo` is a usage error, so is `--diff` with a `--diff=` or a second `--diff=` ("give --diff or one --diff=<range>, not both"); `--help`/`--version` win; `--ai` is accepted with every mode and never stored, only `Range` keeps it as `Ai` = `Off` | `On`, plan §2 #108), `appimage.rs` (inside an AppImage — `APPIMAGE` and `APPDIR` set and the binary under `$APPDIR` — a relative window folder is resolved against `OWD` by `repo_from_start_dir`; never chdir, WebKit's helper paths are relative to `$APPDIR/usr`; called through `from_start_dir` for every window; `running_appimage`: the `$APPIMAGE` file only inside the AppImage, else `None`, the program `second_window.rs` starts, since the mount the running binary lives in goes away with this process), `outcome.rs` (start-up decision, exit status 0/1/2: `MergeSession::open`'s error is exit 2; with a live record of a merge yamt started (`yamt_local_merge::find_live`) the window first takes `claim_window` — another window holding it is exit 2 "the merge of !<iid> is already open in another yamt window" (RK47), a git error exit 2 with its line — and opens even on a stop with no file; without a record and no file "nothing to merge in <root>", exit 0; `Startup::Merge { session, claim }`; the close ending, `ending_when_git_is_done` — `ending_on_close` once `lock_when_git_is_done` lets go: `Finished(kind)` and `Committed` 0 with `<operation> finished` (`merge finished` for `Committed`), `Aborted(kind)` 1 with `<operation> aborted` (`merge aborted` for a merge), reading and writing nothing; `Held` lists through `refresh_stop` and counts git's view, a `MovedOn` there counting the stop git moved on to like `MovedOn`; `MovedOn` opens the stop git is at only to count its unmerged files, settling nothing), `merge.rs` (`Merge` = `Held(Box<MergeSession>)` | `Running(kind)` | `MovedOn { root, highest_disk_version }` | `Aborted(kind)` | `Committed { root, offer: PushOffer }` | `Finished(kind)`, the app's merge state as `MergeState` = `Mutex<Merge>`; `session()` answers `GitRunning`, `StopMovedOn`, `MergeAborted` or `MergeFinished` (also for `Committed`) outside `Held` — the one state → refusal mapping, also what a worker hand-over refuses with; `has_ended()` is true only for `Finished`/`Aborted` (a `Committed` merge still asks whether to push); `list_stop` opens the new stop after a move with `MergeSession::open_after(root, highest_disk_version)`, so its disk versions start above the old session's and a write meant for the old stop is refused (#1383), becomes `MovedOn` when git moved on, and builds `Listing::Files` from session's `StopList` by an exhaustive destructure, so a new field does not compile until it is listed, plus `merge_request`: the live record's `MergeView`, read fresh by `find_live` on every list (a git error → `Git`); every `MovedOn` is built by `moved_on(&session)` (root and `highest_disk_version()`); `abort_operation`/`continue_operation` read the live record before they hand the session to a `spawn_blocking` worker while `Running` and put the outcome back: refused → `Held`, the stop moved on outside yamt (`StopMovedOn`) → `MovedOn`, so the next `list_stop` opens git's stop (#1440), stopped → `MovedOn`, a panicked worker → `MovedOn` built before the hand-over, answering `StopMovedOn` like every later call (the window goes to the next stop) and logging the join error with `tracing::error!`; the abort's worker runs git's abort and then, for a recorded merge, `LiveMerge::restore`, answering `AbortReply { leftovers }` (#140); a continue that finishes a recorded merge calls `LiveMerge::committed` and becomes `Committed`, answering `ContinueReply::ReadyToPush { branch }` (#141); `push_merged_branch` takes the offer out of `Committed` only (else `NoOperation`, RK45), pushes on a `spawn_blocking` worker while `Running(Merge)` — `Pushed` → `Finished(Merge)`, `Failed` or a panicked worker (`WorkerStopped`) → `Committed` again; `end_committed` (Keep Local): `Committed` → `Finished(Merge)`, any other state stays; `lock_when_git_is_done` makes the close ending wait for git; plan §2 #74, #88, #89, #140, #141; its tests in `merge/tests.rs` and, on `scripts/mr-conflict-repo.sh` with the merge started by `yamt_local_merge::start`, `merge/merge_request_tests.rs` (also `outcome::startup`'s claim)), `compare.rs` (the compare window, plan §2 #94/#95/#97: `manage_store_in` opens `TabStore` and manages it as `CompareState` in `<data_dir>/yamt/compare/` before any window, its failure the one line `yamt --diff` ends with (exit 2); `CompareState` = `Mutex<TabStore>`; the eight commands `open_compare`, `load_tab`, `set_column`, `add_tab`, `close_tab`, `rename_tab`, `set_tab_language`, `show_tab`; `load_tab`/`set_column` run on a `spawn_blocking` worker that locks the store only to call it, then builds the reply (`tab_texts`/`comparison`, the diff) after the lock is released; a worker that panicked answers `WorkerStopped`), `range.rs` (the range window, plan §2 #103–#107, #117: `run_range` resolves the range before any app is built — not a repository, an unknown name, no merge base: one `yamt: …` line, exit 2, no window —, builds the app with `with_commands`, takes the pair's `PairLock` under `<data_dir>/yamt/range/` before listing (another window on the same pair: one line naming both short ids, exit 2), then opens the pair folder's `threads.json` with `ThreadStore::open` before any window (unreadable, broken or newer: one `yamt: …` line naming the file, exit 2, the file untouched) and logs the stored paths the range does not list once with `tracing::warn!`; manages the AI's state through `ai::manage`, the merge-request page's through `merge_requests::manage` on the range's repository root, and `RangeState { range, threads: Mutex<ThreadStore>, sending: Mutex<()>, _lock }` (the range itself never changes after start), opens the window titled `<range as typed> — <repository folder> — yamt` and, once it closed, runs `ai::end_at_exit`, then ends with exit 0 and no message; never a `MergeSession`, `HostState` or `TabStore`; the two commands `open_range` (`Range::start`) and `load_range_file` (`Range::load` on a `spawn_blocking` worker, a panic → `WorkerStopped`); `range_folder(app_folder)`, the folder pair locks live in, shared with `merge_requests.rs`; its test helpers `open_range_window`/`open_range_window_with(ai)`/`open_range_window_in(repo, data, ai)`/`open_range_window_on(repo, range)` (Unix only)/`RangeWindow` are shared with `review.rs` and `ai.rs`), `ai.rs` (the range window's AI, plan §2 #108–#111, #114: `AiState` = `Off` | `On(Workspace)`, managed as `Mutex<AiState>` by every range window; `AiState::workspace()` is the one `AiOff` mapping, the private `lock` the only way to the state; `manage` builds the `Workspace` (repository root, pair folder, the right commit's full id) only in its `Ai::On` arm and there starts a background thread that holds the state while `Workspace::remove_own_leftovers` removes this pair's partial and removing folders, `manage` returning once it holds it, so no checkout of the pair is made or removed meanwhile; the thread then releases the state and runs `yamt_agent::sweep_other_pairs` without it (`sweep_own_then_others(state, held, others)`, whose test sees the state free when `others` runs), so the looks at every other pair's kept checkout never hold up a command; `stop_agent_on_page_start(app, event)`: a page that starts loading stops the agent with `try_lock`; while a prepare, a start, a discard or the own-pair sweep holds the state, a thread waits for the lock and stops the agent then (deferred, never dropped), the checkout kept; `end_at_exit` takes the workspace out and calls `Workspace::end` (stop and reap the agent, look again, remove only a clean checkout); the seven commands `prepare_checkout` (on a `spawn_blocking` worker, under the lock), `start_agent` (a worker command: under the lock it stops and reaps an earlier agent — up to about 3 s — and spawns the new one; a small thread forwards the agent's events into its `Channel` through `servers::forward`), `send_to_agent`, `stop_agent`, `checkout_changes` (the `LookJob` taken under the lock, git's look on the worker after it is released), `discard_checkout` (worker, under the lock while the folder is removed; a failed removal → `RemoveFailed`), `diff_texts` (worker, `yamt_compare::text_differences`, needs no AI state, a side over 8 MiB → `ColumnTooLarge`); its tests in `ai/tests.rs`), `review.rs` (the range window's threads and posting, plan §2 #117–#119, #121: `list_threads`, `add_thread`, `add_note`, `queue_message`, `unqueue_message`, `set_thread_session`, `add_ai_answer` lock `threads`, call one `ThreadStore` method with the range and let go; `check_gitlab` and `send_queue` run on a `spawn_blocking` worker (a panic → `WorkerStopped`) with the glab `yamt_review::Glab::find()` finds on PATH at each call; `send_queue` takes the send guard with `try_lock` — another send running answers `SendRunning`, a guard poisoned by a panicked send is taken again — and holds it for the whole send, while `yamt_review::send_queue` locks `threads` only between glab calls; each `SendProgress` goes to the call's `Channel`, a failed send logged; its tests in `review/tests.rs`, whose Unix-only `through_glab` tests run `send_queue` and `check_gitlab` in a child test process whose PATH starts with the committed `scripts/fake-glab`, on `scripts/range-repo.sh`'s `main...feature` and the scenarios `tests/glab/slow-post` and `lined-up`), `merge_requests.rs` (the merge-request page of the compare and range windows, plan §2 #128–#135, #137, #139, #143: `manage(app, folder, app_folder)` reads `folder`'s remotes once, offline, with `gitlab_repository` and manages `MergeRequestState { gitlab, range_dir, pages: Mutex<BTreeSet<WebPage>> }`; no GitLab remote → every list and open answers the one line `NO_PROJECT`, a resolve `GitLabRefused { Failed { NO_PROJECT } }`, a continue `Ended`, `find_local_merge` `Free`; the seven commands `find_gitlab_project`, `list_merge_requests` (a worker: every `MergeRequestPage` then one `ListEnd` as `ListMessage` on the call's `Channel`, the end on the channel too since tauri delivers a large channel message by a later fetch; each page's rows' and failed jobs' pages remembered as offered before it is sent), `open_merge_request` (a worker: `prepare_open` checks glab's login, asks glab for the merge request's commits, fetches them only when one is missing (plan §2 #132), tries the pair's lock, then `second_window::start_range`), `resolve_merge_request` (a worker, `resolved`: `prepare_resolve` → `GitLabRefused`, `yamt_local_merge::start` → `Refused`, then the window start → `Started` or `WindowFailed { started, message }`), `continue_merge_request` (a worker, `continued`: no live record or another merge request's → `Ended` (a git error logged), its window open (`window_is_open`) → `AlreadyOpen`, else the window start → `Opened { branch, target }` or `WindowFailed`; nothing in git changes), `find_local_merge` (a worker: `yamt_local_merge::local_merge` on the repository) and `open_page` (only a merge request's or failed job's page a list of this window sent reaches the browser, else `NotOffered`); `resolved` and `continued` take the window start as a parameter, the commands pass `second_window::start_merge`; glab is `Glab::find()` at each call; `pages` is locked only to add or look; its tests in `merge_requests/tests.rs` and `merge_requests/tests/resolve.rs`, whose Unix-only `through_glab` tests run in a child test process whose PATH starts with `scripts/fake-glab` and `scripts/fake-open`, on `scripts/range-repo.sh` and the scenario `tests/glab/merge-requests`, or on `scripts/mr-conflict-repo.sh` and `tests/glab/mr-conflicts` with a recording or failing window start), `second_window.rs` (a second yamt started by this one, plan §2 #132, #139: `start_range(range)`, `yamt --diff=<spec> --repo <root>`, a failed start → `OpenReply::StartFailed`; `start_merge(root)`, `yamt --repo <root>`, `Err` with why it did not start; both through one private `spawn`: in `root`, stdin and stdout closed, stderr inherited, in a process group of its own (Unix `process_group(0)`, Windows `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) so it outlives this one and the terminal; the program is `appimage.rs` `running_appimage` when there is one, else `current_exe`; a thread reaps it and logs its exit; RK42's tests parse both argument lists with `args::parse`), `clipboard.rs` (`read_clipboard(selection: ClipboardSelection)` → the text or `None`, for every window, no managed state, plan §2 #99: on Linux GTK's text request (`gtk::Clipboard::request_text`), started on the main thread by `run_on_main_thread` and waited for on a `spawn_blocking` worker, so a hung owner never blocks the window; it never asks GTK for the selection's format list — no `request_targets`, `wait_for_targets`, `wait_is_*_available`, `wait_for_contents`, `request_contents` — since WebKitGTK 2.54 crashes on a failed one; other systems answer `None`), `window.rs` (one window per run, merge, compare or range, built by one `open_and_wait` (private, as is `context()`; `open_with_data_folder` and `window_title` are `pub(crate)` for `range.rs`): reads `stored_at_start` once — theme and antialiasing — and applies font rendering before building the webview with the start script; `WindowKind` (`name()`: merge, compare or range); `open_with_data_folder(title, kind, ai, manage, at_exit)`: `manage` before the window, `at_exit` after it closed; close fallback: a close request between `UNANSWERED_CLOSE_GRACE` and `UNANSWERED_CLOSE_TIMEOUT` after an unanswered one destroys the window; after the event loop the merge window runs `stop_all` so no language server outlives a normal close, then the ending once git is done; `run_compare(folder)`: the compare window, titled `Compare — yamt`, manages its `TabStore` and `merge_requests::manage` on `folder` (plan §2 #94 as amended for #130, #132): it reads `folder`'s remotes at start and runs glab, and a fetch if needed, only for the merge-request page, never opens a `MergeSession` or manages `Mutex<Merge>`/`HostState`, and ends with exit 0 and no message), `start_script.rs` (`start_script(theme, kind, ai)`: sets `<html data-theme>` and `<html data-window="merge|compare|range">` before the first frame, and `<html data-ai="on">` only for a range window started with `--ai`), `font_rendering.rs` (Linux: the Antialiasing setting onto GTK's `gtk-xft-antialias`/`gtk-xft-rgba` before the webview is built, plan §2 #60), `commands.rs` (commands ≤ 15 lines delegating to `session` through `Merge::session`, or to `merge.rs`; the async commands destroy the window only when `Merge::has_ended()` (finished or aborted, never after `Stopped` nor while `Committed`), which ends the event loop without a close request, so the page asks nothing — `abort_operation` only when `leftovers` is empty too (the page shows them first), `push_merged_branch` after `Pushed`; `close_ended_merge` ends a `Committed` merge (Keep Local) and destroys the window when the merge has ended, also after an abort with leftovers; they take the window and read the state from it, since tauri's check of an async command with a borrowed argument expands to an `unreachable!`; `specta_builder` registers every command of every window; `with_session` manages `Mutex<Merge>`, calls `servers::manage` for the host, sets the invoke handler and registers the merge window's page-load hook: a page that starts loading calls `servers::stop_runs_on_page_start`; `with_commands` (the compare and range windows) sets the invoke handler and its page-load hook: a page that starts loading calls `ai::stop_agent_on_page_start` with the app handle, which does nothing without a `Mutex<AiState>` (every range window manages one, never the compare window); Tauri keeps only the last `on_page_load`, so each builder registers one), `servers.rs` (`manage`: builds and manages the `HostState` (`Mutex<Host>`) for the session's repository, nothing else; `stop_runs_on_page_start`: on `PageLoadEvent::Started` stops every run of the page before it (`Host::stop_every`), since a reloaded page's channels still take events; `forward`: the one rule that hands a run's events to its Tauri `Channel` and, when a send fails, drops them so the run stops itself, used by `start_server` and `ai::start_agent`; the six language server commands, plan §2 #70: `servers_context`, `start_server`, `send_to_server`, `stop_server`, `find_program`, `project_files`; its Unix-only test helpers `channel_into` and `is_alive` are shared with `ai.rs`), `settings.rs` (`Places` and the eight settings commands; `set_server_answer` and `set_server_switch` (a found server switched off or on, plan §2 #83) key their change by the host's root, and a root that is not UTF-8 only reads), `ipc_error.rs` (`IpcError`, mapped from `yamt_session::Error` — git's refusal of a Continue is `Git` with git's own text —, from `yamt_settings::Error`, from `yamt_compare::Error` (a stored-tabs problem is `ReadFailed`, `UnknownTab`, a column over the limit `ColumnTooLarge { limit }`), from `yamt_range::Error` (`UnknownFile` → `UnknownRangeFile { file }`, everything else `Git` with its line), from `yamt_review::Error` (`WriteFailed { path, message }`, `UnknownFile` → `UnknownRangeFile`, `UnknownThread { thread }`, `UnknownMessage { message }`, `EmptyMessage`, `MessagePending { message }`; the start-only read refusals `Git` with their line) and from `yamt_agent::Error` (`Remove`/`Rename` → `RemoveFailed { folder, message }`, `Git` → `Git`), plus `MergeAborted`, `GitRunning`, `MergeFinished`, `WorkerStopped`, `SendRunning`, `AiOff`; `blocking_reply`: a worker command's work on `spawn_blocking`, a panic logged and answered `WorkerStopped`; every mapping's tests in `ipc_error/tests.rs`), `frontend_log.rs` (`LogEntry` → `tracing`, target `frontend`), `mock_window.rs` (tests only: a conflict or operation repository opened in a mock-runtime window, `invoke` a command by name, `invoke_on` from another thread, `ending()` calls `outcome::ending_when_git_is_done` — the close ending as `window.rs` computes it; used by the command tests in `commands.rs`, `merge/tests.rs`, `merge/merge_request_tests.rs` and `servers.rs`; `open_compare_window`: the compare window on a temp data folder, used by `compare.rs`; `range.rs` and `merge_requests/tests.rs` build their own mock windows and call `invoke_on`). Merge window: `Mutex<Merge>` and `Mutex<Host>`, and, on a merge yamt started, the `WindowClaim` held by `lib.rs` `merge()` for the window's life (a file lock, never a `Mutex`); compare window: `Mutex<TabStore>`; range window: `Mutex<ThreadStore>`, the send guard `Mutex<()>` and `Mutex<AiState>` (its long holders: a prepare while git makes the checkout, a start while it reaps the earlier agent (up to about 3 s), a discard while it removes the folder, and the start's own-pair sweep; meanwhile the sync `send_to_agent`/`stop_agent` wait on the main thread); compare and range windows: `MergeRequestState`'s `pages` `Mutex`. Never two held together, but for a send: it holds the send guard throughout and takes `threads` only between glab calls; a command locks one, calls one method and lets go; a worker never holds the merge's lock while git runs, nor the store's while it diffs, nor the AI's while it looks at the checkout or sweeps other pairs. `bin/export-bindings.rs` generates `frontend/src/ipc/bindings.ts` (`just bindings`). `tauri.conf.json` `bundle.resources` ships `LICENSE` and `THIRD_PARTY_LICENSES.txt` (`scripts/third-party-licenses.sh`) in every bundle. Depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent`, `merge-requests` and `local-merge` only, never on `gitio` or `merge-core` (arch-check).
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index c817073..a1c80a2 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -32,6 +32,7 @@ yamt-range.workspace = true
+ yamt-review.workspace = true
+ yamt-agent.workspace = true
+ yamt-merge-requests.workspace = true
++yamt-local-merge.workspace = true
+ serde.workspace = true
+ specta.workspace = true
+ specta-typescript.workspace = true
+diff --git a/src-tauri/src/commands.rs b/src-tauri/src/commands.rs
+index cb5b439..3cda188 100644
+--- a/src-tauri/src/commands.rs
++++ b/src-tauri/src/commands.rs
+@@ -1,11 +1,12 @@
+ use std::sync::Mutex;
+ 
+ use tauri::{Manager, Runtime, State, WebviewWindow};
++use yamt_local_merge::PushReply;
+ use yamt_session::{DiskVersion, FileMergeData, FileSides, MergeSession, Side, WriteReply};
+ 
+ use crate::frontend_log::LogEntry;
+ use crate::ipc_error::IpcError;
+-use crate::merge::{self, ContinueReply, Listing, Merge, MergeState, lock};
++use crate::merge::{self, AbortReply, ContinueReply, Listing, Merge, MergeState, lock};
+ use crate::{ai, clipboard, compare, merge_requests, range, review, servers, settings};
+ 
+ #[expect(
+@@ -23,6 +24,8 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         list_stop,
+         continue_operation::<tauri::Wry>,
+         abort_operation::<tauri::Wry>,
++        push_merged_branch::<tauri::Wry>,
++        close_ended_merge::<tauri::Wry>,
+         log,
+         settings::load_settings::<tauri::Wry>,
+         settings::set_theme::<tauri::Wry>,
+@@ -73,6 +76,9 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
+         merge_requests::list_merge_requests::<tauri::Wry>,
+         merge_requests::open_merge_request::<tauri::Wry>,
+         merge_requests::open_page,
++        merge_requests::resolve_merge_request::<tauri::Wry>,
++        merge_requests::continue_merge_request::<tauri::Wry>,
++        merge_requests::find_local_merge::<tauri::Wry>,
+     ])
+ }
+ 
+@@ -190,10 +196,31 @@ async fn continue_operation<R: Runtime>(
+ 
+ #[tauri::command]
+ #[specta::specta]
+-async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<(), IpcError> {
+-    merge::abort_operation(&window.state()).await?;
+-    close_window_if_ended(&window, "aborted");
+-    Ok(())
++async fn abort_operation<R: Runtime>(window: WebviewWindow<R>) -> Result<AbortReply, IpcError> {
++    let reply = merge::abort_operation(&window.state()).await?;
++    if reply.leftovers.is_empty() {
++        close_window_if_ended(&window, "aborted");
++    }
++    Ok(reply)
++}
++
++#[tauri::command]
++#[specta::specta]
++async fn push_merged_branch<R: Runtime>(window: WebviewWindow<R>) -> Result<PushReply, IpcError> {
++    let reply = merge::push_merged_branch(&window.state()).await?;
++    close_window_if_ended(&window, "pushed");
++    Ok(reply)
++}
++
++#[tauri::command]
++#[specta::specta]
++#[expect(
++    clippy::needless_pass_by_value,
++    reason = "tauri passes the window by value"
++)]
++fn close_ended_merge<R: Runtime>(window: WebviewWindow<R>) {
++    lock(&window.state()).end_committed();
++    close_window_if_ended(&window, "finished");
+ }
+ 
+ fn close_window_if_ended<R: Runtime>(window: &WebviewWindow<R>, ended: &str) {
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 7a3e247..368751a 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -22,8 +22,8 @@ mod merge_requests;
+ mod mock_window;
+ mod outcome;
+ mod range;
+-mod range_window;
+ mod review;
++mod second_window;
+ mod servers;
+ mod settings;
+ mod start_script;
+@@ -79,7 +79,11 @@ pub fn export_bindings(path: &Path) -> Result<(), specta_typescript::Error> {
+ 
+ fn merge(repo: &Path) -> Ending {
+     match startup(repo) {
+-        Startup::Merge(session) => window::run(session),
++        Startup::Merge { session, claim } => {
++            let ending = window::run(session);
++            drop(claim);
++            ending
++        }
+         Startup::Done(ending) => ending,
+     }
+ }
+diff --git a/src-tauri/src/merge.rs b/src-tauri/src/merge.rs
+index ced5719..65871be 100644
+--- a/src-tauri/src/merge.rs
++++ b/src-tauri/src/merge.rs
+@@ -1,8 +1,9 @@
+-use std::path::PathBuf;
++use std::path::{Path, PathBuf};
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ use std::thread;
+ use std::time::Duration;
+ 
++use yamt_local_merge::{Leftover, LiveMerge, MergeView, PushOffer, PushReply, find_live};
+ use yamt_session::{
+     Continued, DiskChange, DiskVersion, FileEntry, MergeSession, OperationKind, OperationView,
+     Refreshed, SideNames, StopList,
+@@ -12,10 +13,10 @@ use crate::ipc_error::IpcError;
+ 
+ const GIT_RUNNING_POLL: Duration = Duration::from_millis(50);
+ 
+-/// The stop this run works on (plan §2 #74, #88, #89).
++/// The stop this run works on (plan §2 #74, #88, #89, #141).
+ pub(crate) enum Merge {
+     Held(Box<MergeSession>),
+-    /// git aborts or continues; the session is with the worker.
++    /// git aborts or continues, or pushes a committed merge; the session is with the worker.
+     Running(OperationKind),
+     /// git moved on to another stop: the old session is dropped; the next list opens the new one,
+     /// its disk versions above the old session's highest (#1383).
+@@ -24,6 +25,11 @@ pub(crate) enum Merge {
+         highest_disk_version: DiskVersion,
+     },
+     Aborted(OperationKind),
++    /// A merge yamt started is committed in `root`; the window asks whether to push it.
++    Committed {
++        root: PathBuf,
++        offer: PushOffer,
++    },
+     Finished(OperationKind),
+ }
+ 
+@@ -42,18 +48,28 @@ pub enum Listing {
+         disk_changes: Vec<DiskChange>,
+         operation: Option<OperationView>,
+         sides: SideNames,
++        /// The merge yamt started at this stop, from its record; `None` for any other stop.
++        merge_request: Option<MergeView>,
+     },
+     MovedOn,
+ }
+ 
+-/// What a Continue git accepted led to: the operation ended, or git stopped at another stop.
++/// What a Continue git accepted led to: the operation ended, a merge yamt started was committed and may be
++/// pushed, or git stopped at another stop.
+ #[derive(Debug, PartialEq, Eq, serde::Serialize, specta::Type)]
+ #[serde(tag = "kind")]
+ pub enum ContinueReply {
+     Finished,
++    ReadyToPush { branch: String },
+     Stopped { message: String },
+ }
+ 
++/// What an Abort git accepted could not put back of a merge yamt started.
++#[derive(Debug, PartialEq, Eq, serde::Serialize, specta::Type)]
++pub struct AbortReply {
++    pub leftovers: Vec<Leftover>,
++}
++
+ pub(crate) fn lock(state: &MergeState) -> MutexGuard<'_, Merge> {
+     state.lock().unwrap_or_else(PoisonError::into_inner)
+ }
+@@ -77,7 +93,7 @@ impl Merge {
+             Merge::Running(_) => Err(IpcError::GitRunning),
+             Merge::MovedOn { .. } => Err(IpcError::StopMovedOn),
+             Merge::Aborted(_) => Err(IpcError::MergeAborted),
+-            Merge::Finished(_) => Err(IpcError::MergeFinished),
++            Merge::Finished(_) | Merge::Committed { .. } => Err(IpcError::MergeFinished),
+         }
+     }
+ 
+@@ -103,6 +119,7 @@ impl Merge {
+                 disk_changes,
+                 operation,
+                 sides,
++                merge_request: recorded_merge(session.root())?.map(|live| live.view()),
+             }),
+             Refreshed::MovedOn => {
+                 *self = moved_on(session);
+@@ -111,11 +128,22 @@ impl Merge {
+         }
+     }
+ 
+-    /// git finished or aborted the operation: nothing is left for this window.
++    /// git finished or aborted the operation: nothing is left for this window. A committed merge yamt started
++    /// still asks whether to push it.
+     pub(crate) fn has_ended(&self) -> bool {
+         match self {
+             Merge::Finished(_) | Merge::Aborted(_) => true,
+-            Merge::Held(_) | Merge::Running(_) | Merge::MovedOn { .. } => false,
++            Merge::Held(_)
++            | Merge::Running(_)
++            | Merge::MovedOn { .. }
++            | Merge::Committed { .. } => false,
++        }
++    }
++
++    /// Keep Local: a committed merge yamt started ends without a push; any other state stays.
++    pub(crate) fn end_committed(&mut self) {
++        if let Merge::Committed { .. } = self {
++            *self = Merge::Finished(OperationKind::Merge);
+         }
+     }
+ 
+@@ -129,12 +157,42 @@ impl Merge {
+             refused @ (Merge::Running(_)
+             | Merge::MovedOn { .. }
+             | Merge::Aborted(_)
++            | Merge::Committed { .. }
+             | Merge::Finished(_)) => {
+                 *self = refused;
+                 self.hand_to_worker()
+             }
+         }
+     }
++
++    /// The committed merge yamt started, taken out for a push while `Running`; any other state stays and
++    /// answers `NoOperation`.
++    fn take_committed(&mut self) -> Result<(PathBuf, PushOffer), IpcError> {
++        match std::mem::replace(self, Merge::Running(OperationKind::Merge)) {
++            Merge::Committed { root, offer } => Ok((root, offer)),
++            kept @ (Merge::Held(_)
++            | Merge::Running(_)
++            | Merge::MovedOn { .. }
++            | Merge::Aborted(_)
++            | Merge::Finished(_)) => {
++                *self = kept;
++                Err(IpcError::NoOperation)
++            }
++        }
++    }
++}
++
++/// The merge yamt started in `root`, read fresh from its record while git is still in it.
++fn recorded_merge(root: &Path) -> Result<Option<LiveMerge>, IpcError> {
++    find_live(root).map_err(|error| IpcError::Git {
++        message: error.to_string(),
++    })
++}
++
++/// The recorded merge at the held stop; read before the session goes to a worker.
++fn held_recorded_merge(state: &MergeState) -> Result<Option<LiveMerge>, IpcError> {
++    let root = lock(state).session()?.root().to_path_buf();
++    recorded_merge(&root)
+ }
+ 
+ fn moved_on(session: &MergeSession) -> Merge {
+@@ -176,22 +234,38 @@ where
+     }
+ }
+ 
+-/// git's abort of the operation (plan §2 #88); `Aborted` only after git succeeded.
+-pub(crate) async fn abort_operation(state: &MergeState) -> Result<(), IpcError> {
+-    let (_session, kind) = on_worker(state, MergeSession::abort_operation).await?;
++/// git's abort of the operation (plan §2 #88), then, for a merge yamt started, the checkout put back as its
++/// record says (#140); `Aborted` only after git succeeded.
++pub(crate) async fn abort_operation(state: &MergeState) -> Result<AbortReply, IpcError> {
++    let live = held_recorded_merge(state)?;
++    let aborted = on_worker(state, move |session| {
++        let kind = session.abort_operation()?;
++        let leftovers = live.map(LiveMerge::restore).unwrap_or_default();
++        Ok((kind, leftovers))
++    });
++    let (_session, (kind, leftovers)) = aborted.await?;
+     *lock(state) = Merge::Aborted(kind);
+-    Ok(())
++    Ok(AbortReply { leftovers })
+ }
+ 
+-/// git's continue (plan §2 #89): finished, or stopped at another stop (`MovedOn`).
++/// git's continue (plan §2 #89): finished, committed a merge yamt started (`Committed`, #141), or stopped at
++/// another stop (`MovedOn`).
+ pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueReply, IpcError> {
++    let live = held_recorded_merge(state)?;
+     let (session, continued) = on_worker(state, MergeSession::continue_operation).await?;
+     let mut merge = lock(state);
+     match continued {
+         Continued::Finished { kind, output } => {
+             tracing::info!(%output, "git finished the operation");
+-            *merge = Merge::Finished(kind);
+-            Ok(ContinueReply::Finished)
++            let Some(live) = live else {
++                *merge = Merge::Finished(kind);
++                return Ok(ContinueReply::Finished);
++            };
++            let offer = live.committed();
++            let branch = offer.branch().to_owned();
++            let root = session.root().to_path_buf();
++            *merge = Merge::Committed { root, offer };
++            Ok(ContinueReply::ReadyToPush { branch })
+         }
+         Continued::Stopped { message } => {
+             *merge = moved_on(&session);
+@@ -200,5 +274,35 @@ pub(crate) async fn continue_operation(state: &MergeState) -> Result<ContinueRep
+     }
+ }
+ 
++/// Pushes the committed merge yamt started on a worker while `Running` (#141): pushed → `Finished`; refused,
++/// or a worker that panicked, → `Committed` again, so the window may ask once more.
++pub(crate) async fn push_merged_branch(state: &MergeState) -> Result<PushReply, IpcError> {
++    let (root, offer) = lock(state).take_committed()?;
++    let worker = {
++        let (root, offer) = (root.clone(), offer.clone());
++        tauri::async_runtime::spawn_blocking(move || yamt_local_merge::push(&root, &offer))
++    };
++    let pushed = worker.await;
++    let mut merge = lock(state);
++    match pushed {
++        Ok(PushReply::Pushed) => {
++            *merge = Merge::Finished(OperationKind::Merge);
++            Ok(PushReply::Pushed)
++        }
++        Ok(failed @ PushReply::Failed { .. }) => {
++            *merge = Merge::Committed { root, offer };
++            Ok(failed)
++        }
++        Err(error) => {
++            tracing::error!(%error, "yamt's worker stopped while git pushed");
++            *merge = Merge::Committed { root, offer };
++            Err(IpcError::WorkerStopped)
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests;
++
++#[cfg(test)]
++mod merge_request_tests;
+diff --git a/src-tauri/src/merge/merge_request_tests.rs b/src-tauri/src/merge/merge_request_tests.rs
+new file mode 100644
+index 0000000..d6c59ba
+--- /dev/null
++++ b/src-tauri/src/merge/merge_request_tests.rs
+@@ -0,0 +1,305 @@
++use std::fs;
++use std::path::Path;
++use std::process::Command;
++
++use serde_json::{Value, json};
++use tauri::Manager;
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_local_merge::{MergeRequestBranches, claim_window};
++
++use super::*;
++use crate::mock_window::{Window, open_window, open_window_in};
++use crate::outcome::{Ending, Exit, Startup, startup};
++
++const IID: u32 = 21;
++const DUE_DATES: &str = "feature/due-dates";
++const CLEAN: &str = "feature/clean";
++const CARD: &str = "src/board/card.ts";
++const GITLAB: &str = ".git/fake-gitlab.git";
++const RECORD: &str = ".git/yamt-merge-request.json";
++
++/// `scripts/mr-conflict-repo.sh`'s repository, on `develop`.
++fn mr_conflict_repo() -> TempDir {
++    let repo = TempDir::new().unwrap();
++    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/mr-conflict-repo.sh");
++    let built = Command::new(script).arg(repo.path()).output().unwrap();
++    assert!(built.status.success(), "{built:?}");
++    repo
++}
++
++/// Merge request !21 of `branch` into `main` started in `repo` as the page's Resolve starts it.
++fn start_merge(repo: &TempDir, branch: &str) {
++    let branches = MergeRequestBranches {
++        iid: IID,
++        remote: "origin".to_owned(),
++        branch: branch.to_owned(),
++        target: "main".to_owned(),
++    };
++    yamt_local_merge::start(repo.path(), &branches).unwrap();
++}
++
++fn window_on_started(branch: &str) -> Window {
++    let repo = mr_conflict_repo();
++    start_merge(&repo, branch);
++    open_window_in(repo)
++}
++
++fn git_line(root: &Path, args: &[&str]) -> String {
++    let output = git_ok(root, args).unwrap();
++    String::from_utf8(output).unwrap().trim_end().to_owned()
++}
++
++fn merge_has_ended(window: &Window) -> bool {
++    lock(&window.app.state::<MergeState>()).has_ended()
++}
++
++fn finished(message: &str) -> Ending {
++    Ending {
++        exit: Exit::Success,
++        message: Some(message.to_owned()),
++    }
++}
++
++/// A clean merge yamt started, committed by the window's Continue.
++fn committed_clean_merge() -> Window {
++    let window = window_on_started(CLEAN);
++    let continued = window.invoke("continue_operation", json!({}));
++    assert_eq!(
++        continued,
++        Ok(json!({ "kind": "ReadyToPush", "branch": CLEAN }))
++    );
++    window
++}
++
++#[test]
++fn list_names_the_recorded_merge() {
++    let window = window_on_started(DUE_DATES);
++
++    let listed = window.invoke("list_stop", json!({})).unwrap();
++
++    let view = json!({
++        "branch": DUE_DATES,
++        "target": "main",
++        "returnTo": { "kind": "branch", "name": "develop" },
++        "branchBefore": { "kind": "created" },
++    });
++    assert_eq!(listed["merge_request"], view, "{listed}");
++    let users_own = open_window().invoke("list_stop", json!({})).unwrap();
++    assert_eq!(users_own["merge_request"], Value::Null, "{users_own}");
++}
++
++#[test]
++fn abort_of_a_merge_yamt_started_restores_and_closes() {
++    let window = window_on_started(DUE_DATES);
++    let root = window.repo.path();
++
++    let aborted = window.invoke("abort_operation", json!({}));
++
++    assert_eq!(aborted, Ok(json!({ "leftovers": [] })));
++    assert!(merge_has_ended(&window));
++    assert_eq!(git_line(root, &["branch", "--show-current"]), "develop");
++    let due_dates = format!("refs/heads/{DUE_DATES}");
++    assert_eq!(git_line(root, &["for-each-ref", &due_dates]), "");
++    assert!(!root.join(RECORD).exists());
++    assert_eq!(
++        window.ending(),
++        Ending {
++            exit: Exit::Unresolved,
++            message: Some("merge aborted".to_owned()),
++        }
++    );
++}
++
++// develop's docs/develop.md, untracked on the merge request's branch, refuses the return to develop.
++#[test]
++fn abort_with_leftovers_keeps_the_window_and_answers_them() {
++    let window = window_on_started(DUE_DATES);
++    let root = window.repo.path();
++    fs::create_dir_all(root.join("docs")).unwrap();
++    fs::write(root.join("docs/develop.md"), "mine\n").unwrap();
++
++    let aborted = window.invoke("abort_operation", json!({})).unwrap();
++
++    let leftovers = aborted["leftovers"].as_array().unwrap();
++    assert_eq!(leftovers.len(), 2, "{aborted}");
++    assert_eq!(leftovers[0]["kind"], "returnRefused", "{aborted}");
++    assert_eq!(
++        leftovers[0]["to"],
++        json!({ "kind": "branch", "name": "develop" })
++    );
++    assert!(merge_has_ended(&window));
++    assert_eq!(git_line(root, &["branch", "--show-current"]), DUE_DATES);
++
++    assert_eq!(
++        window.invoke("close_ended_merge", json!({})),
++        Ok(Value::Null)
++    );
++    assert!(merge_has_ended(&window));
++}
++
++#[test]
++fn continue_on_a_recorded_merge_answers_ready_to_push_and_keeps_the_window() {
++    let window = window_on_started(DUE_DATES);
++    let root = window.repo.path();
++    let args = json!({ "path": CARD, "text": "merged\n", "diskVersion": 0 });
++    assert_eq!(
++        window.invoke("finish_file", args).unwrap()["kind"],
++        "Written"
++    );
++
++    let continued = window.invoke("continue_operation", json!({}));
++
++    assert_eq!(
++        continued,
++        Ok(json!({ "kind": "ReadyToPush", "branch": DUE_DATES }))
++    );
++    assert!(!merge_has_ended(&window));
++    assert!(!root.join(RECORD).exists());
++    assert_eq!(
++        git_line(root, &["rev-list", "--count", "--merges", "HEAD"]),
++        "1"
++    );
++    let merge_finished = Err(json!({ "kind": "MergeFinished" }));
++    assert_eq!(window.invoke("list_stop", json!({})), merge_finished);
++}
++
++#[test]
++fn push_merged_branch_pushes_and_ends_with_exit_0() {
++    let window = committed_clean_merge();
++    let root = window.repo.path();
++
++    let pushed = window.invoke("push_merged_branch", json!({}));
++
++    assert_eq!(pushed, Ok(json!({ "kind": "pushed" })));
++    let merge_commit = git_line(root, &["rev-parse", "HEAD"]);
++    assert_eq!(
++        git_line(&root.join(GITLAB), &["rev-parse", CLEAN]),
++        merge_commit
++    );
++    assert_eq!(git_line(root, &["branch", "--show-current"]), CLEAN);
++    assert!(merge_has_ended(&window));
++    assert_eq!(window.ending(), finished("merge finished"));
++}
++
++#[test]
++fn a_rejected_push_keeps_the_merge_committed_and_the_window() {
++    let window = committed_clean_merge();
++    let gitlab = window.repo.path().join(GITLAB);
++    let tree = format!("{CLEAN}^{{tree}}");
++    let theirs = git_line(
++        &gitlab,
++        &["commit-tree", "-p", CLEAN, "-m", "Theirs", &tree],
++    );
++    git_ok(
++        &gitlab,
++        &["update-ref", &format!("refs/heads/{CLEAN}"), &theirs],
++    )
++    .unwrap();
++
++    let pushed = window.invoke("push_merged_branch", json!({})).unwrap();
++
++    assert_eq!(pushed["kind"], "failed", "{pushed}");
++    let message = pushed["message"].as_str().unwrap();
++    assert!(message.starts_with("[rejected]"), "{message}");
++    assert_eq!(git_line(&gitlab, &["rev-parse", CLEAN]), theirs);
++    assert!(!merge_has_ended(&window));
++    assert!(matches!(
++        &*lock(&window.app.state::<MergeState>()),
++        Merge::Committed { .. }
++    ));
++    assert_eq!(window.ending(), finished("merge finished"));
++}
++
++#[test]
++fn push_merged_branch_refuses_unless_a_recorded_merge_was_just_committed() {
++    let no_operation = Err(json!({ "kind": "NoOperation" }));
++    let held = open_window();
++
++    assert_eq!(held.invoke("push_merged_branch", json!({})), no_operation);
++
++    assert!(matches!(
++        &*lock(&held.app.state::<MergeState>()),
++        Merge::Held(_)
++    ));
++    for path in ["added.ts", "crlf.ts", "view.vue"] {
++        let args = json!({ "path": path, "text": "done\n", "diskVersion": 0 });
++        held.invoke("finish_file", args).unwrap();
++    }
++    let continued = held.invoke("continue_operation", json!({}));
++    assert_eq!(continued, Ok(json!({ "kind": "Finished" })));
++    assert_eq!(held.invoke("push_merged_branch", json!({})), no_operation);
++    assert_eq!(held.ending(), finished("merge finished"));
++}
++
++#[test]
++fn close_ended_merge_after_keep_local_ends_with_exit_0() {
++    let held = open_window();
++    assert_eq!(held.invoke("close_ended_merge", json!({})), Ok(Value::Null));
++    assert!(!merge_has_ended(&held));
++    let window = committed_clean_merge();
++
++    assert_eq!(
++        window.invoke("close_ended_merge", json!({})),
++        Ok(Value::Null)
++    );
++
++    assert!(merge_has_ended(&window));
++    assert_eq!(window.ending(), finished("merge finished"));
++    let gitlab = window.repo.path().join(GITLAB);
++    let gitlab_tip = git_line(&gitlab, &["rev-parse", CLEAN]);
++    assert_ne!(
++        gitlab_tip,
++        git_line(window.repo.path(), &["rev-parse", "HEAD"])
++    );
++}
++
++fn startup_ending(started: Startup) -> Ending {
++    match started {
++        Startup::Merge { session, .. } => panic!("a merge in {:?}", session.root()),
++        Startup::Done(ending) => ending,
++    }
++}
++
++#[test]
++fn startup_opens_a_clean_merge_yamt_started() {
++    let repo = mr_conflict_repo();
++    start_merge(&repo, CLEAN);
++
++    let Startup::Merge { session, claim } = startup(repo.path()) else {
++        panic!("expected a merge");
++    };
++
++    assert_eq!(session.files(), []);
++    assert!(claim.is_some());
++}
++
++#[test]
++fn startup_still_says_nothing_to_merge_without_a_record() {
++    let repo = mr_conflict_repo();
++    start_merge(&repo, CLEAN);
++    fs::remove_file(repo.path().join(RECORD)).unwrap();
++
++    let ending = startup_ending(startup(repo.path()));
++
++    assert_eq!(ending.exit, Exit::Success);
++    let message = ending.message.unwrap();
++    assert!(message.starts_with("nothing to merge in "), "{message}");
++}
++
++#[test]
++fn startup_refuses_a_second_window_on_a_recorded_merge() {
++    let repo = mr_conflict_repo();
++    start_merge(&repo, DUE_DATES);
++    let refused = Ending::failure(format!(
++        "the merge of !{IID} is already open in another yamt window"
++    ));
++    let held_by_the_test = claim_window(repo.path()).unwrap().unwrap();
++
++    assert_eq!(startup_ending(startup(repo.path())), refused);
++
++    drop(held_by_the_test);
++    let first = startup(repo.path());
++    assert!(matches!(first, Startup::Merge { claim: Some(_), .. }));
++    assert_eq!(startup_ending(startup(repo.path())), refused);
++    assert_eq!(refused.exit as u8, 2);
++}
+diff --git a/src-tauri/src/merge/tests.rs b/src-tauri/src/merge/tests.rs
+index cbda30b..757e7f3 100644
+--- a/src-tauri/src/merge/tests.rs
++++ b/src-tauri/src/merge/tests.rs
+@@ -71,7 +71,10 @@ fn ending(exit: Exit, message: &str) -> Ending {
+ fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
+     let window = open_window();
+ 
+-    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
++    assert_eq!(
++        window.invoke("abort_operation", json!({})),
++        Ok(json!({ "leftovers": [] }))
++    );
+ 
+     for (command, args) in merge_commands() {
+         assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
+@@ -405,7 +408,10 @@ fn a_continue_that_moves_on_to_a_stop_without_conflicts_lists_no_files_under_the
+ fn a_rebase_aborted_answers_merge_aborted_to_every_command_and_ends_rebase_aborted() {
+     let window = rebase_window();
+ 
+-    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
++    assert_eq!(
++        window.invoke("abort_operation", json!({})),
++        Ok(json!({ "leftovers": [] }))
++    );
+ 
+     assert!(window.has_ended());
+     for (command, args) in merge_commands() {
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index 5b882d3..2b8bb57 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -4,14 +4,15 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use tauri::ipc::Channel;
+ use tauri::{App, Manager, Runtime, State, WebviewWindow};
++use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
+ use yamt_merge_requests::{
+     GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage, OpenReply,
+-    PageOpened, WebPage, gitlab_repository, prepare_open,
++    PageOpened, ResolveRefusal, WebPage, gitlab_repository, prepare_open, prepare_resolve,
+ };
+ 
+ use crate::ipc_error::{IpcError, blocking_reply};
+ use crate::range::range_folder;
+-use crate::range_window;
++use crate::second_window;
+ 
+ const NO_PROJECT: &str = "this window's folder has no remote on a GitLab server";
+ 
+@@ -25,6 +26,27 @@ pub(crate) enum ListMessage {
+     End { end: ListEnd },
+ }
+ 
++/// What resolving a merge request's conflicts did (plan §2 #139): a merge started in this checkout and its
++/// window started or not, or why nothing changed.
++#[derive(Debug, serde::Serialize, specta::Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub(crate) enum ResolveReply {
++    Started { started: Started },
++    WindowFailed { started: Started, message: String },
++    Refused { refusal: Refusal },
++    GitLabRefused { refusal: ResolveRefusal },
++}
++
++/// What continuing an unfinished merge yamt started did (plan §2 #143); nothing in git changes.
++#[derive(Debug, serde::Serialize, specta::Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub(crate) enum ContinueMergeReply {
++    Opened { branch: String, target: String },
++    AlreadyOpen,
++    Ended,
++    WindowFailed { message: String },
++}
++
+ /// The window's GitLab project, found once at start, the folder pair locks live in, and every merge request's and
+ /// failed job's page a list sent in this run: only those may be opened (plan §2 #128–#137); never locked together
+ /// with another `Mutex`.
+@@ -89,11 +111,75 @@ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid)
+         };
+     };
+     match prepare_open(repository, glab, iid, &state.range_dir) {
+-        Ok(range) => range_window::start(&range),
++        Ok(range) => second_window::start_range(&range),
+         Err(reply) => reply,
+     }
+ }
+ 
++/// Starts merge request `iid`'s merge in this checkout, then its window by `start_window`.
++fn resolved(
++    state: &MergeRequestState,
++    glab: Option<&Glab>,
++    iid: MergeRequestIid,
++    start_window: impl FnOnce(&Path) -> Result<(), String>,
++) -> ResolveReply {
++    let Some(repository) = &state.gitlab else {
++        let message = NO_PROJECT.to_owned();
++        return ResolveReply::GitLabRefused {
++            refusal: ResolveRefusal::Failed { message },
++        };
++    };
++    let target = match prepare_resolve(repository, glab, iid) {
++        Ok(target) => target,
++        Err(refusal) => return ResolveReply::GitLabRefused { refusal },
++    };
++    let branches = MergeRequestBranches {
++        iid: target.iid.0,
++        remote: target.remote,
++        branch: target.branch,
++        target: target.target,
++    };
++    match yamt_local_merge::start(&target.root, &branches) {
++        Err(refusal) => ResolveReply::Refused { refusal },
++        Ok(started) => match start_window(&target.root) {
++            Ok(()) => ResolveReply::Started { started },
++            Err(message) => ResolveReply::WindowFailed { started, message },
++        },
++    }
++}
++
++/// Starts the window of merge request `iid`'s unfinished merge again by `start_window`, unless the merge ended
++/// or its window is open.
++fn continued(
++    state: &MergeRequestState,
++    iid: MergeRequestIid,
++    start_window: impl FnOnce(&Path) -> Result<(), String>,
++) -> ContinueMergeReply {
++    let Some(repository) = &state.gitlab else {
++        return ContinueMergeReply::Ended;
++    };
++    let root = repository.root();
++    let live = match yamt_local_merge::find_live(root) {
++        Ok(Some(live)) if live.iid() == iid.0 => live,
++        Ok(_) => return ContinueMergeReply::Ended,
++        Err(error) => {
++            tracing::warn!(%error, "cannot tell whether a merge yamt started is in progress");
++            return ContinueMergeReply::Ended;
++        }
++    };
++    if yamt_local_merge::window_is_open(root) {
++        return ContinueMergeReply::AlreadyOpen;
++    }
++    let view = live.view();
++    match start_window(root) {
++        Ok(()) => ContinueMergeReply::Opened {
++            branch: view.branch,
++            target: view.target,
++        },
++        Err(message) => ContinueMergeReply::WindowFailed { message },
++    }
++}
++
+ #[tauri::command]
+ #[specta::specta]
+ #[expect(clippy::needless_pass_by_value, reason = "tauri passes State by value")]
+@@ -128,6 +214,51 @@ pub(crate) async fn open_merge_request<R: Runtime>(
+     blocking_reply(move || Ok(opened(&window.state(), Glab::find().as_ref(), iid))).await
+ }
+ 
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn resolve_merge_request<R: Runtime>(
++    window: WebviewWindow<R>,
++    iid: MergeRequestIid,
++) -> Result<ResolveReply, IpcError> {
++    blocking_reply(move || {
++        let glab = Glab::find();
++        Ok(resolved(
++            &window.state(),
++            glab.as_ref(),
++            iid,
++            second_window::start_merge,
++        ))
++    })
++    .await
++}
++
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn continue_merge_request<R: Runtime>(
++    window: WebviewWindow<R>,
++    iid: MergeRequestIid,
++) -> Result<ContinueMergeReply, IpcError> {
++    blocking_reply(move || Ok(continued(&window.state(), iid, second_window::start_merge))).await
++}
++
++/// Whether a merge yamt started is unfinished in this window's repository; no GitLab project is `Free`.
++#[tauri::command]
++#[specta::specta]
++pub(crate) async fn find_local_merge<R: Runtime>(
++    window: WebviewWindow<R>,
++) -> Result<LocalMerge, IpcError> {
++    blocking_reply(move || Ok(local_merge(&window.state()))).await
++}
++
++fn local_merge(state: &MergeRequestState) -> LocalMerge {
++    state
++        .gitlab
++        .as_ref()
++        .map_or(LocalMerge::Free, |repository| {
++            yamt_local_merge::local_merge(repository.root())
++        })
++}
++
+ /// Opens `page` in the browser only when a list of this window sent it: the window cannot hand any other
+ /// address to the system.
+ #[tauri::command]
+diff --git a/src-tauri/src/merge_requests/tests.rs b/src-tauri/src/merge_requests/tests.rs
+index 9f0a8f5..6b4d364 100644
+--- a/src-tauri/src/merge_requests/tests.rs
++++ b/src-tauri/src/merge_requests/tests.rs
+@@ -105,6 +105,9 @@ fn list(window: &MergeRequestWindow) -> Vec<Value> {
+     received.try_iter().collect()
+ }
+ 
++#[cfg(unix)]
++mod resolve;
++
+ #[cfg(unix)]
+ mod through_glab {
+     use std::path::PathBuf;
+@@ -128,7 +131,7 @@ mod through_glab {
+     const OPEN_WAIT: Duration = Duration::from_secs(10);
+     const POLL: Duration = Duration::from_millis(10);
+ 
+-    fn in_this_repository(relative: &str) -> PathBuf {
++    pub(super) fn in_this_repository(relative: &str) -> PathBuf {
+         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+             .join("..")
+             .join(relative)
+@@ -145,9 +148,9 @@ mod through_glab {
+         open_window_in(repo)
+     }
+ 
+-    /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `merge-requests`
++    /// Runs `test` in a child whose PATH starts with the committed fake glab on the scenario `tests/glab/<scenario>`
+     /// and the fake xdg-open, their logs in a folder of this test's.
+-    fn run_with_fakes(test: &str) {
++    pub(super) fn run_with_fakes(test: &str, scenario: &str) {
+         let fake = TempDir::new().unwrap();
+         let inherited = std::env::var_os("PATH").unwrap_or_default();
+         let mut folders = vec![
+@@ -156,7 +159,7 @@ mod through_glab {
+         ];
+         folders.extend(std::env::split_paths(&inherited));
+         let path = std::env::join_paths(folders).unwrap();
+-        let scenario = in_this_repository("tests/glab/merge-requests");
++        let scenario = in_this_repository("tests/glab").join(scenario);
+ 
+         let ran = run_ignored_in_child(&[test], |child| {
+             child
+@@ -200,7 +203,7 @@ mod through_glab {
+ 
+     #[test]
+     fn every_page_then_one_end_reaches_the_window_s_channel() {
+-        run_with_fakes(LIST_TEST);
++        run_with_fakes(LIST_TEST, "merge-requests");
+     }
+ 
+     #[test]
+@@ -226,7 +229,7 @@ mod through_glab {
+ 
+     #[test]
+     fn only_a_page_a_list_sent_is_handed_to_the_browser() {
+-        run_with_fakes(PAGES_TEST);
++        run_with_fakes(PAGES_TEST, "merge-requests");
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/merge_requests/tests/resolve.rs b/src-tauri/src/merge_requests/tests/resolve.rs
+new file mode 100644
+index 0000000..c69c35d
+--- /dev/null
++++ b/src-tauri/src/merge_requests/tests/resolve.rs
+@@ -0,0 +1,179 @@
++use std::path::PathBuf;
++use std::process::Command;
++
++use yamt_local_merge::claim_window;
++
++use super::through_glab::{in_this_repository, run_with_fakes};
++use super::*;
++
++const RESOLVE_TEST: &str = "merge_requests::tests::resolve::resolve_replies_on_path_s_glab";
++const CONTINUE_TEST: &str = "merge_requests::tests::resolve::continue_replies_on_path_s_glab";
++const SCENARIO: &str = "mr-conflicts";
++const NO_DISPLAY: &str = "cannot start yamt: no display";
++
++/// A window on `scripts/mr-conflict-repo.sh`'s repository, on `develop`, whose `origin` is the fake GitLab.
++fn mr_conflict_window() -> MergeRequestWindow {
++    let repo = TempDir::new().unwrap();
++    let script = in_this_repository("scripts/mr-conflict-repo.sh");
++    let built = Command::new(script).arg(repo.path()).output().unwrap();
++    assert!(built.status.success(), "{built:?}");
++    open_window_in(repo)
++}
++
++fn root_of(window: &MergeRequestWindow) -> PathBuf {
++    std::fs::canonicalize(window.repo.path()).unwrap()
++}
++
++fn resolve(window: &MergeRequestWindow, iid: u32) -> Value {
++    let reply = block_on(resolve_merge_request(
++        window.webview.clone(),
++        MergeRequestIid(iid),
++    ));
++    serde_json::to_value(reply.unwrap()).unwrap()
++}
++
++fn continue_merge(window: &MergeRequestWindow, iid: u32) -> Value {
++    let reply = block_on(continue_merge_request(
++        window.webview.clone(),
++        MergeRequestIid(iid),
++    ));
++    serde_json::to_value(reply.unwrap()).unwrap()
++}
++
++fn local(window: &MergeRequestWindow) -> Value {
++    let reply = block_on(find_local_merge(window.webview.clone()));
++    serde_json::to_value(reply.unwrap()).unwrap()
++}
++
++/// Resolves through the composing function with `start` as the window start.
++fn resolved_with(
++    window: &MergeRequestWindow,
++    iid: u32,
++    start: impl FnOnce(&Path) -> Result<(), String>,
++) -> Value {
++    let state = window.webview.state();
++    let reply = resolved(&state, Glab::find().as_ref(), MergeRequestIid(iid), start);
++    serde_json::to_value(reply).unwrap()
++}
++
++/// Continues through the composing function with `start` as the window start.
++fn continued_with(
++    window: &MergeRequestWindow,
++    iid: u32,
++    start: impl FnOnce(&Path) -> Result<(), String>,
++) -> Value {
++    let reply = continued(&window.webview.state(), MergeRequestIid(iid), start);
++    serde_json::to_value(reply).unwrap()
++}
++
++fn failing_start(_: &Path) -> Result<(), String> {
++    Err(NO_DISPLAY.to_owned())
++}
++
++fn started_due_dates() -> Value {
++    json!({ "branch": "feature/due-dates", "target": "main", "conflicts": true })
++}
++
++#[test]
++fn without_a_project_resolve_refuses_continue_answers_ended_and_nothing_merges() {
++    let plain = TempDir::new().unwrap();
++    git_ok(plain.path(), &["init", "-q"]).unwrap();
++    let window = open_window_in(plain);
++
++    let failed = json!({ "kind": "failed", "message": NO_PROJECT });
++    assert_eq!(
++        resolve(&window, 21),
++        json!({ "kind": "gitLabRefused", "refusal": failed })
++    );
++    assert_eq!(continue_merge(&window, 21), json!({ "kind": "ended" }));
++    assert_eq!(local(&window), json!({ "kind": "free" }));
++}
++
++#[test]
++fn resolve_merge_request_answers_every_refusal_and_starts_the_merge_window() {
++    run_with_fakes(RESOLVE_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by resolve_merge_request_answers_every_refusal_and_starts_the_merge_window"]
++fn resolve_replies_on_path_s_glab() {
++    let window = mr_conflict_window();
++    let root = root_of(&window);
++    let refused_by_gitlab =
++        |kind: &str| json!({ "kind": "gitLabRefused", "refusal": { "kind": kind } });
++    assert_eq!(resolve(&window, 22), refused_by_gitlab("fromFork"));
++    assert_eq!(resolve(&window, 30), refused_by_gitlab("notOpen"));
++    std::fs::write(root.join("README.md"), "edited\n").unwrap();
++    let uncommitted = json!({ "kind": "refused", "refusal": { "kind": "uncommittedChanges" } });
++    assert_eq!(resolve(&window, 21), uncommitted);
++    git_ok(&root, &["checkout", "--", "README.md"]).unwrap();
++    assert_eq!(local(&window), json!({ "kind": "free" }));
++
++    let window_failed = resolved_with(&window, 21, failing_start);
++
++    let failed =
++        json!({ "kind": "windowFailed", "started": started_due_dates(), "message": NO_DISPLAY });
++    assert_eq!(window_failed, failed);
++    let merging = |open: bool| json!({ "kind": "merging", "iid": 21, "windowOpen": open });
++    assert_eq!(local(&window), merging(false));
++    let claim = claim_window(&root).unwrap().unwrap();
++    assert_eq!(local(&window), merging(true));
++    drop(claim);
++    let already = json!({ "kind": "alreadyMerging", "iid": 21 });
++    assert_eq!(
++        resolve(&window, 21),
++        json!({ "kind": "refused", "refusal": already })
++    );
++
++    git_ok(&root, &["merge", "--abort"]).unwrap();
++    let mut roots = Vec::new();
++    let started = resolved_with(&window, 21, |root| {
++        roots.push(std::fs::canonicalize(root).unwrap());
++        Ok(())
++    });
++
++    assert_eq!(
++        started,
++        json!({ "kind": "started", "started": started_due_dates() })
++    );
++    assert_eq!(roots, [root]);
++}
++
++#[test]
++fn continue_merge_request_answers_ended_already_open_opened_and_window_failed() {
++    run_with_fakes(CONTINUE_TEST, SCENARIO);
++}
++
++#[test]
++#[ignore = "run by continue_merge_request_answers_ended_already_open_opened_and_window_failed"]
++fn continue_replies_on_path_s_glab() {
++    let window = mr_conflict_window();
++    let root = root_of(&window);
++    let ended = json!({ "kind": "ended" });
++    assert_eq!(continue_merge(&window, 21), ended);
++    let started = resolved_with(&window, 21, |_| Ok(()));
++    assert_eq!(started["kind"], "started", "{started}");
++    assert_eq!(continue_merge(&window, 23), ended);
++    let claim = claim_window(&root).unwrap().unwrap();
++    assert_eq!(
++        continue_merge(&window, 21),
++        json!({ "kind": "alreadyOpen" })
++    );
++    drop(claim);
++
++    let mut roots = Vec::new();
++    let opened = continued_with(&window, 21, |root| {
++        roots.push(std::fs::canonicalize(root).unwrap());
++        Ok(())
++    });
++
++    let names = json!({ "kind": "opened", "branch": "feature/due-dates", "target": "main" });
++    assert_eq!(opened, names);
++    assert_eq!(roots, std::slice::from_ref(&root));
++    assert_eq!(
++        continued_with(&window, 21, failing_start),
++        json!({ "kind": "windowFailed", "message": NO_DISPLAY })
++    );
++    git_ok(&root, &["merge", "--abort"]).unwrap();
++    assert_eq!(continue_merge(&window, 21), ended);
++}
+diff --git a/src-tauri/src/outcome.rs b/src-tauri/src/outcome.rs
+index 2cb355c..92e171b 100644
+--- a/src-tauri/src/outcome.rs
++++ b/src-tauri/src/outcome.rs
+@@ -1,6 +1,7 @@
+ use std::path::Path;
+ use std::process::ExitCode;
+ 
++use yamt_local_merge::{WindowClaim, claim_window, find_live};
+ use yamt_session::{MergeSession, OperationKind, Refreshed};
+ 
+ use crate::merge::{Merge, MergeState, lock_when_git_is_done};
+@@ -35,18 +36,49 @@ impl Ending {
+ }
+ 
+ pub(crate) enum Startup {
+-    Merge(Box<MergeSession>),
++    /// `claim`: this window's hold on a merge yamt started, kept until the window closes (RK47).
++    Merge {
++        session: Box<MergeSession>,
++        claim: Option<WindowClaim>,
++    },
+     Done(Ending),
+ }
+ 
++/// A merge yamt started opens the window even without a conflicted file, so its merge can be committed.
+ pub(crate) fn startup(repo: &Path) -> Startup {
+-    match MergeSession::open(repo) {
+-        Err(error) => Startup::Done(Ending::failure(error.to_string())),
+-        Ok(session) if session.files().is_empty() => Startup::Done(Ending {
++    let session = match MergeSession::open(repo) {
++        Ok(session) => session,
++        Err(error) => return Startup::Done(Ending::failure(error.to_string())),
++    };
++    let claim = match claim_recorded_merge(session.root()) {
++        Ok(claim) => claim,
++        Err(ending) => return Startup::Done(ending),
++    };
++    if session.files().is_empty() && claim.is_none() {
++        return Startup::Done(Ending {
+             exit: Exit::Success,
+             message: Some(format!("nothing to merge in {}", session.root().display())),
+-        }),
+-        Ok(session) => Startup::Merge(Box::new(session)),
++        });
++    }
++    Startup::Merge {
++        session: Box::new(session),
++        claim,
++    }
++}
++
++/// The window's claim on the merge yamt started in `root`, if there is one; another window holding it is the
++/// ending instead.
++fn claim_recorded_merge(root: &Path) -> Result<Option<WindowClaim>, Ending> {
++    let failure = |error: yamt_local_merge::Error| Ending::failure(error.to_string());
++    let Some(live) = find_live(root).map_err(failure)? else {
++        return Ok(None);
++    };
++    match claim_window(root).map_err(failure)? {
++        Some(claim) => Ok(Some(claim)),
++        None => Err(Ending::failure(format!(
++            "the merge of !{} is already open in another yamt window",
++            live.iid()
++        ))),
+     }
+ }
+ 
+@@ -64,10 +96,8 @@ pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
+             exit: Exit::Unresolved,
+             message: Some(format!("{} aborted", operation_name(*kind))),
+         },
+-        Merge::Finished(kind) => Ending {
+-            exit: Exit::Success,
+-            message: Some(format!("{} finished", operation_name(*kind))),
+-        },
++        Merge::Finished(kind) => finished_ending(*kind),
++        Merge::Committed { .. } => finished_ending(OperationKind::Merge),
+         Merge::Running(kind) => Ending::failure(format!(
+             "closed while git ran the {}",
+             operation_name(*kind)
+@@ -75,6 +105,13 @@ pub(crate) fn ending_on_close(merge: &mut Merge) -> Ending {
+     }
+ }
+ 
++fn finished_ending(kind: OperationKind) -> Ending {
++    Ending {
++        exit: Exit::Success,
++        message: Some(format!("{} finished", operation_name(kind))),
++    }
++}
++
+ fn operation_name(kind: OperationKind) -> &'static str {
+     match kind {
+         OperationKind::Merge => "merge",
+@@ -146,7 +183,7 @@ mod tests {
+ 
+     fn ending(startup: Startup) -> Ending {
+         match startup {
+-            Startup::Merge(session) => {
++            Startup::Merge { session, .. } => {
+                 panic!("expected an ending, got a merge in {:?}", session.root())
+             }
+             Startup::Done(ending) => ending,
+@@ -253,7 +290,7 @@ mod tests {
+         .unwrap();
+         let inside = repo.path().join("inside");
+         std::fs::create_dir(&inside).unwrap();
+-        let Startup::Merge(session) = startup(&inside) else {
++        let Startup::Merge { session, .. } = startup(&inside) else {
+             panic!("expected a merge");
+         };
+         assert_eq!(
+diff --git a/src-tauri/src/range_window.rs b/src-tauri/src/second_window.rs
+similarity index 68%
+rename from src-tauri/src/range_window.rs
+rename to src-tauri/src/second_window.rs
+index a1012f7..5a5be80 100644
+--- a/src-tauri/src/range_window.rs
++++ b/src-tauri/src/second_window.rs
+@@ -1,42 +1,45 @@
+ use std::ffi::OsString;
+-use std::path::PathBuf;
++use std::path::{Path, PathBuf};
+ use std::process::{Child, Command, Stdio};
+ use std::thread;
+ 
+ use yamt_merge_requests::{OpenReply, RangeToOpen};
+ 
+-/// Starts a second yamt, `yamt --diff=<spec> --repo <root>`, on its own: in a process group of its own, so it
+-/// outlives this one and the terminal; a thread waits for its exit.
+-pub(crate) fn start(range: &RangeToOpen) -> OpenReply {
+-    let exe = match std::env::current_exe() {
+-        Ok(exe) => exe,
+-        Err(error) => {
+-            return OpenReply::StartFailed {
+-                message: format!("cannot find yamt's own program: {error}"),
+-            };
+-        }
+-    };
++/// Starts a second yamt on the range, `yamt --diff=<spec> --repo <root>`.
++pub(crate) fn start_range(range: &RangeToOpen) -> OpenReply {
++    match spawn(range_arguments(range), &range.root) {
++        Ok(()) => OpenReply::Opened,
++        Err(message) => OpenReply::StartFailed { message },
++    }
++}
++
++/// Starts a second yamt on the merge in `root`, `yamt --repo <root>`; `Err` is why it did not start.
++pub(crate) fn start_merge(root: &Path) -> Result<(), String> {
++    spawn(merge_arguments(root), root)
++}
++
++/// Starts yamt with `arguments` in `root` on its own: in a process group of its own, so it outlives this one and
++/// the terminal; a thread waits for its exit.
++fn spawn(arguments: Vec<OsString>, root: &Path) -> Result<(), String> {
++    let exe = std::env::current_exe()
++        .map_err(|error| format!("cannot find yamt's own program: {error}"))?;
+     let mut command = Command::new(program(running_appimage(), exe));
+     command
+-        .args(arguments(range))
+-        .current_dir(&range.root)
++        .args(arguments)
++        .current_dir(root)
+         .stdin(Stdio::null())
+         .stdout(Stdio::null())
+         .stderr(Stdio::inherit());
+     detach(&mut command);
+-    tracing::info!(program = ?command.get_program(), spec = range.spec, "starting a range window");
+-    match command.spawn() {
+-        Ok(child) => {
+-            reap(child);
+-            OpenReply::Opened
+-        }
+-        Err(error) => OpenReply::StartFailed {
+-            message: format!("cannot start {}: {error}", command.get_program().display()),
+-        },
+-    }
++    tracing::info!(program = ?command.get_program(), arguments = ?command.get_args(), "starting a second window");
++    let child = command
++        .spawn()
++        .map_err(|error| format!("cannot start {}: {error}", command.get_program().display()))?;
++    reap(child);
++    Ok(())
+ }
+ 
+-fn arguments(range: &RangeToOpen) -> Vec<OsString> {
++fn range_arguments(range: &RangeToOpen) -> Vec<OsString> {
+     vec![
+         format!("--diff={}", range.spec).into(),
+         "--repo".into(),
+@@ -44,6 +47,10 @@ fn arguments(range: &RangeToOpen) -> Vec<OsString> {
+     ]
+ }
+ 
++fn merge_arguments(root: &Path) -> Vec<OsString> {
++    vec!["--repo".into(), root.into()]
++}
++
+ /// The program a second yamt runs: the `AppImage` file when this one runs from it, else this binary.
+ fn program(appimage: Option<PathBuf>, exe: PathBuf) -> PathBuf {
+     appimage.unwrap_or(exe)
+@@ -82,8 +89,8 @@ fn detach(command: &mut Command) {
+ 
+ fn reap(mut child: Child) {
+     thread::spawn(move || match child.wait() {
+-        Ok(status) => tracing::info!(%status, "a range window this one started ended"),
+-        Err(error) => tracing::warn!(%error, "a range window this one started was not waited for"),
++        Ok(status) => tracing::info!(%status, "a window this one started ended"),
++        Err(error) => tracing::warn!(%error, "a window this one started was not waited for"),
+     });
+ }
+ 
+@@ -107,7 +114,7 @@ mod tests {
+             spec: SPEC.to_owned(),
+         };
+ 
+-        let invocation = crate::args::parse(arguments(&range));
++        let invocation = crate::args::parse(range_arguments(&range));
+ 
+         let wanted = Invocation::Range {
+             spec: RangeSpec::parse(SPEC).unwrap(),
+@@ -117,6 +124,25 @@ mod tests {
+         assert_eq!(invocation, Ok(wanted));
+     }
+ 
++    #[test]
++    fn the_second_yamt_is_asked_for_the_merge_in_its_repository() {
++        let arguments = merge_arguments(Path::new(ROOT));
++
++        assert_eq!(arguments, [OsString::from("--repo"), OsString::from(ROOT)]);
++        let wanted = Invocation::Merge { repo: ROOT.into() };
++        assert_eq!(crate::args::parse(arguments), Ok(wanted));
++    }
++
++    #[test]
++    fn a_merge_window_that_cannot_start_answers_why() {
++        let folder = yamt_conflict_repo::TempDir::new().unwrap();
++        let missing = folder.path().join("missing");
++
++        let message = start_merge(&missing).unwrap_err();
++
++        assert!(message.starts_with("cannot start "), "{message}");
++    }
++
+     #[test]
+     fn a_second_yamt_starts_from_the_appimage_when_there_is_one() {
+         assert_eq!(
+@@ -138,7 +164,7 @@ mod tests {
+         use super::*;
+ 
+         const CHOICE_TEST: &str =
+-            "range_window::tests::inside_an_appimage::the_program_is_the_appimage_file";
++            "second_window::tests::inside_an_appimage::the_program_is_the_appimage_file";
+ 
+         #[test]
+         fn a_second_yamt_starts_from_the_appimage_file_its_variables_name() {

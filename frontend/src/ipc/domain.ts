@@ -101,6 +101,7 @@ export type Listing =
       readonly diskChanges: readonly DiskChange[];
       readonly operation: OperationView | null;
       readonly sides: SideNames;
+      readonly mergeRequest: Readonly<Generated.MergeView> | null;
     }
   | { readonly kind: "MovedOn" };
 
@@ -277,8 +278,8 @@ export function toListing(dto: Generated.Listing): Listing {
   if (dto.kind === "MovedOn") {
     return dto;
   }
-  const { files, disk_changes: diskChanges, operation, sides } = dto;
-  return { kind: "Files", files, diskChanges, operation, sides };
+  const { files, disk_changes: diskChanges, operation, sides, merge_request: mergeRequest } = dto;
+  return { kind: "Files", files, diskChanges, operation, sides, mergeRequest };
 }
 
 export function toSettingsRead(dto: Generated.SettingsRead): SettingsRead {

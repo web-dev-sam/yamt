@@ -12,7 +12,9 @@ export const commands = {
 	takeSide: (path: string, side: Side, diskVersion: DiskVersion) => typedError<WriteReply, IpcError>(__TAURI_INVOKE("take_side", { path, side, diskVersion })),
 	listStop: () => typedError<Listing, IpcError>(__TAURI_INVOKE("list_stop")),
 	continueOperation: () => typedError<ContinueReply, IpcError>(__TAURI_INVOKE("continue_operation")),
-	abortOperation: () => typedError<null, IpcError>(__TAURI_INVOKE("abort_operation")),
+	abortOperation: () => typedError<AbortReply, IpcError>(__TAURI_INVOKE("abort_operation")),
+	pushMergedBranch: () => typedError<PushReply, IpcError>(__TAURI_INVOKE("push_merged_branch")),
+	closeEndedMerge: () => __TAURI_INVOKE<void>("close_ended_merge"),
 	log: (entry: LogEntry) => __TAURI_INVOKE<void>("log", { entry }),
 	loadSettings: (current: StoredSettings) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("load_settings", { current })),
 	setTheme: (current: StoredSettings, theme: Theme) => typedError<SettingsRead, IpcError>(__TAURI_INVOKE("set_theme", { current, theme })),
@@ -75,9 +77,18 @@ export const commands = {
 	 *  address to the system.
 	 */
 	openPage: (page: WebPage) => __TAURI_INVOKE<PageOpened>("open_page", { page }),
+	resolveMergeRequest: (iid: MergeRequestIid) => typedError<ResolveReply, IpcError>(__TAURI_INVOKE("resolve_merge_request", { iid })),
+	continueMergeRequest: (iid: MergeRequestIid) => typedError<ContinueMergeReply, IpcError>(__TAURI_INVOKE("continue_merge_request", { iid })),
+	/**  Whether a merge yamt started is unfinished in this window's repository; no GitLab project is `Free`. */
+	findLocalMerge: () => typedError<LocalMerge, IpcError>(__TAURI_INVOKE("find_local_merge")),
 };
 
 /* Types */
+/**  What an Abort git accepted could not put back of a merge yamt started. */
+export type AbortReply = {
+	leftovers: Leftover[],
+};
+
 /**
  *  A server the user added: the program and its arguments, and the file extensions it serves
  *  (without dots).
@@ -151,6 +162,11 @@ export type BlockedReason =
 { kind: "other"; 
 /**  GitLab's word for it. */
 status: string };
+
+/**  What the start did to the merge request's local branch. */
+export type BranchBefore = { kind: "created" } | 
+/**  `id`: the first 7 hex characters of the commit it was fast-forwarded from. */
+{ kind: "movedFrom"; id: string } | { kind: "unchanged" };
 
 /**  How much a merge request changes, GitLab's counts. */
 export type ChangeSize = {
@@ -250,8 +266,14 @@ export type Comparison = {
 	differences: Difference[],
 };
 
-/**  What a Continue git accepted led to: the operation ended, or git stopped at another stop. */
-export type ContinueReply = { kind: "Finished" } | { kind: "Stopped"; message: string };
+/**  What continuing an unfinished merge yamt started did (plan §2 #143); nothing in git changes. */
+export type ContinueMergeReply = { kind: "opened"; branch: string; target: string } | { kind: "alreadyOpen" } | { kind: "ended" } | { kind: "windowFailed"; message: string };
+
+/**
+ *  What a Continue git accepted led to: the operation ended, a merge yamt started was committed and may be
+ *  pushed, or git stopped at another stop.
+ */
+export type ContinueReply = { kind: "Finished" } | { kind: "ReadyToPush"; branch: string } | { kind: "Stopped"; message: string };
 
 /**  One place where the right text differs from the left, located in both texts. */
 export type Difference = {
@@ -404,6 +426,15 @@ export type LanguageServerSettings = {
 /**  0-based line index in the left text of a 2-way compare. */
 export type LeftLine = number;
 
+/**  What a restore could not put back. */
+export type Leftover = 
+/**  HEAD moved after the merge started, so it stays where it is. */
+{ kind: "notReturned"; to: ReturnTo } | { kind: "returnRefused"; to: ReturnTo; message: string } | 
+/**  The branch moved after the merge started, so it stays where it is. */
+{ kind: "branchKept"; branch: string } | 
+/**  The branch the start created is still checked out (its return was refused or not done), so it stays. */
+{ kind: "branchCheckedOut"; branch: string } | { kind: "branchRefused"; branch: string; message: string };
+
 /**  Where two texts differ, by lines only: the same ranges as a [`Difference`], without its word marks. */
 export type LineChange = {
 	/**  The lines in the left; empty where the right inserted lines. */
@@ -447,10 +478,15 @@ message: string };
 export type ListMessage = { kind: "page"; page: MergeRequestPage } | { kind: "end"; end: ListEnd };
 
 /**  The files of the stop as git sees them, or `MovedOn`: git is at another stop, the next list opens it. */
-export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames } | { kind: "MovedOn" };
+export type Listing = { kind: "Files"; files: FileEntry[]; disk_changes: DiskChange[]; operation: OperationView | null; sides: SideNames; 
+/**  The merge yamt started at this stop, from its record; `None` for any other stop. */
+merge_request: MergeView | null } | { kind: "MovedOn" };
 
 /**  0-based line index in the local text. */
 export type LocalLine = number;
+
+/**  Whether a merge yamt started is unfinished in a repository. */
+export type LocalMerge = { kind: "free" } | { kind: "merging"; iid: number; windowOpen: boolean };
 
 export type LogEntry = {
 	level: LogLevel,
@@ -531,6 +567,15 @@ export type MergeRequestRow = {
 	readiness: Readiness,
 	/**  Whether its branch lives in another project than its target, or in a deleted one. */
 	fromFork: boolean,
+};
+
+/**  The recorded merge as the merge window shows it. */
+export type MergeView = {
+	branch: string,
+	target: string,
+	/**  `None` when the branch itself was checked out before. */
+	returnTo: ReturnTo | null,
+	branchBefore: BranchBefore,
 };
 
 /**  One message of a thread. */
@@ -732,6 +777,10 @@ export type ProgressView = {
 /**  What a repository-relative path holds, for detection; a path outside the repository is `Missing`. */
 export type ProjectFile = { kind: "Missing" } | { kind: "Folder" } | { kind: "Text"; text: string } | { kind: "TooLarge" } | { kind: "NotText" };
 
+export type PushReply = { kind: "pushed" } | 
+/**  git's words: the ref's rejection, else its first `fatal:`/`error:` line. */
+{ kind: "failed"; message: string };
+
 export type RangeChange = { kind: "added" } | { kind: "modified" } | { kind: "deleted" } | { kind: "renamed"; old_path: string };
 
 /**  One row of the list; `path` is the new path, the old one for a deleted file (UTF-8, lossy for display). */
@@ -796,6 +845,15 @@ also: BlockedReason[] } |
 /**  What blocks it. */
 reason: BlockedReason };
 
+/**  Why a start changed nothing (or, for `GitRefused` with leftovers, could not put everything back). */
+export type Refusal = 
+/**  `Some`: the iid of the unfinished merge; `None`: another start holds the start lock. */
+{ kind: "alreadyMerging"; iid: number | null } | 
+/**  git is in the middle of another operation. */
+{ kind: "busy" } | { kind: "uncommittedChanges" } | { kind: "fetchFailed"; message: string } | 
+/**  The local branch has commits GitLab's does not. */
+{ kind: "localAhead"; branch: string } | { kind: "alreadyContains"; branch: string; target: string } | { kind: "gitRefused"; message: string; left: Leftover[] } | { kind: "recordUnreadable"; path: string; message: string };
+
 /**  0-based line index in the remote text. */
 export type RemoteLine = number;
 
@@ -811,6 +869,38 @@ export type Removal<L> = {
 };
 
 export type RepositoryAnswer = "start" | "dontStart";
+
+/**  Why the branches of a merge request to resolve are not given. */
+export type ResolveRefusal = 
+/**  The merge request is no longer open. */
+{ kind: "notOpen" } | 
+/**  Its source branch lives in another project. */
+{ kind: "fromFork" } | 
+/**  No remote of the repository names the project. */
+{ kind: "noRemote"; 
+/**  The project's full path, `group/project`. */
+project: string } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first output line, which names the instance. */
+detail: string } | 
+/**  glab failed, timed out or answered something unexpected. */
+{ kind: "failed"; 
+/**  What went wrong, in glab's, GitLab's or yamt's words. */
+message: string };
+
+/**
+ *  What resolving a merge request's conflicts did (plan §2 #139): a merge started in this checkout and its
+ *  window started or not, or why nothing changed.
+ */
+export type ResolveReply = { kind: "started"; started: Started } | { kind: "windowFailed"; started: Started; message: string } | { kind: "refused"; refusal: Refusal } | { kind: "gitLabRefused"; refusal: ResolveRefusal };
+
+/**  Where Abort returns HEAD to. */
+export type ReturnTo = { kind: "branch"; name: string } | 
+/**  `id`: the commit's first 7 hex characters. */
+{ kind: "commit"; id: string };
 
 /**  0-based line index in the right text of a 2-way compare. */
 export type RightLine = number;
@@ -915,6 +1005,14 @@ export type SideWordChanges<L> = {
 };
 
 export type StartReply = { kind: "Started"; run: RunId } | { kind: "NotFound"; program: string; searched: string[] } | { kind: "SpawnFailed"; program: string; message: string } | { kind: "OutsideRepository"; project: string };
+
+/**  A started merge: `target` merged into `branch`, stopped before its commit. */
+export type Started = {
+	branch: string,
+	target: string,
+	/**  false: GitLab's "has conflicts" was stale, the merge is clean. */
+	conflicts: boolean,
+};
 
 /**
  *  What the window holds and sends: `keys` = action id → key strings, only for actions whose

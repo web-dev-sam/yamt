@@ -71,7 +71,10 @@ fn ending(exit: Exit, message: &str) -> Ending {
 fn after_an_abort_every_merge_command_answers_merge_aborted_and_writes_nothing() {
     let window = open_window();
 
-    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
+    assert_eq!(
+        window.invoke("abort_operation", json!({})),
+        Ok(json!({ "leftovers": [] }))
+    );
 
     for (command, args) in merge_commands() {
         assert_eq!(window.invoke(command, args), merge_aborted(), "{command}");
@@ -405,7 +408,10 @@ fn a_continue_that_moves_on_to_a_stop_without_conflicts_lists_no_files_under_the
 fn a_rebase_aborted_answers_merge_aborted_to_every_command_and_ends_rebase_aborted() {
     let window = rebase_window();
 
-    assert_eq!(window.invoke("abort_operation", json!({})), Ok(Value::Null));
+    assert_eq!(
+        window.invoke("abort_operation", json!({})),
+        Ok(json!({ "leftovers": [] }))
+    );
 
     assert!(window.has_ended());
     for (command, args) in merge_commands() {

@@ -1,47 +1,54 @@
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 
 use yamt_merge_requests::{OpenReply, RangeToOpen};
 
-/// Starts a second yamt, `yamt --diff=<spec> --repo <root>`, on its own: in a process group of its own, so it
-/// outlives this one and the terminal; a thread waits for its exit.
-pub(crate) fn start(range: &RangeToOpen) -> OpenReply {
-    let exe = match std::env::current_exe() {
-        Ok(exe) => exe,
-        Err(error) => {
-            return OpenReply::StartFailed {
-                message: format!("cannot find yamt's own program: {error}"),
-            };
-        }
-    };
+/// Starts a second yamt on the range, `yamt --diff=<spec> --repo <root>`.
+pub(crate) fn start_range(range: &RangeToOpen) -> OpenReply {
+    match spawn(range_arguments(range), &range.root) {
+        Ok(()) => OpenReply::Opened,
+        Err(message) => OpenReply::StartFailed { message },
+    }
+}
+
+/// Starts a second yamt on the merge in `root`, `yamt --repo <root>`; `Err` is why it did not start.
+pub(crate) fn start_merge(root: &Path) -> Result<(), String> {
+    spawn(merge_arguments(root), root)
+}
+
+/// Starts yamt with `arguments` in `root` on its own: in a process group of its own, so it outlives this one and
+/// the terminal; a thread waits for its exit.
+fn spawn(arguments: Vec<OsString>, root: &Path) -> Result<(), String> {
+    let exe = std::env::current_exe()
+        .map_err(|error| format!("cannot find yamt's own program: {error}"))?;
     let mut command = Command::new(program(running_appimage(), exe));
     command
-        .args(arguments(range))
-        .current_dir(&range.root)
+        .args(arguments)
+        .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     detach(&mut command);
-    tracing::info!(program = ?command.get_program(), spec = range.spec, "starting a range window");
-    match command.spawn() {
-        Ok(child) => {
-            reap(child);
-            OpenReply::Opened
-        }
-        Err(error) => OpenReply::StartFailed {
-            message: format!("cannot start {}: {error}", command.get_program().display()),
-        },
-    }
+    tracing::info!(program = ?command.get_program(), arguments = ?command.get_args(), "starting a second window");
+    let child = command
+        .spawn()
+        .map_err(|error| format!("cannot start {}: {error}", command.get_program().display()))?;
+    reap(child);
+    Ok(())
 }
 
-fn arguments(range: &RangeToOpen) -> Vec<OsString> {
+fn range_arguments(range: &RangeToOpen) -> Vec<OsString> {
     vec![
         format!("--diff={}", range.spec).into(),
         "--repo".into(),
         range.root.clone().into(),
     ]
+}
+
+fn merge_arguments(root: &Path) -> Vec<OsString> {
+    vec!["--repo".into(), root.into()]
 }
 
 /// The program a second yamt runs: the `AppImage` file when this one runs from it, else this binary.
@@ -82,8 +89,8 @@ fn detach(command: &mut Command) {
 
 fn reap(mut child: Child) {
     thread::spawn(move || match child.wait() {
-        Ok(status) => tracing::info!(%status, "a range window this one started ended"),
-        Err(error) => tracing::warn!(%error, "a range window this one started was not waited for"),
+        Ok(status) => tracing::info!(%status, "a window this one started ended"),
+        Err(error) => tracing::warn!(%error, "a window this one started was not waited for"),
     });
 }
 
@@ -107,7 +114,7 @@ mod tests {
             spec: SPEC.to_owned(),
         };
 
-        let invocation = crate::args::parse(arguments(&range));
+        let invocation = crate::args::parse(range_arguments(&range));
 
         let wanted = Invocation::Range {
             spec: RangeSpec::parse(SPEC).unwrap(),
@@ -115,6 +122,25 @@ mod tests {
             ai: Ai::Off,
         };
         assert_eq!(invocation, Ok(wanted));
+    }
+
+    #[test]
+    fn the_second_yamt_is_asked_for_the_merge_in_its_repository() {
+        let arguments = merge_arguments(Path::new(ROOT));
+
+        assert_eq!(arguments, [OsString::from("--repo"), OsString::from(ROOT)]);
+        let wanted = Invocation::Merge { repo: ROOT.into() };
+        assert_eq!(crate::args::parse(arguments), Ok(wanted));
+    }
+
+    #[test]
+    fn a_merge_window_that_cannot_start_answers_why() {
+        let folder = yamt_conflict_repo::TempDir::new().unwrap();
+        let missing = folder.path().join("missing");
+
+        let message = start_merge(&missing).unwrap_err();
+
+        assert!(message.starts_with("cannot start "), "{message}");
     }
 
     #[test]
@@ -138,7 +164,7 @@ mod tests {
         use super::*;
 
         const CHOICE_TEST: &str =
-            "range_window::tests::inside_an_appimage::the_program_is_the_appimage_file";
+            "second_window::tests::inside_an_appimage::the_program_is_the_appimage_file";
 
         #[test]
         fn a_second_yamt_starts_from_the_appimage_file_its_variables_name() {
