@@ -12,12 +12,12 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 tagged; its ci run failed on macOS and Windows in the merge-request tests (#1976). 0.6.2 = that fix plus the CI
 changes after 0.6.1's release commit (cache, macOS 15). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                        | owner        | status  | evidence |
-| --- | -------------------------------------------------------------------------------------------- | ------------ | ------- | -------- |
-| 1   | merge-request tests on macOS and Windows (`briefs/mr-portable-tests.md`) (`MrPortableTests`) | rust-impl    | running |          |
-| 2   | release commit 0.6.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README                      | orchestrator | todo    |          |
-| 3   | final run 0.6.2 before tagging                                                               | verifier     | todo    |          |
-| 4   | push `main`, ci green on all four jobs, tag `v0.6.2`, publish                                | human        | todo    |          |
+| row | slice                                                                                        | owner        | status  | evidence                                                                                                                                                                                                                                             |
+| --- | -------------------------------------------------------------------------------------------- | ------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | merge-request tests on macOS and Windows (`briefs/mr-portable-tests.md`) (`MrPortableTests`) | rust-impl    | review  | `c171d5c`: tests only (product question: no — every path key comes from git). macOS form reproduced on Linux via symlinked TMPDIR: 3+1 fail before, pass after; Windows/macOS `cargo check --tests` clean for the crates. Notes `MrPortableTests.md` |
+| 2   | release commit 0.6.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README                      | orchestrator | done    | `34c5369`                                                                                                                                                                                                                                            |
+| 3   | final run 0.6.2 before tagging (`briefs/release-0.6.2-verify.md`)                            | verifier     | running |                                                                                                                                                                                                                                                      |
+| 4   | push `main`, ci green on all four jobs, tag `v0.6.2`, publish                                | human        | todo    |                                                                                                                                                                                                                                                      |
 
 ## Open product questions
 
