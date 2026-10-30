@@ -1198,6 +1198,21 @@ further question; a failing release step is documented as a known issue of this 
 | 4   | two Rust tests portable to Windows and macOS (`briefs/ci-portable-tests.md`, `-rework-1.md`) (`CiPortableTests`, `CiPortableTestsR1`)                                                                                                                           | rust-impl    | accepted    | `ca1ddd4` + R1 `60d9519`: expected home entries per segment; odd names only where the system can create them; every staged blob stored (#1761: the second push still failed at commit). Linux pass, CI's failure reproduced on Linux with the gate off; Windows/macOS `cargo check --tests` clean; reviews pass. Notes `CiPortableTests.md` |
 | 5   | the refused-page server-run test waits for its forwarder to end, then sends once (`briefs/flaky-server-stop-test.md`, `-rework-1.md`) (`FlakyServerStopTest`, `FlakyServerStopTestR1`)                                                                          | rust-impl    | accepted    | branch `fix/flaky-server-stop-test` (`a582381` + R1 `a990621`), merged into `main` as `ed91fe1` at the owner's word: race proved with a delay, the supervisor-ignores-`EventsGone` mutant now fails it, 50/50 runs; reviews pass. Notes `FlakyServerStopTest.md`                                                                            |
 
+## Releases 0.6.0 and 0.6.1 (session 38, owner request #1973: "release branch maintainability to be 0.6.0 and merge this branch into main and make it 0.6.1")
+
+No branch `maintainability` exists; read as `main` (0.6.0-beta.2's product, no product change since) released as
+0.6.0, then `feat/merge-requests` (the merge-request overview, owner-accepted #1972) merged into `main` and released as
+0.6.1. Release commits change version, changelog and README file names only (0.6.1 also adds the overview's README
+sentence). The owner tags and pushes (`docs/slices/handoff-release-0.6.0-0.6.1.md`). Nothing pushed.
+
+| row | slice                                                                                                    | owner        | status | evidence |
+| --- | -------------------------------------------------------------------------------------------------------- | ------------ | ------ | -------- |
+| 1   | release commit 0.6.0 on `main`: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.6.0] - 2026-10-30`, README | orchestrator | done   |          |
+| 2   | final run 0.6.0 before tagging (`briefs/release-0.6.0-verify.md`)                                        | verifier     | todo   |          |
+| 3   | merge `feat/merge-requests` into `main`; release commit 0.6.1                                            | orchestrator | todo   |          |
+| 4   | final run 0.6.1 before tagging (`briefs/release-0.6.1-verify.md`)                                        | verifier     | todo   |          |
+| 5   | push, tags `v0.6.0` and `v0.6.1`, publish both (handoff)                                                 | human        | todo   |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
