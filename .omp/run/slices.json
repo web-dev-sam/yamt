@@ -23,19 +23,12 @@
       "crates/review/tests/review.rs"
     ]
   },
-  "MrWindowCoreR1": {
+  "MrDetectListR1": {
     "owned": [
-      "frontend/src/ui/windowStorage.ts",
-      "frontend/src/ui/windowStorage.test.ts",
-      "frontend/src/ui/serverPins.ts",
-      "frontend/src/ui/serverPins.test.ts",
-      "frontend/src/ui/mergeRequestFilters.ts",
-      "frontend/src/ui/mergeRequestFilters.test.ts",
-      "frontend/src/mergeRequests/internal/filters.ts",
-      "frontend/src/mergeRequests/internal/filters.test.ts",
-      "frontend/src/mergeRequests/internal/choices.ts",
-      "frontend/src/mergeRequests/internal/choices.test.ts",
-      "frontend/scripts/fences.test.ts"
+      "crates/gitio/src/names.rs",
+      "crates/gitio/src/merge_config.rs",
+      "crates/gitio/tests/glab.rs",
+      "crates/gitio/tests/names.rs"
     ]
   }
 }
