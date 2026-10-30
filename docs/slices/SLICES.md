@@ -1198,6 +1198,29 @@ further question; a failing release step is documented as a known issue of this 
 | 4   | two Rust tests portable to Windows and macOS (`briefs/ci-portable-tests.md`, `-rework-1.md`) (`CiPortableTests`, `CiPortableTestsR1`)                                                                                                                           | rust-impl    | accepted    | `ca1ddd4` + R1 `60d9519`: expected home entries per segment; odd names only where the system can create them; every staged blob stored (#1761: the second push still failed at commit). Linux pass, CI's failure reproduced on Linux with the gate off; Windows/macOS `cargo check --tests` clean; reviews pass. Notes `CiPortableTests.md` |
 | 5   | the refused-page server-run test waits for its forwarder to end, then sends once (`briefs/flaky-server-stop-test.md`, `-rework-1.md`) (`FlakyServerStopTest`, `FlakyServerStopTestR1`)                                                                          | rust-impl    | accepted    | branch `fix/flaky-server-stop-test` (`a582381` + R1 `a990621`), merged into `main` as `ed91fe1` at the owner's word: race proved with a delay, the supervisor-ignores-`EventsGone` mutant now fails it, 50/50 runs; reviews pass. Notes `FlakyServerStopTest.md`                                                                            |
 
+## Merge requests — the GitLab project's open MRs in the diff windows, quick filters, open an MR's changes (session 37, branch `feat/merge-requests` off main `d97a270`, the 0.7.x line)
+
+Owner request #1765 (2026-10-30): an icon button left of the gear in the compare (`--diff`) and range (`--diff=…`)
+windows of a GitLab repository opens an overview of the project's open merge requests, newest first; a row shows the
+title, `!iid`, "created x ago", open discussions, approvals (single numbers) and the CI status, whose hover lists only
+the failed jobs, each opening its log page in the system browser; a button opens the MR's changes; filters on
+assignee, reviewer, label and draft, set with one click each. Intent, rules 1–9, acceptance, non-goals, reopened rows
+(#94, #112/#115/#118), sourced facts and risks: `docs/slices/request-merge-requests.md`. Three product questions asked
+(where an MR's changes open, drop-down or full page, filters remembered); the design started beside them (OR13) on the
+recommended answers. Scout facts at `d97a270`: `.omp/run/notes/PlanScoutMr{Gitlab,Chrome}.md`.
+
+| row | slice                                                                                                                                                                                                | owner     | status  | evidence |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------- | -------- |
+| 0   | the three product questions (request file, "Questions")                                                                                                                                              | human     | asked   |          |
+| 1   | design: offline detection, the GraphQL query and its paging, crate, fetch and a second window, the opener, one panel per window, the pure core (`briefs/mr-overview-design.md`) (`MrOverviewDesign`) | designer  | running |          |
+| 2   | Rust: detection, the MR list and "Me" through glab, commands for both windows, fake-glab GraphQL scenarios                                                                                           | rust-impl | todo    |          |
+| 3   | Rust: open an MR's changes (fetch, start a range window), a failed job's page in the system browser                                                                                                  | rust-impl | todo    |          |
+| 4   | window core: filters, order, summary, relative time, CI box contents, remembered filters (pure)                                                                                                      | web-impl  | todo    |          |
+| 5   | window: the button beside the gear in both windows, the panel, rows, checklists, CI box, sources, both stores                                                                                        | web-impl  | todo    |          |
+| 6   | final run: `just check`, WebKit both windows, real app with the fake glab, dark and light                                                                                                            | verifier  | todo    |          |
+
+Order: 1, then 2 ∥ 4, then 3 ∥ 5 (the slice graph in the request; re-cut from the chosen design).
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
