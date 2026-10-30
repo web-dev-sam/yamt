@@ -24,10 +24,16 @@ pub struct MergeConfig {
 
 impl Repo {
     pub fn merge_config(&self) -> Result<MergeConfig> {
-        let args = [CONFIG, "-z", "--get-regexp", MERGE_DRIVER_KEYS];
+        let entries = self.config_entries(MERGE_DRIVER_KEYS)?;
+        Ok(merge_config_from(entries))
+    }
+
+    /// Every `(key, value)` whose key matches `regexp`, in config order; empty when none matches.
+    pub(crate) fn config_entries(&self, regexp: &str) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let args = [CONFIG, "-z", "--get-regexp", regexp];
         let command = self.command(Access::Read, &args);
         let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_no_match)?;
-        Ok(parse_merge_config(&output))
+        Ok(parse_config_entries(&output))
     }
 }
 
@@ -37,15 +43,22 @@ fn is_found_or_no_match(status: ExitStatus) -> bool {
 
 // git-config(1) `-z`: each entry is `<key> NL <value> NUL`, or `<key> NUL` for a key without a
 // value; section and variable names are lowercase, the `<name>` subsection is kept as written.
-fn parse_merge_config(output: &[u8]) -> MergeConfig {
-    let mut config = MergeConfig::default();
+pub(crate) fn parse_config_entries(output: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut entries = Vec::new();
     for entry in output.split(|&byte| byte == b'\0') {
         let mut parts = entry.splitn(2, |&byte| byte == b'\n');
-        let (Some(key), Some(value)) = (parts.next(), parts.next()) else {
-            continue;
-        };
+        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
+            entries.push((key.to_vec(), value.to_vec()));
+        }
+    }
+    entries
+}
+
+fn merge_config_from(entries: Vec<(Vec<u8>, Vec<u8>)>) -> MergeConfig {
+    let mut config = MergeConfig::default();
+    for (key, value) in entries {
         if key == DEFAULT_KEY {
-            config.default = Some(value.to_vec());
+            config.default = Some(value);
         } else if let Some(name) = key
             .strip_prefix(DRIVER_KEY_PREFIX)
             .and_then(|rest| rest.strip_suffix(DRIVER_KEY_SUFFIX))
@@ -59,6 +72,10 @@ fn parse_merge_config(output: &[u8]) -> MergeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_merge_config(output: &[u8]) -> MergeConfig {
+        merge_config_from(parse_config_entries(output))
+    }
 
     #[test]
     fn the_last_default_wins_and_every_driver_name_is_kept_as_written() {

@@ -1,8 +1,6 @@
-use std::process::ExitStatus;
-
 use crate::entry::Oid;
 use crate::repo::{REV_PARSE, Repo, read_if_present, without_final_newline};
-use crate::run::{Access, GIT_TIMEOUT, run, run_accepting};
+use crate::run::{Access, GIT_TIMEOUT, run};
 use crate::{Error, Result};
 
 const BRANCH: &str = "branch";
@@ -15,8 +13,6 @@ const COMMIT_SUMMARY_FIELDS: usize = 3;
 const REMOTE_URL_KEYS: &str = r"^remote\..*\.url$";
 const REMOTE_KEY_PREFIX: &[u8] = b"remote.";
 const URL_KEY_SUFFIX: &[u8] = b".url";
-// git-config(1): `--get-regexp` exits with 1 when no key matches.
-const NO_MATCH_STATUS: i32 = 1;
 
 /// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -73,12 +69,10 @@ impl Repo {
         Ok(non_empty_lines(&output))
     }
 
-    /// Every remote's URL in config order (`config -z --get-regexp`); empty when there is none.
+    /// Every remote's URL in config order; empty when there is none.
     pub fn remote_urls(&self) -> Result<Vec<RemoteUrl>> {
-        let args = ["config", "-z", "--get-regexp", REMOTE_URL_KEYS];
-        let command = self.command(Access::Read, &args);
-        let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_no_match)?;
-        Ok(parse_remote_urls(&output))
+        let entries = self.config_entries(REMOTE_URL_KEYS)?;
+        Ok(remote_urls_from(entries))
     }
 
     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
@@ -120,25 +114,16 @@ fn non_empty_lines(output: &[u8]) -> Vec<Vec<u8>> {
         .collect()
 }
 
-fn is_found_or_no_match(status: ExitStatus) -> bool {
-    status.success() || status.code() == Some(NO_MATCH_STATUS)
-}
-
-// git-config(1) `-z`: each entry is `<key> NL <value> NUL`; the `<name>` subsection is kept as written.
-fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
+fn remote_urls_from(entries: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<RemoteUrl> {
     let mut urls = Vec::new();
-    for entry in output.split(|&byte| byte == b'\0') {
-        let mut parts = entry.splitn(2, |&byte| byte == b'\n');
-        let (Some(key), Some(url)) = (parts.next(), parts.next()) else {
-            continue;
-        };
+    for (key, url) in entries {
         let name = key
             .strip_prefix(REMOTE_KEY_PREFIX)
             .and_then(|rest| rest.strip_suffix(URL_KEY_SUFFIX));
         if let Some(name) = name {
             urls.push(RemoteUrl {
                 name: name.to_vec(),
-                url: url.to_vec(),
+                url,
             });
         }
     }
@@ -148,6 +133,11 @@ fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::merge_config::parse_config_entries;
+
+    fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
+        remote_urls_from(parse_config_entries(output))
+    }
 
     #[test]
     fn remote_urls_keep_config_order_and_dotted_names_and_skip_valueless_keys() {

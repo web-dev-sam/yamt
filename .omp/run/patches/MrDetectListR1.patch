@@ -1,0 +1,336 @@
+diff --git a/crates/gitio/src/merge_config.rs b/crates/gitio/src/merge_config.rs
+index 253bb5a..dec613e 100644
+--- a/crates/gitio/src/merge_config.rs
++++ b/crates/gitio/src/merge_config.rs
+@@ -24,10 +24,16 @@ pub struct MergeConfig {
+ 
+ impl Repo {
+     pub fn merge_config(&self) -> Result<MergeConfig> {
+-        let args = [CONFIG, "-z", "--get-regexp", MERGE_DRIVER_KEYS];
++        let entries = self.config_entries(MERGE_DRIVER_KEYS)?;
++        Ok(merge_config_from(entries))
++    }
++
++    /// Every `(key, value)` whose key matches `regexp`, in config order; empty when none matches.
++    pub(crate) fn config_entries(&self, regexp: &str) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
++        let args = [CONFIG, "-z", "--get-regexp", regexp];
+         let command = self.command(Access::Read, &args);
+         let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_no_match)?;
+-        Ok(parse_merge_config(&output))
++        Ok(parse_config_entries(&output))
+     }
+ }
+ 
+@@ -37,15 +43,22 @@ fn is_found_or_no_match(status: ExitStatus) -> bool {
+ 
+ // git-config(1) `-z`: each entry is `<key> NL <value> NUL`, or `<key> NUL` for a key without a
+ // value; section and variable names are lowercase, the `<name>` subsection is kept as written.
+-fn parse_merge_config(output: &[u8]) -> MergeConfig {
+-    let mut config = MergeConfig::default();
++pub(crate) fn parse_config_entries(output: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
++    let mut entries = Vec::new();
+     for entry in output.split(|&byte| byte == b'\0') {
+         let mut parts = entry.splitn(2, |&byte| byte == b'\n');
+-        let (Some(key), Some(value)) = (parts.next(), parts.next()) else {
+-            continue;
+-        };
++        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
++            entries.push((key.to_vec(), value.to_vec()));
++        }
++    }
++    entries
++}
++
++fn merge_config_from(entries: Vec<(Vec<u8>, Vec<u8>)>) -> MergeConfig {
++    let mut config = MergeConfig::default();
++    for (key, value) in entries {
+         if key == DEFAULT_KEY {
+-            config.default = Some(value.to_vec());
++            config.default = Some(value);
+         } else if let Some(name) = key
+             .strip_prefix(DRIVER_KEY_PREFIX)
+             .and_then(|rest| rest.strip_suffix(DRIVER_KEY_SUFFIX))
+@@ -60,6 +73,10 @@ fn parse_merge_config(output: &[u8]) -> MergeConfig {
+ mod tests {
+     use super::*;
+ 
++    fn parse_merge_config(output: &[u8]) -> MergeConfig {
++        merge_config_from(parse_config_entries(output))
++    }
++
+     #[test]
+     fn the_last_default_wins_and_every_driver_name_is_kept_as_written() {
+         let output = b"merge.default\nunion\0merge.mergiraf.driver\nmergiraf merge %O %A %B\0\
+diff --git a/crates/gitio/src/names.rs b/crates/gitio/src/names.rs
+index 587b3ad..d7a3504 100644
+--- a/crates/gitio/src/names.rs
++++ b/crates/gitio/src/names.rs
+@@ -1,8 +1,6 @@
+-use std::process::ExitStatus;
+-
+ use crate::entry::Oid;
+ use crate::repo::{REV_PARSE, Repo, read_if_present, without_final_newline};
+-use crate::run::{Access, GIT_TIMEOUT, run, run_accepting};
++use crate::run::{Access, GIT_TIMEOUT, run};
+ use crate::{Error, Result};
+ 
+ const BRANCH: &str = "branch";
+@@ -15,8 +13,6 @@ const COMMIT_SUMMARY_FIELDS: usize = 3;
+ const REMOTE_URL_KEYS: &str = r"^remote\..*\.url$";
+ const REMOTE_KEY_PREFIX: &[u8] = b"remote.";
+ const URL_KEY_SUFFIX: &[u8] = b".url";
+-// git-config(1): `--get-regexp` exits with 1 when no key matches.
+-const NO_MATCH_STATUS: i32 = 1;
+ 
+ /// A commit as `git log` prints it: `%h`, `%s` and `%B`, bytes as git wrote them.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+@@ -73,12 +69,10 @@ impl Repo {
+         Ok(non_empty_lines(&output))
+     }
+ 
+-    /// Every remote's URL in config order (`config -z --get-regexp`); empty when there is none.
++    /// Every remote's URL in config order; empty when there is none.
+     pub fn remote_urls(&self) -> Result<Vec<RemoteUrl>> {
+-        let args = ["config", "-z", "--get-regexp", REMOTE_URL_KEYS];
+-        let command = self.command(Access::Read, &args);
+-        let output = run_accepting(command, None, GIT_TIMEOUT, is_found_or_no_match)?;
+-        Ok(parse_remote_urls(&output))
++        let entries = self.config_entries(REMOTE_URL_KEYS)?;
++        Ok(remote_urls_from(entries))
+     }
+ 
+     pub fn merge_message(&self) -> Result<Option<Vec<u8>>> {
+@@ -120,25 +114,16 @@ fn non_empty_lines(output: &[u8]) -> Vec<Vec<u8>> {
+         .collect()
+ }
+ 
+-fn is_found_or_no_match(status: ExitStatus) -> bool {
+-    status.success() || status.code() == Some(NO_MATCH_STATUS)
+-}
+-
+-// git-config(1) `-z`: each entry is `<key> NL <value> NUL`; the `<name>` subsection is kept as written.
+-fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
++fn remote_urls_from(entries: Vec<(Vec<u8>, Vec<u8>)>) -> Vec<RemoteUrl> {
+     let mut urls = Vec::new();
+-    for entry in output.split(|&byte| byte == b'\0') {
+-        let mut parts = entry.splitn(2, |&byte| byte == b'\n');
+-        let (Some(key), Some(url)) = (parts.next(), parts.next()) else {
+-            continue;
+-        };
++    for (key, url) in entries {
+         let name = key
+             .strip_prefix(REMOTE_KEY_PREFIX)
+             .and_then(|rest| rest.strip_suffix(URL_KEY_SUFFIX));
+         if let Some(name) = name {
+             urls.push(RemoteUrl {
+                 name: name.to_vec(),
+-                url: url.to_vec(),
++                url,
+             });
+         }
+     }
+@@ -148,6 +133,11 @@ fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use crate::merge_config::parse_config_entries;
++
++    fn parse_remote_urls(output: &[u8]) -> Vec<RemoteUrl> {
++        remote_urls_from(parse_config_entries(output))
++    }
+ 
+     #[test]
+     fn remote_urls_keep_config_order_and_dotted_names_and_skip_valueless_keys() {
+diff --git a/crates/gitio/tests/glab.rs b/crates/gitio/tests/glab.rs
+index 744d93a..1a0a51c 100644
+--- a/crates/gitio/tests/glab.rs
++++ b/crates/gitio/tests/glab.rs
+@@ -6,10 +6,8 @@ use std::os::unix::fs::PermissionsExt;
+ use std::path::{Path, PathBuf};
+ use std::time::{Duration, Instant};
+ 
+-use yamt_conflict_repo::{
+-    ConflictFile, FileKind, TempDir, diverged_repo, git_ok, run_ignored_in_child,
+-};
+-use yamt_gitio::{AuthStatus, Error, Glab, GlabRun, Oid, RemoteUrl, Repo, TIMED_OUT};
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, run_ignored_in_child};
++use yamt_gitio::{AuthStatus, Error, Glab, GlabRun, TIMED_OUT};
+ 
+ const SHORT_TIMEOUT: Duration = Duration::from_millis(300);
+ const HANG_SECONDS: u64 = 5;
+@@ -302,80 +300,6 @@ fn glab_found_on_path_is_the_one_run() {
+     assert_eq!(ran, expected);
+ }
+ 
+-fn oid_of(root: &Path, revision: &str) -> Oid {
+-    let output = git_ok(root, &["rev-parse", revision]).unwrap();
+-    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
+-}
+-
+-#[test]
+-fn branch_names_from_heads_and_remote_tracking_and_none_for_a_commit_id() {
+-    let dir = diverged_repo(&FILES).unwrap();
+-    let root = dir.path();
+-    let repo = Repo::discover(root).unwrap();
+-    git_ok(
+-        root,
+-        &["update-ref", "refs/remotes/origin/feature", "remote"],
+-    )
+-    .unwrap();
+-    let remote_commit = oid_of(root, "remote");
+-    let name = |name: &str| repo.symbolic_full_name(name).unwrap();
+-
+-    let named: [(&str, Option<&[u8]>); 5] = [
+-        ("remote", Some(b"refs/heads/remote")),
+-        ("origin/feature", Some(b"refs/remotes/origin/feature")),
+-        ("HEAD", Some(b"refs/heads/local")),
+-        (remote_commit.as_str(), None),
+-        ("remote~1", None),
+-    ];
+-    for (typed, expected) in named {
+-        assert_eq!(name(typed), expected.map(<[u8]>::to_vec), "{typed}");
+-    }
+-    let range = repo.symbolic_full_name("main...remote");
+-    assert!(matches!(range, Err(Error::GitFailed { .. })), "{range:?}");
+-    git_ok(root, &["checkout", "--quiet", "--detach"]).unwrap();
+-    assert_eq!(name("HEAD"), Some(b"HEAD".to_vec()));
+-}
+-
+-#[test]
+-fn remote_names_lists_every_remote() {
+-    let dir = diverged_repo(&FILES).unwrap();
+-    let root = dir.path();
+-    let repo = Repo::discover(root).unwrap();
+-    assert_eq!(repo.remote_names().unwrap(), Vec::<Vec<u8>>::new());
+-
+-    for remote in ["upstream", "origin", "fork"] {
+-        let url = format!("https://gitlab.example/{remote}.git");
+-        git_ok(root, &["remote", "add", remote, &url]).unwrap();
+-    }
+-
+-    let expected: [&[u8]; 3] = [b"fork", b"origin", b"upstream"];
+-    assert_eq!(repo.remote_names().unwrap(), expected);
+-}
+-
+-#[test]
+-fn remote_urls_are_in_config_order_none_without_remotes_and_an_error_on_a_broken_config() {
+-    let dir = diverged_repo(&FILES).unwrap();
+-    let repo = Repo::discover(dir.path()).unwrap();
+-    assert_eq!(repo.remote_urls().unwrap(), []);
+-    let remotes = [
+-        ("upstream", "git@gitlab.example:a/b.git"),
+-        ("fork", "https://gitlab.example/c/b"),
+-    ];
+-
+-    for (name, url) in remotes {
+-        git_ok(dir.path(), &["remote", "add", name, url]).unwrap();
+-    }
+-
+-    let expected = remotes.map(|(name, url)| RemoteUrl {
+-        name: name.as_bytes().to_vec(),
+-        url: url.as_bytes().to_vec(),
+-    });
+-    assert_eq!(repo.remote_urls().unwrap(), expected);
+-    fs::write(dir.path().join(".git/config"), "[remote \"broken\"\n").unwrap();
+-    let broken = repo.remote_urls();
+-    assert!(matches!(broken, Err(Error::GitFailed { .. })), "{broken:?}");
+-}
+-
+ #[test]
+ fn get_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_start() {
+     let fake = Fake::new(3);
+diff --git a/crates/gitio/tests/names.rs b/crates/gitio/tests/names.rs
+new file mode 100644
+index 0000000..0e322e5
+--- /dev/null
++++ b/crates/gitio/tests/names.rs
+@@ -0,0 +1,89 @@
++#![cfg(test)]
++
++use std::fs;
++use std::path::Path;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, diverged_repo, git_ok};
++use yamt_gitio::{Error, Oid, RemoteUrl, Repo};
++
++const FILES: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "a.txt",
++    kind: FileKind::Regular,
++    base: Some(b"base\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++
++fn oid_of(root: &Path, revision: &str) -> Oid {
++    let output = git_ok(root, &["rev-parse", revision]).unwrap();
++    Oid::parse(String::from_utf8(output).unwrap().trim_end()).unwrap()
++}
++
++#[test]
++fn branch_names_from_heads_and_remote_tracking_and_none_for_a_commit_id() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    git_ok(
++        root,
++        &["update-ref", "refs/remotes/origin/feature", "remote"],
++    )
++    .unwrap();
++    let remote_commit = oid_of(root, "remote");
++    let name = |name: &str| repo.symbolic_full_name(name).unwrap();
++
++    let named: [(&str, Option<&[u8]>); 5] = [
++        ("remote", Some(b"refs/heads/remote")),
++        ("origin/feature", Some(b"refs/remotes/origin/feature")),
++        ("HEAD", Some(b"refs/heads/local")),
++        (remote_commit.as_str(), None),
++        ("remote~1", None),
++    ];
++    for (typed, expected) in named {
++        assert_eq!(name(typed), expected.map(<[u8]>::to_vec), "{typed}");
++    }
++    let range = repo.symbolic_full_name("main...remote");
++    assert!(matches!(range, Err(Error::GitFailed { .. })), "{range:?}");
++    git_ok(root, &["checkout", "--quiet", "--detach"]).unwrap();
++    assert_eq!(name("HEAD"), Some(b"HEAD".to_vec()));
++}
++
++#[test]
++fn remote_names_lists_every_remote() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    assert_eq!(repo.remote_names().unwrap(), Vec::<Vec<u8>>::new());
++
++    for remote in ["upstream", "origin", "fork"] {
++        let url = format!("https://gitlab.example/{remote}.git");
++        git_ok(root, &["remote", "add", remote, &url]).unwrap();
++    }
++
++    let expected: [&[u8]; 3] = [b"fork", b"origin", b"upstream"];
++    assert_eq!(repo.remote_names().unwrap(), expected);
++}
++
++#[test]
++fn remote_urls_are_in_config_order_none_without_remotes_and_an_error_on_a_broken_config() {
++    let dir = diverged_repo(&FILES).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    assert_eq!(repo.remote_urls().unwrap(), []);
++    let remotes = [
++        ("upstream", "git@gitlab.example:a/b.git"),
++        ("fork", "https://gitlab.example/c/b"),
++    ];
++
++    for (name, url) in remotes {
++        git_ok(dir.path(), &["remote", "add", name, url]).unwrap();
++    }
++
++    let expected = remotes.map(|(name, url)| RemoteUrl {
++        name: name.as_bytes().to_vec(),
++        url: url.as_bytes().to_vec(),
++    });
++    assert_eq!(repo.remote_urls().unwrap(), expected);
++    fs::write(dir.path().join(".git/config"), "[remote \"broken\"\n").unwrap();
++    let broken = repo.remote_urls();
++    assert!(matches!(broken, Err(Error::GitFailed { .. })), "{broken:?}");
++}
