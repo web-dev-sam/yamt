@@ -5,7 +5,7 @@ description: Where things live in yamt, which module may depend on which, who ow
 
 # yamt — project map
 
-Verified against commit: `abcb805` (the merge-request page in the compare and range windows, plan §2 #128–#137: a row opens its GitLab page; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
+Verified against commit: `80345da` (resolving a merge request's conflicts in the user's own checkout, plan §2 #138–#143: a row's size, readiness and Resolve/Continue, crate `yamt-local-merge`, the merge window's push and Abort's restore; `map-check` ok). Full text: `docs/architecture.md`. Package names (`cargo -p`, `just`, arch-check) are in parentheses.
 
 ## Core visions (ranked; lower number wins a conflict)
 
@@ -34,12 +34,13 @@ merge-core ◄── session ◄── cli   (cli also uses merge-core directly)
 gitio      ◄──┘        ◄── src-tauri ─generates─► ipc/bindings.ts
 merge-core ◄── compare ◄── src-tauri   (settings, lsp-host ◄── src-tauri too)
 gitio, range ◄── merge-requests ◄── src-tauri   (range, review, agent ◄── src-tauri too; §2 of architecture)
+gitio ◄── local-merge ◄── src-tauri
 ipc ◄── editor ◄── ui ◄── main.ts      (ui reaches editor only through useMergeController and, for the compare root, useCompareController; ui also imports ipc: types, logger, source)
 ipc ◄── lsp ◄── editor, ui, main.ts   (lsp imports only ipc; editor and ui reach it only through lsp/index.ts)
 connectors ◄── editor                 (model/ is empty and unused)
 ```
 
-- [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`; `src-tauri` (yamt-app) depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent` and `merge-requests` only, never directly on `gitio`/`merge-core`; `compare` depends on `merge-core` only among `yamt-*`, never on tauri; `merge-requests` depends on `range`, `gitio` and `merge-core` only among `yamt-*`, never on tauri. Detector: `just arch-check` (`cargo tree --target all --all-features`; yamt-app's and each library crate's direct deps; std::fs/process grep), clippy `disallowed_*`.
+- [PM1] `gitio` never depends on `merge-core`; `merge-core` has no `std::process`/`std::fs`/`tauri`/`serde_json`/`tokio`; `src-tauri` (yamt-app) depends on `session`, `settings`, `lsp-host`, `compare`, `range`, `review`, `agent`, `merge-requests` and `local-merge` only, never directly on `gitio`/`merge-core`; `compare` depends on `merge-core` only among `yamt-*`, never on tauri; `merge-requests` depends on `range`, `gitio` and `merge-core` only among `yamt-*`, never on tauri; `local-merge` depends on `gitio` only among `yamt-*`, never on tauri. Detector: `just arch-check` (`cargo tree --target all --all-features`; yamt-app's and each library crate's direct deps; std::fs/process grep), clippy `disallowed_*`.
 - [PM2] `ui/**` never imports `@codemirror/*`, `@tauri-apps/*` (only `ipc/` talks to the app), `editor/internal/**`, `model/**` (at any depth); `lsp/**` never imports `editor/`, `ui/`, `model/`, `connectors/`. Detector: oxlint overrides (`/**` globs: oxlint 1.87 does not match nested specifiers with `/*`) + `frontend/scripts/fences.test.ts`.
 - [PM3] `editor/**`, `model/**`, `connectors/**`, `lsp/**`, `jsonrpc/**`, `agent/**`, `search/**`, `mergeRequests/**` never import `vue`, `vue/*`, `@vue/*`, `@vueuse/*`, `@tauri-apps/*`, or `~icons/*` without `?raw`; `jsonrpc/`, `search/` and `mergeRequests/` import no other `src/` module. Detector: oxlint overrides + `frontend/scripts/fences.test.ts` (`~icons/*` and the self-contained rule: `fences.ts` only).
 - [PM4] `ipc/bindings.ts` is generated; never hand-edited. Detector: hook `generated.ts` + `hooks.test.ts`, oxlint/oxfmt `ignorePatterns`, `just bindings-check` (diffs a fresh export in `target/`).
