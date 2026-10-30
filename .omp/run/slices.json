@@ -1,45 +1,4 @@
 {
-  "MrWindowState": {
-    "owned": [
-      "frontend/src/ipc/MergeRequestSource.ts",
-      "frontend/src/ipc/mergeRequestDomain.ts",
-      "frontend/src/ipc/mergeRequestDomain.test.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/tauriMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/fixtureMergeRequestData.ts",
-      "frontend/src/ipc/domain.ts",
-      "frontend/src/ipc/domain.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/fixture.ts",
-      "frontend/src/ipc/fixture.test.ts",
-      "frontend/src/ipc/CompareSource.ts",
-      "frontend/src/ipc/RangeSource.ts",
-      "frontend/src/ipc/tauriCompare.ts",
-      "frontend/src/ipc/tauriCompare.test.ts",
-      "frontend/src/ipc/tauriRange.ts",
-      "frontend/src/ipc/tauriRange.test.ts",
-      "frontend/src/ipc/fixtureCompare.ts",
-      "frontend/src/ipc/fixtureCompare.test.ts",
-      "frontend/src/ipc/fixtureRange.ts",
-      "frontend/src/ipc/fixtureRange.test.ts",
-      "frontend/src/ui/screen.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/mergeRequestsStore.ts",
-      "frontend/src/ui/mergeRequestsText.ts",
-      "frontend/src/ui/mergeRequestsText.test.ts",
-      "frontend/src/ui/problem.ts",
-      "frontend/src/ui/problem.test.ts",
-      "frontend/src/ui/problemText.ts",
-      "frontend/src/ui/problemText.test.ts",
-      "frontend/src/ui/compareStore.ts",
-      "frontend/src/ui/compareStore.test.ts",
-      "frontend/src/ui/rangeStore.ts",
-      "frontend/src/ui/rangeStore.test.ts"
-    ]
-  },
   "MrOpenCommands": {
     "owned": [
       "crates/merge-requests/**",
@@ -61,6 +20,21 @@
       "scripts/fake-glab/glab",
       "tests/glab/README.md",
       "tests/glab/merge-requests/**"
+    ]
+  },
+  "MrWindowCoreR1": {
+    "owned": [
+      "frontend/src/ui/windowStorage.ts",
+      "frontend/src/ui/windowStorage.test.ts",
+      "frontend/src/ui/serverPins.ts",
+      "frontend/src/ui/serverPins.test.ts",
+      "frontend/src/ui/mergeRequestFilters.ts",
+      "frontend/src/ui/mergeRequestFilters.test.ts",
+      "frontend/src/mergeRequests/internal/filters.ts",
+      "frontend/src/mergeRequests/internal/filters.test.ts",
+      "frontend/src/mergeRequests/internal/choices.ts",
+      "frontend/src/mergeRequests/internal/choices.test.ts",
+      "frontend/scripts/fences.test.ts"
     ]
   }
 }
