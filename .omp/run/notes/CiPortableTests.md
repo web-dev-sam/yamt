@@ -14,3 +14,12 @@ a token). Brief `docs/slices/briefs/ci-portable-tests.md`; rust-impl, isolated, 
   `aarch64-apple-darwin`: no warnings in the two files. `cargo check --workspace` for Windows: ok; for macOS everything
   but `yamt-app` (its `objc2-exception-helper` build script needs Apple's compiler).
 - Correctness review pass. Not provable here: the real Windows and macOS runs — ci on the next push.
+
+## Fix round 1 (`CiPortableTestsR1`, 2m4s, patch `60d9519`, `.omp/run/patches/CiPortableTestsR1.patch`)
+
+Owner #1761: ci still red at `d2a86e9` — the agent test passed on Windows; the odd-names test failed on macOS and
+Windows at `commit`: "invalid object … for 'added name.txt'". `blob()` hashes without `-w`; on Linux the non-UTF-8
+step's `git add` stored "new\n" by chance, round 1 compiled that step out elsewhere. Fix: `stored_blob` (`git
+hash-object -w` on `.git/stored-blob`) for both staged ids. Linux with the gate off: the CI error before, pass after;
+153 gitio tests; clippy, fmt, both cross `cargo check --tests` clean. Correctness re-check pass (traced every staged id
+per platform; `GIT_CONFIG_NOSYSTEM=1` keeps Windows' system autocrlf out); one should dropped (#1762).
