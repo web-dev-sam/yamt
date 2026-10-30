@@ -1,0 +1,7 @@
+        FAIL [   2.118s] (109/995) yamt-app merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none
+        FAIL [  12.463s] (114/995) yamt-app merge_requests::tests::through_glab::only_a_job_page_a_list_sent_is_handed_to_the_browser
+        FAIL [   0.340s] (577/995) yamt-merge-requests::detect a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+        FAIL [   0.401s] (583/995) yamt-merge-requests::list glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt
+        FAIL [   2.582s] (588/995) yamt-merge-requests::open a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_up
+error: test run failed
+error: recipe `test` failed on line 19 with exit code 100

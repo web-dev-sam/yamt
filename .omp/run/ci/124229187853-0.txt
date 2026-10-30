@@ -1,0 +1,80 @@
+   Compiling tao v0.37.1
+   Compiling tracing-log v0.2.0
+   Compiling matchers v0.2.0
+   Compiling yamt-cli v0.6.1 (D:\a\yamt\yamt\crates\cli)
+   Compiling specta-util v0.0.12
+   Compiling specta-typescript v0.0.12
+   Compiling webview2-com v0.39.1
+   Compiling specta-serde v0.0.12
+   Compiling nu-ansi-term v0.50.3
+   Compiling thread_local v1.1.10
+   Compiling tracing-subscriber v0.3.23
+warning: unused import: `Error`
+ --> crates\agent\tests\checkout.rs:9:47
+  |
+9 | use yamt_agent::{CheckoutLook, CheckoutReply, Error, Workspace, sweep_other_pairs};
+  |                                               ^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `yamt-agent` (test "checkout") generated 1 warning (run `cargo fix --test "checkout" -p yamt-agent` to apply 1 suggestion)
+   Compiling tauri-specta v2.0.0-rc.25
+warning: unused import: `Duration`
+ --> crates\gitio\tests\fetch.rs:4:17
+  |
+4 | use std::time::{Duration, Instant};
+  |                 ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `yamt-gitio` (test "fetch") generated 1 warning (run `cargo fix --test "fetch" -p yamt-gitio` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 30s
+────────────
+ Nextest run ID a13eec15-92ed-4034-b8d1-f8fcba964111 with nextest profile: ci
+    Starting 911 tests across 85 binaries (14 tests skipped)
+        FAIL [   0.015s] (103/911) yamt-app merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none
+        FAIL [   0.625s] (549/911) yamt-merge-requests::detect a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+────────────
+     Summary [ 153.748s] 911 tests run: 909 passed, 2 failed, 14 skipped
+        FAIL [   0.015s] (103/911) yamt-app merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none
+  stdout ───
+
+    running 1 test
+    test merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none ... FAILED
+
+    failures:
+
+    failures:
+        merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 119 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none' (9240) panicked at src-tauri\src\merge_requests\tests.rs:56:10:
+    called `Result::unwrap()` on an `Err` value: Os { code: 193, kind: Uncategorized, message: "%1 is not a valid Win32 application." }
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.625s] (549/911) yamt-merge-requests::detect a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+  stdout ───
+
+    running 1 test
+    test a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder ... FAILED
+
+    failures:
+
+    failures:
+        a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.62s
+
+  stderr ───
+
+    thread 'a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder' (8716) panicked at crates\merge-requests\tests\detect.rs:51:5:
+    assertion `left == right` failed
+      left: "C:/Users/runneradmin/AppData/Local/Temp/.tmpc6q66G"
+     right: "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\.tmpc6q66G"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+error: test run failed
+error: recipe `test` failed on line 19 with exit code 100

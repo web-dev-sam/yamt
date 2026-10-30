@@ -1,0 +1,80 @@
+    ---- merge_requests::tests::through_glab::job_pages_on_path_s_opener stdout ----
+
+    thread 'merge_requests::tests::through_glab::job_pages_on_path_s_opener' (90965) panicked at src-tauri/src/merge_requests/tests.rs:174:13:
+    the opener never ran
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+    failures:
+        merge_requests::tests::through_glab::job_pages_on_path_s_opener
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 131 filtered out; finished in 12.43s
+
+
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.340s] (577/995) yamt-merge-requests::detect a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+  stdout ───
+
+    running 1 test
+    test a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder ... FAILED
+
+    failures:
+
+    failures:
+        a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.33s
+
+  stderr ───
+
+    thread 'a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder' (155148) panicked at crates/merge-requests/tests/detect.rs:51:5:
+    assertion `left == right` failed
+      left: "/private/var/folders/y3/p6x0rn5562l5qyxy7x6jqrsc0000gn/T/.tmpATVIGM"
+     right: "/var/folders/y3/p6x0rn5562l5qyxy7x6jqrsc0000gn/T/.tmpATVIGM"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   0.401s] (583/995) yamt-merge-requests::list glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt
+  stdout ───
+
+    running 1 test
+    test glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt ... FAILED
+
+    failures:
+
+    failures:
+        glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.39s
+
+  stderr ───
+
+    thread 'glab_runs_in_the_repository_with_no_color_and_no_terminal_prompt' (156521) panicked at crates/merge-requests/tests/list.rs:95:5:
+    assertion `left == right` failed
+      left: "/private/var/folders/y3/p6x0rn5562l5qyxy7x6jqrsc0000gn/T/.tmpS1uMnJ"
+     right: "/var/folders/y3/p6x0rn5562l5qyxy7x6jqrsc0000gn/T/.tmpS1uMnJ"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [   2.582s] (588/995) yamt-merge-requests::open a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_up
+  stdout ───
+
+    running 1 test
+    test a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_up ... FAILED
+
+    failures:
+
+    failures:
+        a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_up
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 2.57s
+
+  stderr ───
+
+    thread 'a_merge_request_whose_head_is_only_on_gitlab_is_fetched_and_its_range_lines_up' (158216) panicked at crates/merge-requests/tests/open.rs:110:5:
+    assertion `left == right` failed
+      left: "/private/var/folders/y3/p6x0rn5562l5qyxy7x6jqrsc0000gn/T/.tmpTiqoop/rr"
+     right: "/var/folders/y3/p6x0rn5562l5qyxy7x6jqrsc0000gn/T/.tmpTiqoop/rr"
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+error: test run failed
+error: recipe `test` failed on line 19 with exit code 100

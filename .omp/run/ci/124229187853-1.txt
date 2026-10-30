@@ -1,0 +1,4 @@
+        FAIL [   0.015s] (103/911) yamt-app merge_requests::tests::a_repository_with_a_gitlab_remote_is_found_and_one_without_is_none
+        FAIL [   0.625s] (549/911) yamt-merge-requests::detect a_repository_with_any_remote_on_gitlab_is_found_from_a_subfolder
+error: test run failed
+error: recipe `test` failed on line 19 with exit code 100

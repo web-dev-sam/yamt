@@ -6,21 +6,18 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
-## Releases 0.6.0 and 0.6.1 (session 38, owner request #1973: "release branch maintainability to be 0.6.0 and merge this branch into main and make it 0.6.1")
+## Release 0.6.2 (session 38, owner request #1975: "merge this branch into main and release 0.6.2 … but fix CI before, windows and mac failed")
 
-No branch `maintainability` exists; read as `main` (0.6.0-beta.2's product, no product change since) released as
-0.6.0, then `feat/merge-requests` (the merge-request overview, owner-accepted #1972) merged into `main` and released as
-0.6.1. Release commits change version, changelog and README file names only (0.6.1 also adds the overview's README
-sentence). The owner tags and pushes (`docs/slices/handoff-release-0.6.0-0.6.1.md`). Nothing pushed. Closed sections
-of `main`'s board moved to `archive/board.md` with the merge (the branch had archived them).
+`feat/merge-requests` has no commit outside `main` (merged in `2a4b7af`): nothing to merge. `v0.6.1` (`0927634`) is
+tagged; its ci run failed on macOS and Windows in the merge-request tests (#1976). 0.6.2 = that fix plus the CI
+changes after 0.6.1's release commit (cache, macOS 15). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                      | owner        | status      | evidence                                                                                                                                                                                                                                                                                                                                           |
-| --- | ---------------------------------------------------------------------------------------------------------- | ------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | release commit 0.6.0 on `main`: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md` `[0.6.0] - 2026-10-30`, README   | orchestrator | done        | `8ece003`                                                                                                                                                                                                                                                                                                                                          |
-| 2   | final run 0.6.0 before tagging (`briefs/release-0.6.0-verify.md`)                                          | verifier     | done        | `Release060Verify` at `ec5c914`: gate pass; `readmer check`, licences no diff; `yamt_0.6.0_amd64.deb` Version `0.6.0` (read with `bsdtar`: no `dpkg-deb` here), `yamt 0.6.0`; merge, range (one POST), compare with the release binary pass. Notes `Release060Verify.md`                                                                           |
-| 3   | merge `feat/merge-requests` into `main`; release commit 0.6.1                                              | orchestrator | done        | merge `2a4b7af` (product files equal to the branch head; conflicts only in changelog and board); release `43461ef`                                                                                                                                                                                                                                 |
-| 4   | final run 0.6.1 before tagging (`briefs/release-0.6.1-verify.md`)                                          | verifier     | done        | `Release061Verify` at `4d81d47`: gate pass; `readmer check`, licences no diff; `yamt_0.6.1_amd64.deb` Version `0.6.1`, `yamt 0.6.1`; merge window, merge-request page (5 rows, filter, CI hover, job → opened.log, !13 child from the release binary, repo unchanged, already open, stop sweeps), compare window pass. Notes `Release061Verify.md` |
-| 5   | push, tags `v0.6.0` on `ec5c914` and `v0.6.1` on the head, publish both (`handoff-release-0.6.0-0.6.1.md`) | human        | handed over |                                                                                                                                                                                                                                                                                                                                                    |
+| row | slice                                                                                        | owner        | status  | evidence |
+| --- | -------------------------------------------------------------------------------------------- | ------------ | ------- | -------- |
+| 1   | merge-request tests on macOS and Windows (`briefs/mr-portable-tests.md`) (`MrPortableTests`) | rust-impl    | running |          |
+| 2   | release commit 0.6.2: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README                      | orchestrator | todo    |          |
+| 3   | final run 0.6.2 before tagging                                                               | verifier     | todo    |          |
+| 4   | push `main`, ci green on all four jobs, tag `v0.6.2`, publish                                | human        | todo    |          |
 
 ## Open product questions
 
