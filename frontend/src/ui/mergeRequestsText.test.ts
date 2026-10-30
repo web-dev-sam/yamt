@@ -88,8 +88,7 @@ test("a filter's clear button and narrowing box name the filter; the placeholder
   expect(narrowPlaceholder("Label")).toBe("Find label…");
 });
 
-test.each<[OpenReply, string]>([
-  [{ kind: "opened" }, "Opened !13 in a new window."],
+test.each<[Exclude<OpenReply, { kind: "opened" }>, string]>([
   [{ kind: "alreadyOpen" }, "!13 is already open in another yamt window."],
   [{ kind: "preparing" }, "GitLab is still preparing the changes of !13; try again in a moment."],
   [{ kind: "notOpen" }, "!13 is no longer open."],

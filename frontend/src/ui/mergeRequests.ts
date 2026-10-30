@@ -41,7 +41,6 @@ export type ListLoad =
 
 export type Opening =
   | { readonly kind: "fetching" }
-  | { readonly kind: "opened" }
   | { readonly kind: "refused"; readonly reply: Exclude<OpenReply, { readonly kind: "opened" }> };
 
 type Choices = Readonly<{
@@ -180,7 +179,7 @@ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
     return;
   }
   const reply = outcome.value;
-  setOpening(state, iid, reply.kind === "opened" ? { kind: "opened" } : { kind: "refused", reply });
+  setOpening(state, iid, reply.kind === "opened" ? null : { kind: "refused", reply });
 }
 
 async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {

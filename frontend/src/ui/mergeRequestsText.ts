@@ -78,7 +78,11 @@ export function narrowPlaceholder(name: string): string {
   return `Find ${name.toLowerCase()}…`;
 }
 
-function openRefusedText(reply: Exclude<OpenReply, { kind: "opened" }>, mr: string): string {
+export function openReplyText(
+  reply: Exclude<OpenReply, { kind: "opened" }>,
+  iid: MergeRequestIid,
+): string {
+  const mr = mergeRequestReference(iid);
   switch (reply.kind) {
     case "alreadyOpen":
       return `${mr} is already open in another yamt window.`;
@@ -105,11 +109,6 @@ function openRefusedText(reply: Exclude<OpenReply, { kind: "opened" }>, mr: stri
       return _exhaustive;
     }
   }
-}
-
-export function openReplyText(reply: OpenReply, iid: MergeRequestIid): string {
-  const mr = mergeRequestReference(iid);
-  return reply.kind === "opened" ? `Opened ${mr} in a new window.` : openRefusedText(reply, mr);
 }
 
 const NOT_OFFERED: Readonly<Record<PageKind, string>> = {

@@ -105,13 +105,6 @@ function escapePressed(event: KeyboardEvent): void {
         @toggle="requests.toggle(filter, $event)"
         @clear="requests.clear(filter)"
       />
-      <ChoiceButtons
-        role="group"
-        :aria-label="DRAFT_LABEL"
-        :options="DRAFT_OPTIONS"
-        :pressed="filters.draft"
-        @pick="requests.setDraft"
-      />
       <button
         v-if="filtered"
         type="button"
@@ -120,6 +113,14 @@ function escapePressed(event: KeyboardEvent): void {
       >
         {{ CLEAR_FILTERS }}
       </button>
+      <ChoiceButtons
+        role="group"
+        :aria-label="DRAFT_LABEL"
+        :options="DRAFT_OPTIONS"
+        :pressed="filters.draft"
+        class="ml-auto"
+        @pick="requests.setDraft"
+      />
     </div>
     <p
       v-if="pageProblem !== null"

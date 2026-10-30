@@ -35,14 +35,9 @@ const approvals = computed(() => approvalsText(props.row.approvals));
 const openTitle = computed(() => openChangesTitle(props.row.iid));
 const pageTitle = computed(() => openPageTitle(props.row.iid, props.row.title));
 const fetching = computed(() => props.opening?.kind === "fetching");
-const sentence = computed(() => {
-  const opening = props.opening;
-  if (opening === null || opening.kind === "fetching") {
-    return null;
-  }
-  const reply = opening.kind === "opened" ? ({ kind: "opened" } as const) : opening.reply;
-  return { text: openReplyText(reply, props.row.iid), refused: opening.kind === "refused" };
-});
+const refusal = computed(() =>
+  props.opening?.kind === "refused" ? openReplyText(props.opening.reply, props.row.iid) : null,
+);
 
 function openPage(): void {
   if (props.row.page !== null) {
@@ -115,12 +110,8 @@ function openPage(): void {
         </button>
       </span>
     </div>
-    <p
-      v-if="sentence !== null"
-      role="status"
-      :class="sentence.refused ? 'text-problem-error' : 'text-fg-muted'"
-    >
-      {{ sentence.text }}
+    <p v-if="refusal !== null" role="status" class="text-problem-error">
+      {{ refusal }}
     </p>
   </li>
 </template>

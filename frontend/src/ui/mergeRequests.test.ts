@@ -463,7 +463,7 @@ test("a reviewer choice counts reviewers, not assignees", async () => {
   expect(none?.count).toBe(ROWS.filter((row) => row.reviewers.length === 0).length);
 });
 
-test("opening shows fetching, then opened or the refusal (catches the row staying busy)", async () => {
+test("opening shows fetching, then nothing once opened or the refusal (catches the row staying busy)", async () => {
   const live = rig();
   const [first, second] = [iid(640), iid(639)];
 
@@ -477,7 +477,7 @@ test("opening shows fetching, then opened or the refusal (catches the row stayin
   live.opens[0]?.answer({ ok: true, value: { kind: "opened" } });
   live.opens[1]?.answer({ ok: true, value: { kind: "alreadyOpen" } });
   await Promise.all([opening, refusing]);
-  expect(live.slice.openings.value.get(first)).toEqual({ kind: "opened" });
+  expect(live.slice.openings.value.has(first)).toBe(false);
   expect(live.slice.openings.value.get(second)).toEqual({
     kind: "refused",
     reply: { kind: "alreadyOpen" },
@@ -487,7 +487,7 @@ test("opening shows fetching, then opened or the refusal (catches the row stayin
   expect(live.slice.openings.value.get(second)).toEqual({ kind: "fetching" });
   live.opens[2]?.answer({ ok: true, value: { kind: "opened" } });
   await again;
-  expect(live.slice.openings.value.get(second)).toEqual({ kind: "opened" });
+  expect(live.slice.openings.value.has(second)).toBe(false);
 });
 
 test("a failed open call is reported and clears the row's state", async () => {

@@ -13,6 +13,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the row except its CI box and its open-changes button); its title is reachable with Tab and opens on Enter or
   Space. A GitLab installed under a sub-path (`https://host/gitlab`) keeps it in the address.
 
+### Changed
+
+- The merge-request page's filters show an icon before their names (a person for Assignee and Reviewer, a tag for
+  Label), and All / Drafts / Ready sit at the right end of the filter row.
+- Opening a merge request's changes no longer adds "Opened !N in a new window." under its row; only a refusal is
+  shown there.
+
 ## [0.6.2] - 2026-10-30
 
 No change to the app since 0.6.1. The merge-request overview's tests now also pass on macOS and Windows, and the

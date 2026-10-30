@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, shallowRef, useTemplateRef } from "vue";
+import { computed, shallowRef, useTemplateRef, type Component } from "vue";
 import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
+import Tag from "~icons/lucide/tag";
+import UserRound from "~icons/lucide/user-round";
 import X from "~icons/lucide/x";
 
 import {
@@ -25,6 +27,12 @@ const props = defineProps<{
   choices: readonly Choice<Value>[];
 }>();
 const emit = defineEmits<{ toggle: [value: Value]; clear: [] }>();
+
+const ICONS: Readonly<Record<ListFilter, Component>> = {
+  assignee: UserRound,
+  reviewer: UserRound,
+  label: Tag,
+};
 
 const opener = useTemplateRef<HTMLButtonElement>("opener");
 const menu = useTemplateRef<HTMLDivElement>("menu");
@@ -71,10 +79,11 @@ async function openerClicked(): Promise<void> {
       type="button"
       aria-haspopup="menu"
       :aria-expanded="openFor !== null"
-      class="flex items-center gap-1 border border-control-border py-1 pr-2 pl-3 hover:bg-hover aria-expanded:bg-row-selected"
+      class="flex items-center gap-1.5 border border-control-border py-1 pr-2 pl-2.5 hover:bg-hover aria-expanded:bg-row-selected"
       :class="set ? 'rounded-l border-primary' : 'rounded'"
       @click="openerClicked"
     >
+      <component :is="ICONS[filter]" class="size-4" aria-hidden="true" />
       {{ label }}
       <ChevronDown class="size-3.5" aria-hidden="true" />
     </button>
