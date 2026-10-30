@@ -1,30 +1,9 @@
 {
-  "MrConflictsPageR1": {
+  "MrConflictsDocs": {
     "owned": [
-      "frontend/src/ipc/MergeRequestSource.ts",
-      "frontend/src/ipc/tauriMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.ts",
-      "frontend/src/ipc/fixtureMergeRequests.test.ts",
-      "frontend/src/ipc/AGENTS.md",
-      "frontend/src/ipc/tauriResolve.test.ts",
-      "frontend/src/ipc/index.ts",
-      "frontend/src/ipc/mergeRequestDomain.ts",
-      "frontend/src/ipc/localMergeDomain.ts",
-      "frontend/src/ui/mergeRequests.ts",
-      "frontend/src/ui/mergeRequests.test.ts",
-      "frontend/src/ui/mergeRequestsText.ts",
-      "frontend/src/ui/mergeRequestsText.test.ts",
-      "frontend/src/ui/mergeRequestActions.ts",
-      "frontend/src/ui/mergeRequestActions.test.ts",
-      "frontend/src/ui/MergeRequestRow.vue",
-      "frontend/src/ui/MergeRequestsView.vue",
-      "frontend/src/ui/MergeRequestReadiness.vue",
-      "frontend/src/ui/AGENTS.md",
-      "frontend/src/ui/aborting.ts",
-      "frontend/src/ui/aborting.test.ts",
-      "frontend/src/mergeRequests/index.ts",
-      "frontend/src/mergeRequests/AGENTS.md",
-      "frontend/src/mergeRequests/internal/**"
+      "docs/architecture.md",
+      ".omp/skills/project-map/**",
+      ".omp/skills/ipc-contract/SKILL.md"
     ]
   }
 }
