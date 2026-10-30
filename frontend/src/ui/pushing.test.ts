@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { shallowRef } from "vue";
 
-import type { PushReply, SourceResult } from "../ipc";
+import type { MergeView, PushReply, SourceResult } from "../ipc";
 import { createAsking, type Asking } from "./asking";
 import { createGitRun, type GitRun } from "./gitRun";
 import type { Problem } from "./problem";
@@ -15,6 +15,12 @@ const PUSHED: SourceResult<PushReply> = { ok: true, value: { kind: "pushed" } };
 const FAILED: SourceResult<PushReply> = {
   ok: true,
   value: { kind: "failed", message: REJECTED },
+};
+const DUE_DATES: MergeView = {
+  branch: BRANCH,
+  target: "main",
+  returnTo: { kind: "branch", name: "develop" },
+  branchBefore: { kind: "movedFrom", id: "3f1c2a9" },
 };
 
 type Offered = {
@@ -38,12 +44,14 @@ function offered(
   const gitRun = createGitRun();
   const calls: string[] = [];
   const problem = shallowRef<Problem | null>(null);
+  const mergeRequest = shallowRef<MergeView | null>(DUE_DATES);
   const stop = { dropped: false };
   const { offerPush } = createPushing({
     stop,
     asking,
     gitRun,
     problem,
+    mergeRequest,
     source: {
       pushMergedBranch: () => {
         calls.push("push");
@@ -55,7 +63,9 @@ function offered(
       },
     },
   });
-  return { asking, gitRun, calls, problem, stop, done: offerPush(BRANCH) };
+  const done = offerPush(BRANCH);
+  mergeRequest.value = null;
+  return { asking, gitRun, calls, problem, stop, done };
 }
 
 async function asked(offer: Offered): Promise<void> {
@@ -169,7 +179,7 @@ test("a push answered after its stop was dropped asks nothing more and closes no
   ]);
 });
 
-test("a close the app refuses after Keep Local is the push problem and the window can be used again", async () => {
+test("a close the app refuses after Keep Local is the close problem, never a push, and the window can be used again", async () => {
   vi.spyOn(console, "error").mockImplementation(() => undefined);
   const offer = offered([], { ok: false, failure: { kind: "WorkerStopped" } });
 
@@ -177,8 +187,24 @@ test("a close the app refuses after Keep Local is the push problem and the windo
   await offer.done;
 
   const { problem } = offer;
+  expect(problem.value).toEqual({
+    action: "closeMerge",
+    merge: DUE_DATES,
+    cause: { kind: "WorkerStopped" },
+  });
   expect(problem.value === null ? null : problemText(problem.value, LINUX)).toBe(
-    "Could not push feature/due-dates: yamt's worker stopped; try again.",
+    "Could not close the merge of main into feature/due-dates: yamt's worker stopped; try again.",
   );
   expect(offer.gitRun.running.value).toBe(false);
+});
+
+test("a refused push followed by a refused close shows the close problem", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+  const refused = { ok: false, failure: { kind: "WorkerStopped" } } as const;
+  const offer = offered([refused], refused);
+
+  offer.asking.answer(true);
+  await offer.done;
+
+  expect([offer.calls, offer.problem.value?.action]).toEqual([["push", "close"], "closeMerge"]);
 });

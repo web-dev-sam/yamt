@@ -1,0 +1,2 @@
+just mutants HEAD → problem.ts 100% (101 killed), pushing.ts 100% (49 killed), problemText.ts 95.24% (160 killed, 4 survived, 4 no coverage); total 97.48%
+problemText.ts:155,164,165,180,205 (4 survived, 4 NoCoverage) — not on changed lines: unchanged brokenText/keyProblemText/causedText. The run mutates the whole changed file; my lines 4, 94-96, 117-119 have none.

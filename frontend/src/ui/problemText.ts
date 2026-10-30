@@ -1,7 +1,7 @@
-import { keyLabel, type KeyProblem } from "../ipc";
+import { keyLabel, type KeyProblem, type MergeView } from "../ipc";
 import { columnLimitText } from "./compareText";
 import { ACTION_NAMES } from "./keyText";
-import { continueAction, operationName } from "./operationText";
+import { continueAction, mergeOfText, operationName } from "./operationText";
 import type { AiAttempt, MergeRequestStep, Problem, ProblemCause, ThreadStep } from "./problem";
 
 type CausedProblem = Exclude<Problem, { action: "stopped" | "close" }>;
@@ -91,6 +91,10 @@ const FIXED_ATTEMPT_WORDS: Readonly<
   search: "Search stopped",
 };
 
+function closeMergeText(merge: MergeView | null): string {
+  return merge === null ? "Could not close the merge" : `Could not close the ${mergeOfText(merge)}`;
+}
+
 function attempted(problem: CausedProblem): string {
   switch (problem.action) {
     case "open":
@@ -111,6 +115,8 @@ function attempted(problem: CausedProblem): string {
     }
     case "push":
       return `Could not push ${problem.branch}`;
+    case "closeMerge":
+      return closeMergeText(problem.merge);
     case "list":
     case "settings":
     case "tabs":

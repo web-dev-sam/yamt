@@ -348,11 +348,23 @@ test.each([
   expect(text({ action: "continue", operation, cause })).toBe(words);
 });
 
-test("a failed push or close after the commit names the branch, never the commit", () => {
+test("a failed push names the branch; a failed close names the merge, never a push", () => {
   const cause = { kind: "WorkerStopped" } as const;
+  const merge = {
+    branch: "feature/due-dates",
+    target: "main",
+    returnTo: null,
+    branchBefore: { kind: "movedFrom", id: "3f1c2a9" },
+  } as const;
 
   expect(text({ action: "push", branch: "feature/due-dates", cause })).toBe(
     "Could not push feature/due-dates: yamt's worker stopped; try again.",
+  );
+  expect(text({ action: "closeMerge", merge, cause })).toBe(
+    "Could not close the merge of main into feature/due-dates: yamt's worker stopped; try again.",
+  );
+  expect(text({ action: "closeMerge", merge: null, cause })).toBe(
+    "Could not close the merge: yamt's worker stopped; try again.",
   );
 });
 

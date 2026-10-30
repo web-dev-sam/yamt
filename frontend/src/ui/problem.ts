@@ -4,6 +4,7 @@ import {
   log,
   type Column,
   type KeyProblem,
+  type MergeView,
   type OperationKind,
   type SourceFailure,
   type SourceResult,
@@ -54,6 +55,11 @@ export type Problem =
     }
   | { readonly action: "push"; readonly branch: string; readonly cause: ProblemCause }
   | { readonly action: "close" }
+  | {
+      readonly action: "closeMerge";
+      readonly merge: MergeView | null;
+      readonly cause: ProblemCause;
+    }
   | {
       readonly action: "stopped";
       readonly operation: OperationKind | null;
@@ -111,6 +117,10 @@ function stoppedFields(problem: Extract<Problem, { action: "stopped" }>): Record
   return { operation: problem.operation ?? "none", message: problem.message };
 }
 
+function mergeFields(merge: MergeView | null): Record<string, string> {
+  return merge === null ? {} : { target: merge.target, branch: merge.branch };
+}
+
 function failureFields(
   problem: Exclude<Problem, { action: "close" | "stopped" }>,
 ): Record<string, string | number | boolean> {
@@ -125,6 +135,8 @@ function failureFields(
       return { operation: problem.operation, ...problem.cause };
     case "push":
       return { branch: problem.branch, ...problem.cause };
+    case "closeMerge":
+      return { ...mergeFields(problem.merge), ...problem.cause };
     case "settings":
       return settingsFields(problem.cause);
     case "open":

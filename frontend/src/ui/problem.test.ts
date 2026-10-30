@@ -97,6 +97,23 @@ test("a failed push logs its branch and cause under its own event (catches a pus
   ).toEqual(['[error] store.push_failed {branch: "feature/due-dates", kind: "WorkerStopped"}']);
 });
 
+test("a failed close of the ended merge logs the merge and cause under its own event, never a push", () => {
+  const merge = {
+    branch: "feature/due-dates",
+    target: "main",
+    returnTo: null,
+    branchBefore: { kind: "movedFrom", id: "3f1c2a9" },
+  } as const;
+  const cause = { kind: "WorkerStopped" } as const;
+  expect(logged({ action: "closeMerge", merge, cause })).toEqual([
+    '[error] store.closeMerge_failed {target: "main", branch: "feature/due-dates", kind: "WorkerStopped"}',
+  ]);
+  vi.restoreAllMocks();
+  expect(logged({ action: "closeMerge", merge: null, cause })).toEqual([
+    '[error] store.closeMerge_failed {kind: "WorkerStopped"}',
+  ]);
+});
+
 test.each(["open", "finish", "save", "take", "reset"] as const)(
   "a failed %s logs the file and the cause (catches a log line without the path)",
   (action) => {
