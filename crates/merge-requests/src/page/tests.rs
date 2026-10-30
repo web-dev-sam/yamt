@@ -7,6 +7,8 @@ const FULL_PATH: &str = "taskboard/taskboard";
 const WEB_PATH: &str = "/taskboard/taskboard";
 const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
 const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
+const CONFLICTS_PAGE: &[u8] =
+    include_bytes!("../../../../tests/glab/mr-conflicts/graphql-page-1.json");
 
 fn person(username: &str, name: &str) -> Person {
     Person {
@@ -54,6 +56,42 @@ fn snooze_a_reminder() -> MergeRequestRow {
         page: Some(WebPage(
             "https://gitlab.example/taskboard/taskboard/-/merge_requests/13".to_owned(),
         )),
+        size: Some(size(64, 9, 4)),
+        readiness: blocked(BlockedReason::PipelineMustPass),
+        from_fork: false,
+    }
+}
+
+/// A node with GitLab's non-null fields, then `fields` over them.
+fn node_with(fields: &Value) -> Value {
+    let mut node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
+        "conflicts": false, "sourceProjectId": 1, "targetProjectId": 1 });
+    for (name, value) in fields.as_object().unwrap() {
+        node[name] = value.clone();
+    }
+    node
+}
+
+fn row_with(fields: &Value) -> MergeRequestRow {
+    let page = last_page_of(&json!([node_with(fields)])).unwrap();
+    page.rows.into_iter().next().unwrap()
+}
+
+fn conflicts(also: &[BlockedReason]) -> Readiness {
+    Readiness::Conflicts {
+        also: also.to_vec(),
+    }
+}
+
+fn blocked(reason: BlockedReason) -> Readiness {
+    Readiness::Blocked { reason }
+}
+
+fn size(additions: u32, deletions: u32, files: u32) -> ChangeSize {
+    ChangeSize {
+        additions,
+        deletions,
+        files,
     }
 }
 
@@ -79,7 +117,7 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
     assert_eq!(page.me.as_deref(), Some("sam"));
     assert_eq!(page.next.as_deref(), Some("page-2"));
     let complexity = Complexity {
-        score: 112,
+        score: 119,
         limit: 250,
     };
     assert_eq!(page.complexity, Some(complexity));
@@ -92,6 +130,9 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
     let draft = &page.rows[2];
     assert!(draft.draft);
     assert_eq!(draft.title, "Draft: Move reminders to the settings page");
+    let readiness: Vec<&Readiness> = page.rows.iter().map(|row| &row.readiness).collect();
+    let conflicting_draft = conflicts(&[BlockedReason::Draft]);
+    assert_eq!(readiness[1..], [&Readiness::Ready, &conflicting_draft]);
 }
 
 #[test]
@@ -102,6 +143,13 @@ fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
     assert_eq!(page.rows[0].pipeline, None);
     assert_eq!(status_of(&page.rows[1]), Some(CiStatus::Manual));
     assert_eq!(page.rows[1].approvals, 1);
+    assert_eq!(page.rows[0].readiness, Readiness::NeedsRebase);
+    assert_eq!(page.rows[0].size, None);
+    assert_eq!(page.rows[1].readiness, Readiness::Checking);
+    assert_eq!(
+        (page.rows[0].from_fork, page.rows[1].from_fork),
+        (false, true)
+    );
 }
 
 #[test]
@@ -132,12 +180,12 @@ fn on_a_gitlab_under_a_sub_path_a_row_s_page_keeps_the_sub_path() {
 
 #[test]
 fn null_fields_are_empty_or_zero_and_more_failed_jobs_than_asked_are_flagged() {
-    let node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
-        "labels": null, "assignees": null, "reviewers": null, "approvedBy": null,
+    let node = node_with(
+        &json!({ "labels": null, "assignees": null, "reviewers": null, "approvedBy": null,
         "resolvableDiscussionsCount": null, "resolvedDiscussionsCount": null,
         "headPipeline": { "status": "CANCELING", "jobs": { "pageInfo": { "hasNextPage": true },
-            "nodes": [{ "name": "e2e", "allowFailure": false, "webPath": "/a/-/jobs/x", "stage": null }] } } });
-
+            "nodes": [{ "name": "e2e", "allowFailure": false, "webPath": "/a/-/jobs/x", "stage": null }] } } }),
+    );
     let page = last_page_of(&json!([node])).unwrap();
 
     let row = &page.rows[0];
@@ -206,7 +254,7 @@ fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
     let no_cursor = json!({ "hasNextPage": true, "endCursor": null });
     let no_project = json!({ "data": { "project": null } }).to_string();
     let no_merge_requests = json!({ "data": { "project": { "mergeRequests": null } } }).to_string();
-    let bad_iid = json!([{ "iid": "!4", "title": "t", "createdAt": "x", "draft": false }]);
+    let bad_iid = json!([node_with(&json!({ "iid": "!4" }))]);
     let error = |answer: &[u8]| parsed(answer, &taskboard(Some(ORIGIN))).err();
 
     assert_eq!(error(b"{}").as_deref(), Some(NO_DATA));
@@ -219,4 +267,123 @@ fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
     let expected = r#"GitLab sent "!4" as a merge request number"#;
     assert_eq!(bad.as_deref(), Some(expected));
     assert!(error(b"<html>").is_some());
+}
+
+/// GitLab's 24 `DetailedMergeStatus` values and what each folds to.
+fn merge_status_table() -> [(&'static str, Readiness); 24] {
+    use BlockedReason::{
+        Approvals, ChangesRequested, Dependencies, Discussions, Draft, JiraIssue, LockedFiles,
+        LockedPaths, MergeTime, NotOpen, PipelineMustPass, PipelineRunning, SecurityPipelines,
+        SecurityPolicies, SourceBranch, StatusChecks, TitleRule,
+    };
+    [
+        ("MERGEABLE", Readiness::Ready),
+        ("CONFLICT", conflicts(&[])),
+        ("NEED_REBASE", Readiness::NeedsRebase),
+        ("CHECKING", Readiness::Checking),
+        ("UNCHECKED", Readiness::Checking),
+        ("PREPARING", Readiness::Checking),
+        ("APPROVALS_SYNCING", Readiness::Checking),
+        ("DRAFT_STATUS", blocked(Draft)),
+        ("DISCUSSIONS_NOT_RESOLVED", blocked(Discussions)),
+        ("NOT_APPROVED", blocked(Approvals)),
+        ("CI_MUST_PASS", blocked(PipelineMustPass)),
+        ("CI_STILL_RUNNING", blocked(PipelineRunning)),
+        ("REQUESTED_CHANGES", blocked(ChangesRequested)),
+        ("BLOCKED_STATUS", blocked(Dependencies)),
+        ("EXTERNAL_STATUS_CHECKS", blocked(StatusChecks)),
+        ("JIRA_ASSOCIATION", blocked(JiraIssue)),
+        ("LOCKED_LFS_FILES", blocked(LockedFiles)),
+        ("LOCKED_PATHS", blocked(LockedPaths)),
+        ("MERGE_TIME", blocked(MergeTime)),
+        ("NOT_OPEN", blocked(NotOpen)),
+        ("COMMITS_STATUS", blocked(SourceBranch)),
+        ("SECURITY_POLICIES_VIOLATIONS", blocked(SecurityPolicies)),
+        ("SECURITY_POLICY_PIPELINE_CHECK", blocked(SecurityPipelines)),
+        ("TITLE_NOT_MATCHING", blocked(TitleRule)),
+    ]
+}
+
+fn unknown_status() -> BlockedReason {
+    BlockedReason::Other {
+        status: "MERGE_TRAIN_STUCK".to_owned(),
+    }
+}
+
+#[test]
+fn every_gitlab_merge_status_folds_as_the_table_null_is_checking_and_an_unknown_one_blocks() {
+    for (gitlab, folded) in merge_status_table() {
+        assert_eq!(readiness(Some(gitlab), false, false), folded, "{gitlab}");
+    }
+    let unknown = readiness(Some("MERGE_TRAIN_STUCK"), false, false);
+    assert_eq!(unknown, blocked(unknown_status()));
+    let missing = row_with(&json!({ "detailedMergeStatus": null }));
+    assert_eq!(missing.readiness, Readiness::Checking);
+}
+
+#[test]
+fn a_conflict_flag_or_status_comes_first_with_the_status_s_blocker_then_a_draft() {
+    use BlockedReason::{Discussions, Draft, PipelineMustPass};
+    let cases: [(Option<&str>, bool, &[BlockedReason]); 9] = [
+        (Some("DRAFT_STATUS"), true, &[Draft]),
+        (Some("CI_MUST_PASS"), true, &[PipelineMustPass, Draft]),
+        (Some("DISCUSSIONS_NOT_RESOLVED"), false, &[Discussions]),
+        (Some("MERGEABLE"), false, &[]),
+        (Some("MERGEABLE"), true, &[Draft]),
+        (Some("CHECKING"), false, &[]),
+        (Some("NEED_REBASE"), false, &[]),
+        (None, false, &[]),
+        (Some("MERGE_TRAIN_STUCK"), false, &[unknown_status()]),
+    ];
+    for (status, draft, also) in cases {
+        let folded = readiness(status, true, draft);
+        assert_eq!(folded, conflicts(also), "{status:?}");
+    }
+    assert_eq!(readiness(Some("CONFLICT"), false, false), conflicts(&[]));
+    assert_eq!(
+        readiness(Some("CONFLICT"), false, true),
+        conflicts(&[Draft])
+    );
+    assert_eq!(readiness(Some("DRAFT_STATUS"), false, true), blocked(Draft));
+}
+
+#[test]
+fn counts_saturate_a_null_summary_is_no_size_and_another_or_no_source_project_is_a_fork() {
+    let summary = json!({ "additions": -3, "deletions": 7, "fileCount": 5_000_000_000_i64 });
+    let counted = row_with(&json!({ "diffStatsSummary": summary }));
+    assert_eq!(counted.size, Some(size(0, 7, u32::MAX)));
+    assert_eq!(row_with(&json!({ "diffStatsSummary": null })).size, None);
+    assert!(!counted.from_fork);
+    assert!(row_with(&json!({ "sourceProjectId": 2, "targetProjectId": 1 })).from_fork);
+    assert!(row_with(&json!({ "sourceProjectId": null })).from_fork);
+}
+
+#[test]
+fn the_mr_conflicts_scenario_s_page_folds_as_its_readme_says() {
+    use BlockedReason::{Draft, PipelineMustPass};
+    let page = parsed(CONFLICTS_PAGE, &taskboard(Some(ORIGIN))).unwrap();
+
+    let rows: Vec<(u32, Readiness, bool)> = page
+        .rows
+        .iter()
+        .map(|row| (row.iid.0, row.readiness.clone(), row.from_fork))
+        .collect();
+
+    let expected = [
+        (32, conflicts(&[PipelineMustPass, Draft]), false),
+        (31, conflicts(&[Draft]), false),
+        (29, conflicts(&[]), false),
+        (28, blocked(unknown_status()), false),
+        (27, Readiness::Ready, false),
+        (26, Readiness::Checking, false),
+        (25, blocked(Draft), false),
+        (24, Readiness::NeedsRebase, false),
+        (23, conflicts(&[]), false),
+        (22, conflicts(&[]), true),
+        (21, conflicts(&[]), false),
+    ];
+    assert_eq!(rows, expected);
+    assert_eq!((page.me.as_deref(), page.next), (Some("sam"), None));
+    assert_eq!(page.rows[4].size, None);
+    assert_eq!(page.rows[10].size, Some(size(120, 40, 6)));
 }

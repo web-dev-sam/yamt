@@ -1,16 +1,16 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use yamt_gitio::{AuthStatus, FETCH_TIMEOUT, Glab, Oid, Repo};
+use yamt_gitio::{FETCH_TIMEOUT, Glab, Oid, Repo};
 use yamt_range::{PairLock, RangeSpec, Resolved};
 
 use crate::page::{NO_PROJECT, graphql_data};
-use crate::project::project;
+use crate::project::logged_in_project;
 use crate::query::details_args;
 use crate::remote::remote_for;
 use crate::{GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen};
 
-const OPENED: &str = "opened";
+pub(crate) const OPENED: &str = "opened";
 const SHORT_ID_CHARS: usize = 7;
 const REFSPEC_SEPARATOR: char = ':';
 
@@ -60,12 +60,7 @@ pub fn prepare_open(
         return Err(OpenReply::GlabMissing);
     };
     let root = repository.root();
-    match glab.auth_status(root) {
-        AuthStatus::LoggedIn => {}
-        AuthStatus::LoggedOut { detail } => return Err(OpenReply::NotLoggedIn { detail }),
-        AuthStatus::Failed { message } => return Err(OpenReply::Failed { message }),
-    }
-    let full_path = project(glab, root).map_err(failed)?.full_path;
+    let full_path = logged_in_project(glab, root)?.full_path;
     let diff = open_diff(glab, root, &full_path, iid)?;
     fetch_unless_local(repository, &full_path, iid, &diff)?;
     let spec = format!("{}..{}", diff.base.as_str(), diff.head.as_str());
@@ -108,6 +103,15 @@ fn commit_id(sent: &str) -> Result<Oid, OpenReply> {
     Oid::parse(sent).map_err(|_| failed(format!("GitLab sent {sent:?} as a commit id")))
 }
 
+/// A branch name a fetch refspec can carry: one with a colon names a ref to write (git-fetch(1) "<refspec>"), and
+/// git refuses one in a branch name.
+pub(crate) fn require_branch_name(sent: &str) -> Result<(), String> {
+    if sent.contains(REFSPEC_SEPARATOR) {
+        return Err(format!("GitLab sent {sent:?} as a branch name"));
+    }
+    Ok(())
+}
+
 /// Fetches the merge request's head and its target branch from the project's remote, unless both commits are
 /// already in the repository.
 fn fetch_unless_local(
@@ -125,11 +129,7 @@ fn fetch_unless_local(
             project: full_path.to_owned(),
         });
     };
-    // A refspec with a colon names a ref to write (git-fetch(1) "<refspec>"); git refuses one in a branch name.
-    if diff.target_branch.contains(REFSPEC_SEPARATOR) {
-        let target = &diff.target_branch;
-        return Err(failed(format!("GitLab sent {target:?} as a branch name")));
-    }
+    require_branch_name(&diff.target_branch).map_err(failed)?;
     let head_ref = format!("refs/merge-requests/{}/head", iid.0);
     let target_ref = format!("refs/heads/{}", diff.target_branch);
     let refspecs = [head_ref.as_str(), target_ref.as_str()];

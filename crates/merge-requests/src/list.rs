@@ -1,7 +1,7 @@
-use yamt_gitio::{AuthStatus, Glab};
+use yamt_gitio::Glab;
 
 use crate::page::{ParsedPage, parsed};
-use crate::project::project;
+use crate::project::logged_in_project;
 use crate::query::list_args;
 use crate::{GitLabRepository, ListEnd, MAX_MERGE_REQUESTS, MergeRequestPage, PAGE_SIZE};
 
@@ -18,14 +18,9 @@ pub fn list_merge_requests(
         return ListEnd::GlabMissing;
     };
     let root = repository.root();
-    match glab.auth_status(root) {
-        AuthStatus::LoggedIn => {}
-        AuthStatus::LoggedOut { detail } => return ListEnd::NotLoggedIn { detail },
-        AuthStatus::Failed { message } => return ListEnd::Failed { message },
-    }
-    let project = match project(glab, root) {
+    let project = match logged_in_project(glab, root) {
         Ok(project) => project,
-        Err(message) => return ListEnd::Failed { message },
+        Err(refused) => return refused.into(),
     };
     let mut fetch = |after: Option<&str>| {
         let args = list_args(&project.full_path, after);
@@ -73,7 +68,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::*;
-    use crate::{MergeRequestIid, MergeRequestRow};
+    use crate::{MergeRequestIid, MergeRequestRow, Readiness};
 
     fn row(iid: u32) -> MergeRequestRow {
         MergeRequestRow {
@@ -88,6 +83,9 @@ mod tests {
             approvals: 0,
             pipeline: None,
             page: None,
+            size: None,
+            readiness: Readiness::Ready,
+            from_fork: false,
         }
     }
 

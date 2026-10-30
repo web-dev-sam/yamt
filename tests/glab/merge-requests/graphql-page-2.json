@@ -1,6 +1,6 @@
 {
   "data": {
-    "queryComplexity": { "score": 112, "limit": 250 },
+    "queryComplexity": { "score": 119, "limit": 250 },
     "currentUser": { "username": "sam" },
     "project": {
       "mergeRequests": {
@@ -17,6 +17,11 @@
             "approvedBy": { "nodes": [] },
             "resolvableDiscussionsCount": 0,
             "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "NEED_REBASE",
+            "conflicts": false,
+            "diffStatsSummary": null,
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
             "headPipeline": null
           },
           {
@@ -30,6 +35,11 @@
             "approvedBy": { "nodes": [{ "username": "anna" }] },
             "resolvableDiscussionsCount": 2,
             "resolvedDiscussionsCount": 2,
+            "detailedMergeStatus": null,
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 5, "deletions": 5, "fileCount": 1 },
+            "sourceProjectId": 12,
+            "targetProjectId": 7,
             "headPipeline": {
               "status": "MANUAL",
               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }

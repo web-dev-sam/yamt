@@ -1,0 +1,238 @@
+{
+  "data": {
+    "queryComplexity": { "score": 119, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "32",
+            "title": "Board themes",
+            "createdAt": "2026-10-29T16:00:00Z",
+            "draft": true,
+            "labels": { "nodes": [{ "title": "ui" }] },
+            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "FAILED",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "CI_MUST_PASS",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 75, "deletions": 12, "fileCount": 5 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "31",
+            "title": "Draft: Calendar view",
+            "createdAt": "2026-10-29T11:00:00Z",
+            "draft": true,
+            "labels": { "nodes": [{ "title": "ui" }] },
+            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": null,
+            "detailedMergeStatus": "DRAFT_STATUS",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 210, "deletions": 3, "fileCount": 7 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "29",
+            "title": "Merged already",
+            "createdAt": "2026-10-28T15:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [] },
+            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
+            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "CONFLICT",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 8, "deletions": 1, "fileCount": 1 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "28",
+            "title": "Due-date filter",
+            "createdAt": "2026-10-28T09:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "cards" }] },
+            "assignees": { "nodes": [] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "MERGE_TRAIN_STUCK",
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 44, "deletions": 6, "fileCount": 3 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "27",
+            "title": "Reminder sounds",
+            "createdAt": "2026-10-27T14:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "reminders" }] },
+            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "approvedBy": { "nodes": [{ "username": "anna" }] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "diffStatsSummary": null,
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "26",
+            "title": "Archive cards",
+            "createdAt": "2026-10-27T08:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "cards" }] },
+            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": null,
+            "detailedMergeStatus": "UNCHECKED",
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 31, "deletions": 0, "fileCount": 2 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "25",
+            "title": "Draft: Keyboard help",
+            "createdAt": "2026-10-26T13:00:00Z",
+            "draft": true,
+            "labels": { "nodes": [{ "title": "docs" }] },
+            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "RUNNING",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "DRAFT_STATUS",
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 18, "deletions": 2, "fileCount": 1 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "24",
+            "title": "Board export",
+            "createdAt": "2026-10-25T10:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "boards" }] },
+            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "reviewers": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 2,
+            "resolvedDiscussionsCount": 1,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "NEED_REBASE",
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 96, "deletions": 22, "fileCount": 4 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "23",
+            "title": "Swimlanes",
+            "createdAt": "2026-10-24T15:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "boards" }, { "title": "ui" }] },
+            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
+            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "CONFLICT",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 52, "deletions": 14, "fileCount": 3 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "22",
+            "title": "Card colours",
+            "createdAt": "2026-10-23T09:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "cards" }] },
+            "assignees": { "nodes": [{ "username": "chiara", "name": "Chiara Rossi" }] },
+            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "approvedBy": { "nodes": [] },
+            "resolvableDiscussionsCount": 1,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "CONFLICT",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 27, "deletions": 9, "fileCount": 2 },
+            "sourceProjectId": 2,
+            "targetProjectId": 1
+          },
+          {
+            "iid": "21",
+            "title": "Due dates on cards",
+            "createdAt": "2026-10-22T08:00:00Z",
+            "draft": false,
+            "labels": { "nodes": [{ "title": "cards" }] },
+            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
+            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
+            "approvedBy": { "nodes": [{ "username": "anna" }] },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "headPipeline": {
+              "status": "SUCCESS",
+              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+            },
+            "detailedMergeStatus": "CONFLICT",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
+            "sourceProjectId": 1,
+            "targetProjectId": 1
+          }
+        ]
+      }
+    }
+  }
+}

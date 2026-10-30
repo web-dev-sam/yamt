@@ -28,6 +28,9 @@ const ROW: Generated.MergeRequestRow = {
     moreFailedJobs: true,
   },
   page: "https://gitlab.example/taskboard/taskboard/-/merge_requests/13",
+  size: { additions: 120, deletions: 40, files: 6 },
+  readiness: { kind: "conflicts", also: [{ kind: "pipelineMustPass" }, { kind: "draft" }] },
+  fromFork: true,
 };
 
 function page(row: Partial<Generated.MergeRequestRow>): Generated.MergeRequestPage {

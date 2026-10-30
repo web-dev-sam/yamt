@@ -1,0 +1,1713 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index 7b45ba2..c575e79 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, request `docs/slices/request-merge-requests.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https), `query.rs` (the one list query and the details query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; `details_args`: `… -f fullPath=<path> -f iid=<n>`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `Glab::auth_status` → `NotLoggedIn`/`Failed`, the project, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, logged in, the project, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target with `:` refused); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs`, `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s recorded pages); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs` and `tests/open.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`, `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply` and `ResolveRefusal` through `From`: the one prelude of listing, opening and resolving), `query.rs` (the list query, the details query and the branches query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `detailedMergeStatus conflicts diffStatsSummary { additions deletions fileCount } sourceProjectId targetProjectId` too; `details_args` and `branches_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; `readiness`: GitLab's 24 `DetailedMergeStatus` values folded (`MERGEABLE` ready, `CONFLICT` conflicts, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null checking, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning), then conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `size` from `diffStatsSummary` (null → `None`; GitLab's `Int` saturating into `u32`, below 0 → 0); `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches argv exact), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, saturating counts, forks); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs`, `tests/open.rs` and `tests/resolve.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+diff --git a/crates/merge-requests/src/lib.rs b/crates/merge-requests/src/lib.rs
+index f06d574..70f1fdd 100644
+--- a/crates/merge-requests/src/lib.rs
++++ b/crates/merge-requests/src/lib.rs
+@@ -10,6 +10,7 @@ mod page;
+ mod project;
+ mod query;
+ mod remote;
++mod resolve;
+ mod web_page;
+ 
+ use std::path::PathBuf;
+@@ -20,6 +21,7 @@ use specta::Type;
+ pub use detect::{GitLabRepository, gitlab_repository};
+ pub use list::list_merge_requests;
+ pub use open::prepare_open;
++pub use resolve::prepare_resolve;
+ pub use web_page::open_page;
+ pub use yamt_gitio::Glab;
+ 
+@@ -109,6 +111,86 @@ pub struct Pipeline {
+     pub more_failed_jobs: bool,
+ }
+ 
++/// How much a merge request changes, GitLab's counts.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(rename_all = "camelCase")]
++pub struct ChangeSize {
++    /// Lines added.
++    pub additions: u32,
++    /// Lines removed.
++    pub deletions: u32,
++    /// Files changed.
++    pub files: u32,
++}
++
++/// Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag: one
++/// state per row, a conflict first.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum Readiness {
++    /// It can be merged.
++    Ready,
++    /// Its branch conflicts with its target.
++    Conflicts {
++        /// What else blocks it, GitLab's status first, then `Draft`; empty when nothing else is known.
++        also: Vec<BlockedReason>,
++    },
++    /// Its branch must be rebased first.
++    NeedsRebase,
++    /// GitLab still checks whether it can be merged.
++    Checking,
++    /// Something other than a conflict blocks it.
++    Blocked {
++        /// What blocks it.
++        reason: BlockedReason,
++    },
++}
++
++/// What blocks a merge, GitLab's `DetailedMergeStatus` in the window's words.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum BlockedReason {
++    /// It is a draft.
++    Draft,
++    /// Discussions are unresolved.
++    Discussions,
++    /// Approvals are missing.
++    Approvals,
++    /// The pipeline must pass.
++    PipelineMustPass,
++    /// The pipeline still runs.
++    PipelineRunning,
++    /// A reviewer requested changes.
++    ChangesRequested,
++    /// Merge requests it depends on must be merged first.
++    Dependencies,
++    /// External status checks must pass.
++    StatusChecks,
++    /// Its title or description must name a Jira issue.
++    JiraIssue,
++    /// It changes LFS files someone locked.
++    LockedFiles,
++    /// It changes paths someone locked.
++    LockedPaths,
++    /// It may not be merged at this time.
++    MergeTime,
++    /// It is not open.
++    NotOpen,
++    /// Its source branch is missing or has no commits.
++    SourceBranch,
++    /// Security policies are not satisfied.
++    SecurityPolicies,
++    /// Security policy pipelines must pass.
++    SecurityPipelines,
++    /// Its title does not match the project's rule.
++    TitleRule,
++    /// A status yamt does not know.
++    Other {
++        /// GitLab's word for it.
++        status: String,
++    },
++}
++
+ /// One open merge request as a row of the list.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ #[serde(rename_all = "camelCase")]
+@@ -135,6 +217,12 @@ pub struct MergeRequestRow {
+     pub pipeline: Option<Pipeline>,
+     /// Its page on GitLab; `None` when GitLab is not on https.
+     pub page: Option<WebPage>,
++    /// How much it changes; `None` when GitLab has not counted it.
++    pub size: Option<ChangeSize>,
++    /// Whether it can be merged.
++    pub readiness: Readiness,
++    /// Whether its branch lives in another project than its target, or in a deleted one.
++    pub from_fork: bool,
+ }
+ 
+ /// One page of the list, sent as soon as it arrives.
+@@ -241,3 +329,45 @@ pub struct RangeToOpen {
+     /// `<base_sha>..<head_sha>`, both GitLab's full commit ids.
+     pub spec: String,
+ }
++
++/// The branches of merge request `iid` and the remote holding them, asked afresh (plan §2 #139).
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct ResolveTarget {
++    /// The repository's work tree root, absolute.
++    pub root: PathBuf,
++    /// The merge request.
++    pub iid: MergeRequestIid,
++    /// The name of the remote that names the project.
++    pub remote: String,
++    /// Its source branch.
++    pub branch: String,
++    /// Its target branch.
++    pub target: String,
++}
++
++/// Why the branches of a merge request to resolve are not given.
++#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum ResolveRefusal {
++    /// The merge request is no longer open.
++    NotOpen,
++    /// Its source branch lives in another project.
++    FromFork,
++    /// No remote of the repository names the project.
++    NoRemote {
++        /// The project's full path, `group/project`.
++        project: String,
++    },
++    /// glab is not found on PATH.
++    GlabMissing,
++    /// `glab auth status` failed.
++    NotLoggedIn {
++        /// glab's first output line, which names the instance.
++        detail: String,
++    },
++    /// glab failed, timed out or answered something unexpected.
++    Failed {
++        /// What went wrong, in glab's, GitLab's or yamt's words.
++        message: String,
++    },
++}
+diff --git a/crates/merge-requests/src/list.rs b/crates/merge-requests/src/list.rs
+index 51cbeec..79cc954 100644
+--- a/crates/merge-requests/src/list.rs
++++ b/crates/merge-requests/src/list.rs
+@@ -1,7 +1,7 @@
+-use yamt_gitio::{AuthStatus, Glab};
++use yamt_gitio::Glab;
+ 
+ use crate::page::{ParsedPage, parsed};
+-use crate::project::project;
++use crate::project::logged_in_project;
+ use crate::query::list_args;
+ use crate::{GitLabRepository, ListEnd, MAX_MERGE_REQUESTS, MergeRequestPage, PAGE_SIZE};
+ 
+@@ -18,14 +18,9 @@ pub fn list_merge_requests(
+         return ListEnd::GlabMissing;
+     };
+     let root = repository.root();
+-    match glab.auth_status(root) {
+-        AuthStatus::LoggedIn => {}
+-        AuthStatus::LoggedOut { detail } => return ListEnd::NotLoggedIn { detail },
+-        AuthStatus::Failed { message } => return ListEnd::Failed { message },
+-    }
+-    let project = match project(glab, root) {
++    let project = match logged_in_project(glab, root) {
+         Ok(project) => project,
+-        Err(message) => return ListEnd::Failed { message },
++        Err(refused) => return refused.into(),
+     };
+     let mut fetch = |after: Option<&str>| {
+         let args = list_args(&project.full_path, after);
+@@ -73,7 +68,7 @@ mod tests {
+     use std::sync::mpsc;
+ 
+     use super::*;
+-    use crate::{MergeRequestIid, MergeRequestRow};
++    use crate::{MergeRequestIid, MergeRequestRow, Readiness};
+ 
+     fn row(iid: u32) -> MergeRequestRow {
+         MergeRequestRow {
+@@ -88,6 +83,9 @@ mod tests {
+             approvals: 0,
+             pipeline: None,
+             page: None,
++            size: None,
++            readiness: Readiness::Ready,
++            from_fork: false,
+         }
+     }
+ 
+diff --git a/crates/merge-requests/src/open.rs b/crates/merge-requests/src/open.rs
+index 4fc8833..a3bc6d7 100644
+--- a/crates/merge-requests/src/open.rs
++++ b/crates/merge-requests/src/open.rs
+@@ -1,16 +1,16 @@
+ use std::path::Path;
+ 
+ use serde::Deserialize;
+-use yamt_gitio::{AuthStatus, FETCH_TIMEOUT, Glab, Oid, Repo};
++use yamt_gitio::{FETCH_TIMEOUT, Glab, Oid, Repo};
+ use yamt_range::{PairLock, RangeSpec, Resolved};
+ 
+ use crate::page::{NO_PROJECT, graphql_data};
+-use crate::project::project;
++use crate::project::logged_in_project;
+ use crate::query::details_args;
+ use crate::remote::remote_for;
+ use crate::{GitLabRepository, MergeRequestIid, OpenReply, RangeToOpen};
+ 
+-const OPENED: &str = "opened";
++pub(crate) const OPENED: &str = "opened";
+ const SHORT_ID_CHARS: usize = 7;
+ const REFSPEC_SEPARATOR: char = ':';
+ 
+@@ -60,12 +60,7 @@ pub fn prepare_open(
+         return Err(OpenReply::GlabMissing);
+     };
+     let root = repository.root();
+-    match glab.auth_status(root) {
+-        AuthStatus::LoggedIn => {}
+-        AuthStatus::LoggedOut { detail } => return Err(OpenReply::NotLoggedIn { detail }),
+-        AuthStatus::Failed { message } => return Err(OpenReply::Failed { message }),
+-    }
+-    let full_path = project(glab, root).map_err(failed)?.full_path;
++    let full_path = logged_in_project(glab, root)?.full_path;
+     let diff = open_diff(glab, root, &full_path, iid)?;
+     fetch_unless_local(repository, &full_path, iid, &diff)?;
+     let spec = format!("{}..{}", diff.base.as_str(), diff.head.as_str());
+@@ -108,6 +103,15 @@ fn commit_id(sent: &str) -> Result<Oid, OpenReply> {
+     Oid::parse(sent).map_err(|_| failed(format!("GitLab sent {sent:?} as a commit id")))
+ }
+ 
++/// A branch name a fetch refspec can carry: one with a colon names a ref to write (git-fetch(1) "<refspec>"), and
++/// git refuses one in a branch name.
++pub(crate) fn require_branch_name(sent: &str) -> Result<(), String> {
++    if sent.contains(REFSPEC_SEPARATOR) {
++        return Err(format!("GitLab sent {sent:?} as a branch name"));
++    }
++    Ok(())
++}
++
+ /// Fetches the merge request's head and its target branch from the project's remote, unless both commits are
+ /// already in the repository.
+ fn fetch_unless_local(
+@@ -125,11 +129,7 @@ fn fetch_unless_local(
+             project: full_path.to_owned(),
+         });
+     };
+-    // A refspec with a colon names a ref to write (git-fetch(1) "<refspec>"); git refuses one in a branch name.
+-    if diff.target_branch.contains(REFSPEC_SEPARATOR) {
+-        let target = &diff.target_branch;
+-        return Err(failed(format!("GitLab sent {target:?} as a branch name")));
+-    }
++    require_branch_name(&diff.target_branch).map_err(failed)?;
+     let head_ref = format!("refs/merge-requests/{}/head", iid.0);
+     let target_ref = format!("refs/heads/{}", diff.target_branch);
+     let refspecs = [head_ref.as_str(), target_ref.as_str()];
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index dfeaf8b..cb2a34a 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -3,7 +3,10 @@ use serde::de::DeserializeOwned;
+ use serde::de::IgnoredAny;
+ 
+ use crate::project::Project;
+-use crate::{CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person, Pipeline, WebPage};
++use crate::{
++    BlockedReason, ChangeSize, CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person,
++    Pipeline, Readiness, WebPage,
++};
+ 
+ const NO_DATA: &str = "GitLab's answer holds no data";
+ pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
+@@ -89,6 +92,19 @@ struct Node {
+     resolvable_discussions_count: Option<i64>,
+     resolved_discussions_count: Option<i64>,
+     head_pipeline: Option<PipelineNode>,
++    detailed_merge_status: Option<String>,
++    conflicts: bool,
++    diff_stats_summary: Option<DiffStats>,
++    source_project_id: Option<i64>,
++    target_project_id: i64,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct DiffStats {
++    additions: i64,
++    deletions: i64,
++    file_count: i64,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -177,6 +193,13 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
+         approvals: count(listed(node.approved_by).len()),
+         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
+         page,
++        size: node.diff_stats_summary.as_ref().map(change_size),
++        readiness: readiness(
++            node.detailed_merge_status.as_deref(),
++            node.conflicts,
++            node.draft,
++        ),
++        from_fork: is_from_fork(node.source_project_id, node.target_project_id),
+     })
+ }
+ 
+@@ -189,13 +212,32 @@ fn open_discussions(resolvable: Option<i64>, resolved: Option<i64>) -> u32 {
+     let open = resolvable
+         .unwrap_or(0)
+         .saturating_sub(resolved.unwrap_or(0));
+-    u32::try_from(open.max(0)).unwrap_or(u32::MAX)
++    saturated(open)
++}
++
++/// GitLab's `Int` as a count: below 0 is 0, above `u32::MAX` is `u32::MAX`.
++fn saturated(sent: i64) -> u32 {
++    u32::try_from(sent.max(0)).unwrap_or(u32::MAX)
+ }
+ 
+ fn count(length: usize) -> u32 {
+     u32::try_from(length).unwrap_or(u32::MAX)
+ }
+ 
++fn change_size(stats: &DiffStats) -> ChangeSize {
++    ChangeSize {
++        additions: saturated(stats.additions),
++        deletions: saturated(stats.deletions),
++        files: saturated(stats.file_count),
++    }
++}
++
++/// Whether a merge request's source branch lives outside its target's project; a deleted source project
++/// (`sourceProjectId` null) counts, as its branch is not in the target's project either.
++pub(crate) fn is_from_fork(source_project_id: Option<i64>, target_project_id: i64) -> bool {
++    source_project_id != Some(target_project_id)
++}
++
+ fn pipeline(found: PipelineNode, origin: Option<&str>) -> Pipeline {
+     let (jobs, more_failed_jobs) = match found.jobs {
+         Some(jobs) => (jobs.nodes, jobs.page_info.has_next_page),
+@@ -244,5 +286,67 @@ fn ci_status(status: &str) -> CiStatus {
+     }
+ }
+ 
++/// The row's one readiness: GitLab's merge status alone, unless the merge request conflicts (its `conflicts` flag
++/// or a `CONFLICT` status). A conflict comes first, with what else blocks the merge (request rule 2, #1998): the
++/// status's blocked reason, then `Draft` for a draft — GitLab never merges one, whatever its status says.
++fn readiness(status: Option<&str>, conflicts: bool, draft: bool) -> Readiness {
++    let folded = status.map_or(Readiness::Checking, merge_status);
++    if !conflicts && !matches!(folded, Readiness::Conflicts { .. }) {
++        return folded;
++    }
++    let mut also = match folded {
++        Readiness::Blocked { reason } => vec![reason],
++        Readiness::Ready
++        | Readiness::Conflicts { .. }
++        | Readiness::NeedsRebase
++        | Readiness::Checking => Vec::new(),
++    };
++    if draft && !also.contains(&BlockedReason::Draft) {
++        also.push(BlockedReason::Draft);
++    }
++    Readiness::Conflicts { also }
++}
++
++/// GitLab's `DetailedMergeStatus` (GraphQL reference) as a readiness; an unknown one blocks, in GitLab's word.
++fn merge_status(status: &str) -> Readiness {
++    match status {
++        "MERGEABLE" => Readiness::Ready,
++        "CONFLICT" => Readiness::Conflicts { also: Vec::new() },
++        "NEED_REBASE" => Readiness::NeedsRebase,
++        "CHECKING" | "UNCHECKED" | "PREPARING" | "APPROVALS_SYNCING" => Readiness::Checking,
++        blocking => Readiness::Blocked {
++            reason: blocked_reason(blocking),
++        },
++    }
++}
++
++fn blocked_reason(status: &str) -> BlockedReason {
++    match status {
++        "DRAFT_STATUS" => BlockedReason::Draft,
++        "DISCUSSIONS_NOT_RESOLVED" => BlockedReason::Discussions,
++        "NOT_APPROVED" => BlockedReason::Approvals,
++        "CI_MUST_PASS" => BlockedReason::PipelineMustPass,
++        "CI_STILL_RUNNING" => BlockedReason::PipelineRunning,
++        "REQUESTED_CHANGES" => BlockedReason::ChangesRequested,
++        "BLOCKED_STATUS" => BlockedReason::Dependencies,
++        "EXTERNAL_STATUS_CHECKS" => BlockedReason::StatusChecks,
++        "JIRA_ASSOCIATION" => BlockedReason::JiraIssue,
++        "LOCKED_LFS_FILES" => BlockedReason::LockedFiles,
++        "LOCKED_PATHS" => BlockedReason::LockedPaths,
++        "MERGE_TIME" => BlockedReason::MergeTime,
++        "NOT_OPEN" => BlockedReason::NotOpen,
++        "COMMITS_STATUS" => BlockedReason::SourceBranch,
++        "SECURITY_POLICIES_VIOLATIONS" => BlockedReason::SecurityPolicies,
++        "SECURITY_POLICY_PIPELINE_CHECK" => BlockedReason::SecurityPipelines,
++        "TITLE_NOT_MATCHING" => BlockedReason::TitleRule,
++        unknown => {
++            tracing::warn!(status = unknown, "unknown merge status, shown as blocked");
++            BlockedReason::Other {
++                status: unknown.to_owned(),
++            }
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests;
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+index 95a3417..2aa7859 100644
+--- a/crates/merge-requests/src/page/tests.rs
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -7,6 +7,8 @@ const FULL_PATH: &str = "taskboard/taskboard";
+ const WEB_PATH: &str = "/taskboard/taskboard";
+ const PAGE_1: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-1.json");
+ const PAGE_2: &[u8] = include_bytes!("../../../../tests/glab/merge-requests/graphql-page-2.json");
++const CONFLICTS_PAGE: &[u8] =
++    include_bytes!("../../../../tests/glab/mr-conflicts/graphql-page-1.json");
+ 
+ fn person(username: &str, name: &str) -> Person {
+     Person {
+@@ -54,6 +56,42 @@ fn snooze_a_reminder() -> MergeRequestRow {
+         page: Some(WebPage(
+             "https://gitlab.example/taskboard/taskboard/-/merge_requests/13".to_owned(),
+         )),
++        size: Some(size(64, 9, 4)),
++        readiness: blocked(BlockedReason::PipelineMustPass),
++        from_fork: false,
++    }
++}
++
++/// A node with GitLab's non-null fields, then `fields` over them.
++fn node_with(fields: &Value) -> Value {
++    let mut node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
++        "conflicts": false, "sourceProjectId": 1, "targetProjectId": 1 });
++    for (name, value) in fields.as_object().unwrap() {
++        node[name] = value.clone();
++    }
++    node
++}
++
++fn row_with(fields: &Value) -> MergeRequestRow {
++    let page = last_page_of(&json!([node_with(fields)])).unwrap();
++    page.rows.into_iter().next().unwrap()
++}
++
++fn conflicts(also: &[BlockedReason]) -> Readiness {
++    Readiness::Conflicts {
++        also: also.to_vec(),
++    }
++}
++
++fn blocked(reason: BlockedReason) -> Readiness {
++    Readiness::Blocked { reason }
++}
++
++fn size(additions: u32, deletions: u32, files: u32) -> ChangeSize {
++    ChangeSize {
++        additions,
++        deletions,
++        files,
+     }
+ }
+ 
+@@ -79,7 +117,7 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
+     assert_eq!(page.me.as_deref(), Some("sam"));
+     assert_eq!(page.next.as_deref(), Some("page-2"));
+     let complexity = Complexity {
+-        score: 112,
++        score: 119,
+         limit: 250,
+     };
+     assert_eq!(page.complexity, Some(complexity));
+@@ -92,6 +130,9 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
+     let draft = &page.rows[2];
+     assert!(draft.draft);
+     assert_eq!(draft.title, "Draft: Move reminders to the settings page");
++    let readiness: Vec<&Readiness> = page.rows.iter().map(|row| &row.readiness).collect();
++    let conflicting_draft = conflicts(&[BlockedReason::Draft]);
++    assert_eq!(readiness[1..], [&Readiness::Ready, &conflicting_draft]);
+ }
+ 
+ #[test]
+@@ -102,6 +143,13 @@ fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
+     assert_eq!(page.rows[0].pipeline, None);
+     assert_eq!(status_of(&page.rows[1]), Some(CiStatus::Manual));
+     assert_eq!(page.rows[1].approvals, 1);
++    assert_eq!(page.rows[0].readiness, Readiness::NeedsRebase);
++    assert_eq!(page.rows[0].size, None);
++    assert_eq!(page.rows[1].readiness, Readiness::Checking);
++    assert_eq!(
++        (page.rows[0].from_fork, page.rows[1].from_fork),
++        (false, true)
++    );
+ }
+ 
+ #[test]
+@@ -132,12 +180,12 @@ fn on_a_gitlab_under_a_sub_path_a_row_s_page_keeps_the_sub_path() {
+ 
+ #[test]
+ fn null_fields_are_empty_or_zero_and_more_failed_jobs_than_asked_are_flagged() {
+-    let node = json!({ "iid": "4", "title": "t", "createdAt": "2026-01-01T00:00:00Z", "draft": false,
+-        "labels": null, "assignees": null, "reviewers": null, "approvedBy": null,
++    let node = node_with(
++        &json!({ "labels": null, "assignees": null, "reviewers": null, "approvedBy": null,
+         "resolvableDiscussionsCount": null, "resolvedDiscussionsCount": null,
+         "headPipeline": { "status": "CANCELING", "jobs": { "pageInfo": { "hasNextPage": true },
+-            "nodes": [{ "name": "e2e", "allowFailure": false, "webPath": "/a/-/jobs/x", "stage": null }] } } });
+-
++            "nodes": [{ "name": "e2e", "allowFailure": false, "webPath": "/a/-/jobs/x", "stage": null }] } } }),
++    );
+     let page = last_page_of(&json!([node])).unwrap();
+ 
+     let row = &page.rows[0];
+@@ -206,7 +254,7 @@ fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
+     let no_cursor = json!({ "hasNextPage": true, "endCursor": null });
+     let no_project = json!({ "data": { "project": null } }).to_string();
+     let no_merge_requests = json!({ "data": { "project": { "mergeRequests": null } } }).to_string();
+-    let bad_iid = json!([{ "iid": "!4", "title": "t", "createdAt": "x", "draft": false }]);
++    let bad_iid = json!([node_with(&json!({ "iid": "!4" }))]);
+     let error = |answer: &[u8]| parsed(answer, &taskboard(Some(ORIGIN))).err();
+ 
+     assert_eq!(error(b"{}").as_deref(), Some(NO_DATA));
+@@ -220,3 +268,122 @@ fn an_answer_without_data_project_cursor_or_number_is_an_error_not_a_page() {
+     assert_eq!(bad.as_deref(), Some(expected));
+     assert!(error(b"<html>").is_some());
+ }
++
++/// GitLab's 24 `DetailedMergeStatus` values and what each folds to.
++fn merge_status_table() -> [(&'static str, Readiness); 24] {
++    use BlockedReason::{
++        Approvals, ChangesRequested, Dependencies, Discussions, Draft, JiraIssue, LockedFiles,
++        LockedPaths, MergeTime, NotOpen, PipelineMustPass, PipelineRunning, SecurityPipelines,
++        SecurityPolicies, SourceBranch, StatusChecks, TitleRule,
++    };
++    [
++        ("MERGEABLE", Readiness::Ready),
++        ("CONFLICT", conflicts(&[])),
++        ("NEED_REBASE", Readiness::NeedsRebase),
++        ("CHECKING", Readiness::Checking),
++        ("UNCHECKED", Readiness::Checking),
++        ("PREPARING", Readiness::Checking),
++        ("APPROVALS_SYNCING", Readiness::Checking),
++        ("DRAFT_STATUS", blocked(Draft)),
++        ("DISCUSSIONS_NOT_RESOLVED", blocked(Discussions)),
++        ("NOT_APPROVED", blocked(Approvals)),
++        ("CI_MUST_PASS", blocked(PipelineMustPass)),
++        ("CI_STILL_RUNNING", blocked(PipelineRunning)),
++        ("REQUESTED_CHANGES", blocked(ChangesRequested)),
++        ("BLOCKED_STATUS", blocked(Dependencies)),
++        ("EXTERNAL_STATUS_CHECKS", blocked(StatusChecks)),
++        ("JIRA_ASSOCIATION", blocked(JiraIssue)),
++        ("LOCKED_LFS_FILES", blocked(LockedFiles)),
++        ("LOCKED_PATHS", blocked(LockedPaths)),
++        ("MERGE_TIME", blocked(MergeTime)),
++        ("NOT_OPEN", blocked(NotOpen)),
++        ("COMMITS_STATUS", blocked(SourceBranch)),
++        ("SECURITY_POLICIES_VIOLATIONS", blocked(SecurityPolicies)),
++        ("SECURITY_POLICY_PIPELINE_CHECK", blocked(SecurityPipelines)),
++        ("TITLE_NOT_MATCHING", blocked(TitleRule)),
++    ]
++}
++
++fn unknown_status() -> BlockedReason {
++    BlockedReason::Other {
++        status: "MERGE_TRAIN_STUCK".to_owned(),
++    }
++}
++
++#[test]
++fn every_gitlab_merge_status_folds_as_the_table_null_is_checking_and_an_unknown_one_blocks() {
++    for (gitlab, folded) in merge_status_table() {
++        assert_eq!(readiness(Some(gitlab), false, false), folded, "{gitlab}");
++    }
++    let unknown = readiness(Some("MERGE_TRAIN_STUCK"), false, false);
++    assert_eq!(unknown, blocked(unknown_status()));
++    let missing = row_with(&json!({ "detailedMergeStatus": null }));
++    assert_eq!(missing.readiness, Readiness::Checking);
++}
++
++#[test]
++fn a_conflict_flag_or_status_comes_first_with_the_status_s_blocker_then_a_draft() {
++    use BlockedReason::{Discussions, Draft, PipelineMustPass};
++    let cases: [(Option<&str>, bool, &[BlockedReason]); 9] = [
++        (Some("DRAFT_STATUS"), true, &[Draft]),
++        (Some("CI_MUST_PASS"), true, &[PipelineMustPass, Draft]),
++        (Some("DISCUSSIONS_NOT_RESOLVED"), false, &[Discussions]),
++        (Some("MERGEABLE"), false, &[]),
++        (Some("MERGEABLE"), true, &[Draft]),
++        (Some("CHECKING"), false, &[]),
++        (Some("NEED_REBASE"), false, &[]),
++        (None, false, &[]),
++        (Some("MERGE_TRAIN_STUCK"), false, &[unknown_status()]),
++    ];
++    for (status, draft, also) in cases {
++        let folded = readiness(status, true, draft);
++        assert_eq!(folded, conflicts(also), "{status:?}");
++    }
++    assert_eq!(readiness(Some("CONFLICT"), false, false), conflicts(&[]));
++    assert_eq!(
++        readiness(Some("CONFLICT"), false, true),
++        conflicts(&[Draft])
++    );
++    assert_eq!(readiness(Some("DRAFT_STATUS"), false, true), blocked(Draft));
++}
++
++#[test]
++fn counts_saturate_a_null_summary_is_no_size_and_another_or_no_source_project_is_a_fork() {
++    let summary = json!({ "additions": -3, "deletions": 7, "fileCount": 5_000_000_000_i64 });
++    let counted = row_with(&json!({ "diffStatsSummary": summary }));
++    assert_eq!(counted.size, Some(size(0, 7, u32::MAX)));
++    assert_eq!(row_with(&json!({ "diffStatsSummary": null })).size, None);
++    assert!(!counted.from_fork);
++    assert!(row_with(&json!({ "sourceProjectId": 2, "targetProjectId": 1 })).from_fork);
++    assert!(row_with(&json!({ "sourceProjectId": null })).from_fork);
++}
++
++#[test]
++fn the_mr_conflicts_scenario_s_page_folds_as_its_readme_says() {
++    use BlockedReason::{Draft, PipelineMustPass};
++    let page = parsed(CONFLICTS_PAGE, &taskboard(Some(ORIGIN))).unwrap();
++
++    let rows: Vec<(u32, Readiness, bool)> = page
++        .rows
++        .iter()
++        .map(|row| (row.iid.0, row.readiness.clone(), row.from_fork))
++        .collect();
++
++    let expected = [
++        (32, conflicts(&[PipelineMustPass, Draft]), false),
++        (31, conflicts(&[Draft]), false),
++        (29, conflicts(&[]), false),
++        (28, blocked(unknown_status()), false),
++        (27, Readiness::Ready, false),
++        (26, Readiness::Checking, false),
++        (25, blocked(Draft), false),
++        (24, Readiness::NeedsRebase, false),
++        (23, conflicts(&[]), false),
++        (22, conflicts(&[]), true),
++        (21, conflicts(&[]), false),
++    ];
++    assert_eq!(rows, expected);
++    assert_eq!((page.me.as_deref(), page.next), (Some("sam"), None));
++    assert_eq!(page.rows[4].size, None);
++    assert_eq!(page.rows[10].size, Some(size(120, 40, 6)));
++}
+diff --git a/crates/merge-requests/src/project.rs b/crates/merge-requests/src/project.rs
+index b6a3b7a..06c3533 100644
+--- a/crates/merge-requests/src/project.rs
++++ b/crates/merge-requests/src/project.rs
+@@ -1,9 +1,10 @@
+ use std::path::Path;
+ 
+ use serde::Deserialize;
+-use yamt_gitio::Glab;
++use yamt_gitio::{AuthStatus, Glab};
+ 
+ use crate::web_page::HTTPS;
++use crate::{ListEnd, OpenReply, ResolveRefusal};
+ 
+ /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
+ const PROJECT_ROUTE: &str = "projects/:fullpath";
+@@ -24,9 +25,23 @@ struct ProjectAnswer {
+     web_url: String,
+ }
+ 
+-pub(crate) fn project(glab: &Glab, root: &Path) -> Result<Project, String> {
+-    let json = glab.get(root, &["api", PROJECT_ROUTE])?;
+-    project_from(&json)
++/// Why glab named no project: logged out, or a call failed.
++pub(crate) enum NoProject {
++    NotLoggedIn { detail: String },
++    Failed { message: String },
++}
++
++/// The project of the repository's remotes, asked once `glab auth status` says glab is logged in.
++pub(crate) fn logged_in_project(glab: &Glab, root: &Path) -> Result<Project, NoProject> {
++    match glab.auth_status(root) {
++        AuthStatus::LoggedIn => {}
++        AuthStatus::LoggedOut { detail } => return Err(NoProject::NotLoggedIn { detail }),
++        AuthStatus::Failed { message } => return Err(NoProject::Failed { message }),
++    }
++    let json = glab
++        .get(root, &["api", PROJECT_ROUTE])
++        .map_err(|message| NoProject::Failed { message })?;
++    project_from(&json).map_err(|message| NoProject::Failed { message })
+ }
+ 
+ fn project_from(json: &[u8]) -> Result<Project, String> {
+@@ -51,6 +66,33 @@ fn web_origin(web_url: &str) -> Option<String> {
+     Some(format!("{HTTPS}{authority}"))
+ }
+ 
++impl From<NoProject> for ListEnd {
++    fn from(refused: NoProject) -> ListEnd {
++        match refused {
++            NoProject::NotLoggedIn { detail } => ListEnd::NotLoggedIn { detail },
++            NoProject::Failed { message } => ListEnd::Failed { message },
++        }
++    }
++}
++
++impl From<NoProject> for OpenReply {
++    fn from(refused: NoProject) -> OpenReply {
++        match refused {
++            NoProject::NotLoggedIn { detail } => OpenReply::NotLoggedIn { detail },
++            NoProject::Failed { message } => OpenReply::Failed { message },
++        }
++    }
++}
++
++impl From<NoProject> for ResolveRefusal {
++    fn from(refused: NoProject) -> ResolveRefusal {
++        match refused {
++            NoProject::NotLoggedIn { detail } => ResolveRefusal::NotLoggedIn { detail },
++            NoProject::Failed { message } => ResolveRefusal::Failed { message },
++        }
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+index 535a8fd..c78ec5f 100644
+--- a/crates/merge-requests/src/query.rs
++++ b/crates/merge-requests/src/query.rs
+@@ -6,9 +6,16 @@ const DETAILS_QUERY: &str = "query MergeRequestDetails($fullPath: ID!, $iid: Str
+      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
+      state targetBranch diffRefs { baseSha headSha } } } }";
+ 
++/// What resolving a merge request's conflicts needs, asked afresh on each click: its state, its two branches and
++/// whether the source branch lives in the target's project.
++const BRANCHES_QUERY: &str = "query MergeRequestBranches($fullPath: ID!, $iid: String!) { \
++     project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
++     state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
++
+ /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
+-/// jobs (the latest run of each); about 112 of GitLab's complexity limit of 250 (`.omp/run/notes/MrOverviewDesign.md`
+-/// §2.2). One line, so the fake glab logs each call on one line.
++/// jobs (the latest run of each), its merge status and size; about 119 of GitLab's complexity limit of 250
++/// (`.omp/run/notes/MrOverviewDesign.md` §2.2, `docs/slices/briefs/mr-conflicts-design.md` §1). One line, so the
++/// fake glab logs each call on one line.
+ fn list_query() -> String {
+     format!(
+         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
+@@ -24,6 +31,8 @@ fn list_query() -> String {
+          reviewers {{ nodes {{ username name }} }} \
+          approvedBy {{ nodes {{ username }} }} \
+          resolvableDiscussionsCount resolvedDiscussionsCount \
++         detailedMergeStatus conflicts diffStatsSummary {{ additions deletions fileCount }} \
++         sourceProjectId targetProjectId \
+          headPipeline {{ status \
+          jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
+          pageInfo {{ hasNextPage }} nodes {{ name allowFailure webPath stage {{ name }} }} }} }} \
+@@ -52,11 +61,20 @@ pub(crate) fn list_args(full_path: &str, after: Option<&str>) -> Vec<String> {
+ 
+ /// `glab api graphql` for merge request `iid`'s details.
+ pub(crate) fn details_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
++    merge_request_args(DETAILS_QUERY, full_path, iid)
++}
++
++/// `glab api graphql` for merge request `iid`'s branches.
++pub(crate) fn branches_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
++    merge_request_args(BRANCHES_QUERY, full_path, iid)
++}
++
++fn merge_request_args(query: &str, full_path: &str, iid: MergeRequestIid) -> Vec<String> {
+     vec![
+         "api".to_owned(),
+         "graphql".to_owned(),
+         "-f".to_owned(),
+-        format!("query={DETAILS_QUERY}"),
++        format!("query={query}"),
+         "-f".to_owned(),
+         format!("fullPath={full_path}"),
+         "-f".to_owned(),
+@@ -69,11 +87,14 @@ mod tests {
+     use super::*;
+ 
+     #[test]
+-    fn the_query_is_one_line_with_balanced_braces_and_the_failed_job_limit() {
++    fn the_query_is_one_line_with_balanced_braces_the_failed_job_limit_and_the_merge_fields() {
+         let query = list_query();
+         assert!(!query.contains('\n'), "{query}");
+         assert_eq!(query.matches('{').count(), query.matches('}').count());
+         assert!(query.contains("first: 50)"), "{query}");
++        let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
++             diffStatsSummary { additions deletions fileCount } sourceProjectId targetProjectId headPipeline";
++        assert!(query.contains(merge_fields), "{query}");
+     }
+ 
+     #[test]
+@@ -86,5 +107,30 @@ mod tests {
+             args[4..],
+             ["-f", "fullPath=taskboard/taskboard", "-f", "iid=13"]
+         );
++        assert!(args[3].starts_with("query=query MergeRequestDetails("));
++    }
++
++    #[test]
++    fn the_branches_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
++        assert!(!BRANCHES_QUERY.contains('\n'), "{BRANCHES_QUERY}");
++        let braces = BRANCHES_QUERY.matches('{').count();
++        assert_eq!(braces, BRANCHES_QUERY.matches('}').count());
++        let query = "query=query MergeRequestBranches($fullPath: ID!, $iid: String!) { \
++             project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
++             state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
++
++        let args = branches_args("taskboard/taskboard", MergeRequestIid(21));
++
++        let expected = [
++            "api",
++            "graphql",
++            "-f",
++            query,
++            "-f",
++            "fullPath=taskboard/taskboard",
++            "-f",
++            "iid=21",
++        ];
++        assert_eq!(args, expected);
+     }
+ }
+diff --git a/crates/merge-requests/src/resolve.rs b/crates/merge-requests/src/resolve.rs
+new file mode 100644
+index 0000000..9b92312
+--- /dev/null
++++ b/crates/merge-requests/src/resolve.rs
+@@ -0,0 +1,84 @@
++use std::path::Path;
++
++use serde::Deserialize;
++use yamt_gitio::Glab;
++
++use crate::open::{OPENED, require_branch_name};
++use crate::page::{NO_PROJECT, graphql_data, is_from_fork};
++use crate::project::logged_in_project;
++use crate::query::branches_args;
++use crate::remote::remote_for;
++use crate::{GitLabRepository, MergeRequestIid, ResolveRefusal, ResolveTarget};
++
++#[derive(Deserialize)]
++struct BranchesData {
++    project: Option<BranchesProject>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct BranchesProject {
++    merge_request: Option<Branches>,
++}
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct Branches {
++    state: String,
++    source_branch: String,
++    target_branch: String,
++    source_project_id: Option<i64>,
++    target_project_id: i64,
++}
++
++/// What resolving merge request `iid`'s conflicts in this repository needs: its two branches, asked afresh, and
++/// the remote naming its project; `Err` is the answer the window shows instead. Nothing is fetched or written.
++pub fn prepare_resolve(
++    repository: &GitLabRepository,
++    glab: Option<&Glab>,
++    iid: MergeRequestIid,
++) -> Result<ResolveTarget, ResolveRefusal> {
++    let Some(glab) = glab else {
++        return Err(ResolveRefusal::GlabMissing);
++    };
++    let root = repository.root();
++    let full_path = logged_in_project(glab, root)?.full_path;
++    let branches = branches(glab, root, &full_path, iid)?;
++    if branches.state != OPENED {
++        return Err(ResolveRefusal::NotOpen);
++    }
++    if is_from_fork(branches.source_project_id, branches.target_project_id) {
++        return Err(ResolveRefusal::FromFork);
++    }
++    require_branch_name(&branches.source_branch).map_err(failed)?;
++    require_branch_name(&branches.target_branch).map_err(failed)?;
++    let Some(remote) = remote_for(repository.gitlab_remotes(), &full_path) else {
++        return Err(ResolveRefusal::NoRemote { project: full_path });
++    };
++    Ok(ResolveTarget {
++        root: root.to_owned(),
++        iid,
++        remote: remote.name.clone(),
++        branch: branches.source_branch,
++        target: branches.target_branch,
++    })
++}
++
++/// The merge request's branches as GitLab has them now; no such merge request is `NotOpen`.
++fn branches(
++    glab: &Glab,
++    root: &Path,
++    full_path: &str,
++    iid: MergeRequestIid,
++) -> Result<Branches, ResolveRefusal> {
++    let args = branches_args(full_path, iid);
++    let args: Vec<&str> = args.iter().map(String::as_str).collect();
++    let json = glab.get(root, &args).map_err(failed)?;
++    let data: BranchesData = graphql_data(&json).map_err(failed)?;
++    let project = data.project.ok_or_else(|| failed(NO_PROJECT.to_owned()))?;
++    project.merge_request.ok_or(ResolveRefusal::NotOpen)
++}
++
++fn failed(message: String) -> ResolveRefusal {
++    ResolveRefusal::Failed { message }
++}
+diff --git a/crates/merge-requests/tests/resolve.rs b/crates/merge-requests/tests/resolve.rs
+new file mode 100644
+index 0000000..f14e209
+--- /dev/null
++++ b/crates/merge-requests/tests/resolve.rs
+@@ -0,0 +1,139 @@
++#![cfg(test)]
++#![cfg(unix)]
++
++mod fake_glab;
++
++use std::fs;
++use std::path::PathBuf;
++use std::process::Command;
++
++use yamt_conflict_repo::{TempDir, git_ok};
++use yamt_merge_requests::{
++    GitLabRepository, MergeRequestIid, ResolveRefusal, ResolveTarget, gitlab_repository,
++    prepare_resolve,
++};
++
++use fake_glab::{Fake, in_this_repository};
++
++const BRANCHES_START: &str = "argv: api graphql -f query=query MergeRequestBranches(";
++
++/// `scripts/range-repo.sh`'s repository, whose `origin` is the project `taskboard/taskboard`, with the fake glab on
++/// the `mr-conflicts/` scenario.
++struct Setup {
++    repo: TempDir,
++    fake: Fake,
++}
++
++impl Setup {
++    fn new() -> Setup {
++        let repo = tempfile::tempdir().unwrap();
++        let built = Command::new(in_this_repository("scripts/range-repo.sh"))
++            .arg(repo.path().join("rr"))
++            .output()
++            .unwrap();
++        assert!(built.status.success(), "{built:?}");
++        Setup {
++            repo,
++            fake: Fake::new("mr-conflicts"),
++        }
++    }
++
++    fn root(&self) -> PathBuf {
++        self.repo.path().join("rr")
++    }
++
++    fn repository(&self) -> GitLabRepository {
++        gitlab_repository(&self.root()).unwrap()
++    }
++
++    fn resolve(&self, iid: u32) -> Result<ResolveTarget, ResolveRefusal> {
++        prepare_resolve(
++            &self.repository(),
++            Some(&self.fake.glab),
++            MergeRequestIid(iid),
++        )
++    }
++
++    /// What asking must leave as it was: every ref, the status and HEAD.
++    fn untouched(&self) -> Vec<u8> {
++        let mut seen = git_ok(&self.root(), &["for-each-ref"]).unwrap();
++        seen.extend(git_ok(&self.root(), &["status", "--porcelain=v1"]).unwrap());
++        seen.extend(git_ok(&self.root(), &["rev-parse", "HEAD"]).unwrap());
++        seen
++    }
++}
++
++#[test]
++fn an_open_merge_request_names_its_branches_and_the_project_s_remote_and_changes_nothing() {
++    let setup = Setup::new();
++    let before = setup.untouched();
++
++    let target = setup.resolve(21).unwrap();
++
++    assert_eq!(
++        fs::canonicalize(&target.root).unwrap(),
++        fs::canonicalize(setup.root()).unwrap()
++    );
++    let expected = ResolveTarget {
++        root: target.root.clone(),
++        iid: MergeRequestIid(21),
++        remote: "origin".to_owned(),
++        branch: "feature/due-dates".to_owned(),
++        target: "main".to_owned(),
++    };
++    assert_eq!(target, expected);
++    assert_eq!(setup.untouched(), before);
++    let asked = setup.fake.logged(BRANCHES_START);
++    assert_eq!(asked.len(), 1, "{asked:?}");
++    assert!(
++        asked[0].ends_with(" -f fullPath=taskboard/taskboard -f iid=21"),
++        "{asked:?}"
++    );
++}
++
++#[test]
++fn a_fork_s_merge_request_and_one_no_longer_open_are_refused() {
++    let setup = Setup::new();
++
++    assert_eq!(setup.resolve(22), Err(ResolveRefusal::FromFork));
++    assert_eq!(setup.resolve(30), Err(ResolveRefusal::NotOpen));
++}
++
++#[test]
++fn without_a_remote_of_the_project_there_is_nothing_to_resolve_in() {
++    let setup = Setup::new();
++    let other = "https://gitlab.example/other/project.git";
++    git_ok(&setup.root(), &["remote", "set-url", "origin", other]).unwrap();
++
++    let refused = setup.resolve(21);
++
++    let project = "taskboard/taskboard".to_owned();
++    assert_eq!(refused, Err(ResolveRefusal::NoRemote { project }));
++}
++
++#[test]
++fn a_branch_name_naming_a_ref_to_write_is_refused() {
++    let setup = Setup::new();
++
++    let refused = setup.resolve(33);
++
++    let message = r#"GitLab sent "feature/x:refs/heads/main" as a branch name"#.to_owned();
++    assert_eq!(refused, Err(ResolveRefusal::Failed { message }));
++}
++
++#[test]
++fn glab_missing_or_logged_out_is_answered_before_gitlab_is_asked() {
++    let setup = Setup::new();
++    let repository = setup.repository();
++    let logged_out = Fake::new("logged-out");
++
++    let missing = prepare_resolve(&repository, None, MergeRequestIid(21));
++    let refused = prepare_resolve(&repository, Some(&logged_out.glab), MergeRequestIid(21));
++
++    assert_eq!(missing, Err(ResolveRefusal::GlabMissing));
++    assert!(
++        matches!(refused, Err(ResolveRefusal::NotLoggedIn { .. })),
++        "{refused:?}"
++    );
++    assert_eq!(logged_out.logged("argv: "), ["argv: auth status"]);
++}
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.test.ts b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+new file mode 100644
+index 0000000..b664414
+--- /dev/null
++++ b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+@@ -0,0 +1,46 @@
++import { expect, test } from "vitest";
++
++import type * as Generated from "./bindings";
++import { fixtureRows } from "./fixtureMergeRequestData";
++
++const LISTED = 40;
++
++function rowOf(rows: readonly Generated.MergeRequestRow[], iid: number): Generated.MergeRequestRow {
++  const found = rows.find((row) => row.iid === iid);
++  if (found === undefined) {
++    throw new Error(`no fixture row !${iid}`);
++  }
++  return found;
++}
++
++test("the readiness cycle puts a conflict first, a fork's conflict second and a draft's blocker last (catches a page script finding no conflicting row)", () => {
++  const rows = fixtureRows(0, LISTED);
++  expect(rowOf(rows, 640).readiness).toEqual({ kind: "conflicts", also: [] });
++  expect(rowOf(rows, 639).readiness).toEqual({ kind: "conflicts", also: [] });
++  expect(rowOf(rows, 636).readiness).toEqual({
++    kind: "conflicts",
++    also: [{ kind: "discussions" }],
++  });
++  expect(rowOf(rows, 634).readiness).toEqual({ kind: "blocked", reason: { kind: "draft" } });
++  expect(rowOf(rows, 620).readiness).toEqual({
++    kind: "conflicts",
++    also: [{ kind: "discussions" }, { kind: "draft" }],
++  });
++  expect(rowOf(rows, 633).readiness).toEqual({
++    kind: "blocked",
++    reason: { kind: "other", status: "MERGE_TRAIN_STUCK" },
++  });
++  expect(rows.filter((row) => row.fromFork).map((row) => row.iid)).toEqual([
++    639, 631, 623, 615, 607,
++  ]);
++});
++
++test("every fifth row has no size and the others grow with the row (catches a size cycle off by one)", () => {
++  const rows = fixtureRows(0, LISTED);
++  expect(rowOf(rows, 636).size).toBeNull();
++  expect(rowOf(rows, 640).size).toEqual({ additions: 12, deletions: 0, files: 1 });
++  expect(rowOf(rows, 633).size).toEqual({ additions: 96, deletions: 15, files: 2 });
++  expect(rows.filter((row) => row.size === null).map((row) => row.iid)).toEqual([
++    636, 631, 626, 621, 616, 611, 606, 601,
++  ]);
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index 70f0362..c6ec51c 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -22,6 +22,12 @@ const BUG_EVERY = 3;
+ const FIRST_JOB = 9000;
+ const JOBS_PER_ROW = 10;
+ const MORE_JOBS_AT = 8;
++const FORK_AT = 1;
++const NO_SIZE_EVERY = 5;
++const ADDED_PER_ROW = 12;
++const REMOVED_STEP = 5;
++const REMOVED_CYCLE = 4;
++const FILES_CYCLE = 6;
+ 
+ const TITLES = [
+   "Snooze a reminder",
+@@ -68,6 +74,17 @@ export const OPEN_REPLIES: Readonly<Record<number, Generated.OpenReply>> = {
+   [PREPARING_IID]: { kind: "preparing" },
+ };
+ 
++const READINESS: readonly Generated.Readiness[] = [
++  { kind: "conflicts", also: [] },
++  { kind: "conflicts", also: [] },
++  { kind: "ready" },
++  { kind: "needsRebase" },
++  { kind: "conflicts", also: [{ kind: "discussions" }] },
++  { kind: "checking" },
++  { kind: "blocked", reason: { kind: "pipelineMustPass" } },
++  { kind: "blocked", reason: { kind: "other", status: "MERGE_TRAIN_STUCK" } },
++];
++
+ function cycled<T>(values: readonly T[], index: number): T {
+   const value = values[index % values.length];
+   if (value === undefined) {
+@@ -111,6 +128,28 @@ function labels(index: number): string[] {
+   return index % BUG_EVERY === 0 ? [label, "bug"] : [label];
+ }
+ 
++function readiness(index: number, draft: boolean): Generated.Readiness {
++  const cycle = cycled(READINESS, index);
++  if (!draft) {
++    return cycle;
++  }
++  if (cycle.kind === "conflicts") {
++    return { kind: "conflicts", also: [...cycle.also, { kind: "draft" }] };
++  }
++  return { kind: "blocked", reason: { kind: "draft" } };
++}
++
++function size(index: number): Generated.ChangeSize | null {
++  if (index % NO_SIZE_EVERY === NO_SIZE_EVERY - 1) {
++    return null;
++  }
++  return {
++    additions: ADDED_PER_ROW * (index + 1),
++    deletions: REMOVED_STEP * (index % REMOVED_CYCLE),
++    files: (index % FILES_CYCLE) + 1,
++  };
++}
++
+ function row(index: number): Generated.MergeRequestRow {
+   const title = cycled(TITLES, index);
+   const draft = index % DRAFT_EVERY === DRAFT_EVERY - 1;
+@@ -127,6 +166,9 @@ function row(index: number): Generated.MergeRequestRow {
+     approvals: index % NO_ASSIGNEE_EVERY,
+     pipeline: pipeline(index),
+     page: `${ORIGIN}/-/merge_requests/${iid}`,
++    size: size(index),
++    readiness: readiness(index, draft),
++    fromFork: index % READINESS.length === FORK_AT,
+   };
+ }
+ 
+diff --git a/frontend/src/ipc/mergeRequestDomain.test.ts b/frontend/src/ipc/mergeRequestDomain.test.ts
+index f96ac68..b5520c4 100644
+--- a/frontend/src/ipc/mergeRequestDomain.test.ts
++++ b/frontend/src/ipc/mergeRequestDomain.test.ts
+@@ -28,6 +28,9 @@ const ROW: Generated.MergeRequestRow = {
+     moreFailedJobs: true,
+   },
+   page: "https://gitlab.example/taskboard/taskboard/-/merge_requests/13",
++  size: { additions: 120, deletions: 40, files: 6 },
++  readiness: { kind: "conflicts", also: [{ kind: "pipelineMustPass" }, { kind: "draft" }] },
++  fromFork: true,
+ };
+ 
+ function page(row: Partial<Generated.MergeRequestRow>): Generated.MergeRequestPage {
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index a4cbed5..98783f5 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -35,6 +35,9 @@ const ROW: Generated.MergeRequestRow = {
+   approvals: 2,
+   pipeline: null,
+   page: null,
++  size: null,
++  readiness: { kind: "blocked", reason: { kind: "other", status: "MERGE_TRAIN_STUCK" } },
++  fromFork: false,
+ };
+ 
+ const STOPPED = { kind: "WorkerStopped" };
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 0d71255..a4ec5b8 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -80,9 +80,10 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+   2 s before it is accepted, so a second send can arrive while it runs.
+ - `merge-requests/` — the merge-request list and opening one (`crates/merge-requests/tests/{list,open}.rs`,
+   `src-tauri/src/merge_requests/tests.rs`): logged in; project `taskboard/taskboard` on `https://gitlab.example`;
+-  user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail), !12 (passed, 2 approvals, 1 open
+-  discussion), !11 (a draft, "Draft: …", running), more to come (`page-2`); page 2: !9 (no pipeline), !8 (manual),
+-  the last. Details over GraphQL, all from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into
++  user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail; `CI_MUST_PASS`), !12 (passed, 2
++  approvals, 1 open discussion; `MERGEABLE`), !11 (a draft, "Draft: …", running; `DRAFT_STATUS` and conflicts), more
++  to come (`page-2`); page 2: !9 (no pipeline; `NEED_REBASE`, no diff stats), !8 (manual; no merge status, from a
++  fork), the last. Details over GraphQL, all from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into
+   `main`: !12 ends at `feature` (`9c1ba3f`), !13 at `6ea97d8` ("Snooze a reminder", only in range-repo's fake
+   GitLab), !14 has no diff yet (`diffRefs` null), !15 is merged, !16 starts from `deadbee`, a commit no repository
+   has, !17 is !13's diff into a branch named `main:refs/heads/x`, which a fetch refspec would read as a ref to write.
+@@ -90,6 +91,16 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+   `merge-request-12.json` and `merge-request-13.json` hold their diffs.
+ - `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's
+   deadline.
++- `mr-conflicts/` — merge readiness on the list and the branches resolving a merge request's conflicts needs
++  (`crates/merge-requests/{src/page/tests.rs,tests/resolve.rs}`, the merge-request conflicts app tests): logged in;
++  `merge-requests/`'s project; user `sam`; one page, the last: !32 (a draft, `CI_MUST_PASS`, conflicts), !31 (a draft,
++  `DRAFT_STATUS`, conflicts), !29 (`CONFLICT`, stale: `feature/merged` already contains `main`), !28 (the unknown
++  `MERGE_TRAIN_STUCK`), !27 (`MERGEABLE`, no diff stats), !26 (`UNCHECKED`), !25 (a draft, `DRAFT_STATUS`), !24
++  (`NEED_REBASE`), !23 (`CONFLICT`, stale: `feature/clean` merges clean), !22 (`CONFLICT`, from a fork: source project
++  2, target 1), !21 (`CONFLICT`, `feature/due-dates` conflicts with `main`). The branches query over GraphQL, the
++  branch names of `scripts/mr-conflict-repo.sh`, all into `main`: !21 `feature/due-dates`, !22 `feature/colours` from
++  the fork, !23 `feature/clean`, !29 `feature/merged`, !30 merged, !33 `feature/x:refs/heads/main`, which a fetch
++  refspec would read as a ref to write.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/merge-requests-timeout/graphql-page-1.json b/tests/glab/merge-requests-timeout/graphql-page-1.json
+index db3d068..5738ae5 100644
+--- a/tests/glab/merge-requests-timeout/graphql-page-1.json
++++ b/tests/glab/merge-requests-timeout/graphql-page-1.json
+@@ -1,6 +1,6 @@
+ {
+   "data": {
+-    "queryComplexity": { "score": 112, "limit": 250 },
++    "queryComplexity": { "score": 119, "limit": 250 },
+     "currentUser": { "username": "sam" },
+     "project": {
+       "mergeRequests": {
+@@ -17,6 +17,11 @@
+             "approvedBy": { "nodes": [] },
+             "resolvableDiscussionsCount": 0,
+             "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "CI_MUST_PASS",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 64, "deletions": 9, "fileCount": 4 },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "FAILED",
+               "jobs": {
+@@ -54,6 +59,11 @@
+             "approvedBy": { "nodes": [{ "username": "sam" }, { "username": "lee" }] },
+             "resolvableDiscussionsCount": 3,
+             "resolvedDiscussionsCount": 2,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 30, "deletions": 2, "fileCount": 2 },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "SUCCESS",
+               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+@@ -70,6 +80,11 @@
+             "approvedBy": { "nodes": [] },
+             "resolvableDiscussionsCount": 1,
+             "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DRAFT_STATUS",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "RUNNING",
+               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+diff --git a/tests/glab/merge-requests/graphql-page-1.json b/tests/glab/merge-requests/graphql-page-1.json
+index db3d068..5738ae5 100644
+--- a/tests/glab/merge-requests/graphql-page-1.json
++++ b/tests/glab/merge-requests/graphql-page-1.json
+@@ -1,6 +1,6 @@
+ {
+   "data": {
+-    "queryComplexity": { "score": 112, "limit": 250 },
++    "queryComplexity": { "score": 119, "limit": 250 },
+     "currentUser": { "username": "sam" },
+     "project": {
+       "mergeRequests": {
+@@ -17,6 +17,11 @@
+             "approvedBy": { "nodes": [] },
+             "resolvableDiscussionsCount": 0,
+             "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "CI_MUST_PASS",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 64, "deletions": 9, "fileCount": 4 },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "FAILED",
+               "jobs": {
+@@ -54,6 +59,11 @@
+             "approvedBy": { "nodes": [{ "username": "sam" }, { "username": "lee" }] },
+             "resolvableDiscussionsCount": 3,
+             "resolvedDiscussionsCount": 2,
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 30, "deletions": 2, "fileCount": 2 },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "SUCCESS",
+               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+@@ -70,6 +80,11 @@
+             "approvedBy": { "nodes": [] },
+             "resolvableDiscussionsCount": 1,
+             "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "DRAFT_STATUS",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "RUNNING",
+               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+diff --git a/tests/glab/merge-requests/graphql-page-2.json b/tests/glab/merge-requests/graphql-page-2.json
+index ba3895f..54d27c1 100644
+--- a/tests/glab/merge-requests/graphql-page-2.json
++++ b/tests/glab/merge-requests/graphql-page-2.json
+@@ -1,6 +1,6 @@
+ {
+   "data": {
+-    "queryComplexity": { "score": 112, "limit": 250 },
++    "queryComplexity": { "score": 119, "limit": 250 },
+     "currentUser": { "username": "sam" },
+     "project": {
+       "mergeRequests": {
+@@ -17,6 +17,11 @@
+             "approvedBy": { "nodes": [] },
+             "resolvableDiscussionsCount": 0,
+             "resolvedDiscussionsCount": 0,
++            "detailedMergeStatus": "NEED_REBASE",
++            "conflicts": false,
++            "diffStatsSummary": null,
++            "sourceProjectId": 7,
++            "targetProjectId": 7,
+             "headPipeline": null
+           },
+           {
+@@ -30,6 +35,11 @@
+             "approvedBy": { "nodes": [{ "username": "anna" }] },
+             "resolvableDiscussionsCount": 2,
+             "resolvedDiscussionsCount": 2,
++            "detailedMergeStatus": null,
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 5, "deletions": 5, "fileCount": 1 },
++            "sourceProjectId": 12,
++            "targetProjectId": 7,
+             "headPipeline": {
+               "status": "MANUAL",
+               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-21.json b/tests/glab/mr-conflicts/graphql-merge-request-21.json
+new file mode 100644
+index 0000000..f1c24d8
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-21.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"opened","sourceBranch":"feature/due-dates","targetBranch":"main","sourceProjectId":1,"targetProjectId":1}}}}
+\ No newline at end of file
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-22.json b/tests/glab/mr-conflicts/graphql-merge-request-22.json
+new file mode 100644
+index 0000000..f81b2ee
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-22.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"opened","sourceBranch":"feature/colours","targetBranch":"main","sourceProjectId":2,"targetProjectId":1}}}}
+\ No newline at end of file
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-23.json b/tests/glab/mr-conflicts/graphql-merge-request-23.json
+new file mode 100644
+index 0000000..00015c7
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-23.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"opened","sourceBranch":"feature/clean","targetBranch":"main","sourceProjectId":1,"targetProjectId":1}}}}
+\ No newline at end of file
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-29.json b/tests/glab/mr-conflicts/graphql-merge-request-29.json
+new file mode 100644
+index 0000000..cda012e
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-29.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"opened","sourceBranch":"feature/merged","targetBranch":"main","sourceProjectId":1,"targetProjectId":1}}}}
+\ No newline at end of file
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-30.json b/tests/glab/mr-conflicts/graphql-merge-request-30.json
+new file mode 100644
+index 0000000..5315577
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-30.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"merged","sourceBranch":"feature/archive","targetBranch":"main","sourceProjectId":1,"targetProjectId":1}}}}
+\ No newline at end of file
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-33.json b/tests/glab/mr-conflicts/graphql-merge-request-33.json
+new file mode 100644
+index 0000000..778df6f
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-33.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"opened","sourceBranch":"feature/x:refs/heads/main","targetBranch":"main","sourceProjectId":1,"targetProjectId":1}}}}
+\ No newline at end of file
+diff --git a/tests/glab/mr-conflicts/graphql-page-1.json b/tests/glab/mr-conflicts/graphql-page-1.json
+new file mode 100644
+index 0000000..eb109bc
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-page-1.json
+@@ -0,0 +1,238 @@
++{
++  "data": {
++    "queryComplexity": { "score": 119, "limit": 250 },
++    "currentUser": { "username": "sam" },
++    "project": {
++      "mergeRequests": {
++        "pageInfo": { "hasNextPage": false, "endCursor": null },
++        "nodes": [
++          {
++            "iid": "32",
++            "title": "Board themes",
++            "createdAt": "2026-10-29T16:00:00Z",
++            "draft": true,
++            "labels": { "nodes": [{ "title": "ui" }] },
++            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "FAILED",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "CI_MUST_PASS",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 75, "deletions": 12, "fileCount": 5 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "31",
++            "title": "Draft: Calendar view",
++            "createdAt": "2026-10-29T11:00:00Z",
++            "draft": true,
++            "labels": { "nodes": [{ "title": "ui" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "DRAFT_STATUS",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 210, "deletions": 3, "fileCount": 7 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "29",
++            "title": "Merged already",
++            "createdAt": "2026-10-28T15:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [] },
++            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "CONFLICT",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 8, "deletions": 1, "fileCount": 1 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "28",
++            "title": "Due-date filter",
++            "createdAt": "2026-10-28T09:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "cards" }] },
++            "assignees": { "nodes": [] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "MERGE_TRAIN_STUCK",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 44, "deletions": 6, "fileCount": 3 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "27",
++            "title": "Reminder sounds",
++            "createdAt": "2026-10-27T14:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "reminders" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "approvedBy": { "nodes": [{ "username": "anna" }] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "MERGEABLE",
++            "conflicts": false,
++            "diffStatsSummary": null,
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "26",
++            "title": "Archive cards",
++            "createdAt": "2026-10-27T08:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "cards" }] },
++            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": null,
++            "detailedMergeStatus": "UNCHECKED",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 31, "deletions": 0, "fileCount": 2 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "25",
++            "title": "Draft: Keyboard help",
++            "createdAt": "2026-10-26T13:00:00Z",
++            "draft": true,
++            "labels": { "nodes": [{ "title": "docs" }] },
++            "assignees": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "reviewers": { "nodes": [] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "RUNNING",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "DRAFT_STATUS",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 18, "deletions": 2, "fileCount": 1 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "24",
++            "title": "Board export",
++            "createdAt": "2026-10-25T10:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "boards" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 2,
++            "resolvedDiscussionsCount": 1,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "NEED_REBASE",
++            "conflicts": false,
++            "diffStatsSummary": { "additions": 96, "deletions": 22, "fileCount": 4 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "23",
++            "title": "Swimlanes",
++            "createdAt": "2026-10-24T15:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "boards" }, { "title": "ui" }] },
++            "assignees": { "nodes": [{ "username": "lee", "name": "Lee Park" }] },
++            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "CONFLICT",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 52, "deletions": 14, "fileCount": 3 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "22",
++            "title": "Card colours",
++            "createdAt": "2026-10-23T09:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "cards" }] },
++            "assignees": { "nodes": [{ "username": "chiara", "name": "Chiara Rossi" }] },
++            "reviewers": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "approvedBy": { "nodes": [] },
++            "resolvableDiscussionsCount": 1,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "CONFLICT",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 27, "deletions": 9, "fileCount": 2 },
++            "sourceProjectId": 2,
++            "targetProjectId": 1
++          },
++          {
++            "iid": "21",
++            "title": "Due dates on cards",
++            "createdAt": "2026-10-22T08:00:00Z",
++            "draft": false,
++            "labels": { "nodes": [{ "title": "cards" }] },
++            "assignees": { "nodes": [{ "username": "sam", "name": "Sam Doe" }] },
++            "reviewers": { "nodes": [{ "username": "anna", "name": "Anna Berg" }] },
++            "approvedBy": { "nodes": [{ "username": "anna" }] },
++            "resolvableDiscussionsCount": 0,
++            "resolvedDiscussionsCount": 0,
++            "headPipeline": {
++              "status": "SUCCESS",
++              "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
++            },
++            "detailedMergeStatus": "CONFLICT",
++            "conflicts": true,
++            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
++            "sourceProjectId": 1,
++            "targetProjectId": 1
++          }
++        ]
++      }
++    }
++  }
++}
+diff --git a/tests/glab/mr-conflicts/project.json b/tests/glab/mr-conflicts/project.json
+new file mode 100644
+index 0000000..d591a82
+--- /dev/null
++++ b/tests/glab/mr-conflicts/project.json
+@@ -0,0 +1 @@
++{"id":7,"path_with_namespace":"taskboard/taskboard","web_url":"https://gitlab.example/taskboard/taskboard"}

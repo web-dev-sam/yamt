@@ -1,0 +1,3 @@
+just mutants HEAD → Rust 40 mutants: 26 caught, 14 unviable, 0 missed; Stryker fixtureMergeRequestData.ts 124 killed / 82 survived / 2 no-cov
+frontend/src/ipc/fixtureMergeRequestData.ts:77-85 READINESS literal mutants — equivalent: module-level static, not re-run under vitest (#732); 82:30 `also: []` survives a test asserting [discussions]. Lines 131-171 have none.
+frontend/src/ipc/fixtureMergeRequestData.ts:25-30 new tunable consts — equivalent: same module-level static case; their effects are killed via size()/fromFork in the functions

@@ -80,9 +80,10 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   2 s before it is accepted, so a second send can arrive while it runs.
 - `merge-requests/` — the merge-request list and opening one (`crates/merge-requests/tests/{list,open}.rs`,
   `src-tauri/src/merge_requests/tests.rs`): logged in; project `taskboard/taskboard` on `https://gitlab.example`;
-  user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail), !12 (passed, 2 approvals, 1 open
-  discussion), !11 (a draft, "Draft: …", running), more to come (`page-2`); page 2: !9 (no pipeline), !8 (manual),
-  the last. Details over GraphQL, all from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into
+  user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail; `CI_MUST_PASS`), !12 (passed, 2
+  approvals, 1 open discussion; `MERGEABLE`), !11 (a draft, "Draft: …", running; `DRAFT_STATUS` and conflicts), more
+  to come (`page-2`); page 2: !9 (no pipeline; `NEED_REBASE`, no diff stats), !8 (manual; no merge status, from a
+  fork), the last. Details over GraphQL, all from `scripts/range-repo.sh`'s merge base `531ea52` and, but for !17, into
   `main`: !12 ends at `feature` (`9c1ba3f`), !13 at `6ea97d8` ("Snooze a reminder", only in range-repo's fake
   GitLab), !14 has no diff yet (`diffRefs` null), !15 is merged, !16 starts from `deadbee`, a commit no repository
   has, !17 is !13's diff into a branch named `main:refs/heads/x`, which a fetch refspec would read as a ref to write.
@@ -90,6 +91,16 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   `merge-request-12.json` and `merge-request-13.json` hold their diffs.
 - `merge-requests-timeout/` — `merge-requests/`'s project and first page, which waits 25 s: a list past glab's
   deadline.
+- `mr-conflicts/` — merge readiness on the list and the branches resolving a merge request's conflicts needs
+  (`crates/merge-requests/{src/page/tests.rs,tests/resolve.rs}`, the merge-request conflicts app tests): logged in;
+  `merge-requests/`'s project; user `sam`; one page, the last: !32 (a draft, `CI_MUST_PASS`, conflicts), !31 (a draft,
+  `DRAFT_STATUS`, conflicts), !29 (`CONFLICT`, stale: `feature/merged` already contains `main`), !28 (the unknown
+  `MERGE_TRAIN_STUCK`), !27 (`MERGEABLE`, no diff stats), !26 (`UNCHECKED`), !25 (a draft, `DRAFT_STATUS`), !24
+  (`NEED_REBASE`), !23 (`CONFLICT`, stale: `feature/clean` merges clean), !22 (`CONFLICT`, from a fork: source project
+  2, target 1), !21 (`CONFLICT`, `feature/due-dates` conflicts with `main`). The branches query over GraphQL, the
+  branch names of `scripts/mr-conflict-repo.sh`, all into `main`: !21 `feature/due-dates`, !22 `feature/colours` from
+  the fork, !23 `feature/clean`, !29 `feature/merged`, !30 merged, !33 `feature/x:refs/heads/main`, which a fetch
+  refspec would read as a ref to write.
 
 ## Fake browser opener
 

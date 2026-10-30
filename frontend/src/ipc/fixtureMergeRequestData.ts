@@ -22,6 +22,12 @@ const BUG_EVERY = 3;
 const FIRST_JOB = 9000;
 const JOBS_PER_ROW = 10;
 const MORE_JOBS_AT = 8;
+const FORK_AT = 1;
+const NO_SIZE_EVERY = 5;
+const ADDED_PER_ROW = 12;
+const REMOVED_STEP = 5;
+const REMOVED_CYCLE = 4;
+const FILES_CYCLE = 6;
 
 const TITLES = [
   "Snooze a reminder",
@@ -68,6 +74,17 @@ export const OPEN_REPLIES: Readonly<Record<number, Generated.OpenReply>> = {
   [PREPARING_IID]: { kind: "preparing" },
 };
 
+const READINESS: readonly Generated.Readiness[] = [
+  { kind: "conflicts", also: [] },
+  { kind: "conflicts", also: [] },
+  { kind: "ready" },
+  { kind: "needsRebase" },
+  { kind: "conflicts", also: [{ kind: "discussions" }] },
+  { kind: "checking" },
+  { kind: "blocked", reason: { kind: "pipelineMustPass" } },
+  { kind: "blocked", reason: { kind: "other", status: "MERGE_TRAIN_STUCK" } },
+];
+
 function cycled<T>(values: readonly T[], index: number): T {
   const value = values[index % values.length];
   if (value === undefined) {
@@ -111,6 +128,28 @@ function labels(index: number): string[] {
   return index % BUG_EVERY === 0 ? [label, "bug"] : [label];
 }
 
+function readiness(index: number, draft: boolean): Generated.Readiness {
+  const cycle = cycled(READINESS, index);
+  if (!draft) {
+    return cycle;
+  }
+  if (cycle.kind === "conflicts") {
+    return { kind: "conflicts", also: [...cycle.also, { kind: "draft" }] };
+  }
+  return { kind: "blocked", reason: { kind: "draft" } };
+}
+
+function size(index: number): Generated.ChangeSize | null {
+  if (index % NO_SIZE_EVERY === NO_SIZE_EVERY - 1) {
+    return null;
+  }
+  return {
+    additions: ADDED_PER_ROW * (index + 1),
+    deletions: REMOVED_STEP * (index % REMOVED_CYCLE),
+    files: (index % FILES_CYCLE) + 1,
+  };
+}
+
 function row(index: number): Generated.MergeRequestRow {
   const title = cycled(TITLES, index);
   const draft = index % DRAFT_EVERY === DRAFT_EVERY - 1;
@@ -127,6 +166,9 @@ function row(index: number): Generated.MergeRequestRow {
     approvals: index % NO_ASSIGNEE_EVERY,
     pipeline: pipeline(index),
     page: `${ORIGIN}/-/merge_requests/${iid}`,
+    size: size(index),
+    readiness: readiness(index, draft),
+    fromFork: index % READINESS.length === FORK_AT,
   };
 }
 

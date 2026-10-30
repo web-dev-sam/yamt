@@ -10,6 +10,7 @@ mod page;
 mod project;
 mod query;
 mod remote;
+mod resolve;
 mod web_page;
 
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ use specta::Type;
 pub use detect::{GitLabRepository, gitlab_repository};
 pub use list::list_merge_requests;
 pub use open::prepare_open;
+pub use resolve::prepare_resolve;
 pub use web_page::open_page;
 pub use yamt_gitio::Glab;
 
@@ -109,6 +111,86 @@ pub struct Pipeline {
     pub more_failed_jobs: bool,
 }
 
+/// How much a merge request changes, GitLab's counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeSize {
+    /// Lines added.
+    pub additions: u32,
+    /// Lines removed.
+    pub deletions: u32,
+    /// Files changed.
+    pub files: u32,
+}
+
+/// Whether a merge request can be merged, GitLab's `detailedMergeStatus` folded with its `conflicts` flag: one
+/// state per row, a conflict first.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Readiness {
+    /// It can be merged.
+    Ready,
+    /// Its branch conflicts with its target.
+    Conflicts {
+        /// What else blocks it, GitLab's status first, then `Draft`; empty when nothing else is known.
+        also: Vec<BlockedReason>,
+    },
+    /// Its branch must be rebased first.
+    NeedsRebase,
+    /// GitLab still checks whether it can be merged.
+    Checking,
+    /// Something other than a conflict blocks it.
+    Blocked {
+        /// What blocks it.
+        reason: BlockedReason,
+    },
+}
+
+/// What blocks a merge, GitLab's `DetailedMergeStatus` in the window's words.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum BlockedReason {
+    /// It is a draft.
+    Draft,
+    /// Discussions are unresolved.
+    Discussions,
+    /// Approvals are missing.
+    Approvals,
+    /// The pipeline must pass.
+    PipelineMustPass,
+    /// The pipeline still runs.
+    PipelineRunning,
+    /// A reviewer requested changes.
+    ChangesRequested,
+    /// Merge requests it depends on must be merged first.
+    Dependencies,
+    /// External status checks must pass.
+    StatusChecks,
+    /// Its title or description must name a Jira issue.
+    JiraIssue,
+    /// It changes LFS files someone locked.
+    LockedFiles,
+    /// It changes paths someone locked.
+    LockedPaths,
+    /// It may not be merged at this time.
+    MergeTime,
+    /// It is not open.
+    NotOpen,
+    /// Its source branch is missing or has no commits.
+    SourceBranch,
+    /// Security policies are not satisfied.
+    SecurityPolicies,
+    /// Security policy pipelines must pass.
+    SecurityPipelines,
+    /// Its title does not match the project's rule.
+    TitleRule,
+    /// A status yamt does not know.
+    Other {
+        /// GitLab's word for it.
+        status: String,
+    },
+}
+
 /// One open merge request as a row of the list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +217,12 @@ pub struct MergeRequestRow {
     pub pipeline: Option<Pipeline>,
     /// Its page on GitLab; `None` when GitLab is not on https.
     pub page: Option<WebPage>,
+    /// How much it changes; `None` when GitLab has not counted it.
+    pub size: Option<ChangeSize>,
+    /// Whether it can be merged.
+    pub readiness: Readiness,
+    /// Whether its branch lives in another project than its target, or in a deleted one.
+    pub from_fork: bool,
 }
 
 /// One page of the list, sent as soon as it arrives.
@@ -240,4 +328,46 @@ pub struct RangeToOpen {
     pub root: PathBuf,
     /// `<base_sha>..<head_sha>`, both GitLab's full commit ids.
     pub spec: String,
+}
+
+/// The branches of merge request `iid` and the remote holding them, asked afresh (plan §2 #139).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolveTarget {
+    /// The repository's work tree root, absolute.
+    pub root: PathBuf,
+    /// The merge request.
+    pub iid: MergeRequestIid,
+    /// The name of the remote that names the project.
+    pub remote: String,
+    /// Its source branch.
+    pub branch: String,
+    /// Its target branch.
+    pub target: String,
+}
+
+/// Why the branches of a merge request to resolve are not given.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ResolveRefusal {
+    /// The merge request is no longer open.
+    NotOpen,
+    /// Its source branch lives in another project.
+    FromFork,
+    /// No remote of the repository names the project.
+    NoRemote {
+        /// The project's full path, `group/project`.
+        project: String,
+    },
+    /// glab is not found on PATH.
+    GlabMissing,
+    /// `glab auth status` failed.
+    NotLoggedIn {
+        /// glab's first output line, which names the instance.
+        detail: String,
+    },
+    /// glab failed, timed out or answered something unexpected.
+    Failed {
+        /// What went wrong, in glab's, GitLab's or yamt's words.
+        message: String,
+    },
 }

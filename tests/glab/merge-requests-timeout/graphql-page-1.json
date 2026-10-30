@@ -1,6 +1,6 @@
 {
   "data": {
-    "queryComplexity": { "score": 112, "limit": 250 },
+    "queryComplexity": { "score": 119, "limit": 250 },
     "currentUser": { "username": "sam" },
     "project": {
       "mergeRequests": {
@@ -17,6 +17,11 @@
             "approvedBy": { "nodes": [] },
             "resolvableDiscussionsCount": 0,
             "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "CI_MUST_PASS",
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 64, "deletions": 9, "fileCount": 4 },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
             "headPipeline": {
               "status": "FAILED",
               "jobs": {
@@ -54,6 +59,11 @@
             "approvedBy": { "nodes": [{ "username": "sam" }, { "username": "lee" }] },
             "resolvableDiscussionsCount": 3,
             "resolvedDiscussionsCount": 2,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "diffStatsSummary": { "additions": 30, "deletions": 2, "fileCount": 2 },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
             "headPipeline": {
               "status": "SUCCESS",
               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }
@@ -70,6 +80,11 @@
             "approvedBy": { "nodes": [] },
             "resolvableDiscussionsCount": 1,
             "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "DRAFT_STATUS",
+            "conflicts": true,
+            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
             "headPipeline": {
               "status": "RUNNING",
               "jobs": { "pageInfo": { "hasNextPage": false }, "nodes": [] }

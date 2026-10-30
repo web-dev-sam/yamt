@@ -3,7 +3,10 @@ use serde::de::DeserializeOwned;
 use serde::de::IgnoredAny;
 
 use crate::project::Project;
-use crate::{CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person, Pipeline, WebPage};
+use crate::{
+    BlockedReason, ChangeSize, CiStatus, FailedJob, MergeRequestIid, MergeRequestRow, Person,
+    Pipeline, Readiness, WebPage,
+};
 
 const NO_DATA: &str = "GitLab's answer holds no data";
 pub(crate) const NO_PROJECT: &str = "GitLab finds no such project, or you may not see it";
@@ -89,6 +92,19 @@ struct Node {
     resolvable_discussions_count: Option<i64>,
     resolved_discussions_count: Option<i64>,
     head_pipeline: Option<PipelineNode>,
+    detailed_merge_status: Option<String>,
+    conflicts: bool,
+    diff_stats_summary: Option<DiffStats>,
+    source_project_id: Option<i64>,
+    target_project_id: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiffStats {
+    additions: i64,
+    deletions: i64,
+    file_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -177,6 +193,13 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
         approvals: count(listed(node.approved_by).len()),
         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
         page,
+        size: node.diff_stats_summary.as_ref().map(change_size),
+        readiness: readiness(
+            node.detailed_merge_status.as_deref(),
+            node.conflicts,
+            node.draft,
+        ),
+        from_fork: is_from_fork(node.source_project_id, node.target_project_id),
     })
 }
 
@@ -189,11 +212,30 @@ fn open_discussions(resolvable: Option<i64>, resolved: Option<i64>) -> u32 {
     let open = resolvable
         .unwrap_or(0)
         .saturating_sub(resolved.unwrap_or(0));
-    u32::try_from(open.max(0)).unwrap_or(u32::MAX)
+    saturated(open)
+}
+
+/// GitLab's `Int` as a count: below 0 is 0, above `u32::MAX` is `u32::MAX`.
+fn saturated(sent: i64) -> u32 {
+    u32::try_from(sent.max(0)).unwrap_or(u32::MAX)
 }
 
 fn count(length: usize) -> u32 {
     u32::try_from(length).unwrap_or(u32::MAX)
+}
+
+fn change_size(stats: &DiffStats) -> ChangeSize {
+    ChangeSize {
+        additions: saturated(stats.additions),
+        deletions: saturated(stats.deletions),
+        files: saturated(stats.file_count),
+    }
+}
+
+/// Whether a merge request's source branch lives outside its target's project; a deleted source project
+/// (`sourceProjectId` null) counts, as its branch is not in the target's project either.
+pub(crate) fn is_from_fork(source_project_id: Option<i64>, target_project_id: i64) -> bool {
+    source_project_id != Some(target_project_id)
 }
 
 fn pipeline(found: PipelineNode, origin: Option<&str>) -> Pipeline {
@@ -240,6 +282,68 @@ fn ci_status(status: &str) -> CiStatus {
                 "unknown pipeline status, shown as pending"
             );
             CiStatus::Pending
+        }
+    }
+}
+
+/// The row's one readiness: GitLab's merge status alone, unless the merge request conflicts (its `conflicts` flag
+/// or a `CONFLICT` status). A conflict comes first, with what else blocks the merge (request rule 2, #1998): the
+/// status's blocked reason, then `Draft` for a draft — GitLab never merges one, whatever its status says.
+fn readiness(status: Option<&str>, conflicts: bool, draft: bool) -> Readiness {
+    let folded = status.map_or(Readiness::Checking, merge_status);
+    if !conflicts && !matches!(folded, Readiness::Conflicts { .. }) {
+        return folded;
+    }
+    let mut also = match folded {
+        Readiness::Blocked { reason } => vec![reason],
+        Readiness::Ready
+        | Readiness::Conflicts { .. }
+        | Readiness::NeedsRebase
+        | Readiness::Checking => Vec::new(),
+    };
+    if draft && !also.contains(&BlockedReason::Draft) {
+        also.push(BlockedReason::Draft);
+    }
+    Readiness::Conflicts { also }
+}
+
+/// GitLab's `DetailedMergeStatus` (GraphQL reference) as a readiness; an unknown one blocks, in GitLab's word.
+fn merge_status(status: &str) -> Readiness {
+    match status {
+        "MERGEABLE" => Readiness::Ready,
+        "CONFLICT" => Readiness::Conflicts { also: Vec::new() },
+        "NEED_REBASE" => Readiness::NeedsRebase,
+        "CHECKING" | "UNCHECKED" | "PREPARING" | "APPROVALS_SYNCING" => Readiness::Checking,
+        blocking => Readiness::Blocked {
+            reason: blocked_reason(blocking),
+        },
+    }
+}
+
+fn blocked_reason(status: &str) -> BlockedReason {
+    match status {
+        "DRAFT_STATUS" => BlockedReason::Draft,
+        "DISCUSSIONS_NOT_RESOLVED" => BlockedReason::Discussions,
+        "NOT_APPROVED" => BlockedReason::Approvals,
+        "CI_MUST_PASS" => BlockedReason::PipelineMustPass,
+        "CI_STILL_RUNNING" => BlockedReason::PipelineRunning,
+        "REQUESTED_CHANGES" => BlockedReason::ChangesRequested,
+        "BLOCKED_STATUS" => BlockedReason::Dependencies,
+        "EXTERNAL_STATUS_CHECKS" => BlockedReason::StatusChecks,
+        "JIRA_ASSOCIATION" => BlockedReason::JiraIssue,
+        "LOCKED_LFS_FILES" => BlockedReason::LockedFiles,
+        "LOCKED_PATHS" => BlockedReason::LockedPaths,
+        "MERGE_TIME" => BlockedReason::MergeTime,
+        "NOT_OPEN" => BlockedReason::NotOpen,
+        "COMMITS_STATUS" => BlockedReason::SourceBranch,
+        "SECURITY_POLICIES_VIOLATIONS" => BlockedReason::SecurityPolicies,
+        "SECURITY_POLICY_PIPELINE_CHECK" => BlockedReason::SecurityPipelines,
+        "TITLE_NOT_MATCHING" => BlockedReason::TitleRule,
+        unknown => {
+            tracing::warn!(status = unknown, "unknown merge status, shown as blocked");
+            BlockedReason::Other {
+                status: unknown.to_owned(),
+            }
         }
     }
 }

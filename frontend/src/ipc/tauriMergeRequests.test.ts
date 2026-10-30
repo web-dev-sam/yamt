@@ -35,6 +35,9 @@ const ROW: Generated.MergeRequestRow = {
   approvals: 2,
   pipeline: null,
   page: null,
+  size: null,
+  readiness: { kind: "blocked", reason: { kind: "other", status: "MERGE_TRAIN_STUCK" } },
+  fromFork: false,
 };
 
 const STOPPED = { kind: "WorkerStopped" };

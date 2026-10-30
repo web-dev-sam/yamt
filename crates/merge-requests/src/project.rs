@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use yamt_gitio::Glab;
+use yamt_gitio::{AuthStatus, Glab};
 
 use crate::web_page::HTTPS;
+use crate::{ListEnd, OpenReply, ResolveRefusal};
 
 /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
 const PROJECT_ROUTE: &str = "projects/:fullpath";
@@ -24,9 +25,23 @@ struct ProjectAnswer {
     web_url: String,
 }
 
-pub(crate) fn project(glab: &Glab, root: &Path) -> Result<Project, String> {
-    let json = glab.get(root, &["api", PROJECT_ROUTE])?;
-    project_from(&json)
+/// Why glab named no project: logged out, or a call failed.
+pub(crate) enum NoProject {
+    NotLoggedIn { detail: String },
+    Failed { message: String },
+}
+
+/// The project of the repository's remotes, asked once `glab auth status` says glab is logged in.
+pub(crate) fn logged_in_project(glab: &Glab, root: &Path) -> Result<Project, NoProject> {
+    match glab.auth_status(root) {
+        AuthStatus::LoggedIn => {}
+        AuthStatus::LoggedOut { detail } => return Err(NoProject::NotLoggedIn { detail }),
+        AuthStatus::Failed { message } => return Err(NoProject::Failed { message }),
+    }
+    let json = glab
+        .get(root, &["api", PROJECT_ROUTE])
+        .map_err(|message| NoProject::Failed { message })?;
+    project_from(&json).map_err(|message| NoProject::Failed { message })
 }
 
 fn project_from(json: &[u8]) -> Result<Project, String> {
@@ -49,6 +64,33 @@ fn web_path(web_url: &str) -> String {
 fn web_origin(web_url: &str) -> Option<String> {
     let authority = web_url.strip_prefix(HTTPS)?.split('/').next()?;
     Some(format!("{HTTPS}{authority}"))
+}
+
+impl From<NoProject> for ListEnd {
+    fn from(refused: NoProject) -> ListEnd {
+        match refused {
+            NoProject::NotLoggedIn { detail } => ListEnd::NotLoggedIn { detail },
+            NoProject::Failed { message } => ListEnd::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for OpenReply {
+    fn from(refused: NoProject) -> OpenReply {
+        match refused {
+            NoProject::NotLoggedIn { detail } => OpenReply::NotLoggedIn { detail },
+            NoProject::Failed { message } => OpenReply::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for ResolveRefusal {
+    fn from(refused: NoProject) -> ResolveRefusal {
+        match refused {
+            NoProject::NotLoggedIn { detail } => ResolveRefusal::NotLoggedIn { detail },
+            NoProject::Failed { message } => ResolveRefusal::Failed { message },
+        }
+    }
 }
 
 #[cfg(test)]
