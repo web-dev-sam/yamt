@@ -207,6 +207,7 @@ fn fetch_branches_writes_only_the_two_remote_tracking_refs() {
     expected.push(format!("refs/remotes/gitlab/main {}", main.trim_end()));
     expected.push(format!("refs/remotes/gitlab/remote {head}"));
     expected.sort();
+    git_ok(root, &["update-ref", "refs/remotes/gitlab/remote", "local"]).unwrap();
 
     let repo = Repo::discover(root).unwrap();
     let fetched = repo.fetch_branches("gitlab", &["main", "remote"], FETCH_TIMEOUT);

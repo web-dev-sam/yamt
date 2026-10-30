@@ -1,0 +1,2 @@
+just mutants HEAD (in the scratch copy target/r1/src): Found 7 mutants to test; 7 mutants tested in 35s: 5 caught, 2 unviable
+

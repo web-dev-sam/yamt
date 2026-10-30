@@ -1,8 +1,8 @@
 use std::time::Duration;
 
-use crate::fetch::refuse_prompts;
+use crate::fetch::run_without_prompts;
 use crate::repo::Repo;
-use crate::run::{Access, Waited, argv, run_with_deadline};
+use crate::run::Access;
 
 /// A push's deadline: it talks to a server over the network, and may never get an answer.
 pub const PUSH_TIMEOUT: Duration = Duration::from_secs(120);
@@ -24,18 +24,7 @@ impl Repo {
         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
         let mut command = self.command(Access::Write, &PUSH);
         command.arg(remote).arg(&refspec);
-        refuse_prompts(&mut command);
-        tracing::debug!(args = ?argv(&command), "running git");
-        let finished = match run_with_deadline(command, None, timeout) {
-            Err(error) => return Err(format!("cannot run git push: {error}")),
-            Ok(Waited::TimedOut) => {
-                return Err(format!(
-                    "git push got no answer within {} s",
-                    timeout.as_secs()
-                ));
-            }
-            Ok(Waited::Exited(finished)) => finished,
-        };
+        let finished = run_without_prompts(command, "push", timeout)?;
         if let Some(summary) = rejection(&finished.stdout, &refspec) {
             return Err(summary);
         }

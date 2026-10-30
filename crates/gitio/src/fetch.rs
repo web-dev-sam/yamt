@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crate::Repo;
 use crate::glab::first_line;
-use crate::run::{Access, Waited, argv, run_with_deadline};
+use crate::run::{Access, Finished, Waited, argv, run_with_deadline};
 
 /// A fetch's deadline: it talks to a server over the network, and may never get an answer.
 pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
@@ -53,24 +53,37 @@ impl Repo {
     fn fetch(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String> {
         let mut command = self.command(Access::Write, &FETCH);
         command.arg(remote).args(refspecs);
-        refuse_prompts(&mut command);
-        tracing::debug!(args = ?argv(&command), "running git");
-        match run_with_deadline(command, None, timeout) {
-            Err(error) => Err(format!("cannot run git fetch: {error}")),
-            Ok(Waited::TimedOut) => Err(format!(
-                "git fetch got no answer within {} s",
-                timeout.as_secs()
-            )),
-            Ok(Waited::Exited(finished)) if finished.status.success() => Ok(()),
-            Ok(Waited::Exited(finished)) => Err(first_line(&finished.stderr)
-                .unwrap_or_else(|| format!("git fetch failed: {}", finished.status))),
+        let finished = run_without_prompts(command, "fetch", timeout)?;
+        if finished.status.success() {
+            return Ok(());
         }
+        Err(first_line(&finished.stderr)
+            .unwrap_or_else(|| format!("git fetch failed: {}", finished.status)))
+    }
+}
+
+/// Runs `command`, a git `<verb>` that talks to a server, with prompts refused and killed at `timeout`. `Err`
+/// holds the words for a git that could not start or got no answer in time.
+pub(crate) fn run_without_prompts(
+    mut command: Command,
+    verb: &str,
+    timeout: Duration,
+) -> Result<Finished, String> {
+    refuse_prompts(&mut command);
+    tracing::debug!(args = ?argv(&command), "running git");
+    match run_with_deadline(command, None, timeout) {
+        Err(error) => Err(format!("cannot run git {verb}: {error}")),
+        Ok(Waited::TimedOut) => Err(format!(
+            "git {verb} got no answer within {} s",
+            timeout.as_secs()
+        )),
+        Ok(Waited::Exited(finished)) => Ok(finished),
     }
 }
 
 /// Sets `command`'s environment so that no prompt of git, ssh or a credential manager waits for an answer: a
 /// question that needs one fails the run instead.
-pub(crate) fn refuse_prompts(command: &mut Command) {
+fn refuse_prompts(command: &mut Command) {
     command
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never");

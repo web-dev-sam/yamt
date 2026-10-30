@@ -9,6 +9,8 @@ use yamt_gitio::{Error, Oid, Repo};
 
 const UNKNOWN_COMMIT: &str = "1111111111111111111111111111111111111111";
 const GIT_FATAL_STATUS: i32 = 128;
+const DASH_BRANCH: &str = "-x";
+const NOT_A_BRANCH_NAME: &str = "fatal: '-x' is not a valid branch name";
 const CONFLICTED: [ConflictFile<'static>; 1] = [ConflictFile {
     path: "a.txt",
     kind: FileKind::Regular,
@@ -60,6 +62,58 @@ fn diverged() -> (TempDir, Repo) {
     let dir = diverged_repo(&CONFLICTED).unwrap();
     let repo = Repo::discover(dir.path()).unwrap();
     (dir, repo)
+}
+
+/// The diverged repository with a branch `DASH_BRANCH` at `at`: git refuses to create such a name, `update-ref`
+/// writes it all the same.
+fn diverged_with_dash_branch(at: &str) -> (TempDir, Repo) {
+    let (dir, repo) = diverged();
+    git_ok(dir.path(), &["update-ref", "refs/heads/-x", at]).unwrap();
+    (dir, repo)
+}
+
+fn assert_refused_as_a_branch_name(result: yamt_gitio::Result<()>) {
+    match result {
+        Err(Error::GitFailed { stderr, .. }) => {
+            assert!(stderr.starts_with(NOT_A_BRANCH_NAME), "{stderr}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn checkout_branch_reads_a_leading_dash_as_a_branch_name() {
+    let (dir, repo) = diverged_with_dash_branch("remote");
+
+    repo.checkout_branch(DASH_BRANCH).unwrap();
+
+    assert_eq!(text(dir.path(), &["symbolic-ref", "HEAD"]), "refs/heads/-x");
+}
+
+#[test]
+fn checkout_branch_at_reads_a_leading_dash_as_a_branch_name() {
+    let (_dir, repo) = diverged();
+    let main = commit(&repo, "main");
+
+    assert_refused_as_a_branch_name(repo.checkout_branch_at(DASH_BRANCH, &main));
+}
+
+#[test]
+fn delete_branch_reads_a_leading_dash_as_a_branch_name() {
+    let (_dir, repo) = diverged_with_dash_branch("remote");
+
+    repo.delete_branch(DASH_BRANCH).unwrap();
+
+    assert_eq!(repo.commit_named("refs/heads/-x").unwrap(), None);
+}
+
+#[test]
+fn move_branch_reads_a_leading_dash_as_a_branch_name() {
+    let (_dir, repo) = diverged_with_dash_branch("remote");
+    let (main, remote) = (commit(&repo, "main"), commit(&repo, "remote"));
+
+    assert_refused_as_a_branch_name(repo.move_branch(DASH_BRANCH, &main));
+    assert_eq!(commit(&repo, "refs/heads/-x"), remote);
 }
 
 #[test]
@@ -271,4 +325,32 @@ fn merge_no_commit_stops_with_merge_head_on_conflicts_and_on_a_clean_merge() {
         std::fs::read(clean_dir.path().join("remote.txt")).unwrap(),
         b"remote\n"
     );
+}
+
+#[test]
+fn merge_no_commit_stops_with_merge_head_when_it_could_fast_forward() {
+    let (_dir, repo) = diverged();
+    repo.checkout_branch("main").unwrap();
+    let main = commit(&repo, "main");
+
+    let merged = repo.merge_no_commit("local").unwrap();
+
+    assert!(
+        merged.succeeded,
+        "{}",
+        String::from_utf8_lossy(&merged.output)
+    );
+    assert!(repo.git_path("MERGE_HEAD").unwrap().exists());
+    assert_eq!(commit(&repo, "HEAD"), main);
+}
+
+#[test]
+fn merge_no_commit_reads_a_leading_dash_as_a_revision() {
+    let (_dir, repo) = diverged_with_dash_branch("remote");
+    let remote = commit(&repo, "remote");
+
+    let merged = repo.merge_no_commit(DASH_BRANCH).unwrap();
+
+    assert!(!merged.succeeded);
+    assert_eq!(commit(&repo, "MERGE_HEAD"), remote);
 }

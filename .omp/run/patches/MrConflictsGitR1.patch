@@ -1,0 +1,298 @@
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index d9e7af9..66c9495 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -8,6 +8,6 @@ The AI's checkout (`src/checkout.rs`, plan §2 #110, #122): `clone_shared_into(i
+ 
+ The merge-request fetch (`src/fetch.rs`, plan §2 #128–#135): `Repo::fetch_without_refs(remote, refspecs, timeout)` (`fetch --no-tags --no-write-fetch-head --no-recurse-submodules --no-auto-maintenance --refmap= --quiet --end-of-options <remote> <refspecs>`, `Access::Write`: refspecs without a destination and an empty `--refmap=` bring the commits and write no ref and no `FETCH_HEAD`; `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and on Unix `SSH_ASKPASS_REQUIRE=force` with `SSH_ASKPASS=false`, so no prompt of git, ssh or a credential manager waits; run by `run_with_deadline`, killed at `timeout` — callers pass `FETCH_TIMEOUT`, 120 s, a test a shorter one; `Err(String)` is git's first stderr line through `glab.rs` `first_line`, the deadline's own words or the exit status). `tests/fetch.rs` against a bare server in a tempdir: no ref, status, index or HEAD changed, the no-prompt environment recorded, a missing server or ref in git's words, a hang ended at its deadline.
+ 
+-The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): the no-prompt environment above is one helper, `fetch.rs` `refuse_prompts`, called by both fetches and the push. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit <rev>` and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
++The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): a run that talks to a server is one helper, `fetch.rs` `run_without_prompts(command, verb, timeout)`: the no-prompt environment above (`refuse_prompts`), the argv logged at `debug`, `run_with_deadline`, and `Err` "cannot run git <verb>: …" or "git <verb> got no answer within N s"; both fetches and the push read only the `Finished` run it gives. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else, forced over a rebased branch (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. A GitLab name is never read as an option: `--end-of-options` comes before it wherever git would parse a leading `-` as a flag, and `-B`'s value is a name whatever it starts with (`tests/branch.rs` `*_reads_a_leading_dash_as_*`). `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet --end-of-options <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D --end-of-options <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force --end-of-options <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit --end-of-options <rev>` (`--no-ff` leaves `MERGE_HEAD` even when HEAD could fast-forward) and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
+ 
+ glab (`src/glab.rs`, plan §2 #118, #128–#135): `Glab::find()` (the first runnable `glab` on PATH, `program.rs` `program_in`; `None` when not installed), `Glab::at(program)`, `with_timeout` (default `GLAB_TIMEOUT`, 20 s); `run(cwd, args, stdin)` → `GlabRun` = `Printed { stdout }` | `Failed { status, stdout, stderr }` | `TimedOut`, with the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`, stdin closed or written and closed, a glab that cannot start `Error::GlabIo { program, source }`; `get(cwd, args)` → stdout or `Err(String)`: glab's `last_line` of stderr (its error comes after any notice), else the exit status or signal in words, `TIMED_OUT` (`"glab timed out"`) at the deadline; `auth_status(cwd)` → `AuthStatus` = `LoggedIn` | `LoggedOut { detail }` (glab's first line of stderr, else stdout, naming the instance) | `Failed { message }` (could not run, or `TIMED_OUT`). `first_line`/`last_line`: the first or last non-blank line, trimmed, of bytes decoded lossily. `tests/glab.rs` runs the committed `scripts/fake-glab` on the `tests/glab/runner` scenario through a symlink (stdin and stdout, a failure's exit and streams, a hang's timeout, the environment overrides in a child process, a missing glab).
+diff --git a/crates/gitio/src/branch.rs b/crates/gitio/src/branch.rs
+index 0c9cdaa..c7f9f16 100644
+--- a/crates/gitio/src/branch.rs
++++ b/crates/gitio/src/branch.rs
+@@ -6,16 +6,18 @@ use crate::run::{Access, GIT_TIMEOUT, run, run_to_end, run_to_success};
+ 
+ impl Repo {
+     /// `git checkout --quiet -B <branch> <commit>`: the branch created, or moved, at `commit` and checked out; an
+-    /// existing branch keeps its `branch.<branch>.*` config. No deadline: writing a large tree takes long.
++    /// existing branch keeps its `branch.<branch>.*` config. `branch` is `-B`'s mandatory value, a name even when
++    /// it starts with `-` (gitcli(7) "Separating argument from the option"). No deadline: writing a large tree
++    /// takes long.
+     pub fn checkout_branch_at(&self, branch: &str, commit: &Oid) -> Result<()> {
+         let args = ["checkout", "--quiet", "-B", branch, commit.as_str()];
+         run_to_success(self.command(Access::Write, &args))?;
+         Ok(())
+     }
+ 
+-    /// `git checkout --quiet <branch> --`. No deadline: writing a large tree takes long.
++    /// `git checkout --quiet --end-of-options <branch> --`. No deadline: writing a large tree takes long.
+     pub fn checkout_branch(&self, branch: &str) -> Result<()> {
+-        let args = ["checkout", "--quiet", branch, "--"];
++        let args = ["checkout", "--quiet", "--end-of-options", branch, "--"];
+         run_to_success(self.command(Access::Write, &args))?;
+         Ok(())
+     }
+@@ -39,17 +41,25 @@ impl Repo {
+         Ok(())
+     }
+ 
+-    /// `git branch --quiet -D <branch>`, its `branch.<branch>.*` config with it; git refuses a branch checked out
+-    /// in any worktree.
++    /// `git branch --quiet -D --end-of-options <branch>`, its `branch.<branch>.*` config with it; git refuses a
++    /// branch checked out in any worktree.
+     pub fn delete_branch(&self, branch: &str) -> Result<()> {
+-        let command = self.command(Access::Write, &["branch", "--quiet", "-D", branch]);
+-        run(command, None, GIT_TIMEOUT)?;
++        let args = ["branch", "--quiet", "-D", "--end-of-options", branch];
++        run(self.command(Access::Write, &args), None, GIT_TIMEOUT)?;
+         Ok(())
+     }
+ 
+-    /// `git branch --quiet --force <branch> <commit>`; git refuses a branch checked out in any worktree.
++    /// `git branch --quiet --force --end-of-options <branch> <commit>`; git refuses a branch checked out in any
++    /// worktree.
+     pub fn move_branch(&self, branch: &str, commit: &Oid) -> Result<()> {
+-        let args = ["branch", "--quiet", "--force", branch, commit.as_str()];
++        let args = [
++            "branch",
++            "--quiet",
++            "--force",
++            "--end-of-options",
++            branch,
++            commit.as_str(),
++        ];
+         run(self.command(Access::Write, &args), None, GIT_TIMEOUT)?;
+         Ok(())
+     }
+@@ -62,10 +72,10 @@ impl Repo {
+         Ok(())
+     }
+ 
+-    /// `git merge --no-ff --no-commit <rev>`. No deadline: a large merge takes long. A non-zero exit is not an
+-    /// `Err`, as in `continue_operation`: the caller reads the stop to learn what happened.
++    /// `git merge --no-ff --no-commit --end-of-options <rev>`. No deadline: a large merge takes long. A non-zero
++    /// exit is not an `Err`, as in `continue_operation`: the caller reads the stop to learn what happened.
+     pub fn merge_no_commit(&self, rev: &str) -> Result<GitRun> {
+-        let args = ["merge", "--no-ff", "--no-commit", rev];
++        let args = ["merge", "--no-ff", "--no-commit", "--end-of-options", rev];
+         let finished = run_to_end(self.command(Access::Write, &args))?;
+         Ok(GitRun {
+             succeeded: finished.status.success(),
+diff --git a/crates/gitio/src/fetch.rs b/crates/gitio/src/fetch.rs
+index 8fd3b4e..45a89ee 100644
+--- a/crates/gitio/src/fetch.rs
++++ b/crates/gitio/src/fetch.rs
+@@ -3,7 +3,7 @@ use std::time::Duration;
+ 
+ use crate::Repo;
+ use crate::glab::first_line;
+-use crate::run::{Access, Waited, argv, run_with_deadline};
++use crate::run::{Access, Finished, Waited, argv, run_with_deadline};
+ 
+ /// A fetch's deadline: it talks to a server over the network, and may never get an answer.
+ pub const FETCH_TIMEOUT: Duration = Duration::from_secs(120);
+@@ -53,24 +53,37 @@ impl Repo {
+     fn fetch(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String> {
+         let mut command = self.command(Access::Write, &FETCH);
+         command.arg(remote).args(refspecs);
+-        refuse_prompts(&mut command);
+-        tracing::debug!(args = ?argv(&command), "running git");
+-        match run_with_deadline(command, None, timeout) {
+-            Err(error) => Err(format!("cannot run git fetch: {error}")),
+-            Ok(Waited::TimedOut) => Err(format!(
+-                "git fetch got no answer within {} s",
+-                timeout.as_secs()
+-            )),
+-            Ok(Waited::Exited(finished)) if finished.status.success() => Ok(()),
+-            Ok(Waited::Exited(finished)) => Err(first_line(&finished.stderr)
+-                .unwrap_or_else(|| format!("git fetch failed: {}", finished.status))),
++        let finished = run_without_prompts(command, "fetch", timeout)?;
++        if finished.status.success() {
++            return Ok(());
+         }
++        Err(first_line(&finished.stderr)
++            .unwrap_or_else(|| format!("git fetch failed: {}", finished.status)))
++    }
++}
++
++/// Runs `command`, a git `<verb>` that talks to a server, with prompts refused and killed at `timeout`. `Err`
++/// holds the words for a git that could not start or got no answer in time.
++pub(crate) fn run_without_prompts(
++    mut command: Command,
++    verb: &str,
++    timeout: Duration,
++) -> Result<Finished, String> {
++    refuse_prompts(&mut command);
++    tracing::debug!(args = ?argv(&command), "running git");
++    match run_with_deadline(command, None, timeout) {
++        Err(error) => Err(format!("cannot run git {verb}: {error}")),
++        Ok(Waited::TimedOut) => Err(format!(
++            "git {verb} got no answer within {} s",
++            timeout.as_secs()
++        )),
++        Ok(Waited::Exited(finished)) => Ok(finished),
+     }
+ }
+ 
+ /// Sets `command`'s environment so that no prompt of git, ssh or a credential manager waits for an answer: a
+ /// question that needs one fails the run instead.
+-pub(crate) fn refuse_prompts(command: &mut Command) {
++fn refuse_prompts(command: &mut Command) {
+     command
+         .env("GIT_TERMINAL_PROMPT", "0")
+         .env("GCM_INTERACTIVE", "never");
+diff --git a/crates/gitio/src/push.rs b/crates/gitio/src/push.rs
+index d27e620..35791d0 100644
+--- a/crates/gitio/src/push.rs
++++ b/crates/gitio/src/push.rs
+@@ -1,8 +1,8 @@
+ use std::time::Duration;
+ 
+-use crate::fetch::refuse_prompts;
++use crate::fetch::run_without_prompts;
+ use crate::repo::Repo;
+-use crate::run::{Access, Waited, argv, run_with_deadline};
++use crate::run::Access;
+ 
+ /// A push's deadline: it talks to a server over the network, and may never get an answer.
+ pub const PUSH_TIMEOUT: Duration = Duration::from_secs(120);
+@@ -24,18 +24,7 @@ impl Repo {
+         let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+         let mut command = self.command(Access::Write, &PUSH);
+         command.arg(remote).arg(&refspec);
+-        refuse_prompts(&mut command);
+-        tracing::debug!(args = ?argv(&command), "running git");
+-        let finished = match run_with_deadline(command, None, timeout) {
+-            Err(error) => return Err(format!("cannot run git push: {error}")),
+-            Ok(Waited::TimedOut) => {
+-                return Err(format!(
+-                    "git push got no answer within {} s",
+-                    timeout.as_secs()
+-                ));
+-            }
+-            Ok(Waited::Exited(finished)) => finished,
+-        };
++        let finished = run_without_prompts(command, "push", timeout)?;
+         if let Some(summary) = rejection(&finished.stdout, &refspec) {
+             return Err(summary);
+         }
+diff --git a/crates/gitio/tests/branch.rs b/crates/gitio/tests/branch.rs
+index 6ca79f2..0645472 100644
+--- a/crates/gitio/tests/branch.rs
++++ b/crates/gitio/tests/branch.rs
+@@ -9,6 +9,8 @@ use yamt_gitio::{Error, Oid, Repo};
+ 
+ const UNKNOWN_COMMIT: &str = "1111111111111111111111111111111111111111";
+ const GIT_FATAL_STATUS: i32 = 128;
++const DASH_BRANCH: &str = "-x";
++const NOT_A_BRANCH_NAME: &str = "fatal: '-x' is not a valid branch name";
+ const CONFLICTED: [ConflictFile<'static>; 1] = [ConflictFile {
+     path: "a.txt",
+     kind: FileKind::Regular,
+@@ -62,6 +64,58 @@ fn diverged() -> (TempDir, Repo) {
+     (dir, repo)
+ }
+ 
++/// The diverged repository with a branch `DASH_BRANCH` at `at`: git refuses to create such a name, `update-ref`
++/// writes it all the same.
++fn diverged_with_dash_branch(at: &str) -> (TempDir, Repo) {
++    let (dir, repo) = diverged();
++    git_ok(dir.path(), &["update-ref", "refs/heads/-x", at]).unwrap();
++    (dir, repo)
++}
++
++fn assert_refused_as_a_branch_name(result: yamt_gitio::Result<()>) {
++    match result {
++        Err(Error::GitFailed { stderr, .. }) => {
++            assert!(stderr.starts_with(NOT_A_BRANCH_NAME), "{stderr}");
++        }
++        other => panic!("{other:?}"),
++    }
++}
++
++#[test]
++fn checkout_branch_reads_a_leading_dash_as_a_branch_name() {
++    let (dir, repo) = diverged_with_dash_branch("remote");
++
++    repo.checkout_branch(DASH_BRANCH).unwrap();
++
++    assert_eq!(text(dir.path(), &["symbolic-ref", "HEAD"]), "refs/heads/-x");
++}
++
++#[test]
++fn checkout_branch_at_reads_a_leading_dash_as_a_branch_name() {
++    let (_dir, repo) = diverged();
++    let main = commit(&repo, "main");
++
++    assert_refused_as_a_branch_name(repo.checkout_branch_at(DASH_BRANCH, &main));
++}
++
++#[test]
++fn delete_branch_reads_a_leading_dash_as_a_branch_name() {
++    let (_dir, repo) = diverged_with_dash_branch("remote");
++
++    repo.delete_branch(DASH_BRANCH).unwrap();
++
++    assert_eq!(repo.commit_named("refs/heads/-x").unwrap(), None);
++}
++
++#[test]
++fn move_branch_reads_a_leading_dash_as_a_branch_name() {
++    let (_dir, repo) = diverged_with_dash_branch("remote");
++    let (main, remote) = (commit(&repo, "main"), commit(&repo, "remote"));
++
++    assert_refused_as_a_branch_name(repo.move_branch(DASH_BRANCH, &main));
++    assert_eq!(commit(&repo, "refs/heads/-x"), remote);
++}
++
+ #[test]
+ fn checkout_branch_at_creates_fast_forwards_and_keeps_upstream() {
+     let (dir, repo) = diverged();
+@@ -272,3 +326,31 @@ fn merge_no_commit_stops_with_merge_head_on_conflicts_and_on_a_clean_merge() {
+         b"remote\n"
+     );
+ }
++
++#[test]
++fn merge_no_commit_stops_with_merge_head_when_it_could_fast_forward() {
++    let (_dir, repo) = diverged();
++    repo.checkout_branch("main").unwrap();
++    let main = commit(&repo, "main");
++
++    let merged = repo.merge_no_commit("local").unwrap();
++
++    assert!(
++        merged.succeeded,
++        "{}",
++        String::from_utf8_lossy(&merged.output)
++    );
++    assert!(repo.git_path("MERGE_HEAD").unwrap().exists());
++    assert_eq!(commit(&repo, "HEAD"), main);
++}
++
++#[test]
++fn merge_no_commit_reads_a_leading_dash_as_a_revision() {
++    let (_dir, repo) = diverged_with_dash_branch("remote");
++    let remote = commit(&repo, "remote");
++
++    let merged = repo.merge_no_commit(DASH_BRANCH).unwrap();
++
++    assert!(!merged.succeeded);
++    assert_eq!(commit(&repo, "MERGE_HEAD"), remote);
++}
+diff --git a/crates/gitio/tests/fetch.rs b/crates/gitio/tests/fetch.rs
+index a43ea06..da93ea7 100644
+--- a/crates/gitio/tests/fetch.rs
++++ b/crates/gitio/tests/fetch.rs
+@@ -207,6 +207,7 @@ fn fetch_branches_writes_only_the_two_remote_tracking_refs() {
+     expected.push(format!("refs/remotes/gitlab/main {}", main.trim_end()));
+     expected.push(format!("refs/remotes/gitlab/remote {head}"));
+     expected.sort();
++    git_ok(root, &["update-ref", "refs/remotes/gitlab/remote", "local"]).unwrap();
+ 
+     let repo = Repo::discover(root).unwrap();
+     let fetched = repo.fetch_branches("gitlab", &["main", "remote"], FETCH_TIMEOUT);
