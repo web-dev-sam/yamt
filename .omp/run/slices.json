@@ -1,1 +1,5 @@
-{}
+{
+  "FlakyServerStopTest": {
+    "owned": ["src-tauri/src/servers.rs"]
+  }
+}
