@@ -1,0 +1,2 @@
+just mutants HEAD: 473 killed, 11 survived, 13 no-cov (95.17%). No Rust changes. Every mutant on a changed line was killed.
+

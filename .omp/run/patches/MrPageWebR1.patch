@@ -1,0 +1,175 @@
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 388b156..9ccde0a 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -33,7 +33,7 @@ const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
+ const discussions = computed(() => discussionsText(props.row.openDiscussions));
+ const approvals = computed(() => approvalsText(props.row.approvals));
+ const openTitle = computed(() => openChangesTitle(props.row.iid));
+-const pageTitle = computed(() => openPageTitle(props.row.iid));
++const pageTitle = computed(() => openPageTitle(props.row.iid, props.row.title));
+ const fetching = computed(() => props.opening?.kind === "fetching");
+ const sentence = computed(() => {
+   const opening = props.opening;
+@@ -67,7 +67,7 @@ function openPage(): void {
+           :aria-label="pageTitle"
+           @click.stop="openPage"
+         >
+-          <span :title="row.title">{{ row.title }}</span>
++          {{ row.title }}
+         </button>
+         <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
+         <span class="shrink-0 text-fg-muted">{{ mr }}</span>
+@@ -91,25 +91,29 @@ function openPage(): void {
+         <ThumbsUp class="size-4" aria-hidden="true" />
+         <span aria-hidden="true">{{ row.approvals }}</span>
+       </span>
+-      <span class="flex w-7 shrink-0 cursor-default justify-center" @click.stop>
++      <span class="flex w-7 shrink-0 justify-center">
+         <CiStatusBox
+           v-if="row.pipeline !== null"
+           :pipeline="row.pipeline"
++          class="cursor-default"
++          @click.stop
+           @open-job="emit('openPage', 'job', $event)"
+         />
+       </span>
+-      <button
+-        type="button"
+-        :title="openTitle"
+-        :aria-label="openTitle"
+-        :aria-busy="fetching"
+-        :disabled="fetching"
+-        class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+-        @click.stop="emit('open', row.iid)"
+-      >
+-        <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
+-        <FileDiff v-else class="size-4" aria-hidden="true" />
+-      </button>
++      <span class="flex shrink-0" @click.stop>
++        <button
++          type="button"
++          :title="openTitle"
++          :aria-label="openTitle"
++          :aria-busy="fetching"
++          :disabled="fetching"
++          class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
++          @click="emit('open', row.iid)"
++        >
++          <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
++          <FileDiff v-else class="size-4" aria-hidden="true" />
++        </button>
++      </span>
+     </div>
+     <p
+       v-if="sentence !== null"
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 05d6563..4cc1c12 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -551,7 +551,7 @@ test("an opened page clears an earlier page problem, whichever kind it was", asy
+ 
+ test.each<[PageKind, string, MergeRequestStep]>([
+   ["job", JOB, "job"],
+-  ["mergeRequest", MR, "page"],
++  ["mergeRequest", MR, "mergeRequest"],
+ ])(
+   "a failed %s page call is reported at its own step and leaves no page problem",
+   async (clicked, address, step) => {
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 0d6e194..a2bea5c 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -31,7 +31,7 @@ import {
+ import { RECHECK_PAUSE_MS } from "./glab";
+ import { createRememberedFilters } from "./mergeRequestFilters";
+ import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
+-import { attempt, type MergeRequestStep, type Problem } from "./problem";
++import { attempt, type Problem } from "./problem";
+ import type { Screen } from "./screen";
+ 
+ export type ListLoad =
+@@ -183,15 +183,10 @@ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
+   setOpening(state, iid, reply.kind === "opened" ? { kind: "opened" } : { kind: "refused", reply });
+ }
+ 
+-const PAGE_STEPS: Readonly<Record<PageKind, MergeRequestStep>> = {
+-  job: "job",
+-  mergeRequest: "page",
+-};
+-
+ async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
+   const outcome = await attempt(() => state.source.openPage(page));
+   if (!outcome.ok) {
+-    state.report({ action: "mergeRequests", step: PAGE_STEPS[clicked], cause: outcome.cause });
++    state.report({ action: "mergeRequests", step: clicked, cause: outcome.cause });
+     return;
+   }
+   state.pageProblem.value = pageProblemText(outcome.value, clicked);
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 842be30..1ec4d31 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -75,7 +75,7 @@ test.each([
+ 
+ test("a row's button and a job's title name what they open; a job without a page says why", () => {
+   expect(openChangesTitle(IID)).toBe("Open the changes of !13");
+-  expect(openPageTitle(IID)).toBe("Open !13 on GitLab");
++  expect(openPageTitle(IID, "Fix: the login form")).toBe("Open !13 on GitLab: Fix: the login form");
+   expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
+     "Open the log of test on GitLab",
+   );
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index 32efe2f..2ca82a7 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -48,8 +48,8 @@ export function openChangesTitle(iid: MergeRequestIid): string {
+   return `Open the changes of ${mergeRequestReference(iid)}`;
+ }
+ 
+-export function openPageTitle(iid: MergeRequestIid): string {
+-  return `Open ${mergeRequestReference(iid)} on GitLab`;
++export function openPageTitle(iid: MergeRequestIid, title: string): string {
++  return `Open ${mergeRequestReference(iid)} on GitLab: ${title}`;
+ }
+ 
+ export function discussionsText(count: number): string {
+diff --git a/frontend/src/ui/problem.ts b/frontend/src/ui/problem.ts
+index 964e25b..edfc039 100644
+--- a/frontend/src/ui/problem.ts
++++ b/frontend/src/ui/problem.ts
+@@ -35,7 +35,7 @@ export type ThreadStep =
+ 
+ export type AiAttempt = "ask" | "diff" | "discard";
+ 
+-export type MergeRequestStep = "find" | "list" | "open" | "job" | "page";
++export type MergeRequestStep = "find" | "list" | "open" | "job" | "mergeRequest";
+ 
+ export type Problem =
+   | { readonly action: "list"; readonly cause: ProblemCause }
+diff --git a/frontend/src/ui/problemText.test.ts b/frontend/src/ui/problemText.test.ts
+index e475cbc..d280b61 100644
+--- a/frontend/src/ui/problemText.test.ts
++++ b/frontend/src/ui/problemText.test.ts
+@@ -287,7 +287,7 @@ test.each([
+   ["list", "Could not list the merge requests: yamt's worker stopped; try again."],
+   ["open", "Could not open the merge request's changes: yamt's worker stopped; try again."],
+   ["job", "Could not open the job's page: yamt's worker stopped; try again."],
+-  ["page", "Could not open the merge request's page: yamt's worker stopped; try again."],
++  ["mergeRequest", "Could not open the merge request's page: yamt's worker stopped; try again."],
+ ] as const)("a failed merge-request call at %s says what failed", (step, words) => {
+   expect(text({ action: "mergeRequests", step, cause: { kind: "WorkerStopped" } })).toBe(words);
+ });
+diff --git a/frontend/src/ui/problemText.ts b/frontend/src/ui/problemText.ts
+index 6cbc641..d06d2ef 100644
+--- a/frontend/src/ui/problemText.ts
++++ b/frontend/src/ui/problemText.ts
+@@ -75,7 +75,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
+   list: "Could not list the merge requests",
+   open: "Could not open the merge request's changes",
+   job: "Could not open the job's page",
+-  page: "Could not open the merge request's page",
++  mergeRequest: "Could not open the merge request's page",
+ };
+ 
+ const FIXED_ATTEMPT_WORDS: Readonly<

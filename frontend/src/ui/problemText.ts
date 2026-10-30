@@ -75,7 +75,7 @@ const MERGE_REQUEST_STEP_WORDS: Readonly<Record<MergeRequestStep, string>> = {
   list: "Could not list the merge requests",
   open: "Could not open the merge request's changes",
   job: "Could not open the job's page",
-  page: "Could not open the merge request's page",
+  mergeRequest: "Could not open the merge request's page",
 };
 
 const FIXED_ATTEMPT_WORDS: Readonly<

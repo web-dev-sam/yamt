@@ -48,8 +48,8 @@ export function openChangesTitle(iid: MergeRequestIid): string {
   return `Open the changes of ${mergeRequestReference(iid)}`;
 }
 
-export function openPageTitle(iid: MergeRequestIid): string {
-  return `Open ${mergeRequestReference(iid)} on GitLab`;
+export function openPageTitle(iid: MergeRequestIid, title: string): string {
+  return `Open ${mergeRequestReference(iid)} on GitLab: ${title}`;
 }
 
 export function discussionsText(count: number): string {

@@ -31,7 +31,7 @@ import {
 import { RECHECK_PAUSE_MS } from "./glab";
 import { createRememberedFilters } from "./mergeRequestFilters";
 import { listFailureText, pageProblemText, type PageKind } from "./mergeRequestsText";
-import { attempt, type MergeRequestStep, type Problem } from "./problem";
+import { attempt, type Problem } from "./problem";
 import type { Screen } from "./screen";
 
 export type ListLoad =
@@ -183,15 +183,10 @@ async function openChanges(state: State, iid: MergeRequestIid): Promise<void> {
   setOpening(state, iid, reply.kind === "opened" ? { kind: "opened" } : { kind: "refused", reply });
 }
 
-const PAGE_STEPS: Readonly<Record<PageKind, MergeRequestStep>> = {
-  job: "job",
-  mergeRequest: "page",
-};
-
 async function openPage(state: State, clicked: PageKind, page: WebPage): Promise<void> {
   const outcome = await attempt(() => state.source.openPage(page));
   if (!outcome.ok) {
-    state.report({ action: "mergeRequests", step: PAGE_STEPS[clicked], cause: outcome.cause });
+    state.report({ action: "mergeRequests", step: clicked, cause: outcome.cause });
     return;
   }
   state.pageProblem.value = pageProblemText(outcome.value, clicked);

@@ -75,7 +75,7 @@ test.each([
 
 test("a row's button and a job's title name what they open; a job without a page says why", () => {
   expect(openChangesTitle(IID)).toBe("Open the changes of !13");
-  expect(openPageTitle(IID)).toBe("Open !13 on GitLab");
+  expect(openPageTitle(IID, "Fix: the login form")).toBe("Open !13 on GitLab: Fix: the login form");
   expect(jobTitle("test", "https://gitlab.example/taskboard/taskboard/-/jobs/9001")).toBe(
     "Open the log of test on GitLab",
   );

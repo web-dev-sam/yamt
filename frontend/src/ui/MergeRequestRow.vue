@@ -33,7 +33,7 @@ const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
 const discussions = computed(() => discussionsText(props.row.openDiscussions));
 const approvals = computed(() => approvalsText(props.row.approvals));
 const openTitle = computed(() => openChangesTitle(props.row.iid));
-const pageTitle = computed(() => openPageTitle(props.row.iid));
+const pageTitle = computed(() => openPageTitle(props.row.iid, props.row.title));
 const fetching = computed(() => props.opening?.kind === "fetching");
 const sentence = computed(() => {
   const opening = props.opening;
@@ -67,7 +67,7 @@ function openPage(): void {
           :aria-label="pageTitle"
           @click.stop="openPage"
         >
-          <span :title="row.title">{{ row.title }}</span>
+          {{ row.title }}
         </button>
         <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
         <span class="shrink-0 text-fg-muted">{{ mr }}</span>
@@ -91,25 +91,29 @@ function openPage(): void {
         <ThumbsUp class="size-4" aria-hidden="true" />
         <span aria-hidden="true">{{ row.approvals }}</span>
       </span>
-      <span class="flex w-7 shrink-0 cursor-default justify-center" @click.stop>
+      <span class="flex w-7 shrink-0 justify-center">
         <CiStatusBox
           v-if="row.pipeline !== null"
           :pipeline="row.pipeline"
+          class="cursor-default"
+          @click.stop
           @open-job="emit('openPage', 'job', $event)"
         />
       </span>
-      <button
-        type="button"
-        :title="openTitle"
-        :aria-label="openTitle"
-        :aria-busy="fetching"
-        :disabled="fetching"
-        class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
-        @click.stop="emit('open', row.iid)"
-      >
-        <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
-        <FileDiff v-else class="size-4" aria-hidden="true" />
-      </button>
+      <span class="flex shrink-0" @click.stop>
+        <button
+          type="button"
+          :title="openTitle"
+          :aria-label="openTitle"
+          :aria-busy="fetching"
+          :disabled="fetching"
+          class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+          @click="emit('open', row.iid)"
+        >
+          <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
+          <FileDiff v-else class="size-4" aria-hidden="true" />
+        </button>
+      </span>
     </div>
     <p
       v-if="sentence !== null"

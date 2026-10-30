@@ -35,7 +35,7 @@ export type ThreadStep =
 
 export type AiAttempt = "ask" | "diff" | "discard";
 
-export type MergeRequestStep = "find" | "list" | "open" | "job" | "page";
+export type MergeRequestStep = "find" | "list" | "open" | "job" | "mergeRequest";
 
 export type Problem =
   | { readonly action: "list"; readonly cause: ProblemCause }

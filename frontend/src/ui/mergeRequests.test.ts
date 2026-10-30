@@ -551,7 +551,7 @@ test("an opened page clears an earlier page problem, whichever kind it was", asy
 
 test.each<[PageKind, string, MergeRequestStep]>([
   ["job", JOB, "job"],
-  ["mergeRequest", MR, "page"],
+  ["mergeRequest", MR, "mergeRequest"],
 ])(
   "a failed %s page call is reported at its own step and leaves no page problem",
   async (clicked, address, step) => {
