@@ -26,5 +26,15 @@
       "frontend/src/ui/mergeRequestActions.ts",
       "frontend/src/ui/mergeRequestActions.test.ts"
     ]
+  },
+  "MrConflictsWindowR2": {
+    "owned": [
+      "frontend/src/ui/pushing.ts",
+      "frontend/src/ui/pushing.test.ts",
+      "frontend/src/ui/problem.ts",
+      "frontend/src/ui/problem.test.ts",
+      "frontend/src/ui/problemText.ts",
+      "frontend/src/ui/problemText.test.ts"
+    ]
   }
 }
