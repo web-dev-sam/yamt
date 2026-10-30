@@ -13,13 +13,20 @@ function rowOf(rows: readonly Generated.MergeRequestRow[], iid: number): Generat
   return found;
 }
 
-test("the readiness cycle puts a conflict first, a fork's conflict second and a draft's blocker last (catches a page script finding no conflicting row)", () => {
+test("the readiness cycle holds each of its eight positions, a fork's conflict second and a draft's blocker last (catches a page script finding no row in a state)", () => {
   const rows = fixtureRows(0, LISTED);
   expect(rowOf(rows, 640).readiness).toEqual({ kind: "conflicts", also: [] });
   expect(rowOf(rows, 639).readiness).toEqual({ kind: "conflicts", also: [] });
+  expect(rowOf(rows, 638).readiness).toEqual({ kind: "ready" });
+  expect(rowOf(rows, 637).readiness).toEqual({ kind: "needsRebase" });
   expect(rowOf(rows, 636).readiness).toEqual({
     kind: "conflicts",
     also: [{ kind: "discussions" }],
+  });
+  expect(rowOf(rows, 635).readiness).toEqual({ kind: "checking" });
+  expect(rowOf(rows, 626).readiness).toEqual({
+    kind: "blocked",
+    reason: { kind: "pipelineMustPass" },
   });
   expect(rowOf(rows, 634).readiness).toEqual({ kind: "blocked", reason: { kind: "draft" } });
   expect(rowOf(rows, 620).readiness).toEqual({

@@ -112,13 +112,18 @@ fn without_a_remote_of_the_project_there_is_nothing_to_resolve_in() {
 }
 
 #[test]
-fn a_branch_name_naming_a_ref_to_write_is_refused() {
+fn a_source_or_target_branch_name_naming_a_ref_to_write_is_refused_and_changes_nothing() {
     let setup = Setup::new();
+    let before = setup.untouched();
 
-    let refused = setup.resolve(33);
+    let source = setup.resolve(33);
+    let target = setup.resolve(34);
 
     let message = r#"GitLab sent "feature/x:refs/heads/main" as a branch name"#.to_owned();
-    assert_eq!(refused, Err(ResolveRefusal::Failed { message }));
+    assert_eq!(source, Err(ResolveRefusal::Failed { message }));
+    let message = r#"GitLab sent "main:refs/heads/x" as a branch name"#.to_owned();
+    assert_eq!(target, Err(ResolveRefusal::Failed { message }));
+    assert_eq!(setup.untouched(), before);
 }
 
 #[test]

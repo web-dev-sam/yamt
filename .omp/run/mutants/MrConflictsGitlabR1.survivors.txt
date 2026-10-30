@@ -1,0 +1,2 @@
+just mutants HEAD (scratch): exit 4, the untracked local-merge copy failed its unmutated tests. Own diff: 0 Rust mutants (integration test only); only TS change is a .test.ts (excluded).
+fixtureMergeRequestData.ts:77-86 READINESS (27 in a range run, unchanged lines): #732 static false survivors, not equivalent. sed-changing 80/81/83/84 fails the test; 78/79/82/85 were already asserted.

@@ -1,0 +1,79 @@
+diff --git a/crates/merge-requests/tests/resolve.rs b/crates/merge-requests/tests/resolve.rs
+index f14e209..9050384 100644
+--- a/crates/merge-requests/tests/resolve.rs
++++ b/crates/merge-requests/tests/resolve.rs
+@@ -112,13 +112,18 @@ fn without_a_remote_of_the_project_there_is_nothing_to_resolve_in() {
+ }
+ 
+ #[test]
+-fn a_branch_name_naming_a_ref_to_write_is_refused() {
++fn a_source_or_target_branch_name_naming_a_ref_to_write_is_refused_and_changes_nothing() {
+     let setup = Setup::new();
++    let before = setup.untouched();
+ 
+-    let refused = setup.resolve(33);
++    let source = setup.resolve(33);
++    let target = setup.resolve(34);
+ 
+     let message = r#"GitLab sent "feature/x:refs/heads/main" as a branch name"#.to_owned();
+-    assert_eq!(refused, Err(ResolveRefusal::Failed { message }));
++    assert_eq!(source, Err(ResolveRefusal::Failed { message }));
++    let message = r#"GitLab sent "main:refs/heads/x" as a branch name"#.to_owned();
++    assert_eq!(target, Err(ResolveRefusal::Failed { message }));
++    assert_eq!(setup.untouched(), before);
+ }
+ 
+ #[test]
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.test.ts b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+index b664414..f65d4f3 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+@@ -13,14 +13,21 @@ function rowOf(rows: readonly Generated.MergeRequestRow[], iid: number): Generat
+   return found;
+ }
+ 
+-test("the readiness cycle puts a conflict first, a fork's conflict second and a draft's blocker last (catches a page script finding no conflicting row)", () => {
++test("the readiness cycle holds each of its eight positions, a fork's conflict second and a draft's blocker last (catches a page script finding no row in a state)", () => {
+   const rows = fixtureRows(0, LISTED);
+   expect(rowOf(rows, 640).readiness).toEqual({ kind: "conflicts", also: [] });
+   expect(rowOf(rows, 639).readiness).toEqual({ kind: "conflicts", also: [] });
++  expect(rowOf(rows, 638).readiness).toEqual({ kind: "ready" });
++  expect(rowOf(rows, 637).readiness).toEqual({ kind: "needsRebase" });
+   expect(rowOf(rows, 636).readiness).toEqual({
+     kind: "conflicts",
+     also: [{ kind: "discussions" }],
+   });
++  expect(rowOf(rows, 635).readiness).toEqual({ kind: "checking" });
++  expect(rowOf(rows, 626).readiness).toEqual({
++    kind: "blocked",
++    reason: { kind: "pipelineMustPass" },
++  });
+   expect(rowOf(rows, 634).readiness).toEqual({ kind: "blocked", reason: { kind: "draft" } });
+   expect(rowOf(rows, 620).readiness).toEqual({
+     kind: "conflicts",
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index a4ec5b8..0d78d02 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -98,9 +98,10 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+   `MERGE_TRAIN_STUCK`), !27 (`MERGEABLE`, no diff stats), !26 (`UNCHECKED`), !25 (a draft, `DRAFT_STATUS`), !24
+   (`NEED_REBASE`), !23 (`CONFLICT`, stale: `feature/clean` merges clean), !22 (`CONFLICT`, from a fork: source project
+   2, target 1), !21 (`CONFLICT`, `feature/due-dates` conflicts with `main`). The branches query over GraphQL, the
+-  branch names of `scripts/mr-conflict-repo.sh`, all into `main`: !21 `feature/due-dates`, !22 `feature/colours` from
+-  the fork, !23 `feature/clean`, !29 `feature/merged`, !30 merged, !33 `feature/x:refs/heads/main`, which a fetch
+-  refspec would read as a ref to write.
++  branch names of `scripts/mr-conflict-repo.sh`, into `main` but for !34: !21 `feature/due-dates`, !22
++  `feature/colours` from the fork, !23 `feature/clean`, !29 `feature/merged`, !30 merged, !33
++  `feature/x:refs/heads/main` and !34 `feature/due-dates` into `main:refs/heads/x`, branch names a fetch refspec
++  would read as a ref to write.
+ 
+ ## Fake browser opener
+ 
+diff --git a/tests/glab/mr-conflicts/graphql-merge-request-34.json b/tests/glab/mr-conflicts/graphql-merge-request-34.json
+new file mode 100644
+index 0000000..91c4575
+--- /dev/null
++++ b/tests/glab/mr-conflicts/graphql-merge-request-34.json
+@@ -0,0 +1 @@
++{"data":{"project":{"mergeRequest":{"state":"opened","sourceBranch":"feature/due-dates","targetBranch":"main:refs/heads/x","sourceProjectId":1,"targetProjectId":1}}}}
+\ No newline at end of file
