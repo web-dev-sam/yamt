@@ -5,6 +5,9 @@ inputs:
   rust:
     description: "'false' skips the Rust/Tauri part (Linux system packages, rustup, tauri-cli) for a frontend-only job."
     default: "true"
+  cache:
+    description: "'true' restores and saves the Rust build, the registry and installed cargo binaries (tauri-cli) between runs. ci.yml only: release.yml builds from scratch."
+    default: "false"
 
 runs:
   using: composite
@@ -22,6 +25,11 @@ runs:
       run: |
         rustup toolchain install
         rustup show active-toolchain
+
+    - uses: Swatinem/rust-cache@v2.9.3
+      if: inputs.rust == 'true' && inputs.cache == 'true'
+      with:
+        cache-on-failure: "true"
 
     - name: Tauri CLI
       if: inputs.rust == 'true'
