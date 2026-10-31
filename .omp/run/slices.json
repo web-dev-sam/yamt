@@ -1,5 +1,1 @@
-{
-  "MrRowTwoLines": {
-    "owned": ["frontend/src/ui/MergeRequestRow.vue", "frontend/src/ui/AGENTS.md"]
-  }
-}
+{}

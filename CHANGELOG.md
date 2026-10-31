@@ -25,8 +25,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rejected one keeps the commit local. Abort puts the checkout back as it was before the resolve — the branch you
   were on, a branch yamt created deleted, a branch it fast-forwarded moved back — even after yamt was closed in
   between, and lists anything it could not put back.
-- While such a merge is unfinished, its row offers "Continue merging !12" (it reopens the merge window), and every
-  other row's Resolve waits.
+- While such a merge is unfinished, its row offers "Continue merging" (it reopens the merge window), and every other
+  row's Resolve waits.
 
 ### Changed
 

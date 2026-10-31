@@ -6,12 +6,6 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
-## Merge-request row in two lines (session 40, owner: "make this more structured. All these info is in one line and misaligned" → picked "Two lines, like GitLab")
-
-| row | slice                                                                           | owner    | status  | evidence |
-| --- | ------------------------------------------------------------------------------- | -------- | ------- | -------- |
-| 1   | title line, muted details line (`briefs/mr-row-two-lines.md`) (`MrRowTwoLines`) | web-impl | running |          |
-
 ## Release 0.6.2 (session 38, owner request #1975: "merge this branch into main and release 0.6.2 … but fix CI before, windows and mac failed")
 
 `feat/merge-requests` has no commit outside `main` (merged in `2a4b7af`): nothing to merge. `v0.6.1` (`0927634`) is
