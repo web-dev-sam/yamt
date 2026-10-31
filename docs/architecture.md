@@ -686,8 +686,8 @@ Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (ma
   `pending` with a warning), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob {
   name, stage, allowFailure, page }`, `Pipeline { status, failedJobs, moreFailedJobs }`, `MergeRequestRow` (`createdAt`
   as GitLab sent it, `openDiscussions` = resolvable − resolved saturating, `approvals` = `approvedBy` nodes, `page` its
-  GitLab page or `None` off https, `size: Option<ChangeSize { additions, deletions, files }>` (none for a null
-  `diffStatsSummary`), `readiness: Readiness`, `fromFork`; #138), `Readiness` `ready` | `conflicts { also:
+  GitLab page or `None` off https, `size: Option<ChangeSize { additions, deletions, files }>` (the sums over
+  `diffStats`, `files` its entry count; none for a null or empty list), `readiness: Readiness`, `fromFork`; #138), `Readiness` `ready` | `conflicts { also:
   BlockedReason[] }` | `needsRebase` | `checking` | `blocked { reason }`, `BlockedReason` (GitLab's
   `DetailedMergeStatus` in yamt's words: `draft`, `discussions`, `approvals`, `pipelineMustPass`, …, `other { status
   }`), `MergeRequestPage { me, rows }`, `ListEnd` `loaded` | `cut { limit }` |
@@ -708,8 +708,9 @@ Package `yamt-merge-requests`; depends on `gitio` and `range` among `yamt-*` (ma
   `Project { full_path, web_path, web_origin }` (`web_path`:
   the `web_url` after the origin, so any sub-path GitLab is installed under stays; origin and path only on https,
   else `None` and empty); then at most 5 pages of the one single-line GraphQL query (`list_args`: `api graphql -f query=… -f
-  fullPath=<path> -F first=100 [-f after=<cursor>]`; it asks `detailedMergeStatus conflicts diffStatsSummary {
-  additions deletions fileCount } sourceProjectId targetProjectId` too), each its own glab call handed to `on_page` as
+  fullPath=<path> -F first=100 [-f after=<cursor>]`; it asks `detailedMergeStatus conflicts diffStats { additions
+  deletions } sourceProjectId targetProjectId` too — never `diffStatsSummary`, beside which gitlab.com answers
+  `CONFLICT` for clean merge requests in a list), each its own glab call handed to `on_page` as
   it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay;
   GraphQL `errors` win over `data`; the first page's `queryComplexity` logged at info. `page.rs` `readiness` folds
   the status and the `conflicts` flag into one state: a conflict (the flag or `CONFLICT`) comes first, with the

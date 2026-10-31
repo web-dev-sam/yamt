@@ -113,6 +113,8 @@ scripts/range-repo.sh    `<dir>`: the range window's smoke repository (Taskboard
 scripts/mr-conflict-repo.sh `<dir>`: the smoke repository of resolving a merge request's conflicts (plan §2 #138–#143): `main`, `develop` (checked out), `feature/due-dates` (conflicts with main),
                     `feature/clean`, `feature/merged`; a fake GitLab: the bare `.git/fake-gitlab.git` with every branch, `origin` https://gitlab.example/taskboard/taskboard.git through `url.<bare>.insteadOf`; the checkout
                     keeps only main and develop, no `refs/remotes`; fixed commit ids that crates/local-merge tests, src-tauri tests and `tests/glab/mr-conflicts` use
+scripts/gitlab-playground.sh `[--reset] <dir>`: fills a real GitLab project from `<dir>`'s `origin` with mr-conflict-repo.sh's branches (main never forced; the others force-pushed only with `--reset`)
+                    and opens their merge requests through `glab mr create` when none is open (!1 conflicts, two clean, a draft); `--reset` also puts the clone back on main; behind the VS Code tasks "gitlab: …"
 scripts/fake-glab/glab   the fake glab the review and merge-request tests and `app-session --glab` put first on PATH: answers from a `tests/glab/<scenario>/` folder (`merge-request-<iid>.json` first; `projects/:fullpath` → project.json;
                     `graphql` → `graphql-page-<n>.json` by the `after=page-<n>` field, `graphql-merge-request-<iid>.json` by `iid`; `-f`/`-F` fields make a POST), logs each call
 scripts/fake-open/xdg-open  the stand-in for xdg-open in tests and app sessions: opens nothing, appends `argv: <arguments>` to $YAMT_FAKE_OPEN_LOG (or the open.env beside it), exits 0
