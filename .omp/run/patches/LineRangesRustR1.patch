@@ -1,0 +1,606 @@
+diff --git a/crates/review/AGENTS.md b/crates/review/AGENTS.md
+index d3e6497..cc78d80 100644
+--- a/crates/review/AGENTS.md
++++ b/crates/review/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120, #121, #123, #145–#148): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `DiffLine` — `removed`/`added`/`unchanged`: a line of GitLab's one-column diff, no column —, `ThreadPlace` `{ start: DiffLine, end: ThreadLine }` (the lines a thread is on, `start` to `end` in GitLab's order, both included; `one_line(line)` is `{ start: line.diff_line(), end: line }`, the one shape of a one-line thread; `is_one_line`; `runs_forward`: where both ends have a left line start's is not after end's, the same for right lines — an added start and a removed end share no side, so their order is left to the editor, which orders by the differences), `MessageBody` `note`/`aiAnswer` (`session`, `turn`: the answer is turn `turn` among that session's answers, its text only in omp's session), `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`; `place`; `session` the conversation the next "Ask AI" continues), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 2 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `place` {`start`, `end`}, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a place that does not run forward, a thread without messages, a counter at `u32::MAX`, or a format below 1 ("format 0 is not 1 or 2"); `NewerFormat` above 2, so an older yamt refuses a format-2 file by name and never rewrites a range into its end line (RK49); nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read; `message`/`message_mut` the one way to find a message by id, `remove_message` the one way to take it out — from its own thread, and that thread when it is left empty), `thread_file/format_1.rs` (format 1, read only: each thread's `line` becomes `ThreadPlace::one_line(line)` and the file in memory is format 2, so reading never writes and the first change writes format 2), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread (refuses in the order `EmptyMessage`, `UnknownFile`, `BackwardPlace`; the place is not checked against the file's lines), add_note, set_session (replaces the thread's session), add_ai_answer (sets the session, then appends `AiAnswer { session, turn }`, turn = that session's answers already in the thread: the one numbering rule, #121), queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`), edit_note (the note's text; a note that waits for a send — `waiting_text_of`, the one waiting rule — becomes `Queued` with the new text, a `NotQueued` one stays, #123), delete_message (`remove_message` after a read-only check: the note leaves its thread; a thread left with no message leaves the file; the thread's session stays while the thread does, #123); edit and delete check in one order, the lookup then `require_unsent_note`: unknown or not on a listed path `UnknownMessage`, an AI answer `NotANote`, a pending message `MessagePending`, then (edit) blank text `EmptyMessage`; blank text is `EmptyMessage`, a pending message is `MessagePending`, a thread on a path the range does not list is `UnknownThread`; ids from the counters, never reused (a delete leaves the counters); the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule, `shown_message`/`shown_message_mut` the one shown-message lookup), `thread_store/waiting.rs` (the sender's side of the store, `pub(crate)`: `QueuedMessage` (with its thread's `place`), `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did; a gone message is `UnknownMessage`, unreachable while edit and delete wait for the send guard); `waiting_text_of` (`pub(super)`) the one rule of which postings wait), `position.rs` (the draft-notes body: `line_place` names the place's end line in `position.old_line`/`new_line`; `PostBody.multi_line` is `None` for a one-line place, so its body is unchanged, else `position.line_range { start, end }`; `same_draft`: the same text, head, paths and lines, and the same range ends by `type`, `old_line`, `new_line` (`line_code` follows from them), no range only matching no range), `position/line_codes.rs` (GitLab's multi-line ends, the one place of GitLab's numbering, RK48: each end `{ line_code, type?, old_line?, new_line? }`, 1-based, keys left out rather than `null`; `line_code` = `<SHA-1 of the entry's new path, also for a renamed file>_<old>_<new>` with GitLab's parser counters: an unchanged line its own two numbers and no `type` (GitLab's own form sends none, plan §2 #147), a removed line `type` `old` paired with its difference's first new line, an added line `type` `new` paired with the old line after its difference's removed lines; a changed end inside no difference is refused, "the thread's lines are not in this diff any more"), `gitlab.rs` (glab calls and GitLab's answers), `gitlab/drafts.rs` (the user's drafts read back: `position.line_range` `null` or missing is no range, a malformed one leaves the draft without a place), `send.rs` (`check_gitlab`, `send_queue`; a message whose place is not one line loads its file once through `Range::load` for the differences, a file without lines or a failed load refusing that message with its words). Depends on `yamt-range` (`Range::entry`, `Range::entries`, `Range::load`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`); `sha1` (plan §2 #147) for the line codes' path hash. Tests: unit tests in `thread_types.rs`, `thread_file.rs`, `thread_file/format_1.rs`, `thread_store/waiting.rs`, `position.rs`, `position/line_codes.rs`, `gitlab.rs`, `gitlab/drafts.rs`; on real temp folders with a `Range` over a `yamt-conflict-repo` repository: `tests/threads.rs` (the file format — format 2 round-trip, format 1 read and rewritten as format 2 by the first change —, adding, backward places, queueing, sessions and answers) and `tests/note_edits.rs` (edit and delete, #123), both over `tests/stored_threads/` (the shared repository, range, `threads.json` and list builders, `EVERY_KIND` in format 2 with a range across both sides); `tests/review.rs` over `scripts/range-repo.sh` and the fake glab (`tests/glab/`, including `line-range/` and `line-range-drafted/` for range bodies and their drafts).
++Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120, #121, #123, #145–#148): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `DiffLine` — `removed`/`added`/`unchanged`: a line of GitLab's one-column diff, no column; `left()`/`right()` (`pub(crate)`) the one rule of which side's number a line kind carries —, `ThreadPlace` `{ start: DiffLine, end: ThreadLine }` (the lines a thread is on, `start` to `end` in GitLab's order, both included; `one_line(line)` is `{ start: line.diff_line(), end: line }`, the one shape of a one-line thread; `is_one_line`; `runs_forward`: where both ends have a left line start's is not after end's, the same for right lines — a start and an end with no side in common (an added start and a removed end, or a removed start in a later difference than its added end) are not ordered here; the editor orders them by the differences), `MessageBody` `note`/`aiAnswer` (`session`, `turn`: the answer is turn `turn` among that session's answers, its text only in omp's session), `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`; `place`; `session` the conversation the next "Ask AI" continues), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 2 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `place` {`start`, `end`}, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a place that does not run forward, a thread without messages, a counter at `u32::MAX`, or a format below 1 ("format 0 is not 1 or 2"); `NewerFormat` above 2, so an older yamt refuses a format-2 file by name and never rewrites a range into its end line (RK49); nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read; `message`/`message_mut` the one way to find a message by id, `remove_message` the one way to take it out — from its own thread, and that thread when it is left empty), `thread_file/format_1.rs` (format 1, read only: each thread's `line` becomes `ThreadPlace::one_line(line)` and the file in memory is format 2, so reading never writes and the first change writes format 2), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread (refuses in the order `EmptyMessage`, `UnknownFile`, `BackwardPlace`; the place is not checked against the file's lines), add_note, set_session (replaces the thread's session), add_ai_answer (sets the session, then appends `AiAnswer { session, turn }`, turn = that session's answers already in the thread: the one numbering rule, #121), queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`), edit_note (the note's text; a note that waits for a send — `waiting_text_of`, the one waiting rule — becomes `Queued` with the new text, a `NotQueued` one stays, #123), delete_message (`remove_message` after a read-only check: the note leaves its thread; a thread left with no message leaves the file; the thread's session stays while the thread does, #123); edit and delete check in one order, the lookup then `require_unsent_note`: unknown or not on a listed path `UnknownMessage`, an AI answer `NotANote`, a pending message `MessagePending`, then (edit) blank text `EmptyMessage`; blank text is `EmptyMessage`, a pending message is `MessagePending`, a thread on a path the range does not list is `UnknownThread`; ids from the counters, never reused (a delete leaves the counters); the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule, `shown_message`/`shown_message_mut` the one shown-message lookup), `thread_store/waiting.rs` (the sender's side of the store, `pub(crate)`: `QueuedMessage` (with its thread's `place`), `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did; a gone message is `UnknownMessage`, unreachable while edit and delete wait for the send guard); `waiting_text_of` (`pub(super)`) the one rule of which postings wait), `position.rs` (the draft-notes body: `line_place` names the place's end line in `position.old_line`/`new_line`, both from `gitlab_lines`, the 1-based `DiffLine::left`/`right` that every end of a body uses; `PostBody.multi_line` is `None` for a one-line place, so its body is unchanged, else `position.line_range { start, end }`; `same_draft`: the same text, head, paths and lines, and the same range ends by `type`, `old_line`, `new_line` (`line_code` follows from them), no range only matching no range), `position/line_codes.rs` (GitLab's numbering of a multi-line end, RK48: `FileDiff` is a text file's differences and whether each side has no line at all; `line_code` = `<SHA-1 of the entry's new path, also for a renamed file>_<old>_<new>` with GitLab's parser counters: an unchanged line its own two numbers and no `type` (GitLab's own form sends none, plan §2 #147), a removed line `type` `old` paired with the new number of the line after its difference's removed lines, an added line `type` `new` paired with the old number of that line; a side with no line at all (an added file's left, a deleted file's right: git's hunk `@@ -0,0 +1,n @@` / `@@ -1,n +0,0 @@`) pairs with 0; a changed end inside no difference is refused, "the thread's lines are not in this diff any more"), `gitlab.rs` (glab calls and GitLab's answers), `gitlab/line_range.rs` (GitLab's `position[line_range]` shapes next to `LinePlace`: `LineType` `old`/`new`, `RangeEnd` `{ line_code, type?, old_line?, new_line? }` written 1-based with keys left out rather than `null`, `MultiLine`), `gitlab/drafts.rs` (the user's drafts read back: `position.line_range` `null` or missing is no range, a malformed one leaves the draft without a place), `send.rs` (`check_gitlab`, `send_queue`; a message whose place is not one line loads its file once through `Range::load` for the differences and its sides' emptiness, a file without lines or a failed load refusing that message with its words). Depends on `yamt-range` (`Range::entry`, `Range::entries`, `Range::load`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`); `sha1` (plan §2 #147) for the line codes' path hash. Tests: unit tests in `thread_types.rs`, `thread_file.rs`, `thread_file/format_1.rs`, `thread_store/waiting.rs`, `position.rs`, `position/line_codes.rs`, `gitlab.rs`, `gitlab/line_range.rs`, `gitlab/drafts.rs`; on real temp folders with a `Range` over a `yamt-conflict-repo` repository: `tests/threads.rs` (the file format — format 2 round-trip, format 1 read and rewritten as format 2 by the first change —, adding, backward places, queueing, sessions and answers) and `tests/note_edits.rs` (edit and delete, #123), both over `tests/stored_threads/` (the shared repository, range, `threads.json` and list builders, `EVERY_KIND` in format 2 with a range across both sides); `tests/review.rs` over `scripts/range-repo.sh` and the fake glab (`tests/glab/`, including `line-range/` and `line-range-drafted/` for range bodies and their drafts).
+diff --git a/crates/review/src/gitlab.rs b/crates/review/src/gitlab.rs
+index 7b1205c..9d1b58a 100644
+--- a/crates/review/src/gitlab.rs
++++ b/crates/review/src/gitlab.rs
+@@ -3,6 +3,7 @@ use serde_json::Value;
+ use crate::MergeRequestRef;
+ 
+ pub(crate) mod drafts;
++pub(crate) mod line_range;
+ 
+ const OPENED: &str = "opened";
+ 
+diff --git a/crates/review/src/gitlab/drafts.rs b/crates/review/src/gitlab/drafts.rs
+index 4132568..fb92171 100644
+--- a/crates/review/src/gitlab/drafts.rs
++++ b/crates/review/src/gitlab/drafts.rs
+@@ -1,7 +1,7 @@
+ use serde_json::Value;
+ 
++use super::line_range::{LineType, MultiLine, RangeEnd};
+ use super::{LinePlace, field_at, number_at, optional_line_at, text_at, unexpected};
+-use crate::position::{LineType, MultiLine, RangeEnd};
+ 
+ /// One of the user's draft notes on the merge request.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+diff --git a/crates/review/src/gitlab/line_range.rs b/crates/review/src/gitlab/line_range.rs
+new file mode 100644
+index 0000000..0b1a91d
+--- /dev/null
++++ b/crates/review/src/gitlab/line_range.rs
+@@ -0,0 +1,107 @@
++use serde_json::{Map, Value};
++
++const OLD: &str = "old";
++const NEW: &str = "new";
++
++/// The side of GitLab's diff a changed line is on; an unchanged line has none.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum LineType {
++    Old,
++    New,
++}
++
++impl LineType {
++    fn gitlab_name(self) -> &'static str {
++        match self {
++            LineType::Old => OLD,
++            LineType::New => NEW,
++        }
++    }
++
++    pub(crate) fn from_gitlab_name(name: &str) -> Option<LineType> {
++        match name {
++            OLD => Some(LineType::Old),
++            NEW => Some(LineType::New),
++            _ => None,
++        }
++    }
++}
++
++/// One end of GitLab's `position[line_range]`.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct RangeEnd {
++    pub(crate) line_code: String,
++    pub(crate) line_type: Option<LineType>,
++    pub(crate) old_line: Option<u32>,
++    pub(crate) new_line: Option<u32>,
++}
++
++/// GitLab's `position[line_range]`: the first and the last line of a thread on several lines.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct MultiLine {
++    pub(crate) start: RangeEnd,
++    pub(crate) end: RangeEnd,
++}
++
++impl RangeEnd {
++    /// `{ line_code, type?, old_line?, new_line? }`; GitLab's own form sends no `type` for an unchanged line
++    /// (`app/assets/javascripts/diffs/components/diff_line_note_form.vue:64-69`, v19.3.2-ee; plan §2 #147).
++    pub(crate) fn json(&self) -> Value {
++        let mut end = Map::new();
++        end.insert("line_code".to_owned(), self.line_code.clone().into());
++        if let Some(line_type) = self.line_type {
++            end.insert("type".to_owned(), line_type.gitlab_name().into());
++        }
++        insert_lines(&mut end, self.old_line, self.new_line);
++        Value::Object(end)
++    }
++}
++
++/// `old_line` and `new_line`, each only when the line has one.
++pub(crate) fn insert_lines(
++    object: &mut Map<String, Value>,
++    old_line: Option<u32>,
++    new_line: Option<u32>,
++) {
++    if let Some(line) = old_line {
++        object.insert("old_line".to_owned(), line.into());
++    }
++    if let Some(line) = new_line {
++        object.insert("new_line".to_owned(), line.into());
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn range_end(
++        line_code: &str,
++        line_type: Option<LineType>,
++        old_line: Option<u32>,
++        new_line: Option<u32>,
++    ) -> RangeEnd {
++        RangeEnd {
++            line_code: line_code.to_owned(),
++            line_type,
++            old_line,
++            new_line,
++        }
++    }
++
++    #[test]
++    fn a_range_end_writes_type_and_lines_only_where_the_line_has_them() {
++        let unchanged = range_end("h_1_2", None, Some(1), Some(2)).json();
++        let expected = serde_json::json!({ "line_code": "h_1_2", "old_line": 1, "new_line": 2 });
++        assert_eq!(unchanged, expected);
++        let removed = range_end("h_3_4", Some(LineType::Old), Some(3), None).json();
++        let expected = serde_json::json!({ "line_code": "h_3_4", "type": "old", "old_line": 3 });
++        assert_eq!(removed, expected);
++        let added = range_end("h_5_6", Some(LineType::New), None, Some(6)).json();
++        let expected = serde_json::json!({ "line_code": "h_5_6", "type": "new", "new_line": 6 });
++        assert_eq!(added, expected);
++        assert_eq!(LineType::from_gitlab_name("old"), Some(LineType::Old));
++        assert_eq!(LineType::from_gitlab_name("new"), Some(LineType::New));
++        assert_eq!(LineType::from_gitlab_name("context"), None);
++    }
++}
+diff --git a/crates/review/src/position.rs b/crates/review/src/position.rs
+index c11093a..074790b 100644
+--- a/crates/review/src/position.rs
++++ b/crates/review/src/position.rs
+@@ -1,13 +1,14 @@
+ use serde_json::{Map, Value};
+ use yamt_range::{RangeChange, RangeEntry};
+ 
+-use crate::ThreadLine;
+ use crate::gitlab::drafts::DraftNote;
++use crate::gitlab::line_range::{MultiLine, RangeEnd, insert_lines};
+ use crate::gitlab::{DiffRefs, LinePlace};
++use crate::{DiffLine, ThreadLine};
+ 
+ mod line_codes;
+ 
+-pub(crate) use line_codes::{LineType, MultiLine, RangeEnd, multi_line};
++pub(crate) use line_codes::{FileDiff, multi_line};
+ 
+ /// What the range shows in place of a byte it could not read as UTF-8.
+ const REPLACEMENT: char = '\u{FFFD}';
+@@ -33,20 +34,22 @@ pub(crate) fn line_place(entry: &RangeEntry, line: ThreadLine) -> Result<LinePla
+     if old_path.contains(REPLACEMENT) || entry.path.contains(REPLACEMENT) {
+         return Err(NOT_UTF8);
+     }
+-    let (old_line, new_line) = match line {
+-        ThreadLine::Removed { left } => (Some(left.0), None),
+-        ThreadLine::Added { right } => (None, Some(right.0)),
+-        ThreadLine::UnchangedOnLeft { left, right }
+-        | ThreadLine::UnchangedOnRight { left, right } => (Some(left.0), Some(right.0)),
+-    };
++    let (old_line, new_line) = gitlab_lines(line.diff_line());
+     Ok(LinePlace {
+         old_path: old_path.clone(),
+         new_path: entry.path.clone(),
+-        old_line: old_line.map(one_based),
+-        new_line: new_line.map(one_based),
++        old_line,
++        new_line,
+     })
+ }
+ 
++/// GitLab's 1-based `old_line` and `new_line` of `line`, each only when the line has one.
++fn gitlab_lines(line: DiffLine) -> (Option<u32>, Option<u32>) {
++    let old_line = line.left().map(|left| one_based(left.0));
++    let new_line = line.right().map(|right| one_based(right.0));
++    (old_line, new_line)
++}
++
+ fn one_based(line: u32) -> u32 {
+     line.saturating_add(1)
+ }
+@@ -85,16 +88,6 @@ impl PostBody {
+     }
+ }
+ 
+-/// `old_line` and `new_line`, each only when the line has one.
+-fn insert_lines(object: &mut Map<String, Value>, old_line: Option<u32>, new_line: Option<u32>) {
+-    if let Some(line) = old_line {
+-        object.insert("old_line".to_owned(), line.into());
+-    }
+-    if let Some(line) = new_line {
+-        object.insert("new_line".to_owned(), line.into());
+-    }
+-}
+-
+ /// A draft GitLab already holds for this body: the same text, paths, lines, range ends and head commit.
+ pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
+     let Some(placed) = &draft.placed else {
+@@ -130,6 +123,7 @@ mod tests {
+ 
+     use super::*;
+     use crate::gitlab::drafts::PlacedDraft;
++    use crate::gitlab::line_range::LineType;
+ 
+     fn entry(path: &str, change: RangeChange) -> RangeEntry {
+         RangeEntry {
+diff --git a/crates/review/src/position/line_codes.rs b/crates/review/src/position/line_codes.rs
+index 08a0300..30c7af0 100644
+--- a/crates/review/src/position/line_codes.rs
++++ b/crates/review/src/position/line_codes.rs
+@@ -1,78 +1,30 @@
+-use serde_json::{Map, Value};
+ use sha1::{Digest, Sha1};
+ use yamt_merge_core::Difference;
+ use yamt_range::RangeEntry;
+ 
+-use super::{insert_lines, one_based};
++use super::{gitlab_lines, one_based};
++use crate::gitlab::line_range::{LineType, MultiLine, RangeEnd};
+ use crate::{DiffLine, ThreadPlace};
+ 
+ const NOT_IN_THIS_DIFF: &str = "the thread's lines are not in this diff any more";
+-const OLD: &str = "old";
+-const NEW: &str = "new";
+ 
+-/// The side of GitLab's diff a changed line is on; an unchanged line has none.
+-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+-pub(crate) enum LineType {
+-    Old,
+-    New,
+-}
+-
+-impl LineType {
+-    fn gitlab_name(self) -> &'static str {
+-        match self {
+-            LineType::Old => OLD,
+-            LineType::New => NEW,
+-        }
+-    }
+-
+-    pub(crate) fn from_gitlab_name(name: &str) -> Option<LineType> {
+-        match name {
+-            OLD => Some(LineType::Old),
+-            NEW => Some(LineType::New),
+-            _ => None,
+-        }
+-    }
+-}
+-
+-/// One end of GitLab's `position[line_range]`.
++/// A text file's differences, and whether a side has no line at all (an added file's left, a deleted file's right).
+ #[derive(Clone, Debug, PartialEq, Eq)]
+-pub(crate) struct RangeEnd {
+-    pub(crate) line_code: String,
+-    pub(crate) line_type: Option<LineType>,
+-    pub(crate) old_line: Option<u32>,
+-    pub(crate) new_line: Option<u32>,
++pub(crate) struct FileDiff {
++    pub(crate) differences: Vec<Difference>,
++    pub(crate) left_is_empty: bool,
++    pub(crate) right_is_empty: bool,
+ }
+ 
+-/// GitLab's `position[line_range]`: the first and the last line of a thread on several lines.
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub(crate) struct MultiLine {
+-    pub(crate) start: RangeEnd,
+-    pub(crate) end: RangeEnd,
+-}
+-
+-impl RangeEnd {
+-    /// `{ line_code, type?, old_line?, new_line? }`; GitLab's own form sends no `type` for an unchanged line
+-    /// (`app/assets/javascripts/diffs/components/diff_line_note_form.vue:64-69`, v19.3.2-ee; plan §2 #147).
+-    pub(super) fn json(&self) -> Value {
+-        let mut end = Map::new();
+-        end.insert("line_code".to_owned(), self.line_code.clone().into());
+-        if let Some(line_type) = self.line_type {
+-            end.insert("type".to_owned(), line_type.gitlab_name().into());
+-        }
+-        insert_lines(&mut end, self.old_line, self.new_line);
+-        Value::Object(end)
+-    }
+-}
+-
+-/// Both ends of `place` in `entry` with `differences`. GitLab hashes the new path, also for a renamed file
++/// Both ends of `place` in `entry`. GitLab hashes the new path, also for a renamed file
+ /// (`lib/gitlab/diff/file.rb:83-85, 253-255`, v19.3.2-ee). `Err` names why it cannot be posted.
+ pub(crate) fn multi_line(
+     entry: &RangeEntry,
+-    differences: &[Difference],
++    diff: &FileDiff,
+     place: ThreadPlace,
+ ) -> Result<MultiLine, &'static str> {
+     let path_hash = format!("{:x}", Sha1::digest(entry.path.as_bytes()));
+-    let end_of = |line| range_end_of(&path_hash, differences, line).ok_or(NOT_IN_THIS_DIFF);
++    let end_of = |line| range_end_of(&path_hash, diff, line).ok_or(NOT_IN_THIS_DIFF);
+     Ok(MultiLine {
+         start: end_of(place.start)?,
+         end: end_of(place.end.diff_line())?,
+@@ -80,45 +32,44 @@ pub(crate) fn multi_line(
+ }
+ 
+ /// GitLab numbers a diff line by its parser's old and new counters when it reads the line
+-/// (`lib/gitlab/diff/parser.rb:13-14, 48, 52-64`, v19.3.2-ee): a removed line pairs with the new number of its
+-/// change's first added line, an added line with the old number after its change's removed lines. `None` for a
+-/// changed line inside no difference.
+-fn range_end_of(path_hash: &str, differences: &[Difference], line: DiffLine) -> Option<RangeEnd> {
+-    match line {
+-        DiffLine::Unchanged { left, right } => {
+-            let (old, new) = (one_based(left.0), one_based(right.0));
+-            Some(RangeEnd {
+-                line_code: line_code(path_hash, old, new),
+-                line_type: None,
+-                old_line: Some(old),
+-                new_line: Some(new),
+-            })
+-        }
++/// (`lib/gitlab/diff/parser.rb:13-14, 48, 52-64`, v19.3.2-ee): a removed line pairs with the new number of the line
++/// after its change's removed lines, an added line with the old number of that line. A side with no line at all
++/// counts from git's hunk header `@@ -0,0 +1,n @@` (or `+0,0`), so its lines pair with 0. `None` for a changed line
++/// inside no difference.
++fn range_end_of(path_hash: &str, diff: &FileDiff, line: DiffLine) -> Option<RangeEnd> {
++    let (line_type, old, new) = match line {
++        DiffLine::Unchanged { left, right } => (None, one_based(left.0), one_based(right.0)),
+         DiffLine::Removed { left } => {
+-            let difference = differences
++            let difference = diff
++                .differences
+                 .iter()
+                 .find(|difference| difference.left.start <= left && left < difference.left.end())?;
+-            let old = one_based(left.0);
+-            Some(RangeEnd {
+-                line_code: line_code(path_hash, old, one_based(difference.right.start.0)),
+-                line_type: Some(LineType::Old),
+-                old_line: Some(old),
+-                new_line: None,
+-            })
++            let new = if diff.right_is_empty {
++                0
++            } else {
++                one_based(difference.right.start.0)
++            };
++            (Some(LineType::Old), one_based(left.0), new)
+         }
+         DiffLine::Added { right } => {
+-            let difference = differences.iter().find(|difference| {
++            let difference = diff.differences.iter().find(|difference| {
+                 difference.right.start <= right && right < difference.right.end()
+             })?;
+-            let new = one_based(right.0);
+-            Some(RangeEnd {
+-                line_code: line_code(path_hash, one_based(difference.left.end().0), new),
+-                line_type: Some(LineType::New),
+-                old_line: None,
+-                new_line: Some(new),
+-            })
++            let old = if diff.left_is_empty {
++                0
++            } else {
++                one_based(difference.left.end().0)
++            };
++            (Some(LineType::New), old, one_based(right.0))
+         }
+-    }
++    };
++    let (old_line, new_line) = gitlab_lines(line);
++    Some(RangeEnd {
++        line_code: line_code(path_hash, old, new),
++        line_type,
++        old_line,
++        new_line,
++    })
+ }
+ 
+ /// `Gitlab::Git.diff_line_code` (`lib/gitlab/git.rb:113-115`, v19.3.2-ee).
+@@ -138,6 +89,10 @@ mod tests {
+     const BOARD: &str = "e783a9be490e9bcfa1e4a239bf6e62d2ab163459";
+     /// `printf '%s' docs/keys.md | sha1sum`
+     const KEYS: &str = "5aac5fc3e70b10f7e0b73e4222c367c9808e3eb3";
++    /// `printf '%s' src/board/reminders.ts | sha1sum`
++    const REMINDERS: &str = "0b766bb31a60a01e5f1284f46f34806d44b68dba";
++    /// `printf '%s' src/api/mockBoards.ts | sha1sum`
++    const MOCK_BOARDS: &str = "381f208cdbeb0d5464c4b33957afc4b6822e944e";
+ 
+     fn difference(left: u32, left_len: u32, right: u32, right_len: u32) -> Difference {
+         let no_words = DifferenceWords {
+@@ -163,10 +118,18 @@ mod tests {
+         }
+     }
+ 
++    fn modified(differences: Vec<Difference>) -> FileDiff {
++        FileDiff {
++            differences,
++            left_is_empty: false,
++            right_is_empty: false,
++        }
++    }
++
+     /// `src/board/board.ts` of `scripts/range-repo.sh`'s `main...feature` (`frontend/fixtures/range/review.json`
+     /// `files[7]`), 0-based.
+-    fn board_differences() -> Vec<Difference> {
+-        vec![
++    fn board_diff() -> FileDiff {
++        modified(vec![
+             difference(19, 1, 19, 2),
+             difference(179, 0, 180, 3),
+             difference(199, 1, 203, 1),
+@@ -174,7 +137,7 @@ mod tests {
+             difference(308, 18, 314, 0),
+             difference(415, 0, 403, 33),
+             difference(461, 0, 482, 2),
+-        ]
++        ])
+     }
+ 
+     fn entry(path: &str, change: RangeChange) -> RangeEntry {
+@@ -214,7 +177,7 @@ mod tests {
+ 
+     fn board_ends(start: DiffLine, end: ThreadLine) -> Result<MultiLine, &'static str> {
+         let board = entry("src/board/board.ts", RangeChange::Modified);
+-        multi_line(&board, &board_differences(), ThreadPlace { start, end })
++        multi_line(&board, &board_diff(), ThreadPlace { start, end })
+     }
+ 
+     #[test]
+@@ -258,10 +221,54 @@ mod tests {
+             start: removed(199),
+             end: added(203),
+         };
+-        let renamed_ends = multi_line(&keys, &board_differences(), place).unwrap();
++        let renamed_ends = multi_line(&keys, &board_diff(), place).unwrap();
+         assert_eq!(renamed_ends.start.line_code, format!("{KEYS}_200_204"));
+     }
+ 
++    /// `src/board/reminders.ts` (`review.json` `files[8]`, 11 lines) and `src/api/mockBoards.ts` (`files[6]`, 43
++    /// lines): git's hunks `@@ -0,0 +1,11 @@` and `@@ -1,43 +0,0 @@`.
++    #[test]
++    fn the_missing_side_of_an_added_or_a_deleted_file_is_numbered_0() {
++        let added_file = FileDiff {
++            differences: vec![difference(0, 0, 0, 11)],
++            left_is_empty: true,
++            right_is_empty: false,
++        };
++        let reminders = entry("src/board/reminders.ts", RangeChange::Added);
++        let place = ThreadPlace {
++            start: DiffLine::Added {
++                right: RightLine(0),
++            },
++            end: added(3),
++        };
++        let new = Some(LineType::New);
++        let added_ends = MultiLine {
++            start: range_end(&format!("{REMINDERS}_0_1"), new, None, Some(1)),
++            end: range_end(&format!("{REMINDERS}_0_4"), new, None, Some(4)),
++        };
++        assert_eq!(multi_line(&reminders, &added_file, place), Ok(added_ends));
++
++        let deleted_file = FileDiff {
++            differences: vec![difference(0, 43, 0, 0)],
++            left_is_empty: false,
++            right_is_empty: true,
++        };
++        let mock_boards = entry("src/api/mockBoards.ts", RangeChange::Deleted);
++        let place = ThreadPlace {
++            start: removed(0),
++            end: ThreadLine::Removed { left: LeftLine(42) },
++        };
++        let old = Some(LineType::Old);
++        let removed_ends = MultiLine {
++            start: range_end(&format!("{MOCK_BOARDS}_1_0"), old, Some(1), None),
++            end: range_end(&format!("{MOCK_BOARDS}_43_0"), old, Some(43), None),
++        };
++        assert_eq!(
++            multi_line(&mock_boards, &deleted_file, place),
++            Ok(removed_ends)
++        );
++    }
++
+     #[test]
+     fn a_changed_end_inside_no_difference_is_not_in_this_diff() {
+         let not_in_this_diff = Err(NOT_IN_THIS_DIFF);
+@@ -270,20 +277,4 @@ mod tests {
+         assert_eq!(board_ends(removed(199), added(204)), not_in_this_diff);
+         assert_eq!(board_ends(removed(199), added(202)), not_in_this_diff);
+     }
+-
+-    #[test]
+-    fn a_range_end_writes_type_and_lines_only_where_the_line_has_them() {
+-        let unchanged = range_end("h_1_2", None, Some(1), Some(2)).json();
+-        let expected = serde_json::json!({ "line_code": "h_1_2", "old_line": 1, "new_line": 2 });
+-        assert_eq!(unchanged, expected);
+-        let removed = range_end("h_3_4", Some(LineType::Old), Some(3), None).json();
+-        let expected = serde_json::json!({ "line_code": "h_3_4", "type": "old", "old_line": 3 });
+-        assert_eq!(removed, expected);
+-        let added = range_end("h_5_6", Some(LineType::New), None, Some(6)).json();
+-        let expected = serde_json::json!({ "line_code": "h_5_6", "type": "new", "new_line": 6 });
+-        assert_eq!(added, expected);
+-        assert_eq!(LineType::from_gitlab_name("old"), Some(LineType::Old));
+-        assert_eq!(LineType::from_gitlab_name("new"), Some(LineType::New));
+-        assert_eq!(LineType::from_gitlab_name("context"), None);
+-    }
+ }
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+index ef2bca2..dd298e3 100644
+--- a/crates/review/src/send.rs
++++ b/crates/review/src/send.rs
+@@ -5,13 +5,14 @@ use yamt_gitio::{AuthStatus, Glab, Repo};
+ use yamt_range::{Compared, Range, RangeEntry, RangeFile};
+ 
+ use crate::gitlab::drafts::{DraftNote, draft_notes_from};
++use crate::gitlab::line_range::MultiLine;
+ use crate::gitlab::{
+     draft_notes, listed_from, merge_request_details, merge_request_from,
+     merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
+ };
+ use crate::glab_answer::{Outcome, answer, posted, run};
+ use crate::lines_up::{Found, LinedUp, candidates, lines_up};
+-use crate::position::{MultiLine, PostBody, line_place, multi_line, same_draft};
++use crate::position::{FileDiff, PostBody, line_place, multi_line, same_draft};
+ use crate::right_branch::right_branch;
+ use crate::thread_store::waiting::QueuedMessage;
+ use crate::{
+@@ -182,8 +183,17 @@ fn range_ends(
+     entry: &RangeEntry,
+     place: ThreadPlace,
+ ) -> std::result::Result<MultiLine, String> {
+-    let differences = match range.load(entry.id) {
+-        Ok(RangeFile::Texts { differences, .. }) => differences,
++    let diff = match range.load(entry.id) {
++        Ok(RangeFile::Texts {
++            left,
++            right,
++            differences,
++            ..
++        }) => FileDiff {
++            differences,
++            left_is_empty: left.is_empty(),
++            right_is_empty: right.is_empty(),
++        },
+         Ok(
+             RangeFile::Binary
+             | RangeFile::TooLarge { .. }
+@@ -194,7 +204,7 @@ fn range_ends(
+         ) => return Err(NO_LINES.to_owned()),
+         Err(error) => return Err(error.to_string()),
+     };
+-    multi_line(entry, &differences, place).map_err(str::to_owned)
++    multi_line(entry, &diff, place).map_err(str::to_owned)
+ }
+ 
+ fn pending(target: &LinedUp, text: &str, draft_note: u64) -> Posting {
+diff --git a/crates/review/src/thread_types.rs b/crates/review/src/thread_types.rs
+index 345e54d..b1edeea 100644
+--- a/crates/review/src/thread_types.rs
++++ b/crates/review/src/thread_types.rs
+@@ -79,14 +79,14 @@ pub enum DiffLine {
+ }
+ 
+ impl DiffLine {
+-    fn left(self) -> Option<LeftLine> {
++    pub(crate) fn left(self) -> Option<LeftLine> {
+         match self {
+             DiffLine::Removed { left } | DiffLine::Unchanged { left, .. } => Some(left),
+             DiffLine::Added { .. } => None,
+         }
+     }
+ 
+-    fn right(self) -> Option<RightLine> {
++    pub(crate) fn right(self) -> Option<RightLine> {
+         match self {
+             DiffLine::Added { right } | DiffLine::Unchanged { right, .. } => Some(right),
+             DiffLine::Removed { .. } => None,
+@@ -303,13 +303,14 @@ mod tests {
+         assert!(!place(unchanged(5, 8), on_left(5, 7)).runs_forward());
+     }
+ 
+-    // An added start and a removed end share no side, so the order of the two is not seen here: only the
+-    // differences tell, and the editor orders by them.
++    // A start and an end with no side in common (an added start and a removed end, or a removed start in a later
++    // difference than its added end) are not ordered here: only the differences tell, and the editor orders by them.
+     #[test]
+-    fn an_added_start_and_a_removed_end_run_forward_unseen() {
++    fn a_start_and_an_end_with_no_side_in_common_run_forward_unseen() {
+         let start = DiffLine::Added {
+             right: RightLine(9),
+         };
+         assert!(place(start, removed_end(1)).runs_forward());
++        assert!(place(removed(40), added(2)).runs_forward());
+     }
+ }

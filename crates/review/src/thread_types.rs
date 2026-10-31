@@ -79,14 +79,14 @@ pub enum DiffLine {
 }
 
 impl DiffLine {
-    fn left(self) -> Option<LeftLine> {
+    pub(crate) fn left(self) -> Option<LeftLine> {
         match self {
             DiffLine::Removed { left } | DiffLine::Unchanged { left, .. } => Some(left),
             DiffLine::Added { .. } => None,
         }
     }
 
-    fn right(self) -> Option<RightLine> {
+    pub(crate) fn right(self) -> Option<RightLine> {
         match self {
             DiffLine::Added { right } | DiffLine::Unchanged { right, .. } => Some(right),
             DiffLine::Removed { .. } => None,
@@ -303,13 +303,14 @@ mod tests {
         assert!(!place(unchanged(5, 8), on_left(5, 7)).runs_forward());
     }
 
-    // An added start and a removed end share no side, so the order of the two is not seen here: only the
-    // differences tell, and the editor orders by them.
+    // A start and an end with no side in common (an added start and a removed end, or a removed start in a later
+    // difference than its added end) are not ordered here: only the differences tell, and the editor orders by them.
     #[test]
-    fn an_added_start_and_a_removed_end_run_forward_unseen() {
+    fn a_start_and_an_end_with_no_side_in_common_run_forward_unseen() {
         let start = DiffLine::Added {
             right: RightLine(9),
         };
         assert!(place(start, removed_end(1)).runs_forward());
+        assert!(place(removed(40), added(2)).runs_forward());
     }
 }

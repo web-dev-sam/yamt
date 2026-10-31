@@ -1,7 +1,7 @@
 use serde_json::Value;
 
+use super::line_range::{LineType, MultiLine, RangeEnd};
 use super::{LinePlace, field_at, number_at, optional_line_at, text_at, unexpected};
-use crate::position::{LineType, MultiLine, RangeEnd};
 
 /// One of the user's draft notes on the merge request.
 #[derive(Clone, Debug, PartialEq, Eq)]

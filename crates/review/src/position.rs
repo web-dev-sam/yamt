@@ -1,13 +1,14 @@
 use serde_json::{Map, Value};
 use yamt_range::{RangeChange, RangeEntry};
 
-use crate::ThreadLine;
 use crate::gitlab::drafts::DraftNote;
+use crate::gitlab::line_range::{MultiLine, RangeEnd, insert_lines};
 use crate::gitlab::{DiffRefs, LinePlace};
+use crate::{DiffLine, ThreadLine};
 
 mod line_codes;
 
-pub(crate) use line_codes::{LineType, MultiLine, RangeEnd, multi_line};
+pub(crate) use line_codes::{FileDiff, multi_line};
 
 /// What the range shows in place of a byte it could not read as UTF-8.
 const REPLACEMENT: char = '\u{FFFD}';
@@ -33,18 +34,20 @@ pub(crate) fn line_place(entry: &RangeEntry, line: ThreadLine) -> Result<LinePla
     if old_path.contains(REPLACEMENT) || entry.path.contains(REPLACEMENT) {
         return Err(NOT_UTF8);
     }
-    let (old_line, new_line) = match line {
-        ThreadLine::Removed { left } => (Some(left.0), None),
-        ThreadLine::Added { right } => (None, Some(right.0)),
-        ThreadLine::UnchangedOnLeft { left, right }
-        | ThreadLine::UnchangedOnRight { left, right } => (Some(left.0), Some(right.0)),
-    };
+    let (old_line, new_line) = gitlab_lines(line.diff_line());
     Ok(LinePlace {
         old_path: old_path.clone(),
         new_path: entry.path.clone(),
-        old_line: old_line.map(one_based),
-        new_line: new_line.map(one_based),
+        old_line,
+        new_line,
     })
+}
+
+/// GitLab's 1-based `old_line` and `new_line` of `line`, each only when the line has one.
+fn gitlab_lines(line: DiffLine) -> (Option<u32>, Option<u32>) {
+    let old_line = line.left().map(|left| one_based(left.0));
+    let new_line = line.right().map(|right| one_based(right.0));
+    (old_line, new_line)
 }
 
 fn one_based(line: u32) -> u32 {
@@ -85,16 +88,6 @@ impl PostBody {
     }
 }
 
-/// `old_line` and `new_line`, each only when the line has one.
-fn insert_lines(object: &mut Map<String, Value>, old_line: Option<u32>, new_line: Option<u32>) {
-    if let Some(line) = old_line {
-        object.insert("old_line".to_owned(), line.into());
-    }
-    if let Some(line) = new_line {
-        object.insert("new_line".to_owned(), line.into());
-    }
-}
-
 /// A draft GitLab already holds for this body: the same text, paths, lines, range ends and head commit.
 pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
     let Some(placed) = &draft.placed else {
@@ -130,6 +123,7 @@ mod tests {
 
     use super::*;
     use crate::gitlab::drafts::PlacedDraft;
+    use crate::gitlab::line_range::LineType;
 
     fn entry(path: &str, change: RangeChange) -> RangeEntry {
         RangeEntry {

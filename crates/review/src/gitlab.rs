@@ -3,6 +3,7 @@ use serde_json::Value;
 use crate::MergeRequestRef;
 
 pub(crate) mod drafts;
+pub(crate) mod line_range;
 
 const OPENED: &str = "opened";
 

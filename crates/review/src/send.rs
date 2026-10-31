@@ -5,13 +5,14 @@ use yamt_gitio::{AuthStatus, Glab, Repo};
 use yamt_range::{Compared, Range, RangeEntry, RangeFile};
 
 use crate::gitlab::drafts::{DraftNote, draft_notes_from};
+use crate::gitlab::line_range::MultiLine;
 use crate::gitlab::{
     draft_notes, listed_from, merge_request_details, merge_request_from,
     merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
 };
 use crate::glab_answer::{Outcome, answer, posted, run};
 use crate::lines_up::{Found, LinedUp, candidates, lines_up};
-use crate::position::{MultiLine, PostBody, line_place, multi_line, same_draft};
+use crate::position::{FileDiff, PostBody, line_place, multi_line, same_draft};
 use crate::right_branch::right_branch;
 use crate::thread_store::waiting::QueuedMessage;
 use crate::{
@@ -182,8 +183,17 @@ fn range_ends(
     entry: &RangeEntry,
     place: ThreadPlace,
 ) -> std::result::Result<MultiLine, String> {
-    let differences = match range.load(entry.id) {
-        Ok(RangeFile::Texts { differences, .. }) => differences,
+    let diff = match range.load(entry.id) {
+        Ok(RangeFile::Texts {
+            left,
+            right,
+            differences,
+            ..
+        }) => FileDiff {
+            differences,
+            left_is_empty: left.is_empty(),
+            right_is_empty: right.is_empty(),
+        },
         Ok(
             RangeFile::Binary
             | RangeFile::TooLarge { .. }
@@ -194,7 +204,7 @@ fn range_ends(
         ) => return Err(NO_LINES.to_owned()),
         Err(error) => return Err(error.to_string()),
     };
-    multi_line(entry, &differences, place).map_err(str::to_owned)
+    multi_line(entry, &diff, place).map_err(str::to_owned)
 }
 
 fn pending(target: &LinedUp, text: &str, draft_note: u64) -> Posting {
