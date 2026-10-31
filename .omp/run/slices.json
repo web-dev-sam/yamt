@@ -1,8 +1,1 @@
-{
-  "LineRangesEditor": {
-    "owned": ["frontend/src/editor/**"]
-  },
-  "LineRangesDomainR1": {
-    "owned": ["frontend/src/ipc/reviewDomain.test.ts"]
-  }
-}
+{}
