@@ -18,8 +18,8 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
   --repo <path>     any directory inside the work tree
   --diff            compare pasted texts instead of merging
   --diff=<range>    review a commit range
-  --ai              with --diff=<range>: an AI agent answers review comments in its own checkout; with --diff:
-                    the changes windows its merge-request page opens get it too
+  --ai              with --diff=<range>: an AI agent answers review comments in its own checkout; with --diff or
+                    --diff=<range>: the changes windows its merge-request page opens get it too
   --help            print this help
   --version         print the version
 ";
@@ -49,7 +49,7 @@ pub(crate) enum Invocation {
 }
 
 /// `--ai`: accepted with every mode, kept by a range window and by the compare window for the range windows its
-/// merge-request page opens (plan §2 #108).
+/// merge-request page opens (plan §2 #108, #144).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ai {
     Off,

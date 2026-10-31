@@ -105,6 +105,14 @@ fn list(window: &MergeRequestWindow) -> Vec<Value> {
     received.try_iter().collect()
 }
 
+#[test]
+fn a_range_window_s_merge_request_state_keeps_its_own_ai() {
+    for ai in [Ai::Off, Ai::On] {
+        let window = crate::range::tests::open_range_window_with(ai);
+        assert_eq!(window.webview.state::<MergeRequestState>().ai, ai);
+    }
+}
+
 #[cfg(unix)]
 mod resolve;
 

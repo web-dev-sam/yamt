@@ -1,0 +1,2 @@
+just mutants HEAD → "INFO No mutants to filter"; the changed Rust lines are test code, doc comments and the USAGE const string, none of which cargo-mutants mutates
+
