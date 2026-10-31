@@ -2,7 +2,9 @@ import { expect, test } from "vitest";
 
 import {
   changedThreadLine,
+  diffLineOf,
   loadCompareFixture,
+  onePlace,
   unchangedThreadLine,
   type Difference,
 } from "../../ipc";
@@ -32,8 +34,8 @@ test("a removed line's gap sits after the difference's right lines", async () =>
     { left: { start: 1, len: 2 }, right: { start: 1, len: 4 } },
   ]);
   const threads: ShownThread[] = [
-    { key: "removed", line: changedThreadLine("left", 1), shown: "open" },
-    { key: "added", line: changedThreadLine("right", 2), shown: "open" },
+    { key: "removed", place: onePlace(changedThreadLine("left", 1)), shown: "open" },
+    { key: "added", place: onePlace(changedThreadLine("right", 2)), shown: "open" },
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
@@ -48,9 +50,9 @@ test("an unchanged line's threads from both columns share one row", async () => 
   ]);
   const lines = { left: 7, right: 9 };
   const threads: ShownThread[] = [
-    { key: "on-left", line: unchangedThreadLine("left", lines), shown: "open" },
-    { key: "on-right", line: unchangedThreadLine("right", lines), shown: "draft" },
-    { key: "second", line: unchangedThreadLine("left", lines), shown: "open" },
+    { key: "on-left", place: onePlace(unchangedThreadLine("left", lines)), shown: "open" },
+    { key: "on-right", place: onePlace(unchangedThreadLine("right", lines)), shown: "draft" },
+    { key: "second", place: onePlace(unchangedThreadLine("left", lines)), shown: "open" },
   ];
 
   const rows = threadRows(differences, threads);
@@ -69,8 +71,8 @@ test("rows at one place keep their order by the other column's place", async () 
     { left: { start: 3, len: 0 }, right: { start: 3, len: 3 } },
   ]);
   const threads: ShownThread[] = [
-    { key: "later", line: changedThreadLine("right", 5), shown: "open" },
-    { key: "earlier", line: changedThreadLine("right", 3), shown: "open" },
+    { key: "later", place: onePlace(changedThreadLine("right", 5)), shown: "open" },
+    { key: "earlier", place: onePlace(changedThreadLine("right", 3)), shown: "open" },
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
@@ -84,10 +86,14 @@ test("collapsed threads place no row, drafts do", async () => {
   const threads: ShownThread[] = [
     {
       key: "collapsed",
-      line: unchangedThreadLine("left", { left: 0, right: 0 }),
+      place: onePlace(unchangedThreadLine("left", { left: 0, right: 0 })),
       shown: "collapsed",
     },
-    { key: "draft", line: unchangedThreadLine("right", { left: 4, right: 4 }), shown: "draft" },
+    {
+      key: "draft",
+      place: onePlace(unchangedThreadLine("right", { left: 4, right: 4 })),
+      shown: "draft",
+    },
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
@@ -100,13 +106,44 @@ test("a removed line in a pure deletion places its row on the right's empty side
     { left: { start: 3, len: 2 }, right: { start: 3, len: 0 } },
   ]);
   const threads: ShownThread[] = [
-    { key: "removed", line: changedThreadLine("left", 4), shown: "open" },
-    { key: "before", line: unchangedThreadLine("left", { left: 2, right: 2 }), shown: "open" },
+    { key: "removed", place: onePlace(changedThreadLine("left", 4)), shown: "open" },
+    {
+      key: "before",
+      place: onePlace(unchangedThreadLine("left", { left: 2, right: 2 })),
+      shown: "open",
+    },
   ];
 
   expect(places(threadRows(differences, threads))).toEqual([
     { place: { left: 3, right: 3 }, keys: { left: ["before"], right: [] }, kind: "unchanged" },
     { place: { left: 5, right: 3 }, keys: { left: ["removed"], right: [] }, kind: "rightEmpty" },
+  ]);
+});
+
+test("a range's row sits under its end line, not its start; two ranges ending on one line share it", async () => {
+  const differences = await differencesOf([
+    { left: { start: 3, len: 1 }, right: { start: 3, len: 2 } },
+  ]);
+  const end = changedThreadLine("right", 4);
+  const threads: ShownThread[] = [
+    {
+      key: "from-unchanged",
+      place: { start: diffLineOf(unchangedThreadLine("left", { left: 1, right: 1 })), end },
+      shown: "open",
+    },
+    {
+      key: "from-removed",
+      place: { start: diffLineOf(changedThreadLine("left", 3)), end },
+      shown: "draft",
+    },
+  ];
+
+  expect(places(threadRows(differences, threads))).toEqual([
+    {
+      place: { left: 4, right: 5 },
+      keys: { left: [], right: ["from-unchanged", "from-removed"] },
+      kind: "changed",
+    },
   ]);
 });
 

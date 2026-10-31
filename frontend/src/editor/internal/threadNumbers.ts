@@ -15,7 +15,7 @@ import { threadField, type LineCount } from "./threadField";
 import type { ShownThread } from "./threadRows";
 
 export type NumberPress =
-  | { readonly kind: "start"; readonly line: ThreadLine }
+  | { readonly kind: "drag"; readonly line: ThreadLine }
   | { readonly kind: "toggle"; readonly keys: readonly string[] };
 
 const COUNT_CLASS = "cm-thread-count";
@@ -23,7 +23,7 @@ const COUNT_CLASS = "cm-thread-count";
 export function lineCounts(threads: readonly ShownThread[], column: Column): LineCount[] {
   const counts = new Map<number, string[]>();
   for (const thread of threads) {
-    const shown = shownLine(thread.line);
+    const shown = shownLine(thread.place.end);
     if (thread.shown === "draft" || shown.column !== column) {
       continue;
     }
@@ -48,7 +48,7 @@ export function numberPress(press: {
 }): NumberPress {
   const count = press.onBadge ? press.counts.find(({ line }) => line === press.line) : undefined;
   return count === undefined
-    ? { kind: "start", line: anchorAt(press.differences, press.column, press.line) }
+    ? { kind: "drag", line: anchorAt(press.differences, press.column, press.line) }
     : { kind: "toggle", keys: count.keys };
 }
 
@@ -101,7 +101,7 @@ const iconTheme = EditorView.theme({
 });
 
 export function threadNumbers(
-  pressed: (view: EditorView, line: number, onBadge: boolean) => void,
+  pressed: (view: EditorView, line: number, onBadge: boolean, event: MouseEvent) => void,
 ): Extension {
   return [
     lineNumbers({
@@ -122,7 +122,7 @@ export function threadNumbers(
           if (line === null) {
             return false;
           }
-          pressed(view, line, target.closest(`.${COUNT_CLASS}`) !== null);
+          pressed(view, line, target.closest(`.${COUNT_CLASS}`) !== null, event);
           return true;
         },
       },

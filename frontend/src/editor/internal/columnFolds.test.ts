@@ -9,13 +9,16 @@ import { expect, test } from "vitest";
 
 import {
   changedThreadLine,
+  diffLineOf,
   loadCompareFixture,
+  onePlace,
   unchangedThreadLine,
   type Column,
   type ShownThread,
 } from "../../ipc";
 import {
   columnChanges,
+  hiddenLeft,
   columnFoldExtension,
   columnSteps,
   hiddenIn,
@@ -140,8 +143,22 @@ function thread(
 ): ShownThread {
   return {
     key: `${column} ${lines.left} ${shown}`,
-    line: unchangedThreadLine(column, lines),
+    place: onePlace(unchangedThreadLine(column, lines)),
     shown,
+  };
+}
+
+function range(
+  start: { readonly left: number; readonly right: number },
+  end: { readonly left: number; readonly right: number },
+): ShownThread {
+  return {
+    key: `${start.left}-${end.left}`,
+    place: {
+      start: diffLineOf(unchangedThreadLine("left", start)),
+      end: unchangedThreadLine("right", end),
+    },
+    shown: "open",
   };
 }
 
@@ -216,8 +233,16 @@ test.each(COLUMNS)(
 );
 
 test("threads on removed or added lines change no run", () => {
-  const removed: ShownThread = { key: "r", line: changedThreadLine("left", 30), shown: "open" };
-  const added: ShownThread = { key: "a", line: changedThreadLine("right", 71), shown: "draft" };
+  const removed: ShownThread = {
+    key: "r",
+    place: onePlace(changedThreadLine("left", 30)),
+    shown: "open",
+  };
+  const added: ShownThread = {
+    key: "a",
+    place: onePlace(changedThreadLine("right", 71)),
+    shown: "draft",
+  };
   const runs = rangeRuns(DIFFERENCES, [removed, added], DOCS);
   const plain = rangeRuns(DIFFERENCES, [], DOCS);
 
@@ -266,6 +291,73 @@ test.each(SAME_LINE_COLUMNS)(
     expect(changes).toContainEqual(threadLines);
   },
 );
+
+test("every unchanged line of a range stays shown under collapse, split across a difference", () => {
+  const across = range({ left: 20, right: 20 }, { left: 45, right: 46 });
+
+  expect(columnChanges(DIFFERENCES, [across])).toEqual([
+    { left: { start: 20, len: 10 }, right: { start: 20, len: 10 } },
+    { left: { start: 30, len: 1 }, right: { start: 30, len: 2 } },
+    { left: { start: 31, len: 15 }, right: { start: 32, len: 15 } },
+    { left: { start: 70, len: 0 }, right: { start: 71, len: 1 } },
+  ]);
+  const pair = opened([across]);
+  expect(waves(pair.left, "left")).toEqual(["1-16", "-", "-", "51-66", "75-100"]);
+  expect(waves(pair.right, "right")).toEqual(["1-16", "-", "-", "52-67", "77-102"]);
+});
+
+test("two overlapping ranges merge so neither's lines hide; touching ones join, not across an insertion", () => {
+  const long = range({ left: 40, right: 41 }, { left: 60, right: 61 });
+  const short = range({ left: 45, right: 46 }, { left: 50, right: 51 });
+  const touching = range({ left: 61, right: 62 }, { left: 64, right: 65 });
+  const beforeInsertion = range({ left: 65, right: 66 }, { left: 69, right: 70 });
+  const afterInsertion = range({ left: 70, right: 72 }, { left: 72, right: 74 });
+
+  expect(
+    columnChanges(DIFFERENCES, [short, touching, long, beforeInsertion, afterInsertion]),
+  ).toEqual([
+    { left: { start: 30, len: 1 }, right: { start: 30, len: 2 } },
+    { left: { start: 40, len: 30 }, right: { start: 41, len: 30 } },
+    { left: { start: 70, len: 0 }, right: { start: 71, len: 1 } },
+    { left: { start: 70, len: 3 }, right: { start: 72, len: 3 } },
+  ]);
+  const pair = opened([short, long]);
+  expect(waves(pair.left, "left")).toEqual(["1-26", "-", "-", "75-100"]);
+  expect(waves(pair.right, "right")).toEqual(["1-26", "-", "-", "77-102"]);
+});
+
+test("ranges touching on the right only, across a removal, are not joined", async () => {
+  const removal = await loadCompareFixture("removal", {
+    "removal.json": {
+      left: "",
+      right: "",
+      differences: [
+        {
+          left: { start: 10, len: 2 },
+          right: { start: 10, len: 0 },
+          words: { left: NO_WORDS, right: NO_WORDS },
+        },
+      ],
+    },
+  });
+  const before = range({ left: 5, right: 5 }, { left: 9, right: 9 });
+  const after = range({ left: 12, right: 10 }, { left: 14, right: 12 });
+
+  expect(columnChanges(removal.comparison.differences, [after, before])).toEqual([
+    { left: { start: 5, len: 5 }, right: { start: 5, len: 5 } },
+    { left: { start: 10, len: 2 }, right: { start: 10, len: 0 } },
+    { left: { start: 12, len: 3 }, right: { start: 10, len: 3 } },
+  ]);
+});
+
+test("the left column's hidden lines come as spans of the lines shown under each wave", () => {
+  expect(hiddenLeft(opened().left)).toEqual([
+    { start: 0, len: 26 },
+    { start: 35, len: 31 },
+    { start: 74, len: 26 },
+  ]);
+  expect(hiddenLeft(opened([], false).left)).toEqual([]);
+});
 
 test("a step on a run shows its next step in both columns, owner then mirror", () => {
   const once = click(opened(), 1);

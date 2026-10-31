@@ -9,11 +9,13 @@ import {
 } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
-import type { Column, Difference, ShownThread, ThreadLine } from "../../ipc";
+import type { Column, Difference, ShownThread } from "../../ipc";
 import type { ColumnViews } from "./compareViews";
-import { columnRuns, type ColumnChange, type Fold } from "./foldRuns";
+import { unchangedRuns } from "./diffOrder";
+import { columnRuns, type ColumnChange, type Fold, type LineSpan } from "./foldRuns";
 import { revealOnOwner } from "./folds";
 import {
+  displayedIn,
   hiddenLevels,
   hidingAll,
   leaveCollapsed,
@@ -55,47 +57,46 @@ export const mirrorSteps = StateField.define<ColumnSteps>({
   update: (steps, tr) => tr.effects.findLast((effect) => effect.is(setSteps))?.value ?? steps,
 });
 
-function unchangedLine(line: ThreadLine): ColumnChange | null {
-  switch (line.kind) {
-    case "removed":
-    case "added":
-      return null;
-    case "unchangedOnLeft":
-    case "unchangedOnRight":
-      return { left: { start: line.left, len: 1 }, right: { start: line.right, len: 1 } };
-    default: {
-      const _exhaustive: never = line;
-      return _exhaustive;
-    }
-  }
-}
-
-function sameChange(a: ColumnChange, b: ColumnChange): boolean {
-  return (
-    a.left.start === b.left.start &&
-    a.left.len === b.left.len &&
-    a.right.start === b.right.start &&
-    a.right.len === b.right.len
-  );
-}
-
 function byStarts(a: ColumnChange, b: ColumnChange): number {
   const left = a.left.start - b.left.start;
   return left === 0 ? a.right.start - b.right.start : left;
+}
+
+function end(span: LineSpan): number {
+  return span.start + span.len;
+}
+
+function joined(a: ColumnChange, b: ColumnChange): ColumnChange | null {
+  if (b.left.start > end(a.left) || b.right.start > end(a.right)) {
+    return null;
+  }
+  return {
+    left: { start: a.left.start, len: Math.max(end(a.left), end(b.left)) - a.left.start },
+    right: { start: a.right.start, len: Math.max(end(a.right), end(b.right)) - a.right.start },
+  };
+}
+
+function merged(runs: readonly ColumnChange[]): ColumnChange[] {
+  const out: ColumnChange[] = [];
+  for (const run of runs.toSorted(byStarts)) {
+    const last = out.at(-1);
+    const both = last === undefined ? null : joined(last, run);
+    if (both === null) {
+      out.push(run);
+    } else {
+      out[out.length - 1] = both;
+    }
+  }
+  return out;
 }
 
 export function columnChanges(
   differences: readonly Difference[],
   threads: readonly ShownThread[],
 ): ColumnChange[] {
-  const lines = threads.flatMap((thread) => unchangedLine(thread.line) ?? []);
-  const sorted = [...lines, ...differences].toSorted(byStarts);
-  return sorted
-    .filter((change, index) => {
-      const previous = sorted[index - 1];
-      return previous === undefined || !sameChange(previous, change);
-    })
-    .map(({ left, right }) => ({ left, right }));
+  const runs = merged(threads.flatMap((thread) => unchangedRuns(differences, thread.place)));
+  const changes = differences.map(({ left, right }) => ({ left, right }));
+  return [...runs, ...changes].toSorted(byStarts);
 }
 
 export function rangeRuns(
@@ -113,6 +114,14 @@ export function columnSteps(state: EditorState, column: Column): ColumnSteps {
 export function hiddenIn(state: EditorState, column: Column): readonly Fold<Column>[] {
   const { runs, hiding } = columnSteps(state, column);
   return hiddenLevels(runs, hiding);
+}
+
+export function hiddenLeft(left: EditorState): LineSpan[] {
+  const { doc } = left;
+  return displayedIn(hiddenIn(left, "left"), "left").map(({ from, to }) => {
+    const start = doc.lineAt(from).number - 1;
+    return { start, len: doc.lineAt(to).number - start };
+  });
 }
 
 const OUT_OF_HISTORY = Transaction.addToHistory.of(false);

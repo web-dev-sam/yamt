@@ -1,0 +1,8 @@
+just mutants HEAD: no Rust or TS changes (the recipe skips editor/). Stryker on 5 changed editor files, src/editor tests: 434 killed, 26 survived, 80 no coverage
+diffOrder.ts:29 `[]`→`["Stryker was here"]`: equivalent. Filter, reduce and flatMap all skip the string.
+diffOrder.ts:61-62 filter removed or `true`: equivalent. A non-holding segment's coordinate is always followed by a holding one with the same coordinate.
+diffOrder.ts:84,87,97 column literal "right"/"left"→"": equivalent. changedThreadLine/unchangedThreadLine treat any non-"left" as right, and diffLineOf drops the column.
+diffOrder.ts:142 `to > from`→`>=`; :143 `first > from`→`>=`; :144 `last < from`→`<=`: equivalent. Equal indices clamp to `to`, and the pressed line is never hidden.
+threadTint.ts:28 create `[]`→`["…"]`: equivalent. Destructuring the string gives NaN lengths, so no lines.
+threadTint.ts:89 `b[index]?.start`→`b[index].start`: equivalent after the length check.
+columnFolds.ts:62,157,158,162,163,181,189 and threadNumbers.ts:32,49, threadRows.ts:39: on lines this patch did not change.

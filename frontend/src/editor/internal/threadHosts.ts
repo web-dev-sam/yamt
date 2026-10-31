@@ -7,6 +7,11 @@ import type { RowCells } from "./threadWidget";
 
 type ThreadViews = Readonly<Record<Column, EditorView>>;
 type ColumnHosts = Readonly<Record<Column, HTMLElement>>;
+type HostsWiring = {
+  readonly views: ThreadViews;
+  readonly columns: ColumnHosts;
+  readonly hovered: (key: string | null) => void;
+};
 
 const HOST_CLASS = "cm-thread-host";
 const KEY_ATTRIBUTE = "data-thread";
@@ -20,6 +25,7 @@ function px(value: number): string {
 export class ThreadHosts implements RowCells {
   readonly #views: ThreadViews;
   readonly #columns: ColumnHosts;
+  readonly #hovered: (key: string | null) => void;
   readonly #hosts = new Map<string, HTMLElement>();
   readonly #measured = new Map<string, number>();
   readonly #heights = new Map<string, number>();
@@ -34,9 +40,10 @@ export class ThreadHosts implements RowCells {
   #focused: HTMLElement | null = null;
   #focusLost = false;
 
-  constructor({ views, columns }: { readonly views: ThreadViews; readonly columns: ColumnHosts }) {
+  constructor({ views, columns, hovered }: HostsWiring) {
     this.#views = views;
     this.#columns = columns;
+    this.#hovered = hovered;
     for (const column of COLUMNS) {
       const { scrollDOM } = views[column];
       this.#observer.observe(scrollDOM);
@@ -120,10 +127,9 @@ export class ThreadHosts implements RowCells {
     this.#observer.disconnect();
     document.removeEventListener("focusin", this.#focusIn, true);
     document.removeEventListener("pointerdown", this.#pointerDown, true);
-    for (const host of this.#hosts.values()) {
-      host.remove();
+    for (const [key, host] of this.#hosts) {
+      this.#drop(key, host);
     }
-    this.#hosts.clear();
     this.#focused = null;
     for (const column of COLUMNS) {
       this.#columns[column].style.removeProperty(LEFT_VAR);
@@ -150,16 +156,31 @@ export class ThreadHosts implements RowCells {
     return host !== null && this.#hosts.get(host.getAttribute(KEY_ATTRIBUTE) ?? "") === host;
   }
 
+  readonly #enter = (event: PointerEvent): void => {
+    const { currentTarget } = event;
+    this.#hovered(
+      currentTarget instanceof Element ? currentTarget.getAttribute(KEY_ATTRIBUTE) : null,
+    );
+  };
+
+  readonly #leave = (): void => {
+    this.#hovered(null);
+  };
+
   #create(key: string): void {
     const host = document.createElement("div");
     host.className = HOST_CLASS;
     host.setAttribute(KEY_ATTRIBUTE, key);
+    host.addEventListener("pointerenter", this.#enter);
+    host.addEventListener("pointerleave", this.#leave);
     this.#hosts.set(key, host);
     this.#observer.observe(host);
   }
 
   #drop(key: string, host: HTMLElement): void {
     this.#observer.unobserve(host);
+    host.removeEventListener("pointerenter", this.#enter);
+    host.removeEventListener("pointerleave", this.#leave);
     host.remove();
     this.#hosts.delete(key);
     this.#measured.delete(key);

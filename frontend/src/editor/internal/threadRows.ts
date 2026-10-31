@@ -9,20 +9,20 @@ import { linePlace } from "./threadAnchor";
 
 export type { ShownThread } from "../../ipc";
 
-type ThreadPlace = Readonly<Record<Column, number>>;
+type RowPlace = Readonly<Record<Column, number>>;
 
 export type RowKind = "unchanged" | "changed" | "leftEmpty" | "rightEmpty";
 
 export type ThreadRow = {
   readonly key: string;
-  readonly place: ThreadPlace;
+  readonly place: RowPlace;
   readonly keys: Readonly<Record<Column, readonly string[]>>;
   readonly kind: RowKind;
 };
 
 type GrowingRow = Omit<ThreadRow, "keys"> & { readonly keys: Record<Column, string[]> };
 
-type Placed = { readonly place: ThreadPlace; readonly kind: RowKind };
+type Placed = { readonly place: RowPlace; readonly kind: RowKind };
 
 const EMPTY_KIND: Readonly<Record<Column, RowKind>> = { left: "leftEmpty", right: "rightEmpty" };
 
@@ -76,10 +76,10 @@ export function threadRows(
     if (thread.shown === "collapsed") {
       continue;
     }
-    const { place, kind } = placeOf(differences, thread.line);
+    const { place, kind } = placeOf(differences, thread.place.end);
     const key = `${place.left}:${place.right}`;
     const row = rows.get(key) ?? { key, place, keys: { left: [], right: [] }, kind };
-    row.keys[shownColumn(thread.line)].push(thread.key);
+    row.keys[shownColumn(thread.place.end)].push(thread.key);
     rows.set(key, row);
   }
   return [...rows.values()].sort(({ place: a }, { place: b }) =>

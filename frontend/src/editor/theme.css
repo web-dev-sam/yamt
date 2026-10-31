@@ -500,6 +500,11 @@ ul.markdown-list {
   display: flow-root;
 }
 
+.cm-editor .cm-line.cm-thread-tint,
+.cm-editor .cm-gutterElement.cm-thread-tint {
+  background-image: linear-gradient(var(--color-selection), var(--color-selection));
+}
+
 .cm-editor.cm-thread-lines .cm-lineNumbers .cm-gutterElement {
   position: relative;
   padding-left: 20px;

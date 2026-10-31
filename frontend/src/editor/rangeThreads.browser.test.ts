@@ -7,9 +7,11 @@ import { page, userEvent } from "vitest/browser";
 import {
   changedThreadLine,
   DEFAULT_KEYS,
+  diffLineOf,
   loadCompareFixture,
+  onePlace,
   unchangedThreadLine,
-  type ThreadLine,
+  type ThreadPlace,
 } from "../ipc";
 import { RangeController, type CompareHosts, type RangeEvents, type ShownThread } from "./index";
 import { found } from "./paneHarness";
@@ -31,6 +33,9 @@ const LEFT_TOP = 1;
 const RIGHT_TOP = 7;
 const RIGHT_BOTTOM = 9;
 const LEFT_BOTTOM = 15;
+const SCROLLED_LINES = 5;
+const LAST_SHOWN_RIGHT = 25;
+const BOX_PX = 40;
 
 type Edges = { readonly top: number; readonly bottom: number };
 
@@ -54,7 +59,7 @@ const RIGHT = text("const changed = new;");
 const NO_WORDS = { changed: [], removals: [] };
 const THREAD: ShownThread = {
   key: KEY,
-  line: unchangedThreadLine("left", { left: 2, right: 2 }),
+  place: onePlace(unchangedThreadLine("left", { left: 2, right: 2 })),
   shown: "open",
 };
 const MODIFIED: ProbeCase = {
@@ -76,7 +81,11 @@ const DELETION: ProbeCase = {
     { left: { start: DELETED_AT, len: DELETED_LINES }, right: { start: DELETED_AT, len: 0 } },
   ],
   threads: [
-    { key: KEY, line: changedThreadLine("left", DELETED_AT + DELETED_LINES - 1), shown: "open" },
+    {
+      key: KEY,
+      place: onePlace(changedThreadLine("left", DELETED_AT + DELETED_LINES - 1)),
+      shown: "open",
+    },
   ],
 };
 
@@ -87,11 +96,31 @@ const ADDED_FILE: ProbeCase = {
   threads: [],
 };
 
+const DRAG_RIGHT = RIGHT.split("\n")
+  .flatMap((line, index) =>
+    index === 10 ? ["const changed = new a;", "const changed = new b;"] : [line],
+  )
+  .flatMap((line, index) => (index === 21 ? ["const added = 1;", line] : [line]))
+  .join("\n");
+const DRAG: ProbeCase = {
+  left: LEFT,
+  right: DRAG_RIGHT,
+  differences: [
+    { left: { start: 10, len: 1 }, right: { start: 10, len: 2 } },
+    { left: { start: 20, len: 0 }, right: { start: 21, len: 1 } },
+  ],
+  threads: [],
+};
+const ACROSS: ThreadPlace = {
+  start: diffLineOf(unchangedThreadLine("right", { left: 8, right: 8 })),
+  end: changedThreadLine("right", 11),
+};
+
 type Opened = {
   readonly hosts: CompareHosts;
   readonly controller: RangeController;
   readonly threadHosts: () => ReadonlyMap<string, HTMLElement>;
-  readonly started: ThreadLine[];
+  readonly started: ThreadPlace[];
   readonly toggled: (readonly string[])[];
 };
 
@@ -138,7 +167,7 @@ async function measured(host: HTMLElement): Promise<EditorView> {
 
 const controllers: RangeController[] = [];
 
-async function opened(probe: ProbeCase = MODIFIED): Promise<Opened> {
+async function opened(probe: ProbeCase = MODIFIED, collapsed = false): Promise<Opened> {
   const hosts = mount();
   const differences = probe.differences.map((difference) => ({
     ...difference,
@@ -147,10 +176,10 @@ async function opened(probe: ProbeCase = MODIFIED): Promise<Opened> {
   const files = { "threads.json": { left: probe.left, right: probe.right, differences } };
   const { comparison } = await loadCompareFixture("threads", files);
   let shown: ReadonlyMap<string, HTMLElement> = new Map();
-  const started: ThreadLine[] = [];
+  const started: ThreadPlace[] = [];
   const toggled: (readonly string[])[] = [];
   const events: RangeEvents = {
-    startThread: (line) => started.push(line),
+    startThread: (place) => started.push(place),
     toggleThreads: (keys) => toggled.push(keys),
     hosts: (next) => {
       shown = next;
@@ -164,11 +193,13 @@ async function opened(probe: ProbeCase = MODIFIED): Promise<Opened> {
       differences: comparison.differences,
     },
     hosts,
-    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed: false, threads: [] },
+    { preferences: { theme: "dark", keys: DEFAULT_KEYS }, collapsed, threads: [] },
     events,
   );
   controllers.push(controller);
   controller.showThreads(probe.threads);
+  await measured(hosts.left);
+  await measured(hosts.right);
   return { hosts, controller, threadHosts: () => shown, started, toggled };
 }
 
@@ -200,6 +231,46 @@ function bandEdges(strip: SVGSVGElement): Readonly<Record<"left" | "right", Edge
 function lineNumber(host: HTMLElement, label: string): HTMLElement {
   const numbers = [...host.querySelectorAll<HTMLElement>(".cm-lineNumbers .cm-gutterElement")];
   return found(numbers.find((number) => number.textContent === label) ?? null, `line ${label}`);
+}
+
+type Point = { readonly clientX: number; readonly clientY: number };
+
+function centre(element: Element): Point {
+  const rect = element.getBoundingClientRect();
+  return { clientX: (rect.left + rect.right) / 2, clientY: (rect.top + rect.bottom) / 2 };
+}
+
+function pressOn(cell: HTMLElement): void {
+  const init = { bubbles: true, cancelable: true, button: 0, ...centre(cell) };
+  cell.dispatchEvent(new MouseEvent("mousedown", init));
+}
+
+function moveTo(point: Point): void {
+  document.body.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, ...point }));
+}
+
+function release(cell: HTMLElement): void {
+  cell.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, ...centre(cell) }));
+}
+
+function heldDrag(from: HTMLElement, to: HTMLElement): void {
+  pressOn(from);
+  moveTo(centre(to));
+}
+
+function labelOf(cell: Element): string {
+  const text = cell.textContent;
+  const badge = cell.querySelector(".cm-thread-count")?.textContent ?? "";
+  return text.slice(0, text.length - badge.length);
+}
+
+function tinted(host: HTMLElement): string[] {
+  const cells = host.querySelectorAll(".cm-lineNumbers .cm-gutterElement.cm-thread-tint");
+  return [...cells].map(labelOf);
+}
+
+function tintedLines(host: HTMLElement): number {
+  return host.querySelectorAll(".cm-line.cm-thread-tint").length;
 }
 
 beforeEach(async () => {
@@ -294,18 +365,18 @@ test("a box fits inside its column and horizontal scroll leaves it in place", as
   expect(host.getBoundingClientRect().left).toBe(before);
 });
 
-test("a press on a line number starts a thread there; a press on the count toggles that line's threads", async () => {
+test("a press and release on one line number starts a one-line thread on release, nothing on press; a press on the count toggles that line's threads", async () => {
   const probe = await opened();
-  const numbers = [
-    ...probe.hosts.left.querySelectorAll<HTMLElement>(".cm-lineNumbers .cm-gutterElement"),
-  ];
   const count = found(probe.hosts.left.querySelector<HTMLElement>(".cm-thread-count"), "count");
-  const fifth = found(numbers.find((number) => number.textContent === "5") ?? null, "line 5");
+  const fifth = lineNumber(probe.hosts.left, "5");
 
-  await userEvent.click(fifth);
+  pressOn(fifth);
+  const onPress = [...probe.started];
+  release(fifth);
   await userEvent.click(count);
 
-  expect(probe.started).toEqual([{ kind: "unchangedOnLeft", left: 4, right: 4 }]);
+  expect(onPress).toEqual([]);
+  expect(probe.started).toEqual([onePlace(unchangedThreadLine("left", { left: 4, right: 4 }))]);
   expect(probe.toggled).toEqual([[KEY]]);
   expect(count.textContent).toBe("1");
 });
@@ -372,5 +443,164 @@ test("an added file's empty left column and the empty line after a last newline 
   await userEvent.click(lineNumber(probe.hosts.right, "3"));
   await userEvent.click(lineNumber(probe.hosts.right, "2"));
 
-  expect(probe.started).toEqual([{ kind: "added", right: 1 }]);
+  expect(probe.started).toEqual([onePlace(changedThreadLine("right", 1))]);
+});
+
+test("a drag over four right-column numbers across unchanged and added lines tints them and the change's removed lines on the left, and starts the range on release", async () => {
+  const probe = await opened(DRAG);
+  const { left, right } = probe.hosts;
+  const to = lineNumber(right, "12");
+
+  heldDrag(lineNumber(right, "9"), to);
+
+  await vi.waitFor(
+    () => {
+      expect(tinted(right)).toEqual(["9", "10", "11", "12"]);
+      expect(tinted(left)).toEqual(["9", "10", "11"]);
+    },
+    { timeout: WAIT_MS },
+  );
+  expect([tintedLines(left), tintedLines(right)]).toEqual([3, 4]);
+  expect(probe.started).toEqual([]);
+  release(to);
+  expect(probe.started).toEqual([ACROSS]);
+  await vi.waitFor(() => expect([...tinted(left), ...tinted(right)]).toEqual([]), {
+    timeout: WAIT_MS,
+  });
+});
+
+test("a drag from a removed line on the left to an added line on the right starts a both-sides range; upwards gives the same place", async () => {
+  const probe = await opened(DRAG);
+  const { left, right } = probe.hosts;
+  const removed = lineNumber(left, "11");
+  const added = lineNumber(right, "12");
+  const place: ThreadPlace = {
+    start: diffLineOf(changedThreadLine("left", 10)),
+    end: changedThreadLine("right", 11),
+  };
+
+  heldDrag(removed, added);
+  await vi.waitFor(
+    () => {
+      expect(tinted(left)).toEqual(["11"]);
+      expect(tinted(right)).toEqual(["11", "12"]);
+    },
+    { timeout: WAIT_MS },
+  );
+  release(added);
+  heldDrag(added, removed);
+  release(removed);
+
+  expect(probe.started).toEqual([place, place]);
+});
+
+test("Escape during a drag starts nothing and clears the tint", async () => {
+  const probe = await opened(DRAG);
+  const { left, right } = probe.hosts;
+  const to = lineNumber(right, "12");
+  heldDrag(lineNumber(right, "9"), to);
+  await vi.waitFor(() => expect(tinted(right)).toHaveLength(4), { timeout: WAIT_MS });
+  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+
+  document.body.dispatchEvent(escape);
+  release(to);
+
+  expect(escape.defaultPrevented).toBe(true);
+  expect(probe.started).toEqual([]);
+  await vi.waitFor(() => expect([...tinted(left), ...tinted(right)]).toEqual([]), {
+    timeout: WAIT_MS,
+  });
+});
+
+test("a scroll during a drag moves the end to the line under the pointer", async () => {
+  const probe = await opened(DRAG);
+  const view = await measured(probe.hosts.right);
+  const point = centre(lineNumber(probe.hosts.right, "12"));
+  pressOn(lineNumber(probe.hosts.right, "9"));
+  moveTo(point);
+  const scrolled = SCROLLED_LINES * view.defaultLineHeight;
+
+  view.scrollDOM.scrollTop = scrolled;
+  await vi.waitFor(() => expect(view.scrollDOM.scrollTop).toBeCloseTo(scrolled, 0), {
+    timeout: WAIT_MS,
+  });
+  view.scrollDOM.dispatchEvent(new Event("scroll"));
+  document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, ...point }));
+
+  expect(probe.started).toEqual([
+    { start: ACROSS.start, end: unchangedThreadLine("right", { left: 15, right: 16 }) },
+  ]);
+});
+
+test("a drag selects no text in either column", async () => {
+  const probe = await opened(DRAG);
+  const views = [viewIn(probe.hosts.left), viewIn(probe.hosts.right)];
+  const before = views.map((view) => view.state.selection);
+
+  await userEvent.dragAndDrop(
+    lineNumber(probe.hosts.right, "9"),
+    lineNumber(probe.hosts.right, "12"),
+  );
+
+  expect(views.map((view, index) => before[index]?.eq(view.state.selection))).toEqual([true, true]);
+  expect(document.getSelection()?.isCollapsed).toBe(true);
+  expect(probe.started).toEqual([ACROSS]);
+});
+
+test("a drag stops at a collapsed run's wave", async () => {
+  const probe = await opened(DRAG, true);
+  const view = await measured(probe.hosts.right);
+  const from = lineNumber(probe.hosts.right, "22");
+  const wave = view.lineBlockAt(view.state.doc.line(LAST_SHOWN_RIGHT + 2).from);
+
+  pressOn(from);
+  moveTo({
+    clientX: centre(from).clientX,
+    clientY: view.documentTop + (wave.top + wave.bottom) / 2,
+  });
+  release(from);
+
+  expect(probe.started).toEqual([
+    {
+      start: diffLineOf(changedThreadLine("right", 21)),
+      end: unchangedThreadLine("right", { left: LAST_SHOWN_RIGHT - 2, right: LAST_SHOWN_RIGHT }),
+    },
+  ]);
+});
+
+test("the pointer over a thread's box tints its lines in both columns; leaving clears them", async () => {
+  const probe = await opened({ ...DRAG, threads: [{ key: KEY, place: ACROSS, shown: "open" }] });
+  const { left, right } = probe.hosts;
+  const host = hostOf(probe);
+  host.append(box(`height: ${BOX_PX}px`));
+  await vi.waitFor(() => expect(host.getBoundingClientRect().height).toBe(BOX_PX), {
+    timeout: WAIT_MS,
+  });
+  expect([...tinted(left), ...tinted(right)]).toEqual([]);
+
+  await userEvent.hover(host);
+  await vi.waitFor(
+    () => {
+      expect(tinted(right)).toEqual(["9", "10", "11", "12"]);
+      expect(tinted(left)).toEqual(["9", "10", "11"]);
+    },
+    { timeout: WAIT_MS },
+  );
+  await userEvent.unhover(host);
+
+  await vi.waitFor(() => expect([...tinted(left), ...tinted(right)]).toEqual([]), {
+    timeout: WAIT_MS,
+  });
+});
+
+test("a draft's lines stay tinted", async () => {
+  const probe = await opened({ ...DRAG, threads: [{ key: KEY, place: ACROSS, shown: "draft" }] });
+
+  await vi.waitFor(
+    () => {
+      expect(tinted(probe.hosts.right)).toEqual(["9", "10", "11", "12"]);
+      expect(tinted(probe.hosts.left)).toEqual(["9", "10", "11"]);
+    },
+    { timeout: WAIT_MS },
+  );
 });

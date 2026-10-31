@@ -1,19 +1,19 @@
 import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 
-import { changedThreadLine, unchangedThreadLine } from "../../ipc";
+import { changedThreadLine, diffLineOf, onePlace, unchangedThreadLine } from "../../ipc";
 import { lineCounts, numberPress, pressedLine } from "./threadNumbers";
 import type { ShownThread } from "./threadRows";
 
 test("the count mark counts open and collapsed threads shown in this column, not drafts", () => {
   const unchanged = { left: 5, right: 6 };
   const threads: ShownThread[] = [
-    { key: "open", line: changedThreadLine("left", 2), shown: "open" },
-    { key: "collapsed", line: changedThreadLine("left", 2), shown: "collapsed" },
-    { key: "draft", line: changedThreadLine("left", 2), shown: "draft" },
-    { key: "added", line: changedThreadLine("right", 2), shown: "open" },
-    { key: "on-right", line: unchangedThreadLine("right", unchanged), shown: "open" },
-    { key: "on-left", line: unchangedThreadLine("left", unchanged), shown: "collapsed" },
+    { key: "open", place: onePlace(changedThreadLine("left", 2)), shown: "open" },
+    { key: "collapsed", place: onePlace(changedThreadLine("left", 2)), shown: "collapsed" },
+    { key: "draft", place: onePlace(changedThreadLine("left", 2)), shown: "draft" },
+    { key: "added", place: onePlace(changedThreadLine("right", 2)), shown: "open" },
+    { key: "on-right", place: onePlace(unchangedThreadLine("right", unchanged)), shown: "open" },
+    { key: "on-left", place: onePlace(unchangedThreadLine("left", unchanged)), shown: "collapsed" },
   ];
 
   expect(lineCounts(threads, "left")).toEqual([
@@ -26,7 +26,21 @@ test("the count mark counts open and collapsed threads shown in this column, not
   ]);
 });
 
-test("a press on the badge reports the line's keys; a press on the number starts a thread", () => {
+test("a range is counted on its end line in its end's column, not on its start", () => {
+  const range: ShownThread = {
+    key: "range",
+    place: {
+      start: diffLineOf(changedThreadLine("left", 3)),
+      end: changedThreadLine("right", 7),
+    },
+    shown: "open",
+  };
+
+  expect(lineCounts([range], "right")).toEqual([{ line: 7, keys: ["range"] }]);
+  expect(lineCounts([range], "left")).toEqual([]);
+});
+
+test("a press on the badge reports the line's keys; a press on the number starts a drag", () => {
   const press = {
     differences: [],
     column: "left",
@@ -36,7 +50,7 @@ test("a press on the badge reports the line's keys; a press on the number starts
 
   expect(numberPress({ ...press, onBadge: true })).toEqual({ kind: "toggle", keys: ["a", "b"] });
   expect(numberPress({ ...press, onBadge: false })).toEqual({
-    kind: "start",
+    kind: "drag",
     line: { kind: "unchangedOnLeft", left: 2, right: 2 },
   });
 });
