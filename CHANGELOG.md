@@ -7,6 +7,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-10-31
+
 ### Changed
 
 - `yamt --diff --ai` keeps `--ai`: a merge request's "Show Diff" then opens its changes window with "Ask AI" on each
@@ -431,7 +433,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.6.3...HEAD
+[Unreleased]: ../../compare/v0.6.4...HEAD
+[0.6.4]: ../../compare/v0.6.3...v0.6.4
 [0.6.3]: ../../compare/v0.6.2...v0.6.3
 [0.6.2]: ../../compare/v0.6.1...v0.6.2
 [0.6.1]: ../../compare/v0.6.0...v0.6.1
