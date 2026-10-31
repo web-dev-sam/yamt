@@ -6,17 +6,16 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
-## Release 0.6.4 (session 40, owner: "release next patch version")
+## Release 0.6.5 (session 42, owner: "release the next patch version")
 
-0.6.4 = 0.6.3 plus `--ai` carried from `yamt --diff --ai` and range windows to the changes window a merge request's
-Show Diff opens (plan §2 #144), and the Windows test gating (tests only). The owner pushes `main`, waits for green
-ci, then tags.
+0.6.5 = 0.6.4 plus line-range threads (plan §2 #145–#148; section below; the owner's GitLab playground check, its
+row 8, is still open). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                        | owner        | status      | evidence                                                                                                                                                                                                                                                                                  |
-| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | release commit 0.6.4: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done        | `d3a64cc3`                                                                                                                                                                                                                                                                                |
-| 2   | final run 0.6.4 before tagging (`briefs/release-0.6.4-verify.md`)                                            | verifier     | done        | `Release064Verify`: gate pass; readmer, licences; `yamt_0.6.4_amd64.deb` Version `0.6.4`, `yamt 0.6.4`; release binary: Show Diff child `… --repo /tmp/yamt-rel64-rr --ai` with `--ai`, none without; 11 two-line rows; Resolve !21 → merge window, unmerged. Notes `Release064Verify.md` |
-| 3   | push `main`, ci green on all four jobs, tag `v0.6.4`, publish (`handoff-release-0.6.4.md`)                   | human        | handed over |                                                                                                                                                                                                                                                                                           |
+| row | slice                                                                                                        | owner        | status  | evidence   |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
+| 1   | release commit 0.6.5: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `86e49122` |
+| 2   | final run 0.6.5 before tagging (`briefs/release-0.6.5-verify.md`)                                            | verifier     | running |            |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.5`, publish (`handoff-release-0.6.5.md`)                   | human        | todo    |            |
 
 ## Line-range threads (session 42; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
