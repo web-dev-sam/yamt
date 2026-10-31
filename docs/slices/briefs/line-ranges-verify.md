@@ -33,7 +33,10 @@ in-column range (badge on R406), 5 = L255 → R260 both-sides range (badge on R2
 
 **B. Editor WebKit probes.** `pnpm -C frontend test:browser src/editor/rangeThreads.browser.test.ts` → paste every test
 name with its result; these alone prove "Escape mid-drag starts nothing", "a scroll during a drag moves the end" and
-"a drag selects no text" (the session's `drag` cannot hold a press).
+"a drag selects no text" (the session's `drag` cannot hold a press). Plain Playwright WebKit cannot launch on this host
+(#1445, `libicudata.so.74`; smoke #2065/#2066): then run it as the editor build did, `PLAYWRIGHT_BROWSERS_PATH=/tmp/le-pw
+pnpm -C frontend exec vitest run --config /tmp/le-pw/vitest.probe.config.mts --project browser
+src/editor/rangeThreads.browser.test.ts src/editor/range.browser.test.ts`, and say so.
 
 **C. WebKit fixture.** `just app-session start-fixture --name lr --range-case review --threads seeded --size 1600x1000`;
 open `src/board/board.ts`; collapse off. To drag from a number cell, tag it first with `read` (e.g. set `data-probe`
