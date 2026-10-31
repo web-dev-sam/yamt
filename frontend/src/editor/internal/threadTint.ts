@@ -9,9 +9,9 @@ import { Decoration, EditorView, GutterMarker, gutterLineClass } from "@codemirr
 
 import type { Column, Difference, ThreadPlace } from "../../ipc";
 import { placeSpans } from "./diffOrder";
-import type { LineSpan } from "./foldRuns";
+import { joinSpans, type LineSpan } from "./foldRuns";
 
-export type ColumnTint = Readonly<Record<Column, readonly LineSpan[]>>;
+type ColumnTint = Readonly<Record<Column, readonly LineSpan[]>>;
 
 const TINT_CLASS = "cm-thread-tint";
 
@@ -29,16 +29,18 @@ const tintField = StateField.define<readonly LineSpan[]>({
   update: (spans, tr) => tr.effects.findLast((effect) => effect.is(showTint))?.value ?? spans,
 });
 
+export function tintOf(state: EditorState): readonly LineSpan[] {
+  return state.field(tintField);
+}
+
 function lineStarts(state: EditorState): number[] {
   const { doc } = state;
-  return state
-    .field(tintField)
-    .flatMap(({ start, len }) =>
-      Array.from(
-        { length: Math.max(0, Math.min(start + len, doc.lines) - start) },
-        (_, index) => doc.line(start + index + 1).from,
-      ),
-    );
+  return tintOf(state).flatMap(({ start, len }) =>
+    Array.from(
+      { length: Math.max(0, Math.min(start + len, doc.lines) - start) },
+      (_, index) => doc.line(start + index + 1).from,
+    ),
+  );
 }
 
 export const threadTint: Extension = [
@@ -61,11 +63,11 @@ function mergedSpans(spans: readonly LineSpan[]): LineSpan[] {
   const out: LineSpan[] = [];
   for (const span of spans.toSorted((a, b) => a.start - b.start)) {
     const last = out.at(-1);
-    if (last !== undefined && span.start <= last.start + last.len) {
-      const end = Math.max(last.start + last.len, span.start + span.len);
-      out[out.length - 1] = { start: last.start, len: end - last.start };
-    } else {
+    const both = last === undefined ? null : joinSpans(last, span);
+    if (both === null) {
       out.push(span);
+    } else {
+      out[out.length - 1] = both;
     }
   }
   return out;

@@ -502,7 +502,8 @@ ul.markdown-list {
 
 .cm-editor .cm-line.cm-thread-tint,
 .cm-editor .cm-gutterElement.cm-thread-tint {
-  background-image: linear-gradient(var(--color-selection), var(--color-selection));
+  --thread-tint: color-mix(in srgb, var(--color-selection) 45%, transparent);
+  background-image: linear-gradient(var(--thread-tint), var(--thread-tint));
 }
 
 .cm-editor.cm-thread-lines .cm-lineNumbers .cm-gutterElement {

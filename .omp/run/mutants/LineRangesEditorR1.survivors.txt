@@ -1,0 +1,7 @@
+just mutants HEAD → no Rust or TS changes (editor/ not mutated). Stryker on the 7 touched editor/internal files, node tests: 578 killed, 1 timeout, 19 survived, 76 no coverage
+diffOrder.ts:32 `[]`→["Stryker was here"] — equivalent: segmentIn's kind filter drops the string, lineIn's reduce replaces it with the index-0 segment, and overlaps gets NaN bounds, so it yields nothing
+diffOrder.ts:102,105,115 column literal → "" — equivalent: changedThreadLine/unchangedThreadLine treat any non-"left" as right, and diffLineOf drops the column
+diffOrder.ts:160 `to > from`→`>=` — equivalent: with to == from both branches clamp to `to`
+diffOrder.ts:161 `first > from`→`>=`, :162 `last < from`→`<=` — equivalent: the pressed line is always shown, so no hidden stretch starts or ends at it
+threadTint.ts:28 create [] → ["…"] — equivalent: destructuring the string gives NaN lengths, so no lines are tinted
+threadTint.ts:91 `b[index]?.start`→`b[index].start` — equivalent: the length check before it keeps index inside b

@@ -12,7 +12,7 @@ import { EditorView } from "@codemirror/view";
 import type { Column, Difference, ShownThread } from "../../ipc";
 import type { ColumnViews } from "./compareViews";
 import { unchangedRuns } from "./diffOrder";
-import { columnRuns, type ColumnChange, type Fold, type LineSpan } from "./foldRuns";
+import { columnRuns, joinSpans, type ColumnChange, type Fold, type LineSpan } from "./foldRuns";
 import { revealOnOwner } from "./folds";
 import {
   displayedIn,
@@ -62,18 +62,10 @@ function byStarts(a: ColumnChange, b: ColumnChange): number {
   return left === 0 ? a.right.start - b.right.start : left;
 }
 
-function end(span: LineSpan): number {
-  return span.start + span.len;
-}
-
 function joined(a: ColumnChange, b: ColumnChange): ColumnChange | null {
-  if (b.left.start > end(a.left) || b.right.start > end(a.right)) {
-    return null;
-  }
-  return {
-    left: { start: a.left.start, len: Math.max(end(a.left), end(b.left)) - a.left.start },
-    right: { start: a.right.start, len: Math.max(end(a.right), end(b.right)) - a.right.start },
-  };
+  const left = joinSpans(a.left, b.left);
+  const right = joinSpans(a.right, b.right);
+  return left === null || right === null ? null : { left, right };
 }
 
 function merged(runs: readonly ColumnChange[]): ColumnChange[] {

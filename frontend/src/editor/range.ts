@@ -26,13 +26,7 @@ import { showThreadRows, threadAnchors, threadField } from "./internal/threadFie
 import { ThreadHosts } from "./internal/threadHosts";
 import { lineCounts, numberPress, threadNumbers } from "./internal/threadNumbers";
 import { threadRows } from "./internal/threadRows";
-import {
-  placesTint,
-  sameSpans,
-  showTint,
-  threadTint,
-  type ColumnTint,
-} from "./internal/threadTint";
+import { placesTint, sameSpans, showTint, threadTint, tintOf } from "./internal/threadTint";
 
 export type { ShownThread } from "../ipc";
 
@@ -69,7 +63,6 @@ export class RangeController {
   #threads: readonly ShownThread[];
   #dragged: ThreadPlace | null = null;
   #hovered: string | null = null;
-  #tinted: ColumnTint = { left: [], right: [] };
   #settings: PaneSettings;
   #destroyed = false;
 
@@ -177,11 +170,11 @@ export class RangeController {
     ];
     const tint = placesTint(this.#differences, places);
     for (const column of COLUMNS) {
-      if (!sameSpans(this.#tinted[column], tint[column])) {
-        this.#views[column].dispatch({ effects: showTint.of(tint[column]) });
+      const view = this.#views[column];
+      if (!sameSpans(tintOf(view.state), tint[column])) {
+        view.dispatch({ effects: showTint.of(tint[column]) });
       }
     }
-    this.#tinted = tint;
   }
 
   setPreferences(preferences: Preferences): void {

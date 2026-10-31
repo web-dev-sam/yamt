@@ -29,6 +29,15 @@ function runEdge(before: LineSpan | undefined, after: LineSpan | undefined): Run
   };
 }
 
+/** `a` and `b` as one span when `b`, starting no earlier than `a`, overlaps or touches it. */
+export function joinSpans(a: LineSpan, b: LineSpan): LineSpan | null {
+  const end = a.start + a.len;
+  if (b.start > end) {
+    return null;
+  }
+  return { start: a.start, len: Math.max(end, b.start + b.len) - a.start };
+}
+
 function paneEdge(before: Chunk | undefined, after: Chunk | undefined, pane: Pane): RunEdge {
   const key = CHUNK_RANGE[pane];
   return runEdge(before?.[key], after?.[key]);

@@ -55,6 +55,30 @@ test("a press on the badge reports the line's keys; a press on the number starts
   });
 });
 
+test("a press on the second of two counted lines' badges toggles that line's threads, not the first's", () => {
+  const counts = [
+    { line: 2, keys: ["a", "b"] },
+    { line: 5, keys: ["c"] },
+  ];
+
+  expect(numberPress({ differences: [], column: "left", line: 5, onBadge: true, counts })).toEqual({
+    kind: "toggle",
+    keys: ["c"],
+  });
+});
+
+test("counts come sorted by line whatever the threads' order", () => {
+  const threads: ShownThread[] = [
+    { key: "later", place: onePlace(changedThreadLine("left", 7)), shown: "open" },
+    { key: "earlier", place: onePlace(changedThreadLine("left", 3)), shown: "open" },
+  ];
+
+  expect(lineCounts(threads, "left")).toEqual([
+    { line: 3, keys: ["earlier"] },
+    { line: 7, keys: ["later"] },
+  ]);
+});
+
 test("a press on the empty line after a text's last newline is no line of the file", () => {
   const doc = Text.of(["a", "b", ""]);
 

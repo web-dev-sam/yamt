@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 
 import { loadCompareFixture, type Difference } from "../../ipc";
-import { anchorAt } from "./threadAnchor";
+import { anchorAt, linePlace } from "./threadAnchor";
 
 type Lines = { readonly start: number; readonly len: number };
 
@@ -39,6 +39,21 @@ test("an unchanged right line after two differences pairs with its left line", a
     right: 12,
   });
   expect(anchorAt(differences, "left", 9)).toEqual({ kind: "unchangedOnLeft", left: 9, right: 12 });
+});
+
+test("a right line before a difference and one between two pair with their left lines, not with the next removal", async () => {
+  const differences = await differencesOf([
+    { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
+    { left: { start: 5, len: 1 }, right: { start: 7, len: 2 } },
+  ]);
+
+  expect(linePlace(differences, "right", 0)).toEqual({ kind: "between", partner: 0 });
+  expect(linePlace(differences, "right", 5)).toEqual({ kind: "between", partner: 3 });
+  expect(linePlace(differences, "left", 3)).toEqual({ kind: "between", partner: 5 });
+  expect(linePlace(differences, "right", 8)).toEqual({
+    kind: "inside",
+    difference: differences[1],
+  });
 });
 
 test("a line just past a pure insertion is unchanged, the last inserted line added", async () => {

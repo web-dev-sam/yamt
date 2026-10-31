@@ -11,13 +11,16 @@ import {
 } from "../../ipc";
 import type { ColumnChange, LineSpan } from "./foldRuns";
 
-type Segment = {
-  readonly kind: DiffLine["kind"];
+type SegmentLines = {
   readonly index: number;
   readonly left: number;
   readonly right: number;
   readonly len: number;
 };
+
+type Segment =
+  | (SegmentLines & { readonly kind: "unchanged" })
+  | (SegmentLines & { readonly kind: "removed" | "added"; readonly difference: Difference });
 
 type Overlap = { readonly segment: Segment; readonly offset: number; readonly len: number };
 
@@ -37,6 +40,7 @@ function segments(differences: readonly Difference[]): Segment[] {
     left = difference.left.start + difference.left.len;
     order.push({
       kind: "removed",
+      difference,
       index,
       left: difference.left.start,
       right,
@@ -46,6 +50,7 @@ function segments(differences: readonly Difference[]): Segment[] {
     right = difference.right.start + difference.right.len;
     order.push({
       kind: "added",
+      difference,
       index,
       left,
       right: difference.right.start,
@@ -57,10 +62,23 @@ function segments(differences: readonly Difference[]): Segment[] {
   return order;
 }
 
-function indexIn(order: readonly Segment[], column: Column, line: number): number {
-  const segment = order
+/** The segment holding `line` of `column`: an unchanged stretch or the column's side of a difference. */
+export function segmentAt(
+  differences: readonly Difference[],
+  column: Column,
+  line: number,
+): Segment {
+  return segmentIn(segments(differences), column, line);
+}
+
+function segmentIn(order: readonly Segment[], column: Column, line: number): Segment {
+  return order
     .filter(({ kind }) => kind === "unchanged" || kind === CHANGED_KIND[column])
     .reduce((found, next) => (next[column] <= line ? next : found));
+}
+
+function indexIn(order: readonly Segment[], column: Column, line: number): number {
+  const segment = segmentIn(order, column, line);
   return segment.index + line - segment[column];
 }
 

@@ -44,6 +44,19 @@ test("a removed line's gap sits after the difference's right lines", async () =>
   ]);
 });
 
+test("a removed line that no difference holds places its row after its partner line", async () => {
+  const differences = await differencesOf([
+    { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
+  ]);
+  const threads: ShownThread[] = [
+    { key: "outdated", place: onePlace(changedThreadLine("left", 5)), shown: "open" },
+  ];
+
+  expect(places(threadRows(differences, threads))).toEqual([
+    { place: { left: 6, right: 8 }, keys: { left: ["outdated"], right: [] }, kind: "changed" },
+  ]);
+});
+
 test("an unchanged line's threads from both columns share one row", async () => {
   const differences = await differencesOf([
     { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },

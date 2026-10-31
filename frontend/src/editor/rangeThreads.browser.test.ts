@@ -1,5 +1,6 @@
 import "../style.css";
 import { searchPanelOpen } from "@codemirror/search";
+import type { TransactionSpec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
@@ -14,6 +15,7 @@ import {
   type ThreadPlace,
 } from "../ipc";
 import { RangeController, type CompareHosts, type RangeEvents, type ShownThread } from "./index";
+import { showTint } from "./internal/threadTint";
 import { found } from "./paneHarness";
 
 const WIDTH = 1200;
@@ -36,6 +38,8 @@ const LEFT_BOTTOM = 15;
 const SCROLLED_LINES = 5;
 const LAST_SHOWN_RIGHT = 25;
 const BOX_PX = 40;
+const SCREENSHOTS = "/tmp/yamt-range";
+const TEXT_CLEAR_PX = 20;
 
 type Edges = { readonly top: number; readonly bottom: number };
 
@@ -114,6 +118,28 @@ const DRAG: ProbeCase = {
 const ACROSS: ThreadPlace = {
   start: diffLineOf(unchangedThreadLine("right", { left: 8, right: 8 })),
   end: changedThreadLine("right", 11),
+};
+
+const PLAIN = LEFT.split("\n");
+const REMOVED_AT = 5;
+const ADDED_AT = 7;
+const TONES: ProbeCase = {
+  left: LEFT,
+  right: PLAIN.flatMap((line, index) => {
+    if (index === REMOVED_AT) {
+      return [];
+    }
+    return index === ADDED_AT + 1 ? ["const added = 1;", line] : [line];
+  }).join("\n"),
+  differences: [
+    { left: { start: REMOVED_AT, len: 1 }, right: { start: REMOVED_AT, len: 0 } },
+    { left: { start: ADDED_AT + 1, len: 0 }, right: { start: ADDED_AT, len: 1 } },
+  ],
+  threads: [],
+};
+const TONES_PLACE: ThreadPlace = {
+  start: diffLineOf(changedThreadLine("left", REMOVED_AT)),
+  end: changedThreadLine("right", ADDED_AT),
 };
 
 type Opened = {
@@ -273,6 +299,58 @@ function tintedLines(host: HTMLElement): number {
   return host.querySelectorAll(".cm-line.cm-thread-tint").length;
 }
 
+function lineSpot(host: HTMLElement, number: number): Point {
+  const view = viewIn(host);
+  const block = view.lineBlockAt(view.state.doc.line(number).from);
+  return {
+    clientX: view.scrollDOM.getBoundingClientRect().right - TEXT_CLEAR_PX,
+    clientY: view.documentTop + (block.top + block.bottom) / 2,
+  };
+}
+
+async function pixelsAt(
+  spots: Readonly<Record<string, Point>>,
+): Promise<Readonly<Record<string, string>>> {
+  const png = await page.screenshot({ save: false });
+  const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+  const canvas = new OffscreenCanvas(image.width, image.height);
+  const context = canvas.getContext("2d");
+  if (context === null) {
+    throw new Error("no 2d context");
+  }
+  context.drawImage(image, 0, 0);
+  const scale = image.width / window.innerWidth;
+  const entries = Object.entries<Point>(spots).map(([name, { clientX, clientY }]) => {
+    const pixel = context.getImageData(
+      Math.round(clientX * scale),
+      Math.round(clientY * scale),
+      1,
+      1,
+    );
+    return [name, [...pixel.data].join(",")];
+  });
+  return Object.fromEntries(entries);
+}
+
+function escapeDown(): KeyboardEvent {
+  return new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+}
+
+function nextFrame(): Promise<number> {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+async function nextFrames(): Promise<void> {
+  await nextFrame();
+  await nextFrame();
+}
+
+function tintDispatches(calls: readonly (readonly TransactionSpec[])[]): number {
+  return calls.filter((specs) =>
+    specs.some(({ effects }) => [effects ?? []].flat().some((effect) => effect.is(showTint))),
+  ).length;
+}
+
 beforeEach(async () => {
   await page.viewport(WIDTH, HEIGHT);
 });
@@ -280,6 +358,7 @@ beforeEach(async () => {
 afterEach(() => {
   controllers.splice(0).forEach((controller) => controller.destroy());
   document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
+  delete document.documentElement.dataset["theme"];
 });
 
 test("a host growing by 200 px moves the next line in both columns by 200 px and the band's edges with it", async () => {
@@ -603,4 +682,111 @@ test("a draft's lines stay tinted", async () => {
     },
     { timeout: WAIT_MS },
   );
+});
+
+test("the next tint repaints a column whose tint was changed by another dispatch", async () => {
+  const draft: ShownThread = { key: KEY, place: ACROSS, shown: "draft" };
+  const probe = await opened({ ...DRAG, threads: [draft] });
+  const { right } = probe.hosts;
+  await vi.waitFor(() => expect(tinted(right)).toHaveLength(4), { timeout: WAIT_MS });
+  viewIn(right).dispatch({ effects: showTint.of([]) });
+
+  probe.controller.showThreads([draft]);
+
+  expect(tinted(right)).toEqual(["9", "10", "11", "12"]);
+});
+
+test.each(["light", "webstorm-dark"] as const)(
+  "in %s the tint shows on a removed and an added line and each keeps its difference colour",
+  async (theme) => {
+    document.documentElement.dataset["theme"] = theme;
+    const probe = await opened(TONES);
+    const { left, right } = probe.hosts;
+    probe.controller.setPreferences({ theme, keys: DEFAULT_KEYS });
+    function spots(): Readonly<Record<string, Point>> {
+      return {
+        removed: lineSpot(left, REMOVED_AT + 1),
+        leftUnchanged: lineSpot(left, REMOVED_AT + 2),
+        added: lineSpot(right, ADDED_AT + 1),
+        rightUnchanged: lineSpot(right, ADDED_AT),
+      };
+    }
+    const plain = await pixelsAt(spots());
+
+    probe.controller.showThreads([{ key: KEY, place: TONES_PLACE, shown: "draft" }]);
+    await vi.waitFor(() => expect(tinted(right)).toEqual(["6", "7", "8"]), { timeout: WAIT_MS });
+    await page.screenshot({ path: `${SCREENSHOTS}/tint-${theme}.png` });
+    const tint = await pixelsAt(spots());
+
+    expect(tinted(left)).toEqual(["6", "7", "8"]);
+    for (const line of ["removed", "added", "leftUnchanged"]) {
+      expect(tint[line], line).not.toBe(plain[line]);
+    }
+    expect(tint["removed"]).not.toBe(tint["leftUnchanged"]);
+    expect(tint["added"]).not.toBe(tint["rightUnchanged"]);
+  },
+);
+
+test("after a finished drag Escape reaches the page untouched and a further move and release start nothing", async () => {
+  const probe = await opened(DRAG);
+  const { left, right } = probe.hosts;
+  const from = lineNumber(right, "9");
+  const to = lineNumber(right, "12");
+  heldDrag(from, to);
+  release(to);
+  const escape = escapeDown();
+  const reached = vi.fn();
+  document.body.addEventListener("keydown", reached, { once: true });
+
+  document.body.dispatchEvent(escape);
+  moveTo(centre(from));
+  release(from);
+  await nextFrames();
+
+  expect([escape.defaultPrevented, reached.mock.calls.length]).toEqual([false, 1]);
+  expect(probe.started).toEqual([ACROSS]);
+  expect([...tinted(left), ...tinted(right)]).toEqual([]);
+});
+
+test("destroying the controller mid-drag leaves Escape to the page and a further move and release start nothing", async () => {
+  const probe = await opened(DRAG);
+  const from = lineNumber(probe.hosts.right, "9");
+  const to = lineNumber(probe.hosts.right, "12");
+  heldDrag(from, to);
+  const point = centre(to);
+  controllers.splice(controllers.indexOf(probe.controller), 1);
+  probe.controller.destroy();
+  const escape = escapeDown();
+  const reached = vi.fn();
+  document.body.addEventListener("keydown", reached, { once: true });
+
+  document.body.dispatchEvent(escape);
+  moveTo(point);
+  document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, ...point }));
+  await nextFrames();
+
+  expect([escape.defaultPrevented, reached.mock.calls.length]).toEqual([false, 1]);
+  expect(probe.started).toEqual([]);
+});
+
+test("two scrolls in one frame during a drag move the end once, in the next frame, to the line under the pointer", async () => {
+  const probe = await opened(DRAG);
+  const { right } = probe.hosts;
+  const view = await measured(right);
+  pressOn(lineNumber(right, "9"));
+  moveTo(centre(lineNumber(right, "12")));
+  await vi.waitFor(() => expect(tinted(right)).toEqual(["9", "10", "11", "12"]), {
+    timeout: WAIT_MS,
+  });
+  const dispatch = vi.spyOn(view, "dispatch");
+
+  for (const lines of [SCROLLED_LINES, SCROLLED_LINES + 1]) {
+    view.scrollDOM.scrollTop = lines * view.defaultLineHeight;
+    view.scrollDOM.dispatchEvent(new Event("scroll"));
+  }
+  const atOnce = tintDispatches(dispatch.mock.calls);
+  await vi.waitFor(() => expect(tinted(right).at(-1)).toBe("18"), { timeout: WAIT_MS });
+  await nextFrames();
+
+  expect([atOnce, tintDispatches(dispatch.mock.calls)]).toEqual([0, 1]);
 });

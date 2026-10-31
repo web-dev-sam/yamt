@@ -5,6 +5,7 @@ import {
   type Difference,
   type ThreadLine,
 } from "../../ipc";
+import { segmentAt } from "./diffOrder";
 
 export type LinePlace =
   | { readonly kind: "inside"; readonly difference: Difference }
@@ -15,19 +16,12 @@ export function linePlace(
   column: Column,
   line: number,
 ): LinePlace {
-  const other = column === "left" ? "right" : "left";
-  let offset = 0;
-  for (const difference of differences) {
-    const here = difference[column];
-    if (line < here.start) {
-      break;
-    }
-    if (line < here.start + here.len) {
-      return { kind: "inside", difference };
-    }
-    offset += difference[other].len - here.len;
+  const segment = segmentAt(differences, column, line);
+  if (segment.kind !== "unchanged") {
+    return { kind: "inside", difference: segment.difference };
   }
-  return { kind: "between", partner: line + offset };
+  const other = column === "left" ? "right" : "left";
+  return { kind: "between", partner: segment[other] + line - segment[column] };
 }
 
 export function anchorAt(

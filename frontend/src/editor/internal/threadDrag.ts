@@ -73,6 +73,7 @@ export class ThreadDrag {
   readonly #differences: readonly Difference[];
   readonly #events: DragEvents;
   #held: Held | null = null;
+  #frame: number | null = null;
 
   constructor({ views, differences, events }: DragWiring) {
     this.#views = views;
@@ -90,7 +91,7 @@ export class ThreadDrag {
     document.addEventListener("keydown", this.#key, CAPTURE);
     window.addEventListener("blur", this.#cancel);
     for (const view of [this.#views.left, this.#views.right]) {
-      view.scrollDOM.addEventListener("scroll", this.#follow);
+      view.scrollDOM.addEventListener("scroll", this.#request);
     }
     this.#events.moved(onePlace(press));
   }
@@ -101,13 +102,17 @@ export class ThreadDrag {
 
   #stop(): void {
     this.#held = null;
+    if (this.#frame !== null) {
+      cancelAnimationFrame(this.#frame);
+      this.#frame = null;
+    }
     document.removeEventListener("pointermove", this.#move, CAPTURE);
     document.removeEventListener("pointerup", this.#up, CAPTURE);
     document.removeEventListener("pointercancel", this.#cancel, CAPTURE);
     document.removeEventListener("keydown", this.#key, CAPTURE);
     window.removeEventListener("blur", this.#cancel);
     for (const view of [this.#views.left, this.#views.right]) {
-      view.scrollDOM.removeEventListener("scroll", this.#follow);
+      view.scrollDOM.removeEventListener("scroll", this.#request);
     }
   }
 
@@ -115,16 +120,24 @@ export class ThreadDrag {
     return placeBetween(this.#differences, held.press, held.end);
   }
 
-  readonly #follow = (): void => {
-    const held = this.#held;
-    if (held === null) {
-      return;
-    }
+  #endAt(held: Held): void {
     const pointer = pointedLine(this.#views, this.#differences, held.clientX, held.clientY);
     if (pointer !== null) {
       held.end = shownEnd(this.#differences, held.hidden, held.press, pointer);
     }
-    this.#events.moved(this.#place(held));
+  }
+
+  // A column measures itself in its own scroll handler (@codemirror/view DOMObserver.onScroll), and its measures
+  // asked for earlier in a frame run first, so a frame's read sees the heights CodeMirror measured.
+  readonly #request = (): void => {
+    this.#frame ??= requestAnimationFrame(() => {
+      this.#frame = null;
+      const held = this.#held;
+      if (held !== null) {
+        this.#endAt(held);
+        this.#events.moved(this.#place(held));
+      }
+    });
   };
 
   readonly #move = (event: PointerEvent): void => {
@@ -132,13 +145,14 @@ export class ThreadDrag {
       this.#held.clientX = event.clientX;
       this.#held.clientY = event.clientY;
     }
-    this.#follow();
+    this.#request();
   };
 
   readonly #up = (): void => {
     const held = this.#held;
     this.#stop();
     if (held !== null) {
+      this.#endAt(held);
       this.#events.released(this.#place(held));
     }
   };

@@ -1,0 +1,702 @@
+diff --git a/frontend/src/editor/AGENTS.md b/frontend/src/editor/AGENTS.md
+index e837507..a5875c3 100644
+--- a/frontend/src/editor/AGENTS.md
++++ b/frontend/src/editor/AGENTS.md
+@@ -16,7 +16,7 @@ Themes (plan §2 #102): `internal/syntax.ts` holds the code colours — one row
+ 
+ Markdown (plan §2 #112): `markdown.ts` (`MarkdownView`, reached from `ui/` only through `ui/useMarkdown.ts`, fence PM2 in `scripts/fences.ts`) renders yamt's own subset of the AI's answers. `internal/markdownBlocks.ts` (pure: lines → `Block`s, each top-level block with its source lines) and `internal/markdownInline.ts` (pure: a block's text → `Inline`s; code spans and escapes are skipped while an emphasis looks for its closer, so backticks win) never build markup; anything outside the subset, raw HTML included, stays literal text; images become `alt (url)` text and links their text plus the address in `.markdown-address`, never navigable. `internal/markdownDom.ts` builds nodes with `createElement`, `createTextNode`, `textContent` and `className` only, from a fixed tag set, `class` the only attribute — never `innerHTML` or a URL attribute, since the page reaches the IPC. `show(text)` keeps every leading block whose source is unchanged and rebuilds from the first that differs (streaming). `internal/codeBlock.ts` colours a fenced block by its info string through `languageNamed` and `highlightCode` with the panes' own `paletteHighlight` + `fontHighlight` (their rules in one `<style class="markdown-highlight-styles">`, mounted once per document; style-mod's `StyleModule.mount` is not reachable from yamt's own packages), after `load()` only while the block is still in a live view; an unknown language stays plain. The answer's look (spacing, code block, table, quote, list numbers, muted address) is the `.markdown-*` rules in `theme.css`, palette tokens only.
+ 
+-Range threads (plan §2 #116, #145): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. A thread's `ThreadPlace` has two ends: `start` (a `DiffLine`, no column) and `end` (a `ThreadLine`, whose column holds the box and the count badge). `internal/threadAnchor.ts` (`anchorAt`, `linePlace`) is the one rule from a column line to a `ThreadLine` and to its partner line; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `diffOrder.ts` (pure) is GitLab's one-column order over the differences (an unchanged line once, a change's removed lines, then its added ones): `orderIndex`/`lineAtIndex`, `placeBetween` (the earlier of press and pointer is `start`, the later `end`, keeping its column), `shownEnd` (the pointer clamped before a collapsed run), `placeSpans` (each column's lines of a place) and `unchangedRuns` (its unchanged stretches); `threadRows.ts` (pure) groups the shown threads by the aligned place of `place.end` (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field, and reports `hovered(key | null)` from each host's `pointerenter`/`pointerleave` (the hover reaches the editor through its own hosts, never through Vue); `threadNumbers.ts` merges a `mousedown` into the number gutter (returning `true`, so `@codemirror/view` calls `preventDefault` and no text selection starts; a number starts a drag, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing; `lineCounts` counts by `place.end`) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`. `threadDrag.ts` (`ThreadDrag`) runs the drag with capture-phase listeners on `document` (`pointermove`, `pointerup` starts the thread through `RangeEvents.startThread`, `pointercancel` and Escape cancel, Escape taken by the drag alone), `scroll` on both scrollers (the end follows the line under the last pointer position) and window `blur` (cancel), all removed at release, cancel and `destroy`; the pointer's column is the one whose half of the window it is in, and over a thread row, a column's end or an empty column the other column's line at that height. `threadTint.ts` (`threadTint`, `showTint`) is a per-column field of tinted spans (`cm-thread-tint` on lines and gutter cells, `theme.css` paints `--color-selection` over the difference colours); the controller sets it to the union of the drag's place, every draft's and the hovered host's thread, dispatching only when a column's spans change.
++Range threads (plan §2 #116, #145): `range.ts` (`RangeController`) shows the review's threads as block rows inside its two read-only columns; Vue fills them through the hosts `RangeEvents.hosts` hands out, never through the editor. A thread's `ThreadPlace` has two ends: `start` (a `DiffLine`, no column) and `end` (a `ThreadLine`, whose column holds the box and the count badge). `diffOrder.ts` (pure) is GitLab's one-column order over the differences (an unchanged line once, a change's removed lines, then its added ones), built by one walk whose segments carry their difference; its `segmentAt` (a column line's unchanged stretch or its side of a difference) is the one rule for whether a line is inside a difference and for an unchanged line's partner line, and `internal/threadAnchor.ts` (`linePlace`, `anchorAt`: a column line to its place and to a `ThreadLine`) is built on it; which column and line a `ThreadLine` shows in is `ipc`'s `shownLine`; `diffOrder.ts` also gives `orderIndex`/`lineAtIndex`, `placeBetween` (the earlier of press and pointer is `start`, the later `end`, keeping its column), `shownEnd` (the pointer clamped before a collapsed run), `placeSpans` (each column's lines of a place) and `unchangedRuns` (its unchanged stretches); `threadRows.ts` (pure) groups the shown threads by the aligned place of `place.end` (a removed or added line's gap after its difference's other side, an unchanged line's after its partner; collapsed threads place no row), gives each row its `kind` (`unchanged`, `changed`, or `leftEmpty`/`rightEmpty` when the gap is on a difference's empty side) and `rowHeight` (the larger column's summed host heights); `threadField.ts` holds each column's rows and count marks from `showThreadRows` and provides one `block` widget per row (`side: 1 + k` at the end of line `place − 1`; on its empty side a row sits before line `place` with a negative side, so it joins that line's block), plus `threadAnchors` (the text bottom above and the next line's block top below each unchanged row) that `CompareFrame` merges, sorted, into its scroll anchors; `CompareFrame` measures an empty difference side from its joined block's top to its text's top, so the empty side's rows are inside the band; `threadWidget.ts` (`ThreadRowWidget`) `eq`s by row key, column and keys only, so a height change keeps its DOM; `threadHosts.ts` (`ThreadHosts`, built after the views) keeps one host per shown key for as long as the key is shown, one `ResizeObserver` on every host (disconnected hosts skipped) and on both scrollers and gutters writes the row height on both cells and calls `requestMeasure`, writes `--thread-left`/`--thread-width` on each column host (the rows are `position: sticky`), gives focus back to a field inside a host after CodeMirror re-attaches it, unless a press outside every host left that field, and reports `hovered(key | null)` from each host's `pointerenter`/`pointerleave` (the hover reaches the editor through its own hosts, never through Vue); `threadNumbers.ts` merges a `mousedown` into the number gutter (returning `true`, so `@codemirror/view` calls `preventDefault` and no text selection starts; a number starts a drag, the count badge toggles that line's threads; `pressedLine`: the empty line after a last newline and an empty column's line are no line of the file and do nothing; `lineCounts` counts by `place.end`) and draws the number plus the badge as a `lineNumberMarkers` marker; the hover icon is a `theme.css` mask from `--thread-icon`. `threadDrag.ts` (`ThreadDrag`) runs the drag with capture-phase listeners on `document` (`pointermove`, `pointerup` starts the thread through `RangeEvents.startThread`, `pointercancel` and Escape cancel, Escape taken by the drag alone), `scroll` on both scrollers and window `blur` (cancel), all removed at release, cancel and `destroy`; a pointer move or a scroll asks for one `requestAnimationFrame` (a pending one is reused, cancelled at stop), which reads the line under the last pointer position after each column's own scroll-handler measure and moves the end, and a release reads it once more; the pointer's column is the one on the pointer's side of the strip's middle, and over a thread row, a column's end or an empty column the other column's line at that height. `threadTint.ts` (`threadTint`, `showTint`, `tintOf`) is a per-column field of tinted spans (`cm-thread-tint` on lines and gutter cells; `theme.css` paints `--color-selection` mixed at 45 % with transparent, a translucent layer over the difference colours whatever the theme's alpha); the controller sets it to the union of the drag's place, every draft's and the hovered host's thread (spans joined by `foldRuns.ts` `joinSpans`, the one overlap-or-touch rule, which `columnFolds.ts` also joins its runs with), dispatching only when a column's spans differ from that column's field (`tintOf`).
+ 
+ Collapsed unchanged lines in both windows (plan §2 #63, #64, #68, #126): one fold core serves the merge panes and the range columns — `foldRuns.ts` (runs and their 4/8/16 steps; `waveStartsIn`, where each run's wave starts in a pane), `foldSteps.ts` (the step state), `foldView.ts` `paneFoldView` (wave line, gutter wave, atomic ranges), `folding.ts` (hover and click), `geometry.ts` `waveTops` (wave starts to block tops, under `waveRows` and `columnWaves`), `wavePhase.ts` (`chainEnds`/`chainPhases`/`ChainPhases` over a chain of panes and strips — the one phase rule; `WavePhases` is the merge's three-pane chain, `panePhases` its mapping), `gap.ts` `joinPaints` and `strips.ts` `WaveLayer` (the strip's wave joins). The merge's state lives in the middle pane (`folds.ts`); the range's lives in the left column (`columnFolds.ts`: `ownerSteps`, the right's `mirrorSteps` copied by a push, `hiddenIn` each column's shown folds, `hiddenLeft` the left's hidden lines as spans), its view, hover, click and phases in `rangeFolds.ts` (`RangeFolds`, `columnWaves`), reaching `CompareFrame` through its opt-in `waves` part and `CompareStrip` only when given `hovered`, so the compare window paints as before. A press on a wave's gutter cell starts no thread (`threadNumbers.ts`) and shows no comment icon (`theme.css`). A thread's unchanged lines (`diffOrder.ts` `unchangedRuns`, one per stretch between differences; overlapping or touching ones merged, since `columnRuns` assumes changes that do not overlap) are run edges, so no line of a range hides; runs are computed at build and at each `setCollapsed(true)`, never on a thread change. Realigning after a fold change (both windows) or a merge go-to that selected a match is `ScrollSync.follow(source)`: the followed pane leads the next sync, and no other pane's scroll event (a clamped one from the change) replaces it before then.
+ 
+diff --git a/frontend/src/editor/internal/columnFolds.ts b/frontend/src/editor/internal/columnFolds.ts
+index 601c629..11875ed 100644
+--- a/frontend/src/editor/internal/columnFolds.ts
++++ b/frontend/src/editor/internal/columnFolds.ts
+@@ -12,7 +12,7 @@ import { EditorView } from "@codemirror/view";
+ import type { Column, Difference, ShownThread } from "../../ipc";
+ import type { ColumnViews } from "./compareViews";
+ import { unchangedRuns } from "./diffOrder";
+-import { columnRuns, type ColumnChange, type Fold, type LineSpan } from "./foldRuns";
++import { columnRuns, joinSpans, type ColumnChange, type Fold, type LineSpan } from "./foldRuns";
+ import { revealOnOwner } from "./folds";
+ import {
+   displayedIn,
+@@ -62,18 +62,10 @@ function byStarts(a: ColumnChange, b: ColumnChange): number {
+   return left === 0 ? a.right.start - b.right.start : left;
+ }
+ 
+-function end(span: LineSpan): number {
+-  return span.start + span.len;
+-}
+-
+ function joined(a: ColumnChange, b: ColumnChange): ColumnChange | null {
+-  if (b.left.start > end(a.left) || b.right.start > end(a.right)) {
+-    return null;
+-  }
+-  return {
+-    left: { start: a.left.start, len: Math.max(end(a.left), end(b.left)) - a.left.start },
+-    right: { start: a.right.start, len: Math.max(end(a.right), end(b.right)) - a.right.start },
+-  };
++  const left = joinSpans(a.left, b.left);
++  const right = joinSpans(a.right, b.right);
++  return left === null || right === null ? null : { left, right };
+ }
+ 
+ function merged(runs: readonly ColumnChange[]): ColumnChange[] {
+diff --git a/frontend/src/editor/internal/diffOrder.ts b/frontend/src/editor/internal/diffOrder.ts
+index e65ec52..3e9fff8 100644
+--- a/frontend/src/editor/internal/diffOrder.ts
++++ b/frontend/src/editor/internal/diffOrder.ts
+@@ -11,14 +11,17 @@ import {
+ } from "../../ipc";
+ import type { ColumnChange, LineSpan } from "./foldRuns";
+ 
+-type Segment = {
+-  readonly kind: DiffLine["kind"];
++type SegmentLines = {
+   readonly index: number;
+   readonly left: number;
+   readonly right: number;
+   readonly len: number;
+ };
+ 
++type Segment =
++  | (SegmentLines & { readonly kind: "unchanged" })
++  | (SegmentLines & { readonly kind: "removed" | "added"; readonly difference: Difference });
++
+ type Overlap = { readonly segment: Segment; readonly offset: number; readonly len: number };
+ 
+ const CHANGED_KIND = { left: "removed", right: "added" } as const satisfies Readonly<
+@@ -37,6 +40,7 @@ function segments(differences: readonly Difference[]): Segment[] {
+     left = difference.left.start + difference.left.len;
+     order.push({
+       kind: "removed",
++      difference,
+       index,
+       left: difference.left.start,
+       right,
+@@ -46,6 +50,7 @@ function segments(differences: readonly Difference[]): Segment[] {
+     right = difference.right.start + difference.right.len;
+     order.push({
+       kind: "added",
++      difference,
+       index,
+       left,
+       right: difference.right.start,
+@@ -57,10 +62,23 @@ function segments(differences: readonly Difference[]): Segment[] {
+   return order;
+ }
+ 
+-function indexIn(order: readonly Segment[], column: Column, line: number): number {
+-  const segment = order
++/** The segment holding `line` of `column`: an unchanged stretch or the column's side of a difference. */
++export function segmentAt(
++  differences: readonly Difference[],
++  column: Column,
++  line: number,
++): Segment {
++  return segmentIn(segments(differences), column, line);
++}
++
++function segmentIn(order: readonly Segment[], column: Column, line: number): Segment {
++  return order
+     .filter(({ kind }) => kind === "unchanged" || kind === CHANGED_KIND[column])
+     .reduce((found, next) => (next[column] <= line ? next : found));
++}
++
++function indexIn(order: readonly Segment[], column: Column, line: number): number {
++  const segment = segmentIn(order, column, line);
+   return segment.index + line - segment[column];
+ }
+ 
+diff --git a/frontend/src/editor/internal/foldRuns.ts b/frontend/src/editor/internal/foldRuns.ts
+index 7059ab0..868a81a 100644
+--- a/frontend/src/editor/internal/foldRuns.ts
++++ b/frontend/src/editor/internal/foldRuns.ts
+@@ -29,6 +29,15 @@ function runEdge(before: LineSpan | undefined, after: LineSpan | undefined): Run
+   };
+ }
+ 
++/** `a` and `b` as one span when `b`, starting no earlier than `a`, overlaps or touches it. */
++export function joinSpans(a: LineSpan, b: LineSpan): LineSpan | null {
++  const end = a.start + a.len;
++  if (b.start > end) {
++    return null;
++  }
++  return { start: a.start, len: Math.max(end, b.start + b.len) - a.start };
++}
++
+ function paneEdge(before: Chunk | undefined, after: Chunk | undefined, pane: Pane): RunEdge {
+   const key = CHUNK_RANGE[pane];
+   return runEdge(before?.[key], after?.[key]);
+diff --git a/frontend/src/editor/internal/threadAnchor.test.ts b/frontend/src/editor/internal/threadAnchor.test.ts
+index dbd08c3..ed12ba2 100644
+--- a/frontend/src/editor/internal/threadAnchor.test.ts
++++ b/frontend/src/editor/internal/threadAnchor.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import { loadCompareFixture, type Difference } from "../../ipc";
+-import { anchorAt } from "./threadAnchor";
++import { anchorAt, linePlace } from "./threadAnchor";
+ 
+ type Lines = { readonly start: number; readonly len: number };
+ 
+@@ -41,6 +41,21 @@ test("an unchanged right line after two differences pairs with its left line", a
+   expect(anchorAt(differences, "left", 9)).toEqual({ kind: "unchangedOnLeft", left: 9, right: 12 });
+ });
+ 
++test("a right line before a difference and one between two pair with their left lines, not with the next removal", async () => {
++  const differences = await differencesOf([
++    { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
++    { left: { start: 5, len: 1 }, right: { start: 7, len: 2 } },
++  ]);
++
++  expect(linePlace(differences, "right", 0)).toEqual({ kind: "between", partner: 0 });
++  expect(linePlace(differences, "right", 5)).toEqual({ kind: "between", partner: 3 });
++  expect(linePlace(differences, "left", 3)).toEqual({ kind: "between", partner: 5 });
++  expect(linePlace(differences, "right", 8)).toEqual({
++    kind: "inside",
++    difference: differences[1],
++  });
++});
++
+ test("a line just past a pure insertion is unchanged, the last inserted line added", async () => {
+   const differences = await differencesOf([
+     { left: { start: 3, len: 0 }, right: { start: 3, len: 2 } },
+diff --git a/frontend/src/editor/internal/threadAnchor.ts b/frontend/src/editor/internal/threadAnchor.ts
+index 4425ee2..5d239f1 100644
+--- a/frontend/src/editor/internal/threadAnchor.ts
++++ b/frontend/src/editor/internal/threadAnchor.ts
+@@ -5,6 +5,7 @@ import {
+   type Difference,
+   type ThreadLine,
+ } from "../../ipc";
++import { segmentAt } from "./diffOrder";
+ 
+ export type LinePlace =
+   | { readonly kind: "inside"; readonly difference: Difference }
+@@ -15,19 +16,12 @@ export function linePlace(
+   column: Column,
+   line: number,
+ ): LinePlace {
+-  const other = column === "left" ? "right" : "left";
+-  let offset = 0;
+-  for (const difference of differences) {
+-    const here = difference[column];
+-    if (line < here.start) {
+-      break;
+-    }
+-    if (line < here.start + here.len) {
+-      return { kind: "inside", difference };
+-    }
+-    offset += difference[other].len - here.len;
++  const segment = segmentAt(differences, column, line);
++  if (segment.kind !== "unchanged") {
++    return { kind: "inside", difference: segment.difference };
+   }
+-  return { kind: "between", partner: line + offset };
++  const other = column === "left" ? "right" : "left";
++  return { kind: "between", partner: segment[other] + line - segment[column] };
+ }
+ 
+ export function anchorAt(
+diff --git a/frontend/src/editor/internal/threadDrag.ts b/frontend/src/editor/internal/threadDrag.ts
+index 6de8708..98a6c70 100644
+--- a/frontend/src/editor/internal/threadDrag.ts
++++ b/frontend/src/editor/internal/threadDrag.ts
+@@ -73,6 +73,7 @@ export class ThreadDrag {
+   readonly #differences: readonly Difference[];
+   readonly #events: DragEvents;
+   #held: Held | null = null;
++  #frame: number | null = null;
+ 
+   constructor({ views, differences, events }: DragWiring) {
+     this.#views = views;
+@@ -90,7 +91,7 @@ export class ThreadDrag {
+     document.addEventListener("keydown", this.#key, CAPTURE);
+     window.addEventListener("blur", this.#cancel);
+     for (const view of [this.#views.left, this.#views.right]) {
+-      view.scrollDOM.addEventListener("scroll", this.#follow);
++      view.scrollDOM.addEventListener("scroll", this.#request);
+     }
+     this.#events.moved(onePlace(press));
+   }
+@@ -101,13 +102,17 @@ export class ThreadDrag {
+ 
+   #stop(): void {
+     this.#held = null;
++    if (this.#frame !== null) {
++      cancelAnimationFrame(this.#frame);
++      this.#frame = null;
++    }
+     document.removeEventListener("pointermove", this.#move, CAPTURE);
+     document.removeEventListener("pointerup", this.#up, CAPTURE);
+     document.removeEventListener("pointercancel", this.#cancel, CAPTURE);
+     document.removeEventListener("keydown", this.#key, CAPTURE);
+     window.removeEventListener("blur", this.#cancel);
+     for (const view of [this.#views.left, this.#views.right]) {
+-      view.scrollDOM.removeEventListener("scroll", this.#follow);
++      view.scrollDOM.removeEventListener("scroll", this.#request);
+     }
+   }
+ 
+@@ -115,16 +120,24 @@ export class ThreadDrag {
+     return placeBetween(this.#differences, held.press, held.end);
+   }
+ 
+-  readonly #follow = (): void => {
+-    const held = this.#held;
+-    if (held === null) {
+-      return;
+-    }
++  #endAt(held: Held): void {
+     const pointer = pointedLine(this.#views, this.#differences, held.clientX, held.clientY);
+     if (pointer !== null) {
+       held.end = shownEnd(this.#differences, held.hidden, held.press, pointer);
+     }
+-    this.#events.moved(this.#place(held));
++  }
++
++  // A column measures itself in its own scroll handler (@codemirror/view DOMObserver.onScroll), and its measures
++  // asked for earlier in a frame run first, so a frame's read sees the heights CodeMirror measured.
++  readonly #request = (): void => {
++    this.#frame ??= requestAnimationFrame(() => {
++      this.#frame = null;
++      const held = this.#held;
++      if (held !== null) {
++        this.#endAt(held);
++        this.#events.moved(this.#place(held));
++      }
++    });
+   };
+ 
+   readonly #move = (event: PointerEvent): void => {
+@@ -132,13 +145,14 @@ export class ThreadDrag {
+       this.#held.clientX = event.clientX;
+       this.#held.clientY = event.clientY;
+     }
+-    this.#follow();
++    this.#request();
+   };
+ 
+   readonly #up = (): void => {
+     const held = this.#held;
+     this.#stop();
+     if (held !== null) {
++      this.#endAt(held);
+       this.#events.released(this.#place(held));
+     }
+   };
+diff --git a/frontend/src/editor/internal/threadNumbers.test.ts b/frontend/src/editor/internal/threadNumbers.test.ts
+index 28f8db7..357ed88 100644
+--- a/frontend/src/editor/internal/threadNumbers.test.ts
++++ b/frontend/src/editor/internal/threadNumbers.test.ts
+@@ -55,6 +55,30 @@ test("a press on the badge reports the line's keys; a press on the number starts
+   });
+ });
+ 
++test("a press on the second of two counted lines' badges toggles that line's threads, not the first's", () => {
++  const counts = [
++    { line: 2, keys: ["a", "b"] },
++    { line: 5, keys: ["c"] },
++  ];
++
++  expect(numberPress({ differences: [], column: "left", line: 5, onBadge: true, counts })).toEqual({
++    kind: "toggle",
++    keys: ["c"],
++  });
++});
++
++test("counts come sorted by line whatever the threads' order", () => {
++  const threads: ShownThread[] = [
++    { key: "later", place: onePlace(changedThreadLine("left", 7)), shown: "open" },
++    { key: "earlier", place: onePlace(changedThreadLine("left", 3)), shown: "open" },
++  ];
++
++  expect(lineCounts(threads, "left")).toEqual([
++    { line: 3, keys: ["earlier"] },
++    { line: 7, keys: ["later"] },
++  ]);
++});
++
+ test("a press on the empty line after a text's last newline is no line of the file", () => {
+   const doc = Text.of(["a", "b", ""]);
+ 
+diff --git a/frontend/src/editor/internal/threadRows.test.ts b/frontend/src/editor/internal/threadRows.test.ts
+index 764d337..2da235f 100644
+--- a/frontend/src/editor/internal/threadRows.test.ts
++++ b/frontend/src/editor/internal/threadRows.test.ts
+@@ -44,6 +44,19 @@ test("a removed line's gap sits after the difference's right lines", async () =>
+   ]);
+ });
+ 
++test("a removed line that no difference holds places its row after its partner line", async () => {
++  const differences = await differencesOf([
++    { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
++  ]);
++  const threads: ShownThread[] = [
++    { key: "outdated", place: onePlace(changedThreadLine("left", 5)), shown: "open" },
++  ];
++
++  expect(places(threadRows(differences, threads))).toEqual([
++    { place: { left: 6, right: 8 }, keys: { left: ["outdated"], right: [] }, kind: "changed" },
++  ]);
++});
++
+ test("an unchanged line's threads from both columns share one row", async () => {
+   const differences = await differencesOf([
+     { left: { start: 1, len: 1 }, right: { start: 1, len: 3 } },
+diff --git a/frontend/src/editor/internal/threadTint.ts b/frontend/src/editor/internal/threadTint.ts
+index fc58f8b..d0a092e 100644
+--- a/frontend/src/editor/internal/threadTint.ts
++++ b/frontend/src/editor/internal/threadTint.ts
+@@ -9,9 +9,9 @@ import { Decoration, EditorView, GutterMarker, gutterLineClass } from "@codemirr
+ 
+ import type { Column, Difference, ThreadPlace } from "../../ipc";
+ import { placeSpans } from "./diffOrder";
+-import type { LineSpan } from "./foldRuns";
++import { joinSpans, type LineSpan } from "./foldRuns";
+ 
+-export type ColumnTint = Readonly<Record<Column, readonly LineSpan[]>>;
++type ColumnTint = Readonly<Record<Column, readonly LineSpan[]>>;
+ 
+ const TINT_CLASS = "cm-thread-tint";
+ 
+@@ -29,16 +29,18 @@ const tintField = StateField.define<readonly LineSpan[]>({
+   update: (spans, tr) => tr.effects.findLast((effect) => effect.is(showTint))?.value ?? spans,
+ });
+ 
++export function tintOf(state: EditorState): readonly LineSpan[] {
++  return state.field(tintField);
++}
++
+ function lineStarts(state: EditorState): number[] {
+   const { doc } = state;
+-  return state
+-    .field(tintField)
+-    .flatMap(({ start, len }) =>
+-      Array.from(
+-        { length: Math.max(0, Math.min(start + len, doc.lines) - start) },
+-        (_, index) => doc.line(start + index + 1).from,
+-      ),
+-    );
++  return tintOf(state).flatMap(({ start, len }) =>
++    Array.from(
++      { length: Math.max(0, Math.min(start + len, doc.lines) - start) },
++      (_, index) => doc.line(start + index + 1).from,
++    ),
++  );
+ }
+ 
+ export const threadTint: Extension = [
+@@ -61,11 +63,11 @@ function mergedSpans(spans: readonly LineSpan[]): LineSpan[] {
+   const out: LineSpan[] = [];
+   for (const span of spans.toSorted((a, b) => a.start - b.start)) {
+     const last = out.at(-1);
+-    if (last !== undefined && span.start <= last.start + last.len) {
+-      const end = Math.max(last.start + last.len, span.start + span.len);
+-      out[out.length - 1] = { start: last.start, len: end - last.start };
+-    } else {
++    const both = last === undefined ? null : joinSpans(last, span);
++    if (both === null) {
+       out.push(span);
++    } else {
++      out[out.length - 1] = both;
+     }
+   }
+   return out;
+diff --git a/frontend/src/editor/range.ts b/frontend/src/editor/range.ts
+index 8ac54c7..1a9dc55 100644
+--- a/frontend/src/editor/range.ts
++++ b/frontend/src/editor/range.ts
+@@ -26,13 +26,7 @@ import { showThreadRows, threadAnchors, threadField } from "./internal/threadFie
+ import { ThreadHosts } from "./internal/threadHosts";
+ import { lineCounts, numberPress, threadNumbers } from "./internal/threadNumbers";
+ import { threadRows } from "./internal/threadRows";
+-import {
+-  placesTint,
+-  sameSpans,
+-  showTint,
+-  threadTint,
+-  type ColumnTint,
+-} from "./internal/threadTint";
++import { placesTint, sameSpans, showTint, threadTint, tintOf } from "./internal/threadTint";
+ 
+ export type { ShownThread } from "../ipc";
+ 
+@@ -69,7 +63,6 @@ export class RangeController {
+   #threads: readonly ShownThread[];
+   #dragged: ThreadPlace | null = null;
+   #hovered: string | null = null;
+-  #tinted: ColumnTint = { left: [], right: [] };
+   #settings: PaneSettings;
+   #destroyed = false;
+ 
+@@ -177,11 +170,11 @@ export class RangeController {
+     ];
+     const tint = placesTint(this.#differences, places);
+     for (const column of COLUMNS) {
+-      if (!sameSpans(this.#tinted[column], tint[column])) {
+-        this.#views[column].dispatch({ effects: showTint.of(tint[column]) });
++      const view = this.#views[column];
++      if (!sameSpans(tintOf(view.state), tint[column])) {
++        view.dispatch({ effects: showTint.of(tint[column]) });
+       }
+     }
+-    this.#tinted = tint;
+   }
+ 
+   setPreferences(preferences: Preferences): void {
+diff --git a/frontend/src/editor/rangeThreads.browser.test.ts b/frontend/src/editor/rangeThreads.browser.test.ts
+index c5fead0..d4de687 100644
+--- a/frontend/src/editor/rangeThreads.browser.test.ts
++++ b/frontend/src/editor/rangeThreads.browser.test.ts
+@@ -1,5 +1,6 @@
+ import "../style.css";
+ import { searchPanelOpen } from "@codemirror/search";
++import type { TransactionSpec } from "@codemirror/state";
+ import { EditorView } from "@codemirror/view";
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import { page, userEvent } from "vitest/browser";
+@@ -14,6 +15,7 @@ import {
+   type ThreadPlace,
+ } from "../ipc";
+ import { RangeController, type CompareHosts, type RangeEvents, type ShownThread } from "./index";
++import { showTint } from "./internal/threadTint";
+ import { found } from "./paneHarness";
+ 
+ const WIDTH = 1200;
+@@ -36,6 +38,8 @@ const LEFT_BOTTOM = 15;
+ const SCROLLED_LINES = 5;
+ const LAST_SHOWN_RIGHT = 25;
+ const BOX_PX = 40;
++const SCREENSHOTS = "/tmp/yamt-range";
++const TEXT_CLEAR_PX = 20;
+ 
+ type Edges = { readonly top: number; readonly bottom: number };
+ 
+@@ -116,6 +120,28 @@ const ACROSS: ThreadPlace = {
+   end: changedThreadLine("right", 11),
+ };
+ 
++const PLAIN = LEFT.split("\n");
++const REMOVED_AT = 5;
++const ADDED_AT = 7;
++const TONES: ProbeCase = {
++  left: LEFT,
++  right: PLAIN.flatMap((line, index) => {
++    if (index === REMOVED_AT) {
++      return [];
++    }
++    return index === ADDED_AT + 1 ? ["const added = 1;", line] : [line];
++  }).join("\n"),
++  differences: [
++    { left: { start: REMOVED_AT, len: 1 }, right: { start: REMOVED_AT, len: 0 } },
++    { left: { start: ADDED_AT + 1, len: 0 }, right: { start: ADDED_AT, len: 1 } },
++  ],
++  threads: [],
++};
++const TONES_PLACE: ThreadPlace = {
++  start: diffLineOf(changedThreadLine("left", REMOVED_AT)),
++  end: changedThreadLine("right", ADDED_AT),
++};
++
+ type Opened = {
+   readonly hosts: CompareHosts;
+   readonly controller: RangeController;
+@@ -273,6 +299,58 @@ function tintedLines(host: HTMLElement): number {
+   return host.querySelectorAll(".cm-line.cm-thread-tint").length;
+ }
+ 
++function lineSpot(host: HTMLElement, number: number): Point {
++  const view = viewIn(host);
++  const block = view.lineBlockAt(view.state.doc.line(number).from);
++  return {
++    clientX: view.scrollDOM.getBoundingClientRect().right - TEXT_CLEAR_PX,
++    clientY: view.documentTop + (block.top + block.bottom) / 2,
++  };
++}
++
++async function pixelsAt(
++  spots: Readonly<Record<string, Point>>,
++): Promise<Readonly<Record<string, string>>> {
++  const png = await page.screenshot({ save: false });
++  const image = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
++  const canvas = new OffscreenCanvas(image.width, image.height);
++  const context = canvas.getContext("2d");
++  if (context === null) {
++    throw new Error("no 2d context");
++  }
++  context.drawImage(image, 0, 0);
++  const scale = image.width / window.innerWidth;
++  const entries = Object.entries<Point>(spots).map(([name, { clientX, clientY }]) => {
++    const pixel = context.getImageData(
++      Math.round(clientX * scale),
++      Math.round(clientY * scale),
++      1,
++      1,
++    );
++    return [name, [...pixel.data].join(",")];
++  });
++  return Object.fromEntries(entries);
++}
++
++function escapeDown(): KeyboardEvent {
++  return new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
++}
++
++function nextFrame(): Promise<number> {
++  return new Promise((resolve) => requestAnimationFrame(resolve));
++}
++
++async function nextFrames(): Promise<void> {
++  await nextFrame();
++  await nextFrame();
++}
++
++function tintDispatches(calls: readonly (readonly TransactionSpec[])[]): number {
++  return calls.filter((specs) =>
++    specs.some(({ effects }) => [effects ?? []].flat().some((effect) => effect.is(showTint))),
++  ).length;
++}
++
+ beforeEach(async () => {
+   await page.viewport(WIDTH, HEIGHT);
+ });
+@@ -280,6 +358,7 @@ beforeEach(async () => {
+ afterEach(() => {
+   controllers.splice(0).forEach((controller) => controller.destroy());
+   document.querySelectorAll(`[${MOUNTED}]`).forEach((wrapper) => wrapper.remove());
++  delete document.documentElement.dataset["theme"];
+ });
+ 
+ test("a host growing by 200 px moves the next line in both columns by 200 px and the band's edges with it", async () => {
+@@ -604,3 +683,110 @@ test("a draft's lines stay tinted", async () => {
+     { timeout: WAIT_MS },
+   );
+ });
++
++test("the next tint repaints a column whose tint was changed by another dispatch", async () => {
++  const draft: ShownThread = { key: KEY, place: ACROSS, shown: "draft" };
++  const probe = await opened({ ...DRAG, threads: [draft] });
++  const { right } = probe.hosts;
++  await vi.waitFor(() => expect(tinted(right)).toHaveLength(4), { timeout: WAIT_MS });
++  viewIn(right).dispatch({ effects: showTint.of([]) });
++
++  probe.controller.showThreads([draft]);
++
++  expect(tinted(right)).toEqual(["9", "10", "11", "12"]);
++});
++
++test.each(["light", "webstorm-dark"] as const)(
++  "in %s the tint shows on a removed and an added line and each keeps its difference colour",
++  async (theme) => {
++    document.documentElement.dataset["theme"] = theme;
++    const probe = await opened(TONES);
++    const { left, right } = probe.hosts;
++    probe.controller.setPreferences({ theme, keys: DEFAULT_KEYS });
++    function spots(): Readonly<Record<string, Point>> {
++      return {
++        removed: lineSpot(left, REMOVED_AT + 1),
++        leftUnchanged: lineSpot(left, REMOVED_AT + 2),
++        added: lineSpot(right, ADDED_AT + 1),
++        rightUnchanged: lineSpot(right, ADDED_AT),
++      };
++    }
++    const plain = await pixelsAt(spots());
++
++    probe.controller.showThreads([{ key: KEY, place: TONES_PLACE, shown: "draft" }]);
++    await vi.waitFor(() => expect(tinted(right)).toEqual(["6", "7", "8"]), { timeout: WAIT_MS });
++    await page.screenshot({ path: `${SCREENSHOTS}/tint-${theme}.png` });
++    const tint = await pixelsAt(spots());
++
++    expect(tinted(left)).toEqual(["6", "7", "8"]);
++    for (const line of ["removed", "added", "leftUnchanged"]) {
++      expect(tint[line], line).not.toBe(plain[line]);
++    }
++    expect(tint["removed"]).not.toBe(tint["leftUnchanged"]);
++    expect(tint["added"]).not.toBe(tint["rightUnchanged"]);
++  },
++);
++
++test("after a finished drag Escape reaches the page untouched and a further move and release start nothing", async () => {
++  const probe = await opened(DRAG);
++  const { left, right } = probe.hosts;
++  const from = lineNumber(right, "9");
++  const to = lineNumber(right, "12");
++  heldDrag(from, to);
++  release(to);
++  const escape = escapeDown();
++  const reached = vi.fn();
++  document.body.addEventListener("keydown", reached, { once: true });
++
++  document.body.dispatchEvent(escape);
++  moveTo(centre(from));
++  release(from);
++  await nextFrames();
++
++  expect([escape.defaultPrevented, reached.mock.calls.length]).toEqual([false, 1]);
++  expect(probe.started).toEqual([ACROSS]);
++  expect([...tinted(left), ...tinted(right)]).toEqual([]);
++});
++
++test("destroying the controller mid-drag leaves Escape to the page and a further move and release start nothing", async () => {
++  const probe = await opened(DRAG);
++  const from = lineNumber(probe.hosts.right, "9");
++  const to = lineNumber(probe.hosts.right, "12");
++  heldDrag(from, to);
++  const point = centre(to);
++  controllers.splice(controllers.indexOf(probe.controller), 1);
++  probe.controller.destroy();
++  const escape = escapeDown();
++  const reached = vi.fn();
++  document.body.addEventListener("keydown", reached, { once: true });
++
++  document.body.dispatchEvent(escape);
++  moveTo(point);
++  document.body.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, ...point }));
++  await nextFrames();
++
++  expect([escape.defaultPrevented, reached.mock.calls.length]).toEqual([false, 1]);
++  expect(probe.started).toEqual([]);
++});
++
++test("two scrolls in one frame during a drag move the end once, in the next frame, to the line under the pointer", async () => {
++  const probe = await opened(DRAG);
++  const { right } = probe.hosts;
++  const view = await measured(right);
++  pressOn(lineNumber(right, "9"));
++  moveTo(centre(lineNumber(right, "12")));
++  await vi.waitFor(() => expect(tinted(right)).toEqual(["9", "10", "11", "12"]), {
++    timeout: WAIT_MS,
++  });
++  const dispatch = vi.spyOn(view, "dispatch");
++
++  for (const lines of [SCROLLED_LINES, SCROLLED_LINES + 1]) {
++    view.scrollDOM.scrollTop = lines * view.defaultLineHeight;
++    view.scrollDOM.dispatchEvent(new Event("scroll"));
++  }
++  const atOnce = tintDispatches(dispatch.mock.calls);
++  await vi.waitFor(() => expect(tinted(right).at(-1)).toBe("18"), { timeout: WAIT_MS });
++  await nextFrames();
++
++  expect([atOnce, tintDispatches(dispatch.mock.calls)]).toEqual([0, 1]);
++});
+diff --git a/frontend/src/editor/theme.css b/frontend/src/editor/theme.css
+index 1531e8a..5037a93 100644
+--- a/frontend/src/editor/theme.css
++++ b/frontend/src/editor/theme.css
+@@ -502,7 +502,8 @@ ul.markdown-list {
+ 
+ .cm-editor .cm-line.cm-thread-tint,
+ .cm-editor .cm-gutterElement.cm-thread-tint {
+-  background-image: linear-gradient(var(--color-selection), var(--color-selection));
++  --thread-tint: color-mix(in srgb, var(--color-selection) 45%, transparent);
++  background-image: linear-gradient(var(--thread-tint), var(--thread-tint));
+ }
+ 
+ .cm-editor.cm-thread-lines .cm-lineNumbers .cm-gutterElement {
