@@ -48,7 +48,7 @@ export function rowAction(row: ActionRow, localMerge: LocalMerge, running: boole
   if (localMerge.kind === "merging" && localMerge.iid === row.iid) {
     return {
       kind: "continue",
-      label: `Continue merging !${row.iid}`,
+      label: `Continue merging`,
       state: continueState(localMerge.windowOpen, running),
     };
   }

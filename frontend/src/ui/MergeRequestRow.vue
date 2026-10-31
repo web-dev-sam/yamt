@@ -45,7 +45,7 @@ const created = computed(() => createdAgo(props.row.createdAt, props.now));
 const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
 const discussions = computed(() => discussionsText(props.row.openDiscussions));
 const approvals = computed(() => approvalsText(props.row.approvals));
-const openTitle = computed(() => openChangesTitle(props.row.iid));
+const openTitle = computed(() => openChangesTitle());
 const pageTitle = computed(() => openPageTitle(props.row.iid, props.row.title));
 const fetching = computed(() => props.opening?.kind === "fetching");
 const refusal = computed(() =>

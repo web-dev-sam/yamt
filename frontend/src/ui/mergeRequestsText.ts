@@ -54,8 +54,8 @@ export function mergeRequestReference(iid: MergeRequestIid): string {
   return `!${iid}`;
 }
 
-export function openChangesTitle(iid: MergeRequestIid): string {
-  return `Open the changes of ${mergeRequestReference(iid)}`;
+export function openChangesTitle(): string {
+  return `Show Diff`;
 }
 
 export function openPageTitle(iid: MergeRequestIid, title: string): string {

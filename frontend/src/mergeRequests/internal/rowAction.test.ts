@@ -26,7 +26,7 @@ test.each<Readiness>([
 ])("the merging row offers Continue whatever GitLab now says (%j)", (readiness) => {
   const continued: RowAction = {
     kind: "continue",
-    label: "Continue merging !12",
+    label: "Continue merging",
     state: { kind: "enabled" },
   };
   expect(rowAction(row(12, readiness), merging(12), false)).toEqual(continued);
@@ -35,7 +35,7 @@ test.each<Readiness>([
 test("the merging row's Continue is disabled while its window is open, running or not", () => {
   const open: RowAction = {
     kind: "continue",
-    label: "Continue merging !12",
+    label: "Continue merging",
     state: { kind: "disabled", hover: "Its merge window is already open" },
   };
   expect(rowAction(row(12), merging(12, true), false)).toEqual(open);
@@ -45,7 +45,7 @@ test("the merging row's Continue is disabled while its window is open, running o
 test("a running Continue shows as running", () => {
   expect(rowAction(row(12), merging(12), true)).toEqual({
     kind: "continue",
-    label: "Continue merging !12",
+    label: "Continue merging",
     state: { kind: "running" },
   });
 });
