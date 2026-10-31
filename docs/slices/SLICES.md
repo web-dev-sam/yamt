@@ -11,11 +11,11 @@ Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `r
 0.6.5 = 0.6.4 plus line-range threads (plan §2 #145–#148; section below; the owner's GitLab playground check, its
 row 8, is still open). The owner pushes `main`, waits for green ci, then tags.
 
-| row | slice                                                                                                        | owner        | status  | evidence   |
-| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ---------- |
-| 1   | release commit 0.6.5: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done    | `86e49122` |
-| 2   | final run 0.6.5 before tagging (`briefs/release-0.6.5-verify.md`)                                            | verifier     | running |            |
-| 3   | push `main`, ci green on all four jobs, tag `v0.6.5`, publish (`handoff-release-0.6.5.md`)                   | human        | todo    |            |
+| row | slice                                                                                                        | owner        | status      | evidence                                                                                                                                                                                                             |
+| --- | ------------------------------------------------------------------------------------------------------------ | ------------ | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | release commit 0.6.5: `Cargo.toml`/`Cargo.lock`, `CHANGELOG.md`, README (`.readmer/readme.json` + `readmer`) | orchestrator | done        | `86e49122`                                                                                                                                                                                                           |
+| 2   | final run 0.6.5 before tagging (`briefs/release-0.6.5-verify.md`)                                            | verifier     | done        | `Release065Verify`: gate pass; readmer, licences; `yamt_0.6.5_amd64.deb` Version `0.6.5`, `yamt 0.6.5`; release binary: both range headers, `threads.json` format 2, back after restart. Notes `Release065Verify.md` |
+| 3   | push `main`, ci green on all four jobs, tag `v0.6.5`, publish (`handoff-release-0.6.5.md`)                   | human        | handed over |                                                                                                                                                                                                                      |
 
 ## Line-range threads (session 42; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
