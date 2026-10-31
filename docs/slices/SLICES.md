@@ -21,8 +21,8 @@ ci, then tags.
 ## Line-range threads (session 41, planning; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
 Request `docs/slices/request-line-ranges.md` (rules 1–10, acceptance, non-goals, slice graph); facts
-`.omp/run/notes/PlanScoutRangeThreads.md`. One product question open (a range across both columns; recommended no).
-Starts in a new session: `Implement docs/slices/request-line-ranges.md`.
+`.omp/run/notes/PlanScoutRangeThreads.md`. Owner's answer #2052: a range may cover both sides (rule 2). No question
+open. Starts in a new session: `Implement docs/slices/request-line-ranges.md`.
 
 | row | slice                                                                               | owner     | status | evidence |
 | --- | ----------------------------------------------------------------------------------- | --------- | ------ | -------- |
