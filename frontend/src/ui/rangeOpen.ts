@@ -43,9 +43,9 @@ export function createRangeOpen(): RangeOpen {
     shownFor: (list, file) =>
       list.threads
         .filter((thread) => thread.file === file)
-        .map(({ id, line }) => ({
+        .map(({ id, place }) => ({
           key: keyOf(id),
-          line,
+          place,
           shown: open.value.has(id) ? "open" : "collapsed",
         })),
     boxOf: (list, key) => {

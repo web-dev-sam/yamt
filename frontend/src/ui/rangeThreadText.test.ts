@@ -2,6 +2,8 @@ import { expect, test } from "vitest";
 
 import {
   changedThreadLine,
+  diffLineOf,
+  onePlace,
   unchangedThreadLine,
   type NotLinedUp,
   type Posting,
@@ -163,12 +165,72 @@ test.each([
     path: "src/board.ts",
     change: { kind: "renamed", oldPath: "src/old.ts" },
   } as const;
-  expect(threadPlaceText(entry, line)).toBe(place);
+  expect(threadPlaceText(entry, onePlace(line))).toBe(place);
 });
 
 test("a removed line of a file that was not renamed names its own path", () => {
   const entry = { path: "src/board.ts", change: { kind: "deleted" } } as const;
-  expect(threadPlaceText(entry, changedThreadLine("left", 0))).toBe("src/board.ts:1");
+  expect(threadPlaceText(entry, onePlace(changedThreadLine("left", 0)))).toBe("src/board.ts:1");
+});
+
+const BOARD = { path: "src/board/board.ts", change: { kind: "modified" } } as const;
+const MOCK_BOARDS = { path: "src/api/mockBoards.ts", change: { kind: "deleted" } } as const;
+const KEYS = {
+  path: "docs/keys.md",
+  change: { kind: "renamed", oldPath: "docs/shortcuts.md" },
+} as const;
+
+test.each([
+  [
+    BOARD,
+    diffLineOf(changedThreadLine("right", 200)),
+    changedThreadLine("right", 203),
+    "src/board/board.ts:201-204",
+  ],
+  [
+    MOCK_BOARDS,
+    diffLineOf(changedThreadLine("left", 1)),
+    changedThreadLine("left", 4),
+    "src/api/mockBoards.ts:2-5",
+  ],
+  [
+    KEYS,
+    diffLineOf(changedThreadLine("left", 1)),
+    changedThreadLine("left", 4),
+    "docs/shortcuts.md:2-5",
+  ],
+  [
+    BOARD,
+    diffLineOf(unchangedThreadLine("left", { left: 2, right: 5 })),
+    unchangedThreadLine("left", { left: 6, right: 9 }),
+    "src/board/board.ts:6-10",
+  ],
+  [
+    BOARD,
+    diffLineOf(unchangedThreadLine("left", { left: 2, right: 5 })),
+    changedThreadLine("right", 8),
+    "src/board/board.ts:6-9",
+  ],
+  [
+    BOARD,
+    diffLineOf(changedThreadLine("left", 199)),
+    changedThreadLine("right", 203),
+    "src/board/board.ts:-200 to +204",
+  ],
+  [
+    BOARD,
+    diffLineOf(unchangedThreadLine("right", { left: 0, right: 1 })),
+    changedThreadLine("left", 3),
+    "src/board/board.ts:+2 to -4",
+  ],
+  [
+    KEYS,
+    diffLineOf(changedThreadLine("left", 2)),
+    changedThreadLine("right", 3),
+    "docs/shortcuts.md:-3 to docs/keys.md:+4",
+  ],
+])("a range in %o from %o to %o reads %s", (entry, start, end, text) => {
+  expect(threadPlaceText(entry, { start, end })).toBe(text);
 });
 
 test.each([

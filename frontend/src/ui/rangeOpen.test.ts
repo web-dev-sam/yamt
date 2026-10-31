@@ -76,9 +76,9 @@ test("shownFor lists a file's stored threads by key, open or collapsed", () => {
   open.added(threadAt(2).id, "draft-0");
 
   expect(open.shownFor(LIST, file)).toEqual(
-    LIST.threads.map(({ id, line }, index) => ({
+    LIST.threads.map(({ id, place }, index) => ({
       key: index === 2 ? "draft-0" : `thread-${id}`,
-      line,
+      place,
       shown: index === 2 ? "open" : "collapsed",
     })),
   );

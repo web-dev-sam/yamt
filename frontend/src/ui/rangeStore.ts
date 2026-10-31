@@ -119,7 +119,7 @@ export function askContext(
   return {
     template: firstMessageInUse(agent),
     values: {
-      RELATIVE_FILE_PATH_WITH_LINE: threadPlaceText(entry, thread.line),
+      RELATIVE_FILE_PATH_WITH_LINE: threadPlaceText(entry, thread.place),
       RANGE: start.range,
       OLD_COMMIT: start.left.shortId,
       NEW_COMMIT: start.right.shortId,

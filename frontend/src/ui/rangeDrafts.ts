@@ -1,13 +1,14 @@
 import { shallowRef, type ShallowRef } from "vue";
 
 import {
+  sameDiffLine,
   shownLine,
   type Message,
   type MessageId,
   type RangeFileId,
   type ThreadId,
-  type ThreadLine,
   type ThreadList,
+  type ThreadPlace,
 } from "../ipc";
 import { isChangeable } from "./rangeNoteChange";
 
@@ -15,7 +16,7 @@ export type Draft =
   | {
       readonly kind: "thread";
       readonly file: RangeFileId;
-      readonly line: ThreadLine;
+      readonly place: ThreadPlace;
       readonly text: string;
       readonly focus: number;
     }
@@ -29,7 +30,7 @@ export type RangeDrafts = {
   readonly drafts: Readonly<ShallowRef<ReadonlyMap<string, Draft>>>;
   readonly threadDraft: (key: string) => ThreadDraft | null;
   readonly keepStored: (list: ThreadList) => void;
-  startThread(file: RangeFileId, line: ThreadLine): void;
+  startThread(file: RangeFileId, place: ThreadPlace): void;
   writeDraft(key: string, text: string): void;
   dropDraft(key: string): void;
   noteText(thread: ThreadId): string;
@@ -117,21 +118,23 @@ function keepStored(state: State, list: ThreadList): void {
   }
 }
 
-function sameLine(a: ThreadLine, b: ThreadLine): boolean {
-  const [first, second] = [shownLine(a), shownLine(b)];
-  return first.column === second.column && first.line === second.line;
+function samePlace(a: ThreadPlace, b: ThreadPlace): boolean {
+  const [first, second] = [shownLine(a.end), shownLine(b.end)];
+  return (
+    sameDiffLine(a.start, b.start) && first.column === second.column && first.line === second.line
+  );
 }
 
-function startThread(state: State, file: RangeFileId, line: ThreadLine): void {
+function startThread(state: State, file: RangeFileId, place: ThreadPlace): void {
   for (const [key, draft] of state.drafts.value) {
-    if (draft.kind === "thread" && draft.file === file && sameLine(draft.line, line)) {
+    if (draft.kind === "thread" && draft.file === file && samePlace(draft.place, place)) {
       setDraft(state, key, { ...draft, focus: draft.focus + 1 });
       return;
     }
   }
   const key = `draft-${state.nextDraft}`;
   state.nextDraft += 1;
-  setDraft(state, key, { kind: "thread", file, line, text: "", focus: 0 });
+  setDraft(state, key, { kind: "thread", file, place, text: "", focus: 0 });
 }
 
 function messageDrafts(
@@ -172,8 +175,8 @@ export function createRangeDrafts(): RangeDrafts {
     keepStored: (list) => {
       keepStored(state, list);
     },
-    startThread: (file, line) => {
-      startThread(state, file, line);
+    startThread: (file, place) => {
+      startThread(state, file, place);
     },
     writeDraft: (key, text) => {
       const draft = threadDraft(state, key);

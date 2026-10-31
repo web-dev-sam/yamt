@@ -1,0 +1,2 @@
+just mutants HEAD → 775 killed, 0 timeout, 19 survived, 15 no coverage, 1 error (ui + agent/internal/firstMessage.ts)
+src/ui/rangeDrafts.ts:130 `draft.kind === "thread"` → `true` — equivalent: only thread drafts have a `file`, so for a note, post or edit draft `draft.file === file` is already false (undefined).

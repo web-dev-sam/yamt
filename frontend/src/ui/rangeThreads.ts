@@ -9,8 +9,8 @@ import type {
   ShownThread,
   SourceResult,
   ThreadId,
-  ThreadLine,
   ThreadList,
+  ThreadPlace,
 } from "../ipc";
 import { attempt, type Problem, type ThreadStep } from "./problem";
 import { createRangeAdds, type AddsInFlight, type RangeAdds } from "./rangeAdds";
@@ -35,7 +35,7 @@ export type RangeThreads = AddsInFlight & {
   load(): Promise<void>;
   shownFor(file: RangeFileId): readonly ShownThread[];
   boxOf(key: string): ThreadBox | null;
-  startThread(file: RangeFileId, line: ThreadLine): void;
+  startThread(file: RangeFileId, place: ThreadPlace): void;
   writeDraft(key: string, text: string): void;
   dropDraft(key: string): void;
   noteText(thread: ThreadId): string;
@@ -96,7 +96,7 @@ function setList(state: State, list: ThreadList): void {
 function shownFor(state: State, file: RangeFileId): ShownThread[] {
   const drafts = [...state.drafts.drafts.value].flatMap(([key, draft]): ShownThread[] =>
     draft.kind === "thread" && draft.file === file
-      ? [{ key, line: draft.line, shown: "draft" }]
+      ? [{ key, place: draft.place, shown: "draft" }]
       : [],
   );
   return [...state.open.shownFor(state.list.value, file), ...drafts];
@@ -127,7 +127,7 @@ async function addThread(state: State, key: string, text: string): Promise<Threa
     return null;
   }
   const outcome = await state.adds.whileAdding({ kind: "thread", draftKey: key }, () =>
-    attempt(() => state.source.addThread(draft.file, draft.line, text)),
+    attempt(() => state.source.addThread(draft.file, draft.place, text)),
   );
   if (!outcome.ok) {
     state.drafts.writeDraft(key, text);

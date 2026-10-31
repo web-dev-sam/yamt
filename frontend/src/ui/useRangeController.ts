@@ -202,8 +202,8 @@ export function rangeThreadParts(
     threads: () => threads.shownFor(file.id),
     listed: () => threads.listed.value,
     events: {
-      startThread: (line) => {
-        threads.startThread(file.id, line);
+      startThread: (place) => {
+        threads.startThread(file.id, place);
       },
       toggleThreads: (keys) => {
         threads.toggle(keys);

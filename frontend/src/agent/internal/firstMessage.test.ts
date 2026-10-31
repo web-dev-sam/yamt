@@ -55,7 +55,7 @@ test("the default message names all five placeholders and fills to plain text", 
     [
       "You are helping me review the changes main...feature (1a2b3c4..5d6e7f8).",
       "The current folder is a checkout of 5d6e7f8; `git diff 1a2b3c4 5d6e7f8` shows the changes.",
-      "A line removed by the changes is named by its place in 1a2b3c4.",
+      "A line removed by the changes is named by its place in 1a2b3c4; in a range such as `-5 to +8`, `-` marks a line of 1a2b3c4 and `+` one of 5d6e7f8.",
       "",
       "My comment on src/board/board.ts:12:",
       "",

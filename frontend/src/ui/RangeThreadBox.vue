@@ -40,8 +40,8 @@ const thread = computed(() =>
   box.value?.kind === "thread" && box.value.open ? box.value.thread : null,
 );
 const place = computed(() => {
-  const line = draft.value?.line ?? thread.value?.line;
-  return line === undefined ? "" : threadPlaceText(props.file, line);
+  const shown = draft.value?.place ?? thread.value?.place;
+  return shown === undefined ? "" : threadPlaceText(props.file, shown);
 });
 const text = computed(() => {
   if (draft.value !== null) {

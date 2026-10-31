@@ -3,7 +3,9 @@ import { expect, test } from "vitest";
 import {
   changedThreadLine,
   createFixtureRangeSource,
+  diffLineOf,
   log,
+  onePlace,
   unchangedThreadLine,
   type RangeFileId,
   type RangeSource,
@@ -98,12 +100,15 @@ function manyFiles(count: number): unknown {
 
 test("a draft's Comment adds the thread and its key becomes the stored id with the text kept", async () => {
   const { threads, board } = await opened();
-  const line = changedThreadLine("right", 3);
-  threads.startThread(board, line);
-  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "draft" }]);
+  const place = {
+    start: diffLineOf(changedThreadLine("right", 1)),
+    end: changedThreadLine("right", 3),
+  };
+  threads.startThread(board, place);
+  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", place, shown: "draft" }]);
   expect(threads.boxOf("draft-0")).toEqual({
     kind: "draft",
-    draft: { kind: "thread", file: board, line, text: "", focus: 0 },
+    draft: { kind: "thread", file: board, place, text: "", focus: 0 },
   });
 
   threads.writeDraft("draft-0", "Why 300?");
@@ -112,10 +117,10 @@ test("a draft's Comment adds the thread and its key becomes the stored id with t
   const thread = threadAt(threads, 0);
   expect(added).toBe(thread.id);
   expect(texts(thread)).toEqual(["Why 300?"]);
-  expect(thread.line).toEqual(line);
+  expect(thread.place).toEqual(place);
   expect(threads.drafts.value.size).toBe(0);
   expect(threads.open.value).toEqual(new Set([thread.id]));
-  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "open" }]);
+  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", place, shown: "open" }]);
   expect(threads.boxOf("draft-0")).toEqual({ kind: "thread", thread, open: true });
 });
 
@@ -123,7 +128,7 @@ test("a refused Comment keeps the draft with its text and reports the add", asyn
   const { threads, problems, board } = await opened("?range=review", () => ({
     addThread: async () => ({ ok: false, failure: UNKNOWN }),
   }));
-  threads.startThread(board, changedThreadLine("left", 1));
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
 
   expect(await threads.addThread("draft-0", "Why 300?")).toBeNull();
 
@@ -135,12 +140,12 @@ test("a refused Comment keeps the draft with its text and reports the add", asyn
 test("a second Comment while the first is in flight sends nothing more", async () => {
   let calls = 0;
   const { threads, board } = await opened("?range=review", (fixture) => ({
-    addThread: async (file, line, text) => {
+    addThread: async (file, place, text) => {
       calls += 1;
-      return fixture.addThread(file, line, text);
+      return fixture.addThread(file, place, text);
     },
   }));
-  threads.startThread(board, changedThreadLine("left", 1));
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
 
   const both = await Promise.all([
     threads.addThread("draft-0", "a"),
@@ -156,15 +161,15 @@ test("a second Comment while the first is in flight sends nothing more", async (
 test("after a refused Comment the next Comment on that draft is sent and stored once", async () => {
   let calls = 0;
   const { threads, problems, board } = await opened("?range=review", (fixture) => ({
-    addThread: async (file, line, text) => {
+    addThread: async (file, place, text) => {
       calls += 1;
       if (calls === 1) {
         return { ok: false, failure: UNKNOWN };
       }
-      return fixture.addThread(file, line, text);
+      return fixture.addThread(file, place, text);
     },
   }));
-  threads.startThread(board, changedThreadLine("left", 1));
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
 
   await threads.addThread("draft-0", "a");
   await threads.addThread("draft-0", "a");
@@ -178,9 +183,9 @@ test("after a refused Comment the next Comment on that draft is sent and stored 
 test("a Comment on a key with no draft makes no call and reports nothing", async () => {
   let calls = 0;
   const { threads, problems } = await opened("?range=review", (fixture) => ({
-    addThread: async (file, line, text) => {
+    addThread: async (file, place, text) => {
       calls += 1;
-      return fixture.addThread(file, line, text);
+      return fixture.addThread(file, place, text);
     },
   }));
 
@@ -202,7 +207,7 @@ test("a refused Comment whose draft was dropped while it ran brings no draft bac
       return { ok: false, failure: UNKNOWN };
     },
   }));
-  threads.startThread(board, changedThreadLine("left", 1));
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
   const adding = threads.addThread("draft-0", "late");
   threads.dropDraft("draft-0");
 
@@ -217,25 +222,52 @@ test("a refused Comment whose draft was dropped while it ran brings no draft bac
 
 test("a second press on a line with an open draft focuses it, with no second draft", async () => {
   const { threads, board, other } = await opened();
-  const line = unchangedThreadLine("left", { left: 4, right: 6 });
-  threads.startThread(board, line);
+  const place = onePlace(unchangedThreadLine("left", { left: 4, right: 6 }));
+  threads.startThread(board, place);
   threads.writeDraft("draft-0", "half");
 
-  threads.startThread(board, unchangedThreadLine("left", { left: 4, right: 6 }));
+  threads.startThread(board, onePlace(unchangedThreadLine("left", { left: 4, right: 6 })));
 
   expect([...threads.drafts.value]).toEqual([
-    ["draft-0", { kind: "thread", file: board, line, text: "half", focus: 1 }],
+    ["draft-0", { kind: "thread", file: board, place, text: "half", focus: 1 }],
   ]);
 
-  threads.startThread(board, unchangedThreadLine("right", { left: 4, right: 6 }));
-  threads.startThread(board, changedThreadLine("left", 5));
-  threads.startThread(other, line);
+  threads.startThread(board, onePlace(unchangedThreadLine("right", { left: 4, right: 6 })));
+  threads.startThread(board, onePlace(changedThreadLine("left", 5)));
+  threads.startThread(other, place);
   expect([...threads.drafts.value.keys()]).toEqual(["draft-0", "draft-1", "draft-2", "draft-3"]);
+});
+
+test("dragging exactly a draft's range focuses it; another range ending on the same line is a new draft", async () => {
+  const { threads, board } = await opened();
+  const end = changedThreadLine("right", 8);
+  const place = { start: diffLineOf(changedThreadLine("left", 5)), end };
+  threads.startThread(board, place);
+
+  threads.startThread(board, { start: diffLineOf(changedThreadLine("left", 5)), end });
+  threads.startThread(board, { start: diffLineOf(changedThreadLine("left", 6)), end });
+  threads.startThread(board, { start: diffLineOf(changedThreadLine("right", 5)), end });
+  threads.startThread(board, {
+    start: diffLineOf(changedThreadLine("left", 5)),
+    end: unchangedThreadLine("left", { left: 9, right: 8 }),
+  });
+  threads.startThread(board, {
+    start: diffLineOf(changedThreadLine("left", 5)),
+    end: changedThreadLine("right", 9),
+  });
+
+  expect([...threads.drafts.value]).toEqual([
+    ["draft-0", { kind: "thread", file: board, place, text: "", focus: 1 }],
+    ["draft-1", expect.objectContaining({ focus: 0 })],
+    ["draft-2", expect.objectContaining({ focus: 0 })],
+    ["draft-3", expect.objectContaining({ focus: 0 })],
+    ["draft-4", expect.objectContaining({ focus: 0 })],
+  ]);
 });
 
 test("a dropped draft leaves the line; writing a missing draft creates nothing", async () => {
   const { threads, board } = await opened();
-  threads.startThread(board, changedThreadLine("left", 1));
+  threads.startThread(board, onePlace(changedThreadLine("left", 1)));
 
   threads.dropDraft("draft-0");
   threads.writeDraft("draft-0", "late");
@@ -246,7 +278,7 @@ test("a dropped draft leaves the line; writing a missing draft creates nothing",
 
 test("stored threads come back collapsed; open and collapse per thread and per line", async () => {
   const { threads, board } = await opened(SEEDED);
-  const keys = ["thread-0", "thread-1", "thread-2", "thread-3"];
+  const keys = ["thread-0", "thread-1", "thread-2", "thread-3", "thread-4", "thread-5"];
   expect(threads.shownFor(board).map(({ key, shown }) => [key, shown])).toEqual(
     keys.map((key) => [key, "collapsed"]),
   );
@@ -268,23 +300,25 @@ test("stored threads come back collapsed; open and collapse per thread and per l
 
 test("counts per file ignore drafts", async () => {
   const { threads, board, other } = await opened(SEEDED);
-  threads.startThread(other, changedThreadLine("left", 0));
-  threads.startThread(board, changedThreadLine("left", 0));
+  threads.startThread(other, onePlace(changedThreadLine("left", 0)));
+  threads.startThread(board, onePlace(changedThreadLine("left", 0)));
 
-  expect([...threads.counts.value]).toEqual([[board, 4]]);
+  expect([...threads.counts.value]).toEqual([[board, 6]]);
 
   await threads.addThread("draft-0", "here");
 
   expect(threads.counts.value.get(other)).toBe(1);
-  expect(threads.counts.value.get(board)).toBe(4);
+  expect(threads.counts.value.get(board)).toBe(6);
   expect(threads.shownFor(other)).toEqual([
-    { key: "draft-0", line: changedThreadLine("left", 0), shown: "open" },
+    { key: "draft-0", place: onePlace(changedThreadLine("left", 0)), shown: "open" },
   ]);
   expect(threads.shownFor(board).map(({ key }) => key)).toEqual([
     "thread-0",
     "thread-1",
     "thread-2",
     "thread-3",
+    "thread-4",
+    "thread-5",
     "draft-1",
   ]);
 });
@@ -292,9 +326,9 @@ test("counts per file ignore drafts", async () => {
 test("blank text is never sent", async () => {
   const sent: string[] = [];
   const { threads, board } = await opened(SEEDED, (fixture) => ({
-    addThread: async (file, line, text) => {
+    addThread: async (file, place, text) => {
       sent.push("thread");
-      return fixture.addThread(file, line, text);
+      return fixture.addThread(file, place, text);
     },
     addNote: async (thread, text) => {
       sent.push("note");
@@ -310,7 +344,7 @@ test("blank text is never sent", async () => {
   if (message === undefined) {
     throw new Error("no message");
   }
-  threads.startThread(board, changedThreadLine("left", 0));
+  threads.startThread(board, onePlace(changedThreadLine("left", 0)));
 
   expect(await threads.addThread("draft-0", "  \n")).toBeNull();
   expect(await threads.addNote(thread.id, "\t")).toBe(false);
@@ -355,8 +389,8 @@ test("each thread keeps its own reply text", async () => {
 test("a press on the same line number in the other column opens a second draft", async () => {
   const { threads, board } = await opened();
 
-  threads.startThread(board, changedThreadLine("left", 3));
-  threads.startThread(board, changedThreadLine("right", 3));
+  threads.startThread(board, onePlace(changedThreadLine("left", 3)));
+  threads.startThread(board, onePlace(changedThreadLine("right", 3)));
 
   expect([...threads.drafts.value.keys()]).toEqual(["draft-0", "draft-1"]);
 });
@@ -455,7 +489,7 @@ test("a Post text outlives its file's view: 16 other files evict file 0 and the 
   if (first === undefined) {
     throw new Error("no file");
   }
-  store.threads.startThread(first.id, changedThreadLine("right", 0));
+  store.threads.startThread(first.id, onePlace(changedThreadLine("right", 0)));
   await store.threads.addThread("draft-0", "Why?");
   const { id } = messageOf(threadAt(store.threads, 0));
   store.threads.writePost(id, "Why is");
@@ -506,8 +540,8 @@ test("a Cancel while Comment is in flight still adds and opens the thread", asyn
       return fixture.addThread(file, line, text);
     },
   }));
-  const line = changedThreadLine("left", 2);
-  threads.startThread(board, line);
+  const place = onePlace(changedThreadLine("left", 2));
+  threads.startThread(board, place);
   const adding = threads.addThread("draft-0", "late");
   threads.dropDraft("draft-0");
 
@@ -517,7 +551,7 @@ test("a Cancel while Comment is in flight still adds and opens the thread", asyn
   await adding;
 
   expect(texts(threadAt(threads, 0))).toEqual(["late"]);
-  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", line, shown: "open" }]);
+  expect(threads.shownFor(board)).toEqual([{ key: "draft-0", place, shown: "open" }]);
 });
 
 test("replace mirrors a send's list and drops the Post box of a message it no longer holds", async () => {
@@ -549,6 +583,8 @@ test("your notes not yet on GitLab can change; a pending note and an AI answer c
     false,
     true,
     false,
+    true,
+    true,
   ]);
 });
 
@@ -676,7 +712,7 @@ test("deleting a note keeps a thread that still has a message", async () => {
 
   expect(texts(threadAt(threads, 3))).toEqual(["ai"]);
   expect(threads.open.value).toEqual(new Set([thread.id]));
-  expect(threads.counts.value.get(board)).toBe(4);
+  expect(threads.counts.value.get(board)).toBe(6);
 });
 
 test("deleting a thread's last note removes the thread, its line, its count, its open state and its drafts", async () => {
@@ -694,20 +730,22 @@ test("deleting a thread's last note removes the thread, its line, its count, its
   threads.writeNote(kept.id, "kept reply");
   threads.writeEdit(note.id, "half");
   threads.writePost(other.id, "kept post");
-  threads.startThread(board, changedThreadLine("right", 1));
+  threads.startThread(board, onePlace(changedThreadLine("right", 1)));
   threads.writePost(answer.id, "post the answer");
   threads.writeEdit(repliedNote.id, "edit the replied note");
 
   await threads.deleteMessage(note.id);
 
-  expect(threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3]);
+  expect(threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3, 4, 5]);
   expect(threads.shownFor(board).map(({ key }) => key)).toEqual([
     "thread-1",
     "thread-2",
     "thread-3",
+    "thread-4",
+    "thread-5",
     "draft-0",
   ]);
-  expect(threads.counts.value.get(board)).toBe(3);
+  expect(threads.counts.value.get(board)).toBe(5);
   expect(threads.open.value).toEqual(new Set([kept.id]));
   expect(threads.boxOf(`thread-${gone.id}`)).toBeNull();
   expect([...threads.drafts.value.keys()].toSorted()).toEqual(
@@ -757,8 +795,8 @@ test.each([false, true])(
   async (refuses) => {
     const hold = held();
     const { threads, board } = await opened("?range=review", heldAdds([hold], refuses));
-    threads.startThread(board, changedThreadLine("left", 1));
-    threads.startThread(board, changedThreadLine("left", 2));
+    threads.startThread(board, onePlace(changedThreadLine("left", 1)));
+    threads.startThread(board, onePlace(changedThreadLine("left", 2)));
     expect(threads.addingThread("draft-0")).toBe(false);
 
     const adding = threads.addThread("draft-0", "a");

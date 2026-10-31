@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { AgentClient, DEFAULT_AGENT_COMMAND, DEFAULT_FIRST_MESSAGE } from "../agent";
 import {
   changedThreadLine,
+  onePlace,
   createFixtureAgentSource,
   createFixtureRangeSource,
   log,
@@ -331,8 +332,8 @@ test("the 17th file drops the least recently shown and keeps the others' order",
 test("a draft outlives its file's view: 16 other files evict file 0 and the draft is still there", async () => {
   const store = await started(MOUNTED_FILES + 1);
   const first = fileAt(store, 0);
-  const line = changedThreadLine("right", 0);
-  store.threads.startThread(first.id, line);
+  const place = onePlace(changedThreadLine("right", 0));
+  store.threads.startThread(first.id, place);
   store.threads.writeDraft("draft-0", "Why?");
 
   for (let index = 1; index <= MOUNTED_FILES; index += 1) {
@@ -340,7 +341,7 @@ test("a draft outlives its file's view: 16 other files evict file 0 and the draf
   }
 
   expect(store.visited.value).not.toContain(first);
-  expect(store.threads.shownFor(first.id)).toEqual([{ key: "draft-0", line, shown: "draft" }]);
+  expect(store.threads.shownFor(first.id)).toEqual([{ key: "draft-0", place, shown: "draft" }]);
   expect(store.threads.boxOf("draft-0")).toMatchObject({ kind: "draft", draft: { text: "Why?" } });
 });
 
@@ -482,7 +483,8 @@ test("First message's values: the thread's place, the range as typed, both short
   await store.startUp();
   const start = store.start.value;
   const [removed, added] = store.threads.list.value.threads;
-  if (start === null || removed === undefined || added === undefined) {
+  const bothSides = store.threads.list.value.threads[5];
+  if (start === null || removed === undefined || added === undefined || bothSides === undefined) {
     throw new Error("the seeded review did not open");
   }
   const custom = { command: null, firstMessage: "Hi {{ MESSAGE }}" };
@@ -499,6 +501,9 @@ test("First message's values: the thread's place, the range as typed, both short
   expect(askContext(start, custom, removed)).toMatchObject({
     template: "Hi {{ MESSAGE }}",
     values: { RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:20" },
+  });
+  expect(askContext(start, custom, bothSides)).toMatchObject({
+    values: { RELATIVE_FILE_PATH_WITH_LINE: "src/board/board.ts:-255 to +260" },
   });
   expect(askContext(null, custom, added)).toBeNull();
   expect(askContext({ ...start, files: [] }, custom, added)).toBeNull();
@@ -576,13 +581,13 @@ test("deleteNote asks first: Cancel and Escape keep the note, Delete removes it 
   const dismissed = await asked();
   store.dismissQuestion();
   await dismissed.deleting;
-  expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([0, 1, 2, 3]);
+  expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([0, 1, 2, 3, 4, 5]);
 
   const deleted = await asked();
   store.answer(true);
   await deleted.deleting;
-  expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3]);
-  expect(store.threads.counts.value.get(first.file)).toBe(3);
+  expect(store.threads.list.value.threads.map(({ id }) => id)).toEqual([1, 2, 3, 4, 5]);
+  expect(store.threads.counts.value.get(first.file)).toBe(5);
   expect(store.question.value).toBeNull();
 });
 

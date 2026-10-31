@@ -11,7 +11,7 @@ export type Placeholder = (typeof PLACEHOLDERS)[number];
 export const DEFAULT_FIRST_MESSAGE = [
   "You are helping me review the changes {{ RANGE }} ({{ OLD_COMMIT }}..{{ NEW_COMMIT }}).",
   "The current folder is a checkout of {{ NEW_COMMIT }}; `git diff {{ OLD_COMMIT }} {{ NEW_COMMIT }}` shows the changes.",
-  "A line removed by the changes is named by its place in {{ OLD_COMMIT }}.",
+  "A line removed by the changes is named by its place in {{ OLD_COMMIT }}; in a range such as `-5 to +8`, `-` marks a line of {{ OLD_COMMIT }} and `+` one of {{ NEW_COMMIT }}.",
   "",
   "My comment on {{ RELATIVE_FILE_PATH_WITH_LINE }}:",
   "",

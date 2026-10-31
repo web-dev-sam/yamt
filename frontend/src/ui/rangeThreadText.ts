@@ -1,12 +1,15 @@
-import type {
-  MergeRequestRef,
-  NotLinedUp,
-  Posting,
-  RangeEntry,
-  RangeStart,
-  SendProgress,
-  SendReply,
-  ThreadLine,
+import {
+  isOneLine,
+  type DiffLine,
+  type MergeRequestRef,
+  type NotLinedUp,
+  type Posting,
+  type RangeEntry,
+  type RangeStart,
+  type SendProgress,
+  type SendReply,
+  type ThreadLine,
+  type ThreadPlace,
 } from "../ipc";
 import { GLAB_MISSING_TEXT, glabFailedText, glabNotLoggedInText } from "./glab";
 import type { NoticeRow } from "./noticeText";
@@ -161,13 +164,35 @@ export function threadCountText(threads: number): string {
   return threads === 1 ? "1 thread" : `${threads} threads`;
 }
 
-export function threadPlaceText(
+type PlaceEnd = { readonly removed: boolean; readonly path: string; readonly line: number };
+
+function placeEnd(
   entry: Pick<RangeEntry, "path" | "change">,
-  line: ThreadLine,
-): string {
+  line: DiffLine | ThreadLine,
+): PlaceEnd {
   if (line.kind !== "removed") {
-    return `${entry.path}:${line.right + 1}`;
+    return { removed: false, path: entry.path, line: line.right + 1 };
   }
   const path = entry.change.kind === "renamed" ? entry.change.oldPath : entry.path;
-  return `${path}:${line.left + 1}`;
+  return { removed: true, path, line: line.left + 1 };
+}
+
+function signed(end: PlaceEnd): string {
+  return `${end.removed ? "-" : "+"}${end.line}`;
+}
+
+export function threadPlaceText(
+  entry: Pick<RangeEntry, "path" | "change">,
+  place: ThreadPlace,
+): string {
+  const [start, end] = [placeEnd(entry, place.start), placeEnd(entry, place.end)];
+  if (isOneLine(place)) {
+    return `${end.path}:${end.line}`;
+  }
+  if (start.removed === end.removed) {
+    return `${end.path}:${start.line}-${end.line}`;
+  }
+  return start.path === end.path
+    ? `${end.path}:${signed(start)} to ${signed(end)}`
+    : `${start.path}:${signed(start)} to ${end.path}:${signed(end)}`;
 }

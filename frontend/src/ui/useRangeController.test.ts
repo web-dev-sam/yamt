@@ -5,7 +5,9 @@ import type { Preferences, RangeEvents, RangeTexts, ShownThread } from "../edito
 import {
   changedThreadLine,
   createFixtureRangeSource,
+  diffLineOf,
   log,
+  onePlace,
   type RangeFile,
   type RangeSource,
 } from "../ipc";
@@ -56,7 +58,11 @@ const TEXTS: RangeFile = {
   differences: [],
   mode: { kind: "changed", old: "file", new: "executable" },
 };
-const THREAD: ShownThread = { key: "thread-1", line: changedThreadLine("left", 2), shown: "open" };
+const THREAD: ShownThread = {
+  key: "thread-1",
+  place: onePlace(changedThreadLine("left", 2)),
+  shown: "open",
+};
 const IDLE: ShownRange = {
   setPreferences: () => {},
   setCollapsed: () => {},
@@ -103,7 +109,7 @@ function run(from: RunFrom = {}): Run {
       threads: () => threads.value,
       listed: () => listed.value,
       events: {
-        startThread: (line) => calls.push(`start ${line.kind}`),
+        startThread: (place) => calls.push(`start ${place.end.kind}`),
         toggleThreads: (keys) => calls.push(`toggle ${keys.join(",")}`),
       },
       build: (texts, at, options, events) => {
@@ -287,7 +293,7 @@ test("the controller gets the line events and its hosts reach threadHosts", asyn
   const events = live.events();
   const hosts = new Map<string, HTMLElement>();
 
-  events.startThread(changedThreadLine("right", 4));
+  events.startThread(onePlace(changedThreadLine("right", 4)));
   events.toggleThreads(["thread-1", "thread-2"]);
   events.hosts(hosts);
 
@@ -432,7 +438,7 @@ test.each(["left", "right", "strip"] as const)(
   },
 );
 
-test("a press on a line number starts a draft in that file only; toggle opens and closes", async () => {
+test("startThread(place) starts a draft with that place in that file only; toggle opens and closes", async () => {
   const fixture = createFixtureRangeSource(log, "?range=review&threads=seeded");
   const start = await fixture.openRange();
   if (!start.ok) {
@@ -448,11 +454,14 @@ test("a press on a line number starts a draft in that file only; toggle opens an
   await threads.load();
   const before = threads.shownFor(second.id);
   const parts = rangeThreadParts(threads, first);
-  const line = changedThreadLine("right", 1);
+  const place = {
+    start: diffLineOf(changedThreadLine("left", 0)),
+    end: changedThreadLine("right", 1),
+  };
 
-  parts.events.startThread(line);
+  parts.events.startThread(place);
 
-  const draft = { key: "draft-0", line, shown: "draft" };
+  const draft = { key: "draft-0", place, shown: "draft" };
   expect(parts.threads()).toContainEqual(draft);
   expect(threads.shownFor(first.id)).toContainEqual(draft);
   expect(threads.shownFor(second.id)).toEqual(before);
@@ -469,7 +478,7 @@ test("a press on a line number starts a draft in that file only; toggle opens an
 });
 
 test.each([
-  ["read", (fixture: RangeSource): RangeSource => fixture, [4]],
+  ["read", (fixture: RangeSource): RangeSource => fixture, [6]],
   [
     "failed",
     (fixture: RangeSource): RangeSource => ({

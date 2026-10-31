@@ -16,6 +16,7 @@ import {
   changedThreadLine,
   createFixtureRangeSource,
   log,
+  onePlace,
   type Message,
   type RangeSource,
   type Thread,
@@ -970,15 +971,15 @@ test("a refused add reports its problem, keeps the text in the field and asks no
 
 test("Ask AI on a line's new thread adds the thread with the text, then asks its first turn", async () => {
   const live = await rig();
-  const line = changedThreadLine("right", 3);
-  live.threads.startThread(threadOf(live, live.fresh).file, line);
+  const place = onePlace(changedThreadLine("right", 3));
+  live.threads.startThread(threadOf(live, live.fresh).file, place);
   expect(live.ai.canAsk(draftOf("draft-0"), " ")).toBe(false);
   expect(live.ai.canAsk(draftOf("draft-0"), "New here?")).toBe(true);
 
   await live.ai.ask(draftOf("draft-0"), "New here?");
 
   const added = live.threads.list.value.threads.at(-1);
-  expect(added?.line).toEqual(line);
+  expect(added?.place).toEqual(place);
   expect(added?.messages.map(({ body }) => body)).toEqual([{ kind: "note", text: "New here?" }]);
   expect(live.threads.drafts.value.has("draft-0")).toBe(false);
   expect(live.client.asks.map(({ request }) => request)).toEqual([
@@ -991,7 +992,10 @@ test("a refused new thread asks nothing", async () => {
   const live = await rig(undefined, () => ({
     addThread: async () => ({ ok: false, failure: WRITE_FAILED }),
   }));
-  live.threads.startThread(threadOf(live, live.fresh).file, changedThreadLine("right", 3));
+  live.threads.startThread(
+    threadOf(live, live.fresh).file,
+    onePlace(changedThreadLine("right", 3)),
+  );
 
   await live.ai.ask(draftOf("draft-0"), "New here?");
 
@@ -1052,8 +1056,8 @@ test("a new thread's add blocks only its own Ask AI, and a second press adds one
     },
   }));
   const { file } = threadOf(live, live.fresh);
-  live.threads.startThread(file, changedThreadLine("right", 3));
-  live.threads.startThread(file, changedThreadLine("right", 4));
+  live.threads.startThread(file, onePlace(changedThreadLine("right", 3)));
+  live.threads.startThread(file, onePlace(changedThreadLine("right", 4)));
 
   const first = live.ai.ask(draftOf("draft-0"), "New?");
   expect(live.ai.canAsk(draftOf("draft-0"), "New?")).toBe(false);
@@ -1133,8 +1137,8 @@ test.each([false, true])(
 test("Ask AI is off while Comment adds that line's new thread; the added thread is askable", async () => {
   const { live, adds } = await gatedRig(false);
   const { file } = threadOf(live, live.fresh);
-  live.threads.startThread(file, changedThreadLine("right", 3));
-  live.threads.startThread(file, changedThreadLine("right", 4));
+  live.threads.startThread(file, onePlace(changedThreadLine("right", 3)));
+  live.threads.startThread(file, onePlace(changedThreadLine("right", 4)));
   const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
   expect(askable.value).toBe(true);
 
@@ -1150,7 +1154,10 @@ test("Ask AI is off while Comment adds that line's new thread; the added thread 
 
 test("a refused Comment of a line's new thread turns its Ask AI on again", async () => {
   const { live, adds } = await gatedRig(true);
-  live.threads.startThread(threadOf(live, live.fresh).file, changedThreadLine("right", 3));
+  live.threads.startThread(
+    threadOf(live, live.fresh).file,
+    onePlace(changedThreadLine("right", 3)),
+  );
   const askable = computed(() => live.ai.canAsk(draftOf("draft-0"), "New?"));
 
   const comment = live.threads.addThread("draft-0", "New?");
