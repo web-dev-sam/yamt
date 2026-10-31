@@ -1,0 +1,2 @@
+not run: docs-only change (a Markdown file), so no mutants apply; `just mutants HEAD` mutates no .md files
+
