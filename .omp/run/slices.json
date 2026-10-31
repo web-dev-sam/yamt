@@ -1,1 +1,12 @@
-{}
+{
+  "MrDiffStats": {
+    "owned": [
+      "crates/merge-requests/**",
+      "tests/glab/merge-requests/graphql-page-1.json",
+      "tests/glab/merge-requests/graphql-page-2.json",
+      "tests/glab/merge-requests-timeout/graphql-page-1.json",
+      "tests/glab/mr-conflicts/graphql-page-1.json",
+      "tests/glab/README.md"
+    ]
+  }
+}

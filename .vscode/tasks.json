@@ -105,6 +105,29 @@
       "options": {
         "statusbar": { "label": "$(diff) diff" }
       }
+    },
+    {
+      "label": "gitlab: open the playground in yamt",
+      "detail": "Build yamt (debug, pages built in) from the current code and open the compare window in ../glab-yamt-playground, a clone of a real GitLab project (glab logged in). Its merge-requests button lists four merge requests: !1 conflicts with main (Resolve conflicts → merge window, Abort, Commit merge → Push), !2 merges clean, !3 already contains main, !4 is a draft. A row's open-changes button opens its changes in a new window, where comments can be posted to GitLab. Fills the project first when the clone is empty (scripts/gitlab-playground.sh). A compare window already open elsewhere (\"diff: open in yamt\") makes this one say so and exit.",
+      "type": "shell",
+      "command": "dir=\"${workspaceFolder}/../glab-yamt-playground\"; git -C \"$dir\" rev-parse -q --verify HEAD > /dev/null || scripts/gitlab-playground.sh \"$dir\"; cargo tauri build --debug --no-bundle && cd \"$dir\" && \"${workspaceFolder}/target/debug/yamt\" --diff; echo \"yamt exit status: $?\"",
+      "problemMatcher": [],
+      "presentation": { "panel": "dedicated", "reveal": "always" },
+      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+      "options": {
+        "statusbar": { "label": "$(git-pull-request) gitlab" }
+      }
+    },
+    {
+      "label": "gitlab: reset the playground",
+      "detail": "Put the GitLab playground back as scripts/gitlab-playground.sh made it: its four branches force-pushed back (main is never forced; a merged merge request stays merged), missing merge requests opened again, and ../glab-yamt-playground on a clean main — a merge in progress aborted, yamt's record of it removed, local changes, untracked files and local branches other than main deleted.",
+      "type": "shell",
+      "command": "scripts/gitlab-playground.sh --reset \"${workspaceFolder}/../glab-yamt-playground\"",
+      "problemMatcher": [],
+      "presentation": { "panel": "shared", "reveal": "always" },
+      "options": {
+        "statusbar": { "label": "$(discard) gitlab" }
+      }
     }
   ],
   "inputs": [
