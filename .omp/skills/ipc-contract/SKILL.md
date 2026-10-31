@@ -81,8 +81,9 @@ set_agent(current, agent: AgentSettings { command, firstMessage })   -> Settings
 open_range()                      -> RangeStart { range, sides, entries }
 load_range_file(file: RangeFileId) -> RangeFile   async: both texts, MAX_TEXT_BYTES each
 search_range_texts(from: RangeFileId) -> SearchTexts   async: { files: [SearchText { file, left, right, changes: LineChange[] }], next } — the text files from `from` on, pages of ~4 MiB, next null after the last; files `load` would not answer as texts left out (#127)
-# its threads and GitLab (plan §2 #116–#121, crate yamt-review)
-list_threads() -> ThreadList; add_thread(file, line: ThreadLine, text) -> ThreadAdded; add_note(thread, text) / queue_message(message, text) / unqueue_message(message) -> ThreadList
+# its threads and GitLab (plan §2 #116–#121, #145–#148, crate yamt-review)
+list_threads() -> ThreadList; add_thread(file, place: ThreadPlace, text) -> ThreadAdded; add_note(thread, text) / queue_message(message, text) / unqueue_message(message) -> ThreadList
+ThreadPlace { start: DiffLine, end: ThreadLine }   start to end in GitLab's one-column order, both included; DiffLine = removed { left } | added { right } | unchanged { left, right } (no column; tagged `kind`); end's ThreadLine decides the box's column; one line = start is end's own line; a place running backwards on a shared side → IpcError::Git ("a thread's first line comes after its last", after EmptyMessage and UnknownRangeFile); Thread.place, threads.json format 2 (#146)
 edit_note(message, text) / delete_message(message) -> ThreadList   an unsent Note only (#123): AiAnswer → NotANote, Pending → MessagePending; SendRunning while a send runs
 set_thread_session(thread, session) / add_ai_answer(thread, session) -> ThreadList   the store numbers the AI's turns per session (#121)
 check_gitlab()                    -> GitLabCheck   LinedUp { merge_request } | NotLinedUp { why } (#119)
