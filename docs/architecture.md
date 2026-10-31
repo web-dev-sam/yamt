@@ -1506,7 +1506,8 @@ title is a button (`openPageTitle`: "Open !N on GitLab: <title>") for the keyboa
 row's and a failed job's click go through the slice's `openPage(kind, page)` (`PageKind` `job` | `mergeRequest`):
 an IPC failure reaches the problem bar at that step; an answer sets `pageProblem` to `pageProblemText` (`null` when
 opened, a sentence for `notOffered`/`failed`), one line above the list with Dismiss.
-Each row also shows its size in the meta line (`sizeText`, title `sizeTitle`), `MergeRequestReadiness.vue` (the
+Each row is two lines: the title, then the muted `!iid · created …` with the size (`sizeParts`: `+X` green, `−Y` red,
+`N files` in the text colour; title `sizeTitle`), `MergeRequestReadiness.vue` (the
 Lucide icon of `readinessIcon`, title and accessible name `readinessText`) right of the CI box, and left of the
 open-changes button the row's one action (`rowAction`: Resolve on a conflicts row, Continue on the merging row
 whatever its readiness, disabled while its window is open, a fork or another unfinished merge disabling Resolve) with
@@ -1517,7 +1518,7 @@ jobs), held while pointer or focus is in icon or box, closed by leaving both, by
 pure core is `frontend/src/mergeRequests/` (`index.ts` the only surface; framework-free and self-contained like
 `search/`): `filters` (`passes`, `filtered`, the edits, `filterLabel`), `choices` (`personChoices`, `labelChoices`,
 `narrowed`), `order` (`merged`: one row per iid, newest first), `summary`, `relativeTime` (`createdAgo`), `ciBox`, `stored`
-(`filtersFrom`/`storedFilters`, the remembered form), `size` (`sizeText`, `sizeTitle`), `readiness` (`readinessText`,
+(`filtersFrom`/`storedFilters`, the remembered form), `size` (`sizeParts`, `sizeTitle`), `readiness` (`readinessText`,
 `readinessIcon`), `rowAction`. Words: `ui/mergeRequestsText.ts` (the page's, `rowReplyText` too) and `ui/glab.ts`
 (`GLAB_MISSING_TEXT`, `glabNotLoggedInText`, `glabFailedText` and `RECHECK_PAUSE_MS`, shared with the range window's
 GitLab check).
