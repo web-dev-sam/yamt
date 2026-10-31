@@ -20,13 +20,6 @@ gitlab.com, two-line coloured row, cursor). The owner pushes `main`, waits for g
 | 4   | windows-2025 ci: 10 yamt-app tests run `scripts/mr-conflict-repo.sh` directly (`os error 193`, run 41187872315); gate them `cfg(unix)` like every other test of that script (`MrWindowsCi`) | rust-impl    | done   | `a0ed7d52`; Linux 168/168 still run; clippy `--target x86_64-pc-windows-msvc -D warnings` clean; correctness pass (#2045 nit dropped); `just check` exit 0                                                                                                                   |
 | 5   | push `main`; windows-2025 green proves row 4                                                                                                                                                | human        | todo   |                                                                                                                                                                                                                                                                              |
 
-## `--ai` reaches a merge request's changes window (session 40, owner: "make the gitlab vscode task have --ai flag" → picked "Pass --ai on to opened windows")
-
-| row | slice                                                                                                          | owner        | status  | evidence |
-| --- | -------------------------------------------------------------------------------------------------------------- | ------------ | ------- | -------- |
-| 1   | compare keeps `--ai`, Show Diff passes it on (`briefs/mr-ai-carry.md`) (`MrAiCarry`)                           | rust-impl    | running |          |
-| 2   | task "gitlab: open the playground in yamt" runs `--diff --ai`; plan #108/#132, architecture, README, CHANGELOG | orchestrator | todo    |          |
-
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.

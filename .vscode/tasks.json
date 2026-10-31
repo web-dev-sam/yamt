@@ -9,19 +9,29 @@
       "isBackground": true,
       "problemMatcher": {
         "owner": "vite",
-        "pattern": { "regexp": "^(?!x)x$" },
+        "pattern": {
+          "regexp": "^(?!x)x$"
+        },
         "background": {
           "activeBegins": true,
           "beginsPattern": "VITE v\\d",
           "endsPattern": "Local:\\s+http"
         }
       },
-      "presentation": { "panel": "dedicated", "reveal": "always" },
-      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "instancePolicy": "terminateOldest"
+      },
       "options": {
         "statusbar": {
           "label": "$(play)",
-          "running": { "label": "$(radio-tower)" }
+          "running": {
+            "label": "$(radio-tower)"
+          }
         }
       }
     },
@@ -31,9 +41,14 @@
       "type": "shell",
       "command": "just golden-repo ${input:goldenCase} /tmp/yamt-${input:goldenCase}",
       "problemMatcher": [],
-      "presentation": { "panel": "shared", "reveal": "always" },
+      "presentation": {
+        "panel": "shared",
+        "reveal": "always"
+      },
       "options": {
-        "statusbar": { "label": "$(git-merge)" }
+        "statusbar": {
+          "label": "$(git-merge)"
+        }
       }
     },
     {
@@ -42,9 +57,14 @@
       "type": "shell",
       "command": "rm -rf /tmp/yamt-conflict-project && scripts/demo-repo.sh /tmp/yamt-conflict-project",
       "problemMatcher": [],
-      "presentation": { "panel": "shared", "reveal": "always" },
+      "presentation": {
+        "panel": "shared",
+        "reveal": "always"
+      },
       "options": {
-        "statusbar": { "label": "$(new-folder) conflict" }
+        "statusbar": {
+          "label": "$(new-folder) conflict"
+        }
       }
     },
     {
@@ -53,10 +73,17 @@
       "type": "shell",
       "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; setsid -f webstorm /tmp/yamt-conflict-project > /dev/null 2>&1",
       "problemMatcher": [],
-      "presentation": { "panel": "shared", "reveal": "silent" },
+      "presentation": {
+        "panel": "shared",
+        "reveal": "silent"
+      },
       "options": {
-        "env": { "PATH": "${env:HOME}/.local/bin:${env:PATH}" },
-        "statusbar": { "label": "$(link-external) WebStorm" }
+        "env": {
+          "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+        },
+        "statusbar": {
+          "label": "$(link-external) WebStorm"
+        }
       }
     },
     {
@@ -65,10 +92,18 @@
       "type": "shell",
       "command": "test -d /tmp/yamt-conflict-project/.git || scripts/demo-repo.sh /tmp/yamt-conflict-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-conflict-project; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "reveal": "always" },
-      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "instancePolicy": "terminateOldest"
+      },
       "options": {
-        "statusbar": { "label": "$(link-external) yamt" }
+        "statusbar": {
+          "label": "$(link-external) yamt"
+        }
       }
     },
     {
@@ -77,9 +112,14 @@
       "type": "shell",
       "command": "rm -rf /tmp/yamt-lsp-project && scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project",
       "problemMatcher": [],
-      "presentation": { "panel": "shared", "reveal": "always" },
+      "presentation": {
+        "panel": "shared",
+        "reveal": "always"
+      },
       "options": {
-        "statusbar": { "label": "$(new-folder) lsp" }
+        "statusbar": {
+          "label": "$(new-folder) lsp"
+        }
       }
     },
     {
@@ -88,10 +128,18 @@
       "type": "shell",
       "command": "test -d /tmp/yamt-lsp-project/.git || scripts/lsp-repo.sh --servers /tmp/yamt-lsp-project; PATH=\"$(scripts/lsp-servers.sh --path):$PATH\" just app --repo /tmp/yamt-lsp-project; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "reveal": "always" },
-      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "instancePolicy": "terminateOldest"
+      },
       "options": {
-        "statusbar": { "label": "$(link-external) yamt lsp" }
+        "statusbar": {
+          "label": "$(link-external) yamt lsp"
+        }
       }
     },
     {
@@ -100,22 +148,38 @@
       "type": "shell",
       "command": "just app --diff; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "reveal": "always" },
-      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "instancePolicy": "terminateOldest"
+      },
       "options": {
-        "statusbar": { "label": "$(diff) diff" }
+        "statusbar": {
+          "label": "$(diff) diff"
+        }
       }
     },
     {
       "label": "gitlab: open the playground in yamt",
-      "detail": "Build yamt (debug, pages built in) from the current code and open the compare window in ../glab-yamt-playground, a clone of a real GitLab project (glab logged in). Its merge-requests button lists four merge requests: !1 conflicts with main (Resolve conflicts → merge window, Abort, Commit merge → Push), !2 merges clean, !3 already contains main, !4 is a draft. A row's open-changes button opens its changes in a new window, where comments can be posted to GitLab. Fills the project first when the clone is empty (scripts/gitlab-playground.sh). A compare window already open elsewhere (\"diff: open in yamt\") makes this one say so and exit.",
+      "detail": "Build yamt (debug, pages built in) from the current code and open the compare window with --ai in ../glab-yamt-playground, a clone of a real GitLab project (glab logged in). Its merge-requests button lists four merge requests: !1 conflicts with main (Resolve conflicts → merge window, Abort, Commit merge → Push), !2 merges clean, !3 already contains main, !4 is a draft. A row's Show Diff opens its changes in a new window with --ai, where comments can be posted to GitLab and each thread has Ask AI. Fills the project first when the clone is empty (scripts/gitlab-playground.sh). A compare window already open elsewhere (\"diff: open in yamt\") makes this one say so and exit.",
       "type": "shell",
-      "command": "dir=\"${workspaceFolder}/../glab-yamt-playground\"; git -C \"$dir\" rev-parse -q --verify HEAD > /dev/null || scripts/gitlab-playground.sh \"$dir\"; cargo tauri build --debug --no-bundle && cd \"$dir\" && \"${workspaceFolder}/target/debug/yamt\" --diff; echo \"yamt exit status: $?\"",
+      "command": "dir=\"${workspaceFolder}/../glab-yamt-playground\"; git -C \"$dir\" rev-parse -q --verify HEAD > /dev/null || scripts/gitlab-playground.sh \"$dir\"; cargo tauri build --debug --no-bundle && cd \"$dir\" && \"${workspaceFolder}/target/debug/yamt\" --diff --ai; echo \"yamt exit status: $?\"",
       "problemMatcher": [],
-      "presentation": { "panel": "dedicated", "reveal": "always" },
-      "runOptions": { "instanceLimit": 1, "instancePolicy": "terminateOldest" },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always"
+      },
+      "runOptions": {
+        "instanceLimit": 1,
+        "instancePolicy": "terminateOldest"
+      },
       "options": {
-        "statusbar": { "label": "$(git-pull-request) gitlab" }
+        "statusbar": {
+          "label": "$(git-pull-request) gitlab"
+        }
       }
     },
     {
@@ -124,9 +188,14 @@
       "type": "shell",
       "command": "scripts/gitlab-playground.sh --reset \"${workspaceFolder}/../glab-yamt-playground\"",
       "problemMatcher": [],
-      "presentation": { "panel": "shared", "reveal": "always" },
+      "presentation": {
+        "panel": "shared",
+        "reveal": "always"
+      },
       "options": {
-        "statusbar": { "label": "$(discard) gitlab" }
+        "statusbar": {
+          "label": "$(discard) gitlab"
+        }
       }
     }
   ],

@@ -79,7 +79,7 @@
         "",
         "A row with conflicts has \"Resolve conflicts of !12\": in your own checkout (it refuses while you have uncommitted changes to tracked files, while git is busy with another operation, or when your local branch has commits GitLab's does not), yamt fetches the merge request's branch and its target, checks the branch out, merges the target into it without committing and opens the merge window. Commit merge then asks before pushing the branch to GitLab (never forced); Abort puts your checkout back as it was, branch included, even after a restart. While that merge is unfinished, its row offers \"Continue merging\" and the other rows wait. Merge requests from forks are not supported.",
         "",
-        "With `--ai`, each thread has \"Ask AI\": the AI (`omp acp` by default, set in Settings) answers in the thread, working in a temporary checkout of the right-hand commit. Its thinking and steps open under the answer, its edits show as diffs, and closing the window asks whether to keep its changes.",
+        "With `--ai`, each thread has \"Ask AI\": the AI (`omp acp` by default, set in Settings) answers in the thread, working in a temporary checkout of the right-hand commit. Its thinking and steps open under the answer, its edits show as diffs, and closing the window asks whether to keep its changes. A window started with `--ai` (`yamt --diff --ai` too) passes it on to the changes windows its merge-request page opens.",
         "",
         "The gear opens the settings. Theme offers yamt's own Dark and Light and the default dark and light themes of WebStorm (Islands), VS Code (Dark/Light 2026), Zed (One) and Atom (One), in those editors' own colours: window, code and change colours, and their panel shapes."
       ]

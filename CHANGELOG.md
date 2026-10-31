@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `yamt --diff --ai` keeps `--ai`: a merge request's "Show Diff" then opens its changes window with "Ask AI" on each
+  thread. Without `--ai`, nothing changes.
+
 ## [0.6.3] - 2026-10-31
 
 ### Added
