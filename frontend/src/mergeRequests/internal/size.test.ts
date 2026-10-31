@@ -1,15 +1,21 @@
 import { expect, test } from "vitest";
 
-import { sizeText, sizeTitle } from "../index";
+import { sizeParts, sizeTitle } from "../index";
 
-test("the size reads +added −removed · files, the minus a real minus sign (U+2212)", () => {
-  const text = sizeText({ additions: 120, deletions: 40, files: 6 });
-  expect(text).toBe("+120 −40 · 6 files");
-  expect(text.codePointAt(5)).toBe(0x2212);
+test("the size comes in parts: +added, −removed, the files", () => {
+  expect(sizeParts({ additions: 120, deletions: 40, files: 6 })).toEqual({
+    added: "+120",
+    removed: "\u221240",
+    files: "6 files",
+  });
+});
+
+test("the removed count's minus is a real minus sign (U+2212), not a hyphen", () => {
+  expect(sizeParts({ additions: 1, deletions: 2, files: 2 }).removed.codePointAt(0)).toBe(0x2212);
 });
 
 test("one file is a file, not files", () => {
-  expect(sizeText({ additions: 3, deletions: 0, files: 1 })).toBe("+3 −0 · 1 file");
+  expect(sizeParts({ additions: 3, deletions: 0, files: 1 }).files).toBe("1 file");
 });
 
 test("the title spells the counts out, plural", () => {

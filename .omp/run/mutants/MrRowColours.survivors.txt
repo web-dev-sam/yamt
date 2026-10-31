@@ -1,0 +1,2 @@
+just mutants HEAD — size.ts: 17 mutants, 17 killed, 0 timeout, 0 survived, 0 no-cov, 0 errors (score 100.00)
+

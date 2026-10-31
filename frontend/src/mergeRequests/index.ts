@@ -28,7 +28,7 @@ export { summaryText } from "./internal/summary";
 export { createdAgo } from "./internal/relativeTime";
 export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";
 export { filtersFrom, storedFilters, type StoredFilters } from "./internal/stored";
-export { sizeText, sizeTitle } from "./internal/size";
+export { sizeParts, sizeTitle } from "./internal/size";
 export {
   readinessIcon,
   readinessText,

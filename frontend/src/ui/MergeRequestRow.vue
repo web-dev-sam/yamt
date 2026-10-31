@@ -8,7 +8,7 @@ import StepForward from "~icons/lucide/step-forward";
 import ThumbsUp from "~icons/lucide/thumbs-up";
 
 import type { LocalMerge, MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
-import { createdAgo, rowAction, sizeText, sizeTitle } from "../mergeRequests";
+import { createdAgo, rowAction, sizeParts, sizeTitle } from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
 import type { RowActing } from "./mergeRequestActions";
 import MergeRequestReadiness from "./MergeRequestReadiness.vue";
@@ -54,7 +54,7 @@ const refusal = computed(() =>
 const size = computed(() =>
   props.row.size === null
     ? null
-    : { text: sizeText(props.row.size), title: sizeTitle(props.row.size) },
+    : { parts: sizeParts(props.row.size), title: sizeTitle(props.row.size) },
 );
 const action = computed(() =>
   rowAction(props.row, props.localMerge, props.acting?.kind === "running"),
@@ -108,7 +108,12 @@ function act(): void {
           <span>{{ mr }}</span
           >{{ " · " }}<span :title="createdTitle">{{ created }}</span
           ><template v-if="size !== null"
-            >{{ " · " }}<span :title="size.title">{{ size.text }}</span></template
+            >{{ " · "
+            }}<span :title="size.title"
+              ><span class="text-success-signal">{{ size.parts.added }}</span
+              >{{ " " }}<span class="text-problem-error">{{ size.parts.removed }}</span
+              >{{ " · " }}<span class="text-fg">{{ size.parts.files }}</span></span
+            ></template
           >
         </p>
       </div>

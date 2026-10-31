@@ -8,8 +8,18 @@ function counted(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`;
 }
 
-export function sizeText(size: ChangeSize): string {
-  return `+${size.additions} \u2212${size.deletions} · ${counted(size.files, "file", "files")}`;
+type SizeParts = {
+  readonly added: string;
+  readonly removed: string;
+  readonly files: string;
+};
+
+export function sizeParts(size: ChangeSize): SizeParts {
+  return {
+    added: `+${size.additions}`,
+    removed: `\u2212${size.deletions}`,
+    files: counted(size.files, "file", "files"),
+  };
 }
 
 export function sizeTitle(size: ChangeSize): string {
