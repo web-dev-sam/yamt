@@ -4,15 +4,15 @@ import { commands, type SendProgress } from "./bindings";
 import { toGitLabCheck, toSendReply, toThreadAdded, toThreadList } from "./reviewDomain";
 import type { ReviewSource } from "./ReviewSource";
 import { converted, toResult } from "./tauri";
-import { fromThreadLine } from "./threadLine";
+import { fromThreadPlace } from "./threadLine";
 
 export function createTauriReview(): ReviewSource {
   return {
     async listThreads() {
       return converted(toResult(await commands.listThreads()), toThreadList);
     },
-    async addThread(file, line, text) {
-      const reply = await commands.addThread(file, fromThreadLine(line), text);
+    async addThread(file, place, text) {
+      const reply = await commands.addThread(file, fromThreadPlace(place), text);
       return converted(toResult(reply), toThreadAdded);
     },
     async addNote(thread, text) {

@@ -138,11 +138,17 @@ export { THEMES, themeKind, themeOf, themeRows } from "./themes";
 export { createTauriCompareSource } from "./tauriCompare";
 export {
   changedThreadLine,
+  diffLineOf,
+  isOneLine,
+  onePlace,
+  sameDiffLine,
   shownColumn,
   shownLine,
   unchangedThreadLine,
+  type DiffLine,
   type ShownThread,
   type ThreadLine,
+  type ThreadPlace,
 } from "./threadLine";
 export { createTauriRangeSource } from "./tauriRange";
 export type { ServerHost } from "./ServerHost";

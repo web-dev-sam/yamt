@@ -25,7 +25,7 @@ import {
   type ThreadList,
 } from "./reviewDomain";
 import type { ReviewSource } from "./ReviewSource";
-import { fromThreadLine, type ThreadLine } from "./threadLine";
+import { fromThreadPlace, type ThreadPlace } from "./threadLine";
 
 type Store = {
   readonly start: RangeStart;
@@ -63,7 +63,7 @@ function newMessage(store: Store, body: Generated.MessageBody): Generated.Messag
 function addThread(
   store: Store,
   file: number,
-  line: ThreadLine,
+  place: ThreadPlace,
   text: string,
 ): SourceResult<ThreadAdded> {
   if (isBlank(text)) {
@@ -75,7 +75,7 @@ function addThread(
   const id = store.next.thread;
   store.next.thread += 1;
   const messages = [newMessage(store, { kind: "note", text })];
-  store.threads.push({ id, file, line: fromThreadLine(line), messages, session: null });
+  store.threads.push({ id, file, place: fromThreadPlace(place), messages, session: null });
   return { ok: true, value: toThreadAdded({ thread: id, list: listed(store) }) };
 }
 
@@ -236,8 +236,8 @@ function threadCalls(
   store: Store,
 ): Pick<ReviewSource, "addThread" | "addNote" | "setThreadSession" | "addAiAnswer"> {
   return {
-    async addThread(file, line, text) {
-      return addThread(store, file, line, text);
+    async addThread(file, place, text) {
+      return addThread(store, file, place, text);
     },
     async addNote(thread, text) {
       return addNote(store, thread, text);

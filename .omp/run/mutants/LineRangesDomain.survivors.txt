@@ -1,0 +1,4 @@
+recipe's stryker cmd + --testFiles src/ipc/**/*.test.ts (just mutants HEAD stops: ui tests fail in dry run): 601 killed, 5 survived, 25 no coverage
+src/ipc/threadLine.ts:82 `b.kind === "unchanged"` → `true` — equivalent: a removed or added b has no left or no right, so `a.left === b.left && a.right === b.right` is already false
+src/ipc/threadLine.ts sameDiffLine/toThreadLine/toDiffLine `default: never` blocks (NoCoverage) — equivalent: these branches cannot be reached
+fixtureReview.ts:106, reviewDomain.ts:161-163, index.ts:161 survivors/no coverage — not on lines I changed (they were there before)

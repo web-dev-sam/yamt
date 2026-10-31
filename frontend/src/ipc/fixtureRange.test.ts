@@ -5,6 +5,7 @@ import type { Column, Difference } from "./compareDomain";
 import { isRangeFileId, type RangeFileId, type SourceResult } from "./domain";
 import { createFixtureRangeSource } from "./fixtureRange";
 import { createLog, type Log, type LogEntry } from "./log";
+import type { DiffLine, ThreadLine } from "./threadLine";
 
 const REVIEW: { start: Generated.RangeStart; files: Generated.RangeFile[] } = {
   start: {
@@ -237,6 +238,27 @@ function rightOf(differences: readonly Difference[], left: number): number {
     .reduce((line, { left: l, right: r }) => line + r.len - l.len, left);
 }
 
+function sitsOn(differences: readonly Difference[], line: DiffLine | ThreadLine): boolean {
+  switch (line.kind) {
+    case "removed":
+      return inside(differences, "left", line.left);
+    case "added":
+      return inside(differences, "right", line.right);
+    case "unchanged":
+    case "unchangedOnLeft":
+    case "unchangedOnRight":
+      return (
+        !inside(differences, "left", line.left) &&
+        !inside(differences, "right", line.right) &&
+        rightOf(differences, line.left) === line.right
+      );
+    default: {
+      const _exhaustive: never = line;
+      return _exhaustive;
+    }
+  }
+}
+
 test("?threads=seeded sits on board.ts's lines as their kinds say: inside a difference or paired outside", async () => {
   const source = createFixtureRangeSource(quietLog().log, "?range=review&threads=seeded");
 
@@ -244,25 +266,28 @@ test("?threads=seeded sits on board.ts's lines as their kinds say: inside a diff
   const board = valueOf(await source.loadRangeFile(fileId(7)));
 
   expect(valueOf(await source.openRange()).files[7]?.path).toBe("src/board/board.ts");
-  expect(threads.map((thread) => thread.file)).toEqual([7, 7, 7, 7]);
+  expect(threads.map((thread) => thread.file)).toEqual([7, 7, 7, 7, 7, 7]);
   if (board.kind !== "texts") {
     throw new Error("board.ts is not texts");
   }
   const { differences } = board;
-  expect(threads.map((thread) => thread.line)).toEqual([
-    { kind: "removed", left: 19 },
-    { kind: "added", right: 20 },
-    { kind: "unchangedOnLeft", left: 5, right: 5 },
-    { kind: "unchangedOnRight", left: 100, right: 101 },
+  expect(threads.map((thread) => thread.place)).toEqual([
+    { start: { kind: "removed", left: 19 }, end: { kind: "removed", left: 19 } },
+    { start: { kind: "added", right: 20 }, end: { kind: "added", right: 20 } },
+    {
+      start: { kind: "unchanged", left: 5, right: 5 },
+      end: { kind: "unchangedOnLeft", left: 5, right: 5 },
+    },
+    {
+      start: { kind: "unchanged", left: 100, right: 101 },
+      end: { kind: "unchangedOnRight", left: 100, right: 101 },
+    },
+    { start: { kind: "unchanged", left: 400, right: 388 }, end: { kind: "added", right: 405 } },
+    { start: { kind: "removed", left: 254 }, end: { kind: "added", right: 259 } },
   ]);
-  expect([inside(differences, "left", 19), inside(differences, "right", 20)]).toEqual([true, true]);
-  expect([
-    inside(differences, "left", 5),
-    inside(differences, "right", 5),
-    inside(differences, "left", 100),
-    inside(differences, "right", 101),
-  ]).toEqual([false, false, false, false]);
-  expect([rightOf(differences, 5), rightOf(differences, 100)]).toEqual([5, 101]);
+  expect(
+    threads.map(({ place }) => [sitsOn(differences, place.start), sitsOn(differences, place.end)]),
+  ).toEqual(threads.map(() => [true, true]));
 });
 
 test("?range=empty with ?threads=seeded lists no threads", async () => {

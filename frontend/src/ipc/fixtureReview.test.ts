@@ -16,7 +16,7 @@ import { createLog, type Log, type LogEntry } from "./log";
 import type { RangeEntry, RangeStart } from "./rangeDomain";
 import type { SendProgress, Thread } from "./reviewDomain";
 import type { ReviewSource } from "./ReviewSource";
-import { changedThreadLine } from "./threadLine";
+import { changedThreadLine, diffLineOf, onePlace, unchangedThreadLine } from "./threadLine";
 
 const REFUSAL = `400 Bad request - Note {:line_code=>["can't be blank"]}`;
 const MERGE_REQUEST = {
@@ -126,22 +126,58 @@ test.each(["", "?threads", "?threads=", "?threads=other"])(
   },
 );
 
-test("?threads=seeded puts one thread of each line kind on board.ts with every posting kind", async () => {
+test("?threads=seeded puts one thread of each line kind and two range threads on board.ts with every posting kind", async () => {
   const threads = await threadsOf(review("?threads=seeded"));
 
-  expect(threads.map(({ id, file, line, session }) => ({ id, file, line, session }))).toEqual([
-    { id: 0, file: 7, line: { kind: "removed", left: 19 }, session: null },
-    { id: 1, file: 7, line: { kind: "added", right: 20 }, session: null },
-    { id: 2, file: 7, line: { kind: "unchangedOnLeft", left: 5, right: 5 }, session: null },
+  expect(threads.map(({ id, file, place, session }) => ({ id, file, place, session }))).toEqual([
+    {
+      id: 0,
+      file: 7,
+      place: { start: { kind: "removed", left: 19 }, end: { kind: "removed", left: 19 } },
+      session: null,
+    },
+    {
+      id: 1,
+      file: 7,
+      place: { start: { kind: "added", right: 20 }, end: { kind: "added", right: 20 } },
+      session: null,
+    },
+    {
+      id: 2,
+      file: 7,
+      place: {
+        start: { kind: "unchanged", left: 5, right: 5 },
+        end: { kind: "unchangedOnLeft", left: 5, right: 5 },
+      },
+      session: null,
+    },
     {
       id: 3,
       file: 7,
-      line: { kind: "unchangedOnRight", left: 100, right: 101 },
+      place: {
+        start: { kind: "unchanged", left: 100, right: 101 },
+        end: { kind: "unchangedOnRight", left: 100, right: 101 },
+      },
       session: "fixture-session",
+    },
+    {
+      id: 4,
+      file: 7,
+      place: {
+        start: { kind: "unchanged", left: 400, right: 388 },
+        end: { kind: "added", right: 405 },
+      },
+      session: null,
+    },
+    {
+      id: 5,
+      file: 7,
+      place: { start: { kind: "removed", left: 254 }, end: { kind: "added", right: 259 } },
+      session: null,
     },
   ]);
   expect(threads.flatMap((thread) => thread.messages.map((message) => message.id))).toEqual([
-    0, 1, 2, 3, 4,
+    0, 1, 2, 3, 4, 5, 6,
   ]);
   expect(postings(threads)).toEqual([
     { kind: "queued", text: "Why does the overdue check go?" },
@@ -155,10 +191,16 @@ test("?threads=seeded puts one thread of each line kind on board.ts with every p
     },
     { kind: "notQueued" },
     { kind: "notQueued" },
+    { kind: "notQueued" },
+    { kind: "notQueued" },
   ]);
   expect(threads[3]?.messages.map((message) => message.body)).toEqual([
     { kind: "note", text: "Is this still used?" },
     { kind: "aiAnswer", session: "fixture-session", turn: 0 },
+  ]);
+  expect(threads.slice(4).map((thread) => thread.messages.map((message) => message.body))).toEqual([
+    [{ kind: "note", text: "Does the snooze need a column of its own?" }],
+    [{ kind: "note", text: "Why does the limit check move?" }],
   ]);
   expect(threads[0]?.messages[0]?.written).toBe(1_767_225_600);
 });
@@ -169,19 +211,23 @@ test("?threads=seeded on a range without board.ts starts without threads", async
   ).toEqual([]);
 });
 
-test("addThread stores the first note with new ids after the seeded ones and the time in seconds", async () => {
+test("addThread stores the first note on a two-line place with new ids after the seeded ones and the time in seconds", async () => {
   const source = review("?threads=seeded");
+  const place = {
+    start: diffLineOf(unchangedThreadLine("left", { left: 1, right: 1 })),
+    end: changedThreadLine("right", 2),
+  };
 
-  const added = valueOf(await source.addThread(fileId(0), changedThreadLine("left", 2), "Typo"));
+  const added = valueOf(await source.addThread(fileId(0), place, "Typo"));
 
-  expect(added.thread).toBe(4);
+  expect(added.thread).toBe(6);
   expect(added.list.threads.at(-1)).toEqual({
-    id: 4,
+    id: 6,
     file: 0,
-    line: { kind: "removed", left: 2 },
+    place: { start: { kind: "unchanged", left: 1, right: 1 }, end: { kind: "added", right: 2 } },
     messages: [
       {
-        id: 5,
+        id: 7,
         body: { kind: "note", text: "Typo" },
         written: 1_800_000_000,
         posting: { kind: "notQueued" },
@@ -190,9 +236,11 @@ test("addThread stores the first note with new ids after the seeded ones and the
     session: null,
   });
   expect(await threadsOf(source)).toEqual(added.list.threads);
-  const next = valueOf(await source.addThread(fileId(7), changedThreadLine("right", 1), "Two"));
-  expect(next.thread).toBe(5);
-  expect(next.list.threads.at(-1)?.messages[0]?.id).toBe(6);
+  const next = valueOf(
+    await source.addThread(fileId(7), onePlace(changedThreadLine("right", 1)), "Two"),
+  );
+  expect(next.thread).toBe(7);
+  expect(next.list.threads.at(-1)?.messages[0]?.id).toBe(8);
 });
 
 test.each(["", "  \n\t"])(
@@ -200,10 +248,12 @@ test.each(["", "  \n\t"])(
   async (text) => {
     const source = review("");
 
-    expect(await source.addThread(fileId(0), changedThreadLine("left", 0), text)).toEqual({
-      ok: false,
-      failure: { kind: "EmptyMessage" },
-    });
+    expect(await source.addThread(fileId(0), onePlace(changedThreadLine("left", 0)), text)).toEqual(
+      {
+        ok: false,
+        failure: { kind: "EmptyMessage" },
+      },
+    );
     expect(await threadsOf(source)).toEqual([]);
   },
 );
@@ -211,7 +261,7 @@ test.each(["", "  \n\t"])(
 test("addThread on a file the range does not list answers UnknownRangeFile", async () => {
   const source = review("");
 
-  expect(await source.addThread(fileId(3), changedThreadLine("left", 0), "x")).toEqual({
+  expect(await source.addThread(fileId(3), onePlace(changedThreadLine("left", 0)), "x")).toEqual({
     ok: false,
     failure: { kind: "UnknownRangeFile", file: 3 },
   });
@@ -227,7 +277,7 @@ test("addNote appends a note; blank text and unknown threads are refused", async
     { kind: "note", text: "This needs a test." },
     { kind: "note", text: "Still?" },
   ]);
-  expect(list.threads[1]?.messages[1]?.id).toBe(5);
+  expect(list.threads[1]?.messages[1]?.id).toBe(7);
   expect(await source.addNote(threadId(1), " ")).toEqual({
     ok: false,
     failure: { kind: "EmptyMessage" },
@@ -249,6 +299,8 @@ test("setThreadSession replaces the thread's session; an unknown thread is refus
     null,
     null,
     "fixture-session-2",
+    null,
+    null,
   ]);
   expect(list.threads[3]?.messages).toHaveLength(2);
   expect(await source.setThreadSession(threadId(9), session("s"))).toEqual({
@@ -269,13 +321,13 @@ test("addAiAnswer numbers the turn by the session's answers already in the threa
   expect(thread?.messages.slice(2).map(({ id, body, posting }) => ({ id, body, posting }))).toEqual(
     [
       {
-        id: 5,
+        id: 7,
         body: { kind: "aiAnswer", session: "fixture-session", turn: 1 },
         posting: NOT_QUEUED,
       },
-      { id: 6, body: { kind: "aiAnswer", session: "other", turn: 0 }, posting: NOT_QUEUED },
+      { id: 8, body: { kind: "aiAnswer", session: "other", turn: 0 }, posting: NOT_QUEUED },
       {
-        id: 7,
+        id: 9,
         body: { kind: "aiAnswer", session: "fixture-session", turn: 2 },
         posting: NOT_QUEUED,
       },
@@ -387,7 +439,7 @@ test("deleteMessage removes a note and keeps its thread while a message is left"
 
   const list = valueOf(await source.deleteMessage(messageId(3)));
 
-  expect(list.threads.map((thread) => thread.id)).toEqual([0, 1, 2, 3]);
+  expect(list.threads.map((thread) => thread.id)).toEqual([0, 1, 2, 3, 4, 5]);
   expect(list.threads[3]?.messages.map((message) => message.id)).toEqual([4]);
   expect(await threadsOf(source)).toEqual(list.threads);
 });
@@ -396,11 +448,13 @@ test("deleting a thread's only note removes the thread, and ids are not reused",
   const source = review("?threads=seeded");
 
   const list = valueOf(await source.deleteMessage(messageId(0)));
-  const added = valueOf(await source.addThread(fileId(7), changedThreadLine("right", 1), "New"));
+  const added = valueOf(
+    await source.addThread(fileId(7), onePlace(changedThreadLine("right", 1)), "New"),
+  );
 
-  expect(list.threads.map((thread) => thread.id)).toEqual([1, 2, 3]);
-  expect(added.thread).toBe(4);
-  expect(added.list.threads.at(-1)?.messages[0]?.id).toBe(5);
+  expect(list.threads.map((thread) => thread.id)).toEqual([1, 2, 3, 4, 5]);
+  expect(added.thread).toBe(6);
+  expect(added.list.threads.at(-1)?.messages[0]?.id).toBe(7);
 });
 
 test.each<[string, number, unknown]>([
@@ -611,6 +665,8 @@ test("?gitlab=refusal refuses the second queued message with GitLab's words", as
     { kind: "refused", text: "This needs a test.", reason: REFUSAL },
     expect.objectContaining({ kind: "pending", draftNote: 101 }),
     expect.objectContaining({ kind: "pending", text: "Third", draftNote: 103 }),
+    { kind: "notQueued" },
+    { kind: "notQueued" },
     { kind: "notQueued" },
   ]);
 });

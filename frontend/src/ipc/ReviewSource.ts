@@ -1,10 +1,14 @@
 import type { AgentSessionId, MessageId, RangeFileId, SourceResult, ThreadId } from "./domain";
 import type { GitLabCheck, SendProgress, SendReply, ThreadAdded, ThreadList } from "./reviewDomain";
-import type { ThreadLine } from "./threadLine";
+import type { ThreadPlace } from "./threadLine";
 
 export interface ReviewSource {
   listThreads(): Promise<SourceResult<ThreadList>>;
-  addThread(file: RangeFileId, line: ThreadLine, text: string): Promise<SourceResult<ThreadAdded>>;
+  addThread(
+    file: RangeFileId,
+    place: ThreadPlace,
+    text: string,
+  ): Promise<SourceResult<ThreadAdded>>;
   addNote(thread: ThreadId, text: string): Promise<SourceResult<ThreadList>>;
   queueMessage(message: MessageId, text: string): Promise<SourceResult<ThreadList>>;
   unqueueMessage(message: MessageId): Promise<SourceResult<ThreadList>>;

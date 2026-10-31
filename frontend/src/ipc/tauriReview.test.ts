@@ -12,7 +12,7 @@ import {
   type ThreadId,
 } from "./domain";
 import { createTauriReview } from "./tauriReview";
-import { changedThreadLine } from "./threadLine";
+import { changedThreadLine, diffLineOf, onePlace, unchangedThreadLine } from "./threadLine";
 
 const commands = vi.hoisted(() => ({
   listThreads: vi.fn(),
@@ -41,7 +41,10 @@ const PENDING_LIST: Generated.ThreadList = {
     {
       id: 2,
       file: 7,
-      line: { kind: "unchangedOnLeft", left: 5, right: 6 },
+      place: {
+        start: { kind: "unchanged", left: 5, right: 6 },
+        end: { kind: "unchangedOnLeft", left: 5, right: 6 },
+      },
       messages: [
         {
           id: 4,
@@ -66,7 +69,10 @@ const CAMEL_LIST = {
     {
       id: 2,
       file: 7,
-      line: { kind: "unchangedOnLeft", left: 5, right: 6 },
+      place: {
+        start: { kind: "unchanged", left: 5, right: 6 },
+        end: { kind: "unchangedOnLeft", left: 5, right: 6 },
+      },
       messages: [
         {
           id: 4,
@@ -166,13 +172,21 @@ test("each thread command passes its arguments and camelCases the list", async (
   expect(commands.addAiAnswer).toHaveBeenCalledWith(2, "s3");
 });
 
-test("addThread sends the file, the line and the text, and brands the new id", async () => {
+test("addThread hands the file, the place's start and end as they are, and the text, and brands the new id", async () => {
   commands.addThread.mockResolvedValue(ok({ thread: 2, list: PENDING_LIST }));
+  const place = {
+    start: diffLineOf(unchangedThreadLine("right", { left: 1, right: 2 })),
+    end: changedThreadLine("right", 3),
+  };
 
-  const added = await createTauriReview().addThread(fileId(7), changedThreadLine("right", 3), "Hm");
+  const added = await createTauriReview().addThread(fileId(7), place, "Hm");
 
   expect(added).toEqual({ ok: true, value: { thread: 2, list: CAMEL_LIST } });
-  expect(commands.addThread).toHaveBeenCalledWith(7, { kind: "added", right: 3 }, "Hm");
+  expect(commands.addThread).toHaveBeenCalledWith(
+    7,
+    { start: { kind: "unchanged", left: 1, right: 2 }, end: { kind: "added", right: 3 } },
+    "Hm",
+  );
 });
 
 test("checkGitLab camelCases the merge request", async () => {
@@ -225,7 +239,7 @@ test.each<[keyof typeof commands, Generated.IpcError]>([
     listThreads: () => review.listThreads(),
     editNote: () => review.editNote(messageId(4), "x"),
     deleteMessage: () => review.deleteMessage(messageId(4)),
-    addThread: () => review.addThread(fileId(0), changedThreadLine("left", 0), "x"),
+    addThread: () => review.addThread(fileId(0), onePlace(changedThreadLine("left", 0)), "x"),
     addNote: () => review.addNote(threadId(9), "x"),
     queueMessage: () => review.queueMessage(messageId(4), "x"),
     unqueueMessage: () => review.unqueueMessage(messageId(5)),

@@ -9,7 +9,7 @@ import {
   type RangeFileId,
   type ThreadId,
 } from "./domain";
-import { toThreadLine, type ThreadLine } from "./threadLine";
+import { toThreadPlace, type ThreadPlace } from "./threadLine";
 import { branded, invalid, isNonNegativeInteger } from "./validate";
 
 type MessageBody =
@@ -33,7 +33,7 @@ export type Message = {
 export type Thread = {
   readonly id: ThreadId;
   readonly file: RangeFileId;
-  readonly line: ThreadLine;
+  readonly place: ThreadPlace;
   readonly messages: readonly Message[];
   readonly session: AgentSessionId | null;
 };
@@ -130,7 +130,7 @@ function toThread(raw: Generated.Thread, index: number): Thread {
   return {
     id: branded(raw.id, isThreadId, `${field}.id`),
     file: branded(raw.file, isRangeFileId, `${field}.file`),
-    line: toThreadLine(raw.line, `${field}.line`),
+    place: toThreadPlace(raw.place, `${field}.place`),
     messages: raw.messages.map((message, at) => toMessage(message, `${field}.messages[${at}]`)),
     session: raw.session === null ? null : toSession(raw.session, `${field}.session`),
   };
