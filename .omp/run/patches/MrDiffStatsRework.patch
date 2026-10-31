@@ -1,0 +1,17 @@
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+index 9c90e9e..9a9e9eb 100644
+--- a/crates/merge-requests/src/query.rs
++++ b/crates/merge-requests/src/query.rs
+@@ -13,9 +13,9 @@ const BRANCHES_QUERY: &str = "query MergeRequestBranches($fullPath: ID!, $iid: S
+      state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
+ 
+ /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
+-/// jobs (the latest run of each), its merge status and size; about 119 of GitLab's complexity limit of 250
+-/// (`.omp/run/notes/MrOverviewDesign.md` §2.2, `docs/slices/briefs/mr-conflicts-design.md` §1). One line, so the
+-/// fake glab logs each call on one line.
++/// jobs (the latest run of each), its merge status and size; 130 of GitLab's complexity limit of 250, measured on
++/// gitlab.com on 2026-10-31 (`docs/slices/briefs/mr-diff-stats.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
++/// `docs/slices/briefs/mr-conflicts-design.md` §1). One line, so the fake glab logs each call on one line.
+ fn list_query() -> String {
+     format!(
+         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
