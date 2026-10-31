@@ -29,7 +29,7 @@ fn open_window_in(repo: TempDir) -> MergeRequestWindow {
     let app = with_commands(mock_builder())
         .build(mock_context(noop_assets()))
         .unwrap();
-    manage(&app, repo.path(), &app_folder(data.path()));
+    manage(&app, repo.path(), &app_folder(data.path()), Ai::Off);
     let webview = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
         .build()
         .unwrap();

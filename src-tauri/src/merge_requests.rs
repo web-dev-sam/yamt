@@ -12,6 +12,7 @@ use yamt_merge_requests::{
     PageOpened, ResolveRefusal, WebPage, gitlab_repository, prepare_open, prepare_resolve,
 };
 
+use crate::args::Ai;
 use crate::ipc_error::{IpcError, blocking_reply};
 use crate::range::range_folder;
 use crate::second_window;
@@ -52,20 +53,22 @@ pub(crate) enum ContinueMergeReply {
     WindowFailed { message: String },
 }
 
-/// The window's GitLab project, found once at start, the folder pair locks live in, and every merge request's and
-/// failed job's page a list sent in this run: only those may be opened (plan §2 #128–#137); never locked together
-/// with another `Mutex`.
+/// The window's GitLab project, found once at start, the folder pair locks live in, the window's `--ai` that "Show
+/// Diff" passes on, and every merge request's and failed job's page a list sent in this run: only those may be
+/// opened (plan §2 #128–#137); never locked together with another `Mutex`.
 pub(crate) struct MergeRequestState {
     gitlab: Option<GitLabRepository>,
     range_dir: PathBuf,
+    ai: Ai,
     pages: Mutex<BTreeSet<WebPage>>,
 }
 
-/// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app.
-pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path) {
+/// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
+pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path, ai: Ai) {
     app.manage(MergeRequestState {
         gitlab: gitlab_repository(folder),
         range_dir: range_folder(app_folder),
+        ai,
         pages: Mutex::new(BTreeSet::new()),
     });
 }
@@ -116,7 +119,7 @@ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) 
         };
     };
     match prepare_open(repository, glab, iid, &state.range_dir) {
-        Ok(range) => second_window::start_range(&range),
+        Ok(range) => second_window::start_range(&range, state.ai),
         Err(reply) => reply,
     }
 }

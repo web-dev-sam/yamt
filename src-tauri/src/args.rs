@@ -18,7 +18,8 @@ name git knows (branch, tag, commit id, HEAD~3); an empty side is HEAD.
   --repo <path>     any directory inside the work tree
   --diff            compare pasted texts instead of merging
   --diff=<range>    review a commit range
-  --ai              with --diff=<range>: an AI agent answers review comments in its own checkout
+  --ai              with --diff=<range>: an AI agent answers review comments in its own checkout; with --diff:
+                    the changes windows its merge-request page opens get it too
   --help            print this help
   --version         print the version
 ";
@@ -35,7 +36,9 @@ pub(crate) enum Invocation {
     Merge {
         repo: PathBuf,
     },
-    Compare,
+    Compare {
+        ai: Ai,
+    },
     Range {
         spec: RangeSpec,
         repo: PathBuf,
@@ -45,7 +48,8 @@ pub(crate) enum Invocation {
     Version,
 }
 
-/// `--ai`: accepted with every mode, kept only by a range window (plan §2 #108).
+/// `--ai`: accepted with every mode, kept by a range window and by the compare window for the range windows its
+/// merge-request page opens (plan §2 #108).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Ai {
     Off,
@@ -103,7 +107,7 @@ pub(crate) fn parse(args: Vec<OsString>) -> Result<Invocation, String> {
     }
     match (window?, repo) {
         (Window::Compare, Some(_)) => Err(DIFF_WITH_REPO.to_owned()),
-        (Window::Compare, None) => Ok(Invocation::Compare),
+        (Window::Compare, None) => Ok(Invocation::Compare { ai }),
         (Window::Range(spec), repo) => Ok(Invocation::Range {
             spec,
             repo: repo.unwrap_or_else(|| PathBuf::from(START_FOLDER)),
@@ -164,7 +168,7 @@ mod tests {
 
     #[test]
     fn diff_opens_the_compare_window() {
-        assert_eq!(parsed(&["--diff"]), Ok(Invocation::Compare));
+        assert_eq!(parsed(&["--diff"]), Ok(Invocation::Compare { ai: Ai::Off }));
     }
 
     #[test]
@@ -209,14 +213,21 @@ mod tests {
         }
     }
 
-    // A merge or compare window that kept the flag would start an agent nobody can see.
+    // A merge window that kept the flag would start an agent nobody can see.
     #[test]
-    fn ai_is_accepted_with_every_mode_and_reaches_only_the_range_window() {
+    fn ai_is_accepted_with_every_mode_and_reaches_the_range_and_compare_windows() {
         let merge = Invocation::Merge {
             repo: PathBuf::from("p"),
         };
         assert_eq!(parsed(&["--ai", "--repo", "p"]), Ok(merge));
-        assert_eq!(parsed(&["--diff", "--ai"]), Ok(Invocation::Compare));
+        assert_eq!(
+            parsed(&["--diff", "--ai"]),
+            Ok(Invocation::Compare { ai: Ai::On })
+        );
+        assert_eq!(
+            parsed(&["--ai", "--diff"]),
+            Ok(Invocation::Compare { ai: Ai::On })
+        );
         assert_eq!(parsed(&["--ai", "--help"]), Ok(Invocation::Help));
         assert_eq!(parsed(&["--ai", "--version"]), Ok(Invocation::Version));
         let with_ai = Invocation::Range {

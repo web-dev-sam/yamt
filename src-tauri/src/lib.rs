@@ -55,8 +55,8 @@ pub fn run() -> ExitCode {
             println!("yamt {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
-        Ok(Invocation::Compare) => {
-            window::run_compare(&from_start_dir(PathBuf::from(START_FOLDER))).report()
+        Ok(Invocation::Compare { ai }) => {
+            window::run_compare(&from_start_dir(PathBuf::from(START_FOLDER)), ai).report()
         }
         Ok(Invocation::Merge { repo }) => merge(&from_start_dir(repo)).report(),
         Ok(Invocation::Range { spec, repo, ai }) => {

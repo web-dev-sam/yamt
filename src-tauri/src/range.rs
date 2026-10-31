@@ -58,7 +58,7 @@ fn manage_range_in<R: Runtime>(
         tracing::warn!(paths = ?unlisted, "review threads kept on paths this range does not list");
     }
     ai::manage(app, ai, range_folder(app_folder), lock.folder(), &range);
-    merge_requests::manage(app, range.root(), app_folder);
+    merge_requests::manage(app, range.root(), app_folder, ai);
     app.manage(RangeState {
         range,
         threads: Mutex::new(threads),

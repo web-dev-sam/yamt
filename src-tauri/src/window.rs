@@ -71,8 +71,8 @@ pub(crate) fn run(session: Box<MergeSession>) -> Ending {
     }
 }
 
-pub(crate) fn run_compare(folder: &Path) -> Ending {
-    match open_compare(folder) {
+pub(crate) fn run_compare(folder: &Path, ai: Ai) -> Ending {
+    match open_compare(folder, ai) {
         Ok(ending) => ending,
         Err(error) => Ending::failure(error.to_string()),
     }
@@ -89,10 +89,11 @@ fn open_merge(title: &str, session: Box<MergeSession>) -> tauri::Result<Ending> 
     Ok(ending_when_git_is_done(&handle.state::<MergeState>()))
 }
 
-fn open_compare(folder: &Path) -> tauri::Result<Ending> {
+/// The compare window keeps `ai` only for the range windows its merge-request page opens; it has no threads.
+fn open_compare(folder: &Path, ai: Ai) -> tauri::Result<Ending> {
     let manage = |app: &App, app_folder: &Path| {
         compare::manage_store_in(app, app_folder)?;
-        merge_requests::manage(app, folder, app_folder);
+        merge_requests::manage(app, folder, app_folder, ai);
         Ok(())
     };
     open_with_data_folder(COMPARE_TITLE, WindowKind::Compare, Ai::Off, manage, |_| {})

@@ -5,9 +5,11 @@ use std::thread;
 
 use yamt_merge_requests::{OpenReply, RangeToOpen};
 
-/// Starts a second yamt on the range, `yamt --diff=<spec> --repo <root>`.
-pub(crate) fn start_range(range: &RangeToOpen) -> OpenReply {
-    match spawn(range_arguments(range), &range.root) {
+use crate::args::Ai;
+
+/// Starts a second yamt on the range, `yamt --diff=<spec> --repo <root>`, with `--ai` when `ai` is on.
+pub(crate) fn start_range(range: &RangeToOpen, ai: Ai) -> OpenReply {
+    match spawn(range_arguments(range, ai), &range.root) {
         Ok(()) => OpenReply::Opened,
         Err(message) => OpenReply::StartFailed { message },
     }
@@ -39,12 +41,17 @@ fn spawn(arguments: Vec<OsString>, root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn range_arguments(range: &RangeToOpen) -> Vec<OsString> {
-    vec![
+fn range_arguments(range: &RangeToOpen, ai: Ai) -> Vec<OsString> {
+    let mut arguments = vec![
         format!("--diff={}", range.spec).into(),
         "--repo".into(),
         range.root.clone().into(),
-    ]
+    ];
+    match ai {
+        Ai::Off => {}
+        Ai::On => arguments.push("--ai".into()),
+    }
+    arguments
 }
 
 fn merge_arguments(root: &Path) -> Vec<OsString> {
@@ -99,7 +106,7 @@ mod tests {
     use yamt_range::RangeSpec;
 
     use super::*;
-    use crate::args::{Ai, Invocation};
+    use crate::args::Invocation;
 
     const EXE: &str = "/tmp/.mount_yamtAbC/usr/bin/yamt";
     const APPIMAGE: &str = "/home/sam/yamt.AppImage";
@@ -108,20 +115,21 @@ mod tests {
         "531ea52dfb892e20206010fb6cd6161d9c88964a..6ea97d8eee3a6a962d0411a0ed0f8d28ac90fc19";
 
     #[test]
-    fn the_second_yamt_is_asked_for_the_range_in_its_repository_without_ai() {
+    fn the_second_yamt_is_asked_for_the_range_in_its_repository_with_the_windows_ai() {
         let range = RangeToOpen {
             root: ROOT.into(),
             spec: SPEC.to_owned(),
         };
+        for ai in [Ai::Off, Ai::On] {
+            let invocation = crate::args::parse(range_arguments(&range, ai));
 
-        let invocation = crate::args::parse(range_arguments(&range));
-
-        let wanted = Invocation::Range {
-            spec: RangeSpec::parse(SPEC).unwrap(),
-            repo: ROOT.into(),
-            ai: Ai::Off,
-        };
-        assert_eq!(invocation, Ok(wanted));
+            let wanted = Invocation::Range {
+                spec: RangeSpec::parse(SPEC).unwrap(),
+                repo: ROOT.into(),
+                ai,
+            };
+            assert_eq!(invocation, Ok(wanted), "{ai:?}");
+        }
     }
 
     #[test]
