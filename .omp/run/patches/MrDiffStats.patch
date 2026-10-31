@@ -1,0 +1,359 @@
+diff --git a/crates/merge-requests/AGENTS.md b/crates/merge-requests/AGENTS.md
+index c575e79..c9ef645 100644
+--- a/crates/merge-requests/AGENTS.md
++++ b/crates/merge-requests/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`, `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply` and `ResolveRefusal` through `From`: the one prelude of listing, opening and resolving), `query.rs` (the list query, the details query and the branches query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `detailedMergeStatus conflicts diffStatsSummary { additions deletions fileCount } sourceProjectId targetProjectId` too; `details_args` and `branches_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; `readiness`: GitLab's 24 `DetailedMergeStatus` values folded (`MERGEABLE` ready, `CONFLICT` conflicts, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null checking, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning), then conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `size` from `diffStatsSummary` (null → `None`; GitLab's `Int` saturating into `u32`, below 0 → 0); `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches argv exact), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, saturating counts, forks); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs`, `tests/open.rs` and `tests/resolve.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
++Owner skill: `skill://rust-conventions`. The GitLab project's open merge requests for the compare and range windows (plan §2 #128–#135, #137, #138–#143; requests `docs/slices/request-merge-requests.md`, `docs/slices/request-mr-conflicts.md`): `lib.rs` (the IPC types `GitLabProject` `none`/`found` (`repository`: the absolute common git dir, the key the window remembers filters by), `MergeRequestIid`, `Person`, `CiStatus` (seven, camelCase), `WebPage` (a string only `WebPage::job` and `WebPage::merge_request` make), `FailedJob`, `Pipeline`, `ChangeSize` (`additions`, `deletions`, `files`), `Readiness` `ready`/`conflicts { also }`/`needsRebase`/`checking`/`blocked { reason }`, `BlockedReason` (GitLab's seventeen blockers and `other { status }`), `MergeRequestRow` (`createdAt` as GitLab sent it, `openDiscussions` and `approvals` single numbers, `page` its GitLab page or `None`, `size` or `None`, `readiness`, `fromFork`), `MergeRequestPage` (`me`, `rows`), `ListEnd` `loaded`/`cut`/`glabMissing`/`notLoggedIn`/`failed`, `OpenReply` `opened`/`alreadyOpen`/`preparing`/`notOpen`/`noRemote`/`fetchFailed`/`missingCommit`/`startFailed`/`glabMissing`/`notLoggedIn`/`failed`, `PageOpened` `opened`/`notOffered`/`failed`, `ResolveRefusal` `notOpen`/`fromFork`/`noRemote`/`glabMissing`/`notLoggedIn`/`failed` (payload fields snake_case, as `yamt_review::NotLinedUp`), `RangeToOpen` (`root`, `spec` `<base_sha>..<head_sha>`; not IPC), `ResolveTarget` (`root`, `iid`, `remote`, `branch`, `target`; not IPC); `PAGE_SIZE` 100, `MAX_MERGE_REQUESTS` 500, `MAX_FAILED_JOBS` 50; `Glab` re-exported), `detect.rs` (`gitlab_repository`: offline, `Repo::discover`, `Repo::remote_urls`, `Repo::common_dir`; a remote is on GitLab when its host — scp-like, `scheme://[user@]host[:port]`, never a local path, `file://` or a drive letter — has a dot-label starting with "gitlab", or is glab's `GITLAB_HOST`/`GL_HOST`; `gitlab_remotes` keeps those, in config order; `GitLabRepository` holds the `Repo` and only its remotes on GitLab, lossy UTF-8), `project.rs` (`logged_in_project`: `glab auth status` (logged out → `NoProject::NotLoggedIn`, failed → `NoProject::Failed`), then `glab api projects/:fullpath` → `Project { full_path, web_path, web_origin }`: `full_path` for the GraphQL queries, `web_path` = `web_url` after the origin, so a GitLab under a sub-path such as `/gitlab` keeps it (#1983); path and origin only on https; `NoProject` turns into `ListEnd`, `OpenReply` and `ResolveRefusal` through `From`: the one prelude of listing, opening and resolving), `query.rs` (the list query, the details query and the branches query, each a single line; `list_args`: `api graphql -f query=… -f fullPath=<path> -F first=100`, then `-f after=<cursor>`; the list's nodes ask `detailedMergeStatus conflicts diffStats { additions deletions } sourceProjectId targetProjectId` too — per-file `diffStats`, never `diffStatsSummary`: beside `diffStatsSummary` in a list, gitlab.com answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean (measured 2026-10-31, `docs/slices/briefs/mr-diff-stats.md`); `details_args` and `branches_args`: `… -f fullPath=<path> -f iid=<n>`; the branches query asks `state sourceBranch targetBranch sourceProjectId targetProjectId`), `page.rs` (`graphql_data`: a GraphQL answer's `data`, `errors` → `Err(first message)`; one list answer of a `Project` → `ParsedPage`: no data, no project or no next cursor → `Err`; open discussions = resolvable − resolved, saturating at 0, null = 0; approvals = `approvedBy` nodes; GitLab's pipeline status folded into `CiStatus`, an unknown one `Pending` with a warning; `readiness`: GitLab's 24 `DetailedMergeStatus` values folded (`MERGEABLE` ready, `CONFLICT` conflicts, `NEED_REBASE` needs rebase, `CHECKING`/`UNCHECKED`/`PREPARING`/`APPROVALS_SYNCING`/null checking, the other seventeen a `BlockedReason`, an unknown one `Other { status }` with a warning), then conflicts first (#1998): the `conflicts` flag or a `CONFLICT` status → `Conflicts { also }`, `also` the status's blocked reason, then `Draft` for a draft; `size` from `diffStats`: the sums of the entries' `additions` and `deletions`, `files` the number of entries (null or empty → `None`: GitLab sends no entries before it has computed the diff; each count saturating into `u32`, below 0 → 0); `is_from_fork`: `sourceProjectId != Some(targetProjectId)`, a deleted source project a fork; a row's page through `WebPage::merge_request` from the project's origin and web path, job pages through `WebPage::job`), `list.rs` (`list_merge_requests`: glab missing → `GlabMissing`, `logged_in_project`, then at most 5 pages, each one glab call sent to `on_page` as it arrives; a 5th page with more to come → `Cut { limit: 500 }`; a failing page → `Failed`, the pages sent stay; GitLab's `queryComplexity` of the first page logged at info), `open.rs` (`prepare_open`: glab, `logged_in_project`, then the details query asked afresh — not `opened` → `NotOpen`, no `diffRefs` → `Preparing`, ids parsed as `Oid`; both commits local → no fetch, else `remote_for` over the GitLab remotes (`NoRemote`) and `Repo::fetch_without_refs` of `refs/merge-requests/<iid>/head` and `refs/heads/<target>` (`FetchFailed`; a target refused by `require_branch_name`, the crate's one rule for a branch name holding `:`); `Resolved::resolve` of `<base>..<head>` (an unknown side → `MissingCommit`, 7 chars); `PairLock::take` tried and let go (`Locked` → `AlreadyOpen`)), `resolve.rs` (`prepare_resolve`: glab missing → `GlabMissing`, `logged_in_project`, the branches query asked afresh — no merge request or not `opened` → `NotOpen`, `is_from_fork` → `FromFork`, either branch refused by `require_branch_name` → `Failed`; `remote_for` → `NoRemote { project }`; nothing fetched or written), `remote.rs` (`remote_for`: the first remote in config order whose URL, without a final `/` and `.git`, ends in `/<full_path>` or `:<full_path>`, any case), `web_page.rs` (`WebPage::job`: a path matching `<web path>/-/jobs/<digits>`; `WebPage::merge_request`: the project's `<web path>/-/merge_requests/<iid>`; both through `project_page`: `https://<host[:port]>` (`HTTPS`, the crate's one scheme constant) + a web path checked by `is_web_path`: `/` then segments of `[A-Za-z0-9._~-]`, none empty or `..`; `open_page`: `OPENER` `xdg-open <url>` from PATH on Linux and BSD, `/usr/bin/open` on macOS, `rundll32.exe` `URL_HANDLER` (`url.dll,FileProtocolHandler`) on Windows, stdio null, in a process group of its own on Unix, a thread reaps it). Depends on `yamt-gitio` and `yamt-range` among `yamt-*` (may use `yamt-merge-core`), never tauri (`scripts/arch-check.sh`); no Mutex, nothing cached. Tests: unit tests in `detect.rs`, `web_page.rs` (both addresses' rules, a sub-path kept; the opener per system, `cfg`-gated; the Unix process group), `project.rs` (a sub-path `web_url`), `query.rs` (each query one line with balanced braces; the branches argv exact; the list asks `diffStats`, never `diffStatsSummary`), `remote.rs` (a github.com mirror first in config order passed over), `list.rs` (paging with an injected fetcher), `page/tests.rs` (over `tests/glab/merge-requests/`'s and `tests/glab/mr-conflicts/`'s recorded pages; every merge status as a table, conflicts first, sizes summed per file, saturating counts, forks); `tests/fake_glab/mod.rs` (the one fake-glab helper `tests/list.rs`, `tests/open.rs` and `tests/resolve.rs` share: `Fake` on a scenario, its log, `in_this_repository`), `tests/list.rs` (scenarios `merge-requests/`, `merge-requests-timeout/`, `logged-out/`), `tests/open.rs` (`scripts/range-repo.sh`'s repository and fake GitLab with the fake glab: !13 fetched and lined up by `yamt_review::check_gitlab`, !12 without a fetch, a github.com mirror first in config order never fetched from, `AlreadyOpen`, `Preparing`, `NotOpen`, `NoRemote`, `MissingCommit`, `FetchFailed`, !17's target `main:refs/heads/x` → `Failed` with the refs unchanged, glab missing or logged out), `tests/resolve.rs` (`scripts/range-repo.sh`'s repository with the fake glab on `mr-conflicts/`: !21's branches and `origin` with the refs unchanged and the logged argv, !22 `FromFork`, !30 `NotOpen`, `NoRemote`, !33's `:` branch `Failed`, glab missing or logged out), `tests/detect.rs` (real repositories; `GITLAB_HOST`/`GL_HOST` in a child process).
+diff --git a/crates/merge-requests/src/page.rs b/crates/merge-requests/src/page.rs
+index cb2a34a..4977fab 100644
+--- a/crates/merge-requests/src/page.rs
++++ b/crates/merge-requests/src/page.rs
+@@ -94,17 +94,15 @@ struct Node {
+     head_pipeline: Option<PipelineNode>,
+     detailed_merge_status: Option<String>,
+     conflicts: bool,
+-    diff_stats_summary: Option<DiffStats>,
++    diff_stats: Option<Vec<FileStats>>,
+     source_project_id: Option<i64>,
+     target_project_id: i64,
+ }
+ 
+ #[derive(Deserialize)]
+-#[serde(rename_all = "camelCase")]
+-struct DiffStats {
++struct FileStats {
+     additions: i64,
+     deletions: i64,
+-    file_count: i64,
+ }
+ 
+ #[derive(Deserialize)]
+@@ -193,7 +191,7 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
+         approvals: count(listed(node.approved_by).len()),
+         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
+         page,
+-        size: node.diff_stats_summary.as_ref().map(change_size),
++        size: change_size(node.diff_stats.as_deref().unwrap_or_default()),
+         readiness: readiness(
+             node.detailed_merge_status.as_deref(),
+             node.conflicts,
+@@ -224,12 +222,21 @@ fn count(length: usize) -> u32 {
+     u32::try_from(length).unwrap_or(u32::MAX)
+ }
+ 
+-fn change_size(stats: &DiffStats) -> ChangeSize {
+-    ChangeSize {
+-        additions: saturated(stats.additions),
+-        deletions: saturated(stats.deletions),
+-        files: saturated(stats.file_count),
++/// The sums over the changed files, `None` when GitLab sent none (it has not computed the diff yet).
++fn change_size(files: &[FileStats]) -> Option<ChangeSize> {
++    if files.is_empty() {
++        return None;
+     }
++    let mut size = ChangeSize {
++        additions: 0,
++        deletions: 0,
++        files: count(files.len()),
++    };
++    for file in files {
++        size.additions = size.additions.saturating_add(saturated(file.additions));
++        size.deletions = size.deletions.saturating_add(saturated(file.deletions));
++    }
++    Some(size)
+ }
+ 
+ /// Whether a merge request's source branch lives outside its target's project; a deleted source project
+diff --git a/crates/merge-requests/src/page/tests.rs b/crates/merge-requests/src/page/tests.rs
+index 2aa7859..e00a2b5 100644
+--- a/crates/merge-requests/src/page/tests.rs
++++ b/crates/merge-requests/src/page/tests.rs
+@@ -348,11 +348,32 @@ fn a_conflict_flag_or_status_comes_first_with_the_status_s_blocker_then_a_draft(
+ }
+ 
+ #[test]
+-fn counts_saturate_a_null_summary_is_no_size_and_another_or_no_source_project_is_a_fork() {
+-    let summary = json!({ "additions": -3, "deletions": 7, "fileCount": 5_000_000_000_i64 });
+-    let counted = row_with(&json!({ "diffStatsSummary": summary }));
+-    assert_eq!(counted.size, Some(size(0, 7, u32::MAX)));
+-    assert_eq!(row_with(&json!({ "diffStatsSummary": null })).size, None);
++fn a_size_sums_each_file_s_counts_and_counts_the_files() {
++    let files = json!([
++        { "additions": 10, "deletions": 2 },
++        { "additions": 0, "deletions": 5 },
++        { "additions": 7, "deletions": 0 }
++    ]);
++    let counted = row_with(&json!({ "diffStats": files }));
++    assert_eq!(counted.size, Some(size(17, 7, 3)));
++}
++
++#[test]
++fn no_files_or_null_stats_is_no_size() {
++    assert_eq!(row_with(&json!({ "diffStats": [] })).size, None);
++    assert_eq!(row_with(&json!({ "diffStats": null })).size, None);
++    assert_eq!(row_with(&json!({})).size, None);
++}
++
++#[test]
++fn a_negative_count_is_0_a_huge_sum_saturates_and_another_or_no_source_project_is_a_fork() {
++    let files = json!([
++        { "additions": -3, "deletions": 7 },
++        { "additions": 4, "deletions": 5_000_000_000_i64 },
++        { "additions": 2, "deletions": 1 }
++    ]);
++    let counted = row_with(&json!({ "diffStats": files }));
++    assert_eq!(counted.size, Some(size(6, u32::MAX, 3)));
+     assert!(!counted.from_fork);
+     assert!(row_with(&json!({ "sourceProjectId": 2, "targetProjectId": 1 })).from_fork);
+     assert!(row_with(&json!({ "sourceProjectId": null })).from_fork);
+@@ -387,3 +408,28 @@ fn the_mr_conflicts_scenario_s_page_folds_as_its_readme_says() {
+     assert_eq!(page.rows[4].size, None);
+     assert_eq!(page.rows[10].size, Some(size(120, 40, 6)));
+ }
++
++#[test]
++fn the_recorded_pages_give_the_sizes_their_summaries_gave() {
++    let sizes_of = |json: &[u8]| -> Vec<Option<ChangeSize>> {
++        let page = parsed(json, &taskboard(Some(ORIGIN))).unwrap();
++        page.rows.into_iter().map(|row| row.size).collect()
++    };
++    let first = [size(64, 9, 4), size(30, 2, 2), size(120, 40, 6)];
++    assert_eq!(sizes_of(PAGE_1), first.map(Some));
++    assert_eq!(sizes_of(PAGE_2), [None, Some(size(5, 5, 1))]);
++    let conflicts_page = [
++        Some(size(75, 12, 5)),
++        Some(size(210, 3, 7)),
++        Some(size(8, 1, 1)),
++        Some(size(44, 6, 3)),
++        None,
++        Some(size(31, 0, 2)),
++        Some(size(18, 2, 1)),
++        Some(size(96, 22, 4)),
++        Some(size(52, 14, 3)),
++        Some(size(27, 9, 2)),
++        Some(size(120, 40, 6)),
++    ];
++    assert_eq!(sizes_of(CONFLICTS_PAGE), conflicts_page);
++}
+diff --git a/crates/merge-requests/src/query.rs b/crates/merge-requests/src/query.rs
+index c78ec5f..9c90e9e 100644
+--- a/crates/merge-requests/src/query.rs
++++ b/crates/merge-requests/src/query.rs
+@@ -31,7 +31,7 @@ fn list_query() -> String {
+          reviewers {{ nodes {{ username name }} }} \
+          approvedBy {{ nodes {{ username }} }} \
+          resolvableDiscussionsCount resolvedDiscussionsCount \
+-         detailedMergeStatus conflicts diffStatsSummary {{ additions deletions fileCount }} \
++         detailedMergeStatus conflicts diffStats {{ additions deletions }} \
+          sourceProjectId targetProjectId \
+          headPipeline {{ status \
+          jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
+@@ -93,10 +93,19 @@ mod tests {
+         assert_eq!(query.matches('{').count(), query.matches('}').count());
+         assert!(query.contains("first: 50)"), "{query}");
+         let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
+-             diffStatsSummary { additions deletions fileCount } sourceProjectId targetProjectId headPipeline";
++             diffStats { additions deletions } sourceProjectId targetProjectId headPipeline";
+         assert!(query.contains(merge_fields), "{query}");
+     }
+ 
++    #[test]
++    fn the_list_query_asks_per_file_diff_stats_never_the_summary() {
++        // gitlab.com, 2026-10-31 (`docs/slices/briefs/mr-diff-stats.md`): beside `diffStatsSummary` in a
++        // `mergeRequests` list, GitLab answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean.
++        let query = list_query();
++        assert!(query.contains("diffStats {"), "{query}");
++        assert!(!query.contains("diffStatsSummary"), "{query}");
++    }
++
+     #[test]
+     fn the_details_query_is_one_line_with_balanced_braces() {
+         assert!(!DETAILS_QUERY.contains('\n'), "{DETAILS_QUERY}");
+diff --git a/tests/glab/merge-requests-timeout/graphql-page-1.json b/tests/glab/merge-requests-timeout/graphql-page-1.json
+index 5738ae5..f9f5c6c 100644
+--- a/tests/glab/merge-requests-timeout/graphql-page-1.json
++++ b/tests/glab/merge-requests-timeout/graphql-page-1.json
+@@ -19,7 +19,7 @@
+             "resolvedDiscussionsCount": 0,
+             "detailedMergeStatus": "CI_MUST_PASS",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 64, "deletions": 9, "fileCount": 4 },
++            "diffStats": [{ "additions": 20, "deletions": 4 }, { "additions": 20, "deletions": 3 }, { "additions": 16, "deletions": 2 }, { "additions": 8, "deletions": 0 }],
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -61,7 +61,7 @@
+             "resolvedDiscussionsCount": 2,
+             "detailedMergeStatus": "MERGEABLE",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 30, "deletions": 2, "fileCount": 2 },
++            "diffStats": [{ "additions": 24, "deletions": 2 }, { "additions": 6, "deletions": 0 }],
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -82,7 +82,7 @@
+             "resolvedDiscussionsCount": 0,
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
++            "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+diff --git a/tests/glab/merge-requests/graphql-page-1.json b/tests/glab/merge-requests/graphql-page-1.json
+index 5738ae5..f9f5c6c 100644
+--- a/tests/glab/merge-requests/graphql-page-1.json
++++ b/tests/glab/merge-requests/graphql-page-1.json
+@@ -19,7 +19,7 @@
+             "resolvedDiscussionsCount": 0,
+             "detailedMergeStatus": "CI_MUST_PASS",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 64, "deletions": 9, "fileCount": 4 },
++            "diffStats": [{ "additions": 20, "deletions": 4 }, { "additions": 20, "deletions": 3 }, { "additions": 16, "deletions": 2 }, { "additions": 8, "deletions": 0 }],
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -61,7 +61,7 @@
+             "resolvedDiscussionsCount": 2,
+             "detailedMergeStatus": "MERGEABLE",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 30, "deletions": 2, "fileCount": 2 },
++            "diffStats": [{ "additions": 24, "deletions": 2 }, { "additions": 6, "deletions": 0 }],
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+@@ -82,7 +82,7 @@
+             "resolvedDiscussionsCount": 0,
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
++            "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": {
+diff --git a/tests/glab/merge-requests/graphql-page-2.json b/tests/glab/merge-requests/graphql-page-2.json
+index 54d27c1..2143b7b 100644
+--- a/tests/glab/merge-requests/graphql-page-2.json
++++ b/tests/glab/merge-requests/graphql-page-2.json
+@@ -19,7 +19,7 @@
+             "resolvedDiscussionsCount": 0,
+             "detailedMergeStatus": "NEED_REBASE",
+             "conflicts": false,
+-            "diffStatsSummary": null,
++            "diffStats": null,
+             "sourceProjectId": 7,
+             "targetProjectId": 7,
+             "headPipeline": null
+@@ -37,7 +37,7 @@
+             "resolvedDiscussionsCount": 2,
+             "detailedMergeStatus": null,
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 5, "deletions": 5, "fileCount": 1 },
++            "diffStats": [{ "additions": 5, "deletions": 5 }],
+             "sourceProjectId": 12,
+             "targetProjectId": 7,
+             "headPipeline": {
+diff --git a/tests/glab/mr-conflicts/graphql-page-1.json b/tests/glab/mr-conflicts/graphql-page-1.json
+index eb109bc..a87d277 100644
+--- a/tests/glab/mr-conflicts/graphql-page-1.json
++++ b/tests/glab/mr-conflicts/graphql-page-1.json
+@@ -23,7 +23,7 @@
+             },
+             "detailedMergeStatus": "CI_MUST_PASS",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 75, "deletions": 12, "fileCount": 5 },
++            "diffStats": [{ "additions": 30, "deletions": 5 }, { "additions": 20, "deletions": 4 }, { "additions": 12, "deletions": 2 }, { "additions": 8, "deletions": 1 }, { "additions": 5, "deletions": 0 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -41,7 +41,7 @@
+             "headPipeline": null,
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 210, "deletions": 3, "fileCount": 7 },
++            "diffStats": [{ "additions": 90, "deletions": 1 }, { "additions": 50, "deletions": 1 }, { "additions": 30, "deletions": 1 }, { "additions": 20, "deletions": 0 }, { "additions": 10, "deletions": 0 }, { "additions": 6, "deletions": 0 }, { "additions": 4, "deletions": 0 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -62,7 +62,7 @@
+             },
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 8, "deletions": 1, "fileCount": 1 },
++            "diffStats": [{ "additions": 8, "deletions": 1 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -83,7 +83,7 @@
+             },
+             "detailedMergeStatus": "MERGE_TRAIN_STUCK",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 44, "deletions": 6, "fileCount": 3 },
++            "diffStats": [{ "additions": 30, "deletions": 4 }, { "additions": 10, "deletions": 2 }, { "additions": 4, "deletions": 0 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -104,7 +104,7 @@
+             },
+             "detailedMergeStatus": "MERGEABLE",
+             "conflicts": false,
+-            "diffStatsSummary": null,
++            "diffStats": [],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -122,7 +122,7 @@
+             "headPipeline": null,
+             "detailedMergeStatus": "UNCHECKED",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 31, "deletions": 0, "fileCount": 2 },
++            "diffStats": [{ "additions": 25, "deletions": 0 }, { "additions": 6, "deletions": 0 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -143,7 +143,7 @@
+             },
+             "detailedMergeStatus": "DRAFT_STATUS",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 18, "deletions": 2, "fileCount": 1 },
++            "diffStats": [{ "additions": 18, "deletions": 2 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -164,7 +164,7 @@
+             },
+             "detailedMergeStatus": "NEED_REBASE",
+             "conflicts": false,
+-            "diffStatsSummary": { "additions": 96, "deletions": 22, "fileCount": 4 },
++            "diffStats": [{ "additions": 50, "deletions": 10 }, { "additions": 30, "deletions": 8 }, { "additions": 10, "deletions": 3 }, { "additions": 6, "deletions": 1 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -185,7 +185,7 @@
+             },
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 52, "deletions": 14, "fileCount": 3 },
++            "diffStats": [{ "additions": 30, "deletions": 8 }, { "additions": 16, "deletions": 4 }, { "additions": 6, "deletions": 2 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           },
+@@ -206,7 +206,7 @@
+             },
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 27, "deletions": 9, "fileCount": 2 },
++            "diffStats": [{ "additions": 20, "deletions": 6 }, { "additions": 7, "deletions": 3 }],
+             "sourceProjectId": 2,
+             "targetProjectId": 1
+           },
+@@ -227,7 +227,7 @@
+             },
+             "detailedMergeStatus": "CONFLICT",
+             "conflicts": true,
+-            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
++            "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
+             "sourceProjectId": 1,
+             "targetProjectId": 1
+           }

@@ -1,0 +1,2 @@
+just mutants HEAD — 5 mutants: 3 caught, 2 unviable, 0 missed
+

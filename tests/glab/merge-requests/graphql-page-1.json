@@ -19,7 +19,7 @@
             "resolvedDiscussionsCount": 0,
             "detailedMergeStatus": "CI_MUST_PASS",
             "conflicts": false,
-            "diffStatsSummary": { "additions": 64, "deletions": 9, "fileCount": 4 },
+            "diffStats": [{ "additions": 20, "deletions": 4 }, { "additions": 20, "deletions": 3 }, { "additions": 16, "deletions": 2 }, { "additions": 8, "deletions": 0 }],
             "sourceProjectId": 7,
             "targetProjectId": 7,
             "headPipeline": {
@@ -61,7 +61,7 @@
             "resolvedDiscussionsCount": 2,
             "detailedMergeStatus": "MERGEABLE",
             "conflicts": false,
-            "diffStatsSummary": { "additions": 30, "deletions": 2, "fileCount": 2 },
+            "diffStats": [{ "additions": 24, "deletions": 2 }, { "additions": 6, "deletions": 0 }],
             "sourceProjectId": 7,
             "targetProjectId": 7,
             "headPipeline": {
@@ -82,7 +82,7 @@
             "resolvedDiscussionsCount": 0,
             "detailedMergeStatus": "DRAFT_STATUS",
             "conflicts": true,
-            "diffStatsSummary": { "additions": 120, "deletions": 40, "fileCount": 6 },
+            "diffStats": [{ "additions": 40, "deletions": 12 }, { "additions": 30, "deletions": 10 }, { "additions": 20, "deletions": 8 }, { "additions": 15, "deletions": 5 }, { "additions": 10, "deletions": 3 }, { "additions": 5, "deletions": 2 }],
             "sourceProjectId": 7,
             "targetProjectId": 7,
             "headPipeline": {

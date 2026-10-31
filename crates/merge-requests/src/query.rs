@@ -31,7 +31,7 @@ fn list_query() -> String {
          reviewers {{ nodes {{ username name }} }} \
          approvedBy {{ nodes {{ username }} }} \
          resolvableDiscussionsCount resolvedDiscussionsCount \
-         detailedMergeStatus conflicts diffStatsSummary {{ additions deletions fileCount }} \
+         detailedMergeStatus conflicts diffStats {{ additions deletions }} \
          sourceProjectId targetProjectId \
          headPipeline {{ status \
          jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
@@ -93,8 +93,17 @@ mod tests {
         assert_eq!(query.matches('{').count(), query.matches('}').count());
         assert!(query.contains("first: 50)"), "{query}");
         let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
-             diffStatsSummary { additions deletions fileCount } sourceProjectId targetProjectId headPipeline";
+             diffStats { additions deletions } sourceProjectId targetProjectId headPipeline";
         assert!(query.contains(merge_fields), "{query}");
+    }
+
+    #[test]
+    fn the_list_query_asks_per_file_diff_stats_never_the_summary() {
+        // gitlab.com, 2026-10-31 (`docs/slices/briefs/mr-diff-stats.md`): beside `diffStatsSummary` in a
+        // `mergeRequests` list, GitLab answers `detailedMergeStatus: CONFLICT` for merge requests that merge clean.
+        let query = list_query();
+        assert!(query.contains("diffStats {"), "{query}");
+        assert!(!query.contains("diffStatsSummary"), "{query}");
     }
 
     #[test]

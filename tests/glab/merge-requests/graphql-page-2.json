@@ -19,7 +19,7 @@
             "resolvedDiscussionsCount": 0,
             "detailedMergeStatus": "NEED_REBASE",
             "conflicts": false,
-            "diffStatsSummary": null,
+            "diffStats": null,
             "sourceProjectId": 7,
             "targetProjectId": 7,
             "headPipeline": null
@@ -37,7 +37,7 @@
             "resolvedDiscussionsCount": 2,
             "detailedMergeStatus": null,
             "conflicts": false,
-            "diffStatsSummary": { "additions": 5, "deletions": 5, "fileCount": 1 },
+            "diffStats": [{ "additions": 5, "deletions": 5 }],
             "sourceProjectId": 12,
             "targetProjectId": 7,
             "headPipeline": {

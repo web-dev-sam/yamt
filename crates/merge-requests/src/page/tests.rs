@@ -348,11 +348,32 @@ fn a_conflict_flag_or_status_comes_first_with_the_status_s_blocker_then_a_draft(
 }
 
 #[test]
-fn counts_saturate_a_null_summary_is_no_size_and_another_or_no_source_project_is_a_fork() {
-    let summary = json!({ "additions": -3, "deletions": 7, "fileCount": 5_000_000_000_i64 });
-    let counted = row_with(&json!({ "diffStatsSummary": summary }));
-    assert_eq!(counted.size, Some(size(0, 7, u32::MAX)));
-    assert_eq!(row_with(&json!({ "diffStatsSummary": null })).size, None);
+fn a_size_sums_each_file_s_counts_and_counts_the_files() {
+    let files = json!([
+        { "additions": 10, "deletions": 2 },
+        { "additions": 0, "deletions": 5 },
+        { "additions": 7, "deletions": 0 }
+    ]);
+    let counted = row_with(&json!({ "diffStats": files }));
+    assert_eq!(counted.size, Some(size(17, 7, 3)));
+}
+
+#[test]
+fn no_files_or_null_stats_is_no_size() {
+    assert_eq!(row_with(&json!({ "diffStats": [] })).size, None);
+    assert_eq!(row_with(&json!({ "diffStats": null })).size, None);
+    assert_eq!(row_with(&json!({})).size, None);
+}
+
+#[test]
+fn a_negative_count_is_0_a_huge_sum_saturates_and_another_or_no_source_project_is_a_fork() {
+    let files = json!([
+        { "additions": -3, "deletions": 7 },
+        { "additions": 4, "deletions": 5_000_000_000_i64 },
+        { "additions": 2, "deletions": 1 }
+    ]);
+    let counted = row_with(&json!({ "diffStats": files }));
+    assert_eq!(counted.size, Some(size(6, u32::MAX, 3)));
     assert!(!counted.from_fork);
     assert!(row_with(&json!({ "sourceProjectId": 2, "targetProjectId": 1 })).from_fork);
     assert!(row_with(&json!({ "sourceProjectId": null })).from_fork);
@@ -386,4 +407,29 @@ fn the_mr_conflicts_scenario_s_page_folds_as_its_readme_says() {
     assert_eq!((page.me.as_deref(), page.next), (Some("sam"), None));
     assert_eq!(page.rows[4].size, None);
     assert_eq!(page.rows[10].size, Some(size(120, 40, 6)));
+}
+
+#[test]
+fn the_recorded_pages_give_the_sizes_their_summaries_gave() {
+    let sizes_of = |json: &[u8]| -> Vec<Option<ChangeSize>> {
+        let page = parsed(json, &taskboard(Some(ORIGIN))).unwrap();
+        page.rows.into_iter().map(|row| row.size).collect()
+    };
+    let first = [size(64, 9, 4), size(30, 2, 2), size(120, 40, 6)];
+    assert_eq!(sizes_of(PAGE_1), first.map(Some));
+    assert_eq!(sizes_of(PAGE_2), [None, Some(size(5, 5, 1))]);
+    let conflicts_page = [
+        Some(size(75, 12, 5)),
+        Some(size(210, 3, 7)),
+        Some(size(8, 1, 1)),
+        Some(size(44, 6, 3)),
+        None,
+        Some(size(31, 0, 2)),
+        Some(size(18, 2, 1)),
+        Some(size(96, 22, 4)),
+        Some(size(52, 14, 3)),
+        Some(size(27, 9, 2)),
+        Some(size(120, 40, 6)),
+    ];
+    assert_eq!(sizes_of(CONFLICTS_PAGE), conflicts_page);
 }

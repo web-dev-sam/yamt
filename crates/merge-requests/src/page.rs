@@ -94,17 +94,15 @@ struct Node {
     head_pipeline: Option<PipelineNode>,
     detailed_merge_status: Option<String>,
     conflicts: bool,
-    diff_stats_summary: Option<DiffStats>,
+    diff_stats: Option<Vec<FileStats>>,
     source_project_id: Option<i64>,
     target_project_id: i64,
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DiffStats {
+struct FileStats {
     additions: i64,
     deletions: i64,
-    file_count: i64,
 }
 
 #[derive(Deserialize)]
@@ -193,7 +191,7 @@ fn row(node: Node, project: &Project) -> Result<MergeRequestRow, String> {
         approvals: count(listed(node.approved_by).len()),
         pipeline: node.head_pipeline.map(|found| pipeline(found, origin)),
         page,
-        size: node.diff_stats_summary.as_ref().map(change_size),
+        size: change_size(node.diff_stats.as_deref().unwrap_or_default()),
         readiness: readiness(
             node.detailed_merge_status.as_deref(),
             node.conflicts,
@@ -224,12 +222,21 @@ fn count(length: usize) -> u32 {
     u32::try_from(length).unwrap_or(u32::MAX)
 }
 
-fn change_size(stats: &DiffStats) -> ChangeSize {
-    ChangeSize {
-        additions: saturated(stats.additions),
-        deletions: saturated(stats.deletions),
-        files: saturated(stats.file_count),
+/// The sums over the changed files, `None` when GitLab sent none (it has not computed the diff yet).
+fn change_size(files: &[FileStats]) -> Option<ChangeSize> {
+    if files.is_empty() {
+        return None;
     }
+    let mut size = ChangeSize {
+        additions: 0,
+        deletions: 0,
+        files: count(files.len()),
+    };
+    for file in files {
+        size.additions = size.additions.saturating_add(saturated(file.additions));
+        size.deletions = size.deletions.saturating_add(saturated(file.deletions));
+    }
+    Some(size)
 }
 
 /// Whether a merge request's source branch lives outside its target's project; a deleted source project
