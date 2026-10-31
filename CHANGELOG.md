@@ -7,6 +7,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A review thread can cover a range of lines: press a line number in the changes window and drag to another line,
+  in the same column or across to the other side, as on GitLab. The lines are tinted while you drag, while the new
+  thread is being written and while the pointer is over its box; the box sits under the range's last line and its
+  header names the range (`src/board/board.ts:201-204`, or `-200 to +204` across both sides). A press without a drag
+  still starts a one-line thread; Escape during a drag cancels it. Collapsed unchanged lines never hide a range's
+  lines. A range is sent to GitLab as a multi-line comment.
+
+### Changed
+
+- The review threads file moves to format 2 at its first change after this version; an older yamt then refuses
+  that file by name and leaves it untouched.
+
 ## [0.6.4] - 2026-10-31
 
 ### Changed
