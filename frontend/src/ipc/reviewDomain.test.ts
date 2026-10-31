@@ -326,8 +326,14 @@ test.each<[string, () => ThreadLine]>([
   expect(isOneLine({ start: diffLineOf(onLeft(3, 4)), end: end() })).toBe(true);
 });
 
-test("a place from a removed line to an added one is two lines", () => {
-  expect(isOneLine({ start: diffLineOf(removed(3)), end: added(4) })).toBe(false);
+test.each<[string, () => ThreadLine, () => ThreadLine]>([
+  ["a removed line to an added one", () => removed(3), () => added(4)],
+  ["a removed line to another removed one", () => removed(3), () => removed(5)],
+  ["an added line to another added one", () => added(3), () => added(5)],
+  ["an unchanged line to another one on the left", () => onLeft(3, 4), () => onLeft(5, 6)],
+  ["an unchanged line to another one on the right", () => onRight(3, 4), () => onRight(5, 6)],
+])("a place from %s is two lines", (_what, start, end) => {
+  expect(isOneLine({ start: diffLineOf(start()), end: end() })).toBe(false);
 });
 
 const NOT_LINED_UP: [Generated.NotLinedUp, unknown][] = [
