@@ -86,7 +86,9 @@ function act(): void {
 <template>
   <li
     class="flex flex-col gap-0.5 border-b border-separator px-3 py-2"
-    :class="{ 'cursor-pointer hover:bg-row-hover': row.page !== null }"
+    :class="{
+      'cursor-pointer hover:not-has-[[data-row-control]:hover]:bg-row-hover': row.page !== null,
+    }"
     @click="openPage"
   >
     <div class="flex items-center gap-3">
@@ -94,7 +96,7 @@ function act(): void {
         <button
           v-if="row.page !== null"
           type="button"
-          class="min-w-0 truncate rounded text-left"
+          class="min-w-0 cursor-pointer truncate rounded text-left"
           :title="pageTitle"
           :aria-label="pageTitle"
           @click.stop="openPage"
@@ -130,7 +132,8 @@ function act(): void {
         <CiStatusBox
           v-if="row.pipeline !== null"
           :pipeline="row.pipeline"
-          class="cursor-default"
+          data-row-control
+          class="cursor-default [&_button:enabled]:cursor-pointer"
           @click.stop
           @open-job="emit('openPage', 'job', $event)"
         />
@@ -139,13 +142,18 @@ function act(): void {
         <MergeRequestReadiness :readiness="row.readiness" />
       </span>
       <span class="flex w-7 shrink-0" @click.stop>
-        <span v-if="action.kind !== 'none'" class="flex" :title="actionHover ?? action.label">
+        <span
+          v-if="action.kind !== 'none'"
+          data-row-control
+          class="flex cursor-default"
+          :title="actionHover ?? action.label"
+        >
           <button
             type="button"
             :aria-label="action.label"
             :aria-busy="action.state.kind === 'running'"
             :disabled="action.state.kind !== 'enabled'"
-            class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:pointer-events-none disabled:text-fg-muted"
+            class="shrink-0 rounded p-1.5 hover:bg-hover enabled:cursor-pointer disabled:pointer-events-none disabled:text-fg-muted"
             @click="act"
           >
             <LoaderCircle
@@ -158,14 +166,14 @@ function act(): void {
           </button>
         </span>
       </span>
-      <span class="flex shrink-0" @click.stop>
+      <span data-row-control class="flex shrink-0 cursor-default" @click.stop>
         <button
           type="button"
           :title="openTitle"
           :aria-label="openTitle"
           :aria-busy="fetching"
           :disabled="fetching"
-          class="shrink-0 cursor-default rounded p-1.5 hover:bg-hover disabled:text-fg-muted disabled:hover:bg-transparent"
+          class="shrink-0 rounded p-1.5 hover:bg-hover enabled:cursor-pointer disabled:text-fg-muted disabled:hover:bg-transparent"
           @click="emit('open', row.iid)"
         >
           <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />

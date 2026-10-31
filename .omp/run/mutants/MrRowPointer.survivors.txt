@@ -1,0 +1,2 @@
+just mutants HEAD → 'mutants: no Rust changes since HEAD' / 'mutants: no TypeScript changes since HEAD' (.vue is not mutated)
+
