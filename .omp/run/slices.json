@@ -1,1 +1,14 @@
-{}
+{
+  "MrAiCarry": {
+    "owned": [
+      "src-tauri/src/args.rs",
+      "src-tauri/src/lib.rs",
+      "src-tauri/src/window.rs",
+      "src-tauri/src/merge_requests.rs",
+      "src-tauri/src/merge_requests/**",
+      "src-tauri/src/second_window.rs",
+      "src-tauri/src/range.rs",
+      "src-tauri/AGENTS.md"
+    ]
+  }
+}
