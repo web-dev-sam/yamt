@@ -105,13 +105,11 @@ function act(): void {
         </button>
         <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
         <p class="truncate text-xs text-fg-muted">
-          <span>{{ mr }}</span>
-          <span class="mx-1" aria-hidden="true">·</span>
-          <span :title="createdTitle">{{ created }}</span>
-          <template v-if="size !== null">
-            <span class="mx-1" aria-hidden="true">·</span>
-            <span :title="size.title">{{ size.text }}</span>
-          </template>
+          <span>{{ mr }}</span
+          >{{ " · " }}<span :title="createdTitle">{{ created }}</span
+          ><template v-if="size !== null"
+            >{{ " · " }}<span :title="size.title">{{ size.text }}</span></template
+          >
         </p>
       </div>
       <span

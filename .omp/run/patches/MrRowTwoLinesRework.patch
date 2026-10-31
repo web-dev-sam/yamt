@@ -1,0 +1,23 @@
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index a902511..a21312d 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -105,13 +105,11 @@ function act(): void {
+         </button>
+         <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
+         <p class="truncate text-xs text-fg-muted">
+-          <span>{{ mr }}</span>
+-          <span class="mx-1" aria-hidden="true">·</span>
+-          <span :title="createdTitle">{{ created }}</span>
+-          <template v-if="size !== null">
+-            <span class="mx-1" aria-hidden="true">·</span>
+-            <span :title="size.title">{{ size.text }}</span>
+-          </template>
++          <span>{{ mr }}</span
++          >{{ " · " }}<span :title="createdTitle">{{ created }}</span
++          ><template v-if="size !== null"
++            >{{ " · " }}<span :title="size.title">{{ size.text }}</span></template
++          >
+         </p>
+       </div>
+       <span
