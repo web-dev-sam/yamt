@@ -6,6 +6,12 @@ moves to `docs/slices/archive/board.md` (`just archive-board "<heading start>"`)
 
 Status: `todo` → `planned` (brief written, Gate A passed) → `running` → `review` → `done <evidence>` / `blocked <why>`.
 
+## Colours on the merge-request details line (session 40, owner: "the gitlab id can be muted, created X ago too, +X-Y green and red and X files white like now")
+
+| row | slice                                                                        | owner    | status  | evidence |
+| --- | ---------------------------------------------------------------------------- | -------- | ------- | -------- |
+| 1   | size in parts, coloured line 2 (`briefs/mr-row-colours.md`) (`MrRowColours`) | web-impl | running |          |
+
 ## Release 0.6.2 (session 38, owner request #1975: "merge this branch into main and release 0.6.2 … but fix CI before, windows and mac failed")
 
 `feat/merge-requests` has no commit outside `main` (merged in `2a4b7af`): nothing to merge. `v0.6.1` (`0927634`) is

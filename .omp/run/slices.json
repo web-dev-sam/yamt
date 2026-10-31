@@ -1,1 +1,11 @@
-{}
+{
+  "MrRowColours": {
+    "owned": [
+      "frontend/src/mergeRequests/internal/size.ts",
+      "frontend/src/mergeRequests/internal/size.test.ts",
+      "frontend/src/mergeRequests/index.ts",
+      "frontend/src/ui/MergeRequestRow.vue",
+      "frontend/src/ui/AGENTS.md"
+    ]
+  }
+}
