@@ -1,15 +1,26 @@
 {
-  "LineRangesRustR1": {
-    "owned": [
-      "crates/review/src/**",
-      "crates/review/tests/**",
-      "crates/review/AGENTS.md",
-      "tests/glab/line-range/**",
-      "tests/glab/line-range-drafted/**",
-      "tests/glab/README.md"
-    ]
-  },
   "LineRangesEditor": {
     "owned": ["frontend/src/editor/**"]
+  },
+  "LineRangesWindow": {
+    "owned": [
+      "frontend/src/ui/rangeDrafts.ts",
+      "frontend/src/ui/rangeThreads.ts",
+      "frontend/src/ui/rangeThreads.test.ts",
+      "frontend/src/ui/rangeOpen.ts",
+      "frontend/src/ui/rangeOpen.test.ts",
+      "frontend/src/ui/rangeThreadText.ts",
+      "frontend/src/ui/rangeThreadText.test.ts",
+      "frontend/src/ui/rangeStore.ts",
+      "frontend/src/ui/rangeStore.test.ts",
+      "frontend/src/ui/useRangeController.ts",
+      "frontend/src/ui/useRangeController.test.ts",
+      "frontend/src/ui/RangeThreadBox.vue",
+      "frontend/src/ui/rangeAi.test.ts",
+      "frontend/src/ui/rangeGitLab.test.ts",
+      "frontend/src/ui/AGENTS.md",
+      "frontend/src/agent/internal/firstMessage.ts",
+      "frontend/src/agent/internal/firstMessage.test.ts"
+    ]
   }
 }
