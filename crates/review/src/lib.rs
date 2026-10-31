@@ -21,7 +21,8 @@ use yamt_range::RangeFileId;
 pub use crate::send::{check_gitlab, send_queue};
 pub use crate::thread_store::ThreadStore;
 pub use crate::thread_types::{
-    Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine, ThreadList,
+    DiffLine, Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine,
+    ThreadList, ThreadPlace,
 };
 pub use yamt_gitio::Glab;
 
@@ -172,7 +173,7 @@ pub enum Error {
         /// The cause.
         message: String,
     },
-    /// `threads.json` does not read as format 1.
+    /// `threads.json` does not read as format 1 or 2.
     #[error("the review threads {} cannot be read: {message}; nothing was changed", path.display())]
     Broken {
         /// The `threads.json` path.
@@ -229,6 +230,9 @@ pub enum Error {
         /// The message.
         message: MessageId,
     },
+    /// The place's first line comes after its last.
+    #[error("a thread's first line comes after its last")]
+    BackwardPlace,
 }
 
 /// Results of this crate.

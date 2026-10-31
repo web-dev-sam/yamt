@@ -12,6 +12,7 @@ yamt-merge-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 specta.workspace = true
+sha1.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

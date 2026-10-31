@@ -1,5 +1,17 @@
 {
-  "LineRangesDesign": {
-    "owned": ["docs/slices/briefs/line-ranges-*.md"]
+  "LineRangesRust": {
+    "owned": [
+      "crates/review/src/**",
+      "crates/review/tests/**",
+      "crates/review/Cargo.toml",
+      "crates/review/AGENTS.md",
+      "src-tauri/src/review.rs",
+      "src-tauri/src/review/tests.rs",
+      "src-tauri/src/ipc_error.rs",
+      "src-tauri/src/ipc_error/tests.rs",
+      "tests/glab/line-range/**",
+      "tests/glab/line-range-drafted/**",
+      "tests/glab/README.md"
+    ]
   }
 }

@@ -2,23 +2,25 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use yamt_gitio::{AuthStatus, Glab, Repo};
-use yamt_range::{Compared, Range};
+use yamt_range::{Compared, Range, RangeEntry, RangeFile};
 
+use crate::gitlab::drafts::{DraftNote, draft_notes_from};
 use crate::gitlab::{
-    DraftNote, draft_notes, draft_notes_from, listed_from, merge_request_details,
-    merge_request_from, merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
+    draft_notes, listed_from, merge_request_details, merge_request_from,
+    merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
 };
 use crate::glab_answer::{Outcome, answer, posted, run};
 use crate::lines_up::{Found, LinedUp, candidates, lines_up};
-use crate::position::{PostBody, line_place, same_draft};
+use crate::position::{MultiLine, PostBody, line_place, multi_line, same_draft};
 use crate::right_branch::right_branch;
 use crate::thread_store::waiting::QueuedMessage;
 use crate::{
     Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
-    ThreadStore,
+    ThreadPlace, ThreadStore,
 };
 
 const DIFFS_PAGE: &str = "/diffs";
+const NO_LINES: &str = "the file has no lines";
 
 /// Whether GitLab's diff of the merge request for the range's right side is exactly the window's (plan §2 #119).
 #[must_use]
@@ -148,20 +150,51 @@ fn outcome(
 ) -> Result<Outcome> {
     let file = message.file;
     let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
-    let place = match line_place(entry, message.line) {
+    let place = match line_place(entry, message.place.end) {
         Ok(place) => place,
         Err(reason) => return Ok(Outcome::Refused(reason.to_owned())),
+    };
+    let multi_line = if message.place.is_one_line() {
+        None
+    } else {
+        match range_ends(range, entry, message.place) {
+            Ok(ends) => Some(ends),
+            Err(reason) => return Ok(Outcome::Refused(reason)),
+        }
     };
     let body = PostBody {
         note: text.to_owned(),
         diff_refs: target.diff_refs.clone(),
         place,
+        multi_line,
     };
     if let Some(index) = drafts.iter().position(|draft| same_draft(&body, draft)) {
         return Ok(Outcome::Drafted(drafts.swap_remove(index).id));
     }
     let args = post_draft_note(&target.merge_request);
     Ok(posted(run(glab, range.root(), &args, Some(body.json()))))
+}
+
+/// GitLab's ends of a place on several lines, numbered from the file's differences as the range shows them now;
+/// `Err` is why the message cannot be posted.
+fn range_ends(
+    range: &Range,
+    entry: &RangeEntry,
+    place: ThreadPlace,
+) -> std::result::Result<MultiLine, String> {
+    let differences = match range.load(entry.id) {
+        Ok(RangeFile::Texts { differences, .. }) => differences,
+        Ok(
+            RangeFile::Binary
+            | RangeFile::TooLarge { .. }
+            | RangeFile::NotUtf8 { .. }
+            | RangeFile::ModeOnly { .. }
+            | RangeFile::KindChanged { .. }
+            | RangeFile::Submodule { .. },
+        ) => return Err(NO_LINES.to_owned()),
+        Err(error) => return Err(error.to_string()),
+    };
+    multi_line(entry, &differences, place).map_err(str::to_owned)
 }
 
 fn pending(target: &LinedUp, text: &str, draft_note: u64) -> Posting {

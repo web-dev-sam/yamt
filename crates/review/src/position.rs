@@ -2,7 +2,12 @@ use serde_json::{Map, Value};
 use yamt_range::{RangeChange, RangeEntry};
 
 use crate::ThreadLine;
-use crate::gitlab::{DiffRefs, DraftNote, LinePlace};
+use crate::gitlab::drafts::DraftNote;
+use crate::gitlab::{DiffRefs, LinePlace};
+
+mod line_codes;
+
+pub(crate) use line_codes::{LineType, MultiLine, RangeEnd, multi_line};
 
 /// What the range shows in place of a byte it could not read as UTF-8.
 const REPLACEMENT: char = '\u{FFFD}';
@@ -14,6 +19,8 @@ pub(crate) struct PostBody {
     pub(crate) note: String,
     pub(crate) diff_refs: DiffRefs,
     pub(crate) place: LinePlace,
+    /// `None` for a thread on one line.
+    pub(crate) multi_line: Option<MultiLine>,
 }
 
 /// GitLab's place for `line` of `entry`: a removed line has `old_line` only, an added one `new_line` only, an
@@ -46,7 +53,7 @@ fn one_based(line: u32) -> u32 {
 
 impl PostBody {
     /// `{ note, position: { position_type: "text", base_sha, start_sha, head_sha, old_path, new_path, old_line?,
-    /// new_line? } }`, the draft-notes route's body.
+    /// new_line?, line_range? } }`, the draft-notes route's body (`lib/api/draft_notes.rb:95-108`, v19.3.2-ee).
     pub(crate) fn json(&self) -> Vec<u8> {
         let mut position = Map::new();
         position.insert("position_type".to_owned(), "text".into());
@@ -64,11 +71,12 @@ impl PostBody {
         );
         position.insert("old_path".to_owned(), self.place.old_path.clone().into());
         position.insert("new_path".to_owned(), self.place.new_path.clone().into());
-        if let Some(line) = self.place.old_line {
-            position.insert("old_line".to_owned(), line.into());
-        }
-        if let Some(line) = self.place.new_line {
-            position.insert("new_line".to_owned(), line.into());
+        insert_lines(&mut position, self.place.old_line, self.place.new_line);
+        if let Some(multi_line) = &self.multi_line {
+            let mut line_range = Map::new();
+            line_range.insert("start".to_owned(), multi_line.start.json());
+            line_range.insert("end".to_owned(), multi_line.end.json());
+            position.insert("line_range".to_owned(), Value::Object(line_range));
         }
         let mut body = Map::new();
         body.insert("note".to_owned(), self.note.clone().into());
@@ -77,7 +85,17 @@ impl PostBody {
     }
 }
 
-/// A draft GitLab already holds for this body: the same text, paths, lines and head commit.
+/// `old_line` and `new_line`, each only when the line has one.
+fn insert_lines(object: &mut Map<String, Value>, old_line: Option<u32>, new_line: Option<u32>) {
+    if let Some(line) = old_line {
+        object.insert("old_line".to_owned(), line.into());
+    }
+    if let Some(line) = new_line {
+        object.insert("new_line".to_owned(), line.into());
+    }
+}
+
+/// A draft GitLab already holds for this body: the same text, paths, lines, range ends and head commit.
 pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
     let Some(placed) = &draft.placed else {
         return false;
@@ -85,6 +103,24 @@ pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
     draft.note == body.note
         && placed.head_sha == body.diff_refs.head_sha
         && placed.place == body.place
+        && same_range(body.multi_line.as_ref(), placed.multi_line.as_ref())
+}
+
+/// The same ends by their type and lines; `line_code` follows from those and the path.
+fn same_range(body: Option<&MultiLine>, draft: Option<&MultiLine>) -> bool {
+    match (body, draft) {
+        (None, None) => true,
+        (Some(body), Some(draft)) => {
+            same_end(&body.start, &draft.start) && same_end(&body.end, &draft.end)
+        }
+        (Some(_), None) | (None, Some(_)) => false,
+    }
+}
+
+fn same_end(body: &RangeEnd, draft: &RangeEnd) -> bool {
+    body.line_type == draft.line_type
+        && body.old_line == draft.old_line
+        && body.new_line == draft.new_line
 }
 
 #[cfg(test)]
@@ -93,7 +129,7 @@ mod tests {
     use yamt_range::{RangeFileId, RangeLineCounts};
 
     use super::*;
-    use crate::gitlab::PlacedDraft;
+    use crate::gitlab::drafts::PlacedDraft;
 
     fn entry(path: &str, change: RangeChange) -> RangeEntry {
         RangeEntry {
@@ -122,6 +158,32 @@ mod tests {
                 head_sha: "h".repeat(40),
             },
             place: place("a.ts", "a.ts", Some(3), Some(4)),
+            multi_line: None,
+        }
+    }
+
+    fn range_end(
+        line_code: &str,
+        line_type: Option<LineType>,
+        old_line: Option<u32>,
+        new_line: Option<u32>,
+    ) -> RangeEnd {
+        RangeEnd {
+            line_code: line_code.to_owned(),
+            line_type,
+            old_line,
+            new_line,
+        }
+    }
+
+    /// From the removed line 2 to the unchanged line 3 / 4, the body's own line.
+    fn range_body() -> PostBody {
+        PostBody {
+            multi_line: Some(MultiLine {
+                start: range_end("h_2_4", Some(LineType::Old), Some(2), None),
+                end: range_end("h_3_4", None, Some(3), Some(4)),
+            }),
+            ..body()
         }
     }
 
@@ -205,6 +267,27 @@ mod tests {
     }
 
     #[test]
+    fn a_one_line_body_has_no_line_range() {
+        let json: Value = serde_json::from_slice(&body().json()).unwrap();
+        assert_eq!(json["position"].get("line_range"), None);
+        assert_eq!(json["position"]["old_line"], 3);
+        assert_eq!(json["position"]["new_line"], 4);
+    }
+
+    #[test]
+    fn a_range_body_has_line_range_and_names_its_end_line() {
+        let json: Value = serde_json::from_slice(&range_body().json()).unwrap();
+        let line_range = serde_json::json!({
+            "start": { "line_code": "h_2_4", "type": "old", "old_line": 2 },
+            "end": { "line_code": "h_3_4", "old_line": 3, "new_line": 4 },
+        });
+        assert_eq!(json["position"]["line_range"], line_range);
+        assert_eq!(json["position"]["old_line"], 3);
+        assert_eq!(json["position"]["new_line"], 4);
+        assert_eq!(json["note"], "Why 300?");
+    }
+
+    #[test]
     fn a_draft_is_the_same_only_with_the_same_text_place_and_head() {
         let draft = |note: &str, head: &str, place: LinePlace| DraftNote {
             id: 301,
@@ -212,6 +295,7 @@ mod tests {
             placed: Some(PlacedDraft {
                 head_sha: head.to_owned(),
                 place,
+                multi_line: None,
             }),
         };
         let head = "h".repeat(40);
@@ -233,5 +317,51 @@ mod tests {
             placed: None,
         };
         assert!(!same_draft(&body(), &on_no_line));
+    }
+
+    fn range_draft(multi_line: Option<MultiLine>) -> DraftNote {
+        DraftNote {
+            id: 401,
+            note: "Why 300?".to_owned(),
+            placed: Some(PlacedDraft {
+                head_sha: "h".repeat(40),
+                place: body().place,
+                multi_line,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_draft_is_the_same_only_with_the_same_range_or_both_without() {
+        let range = range_body().multi_line;
+        assert!(same_draft(&range_body(), &range_draft(range.clone())));
+        assert!(same_draft(&body(), &range_draft(None)));
+        assert!(!same_draft(&range_body(), &range_draft(None)));
+        assert!(!same_draft(&body(), &range_draft(range.clone())));
+
+        let range = range.unwrap();
+        let other_code = MultiLine {
+            start: range_end("x_2_4", Some(LineType::Old), Some(2), None),
+            ..range.clone()
+        };
+        assert!(same_draft(&range_body(), &range_draft(Some(other_code))));
+        let changed_ends = [
+            range_end("h_2_4", Some(LineType::New), Some(2), None),
+            range_end("h_2_4", None, Some(2), None),
+            range_end("h_2_4", Some(LineType::Old), Some(1), None),
+            range_end("h_2_4", Some(LineType::Old), Some(2), Some(4)),
+        ];
+        for changed in changed_ends {
+            let other_start = MultiLine {
+                start: changed.clone(),
+                ..range.clone()
+            };
+            assert!(!same_draft(&range_body(), &range_draft(Some(other_start))));
+            let other_end = MultiLine {
+                end: changed,
+                ..range.clone()
+            };
+            assert!(!same_draft(&range_body(), &range_draft(Some(other_end))));
+        }
     }
 }

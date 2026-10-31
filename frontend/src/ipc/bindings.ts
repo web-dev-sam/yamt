@@ -45,7 +45,7 @@ export const commands = {
 	loadRangeFile: (file: RangeFileId) => typedError<RangeFile, IpcError>(__TAURI_INVOKE("load_range_file", { file })),
 	searchRangeTexts: (from: RangeFileId) => typedError<SearchTexts, IpcError>(__TAURI_INVOKE("search_range_texts", { from })),
 	listThreads: () => typedError<ThreadList, IpcError>(__TAURI_INVOKE("list_threads")),
-	addThread: (file: RangeFileId, line: ThreadLine, text: string) => typedError<ThreadAdded, IpcError>(__TAURI_INVOKE("add_thread", { file, line, text })),
+	addThread: (file: RangeFileId, place: ThreadPlace, text: string) => typedError<ThreadAdded, IpcError>(__TAURI_INVOKE("add_thread", { file, place, text })),
 	addNote: (thread: ThreadId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("add_note", { thread, text })),
 	queueMessage: (message: MessageId, text: string) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("queue_message", { message, text })),
 	unqueueMessage: (message: MessageId) => typedError<ThreadList, IpcError>(__TAURI_INVOKE("unqueue_message", { message })),
@@ -274,6 +274,26 @@ export type ContinueMergeReply = { kind: "opened"; branch: string; target: strin
  *  pushed, or git stopped at another stop.
  */
 export type ContinueReply = { kind: "Finished" } | { kind: "ReadyToPush"; branch: string } | { kind: "Stopped"; message: string };
+
+/**
+ *  A line of the diff as GitLab's one-column view lists it: an unchanged line once, a change's removed lines, then its
+ *  added lines.
+ */
+export type DiffLine = 
+/**  A left line inside a difference. */
+{ kind: "removed"; 
+/**  The line. */
+left: LeftLine } | 
+/**  A right line inside a difference. */
+{ kind: "added"; 
+/**  The line. */
+right: RightLine } | 
+/**  An unchanged line. */
+{ kind: "unchanged"; 
+/**  The line in the left text. */
+left: LeftLine; 
+/**  The same line in the right text. */
+right: RightLine };
 
 /**  One place where the right text differs from the left, located in both texts. */
 export type Difference = {
@@ -1070,14 +1090,14 @@ export type TabTexts = {
 
 export type Theme = "dark" | "light" | "webstorm-dark" | "webstorm-light" | "vscode-dark" | "vscode-light" | "zed-dark" | "zed-light" | "atom-dark" | "atom-light";
 
-/**  A thread on one line of one file of the range. */
+/**  A thread on lines of one file of the range. */
 export type Thread = {
 	/**  The thread's id. */
 	id: ThreadId,
 	/**  The file it is on. */
 	file: RangeFileId,
-	/**  The line it is on. */
-	line: ThreadLine,
+	/**  The lines it is on. */
+	place: ThreadPlace,
 	/**  Its messages in the order they were added; never empty. */
 	messages: Message[],
 	/**  The AI session the thread's answers live in. */
@@ -1122,6 +1142,17 @@ right: RightLine };
 export type ThreadList = {
 	/**  The threads. */
 	threads: Thread[],
+};
+
+/**
+ *  The lines a thread is on, from `start` to `end` in GitLab's order, both included; one line when `start` is `end`'s
+ *  line. `end` decides the column the box sits in.
+ */
+export type ThreadPlace = {
+	/**  The first line. */
+	start: DiffLine,
+	/**  The last line, in the column it was picked in. */
+	end: ThreadLine,
 };
 
 export type UnsupportedReason = "Binary" | "NonUtf8" | "TooLarge" | "LocalDeleted" | "RemoteDeleted" | "Symlink" | "Submodule";

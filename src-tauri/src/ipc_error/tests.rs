@@ -273,6 +273,14 @@ fn a_start_only_review_error_is_its_line() {
     );
 }
 
+#[test]
+fn a_backward_place_is_its_words() {
+    assert_eq!(
+        review_json(yamt_review::Error::BackwardPlace),
+        json!({ "kind": "Git", "message": "a thread's first line comes after its last" })
+    );
+}
+
 // The window's close shows the folder it could not remove, so the user can remove it by hand.
 #[test]
 fn ai_off_and_a_failed_removal_serialise_with_their_kinds() {

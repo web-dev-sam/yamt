@@ -6,7 +6,7 @@ use yamt_range::{Range, RangeFileId};
 use crate::thread_file::{StoredThread, THREADS_FILE, ThreadFile, read_threads, write_threads};
 use crate::{
     Error, Message, MessageBody, MessageId, Posting, Result, Thread, ThreadAdded, ThreadId,
-    ThreadLine, ThreadList,
+    ThreadList, ThreadPlace,
 };
 
 pub(crate) mod waiting;
@@ -37,7 +37,7 @@ impl ThreadStore {
                 threads.push(Thread {
                     id: stored.id,
                     file,
-                    line: stored.line,
+                    place: stored.place,
                     messages: stored.messages.clone(),
                     session: stored.session.clone(),
                 });
@@ -60,23 +60,26 @@ impl ThreadStore {
         paths
     }
 
-    /// A new thread on `line` of `file`, with `text` as its first message.
+    /// A new thread on `place` of `file`, with `text` as its first message.
     pub fn add_thread(
         &mut self,
         range: &Range,
         file: RangeFileId,
-        line: ThreadLine,
+        place: ThreadPlace,
         text: &str,
     ) -> Result<ThreadAdded> {
         require_text(text)?;
         let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
+        if !place.runs_forward() {
+            return Err(Error::BackwardPlace);
+        }
         let mut next = self.file.clone();
         let id = next.take_thread_id(&self.path)?;
         let message = new_message(next.take_message_id(&self.path)?, note(text));
         next.threads.push(StoredThread {
             id,
             path: entry.path.clone(),
-            line,
+            place,
             session: None,
             messages: vec![message],
         });

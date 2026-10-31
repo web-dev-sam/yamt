@@ -7,14 +7,40 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use yamt_conflict_repo::TempDir;
-use yamt_merge_core::LeftLine;
+use yamt_merge_core::{LeftLine, RightLine};
 use yamt_range::RangeFileId;
-use yamt_review::{Error, MessageId, Posting, ThreadAdded, ThreadId, ThreadLine, ThreadStore};
+use yamt_review::{
+    DiffLine, Error, MessageId, Posting, ThreadAdded, ThreadId, ThreadLine, ThreadPlace,
+    ThreadStore,
+};
 
 use stored_threads::{
-    EVERY_KIND, THREADS, added_line, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
+    EVERY_KIND, THREADS, added_place, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
     only_thread, range, refused, repo, store_with_one_thread, stored, threads_path,
 };
+
+/// `EVERY_KIND`'s first four threads as format 1 stored them: each on its `line`.
+const FORMAT_1_EVERY_KIND: &str = r#"{
+  "format": 1,
+  "nextThread": 5,
+  "nextMessage": 7,
+  "threads": [
+    { "id": 1, "path": "a.txt", "line": { "kind": "removed", "left": 3 }, "session": "omp-session-1",
+      "messages": [
+        { "id": 1, "body": { "kind": "note", "text": "Why 300?" }, "written": 1761300000, "posting": { "kind": "notQueued" } },
+        { "id": 2, "body": { "kind": "aiAnswer", "session": "omp-session-0", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
+    { "id": 2, "path": "b.txt", "line": { "kind": "added", "right": 4 }, "session": null,
+      "messages": [
+        { "id": 3, "body": { "kind": "note", "text": "t" }, "written": 1761300002, "posting": { "kind": "refused", "text": "t", "reason": "400 Bad request" } } ] },
+    { "id": 3, "path": "c.txt", "line": { "kind": "unchangedOnLeft", "left": 5, "right": 6 }, "session": null,
+      "messages": [
+        { "id": 4, "body": { "kind": "note", "text": "p" }, "written": 1761300003,
+          "posting": { "kind": "pending", "text": "p", "draft_note": 12345678901, "merge_request": "!12", "link": "https://gitlab.example/g/p/-/merge_requests/12/diffs" } } ] },
+    { "id": 4, "path": "c.txt", "line": { "kind": "unchangedOnRight", "left": 7, "right": 8 }, "session": null,
+      "messages": [
+        { "id": 6, "body": { "kind": "note", "text": "u" }, "written": 1761300004, "posting": { "kind": "notQueued" } } ] }
+  ]
+}"#;
 
 fn refusal(folder: &TempDir) -> Error {
     match ThreadStore::open(folder.path()) {
@@ -57,8 +83,18 @@ fn a_missing_file_is_an_empty_store_and_nothing_is_written() {
     assert_eq!(folder_names(&folder), Vec::<String>::new());
 }
 
+/// Thread 5 of `EVERY_KIND`: from the removed line 1 to the added line 2.
+fn both_sides() -> ThreadPlace {
+    ThreadPlace {
+        start: DiffLine::Removed { left: LeftLine(1) },
+        end: ThreadLine::Added {
+            right: RightLine(2),
+        },
+    }
+}
+
 #[test]
-fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
+fn format_2_round_trips_every_body_posting_and_place_kind_and_a_session() {
     let repo = repo();
     let range = local_range(&repo);
     let folder = tempfile::tempdir().unwrap();
@@ -66,19 +102,13 @@ fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
     let mut store = ThreadStore::open(folder.path()).unwrap();
 
     let list = store.list(&range);
-    let files: Vec<(u32, RangeFileId)> = list.threads.iter().map(|t| (t.id.0, t.file)).collect();
-    assert_eq!(
-        files,
-        [
-            (1, RangeFileId(0)),
-            (2, RangeFileId(1)),
-            (3, RangeFileId(2)),
-            (4, RangeFileId(2))
-        ]
-    );
+    let files: Vec<(u32, u32)> = list.threads.iter().map(|t| (t.id.0, t.file.0)).collect();
+    assert_eq!(files, [(1, 0), (2, 1), (3, 2), (4, 2), (5, 2)]);
     let first = &list.threads[0];
     assert_eq!(first.session.as_deref(), Some("omp-session-1"));
-    assert_eq!(first.line, ThreadLine::Removed { left: LeftLine(3) });
+    let removed = ThreadLine::Removed { left: LeftLine(3) };
+    assert_eq!(first.place, ThreadPlace::one_line(removed));
+    assert_eq!(list.threads[4].place, both_sides());
     assert_eq!(first.messages[1].body, ai_answer("omp-session-0", 3));
     assert_eq!(first.messages[1].written, 1_761_300_001);
     assert_eq!(
@@ -97,9 +127,100 @@ fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
         .as_array_mut()
         .unwrap()
         .pop();
-    written["nextMessage"] = Value::from(7);
+    written["nextMessage"] = Value::from(8);
     let original: Value = serde_json::from_str(EVERY_KIND).unwrap();
     assert_eq!(written, original);
+}
+
+#[test]
+fn a_format_1_file_reads_as_one_line_places_and_is_written_as_format_2_by_the_first_change() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    stored(&folder, FORMAT_1_EVERY_KIND);
+    let mut store = ThreadStore::open(folder.path()).unwrap();
+
+    let list = store.list(&range);
+    let on_left = ThreadLine::UnchangedOnLeft {
+        left: LeftLine(5),
+        right: RightLine(6),
+    };
+    assert_eq!(list.threads[2].place, ThreadPlace::one_line(on_left));
+    assert_eq!(on_disk(&folder), FORMAT_1_EVERY_KIND.as_bytes());
+    assert_eq!(folder_names(&folder), [THREADS]);
+
+    let before = now();
+    store.add_note(&range, ThreadId(4), "more").unwrap();
+    let after = now();
+
+    let mut written = json_on_disk(&folder);
+    let added = &mut written["threads"][3]["messages"][1];
+    let at = added["written"].as_u64().unwrap();
+    assert!((before..=after).contains(&at), "{at}");
+    added["written"] = Value::from(0);
+    let mut expected: Value = serde_json::from_str(EVERY_KIND).unwrap();
+    expected["threads"].as_array_mut().unwrap().pop();
+    expected["nextThread"] = Value::from(5);
+    let note = serde_json::json!({ "id": 7, "body": { "kind": "note", "text": "more" }, "written": 0,
+        "posting": { "kind": "notQueued" } });
+    expected["threads"][3]["messages"]
+        .as_array_mut()
+        .unwrap()
+        .push(note);
+    assert_eq!(written, expected);
+}
+
+#[test]
+fn a_range_survives_a_reload() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    let mut store = ThreadStore::open(folder.path()).unwrap();
+
+    let added = store
+        .add_thread(&range, RangeFileId(2), both_sides(), "Why these?")
+        .unwrap();
+
+    assert_eq!(only_thread(&added.list).place, both_sides());
+    let reopened = ThreadStore::open(folder.path()).unwrap().list(&range);
+    assert_eq!(reopened, added.list);
+    let place = serde_json::json!({
+        "start": { "kind": "removed", "left": 1 },
+        "end": { "kind": "added", "right": 2 },
+    });
+    assert_eq!(json_on_disk(&folder)["threads"][0]["place"], place);
+}
+
+#[test]
+fn add_thread_refuses_a_backward_place_and_writes_nothing() {
+    let repo = repo();
+    let range = local_range(&repo);
+    let folder = tempfile::tempdir().unwrap();
+    stored(&folder, EVERY_KIND);
+    let mut store = ThreadStore::open(folder.path()).unwrap();
+    let list = store.list(&range);
+    let backward = ThreadPlace {
+        start: DiffLine::Unchanged {
+            left: LeftLine(5),
+            right: RightLine(5),
+        },
+        end: ThreadLine::Added {
+            right: RightLine(2),
+        },
+    };
+
+    let refused_place = store.add_thread(&range, RangeFileId(2), backward, "Why?");
+
+    assert!(
+        matches!(refused_place, Err(Error::BackwardPlace)),
+        "{refused_place:?}"
+    );
+    let blank = store.add_thread(&range, RangeFileId(2), backward, " ");
+    assert!(matches!(blank, Err(Error::EmptyMessage)), "{blank:?}");
+    let unknown = store.add_thread(&range, RangeFileId(3), backward, "Why?");
+    assert_eq!(refused(unknown), "no file 3 in this range");
+    assert_eq!(on_disk(&folder), EVERY_KIND.as_bytes());
+    assert_eq!(store.list(&range), list);
 }
 
 #[test]
@@ -115,11 +236,11 @@ fn a_broken_file_names_line_and_column_and_is_left_unchanged() {
 #[test]
 fn a_newer_format_is_refused_and_left_unchanged() {
     let folder = tempfile::tempdir().unwrap();
-    let json = r#"{"format":2,"anything":"else"}"#;
+    let json = r#"{"format":3,"anything":"else"}"#;
     stored(&folder, json);
     let error = refusal(&folder);
     assert!(
-        matches!(&error, Error::NewerFormat { path, format: 2 } if *path == threads_path(&folder)),
+        matches!(&error, Error::NewerFormat { path, format: 3 } if *path == threads_path(&folder)),
         "{error:?}"
     );
     assert_eq!(on_disk(&folder), json.as_bytes());
@@ -145,15 +266,16 @@ fn message_json(id: u32) -> String {
 }
 
 fn thread_json(id: u32, messages: &[String]) -> String {
+    let line = r#"{"kind":"added","right":0}"#;
     format!(
-        r#"{{"id":{id},"path":"a.txt","line":{{"kind":"added","right":0}},"session":null,"messages":[{}]}}"#,
+        r#"{{"id":{id},"path":"a.txt","place":{{"start":{line},"end":{line}}},"session":null,"messages":[{}]}}"#,
         messages.join(",")
     )
 }
 
 fn file_json(next_thread: u32, next_message: u32, threads: &[String]) -> String {
     format!(
-        r#"{{"format":1,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
+        r#"{{"format":2,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
         threads.join(",")
     )
 }
@@ -198,15 +320,15 @@ fn adding_writes_the_thread_with_its_first_message_and_new_ids() {
     let mut store = ThreadStore::open(folder.path()).unwrap();
     let before = now();
     let added = store
-        .add_thread(&range, RangeFileId(1), added_line(), "Why 300?")
+        .add_thread(&range, RangeFileId(1), added_place(), "Why 300?")
         .unwrap();
     let after = now();
 
     assert_eq!(added.thread, ThreadId(1));
     let thread = only_thread(&added.list);
     assert_eq!(
-        (thread.id, thread.file, thread.line, &thread.session),
-        (ThreadId(1), RangeFileId(1), added_line(), &None)
+        (thread.id, thread.file, thread.place, &thread.session),
+        (ThreadId(1), RangeFileId(1), added_place(), &None)
     );
     let first = &thread.messages[0];
     assert_eq!(first.id, MessageId(1));
@@ -219,7 +341,7 @@ fn adding_writes_the_thread_with_its_first_message_and_new_ids() {
     );
 
     let written = json_on_disk(&folder);
-    assert_eq!(written["format"], 1);
+    assert_eq!(written["format"], 2);
     assert_eq!(written["nextThread"], 2);
     assert_eq!(written["nextMessage"], 2);
     assert_eq!(written["threads"][0]["path"], "b.txt");
@@ -247,14 +369,14 @@ fn ids_never_repeat_after_reopening() {
     );
     let mut store = ThreadStore::open(folder.path()).unwrap();
     let ThreadAdded { thread, list } = store
-        .add_thread(&range, RangeFileId(0), added_line(), "b")
+        .add_thread(&range, RangeFileId(0), added_place(), "b")
         .unwrap();
     assert_eq!(thread, ThreadId(10));
     assert_eq!(list.threads[1].messages[0].id, MessageId(20));
 
     let mut reopened = ThreadStore::open(folder.path()).unwrap();
     let again = reopened
-        .add_thread(&range, RangeFileId(0), added_line(), "c")
+        .add_thread(&range, RangeFileId(0), added_place(), "c")
         .unwrap();
     assert_eq!(again.thread, ThreadId(11));
     assert_eq!(again.list.threads[2].messages[0].id, MessageId(21));
@@ -267,12 +389,12 @@ fn blank_text_is_refused_and_nothing_written() {
     let folder = tempfile::tempdir().unwrap();
     let mut store = ThreadStore::open(folder.path()).unwrap();
     let blank = " \n\t ";
-    let result = store.add_thread(&range, RangeFileId(0), added_line(), blank);
+    let result = store.add_thread(&range, RangeFileId(0), added_place(), blank);
     assert!(matches!(result, Err(Error::EmptyMessage)), "{result:?}");
     assert_eq!(folder_names(&folder), Vec::<String>::new());
 
     let list = store
-        .add_thread(&range, RangeFileId(0), added_line(), "a")
+        .add_thread(&range, RangeFileId(0), added_place(), "a")
         .unwrap()
         .list;
     let bytes = on_disk(&folder);
@@ -363,7 +485,7 @@ fn a_failed_write_changes_nothing_in_memory() {
     let folder = tempfile::tempdir().unwrap();
     let mut store = ThreadStore::open(folder.path()).unwrap();
     let list = store
-        .add_thread(&range, RangeFileId(0), added_line(), "a")
+        .add_thread(&range, RangeFileId(0), added_place(), "a")
         .unwrap()
         .list;
     let bytes = on_disk(&folder);
@@ -373,7 +495,7 @@ fn a_failed_write_changes_nothing_in_memory() {
 
     let failures = [
         store
-            .add_thread(&range, RangeFileId(1), added_line(), "b")
+            .add_thread(&range, RangeFileId(1), added_place(), "b")
             .map(|added| added.list),
         store.add_note(&range, ThreadId(1), "b"),
         store.queue(&range, MessageId(1), "b"),
@@ -393,7 +515,7 @@ fn a_failed_write_changes_nothing_in_memory() {
 
     fs::remove_dir_all(&temp).unwrap();
     let added = store
-        .add_thread(&range, RangeFileId(1), added_line(), "b")
+        .add_thread(&range, RangeFileId(1), added_place(), "b")
         .unwrap();
     assert_eq!(added.thread, ThreadId(2));
     assert_eq!(added.list.threads[1].messages[0].id, MessageId(2));
@@ -408,7 +530,7 @@ fn threads_on_paths_no_longer_listed_are_kept_on_every_write() {
     let mut store = ThreadStore::open(folder.path()).unwrap();
     for (file, text) in [(0, "on a"), (1, "on b"), (2, "on c")] {
         store
-            .add_thread(&local, RangeFileId(file), added_line(), text)
+            .add_thread(&local, RangeFileId(file), added_place(), text)
             .unwrap();
     }
 
@@ -444,7 +566,7 @@ fn a_leftover_temp_file_is_ignored() {
     let mut store = ThreadStore::open(folder.path()).unwrap();
     assert_eq!(store.list(&range).threads, []);
     let list = store
-        .add_thread(&range, RangeFileId(0), added_line(), "a")
+        .add_thread(&range, RangeFileId(0), added_place(), "a")
         .unwrap()
         .list;
     assert_eq!(ThreadStore::open(folder.path()).unwrap().list(&range), list);
@@ -460,10 +582,10 @@ fn an_unknown_file_thread_or_message_is_its_error() {
     let mut store = ThreadStore::open(folder.path()).unwrap();
     let list = store.list(&range);
 
-    let file = store.add_thread(&range, RangeFileId(3), added_line(), "a");
+    let file = store.add_thread(&range, RangeFileId(3), added_place(), "a");
     assert_eq!(refused(file), "no file 3 in this range");
-    let thread = store.add_note(&range, ThreadId(5), "a");
-    assert_eq!(refused(thread), "no review thread has the id 5");
+    let thread = store.add_note(&range, ThreadId(6), "a");
+    assert_eq!(refused(thread), "no review thread has the id 6");
     let queue = store.queue(&range, MessageId(5), "a");
     assert_eq!(refused(queue), "no review message has the id 5");
     let unqueue = store.unqueue(&range, MessageId(5));
@@ -554,7 +676,7 @@ fn an_answer_counts_only_its_own_session_s_answers_and_keeps_the_older_ones() {
 }
 
 #[test]
-fn format_1_writes_an_ai_answer_with_its_session_and_turn() {
+fn an_ai_answer_is_written_with_its_session_and_turn() {
     let repo = repo();
     let range = local_range(&repo);
     let folder = tempfile::tempdir().unwrap();
@@ -580,10 +702,10 @@ fn an_unknown_or_unlisted_thread_gets_no_session_or_answer_and_nothing_is_writte
     let mut store = ThreadStore::open(folder.path()).unwrap();
     let list = store.list(&local);
 
-    let session = store.set_session(&local, ThreadId(5), "omp-1");
-    assert_eq!(refused(session), "no review thread has the id 5");
-    let answer = store.add_ai_answer(&local, ThreadId(5), "omp-1");
-    assert_eq!(refused(answer), "no review thread has the id 5");
+    let session = store.set_session(&local, ThreadId(6), "omp-1");
+    assert_eq!(refused(session), "no review thread has the id 6");
+    let answer = store.add_ai_answer(&local, ThreadId(6), "omp-1");
+    assert_eq!(refused(answer), "no review thread has the id 6");
     let hidden_session = store.set_session(&remote, ThreadId(1), "omp-1");
     assert_eq!(refused(hidden_session), "no review thread has the id 1");
     let hidden_answer = store.add_ai_answer(&remote, ThreadId(1), "omp-1");

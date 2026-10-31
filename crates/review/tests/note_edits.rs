@@ -7,7 +7,7 @@ use yamt_range::{Range, RangeFileId};
 use yamt_review::{Error, MessageId, Posting, ThreadId, ThreadList, ThreadStore};
 
 use stored_threads::{
-    EVERY_KIND, added_line, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
+    EVERY_KIND, added_place, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
     only_thread, range, refused, repo, store_with_one_thread, stored,
 };
 
@@ -119,13 +119,13 @@ fn a_thread_loses_its_last_message_and_goes_while_its_neighbours_keep_order_and_
     let list = store.delete_message(&range, MessageId(3)).unwrap();
 
     let ids: Vec<(u32, u32)> = list.threads.iter().map(|t| (t.id.0, t.file.0)).collect();
-    assert_eq!(ids, [(1, 0), (3, 2), (4, 2)]);
+    assert_eq!(ids, [(1, 0), (3, 2), (4, 2), (5, 2)]);
     assert_eq!(list.threads[0], before.threads[0]);
     assert_eq!(list.threads[1..], before.threads[2..]);
     let written = json_on_disk(&folder);
-    assert_eq!(written["threads"].as_array().unwrap().len(), 3);
-    assert_eq!(written["nextThread"], 5);
-    assert_eq!(written["nextMessage"], 7);
+    assert_eq!(written["threads"].as_array().unwrap().len(), 4);
+    assert_eq!(written["nextThread"], 6);
+    assert_eq!(written["nextMessage"], 8);
     assert_eq!(reopened_list(&folder, &range), list);
 }
 
@@ -151,7 +151,7 @@ fn ids_stay_fresh_after_a_delete() {
     assert_eq!(emptied.threads, []);
     let mut reopened = ThreadStore::open(folder.path()).unwrap();
     let added = reopened
-        .add_thread(&range, RangeFileId(0), added_line(), "Again")
+        .add_thread(&range, RangeFileId(0), added_place(), "Again")
         .unwrap();
     assert_eq!(added.thread, ThreadId(2));
     assert_eq!(only_thread(&added.list).messages[0].id, MessageId(4));

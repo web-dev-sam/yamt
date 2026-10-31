@@ -78,6 +78,11 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
 - `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
   2 s before it is accepted, so a second send can arrive while it runs.
+- `line-range/` — `crates/review/tests/review.rs`'s threads on a range of lines: `lined-up/`'s merge request !12, no
+  drafts, posts 1 and 2 accepted as drafts 201 and 202.
+- `line-range-drafted/` — as `line-range/`, with two drafts already on GitLab: 401 holds the in-column range of
+  `src/board/board.ts` (unchanged L197/R201 to added R204, its `line_range` with `"type": null` on the unchanged
+  start), 402 the both-sides text on R204 alone (`"line_range": null`); post 1 is accepted as draft 501.
 - `merge-requests/` — the merge-request list and opening one (`crates/merge-requests/tests/{list,open}.rs`,
   `src-tauri/src/merge_requests/tests.rs`): logged in; project `taskboard/taskboard` on `https://gitlab.example`;
   user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail; `CI_MUST_PASS`), !12 (passed, 2

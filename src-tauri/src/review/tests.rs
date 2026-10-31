@@ -19,7 +19,8 @@ fn invoke(window: &RangeWindow, cmd: &str, args: Value) -> Result<Value, Value> 
 
 fn add_first_thread(window: &RangeWindow) -> Value {
     let line = json!({ "kind": "added", "right": ADDED_LINE });
-    let args = json!({ "file": FILE, "line": line, "text": "Why two?" });
+    let place = json!({ "start": line, "end": line });
+    let args = json!({ "file": FILE, "place": place, "text": "Why two?" });
     invoke(window, "add_thread", args).unwrap()
 }
 
@@ -34,12 +35,37 @@ fn a_thread_added_through_add_thread_comes_back_from_list_threads() {
     let thread = &listed["threads"][0];
     assert_eq!(thread["id"], added["thread"]);
     assert_eq!(thread["file"], FILE);
-    assert_eq!(
-        thread["line"],
-        json!({ "kind": "added", "right": ADDED_LINE })
-    );
+    let line = json!({ "kind": "added", "right": ADDED_LINE });
+    assert_eq!(thread["place"], json!({ "start": line, "end": line }));
     let note = json!({ "kind": "note", "text": "Why two?" });
     assert_eq!(thread["messages"][0]["body"], note);
+}
+
+#[test]
+fn a_range_thread_added_through_add_thread_comes_back_from_list_threads() {
+    let window = open_range_window();
+    let place = json!({
+        "start": { "kind": "removed", "left": 0 },
+        "end": { "kind": "unchangedOnRight", "left": 1, "right": 1 },
+    });
+    let args = json!({ "file": FILE, "place": place, "text": "Why these?" });
+
+    let added = invoke(&window, "add_thread", args).unwrap();
+
+    let listed = invoke(&window, "list_threads", json!({})).unwrap();
+    assert_eq!(listed, added["list"]);
+    assert_eq!(listed["threads"][0]["place"], place);
+    let backward = json!({
+        "start": { "kind": "unchanged", "left": 5, "right": 5 },
+        "end": { "kind": "added", "right": 2 },
+    });
+    let refused = json!({ "file": FILE, "place": backward, "text": "Why?" });
+    let message = "a thread's first line comes after its last";
+    assert_eq!(
+        invoke(&window, "add_thread", refused),
+        Err(json!({ "kind": "Git", "message": message }))
+    );
+    assert_eq!(invoke(&window, "list_threads", json!({})), Ok(listed));
 }
 
 #[test]
@@ -71,7 +97,8 @@ fn a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back() {
 #[test]
 fn thread_commands_answer_the_store_s_refusals_as_their_kinds() {
     let window = open_range_window();
-    let blank = json!({ "file": FILE, "line": { "kind": "added", "right": 0 }, "text": " " });
+    let line = json!({ "kind": "added", "right": 0 });
+    let blank = json!({ "file": FILE, "place": { "start": line, "end": line }, "text": " " });
     assert_eq!(
         invoke(&window, "add_thread", blank),
         Err(json!({ "kind": "EmptyMessage" }))
@@ -277,7 +304,8 @@ mod through_glab {
         let entries = state.range.entries();
         let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
         let line = json!({ "kind": "added", "right": ADDED_FILE_LINE });
-        let args = json!({ "file": file.unwrap().id, "line": line, "text": "Why?" });
+        let place = json!({ "start": line, "end": line });
+        let args = json!({ "file": file.unwrap().id, "place": place, "text": "Why?" });
         let added = invoke(window, "add_thread", args).unwrap();
         let message = &added["list"]["threads"][0]["messages"][0]["id"];
         let queued = json!({ "message": message, "text": "Why not a Duration?" });

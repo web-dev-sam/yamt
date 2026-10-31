@@ -1,0 +1,2454 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 04ee739..ba42d96 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2967,6 +2967,17 @@ dependencies = [
+  "stable_deref_trait",
+ ]
+ 
++[[package]]
++name = "sha1"
++version = "0.10.7"
++source = "registry+https://github.com/rust-lang/crates.io-index"
++checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
++dependencies = [
++ "cfg-if",
++ "cpufeatures",
++ "digest",
++]
++
+ [[package]]
+ name = "sha2"
+ version = "0.10.9"
+@@ -3547,7 +3558,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
+ checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+ dependencies = [
+  "fastrand",
+- "getrandom 0.3.4",
++ "getrandom 0.4.3",
+  "once_cell",
+  "rustix",
+  "windows-sys 0.61.2",
+@@ -4756,6 +4767,7 @@ version = "0.6.4"
+ dependencies = [
+  "serde",
+  "serde_json",
++ "sha1",
+  "specta",
+  "tempfile",
+  "thiserror 2.0.21",
+diff --git a/crates/review/AGENTS.md b/crates/review/AGENTS.md
+index f611dcb..d3e6497 100644
+--- a/crates/review/AGENTS.md
++++ b/crates/review/AGENTS.md
+@@ -1 +1 @@
+-Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120, #121, #123): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `MessageBody` `note`/`aiAnswer` (`session`, `turn`: the answer is turn `turn` among that session's answers, its text only in omp's session), `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`; `session` the conversation the next "Ask AI" continues), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 1 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `line`, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a thread without messages, or a counter at `u32::MAX`; `NewerFormat` above 1; nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read; `message`/`message_mut` the one way to find a message by id, `remove_message` the one way to take it out — from its own thread, and that thread when it is left empty), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread, add_note, set_session (replaces the thread's session), add_ai_answer (sets the session, then appends `AiAnswer { session, turn }`, turn = that session's answers already in the thread: the one numbering rule, #121), queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`), edit_note (the note's text; a note that waits for a send — `waiting_text_of`, the one waiting rule — becomes `Queued` with the new text, a `NotQueued` one stays, #123), delete_message (`remove_message` after a read-only check: the note leaves its thread; a thread left with no message leaves the file; the thread's session stays while the thread does, #123); edit and delete check in one order, the lookup then `require_unsent_note`: unknown or not on a listed path `UnknownMessage`, an AI answer `NotANote`, a pending message `MessagePending`, then (edit) blank text `EmptyMessage`; blank text is `EmptyMessage`, a pending message is `MessagePending`, a thread on a path the range does not list is `UnknownThread`; ids from the counters, never reused (a delete leaves the counters); the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule, `shown_message`/`shown_message_mut` the one shown-message lookup), `thread_store/waiting.rs` (the sender's side of the store, `pub(crate)`: `QueuedMessage`, `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did; a gone message is `UnknownMessage`, unreachable while edit and delete wait for the send guard); `waiting_text_of` (`pub(super)`) the one rule of which postings wait). Depends on `yamt-range` (`Range::entry`, `Range::entries`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`). Tests: unit tests in `thread_file.rs`, `thread_store/waiting.rs`; on real temp folders with a `Range` over a `yamt-conflict-repo` repository: `tests/threads.rs` (the file format, adding, queueing, sessions and answers) and `tests/note_edits.rs` (edit and delete, #123), both over `tests/stored_threads/` (the shared repository, range, `threads.json` and list builders, `EVERY_KIND`).
++Owner skill: `skill://rust-conventions`. The user's review of a commit range: threads on its lines, stored per repository and commit pair (plan §2 #116, #117, #120, #121, #123, #145–#148): `lib.rs` (`Error`, `Result`), `thread_types.rs` (the IPC types `ThreadId`, `MessageId`, `ThreadLine` — `removed`/`added`/`unchangedOnLeft`/`unchangedOnRight`, 0-based `yamt_merge_core::{LeftLine, RightLine}`, the variant decides the column —, `DiffLine` — `removed`/`added`/`unchanged`: a line of GitLab's one-column diff, no column —, `ThreadPlace` `{ start: DiffLine, end: ThreadLine }` (the lines a thread is on, `start` to `end` in GitLab's order, both included; `one_line(line)` is `{ start: line.diff_line(), end: line }`, the one shape of a one-line thread; `is_one_line`; `runs_forward`: where both ends have a left line start's is not after end's, the same for right lines — an added start and a removed end share no side, so their order is left to the editor, which orders by the differences), `MessageBody` `note`/`aiAnswer` (`session`, `turn`: the answer is turn `turn` among that session's answers, its text only in omp's session), `Posting` `notQueued`/`queued`/`refused`/`pending`, `Message` (`written` seconds since 1970, a `u64` exported as number), `Thread` (`file` = the range's `RangeFileId`; `place`; `session` the conversation the next "Ask AI" continues), `ThreadList`, `ThreadAdded`), `thread_file.rs` (`threads.json` format 2 in the pair folder: `format`, `nextThread`, `nextMessage`, `threads` [`id`, `path`, `place` {`start`, `end`}, `session`, `messages` [`id`, `body`, `written`, `posting`]]; a thread stored by the entry's path, never its file id; refused as `ReadFailed` when it cannot be read (anything but a missing file), as `Broken` when it does not parse (serde's line and column), repeats a thread or message id, holds an id not below its counter, a place that does not run forward, a thread without messages, a counter at `u32::MAX`, or a format below 1 ("format 0 is not 1 or 2"); `NewerFormat` above 2, so an older yamt refuses a format-2 file by name and never rewrites a range into its end line (RK49); nothing written on a refusal; every write `threads.json.tmp` + rename, a leftover temp file never read; `message`/`message_mut` the one way to find a message by id, `remove_message` the one way to take it out — from its own thread, and that thread when it is left empty), `thread_file/format_1.rs` (format 1, read only: each thread's `line` becomes `ThreadPlace::one_line(line)` and the file in memory is format 2, so reading never writes and the first change writes format 2), `thread_store.rs` (`ThreadStore`: open (missing = empty, nothing written), list (pure: threads on paths the range lists, mapped back to their `RangeFileId`, in creation order; others kept on every write and left out), unlisted_paths (the stored paths the range does not list, sorted, each once; the shell logs them once at start), add_thread (refuses in the order `EmptyMessage`, `UnknownFile`, `BackwardPlace`; the place is not checked against the file's lines), add_note, set_session (replaces the thread's session), add_ai_answer (sets the session, then appends `AiAnswer { session, turn }`, turn = that session's answers already in the thread: the one numbering rule, #121), queue (`Queued` with the edited text, a refused message too), unqueue (`NotQueued`), edit_note (the note's text; a note that waits for a send — `waiting_text_of`, the one waiting rule — becomes `Queued` with the new text, a `NotQueued` one stays, #123), delete_message (`remove_message` after a read-only check: the note leaves its thread; a thread left with no message leaves the file; the thread's session stays while the thread does, #123); edit and delete check in one order, the lookup then `require_unsent_note`: unknown or not on a listed path `UnknownMessage`, an AI answer `NotANote`, a pending message `MessagePending`, then (edit) blank text `EmptyMessage`; blank text is `EmptyMessage`, a pending message is `MessagePending`, a thread on a path the range does not list is `UnknownThread`; ids from the counters, never reused (a delete leaves the counters); the file written before memory changes, so a failed write changes nothing; `file_at` the one path → `RangeFileId` rule, `shown_message`/`shown_message_mut` the one shown-message lookup), `thread_store/waiting.rs` (the sender's side of the store, `pub(crate)`: `QueuedMessage` (with its thread's `place`), `queued(range)` (queued and refused messages on files the range lists, with their `RangeFileId`, in thread, then message order), `waiting_text` (a message's text to post, read again before each post), `pending_draft_notes` (the drafts pending messages own) and `record_if_waiting` (stores a send's result only while the message still waits with the posted text; whether it did; a gone message is `UnknownMessage`, unreachable while edit and delete wait for the send guard); `waiting_text_of` (`pub(super)`) the one rule of which postings wait), `position.rs` (the draft-notes body: `line_place` names the place's end line in `position.old_line`/`new_line`; `PostBody.multi_line` is `None` for a one-line place, so its body is unchanged, else `position.line_range { start, end }`; `same_draft`: the same text, head, paths and lines, and the same range ends by `type`, `old_line`, `new_line` (`line_code` follows from them), no range only matching no range), `position/line_codes.rs` (GitLab's multi-line ends, the one place of GitLab's numbering, RK48: each end `{ line_code, type?, old_line?, new_line? }`, 1-based, keys left out rather than `null`; `line_code` = `<SHA-1 of the entry's new path, also for a renamed file>_<old>_<new>` with GitLab's parser counters: an unchanged line its own two numbers and no `type` (GitLab's own form sends none, plan §2 #147), a removed line `type` `old` paired with its difference's first new line, an added line `type` `new` paired with the old line after its difference's removed lines; a changed end inside no difference is refused, "the thread's lines are not in this diff any more"), `gitlab.rs` (glab calls and GitLab's answers), `gitlab/drafts.rs` (the user's drafts read back: `position.line_range` `null` or missing is no range, a malformed one leaves the draft without a place), `send.rs` (`check_gitlab`, `send_queue`; a message whose place is not one line loads its file once through `Range::load` for the differences, a file without lines or a failed load refusing that message with its words). Depends on `yamt-range` (`Range::entry`, `Range::entries`, `Range::load`) and `yamt-merge-core` among `yamt-*`, may use `yamt-gitio`, never tauri (`scripts/arch-check.sh`); `sha1` (plan §2 #147) for the line codes' path hash. Tests: unit tests in `thread_types.rs`, `thread_file.rs`, `thread_file/format_1.rs`, `thread_store/waiting.rs`, `position.rs`, `position/line_codes.rs`, `gitlab.rs`, `gitlab/drafts.rs`; on real temp folders with a `Range` over a `yamt-conflict-repo` repository: `tests/threads.rs` (the file format — format 2 round-trip, format 1 read and rewritten as format 2 by the first change —, adding, backward places, queueing, sessions and answers) and `tests/note_edits.rs` (edit and delete, #123), both over `tests/stored_threads/` (the shared repository, range, `threads.json` and list builders, `EVERY_KIND` in format 2 with a range across both sides); `tests/review.rs` over `scripts/range-repo.sh` and the fake glab (`tests/glab/`, including `line-range/` and `line-range-drafted/` for range bodies and their drafts).
+diff --git a/crates/review/Cargo.toml b/crates/review/Cargo.toml
+index 699a3f4..021a745 100644
+--- a/crates/review/Cargo.toml
++++ b/crates/review/Cargo.toml
+@@ -12,6 +12,7 @@ yamt-merge-core.workspace = true
+ serde.workspace = true
+ serde_json.workspace = true
+ specta.workspace = true
++sha1.workspace = true
+ thiserror.workspace = true
+ 
+ [dev-dependencies]
+diff --git a/crates/review/src/gitlab.rs b/crates/review/src/gitlab.rs
+index 65e6e54..7b1205c 100644
+--- a/crates/review/src/gitlab.rs
++++ b/crates/review/src/gitlab.rs
+@@ -2,6 +2,8 @@ use serde_json::Value;
+ 
+ use crate::MergeRequestRef;
+ 
++pub(crate) mod drafts;
++
+ const OPENED: &str = "opened";
+ 
+ /// One merge request of a list: enough to ask for its details.
+@@ -44,21 +46,6 @@ pub(crate) struct LinePlace {
+     pub(crate) new_line: Option<u32>,
+ }
+ 
+-/// One of the user's draft notes on the merge request.
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub(crate) struct DraftNote {
+-    pub(crate) id: u64,
+-    pub(crate) note: String,
+-    /// `None` for a draft on no line.
+-    pub(crate) placed: Option<PlacedDraft>,
+-}
+-
+-#[derive(Clone, Debug, PartialEq, Eq)]
+-pub(crate) struct PlacedDraft {
+-    pub(crate) head_sha: String,
+-    pub(crate) place: LinePlace,
+-}
+-
+ pub(crate) fn merge_requests_from_branch(branch: &str) -> Vec<String> {
+     owned(&[
+         "api",
+@@ -151,42 +138,6 @@ pub(crate) fn merge_request_from(json: &[u8]) -> Result<MergeRequest, String> {
+     })
+ }
+ 
+-/// The drafts `glab api --paginate` printed: one JSON array, or one per page.
+-pub(crate) fn draft_notes_from(json: &[u8]) -> Result<Vec<DraftNote>, String> {
+-    let mut drafts = Vec::new();
+-    for page in serde_json::Deserializer::from_slice(json).into_iter::<Value>() {
+-        let page = page.map_err(|error| format!("GitLab's answer is not JSON: {error}"))?;
+-        let Value::Array(items) = page else {
+-            return Err(unexpected("draft notes", "list"));
+-        };
+-        for item in items {
+-            drafts.push(draft_note_from(&item)?);
+-        }
+-    }
+-    Ok(drafts)
+-}
+-
+-fn draft_note_from(item: &Value) -> Result<DraftNote, String> {
+-    Ok(DraftNote {
+-        id: number_at(item, "id")?,
+-        note: text_at(item, "note")?,
+-        placed: placed_draft_from(item).ok(),
+-    })
+-}
+-
+-/// A draft on no line has no position, or one without paths: it matches no message.
+-fn placed_draft_from(item: &Value) -> Result<PlacedDraft, String> {
+-    Ok(PlacedDraft {
+-        head_sha: text_at(item, "position.head_sha")?,
+-        place: LinePlace {
+-            old_path: text_at(item, "position.old_path")?,
+-            new_path: text_at(item, "position.new_path")?,
+-            old_line: optional_line_at(item, "position.old_line")?,
+-            new_line: optional_line_at(item, "position.new_line")?,
+-        },
+-    })
+-}
+-
+ /// The new draft's id from a post's answer.
+ pub(crate) fn draft_id_from(json: &[u8]) -> Result<u64, String> {
+     number_at(&value_from(json)?, "id")
+@@ -293,39 +244,6 @@ mod tests {
+         );
+     }
+ 
+-    #[test]
+-    fn every_page_of_drafts_is_read_and_a_draft_on_no_line_is_kept_unplaced() {
+-        let pages = br#"[{"id":1,"note":"a","position":{"head_sha":"h","old_path":"x","new_path":"y","old_line":null,"new_line":2}}]
+-[{"id":2,"note":"b","position":null},{"id":3,"note":"c","position":{"head_sha":"h","old_path":null}}]"#;
+-        let drafts = draft_notes_from(pages).unwrap();
+-        let place = LinePlace {
+-            old_path: "x".to_owned(),
+-            new_path: "y".to_owned(),
+-            old_line: None,
+-            new_line: Some(2),
+-        };
+-        let placed = PlacedDraft {
+-            head_sha: "h".to_owned(),
+-            place,
+-        };
+-        let unplaced = |id: u64, note: &str| DraftNote {
+-            id,
+-            note: note.to_owned(),
+-            placed: None,
+-        };
+-        let first = DraftNote {
+-            placed: Some(placed),
+-            ..unplaced(1, "a")
+-        };
+-        assert_eq!(drafts, [first, unplaced(2, "b"), unplaced(3, "c")]);
+-        assert_eq!(draft_notes_from(b"[]").unwrap(), []);
+-        assert_eq!(
+-            draft_notes_from(br#"[{"id":4}]"#),
+-            Err("unexpected answer from GitLab: `note` is not a text".to_owned())
+-        );
+-        assert!(draft_notes_from(br#"{"id":4}"#).is_err());
+-    }
+-
+     #[test]
+     fn gitlab_s_words_are_its_message_or_its_error() {
+         let words = |json: &[u8]| error_message_from(json);
+diff --git a/crates/review/src/gitlab/drafts.rs b/crates/review/src/gitlab/drafts.rs
+new file mode 100644
+index 0000000..4132568
+--- /dev/null
++++ b/crates/review/src/gitlab/drafts.rs
+@@ -0,0 +1,189 @@
++use serde_json::Value;
++
++use super::{LinePlace, field_at, number_at, optional_line_at, text_at, unexpected};
++use crate::position::{LineType, MultiLine, RangeEnd};
++
++/// One of the user's draft notes on the merge request.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct DraftNote {
++    pub(crate) id: u64,
++    pub(crate) note: String,
++    /// `None` for a draft on no line.
++    pub(crate) placed: Option<PlacedDraft>,
++}
++
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct PlacedDraft {
++    pub(crate) head_sha: String,
++    pub(crate) place: LinePlace,
++    /// `None` for a draft on one line.
++    pub(crate) multi_line: Option<MultiLine>,
++}
++
++/// The drafts `glab api --paginate` printed: one JSON array, or one per page.
++pub(crate) fn draft_notes_from(json: &[u8]) -> Result<Vec<DraftNote>, String> {
++    let mut drafts = Vec::new();
++    for page in serde_json::Deserializer::from_slice(json).into_iter::<Value>() {
++        let page = page.map_err(|error| format!("GitLab's answer is not JSON: {error}"))?;
++        let Value::Array(items) = page else {
++            return Err(unexpected("draft notes", "list"));
++        };
++        for item in items {
++            drafts.push(draft_note_from(&item)?);
++        }
++    }
++    Ok(drafts)
++}
++
++fn draft_note_from(item: &Value) -> Result<DraftNote, String> {
++    Ok(DraftNote {
++        id: number_at(item, "id")?,
++        note: text_at(item, "note")?,
++        placed: placed_draft_from(item).ok(),
++    })
++}
++
++/// A draft on no line has no position, or one without paths: it matches no message.
++fn placed_draft_from(item: &Value) -> Result<PlacedDraft, String> {
++    Ok(PlacedDraft {
++        head_sha: text_at(item, "position.head_sha")?,
++        place: LinePlace {
++            old_path: text_at(item, "position.old_path")?,
++            new_path: text_at(item, "position.new_path")?,
++            old_line: optional_line_at(item, "position.old_line")?,
++            new_line: optional_line_at(item, "position.new_line")?,
++        },
++        multi_line: multi_line_from(item)?,
++    })
++}
++
++fn multi_line_from(item: &Value) -> Result<Option<MultiLine>, String> {
++    match field_at(item, "position.line_range") {
++        None | Some(Value::Null) => Ok(None),
++        Some(_) => Ok(Some(MultiLine {
++            start: range_end_at(item, "position.line_range.start")?,
++            end: range_end_at(item, "position.line_range.end")?,
++        })),
++    }
++}
++
++fn range_end_at(item: &Value, path: &str) -> Result<RangeEnd, String> {
++    Ok(RangeEnd {
++        line_code: text_at(item, &format!("{path}.line_code"))?,
++        line_type: line_type_at(item, &format!("{path}.type"))?,
++        old_line: optional_line_at(item, &format!("{path}.old_line"))?,
++        new_line: optional_line_at(item, &format!("{path}.new_line"))?,
++    })
++}
++
++fn line_type_at(item: &Value, path: &str) -> Result<Option<LineType>, String> {
++    match field_at(item, path) {
++        None | Some(Value::Null) => Ok(None),
++        Some(line_type) => line_type
++            .as_str()
++            .and_then(LineType::from_gitlab_name)
++            .map(Some)
++            .ok_or_else(|| unexpected(path, "line type")),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn every_page_of_drafts_is_read_and_a_draft_on_no_line_is_kept_unplaced() {
++        let pages = br#"[{"id":1,"note":"a","position":{"head_sha":"h","old_path":"x","new_path":"y","old_line":null,"new_line":2}}]
++[{"id":2,"note":"b","position":null},{"id":3,"note":"c","position":{"head_sha":"h","old_path":null}}]"#;
++        let drafts = draft_notes_from(pages).unwrap();
++        let place = LinePlace {
++            old_path: "x".to_owned(),
++            new_path: "y".to_owned(),
++            old_line: None,
++            new_line: Some(2),
++        };
++        let placed = PlacedDraft {
++            head_sha: "h".to_owned(),
++            place,
++            multi_line: None,
++        };
++        let unplaced = |id: u64, note: &str| DraftNote {
++            id,
++            note: note.to_owned(),
++            placed: None,
++        };
++        let first = DraftNote {
++            placed: Some(placed),
++            ..unplaced(1, "a")
++        };
++        assert_eq!(drafts, [first, unplaced(2, "b"), unplaced(3, "c")]);
++        assert_eq!(draft_notes_from(b"[]").unwrap(), []);
++        assert_eq!(
++            draft_notes_from(br#"[{"id":4}]"#),
++            Err("unexpected answer from GitLab: `note` is not a text".to_owned())
++        );
++        assert!(draft_notes_from(br#"{"id":4}"#).is_err());
++    }
++
++    /// The draft read back from a position with this `line_range`; `None` when it has no place.
++    fn placed_with(line_range: &str) -> Option<PlacedDraft> {
++        let json = format!(
++            r#"[{{"id":1,"note":"a","position":{{"head_sha":"h","old_path":"x","new_path":"x","new_line":4,"line_range":{line_range}}}}}]"#
++        );
++        let drafts = draft_notes_from(json.as_bytes()).unwrap();
++        drafts[0].placed.clone()
++    }
++
++    fn range_of(line_range: &str) -> MultiLine {
++        placed_with(line_range).unwrap().multi_line.unwrap()
++    }
++
++    #[test]
++    fn drafts_read_back_their_line_range_or_none() {
++        assert_eq!(placed_with("null").unwrap().multi_line, None);
++        let missing = br#"[{"id":1,"note":"a","position":{"head_sha":"h","old_path":"x","new_path":"x","new_line":4}}]"#;
++        let drafts = draft_notes_from(missing).unwrap();
++        assert_eq!(drafts[0].placed.as_ref().unwrap().multi_line, None);
++
++        let both = r#"{"start":{"line_code":"c_1_2","type":null,"old_line":1,"new_line":2},
++            "end":{"line_code":"c_3_4","type":"new","old_line":null,"new_line":4}}"#;
++        let expected = MultiLine {
++            start: RangeEnd {
++                line_code: "c_1_2".to_owned(),
++                line_type: None,
++                old_line: Some(1),
++                new_line: Some(2),
++            },
++            end: RangeEnd {
++                line_code: "c_3_4".to_owned(),
++                line_type: Some(LineType::New),
++                old_line: None,
++                new_line: Some(4),
++            },
++        };
++        assert_eq!(range_of(both), expected);
++        let old_without_type = r#"{"start":{"line_code":"c_3_4","type":"old","old_line":3},
++            "end":{"line_code":"c_3_4","old_line":3,"new_line":4}}"#;
++        let ends = range_of(old_without_type);
++        assert_eq!(
++            (ends.start.line_type, ends.start.new_line),
++            (Some(LineType::Old), None)
++        );
++        assert_eq!(ends.end.line_type, None);
++    }
++
++    #[test]
++    fn a_malformed_line_range_leaves_the_draft_without_a_place() {
++        let malformed = [
++            r#"{"start":{"line_code":"c","type":"context"},"end":{"line_code":"c"}}"#,
++            r#"{"start":{"line_code":"c","type":3},"end":{"line_code":"c"}}"#,
++            r#"{"start":{"type":"new"},"end":{"line_code":"c"}}"#,
++            r#"{"start":{"line_code":"c"},"end":{"line_code":"c","new_line":"4"}}"#,
++            r#"{"start":{"line_code":"c"}}"#,
++            r#""lines 1 to 4""#,
++        ];
++        for line_range in malformed {
++            assert_eq!(placed_with(line_range), None, "{line_range}");
++        }
++    }
++}
+diff --git a/crates/review/src/lib.rs b/crates/review/src/lib.rs
+index c1def7c..f42958a 100644
+--- a/crates/review/src/lib.rs
++++ b/crates/review/src/lib.rs
+@@ -21,7 +21,8 @@ use yamt_range::RangeFileId;
+ pub use crate::send::{check_gitlab, send_queue};
+ pub use crate::thread_store::ThreadStore;
+ pub use crate::thread_types::{
+-    Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine, ThreadList,
++    DiffLine, Message, MessageBody, MessageId, Posting, Thread, ThreadAdded, ThreadId, ThreadLine,
++    ThreadList, ThreadPlace,
+ };
+ pub use yamt_gitio::Glab;
+ 
+@@ -172,7 +173,7 @@ pub enum Error {
+         /// The cause.
+         message: String,
+     },
+-    /// `threads.json` does not read as format 1.
++    /// `threads.json` does not read as format 1 or 2.
+     #[error("the review threads {} cannot be read: {message}; nothing was changed", path.display())]
+     Broken {
+         /// The `threads.json` path.
+@@ -229,6 +230,9 @@ pub enum Error {
+         /// The message.
+         message: MessageId,
+     },
++    /// The place's first line comes after its last.
++    #[error("a thread's first line comes after its last")]
++    BackwardPlace,
+ }
+ 
+ /// Results of this crate.
+diff --git a/crates/review/src/position.rs b/crates/review/src/position.rs
+index 0c82d17..c11093a 100644
+--- a/crates/review/src/position.rs
++++ b/crates/review/src/position.rs
+@@ -2,7 +2,12 @@ use serde_json::{Map, Value};
+ use yamt_range::{RangeChange, RangeEntry};
+ 
+ use crate::ThreadLine;
+-use crate::gitlab::{DiffRefs, DraftNote, LinePlace};
++use crate::gitlab::drafts::DraftNote;
++use crate::gitlab::{DiffRefs, LinePlace};
++
++mod line_codes;
++
++pub(crate) use line_codes::{LineType, MultiLine, RangeEnd, multi_line};
+ 
+ /// What the range shows in place of a byte it could not read as UTF-8.
+ const REPLACEMENT: char = '\u{FFFD}';
+@@ -14,6 +19,8 @@ pub(crate) struct PostBody {
+     pub(crate) note: String,
+     pub(crate) diff_refs: DiffRefs,
+     pub(crate) place: LinePlace,
++    /// `None` for a thread on one line.
++    pub(crate) multi_line: Option<MultiLine>,
+ }
+ 
+ /// GitLab's place for `line` of `entry`: a removed line has `old_line` only, an added one `new_line` only, an
+@@ -46,7 +53,7 @@ fn one_based(line: u32) -> u32 {
+ 
+ impl PostBody {
+     /// `{ note, position: { position_type: "text", base_sha, start_sha, head_sha, old_path, new_path, old_line?,
+-    /// new_line? } }`, the draft-notes route's body.
++    /// new_line?, line_range? } }`, the draft-notes route's body (`lib/api/draft_notes.rb:95-108`, v19.3.2-ee).
+     pub(crate) fn json(&self) -> Vec<u8> {
+         let mut position = Map::new();
+         position.insert("position_type".to_owned(), "text".into());
+@@ -64,11 +71,12 @@ impl PostBody {
+         );
+         position.insert("old_path".to_owned(), self.place.old_path.clone().into());
+         position.insert("new_path".to_owned(), self.place.new_path.clone().into());
+-        if let Some(line) = self.place.old_line {
+-            position.insert("old_line".to_owned(), line.into());
+-        }
+-        if let Some(line) = self.place.new_line {
+-            position.insert("new_line".to_owned(), line.into());
++        insert_lines(&mut position, self.place.old_line, self.place.new_line);
++        if let Some(multi_line) = &self.multi_line {
++            let mut line_range = Map::new();
++            line_range.insert("start".to_owned(), multi_line.start.json());
++            line_range.insert("end".to_owned(), multi_line.end.json());
++            position.insert("line_range".to_owned(), Value::Object(line_range));
+         }
+         let mut body = Map::new();
+         body.insert("note".to_owned(), self.note.clone().into());
+@@ -77,7 +85,17 @@ impl PostBody {
+     }
+ }
+ 
+-/// A draft GitLab already holds for this body: the same text, paths, lines and head commit.
++/// `old_line` and `new_line`, each only when the line has one.
++fn insert_lines(object: &mut Map<String, Value>, old_line: Option<u32>, new_line: Option<u32>) {
++    if let Some(line) = old_line {
++        object.insert("old_line".to_owned(), line.into());
++    }
++    if let Some(line) = new_line {
++        object.insert("new_line".to_owned(), line.into());
++    }
++}
++
++/// A draft GitLab already holds for this body: the same text, paths, lines, range ends and head commit.
+ pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
+     let Some(placed) = &draft.placed else {
+         return false;
+@@ -85,6 +103,24 @@ pub(crate) fn same_draft(body: &PostBody, draft: &DraftNote) -> bool {
+     draft.note == body.note
+         && placed.head_sha == body.diff_refs.head_sha
+         && placed.place == body.place
++        && same_range(body.multi_line.as_ref(), placed.multi_line.as_ref())
++}
++
++/// The same ends by their type and lines; `line_code` follows from those and the path.
++fn same_range(body: Option<&MultiLine>, draft: Option<&MultiLine>) -> bool {
++    match (body, draft) {
++        (None, None) => true,
++        (Some(body), Some(draft)) => {
++            same_end(&body.start, &draft.start) && same_end(&body.end, &draft.end)
++        }
++        (Some(_), None) | (None, Some(_)) => false,
++    }
++}
++
++fn same_end(body: &RangeEnd, draft: &RangeEnd) -> bool {
++    body.line_type == draft.line_type
++        && body.old_line == draft.old_line
++        && body.new_line == draft.new_line
+ }
+ 
+ #[cfg(test)]
+@@ -93,7 +129,7 @@ mod tests {
+     use yamt_range::{RangeFileId, RangeLineCounts};
+ 
+     use super::*;
+-    use crate::gitlab::PlacedDraft;
++    use crate::gitlab::drafts::PlacedDraft;
+ 
+     fn entry(path: &str, change: RangeChange) -> RangeEntry {
+         RangeEntry {
+@@ -122,6 +158,32 @@ mod tests {
+                 head_sha: "h".repeat(40),
+             },
+             place: place("a.ts", "a.ts", Some(3), Some(4)),
++            multi_line: None,
++        }
++    }
++
++    fn range_end(
++        line_code: &str,
++        line_type: Option<LineType>,
++        old_line: Option<u32>,
++        new_line: Option<u32>,
++    ) -> RangeEnd {
++        RangeEnd {
++            line_code: line_code.to_owned(),
++            line_type,
++            old_line,
++            new_line,
++        }
++    }
++
++    /// From the removed line 2 to the unchanged line 3 / 4, the body's own line.
++    fn range_body() -> PostBody {
++        PostBody {
++            multi_line: Some(MultiLine {
++                start: range_end("h_2_4", Some(LineType::Old), Some(2), None),
++                end: range_end("h_3_4", None, Some(3), Some(4)),
++            }),
++            ..body()
+         }
+     }
+ 
+@@ -204,6 +266,27 @@ mod tests {
+         assert_eq!(json["position"]["new_line"], 4);
+     }
+ 
++    #[test]
++    fn a_one_line_body_has_no_line_range() {
++        let json: Value = serde_json::from_slice(&body().json()).unwrap();
++        assert_eq!(json["position"].get("line_range"), None);
++        assert_eq!(json["position"]["old_line"], 3);
++        assert_eq!(json["position"]["new_line"], 4);
++    }
++
++    #[test]
++    fn a_range_body_has_line_range_and_names_its_end_line() {
++        let json: Value = serde_json::from_slice(&range_body().json()).unwrap();
++        let line_range = serde_json::json!({
++            "start": { "line_code": "h_2_4", "type": "old", "old_line": 2 },
++            "end": { "line_code": "h_3_4", "old_line": 3, "new_line": 4 },
++        });
++        assert_eq!(json["position"]["line_range"], line_range);
++        assert_eq!(json["position"]["old_line"], 3);
++        assert_eq!(json["position"]["new_line"], 4);
++        assert_eq!(json["note"], "Why 300?");
++    }
++
+     #[test]
+     fn a_draft_is_the_same_only_with_the_same_text_place_and_head() {
+         let draft = |note: &str, head: &str, place: LinePlace| DraftNote {
+@@ -212,6 +295,7 @@ mod tests {
+             placed: Some(PlacedDraft {
+                 head_sha: head.to_owned(),
+                 place,
++                multi_line: None,
+             }),
+         };
+         let head = "h".repeat(40);
+@@ -234,4 +318,50 @@ mod tests {
+         };
+         assert!(!same_draft(&body(), &on_no_line));
+     }
++
++    fn range_draft(multi_line: Option<MultiLine>) -> DraftNote {
++        DraftNote {
++            id: 401,
++            note: "Why 300?".to_owned(),
++            placed: Some(PlacedDraft {
++                head_sha: "h".repeat(40),
++                place: body().place,
++                multi_line,
++            }),
++        }
++    }
++
++    #[test]
++    fn a_draft_is_the_same_only_with_the_same_range_or_both_without() {
++        let range = range_body().multi_line;
++        assert!(same_draft(&range_body(), &range_draft(range.clone())));
++        assert!(same_draft(&body(), &range_draft(None)));
++        assert!(!same_draft(&range_body(), &range_draft(None)));
++        assert!(!same_draft(&body(), &range_draft(range.clone())));
++
++        let range = range.unwrap();
++        let other_code = MultiLine {
++            start: range_end("x_2_4", Some(LineType::Old), Some(2), None),
++            ..range.clone()
++        };
++        assert!(same_draft(&range_body(), &range_draft(Some(other_code))));
++        let changed_ends = [
++            range_end("h_2_4", Some(LineType::New), Some(2), None),
++            range_end("h_2_4", None, Some(2), None),
++            range_end("h_2_4", Some(LineType::Old), Some(1), None),
++            range_end("h_2_4", Some(LineType::Old), Some(2), Some(4)),
++        ];
++        for changed in changed_ends {
++            let other_start = MultiLine {
++                start: changed.clone(),
++                ..range.clone()
++            };
++            assert!(!same_draft(&range_body(), &range_draft(Some(other_start))));
++            let other_end = MultiLine {
++                end: changed,
++                ..range.clone()
++            };
++            assert!(!same_draft(&range_body(), &range_draft(Some(other_end))));
++        }
++    }
+ }
+diff --git a/crates/review/src/position/line_codes.rs b/crates/review/src/position/line_codes.rs
+new file mode 100644
+index 0000000..08a0300
+--- /dev/null
++++ b/crates/review/src/position/line_codes.rs
+@@ -0,0 +1,289 @@
++use serde_json::{Map, Value};
++use sha1::{Digest, Sha1};
++use yamt_merge_core::Difference;
++use yamt_range::RangeEntry;
++
++use super::{insert_lines, one_based};
++use crate::{DiffLine, ThreadPlace};
++
++const NOT_IN_THIS_DIFF: &str = "the thread's lines are not in this diff any more";
++const OLD: &str = "old";
++const NEW: &str = "new";
++
++/// The side of GitLab's diff a changed line is on; an unchanged line has none.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub(crate) enum LineType {
++    Old,
++    New,
++}
++
++impl LineType {
++    fn gitlab_name(self) -> &'static str {
++        match self {
++            LineType::Old => OLD,
++            LineType::New => NEW,
++        }
++    }
++
++    pub(crate) fn from_gitlab_name(name: &str) -> Option<LineType> {
++        match name {
++            OLD => Some(LineType::Old),
++            NEW => Some(LineType::New),
++            _ => None,
++        }
++    }
++}
++
++/// One end of GitLab's `position[line_range]`.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct RangeEnd {
++    pub(crate) line_code: String,
++    pub(crate) line_type: Option<LineType>,
++    pub(crate) old_line: Option<u32>,
++    pub(crate) new_line: Option<u32>,
++}
++
++/// GitLab's `position[line_range]`: the first and the last line of a thread on several lines.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub(crate) struct MultiLine {
++    pub(crate) start: RangeEnd,
++    pub(crate) end: RangeEnd,
++}
++
++impl RangeEnd {
++    /// `{ line_code, type?, old_line?, new_line? }`; GitLab's own form sends no `type` for an unchanged line
++    /// (`app/assets/javascripts/diffs/components/diff_line_note_form.vue:64-69`, v19.3.2-ee; plan §2 #147).
++    pub(super) fn json(&self) -> Value {
++        let mut end = Map::new();
++        end.insert("line_code".to_owned(), self.line_code.clone().into());
++        if let Some(line_type) = self.line_type {
++            end.insert("type".to_owned(), line_type.gitlab_name().into());
++        }
++        insert_lines(&mut end, self.old_line, self.new_line);
++        Value::Object(end)
++    }
++}
++
++/// Both ends of `place` in `entry` with `differences`. GitLab hashes the new path, also for a renamed file
++/// (`lib/gitlab/diff/file.rb:83-85, 253-255`, v19.3.2-ee). `Err` names why it cannot be posted.
++pub(crate) fn multi_line(
++    entry: &RangeEntry,
++    differences: &[Difference],
++    place: ThreadPlace,
++) -> Result<MultiLine, &'static str> {
++    let path_hash = format!("{:x}", Sha1::digest(entry.path.as_bytes()));
++    let end_of = |line| range_end_of(&path_hash, differences, line).ok_or(NOT_IN_THIS_DIFF);
++    Ok(MultiLine {
++        start: end_of(place.start)?,
++        end: end_of(place.end.diff_line())?,
++    })
++}
++
++/// GitLab numbers a diff line by its parser's old and new counters when it reads the line
++/// (`lib/gitlab/diff/parser.rb:13-14, 48, 52-64`, v19.3.2-ee): a removed line pairs with the new number of its
++/// change's first added line, an added line with the old number after its change's removed lines. `None` for a
++/// changed line inside no difference.
++fn range_end_of(path_hash: &str, differences: &[Difference], line: DiffLine) -> Option<RangeEnd> {
++    match line {
++        DiffLine::Unchanged { left, right } => {
++            let (old, new) = (one_based(left.0), one_based(right.0));
++            Some(RangeEnd {
++                line_code: line_code(path_hash, old, new),
++                line_type: None,
++                old_line: Some(old),
++                new_line: Some(new),
++            })
++        }
++        DiffLine::Removed { left } => {
++            let difference = differences
++                .iter()
++                .find(|difference| difference.left.start <= left && left < difference.left.end())?;
++            let old = one_based(left.0);
++            Some(RangeEnd {
++                line_code: line_code(path_hash, old, one_based(difference.right.start.0)),
++                line_type: Some(LineType::Old),
++                old_line: Some(old),
++                new_line: None,
++            })
++        }
++        DiffLine::Added { right } => {
++            let difference = differences.iter().find(|difference| {
++                difference.right.start <= right && right < difference.right.end()
++            })?;
++            let new = one_based(right.0);
++            Some(RangeEnd {
++                line_code: line_code(path_hash, one_based(difference.left.end().0), new),
++                line_type: Some(LineType::New),
++                old_line: None,
++                new_line: Some(new),
++            })
++        }
++    }
++}
++
++/// `Gitlab::Git.diff_line_code` (`lib/gitlab/git.rb:113-115`, v19.3.2-ee).
++fn line_code(path_hash: &str, old: u32, new: u32) -> String {
++    format!("{path_hash}_{old}_{new}")
++}
++
++#[cfg(test)]
++mod tests {
++    use yamt_merge_core::{DifferenceWords, LeftLine, LineRange, RightLine, SideWordChanges};
++    use yamt_range::{RangeChange, RangeFileId, RangeLineCounts};
++
++    use super::*;
++    use crate::ThreadLine;
++
++    /// `printf '%s' src/board/board.ts | sha1sum`
++    const BOARD: &str = "e783a9be490e9bcfa1e4a239bf6e62d2ab163459";
++    /// `printf '%s' docs/keys.md | sha1sum`
++    const KEYS: &str = "5aac5fc3e70b10f7e0b73e4222c367c9808e3eb3";
++
++    fn difference(left: u32, left_len: u32, right: u32, right_len: u32) -> Difference {
++        let no_words = DifferenceWords {
++            left: SideWordChanges {
++                changed: Vec::new(),
++                removals: Vec::new(),
++            },
++            right: SideWordChanges {
++                changed: Vec::new(),
++                removals: Vec::new(),
++            },
++        };
++        Difference {
++            left: LineRange {
++                start: LeftLine(left),
++                len: left_len,
++            },
++            right: LineRange {
++                start: RightLine(right),
++                len: right_len,
++            },
++            words: no_words,
++        }
++    }
++
++    /// `src/board/board.ts` of `scripts/range-repo.sh`'s `main...feature` (`frontend/fixtures/range/review.json`
++    /// `files[7]`), 0-based.
++    fn board_differences() -> Vec<Difference> {
++        vec![
++            difference(19, 1, 19, 2),
++            difference(179, 0, 180, 3),
++            difference(199, 1, 203, 1),
++            difference(254, 1, 258, 3),
++            difference(308, 18, 314, 0),
++            difference(415, 0, 403, 33),
++            difference(461, 0, 482, 2),
++        ]
++    }
++
++    fn entry(path: &str, change: RangeChange) -> RangeEntry {
++        RangeEntry {
++            id: RangeFileId(7),
++            path: path.to_owned(),
++            change,
++            lines: RangeLineCounts::NotCounted,
++        }
++    }
++
++    fn removed(left: u32) -> DiffLine {
++        DiffLine::Removed {
++            left: LeftLine(left),
++        }
++    }
++
++    fn added(right: u32) -> ThreadLine {
++        ThreadLine::Added {
++            right: RightLine(right),
++        }
++    }
++
++    fn range_end(
++        line_code: &str,
++        line_type: Option<LineType>,
++        old_line: Option<u32>,
++        new_line: Option<u32>,
++    ) -> RangeEnd {
++        RangeEnd {
++            line_code: line_code.to_owned(),
++            line_type,
++            old_line,
++            new_line,
++        }
++    }
++
++    fn board_ends(start: DiffLine, end: ThreadLine) -> Result<MultiLine, &'static str> {
++        let board = entry("src/board/board.ts", RangeChange::Modified);
++        multi_line(&board, &board_differences(), ThreadPlace { start, end })
++    }
++
++    #[test]
++    fn line_codes_number_a_line_as_gitlabs_parser_does() {
++        let unchanged = DiffLine::Unchanged {
++            left: LeftLine(196),
++            right: RightLine(200),
++        };
++        let unchanged_end = range_end(&format!("{BOARD}_197_201"), None, Some(197), Some(201));
++        let new = Some(LineType::New);
++        let added_end = range_end(&format!("{BOARD}_201_204"), new, None, Some(204));
++        let in_column = MultiLine {
++            start: unchanged_end,
++            end: added_end.clone(),
++        };
++        assert_eq!(board_ends(unchanged, added(203)), Ok(in_column));
++        let old = Some(LineType::Old);
++        let removed_end = range_end(&format!("{BOARD}_200_204"), old, Some(200), None);
++        let both_sides = MultiLine {
++            start: removed_end,
++            end: added_end,
++        };
++        assert_eq!(board_ends(removed(199), added(203)), Ok(both_sides));
++
++        let pure_removal = range_end(&format!("{BOARD}_309_315"), old, Some(309), None);
++        let pure_addition = range_end(&format!("{BOARD}_416_404"), new, None, Some(404));
++        let pure = MultiLine {
++            start: pure_removal,
++            end: pure_addition,
++        };
++        assert_eq!(board_ends(removed(308), added(403)), Ok(pure));
++        let last_lines = board_ends(removed(325), added(435)).unwrap();
++        assert_eq!(last_lines.start.line_code, format!("{BOARD}_326_315"));
++        assert_eq!(last_lines.end.line_code, format!("{BOARD}_416_436"));
++
++        let renamed = RangeChange::Renamed {
++            old_path: "docs/shortcuts.md".to_owned(),
++        };
++        let keys = entry("docs/keys.md", renamed);
++        let place = ThreadPlace {
++            start: removed(199),
++            end: added(203),
++        };
++        let renamed_ends = multi_line(&keys, &board_differences(), place).unwrap();
++        assert_eq!(renamed_ends.start.line_code, format!("{KEYS}_200_204"));
++    }
++
++    #[test]
++    fn a_changed_end_inside_no_difference_is_not_in_this_diff() {
++        let not_in_this_diff = Err(NOT_IN_THIS_DIFF);
++        assert_eq!(board_ends(removed(200), added(203)), not_in_this_diff);
++        assert_eq!(board_ends(removed(326), added(203)), not_in_this_diff);
++        assert_eq!(board_ends(removed(199), added(204)), not_in_this_diff);
++        assert_eq!(board_ends(removed(199), added(202)), not_in_this_diff);
++    }
++
++    #[test]
++    fn a_range_end_writes_type_and_lines_only_where_the_line_has_them() {
++        let unchanged = range_end("h_1_2", None, Some(1), Some(2)).json();
++        let expected = serde_json::json!({ "line_code": "h_1_2", "old_line": 1, "new_line": 2 });
++        assert_eq!(unchanged, expected);
++        let removed = range_end("h_3_4", Some(LineType::Old), Some(3), None).json();
++        let expected = serde_json::json!({ "line_code": "h_3_4", "type": "old", "old_line": 3 });
++        assert_eq!(removed, expected);
++        let added = range_end("h_5_6", Some(LineType::New), None, Some(6)).json();
++        let expected = serde_json::json!({ "line_code": "h_5_6", "type": "new", "new_line": 6 });
++        assert_eq!(added, expected);
++        assert_eq!(LineType::from_gitlab_name("old"), Some(LineType::Old));
++        assert_eq!(LineType::from_gitlab_name("new"), Some(LineType::New));
++        assert_eq!(LineType::from_gitlab_name("context"), None);
++    }
++}
+diff --git a/crates/review/src/send.rs b/crates/review/src/send.rs
+index ee16005..ef2bca2 100644
+--- a/crates/review/src/send.rs
++++ b/crates/review/src/send.rs
+@@ -2,23 +2,25 @@ use std::path::Path;
+ use std::sync::{Mutex, MutexGuard, PoisonError};
+ 
+ use yamt_gitio::{AuthStatus, Glab, Repo};
+-use yamt_range::{Compared, Range};
++use yamt_range::{Compared, Range, RangeEntry, RangeFile};
+ 
++use crate::gitlab::drafts::{DraftNote, draft_notes_from};
+ use crate::gitlab::{
+-    DraftNote, draft_notes, draft_notes_from, listed_from, merge_request_details,
+-    merge_request_from, merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
++    draft_notes, listed_from, merge_request_details, merge_request_from,
++    merge_requests_from_branch, merge_requests_of_commit, post_draft_note,
+ };
+ use crate::glab_answer::{Outcome, answer, posted, run};
+ use crate::lines_up::{Found, LinedUp, candidates, lines_up};
+-use crate::position::{PostBody, line_place, same_draft};
++use crate::position::{MultiLine, PostBody, line_place, multi_line, same_draft};
+ use crate::right_branch::right_branch;
+ use crate::thread_store::waiting::QueuedMessage;
+ use crate::{
+     Error, GitLabCheck, LookedAt, NotLinedUp, Posting, Result, SendProgress, SendReply, ThreadList,
+-    ThreadStore,
++    ThreadPlace, ThreadStore,
+ };
+ 
+ const DIFFS_PAGE: &str = "/diffs";
++const NO_LINES: &str = "the file has no lines";
+ 
+ /// Whether GitLab's diff of the merge request for the range's right side is exactly the window's (plan §2 #119).
+ #[must_use]
+@@ -148,14 +150,23 @@ fn outcome(
+ ) -> Result<Outcome> {
+     let file = message.file;
+     let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
+-    let place = match line_place(entry, message.line) {
++    let place = match line_place(entry, message.place.end) {
+         Ok(place) => place,
+         Err(reason) => return Ok(Outcome::Refused(reason.to_owned())),
+     };
++    let multi_line = if message.place.is_one_line() {
++        None
++    } else {
++        match range_ends(range, entry, message.place) {
++            Ok(ends) => Some(ends),
++            Err(reason) => return Ok(Outcome::Refused(reason)),
++        }
++    };
+     let body = PostBody {
+         note: text.to_owned(),
+         diff_refs: target.diff_refs.clone(),
+         place,
++        multi_line,
+     };
+     if let Some(index) = drafts.iter().position(|draft| same_draft(&body, draft)) {
+         return Ok(Outcome::Drafted(drafts.swap_remove(index).id));
+@@ -164,6 +175,28 @@ fn outcome(
+     Ok(posted(run(glab, range.root(), &args, Some(body.json()))))
+ }
+ 
++/// GitLab's ends of a place on several lines, numbered from the file's differences as the range shows them now;
++/// `Err` is why the message cannot be posted.
++fn range_ends(
++    range: &Range,
++    entry: &RangeEntry,
++    place: ThreadPlace,
++) -> std::result::Result<MultiLine, String> {
++    let differences = match range.load(entry.id) {
++        Ok(RangeFile::Texts { differences, .. }) => differences,
++        Ok(
++            RangeFile::Binary
++            | RangeFile::TooLarge { .. }
++            | RangeFile::NotUtf8 { .. }
++            | RangeFile::ModeOnly { .. }
++            | RangeFile::KindChanged { .. }
++            | RangeFile::Submodule { .. },
++        ) => return Err(NO_LINES.to_owned()),
++        Err(error) => return Err(error.to_string()),
++    };
++    multi_line(entry, &differences, place).map_err(str::to_owned)
++}
++
+ fn pending(target: &LinedUp, text: &str, draft_note: u64) -> Posting {
+     let named = &target.merge_request.named;
+     Posting::Pending {
+diff --git a/crates/review/src/thread_file.rs b/crates/review/src/thread_file.rs
+index 22d6a4a..34bd256 100644
+--- a/crates/review/src/thread_file.rs
++++ b/crates/review/src/thread_file.rs
+@@ -5,10 +5,14 @@ use std::path::{Path, PathBuf};
+ 
+ use serde::{Deserialize, Serialize};
+ 
+-use crate::{Error, Message, MessageId, Result, ThreadId, ThreadLine};
++use crate::{Error, Message, MessageId, Result, ThreadId, ThreadPlace};
++
++mod format_1;
++
++use format_1::{FORMAT_1, Format1File};
+ 
+ pub(crate) const THREADS_FILE: &str = "threads.json";
+-const FORMAT: u32 = 1;
++const FORMAT: u32 = 2;
+ const FIRST_THREAD: ThreadId = ThreadId(1);
+ const FIRST_MESSAGE: MessageId = MessageId(1);
+ const TEMP_SUFFIX: &str = ".tmp";
+@@ -28,7 +32,7 @@ pub(crate) struct ThreadFile {
+ pub(crate) struct StoredThread {
+     pub(crate) id: ThreadId,
+     pub(crate) path: String,
+-    pub(crate) line: ThreadLine,
++    pub(crate) place: ThreadPlace,
+     pub(crate) session: Option<String>,
+     pub(crate) messages: Vec<Message>,
+ }
+@@ -118,7 +122,7 @@ impl ThreadFile {
+     }
+ 
+     /// What makes a parsed file unusable: no id left for a new thread or message, an id repeated or at or
+-    /// above its counter, or a thread without messages.
++    /// above its counter, a place that runs backwards, or a thread without messages.
+     fn problem(&self) -> Option<String> {
+         if let Some(message) = no_room_left(self.next_thread, self.next_message) {
+             return Some(message);
+@@ -135,6 +139,12 @@ impl ThreadFile {
+                     thread.id.0, self.next_thread.0
+                 ));
+             }
++            if !thread.place.runs_forward() {
++                return Some(format!(
++                    "the thread {}'s first line comes after its last",
++                    thread.id.0
++                ));
++            }
+             if thread.messages.is_empty() {
+                 return Some(format!("the thread {} has no messages", thread.id.0));
+             }
+@@ -199,11 +209,15 @@ fn parsed(path: &Path, bytes: &[u8]) -> Result<ThreadFile> {
+             format,
+         });
+     }
+-    if format != FORMAT {
+-        return Err(broken(path, format!("format {format} is not {FORMAT}")));
+-    }
+-    let file: ThreadFile =
+-        serde_json::from_slice(bytes).map_err(|error| broken(path, error.to_string()))?;
++    let file = if format == FORMAT {
++        serde_json::from_slice::<ThreadFile>(bytes)
++    } else if format == FORMAT_1 {
++        serde_json::from_slice::<Format1File>(bytes).map(Format1File::current)
++    } else {
++        let message = format!("format {format} is not {FORMAT_1} or {FORMAT}");
++        return Err(broken(path, message));
++    };
++    let file = file.map_err(|error| broken(path, error.to_string()))?;
+     match file.problem() {
+         Some(message) => Err(broken(path, message)),
+         None => Ok(file),
+@@ -250,19 +264,34 @@ mod tests {
+     const MESSAGE_1: &str =
+         r#"{"id":1,"body":{"kind":"note","text":"a"},"written":0,"posting":{"kind":"notQueued"}}"#;
+ 
+-    fn thread(id: u32, messages: &str) -> String {
++    const ONE_LINE: &str =
++        r#"{"start":{"kind":"added","right":0},"end":{"kind":"added","right":0}}"#;
++
++    fn thread_on(id: u32, place: &str, messages: &str) -> String {
+         format!(
+-            r#"{{"id":{id},"path":"a.txt","line":{{"kind":"added","right":0}},"session":null,"messages":[{messages}]}}"#
++            r#"{{"id":{id},"path":"a.txt","place":{place},"session":null,"messages":[{messages}]}}"#
+         )
+     }
+ 
++    fn thread(id: u32, messages: &str) -> String {
++        thread_on(id, ONE_LINE, messages)
++    }
++
+     fn file(next_thread: u32, next_message: u32, threads: &[String]) -> String {
+         format!(
+-            r#"{{"format":1,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
++            r#"{{"format":2,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
+             threads.join(",")
+         )
+     }
+ 
++    #[test]
++    fn a_backward_place_is_broken() {
++        let backward =
++            r#"{"start":{"kind":"unchanged","left":5,"right":5},"end":{"kind":"added","right":2}}"#;
++        let message = problem_of(&file(3, 2, &[thread_on(2, backward, MESSAGE_1)]));
++        assert_eq!(message, "the thread 2's first line comes after its last");
++    }
++
+     #[test]
+     fn a_thread_id_at_next_thread_is_broken_so_ids_never_repeat() {
+         let message = problem_of(&file(1, 2, &[thread(1, MESSAGE_1)]));
+@@ -301,7 +330,7 @@ mod tests {
+ 
+     #[test]
+     fn format_0_is_broken_not_newer() {
+-        assert_eq!(problem_of(r#"{"format":0}"#), "format 0 is not 1");
++        assert_eq!(problem_of(r#"{"format":0}"#), "format 0 is not 1 or 2");
+     }
+ 
+     #[test]
+diff --git a/crates/review/src/thread_file/format_1.rs b/crates/review/src/thread_file/format_1.rs
+new file mode 100644
+index 0000000..9b1bc1a
+--- /dev/null
++++ b/crates/review/src/thread_file/format_1.rs
+@@ -0,0 +1,88 @@
++use serde::Deserialize;
++
++use super::{FORMAT, StoredThread, ThreadFile};
++use crate::{Message, MessageId, ThreadId, ThreadLine, ThreadPlace};
++
++pub(super) const FORMAT_1: u32 = 1;
++
++/// `threads.json` format 1: each thread on one line.
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(super) struct Format1File {
++    next_thread: ThreadId,
++    next_message: MessageId,
++    threads: Vec<Format1Thread>,
++}
++
++#[derive(Deserialize)]
++struct Format1Thread {
++    id: ThreadId,
++    path: String,
++    line: ThreadLine,
++    session: Option<String>,
++    messages: Vec<Message>,
++}
++
++impl Format1File {
++    /// The same threads, each on its line's one-line place; the next write is the current format.
++    pub(super) fn current(self) -> ThreadFile {
++        let mut threads = Vec::new();
++        for thread in self.threads {
++            threads.push(StoredThread {
++                id: thread.id,
++                path: thread.path,
++                place: ThreadPlace::one_line(thread.line),
++                session: thread.session,
++                messages: thread.messages,
++            });
++        }
++        ThreadFile {
++            format: FORMAT,
++            next_thread: self.next_thread,
++            next_message: self.next_message,
++            threads,
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::path::Path;
++
++    use yamt_merge_core::{LeftLine, RightLine};
++
++    use super::*;
++    use crate::thread_file::{THREADS_FILE, parsed};
++    use crate::{MessageBody, Posting};
++
++    #[test]
++    fn format_1_line_reads_as_a_one_line_place() {
++        let format_1 = r#"{"format":1,"nextThread":2,"nextMessage":2,"threads":[{"id":1,"path":"a.txt","line":{"kind":"unchangedOnLeft","left":3,"right":4},"session":"omp-1","messages":[{"id":1,"body":{"kind":"note","text":"a"},"written":0,"posting":{"kind":"notQueued"}}]}]}"#;
++        let read = parsed(Path::new(THREADS_FILE), format_1.as_bytes()).unwrap();
++        let line = ThreadLine::UnchangedOnLeft {
++            left: LeftLine(3),
++            right: RightLine(4),
++        };
++        let message = Message {
++            id: MessageId(1),
++            body: MessageBody::Note {
++                text: "a".to_owned(),
++            },
++            written: 0,
++            posting: Posting::NotQueued,
++        };
++        let expected = ThreadFile {
++            format: FORMAT,
++            next_thread: ThreadId(2),
++            next_message: MessageId(2),
++            threads: vec![StoredThread {
++                id: ThreadId(1),
++                path: "a.txt".to_owned(),
++                place: ThreadPlace::one_line(line),
++                session: Some("omp-1".to_owned()),
++                messages: vec![message],
++            }],
++        };
++        assert_eq!(read, expected);
++    }
++}
+diff --git a/crates/review/src/thread_store.rs b/crates/review/src/thread_store.rs
+index 86a488d..df7de4d 100644
+--- a/crates/review/src/thread_store.rs
++++ b/crates/review/src/thread_store.rs
+@@ -6,7 +6,7 @@ use yamt_range::{Range, RangeFileId};
+ use crate::thread_file::{StoredThread, THREADS_FILE, ThreadFile, read_threads, write_threads};
+ use crate::{
+     Error, Message, MessageBody, MessageId, Posting, Result, Thread, ThreadAdded, ThreadId,
+-    ThreadLine, ThreadList,
++    ThreadList, ThreadPlace,
+ };
+ 
+ pub(crate) mod waiting;
+@@ -37,7 +37,7 @@ impl ThreadStore {
+                 threads.push(Thread {
+                     id: stored.id,
+                     file,
+-                    line: stored.line,
++                    place: stored.place,
+                     messages: stored.messages.clone(),
+                     session: stored.session.clone(),
+                 });
+@@ -60,23 +60,26 @@ impl ThreadStore {
+         paths
+     }
+ 
+-    /// A new thread on `line` of `file`, with `text` as its first message.
++    /// A new thread on `place` of `file`, with `text` as its first message.
+     pub fn add_thread(
+         &mut self,
+         range: &Range,
+         file: RangeFileId,
+-        line: ThreadLine,
++        place: ThreadPlace,
+         text: &str,
+     ) -> Result<ThreadAdded> {
+         require_text(text)?;
+         let entry = range.entry(file).ok_or(Error::UnknownFile { file })?;
++        if !place.runs_forward() {
++            return Err(Error::BackwardPlace);
++        }
+         let mut next = self.file.clone();
+         let id = next.take_thread_id(&self.path)?;
+         let message = new_message(next.take_message_id(&self.path)?, note(text));
+         next.threads.push(StoredThread {
+             id,
+             path: entry.path.clone(),
+-            line,
++            place,
+             session: None,
+             messages: vec![message],
+         });
+diff --git a/crates/review/src/thread_store/waiting.rs b/crates/review/src/thread_store/waiting.rs
+index e55e5de..af291ee 100644
+--- a/crates/review/src/thread_store/waiting.rs
++++ b/crates/review/src/thread_store/waiting.rs
+@@ -1,14 +1,14 @@
+ use yamt_range::{Range, RangeFileId};
+ 
+ use super::{ThreadStore, file_at};
+-use crate::{Error, MessageId, Posting, Result, ThreadLine};
++use crate::{Error, MessageId, Posting, Result, ThreadPlace};
+ 
+ /// A message waiting for the next send: queued, or refused and sent again. Its text is read again before the post.
+ #[derive(Clone, Debug, PartialEq, Eq)]
+ pub(crate) struct QueuedMessage {
+     pub(crate) message: MessageId,
+     pub(crate) file: RangeFileId,
+-    pub(crate) line: ThreadLine,
++    pub(crate) place: ThreadPlace,
+ }
+ 
+ impl ThreadStore {
+@@ -24,7 +24,7 @@ impl ThreadStore {
+                     queued.push(QueuedMessage {
+                         message: message.id,
+                         file,
+-                        line: thread.line,
++                        place: thread.place,
+                     });
+                 }
+             }
+@@ -89,6 +89,7 @@ mod tests {
+     use yamt_range::{RangeSpec, Resolved};
+ 
+     use super::*;
++    use crate::ThreadLine;
+     use crate::thread_file::THREADS_FILE;
+ 
+     const STORED: &str = r#"{"format":1,"nextThread":3,"nextMessage":6,"threads":[
+@@ -136,15 +137,15 @@ mod tests {
+         let queued: Vec<_> = store
+             .queued(&range(&repo, "main..local"))
+             .into_iter()
+-            .map(|q| (q.message.0, q.file, q.line))
++            .map(|q| (q.message.0, q.file, q.place))
+             .collect();
+-        let line = ThreadLine::Added {
++        let place = ThreadPlace::one_line(ThreadLine::Added {
+             right: RightLine(4),
+-        };
++        });
+         let expected = vec![
+-            (5, RangeFileId(1), line),
+-            (1, RangeFileId(1), line),
+-            (4, RangeFileId(0), line),
++            (5, RangeFileId(1), place),
++            (1, RangeFileId(1), place),
++            (4, RangeFileId(0), place),
+         ];
+         assert_eq!(queued, expected);
+     }
+diff --git a/crates/review/src/thread_types.rs b/crates/review/src/thread_types.rs
+index 06f7615..345e54d 100644
+--- a/crates/review/src/thread_types.rs
++++ b/crates/review/src/thread_types.rs
+@@ -41,6 +41,101 @@ pub enum ThreadLine {
+     },
+ }
+ 
++impl ThreadLine {
++    /// The line without the column it is shown in.
++    #[must_use]
++    pub fn diff_line(self) -> DiffLine {
++        match self {
++            ThreadLine::Removed { left } => DiffLine::Removed { left },
++            ThreadLine::Added { right } => DiffLine::Added { right },
++            ThreadLine::UnchangedOnLeft { left, right }
++            | ThreadLine::UnchangedOnRight { left, right } => DiffLine::Unchanged { left, right },
++        }
++    }
++}
++
++/// A line of the diff as GitLab's one-column view lists it: an unchanged line once, a change's removed lines, then its
++/// added lines.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiffLine {
++    /// A left line inside a difference.
++    Removed {
++        /// The line.
++        left: LeftLine,
++    },
++    /// A right line inside a difference.
++    Added {
++        /// The line.
++        right: RightLine,
++    },
++    /// An unchanged line.
++    Unchanged {
++        /// The line in the left text.
++        left: LeftLine,
++        /// The same line in the right text.
++        right: RightLine,
++    },
++}
++
++impl DiffLine {
++    fn left(self) -> Option<LeftLine> {
++        match self {
++            DiffLine::Removed { left } | DiffLine::Unchanged { left, .. } => Some(left),
++            DiffLine::Added { .. } => None,
++        }
++    }
++
++    fn right(self) -> Option<RightLine> {
++        match self {
++            DiffLine::Added { right } | DiffLine::Unchanged { right, .. } => Some(right),
++            DiffLine::Removed { .. } => None,
++        }
++    }
++}
++
++/// The lines a thread is on, from `start` to `end` in GitLab's order, both included; one line when `start` is `end`'s
++/// line. `end` decides the column the box sits in.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++pub struct ThreadPlace {
++    /// The first line.
++    pub start: DiffLine,
++    /// The last line, in the column it was picked in.
++    pub end: ThreadLine,
++}
++
++impl ThreadPlace {
++    /// The place of one line.
++    #[must_use]
++    pub fn one_line(line: ThreadLine) -> ThreadPlace {
++        ThreadPlace {
++            start: line.diff_line(),
++            end: line,
++        }
++    }
++
++    /// Whether the place holds only its end line.
++    #[must_use]
++    pub fn is_one_line(self) -> bool {
++        self.start == self.end.diff_line()
++    }
++
++    /// Where both ends have a left line, start's is not after end's; the same for right lines.
++    #[must_use]
++    pub fn runs_forward(self) -> bool {
++        let end = self.end.diff_line();
++        let left_forward = match (self.start.left(), end.left()) {
++            (Some(start), Some(end)) => start <= end,
++            (None, _) | (_, None) => true,
++        };
++        let right_forward = match (self.start.right(), end.right()) {
++            (Some(start), Some(end)) => start <= end,
++            (None, _) | (_, None) => true,
++        };
++        left_forward && right_forward
++    }
++}
++
+ /// What a message says.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
+ #[serde(tag = "kind", rename_all = "camelCase")]
+@@ -105,15 +200,15 @@ pub struct Message {
+     pub posting: Posting,
+ }
+ 
+-/// A thread on one line of one file of the range.
++/// A thread on lines of one file of the range.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+ pub struct Thread {
+     /// The thread's id.
+     pub id: ThreadId,
+     /// The file it is on.
+     pub file: RangeFileId,
+-    /// The line it is on.
+-    pub line: ThreadLine,
++    /// The lines it is on.
++    pub place: ThreadPlace,
+     /// Its messages in the order they were added; never empty.
+     pub messages: Vec<Message>,
+     /// The AI session the thread's answers live in.
+@@ -135,3 +230,86 @@ pub struct ThreadAdded {
+     /// Every thread, the new one last.
+     pub list: ThreadList,
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn unchanged(left: u32, right: u32) -> DiffLine {
++        DiffLine::Unchanged {
++            left: LeftLine(left),
++            right: RightLine(right),
++        }
++    }
++
++    fn removed(left: u32) -> DiffLine {
++        DiffLine::Removed {
++            left: LeftLine(left),
++        }
++    }
++
++    fn added(right: u32) -> ThreadLine {
++        ThreadLine::Added {
++            right: RightLine(right),
++        }
++    }
++
++    fn removed_end(left: u32) -> ThreadLine {
++        ThreadLine::Removed {
++            left: LeftLine(left),
++        }
++    }
++
++    fn on_left(left: u32, right: u32) -> ThreadLine {
++        ThreadLine::UnchangedOnLeft {
++            left: LeftLine(left),
++            right: RightLine(right),
++        }
++    }
++
++    fn place(start: DiffLine, end: ThreadLine) -> ThreadPlace {
++        ThreadPlace { start, end }
++    }
++
++    #[test]
++    fn one_line_places_run_forward_and_are_one_line() {
++        let on_right = ThreadLine::UnchangedOnRight {
++            left: LeftLine(4),
++            right: RightLine(6),
++        };
++        for line in [added(3), removed_end(2), on_left(4, 6), on_right] {
++            let one = ThreadPlace::one_line(line);
++            assert_eq!(one.end, line);
++            assert!(one.is_one_line(), "{one:?}");
++            assert!(one.runs_forward(), "{one:?}");
++        }
++        assert_eq!(ThreadPlace::one_line(on_right).start, unchanged(4, 6));
++        assert!(!place(unchanged(3, 5), on_left(4, 6)).is_one_line());
++    }
++
++    #[test]
++    fn a_start_before_its_end_on_the_left_or_on_the_right_runs_forward() {
++        assert!(place(removed(2), removed_end(5)).runs_forward());
++        assert!(place(unchanged(2, 4), on_left(5, 7)).runs_forward());
++        assert!(place(unchanged(2, 4), added(7)).runs_forward());
++        assert!(place(unchanged(5, 7), on_left(5, 7)).runs_forward());
++    }
++
++    #[test]
++    fn a_start_after_its_end_on_either_side_does_not_run_forward() {
++        assert!(!place(removed(6), removed_end(5)).runs_forward());
++        assert!(!place(unchanged(6, 4), on_left(5, 7)).runs_forward());
++        assert!(!place(unchanged(2, 8), added(7)).runs_forward());
++        assert!(!place(unchanged(5, 8), on_left(5, 7)).runs_forward());
++    }
++
++    // An added start and a removed end share no side, so the order of the two is not seen here: only the
++    // differences tell, and the editor orders by them.
++    #[test]
++    fn an_added_start_and_a_removed_end_run_forward_unseen() {
++        let start = DiffLine::Added {
++            right: RightLine(9),
++        };
++        assert!(place(start, removed_end(1)).runs_forward());
++    }
++}
+diff --git a/crates/review/tests/note_edits.rs b/crates/review/tests/note_edits.rs
+index ada4bd9..5d019f9 100644
+--- a/crates/review/tests/note_edits.rs
++++ b/crates/review/tests/note_edits.rs
+@@ -7,7 +7,7 @@ use yamt_range::{Range, RangeFileId};
+ use yamt_review::{Error, MessageId, Posting, ThreadId, ThreadList, ThreadStore};
+ 
+ use stored_threads::{
+-    EVERY_KIND, added_line, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
++    EVERY_KIND, added_place, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
+     only_thread, range, refused, repo, store_with_one_thread, stored,
+ };
+ 
+@@ -119,13 +119,13 @@ fn a_thread_loses_its_last_message_and_goes_while_its_neighbours_keep_order_and_
+     let list = store.delete_message(&range, MessageId(3)).unwrap();
+ 
+     let ids: Vec<(u32, u32)> = list.threads.iter().map(|t| (t.id.0, t.file.0)).collect();
+-    assert_eq!(ids, [(1, 0), (3, 2), (4, 2)]);
++    assert_eq!(ids, [(1, 0), (3, 2), (4, 2), (5, 2)]);
+     assert_eq!(list.threads[0], before.threads[0]);
+     assert_eq!(list.threads[1..], before.threads[2..]);
+     let written = json_on_disk(&folder);
+-    assert_eq!(written["threads"].as_array().unwrap().len(), 3);
+-    assert_eq!(written["nextThread"], 5);
+-    assert_eq!(written["nextMessage"], 7);
++    assert_eq!(written["threads"].as_array().unwrap().len(), 4);
++    assert_eq!(written["nextThread"], 6);
++    assert_eq!(written["nextMessage"], 8);
+     assert_eq!(reopened_list(&folder, &range), list);
+ }
+ 
+@@ -151,7 +151,7 @@ fn ids_stay_fresh_after_a_delete() {
+     assert_eq!(emptied.threads, []);
+     let mut reopened = ThreadStore::open(folder.path()).unwrap();
+     let added = reopened
+-        .add_thread(&range, RangeFileId(0), added_line(), "Again")
++        .add_thread(&range, RangeFileId(0), added_place(), "Again")
+         .unwrap();
+     assert_eq!(added.thread, ThreadId(2));
+     assert_eq!(only_thread(&added.list).messages[0].id, MessageId(4));
+diff --git a/crates/review/tests/review.rs b/crates/review/tests/review.rs
+index 118cb84..d6436b1 100644
+--- a/crates/review/tests/review.rs
++++ b/crates/review/tests/review.rs
+@@ -13,8 +13,8 @@ use yamt_gitio::Glab;
+ use yamt_merge_core::{LeftLine, RightLine};
+ use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
+ use yamt_review::{
+-    GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
+-    SendReply, ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
++    DiffLine, GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
++    SendReply, ThreadLine, ThreadList, ThreadPlace, ThreadStore, check_gitlab, send_queue,
+ };
+ 
+ /// `scripts/range-repo.sh`'s commits, fixed by its names and dates.
+@@ -29,6 +29,9 @@ const REMOVED_TEXT: &str = "Who still uses the mock boards?";
+ const REFUSAL: &str = r#"400 Bad request - Note {:line_code=>["can't be blank"]}"#;
+ const POST_ARGV: &str =
+     "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
++const BOARD: &str = "src/board/board.ts";
++const IN_COLUMN_TEXT: &str = "Why a second reminder here?";
++const BOTH_SIDES_TEXT: &str = "Why replace the limit check?";
+ 
+ fn in_this_repository(relative: &str) -> PathBuf {
+     Path::new(env!("CARGO_MANIFEST_DIR"))
+@@ -123,18 +126,58 @@ impl Review {
+     }
+ 
+     fn on(range_text: &str) -> Review {
++        let threads = [
++            (
++                "src/board/reminders.ts",
++                ThreadPlace::one_line(added(2)),
++                ADDED_TEXT,
++            ),
++            (
++                "docs/keys.md",
++                ThreadPlace::one_line(unchanged(0, 0)),
++                RENAMED_TEXT,
++            ),
++            (
++                "src/api/mockBoards.ts",
++                ThreadPlace::one_line(removed(1)),
++                REMOVED_TEXT,
++            ),
++        ];
++        Review::with_threads(range_text, &threads)
++    }
++
++    /// Two threads on `src/board/board.ts`, each first message queued: from the unchanged L197/R201 to the added
++    /// R204 (in one column), then from the removed L200 to the added R204 (across both); 0-based below.
++    fn ranges() -> Review {
++        let in_column = ThreadPlace {
++            start: DiffLine::Unchanged {
++                left: LeftLine(196),
++                right: RightLine(200),
++            },
++            end: added(203),
++        };
++        let both_sides = ThreadPlace {
++            start: DiffLine::Removed {
++                left: LeftLine(199),
++            },
++            end: added(203),
++        };
++        let threads = [
++            (BOARD, in_column, IN_COLUMN_TEXT),
++            (BOARD, both_sides, BOTH_SIDES_TEXT),
++        ];
++        Review::with_threads("main...feature", &threads)
++    }
++
++    /// A thread per `(path, place, text)`, its first message queued with `text`.
++    fn with_threads(range_text: &str, threads: &[(&str, ThreadPlace, &str)]) -> Review {
+         let repo = range_repo();
+         let range = range_of(&repo, range_text);
+         let pair = tempfile::tempdir().unwrap();
+         let mut store = ThreadStore::open(pair.path()).unwrap();
+-        let threads = [
+-            ("src/board/reminders.ts", added(2), ADDED_TEXT),
+-            ("docs/keys.md", unchanged(0, 0), RENAMED_TEXT),
+-            ("src/api/mockBoards.ts", removed(1), REMOVED_TEXT),
+-        ];
+-        for (path, line, text) in threads {
++        for &(path, place, text) in threads {
+             let added = store
+-                .add_thread(&range, file(&range, path), line, "first thought")
++                .add_thread(&range, file(&range, path), place, "first thought")
+                 .unwrap();
+             let thread = added.list.threads.last().unwrap();
+             store.queue(&range, thread.messages[0].id, text).unwrap();
+@@ -706,3 +749,85 @@ fn several_line_up_as_the_one_that_matches_and_none_name_what_was_looked_at() {
+         GitLabCheck::NotLinedUp { why }
+     );
+ }
++
++/// The draft-notes body of a note on board.ts that ends on the added R204, with GitLab's `line_range`.
++fn board_range_body(note: &str, line_range: &Value) -> Value {
++    json!({
++        "note": note,
++        "position": {
++            "position_type": "text",
++            "base_sha": MERGE_BASE,
++            "start_sha": MAIN,
++            "head_sha": FEATURE,
++            "old_path": BOARD,
++            "new_path": BOARD,
++            "new_line": 204,
++            "line_range": line_range,
++        },
++    })
++}
++
++// The line codes' hash is `printf '%s' src/board/board.ts | sha1sum`, written out so the test does not share the
++// code's hashing.
++#[test]
++fn a_range_posts_both_ends_with_gitlabs_line_codes() {
++    let review = Review::ranges();
++    let fake = Fake::new("line-range");
++
++    let (reply, steps) = review.send(&fake.glab);
++
++    let SendReply::Sent { sent: 2, .. } = reply else {
++        panic!("not sent twice: {reply:?}");
++    };
++    assert_eq!(steps, progress(&[1, 2], 2));
++    let added_end = json!({
++        "line_code": "e783a9be490e9bcfa1e4a239bf6e62d2ab163459_201_204",
++        "type": "new",
++        "new_line": 204,
++    });
++    let in_column = json!({
++        "start": {
++            "line_code": "e783a9be490e9bcfa1e4a239bf6e62d2ab163459_197_201",
++            "old_line": 197,
++            "new_line": 201,
++        },
++        "end": added_end,
++    });
++    let both_sides = json!({
++        "start": {
++            "line_code": "e783a9be490e9bcfa1e4a239bf6e62d2ab163459_200_204",
++            "type": "old",
++            "old_line": 200,
++        },
++        "end": added_end,
++    });
++    let expected = [
++        board_range_body(IN_COLUMN_TEXT, &in_column),
++        board_range_body(BOTH_SIDES_TEXT, &both_sides),
++    ];
++    assert_eq!(fake.bodies(), expected);
++    let posted = vec![pending(IN_COLUMN_TEXT, 201), pending(BOTH_SIDES_TEXT, 202)];
++    assert_eq!(review.postings_on_disk(), posted);
++}
++
++#[test]
++fn a_draft_stands_in_for_a_range_only_when_its_range_matches() {
++    let review = Review::ranges();
++    let fake = Fake::new("line-range-drafted");
++
++    let (reply, _) = review.send(&fake.glab);
++
++    let SendReply::Sent { sent: 2, .. } = reply else {
++        panic!("not sent twice: {reply:?}");
++    };
++    let expected = vec![pending(IN_COLUMN_TEXT, 401), pending(BOTH_SIDES_TEXT, 501)];
++    assert_eq!(review.postings_on_disk(), expected);
++    let notes: Vec<String> = fake
++        .bodies()
++        .iter()
++        .map(|body| note_of(body).to_owned())
++        .collect();
++    assert_eq!(notes, [BOTH_SIDES_TEXT]);
++    let posts = fake.argv().into_iter().filter(|argv| argv == POST_ARGV);
++    assert_eq!(posts.count(), 1, "{}", fake.log());
++}
+diff --git a/crates/review/tests/stored_threads/mod.rs b/crates/review/tests/stored_threads/mod.rs
+index 5a0bf67..736b6d3 100644
+--- a/crates/review/tests/stored_threads/mod.rs
++++ b/crates/review/tests/stored_threads/mod.rs
+@@ -6,7 +6,7 @@ use serde_json::Value;
+ use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo};
+ use yamt_merge_core::RightLine;
+ use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
+-use yamt_review::{Error, MessageBody, Thread, ThreadLine, ThreadList, ThreadStore};
++use yamt_review::{Error, MessageBody, Thread, ThreadLine, ThreadList, ThreadPlace, ThreadStore};
+ 
+ pub const THREADS: &str = "threads.json";
+ 
+@@ -55,10 +55,10 @@ pub fn json_on_disk(folder: &TempDir) -> Value {
+     serde_json::from_slice(&on_disk(folder)).unwrap()
+ }
+ 
+-pub fn added_line() -> ThreadLine {
+-    ThreadLine::Added {
++pub fn added_place() -> ThreadPlace {
++    ThreadPlace::one_line(ThreadLine::Added {
+         right: RightLine(0),
+-    }
++    })
+ }
+ 
+ pub fn note(text: &str) -> MessageBody {
+@@ -78,7 +78,7 @@ pub fn ai_answer(session: &str, turn: u32) -> MessageBody {
+ pub fn store_with_one_thread(folder: &TempDir, range: &Range) -> ThreadStore {
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     store
+-        .add_thread(range, RangeFileId(0), added_line(), "Why 300?")
++        .add_thread(range, RangeFileId(0), added_place(), "Why 300?")
+         .unwrap();
+     store
+ }
+@@ -104,24 +104,38 @@ pub fn only_thread(list: &ThreadList) -> &Thread {
+     &list.threads[0]
+ }
+ 
++/// Today's format: one thread per kind of end line, each on one line, and thread 5 on a range across both sides.
+ pub const EVERY_KIND: &str = r#"{
+-  "format": 1,
+-  "nextThread": 5,
+-  "nextMessage": 7,
++  "format": 2,
++  "nextThread": 6,
++  "nextMessage": 8,
+   "threads": [
+-    { "id": 1, "path": "a.txt", "line": { "kind": "removed", "left": 3 }, "session": "omp-session-1",
++    { "id": 1, "path": "a.txt",
++      "place": { "start": { "kind": "removed", "left": 3 }, "end": { "kind": "removed", "left": 3 } },
++      "session": "omp-session-1",
+       "messages": [
+         { "id": 1, "body": { "kind": "note", "text": "Why 300?" }, "written": 1761300000, "posting": { "kind": "notQueued" } },
+         { "id": 2, "body": { "kind": "aiAnswer", "session": "omp-session-0", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
+-    { "id": 2, "path": "b.txt", "line": { "kind": "added", "right": 4 }, "session": null,
++    { "id": 2, "path": "b.txt",
++      "place": { "start": { "kind": "added", "right": 4 }, "end": { "kind": "added", "right": 4 } },
++      "session": null,
+       "messages": [
+         { "id": 3, "body": { "kind": "note", "text": "t" }, "written": 1761300002, "posting": { "kind": "refused", "text": "t", "reason": "400 Bad request" } } ] },
+-    { "id": 3, "path": "c.txt", "line": { "kind": "unchangedOnLeft", "left": 5, "right": 6 }, "session": null,
++    { "id": 3, "path": "c.txt",
++      "place": { "start": { "kind": "unchanged", "left": 5, "right": 6 }, "end": { "kind": "unchangedOnLeft", "left": 5, "right": 6 } },
++      "session": null,
+       "messages": [
+         { "id": 4, "body": { "kind": "note", "text": "p" }, "written": 1761300003,
+           "posting": { "kind": "pending", "text": "p", "draft_note": 12345678901, "merge_request": "!12", "link": "https://gitlab.example/g/p/-/merge_requests/12/diffs" } } ] },
+-    { "id": 4, "path": "c.txt", "line": { "kind": "unchangedOnRight", "left": 7, "right": 8 }, "session": null,
++    { "id": 4, "path": "c.txt",
++      "place": { "start": { "kind": "unchanged", "left": 7, "right": 8 }, "end": { "kind": "unchangedOnRight", "left": 7, "right": 8 } },
++      "session": null,
+       "messages": [
+-        { "id": 6, "body": { "kind": "note", "text": "u" }, "written": 1761300004, "posting": { "kind": "notQueued" } } ] }
++        { "id": 6, "body": { "kind": "note", "text": "u" }, "written": 1761300004, "posting": { "kind": "notQueued" } } ] },
++    { "id": 5, "path": "c.txt",
++      "place": { "start": { "kind": "removed", "left": 1 }, "end": { "kind": "added", "right": 2 } },
++      "session": null,
++      "messages": [
++        { "id": 7, "body": { "kind": "note", "text": "r" }, "written": 1761300005, "posting": { "kind": "notQueued" } } ] }
+   ]
+ }"#;
+diff --git a/crates/review/tests/threads.rs b/crates/review/tests/threads.rs
+index 1aba89d..0f9e774 100644
+--- a/crates/review/tests/threads.rs
++++ b/crates/review/tests/threads.rs
+@@ -7,15 +7,41 @@ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ use serde_json::Value;
+ use yamt_conflict_repo::TempDir;
+-use yamt_merge_core::LeftLine;
++use yamt_merge_core::{LeftLine, RightLine};
+ use yamt_range::RangeFileId;
+-use yamt_review::{Error, MessageId, Posting, ThreadAdded, ThreadId, ThreadLine, ThreadStore};
++use yamt_review::{
++    DiffLine, Error, MessageId, Posting, ThreadAdded, ThreadId, ThreadLine, ThreadPlace,
++    ThreadStore,
++};
+ 
+ use stored_threads::{
+-    EVERY_KIND, THREADS, added_line, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
++    EVERY_KIND, THREADS, added_place, ai_answer, bodies, json_on_disk, local_range, note, on_disk,
+     only_thread, range, refused, repo, store_with_one_thread, stored, threads_path,
+ };
+ 
++/// `EVERY_KIND`'s first four threads as format 1 stored them: each on its `line`.
++const FORMAT_1_EVERY_KIND: &str = r#"{
++  "format": 1,
++  "nextThread": 5,
++  "nextMessage": 7,
++  "threads": [
++    { "id": 1, "path": "a.txt", "line": { "kind": "removed", "left": 3 }, "session": "omp-session-1",
++      "messages": [
++        { "id": 1, "body": { "kind": "note", "text": "Why 300?" }, "written": 1761300000, "posting": { "kind": "notQueued" } },
++        { "id": 2, "body": { "kind": "aiAnswer", "session": "omp-session-0", "turn": 3 }, "written": 1761300001, "posting": { "kind": "queued", "text": "Why 300 ms?" } } ] },
++    { "id": 2, "path": "b.txt", "line": { "kind": "added", "right": 4 }, "session": null,
++      "messages": [
++        { "id": 3, "body": { "kind": "note", "text": "t" }, "written": 1761300002, "posting": { "kind": "refused", "text": "t", "reason": "400 Bad request" } } ] },
++    { "id": 3, "path": "c.txt", "line": { "kind": "unchangedOnLeft", "left": 5, "right": 6 }, "session": null,
++      "messages": [
++        { "id": 4, "body": { "kind": "note", "text": "p" }, "written": 1761300003,
++          "posting": { "kind": "pending", "text": "p", "draft_note": 12345678901, "merge_request": "!12", "link": "https://gitlab.example/g/p/-/merge_requests/12/diffs" } } ] },
++    { "id": 4, "path": "c.txt", "line": { "kind": "unchangedOnRight", "left": 7, "right": 8 }, "session": null,
++      "messages": [
++        { "id": 6, "body": { "kind": "note", "text": "u" }, "written": 1761300004, "posting": { "kind": "notQueued" } } ] }
++  ]
++}"#;
++
+ fn refusal(folder: &TempDir) -> Error {
+     match ThreadStore::open(folder.path()) {
+         Ok(_) => panic!("the store opened"),
+@@ -57,8 +83,18 @@ fn a_missing_file_is_an_empty_store_and_nothing_is_written() {
+     assert_eq!(folder_names(&folder), Vec::<String>::new());
+ }
+ 
++/// Thread 5 of `EVERY_KIND`: from the removed line 1 to the added line 2.
++fn both_sides() -> ThreadPlace {
++    ThreadPlace {
++        start: DiffLine::Removed { left: LeftLine(1) },
++        end: ThreadLine::Added {
++            right: RightLine(2),
++        },
++    }
++}
++
+ #[test]
+-fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
++fn format_2_round_trips_every_body_posting_and_place_kind_and_a_session() {
+     let repo = repo();
+     let range = local_range(&repo);
+     let folder = tempfile::tempdir().unwrap();
+@@ -66,19 +102,13 @@ fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+ 
+     let list = store.list(&range);
+-    let files: Vec<(u32, RangeFileId)> = list.threads.iter().map(|t| (t.id.0, t.file)).collect();
+-    assert_eq!(
+-        files,
+-        [
+-            (1, RangeFileId(0)),
+-            (2, RangeFileId(1)),
+-            (3, RangeFileId(2)),
+-            (4, RangeFileId(2))
+-        ]
+-    );
++    let files: Vec<(u32, u32)> = list.threads.iter().map(|t| (t.id.0, t.file.0)).collect();
++    assert_eq!(files, [(1, 0), (2, 1), (3, 2), (4, 2), (5, 2)]);
+     let first = &list.threads[0];
+     assert_eq!(first.session.as_deref(), Some("omp-session-1"));
+-    assert_eq!(first.line, ThreadLine::Removed { left: LeftLine(3) });
++    let removed = ThreadLine::Removed { left: LeftLine(3) };
++    assert_eq!(first.place, ThreadPlace::one_line(removed));
++    assert_eq!(list.threads[4].place, both_sides());
+     assert_eq!(first.messages[1].body, ai_answer("omp-session-0", 3));
+     assert_eq!(first.messages[1].written, 1_761_300_001);
+     assert_eq!(
+@@ -97,11 +127,102 @@ fn format_1_round_trips_every_body_and_posting_kind_and_a_session() {
+         .as_array_mut()
+         .unwrap()
+         .pop();
+-    written["nextMessage"] = Value::from(7);
++    written["nextMessage"] = Value::from(8);
+     let original: Value = serde_json::from_str(EVERY_KIND).unwrap();
+     assert_eq!(written, original);
+ }
+ 
++#[test]
++fn a_format_1_file_reads_as_one_line_places_and_is_written_as_format_2_by_the_first_change() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    stored(&folder, FORMAT_1_EVERY_KIND);
++    let mut store = ThreadStore::open(folder.path()).unwrap();
++
++    let list = store.list(&range);
++    let on_left = ThreadLine::UnchangedOnLeft {
++        left: LeftLine(5),
++        right: RightLine(6),
++    };
++    assert_eq!(list.threads[2].place, ThreadPlace::one_line(on_left));
++    assert_eq!(on_disk(&folder), FORMAT_1_EVERY_KIND.as_bytes());
++    assert_eq!(folder_names(&folder), [THREADS]);
++
++    let before = now();
++    store.add_note(&range, ThreadId(4), "more").unwrap();
++    let after = now();
++
++    let mut written = json_on_disk(&folder);
++    let added = &mut written["threads"][3]["messages"][1];
++    let at = added["written"].as_u64().unwrap();
++    assert!((before..=after).contains(&at), "{at}");
++    added["written"] = Value::from(0);
++    let mut expected: Value = serde_json::from_str(EVERY_KIND).unwrap();
++    expected["threads"].as_array_mut().unwrap().pop();
++    expected["nextThread"] = Value::from(5);
++    let note = serde_json::json!({ "id": 7, "body": { "kind": "note", "text": "more" }, "written": 0,
++        "posting": { "kind": "notQueued" } });
++    expected["threads"][3]["messages"]
++        .as_array_mut()
++        .unwrap()
++        .push(note);
++    assert_eq!(written, expected);
++}
++
++#[test]
++fn a_range_survives_a_reload() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    let mut store = ThreadStore::open(folder.path()).unwrap();
++
++    let added = store
++        .add_thread(&range, RangeFileId(2), both_sides(), "Why these?")
++        .unwrap();
++
++    assert_eq!(only_thread(&added.list).place, both_sides());
++    let reopened = ThreadStore::open(folder.path()).unwrap().list(&range);
++    assert_eq!(reopened, added.list);
++    let place = serde_json::json!({
++        "start": { "kind": "removed", "left": 1 },
++        "end": { "kind": "added", "right": 2 },
++    });
++    assert_eq!(json_on_disk(&folder)["threads"][0]["place"], place);
++}
++
++#[test]
++fn add_thread_refuses_a_backward_place_and_writes_nothing() {
++    let repo = repo();
++    let range = local_range(&repo);
++    let folder = tempfile::tempdir().unwrap();
++    stored(&folder, EVERY_KIND);
++    let mut store = ThreadStore::open(folder.path()).unwrap();
++    let list = store.list(&range);
++    let backward = ThreadPlace {
++        start: DiffLine::Unchanged {
++            left: LeftLine(5),
++            right: RightLine(5),
++        },
++        end: ThreadLine::Added {
++            right: RightLine(2),
++        },
++    };
++
++    let refused_place = store.add_thread(&range, RangeFileId(2), backward, "Why?");
++
++    assert!(
++        matches!(refused_place, Err(Error::BackwardPlace)),
++        "{refused_place:?}"
++    );
++    let blank = store.add_thread(&range, RangeFileId(2), backward, " ");
++    assert!(matches!(blank, Err(Error::EmptyMessage)), "{blank:?}");
++    let unknown = store.add_thread(&range, RangeFileId(3), backward, "Why?");
++    assert_eq!(refused(unknown), "no file 3 in this range");
++    assert_eq!(on_disk(&folder), EVERY_KIND.as_bytes());
++    assert_eq!(store.list(&range), list);
++}
++
+ #[test]
+ fn a_broken_file_names_line_and_column_and_is_left_unchanged() {
+     let folder = tempfile::tempdir().unwrap();
+@@ -115,11 +236,11 @@ fn a_broken_file_names_line_and_column_and_is_left_unchanged() {
+ #[test]
+ fn a_newer_format_is_refused_and_left_unchanged() {
+     let folder = tempfile::tempdir().unwrap();
+-    let json = r#"{"format":2,"anything":"else"}"#;
++    let json = r#"{"format":3,"anything":"else"}"#;
+     stored(&folder, json);
+     let error = refusal(&folder);
+     assert!(
+-        matches!(&error, Error::NewerFormat { path, format: 2 } if *path == threads_path(&folder)),
++        matches!(&error, Error::NewerFormat { path, format: 3 } if *path == threads_path(&folder)),
+         "{error:?}"
+     );
+     assert_eq!(on_disk(&folder), json.as_bytes());
+@@ -145,15 +266,16 @@ fn message_json(id: u32) -> String {
+ }
+ 
+ fn thread_json(id: u32, messages: &[String]) -> String {
++    let line = r#"{"kind":"added","right":0}"#;
+     format!(
+-        r#"{{"id":{id},"path":"a.txt","line":{{"kind":"added","right":0}},"session":null,"messages":[{}]}}"#,
++        r#"{{"id":{id},"path":"a.txt","place":{{"start":{line},"end":{line}}},"session":null,"messages":[{}]}}"#,
+         messages.join(",")
+     )
+ }
+ 
+ fn file_json(next_thread: u32, next_message: u32, threads: &[String]) -> String {
+     format!(
+-        r#"{{"format":1,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
++        r#"{{"format":2,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
+         threads.join(",")
+     )
+ }
+@@ -198,15 +320,15 @@ fn adding_writes_the_thread_with_its_first_message_and_new_ids() {
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     let before = now();
+     let added = store
+-        .add_thread(&range, RangeFileId(1), added_line(), "Why 300?")
++        .add_thread(&range, RangeFileId(1), added_place(), "Why 300?")
+         .unwrap();
+     let after = now();
+ 
+     assert_eq!(added.thread, ThreadId(1));
+     let thread = only_thread(&added.list);
+     assert_eq!(
+-        (thread.id, thread.file, thread.line, &thread.session),
+-        (ThreadId(1), RangeFileId(1), added_line(), &None)
++        (thread.id, thread.file, thread.place, &thread.session),
++        (ThreadId(1), RangeFileId(1), added_place(), &None)
+     );
+     let first = &thread.messages[0];
+     assert_eq!(first.id, MessageId(1));
+@@ -219,7 +341,7 @@ fn adding_writes_the_thread_with_its_first_message_and_new_ids() {
+     );
+ 
+     let written = json_on_disk(&folder);
+-    assert_eq!(written["format"], 1);
++    assert_eq!(written["format"], 2);
+     assert_eq!(written["nextThread"], 2);
+     assert_eq!(written["nextMessage"], 2);
+     assert_eq!(written["threads"][0]["path"], "b.txt");
+@@ -247,14 +369,14 @@ fn ids_never_repeat_after_reopening() {
+     );
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     let ThreadAdded { thread, list } = store
+-        .add_thread(&range, RangeFileId(0), added_line(), "b")
++        .add_thread(&range, RangeFileId(0), added_place(), "b")
+         .unwrap();
+     assert_eq!(thread, ThreadId(10));
+     assert_eq!(list.threads[1].messages[0].id, MessageId(20));
+ 
+     let mut reopened = ThreadStore::open(folder.path()).unwrap();
+     let again = reopened
+-        .add_thread(&range, RangeFileId(0), added_line(), "c")
++        .add_thread(&range, RangeFileId(0), added_place(), "c")
+         .unwrap();
+     assert_eq!(again.thread, ThreadId(11));
+     assert_eq!(again.list.threads[2].messages[0].id, MessageId(21));
+@@ -267,12 +389,12 @@ fn blank_text_is_refused_and_nothing_written() {
+     let folder = tempfile::tempdir().unwrap();
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     let blank = " \n\t ";
+-    let result = store.add_thread(&range, RangeFileId(0), added_line(), blank);
++    let result = store.add_thread(&range, RangeFileId(0), added_place(), blank);
+     assert!(matches!(result, Err(Error::EmptyMessage)), "{result:?}");
+     assert_eq!(folder_names(&folder), Vec::<String>::new());
+ 
+     let list = store
+-        .add_thread(&range, RangeFileId(0), added_line(), "a")
++        .add_thread(&range, RangeFileId(0), added_place(), "a")
+         .unwrap()
+         .list;
+     let bytes = on_disk(&folder);
+@@ -363,7 +485,7 @@ fn a_failed_write_changes_nothing_in_memory() {
+     let folder = tempfile::tempdir().unwrap();
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     let list = store
+-        .add_thread(&range, RangeFileId(0), added_line(), "a")
++        .add_thread(&range, RangeFileId(0), added_place(), "a")
+         .unwrap()
+         .list;
+     let bytes = on_disk(&folder);
+@@ -373,7 +495,7 @@ fn a_failed_write_changes_nothing_in_memory() {
+ 
+     let failures = [
+         store
+-            .add_thread(&range, RangeFileId(1), added_line(), "b")
++            .add_thread(&range, RangeFileId(1), added_place(), "b")
+             .map(|added| added.list),
+         store.add_note(&range, ThreadId(1), "b"),
+         store.queue(&range, MessageId(1), "b"),
+@@ -393,7 +515,7 @@ fn a_failed_write_changes_nothing_in_memory() {
+ 
+     fs::remove_dir_all(&temp).unwrap();
+     let added = store
+-        .add_thread(&range, RangeFileId(1), added_line(), "b")
++        .add_thread(&range, RangeFileId(1), added_place(), "b")
+         .unwrap();
+     assert_eq!(added.thread, ThreadId(2));
+     assert_eq!(added.list.threads[1].messages[0].id, MessageId(2));
+@@ -408,7 +530,7 @@ fn threads_on_paths_no_longer_listed_are_kept_on_every_write() {
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     for (file, text) in [(0, "on a"), (1, "on b"), (2, "on c")] {
+         store
+-            .add_thread(&local, RangeFileId(file), added_line(), text)
++            .add_thread(&local, RangeFileId(file), added_place(), text)
+             .unwrap();
+     }
+ 
+@@ -444,7 +566,7 @@ fn a_leftover_temp_file_is_ignored() {
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     assert_eq!(store.list(&range).threads, []);
+     let list = store
+-        .add_thread(&range, RangeFileId(0), added_line(), "a")
++        .add_thread(&range, RangeFileId(0), added_place(), "a")
+         .unwrap()
+         .list;
+     assert_eq!(ThreadStore::open(folder.path()).unwrap().list(&range), list);
+@@ -460,10 +582,10 @@ fn an_unknown_file_thread_or_message_is_its_error() {
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     let list = store.list(&range);
+ 
+-    let file = store.add_thread(&range, RangeFileId(3), added_line(), "a");
++    let file = store.add_thread(&range, RangeFileId(3), added_place(), "a");
+     assert_eq!(refused(file), "no file 3 in this range");
+-    let thread = store.add_note(&range, ThreadId(5), "a");
+-    assert_eq!(refused(thread), "no review thread has the id 5");
++    let thread = store.add_note(&range, ThreadId(6), "a");
++    assert_eq!(refused(thread), "no review thread has the id 6");
+     let queue = store.queue(&range, MessageId(5), "a");
+     assert_eq!(refused(queue), "no review message has the id 5");
+     let unqueue = store.unqueue(&range, MessageId(5));
+@@ -554,7 +676,7 @@ fn an_answer_counts_only_its_own_session_s_answers_and_keeps_the_older_ones() {
+ }
+ 
+ #[test]
+-fn format_1_writes_an_ai_answer_with_its_session_and_turn() {
++fn an_ai_answer_is_written_with_its_session_and_turn() {
+     let repo = repo();
+     let range = local_range(&repo);
+     let folder = tempfile::tempdir().unwrap();
+@@ -580,10 +702,10 @@ fn an_unknown_or_unlisted_thread_gets_no_session_or_answer_and_nothing_is_writte
+     let mut store = ThreadStore::open(folder.path()).unwrap();
+     let list = store.list(&local);
+ 
+-    let session = store.set_session(&local, ThreadId(5), "omp-1");
+-    assert_eq!(refused(session), "no review thread has the id 5");
+-    let answer = store.add_ai_answer(&local, ThreadId(5), "omp-1");
+-    assert_eq!(refused(answer), "no review thread has the id 5");
++    let session = store.set_session(&local, ThreadId(6), "omp-1");
++    assert_eq!(refused(session), "no review thread has the id 6");
++    let answer = store.add_ai_answer(&local, ThreadId(6), "omp-1");
++    assert_eq!(refused(answer), "no review thread has the id 6");
+     let hidden_session = store.set_session(&remote, ThreadId(1), "omp-1");
+     assert_eq!(refused(hidden_session), "no review thread has the id 1");
+     let hidden_answer = store.add_ai_answer(&remote, ThreadId(1), "omp-1");
+diff --git a/src-tauri/src/ipc_error.rs b/src-tauri/src/ipc_error.rs
+index af7db84..959f123 100644
+--- a/src-tauri/src/ipc_error.rs
++++ b/src-tauri/src/ipc_error.rs
+@@ -190,7 +190,8 @@ impl From<yamt_review::Error> for IpcError {
+             yamt_review::Error::NotANote { message } => IpcError::NotANote { message },
+             yamt_review::Error::ReadFailed { .. }
+             | yamt_review::Error::Broken { .. }
+-            | yamt_review::Error::NewerFormat { .. } => IpcError::Git {
++            | yamt_review::Error::NewerFormat { .. }
++            | yamt_review::Error::BackwardPlace => IpcError::Git {
+                 message: error.to_string(),
+             },
+         }
+diff --git a/src-tauri/src/ipc_error/tests.rs b/src-tauri/src/ipc_error/tests.rs
+index 43a0e83..004fe2a 100644
+--- a/src-tauri/src/ipc_error/tests.rs
++++ b/src-tauri/src/ipc_error/tests.rs
+@@ -273,6 +273,14 @@ fn a_start_only_review_error_is_its_line() {
+     );
+ }
+ 
++#[test]
++fn a_backward_place_is_its_words() {
++    assert_eq!(
++        review_json(yamt_review::Error::BackwardPlace),
++        json!({ "kind": "Git", "message": "a thread's first line comes after its last" })
++    );
++}
++
+ // The window's close shows the folder it could not remove, so the user can remove it by hand.
+ #[test]
+ fn ai_off_and_a_failed_removal_serialise_with_their_kinds() {
+diff --git a/src-tauri/src/review.rs b/src-tauri/src/review.rs
+index a169e51..a0a775e 100644
+--- a/src-tauri/src/review.rs
++++ b/src-tauri/src/review.rs
+@@ -4,8 +4,8 @@ use tauri::ipc::Channel;
+ use tauri::{Manager, Runtime, State, WebviewWindow};
+ use yamt_range::RangeFileId;
+ use yamt_review::{
+-    GitLabCheck, Glab, MessageId, SendProgress, SendReply, ThreadAdded, ThreadId, ThreadLine,
+-    ThreadList, ThreadStore,
++    GitLabCheck, Glab, MessageId, SendProgress, SendReply, ThreadAdded, ThreadId, ThreadList,
++    ThreadPlace, ThreadStore,
+ };
+ 
+ use crate::ipc_error::{IpcError, blocking_reply};
+@@ -47,10 +47,10 @@ pub(crate) fn list_threads(state: State<'_, RangeState>) -> Result<ThreadList, I
+ pub(crate) fn add_thread(
+     state: State<'_, RangeState>,
+     file: RangeFileId,
+-    line: ThreadLine,
++    place: ThreadPlace,
+     text: String,
+ ) -> Result<ThreadAdded, IpcError> {
+-    Ok(locked(&state.threads).add_thread(&state.range, file, line, &text)?)
++    Ok(locked(&state.threads).add_thread(&state.range, file, place, &text)?)
+ }
+ 
+ #[tauri::command]
+diff --git a/src-tauri/src/review/tests.rs b/src-tauri/src/review/tests.rs
+index 0867248..9edd2c0 100644
+--- a/src-tauri/src/review/tests.rs
++++ b/src-tauri/src/review/tests.rs
+@@ -19,7 +19,8 @@ fn invoke(window: &RangeWindow, cmd: &str, args: Value) -> Result<Value, Value>
+ 
+ fn add_first_thread(window: &RangeWindow) -> Value {
+     let line = json!({ "kind": "added", "right": ADDED_LINE });
+-    let args = json!({ "file": FILE, "line": line, "text": "Why two?" });
++    let place = json!({ "start": line, "end": line });
++    let args = json!({ "file": FILE, "place": place, "text": "Why two?" });
+     invoke(window, "add_thread", args).unwrap()
+ }
+ 
+@@ -34,14 +35,39 @@ fn a_thread_added_through_add_thread_comes_back_from_list_threads() {
+     let thread = &listed["threads"][0];
+     assert_eq!(thread["id"], added["thread"]);
+     assert_eq!(thread["file"], FILE);
+-    assert_eq!(
+-        thread["line"],
+-        json!({ "kind": "added", "right": ADDED_LINE })
+-    );
++    let line = json!({ "kind": "added", "right": ADDED_LINE });
++    assert_eq!(thread["place"], json!({ "start": line, "end": line }));
+     let note = json!({ "kind": "note", "text": "Why two?" });
+     assert_eq!(thread["messages"][0]["body"], note);
+ }
+ 
++#[test]
++fn a_range_thread_added_through_add_thread_comes_back_from_list_threads() {
++    let window = open_range_window();
++    let place = json!({
++        "start": { "kind": "removed", "left": 0 },
++        "end": { "kind": "unchangedOnRight", "left": 1, "right": 1 },
++    });
++    let args = json!({ "file": FILE, "place": place, "text": "Why these?" });
++
++    let added = invoke(&window, "add_thread", args).unwrap();
++
++    let listed = invoke(&window, "list_threads", json!({})).unwrap();
++    assert_eq!(listed, added["list"]);
++    assert_eq!(listed["threads"][0]["place"], place);
++    let backward = json!({
++        "start": { "kind": "unchanged", "left": 5, "right": 5 },
++        "end": { "kind": "added", "right": 2 },
++    });
++    let refused = json!({ "file": FILE, "place": backward, "text": "Why?" });
++    let message = "a thread's first line comes after its last";
++    assert_eq!(
++        invoke(&window, "add_thread", refused),
++        Err(json!({ "kind": "Git", "message": message }))
++    );
++    assert_eq!(invoke(&window, "list_threads", json!({})), Ok(listed));
++}
++
+ #[test]
+ fn a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back() {
+     let window = open_range_window();
+@@ -71,7 +97,8 @@ fn a_note_and_a_queue_change_the_listed_thread_and_unqueue_takes_it_back() {
+ #[test]
+ fn thread_commands_answer_the_store_s_refusals_as_their_kinds() {
+     let window = open_range_window();
+-    let blank = json!({ "file": FILE, "line": { "kind": "added", "right": 0 }, "text": " " });
++    let line = json!({ "kind": "added", "right": 0 });
++    let blank = json!({ "file": FILE, "place": { "start": line, "end": line }, "text": " " });
+     assert_eq!(
+         invoke(&window, "add_thread", blank),
+         Err(json!({ "kind": "EmptyMessage" }))
+@@ -277,7 +304,8 @@ mod through_glab {
+         let entries = state.range.entries();
+         let file = entries.iter().find(|entry| entry.path == ADDED_FILE);
+         let line = json!({ "kind": "added", "right": ADDED_FILE_LINE });
+-        let args = json!({ "file": file.unwrap().id, "line": line, "text": "Why?" });
++        let place = json!({ "start": line, "end": line });
++        let args = json!({ "file": file.unwrap().id, "place": place, "text": "Why?" });
+         let added = invoke(window, "add_thread", args).unwrap();
+         let message = &added["list"]["threads"][0]["messages"][0]["id"];
+         let queued = json!({ "message": message, "text": "Why not a Duration?" });
+diff --git a/tests/glab/README.md b/tests/glab/README.md
+index 0d78d02..0cca010 100644
+--- a/tests/glab/README.md
++++ b/tests/glab/README.md
+@@ -78,6 +78,11 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
+   post 5 is refused with 400 and a body without `"message"` and no `.err` (the fake's own refusal, exit 2).
+ - `slow-post/` — `src-tauri/src/review.rs`'s send through the commands: `lined-up/` with only post 1, which waits
+   2 s before it is accepted, so a second send can arrive while it runs.
++- `line-range/` — `crates/review/tests/review.rs`'s threads on a range of lines: `lined-up/`'s merge request !12, no
++  drafts, posts 1 and 2 accepted as drafts 201 and 202.
++- `line-range-drafted/` — as `line-range/`, with two drafts already on GitLab: 401 holds the in-column range of
++  `src/board/board.ts` (unchanged L197/R201 to added R204, its `line_range` with `"type": null` on the unchanged
++  start), 402 the both-sides text on R204 alone (`"line_range": null`); post 1 is accepted as draft 501.
+ - `merge-requests/` — the merge-request list and opening one (`crates/merge-requests/tests/{list,open}.rs`,
+   `src-tauri/src/merge_requests/tests.rs`): logged in; project `taskboard/taskboard` on `https://gitlab.example`;
+   user `sam`. Page 1: !13 (failed pipeline, two failed jobs, `lint` allowed to fail; `CI_MUST_PASS`), !12 (passed, 2
+diff --git a/tests/glab/line-range-drafted/draft-notes.json b/tests/glab/line-range-drafted/draft-notes.json
+new file mode 100644
+index 0000000..0fb136b
+--- /dev/null
++++ b/tests/glab/line-range-drafted/draft-notes.json
+@@ -0,0 +1 @@
++[{"id":401,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"note":"Why a second reminder here?","commit_id":null,"line_code":"e783a9be490e9bcfa1e4a239bf6e62d2ab163459_201_204","position":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","start_sha":"437805506eab02eaba409bdeffd00e0383476e35","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","old_path":"src/board/board.ts","new_path":"src/board/board.ts","position_type":"text","old_line":null,"new_line":204,"line_range":{"start":{"line_code":"e783a9be490e9bcfa1e4a239bf6e62d2ab163459_197_201","type":null,"old_line":197,"new_line":201},"end":{"line_code":"e783a9be490e9bcfa1e4a239bf6e62d2ab163459_201_204","type":"new","old_line":null,"new_line":204}}}},{"id":402,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"note":"Why replace the limit check?","commit_id":null,"line_code":"e783a9be490e9bcfa1e4a239bf6e62d2ab163459_201_204","position":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","start_sha":"437805506eab02eaba409bdeffd00e0383476e35","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","old_path":"src/board/board.ts","new_path":"src/board/board.ts","position_type":"text","old_line":null,"new_line":204,"line_range":null}}]
+\ No newline at end of file
+diff --git a/tests/glab/line-range-drafted/merge-request.json b/tests/glab/line-range-drafted/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/line-range-drafted/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/line-range-drafted/merge-requests.json b/tests/glab/line-range-drafted/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/line-range-drafted/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/line-range-drafted/post-1.json b/tests/glab/line-range-drafted/post-1.json
+new file mode 100644
+index 0000000..97a9908
+--- /dev/null
++++ b/tests/glab/line-range-drafted/post-1.json
+@@ -0,0 +1 @@
++{"id":501,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/line-range/draft-notes.json b/tests/glab/line-range/draft-notes.json
+new file mode 100644
+index 0000000..0637a08
+--- /dev/null
++++ b/tests/glab/line-range/draft-notes.json
+@@ -0,0 +1 @@
++[]
+\ No newline at end of file
+diff --git a/tests/glab/line-range/merge-request.json b/tests/glab/line-range/merge-request.json
+new file mode 100644
+index 0000000..bbefba3
+--- /dev/null
++++ b/tests/glab/line-range/merge-request.json
+@@ -0,0 +1 @@
++{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"},"diff_refs":{"base_sha":"531ea52dfb892e20206010fb6cd6161d9c88964a","head_sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","start_sha":"437805506eab02eaba409bdeffd00e0383476e35"}}
+\ No newline at end of file
+diff --git a/tests/glab/line-range/merge-requests.json b/tests/glab/line-range/merge-requests.json
+new file mode 100644
+index 0000000..d3bccda
+--- /dev/null
++++ b/tests/glab/line-range/merge-requests.json
+@@ -0,0 +1 @@
++[{"id":1012,"iid":12,"project_id":7,"title":"Reminders before a card is due","state":"opened","source_branch":"feature","target_branch":"main","sha":"9c1ba3fc606a3776061d23006b83e2af2a357112","web_url":"https://gitlab.example/taskboard/taskboard/-/merge_requests/12","references":{"short":"!12","relative":"!12","full":"taskboard/taskboard!12"}}]
+\ No newline at end of file
+diff --git a/tests/glab/line-range/post-1.json b/tests/glab/line-range/post-1.json
+new file mode 100644
+index 0000000..6a4d6d3
+--- /dev/null
++++ b/tests/glab/line-range/post-1.json
+@@ -0,0 +1 @@
++{"id":201,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file
+diff --git a/tests/glab/line-range/post-2.json b/tests/glab/line-range/post-2.json
+new file mode 100644
+index 0000000..f6e0777
+--- /dev/null
++++ b/tests/glab/line-range/post-2.json
+@@ -0,0 +1 @@
++{"id":202,"author_id":5,"merge_request_id":1012,"resolve_discussion":false,"discussion_id":null,"commit_id":null,"line_code":null}
+\ No newline at end of file

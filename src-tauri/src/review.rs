@@ -4,8 +4,8 @@ use tauri::ipc::Channel;
 use tauri::{Manager, Runtime, State, WebviewWindow};
 use yamt_range::RangeFileId;
 use yamt_review::{
-    GitLabCheck, Glab, MessageId, SendProgress, SendReply, ThreadAdded, ThreadId, ThreadLine,
-    ThreadList, ThreadStore,
+    GitLabCheck, Glab, MessageId, SendProgress, SendReply, ThreadAdded, ThreadId, ThreadList,
+    ThreadPlace, ThreadStore,
 };
 
 use crate::ipc_error::{IpcError, blocking_reply};
@@ -47,10 +47,10 @@ pub(crate) fn list_threads(state: State<'_, RangeState>) -> Result<ThreadList, I
 pub(crate) fn add_thread(
     state: State<'_, RangeState>,
     file: RangeFileId,
-    line: ThreadLine,
+    place: ThreadPlace,
     text: String,
 ) -> Result<ThreadAdded, IpcError> {
-    Ok(locked(&state.threads).add_thread(&state.range, file, line, &text)?)
+    Ok(locked(&state.threads).add_thread(&state.range, file, place, &text)?)
 }
 
 #[tauri::command]

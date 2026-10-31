@@ -2,6 +2,8 @@ use serde_json::Value;
 
 use crate::MergeRequestRef;
 
+pub(crate) mod drafts;
+
 const OPENED: &str = "opened";
 
 /// One merge request of a list: enough to ask for its details.
@@ -42,21 +44,6 @@ pub(crate) struct LinePlace {
     pub(crate) new_path: String,
     pub(crate) old_line: Option<u32>,
     pub(crate) new_line: Option<u32>,
-}
-
-/// One of the user's draft notes on the merge request.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DraftNote {
-    pub(crate) id: u64,
-    pub(crate) note: String,
-    /// `None` for a draft on no line.
-    pub(crate) placed: Option<PlacedDraft>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct PlacedDraft {
-    pub(crate) head_sha: String,
-    pub(crate) place: LinePlace,
 }
 
 pub(crate) fn merge_requests_from_branch(branch: &str) -> Vec<String> {
@@ -148,42 +135,6 @@ pub(crate) fn merge_request_from(json: &[u8]) -> Result<MergeRequest, String> {
             web_url: text_at(&value, "web_url")?,
         },
         diff_refs,
-    })
-}
-
-/// The drafts `glab api --paginate` printed: one JSON array, or one per page.
-pub(crate) fn draft_notes_from(json: &[u8]) -> Result<Vec<DraftNote>, String> {
-    let mut drafts = Vec::new();
-    for page in serde_json::Deserializer::from_slice(json).into_iter::<Value>() {
-        let page = page.map_err(|error| format!("GitLab's answer is not JSON: {error}"))?;
-        let Value::Array(items) = page else {
-            return Err(unexpected("draft notes", "list"));
-        };
-        for item in items {
-            drafts.push(draft_note_from(&item)?);
-        }
-    }
-    Ok(drafts)
-}
-
-fn draft_note_from(item: &Value) -> Result<DraftNote, String> {
-    Ok(DraftNote {
-        id: number_at(item, "id")?,
-        note: text_at(item, "note")?,
-        placed: placed_draft_from(item).ok(),
-    })
-}
-
-/// A draft on no line has no position, or one without paths: it matches no message.
-fn placed_draft_from(item: &Value) -> Result<PlacedDraft, String> {
-    Ok(PlacedDraft {
-        head_sha: text_at(item, "position.head_sha")?,
-        place: LinePlace {
-            old_path: text_at(item, "position.old_path")?,
-            new_path: text_at(item, "position.new_path")?,
-            old_line: optional_line_at(item, "position.old_line")?,
-            new_line: optional_line_at(item, "position.new_line")?,
-        },
     })
 }
 
@@ -291,39 +242,6 @@ mod tests {
             draft_id_from(br#"{"id":-1}"#),
             Err("unexpected answer from GitLab: `id` is not a number".to_owned())
         );
-    }
-
-    #[test]
-    fn every_page_of_drafts_is_read_and_a_draft_on_no_line_is_kept_unplaced() {
-        let pages = br#"[{"id":1,"note":"a","position":{"head_sha":"h","old_path":"x","new_path":"y","old_line":null,"new_line":2}}]
-[{"id":2,"note":"b","position":null},{"id":3,"note":"c","position":{"head_sha":"h","old_path":null}}]"#;
-        let drafts = draft_notes_from(pages).unwrap();
-        let place = LinePlace {
-            old_path: "x".to_owned(),
-            new_path: "y".to_owned(),
-            old_line: None,
-            new_line: Some(2),
-        };
-        let placed = PlacedDraft {
-            head_sha: "h".to_owned(),
-            place,
-        };
-        let unplaced = |id: u64, note: &str| DraftNote {
-            id,
-            note: note.to_owned(),
-            placed: None,
-        };
-        let first = DraftNote {
-            placed: Some(placed),
-            ..unplaced(1, "a")
-        };
-        assert_eq!(drafts, [first, unplaced(2, "b"), unplaced(3, "c")]);
-        assert_eq!(draft_notes_from(b"[]").unwrap(), []);
-        assert_eq!(
-            draft_notes_from(br#"[{"id":4}]"#),
-            Err("unexpected answer from GitLab: `note` is not a text".to_owned())
-        );
-        assert!(draft_notes_from(br#"{"id":4}"#).is_err());
     }
 
     #[test]

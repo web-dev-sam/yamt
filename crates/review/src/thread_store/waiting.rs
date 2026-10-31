@@ -1,14 +1,14 @@
 use yamt_range::{Range, RangeFileId};
 
 use super::{ThreadStore, file_at};
-use crate::{Error, MessageId, Posting, Result, ThreadLine};
+use crate::{Error, MessageId, Posting, Result, ThreadPlace};
 
 /// A message waiting for the next send: queued, or refused and sent again. Its text is read again before the post.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct QueuedMessage {
     pub(crate) message: MessageId,
     pub(crate) file: RangeFileId,
-    pub(crate) line: ThreadLine,
+    pub(crate) place: ThreadPlace,
 }
 
 impl ThreadStore {
@@ -24,7 +24,7 @@ impl ThreadStore {
                     queued.push(QueuedMessage {
                         message: message.id,
                         file,
-                        line: thread.line,
+                        place: thread.place,
                     });
                 }
             }
@@ -89,6 +89,7 @@ mod tests {
     use yamt_range::{RangeSpec, Resolved};
 
     use super::*;
+    use crate::ThreadLine;
     use crate::thread_file::THREADS_FILE;
 
     const STORED: &str = r#"{"format":1,"nextThread":3,"nextMessage":6,"threads":[
@@ -136,15 +137,15 @@ mod tests {
         let queued: Vec<_> = store
             .queued(&range(&repo, "main..local"))
             .into_iter()
-            .map(|q| (q.message.0, q.file, q.line))
+            .map(|q| (q.message.0, q.file, q.place))
             .collect();
-        let line = ThreadLine::Added {
+        let place = ThreadPlace::one_line(ThreadLine::Added {
             right: RightLine(4),
-        };
+        });
         let expected = vec![
-            (5, RangeFileId(1), line),
-            (1, RangeFileId(1), line),
-            (4, RangeFileId(0), line),
+            (5, RangeFileId(1), place),
+            (1, RangeFileId(1), place),
+            (4, RangeFileId(0), place),
         ];
         assert_eq!(queued, expected);
     }

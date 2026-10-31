@@ -26,15 +26,15 @@ Request `docs/slices/request-line-ranges.md` (rules 1–10, acceptance, non-goal
 orchestrator (OR13, plan #147/#146): an unchanged end posts with no `type`, as GitLab's own form (GitLab shows
 "lines 201 to +204"); the first change writes format 2 (rule 9 already accepts an older yamt refusing it).
 
-| row | slice                                                                                          | owner       | status | evidence                                  |
-| --- | ---------------------------------------------------------------------------------------------- | ----------- | ------ | ----------------------------------------- |
-| 1   | design: anchor shape, file format step, GitLab `line_code` rule, editor drag/tint              | designer    | done   | `LineRangesDesign`: option A, five briefs |
-| 2   | rust (`briefs/line-ranges-rust.md`): `ThreadPlace`, format 2, `line_range` body, command       | rust-impl   | todo   |                                           |
-| 3   | domain (`briefs/line-ranges-domain.md`): ipc types, fixtures, seeded range threads             | web-impl    | todo   |                                           |
-| 4   | editor (`briefs/line-ranges-editor.md`): order, drag, tint, collapse; beside row 5             | web-impl    | todo   |                                           |
-| 5   | window (`briefs/line-ranges-window.md`): drafts, place text, AI value, hover; wires the window | web-impl    | todo   |                                           |
-| 6   | docs keeper: architecture §3.8, project map rows for the three new editor files                | docs-keeper | todo   |                                           |
-| 7   | verify (`briefs/line-ranges-verify.md`): smoke after 4+5; final `just check`, WebKit, real app | verifier    | todo   |                                           |
+| row | slice                                                                                          | owner       | status  | evidence                                  |
+| --- | ---------------------------------------------------------------------------------------------- | ----------- | ------- | ----------------------------------------- |
+| 1   | design: anchor shape, file format step, GitLab `line_code` rule, editor drag/tint              | designer    | done    | `LineRangesDesign`: option A, five briefs |
+| 2   | rust (`briefs/line-ranges-rust.md`): `ThreadPlace`, format 2, `line_range` body, command       | rust-impl   | running |                                           |
+| 3   | domain (`briefs/line-ranges-domain.md`): ipc types, fixtures, seeded range threads             | web-impl    | todo    |                                           |
+| 4   | editor (`briefs/line-ranges-editor.md`): order, drag, tint, collapse; beside row 5             | web-impl    | todo    |                                           |
+| 5   | window (`briefs/line-ranges-window.md`): drafts, place text, AI value, hover; wires the window | web-impl    | todo    |                                           |
+| 6   | docs keeper: architecture §3.8, project map rows for the three new editor files                | docs-keeper | todo    |                                           |
+| 7   | verify (`briefs/line-ranges-verify.md`): smoke after 4+5; final `just check`, WebKit, real app | verifier    | todo    |                                           |
 
 ## Open product questions
 

@@ -5,10 +5,14 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, Message, MessageId, Result, ThreadId, ThreadLine};
+use crate::{Error, Message, MessageId, Result, ThreadId, ThreadPlace};
+
+mod format_1;
+
+use format_1::{FORMAT_1, Format1File};
 
 pub(crate) const THREADS_FILE: &str = "threads.json";
-const FORMAT: u32 = 1;
+const FORMAT: u32 = 2;
 const FIRST_THREAD: ThreadId = ThreadId(1);
 const FIRST_MESSAGE: MessageId = MessageId(1);
 const TEMP_SUFFIX: &str = ".tmp";
@@ -28,7 +32,7 @@ pub(crate) struct ThreadFile {
 pub(crate) struct StoredThread {
     pub(crate) id: ThreadId,
     pub(crate) path: String,
-    pub(crate) line: ThreadLine,
+    pub(crate) place: ThreadPlace,
     pub(crate) session: Option<String>,
     pub(crate) messages: Vec<Message>,
 }
@@ -118,7 +122,7 @@ impl ThreadFile {
     }
 
     /// What makes a parsed file unusable: no id left for a new thread or message, an id repeated or at or
-    /// above its counter, or a thread without messages.
+    /// above its counter, a place that runs backwards, or a thread without messages.
     fn problem(&self) -> Option<String> {
         if let Some(message) = no_room_left(self.next_thread, self.next_message) {
             return Some(message);
@@ -133,6 +137,12 @@ impl ThreadFile {
                 return Some(format!(
                     "the thread id {} is not below `nextThread` {}",
                     thread.id.0, self.next_thread.0
+                ));
+            }
+            if !thread.place.runs_forward() {
+                return Some(format!(
+                    "the thread {}'s first line comes after its last",
+                    thread.id.0
                 ));
             }
             if thread.messages.is_empty() {
@@ -199,11 +209,15 @@ fn parsed(path: &Path, bytes: &[u8]) -> Result<ThreadFile> {
             format,
         });
     }
-    if format != FORMAT {
-        return Err(broken(path, format!("format {format} is not {FORMAT}")));
-    }
-    let file: ThreadFile =
-        serde_json::from_slice(bytes).map_err(|error| broken(path, error.to_string()))?;
+    let file = if format == FORMAT {
+        serde_json::from_slice::<ThreadFile>(bytes)
+    } else if format == FORMAT_1 {
+        serde_json::from_slice::<Format1File>(bytes).map(Format1File::current)
+    } else {
+        let message = format!("format {format} is not {FORMAT_1} or {FORMAT}");
+        return Err(broken(path, message));
+    };
+    let file = file.map_err(|error| broken(path, error.to_string()))?;
     match file.problem() {
         Some(message) => Err(broken(path, message)),
         None => Ok(file),
@@ -250,17 +264,32 @@ mod tests {
     const MESSAGE_1: &str =
         r#"{"id":1,"body":{"kind":"note","text":"a"},"written":0,"posting":{"kind":"notQueued"}}"#;
 
-    fn thread(id: u32, messages: &str) -> String {
+    const ONE_LINE: &str =
+        r#"{"start":{"kind":"added","right":0},"end":{"kind":"added","right":0}}"#;
+
+    fn thread_on(id: u32, place: &str, messages: &str) -> String {
         format!(
-            r#"{{"id":{id},"path":"a.txt","line":{{"kind":"added","right":0}},"session":null,"messages":[{messages}]}}"#
+            r#"{{"id":{id},"path":"a.txt","place":{place},"session":null,"messages":[{messages}]}}"#
         )
+    }
+
+    fn thread(id: u32, messages: &str) -> String {
+        thread_on(id, ONE_LINE, messages)
     }
 
     fn file(next_thread: u32, next_message: u32, threads: &[String]) -> String {
         format!(
-            r#"{{"format":1,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
+            r#"{{"format":2,"nextThread":{next_thread},"nextMessage":{next_message},"threads":[{}]}}"#,
             threads.join(",")
         )
+    }
+
+    #[test]
+    fn a_backward_place_is_broken() {
+        let backward =
+            r#"{"start":{"kind":"unchanged","left":5,"right":5},"end":{"kind":"added","right":2}}"#;
+        let message = problem_of(&file(3, 2, &[thread_on(2, backward, MESSAGE_1)]));
+        assert_eq!(message, "the thread 2's first line comes after its last");
     }
 
     #[test]
@@ -301,7 +330,7 @@ mod tests {
 
     #[test]
     fn format_0_is_broken_not_newer() {
-        assert_eq!(problem_of(r#"{"format":0}"#), "format 0 is not 1");
+        assert_eq!(problem_of(r#"{"format":0}"#), "format 0 is not 1 or 2");
     }
 
     #[test]

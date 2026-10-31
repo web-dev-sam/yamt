@@ -13,8 +13,8 @@ use yamt_gitio::Glab;
 use yamt_merge_core::{LeftLine, RightLine};
 use yamt_range::{Range, RangeFileId, RangeSpec, Resolved};
 use yamt_review::{
-    GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
-    SendReply, ThreadLine, ThreadList, ThreadStore, check_gitlab, send_queue,
+    DiffLine, GitLabCheck, LookedAt, MergeRequestRef, MessageId, NotLinedUp, Posting, SendProgress,
+    SendReply, ThreadLine, ThreadList, ThreadPlace, ThreadStore, check_gitlab, send_queue,
 };
 
 /// `scripts/range-repo.sh`'s commits, fixed by its names and dates.
@@ -29,6 +29,9 @@ const REMOVED_TEXT: &str = "Who still uses the mock boards?";
 const REFUSAL: &str = r#"400 Bad request - Note {:line_code=>["can't be blank"]}"#;
 const POST_ARGV: &str =
     "argv: api --include --method POST projects/7/merge_requests/12/draft_notes --input -";
+const BOARD: &str = "src/board/board.ts";
+const IN_COLUMN_TEXT: &str = "Why a second reminder here?";
+const BOTH_SIDES_TEXT: &str = "Why replace the limit check?";
 
 fn in_this_repository(relative: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -123,18 +126,58 @@ impl Review {
     }
 
     fn on(range_text: &str) -> Review {
+        let threads = [
+            (
+                "src/board/reminders.ts",
+                ThreadPlace::one_line(added(2)),
+                ADDED_TEXT,
+            ),
+            (
+                "docs/keys.md",
+                ThreadPlace::one_line(unchanged(0, 0)),
+                RENAMED_TEXT,
+            ),
+            (
+                "src/api/mockBoards.ts",
+                ThreadPlace::one_line(removed(1)),
+                REMOVED_TEXT,
+            ),
+        ];
+        Review::with_threads(range_text, &threads)
+    }
+
+    /// Two threads on `src/board/board.ts`, each first message queued: from the unchanged L197/R201 to the added
+    /// R204 (in one column), then from the removed L200 to the added R204 (across both); 0-based below.
+    fn ranges() -> Review {
+        let in_column = ThreadPlace {
+            start: DiffLine::Unchanged {
+                left: LeftLine(196),
+                right: RightLine(200),
+            },
+            end: added(203),
+        };
+        let both_sides = ThreadPlace {
+            start: DiffLine::Removed {
+                left: LeftLine(199),
+            },
+            end: added(203),
+        };
+        let threads = [
+            (BOARD, in_column, IN_COLUMN_TEXT),
+            (BOARD, both_sides, BOTH_SIDES_TEXT),
+        ];
+        Review::with_threads("main...feature", &threads)
+    }
+
+    /// A thread per `(path, place, text)`, its first message queued with `text`.
+    fn with_threads(range_text: &str, threads: &[(&str, ThreadPlace, &str)]) -> Review {
         let repo = range_repo();
         let range = range_of(&repo, range_text);
         let pair = tempfile::tempdir().unwrap();
         let mut store = ThreadStore::open(pair.path()).unwrap();
-        let threads = [
-            ("src/board/reminders.ts", added(2), ADDED_TEXT),
-            ("docs/keys.md", unchanged(0, 0), RENAMED_TEXT),
-            ("src/api/mockBoards.ts", removed(1), REMOVED_TEXT),
-        ];
-        for (path, line, text) in threads {
+        for &(path, place, text) in threads {
             let added = store
-                .add_thread(&range, file(&range, path), line, "first thought")
+                .add_thread(&range, file(&range, path), place, "first thought")
                 .unwrap();
             let thread = added.list.threads.last().unwrap();
             store.queue(&range, thread.messages[0].id, text).unwrap();
@@ -705,4 +748,86 @@ fn several_line_up_as_the_one_that_matches_and_none_name_what_was_looked_at() {
         check_gitlab(&range, Some(&none.glab)),
         GitLabCheck::NotLinedUp { why }
     );
+}
+
+/// The draft-notes body of a note on board.ts that ends on the added R204, with GitLab's `line_range`.
+fn board_range_body(note: &str, line_range: &Value) -> Value {
+    json!({
+        "note": note,
+        "position": {
+            "position_type": "text",
+            "base_sha": MERGE_BASE,
+            "start_sha": MAIN,
+            "head_sha": FEATURE,
+            "old_path": BOARD,
+            "new_path": BOARD,
+            "new_line": 204,
+            "line_range": line_range,
+        },
+    })
+}
+
+// The line codes' hash is `printf '%s' src/board/board.ts | sha1sum`, written out so the test does not share the
+// code's hashing.
+#[test]
+fn a_range_posts_both_ends_with_gitlabs_line_codes() {
+    let review = Review::ranges();
+    let fake = Fake::new("line-range");
+
+    let (reply, steps) = review.send(&fake.glab);
+
+    let SendReply::Sent { sent: 2, .. } = reply else {
+        panic!("not sent twice: {reply:?}");
+    };
+    assert_eq!(steps, progress(&[1, 2], 2));
+    let added_end = json!({
+        "line_code": "e783a9be490e9bcfa1e4a239bf6e62d2ab163459_201_204",
+        "type": "new",
+        "new_line": 204,
+    });
+    let in_column = json!({
+        "start": {
+            "line_code": "e783a9be490e9bcfa1e4a239bf6e62d2ab163459_197_201",
+            "old_line": 197,
+            "new_line": 201,
+        },
+        "end": added_end,
+    });
+    let both_sides = json!({
+        "start": {
+            "line_code": "e783a9be490e9bcfa1e4a239bf6e62d2ab163459_200_204",
+            "type": "old",
+            "old_line": 200,
+        },
+        "end": added_end,
+    });
+    let expected = [
+        board_range_body(IN_COLUMN_TEXT, &in_column),
+        board_range_body(BOTH_SIDES_TEXT, &both_sides),
+    ];
+    assert_eq!(fake.bodies(), expected);
+    let posted = vec![pending(IN_COLUMN_TEXT, 201), pending(BOTH_SIDES_TEXT, 202)];
+    assert_eq!(review.postings_on_disk(), posted);
+}
+
+#[test]
+fn a_draft_stands_in_for_a_range_only_when_its_range_matches() {
+    let review = Review::ranges();
+    let fake = Fake::new("line-range-drafted");
+
+    let (reply, _) = review.send(&fake.glab);
+
+    let SendReply::Sent { sent: 2, .. } = reply else {
+        panic!("not sent twice: {reply:?}");
+    };
+    let expected = vec![pending(IN_COLUMN_TEXT, 401), pending(BOTH_SIDES_TEXT, 501)];
+    assert_eq!(review.postings_on_disk(), expected);
+    let notes: Vec<String> = fake
+        .bodies()
+        .iter()
+        .map(|body| note_of(body).to_owned())
+        .collect();
+    assert_eq!(notes, [BOTH_SIDES_TEXT]);
+    let posts = fake.argv().into_iter().filter(|argv| argv == POST_ARGV);
+    assert_eq!(posts.count(), 1, "{}", fake.log());
 }

@@ -190,7 +190,8 @@ impl From<yamt_review::Error> for IpcError {
             yamt_review::Error::NotANote { message } => IpcError::NotANote { message },
             yamt_review::Error::ReadFailed { .. }
             | yamt_review::Error::Broken { .. }
-            | yamt_review::Error::NewerFormat { .. } => IpcError::Git {
+            | yamt_review::Error::NewerFormat { .. }
+            | yamt_review::Error::BackwardPlace => IpcError::Git {
                 message: error.to_string(),
             },
         }
