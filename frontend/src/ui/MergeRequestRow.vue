@@ -92,11 +92,11 @@ function act(): void {
     @click="openPage"
   >
     <div class="flex items-center gap-3">
-      <div class="flex min-w-0 flex-1 items-baseline gap-2">
+      <div class="flex min-w-0 flex-1 flex-col">
         <button
           v-if="row.page !== null"
           type="button"
-          class="min-w-0 cursor-pointer truncate rounded text-left"
+          class="max-w-full cursor-pointer self-start truncate rounded text-left"
           :title="pageTitle"
           :aria-label="pageTitle"
           @click.stop="openPage"
@@ -104,11 +104,15 @@ function act(): void {
           {{ row.title }}
         </button>
         <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
-        <span class="shrink-0 text-fg-muted">{{ mr }}</span>
-        <span class="shrink-0 text-fg-muted" :title="createdTitle">{{ created }}</span>
-        <span v-if="size !== null" class="shrink-0 text-fg-muted" :title="size.title">
-          {{ size.text }}
-        </span>
+        <p class="truncate text-xs text-fg-muted">
+          <span>{{ mr }}</span>
+          <span class="mx-1" aria-hidden="true">·</span>
+          <span :title="createdTitle">{{ created }}</span>
+          <template v-if="size !== null">
+            <span class="mx-1" aria-hidden="true">·</span>
+            <span :title="size.title">{{ size.text }}</span>
+          </template>
+        </p>
       </div>
       <span
         class="flex w-12 shrink-0 items-center gap-1"
