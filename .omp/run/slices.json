@@ -1,1 +1,5 @@
-{}
+{
+  "LineRangesDesign": {
+    "owned": ["docs/slices/briefs/line-ranges-*.md"]
+  }
+}

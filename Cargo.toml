@@ -47,6 +47,8 @@ imara-diff = "0.2.0"
 proptest = "1.11.0"
 tracing = "0.1.44"
 tempfile = "3.27.0"
+# SHA-1 of a file path for GitLab's `line_code` in a multi-line comment (plan §2 #147); same digest 0.10 as sha2.
+sha1 = "0.10.6"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # 2.12.1, not today's 2.12.3: same supply-chain cool-down pnpm applies to @tauri-apps/api; matches tauri-cli 2.12.1.
 tauri = "2.12.1"

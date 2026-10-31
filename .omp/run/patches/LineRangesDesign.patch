@@ -1,0 +1,1039 @@
+diff --git a/docs/slices/briefs/line-ranges-design.md b/docs/slices/briefs/line-ranges-design.md
+new file mode 100644
+index 0000000..1b490ea
+--- /dev/null
++++ b/docs/slices/briefs/line-ranges-design.md
+@@ -0,0 +1,379 @@
++# Line-range threads — design
++
++Designer `LineRangesDesign`, 2026-10-31. Request: `docs/slices/request-line-ranges.md` (rules 1–10, owner answer #2052:
++a range may cover both sides). Facts marked `(scout §n)` are from `.omp/run/notes/PlanScoutRangeThreads.md` at `c8c5c54a`,
++given; facts with a path:line were read for this design at `265d168`. GitLab sources are gitlab-org/gitlab at tag
++`v19.3.2-ee` (raw files under `https://gitlab.com/gitlab-org/gitlab/-/raw/v19.3.2-ee/`). Unobserved claims are marked
++`[INFERENCE]`.
++
++## 0. Facts the options stand on
++
++**Today's anchor.**
++- Rust `ThreadLine` = `Removed { left } | Added { right } | UnchangedOnLeft { left, right } | UnchangedOnRight { left, right }`,
++  `#[serde(tag = "kind", rename_all = "camelCase")]` (`crates/review/src/thread_types.rs:14-42`); `Thread.line`
++  (`:108-121`), `StoredThread.line` (`thread_file.rs:26-34`), `QueuedMessage.line` (`thread_store/waiting.rs:7-12`),
++  `add_thread(range, file, line, text)` (`thread_store.rs:63-88`, no check of the line against the file), command
++  `add_thread(file, line, text)` (`src-tauri/src/review.rs:44-54`).
++- TS domain `ThreadLine`, `ShownThread { key, line, shown }`, `shownLine`, `changedThreadLine`, `unchangedThreadLine`,
++  `toThreadLine`, `fromThreadLine` (`frontend/src/ipc/threadLine.ts:6-76`), exported at `ipc/index.ts:139-146`.
++- `anchorAt` turns a pressed column line into a `ThreadLine` from the reply's differences; `linePlace` finds the
++  difference or the partner line (`editor/internal/threadAnchor.ts:13-45`).
++
++**The file.** `threads.json`, `FORMAT = 1` (`thread_file.rs:10-11`); `parsed` reads the format first, `format > FORMAT`
++→ `NewerFormat`, other mismatch → `Broken "format N is not 1"` (`:193-211`); no `deny_unknown_fields`, so an older
++yamt drops an unknown field when it rewrites the file (scout §3). Every format constant in the repo is 1; none has
++ever stepped (scout §3). `ThreadStore::open` never writes (`thread_store.rs:24-29`); every change writes the whole
++file through temp + rename (`thread_file.rs:220-237`). Older yamt builds refuse format 2 with `NewerFormat` naming
++the file, untouched (`thread_file.rs:196-201`; plan §2 #120; tests `a_newer_format_is_refused_and_left_unchanged`,
++`crates/review/tests/threads.rs:115-127`).
++
++**GitLab today.** `line_place(entry, line)` → `LinePlace { old_path, new_path, old_line?, new_line? }`, 1-based, the
++old path a renamed entry's old path, else the entry's path (`position.rs:19-41`, `gitlab.rs:38-45`); `PostBody::json`
++(`position.rs:47-77`); `same_draft` compares note, `head_sha`, `LinePlace` (`position.rs:80-88`); `placed_draft_from`
++reads `position.old_line/new_line` only (`gitlab.rs:177-188`); the send path (`send.rs:141-165`) has only the
++`RangeEntry`, not the file's differences. `Range::load(file)` gives `RangeFile::Texts { left, right, differences, mode }`
++(`crates/range/src/open.rs:96`, `crates/range/src/lib.rs:117-123`).
++
++**GitLab's `line_code`, from GitLab's code.**
++- `Gitlab::Git.diff_line_code(file_path, new_line_position, old_line_position)` =
++  `"#{Digest::SHA1.hexdigest(file_path)}_#{old_line_position}_#{new_line_position}"` (`lib/gitlab/git.rb:113-115`).
++- A diff line's code is `line.legacy_id(file_path)` → `diff_line_code(file_path, new_pos, old_pos)`
++  (`lib/gitlab/diff/file.rb:83-85`, `lib/gitlab/diff/line.rb:170-174`), with `file_path` = `new_path.presence ||
++  old_path` (`file.rb:253-255`): **the new path, also for a renamed file**.
++- `old_pos`/`new_pos` are the parser's counters when the line is read (`lib/gitlab/diff/parser.rb:13-14` start at 1,
++  `:32-33` reset at each hunk header, `:48` the line gets `line_old, line_new`, then `:52-64`: `+` adds 1 to new only,
++  `-` to old only, a context line to both). Git's unified diff lists a change's `-` lines before its `+` lines, so:
++  - **unchanged** line (left `l`, right `r`, 0-based): `<sha1>_<l+1>_<r+1>`;
++  - **removed** line `l` of a difference `d`: `<sha1>_<l+1>_<d.right.start+1>` (the new number of the change's first
++    added line, or of the line after a pure removal);
++  - **added** line `r` of a difference `d`: `<sha1>_<d.left.start+d.left.len+1>_<r+1>` (the old number of the line
++    after the change's removed lines).
++- `type` is `"new"` for `+`, `"old"` for `-`, nil for a context line (`parser.rb:82-87`; `line.rb:92-94` `unchanged?` =
++  `type.nil?`); `old_line` is nil for an added line, `new_line` nil for a removed one (`line.rb:80-86`); these four
++  are what a diff line sends to the browser (`app/serializers/diff_line_entity.rb:4-7`).
++- GitLab's own form builds `line_range` from two such lines: `commentLineStart = { line_code, type: line.type,
++  old_line, new_line }` (`app/assets/javascripts/diffs/components/diff_line_note_form.vue:64-69`), `lineRange:
++  formatLineRange(commentLineStart, this.line)` (`:89`; `notes/components/multiline_comment_utils.js:82-93`).
++- The header "Comment on lines X to Y" signs each end by its `type`: `new` → `+new_line`, `old` → `-old_line`, nil → the
++  bare number, `new_line` when the other end is `new` (`multiline_comment_utils.js:3-7, 9-24`). GitLab tints the
++  commented rows by finding `line_range.start/end.line_code` among its own diff lines (`:95-117`).
++- The REST route takes every `line_range` field as optional: `line_code`, `type` (String), `old_line`, `new_line`
++  (Integer) (`lib/api/draft_notes.rb:95-108`).
++
++Worked on the review fixture's `src/board/board.ts` (`frontend/fixtures/range/review.json`, `files[7]`, which `just
++fixtures` makes from `scripts/range-repo.sh` `main...feature` through the same Rust, `justfile:47-48`): differences
++(0-based) `d0` left 19+1 / right 19+2, `d1` 179+0 / 180+3, `d2` 199+1 / 203+1, `d3` 254+1 / 258+3, `d4` 308+18 / 314+0,
++`d5` 415+0 / 403+33, `d6` 461+0 / 482+2. In display numbers: removed L200 → `<sha1>_200_204`; added R204 →
++`<sha1>_201_204`; unchanged L197/R201 → `<sha1>_197_201`; removed L309 (pure removal `d4`) → `<sha1>_309_315`; added
++R404 (pure addition `d5`) → `<sha1>_416_404`.
++
++**Editor facts.** A gutter `mousedown` on a number starts a thread at once (`threadNumbers.ts:103-128`); returning
++`true` from a CodeMirror gutter handler prevents the default `[INFERENCE: @codemirror/view gutter calls
++preventDefault when a domEventHandler returns true; the editor build checks node_modules]`, so no text selection
++starts from the gutter. The columns are selectable (`pane.ts:209-210`, scout §8). There are no spacer lines between the
++columns (no spacer in `editor/internal`); at any height each column shows one of its own lines, except over a thread
++row, a collapsed run's wave and below its last line. `ThreadHosts` creates one host element per thread key
++(`threadHosts.ts:153-159`) and already listens on the document for focus (`:48-49`); widgets ignore events (plan §2
++#116), host DOM listeners still fire. Hidden lines per column: `hiddenIn(state, column)` and `displayed(fold, column)`
++(`columnFolds.ts:113-116`, `foldRuns.ts:103-105`). `columnRuns` assumes changes that do not overlap: two overlapping
++changes give a run starting inside the first (`foldRuns.ts:25-30, 86-101`), so overlapping range runs must be merged.
++The selection colour is `var(--color-selection)` (`pane.ts:98`; `themes/vscode-dark.css:29`,
++`vscode-light.css:29`). Drag precedent: `IconDrag` with pointer capture (`drag.ts:51-116`).
++
++**Window facts.** Draft identity "same line" = same shown column and line (`rangeDrafts.ts:120-135`); drafts as
++`ShownThread`s (`rangeThreads.ts:96-103`); stored threads as `ShownThread`s (`rangeOpen.ts:45-50`); place text
++`threadPlaceText` (`rangeThreadText.ts:164-173`) for the box header and `aria-label` (`RangeThreadBox.vue:42-45, 157,
++161`) and the AI value (`rangeStore.ts:110-128`); default template `firstMessage.ts:11-19`; seeded fixture threads
++`fixtureThreads.ts:20-68` (ids 0–3 on board.ts, used by index in many ui tests).
++
++## 1. Options
++
++All three keep rules 1–10; they differ in the shape of a thread's place and in where GitLab's numbers come from.
++
++### Option A — one place shape with two ends; GitLab numbers from the file's differences at send (recommended)
++
++**Data.**
++```rust
++/// A line of the diff as GitLab's one-column view lists it: an unchanged line once, a change's removed lines, then its added lines.
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiffLine { Removed { left: LeftLine }, Added { right: RightLine }, Unchanged { left: LeftLine, right: RightLine } }
++
++/// The lines a thread is on, from `start` to `end` in GitLab's order, both included; one line when `start` is `end`'s line.
++/// `end` keeps today's `ThreadLine`: its variant decides the column the box and the count badge sit in.
++pub struct ThreadPlace { pub start: DiffLine, pub end: ThreadLine }
++```
++Serde/TS: `{ "start": { "kind": "unchanged", "left": 196, "right": 200 }, "end": { "kind": "added", "right": 203 } }`;
++a one-line thread is `{ "start": X', "end": X }` with `X'` = `X`'s line (one shape, one code path: tint, folds, rows,
++text and GitLab all read the same two ends; only GitLab and the place text ask "is it one line?"). `start` has no
++column because nothing uses one (an unchanged start is tinted in both columns; the box goes under `end`), so equal
++ranges have one value. `Thread.place`, `StoredThread.place`, `QueuedMessage.place`, `add_thread(file, place, text)`.
++`ThreadPlace::runs_forward()`: where both ends have a left line, start's ≤ end's; where both have a right line,
++start's ≤ end's (GitLab's order is monotonic in each side's numbers). It cannot see every backward place (an added
++start and a later removed end share no side) — the full order needs the differences, which only the editor has; the
++editor builds places only through one ordering function. `add_thread` refuses a backward place
++(`Error::BackwardPlace`), and a loaded file with one is `Broken`, so the check never lets a write make the file
++unreadable.
++
++**File (rule 9).** `FORMAT` 2. A format-1 file is read with its own private shape (`line: ThreadLine`) and each thread
++becomes `ThreadPlace::one_line(line)`; it is not rewritten by reading (`open` never writes); the first change the user
++makes (add, note, queue, send result, edit, delete, session) writes the whole file as format 2. A new field in format 1
++is unsafe (scout §3: an older yamt would drop it on rewrite and turn a range into its end line); format 2 makes an
++older yamt refuse the file by name, untouched. `{"format":0}` stays `Broken` ("format 0 is not 1 or 2"), `{"format":3}`
++is `NewerFormat`. Pinned on disk: the format-1 `EVERY_KIND` text read and left byte-identical by refused operations,
++then the format-2 text a change writes; a format-2 file with a both-sides range round-trips byte-identical.
++
++**GitLab (rule 10).** `PostBody { note, diff_refs, place: LinePlace, multi_line: Option<MultiLine> }`;
++`LinePlace` is today's, computed from `place.end` (the position's `old_line`/`new_line` name the end line);
++`multi_line` is `None` for a one-line place (body unchanged, no `line_range`). For a range, `send` loads the file
++(`Range::load`, once per range message) and `multi_line(path, differences, place)` builds both ends with the line-code
++numbers above, hashing `entry.path` (= `new_path`, `file.rs:253-255`) with SHA-1. `position.line_range` =
++`{ start: { line_code, type?, old_line?, new_line? }, end: {…} }`: `type` `"old"` for a removed end, `"new"` for an added
++end, **left out for an unchanged end** (GitLab's own form sends nil there, `line.rb:92-94`,
++`diff_line_note_form.vue:64-69`; open question 1); `old_line` left out for an added end, `new_line` for a removed end
++(`line.rb:80-86`; the route takes all four as optional, `draft_notes.rb:95-108`). Drafts read back parse
++`position.line_range` into the same `MultiLine` (`null` or missing → `None`); `same_draft` also requires equal
++`multi_line` ends compared on `type`, `old_line`, `new_line` (not `line_code`, which is derived from them and the path
++already compared). A draft read back without a range is a one-line draft: it can stand in only for a one-line
++message, never for a range ending on its line, and a range draft never for a one-line message. A changed end whose line
++is not inside a difference of the loaded file (the diff engine moved on) is `Refused` with "the thread's lines are not
++in this diff any more"; a load failure is `Refused` with its words. SHA-1 needs the crate `sha1` 0.10 (RustCrypto;
++`digest` 0.10.7 is already in `Cargo.lock` through `sha2` 0.10.9): the stack has no SHA-1 (no `sha1` in `Cargo.lock`),
++git's `hash-object` hashes a blob header with the text, and the window's WebCrypto would put GitLab's encoding in the
++stored thread. Plan row below (DR3).
++
++**GitLab's order over two columns (rule 2), editor.** One new pure module `editor/internal/diffOrder.ts` over the
++reply's differences (as `linePlace` reads them):
++- `orderIndex(differences, line: DiffLine)`: the line's index in GitLab's list. Unchanged `(l, r)`: `l` + the added lines
++  of the differences before it; removed `l` in `d`: `l` + the added lines of the differences before `d`; added `r` in
++  `d`: `d.left.start + d.left.len` + the added lines of the differences before `d` + `(r − d.right.start)`.
++  `lineAtIndex(differences, index)` is its inverse.
++- A pointer position becomes a `ThreadLine` with today's `anchorAt(differences, column, line)`; `diffLineOf` drops the
++  column for ordering. Which column: the one whose box (gutter and text) the pointer's x is in; in the strip, the half
++  it is in. Which line: `lineBlockAtHeight(y − documentTop)` in that column when it is a text line of the file
++  (`pressedLine`'s rule: not the empty line after a last newline); over a thread row, below the last line, or in an
++  empty column, the other column's line at that height by the same rule — the line the eye sees there `[INFERENCE:
++  these are the "empty space" the request names; the columns have no spacer lines]`; when neither has one, the end
++  stays where it was. y is clamped into the column's visible height.
++- `placeBetween(differences, press, pointer): ThreadPlace`: the earlier of the two in GitLab's order is `start` (its
++  `DiffLine`), the later is `end` (its `ThreadLine`, so an unchanged end keeps the column it was picked in); the same
++  index is the press's one-line place. Upwards and downwards give the same place.
++- `shownEnd(differences, hiddenLeft, press, pointer): ThreadLine`: the pointer clamped to the unbroken run of shown
++  indices around the press (rule 3): a collapsed run hides unchanged lines in both columns, so it is one stretch of
++  indices; the end stops at the shown line before the wave, in either direction. A line under the wave counts as
++  hidden, so the pointer over the wave clamps too.
++- `placeSpans(differences, place)`: per column, the lines to tint (unchanged in both, removed left, added right) as
++  `{ start, len }` spans; `unchangedRuns(differences, place)`: the place's unchanged lines as `ColumnChange`s, one per
++  stretch between differences (rule 8).
++
++**Drag (rules 1, 3).** `editor/internal/threadDrag.ts` `ThreadDrag`: the gutter `mousedown` (left button, on a number,
++not on a wave, not on the badge) returns `true` (no native selection, CodeMirror's own selection starts only in the
++content) and starts the drag with the pressed `ThreadLine`; document listeners in the capture phase while it runs:
++`pointermove` (recompute the end from the pointer), `scroll` on both columns' scrollers (the wheel scrolls natively;
++recompute from the last pointer position, so the range follows the line under the pointer; no automatic scroll),
++`keydown` Escape (cancel: preventDefault + stopPropagation, so no other Escape action runs), `pointercancel` and window
++`blur` (cancel), `pointerup` (release: `placeBetween(press, shownEnd(...))` → `RangeEvents.startThread(place)`). A
++press and release on one line gives that line's one-line place — today's thread, now started on release. The badge
++press keeps today's toggle and starts no drag (`numberPress` → `{ kind: "toggle" }`).
++
++**Box, badge, tint, collapse (rules 4, 5, 8).** `threadRows` places a row by `place.end` (today's `placeOf`/`gapAfter`
++unchanged), so a range's box is under its last line in GitLab's order and threads ending on one line share a row; the
++badge counts by `shownLine(place.end)` (`lineCounts`). Tint: `editor/internal/threadTint.ts`, a per-column `StateField`
++of spans set by one effect, giving `Decoration.line({ class: "cm-thread-tint" })` and a gutter line class; the
++controller sets it to the union of the live drag's place, every shown draft's place and the hovered thread's place.
++Hover: `ThreadHosts` gets `hovered(key | null)` and adds `pointerenter`/`pointerleave` on each host it creates — the
++box is Vue, its host is the editor's, so nothing crosses into the window. CSS: `.cm-line.cm-thread-tint` and the
++gutter cell get `background-image: linear-gradient(var(--color-selection), var(--color-selection))`, layered over a
++difference's own background, readable in both themes. Collapse: `columnChanges` takes `unchangedRuns` of every shown
++thread (any shown kind, drafts included, #126), merges overlapping or touching runs, then the differences; computed at
++open and on each toggle as today.
++
++**Window (rules 6, 7).** Drafts hold `place`; "the same range" = same `start` and today's same-end rule (shown column
++and line of `end`): the same range focuses the draft, any other is a new draft (sharing the end's row).
++`threadPlaceText(entry, place)` (each end named by today's rule: a removed line by the old path and old number, any
++other by the new path and new number):
++| case | text | example |
++|---|---|---|
++| one line | `path:N` (today) | `src/board/board.ts:204` |
++| both ends on the same side (both removed, or neither) | `path:a-b` | `src/board/board.ts:201-204`, `src/api/mockBoards.ts:2-5` |
++| one removed end, one not, one path | `path:<s>a to <s>b`, `-` an old number, `+` a new one | `src/board/board.ts:-200 to +204` |
++| the same in a renamed file | `<path of start>:<s>a to <path of end>:<s>b` | `docs/shortcuts.md:-3 to docs/keys.md:+4` |
++
++The default first message's sentence becomes: "A line removed by the changes is named by its place in
++{{ OLD_COMMIT }}; in a range such as `-5 to +8`, `-` marks a line of {{ OLD_COMMIT }} and `+` one of
++{{ NEW_COMMIT }}." (placeholder names unchanged, plan §2 #113).
++
++**Fixtures.** `?threads=seeded` keeps threads 0–3 as they are (one-line places) and appends, on board.ts, both
++`notQueued` so queued counts stay: thread 4 "inside a column" `start: unchanged { left: 400, right: 388 }`,
++`end: added { right: 405 }` (R389–R406, left L401–L415; under collapse it keeps L397–L415 shown, which the run
++`d4`→`d5` would hide from L331); thread 5 "across both" `start: removed { left: 254 }`, `end: added { right: 259 }`
++(L255, R259–R260). The `?range` acceptance uses the `review` case (`fixtureRange.ts:28`).
++
++**Files.** Rust: `crates/review/src/{thread_types,thread_file,thread_store,thread_store/waiting,position,gitlab,send,
++lib}.rs`, its tests, `Cargo.toml`, `AGENTS.md`; `src-tauri/src/{review.rs,review/tests.rs,ipc_error.rs,
++ipc_error/tests.rs}`; `tests/glab/{line-range,line-range-drafted}/`, `tests/glab/README.md`. Web: `ipc/{threadLine,
++ReviewSource,reviewDomain,tauriReview,fixtureReview,fixtureThreads,index}.ts` and tests; `editor/internal/{diffOrder,
++threadDrag,threadTint}.ts` (new), `{threadAnchor,threadRows,threadNumbers,columnFolds,threadHosts}.ts`, `range.ts`,
++`theme.css`, tests; `ui/{rangeDrafts,rangeThreads,rangeOpen,rangeThreadText,rangeStore,useRangeController}.ts`,
++`RangeThreadBox.vue`, tests; `agent/internal/firstMessage.ts`.
++
++**Risks.** GitLab's diff is git's; yamt's differences come from `merge_core::compare` (plan §2 #95). Where the two cut
++a change differently, a changed end's partner number differs and GitLab cannot find that `line_code` among its rows:
++its tint (`multiline_comment_utils.js:95-117`) is off, while the note itself still sits on the end line by
++`old_line`/`new_line` (risk row below; owner check on the playground). A range that starts on a line GitLab has not
++expanded (yamt shows more lines than GitLab's 3-line hunks when collapse is off) has the same effect. The drag's three
++document listeners must all go at release, cancel and `destroy`. Every single-line test that names `line` changes
++mechanically to `place`.
++
++**Tests.** §3. **Visions.** 4 (one shape, no column on `start`, a refused backward place, format step), 2 (GitLab's
++order lives in one editor module; GitLab's numbers in one Rust function), 1 (two ends a reader can see in the JSON).
++
++**Cost.** Rust ~900 changed lines, web ~2,100 (≈ half mechanical `line` → `place` in tests), one new crate (`sha1`),
++one format step; five builds (rust, domain, editor, window, verify).
++
++### Option B — every end carries GitLab's two numbers
++
++**Data.** `GitLabLine { kind: Removed | Added | Unchanged, old: u32, new: u32 }` (GitLab's `old_pos`/`new_pos`,
++1-based) for both ends, plus the end's column for an unchanged end; `ThreadPlace { start: GitLabLine, end: GitLabLine,
++column: Column }`. Order is constructive-checkable in Rust (componentwise ≤ on `(old, new)` is exactly GitLab's
++order), line codes need no differences at send, `same_draft` compares numbers directly.
++
++**Cost and risks.** A format-1 removed or added line has no partner number; making one needs the file's differences
++at `ThreadStore::open` (a diff per file with threads, at every start) or two stored shapes (old one-line threads
++without partners, new ones with) — two code paths for one concept. The partner numbers are GitLab's encoding stored
++as yamt's fact, and the editor must produce them for every press (it can, from `linePlace`). Files as A, plus the
++store open path. Visions 4 (stronger order check), against 2 and 5 (a migration that reads git, or two shapes).
++
++### Option C — a range beside the line
++
++**Data.** `Thread { line: ThreadLine, from: Option<DiffLine> }` (`None` = one line); format 2 still needed (an older
++yamt drops `from`). Smallest churn: every one-line code path and test keeps `line`; range code reads `from`.
++
++**Cost and risks.** Two shapes for one concept: tint, folds, place text, drafts and GitLab each branch on the
++`Option`; `Some(from)` equal to `line`'s own line is a second value for a one-line thread (illegal state
++representable), so draft identity and `same_draft` need a normalising step. ~30% fewer changed lines than A.
++Visions 5 (less churn), against 4 and 2.
++
++## 2. Recommendation and cost
++
++**Option A.** One place shape keeps every consumer on one path and makes equal ranges equal values (vision 4); GitLab's
++numbering lives in one Rust function fed by the differences the range already computes, and GitLab's order in one
++editor module (vision 2); format 2 is the only safe way to add data to `threads.json` (rule 9). B buys a stronger Rust
++order check at the price of a migration that reads git or two stored shapes; C buys less churn at the price of two
++shapes and a normalising step. Cost: ~3,000 changed lines over five builds, the `sha1` crate, one format step; the
++editor's drag and tint are WebKit-tested in the editor build, the window's wiring in the verify pass.
++
++## 3. Tests per layer (each with the bug it catches)
++
++**Rust (`yamt-review`, `yamt-app`).**
++- `thread_types` unit: `runs_forward` true for one-line places and for start ≤ end on a shared side; false for a start
++  after the end on the left or on the right (catches a swapped drag reaching the file).
++- `thread_file` unit: `format_0_is_broken_not_newer` ("format 0 is not 1 or 2"); `a_backward_place_is_broken`
++  (catches a hand-edited file loading a range that runs backwards); format 1 `line` read as a one-line place.
++- `tests/threads.rs`: `a_format_1_file_reads_as_one_line_places_and_is_written_as_format_2_by_the_first_change`
++  (pins both JSON texts: `FORMAT_1_EVERY_KIND` bytes unchanged after open and list; the format-2 text after `add_note`;
++  catches a load that rewrites or a write that keeps format 1); `a_range_survives_a_reload` (both-sides place through
++  add, reopen, list); `a_newer_format_is_refused_and_left_unchanged` now with format 3; `add_thread_refuses_a_backward_place_and_writes_nothing`;
++  the format-2 `EVERY_KIND` (one thread per end kind plus one both-sides range) byte-identical after refused
++  operations (`note_edits.rs`, `threads.rs` existing assertions).
++- `position` unit: `line_codes_number_a_line_as_gitlabs_parser_does` (removed in a mixed and in a pure removal, added in
++  a mixed and in a pure addition, unchanged; the hash of the new path for a renamed file; catches partner numbers taken
++  from the wrong side or 0-based); `a_range_body_has_line_range_and_names_its_end_line`; `a_one_line_body_has_no_line_range`;
++  `a_draft_is_the_same_only_with_the_same_range_or_both_without`.
++- `gitlab` unit: `drafts_read_back_their_line_range_or_none` (`null`, missing, a range, a malformed one → no place).
++- `tests/review.rs` over the fake glab: `a_range_posts_both_ends_with_gitlabs_line_codes` (`tests/glab/line-range`: an
++  in-column range and a both-sides range, full bodies: start `old`/end `new` for the both-sides one);
++  `a_draft_stands_in_for_a_range_only_when_its_range_matches` (`tests/glab/line-range-drafted`); the existing
++  `the_post_body_names_the_three_commits_and_the_position` unchanged (one-line bodies keep their shape).
++- `src-tauri`: `a_range_thread_added_through_add_thread_comes_back_from_list_threads`; the `BackwardPlace` mapping in
++  `ipc_error/tests.rs`.
++
++**ipc (domain).** `reviewDomain.test.ts`: a place comes through with both ends, each number checked and named
++(`threads[0].place.start.left`); `tauriReview.test.ts`: `addThread` hands the place as is; `fixtureReview.test.ts`:
++seeded threads 0–5 with their places, `addThread` stores a place; `fixtureRange.test.ts`: every seeded place's ends sit
++on board.ts lines as their kinds say (inside a difference or paired outside).
++
++**editor (node).** `diffOrder.test.ts`: order lists an unchanged line once and a change's removed lines before its
++added ones, including pure additions/removals at the file's start and end (catches added-before-removed or a skipped
++line); `lineAtIndex` inverts `orderIndex` over every index of a fixture; `placeBetween` gives the same place up and
++down and the end keeps its picked column; a one-column drag from an unchanged line to an added line covers the change's
++removed lines; `shownEnd` stops before a collapsed run in both directions and over the wave; `placeSpans` and
++`unchangedRuns` split at differences. `columnFolds.test.ts`: every unchanged line of a range stays shown under
++collapse, split across a difference; overlapping ranges merge (catches lines of a long range hidden by a short one).
++`threadTint.test.ts`: tinted lines and gutter cells get the class; a new set replaces the old. `threadRows.test.ts`: a
++range's row sits under its end; two ranges ending on one line share a row. `threadNumbers.test.ts`: counts by the end;
++a press on a number is a drag, on the badge a toggle.
++
++**editor (WebKit, `rangeThreads.browser.test.ts`).** Press-release on one number starts a one-line thread on release
++and nothing on press (replaces the test at `:297`); a drag over four right-column numbers across unchanged and added
++lines tints them and the change's removed lines on the left, and starts the range on release; left removed → right
++added starts a both-sides range, upwards the same; Escape mid-drag starts nothing and clears the tint; a scroll
++mid-drag moves the end to the line under the pointer; a real drag (`userEvent.dragAndDrop`) leaves both columns'
++selection collapsed; a drag stops at a wave; the pointer over a box tints its thread's lines and leaving clears them;
++the badge still toggles; an added file's empty left column still starts nothing (`:368`).
++
++**window (node).** `rangeThreadText.test.ts`: the four place texts above; `rangeThreads.test.ts`: the same range
++focuses its draft, a range ending on the same line is a new draft; seeded counts 6; `rangeStore.test.ts`:
++`askContext` gives the range's text; `firstMessage.test.ts`: the default text; `useRangeController.test.ts`:
++`startThread(place)` makes a draft with that place.
++
++**Existing single-line tests that change, and why.** Every Rust test naming `ThreadLine` as a thread's `line`
++(`position.rs` tests, `thread_file.rs` tests, `waiting.rs` tests, `tests/{review,threads,note_edits}.rs`,
++`stored_threads/mod.rs`, `src-tauri/src/review/tests.rs`): the field is `place`. `threads.rs:61-103` (format 1 round
++trip) becomes the format step test; `:115-127` uses format 3. Web: `reviewDomain`, `tauriReview`, `fixtureReview`,
++`fixtureRange`, `threadAnchor`, `threadRows`, `threadNumbers`, `columnFolds`, `rangeThreads.browser`, `rangeThreads`,
++`rangeThreadText`, `rangeStore`, `rangeAi`, `useRangeController`, `firstMessage` tests: `line` → `place` (a one-line
++place built with `onePlace`), the press test now releases.
++
++**WebKit and real-app acceptance (verify).** Display numbers on board.ts: see `line-ranges-verify.md` (drags on
++`d2`: R201–R204 and L200 → R204; the wave after `d0` at R25; seeded threads 4 and 5).
++
++## 4. Proposed `docs/plan.md` §2 rows (DR5; text for the orchestrator)
++
++- **145 — A thread sits on a range of lines chosen by dragging over the line numbers** (owner 2026-10-31, #2051, #2052;
++  request `docs/slices/request-line-ranges.md` rules 1–10; design `briefs/line-ranges-design.md` option A). The anchor is
++  `ThreadPlace { start: DiffLine, end: ThreadLine }` (amends #116's `ThreadLine` anchor): `DiffLine` = `Removed { left }
++  | Added { right } | Unchanged { left, right }`, `end` today's `ThreadLine` deciding the box's column; a one-line thread
++  is a place whose start is its end's line. GitLab's one-column order over the two columns (an unchanged line once, a
++  change's removed lines then its added ones) is one pure editor module, `diffOrder.ts`; a gutter press starts a drag
++  (document listeners: move, column scroll, Escape cancels, release starts the thread; the badge keeps its toggle); the
++  range stops at a collapsed run; the box and badge sit on `end`; the tint (selection colour, both columns) shows the
++  drag, every draft and the thread whose box the pointer is over, the hover read from the editor's own hosts; a range's
++  unchanged lines are run edges, merged when they overlap (amends #126's one-line run edges). Rejected: every end with
++  GitLab's two numbers (option B: format-1 lines have no partner without reading git at open); a range beside the line
++  (option C: two shapes, a second value for one line). Visions 4, 2, 1.
++- **146 — `threads.json` format 2** (amends #117/#120's format 1). Format 1 reads as one-line places and is never
++  rewritten by a read; the first change writes format 2; an older yamt refuses format 2 by name, untouched (#120); a
++  place running backwards on a shared side is refused at add (`BackwardPlace`) and `Broken` at read. Rejected: a new
++  field in format 1 (an older yamt drops it on rewrite); writing format 1 while no range exists (two writers of the
++  file's shape). Visions 4, 2.
++- **147 — A range posts as GitLab's multi-line comment** (amends #118's body). `position[line_range]` with `start` and
++  `end` `{ line_code, type?, old_line?, new_line? }`, the position's `old_line`/`new_line` naming the end;
++  `line_code` = `<sha1 of the new path>_<old>_<new>` with GitLab's parser numbers (an added line carries the old number
++  of the line after its change, a removed one the new number of its change's first added line;
++  `lib/gitlab/git.rb:113-115`, `lib/gitlab/diff/parser.rb:52-64`, `lib/gitlab/diff/file.rb:253-255` at `v19.3.2-ee`),
++  computed from `Range::load`'s differences at send; `type` `old`/`new`, left out for an unchanged end (GitLab's own form;
++  owner question); a draft stands in only when its range matches too, a draft without a range only for a one-line
++  message. New crate `sha1` 0.10 in `yamt-review` (amends §7): the stack has no SHA-1. Rejected: computing line codes in
++  the window (GitLab's encoding stored with the thread); sending no `line_code` (GitLab tints the range by it). Visions
++  2, 5.
++- **148 — Defaults decided with the line-range design** (orchestrator, OR13; the owner may veto): in the strip, the
++  pointer belongs to the column of its half; over a thread row, below the last line or in an empty column, the other
++  column's line at that height; Escape during a drag is taken by the drag alone; the tint is a layer over the
++  difference colours; a drag past the column's edge waits for the wheel (no automatic scroll); the place-text wording of
++  `line-ranges-design.md` §1.
++
++## 5. Proposed risk-register rows
++
++| id | risk | owner | proving test |
++|---|---|---|---|
++| RK48 | a posted range's `line_code` names other rows than GitLab's (partner numbers from the wrong side, 0-based, the old path hashed for a rename, or GitLab's hunks cut a change differently than `merge_core::compare`) | `yamt-review` `position` `multi_line` (numbers from `Range::load`'s differences, GitLab's parser rule) | `line_codes_number_a_line_as_gitlabs_parser_does`, `a_range_posts_both_ends_with_gitlabs_line_codes`; owner check on the playground (a different hunk cut is accepted: the note still sits on its end line) |
++| RK49 | a range turns into its end line or a file becomes unreadable (an older yamt rewrites a range file; a backward place written) | `yamt-review` `thread_file` (format 2; format 1 read-only until a change) + `add_thread` (`BackwardPlace`) | `a_format_1_file_reads_as_one_line_places_and_is_written_as_format_2_by_the_first_change`, `a_newer_format_is_refused_and_left_unchanged`, `add_thread_refuses_a_backward_place_and_writes_nothing` |
++| RK50 | a drag selects text, reveals hidden lines, crosses a collapsed run, or leaves a listener behind | `editor/internal/threadDrag.ts` + `diffOrder.ts` `shownEnd` | WebKit `a drag selects no text in either column`, `a drag stops at a collapsed run's wave`, `Escape mid-drag starts nothing`; `shownEnd` node tests |
++| RK51 | a range's unchanged lines hide under collapse (a run edge kept as one line, or two overlapping ranges) | `editor/internal/columnFolds.ts` (`unchangedRuns`, merged) | `columnFolds.test.ts` "every unchanged line of a range stays shown…", "overlapping ranges merge…" |
++
++## 6. Doc updates for the docs keeper (after the builds)
++
++`docs/architecture.md` §3.8 `review` paragraph (`:621-625`: `ThreadPlace`, format 2, the multi-line body); project map
++`tree.md` rows for `crates/review` (`:58-63`), `ipc/threadLine.ts` (`:139`) and the three new editor files (`diffOrder.ts`,
++`threadDrag.ts`, `threadTint.ts`: PM6, `just map-check` fails without them); `skill://ipc-contract` line 85
++(`add_thread(file, place: ThreadPlace, text)`); the risk rows above; plan rows above.
+diff --git a/docs/slices/briefs/line-ranges-domain.md b/docs/slices/briefs/line-ranges-domain.md
+new file mode 100644
+index 0000000..f5b1161
+--- /dev/null
++++ b/docs/slices/briefs/line-ranges-domain.md
+@@ -0,0 +1,108 @@
++# Slice line-ranges-domain — the window's `ThreadPlace`, its conversions and the seeded range threads
++
++Design: `docs/slices/briefs/line-ranges-design.md` option A (§1 "Data", "Fixtures"). This build exists because the
++window's share of the type cutover (ipc + ui + agent, 28 files) is over the size guide, and because the editor and
++window builds both need these types in the tree before they start side by side.
++
++## Target
++
++**Owned:** `frontend/src/ipc/threadLine.ts`, `frontend/src/ipc/ReviewSource.ts`, `frontend/src/ipc/reviewDomain.ts`,
++`frontend/src/ipc/reviewDomain.test.ts`, `frontend/src/ipc/tauriReview.ts`, `frontend/src/ipc/tauriReview.test.ts`,
++`frontend/src/ipc/fixtureReview.ts`, `frontend/src/ipc/fixtureReview.test.ts`, `frontend/src/ipc/fixtureThreads.ts`,
++`frontend/src/ipc/fixtureRange.test.ts`, `frontend/src/ipc/index.ts`, `frontend/src/ipc/AGENTS.md`.
++
++**Read-only:** `frontend/src/ipc/bindings.ts` (regenerated by the orchestrator after the rust build; never edit),
++everything else.
++
++**Needs:** the rust build committed and `just bindings` run (generated `DiffLine`, `ThreadPlace`, `Thread.place`,
++`commands.addThread(file, place, text)`; contract in `line-ranges-rust.md`).
++
++**Non-goals:** any file under `editor/` or `ui/` (the editor and window builds); a fixture refusal of a backward place
++(the window cannot make one; Rust's `BackwardPlace` is not mirrored).
++
++After this build `src/editor/` and `src/ui/` do not typecheck (they still read `line`); the editor and window builds
++fix their own layers.
++
++## Contract
++
++`frontend/src/ipc/threadLine.ts` after this build (exactly these exports; bodies are yours):
++
++```ts
++export type ThreadLine = /* unchanged: removed | added | unchangedOnLeft | unchangedOnRight */;
++
++/** A line of the diff in GitLab's one-column order: an unchanged line once, a change's removed lines, then its added lines. */
++export type DiffLine =
++  | { readonly kind: "removed"; readonly left: LeftLine }
++  | { readonly kind: "added"; readonly right: RightLine }
++  | { readonly kind: "unchanged"; readonly left: LeftLine; readonly right: RightLine };
++
++/** From `start` to `end` in GitLab's order, both included; one line when `start` is `end`'s line. `end` decides the box's column. */
++export type ThreadPlace = { readonly start: DiffLine; readonly end: ThreadLine };
++
++export type ShownThread = {
++  readonly key: string;
++  readonly place: ThreadPlace;
++  readonly shown: "open" | "collapsed" | "draft";
++};
++
++export function shownLine(line: ThreadLine): { readonly column: Column; readonly line: number }; // unchanged
++export function shownColumn(line: ThreadLine): Column;                                            // unchanged
++export function changedThreadLine(column: Column, line: number): ThreadLine;                      // unchanged
++export function unchangedThreadLine(column: Column, lines: { readonly left: number; readonly right: number }): ThreadLine; // unchanged
++/** The line without the column it was picked in: `unchangedOnLeft`/`unchangedOnRight` → `unchanged`. */
++export function diffLineOf(line: ThreadLine): DiffLine;
++/** The one-line place on `line`: `{ start: diffLineOf(line), end: line }`. */
++export function onePlace(line: ThreadLine): ThreadPlace;
++export function sameDiffLine(a: DiffLine, b: DiffLine): boolean;
++/** `start` is `end`'s own line. */
++export function isOneLine(place: ThreadPlace): boolean;
++/** Brands every number, naming the field (`${field}.start.left`, `${field}.end.right`, …) on a bad one. */
++export function toThreadPlace(raw: Generated.ThreadPlace, field?: string): ThreadPlace; // field defaults to "place"
++export function fromThreadPlace(place: ThreadPlace): Generated.ThreadPlace;
++```
++
++`fromThreadLine` goes (no user after the cutover); `toThreadLine` stays as the module's private helper for `end`.
++`ipc/index.ts` exports from `./threadLine`: `changedThreadLine`, `diffLineOf`, `isOneLine`, `onePlace`, `sameDiffLine`,
++`shownColumn`, `shownLine`, `unchangedThreadLine`, `type DiffLine`, `type ShownThread`, `type ThreadLine`,
++`type ThreadPlace`.
++
++Other fixed shapes:
++- `ReviewSource.addThread(file: RangeFileId, place: ThreadPlace, text: string): Promise<SourceResult<ThreadAdded>>`.
++- `reviewDomain.ts` `Thread` has `readonly place: ThreadPlace` in place of `line`; `toThread` uses
++  `toThreadPlace(raw.place, \`${field}.place\`)`.
++- `tauriReview.addThread` → `commands.addThread(file, fromThreadPlace(place), text)`.
++- `fixtureReview` stores `place: fromThreadPlace(place)`.
++- `fixtureThreads.ts` `?threads=seeded` on `src/board/board.ts`: threads 0–3 unchanged in kind, line, messages and
++  session, each now `place: { start: <its line without the column>, end: <its line> }`; appended:
++  - thread 4: `place: { start: { kind: "unchanged", left: 400, right: 388 }, end: { kind: "added", right: 405 } }`,
++    one note "Does the snooze need a column of its own?", `notQueued`, session `null`;
++  - thread 5: `place: { start: { kind: "removed", left: 254 }, end: { kind: "added", right: 259 } }`, one note "Why
++    does the limit check move?", `notQueued`, session `null`.
++  board.ts's differences (0-based, `frontend/fixtures/range/review.json` `files[7]`): `d3` left 254+1 / right 258+3,
++  `d4` 308+18 / 314+0, `d5` 415+0 / 403+33, so left 400–414 are unchanged with right = left − 12. Queued counts stay
++  (both new notes are `notQueued`); message and thread ids 0–3 keep their numbers.
++
++## Change
++
++1. `threadLine.ts` as above; `ReviewSource.ts`, `reviewDomain.ts`, `tauriReview.ts`, `fixtureReview.ts`,
++   `fixtureThreads.ts`, `index.ts`.
++2. Tests: `reviewDomain.test.ts` — a thread's place comes through with both ends; every bad number is refused naming
++   its field (`threads[0].place.start.left`, `threads[0].place.end.right`); `fromThreadPlace` hands the app the same
++   place; `diffLineOf`, `onePlace`, `sameDiffLine` (each kind, each mismatch), `isOneLine` (a one-line place on each end
++   kind; an unchanged start with `unchangedOnLeft` and `unchangedOnRight` ends; a two-line place). `tauriReview.test.ts`
++   — `addThread` hands `{ start, end }` to the command as is. `fixtureReview.test.ts` — seeded threads 0–5 with their
++   places; `addThread` stores a two-line place. `fixtureRange.test.ts` — every seeded place's start and end sit on
++   board.ts lines as their kinds say (inside a difference or paired outside).
++3. `ipc/AGENTS.md`: `toThreadPlace`/`fromThreadPlace` and the seeded range threads in its words.
++
++## Acceptance
++
++- `pnpm -C frontend test src/ipc` → all pass (paste the summary line).
++- `pnpm -C frontend typecheck` → errors only in files under `src/editor/` and `src/ui/` (paste the error count per
++  folder; zero under `src/ipc/`).
++- `pnpm -C frontend exec oxlint --type-aware src/ipc` clean.
++- `just mutants HEAD`; survivors on changed lines killed or kept with a reason (SP11).
++
++## Skills
++
++`skill://ts-conventions`, `skill://ipc-contract`, `skill://comment-policy`.
+diff --git a/docs/slices/briefs/line-ranges-editor.md b/docs/slices/briefs/line-ranges-editor.md
+new file mode 100644
+index 0000000..2f153c1
+--- /dev/null
++++ b/docs/slices/briefs/line-ranges-editor.md
+@@ -0,0 +1,152 @@
++# Slice line-ranges-editor — drag on the line numbers, GitLab's order, tint, a range's box and folds
++
++Design: `docs/slices/briefs/line-ranges-design.md` option A (§0 "Editor facts", §1 "GitLab's order", "Drag", "Box,
++badge, tint, collapse"). Request rules 1–5, 8. Facts with a source below are given; re-check only `[INFERENCE]`.
++
++## Target
++
++**Owned:** `frontend/src/editor/**`. You create `internal/diffOrder.ts`, `internal/diffOrder.test.ts`,
++`internal/threadDrag.ts`, `internal/threadTint.ts`, `internal/threadTint.test.ts`; you change `range.ts`,
++`internal/threadNumbers.ts` (+ test), `internal/threadRows.ts` (+ test), `internal/columnFolds.ts` (+ test),
++`internal/threadHosts.ts`, `theme.css`, `rangeThreads.browser.test.ts`, `AGENTS.md`, and any other editor test that
++builds a `ShownThread` (`line` → `place`).
++
++**Read-only:** `frontend/src/ipc/**` (the domain build's `ThreadPlace`, `DiffLine`, `ShownThread`, `diffLineOf`,
++`onePlace`, `sameDiffLine`, `isOneLine` are in the tree: `line-ranges-domain.md` Contract), `frontend/src/ui/**`.
++
++**Needs:** the domain build committed. Runs beside the window build (`line-ranges-window.md`), which writes the ui
++against the `RangeEvents` below.
++
++**Typecheck while the window build runs:** errors are expected only in files under `src/ui/` (they still read `line`
++until the window build lands); zero under `src/editor/`.
++
++**Non-goals:** automatic scroll at a column's edge; keyboard or Shift+click selection; changing a range after it starts;
++the merge and compare windows; anything in `ui/` (the hover reaches the editor through its own hosts, not through Vue).
++
++## Contract
++
++Fixed for the window build (`editor/index.ts` exports are unchanged in name):
++
++```ts
++// range.ts
++export type RangeEvents = {
++  readonly startThread: (place: ThreadPlace) => void; // on release of a gutter press; a one-line place for a press-release on one line
++  readonly toggleThreads: (keys: readonly string[]) => void; // unchanged: a press on the count badge
++  readonly hosts: (hosts: ReadonlyMap<string, HTMLElement>) => void; // unchanged
++};
++// RangeController.showThreads(threads: readonly ShownThread[]) — unchanged; ShownThread is ipc's { key, place, shown }
++```
++
++Internal shapes (yours to refine; the names below are what the design and the tests use):
++
++```ts
++// internal/diffOrder.ts — GitLab's one-column order over the reply's differences (pure)
++export function orderIndex(differences: readonly Difference[], line: DiffLine): number;
++export function lineAtIndex(differences: readonly Difference[], index: number): DiffLine;
++/** The earlier of the two in GitLab's order is `start` (its DiffLine), the later `end` (its ThreadLine, keeping the
++ *  column it was picked in); the same index gives `onePlace(press)`. */
++export function placeBetween(differences: readonly Difference[], press: ThreadLine, pointer: ThreadLine): ThreadPlace;
++/** `pointer` clamped to the unbroken run of shown lines around `press` (a collapsed run hides unchanged lines in both
++ *  columns: one stretch of indices); a clamped unchanged end takes the pointer's column. */
++export function shownEnd(differences: readonly Difference[], hiddenLeft: readonly LineSpan[], press: ThreadLine, pointer: ThreadLine): ThreadLine;
++/** Per column, the lines to tint: unchanged in both, removed in the left, added in the right. */
++export function placeSpans(differences: readonly Difference[], place: ThreadPlace): Readonly<Record<Column, readonly LineSpan[]>>;
++/** The place's unchanged lines, one ColumnChange per stretch between differences. */
++export function unchangedRuns(differences: readonly Difference[], place: ThreadPlace): ColumnChange[];
++
++// internal/threadTint.ts — one StateField per column, set by one effect
++export const showTint: StateEffectType<readonly LineSpan[]>;
++export const threadTint: Extension; // Decoration.line({ class: "cm-thread-tint" }) + a gutterLineClass marker, class "cm-thread-tint"
++
++// internal/threadDrag.ts
++export function pointedLine(views: ColumnViews, differences: readonly Difference[], clientX: number, clientY: number): ThreadLine | null;
++export class ThreadDrag { start(press: ThreadLine, event: MouseEvent): void; destroy(): void; }
++
++// internal/threadHosts.ts
++new ThreadHosts({ views, columns, hovered: (key: string | null) => void }) // pointerenter/pointerleave on each host it creates
++
++// internal/threadNumbers.ts
++export type NumberPress = { readonly kind: "drag"; readonly line: ThreadLine } | { readonly kind: "toggle"; readonly keys: readonly string[] };
++```
++
++Order formulas (0-based `Difference` lines): unchanged `(l, r)` → `l` + the `right.len` of every difference `d` with
++`d.left.start + d.left.len ≤ l`; removed `l` in `d` → `l` + the `right.len` of the differences before `d`; added `r` in
++`d` → `d.left.start + d.left.len` + the `right.len` of the differences before `d` + `(r − d.right.start)`. Example on
++board.ts (`frontend/fixtures/range/review.json` `files[7]`: `d0` 19+1/19+2, `d1` 179+0/180+3, `d2` 199+1/203+1):
++unchanged 196/200 → 196 + 2 + 3 = 201; unchanged 198/202 → 203; removed 199 → 204; added 203 → 205.
++
++## Change
++
++1. `diffOrder.ts` and `diffOrder.test.ts` (node). Tests, each named by the bug it catches: the order lists an
++   unchanged line once and a change's removed lines before its added ones, with pure additions and removals at the
++   file's first line and last line (catches added-before-removed, an off-by-one at an edge); `lineAtIndex(orderIndex(x))
++   === x` for every line of a fixture with all difference shapes; `placeBetween` gives one place dragged up or down,
++   the end keeps its picked column (`unchangedOnLeft` vs `unchangedOnRight`), and press = pointer gives `onePlace`; a
++   one-column drag from an unchanged line to an added line spans the change's removed lines (rule 2); `shownEnd` stops
++   at the last shown line before a hidden stretch going down and going up, and a pointer on a hidden line clamps the
++   same; `placeSpans` and `unchangedRuns` split at every difference, for an in-column and a both-sides place.
++2. `threadTint.ts` (+ node test: tinted lines and their gutter cells carry the class; a new set replaces the old; an
++   empty set clears). `theme.css`: `.cm-editor .cm-line.cm-thread-tint` and `.cm-editor .cm-gutterElement.cm-thread-tint`
++   get `background-image: linear-gradient(var(--color-selection), var(--color-selection))` (`--color-selection`:
++   `pane.ts:98`), a layer over a difference's own background colour.
++3. `threadNumbers.ts`: the gutter `mousedown` handler keeps today's guards (`:109-124`: left button, a number cell,
++   not a wave, `pressedLine` not null) and returns `true` (no native selection) `[INFERENCE: @codemirror/view's gutter
++   calls preventDefault when a handler returns true; check it in node_modules and say so]`; the controller gets
++   `(view, line, onBadge, event)`. `numberPress` → `drag` or `toggle`. `lineCounts` counts by
++   `shownLine(thread.place.end)`. Test updates.
++4. `threadDrag.ts`: `pointedLine`: the column whose `view.dom` x range holds the pointer (in the strip, the half it is
++   in); y clamped into that column's `scrollDOM` box; `lineBlockAtHeight(y − view.documentTop)` → a text line of the
++   file (`pressedLine`'s rule) → `anchorAt(differences, column, line)`; over a thread row, below the last line or in an
++   empty column, the other column at that height by the same rule; else `null`. `ThreadDrag.start` adds, in the capture
++   phase, `pointermove` and `pointerup`/`pointercancel` on `document`, `keydown` on `document` (Escape: preventDefault,
++   stopPropagation, cancel), `scroll` on both columns' `scrollDOM` (recompute from the last pointer position), `blur`
++   on `window` (cancel); release, cancel and `destroy` remove all of them. A null `pointedLine` keeps the last end.
++5. `threadHosts.ts`: `hovered` on `pointerenter`/`pointerleave` of each host (`#create`), removed with the host.
++6. `threadRows.ts`: a row by `place.end` (`placeOf`, `shownColumn(place.end)`); tests: a range's row sits under its
++   end; two ranges ending on one line share a row.
++7. `columnFolds.ts`: `columnChanges` takes `unchangedRuns(differences, thread.place)` of every shown thread (any shown
++   kind, drafts included, plan §2 #126), sorts them by left start, merges overlapping or touching runs, then the
++   differences (which never overlap them); a helper gives the left column's hidden lines as `LineSpan`s
++   (`hiddenIn` + `displayed`). Tests: every unchanged line of a range stays shown under collapse, split across a
++   difference; two overlapping ranges merge so neither's lines hide (without the merge `columnRuns` starts a run inside
++   the longer one, `foldRuns.ts:25-30, 86-101`); today's one-line tests with `onePlace`.
++8. `range.ts`: wires it: `#pressed` → toggle, or `ThreadDrag.start` with the pressed `ThreadLine` and the hidden left
++   lines read at the press; on move, the tint of `placeBetween(press, shownEnd(…))`; on release,
++   `events.startThread(place)`; on cancel, the drag's tint goes. The tint dispatched to each column is the union of the
++   drag's place, every `shown: "draft"` thread's place and the hovered host's thread place (dropped when that key is not
++   in the last `showThreads`); dispatch only when a column's spans change.
++9. `rangeThreads.browser.test.ts` (WebKit, `pnpm -C frontend test:browser`), with a probe case whose differences hold a
++   one-sided and a two-sided change:
++   - "a press and release on one line number starts a one-line thread on release, nothing on press" (replaces `:297`;
++     the badge test in it stays);
++   - "a drag over four right-column numbers across unchanged and added lines tints them and the change's removed lines
++     on the left, and starts the range on release";
++   - "a drag from a removed line on the left to an added line on the right starts a both-sides range; upwards gives the
++     same place";
++   - "Escape during a drag starts nothing and clears the tint" (held drag: dispatched `mousedown` on the cell, then
++     `pointermove`, then Escape, then `pointerup`);
++   - "a scroll during a drag moves the end to the line under the pointer" (held drag; `scrollTop` changed, `scroll`
++     dispatched, then `pointerup`);
++   - "a drag selects no text in either column" (`userEvent.dragAndDrop` from one number cell to another; both views'
++     selections unchanged and `document.getSelection()` collapsed);
++   - "a drag stops at a collapsed run's wave" (collapsed option on; a drag past the wave ends on the line above it);
++   - "the pointer over a thread's box tints its lines in both columns; leaving clears them" and "a draft's lines stay
++     tinted";
++   - keep "an added file's empty left column and the empty line after a last newline start no thread" (`:368`).
++10. `editor/AGENTS.md`: the range threads paragraph (`:19`) names `diffOrder.ts`, `threadDrag.ts`, `threadTint.ts`, the
++    place's two ends and the hover through the hosts.
++
++## Acceptance
++
++- `pnpm -C frontend test src/editor` → all pass (paste the summary line and the new test names).
++- `pnpm -C frontend test:browser src/editor/rangeThreads.browser.test.ts src/editor/range.browser.test.ts` → all pass
++  (paste them). If WebKit cannot launch, say so verbatim (VF5).
++- `pnpm -C frontend typecheck` → zero errors under `src/editor/`; the remaining ones only under `src/ui/` (paste counts).
++- `pnpm -C frontend exec oxlint --type-aware src/editor` clean.
++- `editor/` is not mutated (VF7): each test above names the bug it catches, and for `diffOrder.ts` paste one hand
++  mutation per formula (e.g. added before removed) and the failing test it trips, then restore.
++
++## Skills
++
++`skill://cm6-rules`, `skill://ts-conventions`, `skill://comment-policy`, `skill://risk-register` (RK34, RK35; new RK50,
++RK51 in the design §5).
+diff --git a/docs/slices/briefs/line-ranges-rust.md b/docs/slices/briefs/line-ranges-rust.md
+new file mode 100644
+index 0000000..a9a2117
+--- /dev/null
++++ b/docs/slices/briefs/line-ranges-rust.md
+@@ -0,0 +1,194 @@
++# Slice line-ranges-rust — a thread's place with two ends, `threads.json` format 2, GitLab's multi-line body
++
++Design: `docs/slices/briefs/line-ranges-design.md` option A (read §0 and §1 "File", "GitLab"). Request:
++`docs/slices/request-line-ranges.md` rules 9, 10. Facts with a source below are given; re-check only `[INFERENCE]`.
++
++## Target
++
++**Owned:** `crates/review/src/**`, `crates/review/tests/**`, `crates/review/Cargo.toml`, `crates/review/AGENTS.md`,
++`src-tauri/src/review.rs`, `src-tauri/src/review/tests.rs`, `src-tauri/src/ipc_error.rs`,
++`src-tauri/src/ipc_error/tests.rs`, `tests/glab/line-range/**` (new), `tests/glab/line-range-drafted/**` (new),
++`tests/glab/README.md`.
++
++**Read-only:** everything else; in particular `crates/range/**`, `crates/merge-core/**`, `scripts/range-repo.sh`,
++`tests/glab/lined-up/**`, `frontend/fixtures/range/review.json`.
++
++**Orchestrator, not you:** before this build, root `Cargo.toml` `[workspace.dependencies]` gains `sha1 = "0.10"` and the
++plan row #147 (DR3) is recorded; `Cargo.lock` changes come from cargo and are committed with your patch; after it,
++`just bindings` regenerates `frontend/src/ipc/bindings.ts` (never edit it). The frontend does not typecheck between your
++commit and the domain build's; that is expected.
++
++**Non-goals:** any frontend file; reading GitLab's threads back; GitLab suggestions; changing a thread's place after it
++starts; mirroring `BackwardPlace` in the fixture.
++
++**Open question this build depends on:** the `type` of an unchanged end (design open question 1). Build the default
++below (left out); the owner's other answer ("old") changes one match arm in `position.rs` and its expected JSON.
++
++## Contract
++
++Fixed (you may add, never change):
++
++```rust
++// crates/review/src/thread_types.rs (exported from lib.rs)
++/// A line of the diff as GitLab's one-column view lists it: an unchanged line once, a change's removed lines, then its
++/// added lines.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++#[serde(tag = "kind", rename_all = "camelCase")]
++pub enum DiffLine {
++    Removed { left: LeftLine },
++    Added { right: RightLine },
++    Unchanged { left: LeftLine, right: RightLine },
++}
++
++/// The lines a thread is on, from `start` to `end` in GitLab's order, both included; one line when `start` is `end`'s
++/// line. `end` decides the column the box sits in.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
++pub struct ThreadPlace {
++    pub start: DiffLine,
++    pub end: ThreadLine,
++}
++
++impl ThreadLine { pub fn diff_line(self) -> DiffLine }        // UnchangedOnLeft/OnRight → Unchanged
++impl ThreadPlace {
++    pub fn one_line(line: ThreadLine) -> ThreadPlace         // { start: line.diff_line(), end: line }
++    pub fn is_one_line(self) -> bool                         // start == end.diff_line()
++    /// Where both ends have a left line, start's is not after end's; the same for right lines.
++    pub fn runs_forward(self) -> bool
++}
++
++pub struct Thread { pub id: ThreadId, pub file: RangeFileId, pub place: ThreadPlace, pub messages: Vec<Message>,
++                    pub session: Option<String> }           // `line` → `place`, doc "A thread on lines of one file"
++
++// crates/review/src/lib.rs, Error
++/// The place's first line comes after its last.
++#[error("a thread's first line comes after its last")]
++BackwardPlace,
++
++// ThreadStore
++pub fn add_thread(&mut self, range: &Range, file: RangeFileId, place: ThreadPlace, text: &str) -> Result<ThreadAdded>
++// order of refusals: EmptyMessage, UnknownFile, BackwardPlace (nothing written on any)
++
++// src-tauri/src/review.rs
++#[tauri::command] #[specta::specta]
++pub(crate) fn add_thread(state: State<'_, RangeState>, file: RangeFileId, place: ThreadPlace, text: String)
++    -> Result<ThreadAdded, IpcError>
++// src-tauri/src/ipc_error.rs: yamt_review::Error::BackwardPlace joins the arm with ReadFailed | Broken | NewerFormat
++// → IpcError::Git { message: error.to_string() } (IpcError itself does not change)
++```
++
++Generated TS the domain build relies on (from the above, after `just bindings`):
++`DiffLine = { kind: "removed"; left: LeftLine } | { kind: "added"; right: RightLine } | { kind: "unchanged"; left:
++LeftLine; right: RightLine }`, `ThreadPlace = { start: DiffLine; end: ThreadLine }`, `Thread.place: ThreadPlace`,
++`commands.addThread(file: RangeFileId, place: ThreadPlace, text: string)` invoking `add_thread` with `{ file, place,
++text }`.
++
++**`threads.json` format 2** (`thread_file.rs`): `FORMAT = 2`; a thread is
++`{ "id", "path", "place": { "start": DiffLine, "end": ThreadLine }, "session", "messages" }` (field order as written,
++`to_string_pretty`). Format 1 (`"line": ThreadLine` in place of `"place"`) is read through a private `StoredThread`
++shape of its own and each thread becomes `ThreadPlace::one_line(line)`; the in-memory file then has `format: FORMAT`,
++so the next write is format 2; a read never writes (`ThreadStore::open` unchanged). `parsed`: `format > 2` →
++`NewerFormat`; `format == 1` → the format-1 shape; `== 2` → the current one; anything else → `Broken "format {n} is
++not 1 or 2"`. `problem()` adds: a place with `!runs_forward()` → `"the thread {id}'s first line comes after its last"`.
++
++**The post body** (`position.rs`), 1-based numbers:
++
++```rust
++pub(crate) enum LineType { Old, New }                        // "old" / "new"
++/// One end of GitLab's `position[line_range]`.
++pub(crate) struct RangeEnd { pub(crate) line_code: String, pub(crate) line_type: Option<LineType>,
++                             pub(crate) old_line: Option<u32>, pub(crate) new_line: Option<u32> }
++pub(crate) struct MultiLine { pub(crate) start: RangeEnd, pub(crate) end: RangeEnd }
++pub(crate) struct PostBody { note, diff_refs, place: LinePlace, multi_line: Option<MultiLine> }
++pub(crate) struct PlacedDraft { head_sha, place: LinePlace, multi_line: Option<MultiLine> }   // gitlab.rs
++```
++
++- `LinePlace` = today's `line_place(entry, place.end)` (the position's own `old_line`/`new_line` name the end line).
++- `multi_line` is `None` when `place.is_one_line()`: the body is byte-for-byte today's (no `line_range` key).
++- Otherwise each end, for a `DiffLine` and the file's `differences` (from `Range::load(file)` →
++  `RangeFile::Texts { differences, .. }`, loaded in `send.rs` only for a message whose place is not one line):
++  | end | `line_code` | `type` | `old_line` | `new_line` |
++  |---|---|---|---|---|
++  | `Unchanged { l, r }` | `<sha1>_{l+1}_{r+1}` | left out | `l+1` | `r+1` |
++  | `Removed { l }` in difference `d` | `<sha1>_{l+1}_{d.right.start+1}` | `"old"` | `l+1` | left out |
++  | `Added { r }` in difference `d` | `<sha1>_{d.left.start+d.left.len+1}_{r+1}` | `"new"` | left out | `r+1` |
++
++  `<sha1>` = lowercase hex SHA-1 of `entry.path` (the new path, also for a renamed file). Sources (gitlab-org/gitlab
++  `v19.3.2-ee`): `lib/gitlab/git.rb:113-115`, `lib/gitlab/diff/file.rb:83-85, 253-255`, `lib/gitlab/diff/line.rb:80-86,
++  170-174`, `lib/gitlab/diff/parser.rb:13-14, 48, 52-64, 82-87`, `lib/api/draft_notes.rb:95-108`; one doc comment on the
++  numbering function names the parser lines. A removed/added end not inside any difference → `Outcome::Refused("the
++  thread's lines are not in this diff any more")`; a load error → `Refused(error.to_string())`; a load that is not
++  `Texts` → `Refused("the file has no lines")`.
++- JSON: `position.line_range = { "start": {…}, "end": {…} }`, each end's keys in the order `line_code`, `type`,
++  `old_line`, `new_line`, left-out keys absent (never `null`).
++- Drafts read back (`placed_draft_from`): `position.line_range` `null` or missing → `multi_line: None`; an object → its
++  `start`/`end` with `line_code` (string), `type` (`"old"`, `"new"`, `null` or missing → `None`; another value → the
++  draft has no place), `old_line`/`new_line` through `optional_line_at`.
++- `same_draft`: today's checks and `multi_line` equal on both ends' `line_type`, `old_line`, `new_line` (`line_code`
++  is not compared); `None` equals only `None`.
++
++## Change
++
++1. `thread_types.rs`, `lib.rs`: `DiffLine`, `ThreadPlace` and its methods, `Thread.place`, `Error::BackwardPlace`;
++   unit tests for `runs_forward` (one-line places; start before end on the left, on the right; start after end on
++   either side → false; an added start and a removed end → true, documented as unseen).
++2. `thread_file.rs`: format 2 and format-1 reading as above; `StoredThread.place`; `problem()` order check; update the
++   unit tests (`thread()` writes format 2; `format_0_is_broken_not_newer` with the new words; new
++   `a_backward_place_is_broken`, `format_1_line_reads_as_a_one_line_place`).
++3. `thread_store.rs`, `thread_store/waiting.rs`: `add_thread(.., place, ..)` refusing `BackwardPlace` after the existing
++   checks; `QueuedMessage.place`; `list` copies `place`; waiting tests keep their format-1 `STORED` text (it reads).
++4. `position.rs`, `gitlab.rs`, `send.rs`: the multi-line body, its read-back, `same_draft`, the per-message load in
++   `outcome`; `crates/review/Cargo.toml` `sha1.workspace = true`.
++5. `src-tauri`: `add_thread` takes `place`; the `BackwardPlace` arm; `review/tests.rs` sends `"place"`;
++   `ipc_error/tests.rs` pins `BackwardPlace` → `Git { message: "a thread's first line comes after its last" }`.
++6. Fake GitLab cases (copy `merge-request.json` and `merge-requests.json` from `tests/glab/lined-up/`):
++   - `tests/glab/line-range/`: `draft-notes.json` `[]`; `post-1.json` and `post-2.json` as `lined-up/post-1.json` with
++     ids 201 and 202.
++   - `tests/glab/line-range-drafted/`: `post-1.json` id 501; `draft-notes.json` with draft 401 (note = the in-column
++     text below, the position of the in-column range with its `line_range`, `"type": null` on the unchanged start,
++     head `9c1ba3fc606a3776061d23006b83e2af2a357112`, base/start as in `drafted/`) and draft 402 (note = the both-sides
++     text, the same paths and `"new_line": 204`, `"old_line": null`, `"line_range": null`).
++   - `tests/glab/README.md`: both scenarios in the list.
++7. Tests in `crates/review/tests/` (`stored_threads/mod.rs` builders take places):
++   - `EVERY_KIND` becomes format 2 (today's four one-line threads as places, plus thread 5 on c.txt with a both-sides
++     place `start: removed { left: 1 }`, `end: added { right: 2 }`); `FORMAT_1_EVERY_KIND` keeps today's text.
++   - `threads.rs`: `a_format_1_file_reads_as_one_line_places_and_is_written_as_format_2_by_the_first_change` (open +
++     list leave the format-1 bytes; `add_note` writes the format-2 JSON, compared whole); `a_range_survives_a_reload`;
++     `add_thread_refuses_a_backward_place_and_writes_nothing` (`start: unchanged { left: 5, right: 5 }`, `end: added {
++     right: 2 }`); `a_newer_format_is_refused_and_left_unchanged` with `{"format":3,…}`; the old format-1 round-trip test
++     becomes the format-2 one over the new `EVERY_KIND`.
++   - `review.rs`, a `Review::ranges()` on `main...feature` with two threads on `src/board/board.ts`, each first message
++     queued: in-column `start: unchanged { left: 196, right: 200 }`, `end: added { right: 203 }`, text "Why a second
++     reminder here?"; both-sides `start: removed { left: 199 }`, `end: added { right: 203 }`, text "Why replace the
++     limit check?" (board.ts's differences: `frontend/fixtures/range/review.json` `files[7]`, `d2` = left 199+1 / right
++     203+1, the same Rust made it: `justfile:47-48`).
++     - `a_range_posts_both_ends_with_gitlabs_line_codes` (`line-range`): bodies equal, in order: position
++       `old_path`/`new_path` `src/board/board.ts`, `new_line: 204`, and `line_range`
++       `{ start: { line_code: "<H>_197_201", old_line: 197, new_line: 201 }, end: { line_code: "<H>_201_204", type: "new",
++       new_line: 204 } }`; then `{ start: { line_code: "<H>_200_204", type: "old", old_line: 200 }, end: { line_code:
++       "<H>_201_204", type: "new", new_line: 204 } }`. `<H>` is a literal pinned from `printf '%s' src/board/board.ts |
++       sha1sum`, never computed by the test.
++     - `a_draft_stands_in_for_a_range_only_when_its_range_matches` (`line-range-drafted`): the in-column message is
++       `Pending` with draft 401 and not posted; the both-sides one is posted once (draft 402 has no range) and `Pending`
++       with 501.
++   - `position.rs` unit: `line_codes_number_a_line_as_gitlabs_parser_does` (board.ts numbers above; removed L309 of the
++     pure removal `d4` = left 308+18 / right 314+0 → `_309_315`; added R404 of the pure addition `d5` = left 415+0 /
++     right 403+33 → `_416_404`; a renamed entry hashes its new path); `a_one_line_body_has_no_line_range`;
++     `a_draft_is_the_same_only_with_the_same_range_or_both_without`. `gitlab.rs` unit:
++     `drafts_read_back_their_line_range_or_none`.
++   - `src-tauri/src/review/tests.rs`: `a_range_thread_added_through_add_thread_comes_back_from_list_threads`.
++8. `crates/review/AGENTS.md`: the place, format 2, the multi-line body in its words.
++
++## Acceptance
++
++- `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo fmt --all --check` clean.
++- With the justfile's `hermetic_git` prefix (RK19): `cargo nextest run -p yamt-review -p yamt-app` → every test above
++  passes by name, and today's `the_post_body_names_the_three_commits_and_the_position` passes unchanged (one-line
++  bodies keep their shape).
++- `just bindings` in your workspace (do not commit its output) shows `DiffLine`, `ThreadPlace`, `Thread.place` and
++  `addThread(file, place, text)`; paste the lines.
++- `just mutants HEAD`; survivors on changed lines killed or kept with a reason (SP11).
++
++## Skills
++
++`skill://rust-conventions`, `skill://ipc-contract`, `skill://risk-register` (RK33, RK36; new rows RK48, RK49 in the
++design §5), `skill://comment-policy`.
+diff --git a/docs/slices/briefs/line-ranges-verify.md b/docs/slices/briefs/line-ranges-verify.md
+new file mode 100644
+index 0000000..5f1a091
+--- /dev/null
++++ b/docs/slices/briefs/line-ranges-verify.md
+@@ -0,0 +1,80 @@
++# Slice line-ranges-verify — the gate, the WebKit fixture and the real app for line-range threads
++
++Design: `docs/slices/briefs/line-ranges-design.md`. Request acceptance: `docs/slices/request-line-ranges.md`
++"Acceptance". Recipes: `skill://verification` (VF4–VF11); windows only on a private display (VF8), screenshots only from
++the session or the private display (VF9).
++
++## Target
++
++**Owned:** none (read-only commands; your scratch folder only).
++
++**Read-only:** the whole tree.
++
++**Needs:** the rust, domain, editor and window builds committed. **Smoke pass** as soon as the editor and window builds
++are both in (no `just check`); **final pass** once the docs keeper has added the project-map rows for
++`editor/internal/diffOrder.ts`, `threadDrag.ts`, `threadTint.ts` (`just map-check`, PM6) and the doc updates of the
++design §6: `just check` once, then every step below.
++
++**Non-goals:** the owner's GitLab playground check (below, for the orchestrator to hand on); fixing anything (VF1).
++
++## Contract
++
++Display numbers on the review case's `src/board/board.ts` (0-based differences from
++`frontend/fixtures/range/review.json` `files[7]`, the same as `scripts/range-repo.sh` `main...feature`):
++`d0` L20 removed / R20–R21 added; `d2` L200 removed / R204 added, with L197–L199 = R201–R203 unchanged above it;
++`d3` L255 removed / R259–R261 added; `d5` R404–R436 added, L401–L415 = R389–R403 unchanged above it. Seeded threads
++(`?threads=seeded`, come back collapsed, plan §2 #120): 0–3 one-line (badges on L20, R21, L6, R102), 4 = R389–R406
++in-column range (badge on R406), 5 = L255 → R260 both-sides range (badge on R260). Line height 20 px
++(`LINE_HEIGHT_PX`, `editor/internal/pane.ts:64`). The tint class is `cm-thread-tint` on `.cm-line` and the gutter cell.
++
++## Change (the steps)
++
++**A. Gate (final pass only).** `just check` → pass, or the failing recipe and its first 30 lines.
++
++**B. Editor WebKit probes.** `pnpm -C frontend test:browser src/editor/rangeThreads.browser.test.ts` → paste every test
++name with its result; these alone prove "Escape mid-drag starts nothing", "a scroll during a drag moves the end" and
++"a drag selects no text" (the session's `drag` cannot hold a press).
++
++**C. WebKit fixture.** `just app-session start-fixture --name lr --range-case review --threads seeded --size 1600x1000`;
++open `src/board/board.ts`; collapse off. To drag from a number cell, tag it first with `read` (e.g. set `data-probe`
++on the right column's `.cm-gutterElement` whose text is `201`, after scrolling that column's `.cm-scroller` so the line
++renders), then `drag --name lr '[data-probe=…]' --dy <px>` (3 lines = 60 px) or `--dx/--dy` from the two cells' rects.
++Observe after each step with `read` (the tinted line numbers per column, the box headers, the focused element) and one
++`shot`:
++1. Drag right R201 → R204: right R201–R204 and left L197–L200 tinted; one new box under R204 headed
++   `src/board/board.ts:201-204`.
++2. Drag left L200 → right R204: a second box in the same row, headed `src/board/board.ts:-200 to +204`; L200 and R204
++   tinted.
++3. Drag right R204 → R201 (upwards): no new box; the first box's field has the focus (rule 7).
++4. Click right number 210 (press-release): a box `src/board/board.ts:210`.
++5. Click the badge on R406: thread 4's box opens; click it again: it collapses; no drag or box started.
++6. Open thread 4, `hover` its box: right R389–R406 and left L401–L415 gain the tint (beyond the drafts' own); hover
++   elsewhere: they lose it.
++7. Collapse on: the left gutter shows every number L401–L415 (a wave ends at L396 or above), and R389–R406.
++8. Collapse on: drag right R23 down 200 px (past the wave after `d0`): the box is headed `src/board/board.ts:23-25`.
++9. `stop --name lr`.
++
++**D. Real app.** `scripts/range-repo.sh <scratch>/rr`; `just app-session start-app --name lra --range main...feature
++--repo <scratch>/rr --home <scratch>/home --settings '{"theme":"dark"}'`; open `src/board/board.ts`:
++1. Drag R201 → R204, type "Range in one column", Comment; drag L200 → R204, type "Across both sides", Comment. `shot`
++   (dark) with a box hovered (its lines tinted).
++2. `stop`; `find <scratch>/home -name threads.json -exec cat {} \;` → `"format": 2` and two threads with
++   `"place": { "start": { "kind": "unchanged", "left": 196, "right": 200 }, "end": { "kind": "added", "right": 203 } }`
++   and `"place": { "start": { "kind": "removed", "left": 199 }, "end": { "kind": "added", "right": 203 } }`.
++3. Start again with the same `--home` and `--settings '{"theme":"light"}'`: the badge on R204 reads 2; open both:
++   headers `src/board/board.ts:201-204` and `src/board/board.ts:-200 to +204`; `shot` (light) with a box hovered.
++4. `stop`.
++
++## Acceptance
++
++Every step of A (final pass), B, C and D with its command and the observed lines or the screenshot path (VF4), the
++toolchain versions (VF5), and `pass` per step.
++
++**For the orchestrator to hand to the owner (not run here):** on `scripts/gitlab-playground.sh`, queue and send the two
++ranges of D.1; GitLab's diff shows "Comment on lines 201 to +204" (the unchanged start without a sign, as GitLab's own
++form makes it — the request's "+a to +b" holds for a range of added lines only; design open question 1) and "Comment on
++lines -200 to +204", each tinting R201–R204 / L200 and R204 on hover.
++
++## Skills
++
++`skill://verification`.
+diff --git a/docs/slices/briefs/line-ranges-window.md b/docs/slices/briefs/line-ranges-window.md
+new file mode 100644
+index 0000000..610935d
+--- /dev/null
++++ b/docs/slices/briefs/line-ranges-window.md
+@@ -0,0 +1,90 @@
++# Slice line-ranges-window — drafts, place text and the AI's value for a range
++
++Design: `docs/slices/briefs/line-ranges-design.md` option A (§1 "Window"). Request rules 6, 7. Facts with a source
++below are given; re-check only `[INFERENCE]`.
++
++## Target
++
++**Owned:** `frontend/src/ui/rangeDrafts.ts`, `frontend/src/ui/rangeThreads.ts`, `frontend/src/ui/rangeThreads.test.ts`,
++`frontend/src/ui/rangeOpen.ts`, `frontend/src/ui/rangeOpen.test.ts`, `frontend/src/ui/rangeThreadText.ts`,
++`frontend/src/ui/rangeThreadText.test.ts`, `frontend/src/ui/rangeStore.ts`, `frontend/src/ui/rangeStore.test.ts`,
++`frontend/src/ui/useRangeController.ts`, `frontend/src/ui/useRangeController.test.ts`,
++`frontend/src/ui/RangeThreadBox.vue`, `frontend/src/ui/rangeAi.test.ts`, `frontend/src/ui/rangeGitLab.test.ts`,
++`frontend/src/ui/AGENTS.md`, `frontend/src/agent/internal/firstMessage.ts`,
++`frontend/src/agent/internal/firstMessage.test.ts`.
++
++**Read-only:** `frontend/src/ipc/**` (the domain build: `ThreadPlace`, `DiffLine`, `ShownThread { key, place, shown }`,
++`onePlace`, `diffLineOf`, `sameDiffLine`, `isOneLine`, `shownLine`; `line-ranges-domain.md` Contract),
++`frontend/src/editor/**`.
++
++**Needs:** the domain build committed. Runs beside the editor build; writes against its `RangeEvents.startThread(place:
++ThreadPlace)` (`line-ranges-editor.md` Contract). This build's commit with the editor's starts the smoke pass.
++
++**Typecheck while the editor build runs:** errors are expected only in files under `src/editor/` and where your code
++meets `RangeEvents.startThread` (`useRangeController.ts` `rangeThreadParts`, and its test's `events.startThread` calls),
++which the editor build's new signature resolves; zero elsewhere under `src/ui/` and `src/agent/`.
++
++**Open question this build depends on:** none (the wording below is the design's; the owner may change it later).
++
++**Non-goals:** quoting the lines' text to the AI; renaming `RELATIVE_FILE_PATH_WITH_LINE` (users' saved templates use it,
++plan §2 #113); any editor behaviour (drag, tint, hover).
++
++## Contract
++
++Fixed:
++- `RangeThreads.startThread(file: RangeFileId, place: ThreadPlace): void`; `RangeDrafts.startThread(file, place)`;
++  the thread draft is `{ kind: "thread", file, place: ThreadPlace, text, focus }`.
++- Draft identity (rule 7): a new `place` focuses (bumps `focus` of) the open thread draft of the same file whose place
++  has the same `start` (`sameDiffLine`) and the same end by today's rule (same `shownLine(end)` column and line,
++  `rangeDrafts.ts:120-123`); any other place is a new draft (even one ending on the same line: they share its row).
++- `rangeThreads.shownFor` gives drafts as `{ key, place: draft.place, shown: "draft" }`; `rangeOpen.shownFor` gives
++  stored threads as `{ key, place, shown }`; `addThread` sends `draft.place`.
++- `rangeThreadParts(...).events.startThread = (place) => threads.startThread(file.id, place)`.
++- `threadPlaceText(entry: Pick<RangeEntry, "path" | "change">, place: ThreadPlace): string`. Each end is named by
++  today's rule: a removed line by `entry.change.oldPath` when renamed, else `entry.path`, and its old number (`left + 1`);
++  any other line by `entry.path` and its new number (`right + 1`). Then:
++  | case | text | example |
++  |---|---|---|
++  | `isOneLine(place)` | `<end path>:<end>` (today's text) | `src/board/board.ts:204` |
++  | both ends removed, or neither | `<end path>:<start>-<end>` | `src/board/board.ts:201-204`; `src/api/mockBoards.ts:2-5` |
++  | one end removed, one not, one path | `<path>:<sign start><start> to <sign end><end>`, `-` removed, `+` other | `src/board/board.ts:-200 to +204` |
++  | the same, paths differ (renamed) | `<start path>:<sign><start> to <end path>:<sign><end>` | `docs/shortcuts.md:-3 to docs/keys.md:+4` |
++  The same text is the box header, its `aria-label` (`RangeThreadBox.vue:42-45, 157, 161`) and the AI's
++  `RELATIVE_FILE_PATH_WITH_LINE` (`rangeStore.ts` `askContext`, `:122`).
++- `DEFAULT_FIRST_MESSAGE` line 3 (`firstMessage.ts:14`) becomes exactly:
++  `A line removed by the changes is named by its place in {{ OLD_COMMIT }}; in a range such as \`-5 to +8\`, \`-\` marks a line of {{ OLD_COMMIT }} and \`+\` one of {{ NEW_COMMIT }}.`
++  Every other line and every placeholder name unchanged.
++
++## Change
++
++1. `rangeDrafts.ts`, `rangeThreads.ts`, `rangeOpen.ts`, `useRangeController.ts`: `line` → `place` as above; the
++   identity rule in `rangeDrafts.ts` (private `samePlace`).
++2. `rangeThreadText.ts` `threadPlaceText(entry, place)`; `RangeThreadBox.vue` reads `draft.value?.place ??
++   thread.value?.place`; `rangeStore.ts` `askContext` passes `thread.place`.
++3. `firstMessage.ts` default line 3; `firstMessage.test.ts`'s expected text.
++4. Tests (`onePlace(changedThreadLine(…))` where a one-line place is meant):
++   - `rangeThreadText.test.ts`: today's one-line cases through `onePlace`; the four range cases above, including a
++     renamed file (`{ kind: "renamed", oldPath: "docs/shortcuts.md" }`, path `docs/keys.md`), a removed-only range in a
++     deleted file, and a range whose start is unchanged in the left column (named by its new number).
++   - `rangeThreads.test.ts`: "dragging exactly a draft's range focuses it; another range ending on the same line is a
++     new draft" (start differs, end the same; end column differs); seeded keys `thread-0`…`thread-5` and counts
++     `[[board, 6]]` (the domain build appends threads 4 and 5, both `notQueued`); `shownFor` gives `place`.
++   - `rangeStore.test.ts`: `askContext` of a both-sides thread gives `src/board/board.ts:-255 to +260` (seeded thread 5:
++     `removed { left: 254 }` → `-255`, `added { right: 259 }` → `+260`).
++   - `useRangeController.test.ts`: `events.startThread(place)` makes a draft with that place.
++   - `rangeAi.test.ts`, `rangeOpen.test.ts`, `rangeGitLab.test.ts`: mechanical (`place`, seeded count) where they
++     break.
++5. `ui/AGENTS.md`: the range thread paragraph names the place, the identity rule and `threadPlaceText`'s cases.
++
++## Acceptance
++
++- `pnpm -C frontend test src/ui src/agent` → all pass (paste the summary line and the new test names).
++- `pnpm -C frontend typecheck` → zero errors under `src/ui/` and `src/agent/` except the `RangeEvents.startThread` ones
++  named in Target (paste them); none once the editor build is in the tree.
++- `pnpm -C frontend exec oxlint --type-aware src/ui src/agent` and `pnpm -C frontend exec eslint --max-warnings 0
++  src/ui/RangeThreadBox.vue` clean.
++- `just mutants HEAD`; survivors on changed lines killed or kept with a reason (SP11).
++
++## Skills
++
++`skill://vue-conventions`, `skill://ts-conventions`, `skill://comment-policy`.

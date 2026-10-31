@@ -18,19 +18,23 @@ ci, then tags.
 | 2   | final run 0.6.4 before tagging (`briefs/release-0.6.4-verify.md`)                                            | verifier     | done        | `Release064Verify`: gate pass; readmer, licences; `yamt_0.6.4_amd64.deb` Version `0.6.4`, `yamt 0.6.4`; release binary: Show Diff child `… --repo /tmp/yamt-rel64-rr --ai` with `--ai`, none without; 11 two-line rows; Resolve !21 → merge window, unmerged. Notes `Release064Verify.md` |
 | 3   | push `main`, ci green on all four jobs, tag `v0.6.4`, publish (`handoff-release-0.6.4.md`)                   | human        | handed over |                                                                                                                                                                                                                                                                                           |
 
-## Line-range threads (session 41, planning; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
+## Line-range threads (session 42; owner #2051: "open discussions on a range of lines by dragging, like in gitlab")
 
-Request `docs/slices/request-line-ranges.md` (rules 1–10, acceptance, non-goals, slice graph); facts
-`.omp/run/notes/PlanScoutRangeThreads.md`. Owner's answer #2052: a range may cover both sides (rule 2). No question
-open. Starts in a new session: `Implement docs/slices/request-line-ranges.md`.
+Request `docs/slices/request-line-ranges.md` (rules 1–10, acceptance, non-goals); facts
+`.omp/run/notes/PlanScoutRangeThreads.md`. Owner's answer #2052: a range may cover both sides (rule 2). Design
+`briefs/line-ranges-design.md` option A, plan §2 #145–#148, risks RK48–RK51. Designer's two questions decided by the
+orchestrator (OR13, plan #147/#146): an unchanged end posts with no `type`, as GitLab's own form (GitLab shows
+"lines 201 to +204"); the first change writes format 2 (rule 9 already accepts an older yamt refusing it).
 
-| row | slice                                                                               | owner     | status | evidence |
-| --- | ----------------------------------------------------------------------------------- | --------- | ------ | -------- |
-| 1   | design: anchor shape, file format step, GitLab `line_code` rule, editor drag/tint   | designer  | todo   |          |
-| 2   | Rust: range anchor in `yamt-review`, post body with `line_range`, command, bindings | rust-impl | todo   |          |
-| 3   | editor: drag on line numbers, tint, range kept visible under collapse               | web-impl  | todo   |          |
-| 4   | window: drafts, place text, AI value, hover, fixtures (wires the window)            | web-impl  | todo   |          |
-| 5   | final run: `just check`, WebKit, real app; owner check on his GitLab playground     | verifier  | todo   |          |
+| row | slice                                                                                          | owner       | status | evidence                                  |
+| --- | ---------------------------------------------------------------------------------------------- | ----------- | ------ | ----------------------------------------- |
+| 1   | design: anchor shape, file format step, GitLab `line_code` rule, editor drag/tint              | designer    | done   | `LineRangesDesign`: option A, five briefs |
+| 2   | rust (`briefs/line-ranges-rust.md`): `ThreadPlace`, format 2, `line_range` body, command       | rust-impl   | todo   |                                           |
+| 3   | domain (`briefs/line-ranges-domain.md`): ipc types, fixtures, seeded range threads             | web-impl    | todo   |                                           |
+| 4   | editor (`briefs/line-ranges-editor.md`): order, drag, tint, collapse; beside row 5             | web-impl    | todo   |                                           |
+| 5   | window (`briefs/line-ranges-window.md`): drafts, place text, AI value, hover; wires the window | web-impl    | todo   |                                           |
+| 6   | docs keeper: architecture §3.8, project map rows for the three new editor files                | docs-keeper | todo   |                                           |
+| 7   | verify (`briefs/line-ranges-verify.md`): smoke after 4+5; final `just check`, WebKit, real app | verifier    | todo   |                                           |
 
 ## Open product questions
 
