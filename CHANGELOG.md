@@ -7,15 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-10-31
+
 ### Added
 
 - A click on a merge request's row in the merge-request page opens it on GitLab in the system browser (anywhere on
-  the row except its CI box and its open-changes button); its title is reachable with Tab and opens on Enter or
-  Space. A GitLab installed under a sub-path (`https://host/gitlab`) keeps it in the address.
-- Each row of the merge-request page shows the size of its latest version (`+120 −40 · 6 files`) and one icon for
-  GitLab's merge status: ready, has conflicts, needs rebase, blocked (the hover names why: draft, unresolved
-  discussions, approvals, pipeline, …) or checking. A merge request with conflicts shows "has conflicts" even when
-  something else blocks it too; the hover lists the rest.
+  the row except its buttons and CI box); its title is reachable with Tab and opens on Enter or Space. A GitLab
+  installed under a sub-path (`https://host/gitlab`) keeps it in the address.
+- Each row of the merge-request page shows the size of its latest version (`+120 −40 · 6 files`, the counts green
+  and red) and one icon for GitLab's merge status: ready, has conflicts, needs rebase, blocked (the hover names why:
+  draft, unresolved discussions, approvals, pipeline, …) or checking. A merge request with conflicts shows "has
+  conflicts" even when something else blocks it too; the hover lists the rest.
 - "Resolve conflicts of !12" on a row with conflicts: yamt fetches the merge request's branch and its target, checks
   the branch out in your own checkout (creating it, or fast-forwarding it when it is only behind), merges the target
   into it without committing and opens the merge window. It refuses, changing nothing, while tracked files have
@@ -30,6 +32,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- A merge-request row is two lines, like GitLab's list: the title, then `!12 · created … ago` and the size, muted.
+  The whole row shows the hand cursor; over one of its buttons only that button is highlighted.
+- The row's button that opens the changes is "Show Diff".
 - The merge-request page's filters show an icon before their names (a person for Assignee and Reviewer, a tag for
   Label), and All / Drafts / Ready sit at the right end of the filter row.
 - Opening a merge request's changes no longer adds "Opened !N in a new window." under its row; only a refusal is
@@ -421,7 +426,8 @@ The 0.6 line as a release: everything in 0.6.0-beta.1 and 0.6.0-beta.2 below, wi
 - On Linux with an NVIDIA driver, the app switches off WebKitGTK's DMABUF renderer itself.
 - Releases for Linux (AppImage, `.deb`) and macOS (`.dmg`, unsigned).
 
-[Unreleased]: ../../compare/v0.6.2...HEAD
+[Unreleased]: ../../compare/v0.6.3...HEAD
+[0.6.3]: ../../compare/v0.6.2...v0.6.3
 [0.6.2]: ../../compare/v0.6.1...v0.6.2
 [0.6.1]: ../../compare/v0.6.0...v0.6.1
 [0.6.0]: ../../compare/v0.6.0-beta.2...v0.6.0
