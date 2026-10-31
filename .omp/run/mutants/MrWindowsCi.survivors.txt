@@ -1,0 +1,2 @@
+just mutants HEAD → 'No mutants to filter'; 'no Rust changes since HEAD' (test-only diff)
+

@@ -462,4 +462,6 @@ fn continue_and_abort_at_a_stop_git_records_no_operation_for_answer_no_operation
     );
 }
 
+// Runs `scripts/mr-conflict-repo.sh`, which Windows cannot execute, as the script's other tests.
+#[cfg(unix)]
 pub(crate) mod merge_request;

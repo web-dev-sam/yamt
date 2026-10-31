@@ -1,0 +1,117 @@
+diff --git a/src-tauri/src/merge/tests.rs b/src-tauri/src/merge/tests.rs
+index 34bd293..ba7c916 100644
+--- a/src-tauri/src/merge/tests.rs
++++ b/src-tauri/src/merge/tests.rs
+@@ -462,4 +462,6 @@ fn continue_and_abort_at_a_stop_git_records_no_operation_for_answer_no_operation
+     );
+ }
+ 
++// Runs `scripts/mr-conflict-repo.sh`, which Windows cannot execute, as the script's other tests.
++#[cfg(unix)]
+ pub(crate) mod merge_request;
+diff --git a/src-tauri/src/outcome/tests.rs b/src-tauri/src/outcome/tests.rs
+index 929cb6a..a3b0fea 100644
+--- a/src-tauri/src/outcome/tests.rs
++++ b/src-tauri/src/outcome/tests.rs
+@@ -5,9 +5,6 @@ use yamt_session::DiskVersion;
+ 
+ use super::*;
+ use crate::frontend_log::tests::logged;
+-use crate::merge::tests::merge_request::{
+-    CLEAN, DUE_DATES, IID, RECORD, mr_conflict_repo, start_merge,
+-};
+ 
+ fn text_conflict(path: &str) -> ConflictFile<'_> {
+     ConflictFile {
+@@ -165,48 +162,57 @@ fn plain_directory_fails_with_status_two() {
+     assert!(message.contains("not a git repository"), "{message}");
+ }
+ 
+-#[test]
+-fn startup_opens_a_clean_merge_yamt_started() {
+-    let repo = mr_conflict_repo();
+-    start_merge(&repo, CLEAN);
+-
+-    let Startup::Merge { session, claim } = startup(repo.path()) else {
+-        panic!("expected a merge");
++// Runs `scripts/mr-conflict-repo.sh`, which Windows cannot execute, as the script's other tests.
++#[cfg(unix)]
++mod merge_request_startup {
++    use super::*;
++    use crate::merge::tests::merge_request::{
++        CLEAN, DUE_DATES, IID, RECORD, mr_conflict_repo, start_merge,
+     };
+ 
+-    assert_eq!(session.files(), []);
+-    assert!(claim.is_some());
+-}
++    #[test]
++    fn startup_opens_a_clean_merge_yamt_started() {
++        let repo = mr_conflict_repo();
++        start_merge(&repo, CLEAN);
+ 
+-#[test]
+-fn startup_still_says_nothing_to_merge_without_a_record() {
+-    let repo = mr_conflict_repo();
+-    start_merge(&repo, CLEAN);
+-    std::fs::remove_file(repo.path().join(RECORD)).unwrap();
++        let Startup::Merge { session, claim } = startup(repo.path()) else {
++            panic!("expected a merge");
++        };
+ 
+-    let ending = ending(startup(repo.path()));
++        assert_eq!(session.files(), []);
++        assert!(claim.is_some());
++    }
+ 
+-    assert_eq!(ending.exit, Exit::Success);
+-    let message = ending.message.unwrap();
+-    assert!(message.starts_with("nothing to merge in "), "{message}");
+-}
++    #[test]
++    fn startup_still_says_nothing_to_merge_without_a_record() {
++        let repo = mr_conflict_repo();
++        start_merge(&repo, CLEAN);
++        std::fs::remove_file(repo.path().join(RECORD)).unwrap();
+ 
+-#[test]
+-fn startup_refuses_a_second_window_on_a_recorded_merge() {
+-    let repo = mr_conflict_repo();
+-    start_merge(&repo, DUE_DATES);
+-    let refused = Ending::failure(format!(
+-        "the merge of !{IID} is already open in another yamt window"
+-    ));
+-    let held_by_the_test = claim_window(repo.path()).unwrap().unwrap();
++        let ending = ending(startup(repo.path()));
+ 
+-    assert_eq!(ending(startup(repo.path())), refused);
++        assert_eq!(ending.exit, Exit::Success);
++        let message = ending.message.unwrap();
++        assert!(message.starts_with("nothing to merge in "), "{message}");
++    }
+ 
+-    drop(held_by_the_test);
+-    let first = startup(repo.path());
+-    assert!(matches!(first, Startup::Merge { claim: Some(_), .. }));
+-    assert_eq!(ending(startup(repo.path())), refused);
+-    assert_eq!(refused.exit as u8, 2);
++    #[test]
++    fn startup_refuses_a_second_window_on_a_recorded_merge() {
++        let repo = mr_conflict_repo();
++        start_merge(&repo, DUE_DATES);
++        let refused = Ending::failure(format!(
++            "the merge of !{IID} is already open in another yamt window"
++        ));
++        let held_by_the_test = claim_window(repo.path()).unwrap().unwrap();
++
++        assert_eq!(ending(startup(repo.path())), refused);
++
++        drop(held_by_the_test);
++        let first = startup(repo.path());
++        assert!(matches!(first, Startup::Merge { claim: Some(_), .. }));
++        assert_eq!(ending(startup(repo.path())), refused);
++        assert_eq!(refused.exit as u8, 2);
++    }
+ }
+ 
+ #[test]
