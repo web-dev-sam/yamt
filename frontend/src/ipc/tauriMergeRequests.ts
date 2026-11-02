@@ -3,15 +3,20 @@ import { Channel } from "@tauri-apps/api/core";
 import { commands, type ListMessage } from "./bindings";
 import type { SourceResult } from "./domain";
 import {
+  toCheckedRow,
   toMergeRequestPage,
   toOpenReply,
+  type CheckedRow,
   type ListEnd,
   type MergeRequestPage,
 } from "./mergeRequestDomain";
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { converted, toResult } from "./tauri";
 
-function listed(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>> {
+function listed(
+  onPage: (page: MergeRequestPage) => void,
+  onChecked: (row: CheckedRow) => void,
+): Promise<SourceResult<ListEnd>> {
   return new Promise((resolve, reject) => {
     let settled = false;
     function end(result: SourceResult<ListEnd>): void {
@@ -23,6 +28,10 @@ function listed(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<
       reject(error);
     }
     const messages = new Channel<ListMessage>((message) => {
+      if (message.kind === "checked") {
+        onChecked(toCheckedRow(message.row));
+        return;
+      }
       if (settled) {
         return;
       }

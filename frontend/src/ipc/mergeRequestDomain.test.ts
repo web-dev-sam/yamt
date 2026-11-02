@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type * as Generated from "./bindings";
 import { isMergeRequestIid, isWebPage } from "./domain";
-import { toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
+import { toCheckedRow, toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
 
 const ROW: Generated.MergeRequestRow = {
   iid: 13,
@@ -62,6 +62,17 @@ test.each(["", "yesterday", "2026-13-45T99:00:00Z"])(
 test.each([-1, 1.5, Number.NaN])("an iid %d is refused (catches an unchecked brand)", (iid) => {
   expect(() => toMergeRequestPage(page({ iid }))).toThrow("rows[0].iid must be");
   expect(isMergeRequestIid(iid)).toBe(false);
+});
+
+test("a checked row keeps its iid and readiness as they came", () => {
+  expect(toCheckedRow({ iid: 41, readiness: { kind: "mergesCleanly" } })).toEqual({
+    iid: 41,
+    readiness: { kind: "mergesCleanly" },
+  });
+});
+
+test("a checked row's iid is branded like a page's (catches an unchecked brand)", () => {
+  expect(() => toCheckedRow({ iid: -1, readiness: { kind: "ready" } })).toThrow("row.iid must be");
 });
 
 test("an iid and a web page are branded as they came", () => {

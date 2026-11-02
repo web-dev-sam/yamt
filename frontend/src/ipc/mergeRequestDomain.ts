@@ -35,6 +35,7 @@ export type Refusal = Readonly<Generated.Refusal>;
 export type ResolveRefusal = Readonly<Generated.ResolveRefusal>;
 export type ResolveReply = Readonly<Generated.ResolveReply>;
 export type ContinueMergeReply = Readonly<Generated.ContinueMergeReply>;
+export type CheckedRow = { readonly iid: MergeRequestIid; readonly readiness: Readiness };
 export type LocalMerge = Readonly<Generated.LocalMerge>;
 
 function toWebPage(text: string, field: string): WebPage {
@@ -76,6 +77,10 @@ function toRow(raw: Generated.MergeRequestRow, index: number): MergeRequestRow {
 
 export function toMergeRequestPage(raw: Generated.MergeRequestPage): MergeRequestPage {
   return { me: raw.me, rows: raw.rows.map(toRow) };
+}
+
+export function toCheckedRow(raw: Generated.CheckedRow): CheckedRow {
+  return { iid: branded(raw.iid, isMergeRequestIid, "row.iid"), readiness: raw.readiness };
 }
 
 export function toOpenReply(raw: Generated.OpenReply): OpenReply {

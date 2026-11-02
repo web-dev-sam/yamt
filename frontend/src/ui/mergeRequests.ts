@@ -2,6 +2,7 @@ import type { StorageLike } from "@vueuse/core";
 import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from "vue";
 
 import type {
+  CheckedRow,
   GitLabProject,
   ListEnd,
   MergeRequestIid,
@@ -82,7 +83,7 @@ type Deps = {
   readonly storage?: StorageLike;
 };
 
-type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+type Load = { buffering: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
 
 type State = Deps & {
   readonly project: ShallowRef<GitLabProject>;
@@ -93,10 +94,11 @@ type State = Deps & {
   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
   readonly pageProblem: ShallowRef<string | null>;
   readonly rowActions: RowActions;
+  shown: Load | null;
 };
 
 function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
-  if (load.buffered) {
+  if (load.buffering) {
     load.buffer = merged(load.buffer, rows);
     load.me = me;
     return;
@@ -110,11 +112,25 @@ function ended(state: State, load: Load, end: ListEnd): void {
   if (listed) {
     state.cut.value = end.kind === "cut";
   }
-  if (load.buffered && listed) {
+  if (load.buffering && listed) {
     state.rows.value = load.buffer;
     state.me.value = load.me;
+    state.shown = load;
   }
+  load.buffering = false;
   state.listing.value = { kind: "done", end, at: Date.now() };
+}
+
+function rechecked(rows: readonly MergeRequestRow[], row: CheckedRow): readonly MergeRequestRow[] {
+  return rows.map((old) => (old.iid === row.iid ? { ...old, readiness: row.readiness } : old));
+}
+
+function checked(state: State, load: Load, row: CheckedRow): void {
+  if (load.buffering) {
+    load.buffer = rechecked(load.buffer, row);
+  } else if (state.shown === load) {
+    state.rows.value = rechecked(state.rows.value, row);
+  }
 }
 
 async function load(state: State): Promise<void> {
@@ -123,12 +139,16 @@ async function load(state: State): Promise<void> {
     return;
   }
   const first = state.rows.value.length === 0;
-  const running: Load = { buffered: !first, buffer: [], me: null };
+  const running: Load = { buffering: !first, buffer: [], me: null };
+  if (first) {
+    state.shown = running;
+  }
   state.listing.value = { kind: "loading", first };
   const outcome = await attempt(() =>
-    state.source.listMergeRequests((page) => {
-      received(state, running, page);
-    }),
+    state.source.listMergeRequests(
+      (page) => received(state, running, page),
+      (row) => checked(state, running, row),
+    ),
   );
   if (outcome.ok) {
     ended(state, running, outcome.value);
@@ -194,6 +214,7 @@ function createState(deps: Deps): State {
     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
     pageProblem: shallowRef<string | null>(null),
     rowActions: createRowActions(deps),
+    shown: null,
   };
 }
 

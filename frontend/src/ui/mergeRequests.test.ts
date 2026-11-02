@@ -6,6 +6,7 @@ import {
   createFixtureCompareSource,
   isMergeRequestIid,
   log,
+  type CheckedRow,
   type ContinueMergeReply,
   type ListEnd,
   type LocalMerge,
@@ -35,6 +36,7 @@ import type { Screen } from "./screen";
 
 type Load = {
   readonly send: (page: MergeRequestPage) => void;
+  readonly check: (row: CheckedRow) => void;
   readonly end: (result: SourceResult<ListEnd>) => void;
 };
 
@@ -77,9 +79,12 @@ let ROWS: readonly MergeRequestRow[] = [];
 
 beforeAll(async () => {
   const rows: MergeRequestRow[] = [];
-  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests((page) => {
-    rows.push(...page.rows);
-  });
+  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests(
+    (page) => {
+      rows.push(...page.rows);
+    },
+    () => undefined,
+  );
   ROWS = rows;
 });
 
@@ -137,9 +142,9 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
   const problems: Problem[] = [];
   const source: MergeRequestSource = {
     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
-    listMergeRequests: (onPage) =>
+    listMergeRequests: (onPage, onChecked) =>
       new Promise((resolve) => {
-        loads.push({ send: onPage, end: resolve });
+        loads.push({ send: onPage, check: onChecked, end: resolve });
       }),
     openMergeRequest: (asked) =>
       new Promise((resolve) => {
@@ -188,6 +193,16 @@ async function loaded(live: Rig, rows: readonly MergeRequestRow[] = ROWS): Promi
 
 function iids(rows: readonly MergeRequestRow[]): number[] {
   return rows.map((row) => row.iid);
+}
+
+const CLEAN: CheckedRow["readiness"] = { kind: "mergesCleanly" };
+
+function checkedRow(value: number, readiness: CheckedRow["readiness"] = CLEAN): CheckedRow {
+  return { iid: iid(value), readiness };
+}
+
+function readinessOf(live: Rig, value: number): MergeRequestRow["readiness"] | undefined {
+  return live.slice.rows.value.find((row) => row.iid === value)?.readiness;
 }
 
 test("the seam refuses use before a slice is registered", () => {
@@ -413,6 +428,85 @@ test("a thrown list call is reported as unexpected", async () => {
       cause: { kind: "Unexpected", message: "unreadable page" },
     },
   ]);
+});
+
+test("a first load's checked row changes that row's readiness, also with the page closed, and nothing else (catches a local result never shown)", async () => {
+  const live = rig();
+  await loaded(live);
+  const others = live.slice.rows.value.filter((row) => row.iid !== 640);
+  expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
+
+  loadAt(live, 0).check(checkedRow(640));
+  expect(readinessOf(live, 640)).toEqual(CLEAN);
+  expect(live.slice.rows.value.filter((row) => row.iid !== 640)).toEqual(others);
+
+  live.slice.close();
+  loadAt(live, 0).check(checkedRow(638, { kind: "conflicts", also: [] }));
+  expect(readinessOf(live, 638)).toEqual({ kind: "conflicts", also: [] });
+  expect(live.problems).toEqual([]);
+});
+
+test("a refresh's checked row arriving while it is buffered lands in the swapped rows, and one after the swap in the rows (catches results applied to the old rows)", async () => {
+  const live = rig();
+  await loaded(live);
+  const reloading = live.slice.refresh();
+  const reload = loadAt(live, 1);
+  reload.send({ me: "sam", rows: ROWS });
+  reload.check(checkedRow(640));
+  expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
+
+  reload.end(LOADED);
+  await reloading;
+  expect(readinessOf(live, 640)).toEqual(CLEAN);
+  reload.check(checkedRow(635));
+  expect(readinessOf(live, 635)).toEqual(CLEAN);
+  expect(live.problems).toEqual([]);
+});
+
+test("an older load's checked row lands while its rows are shown and is dropped once a newer load's rows are (catches a stale result over fresh rows)", async () => {
+  const live = rig();
+  await loaded(live);
+  const reloading = live.slice.refresh();
+  loadAt(live, 1).send({ me: "sam", rows: ROWS });
+  loadAt(live, 0).check(checkedRow(640));
+  expect(readinessOf(live, 640)).toEqual(CLEAN);
+
+  loadAt(live, 1).end(LOADED);
+  await reloading;
+  loadAt(live, 0).check(checkedRow(635));
+  expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
+  expect(readinessOf(live, 635)).toEqual({ kind: "checking" });
+  expect(live.problems).toEqual([]);
+});
+
+test.each<SourceResult<ListEnd>>([
+  { ok: true, value: { kind: "failed", message: "502" } },
+  { ok: false, failure: STOPPED },
+])(
+  "a refresh ending %j never lets its checked rows touch the shown rows (catches a failed load's results shown)",
+  async (result) => {
+    const live = rig();
+    await loaded(live);
+    const reloading = live.slice.refresh();
+    const reload = loadAt(live, 1);
+    reload.send({ me: "sam", rows: ROWS });
+    reload.check(checkedRow(640));
+    reload.end(result);
+    await reloading;
+    reload.check(checkedRow(635));
+
+    expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
+    expect(readinessOf(live, 635)).toEqual({ kind: "checking" });
+  },
+);
+
+test("a checked row with an iid that is not listed changes nothing and reports nothing", async () => {
+  const live = rig();
+  await loaded(live);
+  const before = live.slice.rows.value;
+  loadAt(live, 0).check(checkedRow(1));
+  expect(live.slice.rows.value).toEqual(before);
+  expect(live.problems).toEqual([]);
 });
 
 test("the summary counts shown and loaded rows and says when the list was cut, also through a failed reload", async () => {

@@ -1,0 +1,842 @@
+diff --git a/frontend/src/ipc/AGENTS.md b/frontend/src/ipc/AGENTS.md
+index 4b8f170..c985ea7 100644
+--- a/frontend/src/ipc/AGENTS.md
++++ b/frontend/src/ipc/AGENTS.md
+@@ -6,7 +6,9 @@ The range window's threads and GitLab (plan §2 #116–#120) come through `Revie
+ 
+ Your own notes until they are on GitLab (plan §2 #123): `editNote(message, text)` and `deleteMessage(message)` answer the new `ThreadList`. `fixtureReview.ts` mirrors Rust's order: `SendRunning` while its send runs, then `UnknownMessage`, `NotANote` (an AI answer), `MessagePending`, and for an edit `EmptyMessage`; an edit of a queued or refused note leaves it `queued` with the new text; a delete drops the note and a thread left empty; ids are never reused.
+ 
+-The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's or a merge request's https page, plan §2 #137), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, and an opened page logs `mergeRequests.fixture_page`; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
++The GitLab merge-request overview (compare and range windows) comes through `MergeRequestSource` (`MergeRequestSource.ts`: `findGitLabProject`, `listMergeRequests` with a page callback, `openMergeRequest`, `openPage`), which `CompareSource` and `RangeSource` extend: the `MergeRequestIid`/`WebPage` brands in `domain.ts` (a `WebPage` is a failed job's or a merge request's https page, plan §2 #137), the shapes and their conversions in `mergeRequestDomain.ts` (`createdAt` to ms since 1970, a missing commit's `short_id` as `shortId`), the app's in `tauriMergeRequests.ts`: one `Channel<ListMessage>` per load carries every page, then exactly one end, and the load ends on that end message (or the command's IPC failure), never on the command's own answer, since Tauri may deliver a page after it; an unreadable page fails the load; no page reaches the callback after the load ended. Fixture mode's is `fixtureMergeRequests.ts` over `fixtureMergeRequestData.ts`: `?mr=<script>` (`list`, `local`, `slow`, `many`, `empty`, `noGlab`, `loggedOut`, `timeout`, `refused`, `pageFails`) scripts GitLab's answers, every row with its page `<origin>/-/merge_requests/<iid>`, and an opened page logs `mergeRequests.fixture_page`; without `mr` the project is `none`, and an unknown script logs `mergeRequests.fixture_miss` and is `none` too.
++
++yamt's local conflict check (request `docs/slices/request-local-conflict-check.md`): `listMergeRequests`'s second callback `onChecked` gets a `CheckedRow` (`toCheckedRow`, iid branded) for each `checked` message, which Rust sends after the load's `end` on the same channel, so `tauriMergeRequests.ts` passes it on after the load settled while a late `page` still reaches nobody; the fixture script `?mr=local` is `list`'s rows and end, then, 1,000 ms after the end, !640 and !635 `mergesCleanly` and !638 `conflicts` (every other script sends none).
+ 
+ Resolving a merge request's conflicts (plan §2 #139–#143) adds three `MergeRequestSource` methods, passed through unchanged by `tauriMergeRequests.ts` (`tauriResolve.test.ts`): `resolveMergeRequest(iid)` → `ResolveReply`, `continueMergeRequest(iid)` → `ContinueMergeReply`, `findLocalMerge()` → `LocalMerge`. Fixture mode (`?mr=<script>`) answers a resolve after a second as an open does: !640 `started` with conflicts, !632 `started` clean, !624 `refused` `localAhead`, !616 `windowFailed` "yamt: not found", any other `started`, on `feature/fixture-<iid>` into `main`; `findLocalMerge` is `free` until a `started` or `windowFailed`, then `merging { iid, windowOpen: false }`; `continueMergeRequest` of that iid answers `opened` (after a second) and from then `windowOpen: true`, of any other iid `ended`. Fixture mode's operation also takes ?mergeRequest=created|moved|unchanged|detached|same (Continue answers ReadyToPush), ?clean (no file listed), ?push=rejected (the first push fails) and ?leftovers (Abort leaves two).
+ 
+diff --git a/frontend/src/ipc/MergeRequestSource.ts b/frontend/src/ipc/MergeRequestSource.ts
+index 3725f43..a234bbf 100644
+--- a/frontend/src/ipc/MergeRequestSource.ts
++++ b/frontend/src/ipc/MergeRequestSource.ts
+@@ -1,5 +1,6 @@
+ import type { MergeRequestIid, SourceResult, WebPage } from "./domain";
+ import type {
++  CheckedRow,
+   ContinueMergeReply,
+   GitLabProject,
+   ListEnd,
+@@ -12,8 +13,14 @@ import type {
+ 
+ export interface MergeRequestSource {
+   findGitLabProject(): Promise<SourceResult<GitLabProject>>;
+-  /** Every page reaches `onPage` before the returned promise settles, and none after. */
+-  listMergeRequests(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>>;
++  /**
++   * Every page reaches `onPage` before the returned promise settles, and none after. `onChecked` gets this load's
++   * local results (rows yamt's own merge changed), after the promise settled, and never another load's.
++   */
++  listMergeRequests(
++    onPage: (page: MergeRequestPage) => void,
++    onChecked: (row: CheckedRow) => void,
++  ): Promise<SourceResult<ListEnd>>;
+   openMergeRequest(iid: MergeRequestIid): Promise<SourceResult<OpenReply>>;
+   openPage(page: WebPage): Promise<SourceResult<PageOpened>>;
+   resolveMergeRequest(iid: MergeRequestIid): Promise<SourceResult<ResolveReply>>;
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.test.ts b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+index f65d4f3..46a0598 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.test.ts
+@@ -1,7 +1,7 @@
+ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+-import { fixtureRows } from "./fixtureMergeRequestData";
++import { fixtureRows, LOCAL_CHECKED } from "./fixtureMergeRequestData";
+ 
+ const LISTED = 40;
+ 
+@@ -51,3 +51,11 @@ test("every fifth row has no size and the others grow with the row (catches a si
+     636, 631, 626, 621, 616, 611, 606, 601,
+   ]);
+ });
++
++test("each locally checked row is a listed row whose readiness the check changes (catches a fixture result Rust would never send)", () => {
++  const rows = fixtureRows(0, LISTED);
++  for (const checked of LOCAL_CHECKED) {
++    expect(rowOf(rows, checked.iid).readiness).not.toEqual(checked.readiness);
++  }
++  expect(LOCAL_CHECKED.map((checked) => checked.iid)).toEqual([640, 638, 635]);
++});
+diff --git a/frontend/src/ipc/fixtureMergeRequestData.ts b/frontend/src/ipc/fixtureMergeRequestData.ts
+index c6ec51c..630a539 100644
+--- a/frontend/src/ipc/fixtureMergeRequestData.ts
++++ b/frontend/src/ipc/fixtureMergeRequestData.ts
+@@ -13,6 +13,7 @@ const NEWEST_IID = 640;
+ export const ALREADY_OPEN_IID = 639;
+ export const FETCH_FAILS_IID = 638;
+ export const PREPARING_IID = 637;
++const CHECKING_IID = 635;
+ const NEWEST_CREATED = Date.parse("2026-10-30T09:00:00Z");
+ const CREATED_STEP_MS = 21_600_000;
+ const DRAFT_EVERY = 7;
+@@ -85,6 +86,13 @@ const READINESS: readonly Generated.Readiness[] = [
+   { kind: "blocked", reason: { kind: "other", status: "MERGE_TRAIN_STUCK" } },
+ ];
+ 
++/** What yamt's own merge says, for rows whose GitLab readiness it changes. */
++export const LOCAL_CHECKED: readonly Generated.CheckedRow[] = [
++  { iid: NEWEST_IID, readiness: { kind: "mergesCleanly" } },
++  { iid: FETCH_FAILS_IID, readiness: { kind: "conflicts", also: [] } },
++  { iid: CHECKING_IID, readiness: { kind: "mergesCleanly" } },
++];
++
+ function cycled<T>(values: readonly T[], index: number): T {
+   const value = values[index % values.length];
+   if (value === undefined) {
+diff --git a/frontend/src/ipc/fixtureMergeRequests.test.ts b/frontend/src/ipc/fixtureMergeRequests.test.ts
+index c944d3e..c6d4f55 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.test.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.test.ts
+@@ -15,6 +15,7 @@ import { createFixtureMergeRequests, type MergeRequestScript } from "./fixtureMe
+ import { createFixtureRangeSource } from "./fixtureRange";
+ import type { Log } from "./log";
+ import type {
++  CheckedRow,
+   ContinueMergeReply,
+   ListEnd,
+   LocalMerge,
+@@ -43,7 +44,10 @@ function source(search: string, lines: string[] = []): MergeRequestSource {
+ 
+ async function listed(mergeRequests: MergeRequestSource): Promise<Listed> {
+   const pages: MergeRequestPage[] = [];
+-  const result = await mergeRequests.listMergeRequests((page) => pages.push(page));
++  const result = await mergeRequests.listMergeRequests(
++    (page) => pages.push(page),
++    () => undefined,
++  );
+   return { pages, end: result.ok ? result.value : null };
+ }
+ 
+@@ -64,7 +68,7 @@ test("an unknown script is logged with the known ones and means no project", asy
+   const unknown = source("?mr=nope", lines);
+   expect(await unknown.findGitLabProject()).toEqual({ ok: true, value: { kind: "none" } });
+   expect(lines).toEqual([
+-    'mergeRequests.fixture_miss {"mr":"nope","known":"list, slow, many, empty, noGlab, loggedOut, timeout, refused, pageFails"}',
++    'mergeRequests.fixture_miss {"mr":"nope","known":"list, local, slow, many, empty, noGlab, loggedOut, timeout, refused, pageFails"}',
+   ]);
+ });
+ 
+@@ -77,6 +81,7 @@ test("a script finds the project by its repository", async () => {
+ 
+ test.each<[MergeRequestScript, readonly number[], ListEnd]>([
+   ["list", [20, 20], { kind: "loaded" }],
++  ["local", [20, 20], { kind: "loaded" }],
+   ["many", [100, 100, 100, 100, 100], { kind: "cut", limit: 500 }],
+   ["empty", [0], { kind: "loaded" }],
+   ["noGlab", [], { kind: "glabMissing" }],
+@@ -185,7 +190,10 @@ test("a second load of the list drops one label, so a checked label can stay at
+ test("slow sends its pages a second apart", async () => {
+   vi.useFakeTimers();
+   const pages: MergeRequestPage[] = [];
+-  const listing = source("?mr=slow").listMergeRequests((page) => pages.push(page));
++  const listing = source("?mr=slow").listMergeRequests(
++    (page) => pages.push(page),
++    () => undefined,
++  );
+   await vi.advanceTimersByTimeAsync(999);
+   expect(pages).toHaveLength(0);
+   await vi.advanceTimersByTimeAsync(1);
+@@ -195,6 +203,37 @@ test("slow sends its pages a second apart", async () => {
+   expect(await listing).toEqual({ ok: true, value: { kind: "loaded" } });
+ });
+ 
++test("?mr=local sends its three checked rows 1,000 ms after its end, and ?mr=list none (catches results sent before GitLab's list ends)", async () => {
++  vi.useFakeTimers();
++  const checked: CheckedRow[] = [];
++  const listChecked: CheckedRow[] = [];
++  const pages: MergeRequestPage[] = [];
++  expect(
++    await source("?mr=local").listMergeRequests(
++      (page) => pages.push(page),
++      (row) => checked.push(row),
++    ),
++  ).toEqual({ ok: true, value: { kind: "loaded" } });
++  expect(
++    await source("?mr=list").listMergeRequests(
++      () => undefined,
++      (row) => listChecked.push(row),
++    ),
++  ).toEqual({ ok: true, value: { kind: "loaded" } });
++  expect(pages).toHaveLength(2);
++  await vi.advanceTimersByTimeAsync(999);
++  expect(checked).toEqual([]);
++  await vi.advanceTimersByTimeAsync(1);
++  expect(checked).toEqual([
++    { iid: iid(640), readiness: { kind: "mergesCleanly" } },
++    { iid: iid(638), readiness: { kind: "conflicts", also: [] } },
++    { iid: iid(635), readiness: { kind: "mergesCleanly" } },
++  ]);
++  await vi.advanceTimersByTimeAsync(10_000);
++  expect(checked).toHaveLength(3);
++  expect(listChecked).toEqual([]);
++});
++
+ test.each([
+   [ALREADY_OPEN_IID, { kind: "alreadyOpen" }],
+   [FETCH_FAILS_IID, { kind: "fetchFailed", message: expect.stringContaining("Could not resolve") }],
+diff --git a/frontend/src/ipc/fixtureMergeRequests.ts b/frontend/src/ipc/fixtureMergeRequests.ts
+index b436c53..77c3b8a 100644
+--- a/frontend/src/ipc/fixtureMergeRequests.ts
++++ b/frontend/src/ipc/fixtureMergeRequests.ts
+@@ -6,6 +6,7 @@ import {
+   FIXTURE_ME,
+   FIXTURE_REPOSITORY,
+   fixtureRows,
++  LOCAL_CHECKED,
+   LOGGED_OUT_DETAIL,
+   OPEN_REPLIES,
+   PAGE_FAILED_MESSAGE,
+@@ -13,8 +14,10 @@ import {
+ } from "./fixtureMergeRequestData";
+ import type { Log } from "./log";
+ import {
++  toCheckedRow,
+   toMergeRequestPage,
+   toOpenReply,
++  type CheckedRow,
+   type ContinueMergeReply,
+   type LocalMerge,
+   type ResolveReply,
+@@ -23,6 +26,7 @@ import type { MergeRequestSource } from "./MergeRequestSource";
+ 
+ export type MergeRequestScript =
+   | "list"
++  | "local"
+   | "slow"
+   | "many"
+   | "empty"
+@@ -39,6 +43,7 @@ type Scripted = {
+ 
+ const SCRIPTS: Readonly<Record<MergeRequestScript, true>> = {
+   list: true,
++  local: true,
+   slow: true,
+   many: true,
+   empty: true,
+@@ -54,6 +59,7 @@ const LIST_PAGES = 2;
+ const MANY_PAGE = 100;
+ const MANY_PAGES = 5;
+ const SLOW_PAGE_MS = 1000;
++const LOCAL_CHECK_MS = 1000;
+ const OPEN_PAUSE_MS = 1000;
+ const LOADED: Generated.ListEnd = { kind: "loaded" };
+ const CLEAN_IID = 632;
+@@ -93,7 +99,8 @@ function withoutDroppedLabel(
+ 
+ function scripted(script: MergeRequestScript, load: number): Scripted {
+   switch (script) {
+-    case "list": {
++    case "list":
++    case "local": {
+       const first = pages(LIST_PAGE, LIST_PAGES);
+       return { pages: load === 1 ? first : first.map(withoutDroppedLabel), end: LOADED };
+     }
+@@ -123,6 +130,14 @@ function scripted(script: MergeRequestScript, load: number): Scripted {
+   }
+ }
+ 
++function checkLater(onChecked: (row: CheckedRow) => void): void {
++  setTimeout(() => {
++    for (const row of LOCAL_CHECKED) {
++      onChecked(toCheckedRow(row));
++    }
++  }, LOCAL_CHECK_MS);
++}
++
+ function fixtureBranch(iid: number): string {
+   return `feature/fixture-${iid}`;
+ }
+@@ -187,7 +202,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+           script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY },
+       };
+     },
+-    async listMergeRequests(onPage) {
++    async listMergeRequests(onPage, onChecked) {
+       if (script === null) {
+         return { ok: true, value: LOADED };
+       }
+@@ -199,6 +214,9 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
+         }
+         onPage(toMergeRequestPage({ me: FIXTURE_ME, rows: [...rows] }));
+       }
++      if (script === "local") {
++        checkLater(onChecked);
++      }
+       return { ok: true, value: end };
+     },
+     async openMergeRequest(iid) {
+diff --git a/frontend/src/ipc/index.ts b/frontend/src/ipc/index.ts
+index 9958685..2b8caa0 100644
+--- a/frontend/src/ipc/index.ts
++++ b/frontend/src/ipc/index.ts
+@@ -67,6 +67,7 @@ export { agentSessionId, isAgentSessionId, isMergeRequestIid, nextColumnVersion
+ export type { AgentSessionId, MergeRequestIid, MessageId, ThreadId, WebPage } from "./domain";
+ export type { AbortReply, Leftover, MergeView, PushReply, ReturnTo } from "./localMergeDomain";
+ export type {
++  CheckedRow,
+   ContinueMergeReply,
+   GitLabProject,
+   ListEnd,
+diff --git a/frontend/src/ipc/mergeRequestDomain.test.ts b/frontend/src/ipc/mergeRequestDomain.test.ts
+index b5520c4..fe68690 100644
+--- a/frontend/src/ipc/mergeRequestDomain.test.ts
++++ b/frontend/src/ipc/mergeRequestDomain.test.ts
+@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+ import { isMergeRequestIid, isWebPage } from "./domain";
+-import { toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
++import { toCheckedRow, toMergeRequestPage, toOpenReply } from "./mergeRequestDomain";
+ 
+ const ROW: Generated.MergeRequestRow = {
+   iid: 13,
+@@ -64,6 +64,17 @@ test.each([-1, 1.5, Number.NaN])("an iid %d is refused (catches an unchecked bra
+   expect(isMergeRequestIid(iid)).toBe(false);
+ });
+ 
++test("a checked row keeps its iid and readiness as they came", () => {
++  expect(toCheckedRow({ iid: 41, readiness: { kind: "mergesCleanly" } })).toEqual({
++    iid: 41,
++    readiness: { kind: "mergesCleanly" },
++  });
++});
++
++test("a checked row's iid is branded like a page's (catches an unchecked brand)", () => {
++  expect(() => toCheckedRow({ iid: -1, readiness: { kind: "ready" } })).toThrow("row.iid must be");
++});
++
+ test("an iid and a web page are branded as they came", () => {
+   expect(isMergeRequestIid(0)).toBe(true);
+   expect(isWebPage("https://gitlab.example/x/-/jobs/1")).toBe(true);
+diff --git a/frontend/src/ipc/mergeRequestDomain.ts b/frontend/src/ipc/mergeRequestDomain.ts
+index 49a6994..2338971 100644
+--- a/frontend/src/ipc/mergeRequestDomain.ts
++++ b/frontend/src/ipc/mergeRequestDomain.ts
+@@ -35,6 +35,7 @@ export type Refusal = Readonly<Generated.Refusal>;
+ export type ResolveRefusal = Readonly<Generated.ResolveRefusal>;
+ export type ResolveReply = Readonly<Generated.ResolveReply>;
+ export type ContinueMergeReply = Readonly<Generated.ContinueMergeReply>;
++export type CheckedRow = { readonly iid: MergeRequestIid; readonly readiness: Readiness };
+ export type LocalMerge = Readonly<Generated.LocalMerge>;
+ 
+ function toWebPage(text: string, field: string): WebPage {
+@@ -78,6 +79,10 @@ export function toMergeRequestPage(raw: Generated.MergeRequestPage): MergeReques
+   return { me: raw.me, rows: raw.rows.map(toRow) };
+ }
+ 
++export function toCheckedRow(raw: Generated.CheckedRow): CheckedRow {
++  return { iid: branded(raw.iid, isMergeRequestIid, "row.iid"), readiness: raw.readiness };
++}
++
+ export function toOpenReply(raw: Generated.OpenReply): OpenReply {
+   return raw.kind === "missingCommit" ? { kind: "missingCommit", shortId: raw.short_id } : raw;
+ }
+diff --git a/frontend/src/ipc/tauriMergeRequests.test.ts b/frontend/src/ipc/tauriMergeRequests.test.ts
+index 98783f5..fd141de 100644
+--- a/frontend/src/ipc/tauriMergeRequests.test.ts
++++ b/frontend/src/ipc/tauriMergeRequests.test.ts
+@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
+ 
+ import type * as Generated from "./bindings";
+ import { isMergeRequestIid, isWebPage } from "./domain";
+-import type { MergeRequestPage } from "./mergeRequestDomain";
++import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
+ import { createTauriMergeRequests } from "./tauriMergeRequests";
+ import { branded } from "./validate";
+ 
+@@ -57,6 +57,10 @@ async function settled(): Promise<void> {
+   }
+ }
+ 
++function unchecked(): void {
++  throw new Error("no checked row was expected");
++}
++
+ function heldChannel(reply: unknown = { status: "ok", data: null }): {
+   readonly channel: () => MessageChannel;
+ } {
+@@ -96,7 +100,10 @@ test("each page from the channel reaches the callback converted, then the end me
+   });
+   const pages: MergeRequestPage[] = [];
+ 
+-  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
++  const ended = await createTauriMergeRequests().listMergeRequests(
++    (got) => pages.push(got),
++    unchecked,
++  );
+ 
+   expect(pages).toEqual([
+     { me: "sam", rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 29, 8) }] },
+@@ -110,7 +117,7 @@ test("a page that arrives after the command resolved is still in the load, which
+   const pages: MergeRequestPage[] = [];
+   let answer: unknown = null;
+   const loading = createTauriMergeRequests()
+-    .listMergeRequests((got) => pages.push(got))
++    .listMergeRequests((got) => pages.push(got), unchecked)
+     .then((result) => {
+       answer = result;
+       return result;
+@@ -129,10 +136,34 @@ test("a page that arrives after the command resolved is still in the load, which
+   expect(pages).toHaveLength(1);
+ });
+ 
++test("a_checked_message_after_the_end_reaches_onChecked_converted, and a page after the end still reaches nobody (catches checked rows dropped with late pages)", async () => {
++  const held = heldChannel();
++  const pages: MergeRequestPage[] = [];
++  const checked: CheckedRow[] = [];
++  const loading = createTauriMergeRequests().listMergeRequests(
++    (got) => pages.push(got),
++    (row) => checked.push(row),
++  );
++  await settled();
++
++  held.channel().onmessage(page([ROW]));
++  held.channel().onmessage(end({ kind: "loaded" }));
++  expect(await loading).toEqual({ ok: true, value: { kind: "loaded" } });
++  held
++    .channel()
++    .onmessage({ kind: "checked", row: { iid: 12, readiness: { kind: "mergesCleanly" } } });
++  held.channel().onmessage(page([ROW]));
++
++  expect(checked).toEqual([
++    { iid: branded(12, isMergeRequestIid, "iid"), readiness: { kind: "mergesCleanly" } },
++  ]);
++  expect(pages).toHaveLength(1);
++});
++
+ test("an unreadable page fails the load even after the command resolved, and no page is passed on after it (catches it lost in the channel)", async () => {
+   const held = heldChannel();
+   const pages: MergeRequestPage[] = [];
+-  const loading = createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
++  const loading = createTauriMergeRequests().listMergeRequests((got) => pages.push(got), unchecked);
+   await settled();
+ 
+   held.channel().onmessage(page([ROW]));
+@@ -148,7 +179,10 @@ test("an IPC failure of the command ends the load as that failure, and a later p
+   const held = heldChannel({ status: "error", error: STOPPED });
+   const pages: MergeRequestPage[] = [];
+ 
+-  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
++  const ended = await createTauriMergeRequests().listMergeRequests(
++    (got) => pages.push(got),
++    unchecked,
++  );
+   held.channel().onmessage(page([ROW]));
+ 
+   expect(ended).toEqual({ ok: false, failure: STOPPED });
+@@ -158,9 +192,9 @@ test("an IPC failure of the command ends the load as that failure, and a later p
+ test("a command that throws fails the load", async () => {
+   commands.listMergeRequests.mockRejectedValue(new Error("no app"));
+ 
+-  await expect(createTauriMergeRequests().listMergeRequests(() => undefined)).rejects.toThrow(
+-    "no app",
+-  );
++  await expect(
++    createTauriMergeRequests().listMergeRequests(() => undefined, unchecked),
++  ).rejects.toThrow("no app");
+ });
+ 
+ test("opening passes the iid and camelCases a missing commit", async () => {
+@@ -198,7 +232,7 @@ test.each([
+   commands[name].mockResolvedValue({ status: "error", error: failure });
+   const source = createTauriMergeRequests();
+   const calls = {
+-    listMergeRequests: () => source.listMergeRequests(() => undefined),
++    listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
+     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
+   };
+   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index bc38ace..db0f047 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -3,15 +3,20 @@ import { Channel } from "@tauri-apps/api/core";
+ import { commands, type ListMessage } from "./bindings";
+ import type { SourceResult } from "./domain";
+ import {
++  toCheckedRow,
+   toMergeRequestPage,
+   toOpenReply,
++  type CheckedRow,
+   type ListEnd,
+   type MergeRequestPage,
+ } from "./mergeRequestDomain";
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import { converted, toResult } from "./tauri";
+ 
+-function listed(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<ListEnd>> {
++function listed(
++  onPage: (page: MergeRequestPage) => void,
++  onChecked: (row: CheckedRow) => void,
++): Promise<SourceResult<ListEnd>> {
+   return new Promise((resolve, reject) => {
+     let settled = false;
+     function end(result: SourceResult<ListEnd>): void {
+@@ -23,6 +28,10 @@ function listed(onPage: (page: MergeRequestPage) => void): Promise<SourceResult<
+       reject(error);
+     }
+     const messages = new Channel<ListMessage>((message) => {
++      if (message.kind === "checked") {
++        onChecked(toCheckedRow(message.row));
++        return;
++      }
+       if (settled) {
+         return;
+       }
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 980bc93..7347c51 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -2,4 +2,6 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `index.ts` is the only surface. Framework-free (PM3) and self-contained: nothing here imports another `src/` module, as `search/` (PM2, `frontend/scripts/fences.ts`). Pure: no DOM, no timers, no storage, no state; the window's `ui/` owns loading, remembering (`ui/mergeRequestFilters.ts`) and the page's other words.
+ 
++`readiness` also has `mergesCleanly`, yamt's own merge of GitLab's two commits found no conflict: "No conflicts (checked locally). GitLab has not checked the rest yet", icon `circle-dashed-check`, never `ready`'s words or icon.
++
+ `internal/`: `filters` (the filter types, `passes`, the edits, `filterLabel`), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running). Every file has its `*.test.ts` (node), each test named for the bug it catches.
+diff --git a/frontend/src/mergeRequests/internal/readiness.test.ts b/frontend/src/mergeRequests/internal/readiness.test.ts
+index 28b7484..79bc960 100644
+--- a/frontend/src/mergeRequests/internal/readiness.test.ts
++++ b/frontend/src/mergeRequests/internal/readiness.test.ts
+@@ -43,6 +43,17 @@ test.each<[Readiness, string, ReadinessIcon]>([
+   expect(readinessIcon(readiness)).toBe(icon);
+ });
+ 
++test("a row yamt merged cleanly says so in its own words and icon, not ready's (catches a local check shown as GitLab's ready)", () => {
++  const local: Readiness = { kind: "mergesCleanly" };
++  const ready: Readiness = { kind: "ready" };
++  expect(readinessText(local)).toBe(
++    "No conflicts (checked locally). GitLab has not checked the rest yet",
++  );
++  expect(readinessIcon(local)).toBe("circle-dashed-check");
++  expect(readinessText(local)).not.toBe(readinessText(ready));
++  expect(readinessIcon(local)).not.toBe(readinessIcon(ready));
++});
++
+ test("a conflicting row names its one other blocker after the conflict", () => {
+   const readiness: Readiness = { kind: "conflicts", also: [{ kind: "discussions" }] };
+   expect(readinessText(readiness)).toBe("Has conflicts. Also blocked: discussions are unresolved");
+diff --git a/frontend/src/mergeRequests/internal/readiness.ts b/frontend/src/mergeRequests/internal/readiness.ts
+index 493c575..518170b 100644
+--- a/frontend/src/mergeRequests/internal/readiness.ts
++++ b/frontend/src/mergeRequests/internal/readiness.ts
+@@ -26,14 +26,16 @@ export type Readiness =
+   | { readonly kind: "conflicts"; readonly also: readonly BlockedReason[] }
+   | { readonly kind: "needsRebase" }
+   | { readonly kind: "checking" }
+-  | { readonly kind: "blocked"; readonly reason: BlockedReason };
++  | { readonly kind: "blocked"; readonly reason: BlockedReason }
++  | { readonly kind: "mergesCleanly" };
+ 
+ export type ReadinessIcon =
+   | "circle-check"
+   | "git-merge-conflict"
+   | "git-compare-arrows"
+   | "hourglass"
+-  | "circle-slash";
++  | "circle-slash"
++  | "circle-dashed-check";
+ 
+ const REASON_TEXTS: Readonly<Record<NamedReason, string>> = {
+   draft: "it is a draft",
+@@ -61,6 +63,7 @@ const ICONS: Readonly<Record<Readiness["kind"], ReadinessIcon>> = {
+   needsRebase: "git-compare-arrows",
+   checking: "hourglass",
+   blocked: "circle-slash",
++  mergesCleanly: "circle-dashed-check",
+ };
+ 
+ function reasonText(reason: BlockedReason): string {
+@@ -81,6 +84,8 @@ export function readinessText(readiness: Readiness): string {
+       return "GitLab is still checking whether it can be merged";
+     case "blocked":
+       return `Blocked: ${reasonText(readiness.reason)}`;
++    case "mergesCleanly":
++      return "No conflicts (checked locally). GitLab has not checked the rest yet";
+     default: {
+       const _exhaustive: never = readiness;
+       return _exhaustive;
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 3983382..1a4a8d3 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -46,6 +46,8 @@ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`
+ 
+ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; `useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
++Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid among its own load's rows only — the buffer while a refresh is still buffering, `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap) is that load — and drops any other, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
++
+ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeParts`, each part its own span, title `sizeTitle` on the whole size; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
+ 
+ The merge window of a merge request (plan §2 #138–#143): `question.ts` is what is asked; `questionText.ts` is its words (`cancel: null` draws one button; a bullet list is kind `lines`). Abort of a merge yamt started (`mergeRequest`, written only by `listing.ts`) asks by returnTo/branchBefore, then shows the one-button notice if git left anything (`leftoverText.ts`, the page's `gitRefused` line uses it too), then `closeEndedMerge`. `pushing.ts` offers the push after Continue answers ReadyToPush: only Push pushes (RK45), a failure asks pushFailed again, Keep Local or Escape closes once. A failed push is the `push` problem ("Could not push <branch>"); a failed `closeEndedMerge`, after the push offer or after Abort's leftovers, is the `closeMerge` problem of the merge read before the action began ("Could not close the merge of <target> into <branch>"), never Abort's. Once Continue answers ReadyToPush, or Abort answers leftovers, git stays running: the window is ended for every reader.
+diff --git a/frontend/src/ui/MergeRequestReadiness.vue b/frontend/src/ui/MergeRequestReadiness.vue
+index 746fe21..d095bc0 100644
+--- a/frontend/src/ui/MergeRequestReadiness.vue
++++ b/frontend/src/ui/MergeRequestReadiness.vue
+@@ -1,6 +1,7 @@
+ <script setup lang="ts">
+ import { computed, type Component } from "vue";
+ import CircleCheck from "~icons/lucide/circle-check";
++import CircleDashedCheck from "~icons/lucide/circle-dashed-check";
+ import CircleSlash from "~icons/lucide/circle-slash";
+ import GitCompareArrows from "~icons/lucide/git-compare-arrows";
+ import GitMergeConflict from "~icons/lucide/git-merge-conflict";
+@@ -19,6 +20,7 @@ const LOOKS: Readonly<Record<ReadinessIcon, ReadinessLook>> = {
+   "git-compare-arrows": { icon: GitCompareArrows, tone: "text-problem-warning" },
+   hourglass: { icon: Hourglass, tone: "text-fg-muted" },
+   "circle-slash": { icon: CircleSlash, tone: "text-fg-muted" },
++  "circle-dashed-check": { icon: CircleDashedCheck, tone: "text-fg-muted" },
+ };
+ 
+ const look = computed(() => LOOKS[readinessIcon(props.readiness)]);
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index a88576a..9cdcd72 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -6,6 +6,7 @@ import {
+   createFixtureCompareSource,
+   isMergeRequestIid,
+   log,
++  type CheckedRow,
+   type ContinueMergeReply,
+   type ListEnd,
+   type LocalMerge,
+@@ -35,6 +36,7 @@ import type { Screen } from "./screen";
+ 
+ type Load = {
+   readonly send: (page: MergeRequestPage) => void;
++  readonly check: (row: CheckedRow) => void;
+   readonly end: (result: SourceResult<ListEnd>) => void;
+ };
+ 
+@@ -77,9 +79,12 @@ let ROWS: readonly MergeRequestRow[] = [];
+ 
+ beforeAll(async () => {
+   const rows: MergeRequestRow[] = [];
+-  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests((page) => {
+-    rows.push(...page.rows);
+-  });
++  await createFixtureCompareSource(log, "?mr=list", {}).listMergeRequests(
++    (page) => {
++      rows.push(...page.rows);
++    },
++    () => undefined,
++  );
+   ROWS = rows;
+ });
+ 
+@@ -137,9 +142,9 @@ function rig(edit: Edit = {}, storage = memoryStorage()): Rig {
+   const problems: Problem[] = [];
+   const source: MergeRequestSource = {
+     findGitLabProject: async () => ({ ok: true, value: { kind: "found", repository: REPOSITORY } }),
+-    listMergeRequests: (onPage) =>
++    listMergeRequests: (onPage, onChecked) =>
+       new Promise((resolve) => {
+-        loads.push({ send: onPage, end: resolve });
++        loads.push({ send: onPage, check: onChecked, end: resolve });
+       }),
+     openMergeRequest: (asked) =>
+       new Promise((resolve) => {
+@@ -190,6 +195,16 @@ function iids(rows: readonly MergeRequestRow[]): number[] {
+   return rows.map((row) => row.iid);
+ }
+ 
++const CLEAN: CheckedRow["readiness"] = { kind: "mergesCleanly" };
++
++function checkedRow(value: number, readiness: CheckedRow["readiness"] = CLEAN): CheckedRow {
++  return { iid: iid(value), readiness };
++}
++
++function readinessOf(live: Rig, value: number): MergeRequestRow["readiness"] | undefined {
++  return live.slice.rows.value.find((row) => row.iid === value)?.readiness;
++}
++
+ test("the seam refuses use before a slice is registered", () => {
+   expect(() => useMergeRequests()).toThrow(
+     "useMergeRequests() called before registerMergeRequests()",
+@@ -415,6 +430,85 @@ test("a thrown list call is reported as unexpected", async () => {
+   ]);
+ });
+ 
++test("a first load's checked row changes that row's readiness, also with the page closed, and nothing else (catches a local result never shown)", async () => {
++  const live = rig();
++  await loaded(live);
++  const others = live.slice.rows.value.filter((row) => row.iid !== 640);
++  expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
++
++  loadAt(live, 0).check(checkedRow(640));
++  expect(readinessOf(live, 640)).toEqual(CLEAN);
++  expect(live.slice.rows.value.filter((row) => row.iid !== 640)).toEqual(others);
++
++  live.slice.close();
++  loadAt(live, 0).check(checkedRow(638, { kind: "conflicts", also: [] }));
++  expect(readinessOf(live, 638)).toEqual({ kind: "conflicts", also: [] });
++  expect(live.problems).toEqual([]);
++});
++
++test("a refresh's checked row arriving while it is buffered lands in the swapped rows, and one after the swap in the rows (catches results applied to the old rows)", async () => {
++  const live = rig();
++  await loaded(live);
++  const reloading = live.slice.refresh();
++  const reload = loadAt(live, 1);
++  reload.send({ me: "sam", rows: ROWS });
++  reload.check(checkedRow(640));
++  expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
++
++  reload.end(LOADED);
++  await reloading;
++  expect(readinessOf(live, 640)).toEqual(CLEAN);
++  reload.check(checkedRow(635));
++  expect(readinessOf(live, 635)).toEqual(CLEAN);
++  expect(live.problems).toEqual([]);
++});
++
++test("an older load's checked row lands while its rows are shown and is dropped once a newer load's rows are (catches a stale result over fresh rows)", async () => {
++  const live = rig();
++  await loaded(live);
++  const reloading = live.slice.refresh();
++  loadAt(live, 1).send({ me: "sam", rows: ROWS });
++  loadAt(live, 0).check(checkedRow(640));
++  expect(readinessOf(live, 640)).toEqual(CLEAN);
++
++  loadAt(live, 1).end(LOADED);
++  await reloading;
++  loadAt(live, 0).check(checkedRow(635));
++  expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
++  expect(readinessOf(live, 635)).toEqual({ kind: "checking" });
++  expect(live.problems).toEqual([]);
++});
++
++test.each<SourceResult<ListEnd>>([
++  { ok: true, value: { kind: "failed", message: "502" } },
++  { ok: false, failure: STOPPED },
++])(
++  "a refresh ending %j never lets its checked rows touch the shown rows (catches a failed load's results shown)",
++  async (result) => {
++    const live = rig();
++    await loaded(live);
++    const reloading = live.slice.refresh();
++    const reload = loadAt(live, 1);
++    reload.send({ me: "sam", rows: ROWS });
++    reload.check(checkedRow(640));
++    reload.end(result);
++    await reloading;
++    reload.check(checkedRow(635));
++
++    expect(readinessOf(live, 640)).toEqual({ kind: "conflicts", also: [] });
++    expect(readinessOf(live, 635)).toEqual({ kind: "checking" });
++  },
++);
++
++test("a checked row with an iid that is not listed changes nothing and reports nothing", async () => {
++  const live = rig();
++  await loaded(live);
++  const before = live.slice.rows.value;
++  loadAt(live, 0).check(checkedRow(1));
++  expect(live.slice.rows.value).toEqual(before);
++  expect(live.problems).toEqual([]);
++});
++
+ test("the summary counts shown and loaded rows and says when the list was cut, also through a failed reload", async () => {
+   const live = rig();
+   live.slice.show();
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 1ee4f62..43b534a 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -2,6 +2,7 @@ import type { StorageLike } from "@vueuse/core";
+ import { computed, shallowRef, type ComputedRef, type Ref, type ShallowRef } from "vue";
+ 
+ import type {
++  CheckedRow,
+   GitLabProject,
+   ListEnd,
+   MergeRequestIid,
+@@ -82,7 +83,7 @@ type Deps = {
+   readonly storage?: StorageLike;
+ };
+ 
+-type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
++type Load = { buffering: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+ 
+ type State = Deps & {
+   readonly project: ShallowRef<GitLabProject>;
+@@ -93,10 +94,11 @@ type State = Deps & {
+   readonly openings: ShallowRef<ReadonlyMap<MergeRequestIid, Opening>>;
+   readonly pageProblem: ShallowRef<string | null>;
+   readonly rowActions: RowActions;
++  shown: Load | null;
+ };
+ 
+ function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
+-  if (load.buffered) {
++  if (load.buffering) {
+     load.buffer = merged(load.buffer, rows);
+     load.me = me;
+     return;
+@@ -110,25 +112,43 @@ function ended(state: State, load: Load, end: ListEnd): void {
+   if (listed) {
+     state.cut.value = end.kind === "cut";
+   }
+-  if (load.buffered && listed) {
++  if (load.buffering && listed) {
+     state.rows.value = load.buffer;
+     state.me.value = load.me;
++    state.shown = load;
+   }
++  load.buffering = false;
+   state.listing.value = { kind: "done", end, at: Date.now() };
+ }
+ 
++function rechecked(rows: readonly MergeRequestRow[], row: CheckedRow): readonly MergeRequestRow[] {
++  return rows.map((old) => (old.iid === row.iid ? { ...old, readiness: row.readiness } : old));
++}
++
++function checked(state: State, load: Load, row: CheckedRow): void {
++  if (load.buffering) {
++    load.buffer = rechecked(load.buffer, row);
++  } else if (state.shown === load) {
++    state.rows.value = rechecked(state.rows.value, row);
++  }
++}
++
+ async function load(state: State): Promise<void> {
+   const before = state.listing.value;
+   if (before.kind === "loading") {
+     return;
+   }
+   const first = state.rows.value.length === 0;
+-  const running: Load = { buffered: !first, buffer: [], me: null };
++  const running: Load = { buffering: !first, buffer: [], me: null };
++  if (first) {
++    state.shown = running;
++  }
+   state.listing.value = { kind: "loading", first };
+   const outcome = await attempt(() =>
+-    state.source.listMergeRequests((page) => {
+-      received(state, running, page);
+-    }),
++    state.source.listMergeRequests(
++      (page) => received(state, running, page),
++      (row) => checked(state, running, row),
++    ),
+   );
+   if (outcome.ok) {
+     ended(state, running, outcome.value);
+@@ -194,6 +214,7 @@ function createState(deps: Deps): State {
+     openings: shallowRef<ReadonlyMap<MergeRequestIid, Opening>>(new Map()),
+     pageProblem: shallowRef<string | null>(null),
+     rowActions: createRowActions(deps),
++    shown: null,
+   };
+ }
+ 

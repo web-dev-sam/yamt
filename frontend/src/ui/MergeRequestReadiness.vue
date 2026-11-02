@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
 import CircleCheck from "~icons/lucide/circle-check";
+import CircleDashedCheck from "~icons/lucide/circle-dashed-check";
 import CircleSlash from "~icons/lucide/circle-slash";
 import GitCompareArrows from "~icons/lucide/git-compare-arrows";
 import GitMergeConflict from "~icons/lucide/git-merge-conflict";
@@ -19,6 +20,7 @@ const LOOKS: Readonly<Record<ReadinessIcon, ReadinessLook>> = {
   "git-compare-arrows": { icon: GitCompareArrows, tone: "text-problem-warning" },
   hourglass: { icon: Hourglass, tone: "text-fg-muted" },
   "circle-slash": { icon: CircleSlash, tone: "text-fg-muted" },
+  "circle-dashed-check": { icon: CircleDashedCheck, tone: "text-fg-muted" },
 };
 
 const look = computed(() => LOOKS[readinessIcon(props.readiness)]);

@@ -15,6 +15,7 @@ import { createFixtureMergeRequests, type MergeRequestScript } from "./fixtureMe
 import { createFixtureRangeSource } from "./fixtureRange";
 import type { Log } from "./log";
 import type {
+  CheckedRow,
   ContinueMergeReply,
   ListEnd,
   LocalMerge,
@@ -43,7 +44,10 @@ function source(search: string, lines: string[] = []): MergeRequestSource {
 
 async function listed(mergeRequests: MergeRequestSource): Promise<Listed> {
   const pages: MergeRequestPage[] = [];
-  const result = await mergeRequests.listMergeRequests((page) => pages.push(page));
+  const result = await mergeRequests.listMergeRequests(
+    (page) => pages.push(page),
+    () => undefined,
+  );
   return { pages, end: result.ok ? result.value : null };
 }
 
@@ -64,7 +68,7 @@ test("an unknown script is logged with the known ones and means no project", asy
   const unknown = source("?mr=nope", lines);
   expect(await unknown.findGitLabProject()).toEqual({ ok: true, value: { kind: "none" } });
   expect(lines).toEqual([
-    'mergeRequests.fixture_miss {"mr":"nope","known":"list, slow, many, empty, noGlab, loggedOut, timeout, refused, pageFails"}',
+    'mergeRequests.fixture_miss {"mr":"nope","known":"list, local, slow, many, empty, noGlab, loggedOut, timeout, refused, pageFails"}',
   ]);
 });
 
@@ -77,6 +81,7 @@ test("a script finds the project by its repository", async () => {
 
 test.each<[MergeRequestScript, readonly number[], ListEnd]>([
   ["list", [20, 20], { kind: "loaded" }],
+  ["local", [20, 20], { kind: "loaded" }],
   ["many", [100, 100, 100, 100, 100], { kind: "cut", limit: 500 }],
   ["empty", [0], { kind: "loaded" }],
   ["noGlab", [], { kind: "glabMissing" }],
@@ -185,7 +190,10 @@ test("a second load of the list drops one label, so a checked label can stay at 
 test("slow sends its pages a second apart", async () => {
   vi.useFakeTimers();
   const pages: MergeRequestPage[] = [];
-  const listing = source("?mr=slow").listMergeRequests((page) => pages.push(page));
+  const listing = source("?mr=slow").listMergeRequests(
+    (page) => pages.push(page),
+    () => undefined,
+  );
   await vi.advanceTimersByTimeAsync(999);
   expect(pages).toHaveLength(0);
   await vi.advanceTimersByTimeAsync(1);
@@ -193,6 +201,37 @@ test("slow sends its pages a second apart", async () => {
   await vi.advanceTimersByTimeAsync(1000);
   expect(pages).toHaveLength(2);
   expect(await listing).toEqual({ ok: true, value: { kind: "loaded" } });
+});
+
+test("?mr=local sends its three checked rows 1,000 ms after its end, and ?mr=list none (catches results sent before GitLab's list ends)", async () => {
+  vi.useFakeTimers();
+  const checked: CheckedRow[] = [];
+  const listChecked: CheckedRow[] = [];
+  const pages: MergeRequestPage[] = [];
+  expect(
+    await source("?mr=local").listMergeRequests(
+      (page) => pages.push(page),
+      (row) => checked.push(row),
+    ),
+  ).toEqual({ ok: true, value: { kind: "loaded" } });
+  expect(
+    await source("?mr=list").listMergeRequests(
+      () => undefined,
+      (row) => listChecked.push(row),
+    ),
+  ).toEqual({ ok: true, value: { kind: "loaded" } });
+  expect(pages).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(checked).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(checked).toEqual([
+    { iid: iid(640), readiness: { kind: "mergesCleanly" } },
+    { iid: iid(638), readiness: { kind: "conflicts", also: [] } },
+    { iid: iid(635), readiness: { kind: "mergesCleanly" } },
+  ]);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(checked).toHaveLength(3);
+  expect(listChecked).toEqual([]);
 });
 
 test.each([

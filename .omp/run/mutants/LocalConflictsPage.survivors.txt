@@ -1,0 +1,3 @@
+just mutants HEAD (TS, 7 files): 616 killed, 114 survived, 7 no cov; ipc domain/tauri 100%; ui/mergeRequests.ts 1 survivor at l.168 (show's `stale`, not changed here)
+frontend/src/ipc/fixtureMergeRequests.ts:46 `local: true`→false — equivalent: SCRIPTS is a membership Record read only by Object.hasOwn; the value is never read
+fixtureMergeRequestData.ts:90-93 LOCAL_CHECKED literal mutants — gate-covered: module-level const that Stryker does not re-run (--ignoreStatic, #732), as READINESS l.80-86; pinned by the ?mr=local and data tests

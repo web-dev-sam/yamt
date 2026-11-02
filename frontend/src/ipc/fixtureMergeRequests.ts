@@ -6,6 +6,7 @@ import {
   FIXTURE_ME,
   FIXTURE_REPOSITORY,
   fixtureRows,
+  LOCAL_CHECKED,
   LOGGED_OUT_DETAIL,
   OPEN_REPLIES,
   PAGE_FAILED_MESSAGE,
@@ -13,8 +14,10 @@ import {
 } from "./fixtureMergeRequestData";
 import type { Log } from "./log";
 import {
+  toCheckedRow,
   toMergeRequestPage,
   toOpenReply,
+  type CheckedRow,
   type ContinueMergeReply,
   type LocalMerge,
   type ResolveReply,
@@ -23,6 +26,7 @@ import type { MergeRequestSource } from "./MergeRequestSource";
 
 export type MergeRequestScript =
   | "list"
+  | "local"
   | "slow"
   | "many"
   | "empty"
@@ -39,6 +43,7 @@ type Scripted = {
 
 const SCRIPTS: Readonly<Record<MergeRequestScript, true>> = {
   list: true,
+  local: true,
   slow: true,
   many: true,
   empty: true,
@@ -54,6 +59,7 @@ const LIST_PAGES = 2;
 const MANY_PAGE = 100;
 const MANY_PAGES = 5;
 const SLOW_PAGE_MS = 1000;
+const LOCAL_CHECK_MS = 1000;
 const OPEN_PAUSE_MS = 1000;
 const LOADED: Generated.ListEnd = { kind: "loaded" };
 const CLEAN_IID = 632;
@@ -93,7 +99,8 @@ function withoutDroppedLabel(
 
 function scripted(script: MergeRequestScript, load: number): Scripted {
   switch (script) {
-    case "list": {
+    case "list":
+    case "local": {
       const first = pages(LIST_PAGE, LIST_PAGES);
       return { pages: load === 1 ? first : first.map(withoutDroppedLabel), end: LOADED };
     }
@@ -121,6 +128,14 @@ function scripted(script: MergeRequestScript, load: number): Scripted {
       return _exhaustive;
     }
   }
+}
+
+function checkLater(onChecked: (row: CheckedRow) => void): void {
+  setTimeout(() => {
+    for (const row of LOCAL_CHECKED) {
+      onChecked(toCheckedRow(row));
+    }
+  }, LOCAL_CHECK_MS);
 }
 
 function fixtureBranch(iid: number): string {
@@ -187,7 +202,7 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
           script === null ? { kind: "none" } : { kind: "found", repository: FIXTURE_REPOSITORY },
       };
     },
-    async listMergeRequests(onPage) {
+    async listMergeRequests(onPage, onChecked) {
       if (script === null) {
         return { ok: true, value: LOADED };
       }
@@ -198,6 +213,9 @@ export function createFixtureMergeRequests(log: Log, search: string): MergeReque
           await pause(SLOW_PAGE_MS);
         }
         onPage(toMergeRequestPage({ me: FIXTURE_ME, rows: [...rows] }));
+      }
+      if (script === "local") {
+        checkLater(onChecked);
       }
       return { ok: true, value: end };
     },

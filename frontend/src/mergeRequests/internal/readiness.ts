@@ -26,14 +26,16 @@ export type Readiness =
   | { readonly kind: "conflicts"; readonly also: readonly BlockedReason[] }
   | { readonly kind: "needsRebase" }
   | { readonly kind: "checking" }
-  | { readonly kind: "blocked"; readonly reason: BlockedReason };
+  | { readonly kind: "blocked"; readonly reason: BlockedReason }
+  | { readonly kind: "mergesCleanly" };
 
 export type ReadinessIcon =
   | "circle-check"
   | "git-merge-conflict"
   | "git-compare-arrows"
   | "hourglass"
-  | "circle-slash";
+  | "circle-slash"
+  | "circle-dashed-check";
 
 const REASON_TEXTS: Readonly<Record<NamedReason, string>> = {
   draft: "it is a draft",
@@ -61,6 +63,7 @@ const ICONS: Readonly<Record<Readiness["kind"], ReadinessIcon>> = {
   needsRebase: "git-compare-arrows",
   checking: "hourglass",
   blocked: "circle-slash",
+  mergesCleanly: "circle-dashed-check",
 };
 
 function reasonText(reason: BlockedReason): string {
@@ -81,6 +84,8 @@ export function readinessText(readiness: Readiness): string {
       return "GitLab is still checking whether it can be merged";
     case "blocked":
       return `Blocked: ${reasonText(readiness.reason)}`;
+    case "mergesCleanly":
+      return "No conflicts (checked locally). GitLab has not checked the rest yet";
     default: {
       const _exhaustive: never = readiness;
       return _exhaustive;

@@ -13,6 +13,7 @@ const NEWEST_IID = 640;
 export const ALREADY_OPEN_IID = 639;
 export const FETCH_FAILS_IID = 638;
 export const PREPARING_IID = 637;
+const CHECKING_IID = 635;
 const NEWEST_CREATED = Date.parse("2026-10-30T09:00:00Z");
 const CREATED_STEP_MS = 21_600_000;
 const DRAFT_EVERY = 7;
@@ -83,6 +84,13 @@ const READINESS: readonly Generated.Readiness[] = [
   { kind: "checking" },
   { kind: "blocked", reason: { kind: "pipelineMustPass" } },
   { kind: "blocked", reason: { kind: "other", status: "MERGE_TRAIN_STUCK" } },
+];
+
+/** What yamt's own merge says, for rows whose GitLab readiness it changes. */
+export const LOCAL_CHECKED: readonly Generated.CheckedRow[] = [
+  { iid: NEWEST_IID, readiness: { kind: "mergesCleanly" } },
+  { iid: FETCH_FAILS_IID, readiness: { kind: "conflicts", also: [] } },
+  { iid: CHECKING_IID, readiness: { kind: "mergesCleanly" } },
 ];
 
 function cycled<T>(values: readonly T[], index: number): T {

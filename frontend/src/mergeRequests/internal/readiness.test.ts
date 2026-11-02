@@ -43,6 +43,17 @@ test.each<[Readiness, string, ReadinessIcon]>([
   expect(readinessIcon(readiness)).toBe(icon);
 });
 
+test("a row yamt merged cleanly says so in its own words and icon, not ready's (catches a local check shown as GitLab's ready)", () => {
+  const local: Readiness = { kind: "mergesCleanly" };
+  const ready: Readiness = { kind: "ready" };
+  expect(readinessText(local)).toBe(
+    "No conflicts (checked locally). GitLab has not checked the rest yet",
+  );
+  expect(readinessIcon(local)).toBe("circle-dashed-check");
+  expect(readinessText(local)).not.toBe(readinessText(ready));
+  expect(readinessIcon(local)).not.toBe(readinessIcon(ready));
+});
+
 test("a conflicting row names its one other blocker after the conflict", () => {
   const readiness: Readiness = { kind: "conflicts", also: [{ kind: "discussions" }] };
   expect(readinessText(readiness)).toBe("Has conflicts. Also blocked: discussions are unresolved");

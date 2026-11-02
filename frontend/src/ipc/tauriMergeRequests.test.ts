@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 import type * as Generated from "./bindings";
 import { isMergeRequestIid, isWebPage } from "./domain";
-import type { MergeRequestPage } from "./mergeRequestDomain";
+import type { CheckedRow, MergeRequestPage } from "./mergeRequestDomain";
 import { createTauriMergeRequests } from "./tauriMergeRequests";
 import { branded } from "./validate";
 
@@ -57,6 +57,10 @@ async function settled(): Promise<void> {
   }
 }
 
+function unchecked(): void {
+  throw new Error("no checked row was expected");
+}
+
 function heldChannel(reply: unknown = { status: "ok", data: null }): {
   readonly channel: () => MessageChannel;
 } {
@@ -96,7 +100,10 @@ test("each page from the channel reaches the callback converted, then the end me
   });
   const pages: MergeRequestPage[] = [];
 
-  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
+  const ended = await createTauriMergeRequests().listMergeRequests(
+    (got) => pages.push(got),
+    unchecked,
+  );
 
   expect(pages).toEqual([
     { me: "sam", rows: [{ ...ROW, createdAt: Date.UTC(2026, 9, 29, 8) }] },
@@ -110,7 +117,7 @@ test("a page that arrives after the command resolved is still in the load, which
   const pages: MergeRequestPage[] = [];
   let answer: unknown = null;
   const loading = createTauriMergeRequests()
-    .listMergeRequests((got) => pages.push(got))
+    .listMergeRequests((got) => pages.push(got), unchecked)
     .then((result) => {
       answer = result;
       return result;
@@ -129,10 +136,34 @@ test("a page that arrives after the command resolved is still in the load, which
   expect(pages).toHaveLength(1);
 });
 
+test("a_checked_message_after_the_end_reaches_onChecked_converted, and a page after the end still reaches nobody (catches checked rows dropped with late pages)", async () => {
+  const held = heldChannel();
+  const pages: MergeRequestPage[] = [];
+  const checked: CheckedRow[] = [];
+  const loading = createTauriMergeRequests().listMergeRequests(
+    (got) => pages.push(got),
+    (row) => checked.push(row),
+  );
+  await settled();
+
+  held.channel().onmessage(page([ROW]));
+  held.channel().onmessage(end({ kind: "loaded" }));
+  expect(await loading).toEqual({ ok: true, value: { kind: "loaded" } });
+  held
+    .channel()
+    .onmessage({ kind: "checked", row: { iid: 12, readiness: { kind: "mergesCleanly" } } });
+  held.channel().onmessage(page([ROW]));
+
+  expect(checked).toEqual([
+    { iid: branded(12, isMergeRequestIid, "iid"), readiness: { kind: "mergesCleanly" } },
+  ]);
+  expect(pages).toHaveLength(1);
+});
+
 test("an unreadable page fails the load even after the command resolved, and no page is passed on after it (catches it lost in the channel)", async () => {
   const held = heldChannel();
   const pages: MergeRequestPage[] = [];
-  const loading = createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
+  const loading = createTauriMergeRequests().listMergeRequests((got) => pages.push(got), unchecked);
   await settled();
 
   held.channel().onmessage(page([ROW]));
@@ -148,7 +179,10 @@ test("an IPC failure of the command ends the load as that failure, and a later p
   const held = heldChannel({ status: "error", error: STOPPED });
   const pages: MergeRequestPage[] = [];
 
-  const ended = await createTauriMergeRequests().listMergeRequests((got) => pages.push(got));
+  const ended = await createTauriMergeRequests().listMergeRequests(
+    (got) => pages.push(got),
+    unchecked,
+  );
   held.channel().onmessage(page([ROW]));
 
   expect(ended).toEqual({ ok: false, failure: STOPPED });
@@ -158,9 +192,9 @@ test("an IPC failure of the command ends the load as that failure, and a later p
 test("a command that throws fails the load", async () => {
   commands.listMergeRequests.mockRejectedValue(new Error("no app"));
 
-  await expect(createTauriMergeRequests().listMergeRequests(() => undefined)).rejects.toThrow(
-    "no app",
-  );
+  await expect(
+    createTauriMergeRequests().listMergeRequests(() => undefined, unchecked),
+  ).rejects.toThrow("no app");
 });
 
 test("opening passes the iid and camelCases a missing commit", async () => {
@@ -198,7 +232,7 @@ test.each([
   commands[name].mockResolvedValue({ status: "error", error: failure });
   const source = createTauriMergeRequests();
   const calls = {
-    listMergeRequests: () => source.listMergeRequests(() => undefined),
+    listMergeRequests: () => source.listMergeRequests(() => undefined, unchecked),
     openMergeRequest: () => source.openMergeRequest(branded(1, isMergeRequestIid, "iid")),
   };
   expect(await calls[name]()).toEqual({ ok: false, failure: STOPPED });
