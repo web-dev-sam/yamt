@@ -1,0 +1,2 @@
+not run: this change touches test code only (cfg attributes), so it has no product-code lines to mutate, as the brief says
+
