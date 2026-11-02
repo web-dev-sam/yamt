@@ -1,0 +1,5 @@
+just mutants HEAD (Stryker, mutates whole files: calendar.ts, dueDate.ts, mergeRequestsText.ts): 310 killed, 31 survived, 14 no coverage, 87.32%
+calendar.ts:6 WEEKDAYS array/string mutants (8) — equivalent: a static module-level const that the vitest runner never re-evaluates (justfile #732). Applied by hand, 'the weekdays start on Monday' fails
+dueDate.ts:6 TYPED_DAY regex mutants (15: ^/$ removal, \d→\D, {1,2}/{2}/{4}→single, [^./-]) — equivalent, same static-const cause. ^ removal applied by hand failed 3 typedDay refuses tests
+dueDate.ts:4 DAY_TEXT regex mutants (8) — on an unchanged line (Stryker mutates the whole file); same static-const cause
+mergeRequestsText.ts 14 NoCoverage — unchanged lines (the exhaustive `default: never` arms)

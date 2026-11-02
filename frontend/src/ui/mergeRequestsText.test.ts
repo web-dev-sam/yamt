@@ -14,10 +14,16 @@ import {
   type PageOpened,
   type RangeStart,
 } from "../ipc";
+import { daysLeft, daysLeftText, dueDateText } from "../mergeRequests";
 import {
   approvalsText,
   ASSIGNEES,
   CLEAR_DUE_DATE,
+  DUE_DATE_DIALOG,
+  DUE_DATE_PLACEHOLDER,
+  DUE_TODAY,
+  NEXT_MONTH,
+  PREVIOUS_MONTH,
   clearFilterTitle,
   discussionsText,
   dueDateLabel,
@@ -287,6 +293,16 @@ test("the people box, re-request and due-date words are GitLab's and the request
   ]);
 });
 
+test("the date picker's words are the request's, the field asks for day first", () => {
+  expect([DUE_DATE_DIALOG, DUE_DATE_PLACEHOLDER, DUE_TODAY, PREVIOUS_MONTH, NEXT_MONTH]).toEqual([
+    "Choose a due date",
+    "DD.MM.YYYY",
+    "Today",
+    "Previous month",
+    "Next month",
+  ]);
+});
+
 test("the re-request button is named after its reviewer", () => {
   expect(rerequestLabel("Anna Berg")).toBe("Re-request review from Anna Berg");
 });
@@ -317,9 +333,11 @@ test("a refused re-request reads the list's sentence for the same glab problem",
   );
 });
 
-test("the due-date button names the date, the days left and what a click does", () => {
-  expect(dueDateLabel("Nov 9, 2026", "7 days left")).toBe(
-    "Due Nov 9, 2026, 7 days left. Change the due date",
+test("the due-date button names the date day first, the days left and what a click does", () => {
+  const due = { year: 2026, month: 11, day: 3 };
+  const now = new Date(2026, 10, 2, 12).getTime();
+  expect(dueDateLabel(dueDateText(due), daysLeftText(daysLeft(due, now)).text)).toBe(
+    "Due 03.11.2026, 1 day left. Change the due date",
   );
 });
 

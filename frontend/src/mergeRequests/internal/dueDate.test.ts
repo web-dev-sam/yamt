@@ -7,6 +7,8 @@ import {
   daysLeft,
   daysLeftText,
   dueDateText,
+  localDay,
+  typedDay,
   type CalendarDay,
 } from "../index";
 
@@ -112,14 +114,50 @@ test("compareDays counts the whole days between two days across months, years an
   expect(compareDays(day("2028-03-01"), day("2028-02-28"))).toBe(2);
 });
 
-test("dueDateText reads the day in English, medium style, whatever the time zone", async () => {
-  expect(dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
-  expect(dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
-  vi.stubEnv("TZ", "America/Los_Angeles");
-  vi.resetModules();
-  // The formatter takes the process zone when the module loads, so it loads again west of UTC.
-  const west = await import("../index");
-  vi.stubEnv("TZ", "Europe/Berlin");
-  expect(west.dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
-  expect(west.dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
+test("dueDateText writes day, month, year with leading zeros, never the American order", () => {
+  expect(dueDateText(day("2026-11-03"))).toBe("03.11.2026");
+  expect(dueDateText(day("0050-01-01"))).toBe("01.01.0050");
+  expect(dueDateText(day("2026-12-25"))).toBe("25.12.2026");
+});
+
+test.each<[string, CalendarDay]>([
+  ["3.11.2026", { year: 2026, month: 11, day: 3 }],
+  ["03.11.2026", { year: 2026, month: 11, day: 3 }],
+  ["03/11/2026", { year: 2026, month: 11, day: 3 }],
+  ["03-11-2026", { year: 2026, month: 11, day: 3 }],
+  ["03112026", { year: 2026, month: 11, day: 3 }],
+  ["11/3/2026", { year: 2026, month: 3, day: 11 }],
+  ["29.02.2028", { year: 2028, month: 2, day: 29 }],
+  [" 05.12.2026 ", { year: 2026, month: 12, day: 5 }],
+])("typedDay reads %j day first", (text, expected) => {
+  expect(typedDay(text)).toEqual(expected);
+});
+
+test.each([
+  "31.02.2026",
+  "29.02.2026",
+  "2026-11-03",
+  "3.11.26",
+  "00.11.2026",
+  "03.00.2026",
+  "03.13.2026",
+  "03.11-2026",
+  "3112026",
+  "031120266",
+  "003.11.2026",
+  "03.011.2026",
+  "03 11 2026",
+  "a03.11.2026",
+  "03.11.2026a",
+  "",
+])("typedDay refuses %j", (text) => {
+  expect(typedDay(text)).toBeNull();
+});
+
+test("localDay is the calendar day of the local clock, turning at local midnight", () => {
+  expect(localDay(localTime("2026-11-08", 23, 59, 999))).toEqual(day("2026-11-08"));
+  expect(localDay(localTime("2026-11-09", 0))).toEqual(day("2026-11-09"));
+  expect(localDay(localTime("2026-12-31", 23, 59))).toEqual(day("2026-12-31"));
+  expect(localDay(localTime("2027-01-01", 0))).toEqual(day("2027-01-01"));
+  expect(localDay(Date.UTC(2026, 10, 8, 23, 30))).toEqual(day("2026-11-09"));
 });

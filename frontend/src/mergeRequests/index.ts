@@ -38,8 +38,24 @@ export {
   daysLeft,
   daysLeftText,
   dueDateText,
+  localDay,
+  typedDay,
   type CalendarDay,
 } from "./internal/dueDate";
+export {
+  MONTHS_PER_YEAR,
+  WEEKDAYS,
+  addDays,
+  addMonths,
+  dayName,
+  monthCaption,
+  monthGrid,
+  monthOf,
+  sameDay,
+  weekdayIndex,
+  type CalendarMonth,
+  type GridDay,
+} from "./internal/calendar";
 export {
   NO_PEOPLE_TEXT,
   STACK_SHOWN,

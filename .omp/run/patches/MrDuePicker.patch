@@ -1,0 +1,886 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 13e9676..1af3374 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -4,9 +4,11 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `readiness` also has `mergesCleanly`, yamt's own merge of GitLab's two commits found no conflict: "No conflicts (checked locally). GitLab has not checked the rest yet", icon `circle-dashed-check`, never `ready`'s words or icon. `rechecked` puts a checked row's readiness on the row with its iid, every other row and field kept.
+ 
+-`internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running). Every file has its `*.test.ts` (node), each test named for the bug it catches.
++`internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`. Every file has its `*.test.ts` (node), each test named for the bug it catches.
+ 
+-`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText`; `compareDays` gives the whole days from one day to another (negative when the first is earlier); `daysLeft` is `compareDays` from the local day of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` English medium ("Nov 9, 2026") read in UTC, so every zone shows the stored day.
++`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale.
++
++`calendar`: the picker's month (`CalendarMonth`, month 1–12): `monthGrid` the 42 `GridDay`s of six weeks from the Monday on or before the 1st (`inMonth` false for the neighbouring months' days), `WEEKDAYS` `Mo`…`Su` (weeks start on Monday) and `weekdayIndex` (Monday 0), `addDays`, `addMonths` (clamped to the target month's last day: 31 January + 1 is 28/29 February; `MONTHS_PER_YEAR` for a year), `sameDay`, `monthOf`, `monthCaption` "November 2026" and `dayName` "Tuesday, 3 November 2026" (English words read in UTC, so every zone names the stored day).
+ 
+ `people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`.
+ 
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 54e8146..90b0f41 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -38,8 +38,24 @@ export {
+   daysLeft,
+   daysLeftText,
+   dueDateText,
++  localDay,
++  typedDay,
+   type CalendarDay,
+ } from "./internal/dueDate";
++export {
++  MONTHS_PER_YEAR,
++  WEEKDAYS,
++  addDays,
++  addMonths,
++  dayName,
++  monthCaption,
++  monthGrid,
++  monthOf,
++  sameDay,
++  weekdayIndex,
++  type CalendarMonth,
++  type GridDay,
++} from "./internal/calendar";
+ export {
+   NO_PEOPLE_TEXT,
+   STACK_SHOWN,
+diff --git a/frontend/src/mergeRequests/internal/calendar.test.ts b/frontend/src/mergeRequests/internal/calendar.test.ts
+new file mode 100644
+index 0000000..361598a
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/calendar.test.ts
+@@ -0,0 +1,161 @@
++import { afterAll, expect, test, vi } from "vitest";
++
++import {
++  WEEKDAYS,
++  addDays,
++  addMonths,
++  calendarDayFrom,
++  calendarDayText,
++  dayName,
++  monthCaption,
++  monthGrid,
++  monthOf,
++  sameDay,
++  weekdayIndex,
++  type CalendarDay,
++  type GridDay,
++} from "../index";
++
++vi.stubEnv("TZ", "Europe/Berlin");
++afterAll(() => {
++  vi.unstubAllEnvs();
++});
++
++function day(text: string): CalendarDay {
++  const parsed = calendarDayFrom(text);
++  if (parsed === null) {
++    throw new Error(`not a day: ${text}`);
++  }
++  return parsed;
++}
++
++function gridText(grid: readonly GridDay[]): readonly string[] {
++  return grid.map(({ day: shown, inMonth }) => `${calendarDayText(shown)}${inMonth ? "" : "*"}`);
++}
++
++test("the weekdays start on Monday", () => {
++  expect(WEEKDAYS).toEqual(["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]);
++});
++
++test("a month starting on a Monday has no leading days", () => {
++  const grid = gridText(monthGrid({ year: 2026, month: 6 }));
++  expect(grid).toHaveLength(42);
++  expect(grid[0]).toBe("2026-06-01");
++  expect(grid[29]).toBe("2026-06-30");
++  expect(grid.slice(30)).toEqual([
++    "2026-07-01*",
++    "2026-07-02*",
++    "2026-07-03*",
++    "2026-07-04*",
++    "2026-07-05*",
++    "2026-07-06*",
++    "2026-07-07*",
++    "2026-07-08*",
++    "2026-07-09*",
++    "2026-07-10*",
++    "2026-07-11*",
++    "2026-07-12*",
++  ]);
++});
++
++test("a month starting on a Sunday has six leading days of the month before", () => {
++  const grid = gridText(monthGrid({ year: 2026, month: 11 }));
++  expect(grid).toHaveLength(42);
++  expect(grid.slice(0, 7)).toEqual([
++    "2026-10-26*",
++    "2026-10-27*",
++    "2026-10-28*",
++    "2026-10-29*",
++    "2026-10-30*",
++    "2026-10-31*",
++    "2026-11-01",
++  ]);
++  expect(grid[35]).toBe("2026-11-30");
++  expect(grid[36]).toBe("2026-12-01*");
++  expect(grid[41]).toBe("2026-12-06*");
++});
++
++test("February of a leap year shows its 29th day", () => {
++  const grid = gridText(monthGrid({ year: 2028, month: 2 }));
++  expect(grid[0]).toBe("2028-01-31*");
++  expect(grid[1]).toBe("2028-02-01");
++  expect(grid[29]).toBe("2028-02-29");
++  expect(grid[30]).toBe("2028-03-01*");
++  expect(grid.filter((shown) => !shown.endsWith("*"))).toHaveLength(29);
++});
++
++test("December's grid turns into January of the next year", () => {
++  const grid = gridText(monthGrid({ year: 2026, month: 12 }));
++  expect(grid[0]).toBe("2026-11-30*");
++  expect(grid[1]).toBe("2026-12-01");
++  expect(grid[31]).toBe("2026-12-31");
++  expect(grid[32]).toBe("2027-01-01*");
++  expect(grid[41]).toBe("2027-01-10*");
++});
++
++test("January's grid starts in December of the year before", () => {
++  const grid = gridText(monthGrid({ year: 2027, month: 1 }));
++  expect(grid.slice(0, 5)).toEqual([
++    "2026-12-28*",
++    "2026-12-29*",
++    "2026-12-30*",
++    "2026-12-31*",
++    "2027-01-01",
++  ]);
++});
++
++test("addMonths clamps to the last day of a shorter month", () => {
++  expect(addMonths(day("2026-01-31"), 1)).toEqual(day("2026-02-28"));
++  expect(addMonths(day("2028-01-31"), 1)).toEqual(day("2028-02-29"));
++  expect(addMonths(day("2026-03-31"), 1)).toEqual(day("2026-04-30"));
++  expect(addMonths(day("2026-03-31"), -1)).toEqual(day("2026-02-28"));
++  expect(addMonths(day("2026-04-15"), 1)).toEqual(day("2026-05-15"));
++});
++
++test("addMonths turns the year both ways", () => {
++  expect(addMonths(day("2026-12-15"), 1)).toEqual(day("2027-01-15"));
++  expect(addMonths(day("2027-01-31"), -1)).toEqual(day("2026-12-31"));
++  expect(addMonths(day("2028-02-29"), 12)).toEqual(day("2029-02-28"));
++  expect(addMonths(day("2028-02-29"), -12)).toEqual(day("2027-02-28"));
++  expect(addMonths(day("2026-11-03"), 14)).toEqual(day("2028-01-03"));
++});
++
++test("addDays crosses month and year ends", () => {
++  expect(addDays(day("2026-01-31"), 1)).toEqual(day("2026-02-01"));
++  expect(addDays(day("2026-03-01"), -1)).toEqual(day("2026-02-28"));
++  expect(addDays(day("2028-03-01"), -1)).toEqual(day("2028-02-29"));
++  expect(addDays(day("2026-12-31"), 1)).toEqual(day("2027-01-01"));
++  expect(addDays(day("2027-01-01"), -7)).toEqual(day("2026-12-25"));
++  expect(addDays(day("2026-03-28"), 2)).toEqual(day("2026-03-30"));
++});
++
++test("weekdayIndex counts from Monday", () => {
++  expect(weekdayIndex(day("2026-11-02"))).toBe(0);
++  expect(weekdayIndex(day("2026-11-03"))).toBe(1);
++  expect(weekdayIndex(day("2026-11-08"))).toBe(6);
++});
++
++test("sameDay compares year, month and day", () => {
++  expect(sameDay(day("2026-11-03"), day("2026-11-03"))).toBe(true);
++  expect(sameDay(day("2026-11-03"), day("2027-11-03"))).toBe(false);
++  expect(sameDay(day("2026-11-03"), day("2026-10-03"))).toBe(false);
++  expect(sameDay(day("2026-11-03"), day("2026-11-04"))).toBe(false);
++});
++
++test("monthOf drops the day", () => {
++  expect(monthOf(day("2026-11-03"))).toEqual({ year: 2026, month: 11 });
++});
++
++test("the caption and the day names are English words read in UTC", async () => {
++  expect(monthCaption({ year: 2026, month: 11 })).toBe("November 2026");
++  expect(monthCaption({ year: 2027, month: 1 })).toBe("January 2027");
++  expect(dayName(day("2026-11-03"))).toBe("Tuesday, 3 November 2026");
++  expect(dayName(day("2027-01-01"))).toBe("Friday, 1 January 2027");
++  vi.stubEnv("TZ", "America/Los_Angeles");
++  vi.resetModules();
++  // The formatters take the process zone when the module loads, so it loads again west of UTC.
++  const west = await import("../index");
++  vi.stubEnv("TZ", "Europe/Berlin");
++  expect(west.monthCaption({ year: 2026, month: 11 })).toBe("November 2026");
++  expect(west.dayName(day("2026-11-01"))).toBe("Sunday, 1 November 2026");
++});
+diff --git a/frontend/src/mergeRequests/internal/calendar.ts b/frontend/src/mergeRequests/internal/calendar.ts
+new file mode 100644
+index 0000000..9f23899
+--- /dev/null
++++ b/frontend/src/mergeRequests/internal/calendar.ts
+@@ -0,0 +1,61 @@
++import { utcMidnight, type CalendarDay } from "./dueDate";
++
++export type CalendarMonth = { readonly year: number; readonly month: number };
++export type GridDay = { readonly day: CalendarDay; readonly inMonth: boolean };
++
++export const WEEKDAYS: readonly string[] = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
++
++const GRID_WEEKS = 6;
++export const MONTHS_PER_YEAR = 12;
++const MONTH_NAME = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
++const WEEKDAY_NAME = new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" });
++
++function dayOf(date: Date): CalendarDay {
++  return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
++}
++
++export function weekdayIndex(day: CalendarDay): number {
++  return (utcMidnight(day).getUTCDay() + WEEKDAYS.length - 1) % WEEKDAYS.length;
++}
++
++export function monthOf({ year, month }: CalendarDay): CalendarMonth {
++  return { year, month };
++}
++
++export function addDays(day: CalendarDay, days: number): CalendarDay {
++  const date = utcMidnight(day);
++  date.setUTCDate(date.getUTCDate() + days);
++  return dayOf(date);
++}
++
++export function addMonths({ year, month, day }: CalendarDay, months: number): CalendarDay {
++  const index = year * MONTHS_PER_YEAR + month - 1 + months;
++  const target = {
++    year: Math.floor(index / MONTHS_PER_YEAR),
++    month: (index % MONTHS_PER_YEAR) + 1,
++  };
++  const lastDay = utcMidnight({ ...target, month: target.month + 1, day: 0 }).getUTCDate();
++  return { ...target, day: Math.min(day, lastDay) };
++}
++
++export function sameDay(a: CalendarDay, b: CalendarDay): boolean {
++  return a.year === b.year && a.month === b.month && a.day === b.day;
++}
++
++export function monthGrid(month: CalendarMonth): readonly GridDay[] {
++  const first = { ...month, day: 1 };
++  const start = addDays(first, -weekdayIndex(first));
++  return Array.from({ length: GRID_WEEKS * WEEKDAYS.length }, (_, offset) => {
++    const day = addDays(start, offset);
++    return { day, inMonth: day.month === month.month };
++  });
++}
++
++export function monthCaption(month: CalendarMonth): string {
++  return `${MONTH_NAME.format(utcMidnight({ ...month, day: 1 }))} ${month.year}`;
++}
++
++export function dayName(day: CalendarDay): string {
++  const date = utcMidnight(day);
++  return `${WEEKDAY_NAME.format(date)}, ${day.day} ${MONTH_NAME.format(date)} ${day.year}`;
++}
+diff --git a/frontend/src/mergeRequests/internal/dueDate.test.ts b/frontend/src/mergeRequests/internal/dueDate.test.ts
+index 053843c..263223e 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.test.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.test.ts
+@@ -7,6 +7,8 @@ import {
+   daysLeft,
+   daysLeftText,
+   dueDateText,
++  localDay,
++  typedDay,
+   type CalendarDay,
+ } from "../index";
+ 
+@@ -112,14 +114,50 @@ test("compareDays counts the whole days between two days across months, years an
+   expect(compareDays(day("2028-03-01"), day("2028-02-28"))).toBe(2);
+ });
+ 
+-test("dueDateText reads the day in English, medium style, whatever the time zone", async () => {
+-  expect(dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
+-  expect(dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
+-  vi.stubEnv("TZ", "America/Los_Angeles");
+-  vi.resetModules();
+-  // The formatter takes the process zone when the module loads, so it loads again west of UTC.
+-  const west = await import("../index");
+-  vi.stubEnv("TZ", "Europe/Berlin");
+-  expect(west.dueDateText(day("2026-11-09"))).toBe("Nov 9, 2026");
+-  expect(west.dueDateText(day("2027-01-01"))).toBe("Jan 1, 2027");
++test("dueDateText writes day, month, year with leading zeros, never the American order", () => {
++  expect(dueDateText(day("2026-11-03"))).toBe("03.11.2026");
++  expect(dueDateText(day("0050-01-01"))).toBe("01.01.0050");
++  expect(dueDateText(day("2026-12-25"))).toBe("25.12.2026");
++});
++
++test.each<[string, CalendarDay]>([
++  ["3.11.2026", { year: 2026, month: 11, day: 3 }],
++  ["03.11.2026", { year: 2026, month: 11, day: 3 }],
++  ["03/11/2026", { year: 2026, month: 11, day: 3 }],
++  ["03-11-2026", { year: 2026, month: 11, day: 3 }],
++  ["03112026", { year: 2026, month: 11, day: 3 }],
++  ["11/3/2026", { year: 2026, month: 3, day: 11 }],
++  ["29.02.2028", { year: 2028, month: 2, day: 29 }],
++  [" 05.12.2026 ", { year: 2026, month: 12, day: 5 }],
++])("typedDay reads %j day first", (text, expected) => {
++  expect(typedDay(text)).toEqual(expected);
++});
++
++test.each([
++  "31.02.2026",
++  "29.02.2026",
++  "2026-11-03",
++  "3.11.26",
++  "00.11.2026",
++  "03.00.2026",
++  "03.13.2026",
++  "03.11-2026",
++  "3112026",
++  "031120266",
++  "003.11.2026",
++  "03.011.2026",
++  "03 11 2026",
++  "a03.11.2026",
++  "03.11.2026a",
++  "",
++])("typedDay refuses %j", (text) => {
++  expect(typedDay(text)).toBeNull();
++});
++
++test("localDay is the calendar day of the local clock, turning at local midnight", () => {
++  expect(localDay(localTime("2026-11-08", 23, 59, 999))).toEqual(day("2026-11-08"));
++  expect(localDay(localTime("2026-11-09", 0))).toEqual(day("2026-11-09"));
++  expect(localDay(localTime("2026-12-31", 23, 59))).toEqual(day("2026-12-31"));
++  expect(localDay(localTime("2027-01-01", 0))).toEqual(day("2027-01-01"));
++  expect(localDay(Date.UTC(2026, 10, 8, 23, 30))).toEqual(day("2026-11-09"));
+ });
+diff --git a/frontend/src/mergeRequests/internal/dueDate.ts b/frontend/src/mergeRequests/internal/dueDate.ts
+index 10290e6..d21874c 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.ts
+@@ -2,50 +2,72 @@ export type CalendarDay = { readonly year: number; readonly month: number; reado
+ 
+ const DAY_MS = 86_400_000;
+ const DAY_TEXT = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})$/u;
++const TYPED_DAY =
++  /^(?:(?<day>\d{1,2})(?<separator>[./-])(?<month>\d{1,2})\k<separator>(?<year>\d{4})|(?<dayDigits>\d{2})(?<monthDigits>\d{2})(?<yearDigits>\d{4}))$/u;
+ const YEAR_DIGITS = 4;
+ const PART_DIGITS = 2;
+-const DUE_FORMAT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeZone: "UTC" });
+ 
+-function utcMidnight({ year, month, day }: CalendarDay): Date {
++export function utcMidnight({ year, month, day }: CalendarDay): Date {
+   const date = new Date(0);
+   date.setUTCFullYear(year, month - 1, day);
+   return date;
+ }
+ 
++function realDay(day: CalendarDay): CalendarDay | null {
++  return utcMidnight(day).getUTCMonth() === day.month - 1 ? day : null;
++}
++
+ export function calendarDayFrom(text: string): CalendarDay | null {
+   const parts = DAY_TEXT.exec(text)?.groups;
+   if (parts === undefined) {
+     return null;
+   }
+-  const day = {
++  return realDay({
+     year: Number(parts["year"]),
+     month: Number(parts["month"]),
+     day: Number(parts["day"]),
+-  };
+-  return utcMidnight(day).getUTCMonth() === day.month - 1 ? day : null;
++  });
++}
++
++export function typedDay(text: string): CalendarDay | null {
++  const parts = TYPED_DAY.exec(text.trim())?.groups;
++  if (parts === undefined) {
++    return null;
++  }
++  return realDay({
++    year: Number(parts["year"] ?? parts["yearDigits"]),
++    month: Number(parts["month"] ?? parts["monthDigits"]),
++    day: Number(parts["day"] ?? parts["dayDigits"]),
++  });
++}
++
++function padded(part: number, digits: number): string {
++  return String(part).padStart(digits, "0");
+ }
+ 
+ export function calendarDayText({ year, month, day }: CalendarDay): string {
+-  const parts = [
+-    String(year).padStart(YEAR_DIGITS, "0"),
+-    String(month).padStart(PART_DIGITS, "0"),
+-    String(day).padStart(PART_DIGITS, "0"),
+-  ];
+-  return parts.join("-");
++  return [padded(year, YEAR_DIGITS), padded(month, PART_DIGITS), padded(day, PART_DIGITS)].join(
++    "-",
++  );
++}
++
++export function dueDateText({ year, month, day }: CalendarDay): string {
++  return [padded(day, PART_DIGITS), padded(month, PART_DIGITS), padded(year, YEAR_DIGITS)].join(
++    ".",
++  );
+ }
+ 
+ export function compareDays(a: CalendarDay, b: CalendarDay): number {
+   return (utcMidnight(a).getTime() - utcMidnight(b).getTime()) / DAY_MS;
+ }
+ 
+-export function dueDateText(day: CalendarDay): string {
+-  return DUE_FORMAT.format(utcMidnight(day));
++export function localDay(now: number): CalendarDay {
++  const local = new Date(now);
++  return { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
+ }
+ 
+ export function daysLeft(day: CalendarDay, now: number): number {
+-  const local = new Date(now);
+-  const today = { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
+-  return compareDays(day, today);
++  return compareDays(day, localDay(now));
+ }
+ 
+ export function daysLeftText(days: number): { readonly text: string; readonly overdue: boolean } {
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 465da7d..0ea0f16 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -48,7 +48,7 @@ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window,
+ 
+ Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
+ 
+-Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date over the days left in the error colour when overdue; its box holds a native date field — WebKitGTK fires `change` on Enter or blur, `input` on each digit — and Clear), then discussions and approvals (`approversText`, one name per line). Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field `typedDay` reads on Enter — a refused text sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/MergeRequestCalendar.vue b/frontend/src/ui/MergeRequestCalendar.vue
+new file mode 100644
+index 0000000..c494338
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestCalendar.vue
+@@ -0,0 +1,188 @@
++<script setup lang="ts">
++import { computed, nextTick, onMounted, shallowRef, useId, useTemplateRef } from "vue";
++import ChevronLeft from "~icons/lucide/chevron-left";
++import ChevronRight from "~icons/lucide/chevron-right";
++
++import {
++  MONTHS_PER_YEAR,
++  WEEKDAYS,
++  addDays,
++  addMonths,
++  calendarDayText,
++  dayName,
++  monthCaption,
++  monthGrid,
++  monthOf,
++  sameDay,
++  weekdayIndex,
++  type CalendarDay,
++  type CalendarMonth,
++} from "../mergeRequests";
++import { NEXT_MONTH, PREVIOUS_MONTH } from "./mergeRequestsText";
++
++type DayCell = {
++  readonly key: string;
++  readonly day: CalendarDay;
++  readonly name: string;
++  readonly number: number;
++  readonly selected: boolean;
++  readonly today: boolean;
++  readonly focused: boolean;
++  readonly tone: string;
++};
++
++const props = defineProps<{ selected: CalendarDay | null; today: CalendarDay }>();
++const emit = defineEmits<{ pick: [day: CalendarDay] }>();
++
++const grid = useTemplateRef<HTMLDivElement>("grid");
++const captionId = useId();
++const focused = shallowRef<CalendarDay>(props.selected ?? props.today);
++
++const shown = computed<CalendarMonth>(() => monthOf(focused.value));
++const caption = computed(() => monthCaption(shown.value));
++const weeks = computed(() => {
++  const cells = monthGrid(shown.value).map(({ day, inMonth }) => dayCell(day, inMonth));
++  const rows: (readonly DayCell[])[] = [];
++  for (let start = 0; start < cells.length; start += WEEKDAYS.length) {
++    rows.push(cells.slice(start, start + WEEKDAYS.length));
++  }
++  return rows;
++});
++
++onMounted(() => {
++  focusDay();
++});
++
++function dayCell(day: CalendarDay, inMonth: boolean): DayCell {
++  const selected = props.selected !== null && sameDay(day, props.selected);
++  const today = sameDay(day, props.today);
++  return {
++    key: calendarDayText(day),
++    day,
++    name: dayName(day),
++    number: day.day,
++    selected,
++    today,
++    focused: sameDay(day, focused.value),
++    tone: dayTone({ selected, today, inMonth }),
++  };
++}
++
++function dayTone(day: { selected: boolean; today: boolean; inMonth: boolean }): string {
++  if (day.selected) {
++    return "bg-primary font-medium text-on-primary";
++  }
++  const muted = day.inMonth ? "" : " text-fg-muted";
++  return day.today ? `bg-hover font-medium hover:bg-hover${muted}` : `hover:bg-hover${muted}`;
++}
++
++function focusDay(): void {
++  grid.value?.querySelector<HTMLButtonElement>("[data-focused]")?.focus({ preventScroll: true });
++}
++
++async function moveTo(day: CalendarDay): Promise<void> {
++  focused.value = day;
++  await nextTick();
++  focusDay();
++}
++
++function turnMonth(months: number): void {
++  focused.value = addMonths(focused.value, months);
++}
++
++function movedDay(event: KeyboardEvent): CalendarDay | null {
++  const day = focused.value;
++  const months = event.shiftKey ? MONTHS_PER_YEAR : 1;
++  switch (event.key) {
++    case "ArrowLeft":
++      return addDays(day, -1);
++    case "ArrowRight":
++      return addDays(day, 1);
++    case "ArrowUp":
++      return addDays(day, -WEEKDAYS.length);
++    case "ArrowDown":
++      return addDays(day, WEEKDAYS.length);
++    case "Home":
++      return addDays(day, -weekdayIndex(day));
++    case "End":
++      return addDays(day, WEEKDAYS.length - 1 - weekdayIndex(day));
++    case "PageUp":
++      return addMonths(day, -months);
++    case "PageDown":
++      return addMonths(day, months);
++    default:
++      return null;
++  }
++}
++
++function gridKeyPressed(event: KeyboardEvent): void {
++  const day = movedDay(event);
++  if (day !== null) {
++    event.preventDefault();
++    void moveTo(day);
++  }
++}
++</script>
++
++<template>
++  <div class="flex flex-col gap-2">
++    <div class="flex items-center justify-between">
++      <button
++        type="button"
++        :aria-label="PREVIOUS_MONTH"
++        class="inline-flex size-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
++        @click="turnMonth(-1)"
++      >
++        <ChevronLeft class="size-4" aria-hidden="true" />
++      </button>
++      <span :id="captionId" class="text-sm font-medium" aria-live="polite">{{ caption }}</span>
++      <button
++        type="button"
++        :aria-label="NEXT_MONTH"
++        class="inline-flex size-7 items-center justify-center rounded-md text-fg-muted hover:bg-hover hover:text-fg"
++        @click="turnMonth(1)"
++      >
++        <ChevronRight class="size-4" aria-hidden="true" />
++      </button>
++    </div>
++    <div
++      ref="grid"
++      role="grid"
++      :aria-labelledby="captionId"
++      class="flex flex-col gap-0.5"
++      @keydown="gridKeyPressed"
++    >
++      <div role="row" class="flex">
++        <span
++          v-for="weekday in WEEKDAYS"
++          :key="weekday"
++          role="columnheader"
++          class="w-8 text-center text-xs text-fg-muted"
++          >{{ weekday }}</span
++        >
++      </div>
++      <div v-for="week in weeks" :key="week[0]?.key" role="row" class="flex">
++        <span
++          v-for="cell in week"
++          :key="cell.key"
++          role="gridcell"
++          :aria-selected="cell.selected"
++          class="flex"
++        >
++          <button
++            type="button"
++            :tabindex="cell.focused ? 0 : -1"
++            :data-focused="cell.focused || undefined"
++            :aria-label="cell.name"
++            :aria-current="cell.today ? 'date' : undefined"
++            class="size-8 rounded-md text-sm"
++            :class="cell.tone"
++            @click="emit('pick', cell.day)"
++          >
++            {{ cell.number }}
++          </button>
++        </span>
++      </div>
++    </div>
++  </div>
++</template>
+diff --git a/frontend/src/ui/MergeRequestDueDate.vue b/frontend/src/ui/MergeRequestDueDate.vue
+index 3311689..2b5e95b 100644
+--- a/frontend/src/ui/MergeRequestDueDate.vue
++++ b/frontend/src/ui/MergeRequestDueDate.vue
+@@ -4,15 +4,23 @@ import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
+ import Calendar from "~icons/lucide/calendar";
+ 
+ import {
+-  calendarDayFrom,
+-  calendarDayText,
+   daysLeft,
+   daysLeftText,
+   dueDateText,
++  localDay,
++  typedDay,
+   type CalendarDay,
+ } from "../mergeRequests";
+ import type { Point } from "./menuPosition";
+-import { CLEAR_DUE_DATE, dueDateLabel, SET_DUE_DATE } from "./mergeRequestsText";
++import MergeRequestCalendar from "./MergeRequestCalendar.vue";
++import {
++  CLEAR_DUE_DATE,
++  DUE_DATE_DIALOG,
++  DUE_DATE_PLACEHOLDER,
++  DUE_TODAY,
++  dueDateLabel,
++  SET_DUE_DATE,
++} from "./mergeRequestsText";
+ import { vTooltip } from "./tooltip";
+ import { useScrollOutside } from "./useHoverBox";
+ import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
+@@ -22,8 +30,8 @@ const emit = defineEmits<{ set: [day: CalendarDay | null] }>();
+ 
+ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+-const field = useTemplateRef<HTMLInputElement>("field");
+ const open = shallowRef(false);
++const refused = shallowRef(false);
+ const at = shallowRef<Point>({ x: 0, y: 0 });
+ const placement = useMenuPlacement(box, at);
+ onClickOutside(
+@@ -40,25 +48,25 @@ useScrollOutside(
+   },
+ );
+ 
++const today = computed(() => localDay(props.now));
+ const shown = computed(() => {
+   if (props.due === null) {
+     return null;
+   }
+   const date = dueDateText(props.due);
+   const left = daysLeftText(daysLeft(props.due, props.now));
+-  return { date, left, label: dueDateLabel(date, left.text), field: calendarDayText(props.due) };
++  return { date, left, label: dueDateLabel(date, left.text) };
+ });
+ const label = computed(() => shown.value?.label ?? SET_DUE_DATE);
+ 
+-async function openerClicked(): Promise<void> {
++function openerClicked(): void {
+   if (open.value || opener.value === null) {
+     open.value = false;
+     return;
+   }
+   at.value = belowLeft(opener.value);
++  refused.value = false;
+   open.value = true;
+-  await nextTick();
+-  field.value?.focus();
+ }
+ 
+ async function closeToOpener(): Promise<void> {
+@@ -69,17 +77,18 @@ async function closeToOpener(): Promise<void> {
+   }
+ }
+ 
+-function picked(event: Event): void {
+-  const day = event.target instanceof HTMLInputElement ? calendarDayFrom(event.target.value) : null;
+-  if (day !== null) {
+-    emit("set", day);
+-    void closeToOpener();
+-  }
++function save(day: CalendarDay | null): void {
++  emit("set", day);
++  void closeToOpener();
+ }
+ 
+-function clearClicked(): void {
+-  emit("set", null);
+-  void closeToOpener();
++function typedEntered(event: KeyboardEvent): void {
++  const day = event.target instanceof HTMLInputElement ? typedDay(event.target.value) : null;
++  if (day === null) {
++    refused.value = true;
++    return;
++  }
++  save(day);
+ }
+ 
+ function keyPressed(event: KeyboardEvent): void {
+@@ -98,6 +107,7 @@ function keyPressed(event: KeyboardEvent): void {
+       type="button"
+       :aria-label="label"
+       :aria-expanded="open"
++      aria-haspopup="dialog"
+       class="rounded hover:bg-hover"
+       :class="shown === null ? 'p-1.5 text-fg-muted' : 'px-1.5 py-0.5 text-left text-xs leading-4'"
+       @click="openerClicked"
+@@ -115,25 +125,40 @@ function keyPressed(event: KeyboardEvent): void {
+     <div
+       v-if="open"
+       ref="box"
+-      class="fixed z-10 flex items-center gap-2 rounded-md border border-control-border bg-panel-inline p-1.5 text-fg shadow-lg"
++      role="dialog"
++      :aria-label="DUE_DATE_DIALOG"
++      class="fixed z-10 flex flex-col gap-3 rounded-md border border-control-border bg-panel-inline p-3 text-fg shadow-lg"
+       :style="placement"
+     >
+       <input
+-        ref="field"
+-        type="date"
+-        :value="shown?.field ?? ''"
++        type="text"
++        :value="shown?.date ?? ''"
++        :placeholder="DUE_DATE_PLACEHOLDER"
+         :aria-label="SET_DUE_DATE"
+-        class="rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
+-        @change="picked"
++        :aria-invalid="refused"
++        class="rounded-md border bg-panel px-2 py-1 text-sm outline-none"
++        :class="refused ? 'border-problem-error' : 'border-control-border focus:border-primary'"
++        @input="refused = false"
++        @keydown.enter.prevent="typedEntered"
+       />
+-      <button
+-        v-if="shown !== null"
+-        type="button"
+-        class="rounded border border-control-border px-2.5 py-1 hover:bg-hover"
+-        @click="clearClicked"
+-      >
+-        {{ CLEAR_DUE_DATE }}
+-      </button>
++      <MergeRequestCalendar :selected="due" :today="today" @pick="save" />
++      <div class="flex gap-2">
++        <button
++          type="button"
++          class="flex-1 rounded-md border border-control-border px-2.5 py-1 text-sm hover:bg-hover"
++          @click="save(today)"
++        >
++          {{ DUE_TODAY }}
++        </button>
++        <button
++          v-if="shown !== null"
++          type="button"
++          class="flex-1 rounded-md border border-control-border px-2.5 py-1 text-sm hover:bg-hover"
++          @click="save(null)"
++        >
++          {{ CLEAR_DUE_DATE }}
++        </button>
++      </div>
+     </div>
+   </span>
+ </template>
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index 7241253..d8b50e5 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -14,10 +14,16 @@ import {
+   type PageOpened,
+   type RangeStart,
+ } from "../ipc";
++import { daysLeft, daysLeftText, dueDateText } from "../mergeRequests";
+ import {
+   approvalsText,
+   ASSIGNEES,
+   CLEAR_DUE_DATE,
++  DUE_DATE_DIALOG,
++  DUE_DATE_PLACEHOLDER,
++  DUE_TODAY,
++  NEXT_MONTH,
++  PREVIOUS_MONTH,
+   clearFilterTitle,
+   discussionsText,
+   dueDateLabel,
+@@ -287,6 +293,16 @@ test("the people box, re-request and due-date words are GitLab's and the request
+   ]);
+ });
+ 
++test("the date picker's words are the request's, the field asks for day first", () => {
++  expect([DUE_DATE_DIALOG, DUE_DATE_PLACEHOLDER, DUE_TODAY, PREVIOUS_MONTH, NEXT_MONTH]).toEqual([
++    "Choose a due date",
++    "DD.MM.YYYY",
++    "Today",
++    "Previous month",
++    "Next month",
++  ]);
++});
++
+ test("the re-request button is named after its reviewer", () => {
+   expect(rerequestLabel("Anna Berg")).toBe("Re-request review from Anna Berg");
+ });
+@@ -317,9 +333,11 @@ test("a refused re-request reads the list's sentence for the same glab problem",
+   );
+ });
+ 
+-test("the due-date button names the date, the days left and what a click does", () => {
+-  expect(dueDateLabel("Nov 9, 2026", "7 days left")).toBe(
+-    "Due Nov 9, 2026, 7 days left. Change the due date",
++test("the due-date button names the date day first, the days left and what a click does", () => {
++  const due = { year: 2026, month: 11, day: 3 };
++  const now = new Date(2026, 10, 2, 12).getTime();
++  expect(dueDateLabel(dueDateText(due), daysLeftText(daysLeft(due, now)).text)).toBe(
++    "Due 03.11.2026, 1 day left. Change the due date",
+   );
+ });
+ 
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index a9ea998..43187f6 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -37,6 +37,11 @@ export const REVIEWERS = "Reviewers";
+ export const REREQUEST_REVIEW = "Re-request review";
+ export const SET_DUE_DATE = "Set a due date";
+ export const CLEAR_DUE_DATE = "Clear";
++export const DUE_DATE_DIALOG = "Choose a due date";
++export const DUE_DATE_PLACEHOLDER = "DD.MM.YYYY";
++export const DUE_TODAY = "Today";
++export const PREVIOUS_MONTH = "Previous month";
++export const NEXT_MONTH = "Next month";
+ 
+ function glabMissingListText(): string {
+   return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
