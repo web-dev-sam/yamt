@@ -1,7 +1,9 @@
 import {
   NO_FILTERS,
+  sameValue,
   type DraftFilter,
   type Filters,
+  type Held,
   type LabelValue,
   type PersonValue,
 } from "./filters";
@@ -15,6 +17,7 @@ export type StoredFilters = {
 
 const USER_PREFIX = "user:";
 const LABEL_PREFIX = "label:";
+const EXCLUDED_PREFIX = "not:";
 
 function storedPerson(value: PersonValue): string {
   return value.kind === "person" ? `${USER_PREFIX}${value.username}` : value.kind;
@@ -49,24 +52,46 @@ function wordsOf(entry: object, field: keyof StoredFilters): readonly string[] {
   return items.filter((word): word is string => typeof word === "string");
 }
 
+function heldFrom<V extends PersonValue | LabelValue>(
+  words: readonly string[],
+  valueFrom: (word: string) => readonly V[],
+): readonly Held<V>[] {
+  const held: Held<V>[] = [];
+  for (const word of words) {
+    const excluded = word.startsWith(EXCLUDED_PREFIX);
+    for (const value of valueFrom(excluded ? word.slice(EXCLUDED_PREFIX.length) : word)) {
+      if (!held.some((entry) => sameValue(entry.value, value))) {
+        held.push({ value, mode: excluded ? "excluded" : "included" });
+      }
+    }
+  }
+  return held;
+}
+
+function storedWords<V>(held: readonly Held<V>[], word: (value: V) => string): readonly string[] {
+  return held.map(({ value, mode }) =>
+    mode === "excluded" ? `${EXCLUDED_PREFIX}${word(value)}` : word(value),
+  );
+}
+
 export function filtersFrom(stored: unknown): Filters {
   if (typeof stored !== "object" || stored === null) {
     return NO_FILTERS;
   }
   const draft: unknown = Reflect.get(stored, "draft");
   return {
-    assignee: wordsOf(stored, "assignee").flatMap(personFrom),
-    reviewer: wordsOf(stored, "reviewer").flatMap(personFrom),
-    label: wordsOf(stored, "label").flatMap(labelFrom),
+    assignee: heldFrom(wordsOf(stored, "assignee"), personFrom),
+    reviewer: heldFrom(wordsOf(stored, "reviewer"), personFrom),
+    label: heldFrom(wordsOf(stored, "label"), labelFrom),
     draft: draft === "drafts" || draft === "ready" ? draft : "all",
   };
 }
 
 export function storedFilters(filters: Filters): StoredFilters {
   return {
-    assignee: filters.assignee.map(storedPerson),
-    reviewer: filters.reviewer.map(storedPerson),
-    label: filters.label.map(storedLabel),
+    assignee: storedWords(filters.assignee, storedPerson),
+    reviewer: storedWords(filters.reviewer, storedPerson),
+    label: storedWords(filters.label, storedLabel),
     draft: filters.draft,
   };
 }

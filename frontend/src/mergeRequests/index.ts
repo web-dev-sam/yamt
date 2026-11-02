@@ -1,20 +1,27 @@
 export {
   NO_FILTERS,
   cleared,
+  clicked,
   filterLabel,
   filterName,
   filtered,
   isFiltered,
   passes,
-  toggled,
+  stateOf,
   withDraft,
+  type ChoiceState,
   type DraftFilter,
   type Filters,
+  type Held,
   type LabelValue,
   type ListFilter,
+  type ListedLabel,
   type ListedRequest,
+  type Mode,
   type Person,
   type PersonValue,
+  type ReviewState,
+  type Reviewer,
 } from "./internal/filters";
 export {
   NARROW_FROM,
@@ -23,7 +30,29 @@ export {
   personChoices,
   type Choice,
 } from "./internal/choices";
-export { merged } from "./internal/order";
+export { byDueDate, merged } from "./internal/order";
+export {
+  calendarDayFrom,
+  calendarDayText,
+  compareDays,
+  daysLeft,
+  daysLeftText,
+  dueDateText,
+  type CalendarDay,
+} from "./internal/dueDate";
+export {
+  NO_PEOPLE_TEXT,
+  STACK_SHOWN,
+  approversText,
+  authorText,
+  displayName,
+  initials,
+  peopleStack,
+  pictureHue,
+  reviewDone,
+  reviewStateText,
+} from "./internal/people";
+export { labelsShown, moreText } from "./internal/labels";
 export { summaryText } from "./internal/summary";
 export { createdAgo } from "./internal/relativeTime";
 export { ciBox, ciStatusText, type CiBoxView, type CiStatusName } from "./internal/ciBox";

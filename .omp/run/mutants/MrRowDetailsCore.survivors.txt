@@ -1,0 +1,5 @@
+just mutants HEAD stops in the dry run on the expected ui failures; same stryker run with tests limited to src/mergeRequests: 8 files, 577 killed, 3 survived, 8 no-cov
+filters.ts:121 stateAfterClick default {} / default: (NoCoverage) — gate-covered: the `never` exhaustive default is unreachable while the switch covers ChoiceState (tsc + tsgolint)
+filters.ts:47,49 sameValue `b.kind === … &&` → true — equivalent, and the line is unchanged: a username/title of a different kind is undefined, never equal to a string
+filters.ts:50,65,190 exhaustive defaults (NoCoverage) — gate-covered and unchanged lines
+stored.ts:49 wordsOf `return []` → ["Stryker was here"] — equivalent, unchanged line: the junk word is dropped as unknown

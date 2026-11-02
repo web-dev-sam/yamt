@@ -6,6 +6,8 @@ import {
   narrowed,
   personChoices,
   type Choice,
+  type ChoiceState,
+  type Held,
   type ListedRequest,
   type Person,
 } from "../index";
@@ -14,16 +16,29 @@ const SAM: Person = { username: "sam", name: "Sam Lee" };
 const ANNA: Person = { username: "anna", name: "Anna Berg" };
 const ZOE: Person = { username: "aaa", name: "Zoe Quinn" };
 
-function request(iid: number, fields: Partial<Omit<ListedRequest, "iid">> = {}): ListedRequest {
+type Fields = {
+  readonly assignees?: readonly Person[];
+  readonly reviewers?: readonly Person[];
+  readonly labels?: readonly string[];
+};
+
+function request(iid: number, fields: Fields = {}): ListedRequest {
   return {
     iid,
     createdAt: iid,
     draft: false,
-    assignees: [],
-    reviewers: [],
-    labels: [],
-    ...fields,
+    assignees: fields.assignees ?? [],
+    reviewers: (fields.reviewers ?? []).map((person) => ({ person, state: "reviewed" })),
+    labels: (fields.labels ?? []).map((title) => ({ title })),
   };
+}
+
+function included<V>(value: V): Held<V> {
+  return { value, mode: "included" };
+}
+
+function excluded<V>(value: V): Held<V> {
+  return { value, mode: "excluded" };
 }
 
 const ROWS: readonly ListedRequest[] = [
@@ -33,33 +48,119 @@ const ROWS: readonly ListedRequest[] = [
   request(4),
 ];
 
-function rows<V>(choices: readonly Choice<V>[]): readonly (readonly [string, number, boolean])[] {
-  return choices.map((listed) => [listed.label, listed.count, listed.checked] as const);
+function rows<V>(
+  choices: readonly Choice<V>[],
+): readonly (readonly [string, number, ChoiceState])[] {
+  return choices.map((listed) => [listed.label, listed.count, listed.state] as const);
 }
 
-test("Assignee lists Me first, then None, then the others by name, counted over every row", () => {
+test("Assignee lists Me first, then None, then the others, counted over every row", () => {
   expect(rows(personChoices(ROWS, "assignees", "sam", []))).toEqual([
-    ["Me", 1, false],
-    ["None", 1, false],
-    ["Anna Berg", 2, false],
-    ["Zoe Quinn", 1, false],
+    ["Me", 1, "off"],
+    ["None", 1, "off"],
+    ["Anna Berg", 2, "off"],
+    ["Zoe Quinn", 1, "off"],
   ]);
 });
 
 test("Reviewer counts its own field", () => {
   expect(rows(personChoices(ROWS, "reviewers", "sam", []))).toEqual([
-    ["Me", 1, false],
-    ["None", 2, false],
-    ["Anna Berg", 1, false],
+    ["Me", 1, "off"],
+    ["None", 2, "off"],
+    ["Anna Berg", 1, "off"],
   ]);
 });
 
 test("Me is missing while the logged-in user is unknown; that user is then listed by name", () => {
   expect(rows(personChoices(ROWS, "assignees", null, []))).toEqual([
-    ["None", 1, false],
-    ["Anna Berg", 2, false],
-    ["Sam Lee", 1, false],
-    ["Zoe Quinn", 1, false],
+    ["None", 1, "off"],
+    ["Anna Berg", 2, "off"],
+    ["Sam Lee", 1, "off"],
+    ["Zoe Quinn", 1, "off"],
+  ]);
+});
+
+test("values_follow_their_count_then_their_name", () => {
+  const counted = [
+    request(1, { assignees: [SAM], labels: ["c", "a", "b"] }),
+    request(2, { assignees: [ZOE, ANNA], labels: ["b", "c", "d"] }),
+    request(3, { assignees: [ZOE], labels: ["c", "b", "d"] }),
+  ];
+  expect(rows(labelChoices(counted, []))).toEqual([
+    ["None", 0, "off"],
+    ["b", 3, "off"],
+    ["c", 3, "off"],
+    ["d", 2, "off"],
+    ["a", 1, "off"],
+  ]);
+  expect(rows(personChoices(counted, "assignees", null, []))).toEqual([
+    ["None", 0, "off"],
+    ["Zoe Quinn", 2, "off"],
+    ["Anna Berg", 1, "off"],
+    ["Sam Lee", 1, "off"],
+  ]);
+});
+
+test("me_and_none_stay_first_whatever_their_count", () => {
+  const counted = [request(1, { assignees: [ANNA] }), request(2, { assignees: [ANNA] })];
+  expect(rows(personChoices(counted, "assignees", "sam", []))).toEqual([
+    ["Me", 0, "off"],
+    ["None", 0, "off"],
+    ["Anna Berg", 2, "off"],
+  ]);
+  expect(rows(labelChoices([request(1, { labels: ["x"] })], []))).toEqual([
+    ["None", 0, "off"],
+    ["x", 1, "off"],
+  ]);
+});
+
+test("a_held_value_no_longer_listed_comes_last_with_count_0", () => {
+  expect(
+    rows(
+      labelChoices(ROWS, [
+        included({ kind: "label", title: "backend" }),
+        excluded({ kind: "label", title: "aardvark" }),
+        included({ kind: "label", title: "ui" }),
+        included({ kind: "none" }),
+      ]),
+    ),
+  ).toEqual([
+    ["None", 2, "included"],
+    ["bug", 2, "off"],
+    ["ui", 1, "included"],
+    ["aardvark", 0, "excluded"],
+    ["backend", 0, "included"],
+  ]);
+  const people = personChoices(ROWS, "assignees", "sam", [
+    included({ kind: "person", username: "bob" }),
+    included({ kind: "none" }),
+  ]);
+  expect(rows(people)).toEqual([
+    ["Me", 1, "off"],
+    ["None", 1, "included"],
+    ["Anna Berg", 2, "off"],
+    ["Zoe Quinn", 1, "off"],
+    ["bob", 0, "included"],
+  ]);
+  expect(people[4]?.value).toEqual({ kind: "person", username: "bob" });
+});
+
+test("an_excluded_value_reads_excluded", () => {
+  const choices = personChoices(ROWS, "assignees", "sam", [
+    excluded({ kind: "me" }),
+    included({ kind: "person", username: "aaa" }),
+    excluded({ kind: "none" }),
+  ]);
+  expect(rows(choices)).toEqual([
+    ["Me", 1, "excluded"],
+    ["None", 1, "excluded"],
+    ["Anna Berg", 2, "off"],
+    ["Zoe Quinn", 1, "included"],
+  ]);
+  expect(rows(labelChoices(ROWS, [excluded({ kind: "label", title: "bug" })]))).toEqual([
+    ["None", 2, "off"],
+    ["bug", 2, "excluded"],
+    ["ui", 1, "off"],
   ]);
 });
 
@@ -71,71 +172,43 @@ test("a person value carries the username, Me and None their kinds", () => {
   ]);
 });
 
-test("checked values show checked", () => {
-  const choices = personChoices(ROWS, "assignees", "sam", [
-    { kind: "me" },
-    { kind: "person", username: "aaa" },
-  ]);
-  expect(rows(choices)).toEqual([
-    ["Me", 1, true],
-    ["None", 1, false],
-    ["Anna Berg", 2, false],
-    ["Zoe Quinn", 1, true],
-  ]);
-});
-
-test("of two people with the same name only the checked one shows checked", () => {
+test("of two people with the same name only the held one reads held", () => {
   const twin: Person = { username: "slee", name: SAM.name };
   const choices = personChoices([request(1, { assignees: [SAM, twin] })], "assignees", null, [
-    { kind: "person", username: "slee" },
+    included({ kind: "person", username: "slee" }),
   ]);
-  expect(choices.map((listed) => [listed.value, listed.checked])).toEqual([
-    [{ kind: "none" }, false],
-    [{ kind: "person", username: "sam" }, false],
-    [{ kind: "person", username: "slee" }, true],
-  ]);
-});
-
-test("a checked person no longer in the list stays checked with 0, among the others by name", () => {
-  const choices = personChoices(ROWS, "assignees", "sam", [
-    { kind: "person", username: "bob" },
-    { kind: "none" },
-  ]);
-  expect(rows(choices)).toEqual([
-    ["Me", 1, false],
-    ["None", 1, true],
-    ["Anna Berg", 2, false],
-    ["bob", 0, true],
-    ["Zoe Quinn", 1, false],
-  ]);
-  expect(choices[3]?.value).toEqual({ kind: "person", username: "bob" });
-});
-
-test("a checked Me while the user is unknown stays first, checked with 0", () => {
-  expect(rows(personChoices(ROWS, "reviewers", null, [{ kind: "me" }]))).toEqual([
-    ["Me", 0, true],
-    ["None", 2, false],
-    ["Anna Berg", 1, false],
-    ["Sam Lee", 1, false],
+  expect(choices.map((listed) => [listed.value, listed.state])).toEqual([
+    [{ kind: "none" }, "off"],
+    [{ kind: "person", username: "sam" }, "off"],
+    [{ kind: "person", username: "slee" }, "included"],
   ]);
 });
 
-test("a checked person who is the logged-in user stays listed, with their count", () => {
+test("a held Me while the user is unknown stays first, with 0", () => {
+  expect(rows(personChoices(ROWS, "reviewers", null, [included({ kind: "me" })]))).toEqual([
+    ["Me", 0, "included"],
+    ["None", 2, "off"],
+    ["Anna Berg", 1, "off"],
+    ["Sam Lee", 1, "off"],
+  ]);
+});
+
+test("a held person who is the logged-in user stays listed, with their count", () => {
   expect(
-    rows(personChoices(ROWS, "reviewers", "sam", [{ kind: "person", username: "sam" }])),
+    rows(personChoices(ROWS, "reviewers", "sam", [excluded({ kind: "person", username: "sam" })])),
   ).toEqual([
-    ["Me", 1, false],
-    ["None", 2, false],
-    ["Anna Berg", 1, false],
-    ["sam", 1, true],
+    ["Me", 1, "off"],
+    ["None", 2, "off"],
+    ["Anna Berg", 1, "off"],
+    ["sam", 1, "excluded"],
   ]);
 });
 
-test("Label lists None first, then the labels by title, counted over every row", () => {
+test("Label lists None first, then the labels, counted over every row", () => {
   expect(rows(labelChoices(ROWS, []))).toEqual([
-    ["None", 2, false],
-    ["bug", 2, false],
-    ["ui", 1, false],
+    ["None", 2, "off"],
+    ["bug", 2, "off"],
+    ["ui", 1, "off"],
   ]);
   expect(labelChoices(ROWS, []).map((listed) => listed.value)).toEqual([
     { kind: "none" },
@@ -144,29 +217,12 @@ test("Label lists None first, then the labels by title, counted over every row",
   ]);
 });
 
-test("a checked label no longer in the list stays checked with 0", () => {
-  expect(
-    rows(
-      labelChoices(ROWS, [
-        { kind: "label", title: "backend" },
-        { kind: "label", title: "ui" },
-        { kind: "none" },
-      ]),
-    ),
-  ).toEqual([
-    ["None", 2, true],
-    ["backend", 0, true],
-    ["bug", 2, false],
-    ["ui", 1, true],
-  ]);
-});
-
 test("an empty list still offers None, and Me when known", () => {
   expect(rows(personChoices([], "assignees", "sam", []))).toEqual([
-    ["Me", 0, false],
-    ["None", 0, false],
+    ["Me", 0, "off"],
+    ["None", 0, "off"],
   ]);
-  expect(rows(labelChoices([], []))).toEqual([["None", 0, false]]);
+  expect(rows(labelChoices([], []))).toEqual([["None", 0, "off"]]);
 });
 
 test("narrowed keeps the choices whose label holds the typed text, any case, trimmed", () => {
@@ -181,11 +237,11 @@ test("narrowed keeps the choices whose label holds the typed text, any case, tri
   expect(narrowed(choices, "xyz")).toEqual([]);
 });
 
-test("a checked None while the user is unknown does not bring Me back", () => {
-  expect(rows(personChoices(ROWS, "reviewers", null, [{ kind: "none" }]))).toEqual([
-    ["None", 2, true],
-    ["Anna Berg", 1, false],
-    ["Sam Lee", 1, false],
+test("a held None while the user is unknown does not bring Me back", () => {
+  expect(rows(personChoices(ROWS, "reviewers", null, [included({ kind: "none" })]))).toEqual([
+    ["None", 2, "included"],
+    ["Anna Berg", 1, "off"],
+    ["Sam Lee", 1, "off"],
   ]);
 });
 
@@ -195,7 +251,7 @@ test("Label's None counts only the rows with no label", () => {
     value: { kind: "none" },
     label: "None",
     count: 1,
-    checked: false,
+    state: "off",
   });
 });
 
