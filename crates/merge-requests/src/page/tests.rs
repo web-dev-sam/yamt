@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{BlockedReason, Readiness};
+use crate::{
+    BlockedReason, Label, LabelColors, Person, PersonPicture, Readiness, ReviewState, Reviewer,
+};
 
 const ORIGIN: &str = "https://gitlab.example";
 const FULL_PATH: &str = "taskboard/taskboard";
@@ -15,6 +17,21 @@ fn person(username: &str, name: &str) -> Person {
     Person {
         username: username.to_owned(),
         name: name.to_owned(),
+        picture: PersonPicture::None,
+    }
+}
+
+fn reviewer(username: &str, name: &str, state: ReviewState) -> Reviewer {
+    Reviewer {
+        person: person(username, name),
+        state,
+    }
+}
+
+fn uncoloured(title: &str) -> Label {
+    Label {
+        title: title.to_owned(),
+        colors: None,
     }
 }
 
@@ -48,11 +65,13 @@ fn snooze_a_reminder() -> MergeRequestRow {
         title: "Snooze a reminder".to_owned(),
         created_at: "2026-10-28T09:15:00Z".to_owned(),
         draft: false,
+        author: None,
         assignees: vec![person("sam", "Sam Doe")],
-        reviewers: vec![person("anna", "Anna Berg")],
-        labels: vec!["reminders".to_owned(), "ui".to_owned()],
+        reviewers: vec![reviewer("anna", "Anna Berg", ReviewState::Requested)],
+        labels: vec![uncoloured("reminders"), uncoloured("ui")],
         open_discussions: 0,
-        approvals: 0,
+        approved_by: Vec::new(),
+        may_rerequest: false,
         pipeline: Some(failed),
         page: Some(WebPage(
             "https://gitlab.example/taskboard/taskboard/-/merge_requests/13".to_owned(),
@@ -130,7 +149,7 @@ fn a_recorded_page_gives_its_rows_the_user_the_cursor_and_the_complexity() {
     assert_eq!(iids, [13, 12, 11]);
     assert_eq!(page.rows[0], snooze_a_reminder());
     let passed = &page.rows[1];
-    assert_eq!((passed.open_discussions, passed.approvals), (1, 2));
+    assert_eq!((passed.open_discussions, passed.approved_by.len()), (1, 2));
     assert_eq!(status_of(passed), Some(CiStatus::Passed));
     let draft = &page.rows[2];
     assert!(draft.draft);
@@ -147,7 +166,7 @@ fn the_last_page_has_no_cursor_and_a_row_without_a_pipeline_has_none() {
     assert_eq!(page.next, None);
     assert_eq!(page.rows[0].pipeline, None);
     assert_eq!(status_of(&page.rows[1]), Some(CiStatus::Manual));
-    assert_eq!(page.rows[1].approvals, 1);
+    assert_eq!(page.rows[1].approved_by.len(), 1);
     assert_eq!(page.rows[0].readiness, Readiness::NeedsRebase);
     assert_eq!(page.rows[0].size, None);
     assert_eq!(page.rows[1].readiness, Readiness::Checking);
@@ -194,8 +213,9 @@ fn null_fields_are_empty_or_zero_and_more_failed_jobs_than_asked_are_flagged() {
     let page = last_page_of(&json!([node])).unwrap();
 
     let row = &page.rows[0];
-    assert_eq!((row.open_discussions, row.approvals), (0, 0));
+    assert_eq!((row.open_discussions, row.approved_by.len()), (0, 0));
     assert!(row.labels.is_empty() && row.assignees.is_empty() && row.reviewers.is_empty());
+    assert_eq!(row.author, None);
     let expected = Pipeline {
         status: CiStatus::Canceled,
         failed_jobs: vec![FailedJob {
@@ -364,10 +384,32 @@ fn a_size_sums_each_file_s_counts_and_counts_the_files() {
 }
 
 #[test]
-fn no_files_or_null_stats_is_no_size() {
+fn no_files_and_no_diff_refs_is_no_size() {
     assert_eq!(row_with(&json!({ "diffStats": [] })).size, None);
+    assert_eq!(
+        row_with(&json!({ "diffStats": [], "diffRefs": null })).size,
+        None
+    );
     assert_eq!(row_with(&json!({ "diffStats": null })).size, None);
     assert_eq!(row_with(&json!({})).size, None);
+}
+
+#[test]
+fn an_empty_diff_with_diff_refs_is_a_zero_size() {
+    let diff_refs = json!({ "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" });
+    let empty = row_with(&json!({ "diffStats": [], "diffRefs": diff_refs }));
+    assert_eq!(empty.size, Some(size(0, 0, 0)));
+    let unsent = row_with(&json!({ "diffStats": null, "diffRefs": diff_refs }));
+    assert_eq!(unsent.size, Some(size(0, 0, 0)));
+}
+
+#[test]
+fn files_count_whatever_diff_refs_says() {
+    let files = json!([{ "additions": 3, "deletions": 1 }, { "additions": 2, "deletions": 0 }]);
+    for diff_refs in [json!(null), json!({ "baseSha": "1732ffd" })] {
+        let counted = row_with(&json!({ "diffStats": files, "diffRefs": diff_refs }));
+        assert_eq!(counted.size, Some(size(5, 1, 2)), "{diff_refs}");
+    }
 }
 
 #[test]
@@ -474,4 +516,205 @@ fn the_recorded_pages_give_the_sizes_their_summaries_gave() {
         Some(size(120, 40, 6)),
     ];
     assert_eq!(sizes_of(CONFLICTS_PAGE), conflicts_page);
+}
+
+/// A reviewer node of `username` whose interaction is `interaction`.
+fn reviewer_node(username: &str, interaction: &Value) -> Value {
+    json!({ "username": username, "name": username, "avatarUrl": null, "mergeRequestInteraction": interaction })
+}
+
+fn states_of(row: &MergeRequestRow) -> Vec<ReviewState> {
+    row.reviewers
+        .iter()
+        .map(|reviewer| reviewer.state)
+        .collect()
+}
+
+#[test]
+fn review_states_fold_into_four_and_an_unknown_one_is_requested() {
+    use ReviewState::{Approved, ChangesRequested, Requested, Reviewed};
+    let interaction = |state: &Value| json!({ "approved": false, "reviewState": state });
+    let reviewers = json!({ "nodes": [
+        reviewer_node("a", &interaction(&json!("UNREVIEWED"))),
+        reviewer_node("b", &interaction(&json!("REVIEW_STARTED"))),
+        reviewer_node("c", &interaction(&json!(null))),
+        reviewer_node("d", &json!({ "approved": false })),
+        reviewer_node("e", &json!(null)),
+        json!({ "username": "f", "name": "f" }),
+        reviewer_node("g", &interaction(&json!("REVIEWED"))),
+        reviewer_node("h", &interaction(&json!("UNAPPROVED"))),
+        reviewer_node("i", &interaction(&json!("APPROVED"))),
+        reviewer_node("j", &interaction(&json!("REQUESTED_CHANGES"))),
+        reviewer_node("k", &interaction(&json!("MERGE_TRAIN_REVIEW"))),
+        reviewer_node("l", &interaction(&json!("MERGE_TRAIN_REVIEW"))),
+    ] });
+
+    let page = last_page_of(&json!([node_with(&json!({ "reviewers": reviewers }))])).unwrap();
+
+    let expected = [
+        Requested,
+        Requested,
+        Requested,
+        Requested,
+        Requested,
+        Requested,
+        Reviewed,
+        Reviewed,
+        Approved,
+        ChangesRequested,
+        Requested,
+        Requested,
+    ];
+    assert_eq!(states_of(&page.rows[0]), expected);
+    let unknown: Vec<&str> = page
+        .unknown_review_states
+        .iter()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(unknown, ["MERGE_TRAIN_REVIEW"]);
+}
+
+#[test]
+fn approved_true_reads_approved_whatever_the_review_state() {
+    let states = [
+        json!("UNREVIEWED"),
+        json!("REVIEW_STARTED"),
+        json!("REVIEWED"),
+        json!("UNAPPROVED"),
+        json!("REQUESTED_CHANGES"),
+        json!("MERGE_TRAIN_REVIEW"),
+        json!(null),
+    ];
+    let nodes: Vec<Value> = states
+        .iter()
+        .map(|state| reviewer_node("chiara", &json!({ "approved": true, "reviewState": state })))
+        .collect();
+    let node = node_with(&json!({ "reviewers": { "nodes": nodes } }));
+
+    let page = last_page_of(&json!([node])).unwrap();
+
+    assert_eq!(states_of(&page.rows[0]), [ReviewState::Approved; 7]);
+    assert!(page.unknown_review_states.is_empty());
+}
+
+#[test]
+fn approvers_reach_the_row_by_name_and_the_count_is_their_number() {
+    let approvers = json!({ "nodes": [
+        { "username": "anna", "name": "Anna Berg", "avatarUrl": null },
+        { "username": "sam", "name": "Sam Doe", "avatarUrl": null },
+    ] });
+
+    let row = row_with(&json!({ "approvedBy": approvers }));
+
+    let expected = [person("anna", "Anna Berg"), person("sam", "Sam Doe")];
+    assert_eq!(row.approved_by, expected);
+    let json = serde_json::to_value(&row).unwrap();
+    assert!(json.get("approvals").is_none(), "{json}");
+    assert_eq!(json["approvedBy"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn a_label_colour_that_is_not_hex_is_no_colour() {
+    let colored = |title: &str, background: &str, text: &str| Label {
+        title: title.to_owned(),
+        colors: Some(LabelColors {
+            background: background.to_owned(),
+            text: text.to_owned(),
+        }),
+    };
+    let labels = json!({ "nodes": [
+        { "title": "frontend", "color": "#428BCA", "textColor": "#FFFFFF" },
+        { "title": "short", "color": "#fff", "textColor": "#0a0" },
+        { "title": "odd", "color": "red", "textColor": "#FFFFFF" },
+        { "title": "text", "color": "#FFFFFF", "textColor": "white" },
+        { "title": "five", "color": "#12345", "textColor": "#FFFFFF" },
+        { "title": "seven", "color": "#1234567", "textColor": "#FFFFFF" },
+        { "title": "not hex", "color": "#GGGGGG", "textColor": "#FFFFFF" },
+        { "title": "no hash", "color": "428BCA", "textColor": "#FFFFFF" },
+        { "title": "css", "color": "#428BCA;background:url(x)", "textColor": "#FFFFFF" },
+        { "title": "null", "color": null, "textColor": "#FFFFFF" },
+        { "title": "missing", "color": "#428BCA" },
+    ] });
+
+    let row = row_with(&json!({ "labels": labels }));
+
+    let expected = [
+        colored("frontend", "#428BCA", "#FFFFFF"),
+        colored("short", "#fff", "#0a0"),
+        uncoloured("odd"),
+        uncoloured("text"),
+        uncoloured("five"),
+        uncoloured("seven"),
+        uncoloured("not hex"),
+        uncoloured("no hash"),
+        uncoloured("css"),
+        uncoloured("null"),
+        uncoloured("missing"),
+    ];
+    assert_eq!(row.labels, expected);
+}
+
+#[test]
+fn a_null_author_is_none() {
+    assert_eq!(row_with(&json!({ "author": null })).author, None);
+    assert_eq!(row_with(&json!({})).author, None);
+    let author = json!({ "username": "anna", "name": "Anna Berg", "avatarUrl": null });
+    let row = row_with(&json!({ "author": author }));
+    assert_eq!(row.author, Some(person("anna", "Anna Berg")));
+}
+
+#[test]
+fn the_update_permission_is_may_rerequest() {
+    let may = |permissions: &Value| {
+        let row = row_with(&json!({ "userPermissions": permissions }));
+        row.may_rerequest
+    };
+    assert!(may(&json!({ "updateMergeRequest": true })));
+    assert!(!may(&json!({ "updateMergeRequest": false })));
+    assert!(!may(&json!(null)));
+    assert!(!row_with(&json!({})).may_rerequest);
+}
+
+const ANNA_AVATAR: &str = "/uploads/-/system/user/avatar/2/avatar.png";
+const SAM_AVATAR: &str = "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png";
+const GRAVATAR: &str =
+    "https://secure.gravatar.com/avatar/205e460b479e2e5b48aec07710c08d50?s=80&d=identicon";
+
+fn user(username: &str, avatar_url: &str) -> Value {
+    json!({ "username": username, "name": username, "avatarUrl": avatar_url })
+}
+
+#[test]
+fn each_person_s_uploaded_picture_is_offered_and_a_gravatar_or_none_is_not() {
+    let anna_again = format!("{ANNA_AVATAR}?v=2");
+    let node = node_with(&json!({
+        "author": user("anna", ANNA_AVATAR),
+        "assignees": { "nodes": [user("sam", SAM_AVATAR)] },
+        "reviewers": { "nodes": [user("ben", GRAVATAR), user("dmitri", "https://seccdn.libravatar.org/avatar/1")] },
+        "approvedBy": { "nodes": [user("anna", &anna_again)] },
+    }));
+
+    let page = last_page_of(&json!([node])).unwrap();
+
+    let offered: Vec<(&str, &str)> = page
+        .pictures
+        .iter()
+        .map(|picture| (picture.username.as_str(), picture.address.as_str()))
+        .collect();
+    let anna = format!("{ORIGIN}{ANNA_AVATAR}");
+    let anna_again = format!("{ORIGIN}{anna_again}");
+    let expected = [
+        ("anna", anna.as_str()),
+        ("sam", SAM_AVATAR),
+        ("anna", &anna_again),
+    ];
+    assert_eq!(offered, expected);
+    let row = serde_json::to_value(&page.rows[0]).unwrap();
+    let pictures = [
+        &row["reviewers"][0]["person"]["picture"],
+        &row["reviewers"][1]["person"]["picture"],
+    ];
+    let gravatar = json!({ "kind": "gravatar", "address": GRAVATAR });
+    assert_eq!(pictures, [&gravatar, &json!({ "kind": "none" })]);
+    assert_eq!(row["author"]["picture"], json!({ "kind": "uploaded" }));
 }

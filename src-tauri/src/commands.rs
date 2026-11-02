@@ -79,6 +79,7 @@ pub(crate) fn specta_builder<R: Runtime>() -> tauri_specta::Builder<R> {
         merge_requests::resolve_merge_request::<tauri::Wry>,
         merge_requests::continue_merge_request::<tauri::Wry>,
         merge_requests::find_local_merge::<tauri::Wry>,
+        merge_requests::rerequest_review::<tauri::Wry>,
     ])
 }
 
@@ -97,10 +98,18 @@ pub(crate) fn with_session<R: Runtime>(
 }
 
 /// A window whose state is managed once the data folder is known: the compare and range windows. A
-/// range window's page that starts loading stops the agent of the page before.
+/// range window's page that starts loading stops the agent of the page before. Uploaded profile pictures come
+/// through the picture scheme.
 pub(crate) fn with_commands<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
         .invoke_handler(specta_builder().invoke_handler())
+        .register_asynchronous_uri_scheme_protocol(
+            merge_requests::PICTURE_SCHEME,
+            |context, request, responder| {
+                let path = request.uri().path().to_owned();
+                merge_requests::answer_picture(context.app_handle().clone(), path, responder);
+            },
+        )
         .on_page_load(|webview, page| {
             ai::stop_agent_on_page_start(webview.app_handle(), page.event());
         })

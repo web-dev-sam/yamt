@@ -108,17 +108,19 @@ fn is_authority(authority: &str) -> bool {
 }
 
 /// `/<segment>/…`: URL path characters only, no empty or `..` segment.
-fn is_web_path(web_path: &str) -> bool {
-    let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-');
-    let is_segment = |segment: &str| {
-        !segment.is_empty() && segment != PARENT_SEGMENT && segment.chars().all(is_path_char)
-    };
+pub(crate) fn is_web_path(web_path: &str) -> bool {
     web_path
         .strip_prefix('/')
-        .is_some_and(|path| path.split('/').all(is_segment))
+        .is_some_and(|path| path.split('/').all(is_path_segment))
 }
 
-fn is_number(text: &str) -> bool {
+/// One segment of a URL path: not empty, not `..`, of `[A-Za-z0-9._~-]`.
+pub(crate) fn is_path_segment(segment: &str) -> bool {
+    let is_path_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '~' | '-');
+    !segment.is_empty() && segment != PARENT_SEGMENT && segment.chars().all(is_path_char)
+}
+
+pub(crate) fn is_number(text: &str) -> bool {
     !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
 }
 

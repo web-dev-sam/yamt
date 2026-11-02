@@ -21,9 +21,10 @@ impl Fake {
     pub fn new(scenario: &str) -> Fake {
         let dir = tempfile::tempdir().unwrap();
         let settings = format!(
-            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_LOG={}\n",
+            "YAMT_FAKE_GLAB={}\nYAMT_FAKE_GLAB_LOG={}\nYAMT_FAKE_GLAB_STATE={}\n",
             in_this_repository(&format!("tests/glab/{scenario}")).display(),
             dir.path().join("log").display(),
+            dir.path().join("state").display(),
         );
         fs::write(dir.path().join("glab.env"), settings).unwrap();
         let link = dir.path().join("glab");

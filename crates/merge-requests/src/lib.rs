@@ -6,13 +6,17 @@
 
 mod check;
 mod detect;
+mod labels;
 mod list;
 mod open;
 mod page;
+mod people;
+mod picture;
 mod project;
 mod query;
 mod readiness;
 mod remote;
+mod rerequest;
 mod resolve;
 mod web_page;
 
@@ -23,8 +27,14 @@ use specta::Type;
 
 pub use check::{CheckSummary, ConflictCheck, MergedPairs, check_conflicts};
 pub use detect::{GitLabRepository, gitlab_repository};
-pub use list::{Listed, list_merge_requests};
+pub use labels::{Label, LabelColors};
+pub use list::{Listed, ListedPage, OfferedPicture, list_merge_requests};
 pub use open::prepare_open;
+pub use people::{Person, PersonPicture, ReviewState, Reviewer};
+pub use picture::{
+    GravatarAddress, ImageKind, MAX_PICTURE_BYTES, Picture, PictureAddress, fetch_picture,
+};
+pub use rerequest::{RerequestReply, rerequest_review};
 pub use resolve::prepare_resolve;
 pub use web_page::open_page;
 pub use yamt_gitio::Glab;
@@ -53,16 +63,6 @@ pub enum GitLabProject {
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Type,
 )]
 pub struct MergeRequestIid(pub u32);
-
-/// A GitLab user.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct Person {
-    /// The login name, without "@".
-    pub username: String,
-    /// The display name.
-    pub name: String,
-}
 
 /// A pipeline's status, GitLab's fifteen folded into the seven the window shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Type)]
@@ -220,21 +220,25 @@ pub struct MergeRequestRow {
     pub created_at: String,
     /// Whether it is a draft.
     pub draft: bool,
+    /// Who opened it; `None` when GitLab names no one.
+    pub author: Option<Person>,
     /// Its assignees.
     pub assignees: Vec<Person>,
-    /// Its reviewers.
-    pub reviewers: Vec<Person>,
-    /// Its labels' titles.
-    pub labels: Vec<String>,
+    /// Its reviewers and how far each review is.
+    pub reviewers: Vec<Reviewer>,
+    /// Its labels, in GitLab's order.
+    pub labels: Vec<Label>,
     /// Resolvable discussions not yet resolved.
     pub open_discussions: u32,
-    /// Approvals given.
-    pub approvals: u32,
+    /// Who approved it.
+    pub approved_by: Vec<Person>,
+    /// Whether you may ask a reviewer for their review again: GitLab's `updateMergeRequest` permission for you.
+    pub may_rerequest: bool,
     /// Its latest pipeline; `None` when it has none.
     pub pipeline: Option<Pipeline>,
     /// Its page on GitLab; `None` when GitLab is not on https.
     pub page: Option<WebPage>,
-    /// How much it changes; `None` when GitLab has not counted it.
+    /// How much it changes; `None` when GitLab has not computed its diff.
     pub size: Option<ChangeSize>,
     /// Whether it can be merged.
     pub readiness: Readiness,

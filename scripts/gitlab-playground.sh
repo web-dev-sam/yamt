@@ -2,13 +2,14 @@
 # Usage: scripts/gitlab-playground.sh [--reset] <dir>
 # Fills a real GitLab project for trying yamt's merge-request page by hand. <dir> is a clone of that project
 # (origin = the GitLab project, glab logged in). The project gets the Taskboard history of scripts/mr-conflict-repo.sh
-# (fixed names and dates, so the commit ids never change) and four open merge requests into main:
+# (fixed names and dates, so the commit ids never change) and five open merge requests into main:
 #   "Due dates on cards"   feature/due-dates  conflicts with main (Resolve conflicts, Abort, Push)
 #   "Card labels"          feature/clean      merges clean
 #   "Notes on priorities"  feature/merged     already contains main
 #   "Draft: Develop notes" develop            a draft
+#   "Empty change"         feature/empty      main's tip: changes nothing ("+0 −0")
 # Branches GitLab already has are left alone and merge requests that are open are not made again, so a second run
-# only fills what is missing. --reset also force-pushes the four branches back to their first commits (main is never
+# only fills what is missing. --reset also force-pushes the five branches back to their first commits (main is never
 # forced) and puts <dir> back on a clean main: a merge in progress is aborted, yamt's record of it removed, local
 # changes, untracked files and every local branch but main deleted. Only for a playground.
 set -euo pipefail
@@ -56,17 +57,24 @@ else
     quiet git --git-dir="$bare" push "$origin" refs/heads/main:refs/heads/main
     echo "main: pushed"
 fi
-for branch in develop feature/due-dates feature/clean feature/merged; do
+
+# $1: the branch on GitLab, $2: the seed's commit it starts at.
+push_branch() {
+    local branch=$1 source=$2
     if $reset; then
-        quiet git --git-dir="$bare" push --force "$origin" "refs/heads/$branch:refs/heads/$branch"
+        quiet git --git-dir="$bare" push --force "$origin" "$source:refs/heads/$branch"
         echo "$branch: pushed back to its first commits"
     elif on_gitlab "$branch"; then
         echo "$branch: already on GitLab"
     else
-        quiet git --git-dir="$bare" push "$origin" "refs/heads/$branch:refs/heads/$branch"
+        quiet git --git-dir="$bare" push "$origin" "$source:refs/heads/$branch"
         echo "$branch: pushed"
     fi
+}
+for branch in develop feature/due-dates feature/clean feature/merged; do
+    push_branch "$branch" "refs/heads/$branch"
 done
+push_branch feature/empty refs/heads/main
 
 git -C "$dir" fetch -q --prune origin
 if $reset; then
@@ -104,3 +112,4 @@ open_merge_request feature/due-dates "Due dates on cards"
 open_merge_request feature/clean "Card labels"
 open_merge_request feature/merged "Notes on priorities"
 open_merge_request develop "Develop notes" --draft
+open_merge_request feature/empty "Empty change"

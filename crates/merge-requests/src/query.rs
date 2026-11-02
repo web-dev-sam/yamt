@@ -1,3 +1,5 @@
+use serde_json::json;
+
 use crate::{MAX_FAILED_JOBS, MergeRequestIid, PAGE_SIZE};
 
 /// A merge request's state, target branch and the two commits of its diff, asked afresh on each open so a push
@@ -12,12 +14,29 @@ const BRANCHES_QUERY: &str = "query MergeRequestBranches($fullPath: ID!, $iid: S
      project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
      state sourceBranch targetBranch sourceProjectId targetProjectId } } }";
 
+/// A merge request's state and reviewers, asked afresh before a review is asked for again: who is still a reviewer,
+/// their global id and how far their review is.
+const REVIEWERS_QUERY: &str = "query MergeRequestReviewers($fullPath: ID!, $iid: String!) { \
+     project(fullPath: $fullPath) { mergeRequest(iid: $iid) { \
+     state reviewers { nodes { id username name avatarUrl \
+     mergeRequestInteraction { approved reviewState } } } } } }";
+
+/// Asks a reviewer for their review again (GitLab's "Re-request review"), answering the merge request's reviewers: the
+/// only write of the crate.
+const REREQUEST_MUTATION: &str = "mutation RerequestReview($projectPath: ID!, $iid: String!, $userId: UserID!) { \
+     mergeRequestReviewerRereview(input: { projectPath: $projectPath, iid: $iid, userId: $userId }) { \
+     errors mergeRequest { reviewers { nodes { username name avatarUrl \
+     mergeRequestInteraction { approved reviewState } } } } } }";
+
+/// `glab api graphql` reading the request's JSON body from stdin.
+pub(crate) const GRAPHQL_BODY_ARGS: [&str; 4] = ["api", "graphql", "--input", "-"];
+
 /// One page of the project's open merge requests, newest created first, each with its latest pipeline's failed
-/// jobs (the latest run of each), its merge status and size, and its target branch and head commit for the local
-/// conflict check; 130 of GitLab's complexity limit of 250, measured on gitlab.com on 2026-10-31 before the last two
-/// (`docs/slices/briefs/mr-diff-stats.md`; `.omp/run/notes/MrOverviewDesign.md` §2.2,
-/// `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1). One line, so
-/// the fake glab logs each call on one line.
+/// jobs (the latest run of each), its merge status and size, its people, labels and your permission to update it, and
+/// its target branch and head commit for the local conflict check; 170 of GitLab's complexity limit of 250, measured
+/// on gitlab.com on 2026-11-02 (`docs/slices/briefs/mr-row-details-rust.md`; `.omp/run/notes/MrOverviewDesign.md`
+/// §2.2, `docs/slices/briefs/mr-conflicts-design.md` §1, `docs/slices/briefs/local-conflicts-design.md` §1,
+/// `docs/slices/briefs/mr-row-details-design.md` §1.1). One line, so the fake glab logs each call on one line.
 fn list_query() -> String {
     format!(
         "query MergeRequestPage($fullPath: ID!, $first: Int!, $after: String) {{ \
@@ -28,12 +47,14 @@ fn list_query() -> String {
          pageInfo {{ hasNextPage endCursor }} \
          nodes {{ \
          iid title createdAt draft \
-         labels {{ nodes {{ title }} }} \
-         assignees {{ nodes {{ username name }} }} \
-         reviewers {{ nodes {{ username name }} }} \
-         approvedBy {{ nodes {{ username }} }} \
+         author {{ username name avatarUrl }} \
+         labels {{ nodes {{ title color textColor }} }} \
+         assignees {{ nodes {{ username name avatarUrl }} }} \
+         reviewers {{ nodes {{ username name avatarUrl mergeRequestInteraction {{ approved reviewState }} }} }} \
+         approvedBy {{ nodes {{ username name avatarUrl }} }} \
+         userPermissions {{ updateMergeRequest }} \
          resolvableDiscussionsCount resolvedDiscussionsCount \
-         detailedMergeStatus conflicts diffStats {{ additions deletions }} \
+         detailedMergeStatus conflicts diffStats {{ additions deletions }} diffRefs {{ baseSha }} \
          sourceProjectId targetProjectId targetBranch diffHeadSha \
          headPipeline {{ status \
          jobs(statuses: [FAILED], retried: false, first: {MAX_FAILED_JOBS}) {{ \
@@ -71,6 +92,21 @@ pub(crate) fn branches_args(full_path: &str, iid: MergeRequestIid) -> Vec<String
     merge_request_args(BRANCHES_QUERY, full_path, iid)
 }
 
+/// `glab api graphql` for merge request `iid`'s state and reviewers.
+pub(crate) fn reviewers_args(full_path: &str, iid: MergeRequestIid) -> Vec<String> {
+    merge_request_args(REVIEWERS_QUERY, full_path, iid)
+}
+
+/// The JSON body asking the reviewer with global id `user_id` (`gid://gitlab/User/<n>`) for their review of merge
+/// request `iid` again; the id travels as a variable, never inside the query text.
+pub(crate) fn rerequest_body(full_path: &str, iid: MergeRequestIid, user_id: &str) -> Vec<u8> {
+    let body = json!({
+        "query": REREQUEST_MUTATION,
+        "variables": { "projectPath": full_path, "iid": iid.0.to_string(), "userId": user_id },
+    });
+    body.to_string().into_bytes()
+}
+
 fn merge_request_args(query: &str, full_path: &str, iid: MergeRequestIid) -> Vec<String> {
     vec![
         "api".to_owned(),
@@ -95,8 +131,8 @@ mod tests {
         assert_eq!(query.matches('{').count(), query.matches('}').count());
         assert!(query.contains("first: 50)"), "{query}");
         let merge_fields = "resolvedDiscussionsCount detailedMergeStatus conflicts \
-             diffStats { additions deletions } sourceProjectId targetProjectId targetBranch diffHeadSha \
-             headPipeline";
+             diffStats { additions deletions } diffRefs { baseSha } sourceProjectId targetProjectId targetBranch \
+             diffHeadSha headPipeline";
         assert!(query.contains(merge_fields), "{query}");
     }
 
@@ -107,6 +143,60 @@ mod tests {
         let query = list_query();
         assert!(query.contains("diffStats {"), "{query}");
         assert!(!query.contains("diffStatsSummary"), "{query}");
+    }
+
+    #[test]
+    fn the_list_query_asks_people_with_pictures_review_states_the_permission_and_label_colours() {
+        let query = list_query();
+        let people = "iid title createdAt draft author { username name avatarUrl } \
+             labels { nodes { title color textColor } } assignees { nodes { username name avatarUrl } } \
+             reviewers { nodes { username name avatarUrl mergeRequestInteraction { approved reviewState } } } \
+             approvedBy { nodes { username name avatarUrl } } userPermissions { updateMergeRequest } \
+             resolvableDiscussionsCount";
+        assert!(query.contains(people), "{query}");
+    }
+
+    #[test]
+    fn the_reviewers_query_is_one_line_with_balanced_braces_and_its_argv_is_exact() {
+        let query = "query=query MergeRequestReviewers($fullPath: ID!, $iid: String!) { \
+             project(fullPath: $fullPath) { mergeRequest(iid: $iid) { state reviewers { nodes { id username name \
+             avatarUrl mergeRequestInteraction { approved reviewState } } } } } }";
+        assert_eq!(query.matches('{').count(), query.matches('}').count());
+
+        let args = reviewers_args("taskboard/taskboard", MergeRequestIid(52));
+
+        let expected = [
+            "api",
+            "graphql",
+            "-f",
+            query,
+            "-f",
+            "fullPath=taskboard/taskboard",
+            "-f",
+            "iid=52",
+        ];
+        assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn the_rerequest_body_names_the_rereview_mutation_and_carries_the_id_as_a_variable() {
+        let mutation = "mutation RerequestReview($projectPath: ID!, $iid: String!, $userId: UserID!) { \
+             mergeRequestReviewerRereview(input: { projectPath: $projectPath, iid: $iid, userId: $userId }) { \
+             errors mergeRequest { reviewers { nodes { username name avatarUrl \
+             mergeRequestInteraction { approved reviewState } } } } } }";
+        assert_eq!(mutation.matches('{').count(), mutation.matches('}').count());
+
+        let body = rerequest_body(
+            "taskboard/taskboard",
+            MergeRequestIid(52),
+            "gid://gitlab/User/3",
+        );
+
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let expected = json!({ "query": mutation, "variables": {
+            "projectPath": "taskboard/taskboard", "iid": "52", "userId": "gid://gitlab/User/3" } });
+        assert_eq!(body, expected);
+        assert_eq!(GRAPHQL_BODY_ARGS, ["api", "graphql", "--input", "-"]);
     }
 
     #[test]

@@ -1,0 +1,3 @@
+just mutants HEAD: 158 tested in 20m, 4 missed, 90 caught, 59 unviable, 5 timeouts (caught). Both is_username misses killed later by the plus+one test (by hand).
+src-tauri/src/merge_requests/pictures.rs:60 replace answer_picture with () — wiring: the async scheme handler around picture_answer; tauri's UriSchemeResponder cannot be built in tests, and picture_answer is fully tested
+crates/merge-requests/src/people.rs:174 replace warn_unknown_review_state with () — wiring: one tracing::warn! line; no subscriber in tests. Which states it warns of is pinned by each_unknown_review_state_is_new_once_per_load

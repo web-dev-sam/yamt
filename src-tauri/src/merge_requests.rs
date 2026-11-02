@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -8,15 +8,19 @@ use tauri::ipc::Channel;
 use tauri::{App, Manager, Runtime, State, WebviewWindow};
 use yamt_local_merge::{LocalMerge, MergeRequestBranches, Refusal, Started};
 use yamt_merge_requests::{
-    CheckedRow, GitLabProject, GitLabRepository, Glab, ListEnd, MergeRequestIid, MergeRequestPage,
-    MergedPairs, OpenReply, PageOpened, ResolveRefusal, WebPage, check_conflicts,
-    gitlab_repository, prepare_open, prepare_resolve,
+    CheckedRow, GitLabProject, GitLabRepository, Glab, ListEnd, ListedPage, MergeRequestIid,
+    MergeRequestPage, MergedPairs, OpenReply, PageOpened, RerequestReply, ResolveRefusal, WebPage,
+    check_conflicts, gitlab_repository, prepare_open, prepare_resolve,
 };
 
 use crate::args::Ai;
 use crate::ipc_error::{IpcError, blocking_reply};
 use crate::range::range_folder;
 use crate::second_window;
+
+mod pictures;
+
+pub(crate) use pictures::{PICTURE_SCHEME, answer_picture};
 
 const NO_PROJECT: &str = "this window's folder has no remote on a GitLab server";
 const CLAIM_PROBE_INTERVAL: Duration = Duration::from_millis(50);
@@ -67,6 +71,11 @@ pub(crate) struct MergeRequestState {
     /// The run's merged pairs; locked for a whole check, so a second load's check waits and then merges nothing
     /// twice (rule 7); never locked together with `pages`.
     merged: Mutex<MergedPairs>,
+    /// The uploaded pictures lists offered and those fetched (plan §2 #152); never locked together with `pages` or
+    /// `merged`, and never held across a glab run.
+    pictures: Mutex<pictures::PictureShelf>,
+    /// Wakes the picture askers waiting for a fetch to end.
+    picture_turns: Condvar,
 }
 
 /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
@@ -77,6 +86,8 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path,
         ai,
         pages: Mutex::new(BTreeSet::new()),
         merged: Mutex::new(MergedPairs::default()),
+        pictures: Mutex::default(),
+        picture_turns: Condvar::new(),
     });
 }
 
@@ -84,10 +95,11 @@ fn offered(pages: &Mutex<BTreeSet<WebPage>>) -> MutexGuard<'_, BTreeSet<WebPage>
     pages.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Remembers the page's merge request and failed job pages as offered, then sends the page to the window.
-fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, page: MergeRequestPage) {
+/// Remembers the page's merge request and failed job pages and its uploaded pictures as offered, then sends the page
+/// to the window.
+fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, listed: ListedPage) {
     let mut pages = offered(&state.pages);
-    for row in &page.rows {
+    for row in &listed.page.rows {
         pages.extend(row.page.clone());
         let jobs = row
             .pipeline
@@ -96,7 +108,8 @@ fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, page:
         pages.extend(jobs.filter_map(|job| job.page.clone()));
     }
     drop(pages);
-    send(channel, ListMessage::Page { page });
+    pictures::offer(state, listed.pictures);
+    send(channel, ListMessage::Page { page: listed.page });
 }
 
 fn send(channel: &Channel<ListMessage>, message: ListMessage) {
@@ -138,6 +151,20 @@ fn opened(state: &MergeRequestState, glab: Option<&Glab>, iid: MergeRequestIid) 
         Ok(range) => second_window::start_range(&range, state.ai),
         Err(reply) => reply,
     }
+}
+
+fn rerequested(
+    state: &MergeRequestState,
+    glab: Option<&Glab>,
+    iid: MergeRequestIid,
+    username: &str,
+) -> RerequestReply {
+    let Some(repository) = &state.gitlab else {
+        return RerequestReply::Failed {
+            message: NO_PROJECT.to_owned(),
+        };
+    };
+    yamt_merge_requests::rerequest_review(repository, glab, iid, username)
 }
 
 /// Starts merge request `iid`'s merge in this checkout, then its window by `start_window`, and waits for its claim.
@@ -255,6 +282,24 @@ pub(crate) async fn open_merge_request<R: Runtime>(
     iid: MergeRequestIid,
 ) -> Result<OpenReply, IpcError> {
     blocking_reply(move || Ok(opened(&window.state(), Glab::find().as_ref(), iid))).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn rerequest_review<R: Runtime>(
+    window: WebviewWindow<R>,
+    iid: MergeRequestIid,
+    username: String,
+) -> Result<RerequestReply, IpcError> {
+    blocking_reply(move || {
+        Ok(rerequested(
+            &window.state(),
+            Glab::find().as_ref(),
+            iid,
+            &username,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]

@@ -27,14 +27,16 @@ test ever runs a file it has just written (ETXTBSY).
 | `merge-request-<iid>.json` | `glab api` GET `…/merge_requests/<iid>` for that iid |
 | `merge-request.json` | `glab api` GET `…/merge_requests/<iid>` for any iid without its own file |
 | `draft-notes.json` | `glab api` GET `…/draft_notes` (`--paginate` accepted) |
-| `post-<n>.json` | the body of the n-th POST `…/draft_notes` (n from 1, counted in the state file) |
+| `post-<n>.json` | the body of the n-th POST `…/draft_notes` or `glab api graphql --input -` (the re-request mutation; n from 1, counted in the state file) |
 | `post-<n>.status` | its HTTP status line (missing = `201 Created`) |
 | `post-<n>.err` | for a status of 400 or more: what glab prints on stderr instead of its own `glab: <message> (HTTP <code>)`; required when the body has no string `"message"` (else the fake exits 2 with "fake glab: no recorded stderr for this body") |
 | `post-<n>.exit` | glab failed before any HTTP answer: `post-<n>.err` (if any) on stderr, this exit status, nothing on stdout |
 | `post-<n>.sleep` | seconds to wait before answering (a post that hangs) |
-| `graphql-page-<n>.json` | `glab api graphql` without a field `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
-| `graphql-merge-request-<iid>.json` | `glab api graphql` with a field `iid=<iid>` |
+| `graphql-page-<n>.json` | `glab api graphql` without `--input -` and without a field `iid`: page 1 without a field `after`, page n for `after=page-<n>` (so each page's `endCursor` is `page-<n+1>`) |
+| `graphql-merge-request-<iid>.json` | `glab api graphql` without `--input -`, with a field `iid=<iid>` |
 | `graphql-*.status`, `.err`, `.exit`, `.sleep` | as for `post-<n>`, beside each `graphql-*.json` (status missing = `200 OK`) |
+| `pictures/<path>` | `glab api` GET of a full address (`https://<host>/<path>?<query>`): the file at the address's path after its host, its query dropped, printed with `cat` byte for byte, exit 0; no such file answers `404 Not Found` |
+| `pictures/<path>.sleep` | seconds to wait before that picture's answer (a slow picture), whether or not the picture exists |
 
 `glab api` keeps the value of every `-f`/`--raw-field`/`-F`/`--field` as `name=value` (the first wins when a name
 is given twice) and, as glab does, sends a POST when a field or `--input` is given without `-X`/`--method`. A GET
@@ -69,6 +71,7 @@ argv: <the arguments, joined by spaces>
 cwd: <the working folder, symlinks resolved>
 env: NO_COLOR=<value or unset> GIT_TERMINAL_PROMPT=<value or unset>
 stdin: <stdin as read, then a newline>     (only with `--input -`)
+answered: <address>                        (a picture, after its .sleep and before its answer)
 ```
 
 ## Scenarios
@@ -120,6 +123,29 @@ stdin: <stdin as read, then a newline>     (only with `--input -`)
   `conflicts { also: [discussions, draft] }`; !48 (`CHECKING`, into `develop`; `feature/clean`) → `mergesCleanly`;
   !49 (`PREPARING`, `diffHeadSha` null, no head ref) keeps GitLab's answer. The other recorded pages name
   `targetBranch` but no `diffHeadSha`, so their rows are never checked.
+- `mr-row-details/` — the merge-request rows' people, labels, sizes and the re-request
+  (`crates/merge-requests/{src/page/tests.rs,tests/list.rs,tests/rerequest.rs,tests/picture.rs}`, the picture and
+  re-request app tests in `src-tauri/src/merge_requests/tests/`): logged in; `merge-requests/`'s project; user `sam`;
+  one page, the last (`queryComplexity` 170 of 250, as gitlab.com measured the query on 2026-11-02); no `diffHeadSha`,
+  so the local check runs no git. !52 (`MERGEABLE`, `updateMergeRequest` true): author anna (her avatar the path
+  `/uploads/-/system/user/avatar/2/avatar.png`), assignee sam (the absolute
+  `https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png`), reviewers ben (`REVIEWED`, a Gravatar on
+  `secure.gravatar.com` with a 64-digit hash and `?s=80&d=identicon`), chiara (`approved: true` with `reviewState:
+  REVIEWED`, as a GitLab older than 16.11 answers; no avatar) and dmitri (`UNREVIEWED`, a Libravatar address: a custom
+  Gravatar host, so no picture); approved by chiara; labels `frontend` (`#428BCA`/`#FFFFFF`), `bug`
+  (`#D9534F`/`#FFFFFF`) and `odd` (`red`, so no colours); `diffStats: []` with `diffRefs` set (a zero size); a passed
+  pipeline. !51 (`PREPARING`, `updateMergeRequest` true): author null, no one assigned, no reviewer, no label,
+  `diffStats: []` and `diffRefs: null` (no size), no pipeline. !50 (`DISCUSSIONS_NOT_RESOLVED`, `updateMergeRequest`
+  false): author ben, assignee dmitri, reviewers anna (`REQUESTED_CHANGES`), sam (`REVIEW_STARTED`), ben
+  (`REVIEWED`) and erik (`MERGE_TRAIN_REVIEW`, a state yamt does not know), approved by anna and sam, two files. The
+  reviewers query: `graphql-merge-request-52.json` (open; ben `gid://gitlab/User/4`, chiara `…/5`, dmitri `…/6`
+  still `UNREVIEWED`), `graphql-merge-request-50.json` (merged since). Post 1 (`200 OK`) is the re-request of ben on
+  !52, answering ben `UNREVIEWED`; post 2 (`200 OK`) the mutation's own error `Reviewer not found`.
+  `pictures/uploads/-/system/user/avatar/1/avatar.png` and `/2/avatar.png` are small PNGs (each holds NUL bytes).
+- `mr-row-details/crowd/` — many uploaded pictures at once (the picture app tests): `mr-row-details/`'s project and
+  user; one merge request, !60, by anna (`/2/avatar.png`, a PNG) with assignees erik (`/3/avatar.png`: an HTML page,
+  so no picture), `plus+one` (`/2/avatar.png` under a name the picture scheme refuses) and user11 to user16 (`/11/`
+  to `/16/`: no file, each answer after 1 s).
 
 ## Fake browser opener
 

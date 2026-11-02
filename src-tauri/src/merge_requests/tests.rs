@@ -117,6 +117,14 @@ fn a_range_window_s_merge_request_state_keeps_its_own_ai() {
 mod resolve;
 
 #[cfg(unix)]
+mod picture_scheme;
+
+#[cfg(unix)]
+mod rerequest;
+
+mod csp;
+
+#[cfg(unix)]
 mod through_glab {
     use std::path::PathBuf;
     use std::process::Command;
@@ -222,6 +230,7 @@ mod through_glab {
                 .env("PATH", path)
                 .env("YAMT_FAKE_GLAB", scenario)
                 .env("YAMT_FAKE_GLAB_LOG", fake.path().join("glab.log"))
+                .env("YAMT_FAKE_GLAB_STATE", fake.path().join("glab.state"))
                 .env(FAKE_OPEN_LOG, fake.path().join("open.log"));
         });
 

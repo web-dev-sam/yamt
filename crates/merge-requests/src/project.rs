@@ -4,7 +4,7 @@ use serde::Deserialize;
 use yamt_gitio::{AuthStatus, Glab};
 
 use crate::web_page::HTTPS;
-use crate::{ListEnd, OpenReply, ResolveRefusal};
+use crate::{ListEnd, OpenReply, RerequestReply, ResolveRefusal};
 
 /// glab fills `:fullpath` with the project of the folder's remotes (glab docs, `glab api`).
 const PROJECT_ROUTE: &str = "projects/:fullpath";
@@ -89,6 +89,15 @@ impl From<NoProject> for ResolveRefusal {
         match refused {
             NoProject::NotLoggedIn { detail } => ResolveRefusal::NotLoggedIn { detail },
             NoProject::Failed { message } => ResolveRefusal::Failed { message },
+        }
+    }
+}
+
+impl From<NoProject> for RerequestReply {
+    fn from(refused: NoProject) -> RerequestReply {
+        match refused {
+            NoProject::NotLoggedIn { detail } => RerequestReply::NotLoggedIn { detail },
+            NoProject::Failed { message } => RerequestReply::Failed { message },
         }
     }
 }

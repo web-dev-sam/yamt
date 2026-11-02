@@ -1,0 +1,27 @@
+{
+  "data": {
+    "project": {
+      "mergeRequest": {
+        "state": "merged",
+        "reviewers": {
+          "nodes": [
+            {
+              "id": "gid://gitlab/User/2",
+              "username": "anna",
+              "name": "Anna Berg",
+              "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png",
+              "mergeRequestInteraction": { "approved": true, "reviewState": "APPROVED" }
+            },
+            {
+              "id": "gid://gitlab/User/7",
+              "username": "erik",
+              "name": "Erik Lund",
+              "avatarUrl": null,
+              "mergeRequestInteraction": { "approved": false, "reviewState": "MERGE_TRAIN_REVIEW" }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -81,6 +81,7 @@ export const commands = {
 	continueMergeRequest: (iid: MergeRequestIid) => typedError<ContinueMergeReply, IpcError>(__TAURI_INVOKE("continue_merge_request", { iid })),
 	/**  Whether a merge yamt started is unfinished in this window's repository; no GitLab project is `Free`. */
 	findLocalMerge: () => typedError<LocalMerge, IpcError>(__TAURI_INVOKE("find_local_merge")),
+	rerequestReview: (iid: MergeRequestIid, username: string) => typedError<RerequestReply, IpcError>(__TAURI_INVOKE("rerequest_review", { iid, username })),
 };
 
 /* Types */
@@ -402,6 +403,12 @@ export type GitLabProject =
 /**  The absolute common git dir (lossy UTF-8): the key filters are remembered by. */
 repository: string };
 
+/**
+ *  A Gravatar picture's address: `https://secure.gravatar.com` or `https://www.gravatar.com`, the path
+ *  `/avatar/<32 or 64 hex digits>`, an optional query of `[A-Za-z0-9=&%._-]`; only `avatar_source` makes one.
+ */
+export type GravatarAddress = string;
+
 /**  What a running server sends the window; `Exited` comes once, last. */
 export type HostEvent = { kind: "Message"; text: string } | { kind: "Log"; line: string } | { kind: "Exited"; code: number | null };
 
@@ -438,6 +445,22 @@ export type IpcError = { kind: "Git"; message: string } | { kind: "UnknownPath";
 export type KeysChange = {
 	action: string,
 	keys: string[] | null,
+};
+
+/**  A label of a merge request; `colors` is `None` when either colour is missing or not `#rgb`/`#rrggbb`. */
+export type Label = {
+	/**  Its title. */
+	title: string,
+	/**  Its colours. */
+	colors: LabelColors | null,
+};
+
+/**  A label's colours as GitLab sends them, each `#rgb` or `#rrggbb` (checked: `#` then 3 or 6 hex digits). */
+export type LabelColors = {
+	/**  The chip's colour. */
+	background: string,
+	/**  The colour of its title. */
+	text: string,
 };
 
 /**
@@ -576,21 +599,25 @@ export type MergeRequestRow = {
 	createdAt: string,
 	/**  Whether it is a draft. */
 	draft: boolean,
+	/**  Who opened it; `None` when GitLab names no one. */
+	author: Person | null,
 	/**  Its assignees. */
 	assignees: Person[],
-	/**  Its reviewers. */
-	reviewers: Person[],
-	/**  Its labels' titles. */
-	labels: string[],
+	/**  Its reviewers and how far each review is. */
+	reviewers: Reviewer[],
+	/**  Its labels, in GitLab's order. */
+	labels: Label[],
 	/**  Resolvable discussions not yet resolved. */
 	openDiscussions: number,
-	/**  Approvals given. */
-	approvals: number,
+	/**  Who approved it. */
+	approvedBy: Person[],
+	/**  Whether you may ask a reviewer for their review again: GitLab's `updateMergeRequest` permission for you. */
+	mayRerequest: boolean,
 	/**  Its latest pipeline; `None` when it has none. */
 	pipeline: Pipeline | null,
 	/**  Its page on GitLab; `None` when GitLab is not on https. */
 	page: WebPage | null,
-	/**  How much it changes; `None` when GitLab has not counted it. */
+	/**  How much it changes; `None` when GitLab has not computed its diff. */
 	size: ChangeSize | null,
 	/**  Whether it can be merged. */
 	readiness: Readiness,
@@ -738,13 +765,26 @@ export type PageOpened =
 /**  Why, in the system's words. */
 message: string };
 
-/**  A GitLab user. */
+/**  A GitLab user and the picture the window may show for them. */
 export type Person = {
 	/**  The login name, without "@". */
 	username: string,
 	/**  The display name. */
 	name: string,
+	/**  The picture the window shows for them. */
+	picture: PersonPicture,
 };
+
+/**  Which picture the window shows for a person. */
+export type PersonPicture = 
+/**  Uploaded to the project's GitLab: the window asks `yamt-picture://localhost/<username>`. */
+{ kind: "uploaded" } | 
+/**  A Gravatar picture: the window loads this address itself. */
+{ kind: "gravatar"; 
+/**  The picture's address on Gravatar. */
+address: GravatarAddress } | 
+/**  Nothing yamt may load: initials. */
+{ kind: "none" };
 
 /**  A merge request's latest pipeline. */
 export type Pipeline = {
@@ -904,6 +944,31 @@ export type Removal<L> = {
 
 export type RepositoryAnswer = "start" | "dontStart";
 
+/**  How asking GitLab to re-request a reviewer's review ended. */
+export type RerequestReply = 
+/**  Done, or already awaiting their review; the merge request's reviewers as GitLab answered. */
+{ kind: "requested"; 
+/**  The merge request's reviewers now. */
+reviewers: Reviewer[] } | 
+/**  They are no longer a reviewer of the merge request: nothing was written (owner #2100, #2104). */
+{ kind: "notReviewer" } | 
+/**  The merge request is no longer open. */
+{ kind: "notOpen" } | 
+/**  glab is not found on PATH. */
+{ kind: "glabMissing" } | 
+/**  `glab auth status` failed. */
+{ kind: "notLoggedIn"; 
+/**  glab's first line, which names the instance. */
+detail: string } | 
+/**  GitLab refused, in its words (the mutation's first `errors` entry). */
+{ kind: "refused"; 
+/**  GitLab's sentence. */
+message: string } | 
+/**  glab failed, timed out or answered something unexpected, in glab's, GitLab's or yamt's words. */
+{ kind: "failed"; 
+/**  What went wrong. */
+message: string };
+
 /**  Why the branches of a merge request to resolve are not given. */
 export type ResolveRefusal = 
 /**  The merge request is no longer open. */
@@ -935,6 +1000,25 @@ export type ResolveReply = { kind: "started"; started: Started } | { kind: "wind
 export type ReturnTo = { kind: "branch"; name: string } | 
 /**  `id`: the commit's first 7 hex characters. */
 { kind: "commit"; id: string };
+
+/**  How far a reviewer's review is: GitLab's state in the four the window names. */
+export type ReviewState = 
+/**  Their review is asked for, or under way. */
+"requested" | 
+/**  They reviewed without approving. */
+"reviewed" | 
+/**  They approved. */
+"approved" | 
+/**  They asked for changes. */
+"changesRequested";
+
+/**  A reviewer of a merge request and how far their review is. */
+export type Reviewer = {
+	/**  Who reviews. */
+	person: Person,
+	/**  How far their review is. */
+	state: ReviewState,
+};
 
 /**  0-based line index in the right text of a 2-way compare. */
 export type RightLine = number;

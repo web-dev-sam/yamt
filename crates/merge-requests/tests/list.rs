@@ -7,10 +7,12 @@ use std::fs;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+use serde_json::{Value, json};
 use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
 use yamt_gitio::{Glab, TIMED_OUT};
 use yamt_merge_requests::{
-    GitLabRepository, ListEnd, MergeRequestPage, gitlab_repository, list_merge_requests,
+    GitLabRepository, ListEnd, ListedPage, MergeRequestPage, fetch_picture, gitlab_repository,
+    list_merge_requests,
 };
 
 use fake_glab::Fake;
@@ -38,8 +40,17 @@ fn gitlab_repo() -> (TempDir, GitLabRepository) {
 
 /// The end of a load and the pages sent before it.
 fn listed(repository: &GitLabRepository, glab: Option<&Glab>) -> (ListEnd, Vec<MergeRequestPage>) {
+    let (end, pages) = listed_with_pictures(repository, glab);
+    (end, pages.into_iter().map(|listed| listed.page).collect())
+}
+
+/// The end of a load and the pages sent before it, each with the pictures it offered.
+fn listed_with_pictures(
+    repository: &GitLabRepository,
+    glab: Option<&Glab>,
+) -> (ListEnd, Vec<ListedPage>) {
     let (sender, sent) = mpsc::channel();
-    let on_page = |page: MergeRequestPage| sender.send(page).unwrap();
+    let on_page = |listed: ListedPage| sender.send(listed).unwrap();
     let end = list_merge_requests(repository, glab, &on_page).end;
     (end, sent.try_iter().collect())
 }
@@ -159,4 +170,125 @@ fn a_project_glab_cannot_find_fails_the_list_in_glab_s_words() {
 
     let message = "glab: 404 Not Found (HTTP 404)".to_owned();
     assert_eq!(not_found, (ListEnd::Failed { message }, Vec::new()));
+}
+
+const BEN_GRAVATAR: &str = "https://secure.gravatar.com/avatar/0f3a9c2e5b7d14f6a8c0e2b4d6f8a1c3e5b7d9f0a2c4e6b8d0f2a4c6e8b0d2f4?s=80&d=identicon";
+
+fn person(username: &str, name: &str, picture: &Value) -> Value {
+    json!({ "username": username, "name": name, "picture": picture })
+}
+
+fn reviewer(person: &Value, state: &str) -> Value {
+    json!({ "person": person, "state": state })
+}
+
+/// The scenario `mr-row-details`' people as the window gets them (`tests/glab/README.md`).
+fn people() -> [Value; 6] {
+    let uploaded = json!({ "kind": "uploaded" });
+    let none = json!({ "kind": "none" });
+    [
+        person("anna", "Anna Berg", &uploaded),
+        person("sam", "Sam Doe", &uploaded),
+        person(
+            "ben",
+            "Ben Okafor",
+            &json!({ "kind": "gravatar", "address": BEN_GRAVATAR }),
+        ),
+        person("chiara", "Chiara Rossi", &none),
+        person("dmitri", "Dmitri Volkov", &none),
+        person("erik", "Erik Lund", &none),
+    ]
+}
+
+fn page_of(number: u32) -> String {
+    format!("https://gitlab.example/taskboard/taskboard/-/merge_requests/{number}")
+}
+
+fn colored(title: &str, background: &str) -> Value {
+    json!({ "title": title, "colors": { "background": background, "text": "#FFFFFF" } })
+}
+
+/// The scenario's three rows as the window gets them.
+fn detailed_rows() -> Value {
+    let [anna, sam, ben, chiara, dmitri, erik] = people();
+    let no_jobs =
+        |status: &str| json!({ "status": status, "failedJobs": [], "moreFailedJobs": false });
+    let colourless = json!({ "title": "odd", "colors": null });
+    json!([
+        { "iid": 52, "title": "Colour the card labels", "createdAt": "2026-11-01T10:00:00Z", "draft": false,
+          "author": anna, "assignees": [sam],
+          "reviewers": [reviewer(&ben, "reviewed"), reviewer(&chiara, "approved"),
+              reviewer(&dmitri, "requested")],
+          "labels": [colored("frontend", "#428BCA"), colored("bug", "#D9534F"), colourless],
+          "openDiscussions": 0, "approvedBy": [chiara], "mayRerequest": true, "pipeline": no_jobs("passed"),
+          "page": page_of(52), "size": { "additions": 0, "deletions": 0, "files": 0 },
+          "readiness": { "kind": "ready" }, "fromFork": false },
+        { "iid": 51, "title": "Archive old boards", "createdAt": "2026-10-31T15:30:00Z", "draft": false,
+          "author": null, "assignees": [], "reviewers": [], "labels": [], "openDiscussions": 0, "approvedBy": [],
+          "mayRerequest": true, "pipeline": null, "page": page_of(51), "size": null,
+          "readiness": { "kind": "checking" }, "fromFork": false },
+        { "iid": 50, "title": "Keyboard shortcuts for cards", "createdAt": "2026-10-30T08:45:00Z", "draft": false,
+          "author": ben, "assignees": [dmitri],
+          "reviewers": [reviewer(&anna, "changesRequested"), reviewer(&sam, "requested"),
+              reviewer(&ben, "reviewed"), reviewer(&erik, "requested")],
+          "labels": [colored("frontend", "#428BCA")], "openDiscussions": 2, "approvedBy": [anna, sam],
+          "mayRerequest": false, "pipeline": no_jobs("running"), "page": page_of(50),
+          "size": { "additions": 52, "deletions": 6, "files": 2 },
+          "readiness": { "kind": "blocked", "reason": { "kind": "discussions" } }, "fromFork": false },
+    ])
+}
+
+#[test]
+fn the_details_scenario_brings_author_pictures_approvers_states_and_label_colours() {
+    let (_repo, repository) = gitlab_repo();
+    let fake = Fake::new("mr-row-details");
+
+    let (end, pages) = listed_with_pictures(&repository, Some(&fake.glab));
+
+    assert_eq!(end, ListEnd::Loaded);
+    let [listed] = &pages[..] else {
+        panic!("{pages:?}");
+    };
+    assert_eq!(
+        serde_json::to_value(&listed.page.rows).unwrap(),
+        detailed_rows()
+    );
+    let offered: Vec<(&str, &str)> = listed
+        .pictures
+        .iter()
+        .map(|picture| (picture.username.as_str(), picture.address.as_str()))
+        .collect();
+    let expected = [
+        (
+            "anna",
+            "https://gitlab.example/uploads/-/system/user/avatar/2/avatar.png",
+        ),
+        (
+            "sam",
+            "https://gitlab.example/uploads/-/system/user/avatar/1/avatar.png",
+        ),
+    ];
+    assert_eq!(offered, expected);
+}
+
+#[test]
+fn a_gravatar_person_is_never_fetched_through_glab() {
+    let (_repo, repository) = gitlab_repo();
+    let fake = Fake::new("mr-row-details");
+
+    let (_, pages) = listed_with_pictures(&repository, Some(&fake.glab));
+    let no_gravatar = |argv: &Vec<String>| argv.iter().all(|line| !line.contains("gravatar"));
+    assert!(
+        no_gravatar(&fake.logged("argv: ")),
+        "{:?}",
+        fake.logged("argv: ")
+    );
+    for picture in &pages[0].pictures {
+        fetch_picture(&fake.glab, repository.root(), &picture.address).unwrap();
+    }
+
+    let argv = fake.logged("argv: ");
+    assert!(no_gravatar(&argv), "{argv:?}");
+    let fetched: Vec<&String> = argv.iter().filter(|line| line.contains("://")).collect();
+    assert_eq!(fetched.len(), 2, "{argv:?}");
 }

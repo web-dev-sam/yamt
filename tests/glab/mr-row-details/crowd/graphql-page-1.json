@@ -1,0 +1,51 @@
+{
+  "data": {
+    "queryComplexity": { "score": 170, "limit": 250 },
+    "currentUser": { "username": "sam" },
+    "project": {
+      "mergeRequests": {
+        "pageInfo": { "hasNextPage": false, "endCursor": null },
+        "nodes": [
+          {
+            "iid": "60",
+            "title": "Team board",
+            "createdAt": "2026-11-01T12:00:00Z",
+            "draft": false,
+            "author": {
+              "username": "anna",
+              "name": "Anna Berg",
+              "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png"
+            },
+            "labels": { "nodes": [] },
+            "assignees": {
+              "nodes": [
+                { "username": "erik", "name": "Erik Lund", "avatarUrl": "/uploads/-/system/user/avatar/3/avatar.png" },
+                { "username": "plus+one", "name": "Plus One", "avatarUrl": "/uploads/-/system/user/avatar/2/avatar.png" },
+                { "username": "user11", "name": "User 11", "avatarUrl": "/uploads/-/system/user/avatar/11/avatar.png" },
+                { "username": "user12", "name": "User 12", "avatarUrl": "/uploads/-/system/user/avatar/12/avatar.png" },
+                { "username": "user13", "name": "User 13", "avatarUrl": "/uploads/-/system/user/avatar/13/avatar.png" },
+                { "username": "user14", "name": "User 14", "avatarUrl": "/uploads/-/system/user/avatar/14/avatar.png" },
+                { "username": "user15", "name": "User 15", "avatarUrl": "/uploads/-/system/user/avatar/15/avatar.png" },
+                { "username": "user16", "name": "User 16", "avatarUrl": "/uploads/-/system/user/avatar/16/avatar.png" }
+              ]
+            },
+            "reviewers": { "nodes": [] },
+            "approvedBy": { "nodes": [] },
+            "userPermissions": { "updateMergeRequest": true },
+            "resolvableDiscussionsCount": 0,
+            "resolvedDiscussionsCount": 0,
+            "detailedMergeStatus": "MERGEABLE",
+            "conflicts": false,
+            "diffStats": [{ "additions": 1, "deletions": 0 }],
+            "diffRefs": { "baseSha": "1732ffd14f9df9ea3b85433dc1fbacbc2260fe85" },
+            "sourceProjectId": 7,
+            "targetProjectId": 7,
+            "targetBranch": "main",
+            "diffHeadSha": null,
+            "headPipeline": null
+          }
+        ]
+      }
+    }
+  }
+}

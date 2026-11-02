@@ -137,6 +137,24 @@ graphql() {
 	reply "$scenario/graphql-page-$page" '200 OK'
 }
 
+# A picture asked by its full address: the file at the address's path after its host (its query dropped) under
+# $scenario/pictures, printed with cat (answer's printf would drop NUL bytes), after its .sleep seconds; "answered:
+# <address>" is logged before the answer, so a test sees which fetches overlapped.
+picture() {
+	path=${endpoint#*://}
+	path=${path#*/}
+	file="$scenario/pictures/${path%%\?*}"
+	if [ -f "$file.sleep" ]; then
+		sleep "$(cat "$file.sleep")"
+	fi
+	log "answered: $endpoint"
+	if [ -f "$file" ]; then
+		cat "$file"
+		exit 0
+	fi
+	answer '404 Not Found' '{"message":"404 Not Found"}'
+}
+
 api() {
 	while [ $# -gt 0 ]; do
 		case $1 in
@@ -173,7 +191,10 @@ api() {
 	fi
 	case "$method $endpoint" in
 	"POST "*/draft_notes) post ;;
-	"POST graphql") graphql ;;
+	"POST graphql")
+		if [ "$input" = - ]; then post; else graphql; fi
+		;;
+	"GET "*://*) picture ;;
 	"GET projects/:fullpath") answer_file project.json ;;
 	"GET "*/draft_notes) answer_file draft-notes.json ;;
 	"GET "*/merge_requests) answer_file merge-requests.json ;;
