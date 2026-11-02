@@ -4,7 +4,9 @@
 //! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
 //! fetches a merge request's commits without writing a ref, or its branches into their remote-tracking branches
 //! (`fetch.rs`); creates, checks out, moves and deletes a branch and starts a merge (`branch.rs`); pushes a branch
-//! (`push.rs`); runs glab, GitLab's command line, the same way.
+//! (`push.rs`); lists a remote's refs (`ls_remote.rs`), finds which commits the object store lacks (`objects.rs`) and
+//! tells whether two commits merge cleanly without a worktree (`merge_tree.rs`); runs glab, GitLab's command line,
+//! the same way.
 #![forbid(unsafe_code)]
 
 mod abort_continue;
@@ -16,9 +18,12 @@ mod diff;
 mod entry;
 mod fetch;
 mod glab;
+mod ls_remote;
 mod merge_config;
 mod merge_file;
+mod merge_tree;
 mod names;
+mod objects;
 mod operation;
 mod program;
 mod push;
@@ -37,8 +42,10 @@ pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
 pub use entry::{Oid, Stage, StageEntry};
 pub use fetch::FETCH_TIMEOUT;
 pub use glab::{AuthStatus, GLAB_TIMEOUT, Glab, GlabRun, TIMED_OUT, first_line, last_line};
+pub use ls_remote::RemoteRef;
 pub use merge_config::MergeConfig;
 pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
+pub use merge_tree::{MergeOutcome, MergeTreeRun};
 pub use names::{CommitSummary, RemoteUrl};
 pub use operation::{Operation, Progress, Rebase, Stop, StopId};
 pub use push::PUSH_TIMEOUT;

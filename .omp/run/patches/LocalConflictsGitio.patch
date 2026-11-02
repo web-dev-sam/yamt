@@ -1,0 +1,666 @@
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index 66c9495..9929054 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -10,4 +10,6 @@ The merge-request fetch (`src/fetch.rs`, plan §2 #128–#135): `Repo::fetch_wit
+ 
+ The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): a run that talks to a server is one helper, `fetch.rs` `run_without_prompts(command, verb, timeout)`: the no-prompt environment above (`refuse_prompts`), the argv logged at `debug`, `run_with_deadline`, and `Err` "cannot run git <verb>: …" or "git <verb> got no answer within N s"; both fetches and the push read only the `Finished` run it gives. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else, forced over a rebased branch (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. A GitLab name is never read as an option: `--end-of-options` comes before it wherever git would parse a leading `-` as a flag, and `-B`'s value is a name whatever it starts with (`tests/branch.rs` `*_reads_a_leading_dash_as_*`). `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet --end-of-options <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D --end-of-options <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force --end-of-options <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit --end-of-options <rev>` (`--no-ff` leaves `MERGE_HEAD` even when HEAD could fast-forward) and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
+ 
++The local conflict check's git runs (`src/merge_tree.rs`, `src/ls_remote.rs`, `src/objects.rs`; RK52): `Repo::merge_tree(first, second, run_kind, timeout)` runs `merge-tree --write-tree [--quiet] <first> <second>` through `run` and answers `MergeOutcome` (`Clean` on exit 0, `Conflicts` on exit 1 with an empty stderr; git also exits 1 for a commit it cannot find, with a message, which stays `GitFailed`), never touching the index, the worktree or a ref. `MergeTreeRun::for_version(GitVersion)` picks `Quiet` (`--quiet`, git 2.50+, `Access::Read`, writes no object) or `Writing` (git 2.38–2.49, `Access::Write`, leaves unreferenced objects), `None` before 2.38; `FIRST_WITH_WRITE_TREE` and `FIRST_WITH_QUIET` are the only place these versions live. `Repo::remote_refs(remote, patterns, timeout)` runs `ls-remote --refs --end-of-options <remote> <patterns>` through `fetch.rs` `run_without_prompts` and gives each `<oid>\t<name>` line as a `RemoteRef { name, id }` in git's order (no object fetched, nothing written; `Err(String)` git's first stderr line, the exit status, or "git ls-remote printed …" for an unreadable line). `Repo::missing_commits(ids)` feeds the ids to one `cat-file --batch-check=%(objectname) %(objecttype)` and names, in the order given, every id that is missing or not a commit. `tests/local_check.rs` runs each against real tempdir repositories and a bare remote. `Oid` derives `Hash`.
++
+ glab (`src/glab.rs`, plan §2 #118, #128–#135): `Glab::find()` (the first runnable `glab` on PATH, `program.rs` `program_in`; `None` when not installed), `Glab::at(program)`, `with_timeout` (default `GLAB_TIMEOUT`, 20 s); `run(cwd, args, stdin)` → `GlabRun` = `Printed { stdout }` | `Failed { status, stdout, stderr }` | `TimedOut`, with the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`, stdin closed or written and closed, a glab that cannot start `Error::GlabIo { program, source }`; `get(cwd, args)` → stdout or `Err(String)`: glab's `last_line` of stderr (its error comes after any notice), else the exit status or signal in words, `TIMED_OUT` (`"glab timed out"`) at the deadline; `auth_status(cwd)` → `AuthStatus` = `LoggedIn` | `LoggedOut { detail }` (glab's first line of stderr, else stdout, naming the instance) | `Failed { message }` (could not run, or `TIMED_OUT`). `first_line`/`last_line`: the first or last non-blank line, trimmed, of bytes decoded lossily. `tests/glab.rs` runs the committed `scripts/fake-glab` on the `tests/glab/runner` scenario through a symlink (stdin and stdout, a failure's exit and streams, a hang's timeout, the environment overrides in a child process, a missing glab).
+diff --git a/crates/gitio/src/entry.rs b/crates/gitio/src/entry.rs
+index da34d92..2c8b2f6 100644
+--- a/crates/gitio/src/entry.rs
++++ b/crates/gitio/src/entry.rs
+@@ -5,7 +5,7 @@ use crate::{Error, Result};
+ const SHA1_HEX_LEN: usize = 40;
+ const SHA256_HEX_LEN: usize = 64;
+ 
+-#[derive(Clone, Debug, PartialEq, Eq)]
++#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+ pub struct Oid(String);
+ 
+ impl Oid {
+diff --git a/crates/gitio/src/lib.rs b/crates/gitio/src/lib.rs
+index 3e97d90..2315fa3 100644
+--- a/crates/gitio/src/lib.rs
++++ b/crates/gitio/src/lib.rs
+@@ -4,7 +4,9 @@
+ //! lists the files that changed between two commits, and makes and reads a shared clone (`checkout.rs`);
+ //! fetches a merge request's commits without writing a ref, or its branches into their remote-tracking branches
+ //! (`fetch.rs`); creates, checks out, moves and deletes a branch and starts a merge (`branch.rs`); pushes a branch
+-//! (`push.rs`); runs glab, GitLab's command line, the same way.
++//! (`push.rs`); lists a remote's refs (`ls_remote.rs`), finds which commits the object store lacks (`objects.rs`) and
++//! tells whether two commits merge cleanly without a worktree (`merge_tree.rs`); runs glab, GitLab's command line,
++//! the same way.
+ #![forbid(unsafe_code)]
+ 
+ mod abort_continue;
+@@ -16,9 +18,12 @@ mod diff;
+ mod entry;
+ mod fetch;
+ mod glab;
++mod ls_remote;
+ mod merge_config;
+ mod merge_file;
++mod merge_tree;
+ mod names;
++mod objects;
+ mod operation;
+ mod program;
+ mod push;
+@@ -37,8 +42,10 @@ pub use diff::{Changed, ChangedFile, Numstat, TreeSide};
+ pub use entry::{Oid, Stage, StageEntry};
+ pub use fetch::FETCH_TIMEOUT;
+ pub use glab::{AuthStatus, GLAB_TIMEOUT, Glab, GlabRun, TIMED_OUT, first_line, last_line};
++pub use ls_remote::RemoteRef;
+ pub use merge_config::MergeConfig;
+ pub use merge_file::{MergeFileOptions, OURS_LABEL, THEIRS_LABEL};
++pub use merge_tree::{MergeOutcome, MergeTreeRun};
+ pub use names::{CommitSummary, RemoteUrl};
+ pub use operation::{Operation, Progress, Rebase, Stop, StopId};
+ pub use push::PUSH_TIMEOUT;
+diff --git a/crates/gitio/src/ls_remote.rs b/crates/gitio/src/ls_remote.rs
+new file mode 100644
+index 0000000..c0aabb1
+--- /dev/null
++++ b/crates/gitio/src/ls_remote.rs
+@@ -0,0 +1,131 @@
++use std::time::Duration;
++
++use crate::entry::Oid;
++use crate::fetch::run_without_prompts;
++use crate::glab::first_line;
++use crate::repo::Repo;
++use crate::run::Access;
++
++const LS_REMOTE: [&str; 3] = ["ls-remote", "--refs", "--end-of-options"];
++
++/// One ref a remote advertises: its full name (git's bytes) and the object it names.
++#[derive(Clone, Debug, PartialEq, Eq)]
++pub struct RemoteRef {
++    pub name: Vec<u8>,
++    pub id: Oid,
++}
++
++impl Repo {
++    /// `git ls-remote --refs --end-of-options <remote> <patterns>…`: every ref the remote advertises that matches a
++    /// pattern (git-ls-remote(1): a glob matched against the ref's tail), in git's order; no object is fetched and
++    /// nothing is written. Runs through `fetch.rs` `run_without_prompts` (the no-prompt environment, RK40), killed at
++    /// `timeout`. `Err` = git's first stderr line, else git's exit words (as `fetch_without_refs`).
++    pub fn remote_refs(
++        &self,
++        remote: &str,
++        patterns: &[&str],
++        timeout: Duration,
++    ) -> Result<Vec<RemoteRef>, String> {
++        let mut command = self.command(Access::Read, &LS_REMOTE);
++        command.arg(remote).args(patterns);
++        let finished = run_without_prompts(command, "ls-remote", timeout)?;
++        if !finished.status.success() {
++            return Err(first_line(&finished.stderr)
++                .unwrap_or_else(|| format!("git ls-remote failed: {}", finished.status)));
++        }
++        remote_refs_in(&finished.stdout)
++    }
++}
++
++/// git-ls-remote(1) output: one `<oid> TAB <refname>` line per ref.
++fn remote_refs_in(output: &[u8]) -> Result<Vec<RemoteRef>, String> {
++    output
++        .split(|&byte| byte == b'\n')
++        .filter(|line| !line.is_empty())
++        .map(remote_ref_in)
++        .collect()
++}
++
++fn remote_ref_in(line: &[u8]) -> Result<RemoteRef, String> {
++    let mut fields = line.splitn(2, |&byte| byte == b'\t');
++    let id = fields.next().and_then(|id| std::str::from_utf8(id).ok());
++    let id = id.and_then(|id| Oid::parse(id).ok());
++    match (id, fields.next()) {
++        (Some(id), Some(name)) if !name.is_empty() => Ok(RemoteRef {
++            name: name.to_vec(),
++            id,
++        }),
++        _ => Err(format!(
++            "git ls-remote printed {:?}",
++            String::from_utf8_lossy(line)
++        )),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const MAIN_ID: &str = "1111111111111111111111111111111111111111";
++    const HEAD_ID: &str = "2222222222222222222222222222222222222222";
++
++    #[test]
++    fn each_tab_separated_line_is_one_ref_in_gits_order() {
++        let output = format!("{MAIN_ID}\trefs/heads/main\n{HEAD_ID}\trefs/merge-requests/7/head\n");
++
++        let refs = remote_refs_in(output.as_bytes());
++
++        assert_eq!(
++            refs,
++            Ok(vec![
++                RemoteRef {
++                    name: b"refs/heads/main".to_vec(),
++                    id: Oid::parse(MAIN_ID).unwrap(),
++                },
++                RemoteRef {
++                    name: b"refs/merge-requests/7/head".to_vec(),
++                    id: Oid::parse(HEAD_ID).unwrap(),
++                },
++            ])
++        );
++    }
++
++    #[test]
++    fn an_empty_answer_is_no_ref() {
++        assert_eq!(remote_refs_in(b""), Ok(Vec::new()));
++    }
++
++    #[test]
++    fn a_name_keeps_gits_bytes() {
++        let output = [MAIN_ID.as_bytes(), b"\trefs/heads/caf\xe9\n"].concat();
++
++        let refs = remote_refs_in(&output).unwrap();
++
++        assert_eq!(refs[0].name, b"refs/heads/caf\xe9".to_vec());
++    }
++
++    #[test]
++    fn a_line_without_an_id_and_a_name_is_unreadable() {
++        let no_tab = format!("{MAIN_ID} refs/heads/main\n");
++        let bad_id = "1234\trefs/heads/main\n";
++        let no_name = format!("{MAIN_ID}\t\n");
++
++        for output in [no_tab.as_str(), bad_id, no_name.as_str()] {
++            let line = output.trim_end_matches('\n');
++            assert_eq!(
++                remote_refs_in(output.as_bytes()),
++                Err(format!("git ls-remote printed {line:?}")),
++            );
++        }
++    }
++
++    #[test]
++    fn one_unreadable_line_fails_the_whole_answer() {
++        let output = format!("{MAIN_ID}\trefs/heads/main\nwarning: something\n");
++
++        assert_eq!(
++            remote_refs_in(output.as_bytes()),
++            Err("git ls-remote printed \"warning: something\"".to_owned())
++        );
++    }
++}
+diff --git a/crates/gitio/src/merge_tree.rs b/crates/gitio/src/merge_tree.rs
+new file mode 100644
+index 0000000..33bf69c
+--- /dev/null
++++ b/crates/gitio/src/merge_tree.rs
+@@ -0,0 +1,107 @@
++use std::time::Duration;
++
++use crate::entry::Oid;
++use crate::repo::Repo;
++use crate::run::{Access, run};
++use crate::{Error, GitVersion, Result};
++
++const MERGE_TREE: &str = "merge-tree";
++const CONFLICTS_STATUS: i32 = 1;
++const FIRST_WITH_WRITE_TREE: GitVersion = GitVersion {
++    major: 2,
++    minor: 38,
++};
++const FIRST_WITH_QUIET: GitVersion = GitVersion {
++    major: 2,
++    minor: 50,
++};
++
++/// Whether git's merge of two commits is clean.
++#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
++pub enum MergeOutcome {
++    Clean,
++    Conflicts,
++}
++
++/// How `merge_tree` runs git, by what the installed git can do.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum MergeTreeRun {
++    /// `--write-tree --quiet` (git 2.50+): no object is written, and git stops at the first conflict.
++    Quiet,
++    /// `--write-tree` (git 2.38–2.49): the merge's objects are left unreferenced in the object store.
++    Writing,
++}
++
++impl MergeTreeRun {
++    /// The run `version` can do; `None` before 2.38, which has no `--write-tree`.
++    #[must_use]
++    pub fn for_version(version: GitVersion) -> Option<MergeTreeRun> {
++        if version >= FIRST_WITH_QUIET {
++            Some(MergeTreeRun::Quiet)
++        } else if version >= FIRST_WITH_WRITE_TREE {
++            Some(MergeTreeRun::Writing)
++        } else {
++            None
++        }
++    }
++}
++
++impl Repo {
++    /// `git merge-tree --write-tree [--quiet] <first> <second>` (`Quiet` adds `--quiet`): exit 0 → `Clean`,
++    /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
++    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)).
++    pub fn merge_tree(
++        &self,
++        first: &Oid,
++        second: &Oid,
++        run_kind: MergeTreeRun,
++        timeout: Duration,
++    ) -> Result<MergeOutcome> {
++        let (access, options): (Access, &[&str]) = match run_kind {
++            MergeTreeRun::Quiet => (Access::Read, &["--write-tree", "--quiet"]),
++            MergeTreeRun::Writing => (Access::Write, &["--write-tree"]),
++        };
++        let mut command = self.command(access, &[MERGE_TREE]);
++        command
++            .args(options)
++            .args([first.as_str(), second.as_str()]);
++        // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
++        // (measured with git 2.56, both forms); a conflict leaves stderr empty.
++        match run(command, None, timeout) {
++            Ok(_) => Ok(MergeOutcome::Clean),
++            Err(Error::GitFailed {
++                status: Some(CONFLICTS_STATUS),
++                stderr,
++                ..
++            }) if stderr.is_empty() => Ok(MergeOutcome::Conflicts),
++            Err(error) => Err(error),
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn run_for(major: u32, minor: u32) -> Option<MergeTreeRun> {
++        MergeTreeRun::for_version(GitVersion { major, minor })
++    }
++
++    #[test]
++    fn git_before_2_38_cannot_merge_without_a_worktree() {
++        assert_eq!(run_for(2, 37), None);
++        assert_eq!(run_for(1, 99), None);
++    }
++
++    #[test]
++    fn git_2_38_to_2_49_writes_the_merge_objects() {
++        assert_eq!(run_for(2, 38), Some(MergeTreeRun::Writing));
++        assert_eq!(run_for(2, 49), Some(MergeTreeRun::Writing));
++    }
++
++    #[test]
++    fn git_2_50_and_later_merges_quietly() {
++        assert_eq!(run_for(2, 50), Some(MergeTreeRun::Quiet));
++        assert_eq!(run_for(3, 0), Some(MergeTreeRun::Quiet));
++    }
++}
+diff --git a/crates/gitio/src/objects.rs b/crates/gitio/src/objects.rs
+new file mode 100644
+index 0000000..229135d
+--- /dev/null
++++ b/crates/gitio/src/objects.rs
+@@ -0,0 +1,99 @@
++use crate::blob::CAT_FILE;
++use crate::entry::Oid;
++use crate::repo::Repo;
++use crate::run::{Access, GIT_TIMEOUT, run};
++use crate::{Error, Result};
++
++const BATCH_CHECK: &str = "--batch-check=%(objectname) %(objecttype)";
++const COMMIT: &str = "commit";
++
++impl Repo {
++    /// Which of `ids` name no commit in the repository's object store, in the order given: one
++    /// `git cat-file --batch-check` reading the ids on stdin (a missing id and one that is not a commit both count).
++    pub fn missing_commits(&self, ids: &[Oid]) -> Result<Vec<Oid>> {
++        let mut input = Vec::new();
++        for id in ids {
++            input.extend_from_slice(id.as_str().as_bytes());
++            input.push(b'\n');
++        }
++        let command = self.command(Access::Read, &[CAT_FILE, BATCH_CHECK]);
++        let output = run(command, Some(input), GIT_TIMEOUT)?;
++        missing_commits_in(ids, &output)
++    }
++}
++
++/// git-cat-file(1) `--batch-check`: one line per id in input order, `<id> <type>` for an object that exists and
++/// `<id> missing` for one that does not.
++fn missing_commits_in(ids: &[Oid], output: &[u8]) -> Result<Vec<Oid>> {
++    let text = String::from_utf8_lossy(output);
++    let lines: Vec<&str> = text.lines().collect();
++    if lines.len() != ids.len() {
++        return Err(unexpected(&text));
++    }
++    let mut missing = Vec::new();
++    for (id, line) in ids.iter().zip(lines) {
++        let kind = line
++            .strip_prefix(id.as_str())
++            .and_then(|rest| rest.strip_prefix(' '))
++            .ok_or_else(|| unexpected(&text))?;
++        if kind != COMMIT {
++            missing.push(id.clone());
++        }
++    }
++    Ok(missing)
++}
++
++fn unexpected(text: &str) -> Error {
++    Error::UnexpectedOutput {
++        command: CAT_FILE,
++        output: text.to_owned(),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn oid(digit: char) -> Oid {
++        Oid::parse(&digit.to_string().repeat(40)).unwrap()
++    }
++
++    #[test]
++    fn missing_ids_and_non_commits_are_named_in_the_order_given() {
++        let ids = [oid('1'), oid('2'), oid('3'), oid('4')];
++        let output = format!(
++            "{} commit\n{} missing\n{} tree\n{} commit\n",
++            ids[0].as_str(),
++            ids[1].as_str(),
++            ids[2].as_str(),
++            ids[3].as_str()
++        );
++
++        let missing = missing_commits_in(&ids, output.as_bytes()).unwrap();
++
++        assert_eq!(missing, vec![oid('2'), oid('3')]);
++    }
++
++    #[test]
++    fn no_ids_give_no_missing_commit() {
++        assert_eq!(missing_commits_in(&[], b"").unwrap(), Vec::<Oid>::new());
++    }
++
++    #[test]
++    fn a_line_for_another_id_or_a_line_too_few_is_unexpected() {
++        let ids = [oid('1'), oid('2')];
++        let swapped = format!("{} commit\n{} commit\n", ids[1].as_str(), ids[0].as_str());
++        let short = format!("{} commit\n", ids[0].as_str());
++        let glued = format!("{}commit\n{} commit\n", ids[0].as_str(), ids[1].as_str());
++
++        for output in [swapped, short, glued] {
++            assert!(matches!(
++                missing_commits_in(&ids, output.as_bytes()),
++                Err(Error::UnexpectedOutput {
++                    command: CAT_FILE,
++                    ..
++                })
++            ));
++        }
++    }
++}
+diff --git a/crates/gitio/tests/local_check.rs b/crates/gitio/tests/local_check.rs
+new file mode 100644
+index 0000000..0143038
+--- /dev/null
++++ b/crates/gitio/tests/local_check.rs
+@@ -0,0 +1,242 @@
++#![cfg(test)]
++
++use std::path::{Path, PathBuf};
++use std::time::Duration;
++
++use yamt_conflict_repo::{ConflictFile, FileKind, TempDir, diverged_repo, git_ok};
++use yamt_gitio::{Error, FETCH_TIMEOUT, MergeOutcome, MergeTreeRun, Oid, RemoteRef, Repo};
++
++const MERGE_TIMEOUT: Duration = Duration::from_secs(30);
++const UNKNOWN_ID: &str = "0123456789abcdef0123456789abcdef01234567";
++const SAME_LINE: [ConflictFile<'static>; 1] = [ConflictFile {
++    path: "a.txt",
++    kind: FileKind::Regular,
++    base: Some(b"base\n"),
++    local: Some(b"local\n"),
++    remote: Some(b"remote\n"),
++}];
++const DISJOINT: [ConflictFile<'static>; 2] = [
++    ConflictFile {
++        path: "a.txt",
++        kind: FileKind::Regular,
++        base: Some(b"a\n"),
++        local: Some(b"a local\n"),
++        remote: Some(b"a\n"),
++    },
++    ConflictFile {
++        path: "b.txt",
++        kind: FileKind::Regular,
++        base: Some(b"b\n"),
++        local: Some(b"b\n"),
++        remote: Some(b"b remote\n"),
++    },
++];
++
++fn text(dir: &Path, args: &[&str]) -> String {
++    String::from_utf8(git_ok(dir, args).unwrap()).unwrap()
++}
++
++fn commit(repo: &Repo, name: &str) -> Oid {
++    repo.commit_named(name).unwrap().unwrap()
++}
++
++/// Every run the installed git can do: `Writing` works wherever `Quiet` does.
++fn supported_runs(repo: &Repo) -> Vec<MergeTreeRun> {
++    match MergeTreeRun::for_version(repo.version().unwrap()) {
++        Some(MergeTreeRun::Quiet) => vec![MergeTreeRun::Quiet, MergeTreeRun::Writing],
++        Some(MergeTreeRun::Writing) => vec![MergeTreeRun::Writing],
++        None => Vec::new(),
++    }
++}
++
++/// What a merge must leave as it was: every ref, the status, the index and HEAD.
++fn untouched(root: &Path) -> [String; 4] {
++    [
++        text(root, &["for-each-ref"]),
++        text(root, &["status", "--porcelain"]),
++        text(root, &["hash-object", ".git/index"]),
++        text(root, &["rev-parse", "HEAD"]),
++    ]
++}
++
++#[test]
++fn merge_tree_is_clean_for_disjoint_changes_and_conflicts_for_the_same_line() {
++    let disjoint = diverged_repo(&DISJOINT).unwrap();
++    let same_line = diverged_repo(&SAME_LINE).unwrap();
++    let disjoint = Repo::discover(disjoint.path()).unwrap();
++    let same_line = Repo::discover(same_line.path()).unwrap();
++    let runs = supported_runs(&disjoint);
++
++    for run in runs {
++        let clean = disjoint.merge_tree(
++            &commit(&disjoint, "local"),
++            &commit(&disjoint, "remote"),
++            run,
++            MERGE_TIMEOUT,
++        );
++        let conflicts = same_line.merge_tree(
++            &commit(&same_line, "local"),
++            &commit(&same_line, "remote"),
++            run,
++            MERGE_TIMEOUT,
++        );
++
++        assert_eq!(clean.unwrap(), MergeOutcome::Clean, "{run:?}");
++        assert_eq!(conflicts.unwrap(), MergeOutcome::Conflicts, "{run:?}");
++    }
++}
++
++#[test]
++fn a_quiet_merge_writes_no_object_and_leaves_refs_index_and_worktree_alone() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    let root = dir.path();
++    let repo = Repo::discover(root).unwrap();
++    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
++
++    for run in supported_runs(&repo) {
++        let before = untouched(root);
++        let objects_before = text(root, &["count-objects", "-v"]);
++
++        let merged = repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT);
++
++        assert_eq!(merged.unwrap(), MergeOutcome::Conflicts, "{run:?}");
++        assert_eq!(untouched(root), before, "{run:?}");
++        let objects_after = text(root, &["count-objects", "-v"]);
++        match run {
++            MergeTreeRun::Quiet => assert_eq!(objects_after, objects_before),
++            MergeTreeRun::Writing => assert_ne!(objects_after, objects_before),
++        }
++    }
++}
++
++#[test]
++fn a_merge_of_a_missing_commit_or_unrelated_histories_is_an_error_not_a_conflict() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    let root = dir.path();
++    let unrelated = text(root, &["commit-tree", "-m", "unrelated", "main^{tree}"]);
++    let unrelated = Oid::parse(unrelated.trim_end()).unwrap();
++    let unknown = Oid::parse(UNKNOWN_ID).unwrap();
++    let repo = Repo::discover(root).unwrap();
++    let local = commit(&repo, "local");
++
++    for run in supported_runs(&repo) {
++        for other in [&unknown, &unrelated] {
++            let merged = repo.merge_tree(&local, other, run, MERGE_TIMEOUT);
++
++            assert!(
++                matches!(merged, Err(Error::GitFailed { .. })),
++                "{run:?} {other:?}: {merged:?}"
++            );
++        }
++    }
++}
++
++#[test]
++fn a_merge_past_its_deadline_is_a_timeout() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    let repo = Repo::discover(dir.path()).unwrap();
++    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
++
++    for run in supported_runs(&repo) {
++        let merged = repo.merge_tree(&local, &remote, run, Duration::ZERO);
++
++        assert!(
++            matches!(merged, Err(Error::Timeout { .. })),
++            "{run:?}: {merged:?}"
++        );
++    }
++}
++
++/// A repository with a remote `gitlab`, a bare clone of it holding merge-request heads.
++struct Fixture {
++    repo: TempDir,
++    _server: TempDir,
++    bare: PathBuf,
++}
++
++fn fixture() -> Fixture {
++    let repo = diverged_repo(&SAME_LINE).unwrap();
++    let server = tempfile::tempdir().unwrap();
++    let bare = server.path().join("gitlab.git");
++    let bare_path = bare.display().to_string();
++    let root = repo.path().display().to_string();
++    git_ok(server.path(), &["clone", "-q", "--bare", &root, &bare_path]).unwrap();
++    git_ok(repo.path(), &["remote", "add", "gitlab", &bare_path]).unwrap();
++    Fixture {
++        repo,
++        _server: server,
++        bare,
++    }
++}
++
++fn remote_ref(bare: &Path, name: &str) -> RemoteRef {
++    let id = text(bare, &["rev-parse", name]);
++    RemoteRef {
++        name: name.as_bytes().to_vec(),
++        id: Oid::parse(id.trim_end()).unwrap(),
++    }
++}
++
++#[test]
++fn remote_refs_lists_the_branch_and_merge_request_heads_of_a_bare_remote_and_writes_nothing() {
++    let fixture = fixture();
++    let (root, bare) = (fixture.repo.path(), &fixture.bare);
++    git_ok(
++        bare,
++        &["update-ref", "refs/merge-requests/7/head", "remote"],
++    )
++    .unwrap();
++    git_ok(bare, &["tag", "-a", "-m", "eight", "eight", "remote"]).unwrap();
++    git_ok(bare, &["update-ref", "refs/merge-requests/8/head", "eight"]).unwrap();
++    let expected = vec![
++        remote_ref(bare, "refs/heads/main"),
++        remote_ref(bare, "refs/merge-requests/7/head"),
++        remote_ref(bare, "refs/merge-requests/8/head"),
++    ];
++    let before = untouched(root);
++    let objects_before = text(root, &["count-objects", "-v"]);
++    assert!(!root.join(".git/FETCH_HEAD").exists());
++
++    let repo = Repo::discover(root).unwrap();
++    let patterns = ["refs/heads/main", "refs/merge-requests/*/head"];
++    let listed = repo.remote_refs("gitlab", &patterns, FETCH_TIMEOUT);
++
++    assert_eq!(listed, Ok(expected));
++    assert_eq!(untouched(root), before);
++    assert_eq!(text(root, &["count-objects", "-v"]), objects_before);
++    assert!(!root.join(".git/FETCH_HEAD").exists());
++}
++
++#[test]
++fn remote_refs_of_an_unreachable_remote_gives_gits_first_line() {
++    let fixture = fixture();
++    let root = fixture.repo.path();
++    let gone = fixture.bare.with_file_name("gone.git");
++    let gone = gone.display().to_string();
++    git_ok(root, &["remote", "add", "gone", &gone]).unwrap();
++    let repo = Repo::discover(root).unwrap();
++
++    let listed = repo.remote_refs("gone", &["refs/heads/main"], FETCH_TIMEOUT);
++
++    assert_eq!(
++        listed,
++        Err(format!(
++            "fatal: '{gone}' does not appear to be a git repository"
++        ))
++    );
++}
++
++#[test]
++fn missing_commits_names_unknown_ids_and_non_commits_in_order() {
++    let dir = diverged_repo(&SAME_LINE).unwrap();
++    let root = dir.path();
++    let tree = Oid::parse(text(root, &["rev-parse", "main^{tree}"]).trim_end()).unwrap();
++    let unknown = Oid::parse(UNKNOWN_ID).unwrap();
++    let repo = Repo::discover(root).unwrap();
++    let (local, remote) = (commit(&repo, "local"), commit(&repo, "remote"));
++    let ids = [local, unknown.clone(), remote, tree.clone()];
++
++    let missing = repo.missing_commits(&ids);
++
++    assert_eq!(missing.unwrap(), vec![unknown, tree]);
++}

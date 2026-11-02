@@ -5,7 +5,7 @@ use crate::{Error, Result};
 const SHA1_HEX_LEN: usize = 40;
 const SHA256_HEX_LEN: usize = 64;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Oid(String);
 
 impl Oid {
