@@ -59,18 +59,24 @@ implementer at a time; the docs keeper may run beside row 4.
 ## Merge-request rows for reviewing (session 44; owner #2095: nine additions to the merge-request page)
 
 Request `docs/slices/request-mr-row-details.md` (rules 1–11, acceptance, non-goals, reopens); facts
-`.omp/run/notes/PlanScoutMrRowFacts.md`. Owner's answers: request review only from people on the merge request
-(#2096); custom tooltip on the merge-request page only (#2097); due ones first, soonest on top (#2098).
-Implementation waits for the local conflict check to close (same files); the design runs now.
+`.omp/run/notes/PlanScoutMrRowFacts.md`. Owner's answers: re-request review beside reviewers who already reviewed
+(#2100, corrected #2104); custom tooltip on the merge-request page only (#2101); due ones first (#2102); Gravatar
+pictures too (#2105). Design `briefs/mr-row-details-design.md` option A (revised for #2104/#2105), plan §2 #151–#157,
+risks RK53–RK56 (docs keeper files them). No product question open.
+Implementation waits for the local conflict check to close (same files). Order: 2 ∥ 3, `just bindings`, 4 ∥ 5, 6.
 
-| row | slice                                                                                                   | owner                 | status  | evidence |
-| --- | ------------------------------------------------------------------------------------------------------- | --------------------- | ------- | -------- |
-| 1   | design: pictures' route, review write, query cost, tooltip shape, stored filter words, empty size cause | designer              | running |          |
-| 2   | Rust: query fields, empty size, pictures, request-review command, fake glab case                        | rust-impl             | todo    |          |
-| 3   | one tooltip component for the merge-request page (may fold into row 5)                                  | web-impl              | todo    |          |
-| 4   | page core: three-state filters, stored words, count order, days left, labels "+N"                       | web-impl              | todo    |          |
-| 5   | page: author, people box, approvers, labels, due date, hover filters, Shift, fixtures; wires the window | web-impl              | todo    |          |
-| 6   | docs keeper; final run: `just check`, WebKit, real app                                                  | docs-keeper, verifier | todo    |          |
+| row | slice                                                                                                       | owner        | status  | evidence                                                                                           |
+| --- | ----------------------------------------------------------------------------------------------------------- | ------------ | ------- | -------------------------------------------------------------------------------------------------- |
+| 1   | design: pictures' route, re-request write, query cost, tooltip shape, stored filter words, empty size       | designer     | done    | `MrRowDetailsDesign`: option A, six briefs, revised for #2104 #2105. Notes `MrRowDetailsDesign.md` |
+| 2   | rust (`briefs/mr-row-details-rust.md`): query fields, empty size, picture scheme + Gravatar CSP, re-request | rust-impl    | planned |                                                                                                    |
+| 3   | core (`briefs/mr-row-details-core.md`): three-state filters, stored words, count order, days left, labels   | web-impl     | planned |                                                                                                    |
+| 3b  | `just bindings` after row 2 lands                                                                           | orchestrator | todo    |                                                                                                    |
+| 4   | state (`briefs/mr-row-details-state.md`): page state, due dates, re-request asks, ipc and fixtures          | web-impl     | planned |                                                                                                    |
+| 5   | hover (`briefs/mr-row-details-hover.md`): `v-tooltip`, `useHoverBox`, `useHoverMenu`                        | web-impl     | planned |                                                                                                    |
+| 6   | page (`briefs/mr-row-details-page.md`): row, people box, labels, due date, filters; wires the window        | web-impl     | planned |                                                                                                    |
+| 7   | docs keeper: design §4 "Shared edits", RK53–RK56                                                            | docs-keeper  | todo    |                                                                                                    |
+| 8   | verify (`briefs/mr-row-details-verify.md`): smoke after 6; final `just check`, WebKit, real app             | verifier     | planned |                                                                                                    |
+| 9   | owner check on the GitLab playground: pictures (uploaded and Gravatar), a re-request shows in GitLab        | human        | todo    | the verify brief's owner check                                                                     |
 
 ## Open product questions
 
