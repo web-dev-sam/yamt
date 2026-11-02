@@ -4,6 +4,7 @@ import {
   calendarDayFrom,
   calendarDayText,
   compareDays,
+  dateTimeText,
   daysLeft,
   daysLeftText,
   dueDateText,
@@ -160,4 +161,12 @@ test("localDay is the calendar day of the local clock, turning at local midnight
   expect(localDay(localTime("2026-12-31", 23, 59))).toEqual(day("2026-12-31"));
   expect(localDay(localTime("2027-01-01", 0))).toEqual(day("2027-01-01"));
   expect(localDay(Date.UTC(2026, 10, 8, 23, 30))).toEqual(day("2026-11-09"));
+});
+
+test("dateTimeText writes the local day first and a padded 24-hour time, never 3:04 PM", () => {
+  expect(dateTimeText(localTime("2026-10-30", 15, 4))).toBe("30.10.2026, 15:04");
+  expect(dateTimeText(localTime("2026-01-05", 9, 7))).toBe("05.01.2026, 09:07");
+  expect(dateTimeText(localTime("2026-12-31", 0, 0))).toBe("31.12.2026, 00:00");
+  expect(dateTimeText(localTime("2026-11-08", 23, 59, 999))).toBe("08.11.2026, 23:59");
+  expect(dateTimeText(Date.UTC(2026, 10, 8, 23, 30))).toBe("09.11.2026, 00:30");
 });

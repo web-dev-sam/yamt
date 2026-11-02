@@ -1,0 +1,8 @@
+just mutants HEAD (Stryker; whole files calendar.ts, dueDate.ts, mergeRequestsText.ts): 337 killed, 31 survived, 14 no coverage, 88.22%; every movedDay/dateTimeText mutant killed
+calendar.ts:7 WEEKDAYS (8) — #732 static false survivor, not equivalent: killed by 'the weekdays start on Monday' ("Tu"→"" applied by hand fails it); [] also fails the monthGrid tests
+dueDate.ts:6 TYPED_DAY ^ removed — #732 static: killed by typedDay refuses "031120266" / "003.11.2026" / "a03.11.2026"
+dueDate.ts:6 TYPED_DAY $ removed — #732 static: killed by typedDay refuses "031120266" / "03.11.2026a"
+dueDate.ts:6 TYPED_DAY day/month/year \d{n}→\d or \D and separator [^./-] (7) — #732 static: killed by typedDay reads "03.11.2026" (and the other separated forms)
+dueDate.ts:6 TYPED_DAY dayDigits/monthDigits/yearDigits →\d or \D (6) — #732 static: killed by typedDay reads "03112026" day first (yearDigits \D applied by hand fails it)
+dueDate.ts:4 DAY_TEXT (8, unchanged line) — #732 static: ^ → calendarDayFrom refuses " 2026-01-01"; $ → refuses "2026-01-01T00:00"; \d{n}→\d/\D → 'calendarDayFrom reads a real day, a leap day included'
+mergeRequestsText.ts 14 NoCoverage — gate-covered: unchanged exhaustive `default: never` arms (the type checker)

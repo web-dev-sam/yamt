@@ -39,7 +39,7 @@ export const SET_DUE_DATE = "Set a due date";
 export const CLEAR_DUE_DATE = "Clear";
 export const DUE_DATE_DIALOG = "Choose a due date";
 export const DUE_DATE_PLACEHOLDER = "DD.MM.YYYY";
-export const DUE_TODAY = "Today";
+export const PICK_TODAY = "Today";
 export const PREVIOUS_MONTH = "Previous month";
 export const NEXT_MONTH = "Next month";
 

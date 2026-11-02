@@ -1,0 +1,400 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 1af3374..e18d063 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -6,9 +6,9 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `internal/`: `filters` (the filter types, `passes`, `stateOf`, `clicked` and the other edits, `filterLabel` "Assignee: not Me, anna"), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running), `dueDate`, `calendar`. Every file has its `*.test.ts` (node), each test named for the bug it catches.
+ 
+-`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale.
++`dueDate`: `CalendarDay` (month 1–12) made by `calendarDayFrom` from `"YYYY-MM-DD"` naming a real day, written back by `calendarDayText` (the stored form); `typedDay` reads what the user types, day first only (`3.11.2026`, `03.11.2026`, `03/11/2026`, `03-11-2026` with one separator throughout, or eight digits `03112026`; a four-digit year; a day that does not exist is refused, `11/3/2026` is 11 March); `compareDays` gives the whole days from one day to another (negative when the first is earlier); `localDay` is the local calendar day of a time; `daysLeft` is `compareDays` from `localDay` of now (both days at UTC midnight, so midnight, month ends and daylight-saving days count once); `daysLeftText` "Due today", "1 day left", "n days left", "1 day overdue", "n days overdue"; `dueDateText` is every shown date, `DD.MM.YYYY` with leading zeros ("03.11.2026"), no locale; `dateTimeText` is every shown time, that local date and the 24-hour local time ("30.10.2026, 15:04", the row's created-at hover).
+ 
+-`calendar`: the picker's month (`CalendarMonth`, month 1–12): `monthGrid` the 42 `GridDay`s of six weeks from the Monday on or before the 1st (`inMonth` false for the neighbouring months' days), `WEEKDAYS` `Mo`…`Su` (weeks start on Monday) and `weekdayIndex` (Monday 0), `addDays`, `addMonths` (clamped to the target month's last day: 31 January + 1 is 28/29 February; `MONTHS_PER_YEAR` for a year), `sameDay`, `monthOf`, `monthCaption` "November 2026" and `dayName` "Tuesday, 3 November 2026" (English words read in UTC, so every zone names the stored day).
++`calendar`: the picker's month (`CalendarMonth`, month 1–12): `monthGrid` the 42 `GridDay`s of six weeks from the Monday on or before the 1st (`inMonth` false for the neighbouring months' days), `WEEKDAYS` `Mo`…`Su` (weeks start on Monday), `addDays`, `addMonths` (clamped to the target month's last day: 31 January + 1 is 28/29 February), `movedDay` (the WAI-ARIA date-picker keys: arrows a day or a week, Home/End the week's Monday/Sunday, PageUp/PageDown a month, with Shift a year, clamped; any other key `null`), `sameDay`, `monthOf`, `monthCaption` "November 2026" and `dayName` "Tuesday, 3 November 2026" (English words read in UTC, so every zone names the stored day).
+ 
+ `people`: `peopleStack` (assignees, then reviewers not assigned; `STACK_SHOWN` 3, the rest as `more`), `displayName` (the username when the name is blank), `initials` (first letters of two words), `pictureHue` (0–359 from the username), `reviewStateText`, `reviewDone` (reviewed, approved or changes requested: GitLab's "Re-request review" applies), `authorText`, `approversText` (one name per line; "No approvals"), `NO_PEOPLE_TEXT`.
+ 
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 90b0f41..d1a0929 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -35,6 +35,7 @@ export {
+   calendarDayFrom,
+   calendarDayText,
+   compareDays,
++  dateTimeText,
+   daysLeft,
+   daysLeftText,
+   dueDateText,
+@@ -43,7 +44,6 @@ export {
+   type CalendarDay,
+ } from "./internal/dueDate";
+ export {
+-  MONTHS_PER_YEAR,
+   WEEKDAYS,
+   addDays,
+   addMonths,
+@@ -51,8 +51,8 @@ export {
+   monthCaption,
+   monthGrid,
+   monthOf,
++  movedDay,
+   sameDay,
+-  weekdayIndex,
+   type CalendarMonth,
+   type GridDay,
+ } from "./internal/calendar";
+diff --git a/frontend/src/mergeRequests/internal/calendar.test.ts b/frontend/src/mergeRequests/internal/calendar.test.ts
+index 361598a..62cd3d1 100644
+--- a/frontend/src/mergeRequests/internal/calendar.test.ts
++++ b/frontend/src/mergeRequests/internal/calendar.test.ts
+@@ -10,8 +10,8 @@ import {
+   monthCaption,
+   monthGrid,
+   monthOf,
++  movedDay,
+   sameDay,
+-  weekdayIndex,
+   type CalendarDay,
+   type GridDay,
+ } from "../index";
+@@ -129,10 +129,43 @@ test("addDays crosses month and year ends", () => {
+   expect(addDays(day("2026-03-28"), 2)).toEqual(day("2026-03-30"));
+ });
+ 
+-test("weekdayIndex counts from Monday", () => {
+-  expect(weekdayIndex(day("2026-11-02"))).toBe(0);
+-  expect(weekdayIndex(day("2026-11-03"))).toBe(1);
+-  expect(weekdayIndex(day("2026-11-08"))).toBe(6);
++function moved(from: string, key: string, shiftKey = false): CalendarDay | null {
++  return movedDay(day(from), { key, shiftKey });
++}
++
++test("the arrows move one day sideways and one week up or down, across month ends", () => {
++  expect(moved("2026-11-01", "ArrowLeft")).toEqual(day("2026-10-31"));
++  expect(moved("2026-11-30", "ArrowRight")).toEqual(day("2026-12-01"));
++  expect(moved("2026-11-03", "ArrowUp")).toEqual(day("2026-10-27"));
++  expect(moved("2026-12-29", "ArrowDown")).toEqual(day("2027-01-05"));
++});
++
++test("Home goes to the week's Monday and End to its Sunday, weeks starting on Monday", () => {
++  expect(moved("2026-11-04", "Home")).toEqual(day("2026-11-02"));
++  expect(moved("2026-11-02", "Home")).toEqual(day("2026-11-02"));
++  expect(moved("2026-11-08", "Home")).toEqual(day("2026-11-02"));
++  expect(moved("2026-11-04", "End")).toEqual(day("2026-11-08"));
++  expect(moved("2026-11-08", "End")).toEqual(day("2026-11-08"));
++  expect(moved("2026-11-02", "End")).toEqual(day("2026-11-08"));
++});
++
++test("PageUp and PageDown move one month, clamped to the shorter month's last day", () => {
++  expect(moved("2026-03-31", "PageUp")).toEqual(day("2026-02-28"));
++  expect(moved("2026-01-31", "PageDown")).toEqual(day("2026-02-28"));
++  expect(moved("2026-12-15", "PageDown")).toEqual(day("2027-01-15"));
++});
++
++test("Shift+PageUp and Shift+PageDown move one year, a leap day clamped to 28 February", () => {
++  expect(moved("2028-02-29", "PageUp", true)).toEqual(day("2027-02-28"));
++  expect(moved("2028-02-29", "PageDown", true)).toEqual(day("2029-02-28"));
++  expect(moved("2026-11-03", "PageDown", true)).toEqual(day("2027-11-03"));
++});
++
++test("Shift changes only the page keys, and other keys move nowhere", () => {
++  expect(moved("2026-11-03", "ArrowRight", true)).toEqual(day("2026-11-04"));
++  expect(moved("2026-11-03", "Enter")).toBeNull();
++  expect(moved("2026-11-03", " ")).toBeNull();
++  expect(moved("2026-11-03", "Tab", true)).toBeNull();
+ });
+ 
+ test("sameDay compares year, month and day", () => {
+diff --git a/frontend/src/mergeRequests/internal/calendar.ts b/frontend/src/mergeRequests/internal/calendar.ts
+index 9f23899..8f11a99 100644
+--- a/frontend/src/mergeRequests/internal/calendar.ts
++++ b/frontend/src/mergeRequests/internal/calendar.ts
+@@ -2,11 +2,12 @@ import { utcMidnight, type CalendarDay } from "./dueDate";
+ 
+ export type CalendarMonth = { readonly year: number; readonly month: number };
+ export type GridDay = { readonly day: CalendarDay; readonly inMonth: boolean };
++type DayKey = { readonly key: string; readonly shiftKey: boolean };
+ 
+ export const WEEKDAYS: readonly string[] = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+ 
+ const GRID_WEEKS = 6;
+-export const MONTHS_PER_YEAR = 12;
++const MONTHS_PER_YEAR = 12;
+ const MONTH_NAME = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
+ const WEEKDAY_NAME = new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" });
+ 
+@@ -14,7 +15,7 @@ function dayOf(date: Date): CalendarDay {
+   return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
+ }
+ 
+-export function weekdayIndex(day: CalendarDay): number {
++function weekdayIndex(day: CalendarDay): number {
+   return (utcMidnight(day).getUTCDay() + WEEKDAYS.length - 1) % WEEKDAYS.length;
+ }
+ 
+@@ -42,6 +43,30 @@ export function sameDay(a: CalendarDay, b: CalendarDay): boolean {
+   return a.year === b.year && a.month === b.month && a.day === b.day;
+ }
+ 
++export function movedDay(day: CalendarDay, { key, shiftKey }: DayKey): CalendarDay | null {
++  const months = shiftKey ? MONTHS_PER_YEAR : 1;
++  switch (key) {
++    case "ArrowLeft":
++      return addDays(day, -1);
++    case "ArrowRight":
++      return addDays(day, 1);
++    case "ArrowUp":
++      return addDays(day, -WEEKDAYS.length);
++    case "ArrowDown":
++      return addDays(day, WEEKDAYS.length);
++    case "Home":
++      return addDays(day, -weekdayIndex(day));
++    case "End":
++      return addDays(day, WEEKDAYS.length - 1 - weekdayIndex(day));
++    case "PageUp":
++      return addMonths(day, -months);
++    case "PageDown":
++      return addMonths(day, months);
++    default:
++      return null;
++  }
++}
++
+ export function monthGrid(month: CalendarMonth): readonly GridDay[] {
+   const first = { ...month, day: 1 };
+   const start = addDays(first, -weekdayIndex(first));
+diff --git a/frontend/src/mergeRequests/internal/dueDate.test.ts b/frontend/src/mergeRequests/internal/dueDate.test.ts
+index 263223e..cbd229e 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.test.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.test.ts
+@@ -4,6 +4,7 @@ import {
+   calendarDayFrom,
+   calendarDayText,
+   compareDays,
++  dateTimeText,
+   daysLeft,
+   daysLeftText,
+   dueDateText,
+@@ -161,3 +162,11 @@ test("localDay is the calendar day of the local clock, turning at local midnight
+   expect(localDay(localTime("2027-01-01", 0))).toEqual(day("2027-01-01"));
+   expect(localDay(Date.UTC(2026, 10, 8, 23, 30))).toEqual(day("2026-11-09"));
+ });
++
++test("dateTimeText writes the local day first and a padded 24-hour time, never 3:04 PM", () => {
++  expect(dateTimeText(localTime("2026-10-30", 15, 4))).toBe("30.10.2026, 15:04");
++  expect(dateTimeText(localTime("2026-01-05", 9, 7))).toBe("05.01.2026, 09:07");
++  expect(dateTimeText(localTime("2026-12-31", 0, 0))).toBe("31.12.2026, 00:00");
++  expect(dateTimeText(localTime("2026-11-08", 23, 59, 999))).toBe("08.11.2026, 23:59");
++  expect(dateTimeText(Date.UTC(2026, 10, 8, 23, 30))).toBe("09.11.2026, 00:30");
++});
+diff --git a/frontend/src/mergeRequests/internal/dueDate.ts b/frontend/src/mergeRequests/internal/dueDate.ts
+index d21874c..ad885b6 100644
+--- a/frontend/src/mergeRequests/internal/dueDate.ts
++++ b/frontend/src/mergeRequests/internal/dueDate.ts
+@@ -66,6 +66,12 @@ export function localDay(now: number): CalendarDay {
+   return { year: local.getFullYear(), month: local.getMonth() + 1, day: local.getDate() };
+ }
+ 
++export function dateTimeText(at: number): string {
++  const local = new Date(at);
++  const time = `${padded(local.getHours(), PART_DIGITS)}:${padded(local.getMinutes(), PART_DIGITS)}`;
++  return `${dueDateText(localDay(at))}, ${time}`;
++}
++
+ export function daysLeft(day: CalendarDay, now: number): number {
+   return compareDays(day, localDay(now));
+ }
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 0ea0f16..c65c2fb 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -48,7 +48,7 @@ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window,
+ 
+ Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
+ 
+-Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field `typedDay` reads on Enter — a refused text sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (the "created … ago" hover is `dateTimeText`, "30.10.2026, 15:04", no locale; labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date `DD.MM.YYYY` over the days left in the error colour when overdue; its `role="dialog"` box "Choose a due date" holds a text field on its own draft (`v-model`, set to the shown date when the box opens, so a re-render never rewrites it) that `typedDay` reads on Enter — a refused text stays as typed, sets `aria-invalid` and the error border, saves nothing —, `MergeRequestCalendar.vue` and Today (`PICK_TODAY`) / Clear; only Enter, a click or a footer button saves, never blur), then discussions and approvals (`approversText`, one name per line). `MergeRequestCalendar.vue` (`selected`, `today`, emits `pick`) is shadcn's Calendar: it owns the focused day, and the shown month is the focused day's (`monthOf`); the caption between the Previous / Next month chevrons, `WEEKDAYS` and `monthGrid`'s six weeks as `role="grid"` labelled by the caption, each day a button named `dayName` (`aria-selected` on its gridcell, `aria-current="date"` today); one tab stop (roving `tabindex`), the WAI-ARIA date-picker keys by `movedDay` (arrows, Home/End, PageUp/PageDown, Shift for a year; Enter/Space are the button's click), and it focuses its day when it mounts. Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/MergeRequestCalendar.vue b/frontend/src/ui/MergeRequestCalendar.vue
+index c494338..0af0f87 100644
+--- a/frontend/src/ui/MergeRequestCalendar.vue
++++ b/frontend/src/ui/MergeRequestCalendar.vue
+@@ -4,17 +4,15 @@ import ChevronLeft from "~icons/lucide/chevron-left";
+ import ChevronRight from "~icons/lucide/chevron-right";
+ 
+ import {
+-  MONTHS_PER_YEAR,
+   WEEKDAYS,
+-  addDays,
+   addMonths,
+   calendarDayText,
+   dayName,
+   monthCaption,
+   monthGrid,
+   monthOf,
++  movedDay,
+   sameDay,
+-  weekdayIndex,
+   type CalendarDay,
+   type CalendarMonth,
+ } from "../mergeRequests";
+@@ -90,33 +88,8 @@ function turnMonth(months: number): void {
+   focused.value = addMonths(focused.value, months);
+ }
+ 
+-function movedDay(event: KeyboardEvent): CalendarDay | null {
+-  const day = focused.value;
+-  const months = event.shiftKey ? MONTHS_PER_YEAR : 1;
+-  switch (event.key) {
+-    case "ArrowLeft":
+-      return addDays(day, -1);
+-    case "ArrowRight":
+-      return addDays(day, 1);
+-    case "ArrowUp":
+-      return addDays(day, -WEEKDAYS.length);
+-    case "ArrowDown":
+-      return addDays(day, WEEKDAYS.length);
+-    case "Home":
+-      return addDays(day, -weekdayIndex(day));
+-    case "End":
+-      return addDays(day, WEEKDAYS.length - 1 - weekdayIndex(day));
+-    case "PageUp":
+-      return addMonths(day, -months);
+-    case "PageDown":
+-      return addMonths(day, months);
+-    default:
+-      return null;
+-  }
+-}
+-
+ function gridKeyPressed(event: KeyboardEvent): void {
+-  const day = movedDay(event);
++  const day = movedDay(focused.value, event);
+   if (day !== null) {
+     event.preventDefault();
+     void moveTo(day);
+diff --git a/frontend/src/ui/MergeRequestDueDate.vue b/frontend/src/ui/MergeRequestDueDate.vue
+index 2b5e95b..34c8620 100644
+--- a/frontend/src/ui/MergeRequestDueDate.vue
++++ b/frontend/src/ui/MergeRequestDueDate.vue
+@@ -17,8 +17,8 @@ import {
+   CLEAR_DUE_DATE,
+   DUE_DATE_DIALOG,
+   DUE_DATE_PLACEHOLDER,
+-  DUE_TODAY,
+   dueDateLabel,
++  PICK_TODAY,
+   SET_DUE_DATE,
+ } from "./mergeRequestsText";
+ import { vTooltip } from "./tooltip";
+@@ -32,6 +32,7 @@ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const box = useTemplateRef<HTMLDivElement>("box");
+ const open = shallowRef(false);
+ const refused = shallowRef(false);
++const draft = shallowRef("");
+ const at = shallowRef<Point>({ x: 0, y: 0 });
+ const placement = useMenuPlacement(box, at);
+ onClickOutside(
+@@ -66,6 +67,7 @@ function openerClicked(): void {
+   }
+   at.value = belowLeft(opener.value);
+   refused.value = false;
++  draft.value = shown.value?.date ?? "";
+   open.value = true;
+ }
+ 
+@@ -82,8 +84,8 @@ function save(day: CalendarDay | null): void {
+   void closeToOpener();
+ }
+ 
+-function typedEntered(event: KeyboardEvent): void {
+-  const day = event.target instanceof HTMLInputElement ? typedDay(event.target.value) : null;
++function typedEntered(): void {
++  const day = typedDay(draft.value);
+   if (day === null) {
+     refused.value = true;
+     return;
+@@ -131,8 +133,8 @@ function keyPressed(event: KeyboardEvent): void {
+       :style="placement"
+     >
+       <input
++        v-model="draft"
+         type="text"
+-        :value="shown?.date ?? ''"
+         :placeholder="DUE_DATE_PLACEHOLDER"
+         :aria-label="SET_DUE_DATE"
+         :aria-invalid="refused"
+@@ -148,7 +150,7 @@ function keyPressed(event: KeyboardEvent): void {
+           class="flex-1 rounded-md border border-control-border px-2.5 py-1 text-sm hover:bg-hover"
+           @click="save(today)"
+         >
+-          {{ DUE_TODAY }}
++          {{ PICK_TODAY }}
+         </button>
+         <button
+           v-if="shown !== null"
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 1920863..9533d83 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -12,6 +12,7 @@ import {
+   approversText,
+   authorText,
+   createdAgo,
++  dateTimeText,
+   rowAction,
+   sizeParts,
+   sizeTitle,
+@@ -56,12 +57,10 @@ const emit = defineEmits<{
+   peopleBoxClosed: [iid: MergeRequestIid];
+ }>();
+ 
+-const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+-
+ const mr = computed(() => mergeRequestReference(props.row.iid));
+ const author = computed(() => authorText(props.row.author));
+ const created = computed(() => createdAgo(props.row.createdAt, props.now));
+-const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
++const createdTitle = computed(() => dateTimeText(props.row.createdAt));
+ const discussions = computed(() => discussionsText(props.row.openDiscussions));
+ const approvals = computed(() => ({
+   count: props.row.approvedBy.length,
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index d8b50e5..2b9a002 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -21,8 +21,8 @@ import {
+   CLEAR_DUE_DATE,
+   DUE_DATE_DIALOG,
+   DUE_DATE_PLACEHOLDER,
+-  DUE_TODAY,
+   NEXT_MONTH,
++  PICK_TODAY,
+   PREVIOUS_MONTH,
+   clearFilterTitle,
+   discussionsText,
+@@ -294,7 +294,7 @@ test("the people box, re-request and due-date words are GitLab's and the request
+ });
+ 
+ test("the date picker's words are the request's, the field asks for day first", () => {
+-  expect([DUE_DATE_DIALOG, DUE_DATE_PLACEHOLDER, DUE_TODAY, PREVIOUS_MONTH, NEXT_MONTH]).toEqual([
++  expect([DUE_DATE_DIALOG, DUE_DATE_PLACEHOLDER, PICK_TODAY, PREVIOUS_MONTH, NEXT_MONTH]).toEqual([
+     "Choose a due date",
+     "DD.MM.YYYY",
+     "Today",
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index 43187f6..de9165c 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -39,7 +39,7 @@ export const SET_DUE_DATE = "Set a due date";
+ export const CLEAR_DUE_DATE = "Clear";
+ export const DUE_DATE_DIALOG = "Choose a due date";
+ export const DUE_DATE_PLACEHOLDER = "DD.MM.YYYY";
+-export const DUE_TODAY = "Today";
++export const PICK_TODAY = "Today";
+ export const PREVIOUS_MONTH = "Previous month";
+ export const NEXT_MONTH = "Next month";
+ 

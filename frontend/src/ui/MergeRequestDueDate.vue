@@ -17,8 +17,8 @@ import {
   CLEAR_DUE_DATE,
   DUE_DATE_DIALOG,
   DUE_DATE_PLACEHOLDER,
-  DUE_TODAY,
   dueDateLabel,
+  PICK_TODAY,
   SET_DUE_DATE,
 } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
@@ -32,6 +32,7 @@ const opener = useTemplateRef<HTMLButtonElement>("opener");
 const box = useTemplateRef<HTMLDivElement>("box");
 const open = shallowRef(false);
 const refused = shallowRef(false);
+const draft = shallowRef("");
 const at = shallowRef<Point>({ x: 0, y: 0 });
 const placement = useMenuPlacement(box, at);
 onClickOutside(
@@ -66,6 +67,7 @@ function openerClicked(): void {
   }
   at.value = belowLeft(opener.value);
   refused.value = false;
+  draft.value = shown.value?.date ?? "";
   open.value = true;
 }
 
@@ -82,8 +84,8 @@ function save(day: CalendarDay | null): void {
   void closeToOpener();
 }
 
-function typedEntered(event: KeyboardEvent): void {
-  const day = event.target instanceof HTMLInputElement ? typedDay(event.target.value) : null;
+function typedEntered(): void {
+  const day = typedDay(draft.value);
   if (day === null) {
     refused.value = true;
     return;
@@ -131,8 +133,8 @@ function keyPressed(event: KeyboardEvent): void {
       :style="placement"
     >
       <input
+        v-model="draft"
         type="text"
-        :value="shown?.date ?? ''"
         :placeholder="DUE_DATE_PLACEHOLDER"
         :aria-label="SET_DUE_DATE"
         :aria-invalid="refused"
@@ -148,7 +150,7 @@ function keyPressed(event: KeyboardEvent): void {
           class="flex-1 rounded-md border border-control-border px-2.5 py-1 text-sm hover:bg-hover"
           @click="save(today)"
         >
-          {{ DUE_TODAY }}
+          {{ PICK_TODAY }}
         </button>
         <button
           v-if="shown !== null"

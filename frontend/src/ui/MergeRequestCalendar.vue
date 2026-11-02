@@ -4,17 +4,15 @@ import ChevronLeft from "~icons/lucide/chevron-left";
 import ChevronRight from "~icons/lucide/chevron-right";
 
 import {
-  MONTHS_PER_YEAR,
   WEEKDAYS,
-  addDays,
   addMonths,
   calendarDayText,
   dayName,
   monthCaption,
   monthGrid,
   monthOf,
+  movedDay,
   sameDay,
-  weekdayIndex,
   type CalendarDay,
   type CalendarMonth,
 } from "../mergeRequests";
@@ -90,33 +88,8 @@ function turnMonth(months: number): void {
   focused.value = addMonths(focused.value, months);
 }
 
-function movedDay(event: KeyboardEvent): CalendarDay | null {
-  const day = focused.value;
-  const months = event.shiftKey ? MONTHS_PER_YEAR : 1;
-  switch (event.key) {
-    case "ArrowLeft":
-      return addDays(day, -1);
-    case "ArrowRight":
-      return addDays(day, 1);
-    case "ArrowUp":
-      return addDays(day, -WEEKDAYS.length);
-    case "ArrowDown":
-      return addDays(day, WEEKDAYS.length);
-    case "Home":
-      return addDays(day, -weekdayIndex(day));
-    case "End":
-      return addDays(day, WEEKDAYS.length - 1 - weekdayIndex(day));
-    case "PageUp":
-      return addMonths(day, -months);
-    case "PageDown":
-      return addMonths(day, months);
-    default:
-      return null;
-  }
-}
-
 function gridKeyPressed(event: KeyboardEvent): void {
-  const day = movedDay(event);
+  const day = movedDay(focused.value, event);
   if (day !== null) {
     event.preventDefault();
     void moveTo(day);

@@ -35,6 +35,7 @@ export {
   calendarDayFrom,
   calendarDayText,
   compareDays,
+  dateTimeText,
   daysLeft,
   daysLeftText,
   dueDateText,
@@ -43,7 +44,6 @@ export {
   type CalendarDay,
 } from "./internal/dueDate";
 export {
-  MONTHS_PER_YEAR,
   WEEKDAYS,
   addDays,
   addMonths,
@@ -51,8 +51,8 @@ export {
   monthCaption,
   monthGrid,
   monthOf,
+  movedDay,
   sameDay,
-  weekdayIndex,
   type CalendarMonth,
   type GridDay,
 } from "./internal/calendar";

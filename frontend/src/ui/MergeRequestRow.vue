@@ -12,6 +12,7 @@ import {
   approversText,
   authorText,
   createdAgo,
+  dateTimeText,
   rowAction,
   sizeParts,
   sizeTitle,
@@ -56,12 +57,10 @@ const emit = defineEmits<{
   peopleBoxClosed: [iid: MergeRequestIid];
 }>();
 
-const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
-
 const mr = computed(() => mergeRequestReference(props.row.iid));
 const author = computed(() => authorText(props.row.author));
 const created = computed(() => createdAgo(props.row.createdAt, props.now));
-const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
+const createdTitle = computed(() => dateTimeText(props.row.createdAt));
 const discussions = computed(() => discussionsText(props.row.openDiscussions));
 const approvals = computed(() => ({
   count: props.row.approvedBy.length,

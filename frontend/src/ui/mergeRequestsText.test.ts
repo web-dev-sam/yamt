@@ -21,8 +21,8 @@ import {
   CLEAR_DUE_DATE,
   DUE_DATE_DIALOG,
   DUE_DATE_PLACEHOLDER,
-  DUE_TODAY,
   NEXT_MONTH,
+  PICK_TODAY,
   PREVIOUS_MONTH,
   clearFilterTitle,
   discussionsText,
@@ -294,7 +294,7 @@ test("the people box, re-request and due-date words are GitLab's and the request
 });
 
 test("the date picker's words are the request's, the field asks for day first", () => {
-  expect([DUE_DATE_DIALOG, DUE_DATE_PLACEHOLDER, DUE_TODAY, PREVIOUS_MONTH, NEXT_MONTH]).toEqual([
+  expect([DUE_DATE_DIALOG, DUE_DATE_PLACEHOLDER, PICK_TODAY, PREVIOUS_MONTH, NEXT_MONTH]).toEqual([
     "Choose a due date",
     "DD.MM.YYYY",
     "Today",

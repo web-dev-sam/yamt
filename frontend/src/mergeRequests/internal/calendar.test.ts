@@ -10,8 +10,8 @@ import {
   monthCaption,
   monthGrid,
   monthOf,
+  movedDay,
   sameDay,
-  weekdayIndex,
   type CalendarDay,
   type GridDay,
 } from "../index";
@@ -129,10 +129,43 @@ test("addDays crosses month and year ends", () => {
   expect(addDays(day("2026-03-28"), 2)).toEqual(day("2026-03-30"));
 });
 
-test("weekdayIndex counts from Monday", () => {
-  expect(weekdayIndex(day("2026-11-02"))).toBe(0);
-  expect(weekdayIndex(day("2026-11-03"))).toBe(1);
-  expect(weekdayIndex(day("2026-11-08"))).toBe(6);
+function moved(from: string, key: string, shiftKey = false): CalendarDay | null {
+  return movedDay(day(from), { key, shiftKey });
+}
+
+test("the arrows move one day sideways and one week up or down, across month ends", () => {
+  expect(moved("2026-11-01", "ArrowLeft")).toEqual(day("2026-10-31"));
+  expect(moved("2026-11-30", "ArrowRight")).toEqual(day("2026-12-01"));
+  expect(moved("2026-11-03", "ArrowUp")).toEqual(day("2026-10-27"));
+  expect(moved("2026-12-29", "ArrowDown")).toEqual(day("2027-01-05"));
+});
+
+test("Home goes to the week's Monday and End to its Sunday, weeks starting on Monday", () => {
+  expect(moved("2026-11-04", "Home")).toEqual(day("2026-11-02"));
+  expect(moved("2026-11-02", "Home")).toEqual(day("2026-11-02"));
+  expect(moved("2026-11-08", "Home")).toEqual(day("2026-11-02"));
+  expect(moved("2026-11-04", "End")).toEqual(day("2026-11-08"));
+  expect(moved("2026-11-08", "End")).toEqual(day("2026-11-08"));
+  expect(moved("2026-11-02", "End")).toEqual(day("2026-11-08"));
+});
+
+test("PageUp and PageDown move one month, clamped to the shorter month's last day", () => {
+  expect(moved("2026-03-31", "PageUp")).toEqual(day("2026-02-28"));
+  expect(moved("2026-01-31", "PageDown")).toEqual(day("2026-02-28"));
+  expect(moved("2026-12-15", "PageDown")).toEqual(day("2027-01-15"));
+});
+
+test("Shift+PageUp and Shift+PageDown move one year, a leap day clamped to 28 February", () => {
+  expect(moved("2028-02-29", "PageUp", true)).toEqual(day("2027-02-28"));
+  expect(moved("2028-02-29", "PageDown", true)).toEqual(day("2029-02-28"));
+  expect(moved("2026-11-03", "PageDown", true)).toEqual(day("2027-11-03"));
+});
+
+test("Shift changes only the page keys, and other keys move nowhere", () => {
+  expect(moved("2026-11-03", "ArrowRight", true)).toEqual(day("2026-11-04"));
+  expect(moved("2026-11-03", "Enter")).toBeNull();
+  expect(moved("2026-11-03", " ")).toBeNull();
+  expect(moved("2026-11-03", "Tab", true)).toBeNull();
 });
 
 test("sameDay compares year, month and day", () => {

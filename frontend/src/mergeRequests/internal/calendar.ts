@@ -2,11 +2,12 @@ import { utcMidnight, type CalendarDay } from "./dueDate";
 
 export type CalendarMonth = { readonly year: number; readonly month: number };
 export type GridDay = { readonly day: CalendarDay; readonly inMonth: boolean };
+type DayKey = { readonly key: string; readonly shiftKey: boolean };
 
 export const WEEKDAYS: readonly string[] = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
 const GRID_WEEKS = 6;
-export const MONTHS_PER_YEAR = 12;
+const MONTHS_PER_YEAR = 12;
 const MONTH_NAME = new Intl.DateTimeFormat("en", { month: "long", timeZone: "UTC" });
 const WEEKDAY_NAME = new Intl.DateTimeFormat("en", { weekday: "long", timeZone: "UTC" });
 
@@ -14,7 +15,7 @@ function dayOf(date: Date): CalendarDay {
   return { year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() };
 }
 
-export function weekdayIndex(day: CalendarDay): number {
+function weekdayIndex(day: CalendarDay): number {
   return (utcMidnight(day).getUTCDay() + WEEKDAYS.length - 1) % WEEKDAYS.length;
 }
 
@@ -40,6 +41,30 @@ export function addMonths({ year, month, day }: CalendarDay, months: number): Ca
 
 export function sameDay(a: CalendarDay, b: CalendarDay): boolean {
   return a.year === b.year && a.month === b.month && a.day === b.day;
+}
+
+export function movedDay(day: CalendarDay, { key, shiftKey }: DayKey): CalendarDay | null {
+  const months = shiftKey ? MONTHS_PER_YEAR : 1;
+  switch (key) {
+    case "ArrowLeft":
+      return addDays(day, -1);
+    case "ArrowRight":
+      return addDays(day, 1);
+    case "ArrowUp":
+      return addDays(day, -WEEKDAYS.length);
+    case "ArrowDown":
+      return addDays(day, WEEKDAYS.length);
+    case "Home":
+      return addDays(day, -weekdayIndex(day));
+    case "End":
+      return addDays(day, WEEKDAYS.length - 1 - weekdayIndex(day));
+    case "PageUp":
+      return addMonths(day, -months);
+    case "PageDown":
+      return addMonths(day, months);
+    default:
+      return null;
+  }
 }
 
 export function monthGrid(month: CalendarMonth): readonly GridDay[] {
