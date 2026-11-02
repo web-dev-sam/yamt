@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { DirectiveBinding, ObjectDirective, VNode } from "vue";
 
-import { delayBefore, TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "./tooltip";
+import { delayBefore, TIP_CLASSES, TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "./tooltip";
 
 type Rect = { top: number; bottom: number; left: number; width: number; height: number };
 
@@ -281,9 +281,7 @@ test("one tip element, made at the first show, hidden from assistive tech and re
   const [tip] = page.appended;
   expect(tip?.tagName).toBe("div");
   expect(tip?.attributes).toEqual(new Map([["aria-hidden", "true"]]));
-  expect(tip?.className).toBe(
-    "pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none",
-  );
+  expect(tip?.className).toBe(TIP_CLASSES);
   expect(shownText()).toBe("Second");
 });
 
@@ -381,6 +379,16 @@ test("entering another element while a tip waits cancels the first", () => {
   vi.advanceTimersByTime(half);
 
   expect(shownText()).toBe("Second");
+});
+
+test("entering an element inside one whose tip shows switches to its tip at once", () => {
+  const row = anchor("Row");
+  const button = anchor("Button");
+  showNow(row);
+
+  send(button, "pointerenter");
+
+  expect(shownText()).toBe("Button");
 });
 
 test("a new value while the tip waits shows at the end of the wait, in its new words", () => {

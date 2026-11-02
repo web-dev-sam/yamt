@@ -5,6 +5,7 @@ import { computed, shallowRef, useTemplateRef, watch } from "vue";
 import type { OperationView } from "../ipc";
 import { operationLine, operationTag } from "./operationText";
 import { tooltipBox } from "./operationTooltip";
+import { TIP_CLASSES } from "./tooltip";
 
 const props = defineProps<{ operation: OperationView }>();
 
@@ -67,7 +68,7 @@ function hide(): void {
   <div
     v-if="open"
     aria-hidden="true"
-    class="pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none"
+    :class="TIP_CLASSES"
     :style="placement"
     v-text="line.tooltip"
   />

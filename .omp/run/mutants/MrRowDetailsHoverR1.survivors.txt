@@ -1,0 +1,12 @@
+just mutants HEAD (no dry-run stop; scope tooltip.ts, useDropdownMenu.ts, useHoverMenu.ts): 282 killed / 24 survived / 17 no-cov / 2 errors; useHoverMenu 21/0, tooltip 154/8, useDropdownMenu 107/16
+frontend/src/ui/tooltip.ts:35 `phase !== null`→true — equivalent: the timer fires only while a phase waits; hide() stops it and start() clears any earlier one
+frontend/src/ui/tooltip.ts:93 `waiting.stop()` removed — equivalent: a stale fire finds no phase (line 35) or re-shows the same shown tip; start() clears it otherwise
+frontend/src/ui/tooltip.ts:40 `{immediate:false}`→{}/true — equivalent: an import-time fire finds no phase (line 35) and does nothing
+frontend/src/ui/tooltip.ts:123 kind "waiting"→"" — gate-covered: vue-tsc rejects "" for kind "waiting"|"shown"
+frontend/src/ui/tooltip.ts:161,175 `bound === undefined`→false (+no-cov block) — gate-covered: tsc needs the narrowing, and Vue never calls updated/beforeUnmount before mounted
+frontend/src/ui/tooltip.ts:12 UNMEASURED→{} — equivalent: only .maxWidth of that call is read, and it does not depend on the tip's size
+frontend/src/ui/useDropdownMenu.ts:62 `opened !== null`→true — equivalent: with nothing open, close() and dismiss() are no-ops
+frontend/src/ui/useDropdownMenu.ts:134 `opener === null`→false — equivalent: onClickOutside skips null ignore entries (`el && …`)
+frontend/src/ui/useDropdownMenu.ts:124 above shallowRef(true) — equivalent: open() writes `above` before any menu shows
+frontend/src/ui/useDropdownMenu.ts:144 contextmenu {capture:true}→{}/false — wiring: a capture flag; the fake window has no tree to tell phases apart
+unchanged lines, not used by dismiss: 30 (visibleBottom loop), 61:44 (contextmenu ?.), 94-101 (menuKey items/findIndex/preventDefault); no-cov on 30-31 and 94-110

@@ -1,3 +1,4 @@
+import { useEventListener, useTimeoutFn } from "@vueuse/core";
 import type { Directive, DirectiveBinding } from "vue";
 
 import type { Size } from "./menuPosition";
@@ -5,46 +6,53 @@ import { tooltipPlacement } from "./operationTooltip";
 
 export const TOOLTIP_DELAY_MS = 400;
 export const TOOLTIP_WARM_MS = 300;
-
-const TIP_CLASSES =
+export const TIP_CLASSES =
   "pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none";
+
 const UNMEASURED: Size = { width: 0, height: 0 };
 
 type Bound = {
   readonly element: HTMLElement;
   text: string | null;
-  readonly enter: () => void;
-  readonly leave: () => void;
+  readonly unbind: readonly (() => void)[];
 };
 
-type Phase =
-  | {
-      readonly kind: "waiting";
-      readonly bound: Bound;
-      readonly timer: ReturnType<typeof setTimeout>;
-    }
-  | { readonly kind: "shown"; readonly bound: Bound; readonly tip: HTMLElement };
+type Phase = {
+  readonly kind: "waiting" | "shown";
+  readonly bound: Bound;
+  readonly unlisten: () => void;
+};
 
-const tip: { element: HTMLElement | null; phase: Phase | null; closedAt: number | null } = {
+const tooltip: { element: HTMLElement | null; phase: Phase | null; closedAt: number | null } = {
   element: null,
   phase: null,
   closedAt: null,
 };
 const bindings = new WeakMap<HTMLElement, Bound>();
+const waiting = useTimeoutFn(
+  () => {
+    const { phase } = tooltip;
+    if (phase !== null) {
+      show(phase.bound, phase.unlisten);
+    }
+  },
+  TOOLTIP_DELAY_MS,
+  { immediate: false },
+);
 
 export function delayBefore(closedAt: number | null, now: number): number {
   return closedAt !== null && now - closedAt <= TOOLTIP_WARM_MS ? 0 : TOOLTIP_DELAY_MS;
 }
 
 function tipElement(): HTMLElement {
-  if (tip.element === null) {
+  if (tooltip.element === null) {
     const element = document.createElement("div");
     element.className = TIP_CLASSES;
     element.setAttribute("aria-hidden", "true");
     document.body.append(element);
-    tip.element = element;
+    tooltip.element = element;
   }
-  return tip.element;
+  return tooltip.element;
 }
 
 function place(element: HTMLElement, anchor: HTMLElement): void {
@@ -65,34 +73,33 @@ function keyPressed(event: KeyboardEvent): void {
   }
 }
 
-function listen(): void {
-  window.addEventListener("pointerdown", hide, { capture: true, passive: true });
-  window.addEventListener("keydown", keyPressed, { capture: true });
-  window.addEventListener("scroll", hide, { capture: true, passive: true });
-}
-
-function unlisten(): void {
-  window.removeEventListener("pointerdown", hide, { capture: true });
-  window.removeEventListener("keydown", keyPressed, { capture: true });
-  window.removeEventListener("scroll", hide, { capture: true });
+function listen(): () => void {
+  const stops = [
+    useEventListener(window, ["pointerdown", "scroll"], hide, { capture: true, passive: true }),
+    useEventListener(window, "keydown", keyPressed, { capture: true }),
+  ];
+  return () => {
+    for (const stop of stops) {
+      stop();
+    }
+  };
 }
 
 function hide(): void {
-  const { phase } = tip;
+  const { phase } = tooltip;
   if (phase === null) {
     return;
   }
-  if (phase.kind === "waiting") {
-    clearTimeout(phase.timer);
-  } else {
-    tip.closedAt = Date.now();
-    phase.tip.hidden = true;
+  waiting.stop();
+  if (phase.kind === "shown") {
+    tooltip.closedAt = Date.now();
+    tipElement().hidden = true;
   }
-  tip.phase = null;
-  unlisten();
+  tooltip.phase = null;
+  phase.unlisten();
 }
 
-function show(bound: Bound): void {
+function show(bound: Bound, unlisten: () => void): void {
   if (bound.text === null) {
     hide();
     return;
@@ -101,7 +108,7 @@ function show(bound: Bound): void {
   element.textContent = bound.text;
   element.hidden = false;
   place(element, bound.element);
-  tip.phase = { kind: "shown", bound, tip: element };
+  tooltip.phase = { kind: "shown", bound, unlisten };
 }
 
 function entered(bound: Bound): void {
@@ -109,20 +116,17 @@ function entered(bound: Bound): void {
   if (bound.text === null) {
     return;
   }
-  const delay = delayBefore(tip.closedAt, Date.now());
-  if (delay === 0) {
-    show(bound);
+  const unlisten = listen();
+  if (delayBefore(tooltip.closedAt, Date.now()) === 0) {
+    show(bound, unlisten);
   } else {
-    const timer = setTimeout(() => {
-      show(bound);
-    }, delay);
-    tip.phase = { kind: "waiting", bound, timer };
+    tooltip.phase = { kind: "waiting", bound, unlisten };
+    waiting.start();
   }
-  listen();
 }
 
 function hideFor(bound: Bound): void {
-  if (tip.phase?.bound === bound) {
+  if (tooltip.phase?.bound === bound) {
     hide();
   }
 }
@@ -139,16 +143,16 @@ function mounted(element: HTMLElement, { value }: DirectiveBinding<string | null
   const bound: Bound = {
     element,
     text: value === "" ? null : value,
-    enter: () => {
-      entered(bound);
-    },
-    leave: () => {
-      hideFor(bound);
-    },
+    unbind: [
+      useEventListener(element, "pointerenter", () => {
+        entered(bound);
+      }),
+      useEventListener(element, "pointerleave", () => {
+        hideFor(bound);
+      }),
+    ],
   };
   bindings.set(element, bound);
-  element.addEventListener("pointerenter", bound.enter);
-  element.addEventListener("pointerleave", bound.leave);
   describe(element, bound.text);
 }
 
@@ -159,8 +163,9 @@ function updated(element: HTMLElement, { value }: DirectiveBinding<string | null
   }
   bound.text = value === "" ? null : value;
   describe(element, bound.text);
-  if (tip.phase?.kind === "shown" && tip.phase.bound === bound) {
-    show(bound);
+  const { phase } = tooltip;
+  if (phase?.kind === "shown" && phase.bound === bound) {
+    show(bound, phase.unlisten);
   }
 }
 
@@ -170,8 +175,9 @@ function beforeUnmount(element: HTMLElement): void {
   if (bound === undefined) {
     return;
   }
-  element.removeEventListener("pointerenter", bound.enter);
-  element.removeEventListener("pointerleave", bound.leave);
+  for (const stop of bound.unbind) {
+    stop();
+  }
   hideFor(bound);
 }
 

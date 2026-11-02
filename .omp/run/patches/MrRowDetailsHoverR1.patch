@@ -1,0 +1,921 @@
+diff --git a/frontend/src/ui/OperationLabel.vue b/frontend/src/ui/OperationLabel.vue
+index 49bda65..dad8997 100644
+--- a/frontend/src/ui/OperationLabel.vue
++++ b/frontend/src/ui/OperationLabel.vue
+@@ -5,6 +5,7 @@ import { computed, shallowRef, useTemplateRef, watch } from "vue";
+ import type { OperationView } from "../ipc";
+ import { operationLine, operationTag } from "./operationText";
+ import { tooltipBox } from "./operationTooltip";
++import { TIP_CLASSES } from "./tooltip";
+ 
+ const props = defineProps<{ operation: OperationView }>();
+ 
+@@ -67,7 +68,7 @@ function hide(): void {
+   <div
+     v-if="open"
+     aria-hidden="true"
+-    class="pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none"
++    :class="TIP_CLASSES"
+     :style="placement"
+     v-text="line.tooltip"
+   />
+diff --git a/frontend/src/ui/tooltip.test.ts b/frontend/src/ui/tooltip.test.ts
+index fb1f9ec..998458e 100644
+--- a/frontend/src/ui/tooltip.test.ts
++++ b/frontend/src/ui/tooltip.test.ts
+@@ -1,7 +1,7 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import type { DirectiveBinding, ObjectDirective, VNode } from "vue";
+ 
+-import { delayBefore, TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "./tooltip";
++import { delayBefore, TIP_CLASSES, TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "./tooltip";
+ 
+ type Rect = { top: number; bottom: number; left: number; width: number; height: number };
+ 
+@@ -281,9 +281,7 @@ test("one tip element, made at the first show, hidden from assistive tech and re
+   const [tip] = page.appended;
+   expect(tip?.tagName).toBe("div");
+   expect(tip?.attributes).toEqual(new Map([["aria-hidden", "true"]]));
+-  expect(tip?.className).toBe(
+-    "pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none",
+-  );
++  expect(tip?.className).toBe(TIP_CLASSES);
+   expect(shownText()).toBe("Second");
+ });
+ 
+@@ -383,6 +381,16 @@ test("entering another element while a tip waits cancels the first", () => {
+   expect(shownText()).toBe("Second");
+ });
+ 
++test("entering an element inside one whose tip shows switches to its tip at once", () => {
++  const row = anchor("Row");
++  const button = anchor("Button");
++  showNow(row);
++
++  send(button, "pointerenter");
++
++  expect(shownText()).toBe("Button");
++});
++
+ test("a new value while the tip waits shows at the end of the wait, in its new words", () => {
+   const save = anchor("Save");
+ 
+diff --git a/frontend/src/ui/tooltip.ts b/frontend/src/ui/tooltip.ts
+index 178f88a..a896d14 100644
+--- a/frontend/src/ui/tooltip.ts
++++ b/frontend/src/ui/tooltip.ts
+@@ -1,3 +1,4 @@
++import { useEventListener, useTimeoutFn } from "@vueuse/core";
+ import type { Directive, DirectiveBinding } from "vue";
+ 
+ import type { Size } from "./menuPosition";
+@@ -5,46 +6,53 @@ import { tooltipPlacement } from "./operationTooltip";
+ 
+ export const TOOLTIP_DELAY_MS = 400;
+ export const TOOLTIP_WARM_MS = 300;
+-
+-const TIP_CLASSES =
++export const TIP_CLASSES =
+   "pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none";
++
+ const UNMEASURED: Size = { width: 0, height: 0 };
+ 
+ type Bound = {
+   readonly element: HTMLElement;
+   text: string | null;
+-  readonly enter: () => void;
+-  readonly leave: () => void;
++  readonly unbind: readonly (() => void)[];
+ };
+ 
+-type Phase =
+-  | {
+-      readonly kind: "waiting";
+-      readonly bound: Bound;
+-      readonly timer: ReturnType<typeof setTimeout>;
+-    }
+-  | { readonly kind: "shown"; readonly bound: Bound; readonly tip: HTMLElement };
++type Phase = {
++  readonly kind: "waiting" | "shown";
++  readonly bound: Bound;
++  readonly unlisten: () => void;
++};
+ 
+-const tip: { element: HTMLElement | null; phase: Phase | null; closedAt: number | null } = {
++const tooltip: { element: HTMLElement | null; phase: Phase | null; closedAt: number | null } = {
+   element: null,
+   phase: null,
+   closedAt: null,
+ };
+ const bindings = new WeakMap<HTMLElement, Bound>();
++const waiting = useTimeoutFn(
++  () => {
++    const { phase } = tooltip;
++    if (phase !== null) {
++      show(phase.bound, phase.unlisten);
++    }
++  },
++  TOOLTIP_DELAY_MS,
++  { immediate: false },
++);
+ 
+ export function delayBefore(closedAt: number | null, now: number): number {
+   return closedAt !== null && now - closedAt <= TOOLTIP_WARM_MS ? 0 : TOOLTIP_DELAY_MS;
+ }
+ 
+ function tipElement(): HTMLElement {
+-  if (tip.element === null) {
++  if (tooltip.element === null) {
+     const element = document.createElement("div");
+     element.className = TIP_CLASSES;
+     element.setAttribute("aria-hidden", "true");
+     document.body.append(element);
+-    tip.element = element;
++    tooltip.element = element;
+   }
+-  return tip.element;
++  return tooltip.element;
+ }
+ 
+ function place(element: HTMLElement, anchor: HTMLElement): void {
+@@ -65,34 +73,33 @@ function keyPressed(event: KeyboardEvent): void {
+   }
+ }
+ 
+-function listen(): void {
+-  window.addEventListener("pointerdown", hide, { capture: true, passive: true });
+-  window.addEventListener("keydown", keyPressed, { capture: true });
+-  window.addEventListener("scroll", hide, { capture: true, passive: true });
+-}
+-
+-function unlisten(): void {
+-  window.removeEventListener("pointerdown", hide, { capture: true });
+-  window.removeEventListener("keydown", keyPressed, { capture: true });
+-  window.removeEventListener("scroll", hide, { capture: true });
++function listen(): () => void {
++  const stops = [
++    useEventListener(window, ["pointerdown", "scroll"], hide, { capture: true, passive: true }),
++    useEventListener(window, "keydown", keyPressed, { capture: true }),
++  ];
++  return () => {
++    for (const stop of stops) {
++      stop();
++    }
++  };
+ }
+ 
+ function hide(): void {
+-  const { phase } = tip;
++  const { phase } = tooltip;
+   if (phase === null) {
+     return;
+   }
+-  if (phase.kind === "waiting") {
+-    clearTimeout(phase.timer);
+-  } else {
+-    tip.closedAt = Date.now();
+-    phase.tip.hidden = true;
++  waiting.stop();
++  if (phase.kind === "shown") {
++    tooltip.closedAt = Date.now();
++    tipElement().hidden = true;
+   }
+-  tip.phase = null;
+-  unlisten();
++  tooltip.phase = null;
++  phase.unlisten();
+ }
+ 
+-function show(bound: Bound): void {
++function show(bound: Bound, unlisten: () => void): void {
+   if (bound.text === null) {
+     hide();
+     return;
+@@ -101,7 +108,7 @@ function show(bound: Bound): void {
+   element.textContent = bound.text;
+   element.hidden = false;
+   place(element, bound.element);
+-  tip.phase = { kind: "shown", bound, tip: element };
++  tooltip.phase = { kind: "shown", bound, unlisten };
+ }
+ 
+ function entered(bound: Bound): void {
+@@ -109,20 +116,17 @@ function entered(bound: Bound): void {
+   if (bound.text === null) {
+     return;
+   }
+-  const delay = delayBefore(tip.closedAt, Date.now());
+-  if (delay === 0) {
+-    show(bound);
++  const unlisten = listen();
++  if (delayBefore(tooltip.closedAt, Date.now()) === 0) {
++    show(bound, unlisten);
+   } else {
+-    const timer = setTimeout(() => {
+-      show(bound);
+-    }, delay);
+-    tip.phase = { kind: "waiting", bound, timer };
++    tooltip.phase = { kind: "waiting", bound, unlisten };
++    waiting.start();
+   }
+-  listen();
+ }
+ 
+ function hideFor(bound: Bound): void {
+-  if (tip.phase?.bound === bound) {
++  if (tooltip.phase?.bound === bound) {
+     hide();
+   }
+ }
+@@ -139,16 +143,16 @@ function mounted(element: HTMLElement, { value }: DirectiveBinding<string | null
+   const bound: Bound = {
+     element,
+     text: value === "" ? null : value,
+-    enter: () => {
+-      entered(bound);
+-    },
+-    leave: () => {
+-      hideFor(bound);
+-    },
++    unbind: [
++      useEventListener(element, "pointerenter", () => {
++        entered(bound);
++      }),
++      useEventListener(element, "pointerleave", () => {
++        hideFor(bound);
++      }),
++    ],
+   };
+   bindings.set(element, bound);
+-  element.addEventListener("pointerenter", bound.enter);
+-  element.addEventListener("pointerleave", bound.leave);
+   describe(element, bound.text);
+ }
+ 
+@@ -159,8 +163,9 @@ function updated(element: HTMLElement, { value }: DirectiveBinding<string | null
+   }
+   bound.text = value === "" ? null : value;
+   describe(element, bound.text);
+-  if (tip.phase?.kind === "shown" && tip.phase.bound === bound) {
+-    show(bound);
++  const { phase } = tooltip;
++  if (phase?.kind === "shown" && phase.bound === bound) {
++    show(bound, phase.unlisten);
+   }
+ }
+ 
+@@ -170,8 +175,9 @@ function beforeUnmount(element: HTMLElement): void {
+   if (bound === undefined) {
+     return;
+   }
+-  element.removeEventListener("pointerenter", bound.enter);
+-  element.removeEventListener("pointerleave", bound.leave);
++  for (const stop of bound.unbind) {
++    stop();
++  }
+   hideFor(bound);
+ }
+ 
+diff --git a/frontend/src/ui/useDropdownMenu.test.ts b/frontend/src/ui/useDropdownMenu.test.ts
+new file mode 100644
+index 0000000..f6268ab
+--- /dev/null
++++ b/frontend/src/ui/useDropdownMenu.test.ts
+@@ -0,0 +1,332 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope, nextTick, type EffectScope } from "vue";
++
++import { useDropdownMenu, type DropdownMenu } from "./useDropdownMenu";
++
++const focusTarget = vi.hoisted(() => {
++  const document = { hasFocus: () => true, createElement: () => ({}) };
++  const window = Object.assign(new EventTarget(), { document });
++  vi.stubGlobal("document", document);
++  vi.stubGlobal("window", window);
++  return window;
++});
++
++type Which = "assignee" | "label";
++
++class FakeElement {
++  readonly parentElement = null;
++  readonly items: FakeElement[] = [];
++  bottom = 0;
++  constructor(readonly name: string) {}
++  focus(): void {
++    page.focused = this;
++  }
++  contains(node: unknown): boolean {
++    return node === this || this.items.some((item) => item === node);
++  }
++  querySelector(): FakeElement | null {
++    return this.items[0] ?? null;
++  }
++  querySelectorAll(): FakeElement[] {
++    return this.items;
++  }
++  getBoundingClientRect(): { readonly bottom: number } {
++    return { bottom: this.bottom };
++  }
++}
++
++const VIEWPORT_HEIGHT = 1000;
++
++const page: { focused: unknown; body: FakeElement } = {
++  focused: null,
++  body: new FakeElement("body"),
++};
++
++let scope: EffectScope;
++let pageWindow: EventTarget;
++let menu: FakeElement;
++let item: FakeElement;
++let elsewhere: FakeElement;
++let openers: Readonly<Record<Which, FakeElement>>;
++let drawn: { menu: boolean; opener: boolean };
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  vi.stubGlobal("HTMLElement", FakeElement);
++  vi.stubGlobal("Element", FakeElement);
++  vi.stubGlobal("Node", FakeElement);
++  pageWindow = Object.assign(new EventTarget(), { innerHeight: VIEWPORT_HEIGHT });
++  vi.stubGlobal("window", pageWindow);
++  vi.stubGlobal("document", {
++    body: page.body,
++    get activeElement() {
++      return page.focused;
++    },
++  });
++  page.focused = page.body;
++  menu = new FakeElement("menu");
++  item = new FakeElement("item");
++  menu.items.push(item);
++  elsewhere = new FakeElement("elsewhere");
++  openers = { assignee: new FakeElement("assignee"), label: new FakeElement("label") };
++  drawn = { menu: true, opener: true };
++  scope = effectScope();
++});
++
++afterEach(() => {
++  scope.stop();
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++
++function asElement(fake: FakeElement): HTMLElement {
++  if (fake instanceof HTMLElement) {
++    return fake;
++  }
++  throw new Error("HTMLElement is not the stub");
++}
++
++function dropdownMenu(): DropdownMenu<Which> {
++  const made = scope.run(() =>
++    useDropdownMenu<Which>({
++      menu: () => (drawn.menu ? asElement(menu) : null),
++      opener: (which) => (drawn.opener ? asElement(openers[which]) : null),
++    }),
++  );
++  if (made === undefined) {
++    throw new Error("scope stopped");
++  }
++  return made;
++}
++
++async function settle(): Promise<void> {
++  await nextTick();
++  await nextTick();
++  await nextTick();
++}
++
++async function opened(how: "open" | "toggle"): Promise<DropdownMenu<Which>> {
++  const dropdown = dropdownMenu();
++  await dropdown[how]("assignee");
++  await settle();
++  return dropdown;
++}
++
++function aimedAt(type: string, target: FakeElement): Event {
++  const event = Object.assign(new Event(type), { detail: 1, composedPath: () => [] });
++  Object.defineProperty(event, "target", { value: target });
++  return event;
++}
++
++async function rightClick(target: FakeElement): Promise<void> {
++  pageWindow.dispatchEvent(aimedAt("contextmenu", target));
++  await settle();
++}
++
++async function click(target: FakeElement): Promise<void> {
++  focusTarget.dispatchEvent(aimedAt("pointerdown", target));
++  focusTarget.dispatchEvent(aimedAt("click", target));
++  vi.runOnlyPendingTimers();
++  await settle();
++}
++
++async function windowFocus(type: "blur" | "focus"): Promise<void> {
++  focusTarget.dispatchEvent(new Event(type));
++  await settle();
++}
++
++test("dismiss with focus on the page body leaves it there", async () => {
++  const dropdown = await opened("open");
++
++  await dropdown.dismiss();
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(page.body);
++});
++
++test("dismiss with focus outside the menu leaves it there", async () => {
++  const dropdown = await opened("open");
++  page.focused = elsewhere;
++
++  await dropdown.dismiss();
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(elsewhere);
++});
++
++test("dismiss with focus in the menu returns it to the opener", async () => {
++  const dropdown = await opened("open");
++  page.focused = item;
++
++  await dropdown.dismiss();
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("dismiss of a menu that is not drawn closes it and moves no focus", async () => {
++  const dropdown = await opened("open");
++  drawn.menu = false;
++
++  await dropdown.dismiss();
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(page.body);
++});
++
++test("closing when the opener is gone moves no focus", async () => {
++  const dropdown = await opened("toggle");
++  drawn.opener = false;
++
++  await dropdown.close();
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(item);
++});
++
++test("closing with nothing open moves no focus", async () => {
++  const dropdown = dropdownMenu();
++
++  await dropdown.close();
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(page.body);
++});
++
++test("a right click elsewhere with focus on the page body still returns focus to the opener", async () => {
++  const dropdown = await opened("toggle");
++  page.focused = page.body;
++
++  await rightClick(elsewhere);
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("a right click elsewhere with focus outside the menu leaves it there", async () => {
++  const dropdown = await opened("toggle");
++  page.focused = elsewhere;
++
++  await rightClick(elsewhere);
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(elsewhere);
++});
++
++test("a right click elsewhere with focus in the menu returns it to the opener", async () => {
++  const dropdown = await opened("toggle");
++  expect(page.focused).toBe(item);
++
++  await rightClick(elsewhere);
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("a right click inside the open menu keeps it open", async () => {
++  const dropdown = await opened("toggle");
++
++  await rightClick(item);
++
++  expect(dropdown.openFor.value).toBe("assignee");
++});
++
++test("a click elsewhere closes the menu; a click on its opener is left to the opener", async () => {
++  const dropdown = await opened("toggle");
++
++  await click(openers.assignee);
++  expect(dropdown.openFor.value).toBe("assignee");
++  await click(elsewhere);
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("a click with no menu open moves no focus", async () => {
++  const dropdown = dropdownMenu();
++
++  await click(elsewhere);
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(page.body);
++});
++
++test("window blur closes a toggled menu and returns focus to its opener", async () => {
++  const dropdown = await opened("toggle");
++  page.focused = page.body;
++
++  await windowFocus("blur");
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("window blur closes a menu opened without focus and leaves focus where it was", async () => {
++  const dropdown = await opened("open");
++  page.focused = elsewhere;
++
++  await windowFocus("blur");
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(elsewhere);
++});
++
++test("window blur with no menu open moves no focus, and focus coming back leaves a new menu open", async () => {
++  const dropdown = dropdownMenu();
++
++  await windowFocus("blur");
++  expect(page.focused).toBe(page.body);
++  await dropdown.toggle("label");
++  await windowFocus("focus");
++
++  expect(dropdown.openFor.value).toBe("label");
++});
++
++test("a menu opened without focus keeps it; toggling it then moves focus in, toggling again closes", async () => {
++  const dropdown = await opened("open");
++  expect(dropdown.opened.value).toEqual({ which: "assignee", focus: "kept" });
++  expect(page.focused).toBe(page.body);
++
++  await dropdown.toggle("assignee");
++  expect(dropdown.opened.value).toEqual({ which: "assignee", focus: "moved" });
++  expect(page.focused).toBe(item);
++
++  await dropdown.toggle("assignee");
++  expect(dropdown.opened.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("a toggled menu closes on a second toggle", async () => {
++  const dropdown = await opened("toggle");
++
++  await dropdown.toggle("assignee");
++
++  expect(dropdown.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("toggling another opener while a menu is open switches to it", async () => {
++  const dropdown = await opened("toggle");
++
++  await dropdown.toggle("label");
++
++  expect(dropdown.opened.value).toEqual({ which: "label", focus: "moved" });
++});
++
++test("a toggled menu that does not fit below opens above", async () => {
++  menu.bottom = VIEWPORT_HEIGHT + 1;
++
++  const dropdown = await opened("toggle");
++
++  expect(dropdown.above.value).toBe(true);
++});
++
++test("toggling a menu opened without focus moves focus in without placing it again", async () => {
++  menu.bottom = VIEWPORT_HEIGHT + 1;
++  const dropdown = await opened("open");
++  menu.bottom = VIEWPORT_HEIGHT;
++
++  await dropdown.toggle("assignee");
++
++  expect(dropdown.above.value).toBe(true);
++});
+diff --git a/frontend/src/ui/useDropdownMenu.ts b/frontend/src/ui/useDropdownMenu.ts
+index bea1f23..ee29c28 100644
+--- a/frontend/src/ui/useDropdownMenu.ts
++++ b/frontend/src/ui/useDropdownMenu.ts
+@@ -1,5 +1,5 @@
+ import { onClickOutside, useEventListener, useWindowFocus } from "@vueuse/core";
+-import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
++import { computed, nextTick, shallowRef, watch, type ShallowRef } from "vue";
+ 
+ import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
+ 
+@@ -8,13 +8,16 @@ type DropdownParts<T> = {
+   readonly opener: (which: T) => HTMLElement | null;
+ };
+ 
++type Opened<T> = { readonly which: T; readonly focus: "kept" | "moved" };
++
+ type Dropdown<T> = DropdownParts<T> & {
+-  readonly openFor: ShallowRef<T | null>;
++  readonly opened: ShallowRef<Opened<T> | null>;
+   readonly above: ShallowRef<boolean>;
+ };
+ 
+ export type DropdownMenu<T> = {
+   readonly openFor: Readonly<ShallowRef<T | null>>;
++  readonly opened: Readonly<ShallowRef<Opened<T> | null>>;
+   readonly above: Readonly<ShallowRef<boolean>>;
+   readonly toggle: (which: T) => Promise<void>;
+   readonly open: (which: T) => Promise<void>;
+@@ -32,49 +35,58 @@ function visibleBottom(element: HTMLElement): number {
+   return window.innerHeight;
+ }
+ 
+-async function close<T>({ openFor, opener }: Dropdown<T>): Promise<void> {
+-  const which = openFor.value;
+-  openFor.value = null;
+-  if (which !== null) {
++async function close<T>({ opened, opener }: Dropdown<T>): Promise<void> {
++  const was = opened.value;
++  opened.value = null;
++  if (was !== null) {
+     await nextTick();
+-    opener(which)?.focus();
++    opener(was.which)?.focus();
+   }
+ }
+ 
+-async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
+-  const focused = document.activeElement;
+-  if (focused !== document.body && dropdown.menu()?.contains(focused) !== true) {
+-    dropdown.openFor.value = null;
++async function dismiss<T>(dropdown: Dropdown<T>): Promise<void> {
++  if (dropdown.menu()?.contains(document.activeElement) === true) {
++    await close(dropdown);
+     return;
+   }
+-  await close(dropdown);
++  dropdown.opened.value = null;
++}
++
++async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
++  await (document.activeElement === document.body ? close(dropdown) : dismiss(dropdown));
+ }
+ 
+ function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void {
+   const target = event.target;
+   const inside = target instanceof Node && dropdown.menu()?.contains(target) === true;
+-  if (dropdown.openFor.value !== null && !inside) {
++  if (dropdown.opened.value !== null && !inside) {
+     void closeAfterClick(dropdown);
+   }
+ }
+ 
+-async function open<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
+-  dropdown.openFor.value = which;
++async function open<T>(dropdown: Dropdown<T>, opened: Opened<T>): Promise<void> {
++  dropdown.opened.value = opened;
+   dropdown.above.value = false;
+   await nextTick();
+-  const opened = dropdown.menu();
+-  if (opened !== null) {
+-    dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
++  const menu = dropdown.menu();
++  if (menu !== null) {
++    dropdown.above.value = menu.getBoundingClientRect().bottom > visibleBottom(menu);
+   }
+ }
+ 
+ async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
+-  if (dropdown.openFor.value === which) {
++  const was = dropdown.opened.value;
++  const isOpen = was !== null && was.which === which;
++  if (isOpen && was.focus === "moved") {
+     await close(dropdown);
+     return;
+   }
+-  await open(dropdown, which);
+-  await nextTick();
++  if (isOpen) {
++    dropdown.opened.value = { which, focus: "moved" };
++  } else {
++    await open(dropdown, { which, focus: "moved" });
++    await nextTick();
++  }
+   dropdown.menu()?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+ }
+ 
+@@ -102,8 +114,14 @@ function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
+   }
+ }
+ 
++function windowFocusChanged<T>(dropdown: Dropdown<T>, focused: boolean): void {
++  if (!focused) {
++    void (dropdown.opened.value?.focus === "kept" ? dismiss(dropdown) : close(dropdown));
++  }
++}
++
+ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
+-  const dropdown: Dropdown<T> = { ...parts, openFor: shallowRef(null), above: shallowRef(false) };
++  const dropdown: Dropdown<T> = { ...parts, opened: shallowRef(null), above: shallowRef(false) };
+   onClickOutside(
+     parts.menu,
+     () => {
+@@ -111,8 +129,8 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
+     },
+     {
+       ignore: () => {
+-        const which = dropdown.openFor.value;
+-        const opener = which === null ? null : parts.opener(which);
++        const opened = dropdown.opened.value;
++        const opener = opened === null ? null : parts.opener(opened.which);
+         return opener === null ? [] : [opener];
+       },
+     },
+@@ -126,17 +144,16 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
+     { capture: true },
+   );
+   watch(useWindowFocus(), (focused) => {
+-    if (!focused) {
+-      void close(dropdown);
+-    }
++    windowFocusChanged(dropdown, focused);
+   });
+   return {
+-    openFor: dropdown.openFor,
++    openFor: computed(() => dropdown.opened.value?.which ?? null),
++    opened: dropdown.opened,
+     above: dropdown.above,
+     toggle: (which) => toggle(dropdown, which),
+-    open: (which) => open(dropdown, which),
++    open: (which) => open(dropdown, { which, focus: "kept" }),
+     close: () => close(dropdown),
+-    dismiss: () => closeAfterClick(dropdown),
++    dismiss: () => dismiss(dropdown),
+     menuKey: (event) => {
+       menuKey(dropdown, event);
+     },
+diff --git a/frontend/src/ui/useHoverMenu.test.ts b/frontend/src/ui/useHoverMenu.test.ts
+index a3ccc12..3f5e0e6 100644
+--- a/frontend/src/ui/useHoverMenu.test.ts
++++ b/frontend/src/ui/useHoverMenu.test.ts
+@@ -3,10 +3,12 @@ import { effectScope, nextTick, type EffectScope } from "vue";
+ 
+ import { HOVER_CLOSE_MS, useHoverMenu, type HoverMenu } from "./useHoverMenu";
+ 
+-vi.hoisted(() => {
++const focusTarget = vi.hoisted(() => {
+   const document = { hasFocus: () => true, createElement: () => ({}) };
++  const window = Object.assign(new EventTarget(), { document });
+   vi.stubGlobal("document", document);
+-  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
++  vi.stubGlobal("window", window);
++  return window;
+ });
+ 
+ type Which = "assignee" | "label";
+@@ -15,6 +17,7 @@ class FakeElement {
+   readonly parentElement = null;
+   bottom = 100;
+   readonly items: FakeElement[] = [];
++  constructor(readonly name: string) {}
+   focus(): void {
+     page.focused = this;
+   }
+@@ -40,7 +43,10 @@ class FakeKeyboardEvent extends Event {
+   }
+ }
+ 
+-const page: { focused: unknown; body: FakeElement } = { focused: null, body: new FakeElement() };
++const page: { focused: unknown; body: FakeElement } = {
++  focused: null,
++  body: new FakeElement("body"),
++};
+ 
+ let scope: EffectScope;
+ let menu: FakeElement;
+@@ -59,10 +65,10 @@ beforeEach(() => {
+     },
+   });
+   page.focused = page.body;
+-  menu = new FakeElement();
+-  item = new FakeElement();
++  menu = new FakeElement("menu");
++  item = new FakeElement("item");
+   menu.items.push(item);
+-  openers = { assignee: new FakeElement(), label: new FakeElement() };
++  openers = { assignee: new FakeElement("assignee"), label: new FakeElement("label") };
+   menuShown = true;
+   scope = effectScope();
+ });
+@@ -153,7 +159,7 @@ test("leaving_closes_after_300_ms_and_re_entering_cancels", async () => {
+ });
+ 
+ test("leaving with focus outside the menu leaves focus there", async () => {
+-  const row = new FakeElement();
++  const row = new FakeElement("row");
+   const hover = await hoverOpened("assignee");
+   page.focused = row;
+ 
+@@ -177,6 +183,39 @@ test("leaving with focus in the menu returns it to the opener", async () => {
+   expect(page.focused).toBe(openers.assignee);
+ });
+ 
++test("leaving with focus on the page body leaves it there", async () => {
++  const hover = await hoverOpened("assignee");
++
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  await settle();
++
++  expect([hover.openFor.value, page.focused]).toEqual([null, page.body]);
++});
++
++test("window blur closes a hover-opened menu and leaves focus where it was", async () => {
++  const row = new FakeElement("row");
++  const hover = await hoverOpened("assignee");
++  page.focused = row;
++
++  focusTarget.dispatchEvent(new Event("blur"));
++  await settle();
++
++  expect([hover.openFor.value, page.focused]).toEqual([null, row]);
++});
++
++test("a menu toggled open after a hover-opened one closed elsewhere stays when hover leaves", async () => {
++  const hover = await hoverOpened("assignee");
++  focusTarget.dispatchEvent(new Event("blur"));
++  await settle();
++
++  await hover.toggle("assignee");
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect(hover.openFor.value).toBe("assignee");
++});
++
+ test("leaving with no menu open starts nothing", async () => {
+   const hover = await hoverOpened("assignee");
+   await hover.close();
+diff --git a/frontend/src/ui/useHoverMenu.ts b/frontend/src/ui/useHoverMenu.ts
+index 2f2c09e..e8a7570 100644
+--- a/frontend/src/ui/useHoverMenu.ts
++++ b/frontend/src/ui/useHoverMenu.ts
+@@ -1,6 +1,5 @@
+ import { useTimeoutFn } from "@vueuse/core";
+ 
+-import { MENU_ITEMS } from "./menuKeys";
+ import { useDropdownMenu, type DropdownMenu } from "./useDropdownMenu";
+ 
+ export const HOVER_CLOSE_MS = 300;
+@@ -16,7 +15,6 @@ export function useHoverMenu<T>(parts: {
+   readonly opener: (which: T) => HTMLElement | null;
+ }): HoverMenu<T> {
+   const dropdown = useDropdownMenu(parts);
+-  let byHover = false;
+   const closing = useTimeoutFn(
+     () => {
+       void dropdown.dismiss();
+@@ -29,24 +27,17 @@ export function useHoverMenu<T>(parts: {
+     pointerEntered: (which) => {
+       closing.stop();
+       if (dropdown.openFor.value !== which) {
+-        byHover = true;
+         void dropdown.open(which);
+       }
+     },
+     pointerLeft: () => {
+-      if (byHover && dropdown.openFor.value !== null) {
++      if (dropdown.opened.value?.focus === "kept") {
+         closing.start();
+       }
+     },
+     openerClicked: async (which) => {
+       closing.stop();
+-      const pinning = byHover && dropdown.openFor.value === which;
+-      byHover = false;
+-      if (pinning) {
+-        parts.menu()?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+-      } else {
+-        await dropdown.toggle(which);
+-      }
++      await dropdown.toggle(which);
+     },
+   };
+ }

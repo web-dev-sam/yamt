@@ -1,5 +1,5 @@
 import { onClickOutside, useEventListener, useWindowFocus } from "@vueuse/core";
-import { nextTick, shallowRef, watch, type ShallowRef } from "vue";
+import { computed, nextTick, shallowRef, watch, type ShallowRef } from "vue";
 
 import { MENU_ITEMS, stepMenuItem } from "./menuKeys";
 
@@ -8,13 +8,16 @@ type DropdownParts<T> = {
   readonly opener: (which: T) => HTMLElement | null;
 };
 
+type Opened<T> = { readonly which: T; readonly focus: "kept" | "moved" };
+
 type Dropdown<T> = DropdownParts<T> & {
-  readonly openFor: ShallowRef<T | null>;
+  readonly opened: ShallowRef<Opened<T> | null>;
   readonly above: ShallowRef<boolean>;
 };
 
 export type DropdownMenu<T> = {
   readonly openFor: Readonly<ShallowRef<T | null>>;
+  readonly opened: Readonly<ShallowRef<Opened<T> | null>>;
   readonly above: Readonly<ShallowRef<boolean>>;
   readonly toggle: (which: T) => Promise<void>;
   readonly open: (which: T) => Promise<void>;
@@ -32,49 +35,58 @@ function visibleBottom(element: HTMLElement): number {
   return window.innerHeight;
 }
 
-async function close<T>({ openFor, opener }: Dropdown<T>): Promise<void> {
-  const which = openFor.value;
-  openFor.value = null;
-  if (which !== null) {
+async function close<T>({ opened, opener }: Dropdown<T>): Promise<void> {
+  const was = opened.value;
+  opened.value = null;
+  if (was !== null) {
     await nextTick();
-    opener(which)?.focus();
+    opener(was.which)?.focus();
   }
 }
 
-async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
-  const focused = document.activeElement;
-  if (focused !== document.body && dropdown.menu()?.contains(focused) !== true) {
-    dropdown.openFor.value = null;
+async function dismiss<T>(dropdown: Dropdown<T>): Promise<void> {
+  if (dropdown.menu()?.contains(document.activeElement) === true) {
+    await close(dropdown);
     return;
   }
-  await close(dropdown);
+  dropdown.opened.value = null;
+}
+
+async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
+  await (document.activeElement === document.body ? close(dropdown) : dismiss(dropdown));
 }
 
 function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void {
   const target = event.target;
   const inside = target instanceof Node && dropdown.menu()?.contains(target) === true;
-  if (dropdown.openFor.value !== null && !inside) {
+  if (dropdown.opened.value !== null && !inside) {
     void closeAfterClick(dropdown);
   }
 }
 
-async function open<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
-  dropdown.openFor.value = which;
+async function open<T>(dropdown: Dropdown<T>, opened: Opened<T>): Promise<void> {
+  dropdown.opened.value = opened;
   dropdown.above.value = false;
   await nextTick();
-  const opened = dropdown.menu();
-  if (opened !== null) {
-    dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+  const menu = dropdown.menu();
+  if (menu !== null) {
+    dropdown.above.value = menu.getBoundingClientRect().bottom > visibleBottom(menu);
   }
 }
 
 async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
-  if (dropdown.openFor.value === which) {
+  const was = dropdown.opened.value;
+  const isOpen = was !== null && was.which === which;
+  if (isOpen && was.focus === "moved") {
     await close(dropdown);
     return;
   }
-  await open(dropdown, which);
-  await nextTick();
+  if (isOpen) {
+    dropdown.opened.value = { which, focus: "moved" };
+  } else {
+    await open(dropdown, { which, focus: "moved" });
+    await nextTick();
+  }
   dropdown.menu()?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
 }
 
@@ -102,8 +114,14 @@ function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
   }
 }
 
+function windowFocusChanged<T>(dropdown: Dropdown<T>, focused: boolean): void {
+  if (!focused) {
+    void (dropdown.opened.value?.focus === "kept" ? dismiss(dropdown) : close(dropdown));
+  }
+}
+
 export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
-  const dropdown: Dropdown<T> = { ...parts, openFor: shallowRef(null), above: shallowRef(false) };
+  const dropdown: Dropdown<T> = { ...parts, opened: shallowRef(null), above: shallowRef(false) };
   onClickOutside(
     parts.menu,
     () => {
@@ -111,8 +129,8 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
     },
     {
       ignore: () => {
-        const which = dropdown.openFor.value;
-        const opener = which === null ? null : parts.opener(which);
+        const opened = dropdown.opened.value;
+        const opener = opened === null ? null : parts.opener(opened.which);
         return opener === null ? [] : [opener];
       },
     },
@@ -126,17 +144,16 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
     { capture: true },
   );
   watch(useWindowFocus(), (focused) => {
-    if (!focused) {
-      void close(dropdown);
-    }
+    windowFocusChanged(dropdown, focused);
   });
   return {
-    openFor: dropdown.openFor,
+    openFor: computed(() => dropdown.opened.value?.which ?? null),
+    opened: dropdown.opened,
     above: dropdown.above,
     toggle: (which) => toggle(dropdown, which),
-    open: (which) => open(dropdown, which),
+    open: (which) => open(dropdown, { which, focus: "kept" }),
     close: () => close(dropdown),
-    dismiss: () => closeAfterClick(dropdown),
+    dismiss: () => dismiss(dropdown),
     menuKey: (event) => {
       menuKey(dropdown, event);
     },

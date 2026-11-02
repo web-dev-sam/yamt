@@ -3,10 +3,12 @@ import { effectScope, nextTick, type EffectScope } from "vue";
 
 import { HOVER_CLOSE_MS, useHoverMenu, type HoverMenu } from "./useHoverMenu";
 
-vi.hoisted(() => {
+const focusTarget = vi.hoisted(() => {
   const document = { hasFocus: () => true, createElement: () => ({}) };
+  const window = Object.assign(new EventTarget(), { document });
   vi.stubGlobal("document", document);
-  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
+  vi.stubGlobal("window", window);
+  return window;
 });
 
 type Which = "assignee" | "label";
@@ -15,6 +17,7 @@ class FakeElement {
   readonly parentElement = null;
   bottom = 100;
   readonly items: FakeElement[] = [];
+  constructor(readonly name: string) {}
   focus(): void {
     page.focused = this;
   }
@@ -40,7 +43,10 @@ class FakeKeyboardEvent extends Event {
   }
 }
 
-const page: { focused: unknown; body: FakeElement } = { focused: null, body: new FakeElement() };
+const page: { focused: unknown; body: FakeElement } = {
+  focused: null,
+  body: new FakeElement("body"),
+};
 
 let scope: EffectScope;
 let menu: FakeElement;
@@ -59,10 +65,10 @@ beforeEach(() => {
     },
   });
   page.focused = page.body;
-  menu = new FakeElement();
-  item = new FakeElement();
+  menu = new FakeElement("menu");
+  item = new FakeElement("item");
   menu.items.push(item);
-  openers = { assignee: new FakeElement(), label: new FakeElement() };
+  openers = { assignee: new FakeElement("assignee"), label: new FakeElement("label") };
   menuShown = true;
   scope = effectScope();
 });
@@ -153,7 +159,7 @@ test("leaving_closes_after_300_ms_and_re_entering_cancels", async () => {
 });
 
 test("leaving with focus outside the menu leaves focus there", async () => {
-  const row = new FakeElement();
+  const row = new FakeElement("row");
   const hover = await hoverOpened("assignee");
   page.focused = row;
 
@@ -175,6 +181,39 @@ test("leaving with focus in the menu returns it to the opener", async () => {
 
   expect(hover.openFor.value).toBeNull();
   expect(page.focused).toBe(openers.assignee);
+});
+
+test("leaving with focus on the page body leaves it there", async () => {
+  const hover = await hoverOpened("assignee");
+
+  hover.pointerLeft();
+  vi.advanceTimersByTime(HOVER_CLOSE_MS);
+  await settle();
+
+  expect([hover.openFor.value, page.focused]).toEqual([null, page.body]);
+});
+
+test("window blur closes a hover-opened menu and leaves focus where it was", async () => {
+  const row = new FakeElement("row");
+  const hover = await hoverOpened("assignee");
+  page.focused = row;
+
+  focusTarget.dispatchEvent(new Event("blur"));
+  await settle();
+
+  expect([hover.openFor.value, page.focused]).toEqual([null, row]);
+});
+
+test("a menu toggled open after a hover-opened one closed elsewhere stays when hover leaves", async () => {
+  const hover = await hoverOpened("assignee");
+  focusTarget.dispatchEvent(new Event("blur"));
+  await settle();
+
+  await hover.toggle("assignee");
+  hover.pointerLeft();
+  vi.advanceTimersByTime(HOVER_CLOSE_MS);
+
+  expect(hover.openFor.value).toBe("assignee");
 });
 
 test("leaving with no menu open starts nothing", async () => {
