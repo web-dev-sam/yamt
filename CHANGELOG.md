@@ -7,6 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The merge-request list decides each open row's conflicts by merging the two commits GitLab shows on the user's
+  machine, in the background, after GitLab's answers appear. A stale "has conflicts" or "still checking" from GitLab
+  is corrected without opening the merge request, and a row GitLab calls mergeable that does conflict shows "Has
+  conflicts". A clean merge GitLab has not fully checked yet reads "No conflicts (checked locally). GitLab has not
+  checked the rest yet", with a dashed check icon. Branches, the working tree, the index and `FETCH_HEAD` are never
+  touched; only missing commits are fetched, by name. Each pair of commits is merged once per run. Without a network
+  or with git older than 2.38 every row keeps GitLab's answer.
+
 ## [0.6.5] - 2026-10-31
 
 ### Added
