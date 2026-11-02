@@ -39,5 +39,9 @@ Facts for `docs/slices/request-local-conflict-check.md` "To be measured". Each l
 
 ## Cost of one merge-tree on a mid-size repository
 
-- Pending: a bare clone of gitlab-runner, `--quiet` merges of two merge requests and of a two-year-old commit
-  against `main`; appended below when it finishes.
+- Bare clone of `gitlab.com/gitlab-org/gitlab-runner` (pack 719 MiB, 1,466 files at `main`; clone 95 s, not part of
+  the feature). Merge requests !6008 and !6009 (heads fetched by name) are 2,049 commits behind `main`:
+  `merge-tree --write-tree --quiet main <head>` → exit 1 in 0.009–0.010 s each, repeated runs the same; without
+  `--quiet` 0.011–0.012 s. A commit from before 2024-01-01 against `main` (1,524 files, +254,935/−45,145 between them):
+  exit 0 in 0.003–0.005 s. Peak memory of the git children ≈ 41 MB. **One merge ≈ 10 ms on a mid-size repository**;
+  a monorepo with far larger trees is unmeasured ([INFERENCE]: tens to hundreds of ms).

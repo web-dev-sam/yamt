@@ -40,17 +40,21 @@ orchestrator (OR13, plan #147/#146): an unchanged end posts with no `type`, as G
 
 Request `docs/slices/request-local-conflict-check.md` (rules 1–8, acceptance, non-goals); measured facts
 `.omp/run/notes/PlanLocalConflictFacts.md`. Owner's answers: the local merge decides conflicts (#2079); every open row,
-GitLab's commits, never the user's branches or working tree (#2080). No product question open.
+GitLab's commits, never the user's branches or working tree (#2080). Design `briefs/local-conflicts-design.md` option A,
+plan §2 #149–#150, risk RK52. The designer's one question (git 2.38–2.49 leaves unreferenced objects) is answered by
+rule 6, which already allows them: decided, plan #150 (OR13). No product question open. Strictly sequential: one
+implementer at a time; the docs keeper may run beside row 4.
 
-| row | slice                                                                                                       | owner       | status  | evidence |
-| --- | ----------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
-| 1   | design (`briefs/local-conflicts-design.md`): measured facts, readiness shape, late results, per-pair memory | designer    | running |          |
-| 2   | git: `ls-remote` ids, fetch of missing commits with no refs, `merge-tree` result                            | rust-impl   | todo    |          |
-| 3   | merge requests: head field, rule 2/3/5 fold, per-pair memory, background run, command and bindings          | rust-impl   | todo    |          |
-| 4   | page: the new state's words and icon, rows updating as results arrive, fixtures                             | web-impl    | todo    |          |
-| 5   | docs keeper: architecture §3.9, project map, ipc contract                                                   | docs-keeper | todo    |          |
-| 6   | verify: `just check`, WebKit fixture, real app on a script-built repository with the fake glab              | verifier    | todo    |          |
-| 7   | owner check on the GitLab playground: a merge request GitLab marks conflicting after its target moved       | human       | todo    |          |
+| row | slice                                                                                                                    | owner        | status  | evidence                                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------ | ------------ | ------- | ------------------------------------------------------------------------------- |
+| 1   | design: measured facts, readiness shape, late results, per-pair memory                                                   | designer     | done    | `LocalConflictsDesign`: option A, three briefs; notes `LocalConflictsDesign.md` |
+| 2   | gitio (`briefs/local-conflicts-gitio.md`): `merge_tree`, `remote_refs`, `missing_commits`, `Oid: Hash`                   | rust-impl    | planned |                                                                                 |
+| 3   | check (`briefs/local-conflicts-check.md`): query fields, fold, `check_conflicts`, `MergedPairs`, `checked` message       | rust-impl    | planned |                                                                                 |
+| 3b  | `just bindings` after row 3 lands (`Readiness`, `CheckedRow`, `ListMessage`)                                             | orchestrator | todo    |                                                                                 |
+| 4   | page (`briefs/local-conflicts-page.md`): words, icon, rows updating, `?mr=local` fixture, real app; wires the window     | web-impl     | planned |                                                                                 |
+| 5   | docs keeper: design §4 "Shared edits" (architecture §3.2/§3.5/§3.9/§4/§5.1, tree.md script row, state.md, README:83)     | docs-keeper  | todo    |                                                                                 |
+| 6   | verify (`briefs/local-conflicts-verify.md`): smoke after row 4; final `just check`, WebKit, real app, unreachable remote | verifier     | planned |                                                                                 |
+| 7   | owner check on the GitLab playground: a merge request GitLab marks conflicting after its target moved                    | human        | todo    | the verify brief's "Owner check"                                                |
 
 ## Open product questions
 
