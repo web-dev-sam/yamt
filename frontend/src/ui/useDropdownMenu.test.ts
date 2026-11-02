@@ -14,7 +14,8 @@ const focusTarget = vi.hoisted(() => {
 type Which = "assignee" | "label";
 
 class FakeElement {
-  readonly parentElement = null;
+  parentElement: FakeElement | null = null;
+  overflowY = "visible";
   readonly items: FakeElement[] = [];
   bottom = 0;
   constructor(readonly name: string) {}
@@ -32,6 +33,14 @@ class FakeElement {
   }
   getBoundingClientRect(): { readonly bottom: number } {
     return { bottom: this.bottom };
+  }
+}
+
+class FakeKeyboardEvent extends Event {
+  readonly key: string;
+  constructor(key: string) {
+    super("keydown", { cancelable: true });
+    this.key = key;
   }
 }
 
@@ -55,6 +64,8 @@ beforeEach(() => {
   vi.stubGlobal("HTMLElement", FakeElement);
   vi.stubGlobal("Element", FakeElement);
   vi.stubGlobal("Node", FakeElement);
+  vi.stubGlobal("KeyboardEvent", FakeKeyboardEvent);
+  vi.stubGlobal("getComputedStyle", (element: FakeElement) => ({ overflowY: element.overflowY }));
   pageWindow = Object.assign(new EventTarget(), { innerHeight: VIEWPORT_HEIGHT });
   vi.stubGlobal("window", pageWindow);
   vi.stubGlobal("document", {
@@ -133,6 +144,15 @@ async function click(target: FakeElement): Promise<void> {
 async function windowFocus(type: "blur" | "focus"): Promise<void> {
   focusTarget.dispatchEvent(new Event(type));
   await settle();
+}
+
+function keyOn(target: FakeElement, name: string): KeyboardEvent {
+  const event = new FakeKeyboardEvent(name);
+  Object.defineProperty(event, "target", { value: target });
+  if (event instanceof KeyboardEvent) {
+    return event;
+  }
+  throw new Error("KeyboardEvent is not the stub");
 }
 
 test("dismiss with focus on the page body leaves it there", async () => {
@@ -329,4 +349,117 @@ test("toggling a menu opened without focus moves focus in without placing it aga
   await dropdown.toggle("assignee");
 
   expect(dropdown.above.value).toBe(true);
+});
+
+test("a click elsewhere with focus on the page body closes a menu opened without focus and leaves focus there", async () => {
+  const dropdown = await opened("open");
+
+  await click(elsewhere);
+
+  expect(dropdown.openFor.value).toBeNull();
+  expect(page.focused).toBe(page.body);
+});
+
+test("a right click elsewhere with focus on the page body closes a menu opened without focus and leaves focus there", async () => {
+  const dropdown = await opened("open");
+
+  await rightClick(elsewhere);
+
+  expect(dropdown.openFor.value).toBeNull();
+  expect(page.focused).toBe(page.body);
+});
+
+test("a right click while the open menu is not drawn yet closes it", async () => {
+  const dropdown = await opened("open");
+  drawn.menu = false;
+
+  await rightClick(elsewhere);
+
+  expect(dropdown.openFor.value).toBeNull();
+  expect(page.focused).toBe(page.body);
+});
+
+test("a menu that overflows its scrolled box opens above, though the window has room", async () => {
+  const wrapper = new FakeElement("wrapper");
+  const scroller = new FakeElement("scroller");
+  menu.parentElement = wrapper;
+  wrapper.parentElement = scroller;
+  wrapper.bottom = VIEWPORT_HEIGHT - 300;
+  scroller.overflowY = "auto";
+  scroller.bottom = VIEWPORT_HEIGHT - 500;
+  menu.bottom = VIEWPORT_HEIGHT - 400;
+
+  const dropdown = await opened("toggle");
+
+  expect(dropdown.above.value).toBe(true);
+});
+
+test("a menu that fits its scrolled box opens below", async () => {
+  const scroller = new FakeElement("scroller");
+  menu.parentElement = scroller;
+  scroller.overflowY = "auto";
+  scroller.bottom = VIEWPORT_HEIGHT - 500;
+  menu.bottom = VIEWPORT_HEIGHT - 600;
+
+  const dropdown = await opened("toggle");
+
+  expect(dropdown.above.value).toBe(false);
+});
+
+test("arrow keys step through the items, wrapping at both ends, and keep the key from scrolling", async () => {
+  const last = new FakeElement("last");
+  menu.items.push(last);
+  const dropdown = await opened("toggle");
+  const down = keyOn(item, "ArrowDown");
+  const up = keyOn(item, "ArrowUp");
+  const wrap = keyOn(last, "ArrowDown");
+
+  dropdown.menuKey(down);
+  expect(page.focused).toBe(last);
+  dropdown.menuKey(wrap);
+  expect(page.focused).toBe(item);
+  dropdown.menuKey(up);
+
+  expect(page.focused).toBe(last);
+  expect([down.defaultPrevented, up.defaultPrevented, wrap.defaultPrevented]).toEqual([
+    true,
+    true,
+    true,
+  ]);
+  expect(dropdown.openFor.value).toBe("assignee");
+});
+
+test("Escape closes the menu, returns focus to the opener and is consumed", async () => {
+  const dropdown = await opened("toggle");
+  const escape = keyOn(item, "Escape");
+
+  dropdown.menuKey(escape);
+  await settle();
+
+  expect(escape.defaultPrevented).toBe(true);
+  expect(dropdown.openFor.value).toBeNull();
+  expect(page.focused).toBe(openers.assignee);
+});
+
+test("other keys are left to the page", async () => {
+  const dropdown = await opened("toggle");
+  const letter = keyOn(item, "a");
+
+  dropdown.menuKey(letter);
+  await settle();
+
+  expect(letter.defaultPrevented).toBe(false);
+  expect(dropdown.openFor.value).toBe("assignee");
+  expect(page.focused).toBe(item);
+});
+
+test("an arrow key with no menu drawn is left to the page", async () => {
+  const dropdown = await opened("toggle");
+  drawn.menu = false;
+  const down = keyOn(item, "ArrowDown");
+
+  dropdown.menuKey(down);
+
+  expect(down.defaultPrevented).toBe(false);
+  expect(page.focused).toBe(item);
 });

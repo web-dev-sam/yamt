@@ -53,7 +53,9 @@ async function dismiss<T>(dropdown: Dropdown<T>): Promise<void> {
 }
 
 async function closeAfterClick<T>(dropdown: Dropdown<T>): Promise<void> {
-  await (document.activeElement === document.body ? close(dropdown) : dismiss(dropdown));
+  const focusLeftForBody =
+    dropdown.opened.value?.focus === "moved" && document.activeElement === document.body;
+  await (focusLeftForBody ? close(dropdown) : dismiss(dropdown));
 }
 
 function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void {

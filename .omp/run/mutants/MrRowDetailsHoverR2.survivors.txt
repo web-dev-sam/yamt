@@ -1,0 +1,9 @@
+just mutants HEAD (no dry-run stop; mutated useDropdownMenu.ts only): 133 killed / 8 survived / 2 no-cov / 3 errors, score 93.01
+useDropdownMenu.ts:64:7 `opened.value !== null`→true — equivalent: with nothing open, close() and dismiss() only set null, and close moves no focus when `was` is null
+useDropdownMenu.ts:108:7 `items[i]?.focus()`→`.focus()` — gate-covered: noUncheckedIndexedAccess makes vue-tsc reject it; the index is always < items.length
+useDropdownMenu.ts:110:10 case "ignore"→"" — gate-covered: vue-tsc rejects "" against MenuStep kind; at runtime the default arm returns step to a void caller
+useDropdownMenu.ts:110:5 `return` removed in case "ignore" — equivalent: falls into default, which only returns step to a void caller
+useDropdownMenu.ts:112:5,112:14 default arm (no-cov) — gate-covered: `never` exhaustiveness, unreachable by type
+useDropdownMenu.ts:136:16 `opener === null`→false — equivalent: onClickOutside skips null ignore entries (`el && …`)
+useDropdownMenu.ts:126:89 above shallowRef(false)→true — equivalent: open() sets above=false before any menu is drawn
+useDropdownMenu.ts:146 {capture:true}→{}/false — wiring, pre-slice gap (84ec8fa7): the fake EventTarget has no tree to tell capture from bubble; needs a browser test
