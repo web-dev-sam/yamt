@@ -36,6 +36,22 @@ orchestrator (OR13, plan #147/#146): an unchanged end posts with no `type`, as G
 | 7   | verify (`briefs/line-ranges-verify.md`): smoke after 4+5; final `just check`, WebKit, real app                              | verifier    | done        | `LineRangesFinal` B–D pass (WebKit 27/27 on private copy #1445; fixture C1–C9; real app format 2, ranges back after restart, dark+light); A re-pass `LineRangesFinalRepass`: `just check` pass at `3a145993`            |
 | 8   | owner check on the GitLab playground (`scripts/gitlab-playground.sh`): send a range in one column and one across both sides | human       | handed over | expected in GitLab: "Comment on lines 201 to +204" and "Comment on lines -200 to +204" (verify brief, after Acceptance)                                                                                                 |
 
+## Local conflict check (session 43; owner #2079–#2080: "check it ourself locally and keep it cheap")
+
+Request `docs/slices/request-local-conflict-check.md` (rules 1–8, acceptance, non-goals); measured facts
+`.omp/run/notes/PlanLocalConflictFacts.md`. Owner's answers: the local merge decides conflicts (#2079); every open row,
+GitLab's commits, never the user's branches or working tree (#2080). No product question open.
+
+| row | slice                                                                                                       | owner       | status  | evidence |
+| --- | ----------------------------------------------------------------------------------------------------------- | ----------- | ------- | -------- |
+| 1   | design (`briefs/local-conflicts-design.md`): measured facts, readiness shape, late results, per-pair memory | designer    | running |          |
+| 2   | git: `ls-remote` ids, fetch of missing commits with no refs, `merge-tree` result                            | rust-impl   | todo    |          |
+| 3   | merge requests: head field, rule 2/3/5 fold, per-pair memory, background run, command and bindings          | rust-impl   | todo    |          |
+| 4   | page: the new state's words and icon, rows updating as results arrive, fixtures                             | web-impl    | todo    |          |
+| 5   | docs keeper: architecture §3.9, project map, ipc contract                                                   | docs-keeper | todo    |          |
+| 6   | verify: `just check`, WebKit fixture, real app on a script-built repository with the fake glab              | verifier    | todo    |          |
+| 7   | owner check on the GitLab playground: a merge request GitLab marks conflicting after its target moved       | human       | todo    |          |
+
 ## Open product questions
 
 See `docs/architecture.md` §10. Answered ones move into `docs/plan.md` §2.
