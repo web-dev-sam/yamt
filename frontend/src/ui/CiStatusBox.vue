@@ -90,12 +90,15 @@ function openJob({ page }: FailedJob): void {
       <template v-else>
         <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ FAILED_JOBS_TITLE }}</p>
         <ul>
-          <li v-for="(job, index) in view.jobs" :key="index">
+          <li
+            v-for="(job, index) in view.jobs"
+            :key="index"
+            v-tooltip="jobTitle(job.name, job.page)"
+          >
             <button
-              v-tooltip="jobTitle(job.name, job.page)"
               type="button"
               :disabled="job.page === null"
-              class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
+              class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:pointer-events-none"
               @click="openJob(job)"
             >
               <span>{{ job.name }}</span>

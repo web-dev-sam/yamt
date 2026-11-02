@@ -1,0 +1,388 @@
+diff --git a/frontend/src/mergeRequests/internal/people.test.ts b/frontend/src/mergeRequests/internal/people.test.ts
+index 0bb4ee0..32fe620 100644
+--- a/frontend/src/mergeRequests/internal/people.test.ts
++++ b/frontend/src/mergeRequests/internal/people.test.ts
+@@ -51,6 +51,17 @@ test("an empty stack shows nobody", () => {
+   expect(NO_PEOPLE_TEXT).toBe("No assignee or reviewer");
+ });
+ 
++test("the stack gives back the people it was given, with all their fields", () => {
++  type Pictured = Person & { readonly picture: string | null };
++  const pictured: Pictured = { ...SAM, picture: "sam.png" };
++  const reviewer: { readonly person: Pictured } = { person: { ...ANNA, picture: null } };
++
++  const { shown } = peopleStack([pictured], [reviewer]);
++
++  expect(shown).toEqual([pictured, reviewer.person]);
++  expect(shown[0]).toBe(pictured);
++});
++
+ test("a blank name reads as the username", () => {
+   expect(displayName(SAM)).toBe("Sam Lee");
+   expect(displayName(NAMELESS)).toBe("jdoe");
+diff --git a/frontend/src/mergeRequests/internal/people.ts b/frontend/src/mergeRequests/internal/people.ts
+index 3b6c54c..2c5e8a4 100644
+--- a/frontend/src/mergeRequests/internal/people.ts
++++ b/frontend/src/mergeRequests/internal/people.ts
+@@ -1,4 +1,4 @@
+-import type { Person, ReviewState, Reviewer } from "./filters";
++import type { Person, ReviewState } from "./filters";
+ 
+ export const STACK_SHOWN = 3;
+ export const NO_PEOPLE_TEXT = "No assignee or reviewer";
+@@ -21,10 +21,10 @@ const REVIEW_DONE: Readonly<Record<ReviewState, boolean>> = {
+   changesRequested: true,
+ };
+ 
+-export function peopleStack(
+-  assignees: readonly Person[],
+-  reviewers: readonly Reviewer[],
+-): { readonly shown: readonly Person[]; readonly more: number } {
++export function peopleStack<P extends Person>(
++  assignees: readonly P[],
++  reviewers: readonly { readonly person: P }[],
++): { readonly shown: readonly P[]; readonly more: number } {
+   const assigned = new Set(assignees.map((person) => person.username));
+   const people = [
+     ...assignees,
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index da56495..465da7d 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -46,9 +46,9 @@ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`
+ 
+ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+-Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click.
++Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). WebKit sends no pointer events to a disabled button, so a control that can be disabled (a CI job without a log, the row action, open changes while fetching) carries its tip on a wrapper and the button `disabled:pointer-events-none`. `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); it and the due-date box close on a scroll outside them (`useScrollOutside`, capture phase, the one copy of that rule). `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click; Escape with a filter list open closes the list, not the page.
+ 
+-Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"`; nobody is the muted `user-round`), the text column (labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs, and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date over the days left in the error colour when overdue; its box holds a native date field — WebKitGTK fires `change` on Enter or blur, `input` on each digit — and Clear), then discussions and approvals (`approversText`, one name per line). Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"` written before `src`; nobody is the muted `user-round`), the text column (labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`, generic over the domain `Person`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs (`aria-disabled`, not `disabled`, so keyboard focus stays on it; when a reply removes the focused button, focus moves to the box itself), and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date over the days left in the error colour when overdue; its box holds a native date field — WebKitGTK fires `change` on Enter or blur, `input` on each digit — and Clear), then discussions and approvals (`approversText`, one name per line). Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/CiStatusBox.vue b/frontend/src/ui/CiStatusBox.vue
+index 12623ff..d9b203d 100644
+--- a/frontend/src/ui/CiStatusBox.vue
++++ b/frontend/src/ui/CiStatusBox.vue
+@@ -90,12 +90,15 @@ function openJob({ page }: FailedJob): void {
+       <template v-else>
+         <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ FAILED_JOBS_TITLE }}</p>
+         <ul>
+-          <li v-for="(job, index) in view.jobs" :key="index">
++          <li
++            v-for="(job, index) in view.jobs"
++            :key="index"
++            v-tooltip="jobTitle(job.name, job.page)"
++          >
+             <button
+-              v-tooltip="jobTitle(job.name, job.page)"
+               type="button"
+               :disabled="job.page === null"
+-              class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
++              class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:pointer-events-none"
+               @click="openJob(job)"
+             >
+               <span>{{ job.name }}</span>
+diff --git a/frontend/src/ui/MergeRequestDueDate.vue b/frontend/src/ui/MergeRequestDueDate.vue
+index 7152dbe..3311689 100644
+--- a/frontend/src/ui/MergeRequestDueDate.vue
++++ b/frontend/src/ui/MergeRequestDueDate.vue
+@@ -14,6 +14,7 @@ import {
+ import type { Point } from "./menuPosition";
+ import { CLEAR_DUE_DATE, dueDateLabel, SET_DUE_DATE } from "./mergeRequestsText";
+ import { vTooltip } from "./tooltip";
++import { useScrollOutside } from "./useHoverBox";
+ import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
+ 
+ const props = defineProps<{ due: CalendarDay | null; now: number }>();
+@@ -32,6 +33,12 @@ onClickOutside(
+   },
+   { ignore: [opener] },
+ );
++useScrollOutside(
++  () => box.value,
++  () => {
++    open.value = false;
++  },
++);
+ 
+ const shown = computed(() => {
+   if (props.due === null) {
+diff --git a/frontend/src/ui/MergeRequestPeople.vue b/frontend/src/ui/MergeRequestPeople.vue
+index ca0ee66..96ee404 100644
+--- a/frontend/src/ui/MergeRequestPeople.vue
++++ b/frontend/src/ui/MergeRequestPeople.vue
+@@ -58,17 +58,7 @@ const { open, placement, on } = useHoverBox({
+   box,
+ });
+ 
+-const stack = computed(() => {
+-  const { assignees } = props.row;
+-  const people = new Map(
+-    [...assignees, ...props.row.reviewers.map(({ person }) => person)].map((person) => [
+-      person.username,
+-      person,
+-    ]),
+-  );
+-  const { shown, more } = peopleStack(assignees, props.row.reviewers);
+-  return { shown: shown.flatMap(({ username }) => people.get(username) ?? []), more };
+-});
++const stack = computed(() => peopleStack(props.row.assignees, props.row.reviewers));
+ const reviewers = computed(() => props.row.reviewers.map(reviewerLine));
+ 
+ watch(open, (isOpen) => {
+@@ -76,6 +66,7 @@ watch(open, (isOpen) => {
+     emit("closed");
+   }
+ });
++watch(reviewers, keepFocusInBox, { flush: "pre" });
+ 
+ function reviewerLine(reviewer: Reviewer): ReviewerLine {
+   const name = displayName(reviewer.person);
+@@ -92,6 +83,20 @@ function reviewerLine(reviewer: Reviewer): ReviewerLine {
+     refusal: ask?.kind === "refused" ? rerequestReplyText(ask.reply, name) : null,
+   };
+ }
++
++function keepFocusInBox(lines: readonly ReviewerLine[]): void {
++  const focused = document.activeElement;
++  const username =
++    focused instanceof HTMLElement && box.value?.contains(focused) === true
++      ? focused.dataset.rerequest
++      : undefined;
++  const kept = lines.some(
++    (line) => line.rerequest !== null && line.reviewer.person.username === username,
++  );
++  if (username !== undefined && !kept) {
++    box.value?.focus();
++  }
++}
+ </script>
+ 
+ <template>
+@@ -138,7 +143,8 @@ function reviewerLine(reviewer: Reviewer): ReviewerLine {
+     <div
+       v-if="open"
+       ref="box"
+-      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg"
++      tabindex="-1"
++      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
+       :style="placement"
+     >
+       <template v-if="row.assignees.length > 0">
+@@ -166,10 +172,11 @@ function reviewerLine(reviewer: Reviewer): ReviewerLine {
+                   v-if="line.rerequest !== null"
+                   v-tooltip="REREQUEST_REVIEW"
+                   type="button"
++                  :data-rerequest="line.reviewer.person.username"
+                   :aria-label="line.rerequest.label"
+                   :aria-busy="line.rerequest.running"
+-                  :disabled="line.rerequest.running"
+-                  class="rounded p-1 hover:bg-hover enabled:cursor-pointer disabled:text-fg-muted disabled:hover:bg-transparent"
++                  :aria-disabled="line.rerequest.running"
++                  class="rounded p-1 not-aria-disabled:cursor-pointer hover:bg-hover aria-disabled:text-fg-muted aria-disabled:hover:bg-transparent"
+                   @click="emit('rerequestReview', line.reviewer.person.username)"
+                 >
+                   <LoaderCircle
+diff --git a/frontend/src/ui/MergeRequestPicture.vue b/frontend/src/ui/MergeRequestPicture.vue
+index 16c861b..553bb33 100644
+--- a/frontend/src/ui/MergeRequestPicture.vue
++++ b/frontend/src/ui/MergeRequestPicture.vue
+@@ -43,9 +43,9 @@ watch(picture, () => {
+     >
+     <img
+       v-if="picture !== null && shown !== 'failed'"
++      referrerpolicy="no-referrer"
+       :src="picture"
+       alt=""
+-      referrerpolicy="no-referrer"
+       class="absolute inset-0 size-full object-cover"
+       :class="{ invisible: shown === 'loading' }"
+       @load="shown = 'loaded'"
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 3adae75..1920863 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -217,14 +217,13 @@ function act(): void {
+           </button>
+         </span>
+       </span>
+-      <span data-row-control class="flex shrink-0 cursor-default" @click.stop>
++      <span v-tooltip="openTitle" data-row-control class="flex shrink-0 cursor-default" @click.stop>
+         <button
+-          v-tooltip="openTitle"
+           type="button"
+           :aria-label="openTitle"
+           :aria-busy="fetching"
+           :disabled="fetching"
+-          class="shrink-0 rounded p-1.5 hover:bg-hover enabled:cursor-pointer disabled:text-fg-muted disabled:hover:bg-transparent"
++          class="shrink-0 rounded p-1.5 hover:bg-hover enabled:cursor-pointer disabled:pointer-events-none disabled:text-fg-muted"
+           @click="emit('open', row.iid)"
+         >
+           <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index f348202..15a1502 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -54,7 +54,7 @@ const {
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
+ const bars = useTemplateRef<FilterBar[]>("bars");
+-const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey } =
++const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss } =
+   useHoverMenu<ListFilter>({
+     menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? null,
+     opener: (which) => barOf(which)?.opener ?? null,
+@@ -82,9 +82,14 @@ async function goBack(): Promise<void> {
+ }
+ 
+ function escapePressed(event: KeyboardEvent): void {
+-  if (event.key === "Escape" && !event.defaultPrevented && !props.asking) {
+-    event.preventDefault();
++  if (event.key !== "Escape" || event.defaultPrevented || props.asking) {
++    return;
++  }
++  event.preventDefault();
++  if (openFor.value === null) {
+     void goBack();
++  } else {
++    void dismiss();
+   }
+ }
+ 
+diff --git a/frontend/src/ui/useHoverBox.test.ts b/frontend/src/ui/useHoverBox.test.ts
+index e3fd362..5cc6d77 100644
+--- a/frontend/src/ui/useHoverBox.test.ts
++++ b/frontend/src/ui/useHoverBox.test.ts
+@@ -1,7 +1,7 @@
+ import { afterEach, beforeEach, expect, test, vi } from "vitest";
+ import { effectScope, type EffectScope } from "vue";
+ 
+-import { useHoverBox, type HoverBox } from "./useHoverBox";
++import { useHoverBox, useScrollOutside, type HoverBox } from "./useHoverBox";
+ 
+ class FakeNode extends EventTarget {
+   readonly children: FakeNode[] = [];
+@@ -237,6 +237,21 @@ test("after a scroll closed it with focus on the opener, that focus still holds
+   expect(box.open.value).toBe(true);
+ });
+ 
++test("a scroll while the box is closed leaves the focus held: the pointer leaving keeps it", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", outside));
++  page.focused = item;
++  openerShown = false;
++  box.on.keydown(key("Escape"));
++  openerShown = true;
++  scroll(outside);
++
++  box.on.pointerenter();
++  box.on.pointerleave();
++
++  expect(box.open.value).toBe(true);
++});
++
+ test("close shuts the box and the pointer re-entering opens it again", () => {
+   const box = hoverBox();
+   box.on.focusin(focusEvent("focusin", outside));
+@@ -279,6 +294,25 @@ test("it listens for scrolls anywhere, captured and passive", () => {
+   ]);
+ });
+ 
++test("a scroll outside the area is reported, one inside is not, and any is without an area", () => {
++  const outsides: string[] = [];
++  scope.run(() => {
++    useScrollOutside(
++      () => (areaShown ? asElement(area) : null),
++      () => {
++        outsides.push(areaShown ? "with area" : "without area");
++      },
++    );
++  });
++
++  scroll(item);
++  scroll(outside);
++  areaShown = false;
++  scroll(item);
++
++  expect(outsides).toEqual(["with area", "without area"]);
++});
++
+ test("without an area every focus move counts as one from outside", () => {
+   areaShown = false;
+   const box = hoverBox();
+diff --git a/frontend/src/ui/useHoverBox.ts b/frontend/src/ui/useHoverBox.ts
+index a606b44..890e9df 100644
+--- a/frontend/src/ui/useHoverBox.ts
++++ b/frontend/src/ui/useHoverBox.ts
+@@ -44,8 +44,8 @@ function hideUnlessHeld(held: Held): void {
+   }
+ }
+ 
+-function isInside(held: Held, target: EventTarget | null): boolean {
+-  return target instanceof Node && held.area()?.contains(target) === true;
++function contains(area: HTMLElement | null, target: EventTarget | null): boolean {
++  return target instanceof Node && area?.contains(target) === true;
+ }
+ 
+ function close(held: Held): void {
+@@ -54,14 +54,14 @@ function close(held: Held): void {
+ }
+ 
+ function focusEntered(held: Held, event: FocusEvent): void {
+-  if (!isInside(held, event.relatedTarget)) {
++  if (!contains(held.area(), event.relatedTarget)) {
+     held.focusInside = true;
+     show(held);
+   }
+ }
+ 
+ function focusLeft(held: Held, event: FocusEvent): void {
+-  if (!isInside(held, event.relatedTarget)) {
++  if (!contains(held.area(), event.relatedTarget)) {
+     held.focusInside = false;
+     hideUnlessHeld(held);
+   }
+@@ -97,6 +97,19 @@ function areaListeners(held: Held): HoverBox["on"] {
+   };
+ }
+ 
++export function useScrollOutside(area: () => HTMLElement | null, scrolled: () => void): void {
++  useEventListener(
++    window,
++    "scroll",
++    (event) => {
++      if (!contains(area(), event.target)) {
++        scrolled();
++      }
++    },
++    { capture: true, passive: true },
++  );
++}
++
+ export function useHoverBox(parts: HoverBoxParts): HoverBox {
+   const held: Held = {
+     ...parts,
+@@ -105,16 +118,11 @@ export function useHoverBox(parts: HoverBoxParts): HoverBox {
+     pointerInside: false,
+     focusInside: false,
+   };
+-  useEventListener(
+-    window,
+-    "scroll",
+-    (event) => {
+-      if (held.open.value && !isInside(held, event.target)) {
+-        close(held);
+-      }
+-    },
+-    { capture: true, passive: true },
+-  );
++  useScrollOutside(parts.area, () => {
++    if (held.open.value) {
++      close(held);
++    }
++  });
+   return {
+     open: held.open,
+     placement: useMenuPlacement(parts.box, held.at),

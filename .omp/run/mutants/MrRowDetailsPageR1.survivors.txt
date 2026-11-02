@@ -1,0 +1,3 @@
+just mutants HEAD (Stryker on people.ts and useHoverBox.ts): 140 killed, 12 survived, 0 no-cov, score 92.11
+src/ui/useHoverBox.ts:117 at: shallowRef({}) — equivalent: `show` always writes `at` before `open` turns true; placement is read only while the box exists.
+src/mergeRequests/internal/people.ts:4,10–21 (11 constant-literal mutants) — not changed lines: this round changed only lines 1 and 24–27 of people.ts.

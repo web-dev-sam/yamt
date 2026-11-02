@@ -43,9 +43,9 @@ watch(picture, () => {
     >
     <img
       v-if="picture !== null && shown !== 'failed'"
+      referrerpolicy="no-referrer"
       :src="picture"
       alt=""
-      referrerpolicy="no-referrer"
       class="absolute inset-0 size-full object-cover"
       :class="{ invisible: shown === 'loading' }"
       @load="shown = 'loaded'"

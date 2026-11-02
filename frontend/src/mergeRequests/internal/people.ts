@@ -1,4 +1,4 @@
-import type { Person, ReviewState, Reviewer } from "./filters";
+import type { Person, ReviewState } from "./filters";
 
 export const STACK_SHOWN = 3;
 export const NO_PEOPLE_TEXT = "No assignee or reviewer";
@@ -21,10 +21,10 @@ const REVIEW_DONE: Readonly<Record<ReviewState, boolean>> = {
   changesRequested: true,
 };
 
-export function peopleStack(
-  assignees: readonly Person[],
-  reviewers: readonly Reviewer[],
-): { readonly shown: readonly Person[]; readonly more: number } {
+export function peopleStack<P extends Person>(
+  assignees: readonly P[],
+  reviewers: readonly { readonly person: P }[],
+): { readonly shown: readonly P[]; readonly more: number } {
   const assigned = new Set(assignees.map((person) => person.username));
   const people = [
     ...assignees,

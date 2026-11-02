@@ -51,6 +51,17 @@ test("an empty stack shows nobody", () => {
   expect(NO_PEOPLE_TEXT).toBe("No assignee or reviewer");
 });
 
+test("the stack gives back the people it was given, with all their fields", () => {
+  type Pictured = Person & { readonly picture: string | null };
+  const pictured: Pictured = { ...SAM, picture: "sam.png" };
+  const reviewer: { readonly person: Pictured } = { person: { ...ANNA, picture: null } };
+
+  const { shown } = peopleStack([pictured], [reviewer]);
+
+  expect(shown).toEqual([pictured, reviewer.person]);
+  expect(shown[0]).toBe(pictured);
+});
+
 test("a blank name reads as the username", () => {
   expect(displayName(SAM)).toBe("Sam Lee");
   expect(displayName(NAMELESS)).toBe("jdoe");

@@ -58,17 +58,7 @@ const { open, placement, on } = useHoverBox({
   box,
 });
 
-const stack = computed(() => {
-  const { assignees } = props.row;
-  const people = new Map(
-    [...assignees, ...props.row.reviewers.map(({ person }) => person)].map((person) => [
-      person.username,
-      person,
-    ]),
-  );
-  const { shown, more } = peopleStack(assignees, props.row.reviewers);
-  return { shown: shown.flatMap(({ username }) => people.get(username) ?? []), more };
-});
+const stack = computed(() => peopleStack(props.row.assignees, props.row.reviewers));
 const reviewers = computed(() => props.row.reviewers.map(reviewerLine));
 
 watch(open, (isOpen) => {
@@ -76,6 +66,7 @@ watch(open, (isOpen) => {
     emit("closed");
   }
 });
+watch(reviewers, keepFocusInBox, { flush: "pre" });
 
 function reviewerLine(reviewer: Reviewer): ReviewerLine {
   const name = displayName(reviewer.person);
@@ -91,6 +82,20 @@ function reviewerLine(reviewer: Reviewer): ReviewerLine {
         : null,
     refusal: ask?.kind === "refused" ? rerequestReplyText(ask.reply, name) : null,
   };
+}
+
+function keepFocusInBox(lines: readonly ReviewerLine[]): void {
+  const focused = document.activeElement;
+  const username =
+    focused instanceof HTMLElement && box.value?.contains(focused) === true
+      ? focused.dataset.rerequest
+      : undefined;
+  const kept = lines.some(
+    (line) => line.rerequest !== null && line.reviewer.person.username === username,
+  );
+  if (username !== undefined && !kept) {
+    box.value?.focus();
+  }
 }
 </script>
 
@@ -138,7 +143,8 @@ function reviewerLine(reviewer: Reviewer): ReviewerLine {
     <div
       v-if="open"
       ref="box"
-      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg"
+      tabindex="-1"
+      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg outline-none"
       :style="placement"
     >
       <template v-if="row.assignees.length > 0">
@@ -166,10 +172,11 @@ function reviewerLine(reviewer: Reviewer): ReviewerLine {
                   v-if="line.rerequest !== null"
                   v-tooltip="REREQUEST_REVIEW"
                   type="button"
+                  :data-rerequest="line.reviewer.person.username"
                   :aria-label="line.rerequest.label"
                   :aria-busy="line.rerequest.running"
-                  :disabled="line.rerequest.running"
-                  class="rounded p-1 hover:bg-hover enabled:cursor-pointer disabled:text-fg-muted disabled:hover:bg-transparent"
+                  :aria-disabled="line.rerequest.running"
+                  class="rounded p-1 not-aria-disabled:cursor-pointer hover:bg-hover aria-disabled:text-fg-muted aria-disabled:hover:bg-transparent"
                   @click="emit('rerequestReview', line.reviewer.person.username)"
                 >
                   <LoaderCircle

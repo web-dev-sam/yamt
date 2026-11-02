@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { effectScope, type EffectScope } from "vue";
 
-import { useHoverBox, type HoverBox } from "./useHoverBox";
+import { useHoverBox, useScrollOutside, type HoverBox } from "./useHoverBox";
 
 class FakeNode extends EventTarget {
   readonly children: FakeNode[] = [];
@@ -237,6 +237,21 @@ test("after a scroll closed it with focus on the opener, that focus still holds 
   expect(box.open.value).toBe(true);
 });
 
+test("a scroll while the box is closed leaves the focus held: the pointer leaving keeps it", () => {
+  const box = hoverBox();
+  box.on.focusin(focusEvent("focusin", outside));
+  page.focused = item;
+  openerShown = false;
+  box.on.keydown(key("Escape"));
+  openerShown = true;
+  scroll(outside);
+
+  box.on.pointerenter();
+  box.on.pointerleave();
+
+  expect(box.open.value).toBe(true);
+});
+
 test("close shuts the box and the pointer re-entering opens it again", () => {
   const box = hoverBox();
   box.on.focusin(focusEvent("focusin", outside));
@@ -277,6 +292,25 @@ test("it listens for scrolls anywhere, captured and passive", () => {
   expect(listen.mock.calls.map(([type, , options]) => [type, options])).toEqual([
     ["scroll", { capture: true, passive: true }],
   ]);
+});
+
+test("a scroll outside the area is reported, one inside is not, and any is without an area", () => {
+  const outsides: string[] = [];
+  scope.run(() => {
+    useScrollOutside(
+      () => (areaShown ? asElement(area) : null),
+      () => {
+        outsides.push(areaShown ? "with area" : "without area");
+      },
+    );
+  });
+
+  scroll(item);
+  scroll(outside);
+  areaShown = false;
+  scroll(item);
+
+  expect(outsides).toEqual(["with area", "without area"]);
 });
 
 test("without an area every focus move counts as one from outside", () => {

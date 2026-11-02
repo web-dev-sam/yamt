@@ -14,6 +14,7 @@ import {
 import type { Point } from "./menuPosition";
 import { CLEAR_DUE_DATE, dueDateLabel, SET_DUE_DATE } from "./mergeRequestsText";
 import { vTooltip } from "./tooltip";
+import { useScrollOutside } from "./useHoverBox";
 import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
 
 const props = defineProps<{ due: CalendarDay | null; now: number }>();
@@ -31,6 +32,12 @@ onClickOutside(
     open.value = false;
   },
   { ignore: [opener] },
+);
+useScrollOutside(
+  () => box.value,
+  () => {
+    open.value = false;
+  },
 );
 
 const shown = computed(() => {

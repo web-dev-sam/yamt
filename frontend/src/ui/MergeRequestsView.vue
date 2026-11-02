@@ -54,7 +54,7 @@ const {
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
 const bars = useTemplateRef<FilterBar[]>("bars");
-const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey } =
+const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey, dismiss } =
   useHoverMenu<ListFilter>({
     menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? null,
     opener: (which) => barOf(which)?.opener ?? null,
@@ -82,9 +82,14 @@ async function goBack(): Promise<void> {
 }
 
 function escapePressed(event: KeyboardEvent): void {
-  if (event.key === "Escape" && !event.defaultPrevented && !props.asking) {
-    event.preventDefault();
+  if (event.key !== "Escape" || event.defaultPrevented || props.asking) {
+    return;
+  }
+  event.preventDefault();
+  if (openFor.value === null) {
     void goBack();
+  } else {
+    void dismiss();
   }
 }
 

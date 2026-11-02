@@ -44,8 +44,8 @@ function hideUnlessHeld(held: Held): void {
   }
 }
 
-function isInside(held: Held, target: EventTarget | null): boolean {
-  return target instanceof Node && held.area()?.contains(target) === true;
+function contains(area: HTMLElement | null, target: EventTarget | null): boolean {
+  return target instanceof Node && area?.contains(target) === true;
 }
 
 function close(held: Held): void {
@@ -54,14 +54,14 @@ function close(held: Held): void {
 }
 
 function focusEntered(held: Held, event: FocusEvent): void {
-  if (!isInside(held, event.relatedTarget)) {
+  if (!contains(held.area(), event.relatedTarget)) {
     held.focusInside = true;
     show(held);
   }
 }
 
 function focusLeft(held: Held, event: FocusEvent): void {
-  if (!isInside(held, event.relatedTarget)) {
+  if (!contains(held.area(), event.relatedTarget)) {
     held.focusInside = false;
     hideUnlessHeld(held);
   }
@@ -97,6 +97,19 @@ function areaListeners(held: Held): HoverBox["on"] {
   };
 }
 
+export function useScrollOutside(area: () => HTMLElement | null, scrolled: () => void): void {
+  useEventListener(
+    window,
+    "scroll",
+    (event) => {
+      if (!contains(area(), event.target)) {
+        scrolled();
+      }
+    },
+    { capture: true, passive: true },
+  );
+}
+
 export function useHoverBox(parts: HoverBoxParts): HoverBox {
   const held: Held = {
     ...parts,
@@ -105,16 +118,11 @@ export function useHoverBox(parts: HoverBoxParts): HoverBox {
     pointerInside: false,
     focusInside: false,
   };
-  useEventListener(
-    window,
-    "scroll",
-    (event) => {
-      if (held.open.value && !isInside(held, event.target)) {
-        close(held);
-      }
-    },
-    { capture: true, passive: true },
-  );
+  useScrollOutside(parts.area, () => {
+    if (held.open.value) {
+      close(held);
+    }
+  });
   return {
     open: held.open,
     placement: useMenuPlacement(parts.box, held.at),

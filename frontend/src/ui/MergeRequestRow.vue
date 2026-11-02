@@ -217,14 +217,13 @@ function act(): void {
           </button>
         </span>
       </span>
-      <span data-row-control class="flex shrink-0 cursor-default" @click.stop>
+      <span v-tooltip="openTitle" data-row-control class="flex shrink-0 cursor-default" @click.stop>
         <button
-          v-tooltip="openTitle"
           type="button"
           :aria-label="openTitle"
           :aria-busy="fetching"
           :disabled="fetching"
-          class="shrink-0 rounded p-1.5 hover:bg-hover enabled:cursor-pointer disabled:text-fg-muted disabled:hover:bg-transparent"
+          class="shrink-0 rounded p-1.5 hover:bg-hover enabled:cursor-pointer disabled:pointer-events-none disabled:text-fg-muted"
           @click="emit('open', row.iid)"
         >
           <LoaderCircle v-if="fetching" class="size-4 animate-spin" aria-hidden="true" />
