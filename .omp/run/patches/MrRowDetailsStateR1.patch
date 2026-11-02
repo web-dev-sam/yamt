@@ -1,0 +1,25 @@
+diff --git a/frontend/src/ipc/tauriMergeRequests.ts b/frontend/src/ipc/tauriMergeRequests.ts
+index 5fc05ac..c1175ef 100644
+--- a/frontend/src/ipc/tauriMergeRequests.ts
++++ b/frontend/src/ipc/tauriMergeRequests.ts
+@@ -14,6 +14,7 @@ import {
+ import type { MergeRequestSource } from "./MergeRequestSource";
+ import { converted, toResult } from "./tauri";
+ 
++// Rust's `PICTURE_SCHEME` in src-tauri/src/merge_requests/pictures.rs registers this scheme.
+ export const PICTURE_SCHEME = "yamt-picture";
+ 
+ function uploadedPicture(username: string): string {
+diff --git a/frontend/src/ui/mergeRequests.test.ts b/frontend/src/ui/mergeRequests.test.ts
+index 48983a0..c2e75ce 100644
+--- a/frontend/src/ui/mergeRequests.test.ts
++++ b/frontend/src/ui/mergeRequests.test.ts
+@@ -983,7 +983,7 @@ test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_
+   expect(live.slice.rerequests.value.size).toBe(0);
+ });
+ 
+-test("a re-request reply after a first load's end writes the rows only once (catches a finished load's buffer kept)", async () => {
++test("a later refresh's rows replace a re-requested row's reviewers", async () => {
+   const live = rig();
+   await loaded(live);
+   const asking = live.slice.rerequestReview(iid(630), "anna");

@@ -14,6 +14,7 @@ import {
 import type { MergeRequestSource } from "./MergeRequestSource";
 import { converted, toResult } from "./tauri";
 
+// Rust's `PICTURE_SCHEME` in src-tauri/src/merge_requests/pictures.rs registers this scheme.
 export const PICTURE_SCHEME = "yamt-picture";
 
 function uploadedPicture(username: string): string {

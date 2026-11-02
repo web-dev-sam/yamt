@@ -983,7 +983,7 @@ test("a_rerequest_reply_replaces_that_rows_reviewers_in_rows_and_in_a_buffering_
   expect(live.slice.rerequests.value.size).toBe(0);
 });
 
-test("a re-request reply after a first load's end writes the rows only once (catches a finished load's buffer kept)", async () => {
+test("a later refresh's rows replace a re-requested row's reviewers", async () => {
   const live = rig();
   await loaded(live);
   const asking = live.slice.rerequestReview(iid(630), "anna");

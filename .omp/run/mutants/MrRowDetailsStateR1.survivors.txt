@@ -1,0 +1,2 @@
+just mutants HEAD → tauriMergeRequests.ts: 51 killed, 0 timeout, 1 survived, 0 no-cov, 0 errors (98.08%)
+tauriMergeRequests.ts:18 PICTURE_SCHEME="" — gate-covered: Stryker does not reload a top-level constant evaluated at import. By hand, this mutant fails 2 tauriMergeRequests tests. The line only moved down one.
