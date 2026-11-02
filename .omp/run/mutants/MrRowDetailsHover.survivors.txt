@@ -1,0 +1,6 @@
+just mutants HEAD (completed; no dry-run stop): 349 killed/23 survived/49 no-cov; operationTooltip 21/0, tooltip 161/3, useHoverBox 88/1, useHoverMenu 35/0, useDropdownMenu 44/19
+frontend/src/ui/tooltip.ts:157 `bound === undefined`→false (updated) — gate-covered: tsc requires the narrowing, and Vue never calls `updated` before `mounted`
+frontend/src/ui/tooltip.ts:170 `bound === undefined`→false (beforeUnmount) — gate-covered: same reason, never called before `mounted`
+frontend/src/ui/tooltip.ts:11 UNMEASURED {}→{} — equivalent: only `.maxWidth` of that call is read, and it does not depend on the tip's size
+frontend/src/ui/useHoverBox.ts:104 initial `at` {x:0,y:0}→{} — equivalent: placement is shown only while open, and `show` always writes `at` before opening
+useDropdownMenu.ts: all 19 survivors and 47 no-cov are on unchanged lines (27-56, 82-129). My changed lines (20, 22, 61-70, 76, 78, 137, 139) have none.

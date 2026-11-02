@@ -1,0 +1,1621 @@
+diff --git a/frontend/src/ui/operationTooltip.test.ts b/frontend/src/ui/operationTooltip.test.ts
+index ea1a72a..2113c26 100644
+--- a/frontend/src/ui/operationTooltip.test.ts
++++ b/frontend/src/ui/operationTooltip.test.ts
+@@ -1,6 +1,6 @@
+ import { expect, test } from "vitest";
+ 
+-import { tooltipBox } from "./operationTooltip";
++import { tooltipBox, tooltipPlacement, type Anchor } from "./operationTooltip";
+ 
+ const VIEWPORT = { width: 1600, height: 1000 };
+ 
+@@ -41,3 +41,41 @@ test("a tag closer than 4 px to the window's top leaves no room", () => {
+     maxHeight: 0,
+   });
+ });
++
++const TIP = { width: 200, height: 30 };
++
++function anchorAt(top: number, left: number): Anchor {
++  return { top, bottom: top + 20, left };
++}
++
++test("a_tip_that_fits_above_sits_above_at_the_left_edge", () => {
++  expect(tooltipPlacement({ anchor: anchorAt(100, 50), tip: TIP, viewport: VIEWPORT })).toEqual({
++    left: 50,
++    top: 66,
++    maxWidth: 480,
++  });
++  expect(tooltipPlacement({ anchor: anchorAt(34, 50), tip: TIP, viewport: VIEWPORT }).top).toBe(0);
++});
++
++test("a_tip_that_does_not_fit_above_goes_below", () => {
++  expect(tooltipPlacement({ anchor: anchorAt(33, 50), tip: TIP, viewport: VIEWPORT })).toEqual({
++    left: 50,
++    top: 57,
++    maxWidth: 480,
++  });
++});
++
++test("a_tip_near_the_right_edge_moves_left_never_past_0", () => {
++  expect(tooltipPlacement({ anchor: anchorAt(100, 1500), tip: TIP, viewport: VIEWPORT }).left).toBe(
++    1400,
++  );
++  expect(tooltipPlacement({ anchor: anchorAt(100, 1400), tip: TIP, viewport: VIEWPORT }).left).toBe(
++    1400,
++  );
++  const narrow = { width: 150, height: 1000 };
++  expect(tooltipPlacement({ anchor: anchorAt(100, 100), tip: TIP, viewport: narrow })).toEqual({
++    left: 0,
++    top: 66,
++    maxWidth: 150,
++  });
++});
+diff --git a/frontend/src/ui/operationTooltip.ts b/frontend/src/ui/operationTooltip.ts
+index 7fc25dc..94cfd4f 100644
+--- a/frontend/src/ui/operationTooltip.ts
++++ b/frontend/src/ui/operationTooltip.ts
+@@ -3,7 +3,11 @@ import type { Size } from "./menuPosition";
+ const GAP_PX = 4;
+ const MAX_WIDTH_PX = 480;
+ 
+-type Anchor = { readonly tagTop: number; readonly textLeft: number; readonly viewport: Size };
++type TagAnchor = { readonly tagTop: number; readonly textLeft: number; readonly viewport: Size };
++
++export type Anchor = { readonly top: number; readonly bottom: number; readonly left: number };
++
++type TooltipPlacement = { readonly left: number; readonly top: number; readonly maxWidth: number };
+ 
+ export type TooltipBox = {
+   readonly left: number;
+@@ -12,7 +16,7 @@ export type TooltipBox = {
+   readonly maxHeight: number;
+ };
+ 
+-export function tooltipBox({ tagTop, textLeft, viewport }: Anchor): TooltipBox {
++export function tooltipBox({ tagTop, textLeft, viewport }: TagAnchor): TooltipBox {
+   const room = Math.max(0, tagTop - GAP_PX);
+   return {
+     left: textLeft,
+@@ -21,3 +25,20 @@ export function tooltipBox({ tagTop, textLeft, viewport }: Anchor): TooltipBox {
+     maxHeight: room,
+   };
+ }
++
++export function tooltipPlacement({
++  anchor,
++  tip,
++  viewport,
++}: {
++  readonly anchor: Anchor;
++  readonly tip: Size;
++  readonly viewport: Size;
++}): TooltipPlacement {
++  const above = anchor.top - GAP_PX - tip.height;
++  return {
++    left: Math.max(0, Math.min(anchor.left, viewport.width - tip.width)),
++    top: above >= 0 ? above : anchor.bottom + GAP_PX,
++    maxWidth: Math.min(MAX_WIDTH_PX, viewport.width),
++  };
++}
+diff --git a/frontend/src/ui/tooltip.test.ts b/frontend/src/ui/tooltip.test.ts
+new file mode 100644
+index 0000000..fb1f9ec
+--- /dev/null
++++ b/frontend/src/ui/tooltip.test.ts
+@@ -0,0 +1,439 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import type { DirectiveBinding, ObjectDirective, VNode } from "vue";
++
++import { delayBefore, TOOLTIP_DELAY_MS, TOOLTIP_WARM_MS } from "./tooltip";
++
++type Rect = { top: number; bottom: number; left: number; width: number; height: number };
++
++function captures(options: EventListenerOptions | boolean | undefined): boolean {
++  return typeof options === "object" ? options.capture === true : options === true;
++}
++
++class FakeTarget extends EventTarget {
++  readonly listening = new Map<string, string>();
++  override addEventListener(
++    type: string,
++    callback: EventListenerOrEventListenerObject | null,
++    options?: AddEventListenerOptions | boolean,
++  ): void {
++    const passive = typeof options === "object" && options.passive === true;
++    const words = [captures(options) ? "capture" : "", passive ? "passive" : ""];
++    this.listening.set(type, words.filter((word) => word !== "").join(" "));
++    super.addEventListener(type, callback, options);
++  }
++  override removeEventListener(
++    type: string,
++    callback: EventListenerOrEventListenerObject | null,
++    options?: EventListenerOptions | boolean,
++  ): void {
++    if (this.listening.get(type)?.startsWith("capture") === captures(options)) {
++      this.listening.delete(type);
++    }
++    super.removeEventListener(type, callback, options);
++  }
++}
++
++class FakeElement extends FakeTarget {
++  className = "";
++  hidden = false;
++  tagName = "";
++  textContent = "";
++  readonly style: Record<string, string> = {};
++  readonly attributes = new Map<string, string>();
++  rect: Rect = { top: 0, bottom: 0, left: 0, width: 0, height: 0 };
++  setAttribute(name: string, value: string): void {
++    this.attributes.set(name, value);
++  }
++  getAttribute(name: string): string | null {
++    return this.attributes.get(name) ?? null;
++  }
++  removeAttribute(name: string): void {
++    this.attributes.delete(name);
++  }
++  getBoundingClientRect(): Rect {
++    return this.rect;
++  }
++}
++
++const TIP_SIZE = { width: 200, height: 30 };
++
++let page: { window: FakeTarget; appended: FakeElement[] };
++let hooks: ObjectDirective<HTMLElement, string | null>;
++
++beforeEach(async () => {
++  vi.useFakeTimers();
++  vi.resetModules();
++  const appended: FakeElement[] = [];
++  const window = Object.assign(new FakeTarget(), { innerWidth: 1600, innerHeight: 1000 });
++  vi.stubGlobal("HTMLElement", FakeElement);
++  vi.stubGlobal("window", window);
++  vi.stubGlobal("document", {
++    createElement: (tag: string) => {
++      const created = Object.assign(new FakeElement(), { tagName: tag });
++      created.rect = { top: 0, bottom: 0, left: 0, ...TIP_SIZE };
++      return created;
++    },
++    body: {
++      append: (element: FakeElement) => {
++        appended.push(element);
++      },
++    },
++  });
++  page = { window, appended };
++  const { vTooltip } = await import("./tooltip");
++  if (typeof vTooltip === "function") {
++    throw new Error("vTooltip is an object directive");
++  }
++  hooks = vTooltip;
++});
++
++afterEach(() => {
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++
++function asElement(fake: FakeElement): HTMLElement {
++  if (fake instanceof HTMLElement) {
++    return fake;
++  }
++  throw new Error("HTMLElement is not the stub");
++}
++
++function binding(value: string | null): DirectiveBinding<string | null> {
++  return { instance: null, value, oldValue: null, modifiers: {}, dir: {} };
++}
++
++function vnode(): VNode<HTMLElement, HTMLElement> {
++  return Object.create(null);
++}
++
++function anchor(text: string | null, rect: Partial<Rect> = {}): FakeElement {
++  const fake = new FakeElement();
++  fake.rect = { top: 100, bottom: 120, left: 50, width: 80, height: 20, ...rect };
++  hooks.mounted?.(asElement(fake), binding(text), vnode(), null);
++  return fake;
++}
++
++function update(fake: FakeElement, text: string | null): void {
++  hooks.updated?.(asElement(fake), binding(text), vnode(), vnode());
++}
++
++function unmount(fake: FakeElement): void {
++  hooks.beforeUnmount?.(asElement(fake), binding(null), vnode(), null);
++}
++
++function send(target: EventTarget, type: string, fields: Record<string, unknown> = {}): Event {
++  const event = Object.assign(new Event(type, { cancelable: true }), fields);
++  target.dispatchEvent(event);
++  return event;
++}
++
++function shownText(): string | null {
++  const [tip, ...more] = page.appended;
++  expect(more).toEqual([]);
++  return tip === undefined || tip.hidden ? null : tip.textContent;
++}
++
++function showNow(fake: FakeElement): void {
++  send(fake, "pointerenter");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++  expect(shownText()).not.toBeNull();
++}
++
++test("the_first_tip_waits_400_ms", () => {
++  expect(delayBefore(null, 5000)).toBe(TOOLTIP_DELAY_MS);
++  expect(delayBefore(null, 100)).toBe(TOOLTIP_DELAY_MS);
++  const save = anchor("Save the file");
++
++  send(save, "pointerenter");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS - 1);
++  expect(page.appended).toEqual([]);
++  vi.advanceTimersByTime(1);
++
++  expect(shownText()).toBe("Save the file");
++});
++
++test("a_tip_within_300_ms_of_the_last_shows_at_once", () => {
++  expect(delayBefore(1000, 1000 + TOOLTIP_WARM_MS)).toBe(0);
++  const first = anchor("First");
++  const second = anchor("Second");
++  showNow(first);
++
++  send(first, "pointerleave");
++  vi.advanceTimersByTime(TOOLTIP_WARM_MS);
++  send(second, "pointerenter");
++
++  expect(shownText()).toBe("Second");
++});
++
++test("a_tip_after_the_warm_window_waits_again", () => {
++  expect(delayBefore(1000, 1001 + TOOLTIP_WARM_MS)).toBe(TOOLTIP_DELAY_MS);
++  const first = anchor("First");
++  const second = anchor("Second");
++  showNow(first);
++
++  send(first, "pointerleave");
++  vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
++  send(second, "pointerenter");
++  expect(shownText()).toBeNull();
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++
++  expect(shownText()).toBe("Second");
++});
++
++test("a tip that never showed does not open the warm window", () => {
++  const first = anchor("First");
++  const second = anchor("Second");
++
++  send(first, "pointerenter");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS - 1);
++  send(first, "pointerleave");
++  send(second, "pointerenter");
++
++  expect(shownText()).toBeNull();
++});
++
++test("leaving the element hides its tip and cancels a waiting one", () => {
++  const save = anchor("Save");
++  showNow(save);
++
++  send(save, "pointerleave");
++  expect(shownText()).toBeNull();
++
++  vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
++  send(save, "pointerenter");
++  send(save, "pointerleave");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++  expect(shownText()).toBeNull();
++});
++
++test("leaving another element leaves the tip alone", () => {
++  const save = anchor("Save");
++  const other = anchor("Other");
++  showNow(save);
++
++  send(other, "pointerleave");
++
++  expect(shownText()).toBe("Save");
++});
++
++test("Escape hides the tip without taking the key; other keys keep it", () => {
++  const save = anchor("Save");
++  showNow(save);
++
++  const enter = send(page.window, "keydown", { key: "Enter" });
++  expect(shownText()).toBe("Save");
++  const escape = send(page.window, "keydown", { key: "Escape" });
++
++  expect(shownText()).toBeNull();
++  expect([enter.defaultPrevented, escape.defaultPrevented]).toEqual([false, false]);
++});
++
++test("a scroll anywhere hides the tip", () => {
++  showNow(anchor("Save"));
++
++  send(page.window, "scroll");
++
++  expect(shownText()).toBeNull();
++});
++
++test("a press anywhere hides the tip and cancels a waiting one", () => {
++  const save = anchor("Save");
++  showNow(save);
++
++  send(page.window, "pointerdown");
++  expect(shownText()).toBeNull();
++
++  vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
++  send(save, "pointerenter");
++  send(page.window, "pointerdown");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++  expect(shownText()).toBeNull();
++});
++
++test("the window listeners are captured while a tip waits or shows, and gone once it hides", () => {
++  const save = anchor("Save");
++  expect(page.window.listening).toEqual(new Map());
++
++  send(save, "pointerenter");
++  expect(page.window.listening).toEqual(
++    new Map([
++      ["pointerdown", "capture passive"],
++      ["keydown", "capture"],
++      ["scroll", "capture passive"],
++    ]),
++  );
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++  send(save, "pointerleave");
++
++  expect(page.window.listening).toEqual(new Map());
++});
++
++test("one tip element, made at the first show, hidden from assistive tech and reused", () => {
++  const first = anchor("First\nline two");
++  const second = anchor("Second");
++  expect(page.appended).toEqual([]);
++
++  showNow(first);
++  send(first, "pointerleave");
++  send(second, "pointerenter");
++
++  const [tip] = page.appended;
++  expect(tip?.tagName).toBe("div");
++  expect(tip?.attributes).toEqual(new Map([["aria-hidden", "true"]]));
++  expect(tip?.className).toBe(
++    "pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none",
++  );
++  expect(shownText()).toBe("Second");
++});
++
++test("the tip sits above its element at the element's left edge, below when it does not fit", () => {
++  const high = anchor("High", { top: 100, bottom: 120, left: 50 });
++  const low = anchor("Low", { top: 10, bottom: 30, left: 1500 });
++
++  showNow(high);
++  const [tip] = page.appended;
++  expect(tip?.style).toEqual({ maxWidth: "480px", left: "50px", top: "66px" });
++  send(high, "pointerleave");
++  send(low, "pointerenter");
++
++  expect(tip?.style).toEqual({ maxWidth: "480px", left: "1400px", top: "34px" });
++});
++
++test("the tip is measured once its text is in and its width is limited", () => {
++  const save = anchor("Save");
++  const widths: string[] = [];
++  vi.stubGlobal("document", {
++    createElement: () => {
++      const created = new FakeElement();
++      created.getBoundingClientRect = () => {
++        widths.push(`${created.textContent}:${created.style["maxWidth"] ?? "none"}`);
++        return { top: 0, bottom: 0, left: 0, ...TIP_SIZE };
++      };
++      return created;
++    },
++    body: { append: () => undefined },
++  });
++
++  send(save, "pointerenter");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++
++  expect(widths).toEqual(["Save:480px"]);
++});
++
++test("a new value while shown changes the text; null or empty hides it and shows nothing", () => {
++  const save = anchor("Save");
++  showNow(save);
++
++  update(save, "Saved");
++  expect(shownText()).toBe("Saved");
++  update(save, null);
++  expect(shownText()).toBeNull();
++
++  vi.advanceTimersByTime(TOOLTIP_WARM_MS + 1);
++  update(save, "");
++  send(save, "pointerenter");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++  expect(shownText()).toBeNull();
++});
++
++test("a value cleared while the tip waits shows nothing", () => {
++  const save = anchor("Save");
++
++  send(save, "pointerenter");
++  update(save, null);
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++
++  expect(shownText()).toBeNull();
++  expect(page.window.listening).toEqual(new Map());
++});
++
++test("a new value while another element's tip shows leaves that tip alone", () => {
++  const save = anchor("Save");
++  const other = anchor("Other");
++  showNow(save);
++
++  update(other, "Changed");
++
++  expect(shownText()).toBe("Save");
++});
++
++test("an element mounted with an empty value shows nothing", () => {
++  const empty = anchor("");
++
++  send(empty, "pointerenter");
++  expect(page.window.listening).toEqual(new Map());
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++
++  expect(page.appended).toEqual([]);
++});
++
++test("entering another element while a tip waits cancels the first", () => {
++  const first = anchor("First");
++  const second = anchor("Second");
++  const half = TOOLTIP_DELAY_MS / 2;
++
++  send(first, "pointerenter");
++  vi.advanceTimersByTime(half);
++  send(second, "pointerenter");
++  vi.advanceTimersByTime(half);
++  expect(shownText()).toBeNull();
++  vi.advanceTimersByTime(half);
++
++  expect(shownText()).toBe("Second");
++});
++
++test("a new value while the tip waits shows at the end of the wait, in its new words", () => {
++  const save = anchor("Save");
++
++  send(save, "pointerenter");
++  update(save, "Saved");
++  expect(shownText()).toBeNull();
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++
++  expect(shownText()).toBe("Saved");
++});
++
++test("unmounting the element while its tip shows hides it, and its listeners go", () => {
++  const save = anchor("Save");
++  showNow(save);
++
++  unmount(save);
++  expect(shownText()).toBeNull();
++  send(save, "pointerenter");
++  vi.advanceTimersByTime(TOOLTIP_DELAY_MS);
++
++  expect(shownText()).toBeNull();
++  expect(save.listening).toEqual(new Map());
++});
++
++test("unmounting another element leaves the tip alone", () => {
++  const save = anchor("Save");
++  const other = anchor("Other");
++  showNow(save);
++
++  unmount(other);
++
++  expect(shownText()).toBe("Save");
++});
++
++test("the text is mirrored into aria-description unless it is the aria-label; never title or aria-label", () => {
++  const save = anchor("Save the file");
++  expect(save.attributes).toEqual(new Map([["aria-description", "Save the file"]]));
++
++  update(save, "Saved");
++  expect(save.attributes).toEqual(new Map([["aria-description", "Saved"]]));
++  save.setAttribute("aria-label", "Saved");
++  update(save, "Saved");
++  expect(save.attributes).toEqual(new Map([["aria-label", "Saved"]]));
++  update(save, "Save");
++  update(save, null);
++  expect(save.attributes).toEqual(new Map([["aria-label", "Saved"]]));
++  update(save, "Save");
++  unmount(save);
++  expect(save.attributes).toEqual(new Map([["aria-label", "Saved"]]));
++});
++
++test("an empty value leaves no aria-description", () => {
++  expect(anchor("").attributes).toEqual(new Map());
++});
+diff --git a/frontend/src/ui/tooltip.ts b/frontend/src/ui/tooltip.ts
+new file mode 100644
+index 0000000..178f88a
+--- /dev/null
++++ b/frontend/src/ui/tooltip.ts
+@@ -0,0 +1,178 @@
++import type { Directive, DirectiveBinding } from "vue";
++
++import type { Size } from "./menuPosition";
++import { tooltipPlacement } from "./operationTooltip";
++
++export const TOOLTIP_DELAY_MS = 400;
++export const TOOLTIP_WARM_MS = 300;
++
++const TIP_CLASSES =
++  "pointer-events-none fixed z-500 w-max overflow-hidden hover-tooltip px-2 py-1 tooltip-text wrap-break-word whitespace-pre-wrap select-none";
++const UNMEASURED: Size = { width: 0, height: 0 };
++
++type Bound = {
++  readonly element: HTMLElement;
++  text: string | null;
++  readonly enter: () => void;
++  readonly leave: () => void;
++};
++
++type Phase =
++  | {
++      readonly kind: "waiting";
++      readonly bound: Bound;
++      readonly timer: ReturnType<typeof setTimeout>;
++    }
++  | { readonly kind: "shown"; readonly bound: Bound; readonly tip: HTMLElement };
++
++const tip: { element: HTMLElement | null; phase: Phase | null; closedAt: number | null } = {
++  element: null,
++  phase: null,
++  closedAt: null,
++};
++const bindings = new WeakMap<HTMLElement, Bound>();
++
++export function delayBefore(closedAt: number | null, now: number): number {
++  return closedAt !== null && now - closedAt <= TOOLTIP_WARM_MS ? 0 : TOOLTIP_DELAY_MS;
++}
++
++function tipElement(): HTMLElement {
++  if (tip.element === null) {
++    const element = document.createElement("div");
++    element.className = TIP_CLASSES;
++    element.setAttribute("aria-hidden", "true");
++    document.body.append(element);
++    tip.element = element;
++  }
++  return tip.element;
++}
++
++function place(element: HTMLElement, anchor: HTMLElement): void {
++  const fixed = {
++    anchor: anchor.getBoundingClientRect(),
++    viewport: { width: window.innerWidth, height: window.innerHeight },
++  };
++  element.style.maxWidth = `${tooltipPlacement({ ...fixed, tip: UNMEASURED }).maxWidth}px`;
++  const { width, height } = element.getBoundingClientRect();
++  const { left, top } = tooltipPlacement({ ...fixed, tip: { width, height } });
++  element.style.left = `${left}px`;
++  element.style.top = `${top}px`;
++}
++
++function keyPressed(event: KeyboardEvent): void {
++  if (event.key === "Escape") {
++    hide();
++  }
++}
++
++function listen(): void {
++  window.addEventListener("pointerdown", hide, { capture: true, passive: true });
++  window.addEventListener("keydown", keyPressed, { capture: true });
++  window.addEventListener("scroll", hide, { capture: true, passive: true });
++}
++
++function unlisten(): void {
++  window.removeEventListener("pointerdown", hide, { capture: true });
++  window.removeEventListener("keydown", keyPressed, { capture: true });
++  window.removeEventListener("scroll", hide, { capture: true });
++}
++
++function hide(): void {
++  const { phase } = tip;
++  if (phase === null) {
++    return;
++  }
++  if (phase.kind === "waiting") {
++    clearTimeout(phase.timer);
++  } else {
++    tip.closedAt = Date.now();
++    phase.tip.hidden = true;
++  }
++  tip.phase = null;
++  unlisten();
++}
++
++function show(bound: Bound): void {
++  if (bound.text === null) {
++    hide();
++    return;
++  }
++  const element = tipElement();
++  element.textContent = bound.text;
++  element.hidden = false;
++  place(element, bound.element);
++  tip.phase = { kind: "shown", bound, tip: element };
++}
++
++function entered(bound: Bound): void {
++  hide();
++  if (bound.text === null) {
++    return;
++  }
++  const delay = delayBefore(tip.closedAt, Date.now());
++  if (delay === 0) {
++    show(bound);
++  } else {
++    const timer = setTimeout(() => {
++      show(bound);
++    }, delay);
++    tip.phase = { kind: "waiting", bound, timer };
++  }
++  listen();
++}
++
++function hideFor(bound: Bound): void {
++  if (tip.phase?.bound === bound) {
++    hide();
++  }
++}
++
++function describe(element: HTMLElement, text: string | null): void {
++  if (text === null || text === element.getAttribute("aria-label")) {
++    element.removeAttribute("aria-description");
++  } else {
++    element.setAttribute("aria-description", text);
++  }
++}
++
++function mounted(element: HTMLElement, { value }: DirectiveBinding<string | null>): void {
++  const bound: Bound = {
++    element,
++    text: value === "" ? null : value,
++    enter: () => {
++      entered(bound);
++    },
++    leave: () => {
++      hideFor(bound);
++    },
++  };
++  bindings.set(element, bound);
++  element.addEventListener("pointerenter", bound.enter);
++  element.addEventListener("pointerleave", bound.leave);
++  describe(element, bound.text);
++}
++
++function updated(element: HTMLElement, { value }: DirectiveBinding<string | null>): void {
++  const bound = bindings.get(element);
++  if (bound === undefined) {
++    return;
++  }
++  bound.text = value === "" ? null : value;
++  describe(element, bound.text);
++  if (tip.phase?.kind === "shown" && tip.phase.bound === bound) {
++    show(bound);
++  }
++}
++
++function beforeUnmount(element: HTMLElement): void {
++  element.removeAttribute("aria-description");
++  const bound = bindings.get(element);
++  if (bound === undefined) {
++    return;
++  }
++  element.removeEventListener("pointerenter", bound.enter);
++  element.removeEventListener("pointerleave", bound.leave);
++  hideFor(bound);
++}
++
++export const vTooltip: Directive<HTMLElement, string | null> = { mounted, updated, beforeUnmount };
+diff --git a/frontend/src/ui/useDropdownMenu.ts b/frontend/src/ui/useDropdownMenu.ts
+index 70156e8..bea1f23 100644
+--- a/frontend/src/ui/useDropdownMenu.ts
++++ b/frontend/src/ui/useDropdownMenu.ts
+@@ -17,7 +17,9 @@ export type DropdownMenu<T> = {
+   readonly openFor: Readonly<ShallowRef<T | null>>;
+   readonly above: Readonly<ShallowRef<boolean>>;
+   readonly toggle: (which: T) => Promise<void>;
++  readonly open: (which: T) => Promise<void>;
+   readonly close: () => Promise<void>;
++  readonly dismiss: () => Promise<void>;
+   readonly menuKey: (event: KeyboardEvent) => void;
+ };
+ 
+@@ -56,21 +58,24 @@ function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void
+   }
+ }
+ 
++async function open<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
++  dropdown.openFor.value = which;
++  dropdown.above.value = false;
++  await nextTick();
++  const opened = dropdown.menu();
++  if (opened !== null) {
++    dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
++  }
++}
++
+ async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
+   if (dropdown.openFor.value === which) {
+     await close(dropdown);
+     return;
+   }
+-  dropdown.openFor.value = which;
+-  dropdown.above.value = false;
++  await open(dropdown, which);
+   await nextTick();
+-  const opened = dropdown.menu();
+-  if (opened === null) {
+-    return;
+-  }
+-  dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+-  await nextTick();
+-  opened.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
++  dropdown.menu()?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+ }
+ 
+ function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
+@@ -129,7 +134,9 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
+     openFor: dropdown.openFor,
+     above: dropdown.above,
+     toggle: (which) => toggle(dropdown, which),
++    open: (which) => open(dropdown, which),
+     close: () => close(dropdown),
++    dismiss: () => closeAfterClick(dropdown),
+     menuKey: (event) => {
+       menuKey(dropdown, event);
+     },
+diff --git a/frontend/src/ui/useHoverBox.test.ts b/frontend/src/ui/useHoverBox.test.ts
+new file mode 100644
+index 0000000..e3fd362
+--- /dev/null
++++ b/frontend/src/ui/useHoverBox.test.ts
+@@ -0,0 +1,300 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope, type EffectScope } from "vue";
++
++import { useHoverBox, type HoverBox } from "./useHoverBox";
++
++class FakeNode extends EventTarget {
++  readonly children: FakeNode[] = [];
++  left = 0;
++  bottom = 0;
++  contains(node: unknown): boolean {
++    return node === this || this.children.some((child) => child.contains(node));
++  }
++  focus(): void {
++    page.focused = this;
++  }
++  getBoundingClientRect(): { readonly left: number; readonly bottom: number } {
++    return { left: this.left, bottom: this.bottom };
++  }
++}
++
++class FakeFocusEvent extends Event {
++  readonly relatedTarget: EventTarget | null;
++  constructor(type: string, relatedTarget: EventTarget | null) {
++    super(type);
++    this.relatedTarget = relatedTarget;
++  }
++}
++
++class FakeKeyboardEvent extends Event {
++  readonly key: string;
++  constructor(key: string) {
++    super("keydown", { cancelable: true });
++    this.key = key;
++  }
++}
++
++const page: { focused: unknown; window: EventTarget } = {
++  focused: null,
++  window: new EventTarget(),
++};
++
++let scope: EffectScope;
++let area: FakeNode;
++let opener: FakeNode;
++let item: FakeNode;
++let outside: FakeNode;
++let openerShown: boolean;
++let areaShown: boolean;
++
++beforeEach(() => {
++  vi.stubGlobal("Node", FakeNode);
++  vi.stubGlobal("HTMLElement", FakeNode);
++  vi.stubGlobal("FocusEvent", FakeFocusEvent);
++  vi.stubGlobal("KeyboardEvent", FakeKeyboardEvent);
++  page.window = new EventTarget();
++  vi.stubGlobal("window", page.window);
++  vi.stubGlobal("document", {
++    get activeElement() {
++      return page.focused;
++    },
++  });
++  area = new FakeNode();
++  opener = Object.assign(new FakeNode(), { left: 10, bottom: 40 });
++  const box = new FakeNode();
++  item = new FakeNode();
++  box.children.push(item);
++  area.children.push(opener, box);
++  outside = new FakeNode();
++  page.focused = outside;
++  openerShown = true;
++  areaShown = true;
++  scope = effectScope();
++});
++
++afterEach(() => {
++  scope.stop();
++  vi.unstubAllGlobals();
++});
++
++function asElement(fake: FakeNode): HTMLElement {
++  if (fake instanceof HTMLElement) {
++    return fake;
++  }
++  throw new Error("HTMLElement is not the stub");
++}
++
++function hoverBox(): HoverBox {
++  const made = scope.run(() =>
++    useHoverBox({
++      area: () => (areaShown ? asElement(area) : null),
++      opener: () => (openerShown ? asElement(opener) : null),
++      box: null,
++    }),
++  );
++  if (made === undefined) {
++    throw new Error("scope stopped");
++  }
++  return made;
++}
++
++function focusEvent(type: "focusin" | "focusout", related: FakeNode | null): FocusEvent {
++  const event = new FakeFocusEvent(type, related);
++  if (event instanceof FocusEvent) {
++    return event;
++  }
++  throw new Error("FocusEvent is not the stub");
++}
++
++function key(name: string): KeyboardEvent {
++  const event = new FakeKeyboardEvent(name);
++  if (event instanceof KeyboardEvent) {
++    return event;
++  }
++  throw new Error("KeyboardEvent is not the stub");
++}
++
++function scroll(target: EventTarget): void {
++  const event = new Event("scroll");
++  Object.defineProperty(event, "target", { value: target });
++  page.window.dispatchEvent(event);
++}
++
++test("the pointer entering opens the box at once below the opener's left edge", () => {
++  const box = hoverBox();
++
++  box.on.pointerenter();
++
++  expect(box.open.value).toBe(true);
++  expect(box.placement.value).toEqual({ left: "10px", top: "40px" });
++});
++
++test("focus entering from outside opens the box", () => {
++  const box = hoverBox();
++
++  box.on.focusin(focusEvent("focusin", outside));
++
++  expect(box.open.value).toBe(true);
++});
++
++test("without an opener nothing opens", () => {
++  openerShown = false;
++  const box = hoverBox();
++
++  box.on.pointerenter();
++
++  expect(box.open.value).toBe(false);
++});
++
++test("the box stays while focus is inside after the pointer leaves, and closes once both left", () => {
++  const box = hoverBox();
++  box.on.pointerenter();
++  box.on.focusin(focusEvent("focusin", outside));
++
++  box.on.pointerleave();
++  expect(box.open.value).toBe(true);
++  box.on.focusout(focusEvent("focusout", outside));
++
++  expect(box.open.value).toBe(false);
++});
++
++test("the box stays while the pointer is inside after focus leaves, and closes once both left", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", null));
++  box.on.pointerenter();
++
++  box.on.focusout(focusEvent("focusout", null));
++  expect(box.open.value).toBe(true);
++  box.on.pointerleave();
++
++  expect(box.open.value).toBe(false);
++});
++
++test("focus moving inside the area neither opens nor closes the box", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", item));
++  expect(box.open.value).toBe(false);
++
++  box.on.focusin(focusEvent("focusin", outside));
++  box.on.focusout(focusEvent("focusout", item));
++
++  expect(box.open.value).toBe(true);
++});
++
++test("Escape closes the box, takes the key and returns focus to the opener", () => {
++  const box = hoverBox();
++  const closedEscape = key("Escape");
++  box.on.keydown(closedEscape);
++  expect(closedEscape.defaultPrevented).toBe(false);
++  box.on.pointerenter();
++  page.focused = item;
++
++  const enter = key("Enter");
++  box.on.keydown(enter);
++  expect([box.open.value, enter.defaultPrevented]).toEqual([true, false]);
++  const escape = key("Escape");
++  box.on.keydown(escape);
++
++  expect([box.open.value, escape.defaultPrevented, page.focused]).toEqual([false, true, opener]);
++});
++
++test("a scroll outside the box closes it; one inside keeps it", () => {
++  const box = hoverBox();
++  box.on.pointerenter();
++
++  scroll(item);
++  expect(box.open.value).toBe(true);
++  scroll(outside);
++
++  expect(box.open.value).toBe(false);
++});
++
++test("after a scroll closed it with focus in the box, the pointer alone holds it again", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", outside));
++  page.focused = item;
++  box.on.pointerenter();
++  scroll(outside);
++
++  box.on.pointerleave();
++  box.on.pointerenter();
++  box.on.pointerleave();
++
++  expect(box.open.value).toBe(false);
++});
++
++test("after a scroll closed it with focus on the opener, that focus still holds it", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", outside));
++  page.focused = opener;
++  box.on.pointerenter();
++  scroll(outside);
++
++  box.on.pointerleave();
++  box.on.pointerenter();
++  box.on.pointerleave();
++
++  expect(box.open.value).toBe(true);
++});
++
++test("close shuts the box and the pointer re-entering opens it again", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", outside));
++  page.focused = item;
++
++  box.close();
++  expect(box.open.value).toBe(false);
++  box.on.pointerenter();
++  expect(box.open.value).toBe(true);
++  box.on.pointerleave();
++
++  expect(box.open.value).toBe(false);
++});
++
++test("the pointer alone holds the box: leaving closes it", () => {
++  const box = hoverBox();
++  box.on.pointerenter();
++
++  box.on.pointerleave();
++
++  expect(box.open.value).toBe(false);
++});
++
++test("focus alone holds the box: leaving closes it", () => {
++  const box = hoverBox();
++  box.on.focusin(focusEvent("focusin", outside));
++
++  box.on.focusout(focusEvent("focusout", outside));
++
++  expect(box.open.value).toBe(false);
++});
++
++test("it listens for scrolls anywhere, captured and passive", () => {
++  const listen = vi.spyOn(page.window, "addEventListener");
++
++  hoverBox();
++
++  expect(listen.mock.calls.map(([type, , options]) => [type, options])).toEqual([
++    ["scroll", { capture: true, passive: true }],
++  ]);
++});
++
++test("without an area every focus move counts as one from outside", () => {
++  areaShown = false;
++  const box = hoverBox();
++
++  box.on.focusin(focusEvent("focusin", item));
++
++  expect(box.open.value).toBe(true);
++});
++
++test("Escape after the opener went closes the box and leaves focus alone", () => {
++  const box = hoverBox();
++  box.on.pointerenter();
++  page.focused = item;
++  openerShown = false;
++
++  box.on.keydown(key("Escape"));
++
++  expect([box.open.value, page.focused]).toEqual([false, item]);
++});
+diff --git a/frontend/src/ui/useHoverBox.ts b/frontend/src/ui/useHoverBox.ts
+new file mode 100644
+index 0000000..a606b44
+--- /dev/null
++++ b/frontend/src/ui/useHoverBox.ts
+@@ -0,0 +1,126 @@
++import { useEventListener } from "@vueuse/core";
++import { shallowRef, type ComputedRef, type MaybeRefOrGetter, type ShallowRef } from "vue";
++
++import type { Point } from "./menuPosition";
++import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
++
++type HoverBoxParts = {
++  readonly area: () => HTMLElement | null;
++  readonly opener: () => HTMLElement | null;
++  readonly box: MaybeRefOrGetter<HTMLElement | null>;
++};
++
++type Held = HoverBoxParts & {
++  readonly open: ShallowRef<boolean>;
++  readonly at: ShallowRef<Point>;
++  pointerInside: boolean;
++  focusInside: boolean;
++};
++
++export type HoverBox = {
++  readonly open: Readonly<ShallowRef<boolean>>;
++  readonly placement: ComputedRef<{ readonly left: string; readonly top: string }>;
++  readonly on: {
++    readonly pointerenter: () => void;
++    readonly pointerleave: () => void;
++    readonly focusin: (event: FocusEvent) => void;
++    readonly focusout: (event: FocusEvent) => void;
++    readonly keydown: (event: KeyboardEvent) => void;
++  };
++  readonly close: () => void;
++};
++
++function show(held: Held): void {
++  const opener = held.opener();
++  if (!held.open.value && opener !== null) {
++    held.at.value = belowLeft(opener);
++    held.open.value = true;
++  }
++}
++
++function hideUnlessHeld(held: Held): void {
++  if (!held.pointerInside && !held.focusInside) {
++    held.open.value = false;
++  }
++}
++
++function isInside(held: Held, target: EventTarget | null): boolean {
++  return target instanceof Node && held.area()?.contains(target) === true;
++}
++
++function close(held: Held): void {
++  held.focusInside = document.activeElement === held.opener();
++  held.open.value = false;
++}
++
++function focusEntered(held: Held, event: FocusEvent): void {
++  if (!isInside(held, event.relatedTarget)) {
++    held.focusInside = true;
++    show(held);
++  }
++}
++
++function focusLeft(held: Held, event: FocusEvent): void {
++  if (!isInside(held, event.relatedTarget)) {
++    held.focusInside = false;
++    hideUnlessHeld(held);
++  }
++}
++
++function keyPressed(held: Held, event: KeyboardEvent): void {
++  if (event.key === "Escape" && held.open.value) {
++    event.preventDefault();
++    held.open.value = false;
++    held.opener()?.focus();
++  }
++}
++
++function areaListeners(held: Held): HoverBox["on"] {
++  return {
++    pointerenter: () => {
++      held.pointerInside = true;
++      show(held);
++    },
++    pointerleave: () => {
++      held.pointerInside = false;
++      hideUnlessHeld(held);
++    },
++    focusin: (event) => {
++      focusEntered(held, event);
++    },
++    focusout: (event) => {
++      focusLeft(held, event);
++    },
++    keydown: (event) => {
++      keyPressed(held, event);
++    },
++  };
++}
++
++export function useHoverBox(parts: HoverBoxParts): HoverBox {
++  const held: Held = {
++    ...parts,
++    open: shallowRef(false),
++    at: shallowRef({ x: 0, y: 0 }),
++    pointerInside: false,
++    focusInside: false,
++  };
++  useEventListener(
++    window,
++    "scroll",
++    (event) => {
++      if (held.open.value && !isInside(held, event.target)) {
++        close(held);
++      }
++    },
++    { capture: true, passive: true },
++  );
++  return {
++    open: held.open,
++    placement: useMenuPlacement(parts.box, held.at),
++    on: areaListeners(held),
++    close: () => {
++      close(held);
++    },
++  };
++}
+diff --git a/frontend/src/ui/useHoverMenu.test.ts b/frontend/src/ui/useHoverMenu.test.ts
+new file mode 100644
+index 0000000..a3ccc12
+--- /dev/null
++++ b/frontend/src/ui/useHoverMenu.test.ts
+@@ -0,0 +1,331 @@
++import { afterEach, beforeEach, expect, test, vi } from "vitest";
++import { effectScope, nextTick, type EffectScope } from "vue";
++
++import { HOVER_CLOSE_MS, useHoverMenu, type HoverMenu } from "./useHoverMenu";
++
++vi.hoisted(() => {
++  const document = { hasFocus: () => true, createElement: () => ({}) };
++  vi.stubGlobal("document", document);
++  vi.stubGlobal("window", Object.assign(new EventTarget(), { document }));
++});
++
++type Which = "assignee" | "label";
++
++class FakeElement {
++  readonly parentElement = null;
++  bottom = 100;
++  readonly items: FakeElement[] = [];
++  focus(): void {
++    page.focused = this;
++  }
++  contains(node: unknown): boolean {
++    return node === this || this.items.some((item) => item === node);
++  }
++  querySelector(): FakeElement | null {
++    return this.items[0] ?? null;
++  }
++  querySelectorAll(): FakeElement[] {
++    return this.items;
++  }
++  getBoundingClientRect(): { readonly bottom: number } {
++    return { bottom: this.bottom };
++  }
++}
++
++class FakeKeyboardEvent extends Event {
++  readonly key: string;
++  constructor(key: string) {
++    super("keydown", { cancelable: true });
++    this.key = key;
++  }
++}
++
++const page: { focused: unknown; body: FakeElement } = { focused: null, body: new FakeElement() };
++
++let scope: EffectScope;
++let menu: FakeElement;
++let item: FakeElement;
++let openers: Readonly<Record<Which, FakeElement>>;
++let menuShown: boolean;
++
++beforeEach(() => {
++  vi.useFakeTimers();
++  vi.stubGlobal("HTMLElement", FakeElement);
++  vi.stubGlobal("window", Object.assign(new EventTarget(), { innerHeight: 1000 }));
++  vi.stubGlobal("document", {
++    body: page.body,
++    get activeElement() {
++      return page.focused;
++    },
++  });
++  page.focused = page.body;
++  menu = new FakeElement();
++  item = new FakeElement();
++  menu.items.push(item);
++  openers = { assignee: new FakeElement(), label: new FakeElement() };
++  menuShown = true;
++  scope = effectScope();
++});
++
++afterEach(() => {
++  scope.stop();
++  vi.useRealTimers();
++  vi.unstubAllGlobals();
++});
++
++function asElement(fake: FakeElement): HTMLElement {
++  if (fake instanceof HTMLElement) {
++    return fake;
++  }
++  throw new Error("HTMLElement is not the stub");
++}
++
++function hoverMenu(): HoverMenu<Which> {
++  const made = scope.run(() =>
++    useHoverMenu<Which>({
++      menu: () => (menuShown ? asElement(menu) : null),
++      opener: (which) => asElement(openers[which]),
++    }),
++  );
++  if (made === undefined) {
++    throw new Error("scope stopped");
++  }
++  return made;
++}
++
++async function settle(): Promise<void> {
++  await nextTick();
++  await nextTick();
++  await nextTick();
++}
++
++async function hoverOpened(which: Which): Promise<HoverMenu<Which>> {
++  const hover = hoverMenu();
++  hover.pointerEntered(which);
++  await settle();
++  return hover;
++}
++
++test("hover_opens_without_moving_focus", async () => {
++  const hover = await hoverOpened("assignee");
++
++  expect(hover.openFor.value).toBe("assignee");
++  expect(page.focused).toBe(page.body);
++});
++
++test("a hover-opened menu that does not fit below opens above", async () => {
++  menu.bottom = 1001;
++
++  const hover = await hoverOpened("assignee");
++
++  expect(hover.above.value).toBe(true);
++  menu.bottom = 1000;
++  hover.pointerEntered("label");
++  await settle();
++  expect(hover.above.value).toBe(false);
++});
++
++test("moving_to_another_opener_closes_the_first_at_once", async () => {
++  const hover = await hoverOpened("assignee");
++
++  hover.pointerLeft();
++  hover.pointerEntered("label");
++  expect(hover.openFor.value).toBe("label");
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  await settle();
++
++  expect(hover.openFor.value).toBe("label");
++});
++
++test("leaving_closes_after_300_ms_and_re_entering_cancels", async () => {
++  const hover = await hoverOpened("assignee");
++
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS - 1);
++  expect(hover.openFor.value).toBe("assignee");
++  hover.pointerEntered("assignee");
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  expect(hover.openFor.value).toBe("assignee");
++
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  expect(hover.openFor.value).toBeNull();
++});
++
++test("leaving with focus outside the menu leaves focus there", async () => {
++  const row = new FakeElement();
++  const hover = await hoverOpened("assignee");
++  page.focused = row;
++
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  await settle();
++
++  expect(hover.openFor.value).toBeNull();
++  expect(page.focused).toBe(row);
++});
++
++test("leaving with focus in the menu returns it to the opener", async () => {
++  const hover = await hoverOpened("assignee");
++  page.focused = item;
++
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  await settle();
++
++  expect(hover.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("leaving with no menu open starts nothing", async () => {
++  const hover = await hoverOpened("assignee");
++  await hover.close();
++
++  hover.pointerLeft();
++
++  expect(vi.getTimerCount()).toBe(0);
++});
++
++test("a_click_on_a_hover_opened_opener_pins_it", async () => {
++  const hover = await hoverOpened("assignee");
++
++  await hover.openerClicked("assignee");
++  expect(page.focused).toBe(item);
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++  await settle();
++
++  expect(hover.openFor.value).toBe("assignee");
++});
++
++test("a_second_click_closes", async () => {
++  const hover = await hoverOpened("assignee");
++  await hover.openerClicked("assignee");
++
++  await hover.openerClicked("assignee");
++
++  expect(hover.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("escape_closes_a_pinned_menu", async () => {
++  const hover = await hoverOpened("assignee");
++  await hover.openerClicked("assignee");
++  vi.stubGlobal("KeyboardEvent", FakeKeyboardEvent);
++  const escape = new FakeKeyboardEvent("Escape");
++  if (!(escape instanceof KeyboardEvent)) {
++    throw new Error("KeyboardEvent is not the stub");
++  }
++
++  hover.menuKey(escape);
++  await settle();
++
++  expect(hover.openFor.value).toBeNull();
++  expect(page.focused).toBe(openers.assignee);
++});
++
++test("a click on a closed opener opens with focus inside and hover leaving keeps it", async () => {
++  const hover = hoverMenu();
++
++  await hover.openerClicked("label");
++  expect([hover.openFor.value, page.focused]).toEqual(["label", item]);
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect(hover.openFor.value).toBe("label");
++});
++
++test("a click on another opener while one is hover-open opens the other with focus inside", async () => {
++  const hover = await hoverOpened("assignee");
++
++  await hover.openerClicked("label");
++
++  expect([hover.openFor.value, page.focused]).toEqual(["label", item]);
++});
++
++test("a click while a hover close is pending cancels it", async () => {
++  const hover = await hoverOpened("assignee");
++  hover.pointerLeft();
++
++  await hover.openerClicked("label");
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect(hover.openFor.value).toBe("label");
++});
++
++test("hovering the open menu's opener again keeps a pinned menu pinned", async () => {
++  const hover = await hoverOpened("assignee");
++  await hover.openerClicked("assignee");
++
++  hover.pointerEntered("assignee");
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect(hover.openFor.value).toBe("assignee");
++});
++
++test("hovering another opener over a pinned menu opens that one by hover", async () => {
++  const hover = await hoverOpened("assignee");
++  await hover.openerClicked("assignee");
++
++  hover.pointerEntered("label");
++  await settle();
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect(hover.openFor.value).toBeNull();
++});
++
++test("a menu opened by toggle stays when hover leaves", async () => {
++  const hover = hoverMenu();
++
++  await hover.toggle("label");
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect(hover.openFor.value).toBe("label");
++});
++
++test("a click on a hover-opened menu without items still pins it", async () => {
++  menu.items.length = 0;
++  const hover = await hoverOpened("assignee");
++
++  await hover.openerClicked("assignee");
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect([hover.openFor.value, page.focused]).toEqual(["assignee", page.body]);
++});
++
++test("a click on a hover-opened menu not drawn yet still pins it", async () => {
++  const hover = await hoverOpened("assignee");
++  menuShown = false;
++
++  await hover.openerClicked("assignee");
++  hover.pointerLeft();
++  vi.advanceTimersByTime(HOVER_CLOSE_MS);
++
++  expect([hover.openFor.value, page.focused]).toEqual(["assignee", page.body]);
++});
++
++test("a menu that is not drawn opens below and takes no focus", async () => {
++  menu.bottom = 1001;
++  const hover = await hoverOpened("assignee");
++  menuShown = false;
++
++  hover.pointerEntered("label");
++  await settle();
++  expect([hover.openFor.value, hover.above.value]).toEqual(["label", false]);
++  await hover.openerClicked("assignee");
++
++  expect([hover.openFor.value, page.focused]).toEqual(["assignee", page.body]);
++});
++
++test("a click opening a menu without items moves no focus", async () => {
++  menu.items.length = 0;
++  const hover = hoverMenu();
++
++  await hover.openerClicked("label");
++
++  expect([hover.openFor.value, page.focused]).toEqual(["label", page.body]);
++});
+diff --git a/frontend/src/ui/useHoverMenu.ts b/frontend/src/ui/useHoverMenu.ts
+new file mode 100644
+index 0000000..2f2c09e
+--- /dev/null
++++ b/frontend/src/ui/useHoverMenu.ts
+@@ -0,0 +1,52 @@
++import { useTimeoutFn } from "@vueuse/core";
++
++import { MENU_ITEMS } from "./menuKeys";
++import { useDropdownMenu, type DropdownMenu } from "./useDropdownMenu";
++
++export const HOVER_CLOSE_MS = 300;
++
++export type HoverMenu<T> = DropdownMenu<T> & {
++  readonly pointerEntered: (which: T) => void;
++  readonly pointerLeft: () => void;
++  readonly openerClicked: (which: T) => Promise<void>;
++};
++
++export function useHoverMenu<T>(parts: {
++  readonly menu: () => HTMLElement | null;
++  readonly opener: (which: T) => HTMLElement | null;
++}): HoverMenu<T> {
++  const dropdown = useDropdownMenu(parts);
++  let byHover = false;
++  const closing = useTimeoutFn(
++    () => {
++      void dropdown.dismiss();
++    },
++    HOVER_CLOSE_MS,
++    { immediate: false },
++  );
++  return {
++    ...dropdown,
++    pointerEntered: (which) => {
++      closing.stop();
++      if (dropdown.openFor.value !== which) {
++        byHover = true;
++        void dropdown.open(which);
++      }
++    },
++    pointerLeft: () => {
++      if (byHover && dropdown.openFor.value !== null) {
++        closing.start();
++      }
++    },
++    openerClicked: async (which) => {
++      closing.stop();
++      const pinning = byHover && dropdown.openFor.value === which;
++      byHover = false;
++      if (pinning) {
++        parts.menu()?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
++      } else {
++        await dropdown.toggle(which);
++      }
++    },
++  };
++}

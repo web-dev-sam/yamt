@@ -17,7 +17,9 @@ export type DropdownMenu<T> = {
   readonly openFor: Readonly<ShallowRef<T | null>>;
   readonly above: Readonly<ShallowRef<boolean>>;
   readonly toggle: (which: T) => Promise<void>;
+  readonly open: (which: T) => Promise<void>;
   readonly close: () => Promise<void>;
+  readonly dismiss: () => Promise<void>;
   readonly menuKey: (event: KeyboardEvent) => void;
 };
 
@@ -56,21 +58,24 @@ function contextMenuElsewhere<T>(dropdown: Dropdown<T>, event: MouseEvent): void
   }
 }
 
+async function open<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
+  dropdown.openFor.value = which;
+  dropdown.above.value = false;
+  await nextTick();
+  const opened = dropdown.menu();
+  if (opened !== null) {
+    dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
+  }
+}
+
 async function toggle<T>(dropdown: Dropdown<T>, which: T): Promise<void> {
   if (dropdown.openFor.value === which) {
     await close(dropdown);
     return;
   }
-  dropdown.openFor.value = which;
-  dropdown.above.value = false;
+  await open(dropdown, which);
   await nextTick();
-  const opened = dropdown.menu();
-  if (opened === null) {
-    return;
-  }
-  dropdown.above.value = opened.getBoundingClientRect().bottom > visibleBottom(opened);
-  await nextTick();
-  opened.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
+  dropdown.menu()?.querySelector<HTMLElement>(MENU_ITEMS)?.focus();
 }
 
 function menuKey<T>(dropdown: Dropdown<T>, event: KeyboardEvent): void {
@@ -129,7 +134,9 @@ export function useDropdownMenu<T>(parts: DropdownParts<T>): DropdownMenu<T> {
     openFor: dropdown.openFor,
     above: dropdown.above,
     toggle: (which) => toggle(dropdown, which),
+    open: (which) => open(dropdown, which),
     close: () => close(dropdown),
+    dismiss: () => closeAfterClick(dropdown),
     menuKey: (event) => {
       menuKey(dropdown, event);
     },
