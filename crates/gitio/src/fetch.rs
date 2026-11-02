@@ -53,13 +53,24 @@ impl Repo {
     fn fetch(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String> {
         let mut command = self.command(Access::Write, &FETCH);
         command.arg(remote).args(refspecs);
-        let finished = run_without_prompts(command, "fetch", timeout)?;
-        if finished.status.success() {
-            return Ok(());
-        }
-        Err(first_line(&finished.stderr)
-            .unwrap_or_else(|| format!("git fetch failed: {}", finished.status)))
+        stdout_without_prompts(command, "fetch", timeout)?;
+        Ok(())
     }
+}
+
+/// `run_without_prompts`, with a non-zero exit as `Err` too: git's first stderr line (the cause, before any
+/// advice), else "git <verb> failed: <status>". `Ok` = git's stdout.
+pub(crate) fn stdout_without_prompts(
+    command: Command,
+    verb: &str,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    let finished = run_without_prompts(command, verb, timeout)?;
+    if finished.status.success() {
+        return Ok(finished.stdout);
+    }
+    Err(first_line(&finished.stderr)
+        .unwrap_or_else(|| format!("git {verb} failed: {}", finished.status)))
 }
 
 /// Runs `command`, a git `<verb>` that talks to a server, with prompts refused and killed at `timeout`. `Err`

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use crate::entry::Oid;
+use crate::objects::refuse_lazy_fetch;
 use crate::repo::Repo;
 use crate::run::{Access, run};
 use crate::{Error, GitVersion, Result};
@@ -49,7 +50,8 @@ impl MergeTreeRun {
 impl Repo {
     /// `git merge-tree --write-tree [--quiet] <first> <second>` (`Quiet` adds `--quiet`): exit 0 → `Clean`,
     /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
-    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)).
+    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
+    /// fetches an object a partial clone lacks: the run fails instead.
     pub fn merge_tree(
         &self,
         first: &Oid,
@@ -65,6 +67,7 @@ impl Repo {
         command
             .args(options)
             .args([first.as_str(), second.as_str()]);
+        refuse_lazy_fetch(&mut command);
         // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
         // (measured with git 2.56, both forms); a conflict leaves stderr empty.
         match run(command, None, timeout) {

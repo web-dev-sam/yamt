@@ -1,46 +1,29 @@
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdout, Command, Stdio};
 
+use crate::objects::LazyFetch;
 use crate::repo::Repo;
-use crate::run::{Access, GIT_TIMEOUT, argv, run};
+use crate::run::argv;
 use crate::{Error, Oid, Result};
 
 pub(crate) const CAT_FILE: &str = "cat-file";
 const BLOB: &str = "blob";
+const TYPE_AND_SIZE: &str = "%(objecttype) %(objectsize)";
 
 impl Repo {
     /// one `git cat-file --batch-check` run over all ids; answers in input order; None = missing; a gitlink id is never asked
     pub fn blob_sizes(&self, oids: &[Oid]) -> Result<Vec<Option<u64>>> {
-        if oids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let mut input = String::new();
-        for oid in oids {
-            input.push_str(oid.as_str());
-            input.push('\n');
-        }
-        let command = self.command(Access::Read, &[CAT_FILE, "--batch-check", "--buffer"]);
-        let output = run(command, Some(input.into_bytes()), GIT_TIMEOUT)?;
-        let text = String::from_utf8_lossy(&output);
-        let answers: Vec<&str> = text.lines().collect();
-        if answers.len() != oids.len() {
-            return Err(unexpected(&text));
-        }
-        oids.iter()
-            .zip(answers)
-            .map(|(oid, answer)| blob_size(oid, answer))
-            .collect()
+        let answers = self.batch_check(oids, TYPE_AND_SIZE, LazyFetch::Allowed)?;
+        answers.iter().map(|answer| blob_size(answer)).collect()
     }
 }
 
-// git-cat-file(1) BATCH OUTPUT: `<oid> SP <type> SP <size> LF`, or `<object> SP missing LF`.
-fn blob_size(oid: &Oid, answer: &str) -> Result<Option<u64>> {
+// git-cat-file(1) BATCH OUTPUT after the id: `<type> SP <size>`, or `missing`.
+fn blob_size(answer: &str) -> Result<Option<u64>> {
     let fields: Vec<&str> = answer.split(' ').collect();
     match fields.as_slice() {
-        [named, "missing"] if *named == oid.as_str() => Ok(None),
-        [named, BLOB, size] if *named == oid.as_str() => {
-            size.parse().map(Some).map_err(|_| unexpected(answer))
-        }
+        ["missing"] => Ok(None),
+        [BLOB, size] => size.parse().map(Some).map_err(|_| unexpected(answer)),
         _ => Err(unexpected(answer)),
     }
 }
@@ -118,7 +101,7 @@ fn closed_pipe() -> io::Error {
     io::Error::from(io::ErrorKind::BrokenPipe)
 }
 
-fn unexpected(output: &str) -> Error {
+pub(crate) fn unexpected(output: &str) -> Error {
     Error::UnexpectedOutput {
         command: CAT_FILE,
         output: output.to_owned(),
@@ -129,17 +112,10 @@ fn unexpected(output: &str) -> Error {
 mod tests {
     use super::*;
 
-    fn hex(digit: char) -> String {
-        digit.to_string().repeat(40)
-    }
-
     #[test]
-    fn an_answer_naming_another_id_is_unexpected_output() {
-        let asked = Oid::parse(&hex('a')).unwrap();
-        let other = hex('b');
-
-        for answer in [format!("{other} blob 3"), format!("{other} missing")] {
-            let error = blob_size(&asked, &answer).unwrap_err();
+    fn a_size_that_is_no_number_or_an_object_that_is_no_blob_is_unexpected_output() {
+        for answer in ["blob three", "tree 3", "blob", "blob 3 extra"] {
+            let error = blob_size(answer).unwrap_err();
 
             assert!(
                 matches!(error, Error::UnexpectedOutput { .. }),

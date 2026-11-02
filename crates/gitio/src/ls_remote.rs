@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 use crate::entry::Oid;
-use crate::fetch::run_without_prompts;
-use crate::glab::first_line;
+use crate::fetch::stdout_without_prompts;
 use crate::repo::Repo;
 use crate::run::Access;
 
@@ -18,8 +17,8 @@ pub struct RemoteRef {
 impl Repo {
     /// `git ls-remote --refs --end-of-options <remote> <patterns>…`: every ref the remote advertises that matches a
     /// pattern (git-ls-remote(1): a glob matched against the ref's tail), in git's order; no object is fetched and
-    /// nothing is written. Runs through `fetch.rs` `run_without_prompts` (the no-prompt environment, RK40), killed at
-    /// `timeout`. `Err` = git's first stderr line, else git's exit words (as `fetch_without_refs`).
+    /// nothing is written. Runs through `fetch.rs` `stdout_without_prompts` (the no-prompt environment, RK40),
+    /// killed at `timeout`. `Err` = git's first stderr line, else git's exit words (as `fetch_without_refs`).
     pub fn remote_refs(
         &self,
         remote: &str,
@@ -28,12 +27,8 @@ impl Repo {
     ) -> Result<Vec<RemoteRef>, String> {
         let mut command = self.command(Access::Read, &LS_REMOTE);
         command.arg(remote).args(patterns);
-        let finished = run_without_prompts(command, "ls-remote", timeout)?;
-        if !finished.status.success() {
-            return Err(first_line(&finished.stderr)
-                .unwrap_or_else(|| format!("git ls-remote failed: {}", finished.status)));
-        }
-        remote_refs_in(&finished.stdout)
+        let stdout = stdout_without_prompts(command, "ls-remote", timeout)?;
+        remote_refs_in(&stdout)
     }
 }
 

@@ -1,0 +1,528 @@
+diff --git a/crates/gitio/AGENTS.md b/crates/gitio/AGENTS.md
+index 9929054..a15761d 100644
+--- a/crates/gitio/AGENTS.md
++++ b/crates/gitio/AGENTS.md
+@@ -8,8 +8,8 @@ The AI's checkout (`src/checkout.rs`, plan §2 #110, #122): `clone_shared_into(i
+ 
+ The merge-request fetch (`src/fetch.rs`, plan §2 #128–#135): `Repo::fetch_without_refs(remote, refspecs, timeout)` (`fetch --no-tags --no-write-fetch-head --no-recurse-submodules --no-auto-maintenance --refmap= --quiet --end-of-options <remote> <refspecs>`, `Access::Write`: refspecs without a destination and an empty `--refmap=` bring the commits and write no ref and no `FETCH_HEAD`; `GIT_TERMINAL_PROMPT=0`, `GCM_INTERACTIVE=never` and on Unix `SSH_ASKPASS_REQUIRE=force` with `SSH_ASKPASS=false`, so no prompt of git, ssh or a credential manager waits; run by `run_with_deadline`, killed at `timeout` — callers pass `FETCH_TIMEOUT`, 120 s, a test a shorter one; `Err(String)` is git's first stderr line through `glab.rs` `first_line`, the deadline's own words or the exit status). `tests/fetch.rs` against a bare server in a tempdir: no ref, status, index or HEAD changed, the no-prompt environment recorded, a missing server or ref in git's words, a hang ended at its deadline.
+ 
+-The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): a run that talks to a server is one helper, `fetch.rs` `run_without_prompts(command, verb, timeout)`: the no-prompt environment above (`refuse_prompts`), the argv logged at `debug`, `run_with_deadline`, and `Err` "cannot run git <verb>: …" or "git <verb> got no answer within N s"; both fetches and the push read only the `Finished` run it gives. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else, forced over a rebased branch (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. A GitLab name is never read as an option: `--end-of-options` comes before it wherever git would parse a leading `-` as a flag, and `-B`'s value is a name whatever it starts with (`tests/branch.rs` `*_reads_a_leading_dash_as_*`). `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet --end-of-options <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D --end-of-options <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force --end-of-options <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit --end-of-options <rev>` (`--no-ff` leaves `MERGE_HEAD` even when HEAD could fast-forward) and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
++The merge-request merge in the user's own checkout (`src/fetch.rs`, `src/branch.rs`, `src/push.rs`, `src/repo.rs`, plan §2 #138–#143): a run that talks to a server is one helper, `fetch.rs` `run_without_prompts(command, verb, timeout)`: the no-prompt environment above (`refuse_prompts`), the argv logged at `debug`, `run_with_deadline`, and `Err` "cannot run git <verb>: …" or "git <verb> got no answer within N s"; the push reads only the `Finished` run it gives, and both fetches and `remote_refs` go through `stdout_without_prompts`, the same run with a non-zero exit as `Err` too (git's first stderr line, else "git <verb> failed: <status>"), the one place that wording lives. `Repo::fetch_branches(remote, branches, timeout)` runs the same fetch with one `+refs/heads/<b>:refs/remotes/<remote>/<b>` refspec per branch, so it writes those remote-tracking refs and nothing else, forced over a rebased branch (no `FETCH_HEAD`; `--refmap=` keeps the configured refspec from updating others); the caller refuses a branch name holding ':'. `is_ancestor(ancestor, of)` runs `merge-base --is-ancestor` (exit 0 true, 1 false, else `GitFailed`). `has_tracked_changes()` runs `status --porcelain=v1 -z --untracked-files=no` (any staged, unstaged or unmerged entry; untracked files do not count). `git_path(name)` is public: `rev-parse --git-path <name>`. A GitLab name is never read as an option: `--end-of-options` comes before it wherever git would parse a leading `-` as a flag, and `-B`'s value is a name whatever it starts with (`tests/branch.rs` `*_reads_a_leading_dash_as_*`). `checkout_branch_at(branch, commit)` runs `checkout --quiet -B <branch> <commit>` (an existing branch keeps its `branch.*` config). `checkout_branch(branch)` runs `checkout --quiet --end-of-options <branch> --`. `set_upstream(branch, remote)` runs `config branch.<b>.remote <remote>` then `config branch.<b>.merge refs/heads/<b>`. `delete_branch(branch)` runs `branch --quiet -D --end-of-options <branch>` (its config goes too). `move_branch(branch, commit)` runs `branch --quiet --force --end-of-options <branch> <commit>` (the config stays; both refuse a branch checked out in any worktree). `reset_keep(commit)` runs `reset --quiet --keep <commit>`. `merge_no_commit(rev)` runs `merge --no-ff --no-commit --end-of-options <rev>` (`--no-ff` leaves `MERGE_HEAD` even when HEAD could fast-forward) and answers `GitRun` (a non-zero exit is not an `Err`, as `continue_operation`). The checkouts, the reset and the merge run without a deadline (`run_to_success`/`run_to_end`), the config and branch writes with `GIT_TIMEOUT`. `Repo::push_branch(remote, branch, timeout)` runs `push --porcelain --no-follow-tags --recurse-submodules=no --end-of-options <remote> refs/heads/<b>:refs/heads/<b>` (never `+`, never `--force`; a configured `remote.<name>.push` does not apply) with the no-prompt environment, killed at `timeout` — callers pass `PUSH_TIMEOUT`, 120 s; `Err(String)` is the ref's porcelain summary and reason when its flag is `!` ("[rejected] (fetch first)"), else git's first `fatal:`/`error:` stderr line, else the exit status. `tests/branch.rs`, `tests/push.rs` and `tests/fetch.rs` run each against real tempdir repositories and a bare remote.
+ 
+-The local conflict check's git runs (`src/merge_tree.rs`, `src/ls_remote.rs`, `src/objects.rs`; RK52): `Repo::merge_tree(first, second, run_kind, timeout)` runs `merge-tree --write-tree [--quiet] <first> <second>` through `run` and answers `MergeOutcome` (`Clean` on exit 0, `Conflicts` on exit 1 with an empty stderr; git also exits 1 for a commit it cannot find, with a message, which stays `GitFailed`), never touching the index, the worktree or a ref. `MergeTreeRun::for_version(GitVersion)` picks `Quiet` (`--quiet`, git 2.50+, `Access::Read`, writes no object) or `Writing` (git 2.38–2.49, `Access::Write`, leaves unreferenced objects), `None` before 2.38; `FIRST_WITH_WRITE_TREE` and `FIRST_WITH_QUIET` are the only place these versions live. `Repo::remote_refs(remote, patterns, timeout)` runs `ls-remote --refs --end-of-options <remote> <patterns>` through `fetch.rs` `run_without_prompts` and gives each `<oid>\t<name>` line as a `RemoteRef { name, id }` in git's order (no object fetched, nothing written; `Err(String)` git's first stderr line, the exit status, or "git ls-remote printed …" for an unreadable line). `Repo::missing_commits(ids)` feeds the ids to one `cat-file --batch-check=%(objectname) %(objecttype)` and names, in the order given, every id that is missing or not a commit. `tests/local_check.rs` runs each against real tempdir repositories and a bare remote. `Oid` derives `Hash`.
++The local conflict check's git runs (`src/merge_tree.rs`, `src/ls_remote.rs`, `src/objects.rs`; RK52): `Repo::merge_tree(first, second, run_kind, timeout)` runs `merge-tree --write-tree [--quiet] <first> <second>` through `run` and answers `MergeOutcome` (`Clean` on exit 0, `Conflicts` on exit 1 with an empty stderr; git also exits 1 for a commit it cannot find, with a message, which stays `GitFailed`), never touching the index, the worktree or a ref. `MergeTreeRun::for_version(GitVersion)` picks `Quiet` (`--quiet`, git 2.50+, `Access::Read`, writes no object) or `Writing` (git 2.38–2.49, `Access::Write`, leaves unreferenced objects), `None` before 2.38; `FIRST_WITH_WRITE_TREE` and `FIRST_WITH_QUIET` are the only place these versions live. `Repo::remote_refs(remote, patterns, timeout)` runs `ls-remote --refs --end-of-options <remote> <patterns>` through `fetch.rs` `stdout_without_prompts` and gives each `<oid>\t<name>` line as a `RemoteRef { name, id }` in git's order (no object fetched, nothing written; `Err(String)` git's first stderr line, the exit status, or "git ls-remote printed …" for an unreadable line). `Repo::missing_commits(ids)` names, in the order given, every id that is missing or not a commit, from one `objects.rs` `batch_check`. `batch_check(ids, fields, LazyFetch)` is the one `cat-file --batch-check='%(objectname) <fields>' --buffer` runner (`blob_sizes` uses it too): no run for no ids, one answer per id in order with the echoed id checked and stripped, else `UnexpectedOutput`. merge-tree and `missing_commits` (`LazyFetch::Refused`) run with `objects.rs` `refuse_lazy_fetch` (`GIT_NO_LAZY_FETCH=1`, git 2.45+), so a partial clone fails on an object it lacks, or calls it missing, instead of fetching it from its promisor remote; `blob_sizes` keeps `LazyFetch::Allowed`. `tests/local_check.rs` runs each against real tempdir repositories, a bare remote (the no-prompt environment recorded for `remote_refs`) and a blobless partial clone whose server records any contact. `Oid` derives `Hash`.
+ 
+ glab (`src/glab.rs`, plan §2 #118, #128–#135): `Glab::find()` (the first runnable `glab` on PATH, `program.rs` `program_in`; `None` when not installed), `Glab::at(program)`, `with_timeout` (default `GLAB_TIMEOUT`, 20 s); `run(cwd, args, stdin)` → `GlabRun` = `Printed { stdout }` | `Failed { status, stdout, stderr }` | `TimedOut`, with the user's environment plus `NO_COLOR=1` and `GIT_TERMINAL_PROMPT=0`, stdin closed or written and closed, a glab that cannot start `Error::GlabIo { program, source }`; `get(cwd, args)` → stdout or `Err(String)`: glab's `last_line` of stderr (its error comes after any notice), else the exit status or signal in words, `TIMED_OUT` (`"glab timed out"`) at the deadline; `auth_status(cwd)` → `AuthStatus` = `LoggedIn` | `LoggedOut { detail }` (glab's first line of stderr, else stdout, naming the instance) | `Failed { message }` (could not run, or `TIMED_OUT`). `first_line`/`last_line`: the first or last non-blank line, trimmed, of bytes decoded lossily. `tests/glab.rs` runs the committed `scripts/fake-glab` on the `tests/glab/runner` scenario through a symlink (stdin and stdout, a failure's exit and streams, a hang's timeout, the environment overrides in a child process, a missing glab).
+diff --git a/crates/gitio/src/blob.rs b/crates/gitio/src/blob.rs
+index 09afe89..f800a48 100644
+--- a/crates/gitio/src/blob.rs
++++ b/crates/gitio/src/blob.rs
+@@ -1,46 +1,29 @@
+ use std::io::{self, BufRead, BufReader, Read, Write};
+ use std::process::{Child, ChildStdout, Command, Stdio};
+ 
++use crate::objects::LazyFetch;
+ use crate::repo::Repo;
+-use crate::run::{Access, GIT_TIMEOUT, argv, run};
++use crate::run::argv;
+ use crate::{Error, Oid, Result};
+ 
+ pub(crate) const CAT_FILE: &str = "cat-file";
+ const BLOB: &str = "blob";
++const TYPE_AND_SIZE: &str = "%(objecttype) %(objectsize)";
+ 
+ impl Repo {
+     /// one `git cat-file --batch-check` run over all ids; answers in input order; None = missing; a gitlink id is never asked
+     pub fn blob_sizes(&self, oids: &[Oid]) -> Result<Vec<Option<u64>>> {
+-        if oids.is_empty() {
+-            return Ok(Vec::new());
+-        }
+-        let mut input = String::new();
+-        for oid in oids {
+-            input.push_str(oid.as_str());
+-            input.push('\n');
+-        }
+-        let command = self.command(Access::Read, &[CAT_FILE, "--batch-check", "--buffer"]);
+-        let output = run(command, Some(input.into_bytes()), GIT_TIMEOUT)?;
+-        let text = String::from_utf8_lossy(&output);
+-        let answers: Vec<&str> = text.lines().collect();
+-        if answers.len() != oids.len() {
+-            return Err(unexpected(&text));
+-        }
+-        oids.iter()
+-            .zip(answers)
+-            .map(|(oid, answer)| blob_size(oid, answer))
+-            .collect()
++        let answers = self.batch_check(oids, TYPE_AND_SIZE, LazyFetch::Allowed)?;
++        answers.iter().map(|answer| blob_size(answer)).collect()
+     }
+ }
+ 
+-// git-cat-file(1) BATCH OUTPUT: `<oid> SP <type> SP <size> LF`, or `<object> SP missing LF`.
+-fn blob_size(oid: &Oid, answer: &str) -> Result<Option<u64>> {
++// git-cat-file(1) BATCH OUTPUT after the id: `<type> SP <size>`, or `missing`.
++fn blob_size(answer: &str) -> Result<Option<u64>> {
+     let fields: Vec<&str> = answer.split(' ').collect();
+     match fields.as_slice() {
+-        [named, "missing"] if *named == oid.as_str() => Ok(None),
+-        [named, BLOB, size] if *named == oid.as_str() => {
+-            size.parse().map(Some).map_err(|_| unexpected(answer))
+-        }
++        ["missing"] => Ok(None),
++        [BLOB, size] => size.parse().map(Some).map_err(|_| unexpected(answer)),
+         _ => Err(unexpected(answer)),
+     }
+ }
+@@ -118,7 +101,7 @@ fn closed_pipe() -> io::Error {
+     io::Error::from(io::ErrorKind::BrokenPipe)
+ }
+ 
+-fn unexpected(output: &str) -> Error {
++pub(crate) fn unexpected(output: &str) -> Error {
+     Error::UnexpectedOutput {
+         command: CAT_FILE,
+         output: output.to_owned(),
+@@ -129,17 +112,10 @@ fn unexpected(output: &str) -> Error {
+ mod tests {
+     use super::*;
+ 
+-    fn hex(digit: char) -> String {
+-        digit.to_string().repeat(40)
+-    }
+-
+     #[test]
+-    fn an_answer_naming_another_id_is_unexpected_output() {
+-        let asked = Oid::parse(&hex('a')).unwrap();
+-        let other = hex('b');
+-
+-        for answer in [format!("{other} blob 3"), format!("{other} missing")] {
+-            let error = blob_size(&asked, &answer).unwrap_err();
++    fn a_size_that_is_no_number_or_an_object_that_is_no_blob_is_unexpected_output() {
++        for answer in ["blob three", "tree 3", "blob", "blob 3 extra"] {
++            let error = blob_size(answer).unwrap_err();
+ 
+             assert!(
+                 matches!(error, Error::UnexpectedOutput { .. }),
+diff --git a/crates/gitio/src/fetch.rs b/crates/gitio/src/fetch.rs
+index 45a89ee..45fd938 100644
+--- a/crates/gitio/src/fetch.rs
++++ b/crates/gitio/src/fetch.rs
+@@ -53,15 +53,26 @@ impl Repo {
+     fn fetch(&self, remote: &str, refspecs: &[&str], timeout: Duration) -> Result<(), String> {
+         let mut command = self.command(Access::Write, &FETCH);
+         command.arg(remote).args(refspecs);
+-        let finished = run_without_prompts(command, "fetch", timeout)?;
+-        if finished.status.success() {
+-            return Ok(());
+-        }
+-        Err(first_line(&finished.stderr)
+-            .unwrap_or_else(|| format!("git fetch failed: {}", finished.status)))
++        stdout_without_prompts(command, "fetch", timeout)?;
++        Ok(())
+     }
+ }
+ 
++/// `run_without_prompts`, with a non-zero exit as `Err` too: git's first stderr line (the cause, before any
++/// advice), else "git <verb> failed: <status>". `Ok` = git's stdout.
++pub(crate) fn stdout_without_prompts(
++    command: Command,
++    verb: &str,
++    timeout: Duration,
++) -> Result<Vec<u8>, String> {
++    let finished = run_without_prompts(command, verb, timeout)?;
++    if finished.status.success() {
++        return Ok(finished.stdout);
++    }
++    Err(first_line(&finished.stderr)
++        .unwrap_or_else(|| format!("git {verb} failed: {}", finished.status)))
++}
++
+ /// Runs `command`, a git `<verb>` that talks to a server, with prompts refused and killed at `timeout`. `Err`
+ /// holds the words for a git that could not start or got no answer in time.
+ pub(crate) fn run_without_prompts(
+diff --git a/crates/gitio/src/ls_remote.rs b/crates/gitio/src/ls_remote.rs
+index c0aabb1..3354858 100644
+--- a/crates/gitio/src/ls_remote.rs
++++ b/crates/gitio/src/ls_remote.rs
+@@ -1,8 +1,7 @@
+ use std::time::Duration;
+ 
+ use crate::entry::Oid;
+-use crate::fetch::run_without_prompts;
+-use crate::glab::first_line;
++use crate::fetch::stdout_without_prompts;
+ use crate::repo::Repo;
+ use crate::run::Access;
+ 
+@@ -18,8 +17,8 @@ pub struct RemoteRef {
+ impl Repo {
+     /// `git ls-remote --refs --end-of-options <remote> <patterns>…`: every ref the remote advertises that matches a
+     /// pattern (git-ls-remote(1): a glob matched against the ref's tail), in git's order; no object is fetched and
+-    /// nothing is written. Runs through `fetch.rs` `run_without_prompts` (the no-prompt environment, RK40), killed at
+-    /// `timeout`. `Err` = git's first stderr line, else git's exit words (as `fetch_without_refs`).
++    /// nothing is written. Runs through `fetch.rs` `stdout_without_prompts` (the no-prompt environment, RK40),
++    /// killed at `timeout`. `Err` = git's first stderr line, else git's exit words (as `fetch_without_refs`).
+     pub fn remote_refs(
+         &self,
+         remote: &str,
+@@ -28,12 +27,8 @@ impl Repo {
+     ) -> Result<Vec<RemoteRef>, String> {
+         let mut command = self.command(Access::Read, &LS_REMOTE);
+         command.arg(remote).args(patterns);
+-        let finished = run_without_prompts(command, "ls-remote", timeout)?;
+-        if !finished.status.success() {
+-            return Err(first_line(&finished.stderr)
+-                .unwrap_or_else(|| format!("git ls-remote failed: {}", finished.status)));
+-        }
+-        remote_refs_in(&finished.stdout)
++        let stdout = stdout_without_prompts(command, "ls-remote", timeout)?;
++        remote_refs_in(&stdout)
+     }
+ }
+ 
+diff --git a/crates/gitio/src/merge_tree.rs b/crates/gitio/src/merge_tree.rs
+index 33bf69c..a5722a0 100644
+--- a/crates/gitio/src/merge_tree.rs
++++ b/crates/gitio/src/merge_tree.rs
+@@ -1,6 +1,7 @@
+ use std::time::Duration;
+ 
+ use crate::entry::Oid;
++use crate::objects::refuse_lazy_fetch;
+ use crate::repo::Repo;
+ use crate::run::{Access, run};
+ use crate::{Error, GitVersion, Result};
+@@ -49,7 +50,8 @@ impl MergeTreeRun {
+ impl Repo {
+     /// `git merge-tree --write-tree [--quiet] <first> <second>` (`Quiet` adds `--quiet`): exit 0 → `Clean`,
+     /// exit 1 with nothing on stderr → `Conflicts`, any other exit → `Error::GitFailed`; killed at `timeout` →
+-    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)).
++    /// `Error::Timeout`. Never reads or writes the index, the working tree or a ref (git-merge-tree(1)), and never
++    /// fetches an object a partial clone lacks: the run fails instead.
+     pub fn merge_tree(
+         &self,
+         first: &Oid,
+@@ -65,6 +67,7 @@ impl Repo {
+         command
+             .args(options)
+             .args([first.as_str(), second.as_str()]);
++        refuse_lazy_fetch(&mut command);
+         // git also exits 1 for a commit it cannot find, printing "merge-tree: <id> - not something we can merge"
+         // (measured with git 2.56, both forms); a conflict leaves stderr empty.
+         match run(command, None, timeout) {
+diff --git a/crates/gitio/src/objects.rs b/crates/gitio/src/objects.rs
+index 229135d..8dc67b9 100644
+--- a/crates/gitio/src/objects.rs
++++ b/crates/gitio/src/objects.rs
+@@ -1,99 +1,128 @@
+-use crate::blob::CAT_FILE;
++use std::process::Command;
++
++use crate::Result;
++use crate::blob::{CAT_FILE, unexpected};
+ use crate::entry::Oid;
+ use crate::repo::Repo;
+ use crate::run::{Access, GIT_TIMEOUT, run};
+-use crate::{Error, Result};
+ 
+-const BATCH_CHECK: &str = "--batch-check=%(objectname) %(objecttype)";
++const OBJECT_TYPE: &str = "%(objecttype)";
+ const COMMIT: &str = "commit";
+ 
++/// Whether a git run may fetch an object a partial clone lacks from its promisor remote.
++#[derive(Clone, Copy)]
++pub(crate) enum LazyFetch {
++    Allowed,
++    Refused,
++}
++
+ impl Repo {
+-    /// Which of `ids` name no commit in the repository's object store, in the order given: one
+-    /// `git cat-file --batch-check` reading the ids on stdin (a missing id and one that is not a commit both count).
++    /// Which of `ids` name no commit in the repository's object store, in the order given (a missing id and one
++    /// that is not a commit both count); a partial clone never fetches an id it lacks to answer.
+     pub fn missing_commits(&self, ids: &[Oid]) -> Result<Vec<Oid>> {
++        let kinds = self.batch_check(ids, OBJECT_TYPE, LazyFetch::Refused)?;
++        Ok(ids
++            .iter()
++            .zip(kinds)
++            .filter_map(|(id, kind)| (kind != COMMIT).then(|| id.clone()))
++            .collect())
++    }
++
++    /// One `git cat-file --batch-check='%(objectname) <fields>' --buffer` run over `ids`: for each id, in the order
++    /// given, what git printed after it (`<fields>`, or `missing`); no run for no ids.
++    pub(crate) fn batch_check(
++        &self,
++        ids: &[Oid],
++        fields: &str,
++        lazy_fetch: LazyFetch,
++    ) -> Result<Vec<String>> {
++        if ids.is_empty() {
++            return Ok(Vec::new());
++        }
+         let mut input = Vec::new();
+         for id in ids {
+             input.extend_from_slice(id.as_str().as_bytes());
+             input.push(b'\n');
+         }
+-        let command = self.command(Access::Read, &[CAT_FILE, BATCH_CHECK]);
++        let format = format!("--batch-check=%(objectname) {fields}");
++        let mut command = self.command(Access::Read, &[CAT_FILE, &format, "--buffer"]);
++        match lazy_fetch {
++            LazyFetch::Allowed => {}
++            LazyFetch::Refused => refuse_lazy_fetch(&mut command),
++        }
+         let output = run(command, Some(input), GIT_TIMEOUT)?;
+-        missing_commits_in(ids, &output)
++        answers_in(ids, &output)
+     }
+ }
+ 
+-/// git-cat-file(1) `--batch-check`: one line per id in input order, `<id> <type>` for an object that exists and
+-/// `<id> missing` for one that does not.
+-fn missing_commits_in(ids: &[Oid], output: &[u8]) -> Result<Vec<Oid>> {
++/// Makes `command` fail on an object a partial clone lacks instead of fetching it from the promisor remote
++/// (git(1) "ENVIRONMENT" `GIT_NO_LAZY_FETCH`, git 2.45+; an older git ignores it and fetches).
++pub(crate) fn refuse_lazy_fetch(command: &mut Command) {
++    command.env("GIT_NO_LAZY_FETCH", "1");
++}
++
++/// git-cat-file(1) BATCH OUTPUT: one line per id in input order, `<id> SP <fields>` for an object that exists and
++/// `<id> SP missing` for one that does not.
++fn answers_in(ids: &[Oid], output: &[u8]) -> Result<Vec<String>> {
+     let text = String::from_utf8_lossy(output);
+     let lines: Vec<&str> = text.lines().collect();
+     if lines.len() != ids.len() {
+         return Err(unexpected(&text));
+     }
+-    let mut missing = Vec::new();
++    let mut answers = Vec::new();
+     for (id, line) in ids.iter().zip(lines) {
+-        let kind = line
++        let answer = line
+             .strip_prefix(id.as_str())
+             .and_then(|rest| rest.strip_prefix(' '))
+             .ok_or_else(|| unexpected(&text))?;
+-        if kind != COMMIT {
+-            missing.push(id.clone());
+-        }
+-    }
+-    Ok(missing)
+-}
+-
+-fn unexpected(text: &str) -> Error {
+-    Error::UnexpectedOutput {
+-        command: CAT_FILE,
+-        output: text.to_owned(),
++        answers.push(answer.to_owned());
+     }
++    Ok(answers)
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
++    use crate::Error;
+ 
+     fn oid(digit: char) -> Oid {
+         Oid::parse(&digit.to_string().repeat(40)).unwrap()
+     }
+ 
+     #[test]
+-    fn missing_ids_and_non_commits_are_named_in_the_order_given() {
+-        let ids = [oid('1'), oid('2'), oid('3'), oid('4')];
++    fn each_answer_is_what_git_printed_after_its_id_in_the_order_given() {
++        let ids = [oid('1'), oid('2'), oid('3')];
+         let output = format!(
+-            "{} commit\n{} missing\n{} tree\n{} commit\n",
++            "{} commit\n{} missing\n{} blob 3\n",
+             ids[0].as_str(),
+             ids[1].as_str(),
+-            ids[2].as_str(),
+-            ids[3].as_str()
++            ids[2].as_str()
+         );
+ 
+-        let missing = missing_commits_in(&ids, output.as_bytes()).unwrap();
++        let answers = answers_in(&ids, output.as_bytes()).unwrap();
+ 
+-        assert_eq!(missing, vec![oid('2'), oid('3')]);
++        assert_eq!(answers, ["commit", "missing", "blob 3"]);
+     }
+ 
+     #[test]
+-    fn no_ids_give_no_missing_commit() {
+-        assert_eq!(missing_commits_in(&[], b"").unwrap(), Vec::<Oid>::new());
+-    }
+-
+-    #[test]
+-    fn a_line_for_another_id_or_a_line_too_few_is_unexpected() {
++    fn a_line_for_another_id_or_a_line_too_few_or_too_many_is_unexpected() {
+         let ids = [oid('1'), oid('2')];
+         let swapped = format!("{} commit\n{} commit\n", ids[1].as_str(), ids[0].as_str());
+         let short = format!("{} commit\n", ids[0].as_str());
++        let long = format!("{short}{} commit\n{short}", ids[1].as_str());
+         let glued = format!("{}commit\n{} commit\n", ids[0].as_str(), ids[1].as_str());
+ 
+-        for output in [swapped, short, glued] {
+-            assert!(matches!(
+-                missing_commits_in(&ids, output.as_bytes()),
+-                Err(Error::UnexpectedOutput {
+-                    command: CAT_FILE,
+-                    ..
+-                })
+-            ));
++        for output in [swapped, short, long, glued] {
++            assert!(
++                matches!(
++                    answers_in(&ids, output.as_bytes()),
++                    Err(Error::UnexpectedOutput {
++                        command: CAT_FILE,
++                        ..
++                    })
++                ),
++                "{output}"
++            );
+         }
+     }
+ }
+diff --git a/crates/gitio/tests/local_check.rs b/crates/gitio/tests/local_check.rs
+index 0143038..b1ffd34 100644
+--- a/crates/gitio/tests/local_check.rs
++++ b/crates/gitio/tests/local_check.rs
+@@ -226,6 +226,32 @@ fn remote_refs_of_an_unreachable_remote_gives_gits_first_line() {
+     );
+ }
+ 
++#[cfg(unix)]
++#[test]
++fn remote_refs_runs_with_no_prompt_of_git_ssh_or_a_credential_manager() {
++    let fixture = fixture();
++    let root = fixture.repo.path();
++    let recorded = root.join("ls-remote.env");
++    let upload_pack = format!("env > '{}'; git-upload-pack", recorded.display());
++    git_ok(root, &["config", "remote.gitlab.uploadpack", &upload_pack]).unwrap();
++    let repo = Repo::discover(root).unwrap();
++
++    repo.remote_refs("gitlab", &["refs/heads/main"], FETCH_TIMEOUT)
++        .unwrap();
++
++    let environment = std::fs::read_to_string(&recorded).unwrap();
++    let lines: Vec<&str> = environment.lines().collect();
++    for wanted in [
++        "GIT_TERMINAL_PROMPT=0",
++        "GCM_INTERACTIVE=never",
++        "SSH_ASKPASS_REQUIRE=force",
++        "SSH_ASKPASS=false",
++        "LC_ALL=C",
++    ] {
++        assert!(lines.contains(&wanted), "{wanted} not in {environment}");
++    }
++}
++
+ #[test]
+ fn missing_commits_names_unknown_ids_and_non_commits_in_order() {
+     let dir = diverged_repo(&SAME_LINE).unwrap();
+@@ -240,3 +266,101 @@ fn missing_commits_names_unknown_ids_and_non_commits_in_order() {
+ 
+     assert_eq!(missing.unwrap(), vec![unknown, tree]);
+ }
++
++/// A blobless partial clone (`--filter=blob:none --no-checkout`, so it holds no blob) of a bare server; the
++/// server's upload-pack leaves `contacted` behind, so any fetch from it, a lazy one too, shows.
++struct PartialClone {
++    clone: TempDir,
++    _server: TempDir,
++    bare: PathBuf,
++    contacted: PathBuf,
++}
++
++fn partial_clone() -> PartialClone {
++    let source = diverged_repo(&SAME_LINE).unwrap();
++    let server = tempfile::tempdir().unwrap();
++    let bare = server.path().join("gitlab.git");
++    let bare_path = bare.display().to_string();
++    let source_path = source.path().display().to_string();
++    git_ok(
++        server.path(),
++        &["clone", "-q", "--bare", &source_path, &bare_path],
++    )
++    .unwrap();
++    git_ok(&bare, &["config", "uploadpack.allowFilter", "true"]).unwrap();
++    git_ok(&bare, &["config", "uploadpack.allowAnySHA1InWant", "true"]).unwrap();
++    let clone = tempfile::tempdir().unwrap();
++    let url = format!("file://{bare_path}");
++    let into = clone.path().display().to_string();
++    let blobless: [&str; 6] = [
++        "clone",
++        "-q",
++        "--filter=blob:none",
++        "--no-checkout",
++        &url,
++        &into,
++    ];
++    git_ok(server.path(), &blobless).unwrap();
++    let contacted = server.path().join("contacted");
++    let upload_pack = format!("touch '{}'; git-upload-pack", contacted.display());
++    git_ok(
++        clone.path(),
++        &["config", "remote.origin.uploadpack", &upload_pack],
++    )
++    .unwrap();
++    PartialClone {
++        clone,
++        _server: server,
++        bare,
++        contacted,
++    }
++}
++
++#[test]
++fn missing_commits_of_a_partial_clone_names_a_head_only_the_server_has_without_fetching_it() {
++    let partial = partial_clone();
++    let head = text(
++        &partial.bare,
++        &["commit-tree", "-p", "main", "-m", "head", "main^{tree}"],
++    );
++    let head = Oid::parse(head.trim_end()).unwrap();
++    let repo = Repo::discover(partial.clone.path()).unwrap();
++    let known = commit(&repo, "origin/local");
++
++    let missing = repo.missing_commits(&[known, head.clone()]);
++
++    assert_eq!(missing.unwrap(), vec![head]);
++    assert!(!partial.contacted.exists());
++}
++
++#[test]
++fn merge_tree_of_a_partial_clone_fails_on_a_blob_it_lacks_instead_of_fetching_it() {
++    let partial = partial_clone();
++    let repo = Repo::discover(partial.clone.path()).unwrap();
++    let (local, remote) = (
++        commit(&repo, "origin/local"),
++        commit(&repo, "origin/remote"),
++    );
++    for run in supported_runs(&repo) {
++        let merged = repo.merge_tree(&local, &remote, run, MERGE_TIMEOUT);
++
++        assert!(
++            matches!(merged, Err(Error::GitFailed { .. })),
++            "{run:?}: {merged:?}"
++        );
++    }
++    assert!(!partial.contacted.exists());
++}
++
++#[test]
++fn blob_sizes_of_a_partial_clone_still_fetches_a_blob_it_lacks() {
++    let partial = partial_clone();
++    let blob = text(&partial.bare, &["rev-parse", "remote:a.txt"]);
++    let blob = Oid::parse(blob.trim_end()).unwrap();
++    let repo = Repo::discover(partial.clone.path()).unwrap();
++
++    let sizes = repo.blob_sizes(&[blob]);
++
++    assert_eq!(sizes.unwrap(), [Some(7)]);
++    assert!(partial.contacted.exists());
++}
