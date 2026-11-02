@@ -5,6 +5,7 @@ import {
   type ListEnd,
   type MergeRequestIid,
   type OpenReply,
+  type RerequestReply,
   type ContinueMergeReply,
   type Refusal,
   type ResolveRefusal,
@@ -15,19 +16,28 @@ import {
 } from "../ipc";
 import {
   approvalsText,
+  ASSIGNEES,
+  CLEAR_DUE_DATE,
   clearFilterTitle,
   discussionsText,
+  dueDateLabel,
   jobTitle,
   listFailureText,
   narrowLabel,
   narrowPlaceholder,
   LOADING_TEXT,
   NONE_TEXT,
+  notValueLabel,
   openChangesTitle,
   openPageTitle,
   openReplyText,
   pageProblemText,
+  REREQUEST_REVIEW,
+  rerequestLabel,
+  rerequestReplyText,
+  REVIEWERS,
   rowReplyText,
+  SET_DUE_DATE,
   type PageKind,
 } from "./mergeRequestsText";
 import { notLinedUpText } from "./rangeThreadText";
@@ -265,4 +275,54 @@ test.each<[ContinueMergeReply, string, boolean]>([
   ],
 ])("the continue reply %j reads %j", (reply, text, refused) => {
   expect(rowReplyText({ kind: "continue", reply }, IID)).toEqual({ text, refused });
+});
+
+test("the people box, re-request and due-date words are GitLab's and the request's", () => {
+  expect([ASSIGNEES, REVIEWERS, REREQUEST_REVIEW, SET_DUE_DATE, CLEAR_DUE_DATE]).toEqual([
+    "Assignees",
+    "Reviewers",
+    "Re-request review",
+    "Set a due date",
+    "Clear",
+  ]);
+});
+
+test("the re-request button is named after its reviewer", () => {
+  expect(rerequestLabel("Anna Berg")).toBe("Re-request review from Anna Berg");
+});
+
+test.each<[Exclude<RerequestReply, { kind: "requested" }>, string]>([
+  [{ kind: "notReviewer" }, "Anna Berg is no longer a reviewer of this merge request."],
+  [{ kind: "notOpen" }, "This merge request is no longer open."],
+  [
+    { kind: "glabMissing" },
+    "glab is not installed (not found on PATH) — install glab, then Refresh.",
+  ],
+  [
+    { kind: "notLoggedIn", detail: DETAIL },
+    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
+  ],
+  [{ kind: "refused", message: "Reviewer not found" }, "Reviewer not found"],
+  [{ kind: "failed", message: "timed out" }, "timed out"],
+])("the re-request reply %j reads %j", (reply, text) => {
+  expect(rerequestReplyText(reply, "Anna Berg")).toBe(text);
+});
+
+test("a refused re-request reads the list's sentence for the same glab problem", () => {
+  expect(rerequestReplyText({ kind: "glabMissing" }, "Anna Berg")).toBe(
+    listFailureText({ kind: "glabMissing" }),
+  );
+  expect(rerequestReplyText({ kind: "notLoggedIn", detail: DETAIL }, "Anna Berg")).toBe(
+    listFailureText({ kind: "notLoggedIn", detail: DETAIL }),
+  );
+});
+
+test("the due-date button names the date, the days left and what a click does", () => {
+  expect(dueDateLabel("Nov 9, 2026", "7 days left")).toBe(
+    "Due Nov 9, 2026, 7 days left. Change the due date",
+  );
+});
+
+test("an excluded value is named with not", () => {
+  expect(notValueLabel("anna")).toBe("not anna");
 });

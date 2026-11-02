@@ -11,6 +11,7 @@ import ChoiceButtons from "./ChoiceButtons.vue";
 import { returnFocus } from "./focusReturn";
 import MergeRequestFilter from "./MergeRequestFilter.vue";
 import MergeRequestRow from "./MergeRequestRow.vue";
+import type { RerequestAsk } from "./mergeRequests";
 import { useMergeRequests } from "./mergeRequestsStore";
 import {
   CLEAR_FILTERS,
@@ -25,11 +26,15 @@ import {
 } from "./mergeRequestsText";
 import { DISMISS_LABEL } from "./searchText";
 import { BACK } from "./serverText";
+import { useHoverMenu } from "./useHoverMenu";
+
+type FilterBar = InstanceType<typeof MergeRequestFilter>;
 
 const props = defineProps<{ asking: boolean }>();
 
 const MINUTE_MS = 60_000;
 const LIST_FILTERS: readonly ListFilter[] = ["assignee", "reviewer", "label"];
+const NO_ASKS: ReadonlyMap<string, RerequestAsk> = new Map();
 
 const requests = useMergeRequests();
 const {
@@ -44,8 +49,16 @@ const {
   pageProblem,
   actions,
   localMerge,
+  dueDates,
+  rerequests,
 } = requests;
 const back = useTemplateRef<HTMLButtonElement>("back");
+const bars = useTemplateRef<FilterBar[]>("bars");
+const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey } =
+  useHoverMenu<ListFilter>({
+    menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? null,
+    opener: (which) => barOf(which)?.opener ?? null,
+  });
 const focusedBefore = document.activeElement;
 const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
 useEventListener(window, "keydown", escapePressed);
@@ -77,6 +90,15 @@ function escapePressed(event: KeyboardEvent): void {
 
 function windowFocused(): void {
   void requests.checkLocalMerge();
+}
+
+function barOf(filter: ListFilter): FilterBar | undefined {
+  return bars.value?.find((bar) => bar.$props.filter === filter);
+}
+
+async function openerClick(filter: ListFilter): Promise<void> {
+  await openerClicked(filter);
+  barOf(filter)?.narrowBox?.focus();
 }
 </script>
 
@@ -113,13 +135,20 @@ function windowFocused(): void {
     >
       <MergeRequestFilter
         v-for="filter in LIST_FILTERS"
+        ref="bars"
         :key="filter"
         :filter="filter"
         :label="filterLabel(filter, filters)"
         :set="filters[filter].length > 0"
         :choices="choices[filter]"
-        @toggle="requests.toggle(filter, $event)"
+        :open="openFor === filter"
+        :above="above"
+        @click="(value, shift) => requests.click(filter, value, shift)"
         @clear="requests.clear(filter)"
+        @opener-click="openerClick(filter)"
+        @pointer-enter="pointerEntered(filter)"
+        @pointer-leave="pointerLeft"
+        @menu-key="menuKey"
       />
       <button
         v-if="filtered"
@@ -185,10 +214,15 @@ function windowFocused(): void {
           :opening="openings.get(row.iid) ?? null"
           :local-merge="localMerge"
           :acting="actions.get(row.iid) ?? null"
+          :due="dueDates.get(row.iid) ?? null"
+          :asks="rerequests.get(row.iid) ?? NO_ASKS"
           @open="requests.openChanges"
           @open-page="requests.openPage"
           @resolve="requests.resolve"
           @continue-merge="requests.continueMerge"
+          @set-due="requests.setDueDate"
+          @rerequest-review="requests.rerequestReview"
+          @people-box-closed="requests.dismissRerequestRefusals"
         />
       </ul>
     </template>

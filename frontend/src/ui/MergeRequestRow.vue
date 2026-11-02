@@ -8,11 +8,23 @@ import StepForward from "~icons/lucide/step-forward";
 import ThumbsUp from "~icons/lucide/thumbs-up";
 
 import type { LocalMerge, MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
-import { createdAgo, rowAction, sizeParts, sizeTitle } from "../mergeRequests";
+import {
+  approversText,
+  authorText,
+  createdAgo,
+  rowAction,
+  sizeParts,
+  sizeTitle,
+  type CalendarDay,
+} from "../mergeRequests";
 import CiStatusBox from "./CiStatusBox.vue";
 import type { RowActing } from "./mergeRequestActions";
+import MergeRequestDueDate from "./MergeRequestDueDate.vue";
+import MergeRequestLabels from "./MergeRequestLabels.vue";
+import MergeRequestPeople from "./MergeRequestPeople.vue";
+import MergeRequestPicture from "./MergeRequestPicture.vue";
 import MergeRequestReadiness from "./MergeRequestReadiness.vue";
-import type { Opening } from "./mergeRequests";
+import type { Opening, RerequestAsk } from "./mergeRequests";
 import {
   approvalsText,
   discussionsText,
@@ -23,6 +35,7 @@ import {
   rowReplyText,
   type PageKind,
 } from "./mergeRequestsText";
+import { vTooltip } from "./tooltip";
 
 const props = defineProps<{
   row: MergeRequestRow;
@@ -30,21 +43,31 @@ const props = defineProps<{
   opening: Opening | null;
   localMerge: LocalMerge;
   acting: RowActing | null;
+  due: CalendarDay | null;
+  asks: ReadonlyMap<string, RerequestAsk>;
 }>();
 const emit = defineEmits<{
   open: [iid: MergeRequestIid];
   openPage: [clicked: PageKind, page: WebPage];
   resolve: [iid: MergeRequestIid];
   continueMerge: [iid: MergeRequestIid];
+  setDue: [iid: MergeRequestIid, day: CalendarDay | null];
+  rerequestReview: [iid: MergeRequestIid, username: string];
+  peopleBoxClosed: [iid: MergeRequestIid];
 }>();
 
 const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
 
 const mr = computed(() => mergeRequestReference(props.row.iid));
+const author = computed(() => authorText(props.row.author));
 const created = computed(() => createdAgo(props.row.createdAt, props.now));
 const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
 const discussions = computed(() => discussionsText(props.row.openDiscussions));
-const approvals = computed(() => approvalsText(props.row.approvals));
+const approvals = computed(() => ({
+  count: props.row.approvedBy.length,
+  label: approvalsText(props.row.approvedBy.length),
+  names: approversText(props.row.approvedBy),
+}));
 const openTitle = computed(() => openChangesTitle());
 const pageTitle = computed(() => openPageTitle(props.row.iid, props.row.title));
 const fetching = computed(() => props.opening?.kind === "fetching");
@@ -92,48 +115,69 @@ function act(): void {
     @click="openPage"
   >
     <div class="flex items-center gap-3">
+      <MergeRequestPicture
+        v-tooltip="author"
+        :person="row.author"
+        size="row"
+        role="img"
+        :aria-label="author"
+      />
       <div class="flex min-w-0 flex-1 flex-col">
         <button
           v-if="row.page !== null"
+          v-tooltip="pageTitle"
           type="button"
           class="max-w-full cursor-pointer self-start truncate rounded text-left"
-          :title="pageTitle"
           :aria-label="pageTitle"
           @click.stop="openPage"
         >
           {{ row.title }}
         </button>
-        <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
-        <p class="truncate text-xs text-fg-muted">
-          <span>{{ mr }}</span
-          >{{ " · " }}<span :title="createdTitle">{{ created }}</span
-          ><template v-if="size !== null"
-            >{{ " · "
-            }}<span :title="size.title"
-              ><span class="text-success-signal">{{ size.parts.added }}</span
-              >{{ " " }}<span class="text-problem-error">{{ size.parts.removed }}</span
-              >{{ " · " }}<span class="text-fg">{{ size.parts.files }}</span></span
-            ></template
-          >
-        </p>
+        <span v-else v-tooltip="row.title" class="truncate">{{ row.title }}</span>
+        <div class="flex min-w-0 items-center gap-2">
+          <p class="min-w-0 truncate text-xs text-fg-muted">
+            <span>{{ mr }}</span
+            >{{ " · " }}<span v-tooltip="createdTitle">{{ created }}</span
+            ><template v-if="size !== null"
+              >{{ " · "
+              }}<span v-tooltip="size.title"
+                ><span class="text-success-signal">{{ size.parts.added }}</span
+                >{{ " " }}<span class="text-problem-error">{{ size.parts.removed }}</span
+                >{{ " · " }}<span class="text-fg">{{ size.parts.files }}</span></span
+              ></template
+            >
+          </p>
+          <MergeRequestLabels :labels="row.labels" />
+        </div>
       </div>
+      <span class="flex w-16 shrink-0">
+        <MergeRequestPeople
+          :row="row"
+          :asks="asks"
+          @rerequest-review="emit('rerequestReview', row.iid, $event)"
+          @closed="emit('peopleBoxClosed', row.iid)"
+        />
+      </span>
+      <span class="flex w-24 shrink-0">
+        <MergeRequestDueDate :due="due" :now="now" @set="emit('setDue', row.iid, $event)" />
+      </span>
       <span
+        v-tooltip="discussions"
         class="flex w-12 shrink-0 items-center gap-1"
         :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
-        :title="discussions"
         :aria-label="discussions"
       >
         <MessageSquare class="size-4" aria-hidden="true" />
         <span aria-hidden="true">{{ row.openDiscussions }}</span>
       </span>
       <span
+        v-tooltip="approvals.names"
         class="flex w-12 shrink-0 items-center gap-1"
-        :class="{ 'text-fg-muted': row.approvals === 0 }"
-        :title="approvals"
-        :aria-label="approvals"
+        :class="{ 'text-fg-muted': approvals.count === 0 }"
+        :aria-label="approvals.label"
       >
         <ThumbsUp class="size-4" aria-hidden="true" />
-        <span aria-hidden="true">{{ row.approvals }}</span>
+        <span aria-hidden="true">{{ approvals.count }}</span>
       </span>
       <span class="flex w-7 shrink-0 justify-center">
         <CiStatusBox
@@ -151,9 +195,9 @@ function act(): void {
       <span class="flex w-7 shrink-0" @click.stop>
         <span
           v-if="action.kind !== 'none'"
+          v-tooltip="actionHover ?? action.label"
           data-row-control
           class="flex cursor-default"
-          :title="actionHover ?? action.label"
         >
           <button
             type="button"
@@ -175,8 +219,8 @@ function act(): void {
       </span>
       <span data-row-control class="flex shrink-0 cursor-default" @click.stop>
         <button
+          v-tooltip="openTitle"
           type="button"
-          :title="openTitle"
           :aria-label="openTitle"
           :aria-busy="fetching"
           :disabled="fetching"

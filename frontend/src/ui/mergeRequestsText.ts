@@ -5,6 +5,7 @@ import type {
   OpenReply,
   PageOpened,
   Refusal,
+  RerequestReply,
   ResolveReply,
 } from "../ipc";
 import type { DraftFilter } from "../mergeRequests";
@@ -31,6 +32,19 @@ export const NONE_TEXT = "No open merge requests.";
 export const FAILED_JOBS_TITLE = "Failed jobs";
 export const ALLOWED_TO_FAIL = "allowed to fail";
 export const MORE_FAILED_JOBS = "More failed jobs on GitLab";
+export const ASSIGNEES = "Assignees";
+export const REVIEWERS = "Reviewers";
+export const REREQUEST_REVIEW = "Re-request review";
+export const SET_DUE_DATE = "Set a due date";
+export const CLEAR_DUE_DATE = "Clear";
+
+function glabMissingListText(): string {
+  return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
+}
+
+function notLoggedInListText(detail: string): string {
+  return `${glabNotLoggedInText(detail)} — run glab auth login in a terminal, then Refresh.`;
+}
 
 export function listFailureText(end: ListEnd): string | null {
   switch (end.kind) {
@@ -38,9 +52,9 @@ export function listFailureText(end: ListEnd): string | null {
     case "cut":
       return null;
     case "glabMissing":
-      return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
+      return glabMissingListText();
     case "notLoggedIn":
-      return `${glabNotLoggedInText(end.detail)} — run glab auth login in a terminal, then Refresh.`;
+      return notLoggedInListText(end.detail);
     case "failed":
       return glabFailedText(end.message);
     default: {
@@ -86,6 +100,41 @@ export function narrowLabel(name: string): string {
 
 export function narrowPlaceholder(name: string): string {
   return `Find ${name.toLowerCase()}…`;
+}
+
+export function rerequestLabel(name: string): string {
+  return `Re-request review from ${name}`;
+}
+
+export function rerequestReplyText(
+  reply: Exclude<RerequestReply, { kind: "requested" }>,
+  name: string,
+): string {
+  switch (reply.kind) {
+    case "notReviewer":
+      return `${name} is no longer a reviewer of this merge request.`;
+    case "notOpen":
+      return "This merge request is no longer open.";
+    case "glabMissing":
+      return glabMissingListText();
+    case "notLoggedIn":
+      return notLoggedInListText(reply.detail);
+    case "refused":
+    case "failed":
+      return reply.message;
+    default: {
+      const _exhaustive: never = reply;
+      return _exhaustive;
+    }
+  }
+}
+
+export function dueDateLabel(date: string, left: string): string {
+  return `Due ${date}, ${left}. Change the due date`;
+}
+
+export function notValueLabel(label: string): string {
+  return `not ${label}`;
 }
 
 export function openReplyText(

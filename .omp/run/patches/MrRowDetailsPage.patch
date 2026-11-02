@@ -1,0 +1,1405 @@
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 0a4a116..da56495 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -44,7 +44,11 @@ Themes (plan §2 #102): `useThemeAttribute` (`settingsStore.ts`, every root) is
+ 
+ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`store.ts` `search` + `liveResults` from `mergeSearch.ts`, `rangeStore.ts` `search` from `rangeSearch.ts`), the only writer of the query, case, filters and closed groups; the runner in `searchRun.ts` writes only `results` and `running` (full runs by generation, each with its own `Working` matcher, ranks and results, 8 ms slices, one-file re-runs by `changed` after `SEARCH_PAUSE_MS`, stale replies dropped per path; `onFullRun` lets `searching.ts` open every group and count `fullRuns`, one per new search). The merge source's `loadFile` replies go through `landed` with the stop they were sent in (`currentStop`). Matching and rows are `search/`'s only. `SideColumn.vue` holds the left column's width and handle (`usePanelWidth`, "File list width"), its visibility and the islands' overlap between the shown panel and list, with `SearchPanel.vue` (box, Match Case, pane toggles from `searchIcons.ts`, summary words in `searchText.ts`, `SearchResults.vue`'s virtual list, `overflow-x-hidden`: WebKitGTK's overlay scrollbar would take the clicks on the last row, #1719; its keys in `searchListKeys.ts` `stepSearchList`) above `FileList.vue`; both roots call `search.toggleKey` after `fileListKey` (`windowKey`, the one guard). `SearchResults.vue` alone owns the list's scroll position and its active row: each new search (`fullRuns`) scrolls to the top and clears the active row, so Down from the box starts at the first row; rows that shrink below the scroll position clamp it to the end; `keepInView` follows the keys. Hiding the panel while the keyboard is in it or on `<body>`: with a file on screen (both roots pass `SearchPanel` the shown path only while `screen.kind === 'files'`), the pane focused at show — CodeMirror's content element, `role=textbox aria-multiline` — when still connected and the same path is shown, else `focusShownFile`; with no file on screen (Settings, a server log), the element focused at show when still connected, never a go-to. A row asks `goTo` and opens its file; the shown view takes it through `took`. `opening.ts` holds the merge store's file opening (`open`, `pick`, `thenMoveOn`).
+ 
+-Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; `useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
++Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; presentational: the View holds their one menu; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the people stack, the "+N" labels chip, the due date, the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box through `useHoverBox` on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
++
++Hover (plan §2 #154, #155): `tooltip.ts` `vTooltip` is the page's only hover text (one tip per window, `tooltipPlacement`, 400 ms, at once within 300 ms of the last; it mirrors its text into `aria-description` unless that equals the `aria-label`); no `MergeRequest*`/`CiStatus*` component has a `title` (detector `mergeRequestTitles.test.ts`). `useHoverBox` is a box the pointer enters (CI, people, labels: opens at once on hover or focus); `useHoverMenu` is one `useDropdownMenu` (`opened` with `kept`/`moved` focus; `dismiss` returns focus only from inside) for several hover-opened openers (300 ms close, a click pins): the View holds one `useHoverMenu<ListFilter>` for the three filters, finds each filter's exposed `opener`/`menu`/`narrowBox` through its template refs, and focuses the narrowing box after an opener click.
++
++Row details (plan §2 #151–#157): left to right `MergeRequestPicture.vue` of the author (24 px; initials of `initials` on `bg-primary` turned by `hue-rotate(pictureHue)`, the domain's `picture` as an `img` over them shown only once loaded and removed on error, `referrerpolicy="no-referrer"`; nobody is the muted `user-round`), the text column (labels at the end of line 2: `MergeRequestLabels.vue`, the first chip in GitLab's colours and "+N" with a hover box of the rest), `MergeRequestPeople.vue` (`peopleStack`: 3 overlapping pictures and "+N"; its hover box lists Assignees, then Reviewers with GitLab's re-request button `rotate-ccw` when `mayRerequest` and `reviewDone`, a spinner while the ask runs, and the state icon; a refusal stays under its reviewer until the box closes, which emits `closed` → `dismissRerequestRefusals`), `MergeRequestDueDate.vue` (a muted calendar, or the date over the days left in the error colour when overdue; its box holds a native date field — WebKitGTK fires `change` on Enter or blur, `input` on each digit — and Clear), then discussions and approvals (`approversText`, one name per line). Three-state filters: `mergeRequestFilters.ts` `click(filter, value, shift)`; Shift (`useKeyModifier`) shows `circle-minus` on every value, an excluded one keeps it in the error colour with its label struck and is named `not <label>`. Due dates (`mergeRequestDueDates.ts`, key `yamt.mergeRequests.dueDates`, per repository) put dated rows first (`datedFirst`); re-request asks are `mergeRequestRerequests.ts`, whose `requested` reply replaces the row's reviewers.
+ 
+ Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+diff --git a/frontend/src/ui/CiStatusBox.vue b/frontend/src/ui/CiStatusBox.vue
+index 12587da..12623ff 100644
+--- a/frontend/src/ui/CiStatusBox.vue
++++ b/frontend/src/ui/CiStatusBox.vue
+@@ -1,6 +1,5 @@
+ <script setup lang="ts">
+-import { useEventListener } from "@vueuse/core";
+-import { computed, shallowRef, useTemplateRef, type Component } from "vue";
++import { computed, useTemplateRef, type Component } from "vue";
+ import CircleCheck from "~icons/lucide/circle-check";
+ import CircleDot from "~icons/lucide/circle-dot";
+ import CircleMinus from "~icons/lucide/circle-minus";
+@@ -11,14 +10,14 @@ import Cog from "~icons/lucide/cog";
+ 
+ import type { MergeRequestRow, WebPage } from "../ipc";
+ import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
+-import type { Point } from "./menuPosition";
+ import {
+   ALLOWED_TO_FAIL,
+   FAILED_JOBS_TITLE,
+   jobTitle,
+   MORE_FAILED_JOBS,
+ } from "./mergeRequestsText";
+-import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
++import { vTooltip } from "./tooltip";
++import { useHoverBox } from "./useHoverBox";
+ 
+ type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
+ type FailedJob = Pipeline["failedJobs"][number];
+@@ -40,12 +39,11 @@ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
+ const area = useTemplateRef<HTMLSpanElement>("area");
+ const icon = useTemplateRef<HTMLButtonElement>("icon");
+ const box = useTemplateRef<HTMLDivElement>("box");
+-const open = shallowRef(false);
+-const at = shallowRef<Point>({ x: 0, y: 0 });
+-const placement = useMenuPlacement(box, at);
+-let pointerInside = false;
+-let focusInside = false;
+-useEventListener(window, "scroll", scrolled, { capture: true, passive: true });
++const { open, placement, on } = useHoverBox({
++  area: () => area.value,
++  opener: () => icon.value,
++  box,
++});
+ 
+ const look = computed(() => LOOKS[props.pipeline.status]);
+ const view = computed(() =>
+@@ -53,62 +51,6 @@ const view = computed(() =>
+ );
+ const statusText = computed(() => ciStatusText(props.pipeline.status));
+ 
+-function show(): void {
+-  if (!open.value && icon.value !== null) {
+-    at.value = belowLeft(icon.value);
+-    open.value = true;
+-  }
+-}
+-
+-function hideUnlessHeld(): void {
+-  if (!pointerInside && !focusInside) {
+-    open.value = false;
+-  }
+-}
+-
+-function pointerEntered(): void {
+-  pointerInside = true;
+-  show();
+-}
+-
+-function pointerLeft(): void {
+-  pointerInside = false;
+-  hideUnlessHeld();
+-}
+-
+-function isInside(target: EventTarget | null): boolean {
+-  return target instanceof Node && area.value?.contains(target) === true;
+-}
+-
+-function focusEntered(event: FocusEvent): void {
+-  if (!isInside(event.relatedTarget)) {
+-    focusInside = true;
+-    show();
+-  }
+-}
+-
+-function focusLeft(event: FocusEvent): void {
+-  if (!isInside(event.relatedTarget)) {
+-    focusInside = false;
+-    hideUnlessHeld();
+-  }
+-}
+-
+-function keyPressed(event: KeyboardEvent): void {
+-  if (event.key === "Escape" && open.value) {
+-    event.preventDefault();
+-    open.value = false;
+-    icon.value?.focus();
+-  }
+-}
+-
+-function scrolled(event: Event): void {
+-  if (open.value && !isInside(event.target)) {
+-    focusInside = document.activeElement === icon.value;
+-    open.value = false;
+-  }
+-}
+-
+ function openJob({ page }: FailedJob): void {
+   if (page !== null) {
+     emit("openJob", page);
+@@ -120,11 +62,11 @@ function openJob({ page }: FailedJob): void {
+   <span
+     ref="area"
+     class="flex"
+-    @pointerenter="pointerEntered"
+-    @pointerleave="pointerLeft"
+-    @focusin="focusEntered"
+-    @focusout="focusLeft"
+-    @keydown="keyPressed"
++    @pointerenter="on.pointerenter"
++    @pointerleave="on.pointerleave"
++    @focusin="on.focusin"
++    @focusout="on.focusout"
++    @keydown="on.keydown"
+   >
+     <button
+       ref="icon"
+@@ -150,8 +92,8 @@ function openJob({ page }: FailedJob): void {
+         <ul>
+           <li v-for="(job, index) in view.jobs" :key="index">
+             <button
++              v-tooltip="jobTitle(job.name, job.page)"
+               type="button"
+-              :title="jobTitle(job.name, job.page)"
+               :disabled="job.page === null"
+               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
+               @click="openJob(job)"
+diff --git a/frontend/src/ui/MergeRequestDueDate.vue b/frontend/src/ui/MergeRequestDueDate.vue
+new file mode 100644
+index 0000000..7152dbe
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestDueDate.vue
+@@ -0,0 +1,132 @@
++<script setup lang="ts">
++import { onClickOutside } from "@vueuse/core";
++import { computed, nextTick, shallowRef, useTemplateRef } from "vue";
++import Calendar from "~icons/lucide/calendar";
++
++import {
++  calendarDayFrom,
++  calendarDayText,
++  daysLeft,
++  daysLeftText,
++  dueDateText,
++  type CalendarDay,
++} from "../mergeRequests";
++import type { Point } from "./menuPosition";
++import { CLEAR_DUE_DATE, dueDateLabel, SET_DUE_DATE } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
++
++const props = defineProps<{ due: CalendarDay | null; now: number }>();
++const emit = defineEmits<{ set: [day: CalendarDay | null] }>();
++
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const box = useTemplateRef<HTMLDivElement>("box");
++const field = useTemplateRef<HTMLInputElement>("field");
++const open = shallowRef(false);
++const at = shallowRef<Point>({ x: 0, y: 0 });
++const placement = useMenuPlacement(box, at);
++onClickOutside(
++  box,
++  () => {
++    open.value = false;
++  },
++  { ignore: [opener] },
++);
++
++const shown = computed(() => {
++  if (props.due === null) {
++    return null;
++  }
++  const date = dueDateText(props.due);
++  const left = daysLeftText(daysLeft(props.due, props.now));
++  return { date, left, label: dueDateLabel(date, left.text), field: calendarDayText(props.due) };
++});
++const label = computed(() => shown.value?.label ?? SET_DUE_DATE);
++
++async function openerClicked(): Promise<void> {
++  if (open.value || opener.value === null) {
++    open.value = false;
++    return;
++  }
++  at.value = belowLeft(opener.value);
++  open.value = true;
++  await nextTick();
++  field.value?.focus();
++}
++
++async function closeToOpener(): Promise<void> {
++  open.value = false;
++  await nextTick();
++  if (document.activeElement === null || document.activeElement === document.body) {
++    opener.value?.focus();
++  }
++}
++
++function picked(event: Event): void {
++  const day = event.target instanceof HTMLInputElement ? calendarDayFrom(event.target.value) : null;
++  if (day !== null) {
++    emit("set", day);
++    void closeToOpener();
++  }
++}
++
++function clearClicked(): void {
++  emit("set", null);
++  void closeToOpener();
++}
++
++function keyPressed(event: KeyboardEvent): void {
++  if (event.key === "Escape" && open.value) {
++    event.preventDefault();
++    void closeToOpener();
++  }
++}
++</script>
++
++<template>
++  <span data-row-control class="flex cursor-default" @click.stop @keydown="keyPressed">
++    <button
++      ref="opener"
++      v-tooltip="label"
++      type="button"
++      :aria-label="label"
++      :aria-expanded="open"
++      class="rounded hover:bg-hover"
++      :class="shown === null ? 'p-1.5 text-fg-muted' : 'px-1.5 py-0.5 text-left text-xs leading-4'"
++      @click="openerClicked"
++    >
++      <Calendar v-if="shown === null" class="size-4" aria-hidden="true" />
++      <template v-else>
++        <span class="block whitespace-nowrap">{{ shown.date }}</span>
++        <span
++          class="block whitespace-nowrap"
++          :class="shown.left.overdue ? 'text-problem-error' : 'text-fg-muted'"
++          >{{ shown.left.text }}</span
++        >
++      </template>
++    </button>
++    <div
++      v-if="open"
++      ref="box"
++      class="fixed z-10 flex items-center gap-2 rounded-md border border-control-border bg-panel-inline p-1.5 text-fg shadow-lg"
++      :style="placement"
++    >
++      <input
++        ref="field"
++        type="date"
++        :value="shown?.field ?? ''"
++        :aria-label="SET_DUE_DATE"
++        class="rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
++        @change="picked"
++      />
++      <button
++        v-if="shown !== null"
++        type="button"
++        class="rounded border border-control-border px-2.5 py-1 hover:bg-hover"
++        @click="clearClicked"
++      >
++        {{ CLEAR_DUE_DATE }}
++      </button>
++    </div>
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestFilter.vue b/frontend/src/ui/MergeRequestFilter.vue
+index b92931e..ba8fc54 100644
+--- a/frontend/src/ui/MergeRequestFilter.vue
++++ b/frontend/src/ui/MergeRequestFilter.vue
+@@ -1,7 +1,9 @@
+ <script setup lang="ts">
+-import { computed, shallowRef, useTemplateRef, type Component } from "vue";
++import { useKeyModifier } from "@vueuse/core";
++import { computed, shallowRef, useTemplateRef, watch, type Component } from "vue";
+ import Check from "~icons/lucide/check";
+ import ChevronDown from "~icons/lucide/chevron-down";
++import CircleMinus from "~icons/lucide/circle-minus";
+ import Tag from "~icons/lucide/tag";
+ import UserRound from "~icons/lucide/user-round";
+ import X from "~icons/lucide/x";
+@@ -15,18 +17,39 @@ import {
+   type ListFilter,
+   type PersonValue,
+ } from "../mergeRequests";
+-import { clearFilterTitle, narrowLabel, narrowPlaceholder } from "./mergeRequestsText";
+-import { useDropdownMenu } from "./useDropdownMenu";
++import {
++  clearFilterTitle,
++  narrowLabel,
++  narrowPlaceholder,
++  notValueLabel,
++} from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
+ 
+ type Value = PersonValue | LabelValue;
++type Item = {
++  readonly key: string;
++  readonly choice: Choice<Value>;
++  readonly excluded: boolean;
++  readonly minusTone: string | null;
++  readonly name: string | undefined;
++};
+ 
+ const props = defineProps<{
+   filter: ListFilter;
+   label: string;
+   set: boolean;
+   choices: readonly Choice<Value>[];
++  open: boolean;
++  above: boolean;
++}>();
++const emit = defineEmits<{
++  click: [value: Value, shift: boolean];
++  clear: [];
++  openerClick: [];
++  pointerEnter: [];
++  pointerLeave: [];
++  menuKey: [event: KeyboardEvent];
+ }>();
+-const emit = defineEmits<{ toggle: [value: Value]; clear: [] }>();
+ 
+ const ICONS: Readonly<Record<ListFilter, Component>> = {
+   assignee: UserRound,
+@@ -38,15 +61,22 @@ const opener = useTemplateRef<HTMLButtonElement>("opener");
+ const menu = useTemplateRef<HTMLDivElement>("menu");
+ const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
+ const typed = shallowRef("");
+-const { openFor, above, toggle, menuKey } = useDropdownMenu<ListFilter>({
+-  menu: () => menu.value,
+-  opener: () => opener.value,
+-});
++const shift = useKeyModifier("Shift");
++defineExpose({ opener, menu, narrowBox });
+ 
+ const name = computed(() => filterName(props.filter));
+ const narrows = computed(() => props.choices.length > NARROW_FROM);
+-const shown = computed(() =>
+-  narrows.value ? narrowed(props.choices, typed.value) : props.choices,
++const items = computed(() =>
++  (narrows.value ? narrowed(props.choices, typed.value) : props.choices).map(item),
++);
++
++watch(
++  () => props.open,
++  (open) => {
++    if (open) {
++      typed.value = "";
++    }
++  },
+ );
+ 
+ function keyOf(value: Value): string {
+@@ -65,23 +95,32 @@ function keyOf(value: Value): string {
+   }
+ }
+ 
+-async function openerClicked(): Promise<void> {
+-  typed.value = "";
+-  await toggle(props.filter);
+-  narrowBox.value?.focus();
++function item(choice: Choice<Value>): Item {
++  const excluded = choice.state === "excluded";
++  return {
++    key: keyOf(choice.value),
++    choice,
++    excluded,
++    minusTone: excluded ? "text-problem-error" : shift.value === true ? "text-fg-muted" : null,
++    name: excluded ? notValueLabel(choice.label) : undefined,
++  };
+ }
+ </script>
+ 
+ <template>
+-  <div class="relative flex items-center">
++  <div
++    class="relative flex items-center"
++    @pointerenter="emit('pointerEnter')"
++    @pointerleave="emit('pointerLeave')"
++  >
+     <button
+       ref="opener"
+       type="button"
+       aria-haspopup="menu"
+-      :aria-expanded="openFor !== null"
++      :aria-expanded="open"
+       class="flex items-center gap-1.5 border border-control-border py-1 pr-2 pl-2.5 hover:bg-hover aria-expanded:bg-row-selected"
+       :class="set ? 'rounded-l border-primary' : 'rounded'"
+-      @click="openerClicked"
++      @click="emit('openerClick')"
+     >
+       <component :is="ICONS[filter]" class="size-4" aria-hidden="true" />
+       {{ label }}
+@@ -89,8 +128,8 @@ async function openerClicked(): Promise<void> {
+     </button>
+     <button
+       v-if="set"
++      v-tooltip="clearFilterTitle(name)"
+       type="button"
+-      :title="clearFilterTitle(name)"
+       :aria-label="clearFilterTitle(name)"
+       class="self-stretch rounded-r border border-l-0 border-primary px-1.5 hover:bg-hover"
+       @click="emit('clear')"
+@@ -98,11 +137,11 @@ async function openerClicked(): Promise<void> {
+       <X class="size-3.5" aria-hidden="true" />
+     </button>
+     <div
+-      v-if="openFor !== null"
++      v-if="open"
+       ref="menu"
+       class="absolute left-0 z-10 flex max-h-[60vh] min-w-56 flex-col rounded border border-control-border bg-panel-inline p-1 shadow-lg"
+       :class="above ? 'bottom-full' : 'top-full'"
+-      @keydown="menuKey"
++      @keydown="emit('menuKey', $event)"
+     >
+       <input
+         v-if="narrows"
+@@ -115,18 +154,32 @@ async function openerClicked(): Promise<void> {
+         class="mb-1 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
+       />
+       <ul role="menu" :aria-label="name" class="min-h-0 overflow-y-auto">
+-        <li v-for="choice in shown" :key="keyOf(choice.value)" role="none">
++        <li v-for="entry in items" :key="entry.key" role="none">
+           <button
+             type="button"
+             role="menuitemcheckbox"
+-            :aria-checked="choice.checked"
++            :aria-checked="entry.choice.state !== 'off'"
++            :aria-label="entry.name"
+             class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
+-            @click="emit('toggle', choice.value)"
++            @click="emit('click', entry.choice.value, $event.shiftKey)"
+           >
+-            <Check v-if="choice.checked" class="size-4 shrink-0" aria-hidden="true" />
++            <CircleMinus
++              v-if="entry.minusTone !== null"
++              class="size-4 shrink-0"
++              :class="entry.minusTone"
++              aria-hidden="true"
++            />
+             <span v-else class="size-4 shrink-0" aria-hidden="true" />
+-            <span class="truncate">{{ choice.label }}</span>
+-            <span class="ml-auto pl-3 text-fg-muted">{{ choice.count }}</span>
++            <Check
++              v-if="entry.choice.state === 'included'"
++              class="size-4 shrink-0"
++              aria-hidden="true"
++            />
++            <span v-else class="size-4 shrink-0" aria-hidden="true" />
++            <span class="truncate" :class="{ 'text-problem-error line-through': entry.excluded }">{{
++              entry.choice.label
++            }}</span>
++            <span class="ml-auto pl-3 text-fg-muted">{{ entry.choice.count }}</span>
+           </button>
+         </li>
+       </ul>
+diff --git a/frontend/src/ui/MergeRequestLabels.vue b/frontend/src/ui/MergeRequestLabels.vue
+new file mode 100644
+index 0000000..44ca753
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestLabels.vue
+@@ -0,0 +1,91 @@
++<script setup lang="ts">
++import { computed, useTemplateRef } from "vue";
++
++import type { Label } from "../ipc";
++import { labelsShown, moreText } from "../mergeRequests";
++import { vTooltip } from "./tooltip";
++import { useHoverBox } from "./useHoverBox";
++
++type Chip = {
++  readonly title: string;
++  readonly tone: string;
++  readonly style: { readonly backgroundColor: string; readonly color: string } | null;
++};
++
++const props = defineProps<{ labels: readonly Label[] }>();
++
++const PLAIN_TONE = "bg-hover text-fg";
++
++const area = useTemplateRef<HTMLSpanElement>("area");
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const box = useTemplateRef<HTMLDivElement>("box");
++const { open, placement, on } = useHoverBox({
++  area: () => area.value,
++  opener: () => opener.value,
++  box,
++});
++
++const chips = computed(() => {
++  const { first, rest } = labelsShown(props.labels);
++  return { first: first === null ? null : chip(first), rest: rest.map(chip) };
++});
++
++function chip({ title, colors }: Label): Chip {
++  return colors === null
++    ? { title, tone: PLAIN_TONE, style: null }
++    : { title, tone: "", style: { backgroundColor: colors.background, color: colors.text } };
++}
++</script>
++
++<template>
++  <span v-if="chips.first !== null" class="flex shrink-0 items-center gap-1 text-xs">
++    <span
++      v-tooltip="chips.first.title"
++      class="max-w-40 truncate rounded px-1.5"
++      :class="chips.first.tone"
++      :style="chips.first.style"
++      >{{ chips.first.title }}</span
++    >
++    <span
++      v-if="chips.rest.length > 0"
++      ref="area"
++      data-row-control
++      class="flex cursor-default"
++      @click.stop
++      @pointerenter="on.pointerenter"
++      @pointerleave="on.pointerleave"
++      @focusin="on.focusin"
++      @focusout="on.focusout"
++      @keydown="on.keydown"
++    >
++      <button
++        ref="opener"
++        type="button"
++        :aria-expanded="open"
++        class="rounded px-1.5"
++        :class="PLAIN_TONE"
++      >
++        {{ moreText(chips.rest.length) }}
++      </button>
++      <div
++        v-if="open"
++        ref="box"
++        class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1.5 shadow-lg"
++        :style="placement"
++      >
++        <ul class="flex flex-col items-start gap-1">
++          <li
++            v-for="label in chips.rest"
++            :key="label.title"
++            v-tooltip="label.title"
++            class="max-w-40 truncate rounded px-1.5"
++            :class="label.tone"
++            :style="label.style"
++          >
++            {{ label.title }}
++          </li>
++        </ul>
++      </div>
++    </span>
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestPeople.vue b/frontend/src/ui/MergeRequestPeople.vue
+new file mode 100644
+index 0000000..ca0ee66
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPeople.vue
+@@ -0,0 +1,201 @@
++<script setup lang="ts">
++import { computed, useTemplateRef, watch, type Component } from "vue";
++import CircleAlert from "~icons/lucide/circle-alert";
++import CircleCheck from "~icons/lucide/circle-check";
++import CircleMinus from "~icons/lucide/circle-minus";
++import LoaderCircle from "~icons/lucide/loader-circle";
++import MessageSquareText from "~icons/lucide/message-square-text";
++import RotateCcw from "~icons/lucide/rotate-ccw";
++
++import type { MergeRequestRow, Reviewer } from "../ipc";
++import {
++  displayName,
++  moreText,
++  NO_PEOPLE_TEXT,
++  peopleStack,
++  reviewDone,
++  reviewStateText,
++  type ReviewState,
++} from "../mergeRequests";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
++import type { RerequestAsk } from "./mergeRequests";
++import {
++  ASSIGNEES,
++  REREQUEST_REVIEW,
++  rerequestLabel,
++  rerequestReplyText,
++  REVIEWERS,
++} from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
++import { useHoverBox } from "./useHoverBox";
++
++type StateLook = { readonly icon: Component; readonly tone: string };
++type ReviewerLine = {
++  readonly reviewer: Reviewer;
++  readonly name: string;
++  readonly look: StateLook;
++  readonly stateText: string;
++  readonly rerequest: { readonly label: string; readonly running: boolean } | null;
++  readonly refusal: string | null;
++};
++
++const props = defineProps<{ row: MergeRequestRow; asks: ReadonlyMap<string, RerequestAsk> }>();
++const emit = defineEmits<{ rerequestReview: [username: string]; closed: [] }>();
++
++const REVIEW_STATE_LOOKS: Readonly<Record<ReviewState, StateLook>> = {
++  requested: { icon: CircleMinus, tone: "text-fg-muted" },
++  reviewed: { icon: MessageSquareText, tone: "text-primary" },
++  approved: { icon: CircleCheck, tone: "text-success-signal" },
++  changesRequested: { icon: CircleAlert, tone: "text-problem-error" },
++};
++
++const area = useTemplateRef<HTMLSpanElement>("area");
++const opener = useTemplateRef<HTMLButtonElement>("opener");
++const box = useTemplateRef<HTMLDivElement>("box");
++const { open, placement, on } = useHoverBox({
++  area: () => area.value,
++  opener: () => opener.value,
++  box,
++});
++
++const stack = computed(() => {
++  const { assignees } = props.row;
++  const people = new Map(
++    [...assignees, ...props.row.reviewers.map(({ person }) => person)].map((person) => [
++      person.username,
++      person,
++    ]),
++  );
++  const { shown, more } = peopleStack(assignees, props.row.reviewers);
++  return { shown: shown.flatMap(({ username }) => people.get(username) ?? []), more };
++});
++const reviewers = computed(() => props.row.reviewers.map(reviewerLine));
++
++watch(open, (isOpen) => {
++  if (!isOpen) {
++    emit("closed");
++  }
++});
++
++function reviewerLine(reviewer: Reviewer): ReviewerLine {
++  const name = displayName(reviewer.person);
++  const ask = props.asks.get(reviewer.person.username);
++  return {
++    reviewer,
++    name,
++    look: REVIEW_STATE_LOOKS[reviewer.state],
++    stateText: reviewStateText(reviewer.state),
++    rerequest:
++      props.row.mayRerequest && reviewDone(reviewer.state)
++        ? { label: rerequestLabel(name), running: ask?.kind === "running" }
++        : null,
++    refusal: ask?.kind === "refused" ? rerequestReplyText(ask.reply, name) : null,
++  };
++}
++</script>
++
++<template>
++  <MergeRequestPicture
++    v-if="stack.shown.length === 0"
++    v-tooltip="NO_PEOPLE_TEXT"
++    :person="null"
++    size="stack"
++    role="img"
++    :aria-label="NO_PEOPLE_TEXT"
++  />
++  <span
++    v-else
++    ref="area"
++    data-row-control
++    class="flex cursor-default"
++    @click.stop
++    @pointerenter="on.pointerenter"
++    @pointerleave="on.pointerleave"
++    @focusin="on.focusin"
++    @focusout="on.focusout"
++    @keydown="on.keydown"
++  >
++    <button
++      ref="opener"
++      type="button"
++      :aria-expanded="open"
++      class="flex items-center rounded p-0.5 hover:bg-hover"
++    >
++      <MergeRequestPicture
++        v-for="(person, index) in stack.shown"
++        :key="person.username"
++        :person="person"
++        size="stack"
++        role="img"
++        :aria-label="displayName(person)"
++        class="ring-2 ring-panel"
++        :class="{ '-ml-1.5': index > 0 }"
++      />
++      <span v-if="stack.more > 0" class="pl-1 text-xs text-fg-muted">{{
++        moreText(stack.more)
++      }}</span>
++    </button>
++    <div
++      v-if="open"
++      ref="box"
++      class="fixed z-10 max-h-[60vh] w-max max-w-[30rem] overflow-y-auto rounded-md border border-control-border bg-panel-inline p-1 text-fg shadow-lg"
++      :style="placement"
++    >
++      <template v-if="row.assignees.length > 0">
++        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ ASSIGNEES }}</p>
++        <ul :aria-label="ASSIGNEES">
++          <li
++            v-for="person in row.assignees"
++            :key="person.username"
++            class="flex items-center gap-2 px-2 py-1"
++          >
++            <MergeRequestPicture :person="person" size="box" aria-hidden="true" />
++            <span>{{ displayName(person) }}</span>
++          </li>
++        </ul>
++      </template>
++      <template v-if="reviewers.length > 0">
++        <p class="px-2 pt-1 pb-0.5 text-fg-muted">{{ REVIEWERS }}</p>
++        <ul :aria-label="REVIEWERS">
++          <li v-for="line in reviewers" :key="line.reviewer.person.username" class="px-2 py-0.5">
++            <div class="flex items-center gap-2">
++              <MergeRequestPicture :person="line.reviewer.person" size="box" aria-hidden="true" />
++              <span>{{ line.name }}</span>
++              <span class="ml-auto flex items-center gap-0.5 pl-4">
++                <button
++                  v-if="line.rerequest !== null"
++                  v-tooltip="REREQUEST_REVIEW"
++                  type="button"
++                  :aria-label="line.rerequest.label"
++                  :aria-busy="line.rerequest.running"
++                  :disabled="line.rerequest.running"
++                  class="rounded p-1 hover:bg-hover enabled:cursor-pointer disabled:text-fg-muted disabled:hover:bg-transparent"
++                  @click="emit('rerequestReview', line.reviewer.person.username)"
++                >
++                  <LoaderCircle
++                    v-if="line.rerequest.running"
++                    class="size-4 animate-spin"
++                    aria-hidden="true"
++                  />
++                  <RotateCcw v-else class="size-4" aria-hidden="true" />
++                </button>
++                <span
++                  v-tooltip="line.stateText"
++                  role="img"
++                  :aria-label="line.stateText"
++                  class="flex p-1"
++                  :class="line.look.tone"
++                >
++                  <component :is="line.look.icon" class="size-4" aria-hidden="true" />
++                </span>
++              </span>
++            </div>
++            <p v-if="line.refusal !== null" role="status" class="max-w-80 pb-1 text-problem-error">
++              {{ line.refusal }}
++            </p>
++          </li>
++        </ul>
++      </template>
++    </div>
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestPicture.vue b/frontend/src/ui/MergeRequestPicture.vue
+new file mode 100644
+index 0000000..16c861b
+--- /dev/null
++++ b/frontend/src/ui/MergeRequestPicture.vue
+@@ -0,0 +1,55 @@
++<script setup lang="ts">
++import { computed, shallowRef, watch } from "vue";
++import UserRound from "~icons/lucide/user-round";
++
++import type { Person } from "../ipc";
++import { initials, pictureHue } from "../mergeRequests";
++
++type PictureSize = "row" | "stack" | "box";
++type Shown = "loading" | "loaded" | "failed";
++
++const props = defineProps<{ person: Person | null; size: PictureSize }>();
++
++const SIZES: Readonly<Record<PictureSize, string>> = {
++  row: "size-6 text-[0.625rem]",
++  stack: "size-5 text-[0.5rem]",
++  box: "size-5 text-[0.5rem]",
++};
++
++const shown = shallowRef<Shown>("loading");
++
++const picture = computed(() => props.person?.picture ?? null);
++const letters = computed(() => (props.person === null ? "" : initials(props.person)));
++const hue = computed(() => ({
++  filter: `hue-rotate(${props.person === null ? 0 : pictureHue(props.person.username)}deg)`,
++}));
++
++watch(picture, () => {
++  shown.value = "loading";
++});
++</script>
++
++<template>
++  <UserRound v-if="person === null" class="shrink-0 text-fg-muted" :class="SIZES[size]" />
++  <span
++    v-else
++    class="relative inline-flex shrink-0 overflow-hidden rounded-full font-semibold"
++    :class="SIZES[size]"
++  >
++    <span
++      class="absolute inset-0 flex items-center justify-center bg-primary text-on-primary"
++      :style="hue"
++      >{{ letters }}</span
++    >
++    <img
++      v-if="picture !== null && shown !== 'failed'"
++      :src="picture"
++      alt=""
++      referrerpolicy="no-referrer"
++      class="absolute inset-0 size-full object-cover"
++      :class="{ invisible: shown === 'loading' }"
++      @load="shown = 'loaded'"
++      @error="shown = 'failed'"
++    />
++  </span>
++</template>
+diff --git a/frontend/src/ui/MergeRequestReadiness.vue b/frontend/src/ui/MergeRequestReadiness.vue
+index d095bc0..f481ba0 100644
+--- a/frontend/src/ui/MergeRequestReadiness.vue
++++ b/frontend/src/ui/MergeRequestReadiness.vue
+@@ -9,6 +9,7 @@ import Hourglass from "~icons/lucide/hourglass";
+ 
+ import type { Readiness } from "../ipc";
+ import { readinessIcon, readinessText, type ReadinessIcon } from "../mergeRequests";
++import { vTooltip } from "./tooltip";
+ 
+ type ReadinessLook = { readonly icon: Component; readonly tone: string };
+ 
+@@ -28,7 +29,7 @@ const text = computed(() => readinessText(props.readiness));
+ </script>
+ 
+ <template>
+-  <span role="img" class="flex p-1" :class="look.tone" :title="text" :aria-label="text">
++  <span v-tooltip="text" role="img" class="flex p-1" :class="look.tone" :aria-label="text">
+     <component :is="look.icon" class="size-4" aria-hidden="true" />
+   </span>
+ </template>
+diff --git a/frontend/src/ui/MergeRequestRow.vue b/frontend/src/ui/MergeRequestRow.vue
+index 8ddeba4..3adae75 100644
+--- a/frontend/src/ui/MergeRequestRow.vue
++++ b/frontend/src/ui/MergeRequestRow.vue
+@@ -8,11 +8,23 @@ import StepForward from "~icons/lucide/step-forward";
+ import ThumbsUp from "~icons/lucide/thumbs-up";
+ 
+ import type { LocalMerge, MergeRequestIid, MergeRequestRow, WebPage } from "../ipc";
+-import { createdAgo, rowAction, sizeParts, sizeTitle } from "../mergeRequests";
++import {
++  approversText,
++  authorText,
++  createdAgo,
++  rowAction,
++  sizeParts,
++  sizeTitle,
++  type CalendarDay,
++} from "../mergeRequests";
+ import CiStatusBox from "./CiStatusBox.vue";
+ import type { RowActing } from "./mergeRequestActions";
++import MergeRequestDueDate from "./MergeRequestDueDate.vue";
++import MergeRequestLabels from "./MergeRequestLabels.vue";
++import MergeRequestPeople from "./MergeRequestPeople.vue";
++import MergeRequestPicture from "./MergeRequestPicture.vue";
+ import MergeRequestReadiness from "./MergeRequestReadiness.vue";
+-import type { Opening } from "./mergeRequests";
++import type { Opening, RerequestAsk } from "./mergeRequests";
+ import {
+   approvalsText,
+   discussionsText,
+@@ -23,6 +35,7 @@ import {
+   rowReplyText,
+   type PageKind,
+ } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
+ 
+ const props = defineProps<{
+   row: MergeRequestRow;
+@@ -30,21 +43,31 @@ const props = defineProps<{
+   opening: Opening | null;
+   localMerge: LocalMerge;
+   acting: RowActing | null;
++  due: CalendarDay | null;
++  asks: ReadonlyMap<string, RerequestAsk>;
+ }>();
+ const emit = defineEmits<{
+   open: [iid: MergeRequestIid];
+   openPage: [clicked: PageKind, page: WebPage];
+   resolve: [iid: MergeRequestIid];
+   continueMerge: [iid: MergeRequestIid];
++  setDue: [iid: MergeRequestIid, day: CalendarDay | null];
++  rerequestReview: [iid: MergeRequestIid, username: string];
++  peopleBoxClosed: [iid: MergeRequestIid];
+ }>();
+ 
+ const CREATED_AT = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" });
+ 
+ const mr = computed(() => mergeRequestReference(props.row.iid));
++const author = computed(() => authorText(props.row.author));
+ const created = computed(() => createdAgo(props.row.createdAt, props.now));
+ const createdTitle = computed(() => CREATED_AT.format(props.row.createdAt));
+ const discussions = computed(() => discussionsText(props.row.openDiscussions));
+-const approvals = computed(() => approvalsText(props.row.approvals));
++const approvals = computed(() => ({
++  count: props.row.approvedBy.length,
++  label: approvalsText(props.row.approvedBy.length),
++  names: approversText(props.row.approvedBy),
++}));
+ const openTitle = computed(() => openChangesTitle());
+ const pageTitle = computed(() => openPageTitle(props.row.iid, props.row.title));
+ const fetching = computed(() => props.opening?.kind === "fetching");
+@@ -92,48 +115,69 @@ function act(): void {
+     @click="openPage"
+   >
+     <div class="flex items-center gap-3">
++      <MergeRequestPicture
++        v-tooltip="author"
++        :person="row.author"
++        size="row"
++        role="img"
++        :aria-label="author"
++      />
+       <div class="flex min-w-0 flex-1 flex-col">
+         <button
+           v-if="row.page !== null"
++          v-tooltip="pageTitle"
+           type="button"
+           class="max-w-full cursor-pointer self-start truncate rounded text-left"
+-          :title="pageTitle"
+           :aria-label="pageTitle"
+           @click.stop="openPage"
+         >
+           {{ row.title }}
+         </button>
+-        <span v-else class="truncate" :title="row.title">{{ row.title }}</span>
+-        <p class="truncate text-xs text-fg-muted">
+-          <span>{{ mr }}</span
+-          >{{ " · " }}<span :title="createdTitle">{{ created }}</span
+-          ><template v-if="size !== null"
+-            >{{ " · "
+-            }}<span :title="size.title"
+-              ><span class="text-success-signal">{{ size.parts.added }}</span
+-              >{{ " " }}<span class="text-problem-error">{{ size.parts.removed }}</span
+-              >{{ " · " }}<span class="text-fg">{{ size.parts.files }}</span></span
+-            ></template
+-          >
+-        </p>
++        <span v-else v-tooltip="row.title" class="truncate">{{ row.title }}</span>
++        <div class="flex min-w-0 items-center gap-2">
++          <p class="min-w-0 truncate text-xs text-fg-muted">
++            <span>{{ mr }}</span
++            >{{ " · " }}<span v-tooltip="createdTitle">{{ created }}</span
++            ><template v-if="size !== null"
++              >{{ " · "
++              }}<span v-tooltip="size.title"
++                ><span class="text-success-signal">{{ size.parts.added }}</span
++                >{{ " " }}<span class="text-problem-error">{{ size.parts.removed }}</span
++                >{{ " · " }}<span class="text-fg">{{ size.parts.files }}</span></span
++              ></template
++            >
++          </p>
++          <MergeRequestLabels :labels="row.labels" />
++        </div>
+       </div>
++      <span class="flex w-16 shrink-0">
++        <MergeRequestPeople
++          :row="row"
++          :asks="asks"
++          @rerequest-review="emit('rerequestReview', row.iid, $event)"
++          @closed="emit('peopleBoxClosed', row.iid)"
++        />
++      </span>
++      <span class="flex w-24 shrink-0">
++        <MergeRequestDueDate :due="due" :now="now" @set="emit('setDue', row.iid, $event)" />
++      </span>
+       <span
++        v-tooltip="discussions"
+         class="flex w-12 shrink-0 items-center gap-1"
+         :class="{ 'text-fg-muted': row.openDiscussions === 0 }"
+-        :title="discussions"
+         :aria-label="discussions"
+       >
+         <MessageSquare class="size-4" aria-hidden="true" />
+         <span aria-hidden="true">{{ row.openDiscussions }}</span>
+       </span>
+       <span
++        v-tooltip="approvals.names"
+         class="flex w-12 shrink-0 items-center gap-1"
+-        :class="{ 'text-fg-muted': row.approvals === 0 }"
+-        :title="approvals"
+-        :aria-label="approvals"
++        :class="{ 'text-fg-muted': approvals.count === 0 }"
++        :aria-label="approvals.label"
+       >
+         <ThumbsUp class="size-4" aria-hidden="true" />
+-        <span aria-hidden="true">{{ row.approvals }}</span>
++        <span aria-hidden="true">{{ approvals.count }}</span>
+       </span>
+       <span class="flex w-7 shrink-0 justify-center">
+         <CiStatusBox
+@@ -151,9 +195,9 @@ function act(): void {
+       <span class="flex w-7 shrink-0" @click.stop>
+         <span
+           v-if="action.kind !== 'none'"
++          v-tooltip="actionHover ?? action.label"
+           data-row-control
+           class="flex cursor-default"
+-          :title="actionHover ?? action.label"
+         >
+           <button
+             type="button"
+@@ -175,8 +219,8 @@ function act(): void {
+       </span>
+       <span data-row-control class="flex shrink-0 cursor-default" @click.stop>
+         <button
++          v-tooltip="openTitle"
+           type="button"
+-          :title="openTitle"
+           :aria-label="openTitle"
+           :aria-busy="fetching"
+           :disabled="fetching"
+diff --git a/frontend/src/ui/MergeRequestsButton.vue b/frontend/src/ui/MergeRequestsButton.vue
+index c1bec34..353d3bf 100644
+--- a/frontend/src/ui/MergeRequestsButton.vue
++++ b/frontend/src/ui/MergeRequestsButton.vue
+@@ -3,6 +3,7 @@ import GitPullRequest from "~icons/lucide/git-pull-request";
+ 
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import { PAGE_TITLE } from "./mergeRequestsText";
++import { vTooltip } from "./tooltip";
+ 
+ const { project, show } = useMergeRequests();
+ </script>
+@@ -10,8 +11,8 @@ const { project, show } = useMergeRequests();
+ <template>
+   <button
+     v-if="project.kind === 'found'"
++    v-tooltip="PAGE_TITLE"
+     type="button"
+-    :title="PAGE_TITLE"
+     :aria-label="PAGE_TITLE"
+     class="rounded p-1.5 hover:bg-hover"
+     @click="show"
+diff --git a/frontend/src/ui/MergeRequestsView.vue b/frontend/src/ui/MergeRequestsView.vue
+index 3388820..f348202 100644
+--- a/frontend/src/ui/MergeRequestsView.vue
++++ b/frontend/src/ui/MergeRequestsView.vue
+@@ -11,6 +11,7 @@ import ChoiceButtons from "./ChoiceButtons.vue";
+ import { returnFocus } from "./focusReturn";
+ import MergeRequestFilter from "./MergeRequestFilter.vue";
+ import MergeRequestRow from "./MergeRequestRow.vue";
++import type { RerequestAsk } from "./mergeRequests";
+ import { useMergeRequests } from "./mergeRequestsStore";
+ import {
+   CLEAR_FILTERS,
+@@ -25,11 +26,15 @@ import {
+ } from "./mergeRequestsText";
+ import { DISMISS_LABEL } from "./searchText";
+ import { BACK } from "./serverText";
++import { useHoverMenu } from "./useHoverMenu";
++
++type FilterBar = InstanceType<typeof MergeRequestFilter>;
+ 
+ const props = defineProps<{ asking: boolean }>();
+ 
+ const MINUTE_MS = 60_000;
+ const LIST_FILTERS: readonly ListFilter[] = ["assignee", "reviewer", "label"];
++const NO_ASKS: ReadonlyMap<string, RerequestAsk> = new Map();
+ 
+ const requests = useMergeRequests();
+ const {
+@@ -44,8 +49,16 @@ const {
+   pageProblem,
+   actions,
+   localMerge,
++  dueDates,
++  rerequests,
+ } = requests;
+ const back = useTemplateRef<HTMLButtonElement>("back");
++const bars = useTemplateRef<FilterBar[]>("bars");
++const { openFor, above, pointerEntered, pointerLeft, openerClicked, menuKey } =
++  useHoverMenu<ListFilter>({
++    menu: () => bars.value?.find((bar) => bar.menu !== null)?.menu ?? null,
++    opener: (which) => barOf(which)?.opener ?? null,
++  });
+ const focusedBefore = document.activeElement;
+ const now = useNow({ scheduler: (tick) => useIntervalFn(tick, MINUTE_MS) });
+ useEventListener(window, "keydown", escapePressed);
+@@ -78,6 +91,15 @@ function escapePressed(event: KeyboardEvent): void {
+ function windowFocused(): void {
+   void requests.checkLocalMerge();
+ }
++
++function barOf(filter: ListFilter): FilterBar | undefined {
++  return bars.value?.find((bar) => bar.$props.filter === filter);
++}
++
++async function openerClick(filter: ListFilter): Promise<void> {
++  await openerClicked(filter);
++  barOf(filter)?.narrowBox?.focus();
++}
+ </script>
+ 
+ <template>
+@@ -113,13 +135,20 @@ function windowFocused(): void {
+     >
+       <MergeRequestFilter
+         v-for="filter in LIST_FILTERS"
++        ref="bars"
+         :key="filter"
+         :filter="filter"
+         :label="filterLabel(filter, filters)"
+         :set="filters[filter].length > 0"
+         :choices="choices[filter]"
+-        @toggle="requests.toggle(filter, $event)"
++        :open="openFor === filter"
++        :above="above"
++        @click="(value, shift) => requests.click(filter, value, shift)"
+         @clear="requests.clear(filter)"
++        @opener-click="openerClick(filter)"
++        @pointer-enter="pointerEntered(filter)"
++        @pointer-leave="pointerLeft"
++        @menu-key="menuKey"
+       />
+       <button
+         v-if="filtered"
+@@ -185,10 +214,15 @@ function windowFocused(): void {
+           :opening="openings.get(row.iid) ?? null"
+           :local-merge="localMerge"
+           :acting="actions.get(row.iid) ?? null"
++          :due="dueDates.get(row.iid) ?? null"
++          :asks="rerequests.get(row.iid) ?? NO_ASKS"
+           @open="requests.openChanges"
+           @open-page="requests.openPage"
+           @resolve="requests.resolve"
+           @continue-merge="requests.continueMerge"
++          @set-due="requests.setDueDate"
++          @rerequest-review="requests.rerequestReview"
++          @people-box-closed="requests.dismissRerequestRefusals"
+         />
+       </ul>
+     </template>
+diff --git a/frontend/src/ui/mergeRequestTitles.test.ts b/frontend/src/ui/mergeRequestTitles.test.ts
+new file mode 100644
+index 0000000..4886491
+--- /dev/null
++++ b/frontend/src/ui/mergeRequestTitles.test.ts
+@@ -0,0 +1,48 @@
++import { expect, test } from "vitest";
++
++type TitleAttribute = { readonly file: string; readonly line: number };
++
++const TITLE_ATTRIBUTE = /\s:?title=/u;
++
++const PAGE_FILES: Readonly<Record<string, string>> = import.meta.glob(
++  ["./MergeRequest*.vue", "./CiStatus*.vue"],
++  { query: "?raw", import: "default", eager: true },
++);
++
++function titleAttributes(files: Readonly<Record<string, string>>): readonly TitleAttribute[] {
++  return Object.entries(files).flatMap(([file, text]) =>
++    text
++      .split("\n")
++      .flatMap((line, index) => (TITLE_ATTRIBUTE.test(line) ? [{ file, line: index + 1 }] : [])),
++  );
++}
++
++test("the page's components are read from disk", () => {
++  expect(Object.keys(PAGE_FILES)).toEqual(
++    expect.arrayContaining([
++      "./CiStatusBox.vue",
++      "./MergeRequestFilter.vue",
++      "./MergeRequestRow.vue",
++      "./MergeRequestsButton.vue",
++    ]),
++  );
++});
++
++test("no page component has a title attribute: every hover text is v-tooltip", () => {
++  expect(titleAttributes(PAGE_FILES)).toEqual([]);
++});
++
++test("a title attribute, bound or not, is reported with its file and line", () => {
++  const sample = [
++    "<template>",
++    '  <span v-tooltip="x">a</span>',
++    '  <span :title="x">b</span>',
++    '  <span title="y">c</span>',
++    '  <span data-title="z">d</span>',
++    "</template>",
++  ].join("\n");
++  expect(titleAttributes({ "./Sample.vue": sample })).toEqual([
++    { file: "./Sample.vue", line: 3 },
++    { file: "./Sample.vue", line: 4 },
++  ]);
++});
+diff --git a/frontend/src/ui/mergeRequestsText.test.ts b/frontend/src/ui/mergeRequestsText.test.ts
+index a6a6d5d..7241253 100644
+--- a/frontend/src/ui/mergeRequestsText.test.ts
++++ b/frontend/src/ui/mergeRequestsText.test.ts
+@@ -5,6 +5,7 @@ import {
+   type ListEnd,
+   type MergeRequestIid,
+   type OpenReply,
++  type RerequestReply,
+   type ContinueMergeReply,
+   type Refusal,
+   type ResolveRefusal,
+@@ -15,19 +16,28 @@ import {
+ } from "../ipc";
+ import {
+   approvalsText,
++  ASSIGNEES,
++  CLEAR_DUE_DATE,
+   clearFilterTitle,
+   discussionsText,
++  dueDateLabel,
+   jobTitle,
+   listFailureText,
+   narrowLabel,
+   narrowPlaceholder,
+   LOADING_TEXT,
+   NONE_TEXT,
++  notValueLabel,
+   openChangesTitle,
+   openPageTitle,
+   openReplyText,
+   pageProblemText,
++  REREQUEST_REVIEW,
++  rerequestLabel,
++  rerequestReplyText,
++  REVIEWERS,
+   rowReplyText,
++  SET_DUE_DATE,
+   type PageKind,
+ } from "./mergeRequestsText";
+ import { notLinedUpText } from "./rangeThreadText";
+@@ -266,3 +276,53 @@ test.each<[ContinueMergeReply, string, boolean]>([
+ ])("the continue reply %j reads %j", (reply, text, refused) => {
+   expect(rowReplyText({ kind: "continue", reply }, IID)).toEqual({ text, refused });
+ });
++
++test("the people box, re-request and due-date words are GitLab's and the request's", () => {
++  expect([ASSIGNEES, REVIEWERS, REREQUEST_REVIEW, SET_DUE_DATE, CLEAR_DUE_DATE]).toEqual([
++    "Assignees",
++    "Reviewers",
++    "Re-request review",
++    "Set a due date",
++    "Clear",
++  ]);
++});
++
++test("the re-request button is named after its reviewer", () => {
++  expect(rerequestLabel("Anna Berg")).toBe("Re-request review from Anna Berg");
++});
++
++test.each<[Exclude<RerequestReply, { kind: "requested" }>, string]>([
++  [{ kind: "notReviewer" }, "Anna Berg is no longer a reviewer of this merge request."],
++  [{ kind: "notOpen" }, "This merge request is no longer open."],
++  [
++    { kind: "glabMissing" },
++    "glab is not installed (not found on PATH) — install glab, then Refresh.",
++  ],
++  [
++    { kind: "notLoggedIn", detail: DETAIL },
++    `glab is not logged in: ${DETAIL} — run glab auth login in a terminal, then Refresh.`,
++  ],
++  [{ kind: "refused", message: "Reviewer not found" }, "Reviewer not found"],
++  [{ kind: "failed", message: "timed out" }, "timed out"],
++])("the re-request reply %j reads %j", (reply, text) => {
++  expect(rerequestReplyText(reply, "Anna Berg")).toBe(text);
++});
++
++test("a refused re-request reads the list's sentence for the same glab problem", () => {
++  expect(rerequestReplyText({ kind: "glabMissing" }, "Anna Berg")).toBe(
++    listFailureText({ kind: "glabMissing" }),
++  );
++  expect(rerequestReplyText({ kind: "notLoggedIn", detail: DETAIL }, "Anna Berg")).toBe(
++    listFailureText({ kind: "notLoggedIn", detail: DETAIL }),
++  );
++});
++
++test("the due-date button names the date, the days left and what a click does", () => {
++  expect(dueDateLabel("Nov 9, 2026", "7 days left")).toBe(
++    "Due Nov 9, 2026, 7 days left. Change the due date",
++  );
++});
++
++test("an excluded value is named with not", () => {
++  expect(notValueLabel("anna")).toBe("not anna");
++});
+diff --git a/frontend/src/ui/mergeRequestsText.ts b/frontend/src/ui/mergeRequestsText.ts
+index 83dfcb8..a9ea998 100644
+--- a/frontend/src/ui/mergeRequestsText.ts
++++ b/frontend/src/ui/mergeRequestsText.ts
+@@ -5,6 +5,7 @@ import type {
+   OpenReply,
+   PageOpened,
+   Refusal,
++  RerequestReply,
+   ResolveReply,
+ } from "../ipc";
+ import type { DraftFilter } from "../mergeRequests";
+@@ -31,6 +32,19 @@ export const NONE_TEXT = "No open merge requests.";
+ export const FAILED_JOBS_TITLE = "Failed jobs";
+ export const ALLOWED_TO_FAIL = "allowed to fail";
+ export const MORE_FAILED_JOBS = "More failed jobs on GitLab";
++export const ASSIGNEES = "Assignees";
++export const REVIEWERS = "Reviewers";
++export const REREQUEST_REVIEW = "Re-request review";
++export const SET_DUE_DATE = "Set a due date";
++export const CLEAR_DUE_DATE = "Clear";
++
++function glabMissingListText(): string {
++  return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
++}
++
++function notLoggedInListText(detail: string): string {
++  return `${glabNotLoggedInText(detail)} — run glab auth login in a terminal, then Refresh.`;
++}
+ 
+ export function listFailureText(end: ListEnd): string | null {
+   switch (end.kind) {
+@@ -38,9 +52,9 @@ export function listFailureText(end: ListEnd): string | null {
+     case "cut":
+       return null;
+     case "glabMissing":
+-      return `${GLAB_MISSING_TEXT} — install glab, then Refresh.`;
++      return glabMissingListText();
+     case "notLoggedIn":
+-      return `${glabNotLoggedInText(end.detail)} — run glab auth login in a terminal, then Refresh.`;
++      return notLoggedInListText(end.detail);
+     case "failed":
+       return glabFailedText(end.message);
+     default: {
+@@ -88,6 +102,41 @@ export function narrowPlaceholder(name: string): string {
+   return `Find ${name.toLowerCase()}…`;
+ }
+ 
++export function rerequestLabel(name: string): string {
++  return `Re-request review from ${name}`;
++}
++
++export function rerequestReplyText(
++  reply: Exclude<RerequestReply, { kind: "requested" }>,
++  name: string,
++): string {
++  switch (reply.kind) {
++    case "notReviewer":
++      return `${name} is no longer a reviewer of this merge request.`;
++    case "notOpen":
++      return "This merge request is no longer open.";
++    case "glabMissing":
++      return glabMissingListText();
++    case "notLoggedIn":
++      return notLoggedInListText(reply.detail);
++    case "refused":
++    case "failed":
++      return reply.message;
++    default: {
++      const _exhaustive: never = reply;
++      return _exhaustive;
++    }
++  }
++}
++
++export function dueDateLabel(date: string, left: string): string {
++  return `Due ${date}, ${left}. Change the due date`;
++}
++
++export function notValueLabel(label: string): string {
++  return `not ${label}`;
++}
++
+ export function openReplyText(
+   reply: Exclude<OpenReply, { kind: "opened" }>,
+   iid: MergeRequestIid,

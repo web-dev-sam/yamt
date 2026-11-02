@@ -9,6 +9,7 @@ import Hourglass from "~icons/lucide/hourglass";
 
 import type { Readiness } from "../ipc";
 import { readinessIcon, readinessText, type ReadinessIcon } from "../mergeRequests";
+import { vTooltip } from "./tooltip";
 
 type ReadinessLook = { readonly icon: Component; readonly tone: string };
 
@@ -28,7 +29,7 @@ const text = computed(() => readinessText(props.readiness));
 </script>
 
 <template>
-  <span role="img" class="flex p-1" :class="look.tone" :title="text" :aria-label="text">
+  <span v-tooltip="text" role="img" class="flex p-1" :class="look.tone" :aria-label="text">
     <component :is="look.icon" class="size-4" aria-hidden="true" />
   </span>
 </template>

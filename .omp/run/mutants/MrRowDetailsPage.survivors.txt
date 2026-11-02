@@ -1,0 +1,3 @@
+just mutants HEAD: Stryker on mergeRequestsText.ts (the only changed non-test .ts): 177 killed, 0 survived, 14 no-cov, score 92.67
+src/ui/mergeRequestsText.ts:60 listFailureText default {}/default: NoCoverage — gate-covered: the `never` exhaustive arm cannot be reached (vue-tsc and tsgolint switch-exhaustiveness)
+src/ui/mergeRequestsText.ts:125 rerequestReplyText default {}/default: NoCoverage — gate-covered: the same `never` arm; the other 10 no-cov are the same arms on unchanged lines 166–268

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, shallowRef, useTemplateRef, type Component } from "vue";
+import { useKeyModifier } from "@vueuse/core";
+import { computed, shallowRef, useTemplateRef, watch, type Component } from "vue";
 import Check from "~icons/lucide/check";
 import ChevronDown from "~icons/lucide/chevron-down";
+import CircleMinus from "~icons/lucide/circle-minus";
 import Tag from "~icons/lucide/tag";
 import UserRound from "~icons/lucide/user-round";
 import X from "~icons/lucide/x";
@@ -15,18 +17,39 @@ import {
   type ListFilter,
   type PersonValue,
 } from "../mergeRequests";
-import { clearFilterTitle, narrowLabel, narrowPlaceholder } from "./mergeRequestsText";
-import { useDropdownMenu } from "./useDropdownMenu";
+import {
+  clearFilterTitle,
+  narrowLabel,
+  narrowPlaceholder,
+  notValueLabel,
+} from "./mergeRequestsText";
+import { vTooltip } from "./tooltip";
 
 type Value = PersonValue | LabelValue;
+type Item = {
+  readonly key: string;
+  readonly choice: Choice<Value>;
+  readonly excluded: boolean;
+  readonly minusTone: string | null;
+  readonly name: string | undefined;
+};
 
 const props = defineProps<{
   filter: ListFilter;
   label: string;
   set: boolean;
   choices: readonly Choice<Value>[];
+  open: boolean;
+  above: boolean;
 }>();
-const emit = defineEmits<{ toggle: [value: Value]; clear: [] }>();
+const emit = defineEmits<{
+  click: [value: Value, shift: boolean];
+  clear: [];
+  openerClick: [];
+  pointerEnter: [];
+  pointerLeave: [];
+  menuKey: [event: KeyboardEvent];
+}>();
 
 const ICONS: Readonly<Record<ListFilter, Component>> = {
   assignee: UserRound,
@@ -38,15 +61,22 @@ const opener = useTemplateRef<HTMLButtonElement>("opener");
 const menu = useTemplateRef<HTMLDivElement>("menu");
 const narrowBox = useTemplateRef<HTMLInputElement>("narrowBox");
 const typed = shallowRef("");
-const { openFor, above, toggle, menuKey } = useDropdownMenu<ListFilter>({
-  menu: () => menu.value,
-  opener: () => opener.value,
-});
+const shift = useKeyModifier("Shift");
+defineExpose({ opener, menu, narrowBox });
 
 const name = computed(() => filterName(props.filter));
 const narrows = computed(() => props.choices.length > NARROW_FROM);
-const shown = computed(() =>
-  narrows.value ? narrowed(props.choices, typed.value) : props.choices,
+const items = computed(() =>
+  (narrows.value ? narrowed(props.choices, typed.value) : props.choices).map(item),
+);
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      typed.value = "";
+    }
+  },
 );
 
 function keyOf(value: Value): string {
@@ -65,23 +95,32 @@ function keyOf(value: Value): string {
   }
 }
 
-async function openerClicked(): Promise<void> {
-  typed.value = "";
-  await toggle(props.filter);
-  narrowBox.value?.focus();
+function item(choice: Choice<Value>): Item {
+  const excluded = choice.state === "excluded";
+  return {
+    key: keyOf(choice.value),
+    choice,
+    excluded,
+    minusTone: excluded ? "text-problem-error" : shift.value === true ? "text-fg-muted" : null,
+    name: excluded ? notValueLabel(choice.label) : undefined,
+  };
 }
 </script>
 
 <template>
-  <div class="relative flex items-center">
+  <div
+    class="relative flex items-center"
+    @pointerenter="emit('pointerEnter')"
+    @pointerleave="emit('pointerLeave')"
+  >
     <button
       ref="opener"
       type="button"
       aria-haspopup="menu"
-      :aria-expanded="openFor !== null"
+      :aria-expanded="open"
       class="flex items-center gap-1.5 border border-control-border py-1 pr-2 pl-2.5 hover:bg-hover aria-expanded:bg-row-selected"
       :class="set ? 'rounded-l border-primary' : 'rounded'"
-      @click="openerClicked"
+      @click="emit('openerClick')"
     >
       <component :is="ICONS[filter]" class="size-4" aria-hidden="true" />
       {{ label }}
@@ -89,8 +128,8 @@ async function openerClicked(): Promise<void> {
     </button>
     <button
       v-if="set"
+      v-tooltip="clearFilterTitle(name)"
       type="button"
-      :title="clearFilterTitle(name)"
       :aria-label="clearFilterTitle(name)"
       class="self-stretch rounded-r border border-l-0 border-primary px-1.5 hover:bg-hover"
       @click="emit('clear')"
@@ -98,11 +137,11 @@ async function openerClicked(): Promise<void> {
       <X class="size-3.5" aria-hidden="true" />
     </button>
     <div
-      v-if="openFor !== null"
+      v-if="open"
       ref="menu"
       class="absolute left-0 z-10 flex max-h-[60vh] min-w-56 flex-col rounded border border-control-border bg-panel-inline p-1 shadow-lg"
       :class="above ? 'bottom-full' : 'top-full'"
-      @keydown="menuKey"
+      @keydown="emit('menuKey', $event)"
     >
       <input
         v-if="narrows"
@@ -115,18 +154,32 @@ async function openerClicked(): Promise<void> {
         class="mb-1 rounded border border-control-border bg-panel px-2 py-1 outline-none focus:border-primary"
       />
       <ul role="menu" :aria-label="name" class="min-h-0 overflow-y-auto">
-        <li v-for="choice in shown" :key="keyOf(choice.value)" role="none">
+        <li v-for="entry in items" :key="entry.key" role="none">
           <button
             type="button"
             role="menuitemcheckbox"
-            :aria-checked="choice.checked"
+            :aria-checked="entry.choice.state !== 'off'"
+            :aria-label="entry.name"
             class="flex w-full items-center gap-2 rounded py-1 pr-2 pl-1.5 text-left whitespace-nowrap outline-none hover:bg-hover focus:bg-row-selected"
-            @click="emit('toggle', choice.value)"
+            @click="emit('click', entry.choice.value, $event.shiftKey)"
           >
-            <Check v-if="choice.checked" class="size-4 shrink-0" aria-hidden="true" />
+            <CircleMinus
+              v-if="entry.minusTone !== null"
+              class="size-4 shrink-0"
+              :class="entry.minusTone"
+              aria-hidden="true"
+            />
             <span v-else class="size-4 shrink-0" aria-hidden="true" />
-            <span class="truncate">{{ choice.label }}</span>
-            <span class="ml-auto pl-3 text-fg-muted">{{ choice.count }}</span>
+            <Check
+              v-if="entry.choice.state === 'included'"
+              class="size-4 shrink-0"
+              aria-hidden="true"
+            />
+            <span v-else class="size-4 shrink-0" aria-hidden="true" />
+            <span class="truncate" :class="{ 'text-problem-error line-through': entry.excluded }">{{
+              entry.choice.label
+            }}</span>
+            <span class="ml-auto pl-3 text-fg-muted">{{ entry.choice.count }}</span>
           </button>
         </li>
       </ul>

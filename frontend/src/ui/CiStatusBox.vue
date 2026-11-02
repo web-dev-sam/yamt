@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { useEventListener } from "@vueuse/core";
-import { computed, shallowRef, useTemplateRef, type Component } from "vue";
+import { computed, useTemplateRef, type Component } from "vue";
 import CircleCheck from "~icons/lucide/circle-check";
 import CircleDot from "~icons/lucide/circle-dot";
 import CircleMinus from "~icons/lucide/circle-minus";
@@ -11,14 +10,14 @@ import Cog from "~icons/lucide/cog";
 
 import type { MergeRequestRow, WebPage } from "../ipc";
 import { ciBox, ciStatusText, type CiStatusName } from "../mergeRequests";
-import type { Point } from "./menuPosition";
 import {
   ALLOWED_TO_FAIL,
   FAILED_JOBS_TITLE,
   jobTitle,
   MORE_FAILED_JOBS,
 } from "./mergeRequestsText";
-import { belowLeft, useMenuPlacement } from "./useMenuPlacement";
+import { vTooltip } from "./tooltip";
+import { useHoverBox } from "./useHoverBox";
 
 type Pipeline = NonNullable<MergeRequestRow["pipeline"]>;
 type FailedJob = Pipeline["failedJobs"][number];
@@ -40,74 +39,17 @@ const LOOKS: Readonly<Record<CiStatusName, StatusLook>> = {
 const area = useTemplateRef<HTMLSpanElement>("area");
 const icon = useTemplateRef<HTMLButtonElement>("icon");
 const box = useTemplateRef<HTMLDivElement>("box");
-const open = shallowRef(false);
-const at = shallowRef<Point>({ x: 0, y: 0 });
-const placement = useMenuPlacement(box, at);
-let pointerInside = false;
-let focusInside = false;
-useEventListener(window, "scroll", scrolled, { capture: true, passive: true });
+const { open, placement, on } = useHoverBox({
+  area: () => area.value,
+  opener: () => icon.value,
+  box,
+});
 
 const look = computed(() => LOOKS[props.pipeline.status]);
 const view = computed(() =>
   ciBox(props.pipeline.status, props.pipeline.failedJobs, props.pipeline.moreFailedJobs),
 );
 const statusText = computed(() => ciStatusText(props.pipeline.status));
-
-function show(): void {
-  if (!open.value && icon.value !== null) {
-    at.value = belowLeft(icon.value);
-    open.value = true;
-  }
-}
-
-function hideUnlessHeld(): void {
-  if (!pointerInside && !focusInside) {
-    open.value = false;
-  }
-}
-
-function pointerEntered(): void {
-  pointerInside = true;
-  show();
-}
-
-function pointerLeft(): void {
-  pointerInside = false;
-  hideUnlessHeld();
-}
-
-function isInside(target: EventTarget | null): boolean {
-  return target instanceof Node && area.value?.contains(target) === true;
-}
-
-function focusEntered(event: FocusEvent): void {
-  if (!isInside(event.relatedTarget)) {
-    focusInside = true;
-    show();
-  }
-}
-
-function focusLeft(event: FocusEvent): void {
-  if (!isInside(event.relatedTarget)) {
-    focusInside = false;
-    hideUnlessHeld();
-  }
-}
-
-function keyPressed(event: KeyboardEvent): void {
-  if (event.key === "Escape" && open.value) {
-    event.preventDefault();
-    open.value = false;
-    icon.value?.focus();
-  }
-}
-
-function scrolled(event: Event): void {
-  if (open.value && !isInside(event.target)) {
-    focusInside = document.activeElement === icon.value;
-    open.value = false;
-  }
-}
 
 function openJob({ page }: FailedJob): void {
   if (page !== null) {
@@ -120,11 +62,11 @@ function openJob({ page }: FailedJob): void {
   <span
     ref="area"
     class="flex"
-    @pointerenter="pointerEntered"
-    @pointerleave="pointerLeft"
-    @focusin="focusEntered"
-    @focusout="focusLeft"
-    @keydown="keyPressed"
+    @pointerenter="on.pointerenter"
+    @pointerleave="on.pointerleave"
+    @focusin="on.focusin"
+    @focusout="on.focusout"
+    @keydown="on.keydown"
   >
     <button
       ref="icon"
@@ -150,8 +92,8 @@ function openJob({ page }: FailedJob): void {
         <ul>
           <li v-for="(job, index) in view.jobs" :key="index">
             <button
+              v-tooltip="jobTitle(job.name, job.page)"
               type="button"
-              :title="jobTitle(job.name, job.page)"
               :disabled="job.page === null"
               class="flex w-full items-baseline gap-2 rounded px-2 py-1 text-left outline-none hover:bg-hover focus:bg-row-selected disabled:hover:bg-transparent"
               @click="openJob(job)"
