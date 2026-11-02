@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -71,11 +71,7 @@ pub(crate) struct MergeRequestState {
     /// The run's merged pairs; locked for a whole check, so a second load's check waits and then merges nothing
     /// twice (rule 7); never locked together with `pages`.
     merged: Mutex<MergedPairs>,
-    /// The uploaded pictures lists offered and those fetched (plan §2 #152); never locked together with `pages` or
-    /// `merged`, and never held across a glab run.
-    pictures: Mutex<pictures::PictureShelf>,
-    /// Wakes the picture askers waiting for a fetch to end.
-    picture_turns: Condvar,
+    pictures: pictures::Pictures,
 }
 
 /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
@@ -86,8 +82,7 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path,
         ai,
         pages: Mutex::new(BTreeSet::new()),
         merged: Mutex::new(MergedPairs::default()),
-        pictures: Mutex::default(),
-        picture_turns: Condvar::new(),
+        pictures: pictures::Pictures::default(),
     });
 }
 
@@ -108,7 +103,7 @@ fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, liste
         pages.extend(jobs.filter_map(|job| job.page.clone()));
     }
     drop(pages);
-    pictures::offer(state, listed.pictures);
+    state.pictures.offer(listed.pictures);
     send(channel, ListMessage::Page { page: listed.page });
 }
 

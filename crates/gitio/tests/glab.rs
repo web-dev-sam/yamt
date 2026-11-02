@@ -323,6 +323,36 @@ fn get_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_
 }
 
 #[test]
+fn post_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_start() {
+    let answered = Fake::new(0);
+    let failing = Fake::new(2);
+    let hanging = Fake::new(3);
+    let missing = answered.dir.path().join("no-glab");
+    let body = br#"{"note":"Why 300?"}"#;
+    let post = |glab: &Glab, cwd: &Path| glab.post(cwd, &POST, body.to_vec());
+
+    let printed = post(&answered.glab, answered.dir.path());
+    let failed = post(&failing.glab, failing.dir.path());
+    let silent = post(&Glab::at(PathBuf::from("false")), answered.dir.path());
+    let timed_out = post(
+        &hanging.glab.with_timeout(SHORT_TIMEOUT),
+        hanging.dir.path(),
+    );
+    let not_started = post(&Glab::at(missing.clone()), answered.dir.path());
+
+    let answer = without_final_newline(runner_file("post-1.json"));
+    assert_eq!(printed, Ok(answer));
+    let logged = format!("stdin: {}\n", String::from_utf8_lossy(body));
+    assert!(answered.log().ends_with(&logged), "{}", answered.log());
+    let line = "glab: the fake's failure before any HTTP answer".to_owned();
+    assert_eq!(failed, Err(line));
+    assert_eq!(silent, Err("glab exited with status 1".to_owned()));
+    assert_eq!(timed_out, Err(TIMED_OUT.to_owned()));
+    let reason = not_started.unwrap_err();
+    assert!(reason.contains(&missing.display().to_string()), "{reason}");
+}
+
+#[test]
 fn auth_status_is_logged_in_or_out_with_glab_s_first_line_or_failed() {
     let logged_in = Fake::on(&in_this_repository("tests/glab/merge-requests"), 0);
     let logged_out = Fake::new(0);

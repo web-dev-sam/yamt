@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use yamt_gitio::{Glab, GlabRun, TIMED_OUT, last_line};
+use yamt_gitio::Glab;
 
 use crate::open::OPENED;
 use crate::page::{NO_PROJECT, Nodes, graphql_data, listed};
@@ -12,7 +12,6 @@ use crate::query::{GRAPHQL_BODY_ARGS, rerequest_body, reviewers_args};
 use crate::{GitLabRepository, MergeRequestIid, Reviewer};
 
 const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
-const GLAB_FAILED: &str = "glab failed without saying why";
 
 /// How asking GitLab to re-request a reviewer's review ended.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
@@ -136,7 +135,7 @@ fn asked_again(
         return requested(&project, nodes.collect());
     }
     let body = rerequest_body(&project.full_path, iid, &asked.id);
-    rereviewed(glab.run(root, &GRAPHQL_BODY_ARGS, Some(body)), &project)
+    rereviewed(glab.post(root, &GRAPHQL_BODY_ARGS, body), &project)
 }
 
 /// The reviewers of merge request `iid` as GitLab has them now; a merge request not open is `NotOpen`.
@@ -158,16 +157,12 @@ fn fresh_reviewers(
     Ok(listed(merge_request.reviewers))
 }
 
-/// The reply to the mutation as glab ran it: glab's failure in its last line, GitLab's top-level error, the
-/// mutation's own first error, or the reviewers it answered.
-fn rereviewed(ran: yamt_gitio::Result<GlabRun>, project: &Project) -> RerequestReply {
+/// The reply to the mutation as glab ran it: glab's failure, GitLab's top-level error, the mutation's own first
+/// error, or the reviewers it answered.
+fn rereviewed(ran: Result<Vec<u8>, String>, project: &Project) -> RerequestReply {
     let stdout = match ran {
-        Err(error) => return failed(error.to_string()),
-        Ok(GlabRun::TimedOut) => return failed(TIMED_OUT.to_owned()),
-        Ok(GlabRun::Failed { stderr, .. }) => {
-            return failed(last_line(&stderr).unwrap_or_else(|| GLAB_FAILED.to_owned()));
-        }
-        Ok(GlabRun::Printed { stdout }) => stdout,
+        Ok(stdout) => stdout,
+        Err(message) => return failed(message),
     };
     let data: RereviewData = match graphql_data(&stdout) {
         Ok(data) => data,
@@ -223,37 +218,16 @@ mod tests {
         }
     }
 
-    fn ran(run: GlabRun) -> RerequestReply {
-        rereviewed(Ok(run), &project())
-    }
-
-    fn glab_failed(stderr: &[u8]) -> GlabRun {
-        GlabRun::Failed {
-            status: Some(1),
-            stdout: b"{\"errors\":[{\"message\":\"not this one\"}]}".to_vec(),
-            stderr: stderr.to_vec(),
-        }
-    }
-
-    fn printed(json: &str) -> GlabRun {
-        GlabRun::Printed {
-            stdout: json.as_bytes().to_vec(),
-        }
+    fn printed(json: &str) -> RerequestReply {
+        rereviewed(Ok(json.as_bytes().to_vec()), &project())
     }
 
     #[test]
-    fn glab_s_failure_is_its_last_line_and_a_time_out_glab_s_words() {
-        let failed_with = |message: &str| RerequestReply::Failed {
-            message: message.to_owned(),
-        };
-        let stderr =
-            b"What's new\n\nglab: Variable $userId of type UserID! was provided invalid value\n";
-        assert_eq!(
-            ran(glab_failed(stderr)),
-            failed_with("glab: Variable $userId of type UserID! was provided invalid value")
-        );
-        assert_eq!(ran(glab_failed(b"")), failed_with(GLAB_FAILED));
-        assert_eq!(ran(GlabRun::TimedOut), failed_with(TIMED_OUT));
+    fn glab_s_failure_is_the_reply_s_message() {
+        let message =
+            "glab: Variable $userId of type UserID! was provided invalid value".to_owned();
+        let reply = rereviewed(Err(message.clone()), &project());
+        assert_eq!(reply, RerequestReply::Failed { message });
     }
 
     #[test]
@@ -265,14 +239,14 @@ mod tests {
             r#"{"data":{"mergeRequestReviewerRereview":{"errors":[],"mergeRequest":null}}}"#;
 
         let message = "The resource that you are attempting to access does not exist".to_owned();
-        assert_eq!(ran(printed(top_level)), RerequestReply::Failed { message });
+        assert_eq!(printed(top_level), RerequestReply::Failed { message });
         let message = "first".to_owned();
-        assert_eq!(ran(printed(refused)), RerequestReply::Refused { message });
+        assert_eq!(printed(refused), RerequestReply::Refused { message });
         let no_answer = RerequestReply::Failed {
             message: NO_MERGE_REQUEST.to_owned(),
         };
-        assert_eq!(ran(printed(no_payload)), no_answer);
-        assert_eq!(ran(printed(no_merge_request)), no_answer);
+        assert_eq!(printed(no_payload), no_answer);
+        assert_eq!(printed(no_merge_request), no_answer);
     }
 
     #[test]

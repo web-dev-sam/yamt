@@ -1,0 +1,383 @@
+diff --git a/crates/gitio/src/glab.rs b/crates/gitio/src/glab.rs
+index cea258d..726bde8 100644
+--- a/crates/gitio/src/glab.rs
++++ b/crates/gitio/src/glab.rs
+@@ -100,16 +100,12 @@ impl Glab {
+ 
+     /// What `glab <args>` printed with stdin closed; `Err` holds what went wrong, glab's own line when it printed one.
+     pub fn get(&self, cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+-        match self
+-            .run(cwd, args, None)
+-            .map_err(|error| error.to_string())?
+-        {
+-            GlabRun::Printed { stdout } => Ok(stdout),
+-            GlabRun::Failed { status, stderr, .. } => {
+-                Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
+-            }
+-            GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
+-        }
++        printed_or_failure(self.run(cwd, args, None))
++    }
++
++    /// What `glab <args>` printed with `body` on its stdin; `Err` as for `get`.
++    pub fn post(&self, cwd: &Path, args: &[&str], body: Vec<u8>) -> Result<Vec<u8>, String> {
++        printed_or_failure(self.run(cwd, args, Some(body)))
+     }
+ 
+     #[must_use]
+@@ -132,6 +128,16 @@ impl Glab {
+     }
+ }
+ 
++fn printed_or_failure(ran: Result<GlabRun>) -> Result<Vec<u8>, String> {
++    match ran.map_err(|error| error.to_string())? {
++        GlabRun::Printed { stdout } => Ok(stdout),
++        GlabRun::Failed { status, stderr, .. } => {
++            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
++        }
++        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
++    }
++}
++
+ fn exit_words(status: Option<i32>) -> String {
+     match status {
+         Some(code) => format!("glab exited with status {code}"),
+diff --git a/crates/gitio/tests/glab.rs b/crates/gitio/tests/glab.rs
+index 1a0a51c..138c465 100644
+--- a/crates/gitio/tests/glab.rs
++++ b/crates/gitio/tests/glab.rs
+@@ -322,6 +322,36 @@ fn get_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_
+     assert!(reason.contains(&missing.display().to_string()), "{reason}");
+ }
+ 
++#[test]
++fn post_gives_the_body_or_glab_s_last_line_its_exit_the_timeout_or_why_it_cannot_start() {
++    let answered = Fake::new(0);
++    let failing = Fake::new(2);
++    let hanging = Fake::new(3);
++    let missing = answered.dir.path().join("no-glab");
++    let body = br#"{"note":"Why 300?"}"#;
++    let post = |glab: &Glab, cwd: &Path| glab.post(cwd, &POST, body.to_vec());
++
++    let printed = post(&answered.glab, answered.dir.path());
++    let failed = post(&failing.glab, failing.dir.path());
++    let silent = post(&Glab::at(PathBuf::from("false")), answered.dir.path());
++    let timed_out = post(
++        &hanging.glab.with_timeout(SHORT_TIMEOUT),
++        hanging.dir.path(),
++    );
++    let not_started = post(&Glab::at(missing.clone()), answered.dir.path());
++
++    let answer = without_final_newline(runner_file("post-1.json"));
++    assert_eq!(printed, Ok(answer));
++    let logged = format!("stdin: {}\n", String::from_utf8_lossy(body));
++    assert!(answered.log().ends_with(&logged), "{}", answered.log());
++    let line = "glab: the fake's failure before any HTTP answer".to_owned();
++    assert_eq!(failed, Err(line));
++    assert_eq!(silent, Err("glab exited with status 1".to_owned()));
++    assert_eq!(timed_out, Err(TIMED_OUT.to_owned()));
++    let reason = not_started.unwrap_err();
++    assert!(reason.contains(&missing.display().to_string()), "{reason}");
++}
++
+ #[test]
+ fn auth_status_is_logged_in_or_out_with_glab_s_first_line_or_failed() {
+     let logged_in = Fake::on(&in_this_repository("tests/glab/merge-requests"), 0);
+diff --git a/crates/merge-requests/src/rerequest.rs b/crates/merge-requests/src/rerequest.rs
+index 2514bcd..c555f2e 100644
+--- a/crates/merge-requests/src/rerequest.rs
++++ b/crates/merge-requests/src/rerequest.rs
+@@ -2,7 +2,7 @@ use std::path::Path;
+ 
+ use serde::{Deserialize, Serialize};
+ use specta::Type;
+-use yamt_gitio::{Glab, GlabRun, TIMED_OUT, last_line};
++use yamt_gitio::Glab;
+ 
+ use crate::open::OPENED;
+ use crate::page::{NO_PROJECT, Nodes, graphql_data, listed};
+@@ -12,7 +12,6 @@ use crate::query::{GRAPHQL_BODY_ARGS, rerequest_body, reviewers_args};
+ use crate::{GitLabRepository, MergeRequestIid, Reviewer};
+ 
+ const NO_MERGE_REQUEST: &str = "GitLab's answer names no merge request";
+-const GLAB_FAILED: &str = "glab failed without saying why";
+ 
+ /// How asking GitLab to re-request a reviewer's review ended.
+ #[derive(Clone, Debug, PartialEq, Eq, Serialize, Type)]
+@@ -136,7 +135,7 @@ fn asked_again(
+         return requested(&project, nodes.collect());
+     }
+     let body = rerequest_body(&project.full_path, iid, &asked.id);
+-    rereviewed(glab.run(root, &GRAPHQL_BODY_ARGS, Some(body)), &project)
++    rereviewed(glab.post(root, &GRAPHQL_BODY_ARGS, body), &project)
+ }
+ 
+ /// The reviewers of merge request `iid` as GitLab has them now; a merge request not open is `NotOpen`.
+@@ -158,16 +157,12 @@ fn fresh_reviewers(
+     Ok(listed(merge_request.reviewers))
+ }
+ 
+-/// The reply to the mutation as glab ran it: glab's failure in its last line, GitLab's top-level error, the
+-/// mutation's own first error, or the reviewers it answered.
+-fn rereviewed(ran: yamt_gitio::Result<GlabRun>, project: &Project) -> RerequestReply {
++/// The reply to the mutation as glab ran it: glab's failure, GitLab's top-level error, the mutation's own first
++/// error, or the reviewers it answered.
++fn rereviewed(ran: Result<Vec<u8>, String>, project: &Project) -> RerequestReply {
+     let stdout = match ran {
+-        Err(error) => return failed(error.to_string()),
+-        Ok(GlabRun::TimedOut) => return failed(TIMED_OUT.to_owned()),
+-        Ok(GlabRun::Failed { stderr, .. }) => {
+-            return failed(last_line(&stderr).unwrap_or_else(|| GLAB_FAILED.to_owned()));
+-        }
+-        Ok(GlabRun::Printed { stdout }) => stdout,
++        Ok(stdout) => stdout,
++        Err(message) => return failed(message),
+     };
+     let data: RereviewData = match graphql_data(&stdout) {
+         Ok(data) => data,
+@@ -223,37 +218,16 @@ mod tests {
+         }
+     }
+ 
+-    fn ran(run: GlabRun) -> RerequestReply {
+-        rereviewed(Ok(run), &project())
+-    }
+-
+-    fn glab_failed(stderr: &[u8]) -> GlabRun {
+-        GlabRun::Failed {
+-            status: Some(1),
+-            stdout: b"{\"errors\":[{\"message\":\"not this one\"}]}".to_vec(),
+-            stderr: stderr.to_vec(),
+-        }
+-    }
+-
+-    fn printed(json: &str) -> GlabRun {
+-        GlabRun::Printed {
+-            stdout: json.as_bytes().to_vec(),
+-        }
++    fn printed(json: &str) -> RerequestReply {
++        rereviewed(Ok(json.as_bytes().to_vec()), &project())
+     }
+ 
+     #[test]
+-    fn glab_s_failure_is_its_last_line_and_a_time_out_glab_s_words() {
+-        let failed_with = |message: &str| RerequestReply::Failed {
+-            message: message.to_owned(),
+-        };
+-        let stderr =
+-            b"What's new\n\nglab: Variable $userId of type UserID! was provided invalid value\n";
+-        assert_eq!(
+-            ran(glab_failed(stderr)),
+-            failed_with("glab: Variable $userId of type UserID! was provided invalid value")
+-        );
+-        assert_eq!(ran(glab_failed(b"")), failed_with(GLAB_FAILED));
+-        assert_eq!(ran(GlabRun::TimedOut), failed_with(TIMED_OUT));
++    fn glab_s_failure_is_the_reply_s_message() {
++        let message =
++            "glab: Variable $userId of type UserID! was provided invalid value".to_owned();
++        let reply = rereviewed(Err(message.clone()), &project());
++        assert_eq!(reply, RerequestReply::Failed { message });
+     }
+ 
+     #[test]
+@@ -265,14 +239,14 @@ mod tests {
+             r#"{"data":{"mergeRequestReviewerRereview":{"errors":[],"mergeRequest":null}}}"#;
+ 
+         let message = "The resource that you are attempting to access does not exist".to_owned();
+-        assert_eq!(ran(printed(top_level)), RerequestReply::Failed { message });
++        assert_eq!(printed(top_level), RerequestReply::Failed { message });
+         let message = "first".to_owned();
+-        assert_eq!(ran(printed(refused)), RerequestReply::Refused { message });
++        assert_eq!(printed(refused), RerequestReply::Refused { message });
+         let no_answer = RerequestReply::Failed {
+             message: NO_MERGE_REQUEST.to_owned(),
+         };
+-        assert_eq!(ran(printed(no_payload)), no_answer);
+-        assert_eq!(ran(printed(no_merge_request)), no_answer);
++        assert_eq!(printed(no_payload), no_answer);
++        assert_eq!(printed(no_merge_request), no_answer);
+     }
+ 
+     #[test]
+diff --git a/src-tauri/src/merge_requests.rs b/src-tauri/src/merge_requests.rs
+index 5abf42e..a77576f 100644
+--- a/src-tauri/src/merge_requests.rs
++++ b/src-tauri/src/merge_requests.rs
+@@ -1,6 +1,6 @@
+ use std::collections::BTreeSet;
+ use std::path::{Path, PathBuf};
+-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
++use std::sync::{Mutex, MutexGuard, PoisonError};
+ use std::thread;
+ use std::time::{Duration, Instant};
+ 
+@@ -71,11 +71,7 @@ pub(crate) struct MergeRequestState {
+     /// The run's merged pairs; locked for a whole check, so a second load's check waits and then merges nothing
+     /// twice (rule 7); never locked together with `pages`.
+     merged: Mutex<MergedPairs>,
+-    /// The uploaded pictures lists offered and those fetched (plan §2 #152); never locked together with `pages` or
+-    /// `merged`, and never held across a glab run.
+-    pictures: Mutex<pictures::PictureShelf>,
+-    /// Wakes the picture askers waiting for a fetch to end.
+-    picture_turns: Condvar,
++    pictures: pictures::Pictures,
+ }
+ 
+ /// Looks for a GitLab project in `folder`'s repository, offline, and hands it to the app with the window's `ai`.
+@@ -86,8 +82,7 @@ pub(crate) fn manage<R: Runtime>(app: &App<R>, folder: &Path, app_folder: &Path,
+         ai,
+         pages: Mutex::new(BTreeSet::new()),
+         merged: Mutex::new(MergedPairs::default()),
+-        pictures: Mutex::default(),
+-        picture_turns: Condvar::new(),
++        pictures: pictures::Pictures::default(),
+     });
+ }
+ 
+@@ -108,7 +103,7 @@ fn forward_page(state: &MergeRequestState, channel: &Channel<ListMessage>, liste
+         pages.extend(jobs.filter_map(|job| job.page.clone()));
+     }
+     drop(pages);
+-    pictures::offer(state, listed.pictures);
++    state.pictures.offer(listed.pictures);
+     send(channel, ListMessage::Page { page: listed.page });
+ }
+ 
+diff --git a/src-tauri/src/merge_requests/pictures.rs b/src-tauri/src/merge_requests/pictures.rs
+index 0472cb0..044ffee 100644
+--- a/src-tauri/src/merge_requests/pictures.rs
++++ b/src-tauri/src/merge_requests/pictures.rs
+@@ -1,5 +1,5 @@
+ use std::collections::BTreeMap;
+-use std::sync::{MutexGuard, PoisonError};
++use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
+ 
+ use tauri::http::header::{CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS};
+ use tauri::http::{Response, StatusCode};
+@@ -14,10 +14,18 @@ pub(crate) const PICTURE_SCHEME: &str = "yamt-picture";
+ const PICTURE_FETCHES: usize = 4;
+ const NO_SNIFFING: &str = "nosniff";
+ 
+-/// The uploaded pictures the lists of this run offered and what fetching each brought; `running` counts the glab
+-/// runs under way, at most `PICTURE_FETCHES`.
++/// The uploaded pictures lists offered and those fetched (plan §2 #152), and the turns of the askers waiting for a
++/// fetch to end; the shelf is never locked together with another `Mutex` and never held across a glab run.
+ #[derive(Default)]
+-pub(crate) struct PictureShelf {
++pub(crate) struct Pictures {
++    shelf: Mutex<PictureShelf>,
++    turns: Condvar,
++}
++
++/// What the lists of this run offered and what fetching each brought; `running` counts the glab runs under way, at
++/// most `PICTURE_FETCHES`.
++#[derive(Default)]
++struct PictureShelf {
+     /// Each username's picture address, the latest list's.
+     offered: BTreeMap<String, PictureAddress>,
+     fetched: BTreeMap<PictureAddress, Fetch>,
+@@ -36,18 +44,47 @@ enum Turn {
+     Fetch(PictureAddress),
+ }
+ 
+-pub(crate) fn shelf(state: &MergeRequestState) -> MutexGuard<'_, PictureShelf> {
+-    state
+-        .pictures
+-        .lock()
+-        .unwrap_or_else(PoisonError::into_inner)
+-}
++impl Pictures {
++    fn shelf(&self) -> MutexGuard<'_, PictureShelf> {
++        self.shelf.lock().unwrap_or_else(PoisonError::into_inner)
++    }
+ 
+-/// Remembers the pictures a list page offered, each username's latest address winning.
+-pub(crate) fn offer(state: &MergeRequestState, pictures: Vec<OfferedPicture>) {
+-    let mut shelf = shelf(state);
+-    for picture in pictures {
+-        shelf.offered.insert(picture.username, picture.address);
++    /// Remembers the pictures a list page offered, each username's latest address winning.
++    pub(crate) fn offer(&self, pictures: Vec<OfferedPicture>) {
++        let mut held = self.shelf();
++        for picture in pictures {
++            held.offered.insert(picture.username, picture.address);
++        }
++    }
++
++    /// Waits until the username's picture is fetched or this caller may fetch it; `None` when no list offered it.
++    fn turn(&self, username: &str) -> Option<Turn> {
++        let mut held = self.shelf();
++        loop {
++            let address = held.offered.get(username)?.clone();
++            match held.fetched.get(&address) {
++                Some(Fetch::Done(picture)) => return Some(Turn::Answer(picture.clone())),
++                None if held.running < PICTURE_FETCHES => {
++                    held.running += 1;
++                    held.fetched.insert(address.clone(), Fetch::Running);
++                    return Some(Turn::Fetch(address));
++                }
++                Some(Fetch::Running) | None => {}
++            }
++            held = self
++                .turns
++                .wait(held)
++                .unwrap_or_else(PoisonError::into_inner);
++        }
++    }
++
++    /// Ends this caller's fetch of `address` and wakes the askers waiting for it or for a free fetch.
++    fn done(&self, address: PictureAddress, fetched: Option<Picture>) {
++        let mut held = self.shelf();
++        held.running -= 1;
++        held.fetched.insert(address, Fetch::Done(fetched));
++        drop(held);
++        self.turns.notify_all();
+     }
+ }
+ 
+@@ -77,7 +114,7 @@ pub(crate) fn picture_answer(
+     let (Some(username), Some(glab), Some(repository)) = (username, glab, &state.gitlab) else {
+         return not_found();
+     };
+-    let address = match turn(state, username) {
++    let address = match state.pictures.turn(username) {
+         None | Some(Turn::Answer(None)) => return not_found(),
+         Some(Turn::Answer(Some(picture))) => return found(picture),
+         Some(Turn::Fetch(address)) => address,
+@@ -85,35 +122,10 @@ pub(crate) fn picture_answer(
+     let fetched = fetch_picture(glab, repository.root(), &address)
+         .inspect_err(|message| tracing::warn!(%message, "a profile picture was not fetched"))
+         .ok();
+-    let mut shelf = shelf(state);
+-    shelf.running -= 1;
+-    shelf.fetched.insert(address, Fetch::Done(fetched.clone()));
+-    drop(shelf);
+-    state.picture_turns.notify_all();
++    state.pictures.done(address, fetched.clone());
+     fetched.map_or_else(not_found, found)
+ }
+ 
+-/// Waits until the username's picture is fetched or this caller may fetch it; `None` when no list offered it.
+-fn turn(state: &MergeRequestState, username: &str) -> Option<Turn> {
+-    let mut shelf = shelf(state);
+-    loop {
+-        let address = shelf.offered.get(username)?.clone();
+-        match shelf.fetched.get(&address) {
+-            Some(Fetch::Done(picture)) => return Some(Turn::Answer(picture.clone())),
+-            None if shelf.running < PICTURE_FETCHES => {
+-                shelf.running += 1;
+-                shelf.fetched.insert(address.clone(), Fetch::Running);
+-                return Some(Turn::Fetch(address));
+-            }
+-            Some(Fetch::Running) | None => {}
+-        }
+-        shelf = state
+-            .picture_turns
+-            .wait(shelf)
+-            .unwrap_or_else(PoisonError::into_inner);
+-    }
+-}
+-
+ fn is_username(name: &str) -> bool {
+     let is_username_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
+     !name.is_empty() && name.chars().all(is_username_char)

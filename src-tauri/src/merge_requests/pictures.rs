@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::{MutexGuard, PoisonError};
+use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 
 use tauri::http::header::{CONTENT_TYPE, HeaderValue, X_CONTENT_TYPE_OPTIONS};
 use tauri::http::{Response, StatusCode};
@@ -14,10 +14,18 @@ pub(crate) const PICTURE_SCHEME: &str = "yamt-picture";
 const PICTURE_FETCHES: usize = 4;
 const NO_SNIFFING: &str = "nosniff";
 
-/// The uploaded pictures the lists of this run offered and what fetching each brought; `running` counts the glab
-/// runs under way, at most `PICTURE_FETCHES`.
+/// The uploaded pictures lists offered and those fetched (plan §2 #152), and the turns of the askers waiting for a
+/// fetch to end; the shelf is never locked together with another `Mutex` and never held across a glab run.
 #[derive(Default)]
-pub(crate) struct PictureShelf {
+pub(crate) struct Pictures {
+    shelf: Mutex<PictureShelf>,
+    turns: Condvar,
+}
+
+/// What the lists of this run offered and what fetching each brought; `running` counts the glab runs under way, at
+/// most `PICTURE_FETCHES`.
+#[derive(Default)]
+struct PictureShelf {
     /// Each username's picture address, the latest list's.
     offered: BTreeMap<String, PictureAddress>,
     fetched: BTreeMap<PictureAddress, Fetch>,
@@ -36,18 +44,47 @@ enum Turn {
     Fetch(PictureAddress),
 }
 
-pub(crate) fn shelf(state: &MergeRequestState) -> MutexGuard<'_, PictureShelf> {
-    state
-        .pictures
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-}
+impl Pictures {
+    fn shelf(&self) -> MutexGuard<'_, PictureShelf> {
+        self.shelf.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
-/// Remembers the pictures a list page offered, each username's latest address winning.
-pub(crate) fn offer(state: &MergeRequestState, pictures: Vec<OfferedPicture>) {
-    let mut shelf = shelf(state);
-    for picture in pictures {
-        shelf.offered.insert(picture.username, picture.address);
+    /// Remembers the pictures a list page offered, each username's latest address winning.
+    pub(crate) fn offer(&self, pictures: Vec<OfferedPicture>) {
+        let mut held = self.shelf();
+        for picture in pictures {
+            held.offered.insert(picture.username, picture.address);
+        }
+    }
+
+    /// Waits until the username's picture is fetched or this caller may fetch it; `None` when no list offered it.
+    fn turn(&self, username: &str) -> Option<Turn> {
+        let mut held = self.shelf();
+        loop {
+            let address = held.offered.get(username)?.clone();
+            match held.fetched.get(&address) {
+                Some(Fetch::Done(picture)) => return Some(Turn::Answer(picture.clone())),
+                None if held.running < PICTURE_FETCHES => {
+                    held.running += 1;
+                    held.fetched.insert(address.clone(), Fetch::Running);
+                    return Some(Turn::Fetch(address));
+                }
+                Some(Fetch::Running) | None => {}
+            }
+            held = self
+                .turns
+                .wait(held)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+
+    /// Ends this caller's fetch of `address` and wakes the askers waiting for it or for a free fetch.
+    fn done(&self, address: PictureAddress, fetched: Option<Picture>) {
+        let mut held = self.shelf();
+        held.running -= 1;
+        held.fetched.insert(address, Fetch::Done(fetched));
+        drop(held);
+        self.turns.notify_all();
     }
 }
 
@@ -77,7 +114,7 @@ pub(crate) fn picture_answer(
     let (Some(username), Some(glab), Some(repository)) = (username, glab, &state.gitlab) else {
         return not_found();
     };
-    let address = match turn(state, username) {
+    let address = match state.pictures.turn(username) {
         None | Some(Turn::Answer(None)) => return not_found(),
         Some(Turn::Answer(Some(picture))) => return found(picture),
         Some(Turn::Fetch(address)) => address,
@@ -85,33 +122,8 @@ pub(crate) fn picture_answer(
     let fetched = fetch_picture(glab, repository.root(), &address)
         .inspect_err(|message| tracing::warn!(%message, "a profile picture was not fetched"))
         .ok();
-    let mut shelf = shelf(state);
-    shelf.running -= 1;
-    shelf.fetched.insert(address, Fetch::Done(fetched.clone()));
-    drop(shelf);
-    state.picture_turns.notify_all();
+    state.pictures.done(address, fetched.clone());
     fetched.map_or_else(not_found, found)
-}
-
-/// Waits until the username's picture is fetched or this caller may fetch it; `None` when no list offered it.
-fn turn(state: &MergeRequestState, username: &str) -> Option<Turn> {
-    let mut shelf = shelf(state);
-    loop {
-        let address = shelf.offered.get(username)?.clone();
-        match shelf.fetched.get(&address) {
-            Some(Fetch::Done(picture)) => return Some(Turn::Answer(picture.clone())),
-            None if shelf.running < PICTURE_FETCHES => {
-                shelf.running += 1;
-                shelf.fetched.insert(address.clone(), Fetch::Running);
-                return Some(Turn::Fetch(address));
-            }
-            Some(Fetch::Running) | None => {}
-        }
-        shelf = state
-            .picture_turns
-            .wait(shelf)
-            .unwrap_or_else(PoisonError::into_inner);
-    }
 }
 
 fn is_username(name: &str) -> bool {

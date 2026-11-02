@@ -100,16 +100,12 @@ impl Glab {
 
     /// What `glab <args>` printed with stdin closed; `Err` holds what went wrong, glab's own line when it printed one.
     pub fn get(&self, cwd: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-        match self
-            .run(cwd, args, None)
-            .map_err(|error| error.to_string())?
-        {
-            GlabRun::Printed { stdout } => Ok(stdout),
-            GlabRun::Failed { status, stderr, .. } => {
-                Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
-            }
-            GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
-        }
+        printed_or_failure(self.run(cwd, args, None))
+    }
+
+    /// What `glab <args>` printed with `body` on its stdin; `Err` as for `get`.
+    pub fn post(&self, cwd: &Path, args: &[&str], body: Vec<u8>) -> Result<Vec<u8>, String> {
+        printed_or_failure(self.run(cwd, args, Some(body)))
     }
 
     #[must_use]
@@ -129,6 +125,16 @@ impl Glab {
                 message: TIMED_OUT.to_owned(),
             },
         }
+    }
+}
+
+fn printed_or_failure(ran: Result<GlabRun>) -> Result<Vec<u8>, String> {
+    match ran.map_err(|error| error.to_string())? {
+        GlabRun::Printed { stdout } => Ok(stdout),
+        GlabRun::Failed { status, stderr, .. } => {
+            Err(last_line(&stderr).unwrap_or_else(|| exit_words(status)))
+        }
+        GlabRun::TimedOut => Err(TIMED_OUT.to_owned()),
     }
 }
 
