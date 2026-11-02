@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   readinessIcon,
   readinessText,
+  rechecked,
   type BlockedReason,
   type Readiness,
   type ReadinessIcon,
@@ -78,4 +79,22 @@ test("an unknown blocker beside a conflict quotes GitLab's word", () => {
   expect(readinessText(readiness)).toBe(
     'Has conflicts. Also blocked: GitLab says "MERGE_TRAIN_STUCK"',
   );
+});
+
+test("a checked row replaces only its own row's readiness and keeps the row and the order (catches another row or field changed)", () => {
+  const rows: { iid: number; title: string; readiness: Readiness }[] = [
+    { iid: 640, title: "newest", readiness: { kind: "conflicts", also: [] } },
+    { iid: 638, title: "older", readiness: { kind: "checking" } },
+  ];
+  expect(rechecked(rows, { iid: 640, readiness: { kind: "mergesCleanly" } })).toEqual([
+    { iid: 640, title: "newest", readiness: { kind: "mergesCleanly" } },
+    { iid: 638, title: "older", readiness: { kind: "checking" } },
+  ]);
+});
+
+test("a checked row whose iid is not listed changes nothing", () => {
+  const rows: { iid: number; readiness: Readiness }[] = [
+    { iid: 640, readiness: { kind: "ready" } },
+  ];
+  expect(rechecked(rows, { iid: 1, readiness: { kind: "mergesCleanly" } })).toEqual(rows);
 });

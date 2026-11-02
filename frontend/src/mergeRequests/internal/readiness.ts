@@ -96,3 +96,12 @@ export function readinessText(readiness: Readiness): string {
 export function readinessIcon(readiness: Readiness): ReadinessIcon {
   return ICONS[readiness.kind];
 }
+
+export function rechecked<R extends { readonly iid: number; readonly readiness: Readiness }>(
+  rows: readonly R[],
+  checked: Pick<R, "iid" | "readiness">,
+): readonly R[] {
+  return rows.map((row) =>
+    row.iid === checked.iid ? { ...row, readiness: checked.readiness } : row,
+  );
+}

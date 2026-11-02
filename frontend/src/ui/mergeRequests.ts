@@ -19,6 +19,7 @@ import {
   merged,
   NO_FILTERS,
   personChoices,
+  rechecked,
   summaryText,
   toggled,
   withDraft,
@@ -83,7 +84,7 @@ type Deps = {
   readonly storage?: StorageLike;
 };
 
-type Load = { buffering: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
 
 type State = Deps & {
   readonly project: ShallowRef<GitLabProject>;
@@ -98,7 +99,7 @@ type State = Deps & {
 };
 
 function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
-  if (load.buffering) {
+  if (load.buffered) {
     load.buffer = merged(load.buffer, rows);
     load.me = me;
     return;
@@ -112,24 +113,19 @@ function ended(state: State, load: Load, end: ListEnd): void {
   if (listed) {
     state.cut.value = end.kind === "cut";
   }
-  if (load.buffering && listed) {
+  if (load.buffered && listed) {
     state.rows.value = load.buffer;
     state.me.value = load.me;
     state.shown = load;
   }
-  load.buffering = false;
   state.listing.value = { kind: "done", end, at: Date.now() };
 }
 
-function rechecked(rows: readonly MergeRequestRow[], row: CheckedRow): readonly MergeRequestRow[] {
-  return rows.map((old) => (old.iid === row.iid ? { ...old, readiness: row.readiness } : old));
-}
-
 function checked(state: State, load: Load, row: CheckedRow): void {
-  if (load.buffering) {
-    load.buffer = rechecked(load.buffer, row);
-  } else if (state.shown === load) {
+  if (state.shown === load) {
     state.rows.value = rechecked(state.rows.value, row);
+  } else {
+    load.buffer = rechecked(load.buffer, row);
   }
 }
 
@@ -139,7 +135,7 @@ async function load(state: State): Promise<void> {
     return;
   }
   const first = state.rows.value.length === 0;
-  const running: Load = { buffering: !first, buffer: [], me: null };
+  const running: Load = { buffered: !first, buffer: [], me: null };
   if (first) {
     state.shown = running;
   }
@@ -157,6 +153,7 @@ async function load(state: State): Promise<void> {
   state.listing.value = before;
   if (first) {
     state.rows.value = [];
+    state.shown = null;
   }
   state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
 }

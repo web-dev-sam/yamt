@@ -1,0 +1,164 @@
+diff --git a/frontend/src/mergeRequests/AGENTS.md b/frontend/src/mergeRequests/AGENTS.md
+index 7347c51..6d033ee 100644
+--- a/frontend/src/mergeRequests/AGENTS.md
++++ b/frontend/src/mergeRequests/AGENTS.md
+@@ -2,6 +2,6 @@ Owner skill: `skill://ts-conventions`. The merge-request page's pure core (plan
+ 
+ `index.ts` is the only surface. Framework-free (PM3) and self-contained: nothing here imports another `src/` module, as `search/` (PM2, `frontend/scripts/fences.ts`). Pure: no DOM, no timers, no storage, no state; the window's `ui/` owns loading, remembering (`ui/mergeRequestFilters.ts`) and the page's other words.
+ 
+-`readiness` also has `mergesCleanly`, yamt's own merge of GitLab's two commits found no conflict: "No conflicts (checked locally). GitLab has not checked the rest yet", icon `circle-dashed-check`, never `ready`'s words or icon.
++`readiness` also has `mergesCleanly`, yamt's own merge of GitLab's two commits found no conflict: "No conflicts (checked locally). GitLab has not checked the rest yet", icon `circle-dashed-check`, never `ready`'s words or icon. `rechecked` puts a checked row's readiness on the row with its iid, every other row and field kept.
+ 
+ `internal/`: `filters` (the filter types, `passes`, the edits, `filterLabel`), `choices`, `order`, `summary`, `relativeTime`, `ciBox`, `stored`, `size` (`sizeParts` `{ added "+120", removed "−40", files "6 files" }` with U+2212, the row colours them green, red, text colour; `sizeTitle`), `readiness` (`readinessText`, "Has conflicts. Also blocked: " and the reasons joined by "; ", GitLab's own word quoted for `other`; `readinessIcon`), `rowAction` (the row's Resolve or Continue, first match wins: Continue on the merging row whatever its readiness, disabled while its window is open; no button unless conflicts; a fork, then another unfinished merge, disable Resolve; then running). Every file has its `*.test.ts` (node), each test named for the bug it catches.
+diff --git a/frontend/src/mergeRequests/index.ts b/frontend/src/mergeRequests/index.ts
+index 067e5bc..6552dae 100644
+--- a/frontend/src/mergeRequests/index.ts
++++ b/frontend/src/mergeRequests/index.ts
+@@ -32,6 +32,7 @@ export { sizeParts, sizeTitle } from "./internal/size";
+ export {
+   readinessIcon,
+   readinessText,
++  rechecked,
+   type BlockedReason,
+   type Readiness,
+   type ReadinessIcon,
+diff --git a/frontend/src/mergeRequests/internal/readiness.test.ts b/frontend/src/mergeRequests/internal/readiness.test.ts
+index 79bc960..d56519f 100644
+--- a/frontend/src/mergeRequests/internal/readiness.test.ts
++++ b/frontend/src/mergeRequests/internal/readiness.test.ts
+@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
+ import {
+   readinessIcon,
+   readinessText,
++  rechecked,
+   type BlockedReason,
+   type Readiness,
+   type ReadinessIcon,
+@@ -79,3 +80,21 @@ test("an unknown blocker beside a conflict quotes GitLab's word", () => {
+     'Has conflicts. Also blocked: GitLab says "MERGE_TRAIN_STUCK"',
+   );
+ });
++
++test("a checked row replaces only its own row's readiness and keeps the row and the order (catches another row or field changed)", () => {
++  const rows: { iid: number; title: string; readiness: Readiness }[] = [
++    { iid: 640, title: "newest", readiness: { kind: "conflicts", also: [] } },
++    { iid: 638, title: "older", readiness: { kind: "checking" } },
++  ];
++  expect(rechecked(rows, { iid: 640, readiness: { kind: "mergesCleanly" } })).toEqual([
++    { iid: 640, title: "newest", readiness: { kind: "mergesCleanly" } },
++    { iid: 638, title: "older", readiness: { kind: "checking" } },
++  ]);
++});
++
++test("a checked row whose iid is not listed changes nothing", () => {
++  const rows: { iid: number; readiness: Readiness }[] = [
++    { iid: 640, readiness: { kind: "ready" } },
++  ];
++  expect(rechecked(rows, { iid: 1, readiness: { kind: "mergesCleanly" } })).toEqual(rows);
++});
+diff --git a/frontend/src/mergeRequests/internal/readiness.ts b/frontend/src/mergeRequests/internal/readiness.ts
+index 518170b..3a4b7e1 100644
+--- a/frontend/src/mergeRequests/internal/readiness.ts
++++ b/frontend/src/mergeRequests/internal/readiness.ts
+@@ -96,3 +96,12 @@ export function readinessText(readiness: Readiness): string {
+ export function readinessIcon(readiness: Readiness): ReadinessIcon {
+   return ICONS[readiness.kind];
+ }
++
++export function rechecked<R extends { readonly iid: number; readonly readiness: Readiness }>(
++  rows: readonly R[],
++  checked: Pick<R, "iid" | "readiness">,
++): readonly R[] {
++  return rows.map((row) =>
++    row.iid === checked.iid ? { ...row, readiness: checked.readiness } : row,
++  );
++}
+diff --git a/frontend/src/ui/AGENTS.md b/frontend/src/ui/AGENTS.md
+index 1a4a8d3..0a4a116 100644
+--- a/frontend/src/ui/AGENTS.md
++++ b/frontend/src/ui/AGENTS.md
+@@ -46,7 +46,7 @@ Search (plan §2 #127): one `searching.ts` `createSearching` per window store (`
+ 
+ Merge requests (plan §2 #128–#135): one `mergeRequests.ts` slice per window, created by `compareStore.ts` / `rangeStore.ts` through `mergeRequestsStore.ts` `windowMergeRequests` and read by every page file through `useMergeRequests()`, never through a root (fence PM10 in `scripts/windowFence.ts`: `MergeRequest*`, `mergeRequest*`, `CiStatus*` under `ui/` import no window root and no `lsp/`). `MergeRequestsButton.vue` (Lucide `git-pull-request`, only while `project.kind === "found"`) sits directly before the gear in every header that shows one: `CompareView`, `RangeView` and the range window's empty-range header, which stays mounted (`v-show`) so the keyboard can return to it. The page `MergeRequestsView.vue` is a screen like Settings (`screen.kind === "mergeRequests"`, mounted by each root with `asking`): Back (focused at mount) and Escape by `ServerLogView.vue`'s rule close it, and `focusReturn.ts` `returnFocus` — the one rule of every full-window page, `SettingsView.vue`'s too — returns the keyboard to the element focused before once it renders, if still connected and visible. A load streams its pages while no row is shown (the first load, Retry after a failed first load, Refresh of an empty list) and the page shows "Loading merge requests…" while it runs; a load over shown rows swaps them in at its end. Which list end is a failure is `mergeRequestsText.ts` `listFailureText` alone: the slice's `failure` (the sentence with Retry) and its row swap both read it. Its filter row is three `MergeRequestFilter.vue` checklists (a Lucide icon before each name: `user-round` for Assignee and Reviewer, `tag` for Label; `useDropdownMenu`; `menuitemcheckbox` items keep it open; a narrowing box above `NARROW_FROM` values; × clears) and the Draft `ChoiceButtons` at the row's right end; the list scrolls inside. `MergeRequestRow.vue` shows one row and, only when opening its changes was refused, the reason (`openReplyText`); a successful open shows nothing in the row. A row is two lines, like GitLab's list (owner 2026-10-31): the title alone, truncated, then at the same left edge in every row `!iid · created … · +X −Y · N files` in `text-xs`, truncated too (no size: it ends after the age, no dangling `·`); the iid, the age and the `·` are muted, `+X` `text-success-signal` and `−Y` `text-problem-error` (the range window's line-count pair, `RangeCounts.vue`), `N files` `text-fg` (owner 2026-10-31); the separators are plain text between the spans, so the line copies as it reads. The fixed-width icon columns sit right of both lines, centred against them, so they line up across rows. A row with a page shows the hand everywhere and `bg-row-hover` under the pointer, except over its controls (each marked `data-row-control`: the CI box, the action, open changes): there only the enabled button under the pointer shows the hand and `bg-hover`, and a disabled one the arrow and no highlight, so a row click and a button click look different (owner 2026-10-31). `CiStatusBox.vue` opens its failed-jobs box on pointer or focus, `position: fixed` but not teleported (Tab reaches the jobs), held while the pointer or focus is inside icon or box, closed by leaving both, by Escape (back to the icon) or by any scroll outside it; a scroll that closes the box with the keyboard on a job lets the focus go with it, so the next hover opens and leaving closes. Words come only from `mergeRequestsText.ts` (sentences, labels, titles, the counts through `serverText.ts` `counted`) and `mergeRequests/` (filter names, choices, summary, `ciStatusText` for the icon's name and the box), except the buttons shared with other pages: Back (`serverText.ts` `BACK`), Retry (`aiText.ts` `RETRY`), Dismiss (`searchText.ts` `DISMISS_LABEL`).
+ 
+-Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid among its own load's rows only — the buffer while a refresh is still buffering, `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap) is that load — and drops any other, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
++Local conflict results (request `docs/slices/request-local-conflict-check.md`): `mergeRequests.ts` `checked` replaces one row's `readiness` by iid (`rechecked`, `mergeRequests/`) among its own load's rows only — `rows` while `shown` (the load whose rows are on the page, written by a first load's start and a refresh's swap, `null` once a failed first load cleared them) is that load, else the load's own buffer (empty unless it is a refresh, read only by a refresh's swap) — so any other is dropped, with no problem and no log; `MergeRequestReadiness.vue` shows `mergesCleanly` as the muted dashed ring (`circle-dashed-check`).
+ 
+ Merge-request conflicts (plan §2 #138–#143): `MergeRequestRow.vue` shows the change size in its meta line (`sizeParts`, each part its own span, title `sizeTitle` on the whole size; none when GitLab gave none), `MergeRequestReadiness.vue` (a `w-7` column right of the CI box: the Lucide icon of `readinessIcon`, title and accessible name `readinessText`) and, left of the open-changes button, the row's one action from `mergeRequests/` `rowAction` (Resolve `git-merge`, Continue `step-forward`; a disabled one through the `<span :title>` hover of `OperationButtons.vue`; the spinner while it runs) with its reply line under the row (`rowReplyText`, `role="status"`, the error colour only when `refused`). `mergeRequestActions.ts` `createRowActions` (held by the slice) is the only writer of `actions` (one `RowActing` per row, replaced by the next click; a click while the row runs sends nothing) and `localMerge` (rules 8, 9): it is read at `show()`, on the window's `focus` while the page is shown (`MergeRequestsView.vue`) and after every resolve or continue reply; a failed read keeps what was known and reports the `localMerge` step. Its `setRow` (a new map with the row's value, or without the row for `null`) and `claimRow` (the row set busy unless it already is) are the one per-row write and busy guard of `actions` and of the slice's `openings`.
+ 
+diff --git a/frontend/src/ui/mergeRequests.ts b/frontend/src/ui/mergeRequests.ts
+index 43b534a..f28755a 100644
+--- a/frontend/src/ui/mergeRequests.ts
++++ b/frontend/src/ui/mergeRequests.ts
+@@ -19,6 +19,7 @@ import {
+   merged,
+   NO_FILTERS,
+   personChoices,
++  rechecked,
+   summaryText,
+   toggled,
+   withDraft,
+@@ -83,7 +84,7 @@ type Deps = {
+   readonly storage?: StorageLike;
+ };
+ 
+-type Load = { buffering: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
++type Load = { readonly buffered: boolean; buffer: readonly MergeRequestRow[]; me: string | null };
+ 
+ type State = Deps & {
+   readonly project: ShallowRef<GitLabProject>;
+@@ -98,7 +99,7 @@ type State = Deps & {
+ };
+ 
+ function received(state: State, load: Load, { me, rows }: MergeRequestPage): void {
+-  if (load.buffering) {
++  if (load.buffered) {
+     load.buffer = merged(load.buffer, rows);
+     load.me = me;
+     return;
+@@ -112,24 +113,19 @@ function ended(state: State, load: Load, end: ListEnd): void {
+   if (listed) {
+     state.cut.value = end.kind === "cut";
+   }
+-  if (load.buffering && listed) {
++  if (load.buffered && listed) {
+     state.rows.value = load.buffer;
+     state.me.value = load.me;
+     state.shown = load;
+   }
+-  load.buffering = false;
+   state.listing.value = { kind: "done", end, at: Date.now() };
+ }
+ 
+-function rechecked(rows: readonly MergeRequestRow[], row: CheckedRow): readonly MergeRequestRow[] {
+-  return rows.map((old) => (old.iid === row.iid ? { ...old, readiness: row.readiness } : old));
+-}
+-
+ function checked(state: State, load: Load, row: CheckedRow): void {
+-  if (load.buffering) {
+-    load.buffer = rechecked(load.buffer, row);
+-  } else if (state.shown === load) {
++  if (state.shown === load) {
+     state.rows.value = rechecked(state.rows.value, row);
++  } else {
++    load.buffer = rechecked(load.buffer, row);
+   }
+ }
+ 
+@@ -139,7 +135,7 @@ async function load(state: State): Promise<void> {
+     return;
+   }
+   const first = state.rows.value.length === 0;
+-  const running: Load = { buffering: !first, buffer: [], me: null };
++  const running: Load = { buffered: !first, buffer: [], me: null };
+   if (first) {
+     state.shown = running;
+   }
+@@ -157,6 +153,7 @@ async function load(state: State): Promise<void> {
+   state.listing.value = before;
+   if (first) {
+     state.rows.value = [];
++    state.shown = null;
+   }
+   state.report({ action: "mergeRequests", step: "list", cause: outcome.cause });
+ }

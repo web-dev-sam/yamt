@@ -32,6 +32,7 @@ export { sizeParts, sizeTitle } from "./internal/size";
 export {
   readinessIcon,
   readinessText,
+  rechecked,
   type BlockedReason,
   type Readiness,
   type ReadinessIcon,

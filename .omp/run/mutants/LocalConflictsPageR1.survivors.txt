@@ -1,0 +1,3 @@
+just mutants HEAD: 202 killed, 1 survived, 2 no-cov, 0 errors (98.54%); readiness.ts 37 killed; ui/mergeRequests.ts 165 killed, 1 survived
+frontend/src/ui/mergeRequests.ts:165 `listing.kind === "done"` → true — not a changed line (show's stale check, pre-existing). Equivalent: a listing that is not `done` has no `at`, so the comparison is NaN >= … and false
+frontend/src/mergeRequests/internal/readiness.ts:89-92 the exhaustive default (2 no-cov) — not changed lines; it cannot be reached by type
